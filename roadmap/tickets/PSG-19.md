@@ -39,6 +39,10 @@ Fix versions: v1.0
 3. Payment methods: ACH/SEPA (ISO 20022 pain.001), check printing, card, wire; positive pay export
 4. Vendor payment advice (email/portal), payment status from bank (pain.002) ingestion
 5. Prepayments, vendor credit notes, reversal handling
+6. ACH prenotes with bank-account status lifecycle, and payment calendars with bank-holiday due-date and execution-date shifting
+7. Vendor balance confirmations and AP correspondence types (statement, payment notice, open items)
+8. Installment open items, noted items and guarantees, vendor-initiated direct debit mandates, and one-time payee payments
+9. Vendor bank account change control: dual approval, out-of-band notification and payment cooling-off
 
 **Deploy.** AP workspace with payment runs; demo entity pays open invoices to a sandbox bank file.
 

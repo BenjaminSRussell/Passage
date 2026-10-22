@@ -40,6 +40,11 @@ Fix versions: v1.0
 3. Return orders (RMA): disposition codes, return to inventory/scrap/repair, credit note, restocking charges
 4. Rebate settlement from wave 26 accruals; customer statements
 5. Customer portal: orders, invoices, payments (Stripe/Adyen adapter), returns, documents
+6. SEPA direct debit mandates and pain.008 collection runs with pre-notification and R-transaction handling
+7. Deductions workbench (match to claims, approve, deny, split, write off) and distributor chargeback claim validation
+8. Correspondence framework (payment notices, open item lists, letters, email templates) and customer balance confirmations
+9. Minimal collection cases (interim until wave 45), down payments and security deposits, vendor dunning, GL/intercompany interest
+10. Portal guided product configuration and returnable-packaging charges
 
 **Deploy.** AR/collections workspace, customer portal at customer.<env>.passage.dev, payment adapter in sandbox.
 

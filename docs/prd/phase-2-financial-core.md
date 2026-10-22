@@ -94,6 +94,16 @@ Out of scope: multiple currencies beyond a single accounting currency (wave 12),
 | Voucher numbering | `NumberSequenceTable` per journal name | Document number ranges per document type (FBN1, `NRIV`) | Number sequence service (wave 5), gap-free per ledger × document type | full |
 | Trial balance / balances | `GeneralJournalAccountEntry` aggregation, Trial balance list page, `LedgerBalance...` | `FAGLFLEXT` (totals), `GLT0`, FAGLB03 | `ledger.Balance` projection; Trial balance screen | full |
 | Posting definitions / posting profiles | Posting definitions, `LedgerPostingSetup` | Account determination (OBYC, T030) | Deferred to the owning subledger waves; wave 11 exposes only account + dimension resolution hooks | partial (by design) |
+| Financial reason codes | `ReasonTable`, `ReasonTableRef`, Reason codes form (Organization administration > Setup > Financial reasons); reversal reason prompt in `LedgerTransReverse` | `T041C` reasons for reversal (OB_REVERSE), negative-posting flag, alternative posting date | `ledger.ReasonCode` with `applies_to[]` modules; required on reversal when the journal name demands it (FR-11.15) | full |
+| Advanced rule structures | `DimensionHierarchy` (type Advanced rule structure), `DimensionAdvancedRule`, `DimensionRuleCriteria`, form "Advanced rules" | Field status groups (OBC4) and validations only; no conditional segment model | `ledger.AdvancedRule` (filter → appended structure segments) (FR-11.16) | improved: versioned with the structure |
+| Default descriptions (transaction text) | Default descriptions form (`TransactionTxt`), placeholders `%1`–`%3` per transaction type and language | Header text `BKPF-BKTXT` / line text `BSEG-SGTXT` set by substitution exits | `ledger.DescriptionTemplate` per source_type × language (FR-11.17) | full |
+| Open-item managed G/L accounts and clearing | Not available for ledger accounts (only customer/vendor settlement and bank reconciliation) | `SKB1-XOPVW` open-item management, F-03/F-04 manual clearing, F.13/F13E automatic clearing, FBRA reset, FAGL_ACTIVATE_OP / FAGL_SWITCH_TO_OPEN_ITEM | `ledger.OpenItem`, `ledger.ClearingDocument`, clearing rules, tolerance groups (FR-11.19, FR-11.20); reused by waves 18/19/30 | full |
+| User-defined validation rules | Journal controls (`LedgerJournalControl`), main account validation (currency, user, posting type) | OB28 / GGB0 validations (`GB90*`, `T001Q`) with message classes at header/line/document | `ledger.ValidationRule` (prerequisite → check → message, CEL) (FR-11.21) | full |
+| Dimension derivation / substitution | Default dimensions on master data; D365 default dimension templates; no rule engine | OBBH / GGB1 substitutions (`GB91*`, `T001R`), KEDR derivation strategy (`TKEDR*`, `K9R*`), 0KEM/0KEP PCA substitution (`T8A*`), FMDERIVE strategy | `ledger.DerivationStrategy` with ordered steps (table lookup, move, clear, expression, constant) applied before structure validation (FR-11.22) | full |
+| Functional area / cost-of-sales accounting | Custom dimension attribute | OKBD functional areas (`TFKB`), FAGL_FUNC_AREA activation, OBBZ/OBBW derivation, `ACDOCA-RFAREA` | Standard dimension attribute `FUNC_AREA` with a shipped lookup-table derivation step (FR-11.22) | full |
+| Document splitting | Not available (account structures require dimensions per line; no inheritance to AP/AR/tax lines) | FAGL_SPLIT*: item categories, splitting method 0000000012, zero-balance clearing account, constants (`T8G01`–`T8G40`) | `ledger.SplittingRule` per source_type: proportional inheritance of splitting dimensions to balance-sheet and tax lines plus zero-balance clearing lines (FR-11.23) | full |
+| Dimension realignment | Not available (manual reclassification journals) | KEND / KEDR realignment run (CO-PA), re-derivation of characteristics on history | `ledger.RealignmentRun` posting reclassification entries, append-only (FR-11.24) | improved: no in-place update of history |
+| Attachments with document types | `DocuRef`, `DocuType`, `DocuValue`, Document handling form | GOS attachments (`SRGBTBREL`), ArchiveLink (OAC0/OAC3) document types | Wave 5 document framework: `document_type`, retention class, store reference on every attachment (FR-11.18) | full |
 
 ### 2.11.3 Functional requirements
 
@@ -134,6 +144,46 @@ Out of scope: multiple currencies beyond a single accounting currency (wave 12),
 - **FR-11.12 Source document linkage** — Must. The system shall record on each entry a `source` object `{system, type, id, uri}` and on each line an optional `source_line_ref`, enabling drill-down from statements (wave 15) to the originating document.
 - **FR-11.13 Opening balances load** — Must. The system shall accept opening balances through the migration framework (wave 10) as a journal entry in period 0 of the first fiscal year, balanced against a conversion-suspense account that must be zero after load.
 - **FR-11.14 Query API** — Must. The system shall expose line and balance queries with filters on ledger, account ranges, dimension values, posting date and period, paginated by keyset cursor (max 1,000 rows per page).
+- **FR-11.15 Financial reason codes** — Must. The system shall maintain one shared `ReasonCode` list per tenant (code ≤ 10 characters, name, `applies_to[]` ⊆ {ledger, bank, customer, vendor, fixed_asset, inventory_counting, tax, project}, `requires_comment`, `negative_posting_allowed`, `alternative_posting_date_allowed`, `active`) that later modules reuse, and shall require a reason code on journal reversal when the journal name or the ledger parameter `reversal_reason_required` is set.
+  - The reverse request carries `reason_code` and optional `reason_comment` (≤ 255 characters); both are stored on the reversing entry and emitted in `journal.reversed.reason_code`.
+  - `negative_posting_allowed` (SAP `T041C` semantics, AX "Correction" parameter): the reversing lines are flagged `negative_posting = true` and the `Balance` projection reduces the original side (debit −100) instead of adding to the opposite side (credit +100); trial balance totals of debits and credits therefore return to their pre-posting values.
+  - `alternative_posting_date_allowed = false` forces the reversal date to equal the original posting date when that period is open.
+  - Maximum 500 codes per tenant; a referenced code cannot be deleted, only deactivated.
+- **FR-11.16 Advanced rule structures** — Must. Beyond FR-11.3, the system shall maintain advanced rules: a filter over (main account ranges, dimension values, wildcards) that, when it matches a line, appends an advanced rule structure (additional segments with their own constraint rows) to the account structure applied to that line.
+  - Several advanced rules may match; their structures are appended in `priority` order; the resulting segment list is capped at 20 attributes (`LEDGER_ADVANCED_RULE_SEGMENT_LIMIT`).
+  - Advanced rules and advanced rule structures share the account structure's version and activation step (AX "Activate" on the structure); activation re-validates the 1,000 most recently used combinations under the new version and lists those that would become invalid before the user confirms.
+- **FR-11.17 Default descriptions** — Should. The system shall maintain description templates keyed by (source_type, legal entity or tenant, language) with placeholders `%1` … `%9` bound to named fields (`{voucher}`, `{party_name}`, `{document_date}`, `{amount_txn}`, `{currency_txn}`, `{source_id}`, `{period}`), applied when a posting request omits `description` or a line omits `text`.
+  - Substituted text is truncated to 255 characters with a trailing ellipsis; language resolves from the legal entity default language (wave 6), or from the user's UI language for manual journals when the journal name sets `description_language = user`.
+  - Legal-entity templates override tenant templates (AX Default descriptions per company semantics).
+- **FR-11.18 Attachment document types and retention** — Should. Attachments (FR-11.11) shall carry a `document_type` from the wave 5 document framework (shipped types `invoice_image`, `approval_evidence`, `supporting_calculation`, `correspondence`, `other`), a retention class (default `financial_record_10y`), and a store reference (object-storage key or external DMS URI), and shall remain readable from the posted entry after the batch is posted.
+  - Attachments become immutable when the batch reaches `posted`; deleting an attachment before its retention class expires is rejected with `LEDGER_ATTACHMENT_RETAINED`.
+  - Maximum 25 MB per file, 50 per batch, as in FR-11.11; virus scanning and content-type allow-list are inherited from wave 5.
+- **FR-11.19 Open-item managed G/L accounts and clearing** — Must. The system shall allow `MainAccountLedgerSetting.open_item_managed = true` on balance-sheet accounts (clearing accounts, bank sub-accounts, GR/IR, suspense, payroll clearing); every posted line on such an account creates an `OpenItem`; open items are cleared by a `ClearingDocument` grouping items whose Σ(debit − credit) in the clearing currency is 0 within the applicable tolerance.
+  - Manual clearing (SAP F-03 semantics): the user selects items (filters: assignment, `source_line_ref`, document id, date range, amount, dimension values); the system shows the residual; a residual within the user's and account's tolerance group posts a difference line to the tolerance group's difference account; a residual outside tolerance either creates a residual item (new open item for the remainder, `residual_of_item_id`) or is rejected with `LEDGER_CLEARING_UNBALANCED`.
+  - Post with clearing (F-04 semantics): a manual journal line on an open-item account may list `clear_item_ids[]`; clearing happens in the same posting transaction and fails the whole post on mismatch.
+  - Reset clearing (FBRA semantics): reopens the items, marks the clearing document `reset` with a reason code (FR-11.15) and actor; if the clearing posted difference or FX lines, a negating entry is posted. Posted entries are never modified.
+  - Activation on an account with history (FAGL_ACTIVATE_OP / FAGL_SWITCH_TO_OPEN_ITEM semantics): permitted only through an activation run that creates one opening open item per non-zero (dimension combination, transaction currency) balance dated the activation date and records the run id on the account setting; deactivation requires zero open items.
+  - Clearing currency per account: `accounting` (default) or `transaction` (foreign-currency sub-accounts); FX differences on clearing post to the realized gain/loss accounts of the wave 12 `CurrencyPolicy` and are excluded from wave 12 revaluation (`revalue_level = open_item`).
+  - AP and AR settlement (waves 19/30) and GR/IR clearing (wave 18) reuse this engine through the open-item contract in §2.11.5 with their own item sources; this wave ships the GL account source only.
+- **FR-11.20 Automatic clearing rules and tolerance groups** — Must. The system shall define automatic clearing rules per (ledger, account range) as an ordered list of up to 5 criteria fields (`assignment`, `source_line_ref`, `document_id`, `dim.<attr>`, `amount_txn`, `posting_date` bucket) that group open items (SAP OB74 semantics), and tolerance groups (SAP OBA0 / AX "Maximum penny difference" semantics) with absolute and percentage limits per currency, assigned to accounts and to users.
+  - The scheduled job `gl-auto-clear` (§2.11.16) evaluates each rule, clears every group whose Σ = 0 (or within the account tolerance when the rule sets `allow_tolerance`) as one `ClearingDocument` per group, and never creates residual items; a simulation mode returns the proposed groups.
+  - The effective tolerance is the minimum of the user's and the account's group; service-account runs use the account group only.
+- **FR-11.21 User-defined validation rules** — Must. The system shall evaluate ordered validation rules per ledger at header, line and document level, each with `prerequisite` (CEL boolean over header fields, line fields, dimension values, main account attributes, source, user groups), `check` (CEL boolean) and `message` (message-catalog code, severity error | warning, parameter bindings).
+  - A failed error rule produces a 422 violation `{code, rule_id, line_index}`; a failed warning rule produces a `warnings[]` entry and, for manual batches, a confirmation step before submit.
+  - Rules are effective-dated and versioned; evaluation adds ≤ 2 ms per 100 lines; the rule editor runs a rule against saved sample entries and shows the result per line.
+  - AX journal controls and main-account validations (currency, user, posting type) and SAP OB28/GGB0 validations are shipped as rule templates.
+- **FR-11.22 Dimension derivation and substitution rules** — Must. The system shall apply a per-ledger `DerivationStrategy` before account-structure validation: ordered steps of type `table_lookup` (source fields → target dimension through a validity-dated lookup table, e.g., (account category, cost center) → functional area), `move` (copy a field or dimension to another), `clear`, `expression` (CEL) and `constant`, each with an optional condition and an `overwrite` flag.
+  - Precedence extends FR-11.2: explicit line value > step with `overwrite` > source document header > master data default > account default > step without `overwrite`.
+  - Every derived value is recorded per line as `derived_by_step_ids[]`, shown in the journal line derivation trace and returned by `POST /ledger/validate`.
+  - Functional area for cost-of-sales accounting is a standard dimension attribute `FUNC_AREA` with a shipped lookup-table step; the P&L-by-function statement in wave 15 reads it. Segment derivation from profit center (SAP FAGL_SEGM) is a shipped `table_lookup` step.
+  - Lookup tables are maintained in the UI and by CSV import (≤ 100,000 rows per table); SAP KEDR / 0KEM / FMDERIVE strategies and OBBH substitutions migrate to steps (§2.11.11).
+- **FR-11.23 Document splitting: dimension inheritance and zero balance** — Must. The system shall, per source_type, inherit a configured set of splitting dimensions (for example profit center, segment, business unit) from the lines that carry them to the lines that do not (payable, receivable, tax, cash discount, bank, rounding) in proportion to the carrying lines' amounts, and post zero-balance clearing lines so that every entry balances per splitting dimension value.
+  - Item categories per account range (expense_revenue, payable, receivable, tax, cash, balance_sheet_other) and the method (`active` = proportional inheritance; `passive` = inherit from the open items being cleared, FR-11.19) are configuration; each ledger names a `zero_balance_clearing_account` and a `default_splitting_value` constant used when no carrying line exists.
+  - Splitting runs after derivation (FR-11.22) and before structure validation; produced lines carry `split_of_line_id` and `inherited = true`; proportional rounding uses the BR-12.4 residual rule; a line that cannot be split and has no default raises `LEDGER_SPLIT_NO_SOURCE`.
+  - A balance sheet by profit center or segment (wave 15 `BS-STD` with a tree over the splitting dimension) therefore balances per unit.
+- **FR-11.24 Dimension realignment** — Should. The system shall provide a controlled restatement that, for a filter (ledger, account ranges, period range, dimension values), re-derives selected dimensions with the current derivation strategy or an explicit old → new value mapping and posts reclassification entries per (account, period, old combination, new combination) flagged `is_realignment = true`, without modifying any posted line.
+  - Simulation lists affected combinations, line counts and amounts; posting requires duty `Run dimension realignment`, a reason code and an open or on-hold GL period with the runner in the allowed group; a run is reversible as a unit.
+  - Realignment entries are ordinary entries for balances and statements and appear in the wave 15 audit trail as `kind = realignment_run`.
 
 ### 2.11.4 Data model
 
@@ -203,6 +253,67 @@ Out of scope: multiple currencies beyond a single accounting currency (wave 12),
 
 **Balance** (projection): `ledger_id`, `main_account_id`, `dimension_combination_id`, `fiscal_period_id`, `currency_type` (txn/acct/rpt), `currency` char(3), `debit`, `credit`, `net`, `line_count`, `last_posting_sequence`; PK over the first five.
 
+**ReasonCode** (FR-11.15)
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| id | uuid | yes | PK |
+| code | text(10) | yes | unique per tenant; `^[A-Z0-9_]{1,10}$` |
+| name | text(60) | yes | translatable |
+| applies_to | enum[] | yes | ledger, bank, customer, vendor, fixed_asset, inventory_counting, tax, project |
+| requires_comment | bool | yes | default false |
+| negative_posting_allowed | bool | yes | default false; SAP `T041C-XNEGP` |
+| alternative_posting_date_allowed | bool | yes | default true |
+| active | bool | yes | |
+
+**OpenItem** and **ClearingDocument** (FR-11.19, FR-11.20)
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| item: id | uuid | yes | PK |
+| item: ledger_id / main_account_id / dimension_combination_id | uuid / uuid / bytea(32) | yes | account must be `open_item_managed` |
+| item: journal_line_id | uuid | yes | unique; the line that created the item (or activation run) |
+| item: source_type | enum | yes | gl_line, activation, residual; waves 18/19/30 add gr_ir, vendor, customer |
+| item: amount_clearing / currency_clearing | numeric(23,6) / char(3) | yes | signed (debit positive) in the account's clearing currency |
+| item: amount_acct | numeric(23,6) | yes | |
+| item: assignment | text(50) | no | free matching key (SAP `ZUONR` semantics) |
+| item: posting_date / due_date | date | yes / no | |
+| item: status | enum | yes | open, cleared, reset_open |
+| item: clearing_document_id | uuid | no | set when cleared |
+| item: residual_of_item_id | uuid | no | FK OpenItem |
+| doc: id | uuid | yes | PK |
+| doc: ledger_id / main_account_id | uuid | yes | |
+| doc: clearing_date | date | yes | posting date of difference/FX lines |
+| doc: mode | enum | yes | manual, post_with_clearing, automatic, activation |
+| doc: rule_id | uuid | no | FK AutoClearingRule when automatic |
+| doc: item_ids | uuid[] | yes | 2..10,000 |
+| doc: difference_amount / difference_entry_id | numeric(23,6) / uuid | no | tolerance posting |
+| doc: fx_difference_entry_id | uuid | no | wave 12 realized gain/loss |
+| doc: status | enum | yes | cleared, reset |
+| doc: reset_reason_code / reset_by / reset_at | text / uuid / timestamptz | conditional | |
+
+**AutoClearingRule**: `id`, `ledger_id`, `account_from`, `account_to`, `criteria` (jsonb ordered list ≤ 5 of field names), `allow_tolerance` bool, `active`. **ToleranceGroup**: `id`, `legal_entity_id`, `code`, `scope` (account | user), `limits` (jsonb per currency: `{abs_debit, abs_credit, pct}`), `difference_account_id`; assignment tables `tolerance_group_account` (account range) and `tolerance_group_user`.
+
+**ValidationRule** and **DerivationStrategy** (FR-11.21, FR-11.22)
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| rule: id / ledger_id / sequence | uuid / uuid / int | yes | evaluated in sequence |
+| rule: level | enum | yes | header, line, document |
+| rule: prerequisite | text (CEL) | no | empty = always |
+| rule: check | text (CEL) | yes | must evaluate true, else message |
+| rule: message_code / severity / params | text / enum / jsonb | yes | catalog code (§2.11.18), error or warning |
+| rule: effective_from / effective_to / version / status | date / date / int / enum | yes | draft, active, retired |
+| strategy: id / ledger_id / version / status | | yes | one active version per ledger |
+| step: id / strategy_id / sequence | | yes | ≤ 50 steps |
+| step: kind | enum | yes | table_lookup, move, clear, expression, constant |
+| step: condition | text (CEL) | no | |
+| step: source_fields / target | jsonb / text | yes | target is a dimension attribute or line field |
+| step: lookup_table_id | uuid | conditional | FK LookupTable (rows: source tuple, target value, valid_from, valid_to) |
+| step: overwrite | bool | yes | default false |
+
+**SplittingRule** (FR-11.23): `id`, `ledger_id`, `source_type`, `splitting_dimensions` (attribute ids), `method` (active | passive), `item_categories` (jsonb account range → category), `zero_balance_clearing_account_id`, `default_splitting_value` (jsonb attribute → value), `active`. **RealignmentRun** (FR-11.24): `id`, `ledger_id`, `filter` (jsonb), `mapping` (jsonb old → new per attribute) or `strategy_version`, `mode` (simulate | post), `status` (proposed, posted, reversed, cancelled), `reason_code`, `entry_ids[]`, `reversal_entry_ids[]`, `combinations_affected`, `created_by`. **DescriptionTemplate** (FR-11.17): `id`, `scope` (tenant | legal_entity), `legal_entity_id`, `source_type`, `language`, `template` text(255), `field_bindings` (jsonb `%n` → field path).
+
 **Invariants**
 - For every JournalEntry: Σ debit lines = Σ credit lines in each of amount_txn (per currency), amount_acct and amount_rpt, exactly, after rounding.
 - Every JournalLine's `dimension_combination_id` was valid under the account structure version effective on `posting_date`.
@@ -226,6 +337,20 @@ Out of scope: multiple currencies beyond a single accounting currency (wave 12),
 | POST | /api/v1/ledger/dimension-combinations/resolve | Tuple → combination id | stateless | View ledger transactions |
 | POST/GET/PATCH | /api/v1/ledger/journal-batches[/{id}] and /{id}:submit, :approve, :post | Manual journal lifecycle | `Idempotency-Key` on :post | Maintain / Approve / Post ledger journals |
 | POST | /api/v1/ledger/balances:rebuild | Trigger rebuild (admin) | run id returned | Administer ledger |
+| GET/PUT | /api/v1/ledger/reason-codes[/{code}] | Reason code CRUD (shared) | PUT idempotent | Maintain reason codes |
+| GET/PUT | /api/v1/ledger/ledgers/{ledger}/advanced-rules[/{id}] | Advanced rules and advanced rule structures | PUT idempotent | Maintain account structures |
+| GET/PUT | /api/v1/ledger/description-templates[/{id}] | Default description templates | PUT idempotent | Maintain ledger setup |
+| GET | /api/v1/ledger/open-items?ledger=&account=&status=&assignment=&dim.{attr}=&cursor= | Open items on OI-managed accounts | n/a | View ledger transactions |
+| POST | /api/v1/ledger/clearings | Manual clearing of selected items (with tolerance / residual options) | `Idempotency-Key` required | Clear open items |
+| POST | /api/v1/ledger/clearings:simulate | Residual and tolerance preview | stateless | Clear open items |
+| POST | /api/v1/ledger/clearings/{id}:reset | Reset clearing (reason code required) | `Idempotency-Key` required | Reset clearings |
+| POST | /api/v1/ledger/accounts/{account}:activate-open-items | Activation run for an account with history | `Idempotency-Key` required | Administer ledger |
+| GET/PUT | /api/v1/ledger/ledgers/{ledger}/auto-clearing-rules[/{id}] and /tolerance-groups[/{code}] | Automatic clearing rules, tolerance groups and assignments | PUT idempotent | Maintain clearing rules |
+| POST | /api/v1/ledger/auto-clearing:run | Run automatic clearing now (simulate or clear) | run id | Run automatic clearing |
+| GET/PUT | /api/v1/ledger/ledgers/{ledger}/validation-rules[/{id}] and POST /validation-rules/{id}:test | Validation rules CRUD and test against samples | PUT idempotent | Maintain validation and derivation rules |
+| GET/PUT | /api/v1/ledger/ledgers/{ledger}/derivation-strategies[/{version}] and /lookup-tables[/{id}] (CSV import) | Derivation strategy, steps, lookup tables | PUT idempotent; import `Idempotency-Key` | Maintain validation and derivation rules |
+| GET/PUT | /api/v1/ledger/ledgers/{ledger}/splitting-rules[/{source_type}] | Document splitting configuration | PUT idempotent | Maintain ledger setup |
+| POST | /api/v1/ledger/realignments and /{id}:post, :reverse | Dimension realignment simulate / post / reverse | `Idempotency-Key` required | Run dimension realignment |
 
 **Posting request (canonical JSON)**
 
@@ -253,6 +378,13 @@ Response 201: `{ "entries":[{"id","ledger_id","voucher","posting_sequence","fisc
 | dev.passage.ledger.batch.status-changed.v1 | batch transition | batch_id, journal_name, from, to, actor, workflow_run_id | notifications, audit |
 | dev.passage.ledger.balance.rebuilt.v1 | rebuild finished | ledger_id, high_water_sequence, rows_written, rows_differing, duration_ms | ops alerting |
 | dev.passage.ledger.account.changed.v1 | account/structure change | chart_id, account_number, change_type, effective_from | reporting, dimension sync |
+| dev.passage.ledger.open-item.cleared.v1 | clearing document committed or reset | clearing_document_id, ledger_id, account, mode, item_ids, difference_amount, fx_difference_entry_id, status (cleared/reset), reason_code | bank reconciliation (wave 36), AP/AR (waves 19/30), reporting, audit |
+| dev.passage.ledger.realignment.completed.v1 | realignment posted or reversed | run_id, ledger_id, period_range, combinations_affected, entry_ids, reversal | reporting, audit |
+| dev.passage.ledger.rules.changed.v1 | validation rule, derivation strategy or splitting rule activated | ledger_id, kind, id, version, actor | posting cache, audit |
+
+Open-item contract for subledgers (used by waves 18/19/30): a service registers an item source `{source_type, resolver_uri}`; the clearing engine calls `resolver_uri` to fetch candidate items and posts the clearing through the same `ClearingDocument` path; the source service consumes `open-item.cleared` to update its own status. The posting request accepts per line `"clear_item_ids": [...]` (FR-11.19) and the derivation/splitting/validation stages run in the order shown in the command pipeline below.
+
+Posting pipeline (revised with FR-11.21–FR-11.23): schema → ledger/period resolution → default descriptions (FR-11.17) → derivation strategy (FR-11.22) → document splitting (FR-11.23) → account existence and postability → structure and advanced rule validation (FR-11.3, FR-11.16) → validation rules (FR-11.21) → combination interning → currency/rounding (wave 12) → period status (wave 14) → balance check → open-item clearing (FR-11.19) → sequence assignment → insert → balance upsert → outbox. `POST /ledger/validate` runs the same stages up to the balance check and returns the derivation trace and splitting result.
 
 ### 2.11.6 User experience
 
@@ -265,6 +397,12 @@ Response 201: `{ "entries":[{"id","ledger_id","voucher","posting_sequence","fisc
 | Journal batch (detail) | Add/edit lines inline, validate, submit, approve, post, attach, save as template | line grid: account, dimensions (segmented entry), D/C, amount, text; totals bar | Maintain / Approve / Post ledger journals |
 | Trial balance | Filter ledger/period/dimension, drill to lines, export | account, opening, debit, credit, closing, net | View ledger balances |
 | Ledger transactions | Filter, drill to source document, trace id link | voucher, date, account, dims, D/C, amount, source | View ledger transactions |
+| Reason codes | Create, deactivate, set modules and flags | code, name, applies_to, requires_comment, negative_posting_allowed | Maintain reason codes |
+| Open items and clearing | Filter items, select, see residual, clear, create residual item, reset clearing | account, assignment, date, amount (clearing / acct), status, clearing document | Clear open items / Reset clearings |
+| Clearing rules and tolerances | Define auto-clearing criteria, tolerance groups, assign to accounts and users, simulate run | account range, criteria order, allow_tolerance, limits per currency, difference account | Maintain clearing rules |
+| Validation and derivation rules | Rule editor with CEL assist, lookup table grid and CSV import, test against sample entries, activate version | sequence, level, prerequisite, check, message; step kind, source, target, overwrite | Maintain validation and derivation rules |
+| Document splitting setup | Item categories by account range, splitting dimensions, method, zero-balance account, test with a sample document | source_type, dimensions, method, categories, clearing account | Maintain ledger setup |
+| Dimension realignment | Define filter and mapping, simulate, review affected combinations, post, reverse | account range, periods, old value, new value, lines, amount | Run dimension realignment |
 
 Interaction rules: segmented account entry accepts `1010-D100-C200` typed as one string with per-segment lookup (Tab moves segment); validation on blur per line and on save for the batch; grid supports paste from Excel (up to 5,000 rows) and bulk fill-down of dimensions; keyboard: Ctrl+Enter = save line, Alt+P = post (confirm dialog), Esc = cancel edit; saved views and column personalization persist per user (wave 5 shell).
 
@@ -281,6 +419,13 @@ Interaction rules: segmented account entry accepts `1010-D100-C200` typed as one
 - **BR-11.9 Error codes (422 unless noted).** `LEDGER_UNBALANCED`, `LEDGER_LINE_LIMIT`, `LEDGER_LINE_EMPTY`, `LEDGER_AMOUNT_SCALE`, `LEDGER_ACCOUNT_NOT_FOUND`, `LEDGER_ACCOUNT_NOT_POSTABLE`, `LEDGER_ACCOUNT_SUSPENDED`, `LEDGER_RECON_ACCOUNT_MANUAL`, `LEDGER_STRUCTURE_NOT_FOUND`, `LEDGER_DIMENSION_REQUIRED`, `LEDGER_DIMENSION_INVALID`, `LEDGER_DIMENSION_INACTIVE`, `LEDGER_COMBINATION_INVALID`, `LEDGER_PERIOD_NOT_FOUND`, `LEDGER_PERIOD_CLOSED`, `LEDGER_PERIOD_ON_HOLD` (403), `LEDGER_DATE_INVALID`, `LEDGER_CURRENCY_MISMATCH`, `LEDGER_RATE_MISSING`, `LEDGER_ROUNDING_EXCEEDED`, `LEDGER_REVERSAL_ALREADY_REVERSED`, `LEDGER_IDEMPOTENCY_CONFLICT` (409), `LEDGER_IDEMPOTENCY_IN_PROGRESS` (409), `LEDGER_FORBIDDEN` (403).
 - **BR-11.10 Journal batch state machine.** `draft → validated` (all lines valid) → `in_approval` (submit; skipped if journal name has no workflow) → `approved | rejected` → `posting` (lock) → `posted` (entry ids recorded) or back to `approved` with error on failure; `draft|validated|rejected → cancelled`; any line edit in `validated|approved` returns the batch to `draft`. Posted and cancelled are terminal.
 - **BR-11.11 Document split.** Entries sharing a `document_id` are independent for balancing; callers that split a document must balance each part (use a clearing account) — the API does not defer balancing across requests.
+- **BR-11.12 Clearing tolerance.** For a selected item set, `residual = Σ amount_clearing`. Let `T_user` and `T_account` be the applicable tolerance groups (absent = 0). The posting limit is `min(T_user, T_account)` per side (`abs_debit` for a debit residual, `abs_credit` for a credit residual) and additionally `pct × Σ|amount|` when `pct` is set. `|residual| = 0` → clear; `0 < |residual| ≤ limit` → clear and post the residual to the tolerance group's `difference_account_id` with the dimensions of the largest item; `|residual| > limit` → `residual_item = true` creates a residual item for `residual` on the same account and combination, else `LEDGER_CLEARING_UNBALANCED`.
+- **BR-11.13 Open-item lifecycle.** `open → cleared` (exactly once per clearing document) → `reset_open` (reset) → `cleared` (again, by a new document); an item in `cleared` cannot be in a second active clearing document (`LEDGER_OPEN_ITEM_ALREADY_CLEARED`); a residual item's `residual_of_item_id` chain is at most 20 deep; clearing dates may not precede the latest posting date of the items cleared; a clearing document is reset as a whole, never partially.
+- **BR-11.14 Derivation evaluation.** Steps run strictly in `sequence`; a step whose target was set by an earlier step in the same run is skipped unless `overwrite = true`; a step may not read a field it also writes; lookup tables are matched on the full source tuple with `*` wildcards and the most specific row wins (fewest wildcards, then latest `valid_from`); a strategy with > 50 steps or a step with a CEL parse error cannot be activated (`LEDGER_DERIVATION_INVALID`).
+- **BR-11.15 Splitting proportions.** For an entry with carrying lines (amounts `a_i`, splitting values `v_i`) and a non-carrying line amount `b`: produce lines `b × a_i / Σa` per distinct `v`, rounded per BR-12.4 with the residual on the largest share; when Σa = 0 or no carrying line exists use `default_splitting_value` or raise `LEDGER_SPLIT_NO_SOURCE`; after inheritance, for each splitting value with Σ(debit − credit) ≠ 0, add a pair of zero-balance lines (clearing account) so each value balances; zero-balance lines are excluded from P&L statements and flagged `is_zero_balance = true`.
+- **BR-11.16 Negative posting.** When a reversal uses a reason code with `negative_posting_allowed`, the reversing lines keep the original side with the opposite sign in the `Balance` projection (`debit −x`), while `JournalLine.debit_credit` stays D/C with positive amounts and `negative_posting = true`; reports that sum debits and credits (trial balance, document journal) apply the flag so turnover totals equal the pre-posting values.
+- **BR-11.17 Validation rule evaluation.** All rules are evaluated (no short-circuit) so the response lists every violation; a rule referencing a dimension attribute not in the ledger is skipped and logged; warnings do not block API callers (service accounts) but are returned in `warnings[]`; the same rule set applies to reversals, allocations, accruals and year-end entries unless the rule's prerequisite excludes the `source_type`.
+- **BR-11.18 Open-item account constraints.** `open_item_managed` is allowed only for balance-sheet accounts that are not reconciliation accounts of type customer/vendor (those are managed by waves 19/30) and not `is_postable = false`; the flag change is effective-dated and requires an activation run when the account has non-zero balances; open items are revalued (wave 12) at item level, so the account is excluded from balance-level revaluation.
 
 ### 2.11.8 Acceptance criteria
 
@@ -294,6 +439,15 @@ Interaction rules: segmented account entry accepts `1010-D100-C200` typed as one
 - **AC-11.8** (FR-11.9, BR-11.10) Given a journal name with a 2-level approval, when a clerk submits a batch, then it is `in_approval`, the approver sees a Temporal task, and after approval the clerk can post.
 - **AC-11.9** (FR-11.13) Given the demo opening balance file, when loaded through the migration framework, then the conversion-suspense account balance is 0.00 and the trial balance equals the AX extract totals.
 - **AC-11.10** (FR-11.14) Given 10M lines, when querying lines for one account and month, then the first page returns in < 300 ms p95 using the keyset cursor.
+- **AC-11.11** (FR-11.15) Given a journal name with `reversal_reason_required = true`, when a reversal is requested without `reason_code`, then 422 `LEDGER_REASON_REQUIRED`; when requested with a code flagged `negative_posting_allowed`, then the trial balance debit and credit turnover equal their values before the original posting.
+- **AC-11.12** (FR-11.19, BR-11.12) Given open items of USD 100.00 (D) and USD 99.98 (C) on a clearing account and a user tolerance of USD 0.05, when cleared manually, then one clearing document exists, a USD 0.02 difference line is posted to the tolerance account, and both items are `cleared`; with tolerance USD 0.01 and `residual_item = true`, then a residual item of USD 0.02 is created instead.
+- **AC-11.13** (FR-11.20) Given 1,000 open items on GR/IR-style accounts with matching `assignment` values summing to zero in 400 groups and 50 unmatched items, when `gl-auto-clear` runs, then 400 clearing documents exist, 50 items remain open, and no residual items were created.
+- **AC-11.14** (FR-11.21) Given an active rule "lines on accounts 6000–6999 require DEPT when amount_acct > 1,000", when a 1,500.00 line without DEPT is validated, then 422 with the rule id and `line_index`; a 500.00 line without DEPT passes.
+- **AC-11.15** (FR-11.22) Given a lookup step (account category = COGS, cost center = C200) → FUNC_AREA = PROD, when a line on a COGS account with C200 and no FUNC_AREA is posted, then the stored combination contains FUNC_AREA = PROD and `derived_by_step_ids` names the step.
+- **AC-11.16** (FR-11.23, BR-11.15) Given a vendor invoice with expense lines 600.00 (PC1) and 400.00 (PC2), a tax line 190.00 and a payable line 1,190.00, when posted with an active splitting rule on PC, then the payable is split 714.00 / 476.00 and the tax 114.00 / 76.00, and Σ(debit − credit) per profit center is 0.00.
+- **AC-11.17** (FR-11.24) Given 2,000 lines on cost center C100 across 3 periods, when a realignment C100 → C150 is posted and then reversed, then balances per combination equal the pre-run values and both runs appear in the audit trail.
+- **AC-11.18** (FR-11.16) Given an advanced rule "account 5000–5999 and DEPT = D100 adds segment PROJECT (required)", when a line on 5100/D100 omits PROJECT, then 422 `LEDGER_DIMENSION_REQUIRED` for PROJECT; a line on 5100/D200 posts without PROJECT.
+- **AC-11.19** (FR-11.17) Given a tenant template for `manual_journal` "Journal %1 of %2" bound to `{voucher}` and `{document_date}`, when a batch without description is posted, then the entry description is "Journal GJ-000123 of 2026-03-31".
 
 ### 2.11.9 Test plan and fixtures
 
@@ -328,6 +482,14 @@ Helm chart `passage-ledger` (deployment, HPA 3–12 pods on CPU 60%, PodDisrupti
 | SAP `SKA1`/`SKAT`/`SKB1` | ChartOfAccounts, MainAccount, MainAccountLedgerSetting | `XSPEB` (blocked) → suspended; `MITKZ` → reconciliation_account_type |
 | SAP `CSKS`, `CEPC`, `TGSB` | DimensionValue (CC, PC, BA attributes) | validity dates preserved |
 | SAP `FAGLFLEXT`/`ACDOCA` closing balances by period | JournalEntry (period 0) | per ledger (`RLDNR`) → Passage ledger |
+| AX `ReasonTable`, `ReasonTableRef` | ReasonCode | `applies_to` from the Ledger/Bank/Cust/Vend/Asset flags |
+| AX `DimensionHierarchy` (advanced rule structures), `DimensionAdvancedRule`, `DimensionRuleCriteria` | AdvancedRule (+ structure) | criteria → filter; structure segments → appended segments |
+| AX `TransactionTxt` (default descriptions) | DescriptionTemplate | `%1`–`%3` mapped to field bindings per transaction type |
+| AX `DocuRef`/`DocuValue` on `LedgerJournalTable` | Attachment (wave 5 framework) | `DocuType` → document_type; files copied to object storage |
+| SAP `T041C` | ReasonCode | `XNEGP` → negative_posting_allowed; `XABWD` → alternative_posting_date_allowed |
+| SAP `SKB1-XOPVW`, open items on OI-managed G/L accounts (`BSIS` with `AUGBL` blank), `T043S`, `TF123` | MainAccountLedgerSetting.open_item_managed, OpenItem (activation run), ToleranceGroup, AutoClearingRule | one open item per uncleared `BSIS` row dated cutover; cleared history (`BSAS`) not migrated |
+| SAP `GB90*`/`T001Q` validations, `GB91*`/`T001R` substitutions, `TKEDR*`/`K9R*` derivation, `T8A*` PCA substitution, `FMDERIVE*`, `TFKB` functional areas | ValidationRule, DerivationStrategy steps, LookupTable, dimension values for FUNC_AREA | Boolean rules converted to CEL where the exit is table-based; user exits (ZGGB*) listed in a conversion report for re-authoring |
+| SAP `T8G01`–`T8G40` document splitting | SplittingRule | item categories → categories; splitting method → active; zero-balance account → clearing account |
 
 Validation: account count match; every migrated combination validates under the migrated structure (exceptions queued); opening TB per entity equals source to the cent. Not migrated: AX `LedgerJournalTable` unposted batches (users re-key), SAP parked documents, posting definitions (re-implemented per subledger wave).
 
@@ -342,6 +504,206 @@ Depends on: wave 3 (metadata entity generation), wave 4 (outbox, Temporal approv
 | Structure change invalidates existing combinations | Medium | Medium | Combinations are tied to structure version; old versions stay queryable |
 
 Open questions: (1) Should `amount_txn` be stored as integer minor units instead of numeric(23,6)? Default: numeric with scale check; decide by wave 12 start. (2) Idempotency scope per legal entity vs per tenant? Default: per legal entity; decide by wave 11 mid-point. (3) Maximum dimensions 20 vs AX's practical 10? Default 20; decide by wave 11 exit.
+
+### 2.11.13 Parameters and setup
+
+| Parameter | Scope | Type | Default | Allowed values | Effect | AX equivalent | SAP equivalent |
+|---|---|---|---|---|---|---|---|
+| `max_lines_per_entry` | tenant | int | 10,000 | 100–50,000 | Posting request line limit (FR-11.5) | — (journal `LinesLimit` on journal name) | 999 line limit per `BSEG` document (hard) |
+| `idempotency_ttl_days` | tenant | int | 400 | 30–3,650 | Retention of idempotency records (FR-11.5) | — | — |
+| `future_posting_days` | legal entity | int | 366 | 0–730 | Maximum days ahead for `posting_date` (BR-11.4) | General ledger parameters > Ledger > "Allow posting to future periods" (implicit) | OB52 open-period range |
+| `reversal_reason_required` | legal entity | bool | true | true / false | Reason code mandatory on reversal (FR-11.15) | General ledger parameters > Ledger > Reason code requirements (reversal) | T041C reason required on FB08 |
+| `negative_posting_enabled` | ledger | bool | false | true / false | Permits reason codes with `negative_posting_allowed` (BR-11.16) | General ledger parameters > Ledger > Correction (storno) | OBY6 "Negative postings permitted" |
+| `check_voucher_used` | ledger | enum | reject_duplicates | reject_duplicates / warn / accept | Duplicate voucher detection across journal names | General ledger parameters > Ledger > Check for voucher used | FBN1 number range object `RF_BELEG` (unique by design) |
+| `use_document_date_for_voucher` | ledger | bool | false | true / false | Voucher sequence drawn from document date year | General ledger parameters > Ledger > Use document date for vouchers | OBA7 document type "Doc. date = posting date" |
+| `journal_name.posting_restriction` | journal name | enum | by_user_group | none / own_journals_only / by_user_group | Who may post batches of this name (FR-11.9) | Journal names > Posting restrictions | OBA7 authorization group |
+| `journal_name.lines_limit` | journal name | int | 5,000 | 1–50,000 | Lines per batch (FR-11.9) | Journal names > Lines limit | — |
+| `journal_name.allow_recon_accounts` | journal name | bool | false | true / false | Manual lines on reconciliation accounts (BR-11.8) | Journal names > Journal control (account types allowed) | OBA7 "Account types allowed" (D/K) |
+| `journal_name.self_approval_allowed` | journal name | bool | false | true / false | Approver may equal submitter | Workflow configuration > automatic actions | WS10000051 agent rule |
+| `journal_name.voucher_sequence_id` | journal name | ref | required | number sequence (wave 5), gap-free | Voucher numbering per journal name | Journal names > Voucher series | OBA7 number range per document type (FBN1) |
+| `journal_name.description_language` | journal name | enum | legal_entity | legal_entity / user | Language for default descriptions (FR-11.17) | Default descriptions > Language | — |
+| `max_dimension_attributes` | ledger | int | 20 | 1–20 | Attributes per ledger (FR-11.2) | Financial dimensions (practical limit ~10) | ACDOCA fixed fields + coding block extension (OXK3) |
+| `account.open_item_managed` | main account × ledger | bool | false | true / false | Creates open items per line (FR-11.19) | — | FS00 company-code data "Open item management" (`SKB1-XOPVW`) |
+| `account.clearing_currency` | main account × ledger | enum | accounting | accounting / transaction | Currency in which items must balance to clear | — | FS00 "Only balances in local currency" |
+| `tolerance_group.limits` | legal entity (per group) | jsonb | `{USD:{abs_debit:0.05, abs_credit:0.05, pct:0}}` | per currency | Clearing difference posting limits (BR-11.12) | General ledger parameters > Ledger > Maximum penny difference | OBA0 tolerance groups for G/L accounts; OB57 user assignment |
+| `auto_clearing.schedule` | ledger | cron | `0 2 * * *` | cron | Schedule of `gl-auto-clear` (FR-11.20) | — | F.13 batch variant (SM36) |
+| `validation_rules.active_version` | ledger | int | latest active | activated version | Rule set in force (FR-11.21) | Journal controls | OB28 activation level 1/2 per company code |
+| `derivation_strategy.active_version` | ledger | int | latest active | activated version | Strategy in force (FR-11.22) | — | KEDR strategy active; OBBH activation |
+| `splitting.method` per source_type | ledger | enum | off | off / active / passive | Document splitting (FR-11.23) | — | FAGL_SPLIT activation per company code; splitting method |
+| `splitting.zero_balance_clearing_account_id` | ledger | ref | none | balance-sheet account | Zero-balance lines (BR-11.15) | — | Zero-balance clearing account (T8G30) |
+| `realignment.enabled` | ledger | bool | false | true / false | Enables FR-11.24 runs | — | KEND authorization |
+| `balance_rebuild_chunk_lines` | tenant | int | 5,000,000 | 1M–20M | Chunk size in BR-11.7 | Financial dimension sets > Rebuild balances (no tuning) | RFINDEX variant |
+| `attachment.default_retention_class` | legal entity | ref | `financial_record_10y` | wave 5 retention classes | Retention applied to voucher attachments (FR-11.18) | Document management parameters > Document types | OAC3 ArchiveLink document type / retention |
+
+### 2.11.14 Inquiries and reports
+
+| Name | Type | Filters & parameters | Columns / measures | Source projection | AX equivalent | SAP equivalent |
+|---|---|---|---|---|---|---|
+| Trial balance | list inquiry | ledger, period range, dimension set, currency type, account range | account, opening, debit, credit, closing, net, line count | `Balance` | Trial balance list page (`LedgerTrialBalanceListPage`); SSRS Trial balance | FAGLB03, S_ALR_87012277, F.08 |
+| Ledger transactions (voucher transactions) | drill-down | ledger, voucher, date range, account, dimension values, source system | voucher, posting date, account, dimensions, D/C, txn/acct/rpt amounts, text, source link, trace id | `JournalLine` ⋈ `JournalEntry` | Voucher transactions / Ledger transactions inquiry; SSRS Ledger transaction list | FBL3N, FAGLL03, S_ALR_87012282, Fiori Display Line Items in General Ledger |
+| Dimension statement | list inquiry | ledger, dimension attribute + value, period range | account, net per period, YTD | `Balance` | Dimension balance inquiry (`DimensionFocus` balances) | KE5Z (profit center), S_ALR_87013611 (cost center) |
+| Chart of accounts listing | operational report | chart, account type, postable, suspended | number, name, type, category, default dimensions, OI flag, recon type | `MainAccount` ⋈ `MainAccountLedgerSetting` | SSRS Chart of accounts | S_ALR_87012326, S_ALR_87012328 |
+| Journal batches (unposted) | list inquiry | journal name, status, owner, date, amount | voucher, name, status, Σ debit, Σ credit, owner, approver, posting date | `JournalBatch` | General journal list page; SSRS Journal (LedgerJournal) | FBV0 / FBV3 parked documents list |
+| Posted journals | operational report | journal name, posted date range, posted by | batch, vouchers, entry ids, totals, posted by/at | `JournalBatch` (posted) ⋈ `JournalEntry` | Posted journals list; SSRS Posted journals | S_ALR_87012287 document journal |
+| Voucher (document) view | drill-down | voucher or entry id | header, all lines with dimensions and three currencies, reversal links, attachments | `JournalEntry` | SSRS Voucher (LedgerTransVoucher); Voucher transactions | FB03, S_ALR_87012289 compact document journal |
+| Open items by account | list inquiry | ledger, account range, status, assignment, date, dimension | item, posting date, assignment, amount clearing/acct, days open, clearing document | `OpenItem` | — (customer/vendor open transactions only) | FBL3N open items, FAGLL03 (OI status) |
+| Clearing documents | drill-down | account, clearing date range, mode, status | document, mode, items, difference, FX difference, reset reason/by | `ClearingDocument` | — | FB03 clearing document, FBRA history |
+| Automatic clearing proposal / log | operational report | run id, ledger, rule | groups proposed, cleared, skipped (reason), items per group | `gl-auto-clear` run log | — | F.13 log (SE38 `SAPF124` output) |
+| Validation rule test result | drill-down | rule id, sample entry | per line: prerequisite result, check result, message | `ValidationRule` test harness | — | GGB0 simulation |
+| Derivation trace | drill-down | batch line or `validate` response | step sequence, kind, matched lookup row, value before/after | posting pipeline | — | KEDR "Analyze derivation" (KE4ST) |
+| Document splitting simulation | drill-down | sample document | lines before/after split, inherited flags, zero-balance lines | posting pipeline | — | FB50 "Simulate general ledger" (split view) |
+| Reason code usage | operational report | reason code, module, period | count of reversals, clearings resets, amounts by code | `JournalEntry` (reversal) ⋈ `ReasonCode` | Reason codes form (no report) | T041C usage via FB03 reversal reason |
+| Balance projection drift KPI | KPI | ledger | rows_differing from last `balance-verify`, duration, HWM | `balance.rebuilt` events | Financial dimension sets rebuild log | RFINDEX / SAPF190 comparison report |
+| Idempotency replays | operational report | legal entity, date range, source system | key, first seen, replays, payload hash, conflicts (409) | idempotency table | — | — |
+
+### 2.11.15 Printed and electronic documents
+
+| Document | Trigger | Layout elements | Formats | Numbering sequence | Legal / retention requirement |
+|---|---|---|---|---|---|
+| Journal batch printout (unposted) | user action on Journal batch; optional on submit for approval | header: journal name, batch id, owner, status, totals; lines: line no., account, dimensions, D/C, currency, amount, text; footer: validation messages, approval chain | PDF, XLSX | batch id (not a legal number) | none; internal working paper, retained with batch 90 days after posting |
+| Posted voucher | user action on entry; attached automatically to approval evidence when the journal name sets `print_on_post` | header: ledger, voucher, posting date, document date, description, source, trace id; lines: account, dimensions, D/C, txn/acct/rpt amounts, text, derived/inherited flags; footer: reversal links, attachments list, posted by/at, result hash | PDF, XLSX, CSV | voucher (gap-free, FR-11.6) | financial record; retention per `attachment.default_retention_class` (default 10 years) |
+| Clearing statement | on clearing document creation or reset | header: account, clearing date, mode, document id; lines: cleared items with assignment, dates, amounts, residual/difference lines; footer: tolerance applied, actor | PDF | clearing document id | financial record; 10 years |
+| Chart of accounts export | user action | account attributes incl. default dimensions, OI flag, recon type, suspended_from | XLSX, CSV, JSON | — | none |
+| Account structure / advanced rule definition export | user action or version activation | segments, constraint rows, advanced rules and structures, version, effective_from | JSON, XLSX | structure version | configuration record; kept with the version indefinitely |
+| Approval evidence pack | batch posted after approval | batch printout + workflow history (submitter, approvers, timestamps, comments) | PDF | batch id | audit evidence; 10 years |
+
+No e-invoice or EDI documents originate in this wave.
+
+### 2.11.16 Periodic and batch jobs
+
+| Job | Schedule default | Partitioning key | Idempotency / checkpoint | Typical runtime target | Failure handling | Monitor / alert |
+|---|---|---|---|---|---|---|
+| `balance-verify` (rebuild into shadow, compare, swap only on diff) | daily 01:00 tenant time zone | ledger | run id per (ledger, date); chunk checkpoints per fiscal period (BR-11.7) | 10M lines < 15 min | retry 1× after 10 min; partial chunks rolled back per chunk | `balance.rebuilt.rows_differing > 0` → P1; duration > 60 min → P3 |
+| `create-partitions` | monthly, 1st 00:30 | tenant shard | idempotent `CREATE TABLE IF NOT EXISTS` for next fiscal year | < 1 min | alert, retry daily | missing partition for next year within 60 days → P2 |
+| `recurring-journal-generate` | per template cron; default last business day of period 06:00 | template | one batch per (template, scheduled date) key; replay returns existing batch | 1,000 templates < 5 min | failed template marked; others continue | failed templates > 0 → P3; batch not generated by due date → P3 |
+| `gl-auto-clear` | daily 02:00 | ledger × rule | run id per (ledger, rule, date); groups cleared individually with idempotency key `auto:{rule}:{group_hash}` | 1M open items < 10 min | group-level failures logged, run continues | cleared count = 0 for 3 consecutive runs on a rule with open items → P3 |
+| `idempotency-purge` | daily 03:00 | tenant | deletes records older than `idempotency_ttl_days`; checkpoint by created_at | < 5 min per 10M keys | retry next day | table growth > 2× expected → P3 |
+| `dimension-value-reconcile` (compare backing entities with `DimensionValue`) | daily 04:00 | dimension attribute | idempotent upsert; diff report stored | < 2 min | alert | diff count > 0 → P3 |
+| `attachment-retention-sweep` (wave 5 framework, ledger hook) | weekly Sunday 05:00 | legal entity | retention class evaluation; deletes only past expiry | < 10 min | skip and retry | failures → P3 |
+| `open-item-aging-snapshot` | daily 05:30 | ledger | one row per (account, date) | < 2 min | retry | — |
+
+### 2.11.17 Security duties and privileges
+
+| Duty | Privileges (entry points) | Segregation-of-duties conflicts | Default roles that include it |
+|---|---|---|---|
+| Maintain chart of accounts | PUT /ledger/charts/*/accounts; screen Chart of accounts; import CSV | Post ledger journals; Maintain ledger journals | Financial controller, Accounting manager |
+| Maintain financial dimensions | PUT dimension attributes/values; screen Financial dimensions | Post ledger journals | Accounting manager |
+| Maintain account structures | PUT account-structures, advanced-rules; activation; screen Account structures | Post ledger journals | Accounting manager |
+| Maintain ledger setup | PUT description-templates, splitting-rules, ledgers; screen Ledger setup, Document splitting setup | Post ledger journals; Maintain ledger journals | Accounting manager, System administrator (finance) |
+| Maintain reason codes | PUT /ledger/reason-codes; screen Reason codes | — | Accounting manager |
+| Maintain ledger journals | POST/PATCH journal-batches, :submit; screen Journals, Journal batch; attachments | Approve ledger journals (same batch); Maintain chart of accounts | Accountant, Accounting clerk |
+| Approve ledger journals | :approve, :reject; Temporal task UI | Maintain ledger journals (same batch); Post ledger journals without approval | Accounting supervisor, Financial controller |
+| Post ledger journals | :post on batches; POST /ledger/validate | Maintain chart of accounts; Maintain validation and derivation rules | Accountant (senior), Accounting supervisor |
+| Post ledger journals without approval | `auto_post` templates, direct post when journal name has no workflow | Maintain ledger journals; Approve ledger journals | Financial controller (limited) |
+| Post journal entries (service accounts) | POST /ledger/journal-entries with `source.system ≠ ledger` | not assignable to human users | Subledger service accounts (waves 16+) |
+| Reverse journal entries | POST /journal-entries/{id}/reverse; screen Ledger transactions > Reverse | Approve ledger journals (same entry) | Accounting supervisor, Financial controller |
+| View ledger transactions | GET journal-entries, journal-lines, open-items; drill-downs | — | All finance roles, Internal auditor |
+| View ledger balances | GET balances; Trial balance; Dimension statement | — | All finance roles, Internal auditor, Department manager (own dimensions via OPA) |
+| Clear open items | POST /ledger/clearings, :simulate; screen Open items and clearing | Reset clearings; Maintain clearing rules; Maintain bank reconciliation (wave 36) | Accountant (senior), Treasury accountant |
+| Reset clearings | POST /clearings/{id}:reset | Clear open items | Accounting supervisor |
+| Maintain clearing rules | PUT auto-clearing-rules, tolerance-groups and assignments | Clear open items; Run automatic clearing | Accounting manager |
+| Run automatic clearing | POST /ledger/auto-clearing:run; job `gl-auto-clear` | Maintain clearing rules | Accounting supervisor, Finance batch operator |
+| Maintain validation and derivation rules | PUT validation-rules, derivation-strategies, lookup-tables; :test | Post ledger journals; Run dimension realignment | Accounting manager, Finance systems analyst |
+| Run dimension realignment | POST /ledger/realignments, :post, :reverse | Maintain validation and derivation rules; Approve ledger journals | Financial controller |
+| Administer ledger | balances:rebuild, accounts:activate-open-items, config, partitions | Post ledger journals | Finance platform administrator |
+
+### 2.11.18 Message catalog
+
+| Code | Severity | User text | Cause | Remediation | Raised by |
+|---|---|---|---|---|---|
+| LEDGER-0001 `LEDGER_UNBALANCED` | error | Entry does not balance in {currency}: debits {debits}, credits {credits}. | Σ D ≠ Σ C in a currency column | Correct the line amounts or add the clearing line | BR-11.1, BR-12.5 |
+| LEDGER-0002 `LEDGER_LINE_LIMIT` | error | Entry has {count} lines; the limit is {max}. | More than `max_lines_per_entry` | Split the document by `document_id` | FR-11.5 |
+| LEDGER-0003 `LEDGER_LINE_EMPTY` | error | Line {line} has no amount, quantity or text. | Zero line without statistical content | Remove the line or add quantity/text | BR-11.2 |
+| LEDGER-0004 `LEDGER_AMOUNT_SCALE` | error | Amount {amount} has more decimals than {currency} allows ({scale}). | Excess precision | Round in the caller | BR-11.3 |
+| LEDGER-0005 `LEDGER_ACCOUNT_NOT_FOUND` | error | Account {account} does not exist in chart {chart}. | Unknown account | Create the account or correct the number | FR-11.1 |
+| LEDGER-0006 `LEDGER_ACCOUNT_NOT_POSTABLE` | error | Account {account} is a total or reporting account. | `is_postable = false` | Use a postable account | FR-11.1 |
+| LEDGER-0007 `LEDGER_ACCOUNT_SUSPENDED` | error | Account {account} is suspended from {date}. | `suspended_from ≤ posting_date` | Use another account or lift the suspension | FR-11.1 |
+| LEDGER-0008 `LEDGER_RECON_ACCOUNT_MANUAL` | error | Account {account} accepts subledger postings only. | Manual line on a reconciliation account | Use a journal name with `allow_recon_accounts` or post through the subledger | BR-11.8 |
+| LEDGER-0009 `LEDGER_STRUCTURE_NOT_FOUND` | error | No active account structure covers account {account} on {date}. | Structure filter gap | Extend a structure's main-account filter | FR-11.3 |
+| LEDGER-0010 `LEDGER_DIMENSION_REQUIRED` | error | Dimension {attribute} is required for account {account}. | Blank not allowed by the structure or advanced rule | Supply the dimension value | FR-11.3, FR-11.16 |
+| LEDGER-0011 `LEDGER_DIMENSION_INVALID` | error | Value {value} is not allowed for {attribute} under structure {structure}. | Constraint row mismatch | Choose an allowed value | FR-11.3 |
+| LEDGER-0012 `LEDGER_DIMENSION_INACTIVE` | error | Value {value} of {attribute} is not active on {date}. | Effective dates / suspended | Use an active value or adjust dates | FR-11.2 |
+| LEDGER-0013 `LEDGER_PERIOD_CLOSED` | error | Period {period} is closed for module {module}. | Period status | Post in an open period or request reopen (wave 14) | BR-11.4, BR-14.1 |
+| LEDGER-0014 `LEDGER_PERIOD_ON_HOLD` | error (403) | Period {period} is on hold; your user group may not post to it. | On-hold without membership | Ask the controller group to post or reopen | BR-14.1 |
+| LEDGER-0015 `LEDGER_IDEMPOTENCY_CONFLICT` | error (409) | Idempotency key {key} was already used with a different payload. | Key reuse | Use a new key for a new request | BR-11.6 |
+| LEDGER-0016 `LEDGER_IDEMPOTENCY_IN_PROGRESS` | error (409) | A request with key {key} is still being processed. | Concurrent duplicate | Retry after 1 s | FR-11.5 |
+| LEDGER-0017 `LEDGER_REVERSAL_ALREADY_REVERSED` | error | Entry {voucher} was already reversed by {reversing_voucher}. | Second reversal | Reverse the reversing entry to reinstate | FR-11.8 |
+| LEDGER-0018 `LEDGER_REASON_REQUIRED` | error | A reason code is required for this reversal. | `reversal_reason_required` | Select a reason code (and comment if required) | FR-11.15 |
+| LEDGER-0019 `LEDGER_REASON_INVALID_MODULE` | error | Reason code {code} does not apply to {module}. | `applies_to` mismatch | Choose a code valid for the module | FR-11.15 |
+| LEDGER-0020 `LEDGER_CLEARING_UNBALANCED` | error | Selected items leave a residual of {residual} {currency}, above the tolerance {limit}. | BR-11.12 | Add items, create a residual item, or adjust the selection | FR-11.19 |
+| LEDGER-0021 `LEDGER_OPEN_ITEM_ALREADY_CLEARED` | error | Item {item} is already cleared by document {document}. | BR-11.13 | Reset the earlier clearing first | FR-11.19 |
+| LEDGER-0022 `LEDGER_OPEN_ITEM_ACCOUNT_REQUIRED` | error | Account {account} is not open-item managed. | Clearing on a non-OI account | Activate open-item management | BR-11.18 |
+| LEDGER-0023 `LEDGER_OI_ACTIVATION_BALANCE` | error | Open-item activation needs an activation run because account {account} has a balance. | Flag changed on an account with history | Run accounts:activate-open-items | FR-11.19 |
+| LEDGER-0024 `LEDGER_VALIDATION_RULE_FAILED` | error / warning | {rule_message} (rule {rule_id}, line {line}). | User-defined rule | Follow the rule's remediation text | FR-11.21 |
+| LEDGER-0025 `LEDGER_DERIVATION_INVALID` | error | Derivation strategy version {version} cannot be activated: {detail}. | Parse error, > 50 steps, cyclic read/write | Fix the step | BR-11.14 |
+| LEDGER-0026 `LEDGER_SPLIT_NO_SOURCE` | error | Line {line} cannot inherit {attribute}: no carrying line and no default value. | FR-11.23 | Add a value on the line or set `default_splitting_value` | BR-11.15 |
+| LEDGER-0027 `LEDGER_SPLIT_CLEARING_ACCOUNT_MISSING` | error | Document splitting is active but no zero-balance clearing account is set for ledger {ledger}. | Configuration | Set the account in Document splitting setup | FR-11.23 |
+| LEDGER-0028 `LEDGER_ADVANCED_RULE_SEGMENT_LIMIT` | error | Advanced rules add more than 20 segments for account {account}. | FR-11.16 | Reduce the matching rules' segments | FR-11.16 |
+| LEDGER-0029 `LEDGER_ATTACHMENT_RETAINED` | error | Attachment {name} is retained until {date} and cannot be deleted. | Retention class | Wait for expiry or request a legal-hold exception (wave 5) | FR-11.18 |
+| LEDGER-0030 `LEDGER_REALIGNMENT_PERIOD_CLOSED` | error | Realignment touches period {period}, which is closed for GL. | Period control | Exclude the period or reopen it | FR-11.24 |
+| LEDGER-0031 `LEDGER_DESCRIPTION_TRUNCATED` | info | Description was truncated to 255 characters. | Template expansion | Shorten the template | FR-11.17 |
+| LEDGER-0032 `LEDGER_NEGATIVE_POSTING_DISABLED` | error | Reason code {code} allows negative posting but the ledger does not. | `negative_posting_enabled = false` | Use another reason code or enable the parameter | BR-11.16 |
+
+### 2.11.19 Performance budgets and capacity
+
+| Operation | Volume assumption | Latency target (p50 / p95 / p99) | Throughput target | Storage growth per year | Index / partition strategy | Degradation behavior under 3× load |
+|---|---|---|---|---|---|---|
+| Post journal entry (2–50 lines, incl. derivation, splitting, validation rules) | 200k lines/day per tenant; peak 5,000 lines/s at month-end | 40 / 120 / 200 ms | 5,000 lines/s sustained 30 min | 400 B/line × 50M lines = 20 GB + 60% indexes ≈ 32 GB | `journal_line` range-partitioned by fiscal year; indexes §2.11.4 | HPA to 12 pods; sequence lock serializes per ledger; p99 may rise to 600 ms; no rejection below 3× |
+| Validate (dry run) | 50k calls/day | 20 / 60 / 100 ms | 1,000 req/s | none | stateless | same as posting |
+| Balance query (one account, 12 periods, group by dimension) | 100k/day | 30 / 150 / 300 ms | 500 req/s | — | PK clustered on `balance` | read replica; cached dimension sets 60 s |
+| Line query page (keyset, 1,000 rows) | 50k/day | 50 / 200 / 300 ms | 300 req/s | — | (ledger, account, posting_date) partition pruning | replica; page size reduced to 500 under pressure |
+| Balance rebuild | nightly, 10M lines | — | 10M lines < 15 min | shadow table transient | chunk per fiscal period ≤ 5M lines | runs on replica snapshot; swap skipped if lock not acquired in 2 s |
+| Manual clearing (≤ 10,000 items) | 5k clearings/day | 100 / 400 / 800 ms | 50/s | 150 B/open item; 2M items/year ≈ 300 MB | `open_item` index (ledger, account, status, assignment) | item selection capped at 10,000; larger via auto-clear |
+| `gl-auto-clear` | 1M open items nightly | — | 1M items < 10 min | — | grouping in SQL per rule with hash on criteria | per-rule timeout 20 min; remaining rules next run |
+| Derivation strategy evaluation | every posted line | ≤ 0.2 ms per line (50 steps) | — | lookup tables ≤ 100k rows each, memory-resident per pod | lookup tables cached, invalidated by `rules.changed` | strategy cache miss adds one query per pod |
+| Document splitting | 30% of entries | ≤ 1 ms per entry of 50 lines | — | +25% lines on split entries | — | — |
+| Realignment run | 10/month; ≤ 5M lines | — | 1M lines < 5 min (simulate), < 10 min (post) | reclassification entries ≈ 2 lines per combination × period | chunked by period | run queued; one active run per ledger |
+| Idempotency table | 200k keys/day × 400 days ≈ 80M rows | lookup ≤ 1 ms | — | 120 B/key ≈ 10 GB | PK (tenant, legal_entity, key); purged daily | — |
+
+### 2.11.20 Localization and compliance hooks
+
+- Chart of accounts templates by country (German SKR03/SKR04, French Plan Comptable Général with mandatory classes 1–7, Indian Schedule III grouping, Spanish PGC, US/UK free-form): wave 48 country packs ship `ChartTemplate` JSON imported through PUT /ledger/charts; account number validation regex per template.
+- Account name translations: `name` is translatable through wave 3 metadata; statutory languages per legal entity come from wave 6.
+- Reversal practice: negative posting (storno) is the default expectation in DE/AT/CH/IT; country packs set `negative_posting_enabled = true` and ship reason codes flagged `negative_posting_allowed`; US/UK packs keep opposite-side reversal.
+- Gap-free voucher numbering (FR-11.6) satisfies IT, FR, PT, ES and PL sequential-numbering rules; country packs may require a separate sequence per document class (e.g., IT sectional numbering) through the wave 5 number sequence scopes.
+- Posting date vs document date: FR-11.5 accepts both; country packs add validation rules (FR-11.21) such as "document date ≤ posting date" (DE GoBD) or "posting within 30 days of document date".
+- Retention: `attachment.default_retention_class` and journal retention map to statutory minimums (DE HGB §257 / AO §147: 10 years; US IRS: 7 years; UK: 6 years; FR: 10 years); the journal itself is never purged in Phase 2; archival export hooks are provided to wave 48 audit files (SAF-T via wave 13, GDPdU/GoBD export, FEC for France) through the line query API with stable ordering.
+- Audit-file fields: `JournalLine` carries every field FEC (FR) and GoBD (DE) require (voucher, journal code via journal name, posting date, account, text, debit, credit, document date, validation date = posted_at); SAF-T `GeneralLedgerEntries` is produced by wave 13 from the same API.
+- Privacy: `text`, `description` and attachment contents may hold personal data; they are tagged `pii_possible` for wave 7 data-subject request searches; no deletion from the journal — masking is applied on export only when legally required.
+- Calendar and currency: fiscal calendars (wave 6) and ISO 4217 minor units (wave 12) are the only currency/calendar dependencies; rounding mode per ledger (BR-12.2) is set by country packs where commercial rounding differs.
+- Extension point: `ledger.country_pack` hook set = chart template import, validation rule pack, description template language pack, reason code pack, and audit-file exporter registration; packs are declarative (JSON) and versioned with the wave 48 pack registry.
+
+### 2.11.21 Coverage closure
+
+| Register row (inventory section + AX form or SAP T-code) | Status before | Disposition | Note |
+|---|---|---|---|
+| AX §12.1.1 Common / Journals — Voucher attachments / document handling (`DocuView`) (AX register row 1) | PARTIAL-11 | ADDED as FR-11.18 | document types, retention class, store reference from wave 5 framework; attachment immutability after posting |
+| AX §12.1.3 Periodic — Reason code assignment (reversal reasons) (AX register row 2) | PARTIAL-11 | ADDED as FR-11.15 | reason code required on reversal; negative posting semantics BR-11.16 |
+| AX §12.1.4 Setup — Chart of accounts → Advanced rule structures / Advanced rules (AX register row 3) | PARTIAL-11 | ADDED as FR-11.16 | advanced rules versioned with account structures; AC-11.18 |
+| AX §12.1.4 Setup — Journals → Default descriptions (Transaction text) (AX register row 5) | PARTIAL-11 | ADDED as FR-11.17 | templates per source_type × language; AC-11.19 |
+| AX §12.1.4 Setup — Posting → Reason codes (financial reasons) (AX register row 6) | PARTIAL-11 | ADDED as FR-11.15 | shared `ReasonCode` with `applies_to[]` |
+| AX §12.3.4 Setup — Sales → Sales reasons / Reason codes (customer) (AX register row 32) | PARTIAL-11 | ADDED as FR-11.15 | `applies_to` includes customer; AR (wave 30) consumes |
+| AX §12.6.4 Setup — Fixed asset → Reason codes (fixed assets) (AX register row 44) | PARTIAL-11 | ADDED as FR-11.15 | `applies_to` includes fixed_asset; wave 37 consumes |
+| AX §12.14.4 Setup — Inventory → Counting → Counting reason code policies (AX register row 137) | PARTIAL-11 | ADDED as FR-11.15 (codes); policies DEFERRED to wave 16 | code list here; the counting policy (which codes are mandatory per warehouse) belongs to the inventory ledger wave |
+| AX §12.29.1 Common / Journals — Reason codes (shared financial reasons across modules) (`ReasonTable`) (AX register row 239) | PARTIAL-11 | ADDED as FR-11.15 | |
+| AX §12.29.4 Setup — Reason codes (Financial reasons: ledger, bank, customer, vendor, fixed asset) (AX register row 258) | PARTIAL-11 | ADDED as FR-11.15 | screen Reason codes; API /ledger/reason-codes |
+| SAP §13.1 FI-GL Master data & documents — F-03 / F-04 Clear G/L account / post with clearing (SAP register row 1) | PARTIAL-11 | ADDED as FR-11.19 | manual clearing, post-with-clearing, reset (FBRA); AC-11.12 |
+| SAP §13.1 FI-GL Master data & documents — FAGL_ACTIVATE_OP (SAP register row 4) | PARTIAL-11 | ADDED as FR-11.19 | activation run creating opening open items |
+| SAP §13.1 FI-GL Master data & documents — FAGL_SWITCH_TO_OPEN_ITEM (SAP register row 5) | PARTIAL-11 | ADDED as FR-11.19 | same activation run; deactivation requires zero open items |
+| SAP §13.1 FI-GL Periodic processing — F.13 / F13E Automatic clearing (SAP register row 7) | PARTIAL-11 | ADDED as FR-11.20 | job `gl-auto-clear`; AC-11.13 |
+| SAP §13.1 FI-GL Customizing — OB28 / GGB0 Validations (SAP register row 12) | PARTIAL-11 | ADDED as FR-11.21 | CEL prerequisite/check/message; AC-11.14 |
+| SAP §13.1 FI-GL Customizing — OBBH / GGB1 Substitutions (SAP register row 13) | PARTIAL-11 | ADDED as FR-11.22 | derivation strategy steps |
+| SAP §13.1 FI-GL Customizing — OBBZ / OBBW Substitution/validation for cost of sales accounting (SAP register row 14) | PARTIAL-11 | ADDED as FR-11.22 | FUNC_AREA attribute + shipped lookup step; AC-11.15 |
+| SAP §13.1 FI-GL Customizing — Document splitting (FAGL_SPLIT*) (SAP register row 15) | PARTIAL-11 | ADDED as FR-11.23 | active/passive inheritance, zero-balance lines; AC-11.16 |
+| SAP §13.1 FI-GL Customizing — OBA0 Tolerance groups for G/L accounts (SAP register row 18) | PARTIAL-11 | ADDED as FR-11.20 | `ToleranceGroup` per account and user; BR-11.12 |
+| SAP §13.1 FI-GL Customizing — OB74 Additional rules for automatic clearing (SAP register row 20) | PARTIAL-11 | ADDED as FR-11.20 | `AutoClearingRule.criteria` |
+| SAP §13.1 FI-GL Customizing — Cost of sales accounting: functional areas (OKBD), FAGL_FUNC_AREA (SAP register row 22) | PARTIAL-11 | ADDED as FR-11.22 | functional area is a standard dimension attribute; P&L by function in wave 15 |
+| SAP §13.9 CO-PA Master data & documents — KEDR / KEDE derivation strategy (SAP register row 102) | PARTIAL-11 | ADDED as FR-11.22 | table_lookup steps with validity dates |
+| SAP §13.9 CO-PA Periodic processing — KEND / KEDR realignment run (SAP register row 105) | PARTIAL-11 | ADDED as FR-11.24 | append-only reclassification; AC-11.17 |
+| SAP §13.9 CO-PA Customizing — KEDR derivation rules (table lookup, rule, move, clear, enhancement) (SAP register row 106) | PARTIAL-11 | ADDED as FR-11.22 | enhancement exits → `expression` (CEL) steps |
+| SAP §13.9 CO-PA Customizing — 0KEM / 0KEP PCA substitution / derivation of PC (SAP register row 107) | PARTIAL-11 | ADDED as FR-11.22 | profit center derived from (sales org, material group) lookup tables once waves 8/27 supply the fields |
+| SAP §13.11 FM / PSM Master data & documents — FMDERIVE (SAP register row 121) | PARTIAL-11 | ADDED as FR-11.22 | FM account assignment (fund, funds center, commitment item) modeled as dimension attributes; budget control in wave 38 |
+| SAP §13.11 FM / PSM Customizing — FMDERIVE strategy (SAP register row 122) | PARTIAL-11 | ADDED as FR-11.22 | strategy versions per ledger |
 
 ## 2.12 Wave 12: Multi-Currency, Parallel Ledgers & Revaluation
 
@@ -376,6 +738,7 @@ After this wave a user can post a EUR invoice into a USD-accounting entity with 
 | Currency translation (reporting currency) | Reporting currency on ledger, revaluation of reporting currency | Currency translation (FAGL_FCV / consolidation) | `ledger.TranslationRun` (monthly, average/closing/historical by account type) | partial: group consolidation in wave 40 |
 | Rounding differences | Penny difference accounts (`LedgerParameters`) | Rounding difference account (OB00), tolerance | `CurrencyPolicy.rounding_difference_account`, tolerance per BR-12.4 | full |
 | Rate audit / history | Database log on `ExchangeRate` | `TCURR` change documents | `fx.ExchangeRate` is append-only with `superseded_by` | improved |
+| Market data beyond FX (interest rates, indices, prices) | Not available (exchange rates only) | TBDM market data import, market data classes (`VTB_MARKET`, `JBD*`), rate types / yield curves / volatility customizing | `fx.MarketDataSeries` (kind ∈ {fx_rate, interest_rate, index, price}) with the same providers, audit and lookup (FR-12.13); curves and security valuation in wave 36 | partial: series storage and import here, valuation in wave 36 |
 
 ### 2.12.3 Functional requirements
 
@@ -409,6 +772,10 @@ After this wave a user can post a EUR invoice into a USD-accounting entity with 
 - **FR-12.10 Exchange rates workspace** — Must. The system shall provide screens for rate types, rate entry/import, provider schedules, lookup tester and rate history.
 - **FR-12.11 Rate audit** — Must. The system shall record who/what created each rate, the provider payload hash, and expose a history view by pair; a rate change that moves more than 10% from the previous value requires confirmation in the UI and emits a warning event.
 - **FR-12.12 Posting-time currency validation** — Must. The system shall reject a transaction currency that is suspended or not enabled for the legal entity with `LEDGER_CURRENCY_MISMATCH`, and a missing rate with `LEDGER_RATE_MISSING` including the (type, pair, date) in the violation.
+- **FR-12.13 Market data series** — Should. The `fx` service shall store, besides exchange rates, generic market data series of kind `interest_rate` (reference rates such as SOFR, €STR, EURIBOR 3M, SONIA by tenor), `index` (CPI, commodity indices) and `price` (security or commodity prices by identifier), each a series of (series_code, valid_from, value numeric(20,10), source, provider_timestamp, payload_hash), append-only with `superseded_by`, imported by the same provider schedule framework as FR-12.4 (ECB SDW, CSV, manual) and queryable by `GET /fx/series/{code}?date=`.
+  - Series carry `unit` (percent per annum, index points, currency per unit), `day_count` for rates (ACT/360, ACT/365, 30/360) and `tenor` (ON, 1W, 1M, 3M, 6M, 12M) as metadata; no interpolation or curve bootstrapping in this wave.
+  - Deviation warning (FR-12.11) applies with a series-specific threshold (default 25% for rates, 10% for prices).
+  - Consumers: wave 36 (interest calculation, yield curves, security valuation), wave 38 (budget rate assumptions), wave 29 (index-linked subscription pricing).
 
 ### 2.12.4 Data model
 
@@ -460,6 +827,8 @@ After this wave a user can post a EUR invoice into a USD-accounting entity with 
 | line: account_id, dimension_combination_id, currency_txn | | yes | key |
 | line: balance_txn, balance_acct_posted, rate_used, balance_acct_revalued, adjustment | numeric | yes | adjustment = revalued − posted |
 
+**MarketDataSeries** (fx, FR-12.13): `id`, `code` text(30) unique per tenant (e.g., `EURIBOR_3M`, `SOFR_ON`, `CPI_US`), `kind` enum (interest_rate, index, price), `unit` text, `currency` char(3) optional, `tenor` enum optional, `day_count` enum optional, `provider_id` optional, `active` bool; **MarketDataPoint**: `series_id`, `valid_from` date, `value` numeric(20,10), `source` enum, `provider_timestamp`, `payload_hash` bytea(32), `superseded_by` uuid, `created_at/by`; unique (series_id, valid_from, version); index (series_id, valid_from DESC) WHERE superseded_by IS NULL.
+
 **Invariants**: `amount_acct = round(amount_txn × rate, minor_units(acct))` per line before residual allocation; after allocation Σ D = Σ C in every column; exactly one leading ledger per legal entity; every member of a ledger group belongs to the same legal entity; a revaluation run that is `posted` with method `closing_rate` has a reversal entry dated period_end + 1 day.
 
 **Indexing**: `exchange_rate` index on (rate_type_id, from_currency, to_currency, valid_from DESC) WHERE superseded_by IS NULL; `journal_line` adds index on (ledger_id, currency_txn, posting_date) for revaluation selection; `revaluation_line` PK (run_id, account_id, dimension_combination_id, currency_txn).
@@ -480,6 +849,9 @@ After this wave a user can post a EUR invoice into a USD-accounting entity with 
 | GET | /api/v1/ledger/revaluations/{id}[/lines] | Inspect proposal/results | n/a | View ledger balances |
 | POST | /api/v1/ledger/revaluations/{id}:post | Post a simulated proposal | `Idempotency-Key` | Run foreign currency revaluation |
 | POST | /api/v1/ledger/translations | Reporting-currency translation run | `Idempotency-Key` | Run currency translation |
+| GET/PUT | /api/v1/fx/series[/{code}] | Market data series definitions (FR-12.13) | PUT idempotent | Maintain exchange rates |
+| POST | /api/v1/fx/series/{code}/points | Append points, bulk up to 5,000 | `Idempotency-Key` | Maintain exchange rates |
+| GET | /api/v1/fx/series/{code}?date= and /history | Resolve a value on a date; full history | n/a | View exchange rates |
 
 Posting request extensions (wave 11 contract, additive): `"ledger_group": "ALL"`, per line `"amount": {"currency":"EUR","value":"1000.00"}`, optional `"rate_override": {"rate_type":"M","rate":"1.0850000000"}`, optional `"ledger_lines": {"HGB": [ … ]}` for ledger-specific substitutions. Response contains `entries[]` one per ledger with `amounts: {txn, acct, rpt}` and `rates_applied[]`.
 
@@ -491,6 +863,7 @@ Commands: `PublishRate` (rate > 0, currencies enabled, 10% deviation warning), `
 | dev.passage.fx.provider.degraded.v1 | import failure after retries | provider, last_success_at, rate_type, error | ops alerting |
 | dev.passage.ledger.revaluation.completed.v1 | run posted | run_id, ledger_id, period, rate_type, gain_total, loss_total, posting_entry_id, reversal_entry_id | reporting, close |
 | dev.passage.ledger.translation.completed.v1 | translation posted | run_id, ledger_id, period, cta_amount, entry_id | reporting, close |
+| dev.passage.fx.series.published.v1 | market data point committed | series_code, kind, valid_from, value, previous_value, source, deviation_pct | treasury (wave 36), budgeting (wave 38), subscription pricing (wave 29) |
 
 ### 2.12.6 User experience
 
@@ -529,6 +902,7 @@ Interaction rules: the line grid shows derived amounts as read-only cells that r
 - **BR-12.9 Revaluation selection.** Only balance-sheet accounts with `revalue = true` and non-zero `balance_txn` in a currency ≠ accounting currency; reconciliation accounts for AP/AR are revalued at open-item level in waves 19/30 and are excluded here (`revalue_level = open_item`).
 - **BR-12.10 Provider precedence.** If two providers deliver the same (type, pair, date), the one with higher `priority` wins and the other is stored as `superseded`.
 - **BR-12.11 Rate precision in display.** Rates display 6 decimals by default with full 10 on hover/export; amounts never display more than the currency scale.
+- **BR-12.12 Market data series resolution.** A value for (series, date) is the point with the greatest `valid_from ≤ date` that is not superseded; no point → `FX_SERIES_VALUE_MISSING` (422); points older than `max_series_age_days` (default 10 business days for rates, 45 for indices) return `FX_SERIES_STALE` in `warnings[]`; the `fx` service never interpolates between points.
 
 ### 2.12.8 Acceptance criteria
 
@@ -541,6 +915,7 @@ Interaction rules: the line grid shows derived amounts as read-only cells that r
 - **AC-12.7** (FR-12.11) Given a manual rate 12% above the previous, when saved, then the UI requires confirmation and the event carries `deviation_pct = 12.0`.
 - **AC-12.8** (FR-12.12) Given a line in a currency not enabled for the entity, when posted, then 422 `LEDGER_CURRENCY_MISMATCH`.
 - **AC-12.9** (FR-12.9) Given the translation fixture, when run, then CTA equals total assets − liabilities − equity restated at the specified rates, to the cent.
+- **AC-12.10** (FR-12.13, BR-12.12) Given series `EURIBOR_3M` with points on 2026-03-02 (2.4100) and 2026-03-03 (2.4300), when `GET /fx/series/EURIBOR_3M?date=2026-03-02` is called, then value 2.4100000000 with `valid_from = 2026-03-02`; when a point of 3.1000 is appended for 2026-03-04, then `fx.series.published` carries `deviation_pct = 27.57` and the UI requires confirmation.
 
 ### 2.12.9 Test plan and fixtures
 
@@ -573,6 +948,7 @@ Helm chart `passage-fx` (deployment 2–6 pods, CloudNativePG `fx-db`, topics `f
 | SAP `TCURV`, `TCURR`, `TCURF`, `TCURX` | ExchangeRateType, ExchangeRate | rate = `UKURS × TFACT/FFACT`; `TCURX` decimals cross-checked against ISO 4217, exceptions reported |
 | SAP `T882` (ledger assignment), `T881` (ledgers), ledger groups | Ledger, LedgerGroup | leading `0L` → is_leading; currency types 10/30 → accounting/reporting |
 | SAP OBA1/OB09 gain/loss accounts | CurrencyPolicy | per ledger × currency |
+| SAP TBDM market data (`VTB_MARKET`, reference interest rates `T056R`/`T056P`, index tables) | MarketDataSeries, MarketDataPoint | reference rate ids → series codes; yield curve definitions not migrated (wave 36 re-defines curves over migrated series) |
 
 Validation: rate counts per type; sampled 1,000 conversions compared with source values to the cent; opening balances in all three currencies tie per ledger. Not migrated: provider credentials (re-entered in Vault), valuation run history.
 
@@ -587,6 +963,144 @@ Depends on: wave 11 (journal, posting API), wave 6 (currencies), wave 4 (Tempora
 | Provider licensing (OXR) | Low | Low | ECB and manual are license-free defaults |
 
 Open questions: (1) Should reporting currency be per ledger or per legal entity? Default per ledger; decide by wave 12 mid-point. (2) Historical rate for non-monetary items in translation: store rate on line at posting (default) or look up by date? Default store; decide by wave 12 exit. (3) Support SAP-style "second local currency" (currency type 40) as a fourth amount? Default no (use a parallel ledger); revisit at wave 40.
+
+### 2.12.13 Parameters and setup
+
+| Parameter | Scope | Type | Default | Allowed values | Effect | AX equivalent | SAP equivalent |
+|---|---|---|---|---|---|---|---|
+| `ledger.accounting_currency` | ledger | char(3) | required | enabled ISO 4217 | Currency of `amount_acct` | Ledger form > Accounting currency | OB22 currency type 10 (company code currency) |
+| `ledger.reporting_currency` | ledger | char(3) | = accounting | enabled ISO 4217 | Currency of `amount_rpt` | Ledger form > Reporting currency | OB22 currency type 30 (group currency) / FINSC_LEDGER |
+| `ledger.reference_currency` | ledger | char(3) | accounting currency | ISO 4217 | Triangulation pivot (FR-12.3) | Currency exchange rate types > Euro triangulation | `TCURV-BWAER` reference currency |
+| `ledger.default_rate_type_id` / `closing_rate_type_id` / `average_rate_type_id` | ledger | ref | `DEFAULT` / `CLOSING` / `AVERAGE` | rate types | Conversion at posting, revaluation, translation | Ledger form > Exchange rate type, budget exchange rate type | OB22 exchange rate type per currency type; OB59 valuation method rate type |
+| `rate_type.allow_inverse` | rate type | bool | true | true / false | Reciprocal lookup when no explicit inverse (FR-12.2) | — (AX stores both directions) | OB08 inversion flag ("Inv." in `TCURR`) |
+| `rate_type.provider_id` and schedule | rate type | ref + cron | ECB, `30 16 * * 1-5` CET | providers: ecb, openexchangerates, csv, manual | Import schedule (FR-12.4) | Currency exchange rate providers; Import currency exchange rates batch | Market data datafeed (TBDM) scheduling |
+| `fx.max_rate_age_days` | tenant | int | 5 | 1–60 business days | Stale rate warning threshold (BR-12.7) | — | — |
+| `ledger.reject_stale_rates` | ledger | bool | false | true / false | Stale rate becomes a 422 | — | — |
+| `fx.deviation_warn_pct` | tenant | numeric | 10 | 1–100 | Confirmation threshold on rate entry (FR-12.11) | — | — |
+| `fx.provider_timeout_s` / `fx.provider_retries` | tenant | int | 10 / 3 | 1–60 / 0–5 | Provider call behavior (FR-12.4) | Batch retry on `ExchangeRateProviderImport` | — |
+| `ledger.rounding_mode` | ledger | enum | half_away_from_zero | half_away_from_zero / half_even | BR-12.2 | — (fixed) | — (commercial rounding fixed) |
+| `currency_policy.unrealized_gain_account_id` / `unrealized_loss_account_id` / `realized_gain_account_id` / `realized_loss_account_id` | ledger × currency | ref | required when currency enabled | P&L accounts | Revaluation and clearing FX postings | Currency revaluation accounts (General ledger > Setup > Currency) | OBA1 KDB/KDF (`T030H`) |
+| `currency_policy.rounding_difference_account_id` and `rounding_tolerance_units` | ledger × currency | ref + int | required; 1 | balance-sheet or P&L account; 0–5 units | BR-12.4 single-line residual | General ledger parameters > Ledger > Penny difference accounts (`LedgerParameters`) | OB00 rounding differences account |
+| `ledger.revaluation_method` | ledger | enum | closing_rate | closing_rate / cumulative_no_reversal | FR-12.8 | Foreign currency revaluation > "Financial dimensions / Reversal" behavior | OB59 valuation method: "Reset" vs "Always valuate" |
+| `account.revalue` and `account.revalue_level` | main account × ledger | bool + enum | false; balance | balance / open_item | Revaluation selection (BR-12.9) | Main account > Foreign currency revaluation checkbox | OBA1 valuation per account; OI-managed accounts valued at item level |
+| `ledger_group.member_ledger_ids` | legal entity | uuid[] | `ALL` auto | ledgers of the entity | Parallel posting target (FR-12.7) | Posting layers (Current/Operations/Tax) | FAGL_LEDGER_GRP ledger groups (`T8G*`) |
+| `ledger.accounting_principle` | ledger | enum | IFRS | IFRS / US_GAAP / LOCAL_GAAP / TAX / MANAGEMENT | Drives `LedgerAccountMapping` and subledger ledger-specific lines | — | Accounting principles (`TACC_PRINCIPLE`), assign to ledger group |
+| `translation.rate_by_account_type` | ledger | jsonb | monetary: closing; non_monetary: historical; pnl: average; equity: historical | rate kinds | FR-12.9 | Reporting currency adjustment settings (D365) | FAGL_FC_TRANS translation method (OB59-like) |
+| `translation.cta_account_id` | ledger | ref | required for translation | equity account | CTA posting (FR-12.9) | — | Translation differences account (OBA1 "Translation") |
+| `fx.provider_priority` | tenant | jsonb | ecb 10, openexchangerates 20, csv 30, manual 40 | ordered | BR-12.10 precedence | — | — |
+| `series.max_series_age_days` | series kind | int | rates 10, indices 45, prices 5 | 1–120 | BR-12.12 staleness warning | — | TBDM "last import" tolerance |
+| `series.deviation_warn_pct` | series kind | numeric | rates 25, prices 10, indices 10 | 1–100 | FR-12.13 confirmation | — | — |
+
+### 2.12.14 Inquiries and reports
+
+| Name | Type | Filters & parameters | Columns / measures | Source projection | AX equivalent | SAP equivalent |
+|---|---|---|---|---|---|---|
+| Exchange rates by pair | list inquiry | rate type, from, to, date range, source | valid_from, rate, inverse, source, provider timestamp, superseded, deviation vs previous | `ExchangeRate` | Currency exchange rates form; SSRS Exchange rate (Currency exchange rates) | OB08 display, S_ALR_87012XXX via `TCURR` table view, Fiori Manage Exchange Rates |
+| Rate lookup tester | drill-down | type, pair, date | resolution path (direct / inverse / triangulated), hops, rates used, result | fx resolver | — | — |
+| Rate history / audit | drill-down | pair, type | version chain with `superseded_by`, created by, payload hash, provider | `ExchangeRate` | Database log on `ExchangeRate` | `TCURR` change documents (SCU3) |
+| Provider import log | operational report | provider, rate type, date range | run, status, pairs imported, pairs unchanged, errors, duration | import run log | Batch job history for `ExchangeRateProviderImport` | TBDM import log |
+| Ledger trial balance per ledger and currency type | list inquiry | ledger, period range, currency type (txn/acct/rpt), currency filter | account, opening, debit, credit, closing in selected currency type | `Balance` | Trial balance with posting layer filter | FAGLB03 per ledger (`RLDNR`), S_PL0_86000030 |
+| Ledger comparison | operational report | two ledgers, period, account range | balance ledger A, ledger B, difference, mapped account | `Balance` × `LedgerAccountMapping` | — | GCAC ledger comparison |
+| Multi-currency line inquiry | drill-down | ledger, currency_txn, date range, account | line, txn amount/currency, rate applied, rate type, override flag, acct, rpt, rounding adjustment | `JournalLine` | Voucher transactions (three currency columns) | FAGLL03 with document/local/group currency columns |
+| Foreign currency revaluation proposal / results | drill-down | run id | account, dimensions, currency, balance txn, posted acct, rate used, revalued, adjustment, exclusion flag | `RevaluationLine` | Foreign currency revaluation form (simulation/results); SSRS Exchange adjustment | FAGL_FC_VAL log / posting list, S_ALR_87012XXX valuation list |
+| Revaluation history | list inquiry | ledger, period range, rate type | run, mode, status, gain, loss, posting entry, reversal entry | `RevaluationRun` | Foreign currency revaluation history (`LedgerExchAdj`) | FAGL_FC_VAL run history (`FAGL_BSBW_HISTRY`) |
+| Translation (CTA) report | operational report | ledger, period | account group, historical/closing/average rate, restated amount, CTA contribution | translation run | Reporting currency adjustment report (D365) | FAGL_FC_TRANS log |
+| Stale rate usage | KPI | ledger, period | postings with `FX_RATE_STALE` warnings per day, pairs affected | posting warnings log | — | — |
+| Market data series inquiry | list inquiry | series code, kind, date range | valid_from, value, unit, tenor, source, deviation | `MarketDataPoint` | — | TBDM market data display, `T056P` reference rates |
+| Rate overrides audit | operational report | ledger, period, user | entry, line, rate type, override rate, market rate, deviation, user | `JournalLine.rate_override` | — | Document header exchange rate ≠ `TCURR` (FB03 rate field) |
+
+### 2.12.15 Printed and electronic documents
+
+| Document | Trigger | Layout elements | Formats | Numbering sequence | Legal / retention requirement |
+|---|---|---|---|---|---|
+| Exchange rate table printout | user action; scheduled monthly | header: rate type, date range, ledger reference currency; lines: pair, valid_from, rate, source; footer: generated at, provider payload hashes | PDF, XLSX, CSV | — | supporting record for audit of conversions; 10 years when attached to a close run |
+| Foreign currency revaluation posting list | run posted | header: ledger, period, rate type, valuation date, method; lines: account, dimensions, currency, balances, rate, adjustment; footer: totals gain/loss, posting and reversal vouchers, result hash | PDF, XLSX | revaluation run id; vouchers from the ledger sequence | financial record; 10 years |
+| Currency translation statement | translation run posted | header: ledger, period, rates applied per class; lines: account group, historical/closing/average amounts; footer: CTA movement, voucher | PDF, XLSX | run id | financial record; 10 years |
+| Rate deviation confirmation record | rate saved above `fx.deviation_warn_pct` | pair, previous rate, new rate, deviation, user, timestamp, confirmation text | PDF (audit evidence), JSON | — | audit evidence; 10 years |
+
+No external e-documents; rate files received from providers are stored as raw payloads (hash in `ExchangeRate.payload_hash`) for 13 months.
+
+### 2.12.16 Periodic and batch jobs
+
+| Job | Schedule default | Partitioning key | Idempotency / checkpoint | Typical runtime target | Failure handling | Monitor / alert |
+|---|---|---|---|---|---|---|
+| `fx-import-ecb` | business days 16:30 CET | rate type | run id per (provider, rate type, date); points upserted by key, unchanged values skipped | < 30 s | 3 retries, exponential back-off; `fx.provider.degraded` after final failure; last-known rates stay valid | provider degraded → P2; no import in 2 business days → P2 |
+| `fx-import-openexchangerates` (optional) | hourly | rate type | same | < 30 s | same | same |
+| `fx-import-csv-inbox` | every 15 min | file | file hash as idempotency key | < 1 min | file quarantined with error report | parse errors → P3 |
+| `fx-series-import` (interest/index/price series) | business days 18:00 | series | run id per (series, date) | < 1 min | same as rates | stale series beyond `max_series_age_days` → P3 |
+| `ledger-fx-revaluation` (automation hook on close checklist, wave 14) | period end + 1 business day 06:00, per ledger | ledger × rate type | idempotent per (ledger, period, rate type); second run rejected while one is posted (BR-12.8) | 100k combinations < 5 min | run marked failed; close task blocked | failure → P2 |
+| `ledger-fx-revaluation-reverse` | first day of next period 00:10 | run | reversal idempotent (`reversal_entry_id` set once) | < 1 min | retry hourly up to 24 h | reversal missing by day 1 12:00 → P2 |
+| `ledger-translation` (close hook) | period end + 2 business days | ledger | idempotent per (ledger, period) | 200k balances < 3 min | failed → close task blocked | failure → P2 |
+| `fx-rate-cache-refresh-audit` | every 5 min | pod | compares pod cache version with latest published rate | < 1 s | pod restarts cache | pod lag > 2 s → P3 |
+| `fx-stale-rate-report` | daily 07:00 | ledger | daily snapshot | < 1 min | — | stale postings > 100/h → P3 |
+
+### 2.12.17 Security duties and privileges
+
+| Duty | Privileges (entry points) | Segregation-of-duties conflicts | Default roles that include it |
+|---|---|---|---|
+| View exchange rates | GET /fx/rates, /rates/history, /convert, /series; screens Exchange rates (read), Rate lookup tester | — | All finance roles |
+| Maintain exchange rates | PUT /fx/rate-types, POST /fx/rates, POST /fx/series/*/points; screens Exchange rate types, Exchange rates, Market data series | Override exchange rates; Run foreign currency revaluation | Treasury accountant, Accounting manager |
+| Administer exchange rates | POST /fx/providers/{p}:import; provider schedules and credentials (Vault); screen Provider schedules | Maintain exchange rates | Finance platform administrator |
+| Override exchange rates | `rate_override` on posting lines; journal line rate cell | Maintain exchange rates; Approve ledger journals | Accounting supervisor (limited), Treasury accountant |
+| Maintain ledger setup | PUT currency-policies, ledger-groups, ledgers, account mapping; screen Ledger setup | Post ledger journals; Run foreign currency revaluation | Accounting manager |
+| Post ledger-specific adjustments | POST /ledger/journal-entries addressed to a single non-leading ledger | Approve ledger journals (same entry) | Financial controller, IFRS/local GAAP specialist |
+| Run foreign currency revaluation | POST /ledger/revaluations, :post; screen Foreign currency revaluation | Maintain exchange rates; Maintain ledger setup | Accounting supervisor, Financial controller |
+| Run currency translation | POST /ledger/translations | Maintain ledger setup | Financial controller, Group accountant |
+| View ledger balances (per ledger) | GET balances with `ledger` filter; Ledger comparison | — | All finance roles |
+
+### 2.12.18 Message catalog
+
+| Code | Severity | User text | Cause | Remediation | Raised by |
+|---|---|---|---|---|---|
+| FX-0001 `LEDGER_RATE_MISSING` | error | No {rate_type} rate from {from} to {to} valid on {date} (direct, inverse or triangulated). | FR-12.3 lookup exhausted | Enter the rate or import; check `allow_inverse` and reference currency | FR-12.3, FR-12.12 |
+| FX-0002 `LEDGER_CURRENCY_MISMATCH` | error | Currency {currency} is not enabled or is suspended for {legal_entity}. | Currency not enabled | Enable the currency (wave 6) | FR-12.12 |
+| FX-0003 `LEDGER_ROUNDING_EXCEEDED` | error | Rounding residual {residual} {currency} exceeds the tolerance {tolerance}. | BR-12.4 | Review amounts; a line split may be needed | FR-12.6 |
+| FX-0004 `FX_RATE_STALE` | warning | Rate {rate_type} {from}/{to} is {age} days old (limit {max}). | BR-12.7 | Import or enter a current rate | FR-12.4 |
+| FX-0005 `FX_RATE_DEVIATION` | warning | New rate {rate} deviates {pct}% from the previous {previous}. | FR-12.11 | Confirm or correct the rate | FR-12.11 |
+| FX-0006 `FX_RATE_INVALID` | error | Rate must be greater than 0 with at most 10 decimals. | Validation | Correct the value | FR-12.2 |
+| FX-0007 `FX_PROVIDER_DEGRADED` | warning (ops) | Provider {provider} failed after {retries} retries; last success {last_success}. | FR-12.4 | Check provider status; enter rates manually | FR-12.4 |
+| FX-0008 `FX_RATE_OVERRIDE_FORBIDDEN` | error (403) | You do not hold the duty to override exchange rates. | FR-12.5 | Remove the override or request the duty | FR-12.5 |
+| FX-0009 `LEDGER_GROUP_UNKNOWN` | error | Ledger group {code} does not exist for {legal_entity}. | FR-12.7 | Create the group or use a ledger id | FR-12.7 |
+| FX-0010 `LEDGER_SPECIFIC_FORBIDDEN` | error (403) | Posting to a single non-leading ledger requires the duty "Post ledger-specific adjustments". | FR-12.7 | Address the ledger group or request the duty | FR-12.7 |
+| FX-0011 `LEDGER_LEDGER_LINES_UNBALANCED` | error | Ledger-specific lines for {ledger} do not balance ({debits} / {credits}). | BR-12.6 | Balance each ledger's lines | FR-12.7 |
+| FX-0012 `REVAL_RUN_EXISTS` | error | A posted revaluation already exists for {ledger} {period} {rate_type}. | BR-12.8 | Reverse it before re-running | FR-12.8 |
+| FX-0013 `REVAL_RATE_MISSING` | error | No closing rate for {currency} on {valuation_date}; {count} balances cannot be revalued. | FR-12.8 | Enter the closing rate | FR-12.8 |
+| FX-0014 `REVAL_PERIOD_CLOSED` | error | GL is closed for {period}; revaluation cannot post. | BR-14.1 | Reopen or choose another period | FR-12.8 |
+| FX-0015 `TRANSLATION_CTA_ACCOUNT_MISSING` | error | No CTA account configured for ledger {ledger}. | FR-12.9 | Set `translation.cta_account_id` | FR-12.9 |
+| FX-0016 `FX_SERIES_VALUE_MISSING` | error | Series {code} has no value on or before {date}. | BR-12.12 | Import or enter a point | FR-12.13 |
+| FX-0017 `FX_SERIES_STALE` | warning | Series {code} value is {age} days old. | BR-12.12 | Import a current point | FR-12.13 |
+| FX-0018 `FX_RATE_DATE_FUTURE` | error | Rate date {rate_date} is after the posting date. | BR-12.3 | Use a rate date ≤ posting date | FR-12.5 |
+
+### 2.12.19 Performance budgets and capacity
+
+| Operation | Volume assumption | Latency target (p50 / p95 / p99) | Throughput target | Storage growth per year | Index / partition strategy | Degradation behavior under 3× load |
+|---|---|---|---|---|---|---|
+| Rate lookup (cached) | every posted line in foreign currency: 60k/day; peak 5,000/s | 0.05 / 1 / 5 ms | 20,000/s per pod | — | in-memory map (type, from, to) → sorted valid_from | cache miss → one indexed query; posting p99 budget unchanged |
+| Rate publish (manual or import) | 2,000 points/day | 20 / 80 / 150 ms | 500/s bulk | 200 B × 500k rows ≈ 100 MB | index §2.12.4 | import queued |
+| `POST /fx/convert` (stateless) | 100k/day | 5 / 20 / 40 ms | 2,000/s | — | — | — |
+| Parallel posting to 3 ledgers | 30% of entries | +15 / +40 / +60 ms over single ledger | 5,000 lines/s aggregate | 3× journal rows for parallel entries | shared `document_id` index | HPA; entries stay atomic |
+| Revaluation run | monthly per ledger; 100k combinations × 4 currencies | — | 100k combinations < 5 min | revaluation lines 120 B × 1.2M/year ≈ 150 MB | `journal_line` (ledger, currency_txn, posting_date); `revaluation_line` PK | run time scales linearly; proposal retained 90 days |
+| Translation run | monthly; 200k balances | — | < 3 min | — | balance PK | — |
+| Rate history query | 5k/day | 20 / 100 / 200 ms | — | — | (type, from, to, valid_from DESC) | — |
+| Market data series storage | 50 series × 260 points/year | lookup 1 ms | — | < 5 MB | (series_id, valid_from DESC) | — |
+
+### 2.12.20 Localization and compliance hooks
+
+- Statutory rate sources: country packs (wave 48) register the mandatory provider per legal entity — ECB reference rates (EU), Bundesbank/ÖNB monthly VAT rates (DE/AT, `Umsatzsteuer-Umrechnungskurse`), HMRC monthly rates (UK), Banco de México FIX (MX), RBI reference rates (IN), Bank of Canada (CA) — as additional `fx` provider adapters with their own rate types (e.g., `TAX_MONTHLY`); the tax engine (wave 13) selects the statutory rate type per country for VAT reporting.
+- Rate direction and quotation conventions (direct vs indirect quotation, per-100 units as in AX and `TCURF` factors) are normalized at import; display conventions per locale (decimal separator, 6 decimals) come from wave 5 formatting.
+- Rounding: ISO 4217 minor units are not overridable; Swiss 0.05 cash rounding and similar are invoice-level concerns handled by waves 29/30 pricing, not by the ledger.
+- Parallel ledgers for local GAAP: country packs ship ledger templates (`HGB`, `PCG`, `Ind AS`, `JGAAP`) with accounting principle, calendar (e.g., Japan April–March), and `LedgerAccountMapping` starter sets.
+- Hyperinflation (IAS 29) restatement and functional-currency changes are out of scope for Phase 2; the `MarketDataSeries` of kind `index` (CPI) is the hook wave 40 uses.
+- Privacy: none (no personal data in rates); provider credentials are secrets in Vault.
+- Extension point: `fx.provider` adapter interface (`Fetch(rateType, date) → []RatePoint`), registered by country packs; `ledger.account_mapping_pack` for principle-specific account remaps.
+
+### 2.12.21 Coverage closure
+
+| Register row (inventory section + AX form or SAP T-code) | Status before | Disposition | Note |
+|---|---|---|---|
+| SAP §13.6 FSCM Master data & documents — TBDM market data import (rates, prices) (SAP register row 74) | PARTIAL-12 | ADDED as FR-12.13 (series storage and import); valuation DEFERRED to wave 36 | exchange-rate import was already FR-12.4; interest, index and price series now stored with the same provider and audit model |
+| SAP §13.6 FSCM Periodic processing — TBDM import run (SAP register row 82) | PARTIAL-12 | ADDED as FR-12.13 | job `fx-series-import` (§2.12.16) |
+| SAP §13.6 FSCM Customizing — Market data: rate types, yield curves, volatility (`VTB*`, `TCURR`) (SAP register row 85) | PARTIAL-12 | ADDED as FR-12.13 for rate types and series metadata; yield curves and volatility DEFERRED to wave 36 | curve bootstrapping, interpolation and volatility surfaces belong to treasury (wave 36), which consumes `fx.series.published` |
 
 ## 2.13 Wave 13: Tax Engine (Sales/Use, VAT/GST, Withholding)
 
@@ -623,6 +1137,11 @@ After this wave a manual journal or any later document gets correct tax lines fo
 | Posted tax | `TaxTrans` | `BSET`, ACDOCA tax fields | `tax.TaxTransaction` linked to JournalLine | full |
 | Settlement and reporting | Settlement periods, "Settle and post sales tax", EU sales list, Intrastat | Tax payable posting (F.12/S_ALR_87012357), ACR (Advanced Compliance Reporting), Intrastat (VE01) | `tax.TaxSettlementRun`, VAT return, ESL, Intrastat, SAF-T extracts | full (formats in wave 48) |
 | External provider | Avalara/Vertex ISV connectors | External tax interface (RFC_CALCULATE_TAXES_DOC) | Provider adapter interface (`TaxProvider`) with failover | full |
+| Intrastat master data | Foreign trade parameters, Commodity codes (`IntrastatCommodity`), Transaction codes (`IntrastatTransactionCode`), Transport methods, Ports, Statistics procedures, Country/region properties (EU), Intrastat compression / check setup | Foreign trade customizing (VEB/VE0: `T604`, `T605`, `T606`, `T616` modes of transport, `T618` customs offices), commodity codes (`T604`), Intrastat settings per country | `tax.CommodityCode`, `tax.IntrastatTransactionCode`, `tax.TransportMode`, `tax.Port`, `tax.StatisticsProcedure`, `tax.CountryTradeProperty` (FR-13.15) | full |
+| Intrastat journal and declaration | Intrastat journal (`IntrastatArchiveGeneral`, `Intrastat` form): transfer from invoices, validate, compress, export file | VE01 / MEIS / VI99 declaration runs (`VEIAV`), Intrastat checks, file export per country | `tax.IntrastatLine` with transfer, validation, compression, correction and export (FR-13.16); country formats via wave 48 | full |
+| Commodity code on products | Released product > Foreign trade > Commodity code | Material master Foreign trade export view (`MARC-STAWN`) | `product.commodity_code_id` (wave 8 field, FK to `tax.CommodityCode`), default per category | full |
+| VAT recovery on expenses | Expense management > Setup > Tax configuration (recoverable VAT per country), Recover VAT (ER-based claim), SSRS VAT recovery report | Non-deductible tax (NAV/NVV), ESC claim via DRC / country-specific reports; no native EU refund directive flow | `tax.VatRecoveryPolicy` per (country, expense category), foreign VAT reclaim extract (FR-13.17) | full |
+| Withholding remittance and certificates | Withholding tax payment (settle), 1099 summary; India TDS challan via GL/Indian localization | J1INCHLN (TDS challan), J1INBANK (bank challan update), J1INCERT (Form 16A), generic WHT reporting RFIDYYWT | `tax.WithholdingRemittanceRun`, certificate numbering and hooks (FR-13.18); country forms in wave 48 | partial: forms in wave 48 |
 
 ### 2.13.3 Functional requirements
 
@@ -647,6 +1166,19 @@ After this wave a manual journal or any later document gets correct tax lines fo
 - **FR-13.12 Statutory extracts** — Should. The system shall produce VAT return boxes (configurable box mapping per country), EU sales list (ESL, by customer VAT id and transaction type), Intrastat lines (commodity code, weight, value, partner country) and SAF-T (OECD v2.0 XSD-valid XML) for a period.
 - **FR-13.13 Tax configuration workspace** — Must. Screens for codes, rates, groups, jurisdictions, certificates, withholding, settlement periods, provider settings and a calculation tester.
 - **FR-13.14 Tax matrix test harness** — Must. The system shall ship a fixture runner that executes the 500-scenario matrix against the engine in CI and reports diffs per scenario.
+- **FR-13.15 Intrastat master data** — Must. The system shall maintain, per tenant with legal-entity overrides: commodity codes (Combined Nomenclature CN8, with validity year, supplementary unit, description, hierarchy by HS6), nature-of-transaction codes (two-digit EU list plus national second digit), transport modes (1–9 per EU regulation 2019/2152), ports and airports (UN/LOCODE), statistics procedures, delivery terms (Incoterms 2020) mapping, country/region trade properties (EU member, Intrastat threshold arrival/dispatch, reporting currency, arrival/dispatch statistical value rules), and the legal entity's Intrastat registration (VAT id, third-party declarant, agent).
+  - CN8 code lists are imported yearly from the EU RAMON/Eurostat CSV through a CSV importer (≤ 20,000 rows); expired codes stay for historic lines.
+  - Commodity code defaults on products via category (wave 8 exposes `commodity_code_id` and `country_of_origin`); a line without a commodity code at Intrastat transfer time is reported as an exception, not dropped.
+- **FR-13.16 Intrastat journal, validation, compression and export** — Must. The system shall build `IntrastatLine` rows from posted documents (wave 13: manual journals flagged with trade data; waves 18/27/28/29 register vendor invoices, sales invoices, shipments and receipts as sources through the `IntrastatSource` contract) with direction (arrival/dispatch), commodity code, partner country and partner VAT id (dispatches, EU 2022 requirement), country of origin, nature of transaction, transport mode, delivery terms, net mass, supplementary units, invoice value, statistical value, and period.
+  - Validation rules per country (mandatory fields by direction, mass > 0 unless supplementary unit, partner VAT id format via wave 7) produce `TAX_INTRASTAT_INVALID` exceptions on a worklist; lines can be corrected in the journal with an audit trail (field, old, new, user).
+  - Compression merges lines with identical (direction, commodity, partner country, origin, transaction nature, transport mode, delivery terms, partner VAT id) per period into one declaration line (summed mass, units, values) per the country's compression setup.
+  - Export produces the declaration dataset for the period (JSON canonical) and country formats registered by wave 48 (DE XML (Destatis), FR DEB/EMEBI, NL CBS IDEP, IT Elenchi; wave 13 ships the canonical format and a generic CSV); thresholds per country decide whether a declaration is required and are reported on the period summary.
+  - Corrections after export create delta lines flagged `correction_of_line_id` and a correction declaration for the original period.
+- **FR-13.17 VAT recovery on expenses** — Should. The system shall maintain `VatRecoveryPolicy` rows per (expense category, country of expense, legal entity country) with `recoverable_pct` (domestic input VAT per category, e.g., DE entertainment 70%, FR passenger cars 0%, BE 50%), `foreign_reclaim_eligible` (EU Directive 2008/9/EC or 13th Directive) and the minimum claim thresholds; the calculation API applies the policy when a document line carries an `expense_category` (expense reports in wave 43, vendor invoices in wave 19) by setting the code's recoverable percentage per line.
+  - A foreign VAT reclaim extract per (legal entity, refund country, calendar quarter or year) lists eligible transactions with invoice reference, vendor VAT id, amounts, and expense codes per Annex of the directive (codes 1–10), and a VAT recovery report shows recoverable, non-recoverable and reclaimable amounts per period and country.
+  - Non-recoverable amounts post to the line's expense account (FR-13.6) and reclaimable foreign VAT posts to a `foreign_vat_receivable_account_id` per policy when `book_foreign_vat_as_receivable = true`, otherwise to expense.
+- **FR-13.18 Withholding remittance and certificate hooks** — Should. The system shall group posted `WithholdingTransaction` rows by (legal entity, authority, withholding code section, period) into a `WithholdingRemittanceRun` that posts the liability transfer to the authority party and records the remittance reference (bank challan number, payment date, bank branch code) and, per payee and period, assigns certificate numbers from a number sequence and exposes the data set (payee, tax id, section, base, rate, tax, remittance references) that country packs render as Form 16A / 26Q (IN), 1099-NEC/MISC and 1042-S (US), CIS statements (UK) and `Lohnsteuerbescheinigung`-style certificates (wave 48).
+  - A remittance run may be `proposed → posted → cancelled` and its transactions are flagged `remitted`; quarterly returns reference remittance runs; a certificate is immutable once issued and can be reissued with a new number and `supersedes_certificate_id`.
 
 ### 2.13.4 Data model
 
@@ -697,6 +1229,34 @@ After this wave a manual journal or any later document gets correct tax lines fo
 
 **ExemptionCertificate**: `id`, `party_id`, `jurisdiction_id`, `certificate_number`, `reason_code`, `valid_from`, `valid_to`, `product_category_id` (optional), `document_uri`, `status` (active, expired, revoked).
 
+**IntrastatLine** (FR-13.16) and Intrastat master data (FR-13.15)
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| id | uuid | yes | PK |
+| legal_entity_id / reporting_period | uuid / text(7) | yes | `YYYY-MM` |
+| direction | enum | yes | arrival, dispatch |
+| source (system, type, id, line_ref) | text | yes | originating document line |
+| commodity_code_id | uuid | conditional | FK CommodityCode (CN8, `validity_year`); missing → exception |
+| partner_country / origin_country | char(2) | yes / conditional | ISO 3166-1; origin mandatory for dispatches since 2022 |
+| partner_vat_id | text(20) | conditional | dispatches; format-checked (wave 7) |
+| transaction_nature_code | text(2) | yes | FK IntrastatTransactionCode |
+| transport_mode | text(1) | yes | FK TransportMode (1–9) |
+| delivery_terms | text(3) | conditional | Incoterms 2020 |
+| port_id | uuid | no | FK Port (UN/LOCODE) |
+| statistics_procedure_id | uuid | no | FK StatisticsProcedure |
+| net_mass_kg / supplementary_units | numeric(18,3) / numeric(18,3) | conditional | mass required unless CN8 has supplementary unit only |
+| invoice_value / statistical_value / currency | numeric(23,6) / numeric(23,6) / char(3) | yes | statistical value per country rule (FR-13.15) |
+| status | enum | yes | transferred, validated, exception, compressed, exported, corrected |
+| compressed_into_id / correction_of_line_id / export_run_id | uuid | no | |
+| corrections | jsonb | no | [{field, old, new, user, at}] |
+
+`CommodityCode`: `id`, `code` text(8), `validity_year`, `description`, `supplementary_unit`, `parent_hs6`; `IntrastatTransactionCode`: `code` text(2), `description`, `country` (null = EU list); `TransportMode`: `code` text(1), `description`; `Port`: `locode` text(5), `name`, `country`; `StatisticsProcedure`: `code`, `description`, `country`; `CountryTradeProperty`: `country`, `is_eu_member`, `threshold_arrival`, `threshold_dispatch`, `reporting_currency`, `statistical_value_rule` (invoice_value | invoice_plus_freight_to_border | custom), `compression_fields` jsonb, `export_format_id` (wave 48). `IntrastatExportRun`: `id`, `legal_entity_id`, `period`, `direction`, `line_count`, `total_value`, `format`, `output_uri`, `hash`, `status`, `declared_at`.
+
+**VatRecoveryPolicy** (FR-13.17): `id`, `legal_entity_id`, `expense_category_id` (wave 43/19 category list; `*` allowed), `expense_country` char(2), `recoverable_pct` numeric(9,6), `foreign_reclaim_eligible` bool, `directive` enum (2008_9, 13th, none), `expense_code_annex` text(2), `book_foreign_vat_as_receivable` bool, `foreign_vat_receivable_account_id`, `min_claim_amount` numeric(23,6), `valid_from`, `valid_to`. `VatReclaimExtract`: `id`, `legal_entity_id`, `refund_country`, `period_from`, `period_to`, `transaction_ids[]`, `total_reclaimable`, `output_uri`, `status`.
+
+**WithholdingRemittanceRun** (FR-13.18): `id`, `legal_entity_id`, `authority_party_id`, `section_code`, `period_from`, `period_to`, `status` (proposed, posted, cancelled), `transaction_ids[]`, `total_withheld`, `entry_id`, `remittance_reference` jsonb (`challan_no`, `bank_code`, `paid_on`, `bsr_code`), `posted_at`. `WithholdingCertificate`: `id`, `payee_party_id`, `period`, `certificate_number` (sequence per legal entity × section), `transaction_ids[]`, `issued_at`, `supersedes_certificate_id`, `output_uri`.
+
 **Invariants**: Σ TaxTransaction.tax_amount_acct per (code, period) = movement on the code's payable/receivable account for that period (checked by settlement); recoverable + nonrecoverable = tax; rate intervals per code do not overlap; a settled transaction cannot change `settlement_run_id` except to null via a cancelled run. Indexing: `tax_transaction` on (legal_entity_id, tax_code_id, fiscal_period_id, settlement_run_id), (source_system, source_type, source_id), (journal_line_id); partitioned by fiscal year.
 
 ### 2.13.5 APIs and events
@@ -715,6 +1275,14 @@ After this wave a manual journal or any later document gets correct tax lines fo
 | POST | /api/v1/tax/settlements | Propose or post a settlement run | `Idempotency-Key` | Settle tax |
 | POST | /api/v1/tax/settlements/{id}:post | Post a proposal | `Idempotency-Key` | Settle tax |
 | POST | /api/v1/tax/extracts/{vat-return|esl|intrastat|saf-t} | Generate extract for a period | run id | Produce tax reports |
+| GET/PUT | /api/v1/tax/intrastat/commodity-codes[/{code}], /transaction-codes, /transport-modes, /ports, /statistics-procedures, /country-properties[/{country}] and POST /commodity-codes:import | Intrastat master data (FR-13.15) | PUT idempotent; import `Idempotency-Key` | Maintain foreign trade setup |
+| POST | /api/v1/tax/intrastat/lines:transfer | Transfer lines from registered sources for a period | `Idempotency-Key` (period) | Maintain Intrastat journal |
+| GET/PATCH | /api/v1/tax/intrastat/lines[/{id}]?le=&period=&direction=&status= | Intrastat journal and corrections | PATCH audited | Maintain Intrastat journal |
+| POST | /api/v1/tax/intrastat/lines:validate, :compress and /exports | Validate, compress, export declaration | run id | Produce tax reports |
+| GET/PUT | /api/v1/tax/legal-entities/{le}/vat-recovery-policies[/{id}] | VAT recovery policies (FR-13.17) | PUT idempotent | Maintain tax codes |
+| POST | /api/v1/tax/vat-reclaims | Foreign VAT reclaim extract for (refund country, period) | run id | Produce tax reports |
+| POST | /api/v1/tax/withholding/remittances and /{id}:post, :cancel | Withholding remittance runs (FR-13.18) | `Idempotency-Key` | Settle tax |
+| POST | /api/v1/tax/withholding/certificates:issue | Issue certificates per payee and period | `Idempotency-Key` | Produce tax reports |
 
 Calculation request/response (abridged): request `{legal_entity, document_type, document_date, tax_date, currency, party:{id, role, tax_id}, ship_from, ship_to, lines:[{line_ref, amount, quantity, product_id, tax_group, item_tax_group, price_includes_tax, account, dimensions, override:{tax_code?, exempt_reason?}}]}`; response `{engine, fallback, lines:[{line_ref, base, taxes:[{code, jurisdiction, rate_pct, tax_amount, recoverable, nonrecoverable, direction}]}], document_taxes_by_code:[…], posting_lines:[… wave 11 line objects …], trace_id, determination_trace[]}`.
 
@@ -727,6 +1295,10 @@ Validation: every line has resolvable groups or an override; dates within code v
 | dev.passage.tax.settled.v1 | settlement posted | run id, authority, period, output, input, net, entry_id, version | reporting, ledger |
 | dev.passage.tax.provider.fallback.v1 | provider failure | provider, document ref, error, retry_after | ops, AP/AR recommit job |
 | dev.passage.tax.rate.changed.v1 | rate row created | code, valid_from, rate_pct, previous | document services cache |
+| dev.passage.tax.intrastat.exported.v1 | declaration export completed | export_run_id, legal_entity, period, direction, line_count, total_value, format, hash | audit, wave 48 submission connectors |
+| dev.passage.tax.withholding.remitted.v1 | remittance run posted | run_id, authority, section, period, total_withheld, entry_id, remittance_reference | AP (wave 19), reporting, wave 48 returns |
+
+`IntrastatSource` contract (used by waves 18/27/28/29): a document service registers `{source_type, resolver_uri}`; at transfer the tax service calls the resolver for posted documents in the period and receives lines with trade fields; documents reversed after transfer produce negative lines on the next transfer.
 
 ### 2.13.6 User experience
 
@@ -741,6 +1313,10 @@ Validation: every line has resolvable groups or an override; dates within code v
 | Tax transactions | Filter by code/period/document, drill to journal line and source | document, code, base, tax, direction, settled | View tax transactions |
 | Settlement | Propose, review by code, post, view history | authority, period, output, input, net, status, version | Settle tax |
 | Provider settings | Select provider per entity/document type, test connection | provider, environment, company code, last success | Administer tax |
+| Foreign trade setup | Maintain commodity codes (import yearly CN8), transaction codes, transport modes, ports, statistics procedures, country properties and thresholds | code, description, validity year, supplementary unit; country, threshold arrival/dispatch, compression fields | Maintain foreign trade setup |
+| Intrastat journal | Transfer period, work exceptions, correct fields, validate, compress, export, view declaration summary vs threshold | direction, commodity, partner country, VAT id, nature, transport, mass, units, invoice/statistical value, status | Maintain Intrastat journal / Produce tax reports |
+| VAT recovery policies | Define recoverable % per category and country, reclaim eligibility, accounts; run reclaim extract; view recovery report | category, country, recoverable %, directive, annex code, receivable account | Maintain tax codes / Produce tax reports |
+| Withholding remittance | Propose run per authority/section/period, enter remittance reference, post, issue certificates | payee, section, base, rate, withheld, challan no., certificate no. | Settle tax / Produce tax reports |
 
 Interaction rules: the tester renders the determination trace as a step list (groups → intersection → jurisdiction → exemptions → brackets → compounding → rounding); rate grids validate non-overlapping intervals on save; settlement proposals show a reconciliation panel (transactions vs GL) and block the post button on mismatch.
 
@@ -758,6 +1334,10 @@ Interaction rules: the tester renders the determination trace as a step list (gr
 - **BR-13.10 Provider commit idempotency.** `commit` with the same key is replayed; a provider `Void` is issued when a document is reversed (`journal.reversed` consumer) and failures queue for retry with alerting after 24 h.
 - **BR-13.11 Negative and zero rates.** Rate 0 is valid (zero-rated vs exempt distinguished by `reason_code` on the code); negative rates are rejected (`TAX_RATE_INVALID`).
 - **BR-13.12 Multi-currency.** Tax is calculated in transaction currency and converted with the document's rates (wave 12); settlement is in accounting currency; the ESL reports in EUR using the ECB rate on tax_date when the accounting currency is not EUR.
+- **BR-13.13 Intrastat line lifecycle.** `transferred → validated | exception`; `exception → validated` after correction; `validated → compressed` (lines merged into one compressed line referencing members) → `exported`; an exported line is immutable; a later correction creates a new line with `correction_of_line_id` dated in the original period and marks the original `corrected`; a period can be exported more than once (each export run is a version; the latest is the declaration of record). Statistical value = invoice value × (1 + `freight_pct`) when the country rule is `invoice_plus_freight_to_border` and no explicit freight is available, with `freight_pct` on the country property (default 0).
+- **BR-13.14 Intrastat thresholds.** The period summary compares cumulative calendar-year value per direction with the country threshold; below threshold the export is produced but flagged `declaration_not_required`; crossing the threshold mid-year sets `declaration_required_from` on the legal entity's country property and raises `TAX_INTRASTAT_THRESHOLD_CROSSED` (info).
+- **BR-13.15 VAT recovery precedence.** Policy resolution: (expense category, expense country, legal entity) > (category, country, `*`) > (`*`, country, legal entity) > (`*`, country, `*`); the resolved `recoverable_pct` overrides the tax code's default for that line only; foreign reclaim applies only when expense country ≠ legal entity country, the vendor VAT id is valid for the expense country, and the invoice meets the country's minimum (EU: simplified invoice ≤ EUR 1,000 accepted; fuel ≤ EUR 250); amounts below `min_claim_amount` per quarter (EUR 400) or year (EUR 50) are carried to the annual claim.
+- **BR-13.16 Withholding remittance.** A remittance run may include only `WithholdingTransaction` rows with `posting_date ≤ period_to`, not yet remitted, for one (authority, section); posting transfers the withholding payable to the authority party's open item (wave 19) or settlement account and sets `remitted = true`; cancelling a posted run is allowed only before the certificate issue and posts a negating entry; certificates are numbered per (legal entity, section, fiscal year) gap-free.
 
 ### 2.13.8 Acceptance criteria
 
@@ -771,6 +1351,11 @@ Interaction rules: the tester renders the determination trace as a step list (gr
 - **AC-13.8** (FR-13.12) Given the demo EU entity, when SAF-T is generated, then the XML validates against the OECD v2.0 XSD.
 - **AC-13.9** (FR-13.8, BR-13.8) Given a vendor with USD 550 cumulative and a USD 600 threshold, when a USD 100 invoice is posted, then withholding applies to USD 50.
 - **AC-13.10** (BR-13.9) Given the TAX module is closed for the period, when a settlement post is attempted, then 422 `LEDGER_PERIOD_CLOSED`.
+- **AC-13.11** (FR-13.15) Given the Eurostat CN8 file for 2026 (≈ 9,500 codes), when imported, then every code has `validity_year = 2026`, the 2025 codes remain for historic lines, and a product category default resolves `commodity_code_id` on a sample product.
+- **AC-13.12** (FR-13.16, BR-13.13) Given 1,200 dispatch lines for DE in March 2026 of which 30 lack net mass, when validated and compressed, then 30 exceptions are listed, the remaining lines compress to the expected 180 declaration lines (fixture), Σ invoice value equals the source documents, and the canonical export carries the partner VAT ids.
+- **AC-13.13** (FR-13.16) Given an exported line whose commodity code is later corrected, when the journal is corrected, then a correction line with `correction_of_line_id` exists, the original is `corrected`, and a correction export run for the same period is produced.
+- **AC-13.14** (FR-13.17, BR-13.15) Given a DE entity with an entertainment policy of 70% and an expense line of EUR 119.00 incl. 19% VAT, when calculated, then recoverable 13.30, non-recoverable 5.70 posted to the expense account; given a FR hotel invoice for the same DE entity, then the line is marked reclaimable under Directive 2008/9 with annex code 6 and appears in the Q1 reclaim extract for FR.
+- **AC-13.15** (FR-13.18, BR-13.16) Given 40 Indian TDS transactions under section 194J for April 2026, when a remittance run is posted with challan reference, then the liability transfer balances, all 40 are `remitted`, and certificates issued for 12 payees are numbered gap-free and carry the challan reference.
 
 ### 2.13.9 Test plan and fixtures
 
@@ -806,6 +1391,11 @@ Helm chart `passage-tax` (deployment 3–10 pods, CloudNativePG `tax-db`, topics
 | SAP `TTXJ`/`TTXD` jurisdictions | TaxJurisdiction | |
 | SAP `T059P`/`T059Z`, `LFBW` | WithholdingTaxCode, party assignments | |
 | SAP `BSET` (unsettled) | TaxTransaction | |
+| AX `IntrastatCommodity`, `IntrastatTransactionCode`, `IntrastatTransportMode`, `IntrastatPort`, `IntrastatStatProc`, `IntrastatParameters`, `IntrastatCountryRegionParameters` | CommodityCode, IntrastatTransactionCode, TransportMode, Port, StatisticsProcedure, CountryTradeProperty | commodity codes re-keyed to CN8 validity year; `InventTable.IntrastatCommodity` → product `commodity_code_id` (wave 8) |
+| AX `Intrastat` (journal, current open period only), `IntrastatArchiveGeneral` | IntrastatLine | open period lines migrated as `transferred`; archived declarations kept in the legacy archive |
+| AX `TrvTaxConfiguration` / expense tax setup (recoverable VAT per country) | VatRecoveryPolicy | category mapping to wave 43 expense categories |
+| SAP `T604`, `T605`, `T616`, `T618`, `MARC-STAWN`, `VEIAV` (open period) | CommodityCode, IntrastatTransactionCode, TransportMode, Port, product commodity code, IntrastatLine | `VEIAV` rows for the current period only |
+| SAP `T059P`/`T059Z` sections, J1INCHLN challan history (open quarter) | WithholdingRemittanceRun (posted, historical reference only) | prior certificates not re-issued |
 
 Validation: code counts; a 200-document sample recalculated in Passage matches the source tax to the cent; unsettled totals per code match. Not migrated: settled history (kept in the legacy archive), provider transaction logs.
 
@@ -820,6 +1410,166 @@ Depends on: wave 11 (posting), wave 12 (currency conversion for tax amounts), wa
 | Rounding disputes with legacy figures | Medium | Low | Rounding mode configurable per code; migration validation sample |
 
 Open questions: (1) Settlement counterpart as tax authority Party (vendor role) vs settlement account? Default Party; decide by wave 13 mid-point. (2) Store provider raw payloads for 13 months or 7 years? Default 13 months payload + 7 years hash; decide by wave 13 exit. (3) Should `tax/calculate` be callable from the posting API automatically for manual journals with a tax group? Default yes behind flag `ledger.auto_tax`; decide by wave 14.
+
+### 2.13.13 Parameters and setup
+
+| Parameter | Scope | Type | Default | Allowed values | Effect | AX equivalent | SAP equivalent |
+|---|---|---|---|---|---|---|---|
+| `tax.provider` per document type | legal entity × document type | enum | internal | internal / avalara / vertex | Engine selection (FR-13.10) | Sales tax parameters > External tax (ISV) / D365 Tax calculation parameters | External tax interface activation (`TTXD`, RFC destination) per tax procedure |
+| `tax.provider_timeout_ms` / `tax.provider_retries` | tenant | int | 2,000 / 1 | 500–10,000 / 0–3 | Failover timing (FR-13.10) | — | RFC timeout |
+| `tax.default_rounding` | legal entity | enum | per_document (VAT), per_line (US) | per_line / per_document | BR-13.3 | General ledger parameters > Sales tax > Rounding (per line / per document) "Calculation" | OBY6 "Tax rounding" / `T001-TXKRS`; condition rounding rule |
+| `tax.price_includes_tax_default` | legal entity × document type | bool | false (US), true (B2C retail) | true / false | Default for `price_includes_tax` (FR-13.5) | Accounts receivable parameters > Prices include sales tax | Pricing procedure gross/net condition (`KZWI`) |
+| `tax.tax_date_basis` | legal entity × document type | enum | document_date | document_date / delivery_date / posting_date | BR-13.1 step 1 | General ledger parameters > Sales tax > "Date of sales tax calculation" | OBCK/`T001-XTXDT` tax reporting date |
+| `tax.conditional_settlement` (cash basis) | legal entity | bool | false | true / false | Tax becomes due on payment (AX conditional sales tax) | General ledger parameters > Sales tax > Conditional sales tax | `T007A` "deferred tax" (target tax code, RFUMSV50) |
+| `tax.tax_on_prepayment` | legal entity | bool | false | true / false | Tax lines on prepayment invoices (waves 19/30) | General ledger parameters > Sales tax > Sales tax on prepayment | Down payment tax (F-29 with tax code) |
+| `tax.cash_discount_base` | legal entity | enum | net_of_tax | net_of_tax / incl_tax | Cash discount tax adjustment base (waves 19/30) | General ledger parameters > Sales tax > Cash discount on invoice incl. sales tax | OBY6 "Discount base is net value" |
+| `tax_code.settlement_period_id` and `authority_party_id` | tax code | ref | required | settlement periods, authority parties | Settlement grouping (FR-13.11) | Sales tax codes > Settlement period; Sales tax authorities | Tax payable posting F.12 by tax code; tax office vendor in `T001` |
+| `tax_code.rounding` | tax code | enum | inherits entity | per_line / per_document | BR-13.3 per code | Sales tax authorities > Rounding | — |
+| `tax.reporting_box_mapping` | legal entity (country) | jsonb | DE/FR/UK/IN reference mappings | box id → (code, direction, base/tax) | VAT return boxes (FR-13.12) | Sales tax reporting codes | ACR report definitions / `T007K` tax report box |
+| `tax.saft_version` | legal entity | enum | OECD_2_0 | OECD_2_0 / country variants (wave 48) | SAF-T schema | Electronic reporting SAF-T format configuration | ACR SAF-T report |
+| `withholding.trigger` | withholding code | enum | payment | invoice / payment | FR-13.8 | Withholding tax codes > "Withholding tax on invoice/payment" | `T059P` "accumulation / posting at payment" |
+| `withholding.threshold` / `withholding.annual_accumulation` | withholding code | numeric / bool | 0 / false | ≥ 0 | BR-13.8 | Withholding tax codes > Limits | `T059Z` minimum amount, accumulation type |
+| `intrastat.registration` (VAT id, declarant, agent) | legal entity | jsonb | required for EU entities | — | Export header (FR-13.15) | Foreign trade parameters > Intrastat | Foreign trade customizing: company code Intrastat data (VE0) |
+| `intrastat.country_property.threshold_arrival` / `threshold_dispatch` | country | numeric | per country (DE EUR 3,000,000 arrival / 1,000,000 dispatch) | ≥ 0 | BR-13.14 | Country/region properties (EU) | Country-specific threshold in VEB settings |
+| `intrastat.compression_fields` | country | jsonb | EU default set (FR-13.16) | field list | Compression keys | Intrastat compression setup | VE01 aggregation settings |
+| `intrastat.statistical_value_rule` / `freight_pct` | country | enum / numeric | invoice_value / 0 | invoice_value / invoice_plus_freight_to_border / custom | BR-13.13 | Foreign trade parameters > Statistical value | VEB statistical value calculation |
+| `vat_recovery.min_claim_quarter` / `min_claim_year` | legal entity | numeric | EUR 400 / EUR 50 | ≥ 0 | BR-13.15 carry-forward | — | — |
+| `tax.payload_retention_days` | tenant | int | 395 | 30–2,555 | Provider payload retention (FR-13.10) | — | — |
+| `tax.recommit_retry_interval` | tenant | duration | 1 h | 5 min–24 h | Provider recommit queue | — | — |
+
+### 2.13.14 Inquiries and reports
+
+| Name | Type | Filters & parameters | Columns / measures | Source projection | AX equivalent | SAP equivalent |
+|---|---|---|---|---|---|---|
+| Posted tax transactions | list inquiry | legal entity, code, period, direction, settled, document | document, code, jurisdiction, base, tax, recoverable, non-recoverable, direction, settled run | `TaxTransaction` | Posted sales tax inquiry; SSRS Sales tax transactions — details | S_ALR_87012357 (line items), FBL3N on tax accounts, `BSET` view |
+| Tax specification by voucher | drill-down | voucher / document | lines with codes, base, tax, determination trace link | `TaxTransaction` ⋈ `JournalLine` | SSRS Sales tax specification by ledger transaction | FB03 → Tax data |
+| Sales tax settlement report | statutory report | authority, period, version | output, input, use, net, by code; GL reconciliation panel | `TaxSettlementRun` | SSRS Sales tax payments; Settled sales tax inquiry | S_ALR_87012357 advance return, F.12 (RFUMSV10) |
+| VAT return (box report) | statutory report | legal entity, period | box id, base, tax per box mapping | `TaxTransaction` grouped by `reporting_box_mapping` | Sales tax report (by reporting codes) | RFUMSV00 / S_ALR_87099918, ACR VAT return |
+| EU sales list | statutory report | legal entity, period | customer VAT id, country, value goods, services, triangulation | `TaxTransaction` (reverse charge / intra-community output) | SSRS EU sales list | RFASLM00 / S_ALR_87012400 |
+| Intrastat declaration summary | statutory report | legal entity, period, direction | lines, Σ invoice value, Σ statistical value, Σ mass, exceptions, threshold status | `IntrastatLine` | Intrastat report / Intrastat list | VE02 / VE03, MEIS output |
+| Intrastat exceptions worklist | list inquiry | period, direction, rule | line, missing/invalid field, source document | `IntrastatLine` (status exception) | Intrastat validation result | VE01 error log |
+| Withholding tax report | statutory report | legal entity, code / section, period, payee | payee, tax id, base, rate, withheld, remitted, certificate | `WithholdingTransaction`, `WithholdingRemittanceRun` | SSRS Withholding tax; Tax 1099 summary / detail | S_ALR_87012111, RFIDYYWT, S_P00_07000134 |
+| VAT recovery report | operational report | legal entity, period, country, category | recoverable, non-recoverable, reclaimable, carried forward | `TaxTransaction` ⋈ `VatRecoveryPolicy` | SSRS VAT recovery report (expense) | — (custom report over `BSET` NAV/NVV) |
+| Foreign VAT reclaim extract | statutory report | legal entity, refund country, period | invoice ref, vendor VAT id, date, taxable amount, VAT, annex code | `VatReclaimExtract` | Recover VAT (ER-based claim) | — |
+| SAF-T audit file | statutory report | legal entity, period | GL entries, master files, source documents (OECD 2.0) | ledger + tax + party APIs | Electronic reporting SAF-T | ACR SAF-T (FIUAMSAFT) |
+| Calculation tester / explain | drill-down | sample document | determination trace steps | tax engine | Sales tax calculation (tax information dialog) | Tax procedure analysis (FB60 > tax simulation) |
+| Provider fallback KPI | KPI | legal entity, day | fallback rate, recommit queue size, mean provider latency | `tax.provider.fallback` events | — | — |
+| Exemption certificate expiry | operational report | party, jurisdiction, days to expiry | certificate, valid_to, status, document link | `ExemptionCertificate` | Tax exempt numbers listing | Exemption licenses list (J_1BLFZ-type / `LFBW` exemption dates) |
+| Tax configuration listing | operational report | legal entity | codes, rates, groups, item groups, accounts | tax setup | SSRS Sales tax list / Sales tax codes | `T007A` / FTXP listing |
+
+### 2.13.15 Printed and electronic documents
+
+| Document | Trigger | Layout elements | Formats | Numbering sequence | Legal / retention requirement |
+|---|---|---|---|---|---|
+| VAT return | settlement period close / user | header: entity, VAT id, period, version; lines: boxes with base and tax; footer: net payable/refundable, preparer, settlement voucher | PDF, canonical JSON; country e-formats (ELSTER XML, UK MTD JSON, FR EDI-TVA) via wave 48 | settlement run id + version | statutory; 10 years (DE/FR), 6 (UK), 7 (US) |
+| EU sales list | monthly / quarterly | header: entity VAT id, period; lines: customer VAT id, country, goods, services, triangulation | PDF, CSV, canonical XML; country e-formats in wave 48 | extract run id | statutory; 10 years |
+| Intrastat declaration | monthly per direction | header: PSI VAT id, declarant, period, direction; lines: CN8, partner country, partner VAT id, origin, nature, transport, delivery terms, mass, units, values | canonical JSON, CSV; DE XML (Destatis IDEV), FR EMEBI, NL CBS via wave 48 | export run id (versioned) | statutory; 10 years |
+| SAF-T file | on request / monthly (PT, NO, PL mandates) | OECD 2.0 header, master files, GL entries, source documents | XML (XSD-validated) | extract run id | statutory; equals ledger retention |
+| Tax settlement voucher | settlement posted | entity, authority, period, codes, output/input/net, voucher | PDF | ledger voucher | financial record; 10 years |
+| Withholding certificate | certificate issue | payer, payee, tax ids, section, period, base, rate, withheld, remittance references, certificate no. | PDF; country forms (Form 16A, 1099-NEC/MISC, 1042-S) rendered by wave 48 | per (legal entity, section, fiscal year), gap-free | statutory; 7–10 years per country |
+| Withholding remittance statement | remittance run posted | authority, section, period, transactions, challan/bank reference | PDF, CSV | remittance run id | statutory; 10 years |
+| Foreign VAT reclaim file | reclaim extract | applicant, refund country, period, invoices with annex codes | XML per refund-country portal (wave 48), CSV | extract run id | statutory; 10 years |
+| Exemption certificate image | certificate registered | uploaded document | PDF / image | certificate number (external) | statutory; certificate validity + 4 years (US streamlined) |
+
+### 2.13.16 Periodic and batch jobs
+
+| Job | Schedule default | Partitioning key | Idempotency / checkpoint | Typical runtime target | Failure handling | Monitor / alert |
+|---|---|---|---|---|---|---|
+| `tax-provider-recommit` | hourly | legal entity × provider | commit with stored `Idempotency-Key`; queue item deleted on success | 1,000 items < 2 min | exponential back-off; alert after 24 h | queue > 100 → P2 |
+| `tax-journal-link` (consume `journal.posted`, link TaxTransaction) | continuous | legal entity | upsert by (source, line_ref) | lag p95 < 5 s | dead-letter after 5 attempts | DLQ > 0 → P2 |
+| `tax-settlement-propose` | per settlement period end + 1 day | authority | run per (authority, period, version) | 1M transactions < 3 min | proposal marked failed; close task blocked | mismatch → P2 |
+| `tax-certificate-expiry` | daily 06:00 | legal entity | daily snapshot | < 1 min | — | certificates expiring ≤ 30 days → notification |
+| `intrastat-transfer` | monthly, 3rd business day 05:00 | legal entity × direction | transfer keyed by (source line, period); re-run adds only new and reversed lines | 100k lines < 5 min | source resolver errors listed; run continues | exceptions > 0 → close task "Intrastat exceptions" |
+| `intrastat-cn8-import` | yearly, 1 December | tenant | file hash | < 1 min | quarantine file | import missing by 31 December → P3 |
+| `withholding-accumulation-rebuild` | daily 02:30 | vendor | recomputes annual accumulation from posted transactions; compare | 100k vendors < 5 min | — | diff > 0 → P2 |
+| `vat-reclaim-quarterly` | quarter end + 10 days | legal entity × refund country | run per (country, quarter) | < 2 min | — | — |
+| `saft-monthly` (where mandated) | 5th day of month | legal entity | run per period | 1M lines < 10 min | retry once | XSD failure → P2 |
+
+### 2.13.17 Security duties and privileges
+
+| Duty | Privileges (entry points) | Segregation-of-duties conflicts | Default roles that include it |
+|---|---|---|---|
+| Calculate tax (service accounts) | POST /tax/calculate, /tax/commit | not assignable to humans | Document service accounts |
+| View tax configuration | /tax/calculate:explain; read screens | — | Tax accountant, Accountant, Internal auditor |
+| Maintain tax codes | PUT codes, rates, VAT recovery policies; screen Tax codes, VAT recovery policies | Settle tax; Produce tax reports (same period sign-off) | Tax manager |
+| Maintain tax groups | PUT groups / item-groups | Maintain tax codes (optional) | Tax manager, Tax accountant |
+| Maintain tax jurisdictions | PUT jurisdictions, postal table import | — | Tax manager |
+| Maintain tax exemptions | certificates CRUD | Maintain customer master (wave 7) | Tax accountant, AR credit specialist |
+| Maintain withholding tax | withholding codes | Settle tax | Tax manager |
+| View tax transactions | GET transactions, Intrastat lines (read) | — | Tax accountant, Accountant, Internal auditor |
+| Settle tax | settlements, :post; withholding remittances | Maintain tax codes; Maintain withholding tax | Tax accountant (senior), Financial controller |
+| Produce tax reports | extracts, Intrastat exports, VAT reclaims, certificates | Maintain tax codes | Tax accountant |
+| Maintain foreign trade setup | Intrastat master data CRUD and CN8 import | Maintain Intrastat journal | Tax manager, Trade compliance officer |
+| Maintain Intrastat journal | transfer, PATCH lines (corrections), validate, compress | Maintain foreign trade setup | Trade compliance clerk, Tax accountant |
+| Administer tax | provider settings, credentials (Vault), recommit queue | Settle tax | Finance platform administrator |
+
+### 2.13.18 Message catalog
+
+| Code | Severity | User text | Cause | Remediation | Raised by |
+|---|---|---|---|---|---|
+| TAX-0001 `TAX_RATE_NOT_FOUND` | error | Tax code {code} has no rate valid on {tax_date}. | BR-13.6 | Add a rate row | FR-13.1 |
+| TAX-0002 `TAX_RATE_INVALID` | error | Rate {rate} is not valid; rates must be ≥ 0 with intervals that do not overlap. | BR-13.11 | Correct the rate rows | FR-13.1 |
+| TAX-0003 `TAX_GROUP_UNRESOLVED` | error | No tax group or item tax group could be resolved for line {line}. | BR-13.1 step 2 | Set party/product defaults or override | FR-13.2 |
+| TAX-0004 `TAX_NO_INTERSECTION` | warning | Groups {group} and {item_group} share no tax code; line {line} is untaxed. | BR-13.1 step 3 | Review group setup | FR-13.4 |
+| TAX-0005 `TAX_EXEMPTION_EXPIRED` | warning | Exemption certificate {number} expired on {valid_to}; full tax applied. | FR-13.7 | Renew the certificate | FR-13.7 |
+| TAX-0006 `TAX_REVERSE_CHARGE_INELIGIBLE` | warning | Reverse charge not applicable: {reason}; standard rate applied. | BR-13.7 | Check VAT id and countries | FR-13.6 |
+| TAX-0007 `TAX_PROVIDER_FALLBACK` | warning | Provider {provider} unavailable; internal engine used. Document flagged for recommit. | FR-13.10 | None; recommit runs automatically | FR-13.10 |
+| TAX-0008 `TAX_SETTLEMENT_MISMATCH` | error | Settlement {total} differs from GL tax account movement {gl} by {diff}. | FR-13.11 | Investigate unlinked tax lines or manual postings on tax accounts | FR-13.11 |
+| TAX-0009 `TAX_SETTLEMENT_PERIOD_CLOSED` | error | Module TAX is closed for {period}. | BR-13.9 | Reopen TAX or settle next period | BR-13.9 |
+| TAX-0010 `TAX_OVERRIDE_FORBIDDEN` | error (403) | You may not override the tax code on this line. | BR-13.1 step 5 | Remove the override or request the duty | FR-13.4 |
+| TAX-0011 `TAX_INCLUSIVE_RESIDUAL` | info | Inclusive back-out residual {residual} applied to the largest tax line. | BR-13.4 | None | FR-13.5 |
+| TAX-0012 `TAX_INTRASTAT_INVALID` | error | Intrastat line {line}: {field} {reason}. | FR-13.16 validation | Correct the line or the source master data | FR-13.16 |
+| TAX-0013 `TAX_INTRASTAT_COMMODITY_MISSING` | error | No commodity code for product {product} on line {line}. | Product without CN8 | Set the product or category commodity code | FR-13.15 |
+| TAX-0014 `TAX_INTRASTAT_LINE_EXPORTED` | error | Line {line} was exported in run {run} and cannot be edited; create a correction. | BR-13.13 | Use the correction action | FR-13.16 |
+| TAX-0015 `TAX_INTRASTAT_THRESHOLD_CROSSED` | info | Cumulative {direction} value {value} exceeds the {country} threshold {threshold}; declarations required from {period}. | BR-13.14 | Submit declarations from that period | FR-13.16 |
+| TAX-0016 `TAX_COMMODITY_CODE_EXPIRED` | warning | Commodity code {code} is not valid for {year}. | CN8 yearly change | Map to the successor code | FR-13.15 |
+| TAX-0017 `TAX_VAT_RECOVERY_POLICY_MISSING` | warning | No VAT recovery policy for category {category} in {country}; tax code default {pct}% used. | BR-13.15 | Add a policy | FR-13.17 |
+| TAX-0018 `TAX_RECLAIM_BELOW_MINIMUM` | info | Reclaimable VAT {amount} for {country} is below the minimum; carried to the annual claim. | BR-13.15 | None | FR-13.17 |
+| TAX-0019 `TAX_WHT_ALREADY_REMITTED` | error | Transaction {id} is already included in remittance {run}. | BR-13.16 | Exclude it | FR-13.18 |
+| TAX-0020 `TAX_WHT_CERTIFICATE_ISSUED` | error | Remittance {run} has issued certificates and cannot be cancelled. | BR-13.16 | Reissue certificates with corrections | FR-13.18 |
+| TAX-0021 `TAX_SAFT_SCHEMA_INVALID` | error | SAF-T file failed XSD validation: {detail}. | FR-13.12 | Correct source master data (e.g., missing tax registration) | FR-13.12 |
+
+### 2.13.19 Performance budgets and capacity
+
+| Operation | Volume assumption | Latency target (p50 / p95 / p99) | Throughput target | Storage growth per year | Index / partition strategy | Degradation behavior under 3× load |
+|---|---|---|---|---|---|---|
+| `POST /tax/calculate` (internal, 100 lines) | 300k documents/day; peak 200/s | 8 / 25 / 50 ms | 1,000 documents/s per 10 pods | none (stateless) | rate/group caches per pod | HPA to 10 pods; p99 ≤ 120 ms |
+| `POST /tax/calculate` (provider) | 30% of US documents | provider + 10 ms | per provider quota | payload 13 months ≈ 50 GB | — | timeout 2 s → internal fallback |
+| TaxTransaction linking | 1M tax lines/month | lag p95 < 5 s | 2,000/s | 350 B/row × 12M = 4 GB | partition by fiscal year; indexes §2.13.4 | lag grows; settlement waits for lag = 0 |
+| Settlement proposal | monthly; 1M transactions | — | < 3 min | settlement rows small | (le, code, period, settlement_run_id) | runs on replica |
+| Intrastat transfer + validate + compress | 100k lines/month per entity | — | < 5 min | 250 B × 1.2M/year = 300 MB | (le, period, direction, status) | chunked per source type |
+| VAT return / ESL extract | monthly | — | < 1 min | outputs ≈ 1 MB | — | — |
+| SAF-T export | monthly / on request; 1M lines | — | < 10 min | 1 GB XML per month (object storage, compressed 10:1) | streamed generation | queued, one per entity |
+| Calculation explain | 5k/day | 15 / 60 / 120 ms | 100/s | — | — | — |
+
+### 2.13.20 Localization and compliance hooks
+
+- Tax regimes vary by country in rates, mechanisms (VAT vs GST vs sales/use), reverse-charge categories (domestic reverse charge for construction, scrap, mobile phones in DE/UK), cash-basis VAT (FR services, PT), split payment (IT, PL), and tax point rules; the internal engine models them as configuration; wave 48 packs ship tax code sets, box mappings and settlement periods per country.
+- Statutory filings: VAT return e-formats (ELSTER DE, MTD UK, EDI-TVA FR, SII ES real-time ledger, Fattura/LIPE IT), ESL formats, Intrastat national formats, SAF-T variants (PT, NO, PL JPK, RO D406), US 1099 IRIS/FIRE files, India GSTR-1/3B and TDS 26Q, Canada GST34 are produced by pack exporters registered on the `tax.extract_format` extension point over the canonical datasets of FR-13.12, FR-13.16, FR-13.18.
+- E-invoicing clearance (SDI, CFDI, Peppol) is wave 35/48; the tax engine supplies tax breakdowns in the canonical form these require.
+- Currency: VAT returns in national currency; ESL in EUR (BR-13.12); statutory rate type per country (wave 12 §2.12.20).
+- Rounding: per-document vs per-line default per country (DE/FR per document, US per line, IN per line per GST rules).
+- Retention: VAT records 10 years (DE, FR), 6 (UK), 7 (US), 8 (IN); tax transactions are part of the append-only ledger domain and never purged in Phase 2.
+- Privacy: party tax ids and addresses are personal data for sole traders; Intrastat partner VAT id and withholding payee data are tagged `pii` for wave 7 data-subject requests; exports are access-logged.
+- Foreign trade beyond Intrastat (export documents, customs declarations, export control screening) is a wave 48 foreign trade pack; wave 13 provides commodity codes, country of origin and trade fields reused by that pack.
+- Extension points: `tax.provider` adapter, `tax.extract_format`, `tax.box_mapping_pack`, `tax.intrastat_validation_pack`, `tax.withholding_form` renderer.
+
+### 2.13.21 Coverage closure
+
+| Register row (inventory section + AX form or SAP T-code) | Status before | Disposition | Note |
+|---|---|---|---|
+| AX §12.1.4 Setup — Foreign trade → Intrastat parameters, commodity codes, transaction codes, transport methods, ports, statistics procedure (AX register row 7) | PARTIAL-13 | ADDED as FR-13.15 | master data entities and screen Foreign trade setup |
+| AX §12.10.2 Inquiries & Reports — SSRS VAT recovery report (expense tax) (AX register row 78) | PARTIAL-13 | ADDED as FR-13.17 | VAT recovery report in §2.13.14 |
+| AX §12.10.3 Periodic — Expense → Recover VAT (ER-based claim) (AX register row 81) | PARTIAL-13 | ADDED as FR-13.17 | foreign VAT reclaim extract; portal file formats DEFERRED to wave 48 |
+| AX §12.10.4 Setup — Expense → Tax configuration (recoverable VAT per country, tax groups on expenses) (AX register row 86) | PARTIAL-13 | ADDED as FR-13.17 | `VatRecoveryPolicy`; expense categories come from wave 43 |
+| AX §12.14.1 Common — Inventory → Commodity codes (Intrastat on item) (AX register row 124) | PARTIAL-13 | ADDED as FR-13.15 | product `commodity_code_id` (wave 8 field) referencing `tax.CommodityCode` |
+| AX §12.29.1 Common — Foreign trade → Intrastat (journal) / EU sales list (link) (AX register row 236) | PARTIAL-13 | ADDED as FR-13.16 | Intrastat journal with corrections and audit |
+| AX §12.29.3 Periodic — Foreign trade → Intrastat transfer / validation / export (file) (AX register row 247) | PARTIAL-13 | ADDED as FR-13.16 | transfer, validate, compress, export; national file formats via wave 48 |
+| AX §12.29.4 Setup — Foreign trade parameters, Commodity codes, Transaction codes, Transport methods, Ports, Statistics procedures, Country/region properties, Intrastat compression, check setup, EU sales list reporting (AX register row 255) | PARTIAL-13 | ADDED as FR-13.15 (setup), FR-13.16 (compression, checks) | ESL reporting was already FR-13.12 |
+| SAP §13.2 FI-AP — J1INCHLN / J1INBANK / J1INCERT (IN WHT) (SAP register row 25) | PARTIAL-13 | ADDED as FR-13.18 (remittance, challan reference, certificate numbering); Form 16A / 26Q rendering DEFERRED to wave 48 | IN country pack renders forms over the canonical dataset |
+| SAP §13.17 LE-SHP — Foreign trade / export documents in delivery (customs, commercial invoice, EUR.1, Intrastat from delivery; GTS) (SAP register row 205) | PARTIAL-13 | ADDED as FR-13.16 for Intrastat from deliveries (via `IntrastatSource`); export documents and customs DEFERRED to wave 48 | register proposes a wave 48 foreign trade/customs pack; wave 28 shipments register as an Intrastat source |
+| SAP §13.17 LE-SHP Customizing — Foreign trade: export control, preference, Intrastat settings (VEB, VE0; `T604`, `T605`) (SAP register row 208) | PARTIAL-13 | ADDED as FR-13.15 for Intrastat settings; export control and preference DEFERRED to wave 48 | denied-party screening and preference calculation are trade compliance, not tax |
+| SAP §13.18 TM — Customs declarations via GTS from TM (SAP register row 212) | PARTIAL-13 | DEFERRED to wave 48 | customs declarations belong to the foreign trade/customs pack; wave 13 supplies commodity codes and origin data |
 
 ## 2.14 Wave 14: Period Close, Year-End & Allocations
 
@@ -853,6 +1603,7 @@ After this wave a controller can close March 2026 for three entities from one bo
 | Year-end close | General ledger > Year-end close (`LedgerFiscalYearClose...`), opening transactions, retained earnings per dimension | FAGLGVTR balance carry-forward, retained earnings account (OB53) | `ledger.YearEndCloseRun` producing period-0 opening entries | full |
 | Reopen period | Change status back to Open | OB52 edit | Dual-approval reopen workflow | improved: four-eyes, audited |
 | Close calendar / status board | Workspace tiles per entity, task list by due date | Cockpit task list, status overview | Close board across legal entities | full |
+| Balance-sheet regrouping / reclassification | Not standard (manual reclassification journals; vendor debit balances via "Customer/vendor balance list" and manual journal) | FAGLF101 / F101 sort and reclassify by remaining term, FAGL_CL_REGROUP (S/4 closing regrouping), FAGL_CL_RGRP sort method and adjustment accounts (`T030`, `T043`), regroup vendors with debit balances and customers with credit balances | `ledger.RegroupingRule`, `ledger.RegroupingRun` with auto-reversal (FR-14.13); AP/AR item sources from waves 19/30 | full |
 
 ### 2.14.3 Functional requirements
 
@@ -880,6 +1631,11 @@ After this wave a controller can close March 2026 for three entities from one bo
   - Requires all periods of the year closed for all modules except `GL` in `on_hold` for the closing user group; year-end entries are flagged `is_closing_entry`/`is_opening_entry` and excluded from P&L statements.
 - **FR-14.11 Recurring journal scheduling** — Must. Completes FR-11.10: schedules by fiscal period offset (e.g., "last business day of period"), with pause/resume, next-run preview and a generated-batch history.
 - **FR-14.12 Close reporting** — Should. The system shall report close duration per period and entity (period end to GL closed), tasks completed late, and reopen history.
+- **FR-14.13 Balance-sheet regrouping (reclassification)** — Must. The system shall run, per ledger and key date, regrouping rules that reclassify balance-sheet positions for presentation and post adjustment entries to adjustment accounts, auto-reversed on the first day of the next period:
+  - Sort method `remaining_term` (FAGLF101 semantics): open items of a source (GL open items from FR-11.19 in this wave; vendor and customer open items and receivable/payable reconciliation accounts when waves 19/30 register their `open_item_source`) are bucketed by remaining term from the key date to `due_date` (default buckets ≤ 1 year, 1–5 years, > 5 years) and each bucket's amount is reclassified from the source account to the bucket's adjustment account with the configured target (e.g., long-term portion of a loan or receivable).
+  - Sort method `debit_credit_balance` per party: vendors whose net balance is a debit are reclassified from payables to "receivables – vendors with debit balance"; customers with a credit net balance from receivables to "payables – customers with credit balance"; the balance is computed per party × reconciliation account × splitting dimensions (FR-11.23) and currency.
+  - Sort method `account_balance_sign` for GL accounts (bank accounts with overdraft reclassified to short-term borrowings; VAT receivable/payable offset positions): the whole account × combination balance is reclassified when its sign is opposite the account's `normal_balance`.
+  - Each run supports simulate and post, records the snapshot it used, is idempotent per (ledger, key date, rule set), and is reversible as a unit; posted entries carry `is_regrouping = true` and keep the source line's dimensions; the close checklist (FR-14.4) offers a "Regrouping" automation hook.
 
 ### 2.14.4 Data model
 
@@ -932,6 +1688,23 @@ After this wave a controller can close March 2026 for three entities from one bo
 
 **AccrualScheme**: `id`, `ledger_id`, `code`, `debit_account_id`, `credit_account_id`, `frequency` (monthly, quarterly, custom), `occurrences`, `spread` (equal, by_days, custom[]), `start_rule` (document_date, next_period_start), `auto_reverse` bool, `reverse_day` int. **YearEndCloseRun**: `id`, `ledger_id`, `fiscal_year_id`, `retained_earnings_combination_id`, `retain_dimensions`, `status`, `closing_entry_ids[]`, `opening_entry_ids[]`, `previous_run_id`.
 
+**RegroupingRule** and **RegroupingRun** (FR-14.13)
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| rule: id / ledger_id / code | uuid / uuid / text(20) | yes | unique (ledger_id, code) |
+| rule: sort_method | enum | yes | remaining_term, debit_credit_balance, account_balance_sign |
+| rule: source | jsonb | yes | {source_type: gl_open_item / vendor / customer / account_balance, account ranges, dimension filter} |
+| rule: buckets | jsonb | conditional | remaining_term: [{from_days, to_days, adjustment_account_id, target_account_id}] |
+| rule: adjustment_account_id / target_account_id | uuid | conditional | debit/credit balance and sign methods |
+| rule: group_by | text[] | yes | party, reconciliation account, splitting dimensions, currency |
+| rule: active / sequence | bool / int | yes | |
+| run: id / ledger_id / key_date / rule_ids | uuid / uuid / date / uuid[] | yes | |
+| run: mode / status | enum / enum | yes | simulate, post; proposed, posted, reversed, cancelled |
+| run: snapshot | jsonb | yes | per rule: groups with balances, buckets, items count (compressed) |
+| run: entry_ids / reversal_entry_ids | uuid[] | no | reversal dated key_date + 1 day |
+| run: totals | jsonb | yes | per adjustment account |
+
 **Invariants**: at most one PeriodStatus per (ledger, period, module); `closed` GL implies every other module closed; an AllocationRun that is `posted` has Σ destination amounts = source amount per rule (after rounding); YearEndCloseRun opening balances per combination = closing balances (verified by the run before commit). Indexing: `period_status` PK; `close_task` on (run_id, status), (assignee_user_id, due_at); `allocation_run` on (ledger_id, fiscal_period_id).
 
 ### 2.14.5 APIs and events
@@ -951,6 +1724,8 @@ After this wave a controller can close March 2026 for three entities from one bo
 | GET/PUT | /api/v1/ledger/ledgers/{id}/accrual-schemes[/{code}] | Schemes | PUT idempotent | Maintain accrual schemes |
 | POST | /api/v1/ledger/year-end-closes | Run year-end close (simulate/post) | `Idempotency-Key` | Run year-end close |
 | GET/PUT | /api/v1/ledger/recurring-journals[/{id}] and :pause, :resume | Schedules | PUT idempotent | Maintain ledger journals |
+| GET/PUT | /api/v1/ledger/ledgers/{id}/regrouping-rules[/{code}] | Regrouping rules (FR-14.13) | PUT idempotent | Maintain regrouping rules |
+| POST | /api/v1/ledger/regroupings and /{id}:post, :reverse | Regrouping run simulate / post / reverse | `Idempotency-Key` | Run regrouping |
 
 Commands: `TransitionPeriodStatus` (validates FR-14.2 ordering; closing with unposted approved batches dated in the period → `CLOSE_PENDING_BATCHES` unless `force` with duty); `RequestReopen` (reason ≥ 10 chars, two approvers distinct from requester); `RunAllocation` (period open for GL, basis non-zero or `allocate_from_zero`); `RunYearEndClose` (all periods closed per FR-14.10, retained earnings account exists and is equity).
 
@@ -962,6 +1737,7 @@ Commands: `TransitionPeriodStatus` (validates FR-14.2 ordering; closing with unp
 | dev.passage.ledger.allocation.completed.v1 | run posted/reversed | run_id, rule_ids, period, iterations, entry_ids, reversal | reporting, close |
 | dev.passage.ledger.accrual.scheduled.v1 | scheme applied | source_entry_id, scheme, occurrences[] (dates, amounts) | close board |
 | dev.passage.ledger.year-end.closed.v1 | year-end posted | ledger_id, fiscal_year_id, closing_entry_ids, opening_entry_ids, retained_earnings_total | reporting, close |
+| dev.passage.ledger.regrouping.completed.v1 | regrouping posted or reversed | run_id, ledger_id, key_date, rule_ids, totals per adjustment account, entry_ids, reversal | reporting, close |
 
 ### 2.14.6 User experience
 
@@ -974,6 +1750,7 @@ Commands: `TransitionPeriodStatus` (validates FR-14.2 ordering; closing with unp
 | Allocation runs | Simulate, review proposal (source → destinations), post, reverse | rule, source amount, destination, basis value, pct, amount | Run allocations |
 | Accrual schemes | Define, preview schedule on a sample amount | code, accounts, frequency, occurrences, spread, reverse day | Maintain accrual schemes |
 | Year-end close | Select year/ledger, simulate, review retained earnings by dimension, post | account, combination, closing balance, opening balance, retained earnings | Run year-end close |
+| Regrouping | Define rules (method, source, buckets, accounts), simulate for a key date, review groups (party / bucket / amount), post, reverse | rule, source account, party, bucket, balance, adjustment account, target account, amount | Maintain regrouping rules / Run regrouping |
 
 Interaction rules: period grid supports keyboard range selection and bulk status change with a confirmation summarizing affected modules; close board tasks open in a side panel without losing filters; blocked tasks show the blocking task inline; allocation proposals support "what-if" edits to percentages that recompute live but require saving the rule to post.
 
@@ -1001,6 +1778,7 @@ Interaction rules: period grid supports keyboard range selection and bulk status
 - **BR-14.10 Close task dependencies.** A task becomes `in_progress`-eligible only when all `depends_on` tasks are `completed` or `skipped`; skipping requires a reason and duty `Skip close tasks`; automation tasks cannot be completed manually unless marked `manual_override_allowed`.
 - **BR-14.11 Concurrency on close.** Closing GL takes `FOR UPDATE` on the PeriodStatus row and waits for in-flight postings (which hold `FOR SHARE`) up to 5 s before failing with `CLOSE_BUSY`; retried by the UI.
 - **BR-14.12 Calendar mismatch across ledgers.** Period-control is per ledger; a ledger group posting where any member ledger's period is closed is rejected as a whole with the offending ledger named.
+- **BR-14.13 Regrouping computation.** Remaining term = `due_date − key_date` in days; items without `due_date` fall into the shortest bucket and are listed as `no_due_date`; overdue items (negative term) fall into the shortest bucket. For `debit_credit_balance`, the group balance is Σ open items per (party, reconciliation account, splitting dimension values, currency) at the key date; only groups whose sign is opposite the account's normal balance are reclassified, for their full balance. Entries: debit/credit the adjustment account and the target account in accounting and reporting currency using the posted amounts (revalued amounts when a wave 12 revaluation for the key date is posted, so reclassification follows valuation); one entry per rule per run; auto-reversal on key_date + 1 day. A second posted run for the same (ledger, key date, rule) is rejected (`CLOSE_REGROUPING_EXISTS`) until the first is reversed. Rules run in `sequence`; an item is used by at most one rule per run.
 
 ### 2.14.8 Acceptance criteria
 
@@ -1014,6 +1792,8 @@ Interaction rules: period grid supports keyboard range selection and bulk status
 - **AC-14.8** (FR-14.10) Given a 12-period dataset, when the year-end close is posted, then every balance-sheet combination's opening balance equals its closing balance, P&L accounts open at 0.00, and retained earnings change equals net income.
 - **AC-14.9** (FR-14.4, FR-14.5) Given a 40-task template across 3 entities with dependencies, when the run completes, then no task was completed before its dependencies and the board shows 120 tasks completed.
 - **AC-14.10** (BR-14.11) Given 50 concurrent postings in flight, when GL close is requested, then it either waits ≤ 5 s and succeeds with no posting committed after the close timestamp, or returns `CLOSE_BUSY`.
+- **AC-14.11** (FR-14.13, BR-14.13) Given a loan clearing account with open items due 2026-09-30 (USD 40,000.00), 2028-03-31 (USD 120,000.00) and 2032-03-31 (USD 200,000.00) and key date 2026-03-31, when the `remaining_term` rule runs, then USD 40,000.00 stays short-term, USD 320,000.00 is reclassified to long-term in one entry, and the reversal is dated 2026-04-01.
+- **AC-14.12** (FR-14.13) Given stub vendor open items where vendor V7 nets to a debit of USD 1,250.00 and customer C3 nets to a credit of USD 800.00, when the `debit_credit_balance` rules run, then USD 1,250.00 moves from payables to "receivables – vendors with debit balance" and USD 800.00 from receivables to "payables – customers with credit balance"; a second post for the same key date returns `CLOSE_REGROUPING_EXISTS`.
 
 ### 2.14.9 Test plan and fixtures
 
@@ -1048,6 +1828,7 @@ Helm charts: `passage-close` (TypeScript service, 2–4 pods, CloudNativePG `clo
 | SAP KSV5/KSU5 cycles (`T811C`, `T811S`, `T811K`) | AllocationRule | segments → rules; tracing factor → basis spec |
 | SAP `T030` retained earnings (OB53) | Ledger.retained_earnings_combination_id | per ledger |
 | SAP closing cockpit templates | CloseTemplate | |
+| SAP FAGLF101 sort methods and adjustment accounts (`T030` transactions PYO, PYU, PYT; `T043`), FAGL_CL_RGRP settings | RegroupingRule | sort method buckets → buckets; adjustment/target accounts per reconciliation account; prior regrouping runs not migrated (they auto-reverse) |
 
 Validation: period statuses per module equal the source at cutover; allocation rules re-executed on the last closed period in simulate mode and compared to source postings (tolerance 0.01 per destination). Not migrated: completed close task history, prior allocation run history, SAP accrual engine objects (re-keyed as schemes).
 
@@ -1062,6 +1843,147 @@ Depends on: wave 11 (posting API hook, reversal), wave 12 (revaluation hook on c
 | Year-end with millions of combinations | Medium | Medium | Chunked generation (50k lines per entry, multiple entries per run); run measured on 1M-combination synthetic set |
 
 Open questions: (1) Should on_hold allow service accounts of the owning module by default? Default no; decide by wave 14 mid-point. (2) Retained earnings per dimension as default? Default yes for the demo; decide with accountant review by wave 14 exit. (3) Do adjustment periods 13–16 get their own close checklist? Default: same run, tasks flagged `adjustment_only`.
+
+### 2.14.13 Parameters and setup
+
+| Parameter | Scope | Type | Default | Allowed values | Effect | AX equivalent | SAP equivalent |
+|---|---|---|---|---|---|---|---|
+| `period_control.module_mapping` | tenant | jsonb | ledger→GL, ap→AP, ar→AR, inventory→INV, fa→FA, project→PROJ, tax→TAX, bank→BANK, payroll→PAYROLL | source.system → module | BR-14.1 module resolution | Ledger calendar > Module access (`LedgerPeriodModuleAccessControl`) | OB52 account types (+, A, D, K, M, S, V) |
+| `period_control.on_hold_group_id` | ledger × period × module | ref | none | user groups (wave 2) | Who may post while on hold | Ledger calendar > Access level / user group | OB52 authorization group (`BRGRU`) second interval |
+| `close.reopen_default_days` | tenant | int | 3 | 1–30 | Reopen expiry (FR-14.3) | — | — |
+| `close.reopen_approvers` | tenant | int | 2 | 2–3 | Distinct approvers for reopen | — | — |
+| `close.lock_wait_ms` | tenant | int | 5,000 | 1,000–30,000 | BR-14.11 wait | — | — |
+| `close.gl_closes_last` | ledger | bool | true | true (fixed in prod) | FR-14.2 ordering | — | — |
+| `close.block_on_pending_batches` | ledger | bool | true | true / false | `CLOSE_PENDING_BATCHES` on close | — | — |
+| `close.template.due_offset` / `business_calendar_id` | template task | int / ref | 0 / legal entity calendar | −10 to +30 business days | Due date computation | Financial period close > Templates > Due day | Closing cockpit task offset (CLOCOC) |
+| `allocation.max_iterations` / `convergence_fraction` | tenant | int / numeric | 100 / 0.5 | 10–1,000 / 0.1–1 | BR-14.5 | Allocation rules (no iterative) | KSV5/KSU5 iterative cycle flag |
+| `allocation.allocate_from_zero` | rule | enum | skip | skip / equally | BR-14.4 zero basis | Allocation rule > "Allocate from zero" | Cycle segment "zero tracing factors" |
+| `allocation.auto_reverse_next_period` | rule | bool | false | true / false | FR-14.8 | — | Cycle "reverse" via KSV6/KSU6 |
+| `accrual.reverse_day` / `post_day` | scheme | int | 1 / 1 | 1–28 | BR-14.7 | Accrual scheme > Reversal / Period key | FBS1 reversal date; ACE reversal settings |
+| `year_end.retained_earnings_combination_id` | ledger | ref | required | equity account combination | FR-14.10 | Ledger > Year-end close > Retained earnings account | OB53 retained earnings account (`T030` BIL) |
+| `year_end.retain_dimensions` | ledger | bool | true | true / false | BR-14.8 | Year-end close template > "Transfer dimensions" (D365) | FAGLGVTR carry-forward of characteristics (`T881` fields) |
+| `year_end.default_closing_combination_id` | ledger | ref | required when retain_dimensions | combination | Remap of inactive values | Year-end close template > Financial dimension defaults | — |
+| `year_end.chunk_lines` | tenant | int | 50,000 | 10,000–100,000 | Entry size in year-end runs | — | — |
+| `regrouping.buckets` default | ledger | jsonb | ≤ 365 d, 366–1,825 d, > 1,825 d | ordered day ranges | BR-14.13 | — | FAGLF101 sort method (`T030` PYO/PYU) |
+| `regrouping.auto_reverse` | ledger | bool | true | true (fixed) | Reversal on key_date + 1 | — | FAGLF101 reversal posting date |
+| `close.reminder_time` | legal entity | time | 08:00 | local time | Close reminders | — | — |
+
+### 2.14.14 Inquiries and reports
+
+| Name | Type | Filters & parameters | Columns / measures | Source projection | AX equivalent | SAP equivalent |
+|---|---|---|---|---|---|---|
+| Period-control matrix | list inquiry | ledger, fiscal year, module | period, module, status, on-hold group, changed by/at, reopen count | `PeriodStatus` | Ledger calendar form | OB52 view (`T001B`), OKP1 (CO period lock), MMPV log |
+| Reopen history | operational report | ledger, year, requester, approver | period, module, reason, requester, approvers, opened/closed at, expiry | `PeriodStatus` audit | Database log on `LedgerPeriod` | `T001B` change documents (SCU3) |
+| Close board / task list | list inquiry | run, entity, status, owner, overdue | task, entity, owner, due, status, blocked by, evidence, late | `CloseTask` | Financial period close workspace (Tasks, Calendar) | CLOCOS monitor, Fiori Manage Closing Tasks |
+| Close duration KPI | KPI | entity, period range | business days period end → GL closed, late tasks %, reopen count | `CloseRun`, `PeriodStatus` | Financial period close workspace tiles | Advanced Financial Closing analytics |
+| Allocation run results | drill-down | run, rule | source amount, destination, basis value, share, amount, iteration count | `AllocationRun` | Allocation journal (review before post); SSRS Allocation rule report | KSV5/KSU5 detail list, KSB5 |
+| Allocation rule listing | operational report | ledger, method | rule, source filter, destinations, basis, offset, iterative group | `AllocationRule` | SSRS Allocation rule report | KSV3/KSU3 cycle display |
+| Accrual schedule | list inquiry | scheme, source entry, date range | occurrence, date, amount, posted, reversal | `AccrualScheme` schedules | Ledger accruals inquiry | ACACPSITEMS, F.81 list |
+| Recurring journal next runs | list inquiry | template, owner | next run, last run, generated batches, paused | `RecurringJournal` | Periodic journals list | F.15 list recurring entries |
+| Year-end close results | operational report | ledger, fiscal year | retained earnings by dimension, opening per combination, remapped combinations | `YearEndCloseRun` | SSRS Fiscal year close report / Opening balances | FAGLGVTR log, 2KET, F.07 log |
+| Regrouping proposal / posting list | drill-down | run, rule, key date | party / item, bucket, balance, adjustment account, target account, amount | `RegroupingRun.snapshot` | — | FAGLF101 sorted list and posting log |
+| Rejected postings in closed periods | KPI | ledger, period, source system | count, amount, first/last attempt | posting rejection log | — | — |
+
+### 2.14.15 Printed and electronic documents
+
+| Document | Trigger | Layout elements | Formats | Numbering sequence | Legal / retention requirement |
+|---|---|---|---|---|---|
+| Close pack (checklist evidence) | CloseRun completed | header: entities, period, template; lines: task, owner, completed at, evidence links, skipped reasons; footer: GL close time, approvers | PDF, XLSX | close run id | audit evidence; 10 years |
+| Period reopen approval record | reopen approved | ledger, period, module, reason, requester, approvers, timestamps, expiry | PDF, JSON | — | audit evidence; 10 years |
+| Allocation posting list | allocation run posted | rules, basis snapshot, destination amounts, vouchers | PDF, XLSX | run id; ledger vouchers | financial record; 10 years |
+| Year-end closing report | year-end run posted | retained earnings per dimension, opening entries summary, remapped combinations, vouchers | PDF, XLSX | run id | financial record; permanent for the fiscal year file |
+| Regrouping posting list | regrouping run posted | rule, buckets, groups, adjustment amounts, vouchers, reversal date | PDF, XLSX | run id | supporting record for balance sheet presentation; 10 years |
+
+No external electronic documents in this wave.
+
+### 2.14.16 Periodic and batch jobs
+
+| Job | Schedule default | Partitioning key | Idempotency / checkpoint | Typical runtime target | Failure handling | Monitor / alert |
+|---|---|---|---|---|---|---|
+| `accrual-generator` | daily 00:30 entity time zone | scheme × occurrence | occurrence keyed (scheme, source entry, n) | 10k occurrences < 2 min | occurrence blocked if period closed → close task | blocked > 0 at day 3 → P3 |
+| `recurring-journal-generate` (scheduling per FR-14.11) | per template | template | (template, scheduled date) | < 5 min for 1,000 templates | per template | — |
+| `reopen-expiry` (Temporal timer) | at `reopen_expires_at` | period status row | transition idempotent | < 1 s | retry; alert | timer missing → P2 |
+| `close-reminders` | daily `close.reminder_time` | legal entity | one notification per (task, day) | < 1 min | — | — |
+| `allocation-run` (close hook) | per checklist | ledger × rule group | (ledger, period, rule ids) key | 1,000 rules < 5 min | run failed; task blocked | non-convergence → P3 |
+| `year-end-close` | on demand / checklist | ledger | (ledger, year, run id); chunks of 50k lines | 1M combinations < 20 min | failed chunk rolls back run | failure → P2 |
+| `regrouping-run` (close hook) | key date = period end, day +2 | ledger × rule | (ledger, key date, rule set) | 1M open items < 10 min | run failed; task blocked | failure → P2 |
+| `regrouping-reverse` | key date + 1 day 00:15 | run | reversal set once | < 1 min | retry hourly | missing by 12:00 → P2 |
+| `period-status-cache-audit` | every 5 min | posting service | compares cached status vs table | < 1 s | cache refresh | mismatch → P2 |
+
+### 2.14.17 Security duties and privileges
+
+| Duty | Privileges (entry points) | Segregation-of-duties conflicts | Default roles that include it |
+|---|---|---|---|
+| View period status | GET periods matrix | — | All finance roles |
+| Maintain period status | PATCH periods/{p}/modules/{m}; bulk close | Approve period reopen; Post ledger journals in on-hold group | Financial controller |
+| Request period reopen | POST :request-reopen | Approve period reopen (same request) | Accounting supervisor, Financial controller |
+| Approve period reopen | Temporal approval task | Request period reopen (same request); Maintain period status | CFO, Group controller |
+| Maintain close templates | close templates CRUD | — | Financial controller, Close manager |
+| Run period close | POST /close/runs | — | Close manager |
+| Work close tasks / View close board | task actions; board | Skip close tasks (own tasks) | All finance roles |
+| Skip close tasks | :skip | Work close tasks (same task) | Close manager |
+| Maintain allocation rules | allocation rules CRUD | Run allocations | Cost accountant (senior) |
+| Run allocations | POST /ledger/allocations, :post, :reverse | Maintain allocation rules | Cost accountant |
+| Maintain accrual schemes | accrual schemes CRUD | Approve ledger journals | Accounting manager |
+| Run year-end close | POST /ledger/year-end-closes | Maintain period status | Financial controller |
+| Maintain regrouping rules | regrouping rules CRUD | Run regrouping | Accounting manager |
+| Run regrouping | POST /ledger/regroupings, :post, :reverse | Maintain regrouping rules | Financial controller, Accounting supervisor |
+
+### 2.14.18 Message catalog
+
+| Code | Severity | User text | Cause | Remediation | Raised by |
+|---|---|---|---|---|---|
+| CLOSE-0001 `CLOSE_INVALID_TRANSITION` | error | Cannot change {module} {period} from {from} to {to}: {reason}. | BR-14.3, FR-14.2 | Close dependent modules first or use the reopen workflow | FR-14.2 |
+| CLOSE-0002 `CLOSE_PENDING_BATCHES` | error | {count} approved journal batches dated in {period} are not posted. | Close with unposted batches | Post or cancel them, or force with duty | FR-14.2 |
+| CLOSE-0003 `CLOSE_BUSY` | error | Postings are in progress for {ledger}; retry the close. | BR-14.11 lock wait | Retry | BR-14.11 |
+| CLOSE-0004 `CLOSE_REOPEN_REASON_REQUIRED` | error | A reason of at least 10 characters is required. | FR-14.3 | Enter a reason | FR-14.3 |
+| CLOSE-0005 `CLOSE_REOPEN_APPROVER_INVALID` | error | Approver {user} is the requester or already approved. | FR-14.3 | Choose a distinct approver | FR-14.3 |
+| CLOSE-0006 `CLOSE_REOPEN_EXPIRED` | info | Period {period} was reclosed automatically after the reopen window. | Expiry timer | Request a new reopen if needed | BR-14.3 |
+| CLOSE-0007 `CLOSE_TEMPLATE_CYCLE` | error | Task dependencies contain a cycle: {path}. | FR-14.4 | Remove a dependency | FR-14.4 |
+| CLOSE-0008 `CLOSE_TASK_BLOCKED` | error | Task {task} is blocked by {blocking}. | BR-14.10 | Complete or skip the blocking tasks | BR-14.10 |
+| CLOSE-0009 `CLOSE_TASK_AUTOMATED` | error | Task {task} completes automatically when {job} finishes. | BR-14.10 | Run the job, or allow manual override | BR-14.10 |
+| CLOSE-0010 `ALLOC_PCT_NOT_100` | error | Destination percentages total {sum}; they must total 100.000000. | FR-14.6 | Adjust percentages | FR-14.6 |
+| CLOSE-0011 `ALLOC_ZERO_BASIS` | warning | Rule {rule} skipped: basis is zero for all destinations. | BR-14.4 | Check basis data or set allocate_from_zero | BR-14.4 |
+| CLOSE-0012 `ALLOC_NO_CONVERGENCE` | error | Iterative group {group} did not converge in {n} iterations. | BR-14.5 | Review reciprocal shares (≥ 50% loops) | FR-14.7 |
+| CLOSE-0013 `YEAR_END_PERIODS_OPEN` | error | Year-end close needs all periods of {year} closed; open: {list}. | FR-14.10 | Close the listed periods | FR-14.10 |
+| CLOSE-0014 `YEAR_END_RE_ACCOUNT_INVALID` | error | Retained earnings account {account} must be an equity account. | FR-14.10 | Fix the ledger setting | FR-14.10 |
+| CLOSE-0015 `YEAR_END_DIMENSION_REMAPPED` | warning | {count} combinations had inactive values and were remapped to {default}. | BR-14.8 | Review the run report | BR-14.8 |
+| CLOSE-0016 `CLOSE_REGROUPING_EXISTS` | error | A posted regrouping exists for {ledger} {key_date} rule {rule}. | BR-14.13 | Reverse it first | FR-14.13 |
+| CLOSE-0017 `CLOSE_REGROUPING_SOURCE_UNAVAILABLE` | error | Open-item source {source} is not registered for {ledger}. | AP/AR wave not live | Use GL sources only or wait for the source | FR-14.13 |
+| CLOSE-0018 `CLOSE_REGROUPING_NO_DUE_DATE` | warning | {count} items without due date were placed in the shortest bucket. | BR-14.13 | Maintain due dates on the source documents | BR-14.13 |
+
+### 2.14.19 Performance budgets and capacity
+
+| Operation | Volume assumption | Latency target (p50 / p95 / p99) | Throughput target | Storage growth per year | Index / partition strategy | Degradation behavior under 3× load |
+|---|---|---|---|---|---|---|
+| Period decision in posting | every posting line batch | +0.3 / +1 / +2 ms | at 5,000 lines/s | — | `period_status` PK cached per pod, invalidated by event | cache miss → PK read |
+| Period transition (close GL) | 3 entities × 10 modules × 16 periods per year | 50 / 500 / 5,000 ms (lock wait) | — | 480 rows/year/ledger | PK | `CLOSE_BUSY` returned after 5 s |
+| Close board load | 1,000 tasks | 80 / 300 / 500 ms | 50 req/s | 1,000 tasks × 12 runs × 1 KB = 12 MB | (run_id, status), (assignee, due_at) | page size reduced |
+| Allocation run | 1,000 rules, 50k destinations | — | < 5 min | basis snapshots 10 MB/run | balance PK queries per rule | runs queued per ledger |
+| Iterative allocation group | ≤ 50 rules | — | < 60 s | — | in-memory solver | fail at 100 iterations |
+| Accrual generation | 10k occurrences/day | — | < 2 min | — | (scheme, date) | — |
+| Year-end close | 1M combinations | — | < 20 min | 2M lines/year/ledger | chunked entries of 50k lines | chunk size reduced, run longer |
+| Regrouping | 1M open items | — | < 10 min | 2 entries per rule per period | `open_item` (account, status, due_date) | per-rule timeout 20 min |
+
+### 2.14.20 Localization and compliance hooks
+
+- Fiscal calendars vary (JP/IN April–March, AU July–June, 4-4-5 retail calendars, 13-period calendars) — handled by wave 6 calendars; period control is per ledger so local-GAAP ledgers can follow a different year end.
+- Year-end: some jurisdictions require closing to the profit-and-loss summary account then to retained earnings (FR, ES PGC class 129 "Resultado del ejercicio"; IT "Utile d'esercizio") and separate opening/closing balance sheets (DE "Eröffnungsbilanzkonto"/"Schlussbilanzkonto" 9000/9008); country packs configure an intermediate result account and closing/opening balance sheet accounts as year-end template steps.
+- Regrouping: remaining-term disclosure buckets vary — HGB §268(4)/(5) "Restlaufzeit bis 1 Jahr / mehr als 5 Jahre", IFRS current/non-current (IAS 1.66–1.76: 12 months), US GAAP current maturities; country packs ship bucket sets and adjustment account sets; debit-balance vendor reclassification is mandatory under HGB and common under IFRS.
+- Statutory locking: DE GoBD requires "Festschreibung" (posted entries immutable within the period of the VAT return) — satisfied by append-only journal plus period close; FR FEC closes the year with a "clôture" that is irreversible — country pack sets `reopen_approvers = 3` and disallows reopen after the statutory deadline.
+- Retention of close evidence: 10 years (DE/FR), 7 (US SOX workpapers per PCAOB AS 1215).
+- SOX: reopen dual approval, close pack evidence and SoD duties above are the SOX 404 control hooks consumed by wave 48 controls monitoring.
+- Extension points: `close.template_pack` (country/industry close templates), `ledger.year_end_step` (intermediate result account, closing/opening BS accounts), `ledger.regrouping_bucket_pack`.
+
+### 2.14.21 Coverage closure
+
+| Register row (inventory section + AX form or SAP T-code) | Status before | Disposition | Note |
+|---|---|---|---|
+| SAP §13.1 FI-GL Periodic processing — FAGLF101 / F101 Regroup receivables/payables (sorted list, reclassification by remaining term) (SAP register row 8) | GAP (propose 14) | ADDED as FR-14.13 | `remaining_term` and `debit_credit_balance` methods; AC-14.11 |
+| SAP §13.1 FI-GL Periodic processing — FAGL_CL_REGROUP / FAGL_CL_MIGRATION Closing: regrouping (S/4) (SAP register row 10) | GAP (propose 14) | ADDED as FR-14.13 | same engine; migration of FAGL_CL settings in §2.14.11 |
+| SAP §13.1 FI-GL Customizing — FAGL_CL_RGRP / Define sort method & adjustment accounts for regrouping (`T043`, `T030`) (SAP register row 21) | GAP (propose 14) | ADDED as FR-14.13 | `RegroupingRule` buckets and adjustment/target accounts; parameters in §2.14.13 |
+| SAP §13.2 FI-AP Periodic processing — FAGLF101 (AP) Regroup vendors with debit balances (SAP register row 30) | GAP (propose 14) | ADDED as FR-14.13 | rule ships in this wave; vendor item source activates when wave 19 registers `open_item_source = vendor` (AC-14.12 uses stub items) |
+| SAP §13.3 FI-AR Periodic processing — FAGLF101 (AR) Regroup customers with credit balances (SAP register row 42) | GAP (propose 14) | ADDED as FR-14.13 | customer item source activates with wave 30 |
 
 ## 2.15 Wave 15: Financial Reporting, Statements & Audit Trail
 
@@ -1096,6 +2018,8 @@ Out of scope: group consolidation with eliminations and translation (wave 40), b
 | Distribution | MR report library, scheduled generation, email | Report scheduling (SM36), SAP Analytics Cloud publication | `StatementRun` schedules with PDF/XLSX/CSV, email, link | full |
 | Security | MR tree security, AX dimension security | Authorization objects (F_BKPF_BUK, K_CSKS), FSV authorization | OPA dimension-value policies applied to every balance query | full |
 | Audit trail | Database log, voucher audit, workflow history | Change documents (CDHDR/CDPOS), FB03 header changes, SE16 on BKPF | Audit trail report over CDC audit (wave 5) + ledger events | full |
+| Main account categories and derived hierarchies | Main account categories (`MainAccountCategory`), D365 derived financial hierarchies (`DimensionHierarchy` type Derived), Financial dimension sets | Account groups / G/L account hierarchies (KDH1–KDH3, `SETHEADER`/`SETNODE`), FSV nodes, profit center groups (KCH1) | `reporting.DerivedHierarchy` over main account categories and dimension values, effective-dated versions, usable as row sets and trees (FR-15.13) | full |
+| P&L by function of expense (cost of sales accounting) | Custom MR rows by dimension | FSV with functional area (`RFAREA`), S_ALR_87012284 with FSV for cost of sales | Standard definition `PL-FUNC` over `FUNC_AREA` (FR-15.14) | full |
 
 ### 2.15.3 Functional requirements
 
@@ -1119,6 +2043,12 @@ Out of scope: group consolidation with eliminations and translation (wave 40), b
 - **FR-15.10 Audit trail report** — Must. The system shall report for a period and ledger: entries posted (who, when, source, idempotency replay flag), batch approvals (submitter, approvers, timestamps), reversals, period status changes including reopen approvals, rate overrides, tax fallbacks, allocation and year-end runs; exportable to CSV/PDF with a hash.
 - **FR-15.11 Definition import/export** — Must. Definitions round-trip as JSON (schema-versioned) for backup, environment promotion and Management Reporter conversion.
 - **FR-15.12 Management Reporter and FSV converters** — Should. The migration framework shall convert MR row/column/tree definitions (from the MR database `ControlRowDetail`, `ControlColumnDetail`, `ControlTreeDetail`) and SAP FSV (`T011`, `FAGL_011PC`, `FAGL_011ZC`) into Passage definitions with a conversion report of unsupported constructs.
+- **FR-15.13 Derived financial hierarchies** — Must. The system shall maintain derived hierarchies: trees whose leaf assignment is derived by rules rather than listed, over (a) main account categories (each main account carries `category_id`; categories nest under hierarchy nodes) and (b) dimension values (nodes with membership rules: value ranges, wildcards, attribute filters such as `cost_center.region = EMEA`), with effective-dated versions.
+  - A derived hierarchy can be used as a row set (one row per node, totals rolled up, leaves expanded on demand) and as a reporting tree (FR-15.4); statements record the hierarchy version used.
+  - Validation on publish: every postable account (or every active dimension value) maps to exactly one leaf node, or is listed in an "unassigned" check node that must be empty for `strict = true` hierarchies (`REPORT_HIERARCHY_UNASSIGNED`); overlaps are rejected (`REPORT_HIERARCHY_OVERLAP`).
+  - Membership is re-evaluated when accounts or dimension values change (`ledger.account.changed`, dimension events); a new value that matches no rule appears in the unassigned node within 60 s and raises a notification to the hierarchy owner.
+  - Up to 12 levels and 20,000 nodes per hierarchy; JSON import/export like FR-15.11.
+- **FR-15.14 P&L by function of expense** — Should. The system shall ship `PL-FUNC` (revenue, cost of sales, distribution costs, administrative expenses, other operating income/expense, financial result) whose expense rows filter on the `FUNC_AREA` dimension (FR-11.22) instead of account ranges, with a check row that lists P&L lines without `FUNC_AREA` and must be 0.00.
 
 ### 2.15.4 Data model
 
@@ -1168,6 +2098,24 @@ Out of scope: group consolidation with eliminations and translation (wave 40), b
 | cell: balance_keys | jsonb | yes | [{ledger, account, combination, period, currency_type}] (compressed; up to 50k keys, overflow stored as a query spec) |
 | cell: line_count | int | yes | |
 
+**DerivedHierarchy** and **HierarchyNode** (FR-15.13)
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| hierarchy: id / code / name | uuid / text(30) / text(120) | yes | unique (tenant, code, version) |
+| hierarchy: subject | enum | yes | main_account_category, main_account, dimension_value |
+| hierarchy: dimension_attribute_id | uuid | conditional | when subject = dimension_value |
+| hierarchy: version / effective_from / status | int / date / enum | yes | draft, published, retired |
+| hierarchy: strict | bool | yes | unassigned must be empty to publish |
+| hierarchy: owner_user_id | uuid | yes | notified on unassigned members |
+| node: id / hierarchy_id / parent_id / sequence | uuid | yes | depth ≤ 12 |
+| node: label / code | text(120) / text(30) | yes | |
+| node: membership_rules | jsonb | no | leaves only: ranges, lists, wildcards, attribute filters, category ids |
+| node: normal_balance / cash_flow_tag | enum | no | inherited by generated rows |
+| membership (materialized): hierarchy_version, node_id, member_id | | yes | rebuilt on change; PK (hierarchy_version, member_id) |
+
+**MainAccountCategory**: `id`, `code` text(20), `name`, `account_type` (must match member accounts' type), `sequence`; `MainAccount.category_id` FK (wave 11 entity extended).
+
 **AuditTrailEntry** (materialized view over audit store + ledger events): `occurred_at`, `ledger_id`, `kind` (posted, replayed, reversed, batch_submitted, batch_approved, batch_rejected, period_changed, reopen_approved, rate_override, tax_fallback, allocation_run, year_end_run, rebuild), `actor_id`, `object_ref`, `details` jsonb, `trace_id`.
 
 **Invariants**: for every cell, Σ ReportingBalance over `balance_keys` = `value` (property-tested); total rows equal Σ referenced rows; `TB-STD` closing per account = opening + debit − credit; `CF-STD` change in cash = Σ cash-tagged account movements; `result_hash` is reproducible for the same HWM and definition version. Indexing: `reporting_balance` PK (ledger, period, account, combination, currency_type) plus (ledger, account, period); `statement_cell` PK (run_id, row_id, column_id); audit view indexed on (ledger_id, occurred_at).
@@ -1188,6 +2136,8 @@ Out of scope: group consolidation with eliminations and translation (wave 40), b
 | GET/PUT | /api/v1/reporting/schedules[/{id}] | Distribution schedules | PUT idempotent | Schedule financial statements |
 | GET | /api/v1/reporting/audit-trail?ledger=&period=&kind= and /audit-trail:export | Audit trail report | export run id | View audit trail |
 | GET | /api/v1/reporting/lag | Read-model lag per ledger | n/a | View financial statements |
+| GET/PUT | /api/v1/reporting/hierarchies[/{code}] and /{code}:publish, /{code}/members?version= | Derived hierarchies, publish, materialized membership (FR-15.13) | PUT idempotent | Maintain report definitions |
+| GET/PUT | /api/v1/ledger/main-account-categories[/{code}] | Main account categories | PUT idempotent | Maintain chart of accounts |
 
 Queries and validation: `RunStatement` requires a published definition, period exists for every selected ledger, viewer has at least one permitted dimension value when a tree is used, and read-model lag ≤ `max_lag_seconds` (default 30) unless `allow_stale = true` (result flagged). `ImportDefinition` validates schema version and rejects duplicate codes without `overwrite`.
 
@@ -1198,6 +2148,7 @@ Queries and validation: `RunStatement` requires a published definition, period e
 | dev.passage.reporting.definition.published.v1 | publish | code, version, actor, diff_summary | audit, cache |
 | dev.passage.reporting.lag.exceeded.v1 | lag > threshold for 60 s | ledger_id, lag_seconds, hwm_ledger, hwm_reporting | ops alerting, close board |
 | dev.passage.reporting.distribution.sent.v1 | email/link delivered | run_id, recipients (hashed), format, size | audit |
+| dev.passage.reporting.hierarchy.unassigned.v1 | new account or dimension value matches no leaf | hierarchy code, version, member_id, member kind | hierarchy owner notification, close board |
 
 ### 2.15.6 User experience
 
@@ -1210,6 +2161,7 @@ Queries and validation: `RunStatement` requires a published definition, period e
 | Report library | Browse outputs by entity/period/definition, share link, retention | definition, period, entity, generated at, hash | View financial statements |
 | Schedules | Define cron/close hook, recipients, formats | definition, parameters, cron, recipients, last run | Schedule financial statements |
 | Audit trail | Filter period/ledger/kind/actor, export with hash | occurred at, kind, actor, object, details, trace id | View audit trail |
+| Derived hierarchies | Build tree, define membership rules per leaf, view unassigned/overlaps, publish version, use as row set or tree | node, level, rules, members count, unassigned count, version | Maintain report definitions |
 
 Interaction rules: designer previews render within 3 s against the demo dataset and update on each save; row grid supports drag-reorder, multi-select indent and "insert total of selection"; statements are keyboard navigable cell-by-cell (arrow keys) with Enter to drill; drill panels stack as breadcrumbs (Statement › Cell › Balances › Lines › Document); exports preserve number formatting and include an "as of" footer with HWM, definition version and result hash; all screens pass axe WCAG 2.1 AA.
 
@@ -1227,6 +2179,7 @@ Interaction rules: designer previews render within 3 s against the demo dataset 
 - **BR-15.10 Multi-ledger columns.** Columns with `ledger_code_override` are allowed only when the ledgers share the chart of accounts; otherwise `REPORT_LEDGER_INCOMPATIBLE`.
 - **BR-15.11 Large cells.** Cells with > 50k balance keys store a query spec instead of the key list; drill level 1 re-executes the query at the run's HWM.
 - **BR-15.12 Audit trail completeness.** Every `journal.posted` event must have an audit row within 60 s; a daily job counts events vs rows and alerts on any difference.
+- **BR-15.13 Derived hierarchy resolution.** A statement run uses the hierarchy version effective on the run period's end date (or an explicit version); membership is materialized per version so re-running at the same HWM and version reproduces `result_hash`; a member matching several leaves blocks publish; for non-strict hierarchies unassigned members roll into an "Unassigned" node shown last with a footnote; a member's category change after publish takes effect only in the next version (or immediately when the hierarchy sets `follow_master_data = true`, which then records the change time in the run).
 
 ### 2.15.8 Acceptance criteria
 
@@ -1241,6 +2194,8 @@ Interaction rules: designer previews render within 3 s against the demo dataset 
 - **AC-15.9** (FR-15.10) Given a reopened period with a posting and re-close, when the audit trail runs, then it lists the reopen with both approvers, the posting, and the re-close in order with trace ids.
 - **AC-15.10** (FR-15.6) Given 200k balances, when a 2,000 × 12 statement runs, then it completes in < 20 s.
 - **AC-15.11** (Phase exit) Given the finance stakeholders' review, when they compare the Passage statement pack to the AX/SAP-derived expectations for the demo period, then every line ties and sign-off is recorded in the wave 15 issue.
+- **AC-15.12** (FR-15.13, BR-15.13) Given a derived hierarchy over main account categories with `strict = true`, when a new postable account without a category is created, then publish of the next version is rejected with `REPORT_HIERARCHY_UNASSIGNED` naming the account and `hierarchy.unassigned` is emitted; after assigning the category, `BS-STD` run with the hierarchy as row set ties to `TB-STD` to the cent.
+- **AC-15.13** (FR-15.14) Given the demo period with every P&L line carrying `FUNC_AREA`, when `PL-FUNC` runs, then its net result equals `PL-STD` net result to the cent and the check row is 0.00.
 
 ### 2.15.9 Test plan and fixtures
 
@@ -1272,6 +2227,8 @@ Helm chart `passage-reporting` (Go service 3–8 pods, CloudNativePG `reporting-
 | AX trial balance / inquiry saved queries | not migrated | standard definitions replace them |
 | SAP `T011`, `T011T`, `FAGL_011PC`, `FAGL_011ZC`, `FAGL_011QT` (FSV) | ReportDefinition (BS/P&L), ReportRow | account intervals → account_range; debit/credit split nodes → two rows with sign rules; net result node → calculation row |
 | SAP Report Painter libraries | not migrated | re-authored in the designer; conversion report lists them |
+| AX `MainAccountCategory`, `DimensionHierarchy` (derived hierarchies), MR reporting trees | MainAccountCategory, DerivedHierarchy, HierarchyNode | category → `MainAccount.category_id`; derived hierarchy rules copied as membership rules |
+| SAP account groups / G/L hierarchies (`SETHEADER`/`SETNODE`/`SETLEAF` class 0109), profit center groups (KCH1) | DerivedHierarchy (subject main_account or dimension_value) | set intervals → range rules |
 | AX database log / SAP CDHDR history | not migrated | legacy audit remains in the archive; Passage audit begins at cutover |
 
 Validation: converted definitions run against migrated opening balances and are compared to the legacy final statements for the cutover period (tolerance 0.00 after sign normalization); conversion report reviewed by the controller.
@@ -1288,3 +2245,130 @@ Depends on: wave 11 (journal events, balances), wave 12 (reporting currency amou
 | Stakeholder sign-off depends on accountant availability | Medium | High | Sign-off session scheduled at wave start; fixtures reviewed incrementally |
 
 Open questions: (1) Should the reporting read model live in `reporting-db` (default) or query `ledger.Balance` directly with replicas? Default separate read model; decide by wave 15 start. (2) Cash flow direct method in v1? Default no (indirect only); revisit at wave 36 (cash and bank). (3) Retention of ad-hoc runs 90 days vs 1 year? Default 90 days; decide by wave 15 exit.
+
+### 2.15.13 Parameters and setup
+
+| Parameter | Scope | Type | Default | Allowed values | Effect | AX equivalent | SAP equivalent |
+|---|---|---|---|---|---|---|---|
+| `reporting.max_lag_seconds` | tenant | int | 30 | 0–600 | Run blocked above lag unless `allow_stale` (§2.15.5) | Financial reporting parameters > data mart refresh | — |
+| `reporting.page_size` | tenant | int | 500 | 100–1,000 | Drill level 2 page size (BR-15.4) | — | ALV page size |
+| `reporting.cell_key_limit` | tenant | int | 50,000 | 1,000–200,000 | BR-15.11 key list vs query spec | — | — |
+| `reporting.retention_closed_years` | legal entity | int | 7 | 1–30 | Library retention for closed-period runs (FR-15.8) | Report library retention | Spool retention (SP01) |
+| `reporting.retention_adhoc_days` | tenant | int | 90 | 7–730 | Ad-hoc run retention | — | Spool retention |
+| `reporting.email_attachment_limit_mb` | tenant | int | 20 | 1–25 | Attach vs link (FR-15.8) | Report distribution email settings | SCOT / SOST size limits |
+| `reporting.share_link_expiry_days` | tenant | int | 14 | 1–90 | Shared link lifetime | — | — |
+| `reporting.include_adjustment_periods` default | definition | bool | false | true / false | BR-15.1 | MR column "Include closing/adjustment periods" | F.01 "special periods" selection |
+| `reporting.opa_cache_seconds` | tenant | int | 60 | 5–600 | BR-15.7 security cache | MR tree security sync | Authorization buffer |
+| `reporting.pdf_concurrency_per_pod` | tenant | int | 4 | 1–16 | Renderer queue | — | — |
+| `definition.currency_type` default | definition | enum | acct | txn / acct / rpt | Column currency | MR report > Currency | F.01 currency type selection |
+| `definition.rounding_display` | definition | enum | units | units / thousands / millions | Display rounding (cells keep exact values; rounding difference row shown) | MR "Rounding" (thousands) | F.01 "Display in thousands" / RFBILA00 scale |
+| `definition.zero_rows` | definition | enum | hide | hide / show | Print-zero default | MR row format "Print zero" | FSV "Display zero balances" |
+| `hierarchy.strict` | hierarchy | bool | true for account hierarchies | true / false | FR-15.13 publish check | Derived hierarchies (D365) validation | FSV "Not assigned" node check (OB58) |
+| `hierarchy.follow_master_data` | hierarchy | bool | false | true / false | BR-15.13 | — | Set maintenance dynamic sets |
+| `audit_trail.export_hash_algorithm` | tenant | enum | sha256 | sha256 | Export integrity (FR-15.10) | — | — |
+| `schedule.timezone` | schedule | tz | entity time zone | IANA | Cron evaluation | Batch job time zone | SM36 server time |
+
+### 2.15.14 Inquiries and reports
+
+| Name | Type | Filters & parameters | Columns / measures | Source projection | AX equivalent | SAP equivalent |
+|---|---|---|---|---|---|---|
+| Trial balance `TB-STD` / `TB-DIM` | statutory report | ledger, period range, currency type, dimension filter, tree | opening, debit, credit, closing, net per account (per dimension) | `ReportingBalance` | Trial balance list page; SSRS Trial balance / Trial balance summary | FAGLB03, S_ALR_87012277, S_ALR_87012301, F.08, Fiori Trial Balance |
+| Balance sheet `BS-STD` | statutory report | ledger, period, comparison (PY), tree, currency type | rows per FSV-like definition, comparison, variance | `ReportingBalance` | MR Balance sheet; SSRS Balance control | F.01 (RFBILA00), S_ALR_87012284, Fiori Display Financial Statement |
+| Income statement `PL-STD` / `PL-FUNC` | statutory report | ledger, period / YTD, comparison, tree | rows, current, PY, variance, % | `ReportingBalance` | MR Income statement; SSRS Dimension statement | S_ALR_87012284, S_PL0_86000028/29 |
+| Cash flow `CF-STD` | statutory report | ledger, period range | operating, investing, financing, net change, check rows | `ReportingBalance` | MR cash flow definitions | S_ALR_87012382 (FSV-based), S/4 Cash Flow app |
+| Consolidated-by-entity view | operational report | legal entities, period, reporting currency | per-entity columns, sum column | `ReportingBalance` | MR multi-company report | S_ALR_87012284 multiple company codes |
+| G/L account statement | operational report | account range, period, dimension | opening, lines, running balance, closing | `ReportingBalance` + journal lines | SSRS Ledger account balance | S_ALR_87012332 |
+| Document journal / line item journal | operational report | ledger, posting date range, voucher range | voucher, date, lines with accounts and amounts, totals | journal line API | SSRS Posted journals / Voucher | S_ALR_87012287, S_ALR_87012289, S_ALR_87012291 |
+| Statement drill-down (cell → balances → lines → document) | drill-down | run, row, column | keys, amounts, lines, source link, trace id | `StatementCell` + ledger API | MR drill-down; Transaction origin | FS10NA, FAGLB03 → FAGLL03 → FB03 |
+| Audit trail | operational report | ledger, period, kind, actor | occurred at, kind, actor, object, details, trace id | `AuditTrailEntry` | SSRS Audit trail; Database log | Fiori Audit Journal, RSSCD100 (change documents), S_ALR_87012287 |
+| Receivables/payables by profit center | operational report | ledger, period, profit center tree | AR/AP reconciliation balances per PC (requires FR-11.23 splitting) | `ReportingBalance` | — | S_AC0_52000887 / 52000888 |
+| Balance sheet by profit center / segment | statutory report | ledger, period, segment tree | BS per segment (IFRS 8) | `ReportingBalance` with splitting dimensions | MR tree by dimension | S_ALR_87013336, FSV by segment |
+| Derived hierarchy membership | list inquiry | hierarchy, version | node, members, unassigned, overlaps | `HierarchyNode` membership | Derived financial hierarchies form | KDH3 / GS03 set display |
+| Read-model lag KPI | KPI | ledger | lag seconds, HWM ledger vs reporting | `/reporting/lag` | MR data mart integration status | — |
+| Report library | list inquiry | definition, entity, period | run, generated at, formats, hash, retention until | `StatementRun` | MR report library | Spool / SAP Analytics Cloud stories |
+
+### 2.15.15 Printed and electronic documents
+
+| Document | Trigger | Layout elements | Formats | Numbering sequence | Legal / retention requirement |
+|---|---|---|---|---|---|
+| Financial statement pack (TB, BS, P&L, CF) | close checklist hook, schedule or user | header: entity, ledger, period, currency, definition code/version, as-of HWM; rows/columns; footer: result hash, generated at/by, "as of sequence N" | PDF, XLSX, CSV, interactive HTML | statement run id | annual statements: statutory (DE HGB §257 10 years, US 7 years); monthly packs: internal, 7 years |
+| Trial balance printout | user / schedule | accounts with opening, debit, credit, closing; totals; hash | PDF, XLSX, CSV | run id | supporting record; 10 years for year-end TB |
+| G/L account statement | user | account header, lines with running balance, closing | PDF, XLSX | run id | supporting record |
+| Audit trail export | user / auditor request | filters used, entries, hash of the file | CSV, PDF | export run id | audit evidence; 10 years |
+| Statement distribution email | schedule | subject with entity/period, body with as-of and link; attachments ≤ 20 MB | email (SMTP via wave 4) | — | distribution log retained 7 years |
+| Definition export | user | JSON definition with schema version | JSON | definition version | configuration record |
+
+XBRL / iXBRL filings are wave 48.
+
+### 2.15.16 Periodic and batch jobs
+
+| Job | Schedule default | Partitioning key | Idempotency / checkpoint | Typical runtime target | Failure handling | Monitor / alert |
+|---|---|---|---|---|---|---|
+| `reporting-balance-consumer` | continuous | ledger (Kafka partition) | upsert by event id with HWM per ledger | lag p95 < 10 s | DLQ after 5 attempts; replay | lag > 60 s → P2 |
+| `reporting-balance-verify` | daily 01:30 | ledger | compare with `ledger.Balance` at HWM | 10M balances < 10 min | rebuild ledger from replay | diff > 0 → P1 |
+| `statement-schedules` | per schedule cron (demo pack 23:00 UTC) | schedule × entity | run per (schedule, fire time) | 2,000 × 12 < 20 s each | retry once; notify owner | failures > 5% → P3 |
+| `library-retention-sweep` | weekly Sunday 04:00 | legal entity | deletes outputs past retention; legal hold respected | < 10 min | skip and retry | — |
+| `audit-completeness-check` | daily 02:00 | ledger | count events vs audit rows per day | < 2 min | — | diff > 0 → P1 |
+| `hierarchy-membership-refresh` | on account/dimension events; full nightly 03:00 | hierarchy | rebuild per version | 20k nodes < 1 min | — | unassigned > 0 on strict → notification |
+
+### 2.15.17 Security duties and privileges
+
+| Duty | Privileges (entry points) | Segregation-of-duties conflicts | Default roles that include it |
+|---|---|---|---|
+| Maintain report definitions | definitions, row/column sets, trees, hierarchies CRUD, publish, import/export | Post ledger journals (for published statutory definitions) | Financial reporting analyst, Financial controller |
+| Run financial statements | POST /reporting/runs | — | Accountant, Financial controller, FP&A analyst |
+| View financial statements | GET runs, cells, outputs, library, lag | — | Finance roles, Executives (via OPA dimension grants) |
+| Schedule financial statements | schedules CRUD | — | Financial reporting analyst |
+| View all dimensions | bypass of dimension filtering for unrestricted copies (BR-15.7) | Maintain dimension security policies | CFO, Group controller, External auditor (time-boxed) |
+| View audit trail | audit-trail query and export | Post ledger journals; Maintain period status | Internal auditor, External auditor, Financial controller |
+| View ledger balances / transactions (drill) | balances, drill level 2 | — | as wave 11 |
+
+### 2.15.18 Message catalog
+
+| Code | Severity | User text | Cause | Remediation | Raised by |
+|---|---|---|---|---|---|
+| REPORT-0001 `REPORT_DEFINITION_NOT_PUBLISHED` | error | Definition {code} has no published version. | RunStatement | Publish the definition | FR-15.6 |
+| REPORT-0002 `REPORT_EXPRESSION_INVALID` | error | Row {row}: {detail} in expression {expr}. | FR-15.2 validation | Fix references | FR-15.2 |
+| REPORT-0003 `REPORT_PERIOD_NOT_FOUND` | error | Period {period} does not exist in ledger {ledger}. | Parameters | Choose an existing period | FR-15.6 |
+| REPORT-0004 `REPORT_STALE` | warning | Read model is {lag} s behind ledger {ledger}; results flagged as stale. | lag > max | Wait or rerun | FR-15.1 |
+| REPORT-0005 `REPORT_LEDGER_INCOMPATIBLE` | error | Ledgers {a} and {b} do not share a chart of accounts. | BR-15.10 | Remove the column override | BR-15.10 |
+| REPORT-0006 `REPORT_NO_PERMITTED_VALUES` | error (403) | You have no permitted values for {attribute} in tree {tree}. | BR-15.7 | Request dimension access | FR-15.9 |
+| REPORT-0007 `REPORT_DRILL_FILTERED` | warning | {amount} of this cell is outside your dimension permissions. | BR-15.4 | None | FR-15.7 |
+| REPORT-0008 `CF_UNRECONCILED` | error | Net cash flow {cf} differs from change in cash {delta}. | BR-15.5 | Tag accounts; fix "not classified" row | FR-15.5 |
+| REPORT-0009 `CF_UNCLASSIFIED_ACCOUNTS` | error | {count} balance-sheet accounts have no cash flow tag. | BR-15.5 | Tag the listed accounts | FR-15.5 |
+| REPORT-0010 `REPORT_PY_PERIOD_MISSING` | info | Prior-year period not found; column left blank. | BR-15.9 | None | BR-15.9 |
+| REPORT-0011 `REPORT_IMPORT_DUPLICATE` | error | Definition code {code} exists; use overwrite to replace. | FR-15.11 | Rename or overwrite | FR-15.11 |
+| REPORT-0012 `REPORT_IMPORT_SCHEMA` | error | Schema version {v} is not supported (supported: {list}). | FR-15.11 | Export from a compatible version | FR-15.11 |
+| REPORT-0013 `REPORT_HIERARCHY_UNASSIGNED` | error | {count} members are not assigned to any leaf of {hierarchy}: {sample}. | FR-15.13 strict | Assign members or relax `strict` | FR-15.13 |
+| REPORT-0014 `REPORT_HIERARCHY_OVERLAP` | error | Member {member} matches leaves {a} and {b}. | BR-15.13 | Narrow membership rules | FR-15.13 |
+| REPORT-0015 `REPORT_PLFUNC_MISSING_FUNC_AREA` | warning | P&L lines totaling {amount} have no functional area. | FR-15.14 | Add derivation steps (FR-11.22) | FR-15.14 |
+| REPORT-0016 `REPORT_RENDER_FAILED` | error | {format} rendering failed for run {run}. | Renderer | Retry; other formats unaffected | FR-15.6 |
+| REPORT-0017 `REPORT_ATTACHMENT_TOO_LARGE` | info | Output exceeds {limit} MB; a link was sent instead. | FR-15.8 | None | FR-15.8 |
+
+### 2.15.19 Performance budgets and capacity
+
+| Operation | Volume assumption | Latency target (p50 / p95 / p99) | Throughput target | Storage growth per year | Index / partition strategy | Degradation behavior under 3× load |
+|---|---|---|---|---|---|---|
+| Read-model update | 5,000 lines/s peak | lag 2 / 10 / 30 s | 5,000 lines/s | `reporting_balance` ≈ ledger Balance size (≈ 5 GB per 10M combinations × periods) | PK (ledger, period, account, combination, currency_type) | lag grows; runs flagged stale or wait |
+| Statement run 2,000 × 12 | 500 runs/day; 50 concurrent at close | 6 / 20 / 35 s | 50 concurrent on replica | cells 60 B × 24k × 500 × 365 ≈ 260 GB raw → kept per retention, compressed | replica; per-run query plans by row kind | queued with concurrency limit; p95 40 s |
+| Drill level 1 / 2 | 20k/day | 80 / 300 / 500 ms | 200 req/s | — | cell keys / query spec; journal line indexes | page size 250 |
+| PDF render | 500/day | 2 / 6 / 12 s | 4 per pod | outputs 1 MB avg × 180k/year = 180 GB object storage | — | queue |
+| Audit trail query (one month) | 2k/day | 200 ms / 1 s / 2 s | — | audit view 1 KB/event × 50M = 50 GB | (ledger_id, occurred_at) | narrowed date range enforced |
+| Hierarchy membership rebuild | 1,000 events/day | < 5 s per event; nightly < 1 min | — | small | (hierarchy_version, member_id) | — |
+
+### 2.15.20 Localization and compliance hooks
+
+- Statutory statement layouts by country: HGB §266/§275 (DE balance sheet and P&L by nature/function), French PCG "bilan / compte de résultat" formats, UK FRS 102 formats, Indian Schedule III, Spanish PGC models, US GAAP/SEC Regulation S-X ordering; wave 48 packs ship `ReportDefinition` JSON per format and language.
+- Presentation: number formats, negative-number display (parentheses vs minus), thousands scaling and statement language come from wave 5 locale settings; definitions carry translatable labels.
+- Segment reporting (IFRS 8 / ASC 280) relies on document splitting (FR-11.23) and segment trees.
+- XBRL/iXBRL tagging (ESEF in the EU, SEC EDGAR, HMRC CT600 iXBRL, MCA India) is wave 48; `ReportRow` reserves `taxonomy_concept` for tagging.
+- Audit-file exports (FEC FR, GoBD DE, SAF-T) use the ledger line API; wave 15's audit trail adds the who/when/approval layer auditors request (ISA 315/330 journal-entry testing).
+- Retention: statements and audit exports per §2.15.15; legal hold suspends `library-retention-sweep` per entity.
+- Privacy: audit trail contains user ids and names; exports to external auditors are scoped by time-boxed duty and logged; data-subject requests mask user display names in exports older than retention when required (actor ids remain).
+- Extension points: `reporting.definition_pack`, `reporting.renderer` (statutory PDF templates), `reporting.taxonomy_mapping`.
+
+### 2.15.21 Coverage closure
+
+| Register row (inventory section + AX form or SAP T-code) | Status before | Disposition | Note |
+|---|---|---|---|
+| AX §12.1.4 Setup — Chart of accounts → Derived financial hierarchies (R3) (AX register row 4) | PARTIAL-15 | ADDED as FR-15.13 | derived hierarchies over main account categories and dimension values, versioned, usable as row sets and trees; AC-15.12 |

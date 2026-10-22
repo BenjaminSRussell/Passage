@@ -104,6 +104,8 @@ Keycloak, OPA, Envoy Gateway and the admin UI live in dev; the placeholder servi
 - Extension mechanism: customer-layer entity extensions (extra fields, enum values, hooks) stored as metadata, applied without code changes
 - Metadata registry service with versioning and diff
 - Field-level attributes: required, unique, default, computed, visibility, PII-flag, audit-flag
+- Decision tables and rule sets (BRF+ equivalent): typed columns, hit policies, effective-dated rows, customer-layer overrides via extension packages, evaluate/explain API used by hooks and workflow conditions
+- Usage metering: nightly named-user and principal counts per tenant, legal entity and role, API requests and row counts per entity, Usage report with CSV export (licensing input, never enforced)
 
 **Proof (testable acceptance)**
 
@@ -146,6 +148,8 @@ Metadata registry + generator in the pipeline; the first three generated entitie
 - Temporal cluster for workflows; SDKs for Go/TS; approval workflow template (submit → approve/reject/delegate/escalate with SLA timers)
 - Batch job framework: scheduled/recurring jobs with partitioning, checkpoints, retry and a job monitor UI
 - Workflow designer: configuration-driven approval chains per entity (e.g. purchase requisition by amount band)
+- Notify service: SMTP/HTTP-API provider adapters, per-tenant sender identity with verification, outbound message queue with distributor job, retries, bounce handling and outbound status inquiry
+- Message templates (per language, sys/customer layers, placeholders from metadata and workflow context) and per-user notification preferences (in-app/email, digests, quiet hours)
 
 **Proof (testable acceptance)**
 
@@ -190,6 +194,9 @@ Kafka, Debezium, Temporal, schema registry, and job monitor UI running in dev; t
 - Audit log: field-level before/after captured from CDC, queryable per record, immutable store (append-only table + hash chain)
 - OpenTelemetry traces/metrics/logs across every service; Grafana/Tempo/Loki/Prometheus; SLO dashboards; PagerDuty-compatible alerting
 - Excel/CSV import-export against any entity
+- Document management: document types, file types, S3-compatible storage locations, versions with check-out/check-in, malware scan, previews, attachment text search, retention archive/purge with legal hold
+- Alert rules: change-based (from CDC) and due-date alerts on any entity/field, org-wide rules, alert inbox in the shell, delivery in-app/email via the notify service
+- Standard text library with language versions and placeholders, referenced by message templates, record notes and document layouts
 
 **Proof (testable acceptance)**
 

@@ -39,6 +39,10 @@ Fix versions: v1.0
 3. Credit management: limits, aging-based rules, credit holds, release workflow
 4. Order holds (credit, fraud, manual), change management, line-level status
 5. Customer portal order entry and status (completed in wave 30); multi-channel order intake API
+6. Supplementary items, product listing/exclusion and cross-sell/product proposals at order entry
+7. Product allocation quotas and backorder processing strategies (win/gain/redistribute/fill/lose) with preview
+8. Scheduling-agreement forecast/JIT releases with cumulative-quantity reconciliation (DELFOR/DELJIT mapping in wave 35)
+9. Customer consignment (fill-up/issue/pick-up/return), sales-order special stock segregation, one-time customer orders and a sales-order cost-estimate hook
 
 **Deploy.** Sales workspace live; demo customers placing orders against the demo plant's stock.
 

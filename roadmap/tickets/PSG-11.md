@@ -39,6 +39,11 @@ Fix versions: v1.0
 3. Posting API used by all subledgers: `Post(JournalEntry)` with source-document linkage and reversal
 4. Balance projection: pre-aggregated balances by account × dimension × period, rebuilt from the journal (event-sourced)
 5. Journal workspace: manual journals, recurring journals, templates, approval workflow, attachments
+6. Shared financial reason codes (ledger, bank, customer, vendor, fixed asset, counting) with required reversal reasons and negative-posting (storno) reversal
+7. Advanced rule structures, default description templates, and voucher attachments with document types and retention classes
+8. Open-item managed G/L accounts: manual clearing, post-with-clearing, reset, activation run, automatic clearing rules and tolerance groups (F-03/F-04/F.13/OBA0/OB74 parity)
+9. User-defined validation rules and a dimension derivation/substitution strategy engine (OB28/OBBH/KEDR/FMDERIVE parity), including functional area for cost-of-sales accounting
+10. Document splitting (dimension inheritance to balance-sheet and tax lines with zero-balance clearing) and audit-logged dimension realignment runs
 
 **Deploy.** GL service and journal workspace live; the demo manufacturer's chart of accounts and opening balances loaded.
 

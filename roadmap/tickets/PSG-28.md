@@ -39,6 +39,8 @@ Fix versions: v1.0
 3. Carrier integration abstraction (rate, label, tracking) with reference adapters (EasyPost/Shippo-style) and ASN output
 4. Drop-ship and direct delivery flows, partial shipments, delivery schedules
 5. Shipment tracking visible to customer portal
+6. Picking workbench (grouped wave creation with preview) and packing instructions for auto-pack
+7. Packaging materials with EU packaging-fee calculation/reporting and returnable transport packaging balances per customer
 
 **Deploy.** Fulfillment workspace and mobile pick UI (basic) in the demo warehouse.
 

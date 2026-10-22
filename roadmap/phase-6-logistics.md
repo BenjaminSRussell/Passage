@@ -20,6 +20,11 @@ Advanced warehouse management, mobile execution, quality management, transportat
 - Work execution: tasks with priorities, user assignment, exceptions, short picks
 - Load planning and dock scheduling; inbound ASN-driven receiving with LPs
 - Slotting analysis and warehouse KPIs
+- Cross-docking (planned via cross-dock templates and opportunistic at receipt) and outbound sorting to sort positions
+- Value-added services and kitting (kit-to-order / kit-to-stock) as VAS work; packaging specifications per item/customer
+- Transfer-order warehouse flow with LP identity preserved across sites
+- Engineered labor standards with planned-vs-actual performance per user/shift (incentive pay excluded)
+- Hazardous-material profiles and storage compatibility by storage class and fire-containment section
 
 **Proof (testable acceptance)**
 
@@ -60,6 +65,8 @@ Warehouse management workspace; demo warehouse re-modeled with locations and dir
 - Offline queue with conflict resolution; session/device management
 - Voice picking adapter and RFID (EPC) read integration points
 - Label printing (ZPL) via print service
+- Automation adapter for AS/RS, conveyors and sorters (MFS telegrams via the wave-25 edge gateway)
+- Printer and output-queue management: device types, queue failover, document routing rules, browser printing
 
 **Proof (testable acceptance)**
 
@@ -100,6 +107,10 @@ Mobile app published to the demo warehouse devices; print service live.
 - Nonconformance → correction/CAPA workflow with root cause (8D template), cost of quality
 - Certificates of analysis, supplier quality scorecards, SPC charts from results
 - Device/instrument calibration tracking
+- Product compliance: regulated/restricted substance lists with BOM roll-up, and safety data sheets with distribution on shipment
+- Incoming vendor certificates gating acceptance, and source inspection before delivery
+- Physical sample management (retention samples), multiple specification sets, in-process inspection points
+- Stability studies with scheduled pull points, audit management, and FMEA/control plans (AIAG-VDA)
 
 **Proof (testable acceptance)**
 
@@ -140,6 +151,11 @@ Quality workspace enabled for the demo plants; CoA generation on shipments.
 - Shipment tracking events (EDI 214/API), proof of delivery
 - Freight reconciliation: carrier invoice vs expected charges, dispute, accrual posting
 - Landed cost allocation to inventory (freight, duties) feeding costing
+- Landed cost voyages with shipping containers, folios and goods-in-transit orders (estimates vs actuals)
+- Yard management (transportation units, yard moves, detention) and driver check-in/out with gate log
+- Dangerous-goods checks for transport (49 CFR / ADR / IMDG / IATA): segregation, ADR 1.1.3.6 points, DG shipping papers
+- Own-fleet resources and driver-hours constraints in VRP; lane RFQ for strategic freight procurement; layer-based load plans
+- Foreign-trade data, commercial invoice, and denied-party screening / customs filing provider hooks (providers in wave 48)
 
 **Proof (testable acceptance)**
 
@@ -180,6 +196,10 @@ Transportation workspace; demo carriers and rate cards; landed cost active.
 - Integration hub: public REST/GraphQL APIs, webhooks, Kafka topic subscriptions, API catalog (Backstage), developer portal, keys and quotas
 - iPaaS connectors: Salesforce, Shopify, Stripe reference connectors
 - Message monitor with replay and partner SLAs
+- Catalog punchout (cXML and SAP OCI) returning requisition lines to wave 17
+- cXML document exchange with cXML networks (Ariba/Coupa): OrderRequest, confirmations, ship notices, invoices
+- PLM reference connector (Teamcenter / Windchill / file drop) into engineering change requests
+- Customer self-billing intake (EDIFACT INVOIC 389, VDA 4908) with line matching and dispute worklist
 
 **Proof (testable acceptance)**
 

@@ -39,6 +39,11 @@ Fix versions: v1.0
 3. Work execution: tasks with priorities, user assignment, exceptions, short picks
 4. Load planning and dock scheduling; inbound ASN-driven receiving with LPs
 5. Slotting analysis and warehouse KPIs
+6. Cross-docking (planned via cross-dock templates and opportunistic at receipt) and outbound sorting to sort positions
+7. Value-added services and kitting (kit-to-order / kit-to-stock) as VAS work; packaging specifications per item/customer
+8. Transfer-order warehouse flow with LP identity preserved across sites
+9. Engineered labor standards with planned-vs-actual performance per user/shift (incentive pay excluded)
+10. Hazardous-material profiles and storage compatibility by storage class and fire-containment section
 
 **Deploy.** Warehouse management workspace; demo warehouse re-modeled with locations and directives.
 

@@ -20,6 +20,9 @@ Project operations, HR core, payroll and expenses, enterprise asset management a
 - Billing: invoice proposals by T&M, fixed-price milestones, retainers, billing rules; customer funding/grants
 - Project accounting: WIP/accrued revenue, cost-to-complete, percentage-of-completion estimates, ledger posting profiles
 - Project reporting: committed costs, EVM (CPI/SPI), profitability
+- Weekly timesheets with periods, favorites, delegates, workflow by project and missing-timesheet reporting; project quotations converted to projects
+- Customer/vendor retention terms and release, indirect cost components on hours, project interest calculation (capitalized interest IAS 23)
+- Change orders and claims, simulation plan versions with transfer, project stock and deliveries from project, forecasts and risk/issue register
 
 **Proof (testable acceptance)**
 
@@ -60,6 +63,9 @@ Projects workspace; a demo engineering-services entity runs projects alongside t
 - Benefits: plans, eligibility, open enrollment, life events; employee self-service and manager self-service
 - Talent: skills, certifications, performance reviews, goals; recruitment pipeline basics
 - HR compliance: PII vaulting, consent, retention, country-specific fields framework
+- Courses and learning (sessions, registrations, completion to skills/certifications) and a reusable questionnaire engine
+- Injury and illness register with OSHA 300/300A/301 data extracts, loaned items, skill mapping and gap analysis
+- Onboarding/offboarding checklists and HR reminders, requisitions/candidates/offers, compensation planning cycles, concurrent and global assignments
 
 **Proof (testable acceptance)**
 
@@ -100,6 +106,9 @@ HR workspace and employee self-service portal; demo workforce loaded.
 - Expense management: reports, receipts (OCR), policies/per diems, approvals, credit-card feed import, reimbursement via AP
 - Year-end forms framework (W-2/1099 structures)
 - Payroll audit and reconciliation reports
+- Cash advances with settlement against expense reports and travel requisitions (pre-trip approval) with variance checks
+- Off-cycle runs (bonus, final pay, manual check, check replacement) with supplemental tax, deduction arrears recovery and overpayment claims
+- Quarterly/annual statutory wage aggregates (941/940/SUI) reconciled to GL, and workers' compensation class codes with premium base
 
 **Proof (testable acceptance)**
 
@@ -141,6 +150,9 @@ Payroll and expense workspaces; demo entity runs a payroll cycle in sandbox.
 - Work orders: planning, scheduling against resources (wave 23), parts reservation, labor, costs → asset and GL
 - Condition monitoring from IoT (wave 25) with thresholds and predictive hooks
 - Asset lifecycle KPIs: MTBF/MTTR, cost per asset, downtime
+- Maintenance rounds and sequences, fault catalog designer with fault analysis, vendor asset warranties with warranty check
+- Permits to work and lockout/tagout (isolation points, personal locks) gating work order execution
+- Maintenance budgets calculated from plans, refurbishment orders for rotables with condition valuation, fleet attributes and fuel logs, criticality assessment
 
 **Proof (testable acceptance)**
 
@@ -181,6 +193,9 @@ Asset management workspace; demo plant's machines maintained with preventive pla
 - Dispatch board and technician scheduling (skills, territory, travel) with OR-Tools; mobile technician app (offline, photos, signatures, parts)
 - Parts consumption from technician trucks (mobile inventory locations), billing to customer or warranty
 - Service KPIs: SLA attainment, first-time fix
+- Generic case management (categories, processes/stages, associations to any record, category security) consolidating wave-9/30 cases
+- Knowledge base (symptom/solution articles, versioning, suggestions on cases) and activities on cases, projects and any record
+- Supplier warranty claims with vendor recovery and email-to-case intake
 
 **Proof (testable acceptance)**
 

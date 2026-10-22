@@ -40,6 +40,10 @@ Fix versions: v1.0
 3. Cost accounting ledger: cost elements, cost objects, dimension hierarchies, allocation policies (assessment/distribution), statistical measures
 4. Activity-based costing and internal orders; cost control workspace with variance analysis
 5. Management reporting cubes feeding wave 46
+6. Budget plan Excel worksheet templates with validated round-trip; plan generation from GL actuals, plans, FA forecast, demand forecast and position forecasts
+7. Cost behavior, overhead rate and cost rollup policies; template (driver-formula) allocation; top-down distribution; cost object hierarchies
+8. Budget reservation documents (earmarked funds: reservation, precommitment, blocking, revenue forecast)
+9. Investment programs with position hierarchy, budget distribution, rollup and carry-forward
 
 **Deploy.** Budgeting and cost accounting workspaces; demo entity budget loaded.
 

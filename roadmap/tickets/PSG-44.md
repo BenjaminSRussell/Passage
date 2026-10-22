@@ -39,6 +39,9 @@ Fix versions: v1.0
 3. Work orders: planning, scheduling against resources (wave 23), parts reservation, labor, costs → asset and GL
 4. Condition monitoring from IoT (wave 25) with thresholds and predictive hooks
 5. Asset lifecycle KPIs: MTBF/MTTR, cost per asset, downtime
+6. Maintenance rounds and sequences, fault catalog designer with fault analysis, vendor asset warranties with warranty check
+7. Permits to work and lockout/tagout (isolation points, personal locks) gating work order execution
+8. Maintenance budgets calculated from plans, refurbishment orders for rotables with condition valuation, fleet attributes and fuel logs, criticality assessment
 
 **Deploy.** Asset management workspace; demo plant's machines maintained with preventive plans.
 

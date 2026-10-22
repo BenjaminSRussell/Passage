@@ -44,6 +44,9 @@ Fix versions: v1.0
 4. Audit log: field-level before/after captured from CDC, queryable per record, immutable store (append-only table + hash chain)
 5. OpenTelemetry traces/metrics/logs across every service; Grafana/Tempo/Loki/Prometheus; SLO dashboards; PagerDuty-compatible alerting
 6. Excel/CSV import-export against any entity
+7. Document management: document types, file types, S3-compatible storage locations, versions with check-out/check-in, malware scan, previews, attachment text search, retention archive/purge with legal hold
+8. Alert rules: change-based (from CDC) and due-date alerts on any entity/field, org-wide rules, alert inbox in the shell, delivery in-app/email via the notify service
+9. Standard text library with language versions and placeholders, referenced by message templates, record notes and document layouts
 
 **Deploy.** Shell at app.<env>.passage.dev with the admin workspace; observability stack and alert routes live. Phase 0 exit: platform demo to stakeholders.
 

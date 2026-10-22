@@ -40,6 +40,10 @@ Fix versions: v1.0
 3. Planned orders with firming, grouping, action messages (advance/postpone/cancel) and futures/delay messages
 4. Forecast model: statistical baseline (ETS/Croston via a Python service) with manual override and consensus workflow
 5. Explain-this-plan: pegging tree from any planned order to its driving demand
+6. Simulation plans / planning scenarios (long-term planning, predictive MRP-style rough-cut) with capacity and purchase-volume evaluations and supplier forecast publishing
+7. DDMRP buffers (decoupling points, buffer profiles, net-flow equation) and priority-based planning
+8. Quota arrangements across vendors/own production/transfers, warehouse- and subcontractor-level planning scopes (MRP areas), and planning strategies (MTS net/gross, MTO, assemble-to-order, planning without final assembly, subassembly)
+9. Shelf-life aware pegging, supply schedule workbench and inventory forecast projection
 
 **Deploy.** Master planning workspace with a nightly plan for the demo plant.
 

@@ -39,6 +39,10 @@ Fix versions: v1.0
 3. Variance analysis: purchase price, production (lot size, quantity, price, substitution), planned vs actual by cost component
 4. Standard cost revaluation of on-hand inventory on activation
 5. Cost estimate comparison and what-if simulations
+6. Standard cost conversion checklist (actual to standard) with revaluation preview
+7. Ad-hoc cost estimates with costing models; mixed costing over procurement alternatives; sales order cost estimates for configured/MTO lines
+8. COGS and price-difference posting by cost component; parallel valuation views (legal/group/profit center)
+9. Parallel inventory valuation ledgers (global inventory accounting), flag-gated
 
 **Deploy.** Costing workspace completes; demo plant on standard cost with monthly variance report.
 

@@ -39,6 +39,8 @@ Fix versions: v1.0
 3. Tax registration numbers with country validation (VAT, EIN, GSTIN) and VIES/IRS TIN check adapters
 4. Customer and vendor groups, posting profiles (hooks for the GL), payment terms, delivery terms, credit limits
 5. Data-governance: ownership, stewardship queue, change approval workflow on master data
+6. Vendor certifications with expiry-driven holds and diversity classifications; installment payment schedules (PaymSched / T052R)
+7. One-time customer and vendor accounts with document-level address capture; party relationships (head office/branch, alternate payer, permitted payee); address books with team security; customer hierarchies; classification code lists and hold reasons
 
 **Deploy.** Customer, vendor and contact workspaces usable for data entry; import of a legacy AX CustTable/VendTable extract via the import tool.
 

@@ -39,6 +39,11 @@ Fix versions: v1.0
 3. Purchase agreements (blanket) with release tracking; trade agreements/price lists for vendor pricing
 4. Purchase order lifecycle with versioned change management, confirmation, charges, delivery schedules
 5. Supplier output: PDF/email, EDI 850/ORDERS adapter hook (completed in wave 35)
+6. Scheduling agreements with FRC/JIT releases, firm/trade-off zones and cumulative quantities
+7. Reusable policy framework scoped by org hierarchy, plus worker signing limits with request workflow and annual recertification
+8. Procurement catalogs with images, publication by org unit and vendor catalog import; category managers, vendor assignment and questionnaires
+9. RFQ types with sealed bids, weighted scoring and amendments
+10. Service PO lines with service outlines, value/contract limits and model service specifications; invoicing plans; subsequent price change (reprice) of open POs; consignment price agreements
 
 **Deploy.** Procurement workspace live; demo vendors with price lists; purchasing policy configured for the demo plant.
 

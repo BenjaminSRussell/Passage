@@ -40,6 +40,11 @@ Fix versions: v1.0
 3. Embedded dashboards in every workspace; self-service explorer; scheduled reports; export to Excel/Power BI/Tableau
 4. Operational report designer (replaces SSRS layouts) for documents: invoices, POs, packing slips, checks
 5. Data catalog and lineage (OpenMetadata)
+6. Print management routing: conditional original/copy destinations per document, entity and account (printer via site print agent, e-mail, e-invoice, archive, portal)
+7. Standard text blocks with placeholders and language versions, form notes, and correspondence types (periodic statements, payment notices, balance confirmations)
+8. Data-quality rules on catalog assets (completeness, validity, uniqueness, referential, freshness) with scorecard tiles
+9. Process event log (mart.process_event) with variant explorer and OCEL 2.0/XES export
+10. Archive tier: closed OLTP partitions moved to Iceberg archive with hash verification, retention-driven residence times and restore
 
 **Deploy.** Analytics stack and embedded dashboards live across all workspaces.
 

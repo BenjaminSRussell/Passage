@@ -39,6 +39,10 @@ Fix versions: v1.0
 3. Nonconformance → correction/CAPA workflow with root cause (8D template), cost of quality
 4. Certificates of analysis, supplier quality scorecards, SPC charts from results
 5. Device/instrument calibration tracking
+6. Product compliance: regulated/restricted substance lists with BOM roll-up, and safety data sheets with distribution on shipment
+7. Incoming vendor certificates gating acceptance, and source inspection before delivery
+8. Physical sample management (retention samples), multiple specification sets, in-process inspection points
+9. Stability studies with scheduled pull points, audit management, and FMEA/control plans (AIAG-VDA)
 
 **Deploy.** Quality workspace enabled for the demo plants; CoA generation on shipments.
 

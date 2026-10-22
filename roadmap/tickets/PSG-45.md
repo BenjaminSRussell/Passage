@@ -41,6 +41,9 @@ Fix versions: v1.0
 3. Dispatch board and technician scheduling (skills, territory, travel) with OR-Tools; mobile technician app (offline, photos, signatures, parts)
 4. Parts consumption from technician trucks (mobile inventory locations), billing to customer or warranty
 5. Service KPIs: SLA attainment, first-time fix
+6. Generic case management (categories, processes/stages, associations to any record, category security) consolidating wave-9/30 cases
+7. Knowledge base (symptom/solution articles, versioning, suggestions on cases) and activities on cases, projects and any record
+8. Supplier warranty claims with vendor recovery and email-to-case intake
 
 **Deploy.** Service workspace and technician mobile app; demo service objects derived from shipped serials.
 

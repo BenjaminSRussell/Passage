@@ -39,6 +39,7 @@ Fix versions: v1.0
 3. Parallel-run harness: replay a legacy period's transactions into Passage and diff trial balances, inventory values and subledgers
 4. Cutover runbook generator: freeze, extract, load, reconcile, go/no-go checklist, rollback plan
 5. Legacy coexistence adapters for phased cutovers (entity-by-entity)
+6. Project beginning balance journals: opening project transactions by category with WIP, on-account and estimate state, reconciled to the legacy project ledger
 
 **Deploy.** Migration factory workspace with packs for AX and SAP; rehearsal environment provisioned by pipeline.
 

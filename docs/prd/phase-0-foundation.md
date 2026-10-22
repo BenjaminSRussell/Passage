@@ -27,6 +27,10 @@
 | NumberSequence, NumberSequenceAllocation | numseq (wave 5) | Sequence scoped to Tenant/LegalEntity; Allocation → Sequence (gap-free audit) |
 | AuditEntry, AuditField | audit (wave 5) | Entry → any entity/record; hash chain per tenant |
 | SavedView, Personalization, ImportJob | shell-bff / importexport (wave 5) | SavedView → EntityDefinition + User; ImportJob → EntityDefinition |
+| RuleSet, DecisionTable, DecisionRow, UsageSnapshot | metadata-registry (wave 3) | RuleSet 1→N DecisionTable 1→N DecisionRow; rows may come from an ExtensionPackage |
+| OutboundMessage, MessageTemplate, NotificationPreference | notify (wave 4) | Message → Template version + recipient User; Preference per User × event class |
+| Attachment, AttachmentVersion, AttachmentLink, DocumentType, FileType | docs (wave 5) | Attachment 1→N Version; Attachment N↔N any record via Link; Attachment → DocumentType |
+| AlertRule, AlertEvent, StandardText | shell-bff (wave 5) | AlertRule → EntityDefinition; AlertEvent → Rule + record + recipient; StandardText referenced by MessageTemplate |
 
 **Cross-wave event catalog**
 
@@ -41,6 +45,10 @@
 | dev.passage.workflow.workitem.assigned.v1 / .escalated.v1 | workflow | shell inbox, notifications | workitem_id, assignee_id, due_at |
 | dev.passage.batch.run.completed.v1 / .failed.v1 | workflow (batch) | shell job monitor, alerting | job_id, run_id, rows_processed, error |
 | dev.passage.audit.entry.recorded.v1 | audit | shell audit viewer (live), analytics (wave 46) | entry_id, entity, record_id, operation, hash |
+| dev.passage.rules.ruleset.published.v1 | metadata-registry | every service holding compiled rule trees, audit | code, version, tables, row_count |
+| dev.passage.notify.message.sent.v1 / .failed.v1 / .bounced.v1 | notify | audit, alerting, identity | message_id, channel, template_code, recipient_user_id |
+| dev.passage.docs.attachment.available.v1 / .purged.v1 | docs | shell, audit, OCR capture (wave 18) | attachment_id, version_no, document_type, links |
+| dev.passage.alerts.alert.fired.v1 | shell-bff (alert evaluator) | notify, shell | rule_id, entity, record_id, recipient_id |
 
 **Phase-level risks**
 
@@ -237,6 +245,133 @@ Depends on: nothing (first wave).
 | GitHub Actions minutes cost | Low | Low | Self-hosted runner module in `infra/` |
 
 Open questions: (1) First cloud provider for `dev`/`stage` (PRD §12 Q4) — default EKS; decide by wave 2 start. (2) Private registry vs ghcr.io for customers — default ghcr.io with mirror instructions; decide by wave 5. (3) Mesh (none vs Linkerd) for mTLS — default none, gateway-to-service mTLS only; decide by wave 4.
+
+### 0.1.13 Parameters and setup
+
+Platform parameters live in Git (`deploy/envs/<env>/values.yaml`, `infra/modules/cluster/variables.tf`, repository settings) rather than in a database form; "scope" below names the file or object that owns the value.
+
+| Parameter | Scope | Type | Default | Allowed values | Effect | AX equivalent | SAP equivalent |
+|---|---|---|---|---|---|---|---|
+| `cluster.provider` | cluster (OpenTofu variable) | enum | `k3d` | k3d, eks, gke, aks, baremetal | selects the provider sub-module for networking, node pools, storage classes | LCS environment topology (cloud-hosted / on-premises) | SAP system landscape (SLD, STMS system overview) |
+| `cluster.kubernetes_version` | cluster | semver | 1.31 | n−2 … n of upstream | pins the control plane and node pools | LCS platform update version | Kernel / SAP_BASIS release (System → Status) |
+| `cluster.node_pools[]` | cluster | list of {name, size, count, labels} | 3 × 8 GB (k3d) | provider-specific | sizes compute; `passage.dev/workload` label routes stateful sets | LCS environment sizing (tier) | SM51 application servers, RZ12 logon groups |
+| `environment.promotion_policy` | environment (`platform.environment`) | enum | auto (dev), pr_approval (stage, prod) | auto, pr_approval | auto-sync vs. PR with required reviewers | LCS "apply package" approval | STMS_QA quality assurance approval, STMS transport route target group |
+| `environment.soak_minutes` | environment | int | 0 dev, 60 stage | 0–1,440 | minimum time a digest must run in the prior tier before promotion | none | none (manual import scheduling in STMS_IMPORT) |
+| `argo.sync.self_heal`, `argo.sync.prune` | environment overlay | bool | true, true | true/false | drift corrected automatically; removed manifests deleted | none | `tp` profile parameter `repeatonerror` (closest) |
+| `argo.sync_waves` | overlay annotation | ordered ints | operators −2, databases −1, services 0, routes 1 | −10 … 10 | start order per sync | AxUpdateInstaller step order | STMS import order / import all |
+| `ci.unit_coverage_min_pct` | repository (`.passage-ci.yaml`) | int | 70 | 0–100 | fails the `unit` check below threshold | Best Practice check severity | ATC check variant (SCI) priority |
+| `ci.vuln.fail_on` | repository | enum set | critical, high_with_fix_older_than_14d | critical, high, high_with_fix_older_than_14d, medium | scan gate policy (FR-1.6) | none | none (SAP Security Notes via SysRec) |
+| `ci.vuln.exception_max_days` | repository | int | 30 | 1–90 | maximum validity of a `.vuln-exceptions.yaml` entry | none | none |
+| `ci.sbom.format` | repository | enum | spdx-2.3 | spdx-2.3, cyclonedx-1.6 | SBOM attestation format | none | none |
+| `admission.verified_namespace_label` | cluster (policy-controller `ClusterImagePolicy`) | string | `passage.dev/verified=true` | label selector | namespaces where unsigned images are denied | strong-name signing requirement for models (`AxUtil /key`) | TMS trusted systems (SE06, SMT1) |
+| `admission.oidc_identity` | cluster | regex | `https://github.com/passage/.*` | issuer + subject regex | identity accepted by cosign keyless verification | none | none |
+| `registry.image_retention_days` | registry | int | 180 | 30–3,650 | untagged, unreferenced digests deleted after this | LCS asset library retention | none (transport files kept in `/usr/sap/trans`) |
+| `registry.sbom_retention_years` | registry | int | 7 | 1–10 | SBOM and attestation retention | none | none |
+| `secrets.path_template` | cluster (ESO `ClusterSecretStore`) | string | `passage/<env>/<svc>/<key>` | Vault KV v2 path | where every service secret is read from | none (web.config / AOS config) | SECSTORE (secure storage), RSECADMIN |
+| `local.profile` | developer (`make deploy-local PROFILE=`) | enum | full | min, full | `min` omits observability and Temporal UI to fit 16 GB | OneBox VHD size | NetWeaver developer edition install profile |
+| `hello_ledger.idempotency_window_hours` | service values | int | 24 | 1–168 | replay window for `Idempotency-Key` | none | none |
+
+### 0.1.14 Inquiries and reports
+
+| Name | Type | Filters & parameters | Columns / measures | Source projection | AX equivalent | SAP equivalent |
+|---|---|---|---|---|---|---|
+| Release history | list inquiry | service, environment, status, date range | service, digest (short), git sha, chart version, status, created_at, signed, sbom link | `platform.release` | LCS Environment details → History / Applied updates | STMS import history (STMS_IMPORT → Goto → Import history), SE10 request log |
+| Environment status | drill-down | environment | app, health, sync status, revision, digest, last sync, soak elapsed | Argo CD Application CRs + `platform.environment` | LCS environment monitoring page | STMS system overview, SM51 |
+| Deployment reconciliation | operational report (nightly) | environment | service, overlay digest, running digest, release status, mismatch flag | overlay files vs. pod image IDs vs. `platform.release` | LCS "Environment details → Version" check | STMS import queue vs. SE03 object directory comparison |
+| CVE exposure by environment | operational report | severity, environment, fixed-available flag | CVE id, package, version, fixed version, digest, environment, first seen | Grype/Trivy results attached to each digest | none | Solution Manager System Recommendations (SysRec) for security notes |
+| Vulnerability exceptions | list inquiry | expiry window | CVE, service, justification, approver, expires_at, days left | `.vuln-exceptions.yaml` (parsed in CI) | none | SNOTE note status / RSECNOTE |
+| Pipeline statistics | KPI | period (day/week), branch | runs, median duration, p95 duration, failure rate by check | GitHub Actions API | Azure DevOps build pipeline analytics (D365) | STMS import log statistics, ChaRM cycle reports |
+| Admission denials | operational report | namespace, period | pod, image, reason (unsigned / wrong issuer), time | policy-controller Kubernetes events | none | TP system log (SLOG/ALOG) rejected imports |
+| Service version page | drill-down | service | git sha, digest, chart version, build time, Go/Node version | `GET /v1/version` of each service | Help → About (kernel and application build numbers) | System → Status (component versions, SPAM/SAINT level) |
+| Hotfix lineage | list inquiry | service | hotfix branch, base prod digest, cherry-picked commits, status | Git refs + `platform.release` | LCS hotfix KB list, "Applied hotfixes" | SNOTE implemented notes, SPAU |
+| Image retention candidates | operational report | registry | digest, service, last referenced env, age, SBOM present | registry API + `platform.release` | LCS asset library | none |
+
+### 0.1.15 Printed and electronic documents
+
+No printed documents. Electronic artifacts produced by the wave:
+
+| Document | Trigger | Layout elements | Formats | Numbering sequence | Legal / retention requirement |
+|---|---|---|---|---|---|
+| SBOM | every `main` build | SPDX document: creator, package list (name, version, license, PURL), relationships, digest it describes | SPDX 2.3 JSON, attached to the image as a cosign attestation | identified by image digest, no sequence | retained 7 years (BR-1.7); evidence for wave 48 SOC 2 CC8.1 |
+| Provenance attestation | every signed build | in-toto statement: builder id, source repo + sha, materials, build config | in-toto JSON (SLSA v1), Rekor transparency log entry | Rekor log index | retained with the image; immutable in Rekor |
+| Promotion PR summary | `passage promote` | title (service, from → to env, digest), checklist (soak met, scan clean, rollback target), SBOM diff table, scan summary | GitHub PR body (Markdown) | PR number | retained with repository history |
+| Release notes (per promotion to prod) | PR merge to prod overlay | commits since previous prod digest grouped by Conventional Commit type, linked issues | Markdown in GitHub Deployment description | release id | none |
+
+### 0.1.16 Periodic and batch jobs
+
+| Job | Schedule default | Partitioning key | Idempotency / checkpoint | Typical runtime target | Failure handling | Monitor / alert |
+|---|---|---|---|---|---|---|
+| Release reconciliation (overlay vs. running vs. DB) | nightly 02:00 UTC | environment | re-runnable; writes a report row per (env, service) keyed by date | < 2 min | report row `mismatch=true`; no automatic correction | `ReleaseDriftDetected` (ticket) |
+| Image retention sweep | weekly Sunday 03:00 UTC | service | deletes only digests not referenced by any `platform.environment`; dry-run list stored first | < 10 min | abort on registry 5xx; rerun next week | `RegistryRetentionFailed` (notify) |
+| Deployed-digest re-scan | daily 04:00 UTC | environment × service | scan result keyed by (digest, scanner db version) | < 15 min for 30 images | partial results kept; missing scans listed | `NewCriticalCVEInProd` (page during business hours) |
+| Vulnerability exception expiry check | daily 05:00 UTC | repository | stateless | < 1 min | opens a GitHub issue per expiring exception (≤ 7 days) | `VulnExceptionExpiring` (notify) |
+| Local CA renewal (k3d) | on `make deploy-local`, and every 300 days | developer machine | reissues only when < 30 days left | < 30 s | prints instruction to re-trust the CA | n/a |
+| Rekor inclusion verification | weekly | service | verifies each prod digest's signature entry is still present | < 5 min | alert; no deployment change | `SignatureVerificationFailed` (page) |
+
+### 0.1.17 Security duties and privileges
+
+Wave 1 has no OPA-enforced API yet (wave 2); the duties below are enforced by GitHub branch protection, CODEOWNERS, Argo CD RBAC (mapped from GitHub teams) and Vault policies, and are re-declared as Passage duties in wave 2 so the same names hold later.
+
+| Duty | Privileges (entry points) | Segregation-of-duties conflicts | Default roles that include it |
+|---|---|---|---|
+| View platform releases | `GET /v1/platform/releases`, Argo CD read-only UI, `passage status` | none | Platform engineer, Release manager, Auditor |
+| Maintain platform releases | `POST /v1/platform/releases/{id}/promote` (dev → stage), `passage promote --to stage`, merge to `deploy/envs/dev`, `deploy/envs/stage` | with Approve production promotion (same person cannot author and sole-approve the prod PR; enforced by required reviewers ≠ author) | Platform engineer |
+| Approve production promotion | review + merge of PRs touching `deploy/envs/prod` (CODEOWNERS `@passage/release-managers`) | with Maintain vulnerability exceptions | Release manager |
+| Rollback environment | `passage rollback --env <env>`, Argo CD rollback action | none (rollback is always allowed to anyone who can promote to that env) | Platform engineer (dev, stage), Release manager (prod) |
+| Maintain vulnerability exceptions | edit `.vuln-exceptions.yaml` (CODEOWNERS `@passage/security`) | with Approve production promotion | Security engineer |
+| Maintain cluster configuration | `tofu apply` on `infra/`, edit `deploy/charts/platform-base` | with Maintain secrets (one person should not hold both cluster admin and Vault root) | Platform engineer |
+| Maintain secrets | Vault policy `passage/<env>/*` write; ESO `ClusterSecretStore` edit | with Maintain cluster configuration | Security engineer |
+| Maintain hello ledger | `POST /v1/hello-ledger/entries` (token-gated from wave 2) | none | Platform engineer (demo only) |
+
+### 0.1.18 Message catalog
+
+Codes `PLT-01xx` are emitted by CI checks, the `passage` CLI, the admission controller and the hello-ledger service; CI messages are also written as GitHub check annotations.
+
+| Code | Severity | User text | Cause | Remediation | Raised by |
+|---|---|---|---|---|---|
+| PLT-0101 | error | Overlay references image by tag `{tag}`; digests are required | `image.tag` or `image:tag` found in `deploy/envs/**` | replace with `image.digest: sha256:…` from the release history | BR-1.2, FR-1.4 |
+| PLT-0102 | error | Promotion to prod blocked: digest ran {minutes} of {required} soak minutes in stage | soak not met | wait, or lower `soak_minutes` with Release manager approval | BR-1.3 |
+| PLT-0103 | error | Promotion to prod blocked: SLO burn alert `{alert}` fired during soak | `SLOBurnRateHigh` within the window | investigate the alert; re-soak after fix | BR-1.3 |
+| PLT-0104 | warning | A promotion of {service} to {env} is already open (#{pr}); this PR was closed | concurrent promotion | wait for the first PR | BR-1.4 |
+| PLT-0105 | error | No rollback target: no earlier `deployed_{env}` release with a different digest | first release in the environment | deploy an earlier digest explicitly with `passage promote --digest` | BR-1.6 |
+| PLT-0106 | error | Vulnerability exception for {cve} expired on {date} | exception past expiry | renew with new justification (≤ 30 days) or fix | BR-1.5, FR-1.6 |
+| PLT-0107 | error | Scan gate failed: {n} CRITICAL / {m} actionable HIGH findings | FR-1.6 policy | upgrade the package or add a justified exception | FR-1.6 |
+| PLT-0108 | error | Pod denied: image {image} has no valid cosign signature from `{identity}` | admission policy | build through CI; never push hand-built images to verified namespaces | FR-1.7 |
+| PLT-0109 | error | Hotfix branch `{branch}` is not based on a deployed_prod release | wrong merge base | `git rebase --onto <prod sha>` | BR-1.8 |
+| PLT-0110 | error | Unit coverage {pct}% below minimum {min}% for {service} | `ci.unit_coverage_min_pct` | add tests | FR-1.5 |
+| PLT-0111 | error | Possible secret committed: {rule} at {path}:{line} | gitleaks rule hit | remove, rotate the secret in Vault, force-push is not allowed; add to history rewrite ticket | FR-1.11 |
+| PLT-0112 | error | Migration job for {service} failed: {atlas error} | Atlas apply error | fix migration; additive-only rule means no down migration is needed | FR-1.10 |
+| PLT-0113 | warning | Local bootstrap needs 16 GB RAM; {gb} GB detected — using PROFILE=min | insufficient memory | accept reduced profile or free memory | FR-1.9 |
+| PLT-0114 | info | Idempotent replay: returning the entry created at {time} for this Idempotency-Key | duplicate POST within 24 h | none | FR-1.8 |
+| PLT-0115 | error | Build not reproducible: digest {a} ≠ {b} for the same source | non-deterministic build input | pin the input (timestamp, dependency) | 0.1.9 reproducibility test |
+
+### 0.1.19 Performance budgets and capacity
+
+| Operation | Volume assumption | Latency target (p50 / p95 / p99) | Throughput target | Storage growth per year | Index / partition strategy | Degradation behavior under 3× load |
+|---|---|---|---|---|---|---|
+| PR pipeline (lint → sign) | 40 runs/day, peak 10 concurrent | 6 min / 8 min / 12 min | 20 concurrent runners | CI cache ≤ 20 GB (LRU) | path-filtered per service; cache keyed by lockfile hash | queued runs wait; no timeouts under 60 min |
+| Promotion merge → Argo Healthy | 10/day across envs | 5 min / 15 min / 20 min | n/a | `platform.release` ≈ 10 k rows/year (≈ 5 MB) | `release(service, created_at desc)` | Argo reconciles in order; sync waves prevent partial start |
+| Rollback | 1/week | 2 min / 5 min / 8 min | n/a | n/a | n/a | same as promotion |
+| Admission webhook (signature verify) | 500 pod creations/day, 50/min at rollout | 50 ms / 200 ms / 500 ms | 20/s | none | verification result cached per digest for 1 h | failurePolicy=Fail in verified namespaces; cached digests still admitted |
+| hello-ledger `POST /entries` | 10 k/day (demo) | 10 ms / 40 ms / 80 ms | 200 rps | ≈ 1 GB/year at 10 M rows | `entry(created_at)` | Postgres connection pool 20; 503 beyond queue depth 100 |
+| Registry pulls at rollout | 30 images × 3 nodes per env | 5 s / 20 s / 40 s per image | 100 MB/s | images ≈ 200 GB/year before retention | retention sweep (0.1.16) | node image cache; rollouts slower, not failed |
+| `make deploy-local` | 5/day per engineer | 7 min / 10 min / 12 min | n/a | 15 GB disk per environment | n/a | PROFILE=min |
+
+### 0.1.20 Localization and compliance hooks
+
+- Nothing in this wave varies by country or language; all timestamps are UTC ISO 8601 and all CLI/CI messages are English only (label packs for CLI output are not planned).
+- Data residency: a customer runs the `infra/modules/cluster` module in the region of their choice; nothing in `deploy/` assumes a region. Wave 48 country packs do not touch this wave; wave 50 (multi-region) adds region-aware overlays under `deploy/envs/<env>-<region>`.
+- Air-gapped and export-controlled sites: registry mirror instructions (open question 2) and a private sigstore (Fulcio/Rekor) profile in `infra/modules/sigstore-private`; `admission.oidc_identity` is the extension point.
+- Supply-chain regulation (EU Cyber Resilience Act, US EO 14028): SBOM + provenance per digest (0.1.15) are the evidence artifacts; retention 7 years.
+- Privacy: no personal data is processed by this wave except Git author identities in commit history (retained as part of source control; excluded from erasure requests under wave 48 privacy tooling, documented).
+
+### 0.1.21 Coverage closure
+
+No `GAP` or `PARTIAL` row in coverage-ax.md §12.99 or coverage-sap.md §13.99 is assigned to wave 1 (both registers parsed on 2026-10-21). Inventory rows tagged `COVERED-1` (SAP §13.30: SE09/SE10/SE01/SE03/STMS/STMS_IMPORT/SE06/SE07 transport organizer and management; STRUST/SSFA/SSO2/SAML2/SNCWIZARD trust manager; STMS import history and SE10 request logs; STMS import jobs / transport of copies / ChaRM cycles) are met by FR-1.1–FR-1.11 and 0.1.14.
+
+| Register row (inventory section + AX form or SAP T-code) | Status before | Disposition | Note |
+|---|---|---|---|
+| none | — | — | Wave 1 has no register rows; see paragraph above for the `COVERED-1` confirmation |
 
 ---
 
@@ -452,6 +587,143 @@ Depends on: wave 1 (cluster, Argo, Vault/ESO, gateway).
 
 Open questions: (1) Field-level masks in P0 or deferred to wave 15 — default: masks compiled but enforced only for PII-flagged fields; decide by wave 3. (2) Session legal entity in a cookie vs header — default header `X-Passage-Legal-Entity`; decide by wave 5. (3) Tenant realm per tenant vs shared realm with groups — default per tenant; decide by wave 2 mid-point.
 
+### 0.2.13 Parameters and setup
+
+Tenant-scoped values are rows of `identity.tenant_settings` (edited on the Admin workspace → Tenant settings form, the AX "System parameters → Security" and SAP RZ10 `login/*` equivalent); realm values are Keycloak realm settings exported to Helm values.
+
+| Parameter | Scope | Type | Default | Allowed values | Effect | AX equivalent | SAP equivalent |
+|---|---|---|---|---|---|---|---|
+| `auth.access_token_ttl_minutes` | tenant (realm) | int | 10 | 5–60 | JWT lifetime; worst-case access after revoke (BR-2.6) | none (AD Kerberos ticket) | `rdisp/gui_auto_logout`, `login/ticket_expiration_time` |
+| `auth.refresh_token_ttl_hours` | tenant (realm) | int | 8 | 1–24 | silent re-login window | none | `login/ticket_expiration_time` |
+| `auth.session_max_hours` | tenant (realm) | int | 12 | 1–24 | absolute session cap | System parameters → Security: session timeout (D365 `SysUserLogTimeout`) | `rdisp/max_wprun_time`, SICF session timeout |
+| `auth.lockout.failures`, `auth.lockout.window_minutes`, `auth.lockout.duration_minutes` | tenant (realm brute-force detection) | int, int, int | 5, 15, 30 | 3–10, 5–60, 5–1,440 | BR-2.1 lock behavior | none (AD policy) | `login/fails_to_user_lock`, `login/failed_user_auto_unlock` |
+| `auth.mfa.required_roles` | tenant | role code list | `TenantOwner`, `SecurityAdmin` | any role codes | roles whose holders must enroll TOTP/WebAuthn | none | SNC / SAML2 enforced for user groups |
+| `auth.mfa.allowed_methods` | tenant | enum set | totp, webauthn | totp, webauthn, recovery_code | enrollment options | none | none |
+| `auth.local_password_policy` | tenant | {min_length, history, max_age_days} | 14, 5, 0 (no expiry) | min_length 12–64 | applies only to break-glass local accounts (federated users have none) | none | `login/min_password_lng`, `login/password_history_size`, `login/password_expiration_time`, USR40 |
+| `auth.idp_brokers[]` | tenant | list {alias, protocol oidc/saml, issuer/metadata URL, attribute mappers, first-login flow} | empty | — | federation targets; first login auto-links by verified email | Users → Active Directory import wizard, Claims users / Identity providers (D365 Entra tenant) | SAML2 trusted providers, SNC configuration, SM30 `VUSREXTID` |
+| `scim.enabled`, `scim.group_role_mapping` | tenant | bool, map {group → role code} | false, {} | — | SCIM endpoints on/off; group → role | AD group import | SAP IPS mapping, CUA |
+| `scim.bulk_max_operations` | tenant | int | 1,000 | 100–1,000 | RFC 7644 bulk limit | none | none |
+| `authz.enforce` | environment / tenant feature flag | enum | enforce (log_only in dev first week) | enforce, log_only | log_only records would-be denies without blocking | none | `auth/no_check_in_some_cases` (SU24 proposals) |
+| `authz.bundle_poll_seconds` | environment | int | 10 | 5–60 | OPA bundle polling | none (AOS cache refresh) | PFCG user comparison (PFUD) |
+| `authz.bundle_max_permissions` | tenant | int | 50,000 | ≤ 100,000 | compile guard (risk table) | none | none |
+| `authz.recompile_time` | tenant | HH:MM tenant time zone | 00:05 | any | nightly effective-date recompile (BR-2.5) | none | PFUD / PFCG_TIME_DEPENDENCY job |
+| `gateway.rate_limit.sustained_rps`, `gateway.rate_limit.burst` | tenant | int, int | 1,000, 2,000 | 100–50,000 | FR-2.8 limits; 429 with `Retry-After` | none | ICM `icm/max_conn`, `rdisp/tm_max_no` |
+| `gateway.jwks_cache_minutes` | environment | int | 5 | 1–60 | JWKS refresh | none | none |
+| `session.legal_entity_header` | environment | string | `X-Passage-Legal-Entity` | header name | carries the current legal entity (open question 2) | `changecompany()` / company switch | SU3 default parameter BUK |
+| `tenant.time_zone`, `tenant.default_currency` | tenant | IANA tz, ISO 4217 | `UTC`, `USD` | valid values | effective-date evaluation, defaults for later waves | System parameters → General (time zone), CompanyInfo currency | SCC4 client, OY01 country, OB22 company code currency |
+| `legal_entity.country` | legal entity | ISO 3166-1 alpha-2 | required | valid code | country-pack hook (0.2.20) | Legal entities form → Addresses (country/region) | OX02 company code country |
+| `agent.max_sponsor_subset` | tenant | bool | true | true | agents may hold only a subset of the sponsor's roles (FR-2.11) | none | SU01 reference user |
+| `identity.deprovision_revoke_seconds` | tenant | int | 60 | 10–300 | session revocation deadline after SCIM deactivation | none | SU10 mass lock |
+
+### 0.2.14 Inquiries and reports
+
+| Name | Type | Filters & parameters | Columns / measures | Source projection | AX equivalent | SAP equivalent |
+|---|---|---|---|---|---|---|
+| Users | list inquiry | status, kind, role, legal entity, last login before | username, email, display name, kind, status, MFA, last login, default legal entity | `identity.user` | Users list (SysUserInfoPage) | SU01 / SU10 list, RSUSR002 users by complex criteria |
+| Users by role | list inquiry | role, legal entity, as-of date | user, role, legal entities, effective from/to, granted by | `authz.role_assignment` ⋈ user | Security → Users by role (SSRS "User role assignments") | SUIM → User → by roles; AGR_USERS |
+| Roles by user | drill-down | user | role, duties, legal entities, effective dates, break-glass flag | same | User details → Roles tab | SU01 → Roles tab, SUIM roles by user |
+| Role permissions (closure) | drill-down | role | duty → privilege → permission (entity, action, field mask, condition) | compiled closure | Security roles → View permissions; SSRS "Security role report" | PFCG → Authorizations (display), SUIM → Roles → by authorization object |
+| Effective permissions | drill-down | user × legal entity (× entity, action) | allow/deny, first allowing path, all denying reasons, bundle version | `GET /v1/authz/effective-permissions`, `POST /v1/authz/decision` | Security development tool → View permissions | SU53, SU56, STAUTHTRACE |
+| Login history | list inquiry | user, outcome, IdP, date range, IP | time, user, outcome, IdP alias, `amr`, IP, user agent | Keycloak event listener → `identity.login_event` | Users → User log (SysUserLog) | SM20 security audit log (logon events), RSUSR200 logon dates |
+| Online sessions | list inquiry | tenant, user | user, session start, last activity, IdP, client; action: revoke | Keycloak sessions API | Online users (SysUsersOnline) | SM04, AL08 |
+| Expiring role assignments | operational report | horizon (default 30 days) | user, role, effective_to, granted by | `authz.role_assignment` | none | PFCG_TIME_DEPENDENCY log |
+| Authorization denials | KPI / operational | period, duty, entity, user | denials per duty per hour, top users, top entities | OPA decision logs (Loki) → `authz.decision_stat` | none | SU53 (per user), SM20 RFC/auth failures |
+| SCIM reconciliation | operational report | last run | users in IdP not in Passage, deprovisioned in IdP still active, group → role mismatches | SCIM sync job output | AD import wizard log | SAP IPS job log, CUA distribution log (SCUL) |
+| Policy bundle versions | list inquiry | tenant | version, sha256, compiled at, role count, permission count, trigger | `authz.bundle` | none | PFCG profile generation log |
+| Tenant and legal entity list | list inquiry | status | code, name, country, currency, time zone, user count | `identity.tenant`, `identity.legal_entity` | Legal entities (OMLegalEntity) | OX02 company codes, SCC4 clients |
+
+### 0.2.15 Printed and electronic documents
+
+No printed documents. Electronic documents:
+
+| Document | Trigger | Layout elements | Formats | Numbering sequence | Legal / retention requirement |
+|---|---|---|---|---|---|
+| User invitation email | user created with `status=invited` (UI or SCIM without federation link) | tenant name, inviter, link (24 h validity), IdP instructions | HTML + text email sent by Keycloak "execute actions" mail (tenant SMTP settings in the realm until wave 4 moves outbound email to FR-4.13) | none | link token single-use; email retained in Keycloak event log 30 days |
+| MFA reset / enrollment email | admin resets MFA; `mfa_required` role granted to an unenrolled user | user, action, link | same | none | same |
+| Effective-permission export | administrator action on the viewer | user, legal entity, bundle version, rows (entity, action, decision, path) | CSV, JSON | none | kept by the requester; wave 48 access reviews re-generate on demand |
+| Security role report | administrator action | role, duties, privileges, permissions, assigned users as of date | CSV, PDF (wave 15 report designer; CSV only in wave 2) | none | SOC 2 evidence (wave 48) retained 7 years |
+
+### 0.2.16 Periodic and batch jobs
+
+Jobs run as Kubernetes CronJobs in wave 2 and are re-registered on the wave 4 batch framework without behavior change.
+
+| Job | Schedule default | Partitioning key | Idempotency / checkpoint | Typical runtime target | Failure handling | Monitor / alert |
+|---|---|---|---|---|---|---|
+| Effective-date recompile | daily 00:05 tenant time (BR-2.5) | tenant | compile is deterministic; skipped when no assignment crosses midnight | < 5 s per tenant | retry 3×; last good bundle keeps serving | `BundleStale` (> 5 min) |
+| SCIM reconciliation | daily 01:00 UTC | tenant | compares IdP export to `identity.user`; writes report only | < 2 min per 10 k users | report with `errors[]`; no automatic deprovision | `ScimDriftDetected` (ticket) |
+| Session cleanup | hourly | realm | Keycloak offline-session purge | < 30 s | n/a | none |
+| Login anomaly aggregation | every 15 min | tenant | window keyed by (tenant, bucket) | < 10 s | skipped bucket recomputed next run | `LoginFailureSpike` (> 50 failures / 15 min / tenant) |
+| Bundle garbage collection | daily 03:00 UTC | tenant | keeps last 10 versions + any referenced by a live `pv` | < 10 s | none | none |
+| JWKS refresh | every 5 min (gateway) | realm | cache keyed by `kid` | < 200 ms | previous keys kept until rotation grace (24 h) | `JwksFetchFailed` |
+| Keycloak realm export (backup) | daily 02:30 UTC | realm | export to object storage keyed by date | < 1 min | alert | `RealmBackupFailed` (ticket) |
+
+### 0.2.17 Security duties and privileges
+
+| Duty | Privileges (entry points) | Segregation-of-duties conflicts | Default roles that include it |
+|---|---|---|---|
+| Maintain users | `GET/POST /v1/identity/users`, `PATCH /v1/identity/users/{id}`, Users screen (invite, lock, disable), revoke session | with Maintain security roles (a holder of both can grant anything to anyone; self-grant is rejected with IAM-0416 regardless) | Security administrator |
+| View users | `GET /v1/identity/users`, Users screen read-only, Login history, Online sessions | none | Security administrator, Auditor, Help desk |
+| Maintain security roles | `/v1/authz/roles`, `/duties`, `/privileges`, `/assignments` (POST/DELETE), `/policies/compile`, Roles/Duties/Privileges/Assignment screens | with Maintain users; with Approve workflow for the same entity (wave 4) | Security administrator |
+| View security reports | `GET /v1/authz/effective-permissions`, `POST /v1/authz/decision`, Role permissions, Users by role, Authorization denials | none | Security administrator, Auditor |
+| Maintain identity providers | realm broker settings (`auth.idp_brokers[]`), mappers, MFA policy | with Maintain users | Tenant owner |
+| Maintain SCIM clients | create/rotate SCIM client credentials; `scim.*` settings | none | Tenant owner |
+| Maintain tenants | `GET/POST /v1/tenants`, tenant settings form | with Maintain legal entities (only in multi-tenant operator context) | Platform operator (system tenant) |
+| Maintain legal entities | `GET/POST /v1/legal-entities`, Legal entities screen | none | Tenant owner, Organization administrator |
+| Tenant owner (break-glass) | all of the above plus Keycloak admin console for the realm; every use requires `reason` (RoleAssignment.reason) and raises an audit event | with everything; limited to ≤ 2 human users per tenant, never agents (BR-2.10) | Tenant owner |
+
+### 0.2.18 Message catalog
+
+| Code | Severity | User text | Cause | Remediation | Raised by |
+|---|---|---|---|---|---|
+| IAM-0401 | error | You do not have the duty "{duty}" required for this action | OPA deny; `duty_missing` | request the role containing the duty from a Security administrator | FR-2.6, FR-2.7 |
+| IAM-0402 | error | Not found | token `tid` ≠ host tenant (returned as 404) | sign in to the correct tenant host | BR-2.7 |
+| IAM-0403 | error | Too many requests; retry after {seconds} s | tenant rate limit | back off; service accounts share the bucket | FR-2.8, BR-2.8 |
+| IAM-0404 | error | Session expired; sign in again | access and refresh tokens expired | sign in | FR-2.1 |
+| IAM-0405 | warning | Your permissions were updated; refresh to apply | token `pv` more than 2 bundle versions behind | refresh the page (silent re-login) | FR-2.6 |
+| IAM-0406 | info | Multi-factor enrollment is required for your role "{role}" | `mfa_required` role without enrolled factor | enroll TOTP or WebAuthn | FR-2.1, AC-2.8 |
+| IAM-0407 | error | Account locked for {minutes} minutes after {n} failed sign-ins | lockout policy | wait or ask an administrator to unlock | BR-2.1 |
+| IAM-0408 | error | Cannot revoke: {user} is the last Tenant owner | last-owner protection (409) | grant Tenant owner to another user first | 0.2.5 validation |
+| IAM-0409 | error | Agent cannot hold "{role}": not within sponsor {user}'s roles | FR-2.11 subset rule (422 `AGENT_EXCEEDS_SPONSOR`) | grant the role to the sponsor first or choose another sponsor | FR-2.11, BR-2.10 |
+| IAM-0410 | error | This role was changed by {user} at {time}; reload to see the current version | optimistic lock (409) | reload and reapply | BR-2.9 |
+| IAM-0411 | error | Role code must match `^[A-Za-z][A-Za-z0-9]{2,63}$` | validation | rename | 0.2.5 validation |
+| IAM-0412 | error | Effective from {from} is after effective to {to} | validation | correct the dates | FR-2.9 |
+| IAM-0413 | error | SCIM bulk request exceeds {max} operations | RFC 7644 limit | split the request | FR-2.2 |
+| IAM-0414 | error (alert) | Policy bundle compile failed for tenant {tenant}: {reason} | compiler error; previous bundle still serves | fix the offending permission condition | FR-2.6 |
+| IAM-0415 | warning | Sign-in attempt by deprovisioned user {user} from {ip} | post-deprovision login | none; recorded in audit and login anomaly report | FR-2.2 |
+| IAM-0416 | error | You cannot grant a role to yourself | self-grant attempt | ask another Security administrator | 0.2.17 SoD |
+| IAM-0417 | error | Reason is required when granting a break-glass role | `RoleAssignment.reason` missing | provide a reason | 0.2.4 RoleAssignment |
+
+### 0.2.19 Performance budgets and capacity
+
+| Operation | Volume assumption | Latency target (p50 / p95 / p99) | Throughput target | Storage growth per year | Index / partition strategy | Degradation behavior under 3× load |
+|---|---|---|---|---|---|---|
+| Interactive login (federated) | 5,000 users/tenant, 2 logins/user/day; peak 300/min at 08:00 | 400 ms / 1.2 s / 2 s (excluding IdP) | 50 logins/s per Keycloak replica | login events ≈ 2.5 M rows (≈ 500 MB) per tenant | `login_event(tenant_id, occurred_at)` monthly partitions | Keycloak HPA 2 → 6 replicas; IdP latency dominates |
+| Token refresh | 5,000 users × 6 refreshes/day | 50 ms / 150 ms / 300 ms | 500/s | none | n/a | same |
+| OPA decision (sidecar) | 2,000 decisions/s per service at peak | 0.5 ms / 2 ms / 5 ms | 5,000/s per sidecar | none | bundle in memory, partial evaluation per entity | CPU-bound; sidecar requests 100 m / limit 500 m; latency rises linearly, no errors |
+| Gateway JWT validation | 1,000 rps sustained per tenant | 0.3 ms / 1 ms / 2 ms | 20,000 rps per gateway replica | none | JWKS cache 5 min | rate limit 429 beyond `burst` |
+| Bundle compile | 500 roles, 2,000 duties, 50 k permissions | 1 s / 5 s / 8 s | 10 compiles/min/tenant (debounced 2 s) | bundles ≈ 2 MB × 10 kept per tenant | one bundle per tenant | compile queue; stale bundle serves (`BundleStale` alert at 5 min) |
+| Effective-permission report | 100/day | 200 ms / 800 ms / 1.5 s | 10/s | none | closure computed from bundle, cached 60 s | cached result served |
+| SCIM bulk (1,000 ops) | 10/day | 5 s / 15 s / 30 s | 100 ops/s | `identity.user` ≈ 1 MB per 5 k users | `user(tenant_id, lower(email))` | queued; 429 to the SCIM client with `Retry-After` |
+| Role assignment table | 5,000 users × 4 roles | n/a | n/a | ≈ 20 k rows/tenant (≈ 5 MB) | `role_assignment(tenant_id, user_id)`, `(tenant_id, effective_to)` | n/a |
+
+### 0.2.20 Localization and compliance hooks
+
+- Privacy: `identity.user.email`, `display_name` and login IPs are personal data (GDPR Art. 4, CCPA). Erasure requests (wave 48 privacy tooling) pseudonymize these columns (`user-<id>@erased.invalid`) and purge `login_event` rows older than the tenant's retention (`identity.login_event_retention_days`, default 365; EU tenants typically 180); the row itself is never deleted (audit integrity). `GET /v1/identity/users/{id}/export` serves the data-subject access export (JSON).
+- Residency: Keycloak and the identity database run in the customer's chosen region (0.1.20); realm per tenant lets a multi-tenant operator pin a tenant's realm database to a regional CNPG cluster from wave 50.
+- Country and legal entity: `LegalEntity.country` is the key the wave 48 country packs use to attach statutory roles (for example, a German "Datenschutzbeauftragter" read-only role) and password/MFA minimums (for example, NIS2-driven MFA for all administrative roles). Extension point: `TenantSettings.overrides` jsonb keyed by country, consumed by the Keycloak values template and the compiler.
+- Language and formats: the Keycloak login theme ships English only in wave 2; locale files are loaded from the wave 48 label packs; dates in effective-date fields are stored as dates (no time) and rendered per user preference from wave 5.
+- Time zone: effective dates are evaluated in `tenant.time_zone` (BR-2.5), not per legal entity; multi-time-zone tenants are an accepted limitation until wave 6 calendars.
+- Accessibility: Keycloak login pages are themed to meet WCAG 2.1 AA (checked by the wave 5 axe suite).
+- Audit and evidence: role grants, revokes, break-glass use and IdP configuration changes are events consumed by wave 5 audit; wave 48 SOC 2 CC6.1–CC6.3 evidence is generated from them.
+
+### 0.2.21 Coverage closure
+
+No `GAP` or `PARTIAL` row in coverage-ax.md §12.99 or coverage-sap.md §13.99 is assigned to wave 2 (both registers parsed on 2026-10-21). Inventory rows tagged `COVERED-2` (AX §12.30 users, user groups, security roles/duties/privileges, automatic role assignment rules, online users, system parameters, user log, security inquiries, SSRS security reports, AD import / claims users / identity providers, password/MFA policies; AX §12.39 external user roles and provisioning; AX §12.7 cost accounting ledger security; AX §12.26 mobile device user authentication; SAP §13.30 SU01/SU10, SUGR, PFCG, SU53/SU56/ST01/STAUTHTRACE, SUIM, SECPOL/RZ10, SU01 user types, SAML/OIDC/SNC, UCON, profile parameters, PFCG org levels, RSUSR* reports, PFUD, SU10 mass lock; SAP §13.2 OBA4 tolerance groups; SAP §13.12 OMET buyer authorizations and authorization groups) are met by FR-2.1–FR-2.11, 0.2.14 and 0.2.17.
+
+| Register row (inventory section + AX form or SAP T-code) | Status before | Disposition | Note |
+|---|---|---|---|
+| none | — | — | Wave 2 has no register rows; see paragraph above for the `COVERED-2` confirmation. The automatic role-assignment rule (`SysSecRoleAssignmentRule`, query-based) is met by `scim.group_role_mapping` plus the wave 4 batch job that evaluates a saved filter over users; the SAP OBA4/OMET amount limits are met by `Permission.condition` |
+
 ---
 
 ## 0.3 Wave 3: Metadata Kernel (Entities, Fields, Extensions)
@@ -483,6 +755,8 @@ In AX every business object is an AOT artifact: a Table with properties (`TableG
 | API exposure | Data entities (IsPublic, PublicCollectionName), OData, custom services | BAPIs, RFC, OData via SEGW / RAP, CDS views | generated REST (OpenAPI 3.1) per entity; GraphQL deferred | partial (no OData $batch) |
 | Extensions | Extensions (`.extension`), Chain of Command, extensible enums | Append structures, CI_* includes, Z/Y namespace | `ExtensionPackage` (customer layer), `x_` field prefix | improved (zero-downtime apply) |
 | Versioning / diff | Model store versions, compare tool | Version management (SE09 versions), transport diffs | `MetadataVersion` + `/diff` endpoint, snapshot golden tests | improved |
+| Business rules / decision tables | Policy rules framework (`SysPolicy`, `SysPolicyRuleType`), audit policy rules, X++ conditions in code | BRF+ (`FDT_WORKBENCH`): applications, functions, rulesets, decision tables, expressions; Decision Service Management | `RuleSet` / `DecisionTable` / `DecisionRow` metadata, `POST /v1/rules/{code}/evaluate`, `rules.eval()` in hooks and workflow conditions | full |
+| Usage and license measurement | License inquiries, named user license counts (`SysUserLicenseCount`), D365 "License usage" report | USMM / SLAW system measurement, ST03N user profile, SUIM users by logon date | `metadata.usage_snapshot` (nightly), Usage report, CSV export | full |
 
 ### 0.3.3 Functional requirements
 
@@ -506,6 +780,10 @@ In AX every business object is an AOT artifact: a Table with properties (`TableG
 - **FR-3.10 Backward compatibility** — Must. CI shall run the previous published version's generated TypeScript client against the new server and fail on any breaking change (removed field, type change, required added, enum value removed); additive changes pass.
 - **FR-3.11 Golden tests** — Must. Ten reference entities (Tenant, LegalEntity, User, Role, VendorStub, ProductStub, JournalLineStub, Address, Note, Attachment) shall have committed snapshots of migration, OpenAPI and client; CI fails on any byte-level drift.
 - **FR-3.12 Performance** — Must. A generated entity API shall serve 1,000 rps of simple reads with p95 < 50 ms on the 3-node dev cluster and 200 rps of creates with p95 < 120 ms.
+- **FR-3.13 Decision tables and rule sets** — Should. The system shall provide a `RuleSet` metadata object (same draft → review → published lifecycle, layers and extension packages as entities) containing one or more `DecisionTable`s with typed input columns (bound to a `TypeDefinition` or an entity field), condition cells (operators eq, ne, lt, le, gt, ge, between, in, like, any), typed result columns, a hit policy (`first`, `priority`, `all`, `collect_sum`), and per-row `effective_from`/`effective_to`; published tables shall be evaluable by `POST /v1/rules/{code}/evaluate`, from declarative hooks via `rules.eval('<code>', {inputs})` and from wave 4 workflow conditions, with an `explain` mode listing the rows that matched.
+  - Notes: limits 10,000 rows and 20 columns per table, 50 tables per rule set; a published version is compiled to an in-memory decision tree per service (p95 ≤ 5 ms for a 1,000-row table); customers add or override rows through an `ExtensionPackage` (`layer=customer` rows evaluate before `sys` rows under `priority`); rows are imported and exported as CSV through wave 5 import/export; later consumers are tax determination (wave 13), output determination (wave 15), credit rules (wave 30), substitution and delegation rules (wave 4), audit policies (wave 48) — none of them may ship a private rules engine.
+- **FR-3.14 Usage metering** — Should. The system shall compute, nightly per tenant, a `UsageSnapshot` with active named users (distinct humans with a login or token use in the last 30 and 90 days) per legal entity and per role, principals by kind (human, service, agent), API requests per entity per day (from gateway metrics), and row counts per entity; expose it as the Usage report (0.3.14) with CSV export; retain snapshots 3 years.
+  - Notes: a user counted in several legal entities counts once at tenant level; service and agent principals are reported but never counted as named users (PRD §12 Q1: no per-seat charge for shop-floor, portal or agent users); the snapshot is the input to the licensing decision and to capacity planning, not an enforcement point — nothing is blocked by a count.
 
 ### 0.3.4 Data model
 
@@ -565,6 +843,38 @@ In AX every business object is an AOT artifact: a Table with properties (`TableG
 
 **EnumDefinition / EnumValue / TypeDefinition / RelationDefinition / IndexDefinition** follow the same shape: id, entity or enum FK, name/code, layer, ordinal; EnumValue has `code int` (sys < 1000, extensions ≥ 1000) and `label`; RelationDefinition has `from_field`, `to_entity`, `to_field`, `on_delete`; IndexDefinition has `fields[]`, `unique`, `where`.
 
+**RuleSet / DecisionTable / DecisionRow** (`metadata.rule_set`, `metadata.decision_table`, `metadata.decision_row`)
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| id | uuid | yes | PK (each table) |
+| tenant_id | uuid | yes | `sys` tenant for shipped rule sets |
+| code | varchar(48) | yes (RuleSet) | unique per tenant and version; e.g. `TaxGroupDetermination` |
+| version, status | int, enum | yes (RuleSet) | draft, review, published, deprecated (BR-3.1 semantics) |
+| rule_set_id, name | uuid, varchar(48) | yes (DecisionTable) | name unique within the set |
+| hit_policy | enum | yes (DecisionTable) | first, priority, all, collect_sum |
+| input_columns, result_columns | jsonb | yes (DecisionTable) | `[{name, type_def_id | field_ref, operators_allowed}]`, `[{name, type}]`; ≤ 20 columns in total |
+| table_id, ordinal, priority | uuid, int, int | yes (DecisionRow) | ordinal = evaluation order under `first`; priority used under `priority` |
+| conditions | jsonb | yes (DecisionRow) | `{column: {op, value | [low, high] | [values]}}`; a missing column means `any` |
+| results | jsonb | yes (DecisionRow) | typed result values |
+| effective_from, effective_to | date | no (DecisionRow) | evaluated in the tenant time zone |
+| layer, extension_package_id | enum, uuid | yes / no (DecisionRow) | sys, partner, customer |
+
+**UsageSnapshot** (`metadata.usage_snapshot`)
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| id | uuid | yes | PK |
+| tenant_id | uuid | yes | |
+| snapshot_date | date | yes | unique with tenant_id |
+| active_users_30d, active_users_90d | int | yes | distinct humans |
+| by_legal_entity | jsonb | yes | `{legal_entity_id: {active_30d, active_90d}}` |
+| by_role | jsonb | yes | `{role_code: active_30d}` |
+| principals_by_kind | jsonb | yes | `{human, service, agent}` |
+| api_requests_by_entity | jsonb | yes | `{entity: count}` for the day |
+| row_counts | jsonb | yes | `{entity: rows}` from `pg_class.reltuples` (estimate) |
+| computed_at | timestamptz | yes | |
+
 Invariants: a published version is immutable; field names unique per entity across layers; an extension cannot change a `sys` field's type or required flag; every `enum` field references an enum; `title_fields` must be string type. Indexing: `entity(tenant_id, domain, name, version)` unique; `field(entity_id, ordinal)`. Partitioning: none (metadata volume < 1M rows).
 
 ### 0.3.5 APIs and events
@@ -582,9 +892,15 @@ Invariants: a published version is immutable; field names unique per entity acro
 | GET | /v1/metadata/openapi/{entity} | Generated OpenAPI 3.1 | n/a | any |
 | GET | /v1/metadata/types, /v1/metadata/enums | EDT and enum catalogs | n/a | any |
 | GET/POST/PATCH/DELETE | /v1/<domain>/<entities>/{id} | Generated entity API | POST: Idempotency-Key; PATCH: If-Match | per Permission(entity, action) |
+| GET/PUT/POST | /v1/rules/sets, /{code}/versions/{v}, /{code}/versions/{v}/publish | Maintain and publish rule sets | by version | Maintain business rules |
+| POST | /v1/rules/{code}/evaluate?table=&explain=true | Evaluate a published table; `explain` returns matched rows | n/a (pure function) | any authenticated (results filtered by the calling service) |
+| POST | /v1/rules/{code}/versions/{v}/rows:import | CSV row import (wave 5 import framework) | file sha256 | Maintain business rules |
+| GET | /v1/metadata/usage?from=&to=&legal_entity_id= | Usage snapshots | n/a | View usage reports |
 
 | Event | Trigger | Payload fields | Consumers |
 |---|---|---|---|
+| dev.passage.rules.ruleset.published.v1 | rule set publish | code, version, tables[], row_count | services holding compiled trees (reload), audit |
+| dev.passage.metadata.usage.snapshot.v1 | nightly snapshot | tenant_id, snapshot_date, active_users_30d, active_users_90d | analytics (wave 46), licensing report (PRD §12 Q1) |
 | dev.passage.metadata.entity.published.v1 | publish | entity, domain, version, api_major, diff_summary{added, changed, removed} | generator pipeline, events (wave 4), shell |
 | dev.passage.metadata.entity.deprecated.v1 | deprecate | entity, version, sunset_date | shell, API docs |
 | dev.passage.metadata.extension.applied.v1 | apply success | package_id, code, version, entities[], fields_added, enum_values_added, migration_id | audit, shell, generator |
@@ -599,6 +915,8 @@ Invariants: a published version is immutable; field names unique per entity acro
 | Entity designer (YAML + form view) | Add field/enum/relation/index/hook, validate, save draft | name, type, required, default, pii, visibility | Maintain entity metadata |
 | Extension packages | Create, validate, apply, retire, view migration log | code, layer, version, status, targets | Apply extensions |
 | Type and enum catalogs | Create EDT, add enum values | code, base type, length, label | Maintain entity metadata |
+| Rule set designer | Add table, define columns, edit rows in a grid with typed cells, test panel (inputs → result + matched rows), publish | code, version, status, table, hit policy, rows, effective dates | Maintain business rules |
+| Usage report | Pick date range and legal entity, export CSV | active users 30/90 d, by role, by legal entity, principals by kind, API requests by entity | View usage reports |
 
 Rules: the designer validates against the JSON Schema on every keystroke (debounced 300 ms) and against the registry on save; apply shows a dry-run migration SQL with an estimated lock time and refuses if > 2 s; keyboard: `Ctrl+S` save draft, `Ctrl+Shift+P` publish.
 
@@ -613,6 +931,8 @@ Rules: the designer validates against the JSON Schema on every keystroke (deboun
 - **BR-3.7** Soft-deleted rows (`deleted_at` set) are excluded from list and get by default; `?include_deleted=true` requires the `delete` action.
 - **BR-3.8** `on_delete: restrict` returns 409 `REFERENCED_BY` with the referencing entity and count; cascade is limited to 10,000 child rows per request.
 - **BR-3.9** PII `sensitive` fields are masked (`***`) in responses unless the Permission grants the field explicitly; they are never included in list endpoints.
+- **BR-3.10** Decision table hit policies: `first` returns the lowest-ordinal matching row; `priority` returns the highest `priority` (ties broken by layer customer > partner > sys, then ordinal); `all` returns every match in ordinal order; `collect_sum` sums numeric result columns across matches. A table with no matching row returns `{matched: false}` and the caller decides (hooks treat it as validation code `RULE_NO_MATCH`). `between` is inclusive on both ends; string comparison is case-insensitive; dates and `effective_*` are evaluated in the tenant time zone.
+- **BR-3.11** A named user is "active" on a day when a human principal obtained a token or used one (gateway request) on that day; counts are distinct per tenant, never summed across legal entities; the snapshot for day D is computed at 01:30 tenant time on D+1 and is never recomputed except by an explicit rebuild with the reason recorded.
 
 ### 0.3.8 Acceptance criteria
 
@@ -624,6 +944,9 @@ Rules: the designer validates against the JSON Schema on every keystroke (deboun
 - **AC-3.6** Given Tenant, LegalEntity and User regenerated from metadata, When the wave-2 test suites run, Then they pass unchanged and the hand-written handlers are removed from the repo. (FR-3.6)
 - **AC-3.7** Given a diff request between versions 3 and 5, When called, Then the response lists each added/changed/removed field with classification additive/breaking. (FR-3.8)
 - **AC-3.8** Given a field with `pii=sensitive`, When listed by a user without the field permission, Then the field is absent; when fetched by id, Then masked. (FR-3.3, BR-3.9)
+- **AC-3.9** Given a published rule set `VendorRiskBand` with a 1,000-row `priority` table (inputs country, spend_band, payment_terms), When evaluated 10,000 times with random inputs from the fixture, Then every result equals the reference evaluator's result, `explain` lists the matched rows, and p95 ≤ 5 ms. (FR-3.13, BR-3.10)
+- **AC-3.10** Given a customer extension package adding 3 rows to `VendorRiskBand`, When applied, Then a hook calling `rules.eval` returns the customer row for the overlapping inputs and the sys row otherwise. (FR-3.9, FR-3.13)
+- **AC-3.11** Given 50 users of whom 30 obtained tokens in the last 30 days (2 of them in two legal entities) plus 5 service accounts, When the nightly snapshot runs, Then `active_users_30d = 30`, the legal-entity breakdown sums to 32, and `principals_by_kind.service = 5`. (FR-3.14, BR-3.11)
 
 ### 0.3.9 Test plan and fixtures
 
@@ -668,6 +991,147 @@ Depends on: wave 2 (tenant_id/RLS, duties `Maintain entity metadata`, `Apply ext
 
 Open questions: (1) GraphQL alongside REST — default no until wave 35; decide by wave 10. (2) Customer scripted hooks (sandboxed TS or WASM) — default declarative only through wave 30; decide by wave 20. (3) Soft delete default for main tables — default on for master data groups, off for transactions; decide by wave 6.
 
+### 0.3.13 Parameters and setup
+
+Registry parameters are rows of `metadata.parameter` edited on Admin workspace → Metadata → Parameters (the AX "System parameters" / SAP SE11 technical-settings equivalent for the kernel); entity-level attributes are part of the YAML and are listed in FR-3.1–FR-3.4.
+
+| Parameter | Scope | Type | Default | Allowed values | Effect | AX equivalent | SAP equivalent |
+|---|---|---|---|---|---|---|---|
+| `metadata.extensions.enabled` | tenant (feature flag) | bool | true | true/false | allows `ExtensionPackage` apply in the tenant | Feature management (D365) | SCC4 client role "customizing allowed", SE06 system change option |
+| `metadata.extension.max_fields_per_entity` | tenant | int | 200 | 1–500 | FR-3.9 limit | none | append structure field limit (practical) |
+| `metadata.extension.max_enum_values_per_package` | tenant | int | 50 | 1–200 | FR-3.9 limit | none | DD07L fixed values |
+| `metadata.extension.max_lock_seconds` | environment | decimal | 2 | 0.5–10 | apply refuses when the dry-run lock estimate exceeds this | none | SE14 table conversion (no guard) |
+| `metadata.decimal.default_scale_qty`, `metadata.decimal.default_scale_amount` | tenant | int, int | 6, 2 | 0–12 | FR-3.2 defaults | EDT `NoOfDecimals` | Domain DECIMALS (CURR/QUAN) |
+| `metadata.rounding_mode` | tenant | enum | half_even | half_even, half_away_from_zero | write-time rounding (BR-3.6); wave 11 ledger may override per legal entity | `round()` X++ semantics | `ROUND` ABAP semantics per currency (TCURX) |
+| `metadata.api.page_size_default`, `metadata.api.page_size_max` | environment | int, int | 50, 500 | 10–200, 100–2,000 | FR-3.6 list paging | none (`maxbuffersize`) | OData `$top` limits (/IWFND/MAINT_SERVICE) |
+| `metadata.api.deprecated_version_days` | tenant | int | 180 | 30–365 | BR-3.1 sunset window | none | none |
+| `metadata.soft_delete_default` | tenant | enum per table group | on for main/group, off for transaction (OQ 3) | on/off per table_group | default of `deleted_at` generation | none | deletion flag (LOEVM) convention |
+| `metadata.pii.sensitive_mask` | tenant | string | `***` | ≤ 8 chars | BR-3.9 mask text | none | none (UI masking via SU24 field auth) |
+| `metadata.registry.cache_ttl_seconds` | environment | int | 60 | 10–600 | ETag cache in gateway/shell | AOS metadata cache | SE11 buffer settings (technical settings → buffering) |
+| `metadata.golden.entities[]` | repository | list | 10 reference entities (FR-3.11) | entity names | golden snapshot set | none | none |
+| `metadata.hooks.expression_timeout_ms` | environment | int | 50 | 10–500 | declarative hook evaluation guard | none | none |
+| `metadata.hooks.coded_timeout_ms` | environment | int | 2,000 | 100–10,000 | coded hook guard; exceeded → 500 with trace id | none | none |
+| `rules.table.max_rows`, `rules.table.max_columns` | tenant | int, int | 10,000, 20 | ≤ 50,000, ≤ 30 | FR-3.13 limits | none | BRF+ decision table limits (none enforced) |
+| `rules.compile_on_publish` | environment | bool | true | true | compiled tree built on `ruleset.published` | none | BRF+ generation (FDT_GENERATE) |
+| `usage.snapshot_time` | tenant | HH:MM tenant time | 01:30 | any | FR-3.14 / BR-3.11 | License count refresh batch | USMM schedule |
+| `usage.retention_years` | tenant | int | 3 | 1–10 | snapshot retention | none | none |
+| `usage.active_window_days[]` | tenant | int list | 30, 90 | 7–365 | windows reported | "Named user license count" window (D365: 30 days) | ST03N month aggregates |
+
+### 0.3.14 Inquiries and reports
+
+| Name | Type | Filters & parameters | Columns / measures | Source projection | AX equivalent | SAP equivalent |
+|---|---|---|---|---|---|---|
+| Entity catalog | list inquiry | domain, status, layer, has extensions | name, domain, version, status, table group, field count, extension count, published at | `metadata.entity` | AOT Tables node, Data entities list (D365) | SE11 table list, SE16 DD02L |
+| Field list | drill-down | entity, layer, pii, audit | field, type, length/precision, required, default, pii, audit, visibility, layer | `metadata.field` | Table → Fields (AOT), SysDictField | SE11 → Fields, DD03L |
+| Where-used | drill-down | field, type definition, enum | referencing entities, relations, indexes, hooks, rule sets, saved views (wave 5) | registry cross-reference | Cross-reference (xRef) | SE11 → Where-used list (RSWBO052) |
+| Entity diff | drill-down | entity, from version, to version | added / changed / removed items with classification additive/breaking | `/diff` endpoint | Model store compare | SE09 version management, SE39 split-screen |
+| Extension package log | list inquiry | status, entity, date | package, layer, version, status, migration id, applied by/at, error | `metadata.extension_package` | Models form (installed models) | SE03 object directory, transport log |
+| Schema drift report | operational report (nightly) | domain | entity, column, registry type, live type, drift kind | registry vs. `information_schema` | none | SE14 consistency check (database utility) |
+| Type and enum catalogs | list inquiry | base type, layer | code, base type, length, label, usages | `metadata.type_definition`, `metadata.enum_definition` | EDTs, Base Enums (AOT) | SE11 domains / data elements, DD07L |
+| API catalog | list inquiry | domain, api_major, status | entity, OpenAPI link, AsyncAPI link (wave 4), deprecated until | `/v1/metadata/openapi/{entity}` | Data entities (IsPublic) | /IWFND/MAINT_SERVICE (OData services), SEGW projects |
+| Generated-API performance | KPI | entity, period | rps, p50/p95/p99, error rate | gateway metrics (Prometheus) | SQL insights (LCS) | ST03N transaction profile, STAD |
+| Rule set catalog and row inquiry | list inquiry / drill-down | rule set, version, table, effective date, layer | code, version, status, tables, rows; per row: conditions, results, effective dates, layer | `metadata.rule_set`, `metadata.decision_row` | Policy rules list | FDT_WORKBENCH object list, decision table display |
+| Rule evaluation trace | drill-down | rule set, inputs | matched rows, hit policy applied, result, duration | `evaluate?explain=true` | none | BRF+ simulation (FDT_WORKBENCH → Simulate), trace (FDT_TRACE) |
+| Usage report | operational report | date range, legal entity | active users 30/90 d, by role, by legal entity, principals by kind, API requests by entity, row counts | `metadata.usage_snapshot` | License inquiries → Named user license counts, License usage by role; SSRS License report | USMM / SLAW, ST03N user profile, RSUSR200 |
+
+### 0.3.15 Printed and electronic documents
+
+No printed documents. Electronic documents:
+
+| Document | Trigger | Layout elements | Formats | Numbering sequence | Legal / retention requirement |
+|---|---|---|---|---|---|
+| OpenAPI 3.1 document per entity | publish | info (entity, version, api_major), paths, components (schemas from JSON Schema), security scheme | JSON, YAML | version = entity version | retained for every published version (immutable) |
+| JSON Schema per entity | publish | `$id`, properties with types/formats, required, enum values | JSON Schema 2020-12 | same | same |
+| TypeScript client package | publish | typed fetch client, request/response types | npm tarball `@passage/client-<domain>@<version>` | semver from version | retained in registry 7 years (same as images) |
+| Migration file | publish / extension apply | Atlas SQL with header (entity, version, package) | `.sql` under `migrations/<domain>/` | timestamped Atlas name | permanent in Git |
+| Extension package manifest | package validated | code, layer, version, targets, dry-run SQL, lock estimate | YAML (`passage-gen export`) | package code + version | permanent in `metadata.extension_package` |
+| Rule set export | administrator action | tables with columns, rows (conditions, results, effective dates, layer) | CSV per table, YAML for the whole set | rule set code + version | retained with the version |
+| Usage report export | administrator action | snapshot rows | CSV, JSON | none | retained by requester; snapshots 3 years |
+
+### 0.3.16 Periodic and batch jobs
+
+| Job | Schedule default | Partitioning key | Idempotency / checkpoint | Typical runtime target | Failure handling | Monitor / alert |
+|---|---|---|---|---|---|---|
+| Schema drift check | nightly 01:00 UTC | domain | compares registry to `information_schema`; report rows keyed by (date, domain) | < 1 min per domain | report with drift rows; no automatic change | `SchemaDrift` (ticket) |
+| Extension apply job | on demand (`/apply`) | package | transactional per domain (BR-3.4); package status is the checkpoint | ≤ 60 s | package → `failed` with SQL error; rerun after fix | `ExtensionApplyFailed` (notify) |
+| Non-constant default backfill | after an apply that needs it | entity, id range (10 k rows) | checkpoint per range in `metadata.backfill` | 100 k rows/min | resume from checkpoint (wave 4 framework after wave 4; CronJob loop before) | `BackfillStalled` (> 30 min no progress) |
+| Deprecated version sunset | daily 02:00 UTC | entity | removes `/v{n}` routes whose sunset passed; idempotent | < 10 s | none | none |
+| Golden snapshot verification | on every CI run and nightly | entity | deterministic | < 2 min | CI failure | CI status |
+| Rule set compile | on `ruleset.published` | rule set | compiled tree keyed by (code, version) | < 5 s for 10 k rows | publish rolled back with error | `RuleCompileFailed` (notify) |
+| Usage snapshot | daily 01:30 tenant time | tenant | one row per (tenant, date); rebuild only with explicit reason (BR-3.11) | < 30 s per tenant | retry 3×; missing day flagged in the report | `UsageSnapshotMissing` (ticket) |
+| Usage snapshot retention | monthly | tenant | deletes rows older than `usage.retention_years` | < 10 s | none | none |
+
+### 0.3.17 Security duties and privileges
+
+| Duty | Privileges (entry points) | Segregation-of-duties conflicts | Default roles that include it |
+|---|---|---|---|
+| Maintain entity metadata | `PUT /v1/metadata/entities/{name}/versions/{v}`, `/publish`, `/compat-check`, Entity designer, Type and enum catalogs | with Apply extensions in production tenants (designer of a sys change should not also apply customer packages without review) | Platform engineer, Solution architect |
+| View entity metadata | `GET /v1/metadata/*`, Entity catalog, Field list, Where-used, Entity diff, API catalog | none | all authenticated users (read of the published version is `any`), Auditor |
+| Apply extensions | `POST /v1/metadata/extensions`, `/validate`, `/apply`, `/retire`, Extension packages screen | with Maintain entity metadata; with Approve workflow for the extended entity (wave 4) | Customer administrator, Partner consultant |
+| Maintain business rules | `/v1/rules/sets`, versions, publish, `rows:import`, Rule set designer | with the business duties that consume a rule set (for example Maintain tax setup, wave 13): a rule author should not also post the documents the rule governs; enforced by wave 48 SoD rule `RULE_AUTHOR_VS_POSTER` | Solution architect, Business administrator |
+| Evaluate business rules | `POST /v1/rules/{code}/evaluate` | none | all services (internal), any authenticated user for `explain` on rules they may read |
+| View usage reports | `GET /v1/metadata/usage`, Usage report | none | Tenant owner, Auditor, Platform operator |
+| Run metadata jobs | trigger drift check, backfill, snapshot rebuild | none | Platform engineer |
+
+### 0.3.18 Message catalog
+
+| Code | Severity | User text | Cause | Remediation | Raised by |
+|---|---|---|---|---|---|
+| MDK-0301 | error | Entity definition invalid at `{json_path}`: {schema error} | JSON Schema validation | fix the YAML | FR-3.1 |
+| MDK-0302 | error | Breaking change `{change}` on {entity} requires `breaking: true` and api_major {n+1} | compat classifier | mark breaking and bump, or make the change additive | FR-3.5, BR-3.2 |
+| MDK-0303 | error | Version {v} of {entity} is published and immutable | PUT on a published version | create a new draft version | BR-3.1 |
+| MDK-0304 | error | {entity} version {v} was published by {user} after your draft; rebase | concurrent publish (409) | reload and reapply | BR-3.5 |
+| MDK-0305 | error | Extension field names must start with `x_` | naming rule | rename | FR-3.9 |
+| MDK-0306 | error | Enum value code {code} must be ≥ 1000 for extensions | layer rule | choose a code ≥ 1000 | FR-3.9 |
+| MDK-0307 | error | Extension cannot change type or required flag of sys field {field} | invariant | add a new field instead | 0.3.4 invariants |
+| MDK-0308 | error | Apply refused: estimated lock {s} s exceeds {max} s on {table} ({rows} rows) | dry-run lock estimate | schedule a backfill or split the change | 0.3.6 rules |
+| MDK-0309 | error | Package {code} v{v} failed at {stage}: {sql error}; nothing was applied | transactional apply | fix and rerun | BR-3.4 |
+| MDK-0310 | error | Value for {field} exceeds precision ({p},{s}) | VALUE_OUT_OF_RANGE (422) | correct the value | BR-3.6 |
+| MDK-0311 | error | Cannot delete {entity} {id}: referenced by {n} {child_entity} rows | REFERENCED_BY (409) | delete or reassign children | BR-3.8 |
+| MDK-0312 | error | Cascade delete limit of 10,000 child rows exceeded | BR-3.8 limit | delete in batches (wave 4 job) | BR-3.8 |
+| MDK-0313 | error | Validation failed: {message} (field {field}) | declarative/coded hook returned ok=false | correct the field | FR-3.7 |
+| MDK-0314 | error | Internal error in hook {name}; trace {trace_id} | coded hook panic / timeout | report with trace id | FR-3.7 |
+| MDK-0315 | warning | Record changed by {user} at {time}; your version {v} is stale | If-Match mismatch (409) | reload | FR-3.4 |
+| MDK-0316 | error | Decision table {table} has {n} rows; limit {max} | FR-3.13 limit | split the table or raise `rules.table.max_rows` | FR-3.13 |
+| MDK-0317 | warning | No row matched in {table} for the given inputs | `{matched:false}` | add a catch-all row or handle `RULE_NO_MATCH` | BR-3.10 |
+| MDK-0318 | error | Row {ordinal}: condition on column {column} uses operator {op} not allowed for type {type} | typed cell validation | choose an allowed operator | FR-3.13 |
+| MDK-0319 | error | Rule set {code} v{v} is referenced by hook {hook} on {entity}; deprecate instead of retiring | reference check | deprecate with sunset date | FR-3.13 |
+| MDK-0320 | info | Usage snapshot for {date} rebuilt by {user}: {reason} | explicit rebuild | none | BR-3.11 |
+
+### 0.3.19 Performance budgets and capacity
+
+| Operation | Volume assumption | Latency target (p50 / p95 / p99) | Throughput target | Storage growth per year | Index / partition strategy | Degradation behavior under 3× load |
+|---|---|---|---|---|---|---|
+| Registry read (current version, ETag) | 5,000/min at shell cold start; 200/min steady | 5 ms / 20 ms / 40 ms | 500 rps | `metadata.*` < 1 M rows total (< 1 GB) | `entity(tenant_id, domain, name, version)` unique; ETag served from cache | cache serves stale ≤ 60 s; registry HPA 2 → 4 |
+| Generated entity read (`GET /{id}`) | 1,000 rps on dev cluster (FR-3.12) | 10 ms / 50 ms / 90 ms | 1,000 rps per 3 pods | per entity: rows × avg 1 KB | PK + declared indexes; `(tenant_id, …)` leading column everywhere | pool exhaustion → 503 with `Retry-After`; p95 may reach 150 ms |
+| Generated entity create | 200 rps | 30 ms / 120 ms / 200 ms | 200 rps | same | hooks inline; outbox row (wave 4) | same |
+| List with filter/sort, page 50 | 300 rps | 20 ms / 80 ms / 150 ms | 300 rps | n/a | cursor pagination on (sort key, id) | large offsets refused (cursor only) |
+| Publish (generate + migrate) | 20/day | 10 s / 30 s / 60 s | 2 concurrent per domain | migrations ≈ 2 MB/year | one Atlas job per domain | queued; CI concurrency limit |
+| Extension apply (100 M-row table) | 5/month | 15 s / 45 s / 60 s | 1 at a time per domain | n/a | `ADD COLUMN` fast default; `CREATE INDEX CONCURRENTLY` | refused above lock estimate (MDK-0308) |
+| Rule evaluation (1,000-row table) | 2,000/s across services at peak | 0.5 ms / 5 ms / 10 ms | 5,000/s per service instance | rule tables ≤ 50 MB per tenant | compiled tree in memory per (code, version) | CPU-bound; no errors |
+| Usage snapshot | 1/day/tenant | 5 s / 30 s / 60 s | n/a | 365 rows × ≈ 20 KB per tenant per year | `(tenant_id, snapshot_date)` unique | runs later; `UsageSnapshotMissing` after 24 h |
+
+### 0.3.20 Localization and compliance hooks
+
+- Labels and help text: `label` and `help` on entities, fields, enum values and rule columns are stored as keys in the registry; English is the only language in wave 3. Wave 48 label packs supply translations per country/language and the shell (wave 5) resolves them per user locale; the extension point is `metadata.label` keyed by (object, locale).
+- Formats: dates, decimals and money are stored canonically (ISO 8601, `decimal`, `money` + ISO 4217) and formatted in the shell per user preference (wave 5); country packs never change storage types. Currency minor-unit scale comes from the wave 11 currency table; until then `money` uses scale 6 for storage and 2 for display.
+- PII classification (`pii=personal|sensitive`) is the hook used by wave 48 privacy tooling (GDPR/CCPA erasure, data-subject export) and by wave 5 audit masking; country packs may raise a field's classification but never lower it.
+- Statutory fields: country packs add fields through `ExtensionPackage` with `layer=partner` (for example Brazil `x_cnpj`, India `x_gstin`) — the same mechanism customers use; validation patterns go in `pattern` and in rule sets (FR-3.13).
+- Decision tables are the extension point for country-dependent determinations (tax groups, document types, numbering formats): a country pack ships `sys`-layer rows with a `country` input column; customers override with `customer`-layer rows.
+- Retention: metadata versions are never deleted (audit trail of schema), which satisfies SOX/ITGC change-management evidence (wave 48) together with the Git history of `metadata/entities`.
+- Usage metering stores no personal data beyond counts; per-user activity lives in wave 2 login events and wave 5 audit.
+
+### 0.3.21 Coverage closure
+
+| Register row (inventory section + AX form or SAP T-code) | Status before | Disposition | Note |
+|---|---|---|---|
+| AX §12.30.2 System administration → Inquiries & Reports: License inquiries (Named user license counts, License usage by role) (register row 265) | PARTIAL-3 | ADDED as FR-3.14 | Usage report in 0.3.14; `UsageSnapshot` entity; named users distinct per tenant (BR-3.11); counts inform PRD §12 Q1, never block |
+| AX §12.30.2 System administration → SSRS: License report / Named user counts (register row 266) | PARTIAL-3 | ADDED as FR-3.14 | CSV/JSON export in 0.3.15; PDF layout arrives with the wave 15 report designer |
+| AX §12.30.3 System administration → Periodic: Licensing → Named user license count refresh (register row 268) | PARTIAL-3 | ADDED as FR-3.14 | nightly Usage snapshot job (0.3.16) at `usage.snapshot_time`; rebuild with reason (MDK-0320) |
+| SAP §13.31 Cross-Application → BRF+ (BRFPLUS / FDT_WORKBENCH) / Decision Service Management: business rules framework (register row 348) | PARTIAL-3 | ADDED as FR-3.13 | `RuleSet` / `DecisionTable` / `DecisionRow`; hit policies in BR-3.10; evaluate and explain endpoints; consumers in waves 4, 13, 15, 30, 48 must use it |
+| SAP §13.31 Cross-Application → SAP Business Rules (BRF+ in GRC, tax, dispute, output) (register row 352) | PARTIAL-3 | ADDED as FR-3.13 | same mechanism; per-domain rule sets are authored in the consuming waves (tax 13, output 15, credit/dispute 30, GRC 48) |
+| SAP §13.31 Customizing (SPRO) → BRF+ applications, functions, rulesets, decision tables, expressions (FDT_*) (register row 354) | PARTIAL-3 | ADDED as FR-3.13 | application = rule set, function = table evaluation, ruleset/decision table = `DecisionTable`, expression = condition cells and `computed_expr` from FR-3.3; formulas beyond the expression subset are deferred with open question 2 |
+
 ---
 
 ## 0.4 Wave 4: Event Backbone, Workflow & Batch
@@ -699,6 +1163,8 @@ AX runs approvals through the workflow framework (`WorkflowTable`, `WorkflowVers
 | Background jobs | `BatchJob`, `Batch`, `BatchGroup`, `SysOperation` data contracts, recurrence (`SysRecurrence`) | SM36/SM37, TBTCO/TBTCP, variants, job classes A/B/C | `BatchJob` definition, `BatchRun`, `BatchTask`, cron recurrence, priority | full |
 | Job monitoring | Batch job history, `BatchJobHistory`, Infolog | SM37, job log (TBTC5), SM50 | Job monitor UI, run log, Prometheus metrics | improved |
 | Restart / reprocess | Rerun batch job, no checkpoints | BD87 IDoc reprocess, job copy in SM37 | checkpoint per partition; resume from last checkpoint | improved |
+| Outbound email | Email parameters (`SysEmailParameters`: SMTP, Exchange, mail sending mode batch/client), Email distributor batch (`SysEmailBatch`), Outbound email status (`SysOutgoingEmailTable`), Retry failed | SAPconnect (SCOT) nodes, send job RSCONN01, SOST send status, SOSV/SOSG | notify service: `OutboundMessage` queue, provider adapter (SMTP / HTTP API), distributor job, status inquiry, retry, bounce ingest | full |
+| Message templates and notification settings | Email templates (`SysEmailTable` / `SysEmailMessageTable`, per language), Workflow approval email templates, Workflow parameters → Notifications, User options → Workflow notifications (email, in-app, digest), Alert email templates | SO10 standard texts in workflow tasks, SWNCONFIG extended notifications (digest schedule, delivery), SBWP settings, SU3 user defaults | `MessageTemplate` (channel, language, placeholders, layout), sys templates per workflow event, `NotificationPreference` per user, per-definition notify flags | full |
 
 ### 0.4.3 Functional requirements
 
@@ -719,6 +1185,10 @@ AX runs approvals through the workflow framework (`WorkflowTable`, `WorkflowVers
 - **FR-4.10 Job monitor** — Must. The system shall show runs, tasks, progress (rows/sec, ETA), logs and errors; allow cancel, hold, resume and rerun-failed-partitions; retain history 90 days.
 - **FR-4.11 Metadata-changed events** — Must. The metadata registry shall emit `dev.passage.metadata.entity.published.v1` through its own outbox (first production consumer of the backbone).
 - **FR-4.12 Chaos and replay** — Should. The platform shall support topic replay from an offset or timestamp per consumer group and ship a chaos test that kills a service between commit and publish.
+- **FR-4.13 Outbound email and message delivery** — Must. The system shall provide a `notify` service (TS) with a provider adapter interface (`Send`, `GetStatus`, `IngestBounce`) implemented for SMTP (STARTTLS or implicit TLS, credentials via ESO) and for an HTTP API provider (the SMTP relay is the P0 default per open question 2); a per-tenant sender identity (from address, display name, reply-to, envelope domain whose SPF/DKIM/DMARC are the customer's responsibility and are checked by a "verify sender" action); an `OutboundMessage` queue (channel email | in_app | webhook; status queued → sending → sent | failed | bounced; attempts; provider message id); a distributor job (every 60 s, batch 500, 5 attempts with backoff 1 min → 1 h); a mail sending mode per tenant (`immediate` for workflow and alerts, `batch` for digests and reports); attachments ≤ 10 MB total per message; an outbound status inquiry; manual retry; and a bounce webhook/IMAP ingest that marks the message `bounced` and, after 3 hard bounces, flags the recipient user (`identity.user.email_status=bouncing`).
+  - Notes: in-app messages are rows in the same table read by the shell notification tray (wave 5) via SSE; webhook deliveries sign the body with HMAC-SHA256 (`X-Passage-Signature`) and retry on non-2xx; messages are retained 90 days (body) and 3 years (metadata); a tenant with no sender identity falls back to the platform default `no-reply@<env>.passage.dev` with a warning on the parameters form; the service never generates email in test environments unless `notify.allowlist_domains` matches the recipient.
+- **FR-4.14 Message templates and notification settings** — Must. The system shall provide `MessageTemplate` (code, channel, language, subject, body in Mustache syntax with placeholders resolved from the entity record via metadata (`{{record.number}}`, `{{record.amount | money}}`), the workflow context (`{{workitem.due_at | date}}`, `{{instance.submitted_by.display_name}}`, `{{link}}` deep link to the work item or record) and standard texts from wave 5 (`{{text:CODE}}`); an HTML layout wrapper per tenant (logo, footer); versioning and `sys`/`customer` layers so customers override shipped templates per language); shipped `sys` templates for `workflow.workitem.assigned`, `.escalated`, `.delegated`, `instance.completed`, `instance.change_requested`, `batch.run.failed`, `identity.user.invited`; per-user `NotificationPreference` (per event class: in_app, email, none; digest none | daily at HH:MM | weekly on day; language; quiet hours); per-`WorkflowDefinition` flags (notify_on_assign, notify_on_escalate, notify_submitter_on_complete, comment_required); and a "preview with sample record" action.
+  - Notes: rendering is fail-closed — a missing placeholder or render error marks the message `failed` with NTF-0407 instead of sending a blank; templates are rendered in the recipient's language, falling back to the tenant default then `en`; digests aggregate pending in-app items into one email at the chosen time (BR-4.12); user-level workflow delegation stays in `WorkItem` (FR-4.7) and is referenced, not duplicated, by preferences.
 
 ### 0.4.4 Data model
 
@@ -764,6 +1234,51 @@ AX runs approvals through the workflow framework (`WorkflowTable`, `WorkflowVers
 
 **BatchJob / BatchRun / BatchTask** (`workflow.batch_*`): BatchJob has id, tenant_id, code (unique), handler, params_schema jsonb, partition_strategy, partition_count, concurrency, priority, cron, time_zone, exclusive, retry_policy jsonb, status (active, hold); BatchRun has id, job_id, params jsonb, status (FR-4.9), scheduled_at, started_at, ended_at, rows_total, rows_done, error, triggered_by; BatchTask has id, run_id, partition_no, status, checkpoint jsonb, attempts, last_error, rows_done.
 
+**OutboundMessage** (`notify.outbound_message`, partitioned monthly)
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| id | uuid | yes | PK |
+| tenant_id | uuid | yes | RLS |
+| channel | enum | yes | email, in_app, webhook |
+| recipient_user_id, recipient_address | uuid, varchar(254) | one of | user for in_app/email; address for external email; URL for webhook |
+| template_code, template_version, language | varchar(48), int, char(5) | no | null when sent raw by a service |
+| subject, body_html, body_text | varchar(255), text, text | yes (email) | rendered content; body retained 90 days |
+| related_entity, related_record_id | varchar(48), uuid | no | deep link target |
+| status | enum | yes | queued, sending, sent, failed, bounced, read (in_app only) |
+| attempts, next_attempt_at, last_error | int, timestamptz, text | yes/no/no | BR-4.8-style backoff |
+| provider_message_id | varchar(200) | no | for bounce correlation |
+| priority | enum | yes | immediate, batch |
+| created_at, sent_at | timestamptz | yes/no | |
+
+**MessageTemplate** (`notify.message_template`)
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| id | uuid | yes | PK |
+| tenant_id | uuid | yes | `sys` tenant for shipped templates |
+| code | varchar(64) | yes | e.g. `workflow.workitem.assigned`; unique with language, layer, version |
+| channel | enum | yes | email, in_app, webhook |
+| language | char(5) | yes | BCP 47 (`en`, `de-DE`) |
+| layer | enum | yes | sys, customer |
+| version, status | int, enum | yes | draft, published, retired |
+| subject, body | varchar(255), text | yes | Mustache; placeholders validated against the event's payload schema at publish |
+| layout_id | uuid | no | FK tenant HTML layout |
+| sample_payload | jsonb | no | for preview |
+
+**NotificationPreference** (`notify.preference`)
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| user_id | uuid | yes | PK with event_class |
+| tenant_id | uuid | yes | |
+| event_class | enum | yes | workflow_assigned, workflow_escalated, workflow_completed, batch_failed, alert (wave 5), system |
+| channels | enum set | yes | in_app, email; default in_app + email for workflow_assigned |
+| digest | enum | yes | none, daily, weekly |
+| digest_time, digest_day | time, int | no | tenant time zone; day 1–7 |
+| quiet_hours | int4range | no | hours suppressed for email (digest still sent) |
+| language | char(5) | no | null = user locale |
+
 Invariants: exactly one active `WorkflowDefinition` version per (entity, legal_entity); a WorkItem is terminal once acted; `BatchRun` of an exclusive job cannot overlap another run of the same job; outbox rows are never updated. Indexing: `outbox_event(created_at)`; `work_item(tenant_id, assignee_id, status)`; `instance(tenant_id, entity, record_id)`; `batch_run(job_id, scheduled_at desc)`. Partitioning: `work_item` and `batch_task` by month from wave 30.
 
 ### 0.4.5 APIs and events
@@ -782,8 +1297,15 @@ Invariants: exactly one active `WorkflowDefinition` version per (entity, legal_e
 | GET/POST/PUT | /v1/batch/jobs, /{id} | Define jobs | by code | Maintain batch jobs |
 | POST | /v1/batch/jobs/{id}/runs | Start run | Idempotency-Key | Maintain batch jobs |
 | GET/POST | /v1/batch/runs/{id}, /{id}/cancel, /{id}/resume, /{id}/rerun-failed | Monitor and control | run id + action | View batch history / Maintain batch jobs |
+| GET/POST/PUT | /v1/notify/templates, /{code}/versions/{v}, /{code}/versions/{v}/publish, /{code}/preview | Templates and preview | by version | Maintain message templates |
+| POST | /v1/notify/messages | Enqueue a message (internal services; template or raw) | Idempotency-Key (24 h) | internal / Send notifications |
+| GET/POST | /v1/notify/messages?status=&recipient=&from=&to=, /{id}/retry | Outbound status and retry | retry: message id | View outbound messages / Maintain notification settings |
+| GET/PUT | /v1/notify/preferences/me, /v1/notify/preferences/{user_id} | Notification preferences | last write wins | self / Maintain users |
+| GET/PUT/POST | /v1/notify/settings, /v1/notify/settings/verify-sender, /test-send | Tenant sender identity, provider, mode; test | n/a | Maintain notification settings |
+| POST | /v1/notify/bounces | Provider bounce webhook (HMAC-verified) | provider message id | provider credential |
+| GET | /v1/notify/inbox?unread=true | In-app messages for the shell tray (SSE at `/v1/notify/inbox/stream`) | n/a | self |
 
-Validation: approve/reject require a comment when the definition flags `comment_required`; delegate target must hold the step's role; a run request against a `hold` job returns 409.
+Validation: approve/reject require a comment when the definition flags `comment_required`; delegate target must hold the step's role; a run request against a `hold` job returns 409; a template publish fails when a placeholder is not in the event's payload schema (NTF-0406); `test-send` is limited to 10 per hour per tenant.
 
 | Event | Trigger | Payload fields | Consumers |
 |---|---|---|---|
@@ -793,6 +1315,8 @@ Validation: approve/reject require a comment when the definition flags `comment_
 | dev.passage.workflow.instance.completed.v1 | terminal status | instance_id, outcome (approved/rejected/canceled/recalled), completed_at | owning service, audit, shell |
 | dev.passage.batch.run.started.v1 / completed.v1 / failed.v1 | run transitions | job_code, run_id, rows_total, rows_done, duration_ms, error | job monitor, alerting, audit |
 | dev.passage.metadata.entity.published.v1 | registry outbox | (see wave 3) | events service (topic/schema create) |
+| dev.passage.notify.message.sent.v1 / failed.v1 / bounced.v1 | distributor outcome | message_id, channel, template_code, recipient_user_id (no address in payload), attempts, error | audit, alerting (`NotifyFailureRate`), identity (bounce flag) |
+| dev.passage.notify.template.published.v1 | template publish | code, version, language, layer | notify workers (cache reload), audit |
 
 ### 0.4.6 User experience
 
@@ -804,6 +1328,10 @@ Validation: approve/reject require a comment when the definition flags `comment_
 | Batch jobs | Define, schedule, hold, run now | code, handler, cron, last run, next run | Maintain batch jobs |
 | Job monitor | Watch progress, cancel, resume, rerun failed, view log | run, status, rows/sec, ETA, errors by partition | View batch history |
 | Topic catalog | Browse topics, schemas, consumer lag | topic, partitions, schema version, lag | Maintain batch jobs |
+| Message templates | Create, edit (subject/body with placeholder picker), preview with sample record, publish per language | code, channel, language, layer, version, status | Maintain message templates |
+| Outbound messages | Filter by status/recipient/date, open rendered message, retry, cancel queued | sent at, channel, recipient, subject, status, attempts, last error, provider id | View outbound messages |
+| Notification settings (tenant) | Sender identity, provider, mode, allowlist, verify sender, test send | from, reply-to, provider, mode, SPF/DKIM check result | Maintain notification settings |
+| My notification preferences | Per event class choose channels, digest, quiet hours, language | event class, in-app, email, digest, time | self |
 
 Rules: bulk approve is limited to 100 items per action and requires a confirmation listing document totals; the inbox refreshes from events within 2 s; designer validates expressions against the entity's current metadata; keyboard `a` approve, `r` reject, `d` delegate on a focused row.
 
@@ -819,6 +1347,9 @@ Rules: bulk approve is limited to 100 items per action and requires a confirmati
 - **BR-4.8** Retry policy: activity failures retry up to 5 times with backoff 2 s × 2^n capped at 5 min; after that the task is `error` and the run continues other partitions; run ends `error` if any task is `error`.
 - **BR-4.9** A workflow definition change never alters running instances; they finish on their version.
 - **BR-4.10** Poison events after 10 delivery attempts go to the DLQ with the last error in header `dlqreason`; a DLQ depth > 0 for 10 min alerts.
+- **BR-4.11** Outbound message status machine: queued → sending → sent | failed; sent → bounced (provider bounce); queued → canceled (administrator); in_app: queued → sent → read. Rendering happens at enqueue time (the stored body is what was sent); a render error is `failed` with NTF-0407 and never a partially rendered send. Retries: attempts 1–5 at 1 min, 5 min, 15 min, 1 h, 1 h; after the fifth failure the message stays `failed` and only a manual retry resets `attempts`.
+- **BR-4.12** Digest: for a user with `digest=daily 08:00`, every in-app item of the configured event classes created since the previous digest is listed in one email at 08:00 tenant time; items already read in the shell are omitted; an empty digest is not sent; `workflow_escalated` always sends immediately regardless of digest (escalations are time-critical); quiet hours delay immediate email to the end of the window but never delay in-app.
+- **BR-4.13** Bounce handling: a hard bounce (5xx, unknown recipient) marks the message `bounced`; the third hard bounce for the same address within 30 days sets `identity.user.email_status=bouncing`, suppresses further email to that user (in-app continues) and notifies Security administrators; a soft bounce (4xx, mailbox full) is retried per BR-4.11.
 
 ### 0.4.8 Acceptance criteria
 
@@ -831,6 +1362,11 @@ Rules: bulk approve is limited to 100 items per action and requires a confirmati
 - **AC-4.7** Given a consumer group replay from `T-1h`, When executed, Then events are redelivered and the dedupe table suppresses side effects for already-processed ids. (FR-4.12)
 - **AC-4.8** Given an exclusive job with a running instance, When a second run is requested, Then 409 `RUN_OVERLAP`. (FR-4.9)
 - **AC-4.9** Given a step whose assignee expression resolves to nobody, When the step is entered, Then it escalates to the workflow administrator within 5 s and emits `workitem.escalated`. (FR-4.7)
+- **AC-4.10** Given a tenant with a verified SMTP sender and a user whose `workflow_assigned` preference is in_app + email, When a work item is assigned, Then an in-app message appears in the tray within 2 s and an email rendered from the `sys` template (subject contains the document number, body contains the deep link) reaches the CI mail sink within 60 s. (FR-4.13, FR-4.14)
+- **AC-4.11** Given the SMTP relay is down for 20 minutes, When 50 messages are enqueued, Then all 50 show `queued`/`sending` with attempts in the outbound inquiry, none is lost, and all are `sent` within 10 minutes of the relay returning. (FR-4.13, BR-4.11)
+- **AC-4.12** Given a user with `digest=daily 08:00` and 7 unread assignments of which 2 were read in the shell, When 08:00 tenant time passes, Then exactly one email lists 5 items and no per-item emails were sent. (FR-4.14, BR-4.12)
+- **AC-4.13** Given a customer template override for `workflow.workitem.assigned` in `de-DE` referencing placeholder `{{record.nonexistent}}`, When published, Then the publish is rejected with NTF-0406 naming the placeholder. (FR-4.14)
+- **AC-4.14** Given the provider reports a hard bounce three times for the same address within 30 days, When the third bounce is ingested, Then the user's `email_status` is `bouncing`, subsequent messages to that user are in-app only, and Security administrators receive a notification. (BR-4.13)
 
 ### 0.4.9 Test plan and fixtures
 
@@ -876,13 +1412,161 @@ Depends on: wave 3 (entity metadata for schemas and outbox generation, registry 
 
 Open questions: (1) JSON vs Avro/Protobuf for payloads — default JSON Schema (matches metadata kernel); decide by wave 4 start. (2) Email provider in P0 — default SMTP relay via ESO secret; decide by wave 5. (3) Temporal namespace per tenant vs shared with search attribute — default shared; decide by wave 48.
 
+### 0.4.13 Parameters and setup
+
+Tenant values live on Admin workspace → Workflow parameters, Batch parameters and Notification settings (the AX "Workflow parameters", "Email parameters" and "System parameters → Alerts" forms; SAP SWU3, SWNCONFIG, SCOT and SM36 settings).
+
+| Parameter | Scope | Type | Default | Allowed values | Effect | AX equivalent | SAP equivalent |
+|---|---|---|---|---|---|---|---|
+| `events.topic.partitions_default` | environment | int | 12 | 1–96 | FR-4.1 default partition count | none | qRFC queue count (SMQR) |
+| `events.topic.retention_days` | environment | int | 7 | 1–30 (compacted topics unlimited) | Kafka retention | AIF message retention | IDoc reorganization (RSETESTD / SARA IDOC) |
+| `events.max_message_bytes` | environment | int | 1,048,576 | ≤ 1 MB | larger payloads use claim-check | none | IDoc segment limits |
+| `outbox.sweep_hours` | environment | int | 24 | 1–168 | outbox row deletion after capture | none | tRFC LUW deletion (SM58 reorg) |
+| `consumer.dedupe_window_days` | environment | int | 7 | 1–30 | BR-4.5 | none | none |
+| `consumer.max_attempts`, `consumer.backoff_max_seconds` | environment | int, int | 10, 300 | 1–50, 10–3,600 | FR-4.5 retry policy before DLQ | Business events retry (D365) | tRFC retry (SM59 `Connection attempts`) |
+| `workflow.enforce` | tenant × entity (flag) | bool | false until a definition is activated | true/false | submit required before posting | Workflow configuration → Activate | Flexible workflow scenario activation |
+| `workflow.admin_user_id` | tenant | uuid | Tenant owner | any active user | escalation target when nobody resolves (FR-4.7) | Workflow parameters → Workflow administrator | SWU3 workflow system administrator; SWIA |
+| `workflow.delegation_max_depth` | tenant | int | 3 | 1–5 | FR-4.7 chain limit | Workflow delegation | HRUS_D2 substitution chain |
+| `workflow.default_sla` | tenant | ISO 8601 duration | P2D | PT1H–P30D | default due date per step | Workflow → time limits (default) | Deadline monitoring latest end |
+| `workflow.history_retention_days` | environment | int | 90 | 30–3,650 | Temporal history retention | Workflow cleanup batch (`WorkflowCleanup`) | SWWL / RSWWWIDE deletion |
+| `batch.max_runtime_hours` | tenant | int | 6 | 1–48 | FR-4.9 run timeout | Batch job "Execution time" alerts | SM37 job runtime / `rdisp/max_wprun_time` |
+| `batch.default_checkpoint_rows` | environment | int | 10,000 | 1,000–1,000,000 | FR-4.9 | none | none |
+| `batch.max_concurrency_per_tenant` | tenant | int | 32 | 1–128 | total concurrent tasks per tenant | Batch server groups / max batch threads | SM61 server groups, `rdisp/wp_no_btc` |
+| `batch.history_retention_days` | tenant | int | 90 | 30–730 | FR-4.10 | Batch job history cleanup | SM37 → delete old jobs (RSBTCDEL2) |
+| `notify.provider` | tenant | enum | smtp | smtp, http_api | FR-4.13 adapter | Email parameters → SMTP / Exchange | SCOT SMTP node |
+| `notify.smtp.host`, `.port`, `.tls`, `.credential_ref` | tenant | string, int, enum, secret ref | platform relay, 587, starttls, ESO path | — | outbound SMTP | Email parameters → SMTP server, port, SSL, user/password | SCOT node → host, port, TLS, logon data |
+| `notify.sender.from`, `.display_name`, `.reply_to` | tenant (legal entity override) | email, string, email | `no-reply@<env>.passage.dev` | verified domain | sender identity | Email parameters → "Send from" | SCOT default domain, SO_USER_AUTOMATIC |
+| `notify.mode` | tenant | enum per event class | immediate (workflow, alerts), batch (digests) | immediate, batch | when the distributor sends | Mail sending mode: batch / client | SCOT send job RSCONN01 period |
+| `notify.distributor_interval_seconds` | environment | int | 60 | 15–900 | distributor polling | Email distributor batch recurrence | RSCONN01 job period |
+| `notify.max_attempts` | tenant | int | 5 | 1–10 | BR-4.11 | Email distributor "Retries" | SCOT retry settings |
+| `notify.allowlist_domains` | environment | domain list | empty in prod, `passage.dev` in dev/stage | domains | non-prod recipient guard | none | SCOT address area restrictions |
+| `notify.body_retention_days`, `notify.metadata_retention_years` | tenant | int, int | 90, 3 | 7–365, 1–10 | outbound history retention | Outbound email status cleanup | SOST reorg (RSBCS_REORG) |
+| `notify.default_language` | tenant | BCP 47 | en | any | template fallback | Email templates default language | SO10 language key fallback |
+
+### 0.4.14 Inquiries and reports
+
+| Name | Type | Filters & parameters | Columns / measures | Source projection | AX equivalent | SAP equivalent |
+|---|---|---|---|---|---|---|
+| Work items (by user, queue, status, overdue) | list inquiry | assignee, status, entity, due before, legal entity | document, step, assignee, original assignee, due, age, SLA state | `workflow.work_item` | Work items assigned to me / Work item inquiries | SBWP, SWI5, SWI2_DEAD |
+| Workflow history per document | drill-down | entity, record | steps, assignees, actions, comments, timers, durations | `workflow.instance` + Temporal history | Workflow history / tracking details | SWIA, SWI1, workflow log |
+| Workflow performance | KPI | definition, period | submitted, approved, rejected, median cycle time, % escalated, % within SLA | `workflow.*` projections | SSRS Workflow performance | SWI2_DURA, SWI2_FREQ |
+| Delegation inquiry | list inquiry | user, date range | delegator, delegate, scope, from, to | `WorkItem.original_assignee_id` + delegation settings | Delegation inquiry (WorkflowDelegation) | HRUS_D2 substitutes |
+| Batch job list | list inquiry | status, priority, handler | code, handler, cron, next run, last run status, exclusive | `workflow.batch_job` | Batch jobs list | SM37 job overview |
+| Batch run history and errors | drill-down | job, status, date range | run, status, rows, duration, failed partitions, error | `workflow.batch_run`, `batch_task` | Batch job history / Batch job errors; SSRS Batch job report | SM37 job log (TBTC5) |
+| Topic and consumer lag | operational report | topic, consumer group | partitions, end offset, committed offset, lag, lag seconds | Kafka admin API | Business events catalog / AIF queue | SMQ1/SMQ2, SM58, WE05 |
+| DLQ report | operational report (daily) | topic, period | event type, count, first/last seen, top `dlqreason` | `…dlq` topics | AIF exceptions | BD87 IDoc status 51 list, SM58 errors |
+| Outbound message status | list inquiry | status, channel, recipient, template, date | sent at, recipient, subject, status, attempts, last error, provider id | `notify.outbound_message` | Outbound email status (E-mail sending status) | SOST |
+| Notification delivery KPI | KPI | period, template | sent, failed, bounced, median send latency | `notify.outbound_message` | none | SOSV send statistics |
+| Template catalog | list inquiry | code, language, layer, status | code, channel, languages present, customer override flag, version | `notify.message_template` | Email templates (`SysEmailTable`) | SO10 text list, SE75 text objects |
+
+### 0.4.15 Printed and electronic documents
+
+| Document | Trigger | Layout elements | Formats | Numbering sequence | Legal / retention requirement |
+|---|---|---|---|---|---|
+| Work item notification email | `workitem.assigned` / `.delegated` (preference allows email) | header: tenant layout logo; subject: `{entity} {record.number} awaits your approval`; body: submitter, amount, due, comment, deep link, approve/reject links (signed, single-use, 72 h); footer: preference link | email (HTML + text) | none (message id) | body 90 days, metadata 3 years |
+| Escalation email | `workitem.escalated` | from/to assignee, overdue by, deep link | email | none | same |
+| Completion email to submitter | `instance.completed` with `notify_submitter_on_complete` | outcome, approver, comment, link | email | none | same |
+| Daily / weekly digest | digest schedule (BR-4.12) | list of pending items grouped by entity with due dates | email | none | same |
+| Batch failure email | `batch.run.failed` to job owner | job, run, failed partitions, first error, link to monitor | email | none | same |
+| Webhook delivery | subscribed event class | CloudEvents JSON body, `X-Passage-Signature` | HTTPS POST | CloudEvents `id` | delivery log 3 years |
+| AsyncAPI document | metadata publish | channels, messages, schemas | AsyncAPI 3.0 YAML/JSON | entity version | retained per version |
+
+### 0.4.16 Periodic and batch jobs
+
+| Job | Schedule default | Partitioning key | Idempotency / checkpoint | Typical runtime target | Failure handling | Monitor / alert |
+|---|---|---|---|---|---|---|
+| Outbox sweep | hourly | domain database | deletes captured rows older than `outbox.sweep_hours` (by `created_at` and Debezium LSN) | < 1 min | retry next hour | `OutboxBacklog` (> 100 k rows) |
+| Dedupe table sweep | daily 02:00 UTC | consumer group | deletes rows older than window | < 5 min | retry | none |
+| DLQ report | daily 06:00 UTC | topic | report keyed by date | < 1 min | none | `DLQNonEmpty` (10 min) |
+| Temporal history archival | daily | namespace | Temporal archival to object storage | < 30 min | retried by Temporal | `TemporalArchivalFailed` |
+| Workflow SLA timers | event-driven (durable timers, not polled) | workflow id | Temporal timer | fires within 1 s of due | survives restarts | `TemporalWorkflowFailedRate` |
+| Email distributor | every 60 s | tenant × priority | `SELECT … FOR UPDATE SKIP LOCKED` batch 500; status is the checkpoint | < 10 s per batch | BR-4.11 retries | `NotifyFailureRate` (> 5% over 15 min), `NotifyQueueAge` (oldest queued > 10 min) |
+| Digest builder | every 15 min (sends users whose digest time fell in the window) | tenant | one digest per (user, period) keyed in `notify.digest_log` | < 1 min | missing digest sent next window | `DigestBacklog` |
+| Bounce ingest (IMAP mode) | every 5 min | tenant mailbox | provider message id unique | < 30 s | retry | `BounceIngestFailed` |
+| Outbound message retention | daily 03:30 UTC | month partition | nulls bodies after 90 days; detaches partitions after 3 years | < 5 min | retry | none |
+| Batch history cleanup | daily 04:00 UTC | tenant | deletes runs older than `batch.history_retention_days` | < 5 min | retry | none |
+
+### 0.4.17 Security duties and privileges
+
+| Duty | Privileges (entry points) | Segregation-of-duties conflicts | Default roles that include it |
+|---|---|---|---|
+| Maintain workflows | `/v1/workflows/definitions*`, activate, cancel instances, Workflow designer | with Approve workflow for the same entity (designing your own approval chain) | Workflow administrator |
+| Approve workflow | `/v1/workitems/{id}/actions` (approve, reject, delegate, request_change), Inbox | with the entity's create/post duty on the same record (submitter cannot approve own submission; enforced at runtime, NTF-0410) | every business role with approval steps |
+| Submit for approval | `POST /v1/workflows/instances`, recall | none | entity maintainers |
+| Maintain batch jobs | `/v1/batch/jobs*`, run, cancel, hold, resume, rerun-failed, `/v1/events/replay` | none | Platform engineer, Batch operator |
+| View batch history | `GET /v1/batch/runs*`, Job monitor, Topic catalog read | none | Batch operator, Auditor |
+| Maintain message templates | `/v1/notify/templates*`, preview, publish | none | Workflow administrator, Communications administrator |
+| Maintain notification settings | `/v1/notify/settings*`, verify sender, test send, retry, cancel queued, other users' preferences | with View outbound messages is acceptable; with Maintain secrets (SMTP credentials are ESO references, never visible) | Tenant owner, Workflow administrator |
+| View outbound messages | `GET /v1/notify/messages*`, rendered body view | message bodies may contain document data — masked for `pii=sensitive` placeholders | Workflow administrator, Help desk, Auditor |
+| Send notifications | `POST /v1/notify/messages` | none | internal service principals only |
+
+### 0.4.18 Message catalog
+
+| Code | Severity | User text | Cause | Remediation | Raised by |
+|---|---|---|---|---|---|
+| WFL-0401 | error | Recall is not allowed after step {n} was approved | RECALL_NOT_ALLOWED (409) | ask the workflow administrator to cancel | BR-4.1, AC-4.6 |
+| WFL-0402 | error | A comment is required to {action} | `comment_required` | add a comment | 0.4.5 validation |
+| WFL-0403 | error | {user} cannot receive this item: missing role {role} | delegate target check | pick a user who holds the role | 0.4.5 validation |
+| WFL-0404 | error | Delegation chain limit ({max}) reached | FR-4.7 | approve or reject directly | FR-4.7 |
+| WFL-0405 | warning | No approver resolved for step {n}; escalated to the workflow administrator | empty assignee set | fix the assignee rule | FR-4.7, AC-4.9 |
+| WFL-0406 | error | This document is already in approval (instance {id}) | duplicate submit | open the existing instance | FR-4.7 |
+| WFL-0407 | error | Bulk approve is limited to 100 items | UX rule | approve in batches | 0.4.6 rules |
+| WFL-0408 | error | Job {code} is on hold | run on hold job (409) | release the hold | 0.4.5 validation |
+| WFL-0409 | error | Job {code} already has a running instance | RUN_OVERLAP (409) | wait or cancel the running run | FR-4.9, AC-4.8 |
+| WFL-0410 | error | You cannot approve a document you submitted | runtime SoD | delegate to another approver | 0.4.17 |
+| WFL-0411 | error | Run {id} exceeded the maximum runtime of {h} h and was canceled | `batch.max_runtime_hours` | raise the limit or add partitions | FR-4.9 |
+| EVT-0401 | error | Schema change for {type} is incompatible at `{path}` | BACKWARD_TRANSITIVE check | make the change additive or bump `v<n+1>` | FR-4.3, AC-4.4 |
+| EVT-0402 | warning | Event {id} moved to DLQ after {n} attempts: {reason} | poison event | fix consumer, then replay | BR-4.10 |
+| EVT-0403 | error | Payload exceeds 1 MB; use a claim-check reference | message size | store payload in object storage | FR-4.1 |
+| NTF-0401 | error | Sender {address} is not verified for tenant {tenant} | SPF/DKIM check failed | publish DNS records and re-verify | FR-4.13 |
+| NTF-0402 | warning | Delivery to {recipient} failed (attempt {n} of {max}): {provider error}; retrying at {time} | provider/transient error | none; watch the outbound inquiry | BR-4.11 |
+| NTF-0403 | error | Delivery to {recipient} failed permanently after {max} attempts | retries exhausted | fix the cause and retry manually | BR-4.11 |
+| NTF-0404 | warning | {user}'s email address is bouncing; email suppressed, in-app delivery continues | 3 hard bounces | correct the address in the IdP | BR-4.13 |
+| NTF-0405 | info | Recipient {address} is outside the non-production allowlist; message not sent | `notify.allowlist_domains` | add the domain in dev/stage only | FR-4.13 |
+| NTF-0406 | error | Template {code} ({language}) uses unknown placeholder `{{placeholder}}` | publish-time validation | use a placeholder from the picker | FR-4.14, AC-4.13 |
+| NTF-0407 | error | Message not sent: template render failed ({reason}) | runtime render error | fix the template; retry | FR-4.14, BR-4.11 |
+| NTF-0408 | error | Attachments exceed 10 MB for one message | size limit | send a link instead | FR-4.13 |
+
+### 0.4.19 Performance budgets and capacity
+
+| Operation | Volume assumption | Latency target (p50 / p95 / p99) | Throughput target | Storage growth per year | Index / partition strategy | Degradation behavior under 3× load |
+|---|---|---|---|---|---|---|
+| Outbox publish (commit → Kafka) | 2 M events/day/tenant, peak 2,000/s | 100 ms / 500 ms / 1 s | 6,000 events/s per Kafka cluster | Kafka 7-day retention ≈ 1.2 TB at 1 KB × 170 M; outbox rows transient | partition key = aggregate id; 12 partitions | lag grows; no loss; `ConsumerLagHigh` at 10 s |
+| Consumer processing | same | 5 ms / 50 ms / 200 ms per event | scale by partitions | dedupe table ≈ 14 M rows per group (7 days) | dedupe PK (consumer_group, event_id) | lag, not errors |
+| Workflow action (approve) | 20 k/day/tenant, peak 50/s | 80 ms / 300 ms / 600 ms | 200/s | `work_item` ≈ 7 M rows/year/tenant | `work_item(tenant_id, assignee_id, status)`; monthly partitions from wave 30 | Temporal task queue backlog; UI shows "processing" |
+| Inbox query | 5,000 users × 20 views/day | 20 ms / 80 ms / 150 ms | 300 rps | n/a | same index | cached 2 s per user |
+| Batch run (1 M rows, 16 partitions) | 50 runs/day/tenant | n/a | ≥ 20 k rows/s aggregate | `batch_task` ≈ 300 k rows/year | `batch_run(job_id, scheduled_at desc)` | concurrency capped per tenant; runs queue by priority A > B > C |
+| Email enqueue + render | 50 k messages/day/tenant, peak 100/s | 10 ms / 40 ms / 100 ms | 500/s | ≈ 18 M rows/year/tenant; bodies ≈ 100 GB/year before 90-day nulling | monthly partitions; `(tenant_id, status, next_attempt_at)` | queue grows; immediate priority served first |
+| Email send (enqueue → provider accepted) | same | 5 s / 60 s / 3 min | provider limit (default 50/s per tenant) | n/a | n/a | throttled to provider limit; `NotifyQueueAge` alert |
+| In-app delivery (event → tray) | same | 300 ms / 2 s / 4 s | 1,000/s | same table | SSE fan-out by user | SSE reconnect with `Last-Event-ID` |
+
+### 0.4.20 Localization and compliance hooks
+
+- Language: templates exist per BCP 47 language (FR-4.14); recipient language → tenant default → `en`. Wave 48 label packs ship `sys` template translations for each supported language; formatting filters (`money`, `date`, `number`) use the recipient's locale and the legal entity currency.
+- Calendars and time zones: SLA timers are wall-clock in P0 (BR-4.3); wave 6 adds work calendars per legal entity so `P2D` means two working days; digest times and cron schedules use the tenant time zone (DST transitions: a 02:30 job on a spring-forward day runs at 03:00; on fall-back it runs once).
+- Email compliance: CAN-SPAM / CASL / EU ePrivacy do not apply to transactional workflow mail, but every email carries a preference link and the sender's postal address from the legal entity footer when `notify.include_legal_footer=true` (default true for marketing-like digests in EU legal entities). Wave 48 adds country-specific footer content (for example German Impressum fields) through the tenant HTML layout.
+- Privacy: message bodies may contain personal data; bodies are nulled after 90 days (`notify.body_retention_days`), event payloads carry user ids not addresses, and erasure requests (wave 48) redact `recipient_address` and bodies for the subject.
+- Workflow evidence: approval history (Temporal + `workflow.instance`) is the SOX approval-control evidence; retention follows the record's table group (wave 5 audit) because approval actions are also audited entries.
+- Data residency: Kafka and Temporal run in the tenant's region; email providers are configurable so EU tenants can choose an EU-hosted relay.
+
+### 0.4.21 Coverage closure
+
+| Register row (inventory section + AX form or SAP T-code) | Status before | Disposition | Note |
+|---|---|---|---|
+| AX §12.29.4 Organization administration → Setup: Organization → Workflow approval email templates (register row 261) | PARTIAL-4 | ADDED as FR-4.14 | `MessageTemplate` with sys templates per workflow event and customer overrides per language |
+| AX §12.30.1 System administration → Alerts → Alert parameters / Email templates / Email parameters (SMTP) / Outbound email status (`EventParameters`, `SysEmailTable`, `SysEmailParameters`) (register row 262) | PARTIAL-4 | ADDED as FR-4.13 | SMTP/provider parameters (0.4.13), templates (FR-4.14), outbound status inquiry (0.4.14); alert parameters themselves are in wave 5 (FR-5.17) |
+| AX §12.30.1 System administration → Email → Email distributor batch (`SysEmailBatch`) (register row 263) | PARTIAL-4 | ADDED as FR-4.13 | distributor job every 60 s (0.4.16) |
+| AX §12.30.3 System administration → Periodic: Email → Send email distributor batch / Retry failed (register row 267) | PARTIAL-4 | ADDED as FR-4.13 | distributor + BR-4.11 retries + manual `/retry` |
+| AX §12.30.4 System administration → Setup: Alerts → Alert parameters (polling intervals, retention, drill-down links) / Email templates / Email parameters (SMTP, Exchange, mail sending mode: batch/client) / Email distributor (register row 269) | PARTIAL-4 | ADDED as FR-4.13 | `notify.mode` = mail sending mode; Exchange via SMTP submission or HTTP API adapter; alert polling/retention parameters in 0.5.13 (FR-5.17) |
+| AX §12.31.4 Home / role centers / workflow → Setup: Workflow → Notification settings (email, in-app, digest) / Workflow email templates (register row 274) | PARTIAL-4 | ADDED as FR-4.14 | `NotificationPreference` (channels, digest, quiet hours) and per-definition notify flags; BR-4.12 |
+
 ---
 
 ## 0.5 Wave 5: UX Shell, Number Sequences, Audit & Observability
 
 ### 0.5.1 Scope and business context
 
-AX users work in list pages and details forms generated from the AOT (form datasources, `ListPageInteraction`, action panes, FactBoxes, `SysQueryForm` advanced filters, `SysLastValue` personalization, `SysTableLookup` lookups, Infolog) and D365 workspaces, saved views and the Excel add-in; SAP users work in SAP GUI dynpros and ALV grids with layout variants, F4 search helps, SE16N, and the Fiori launchpad with catalogs and groups. Document numbering comes from AX `NumberSequenceTable` / `NumberSequenceReference` / `NumberSequenceScope` (shared, company, legal entity, fiscal calendar period, operating unit) with continuous and non-continuous modes and `NumberSequenceList` pre-allocation, or SAP `SNRO` number range objects with `NRIV` intervals, buffering (`NRIV_LOKAL`) and gap-free settings. Change tracking is AX `SysDatabaseLog` / `SysDatabaseLogSetup` (Insert/Update/Delete/RenameKey) or SAP change documents (`CDHDR`/`CDPOS`, `SCDO` objects, `DBTABLOG` table logging). Monitoring is LCS environment monitoring or Solution Manager / ST03N / SM21 / ST22. Wave 5 replaces all of this with a React module-federation shell, a metadata-driven form renderer, a number sequence service with a Jepsen-tested gap-free mode, an audit service that derives field-level history from CDC into a hash-chained append-only store, OpenTelemetry across every service into Prometheus/Tempo/Loki/Grafana, and CSV/XLSX import-export against any entity. At wave end the admin workspace runs at `app.<env>.passage.dev` and Phase 0 is demonstrated to stakeholders. Out of scope: full-text search across documents (wave 46), report designer (wave 15), mobile PWA (wave 32), localization of labels (wave 48), fiscal-period scopes for sequences (wave 6 supplies calendars; scope type is reserved here).
+AX users work in list pages and details forms generated from the AOT (form datasources, `ListPageInteraction`, action panes, FactBoxes, `SysQueryForm` advanced filters, `SysLastValue` personalization, `SysTableLookup` lookups, Infolog) and D365 workspaces, saved views and the Excel add-in; SAP users work in SAP GUI dynpros and ALV grids with layout variants, F4 search helps, SE16N, and the Fiori launchpad with catalogs and groups. Document numbering comes from AX `NumberSequenceTable` / `NumberSequenceReference` / `NumberSequenceScope` (shared, company, legal entity, fiscal calendar period, operating unit) with continuous and non-continuous modes and `NumberSequenceList` pre-allocation, or SAP `SNRO` number range objects with `NRIV` intervals, buffering (`NRIV_LOKAL`) and gap-free settings. Change tracking is AX `SysDatabaseLog` / `SysDatabaseLogSetup` (Insert/Update/Delete/RenameKey) or SAP change documents (`CDHDR`/`CDPOS`, `SCDO` objects, `DBTABLOG` table logging). Monitoring is LCS environment monitoring or Solution Manager / ST03N / SM21 / ST22. Wave 5 replaces all of this with a React module-federation shell, a metadata-driven form renderer, a number sequence service with a Jepsen-tested gap-free mode, an audit service that derives field-level history from CDC into a hash-chained append-only store, OpenTelemetry across every service into Prometheus/Tempo/Loki/Grafana, and CSV/XLSX import-export against any entity. At wave end the admin workspace runs at `app.<env>.passage.dev` and Phase 0 is demonstrated to stakeholders. Out of scope: full-text search across business documents and analytics content beyond attachment text (wave 46), report designer (wave 15), mobile PWA (wave 32), localization of labels (wave 48), fiscal-period scopes for sequences (wave 6 supplies calendars; scope type is reserved here).
 
 #### Pain points solved (10x lens)
 
@@ -908,6 +1592,9 @@ AX users work in list pages and details forms generated from the AOT (form datas
 | Database log / change documents | `SysDatabaseLog`, `SysDatabaseLogSetup`, database log viewer | CDHDR/CDPOS, SCDO, DBTABLOG (SCU3) | audit service from CDC; `AuditEntry`/`AuditField`; viewer per record | improved (hash chain) |
 | Excel integration | Excel add-in (OData data entities), Open in Excel | ALV export, Analysis for Office, LSMW upload | CSV/XLSX import-export per entity with staging and validation | partial (no live Excel binding) |
 | Monitoring | LCS environment monitoring, Event Viewer, SQL insights | Solution Manager, ST03N, SM21, ST22, STAD | OpenTelemetry → Grafana/Tempo/Loki/Prometheus; SLO dashboards | improved |
+| Document management | Document handling (`DocuRef`, `DocuValue`, `DocuView`), Document types (`DocuType`: file/note/URL/image/template, group, location archive/database/SharePoint), File types (`DocuFileTypes`), Active document tables, Document management parameters (`DocuParameters`: archive directory, max file size) | GOS attachments (SOOD/SOFFCONT1), ArchiveLink (OAC0 content repositories, OAC3 links, TOA01), DMS document info records (CV01N, DRAW) with originals check-in/check-out, DC30 workstation applications (TDWP), conversion runs | `Attachment` / `AttachmentVersion` on any record, `DocumentType`, `FileType`, S3-compatible storage locations, check-out/check-in, previews, retention and purge, content search | full (native CAD viewing dropped: PLM owns CAD) |
+| Alerts | Alert rules (`EventRule`, `EventRuleField`), change-based and due-date alerts (`EventJobCUD`, `EventJobDueDate` batch), Notification list / My alerts (`EventInbox`), Alert parameters (`EventParameters`) | Alert Management (ALRTCATDEF, ALRTPROC), S/4 Situation Handling (SIT_TEMPLATE), SWE2 change-document event → workflow, Fiori My Notifications | `AlertRule` (change-based / due-date) evaluated from CDC events and a due-date job; alert inbox in the shell; delivery via wave 4 notify | improved (event-driven, no polling batch) |
+| Standard texts | Notes with document type "Note" and restriction internal/external; sales/purchase "Form notes" (`FormLetterRemarks`) | SO10 standard texts (STXH/STXL), SE75 text objects and IDs, SO72 | `StandardText` library with language versions and placeholders, referenced by templates and document layouts | full |
 
 ### 0.5.3 Functional requirements
 
@@ -931,6 +1618,12 @@ AX users work in list pages and details forms generated from the AOT (form datas
   - Notes: sampling 100% in dev, tail-based 10% + 100% of errors and > 1 s in stage/prod; PII never in span attributes (lint rule).
 - **FR-5.14 Dashboards and alerting** — Must. Grafana shall ship per-service SLO dashboards (availability, latency, error budget burn), platform dashboards (Kafka lag, Temporal, Postgres, Argo), and Alertmanager routes to a PagerDuty-compatible webhook with severities page/ticket/notify.
 - **FR-5.15 Import/export** — Must. Users shall import CSV or XLSX into any entity through staging (header mapping saved as a template per entity, type coercion, validation using the entity's JSON Schema and hooks, error file with row and field) and export any list view to CSV/XLSX respecting RLS, permissions and PII masks; 100,000 rows import ≤ 5 min; runs as a wave-4 batch job.
+- **FR-5.16 Document management** — Must. The system shall attach documents to any record of any entity whose metadata sets `attachments: true` (default true for main and transaction table groups), and one document may be linked to many records. Each attachment has a `DocumentType` (code, kind file | note | url | image | template, group, storage location, allowed file types, max size, restriction internal | external, retention class, `active_entities[]`), versions (`AttachmentVersion`: file, sha256, size, mime, uploaded by/at), and an optional check-out lock. Storage locations are S3-compatible buckets (per tenant prefix; credentials via ESO) or `database` for notes; uploads use pre-signed URLs (≤ 100 MB default, `FileType.max_bytes` per type); every upload is malware-scanned before it becomes `available`; previews (PDF first page, image thumbnail 320 px, Office documents converted to PDF) are generated by a conversion job; text is extracted from PDF, Office and text files into a Postgres `tsvector` so global search (FR-5.1) and the documents inquiry find attachment content.
+  - Notes: check-out sets `checked_out_by/at` and blocks new versions by others until check-in or an administrator force-release (lock expires after 7 days); `external` restriction marks documents that may print or send with external documents (wave 15/46 layouts); retention classes (`retain_years`, `on_expiry` purge | archive) drive the purge/archive job, which never purges a document under legal hold (flag set by wave 48) or linked to a record whose own retention has not expired; deleting a record leaves its attachments for the retention job; `active_entities[]` reproduces AX "Active document tables"; native CAD 2D/3D viewing is not provided (PLM systems keep CAD and link by URL document type).
+- **FR-5.17 Alert rules** — Must. Users shall create `AlertRule`s on any entity the user may read: `change-based` (field changes to / from a value, any change of a field, record created, record deleted; optional filter in the list filter grammar) or `due-date` (a date field is within N days before/after today, evaluated daily); with subject and message from a wave 4 `MessageTemplate` or inline text with placeholders, recipients (self, users, role, record owner field), delivery (in-app, email, both), legal entity scope (current or all), active from/to, and "organization-wide" rules (maintained by an administrator for all users of a role). Fired alerts appear in the shell Alerts list with a drill-down link to the record and can be marked read or deleted.
+  - Notes: change-based rules evaluate from the CDC stream already consumed by audit (no polling job; AX change-based batch is replaced); due-date rules evaluate in a daily job at `alerts.due_date_time` tenant time; the recipient must hold read on the entity at evaluation time, otherwise the alert is dropped and counted; a rule firing more than `alerts.max_per_rule_per_hour` (default 500) is suspended and its owner notified (ALR-0505); alerts are retained `alerts.retention_days` (default 90).
+- **FR-5.18 Standard texts** — Should. The system shall provide a `StandardText` library (code, purpose: document header / document footer / line / email / workflow, language versions, body in plain or limited Markdown with placeholders `{{record.field}}`, legal entity scope, effective dates, layer sys | customer) that wave 4 message templates reference as `{{text:CODE}}`, users insert into notes on any record (expanded at insert time), and wave 15/46 document layouts reference by code with the recipient's language.
+  - Notes: language fallback recipient → legal entity default → `en`; a text referenced by a published template or layout cannot be retired (STX-0503); edits create a new version, documents already issued keep the version they printed (layouts store the version id).
 
 ### 0.5.4 Data model
 
@@ -983,6 +1676,65 @@ AX users work in list pages and details forms generated from the AOT (form datas
 
 **ImportJob** (`io.import_job`): id, tenant_id, entity, template_id, file_ref, status (uploaded, validating, validated, loading, completed, failed, canceled), rows_total, rows_ok, rows_failed, error_file_ref, batch_run_id, created_by, created_at.
 
+**Attachment / AttachmentVersion / AttachmentLink** (`docs.attachment`, `docs.attachment_version`, `docs.attachment_link`)
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| id | uuid | yes | PK (each table) |
+| tenant_id, legal_entity_id | uuid | yes / no | RLS |
+| document_type_id | uuid | yes (Attachment) | FK DocumentType |
+| name, description | varchar(255), text | yes / no | |
+| restriction | enum | yes | internal, external |
+| status | enum | yes | uploading, scanning, available, quarantined, archived, purged |
+| current_version_id | uuid | no | FK AttachmentVersion |
+| checked_out_by, checked_out_at | uuid, timestamptz | no | lock (FR-5.16) |
+| legal_hold | bool | yes | default false; set by wave 48 |
+| retain_until | date | no | computed from retention class and linked record |
+| note_body | text | no | kind=note (location database) |
+| url | varchar(2,000) | no | kind=url |
+| Version: attachment_id, version_no, storage_key, sha256, size_bytes, mime, preview_key, extracted_text tsvector, uploaded_by, uploaded_at | — | — | storage_key = `t/<tenant>/docs/<attachment>/<version>` |
+| Link: attachment_id, entity, record_id, linked_by, linked_at | — | — | unique (attachment_id, entity, record_id) |
+
+**DocumentType / FileType** (`docs.document_type`, `docs.file_type`)
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| id | uuid | yes | PK |
+| tenant_id | uuid | yes | `sys` defaults: File, Note, URL, Image, Scanned invoice |
+| code | varchar(20) | yes | unique per tenant |
+| kind | enum | yes | file, note, url, image, template |
+| group | enum | yes | file, note, url, image, other |
+| storage_location | enum | yes | object_storage, database |
+| bucket_ref | varchar(120) | no | ESO secret path for a customer bucket; default platform bucket |
+| allowed_file_types | text[] | no | FileType codes; empty = all active |
+| max_bytes | bigint | yes | default 104,857,600 |
+| retention_years, on_expiry | int, enum | yes | default 10 / archive; purge, archive |
+| active_entities | text[] | no | empty = all entities with `attachments: true` |
+| FileType: code (extension), mime, max_bytes, preview (pdf_first_page, thumbnail, office_to_pdf, none), extract_text bool, blocked bool | — | — | blocked defaults: exe, bat, js, msi, ps1, scr |
+
+**AlertRule / AlertEvent** (`ui.alert_rule`, `ui.alert_event`)
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| id | uuid | yes | PK |
+| tenant_id | uuid | yes | |
+| owner_id | uuid | yes | creator |
+| entity | varchar(48) | yes | |
+| kind | enum | yes | change_based, due_date |
+| event | enum | yes | field_changed, field_changed_to, field_changed_from, record_created, record_deleted, due_in, overdue_by |
+| field, value | varchar(48), jsonb | no | per event |
+| days | int | no | due-date offset 0–365 |
+| filter | jsonb | no | list grammar (FR-3.6) |
+| recipients | jsonb | yes | `{self, user_ids[], role_ids[], owner_field}` |
+| delivery | enum set | yes | in_app, email |
+| template_code, subject, message | varchar(64), varchar(255), text | no | template or inline |
+| legal_entity_scope | enum | yes | current, all |
+| org_wide | bool | yes | administrator-maintained |
+| active_from, active_to, status | date, date, enum | yes/no/yes | active, suspended, expired |
+| Event: rule_id, entity, record_id, recipient_id, fired_at, subject, message, read_at, message_id (wave 4 OutboundMessage) | — | — | retained 90 days |
+
+**StandardText** (`ui.standard_text`): id, tenant_id, code (varchar 32, unique per tenant/version), purpose (enum), language (BCP 47), version, body (text ≤ 8,000), legal_entity_id (nullable = all), effective_from, effective_to, layer (sys, customer), status (draft, published, retired).
+
 Invariants: `next ≤ largest` unless `wrap`; for continuous sequences the set of `used` allocation numbers has no gaps between `smallest` and `next−1`; `hash` of entry n equals SHA-256(prev_hash of n ‖ canonical(n)) and `prev_hash` of n+1 equals `hash` of n; one default SavedView per (owner, entity). Indexing: `sequence(tenant_id, code, scope_value)` unique; `allocation(sequence_id, number)` unique; `entry(tenant_id, entity, record_id, occurred_at desc)`; `entry(tenant_id, seq)` unique; `saved_view(tenant_id, entity, owner_id)`. Partitioning: `audit.entry` and `audit.field` by month; retention 10 years for `transaction` table-group entities, 3 years otherwise, enforced by partition detachment to object storage from wave 46.
 
 ### 0.5.5 APIs and events
@@ -1001,6 +1753,14 @@ Invariants: `next ≤ largest` unless `wrap`; for continuous sequences the set o
 | GET | /v1/ui/search?q=&limit= | Global search | n/a | any (results filtered by read permission) |
 | POST/GET | /v1/io/imports, /{id}, /{id}/validate, /{id}/load, /{id}/errors | Import lifecycle | POST: file sha256 | Import data |
 | POST | /v1/io/exports | Export a view (async, returns file ref) | request id | Export data |
+| POST | /v1/docs/attachments (returns pre-signed upload URL), /{id}/versions, /{id}/links | Create attachment, add version, link to another record | Idempotency-Key; version: sha256 | entity update + Maintain documents |
+| GET | /v1/docs/attachments?entity=&record_id=&type=&q= | List by record, type, or content search | n/a | entity read |
+| GET | /v1/docs/attachments/{id}/content?version=, /preview | Pre-signed download (5 min), preview | n/a | entity read; `external` restriction irrelevant for read |
+| POST | /v1/docs/attachments/{id}/checkout, /checkin, /release | Lock management | attachment version | Maintain documents (release: Administer document management) |
+| GET/POST/PUT | /v1/docs/document-types, /v1/docs/file-types, /v1/docs/parameters | Setup | PUT: If-Match | Administer document management |
+| GET/POST/PUT/DELETE | /v1/alerts/rules, /{id} | Maintain alert rules (own; org-wide needs admin duty) | PUT: If-Match | Maintain alert rules / Administer alerts |
+| GET/POST | /v1/alerts/events?unread=, /{id}/read, /{id}/delete | Alert inbox | event id | self |
+| GET/PUT/POST | /v1/texts, /{code}/versions/{v}, /publish, /render?language=&record= | Standard texts | by version | Maintain standard texts (render: any) |
 
 | Event | Trigger | Payload fields | Consumers |
 |---|---|---|---|
@@ -1009,6 +1769,10 @@ Invariants: `next ≤ largest` unless `wrap`; for continuous sequences the set o
 | dev.passage.audit.chain.anchored.v1 | daily anchor | tenant_id, seq, hash, anchor_ref | compliance evidence (wave 48) |
 | dev.passage.io.import.completed.v1 / failed.v1 | import terminal | import_id, entity, rows_ok, rows_failed, error_file_ref | shell inbox, audit |
 | dev.passage.ui.view.shared.v1 | saved view shared | view_id, entity, role_id, owner | shell cache |
+| dev.passage.docs.attachment.available.v1 / quarantined.v1 | scan outcome | attachment_id, version_no, document_type, links[], sha256, size | shell (refresh panel), audit, OCR capture (wave 18) |
+| dev.passage.docs.attachment.purged.v1 / archived.v1 | retention job | attachment_id, retention class, reason | audit, compliance evidence (wave 48) |
+| dev.passage.alerts.alert.fired.v1 | rule match | rule_id, entity, record_id, recipient_id, delivery | notify (wave 4), shell alert badge |
+| dev.passage.texts.standard-text.published.v1 | publish | code, language, version | notify template cache, layouts (wave 46) |
 
 ### 0.5.6 User experience
 
@@ -1021,6 +1785,12 @@ Invariants: `next ≤ largest` unless `wrap`; for continuous sequences the set o
 | Audit viewer (record and global) | Filter, verify chain, export | time, actor, operation, field, old, new, trace link | View audit log |
 | Import/export | Upload, map, validate, load, download errors | entity, template, rows, status | Import data / Export data |
 | Observability (Grafana, linked) | Open trace from any record history; SLO dashboards | trace id, service, latency, error budget | Platform engineer |
+| Attachments panel (on any detail page) | Upload (drag-drop), new version, check out/in, link existing, preview, download, delete link | name, type, version, size, uploaded by/at, checked out by, restriction | entity read/update; Maintain documents |
+| Documents workspace | Search by type, record, content; bulk re-link; release locks; view quarantined | name, type, linked records, versions, status, retain until, legal hold | View documents / Administer document management |
+| Document management parameters | Document types, file types, storage locations, max sizes, retention classes | code, kind, location, max size, retention | Administer document management |
+| Alerts (shell bell) | Open record, mark read, delete, create rule from a field ("Notify me when…") | fired at, rule, record, message | self |
+| Alert rules | Create, edit, suspend, test against a sample record; org-wide rules | entity, event, field, recipients, delivery, active dates, status, fires/24 h | Maintain alert rules / Administer alerts |
+| Standard texts | Create, translate, preview with record, publish | code, purpose, language, version, used by | Maintain standard texts |
 
 Rules: inline edit commits per row on `Enter` or row blur with optimistic locking (409 shows a diff and lets the user reload or overwrite with permission); bulk edit previews affected rows and runs as a batch job above 200 rows; validation messages appear under the field and in a summary list; personalization never changes required-field visibility; the trace link from the audit viewer deep-links into Tempo with the `trace_id`.
 
@@ -1037,6 +1807,10 @@ Rules: inline edit commits per row on `Enter` or row blur with optimistic lockin
 - **BR-5.9** Deleting a record writes an entry with all audited fields as `old_value`; soft delete is an update with field `deleted_at`.
 - **BR-5.10** Saved view sharing: a shared view is read-only to others; copying creates a personal view; deleting a shared default view reverts affected users to the system default.
 - **BR-5.11** Import loads are all-or-nothing per file by default; `partial=true` loads valid rows and produces the error file for the rest; re-importing the same file sha256 is a no-op with 200 and the previous import id.
+- **BR-5.12** Attachment lifecycle: uploading → scanning → available | quarantined; available → archived (retention `on_expiry=archive`: object moved to the archive storage class, metadata kept) → purged; available → purged (retention `purge`). A version upload while `checked_out_by ≠ caller` returns 423 DOC-0504. `retain_until` = max over linked records of (record retention per its table group, wave 5 audit retention) and the document type's `retention_years` from upload; legal hold blocks archive and purge regardless.
+- **BR-5.13** Content dedupe: an upload whose sha256 equals an existing version in the same tenant stores no new object (the version points to the existing key); a purge deletes the object only when no version references it.
+- **BR-5.14** Change-based alert evaluation: a rule fires once per (rule, record, committed transaction) when its event matches the before/after values in the CDC change and the record passes `filter` after the change; changes by the alert's own recipient fire too unless `exclude_own_changes=true` (default true); due-date rules fire once per (rule, record, due date value) so re-running the daily job never duplicates; a rule on a field the recipient cannot read (field mask) is rejected at save (ALR-0502).
+- **BR-5.15** Standard text expansion: placeholders resolve against the record at insert or render time; an unknown placeholder fails publish (STX-0502); a text with `effective_to` in the past is not offered for insertion but still renders for documents that reference its version.
 
 ### 0.5.8 Acceptance criteria
 
@@ -1049,6 +1823,13 @@ Rules: inline edit commits per row on `Enter` or row blur with optimistic lockin
 - **AC-5.7** Given a CSV of 100,000 vendor stubs with 1% invalid rows, When imported with `partial=true`, Then 99,000 rows load in ≤ 5 min and the error file lists 1,000 rows with field and code. (FR-5.15)
 - **AC-5.8** Given a user saves a view with filter and columns and marks it default, When they reopen the list, Then the view applies; another user in the shared role sees it read-only. (FR-5.7, BR-5.10)
 - **AC-5.9** Given the SLO dashboard for `identity`, When error rate is forced to 2% for 10 min in stage, Then `SLOBurnRateHigh` reaches the webhook with severity page. (FR-5.14)
+- **AC-5.10** Given a PDF uploaded to a VendorStub record with document type "Scanned invoice", When the upload completes, Then the attachment is `available` within 30 s with a first-page preview, its text is found by global search, and linking the same attachment to a second record shows it on both. (FR-5.16)
+- **AC-5.11** Given the EICAR test file uploaded with an allowed extension, When scanning completes, Then the attachment is `quarantined`, no download URL is issued, and DOC-0503 is shown. (FR-5.16, BR-5.12)
+- **AC-5.12** Given user A has checked out an attachment, When user B uploads a new version, Then 423 DOC-0504 names A; after A checks in, B's upload succeeds as version n+1. (FR-5.16, BR-5.12)
+- **AC-5.13** Given a document type with `retention_years=1, on_expiry=purge` and one attachment under legal hold, When the retention job runs past expiry, Then the unheld attachment's object is deleted and `attachment.purged` is emitted, while the held one remains `available`. (FR-5.16, BR-5.12)
+- **AC-5.14** Given a change-based rule "VendorStub.status changes to Blocked, notify role AP clerk by in-app + email", When a vendor is blocked, Then each role member with read access receives one alert in the bell within 5 s and one email via wave 4 notify, and the user who made the change does not. (FR-5.17, BR-5.14)
+- **AC-5.15** Given a due-date rule "due_date within 3 days" on 1,000 records, When the daily job runs twice on the same day, Then each qualifying record fires exactly once per recipient. (FR-5.17, BR-5.14)
+- **AC-5.16** Given a standard text `PAY_TERMS_FOOTER` in `en` and `de-DE` referenced as `{{text:PAY_TERMS_FOOTER}}` in a workflow template, When rendered for a German-language recipient, Then the German version appears with placeholders resolved, and retiring the text is refused with STX-0503. (FR-5.18, BR-5.15)
 
 ### 0.5.9 Test plan and fixtures
 
@@ -1082,6 +1863,10 @@ Charts: `shell-web` (static assets behind the gateway, remotes manifest in Confi
 | AX `SysDatabaseLog` (table, recId, logType, createdBy, createdDateTime, data container) | AuditEntry/AuditField (read-only import) | loaded as historical entries with `source=ax`, excluded from the hash chain (separate chain `legacy`) |
 | SAP CDHDR/CDPOS (OBJECTCLAS, OBJECTID, CHANGENR, USERNAME, UDATE, UTIME, TABNAME, FNAME, VALUE_OLD, VALUE_NEW) | AuditEntry/AuditField | same treatment; OBJECTID resolved to Passage record ids via the migration run ledger (wave 10) |
 | D365 saved views / AX `SysLastValue` usage data; SAP ALV layout variants (LTDX) | SavedView | optional; only named, shared variants are imported |
+| AX `DocuRef` (RefTableId, RefRecId, TypeId, Name, Notes, Restriction) + `DocuValue` (FileName, FileType, Path / File container) + `DocuType` | Attachment / AttachmentVersion / AttachmentLink / DocumentType | file content copied from the archive directory, database container or SharePoint location to object storage; RefTableId/RefRecId resolved via the wave 10 run ledger; notes → kind=note |
+| SAP GOS (SRGBTBREL, SOOD, SOFFCONT1), ArchiveLink (TOA01–TOA03, TOAAT), DMS (DRAW, DRAD object links, originals in KPro) | same | content fetched via `SO_DOCUMENT_READ_API1` / ArchiveLink HTTP or KPro export; DRAD links → AttachmentLink; DMS versions → AttachmentVersion |
+| AX `EventRule` (alert rules) | AlertRule | change-based and due-date rules mapped when the table/field crosswalk resolves; others reported unmapped |
+| SAP SO10 texts (STXH/STXL via `READ_TEXT`, TDOBJECT=TEXT) | StandardText | per language; SAPscript formatting reduced to plain text with line breaks |
 
 Not migrated: AX Infolog history, SAP SM21/ST22 logs, SAP DBTABLOG (table logging) beyond customizing tables, personal (unnamed) usage data. Number sequence `next` values are taken at cutover (wave 49) and never earlier.
 
@@ -1097,3 +1882,192 @@ Depends on: wave 4 (CDC stream for audit, batch jobs for import/export, events f
 | Tail sampling hides a rare slow path | Low | Medium | 100% sampling of > 1 s and errors; exemplar links from metrics |
 
 Open questions: (1) Grid implementation (in-house vs. open-source data grid library) — default open-source MIT grid with virtualization; decide by wave 5 start. (2) Audit anchor target (object storage only vs. external timestamping) — default object storage with WORM policy; decide by wave 48. (3) SSE vs WebSocket for the inbox — default SSE; decide by wave 5 mid-point. (4) Whether `legal_entity_fiscal_period` scope ships in wave 5 or wave 6 — default wave 6 with the enum reserved now; decide by wave 6 start.
+
+### 0.5.13 Parameters and setup
+
+Values live on Admin workspace → Shell parameters, Number sequence parameters, Audit parameters, Document management parameters, Alert parameters and Import/export parameters (AX "Number sequence parameters", "Database log setup", "Document management parameters", "Alert parameters", "System parameters"; SAP SNRO/TNRO, SCDO/SCU3, OAC0/DC10, SM19 and SPRO → SAP NetWeaver → General settings).
+
+| Parameter | Scope | Type | Default | Allowed values | Effect | AX equivalent | SAP equivalent |
+|---|---|---|---|---|---|---|---|
+| `ui.inline_edit`, `ui.bulk_edit` | tenant (feature flags) | bool | true, true | true/false | grid editing modes (FR-5.3) | Form personalization "Edit mode" (System parameters → default view/edit mode) | ALV edit mode (layout) |
+| `ui.bulk_edit.max_rows`, `ui.bulk_edit.batch_threshold` | tenant | int, int | 1,000, 200 | 10–10,000, 10–1,000 | bulk edit cap; above threshold runs as batch job | Excel add-in row limits | MASS transaction selection limits |
+| `ui.grid.page_fetch_rows` | environment | int | 200 | 50–1,000 | virtual-scroll fetch size | `FormDataSource` cache size | ALV `maxrows` |
+| `ui.search.entities[]`, `ui.search.max_results` | tenant | entity list, int | all with title fields, 20 | — | global search scope (FR-5.1) | Search configuration (SysSearchConfiguration) | ESH_COCKPIT search models |
+| `ui.user_defaults` (language, date format, number format, time zone, default legal entity, start workspace) | user (tenant default) | jsonb | tenant defaults | locale codes, IANA tz | My user options / personalization | User options → Preferences (SysUserSetup) | SU3 defaults (date format, decimal notation, time zone) |
+| `numseq.reservation_timeout_seconds` | environment | int | 600 | 60–3,600 | BR-5.1 release of unconfirmed numbers | Number sequence parameters → "Clean up" interval (continuous) | none (NRIV commit-bound) |
+| `numseq.block_size_default` | tenant | int | 50 | 1–1,000 | non-continuous pre-allocation | Number sequence → Performance → Preallocation quantity | SNRO → number of numbers in buffer (TNRO-NOIVBUFFER) |
+| `numseq.exhaustion_warn_pct` | tenant | int | 90 | 50–99 | `SequenceNearExhaustion` alert | Number sequence → "Warning at" | SNRO → warning % (TNRO-PERCENTAGE) |
+| `numseq.reset_on_year` | sequence | bool | false | true/false | BR-5.4 | Segment configuration with fiscal calendar period scope | year-dependent intervals (NRIV-TOYEAR), OBH1 copy to fiscal year |
+| `audit.capture` | domain (flag) | bool | true | true/false | CDC audit capture on/off per domain | Database log setup (SysDatabaseLogSetup) per table | SCDO change document objects; table logging `rec/client`, SE13 log flag |
+| `audit.retention_years.transaction`, `.other` | tenant | int, int | 10, 3 | 1–30 | partition retention (0.5.4) | Database log cleanup (SysDatabaseLogCleanup) | SCU3 / SARA CHANGEDOCU archiving |
+| `audit.anchor_time_utc` | environment | HH:MM | 00:30 | any | daily hash anchor (FR-5.11) | none | none |
+| `docs.max_upload_bytes` | tenant | bigint | 104,857,600 | ≤ 2 GB | upload ceiling across types | Document management parameters → Maximum file size | OAC0 repository settings, `SO_DOCUMENT` size limits |
+| `docs.default_bucket_ref`, `docs.archive_storage_class` | tenant | ESO path, enum | platform bucket, `GLACIER_IR`-equivalent cold class | provider classes | storage location and archive tier | Document management parameters → Archive directory; DocuType location (archive / database / SharePoint) | OAC0 content repositories, OACT categories |
+| `docs.blocked_extensions` | tenant | text[] | exe, bat, cmd, js, msi, ps1, scr, vbs | any | uploads refused (DOC-0502) | File types (DocuFileTypes) | DC30 workstation applications (TDWP) |
+| `docs.checkout_lock_days` | tenant | int | 7 | 1–90 | auto-release of stale check-outs | none | CV01N check-out status (no expiry) |
+| `docs.preview.enabled`, `docs.extract_text.enabled` | tenant | bool, bool | true, true | true/false | conversion and content indexing | none (AX 2012); D365 Office preview | DMS conversion server, TREX/HANA full-text activation |
+| `alerts.due_date_time` | tenant | HH:MM tenant tz | 06:00 | any | daily due-date evaluation | Alert parameters → Due-date alert batch recurrence (`EventJobDueDate`) | ALRTCATDEF scheduling, SWE2 deadline events |
+| `alerts.max_per_rule_per_hour` | tenant | int | 500 | 10–10,000 | runaway-rule suspension (ALR-0505) | none | none |
+| `alerts.retention_days` | tenant | int | 90 | 7–365 | alert inbox retention | Alert parameters → "Alerts retention" (EventParameters) | ALRTPROC cleanup (SALRT_DELETE) |
+| `alerts.drilldown_base_url` | environment | URL | `https://app.<env>.passage.dev` | URL | deep-link target in alert email | Alert parameters → Drill-down target | Fiori launchpad intent base |
+| `io.max_import_rows`, `io.staging_retention_days` | tenant | int, int | 1,000,000, 7 | ≤ 5 M, 1–30 | import size and staging cleanup | Data management parameters (DMFParameters) → staging cleanup | LSMW / Migration Cockpit project retention |
+| `otel.sampling.ratio`, `otel.sampling.latency_threshold_ms` | environment | decimal, int | 1.0 dev / 0.1 stage-prod, 1,000 | 0–1, 100–10,000 | FR-5.13 tail sampling | LCS trace capture settings | ST05 / SAT trace settings |
+| `alerting.webhook_url`, `alerting.routes` | environment | ESO ref, YAML | PagerDuty-compatible | — | Alertmanager routing (FR-5.14) | LCS monitoring alerts | Solution Manager alerting (CCMS RZ20 thresholds) |
+
+### 0.5.14 Inquiries and reports
+
+| Name | Type | Filters & parameters | Columns / measures | Source projection | AX equivalent | SAP equivalent |
+|---|---|---|---|---|---|---|
+| Number sequence list and status | list inquiry | scope, continuous, in use | code, scope value, format preview, next, largest, % consumed, continuous, block size | `numseq.sequence` | Number sequences list page; SSRS Number sequence list / references | SNRO intervals, NRIV display |
+| Continuous allocation status (gaps audit) | operational report | sequence, date range, status | number, status (reserved/used/released), requested by, tx_ref, age | `numseq.allocation` | Number sequence → Status list (`NumberSequenceList`) | S_ALR_87012342 gaps in document number assignment; S_ALR_87012341 numbers allocated twice |
+| Record history | drill-down | entity, record, field, date | time, actor, operation, field, old, new, trace link | `audit.entry`, `audit.field` | Database log viewer (per record) | change documents per object (RSSCD100), S_ALR_87012308 |
+| Global audit search | list inquiry | entity, user, date range, operation | same plus record id | same | Database log inquiry; SSRS Database log report | SCU3, RSSCD100, S_ALR_87012293 |
+| Audit chain verification | operational report | tenant, seq range | range, entries verified, first broken seq, anchor ref | `POST /v1/audit/verify` | none | none (SM20 integrity is file-based) |
+| Import/export job history | list inquiry | entity, status, user, date | job, entity, rows total/ok/failed, duration, error file | `io.import_job` | Data management → Job history (DMFDefinitionGroupExecution) | LSMW / Migration Cockpit logs |
+| Documents by type / record | list inquiry | document type, entity, record, uploaded by, date, content text | name, type, linked records, version, size, status, restriction, retain until | `docs.attachment*` | Document management inquiries (DocuRef list) | GOS attachment list, CV04N document search, OAOR |
+| Document retention preview | operational report | retention class, horizon (days) | attachment, type, retain until, action (archive/purge), legal hold | `docs.attachment` | none (archive purge not standard in AX) | ILM retention (IRMPOL) preview, SARA write variant test |
+| Checked-out documents | list inquiry | user, age | attachment, checked out by, since, linked record | `docs.attachment` | none | CV04N with status "checked out" |
+| My alerts / Alert inquiry by rule or user | list inquiry | rule, user, read status, date | fired at, rule, record, recipient, message, read at, delivery status | `ui.alert_event` | Notification list / My alerts (EventInbox); alert inquiry | ALRTINBOX, SALRT1 alert inbox |
+| Alert rule statistics | KPI | rule, period | fires per day, suspended flag, recipients, email failures | `ui.alert_rule` + events | none | Situation Handling monitor |
+| Standard text where-used | drill-down | text code | templates and layouts referencing it, versions | `ui.standard_text` + notify templates | none | SO10 where-used (none standard) |
+| SLO and service dashboards | KPI | service, window | availability, p95 latency, error budget remaining, burn rate | Prometheus | LCS environment monitoring | Solution Manager technical monitoring, ST03N |
+| Trace explorer | drill-down | trace id, service, duration | spans, attributes, errors | Tempo | Trace parser | ST05, SAT, STAD |
+| Log explorer | list inquiry | service, level, trace id, tenant | time, level, message, trace id | Loki | Event Viewer / Infolog history | SM21 system log, SLG1 application log, ST22 dumps |
+
+### 0.5.15 Printed and electronic documents
+
+No printed business documents (wave 15/46 layouts consume FR-5.18 texts and FR-5.16 `external` attachments). Electronic documents:
+
+| Document | Trigger | Layout elements | Formats | Numbering sequence | Legal / retention requirement |
+|---|---|---|---|---|---|
+| List export | user export of a view (FR-5.15) | header row (column labels), rows per view, footer row with export time, user, filter, legal entity | CSV (UTF-8, RFC 4180), XLSX | none | not retained by Passage after 7 days (download link expiry) |
+| Import error file | import validation | original columns + `row`, `field`, `code`, `message` | CSV, XLSX | import id | 7 days |
+| Audit history export | audit viewer export | entity, record, entries, chain seq range, verification result | CSV, JSON (with hashes for third-party verification) | none | requester's custody; source entries retained per 0.5.4 |
+| Audit chain anchor | daily job | tenant, seq, hash, timestamp | JSON object in WORM bucket | per-tenant seq | 10 years, object lock (compliance mode) |
+| Alert email | alert fired with email delivery | subject (rule or template), record title, changed field old → new or due date, deep link, unsubscribe-from-rule link | email via wave 4 notify | none | wave 4 retention |
+| Attachment preview | conversion job | first page PDF or 320 px thumbnail | PDF, PNG | attachment version | deleted with the version |
+
+### 0.5.16 Periodic and batch jobs
+
+| Job | Schedule default | Partitioning key | Idempotency / checkpoint | Typical runtime target | Failure handling | Monitor / alert |
+|---|---|---|---|---|---|---|
+| Audit chain anchor | daily 00:30 UTC | tenant | anchor row keyed by (tenant, date) | < 1 min for 1,000 tenants | retry 3×; freeze on mismatch (BR-5.7) | `AuditChainBroken` (page), `AuditAnchorMissing` |
+| Audit partition maintenance | weekly | month | creates partitions 3 months ahead; idempotent | < 1 min | alert | `AuditPartitionMissing` |
+| Audit retention detach | monthly | month partition | detaches partitions older than retention to object storage (from wave 46) | < 10 min | retry | none |
+| Sequence exhaustion check | hourly | sequence | stateless | < 10 s | none | `SequenceNearExhaustion` |
+| Stale reservation release | every minute | sequence | releases `reserved` older than timeout (BR-5.1) | < 1 s | retry | `ReservationStuck` (> 3 timeouts/h) |
+| Import staging cleanup | daily 03:00 UTC | tenant | deletes staging and files older than 7 days | < 5 min | retry | none |
+| Notification and alert cleanup | daily 03:15 UTC | tenant | deletes alert events older than retention | < 1 min | retry | none |
+| Due-date alert evaluation | daily at `alerts.due_date_time` | tenant × rule | fired key (rule, record, due value) (BR-5.14) | < 2 min per 100 rules × 100 k records | resume per rule | `AlertJobFailed` |
+| Change-based alert evaluator | continuous (CDC consumer) | Kafka partition | consumer dedupe (BR-4.5) | ≤ 5 s event → alert | DLQ | `AlertLagHigh` (> 30 s) |
+| Attachment scan and preview | on upload (queue) | attachment version | status is the checkpoint | ≤ 30 s for 20 MB | 3 retries, then `quarantined` with reason `scan_failed` | `DocScanBacklog` (> 100 queued) |
+| Attachment text extraction | on `available` | attachment version | writes `extracted_text` once per version | ≤ 60 s for 200 pages | skip with warning DOC-0507 | none |
+| Document retention (archive / purge) | weekly Sunday 01:00 tenant time | tenant × document type | dry-run list stored first; each attachment processed once (status) | < 30 min per 1 M attachments | per-item errors logged, run continues | `DocRetentionErrors` |
+| Stale check-out release | daily | tenant | releases locks older than `docs.checkout_lock_days` | < 1 min | none | none |
+| Personalization / usage data reset | on demand (administrator) | user | deletes Personalization rows for selected users | < 10 s | none | none |
+
+### 0.5.17 Security duties and privileges
+
+| Duty | Privileges (entry points) | Segregation-of-duties conflicts | Default roles that include it |
+|---|---|---|---|
+| Maintain number sequences | `/v1/numseq/sequences*`, Number sequences screen, test next | with posting duties for fiscal documents in production (lowering `next` on a gap-free sequence is a fraud vector; `allow_to_lower=false` by default) | Financial administrator, Platform engineer |
+| View audit log | `/v1/audit/entries*`, `/verify`, audit workspace, history on any record the user can read | with Maintain users / Maintain security roles for the security auditor role (auditors should not administer what they audit) | Auditor, Security administrator (own scope) |
+| Import data | `/v1/io/imports*`, Import screen | per entity: also requires `create`/`update` on the target entity | Data steward, Migration consultant |
+| Export data | `/v1/io/exports`, export button on lists | export of `pii=sensitive` columns requires explicit field permission | most business roles |
+| Maintain saved views | `/v1/ui/views*` own; share with role | none | all users (own); Business administrator (shared, publish to role) |
+| Maintain documents | upload, version, check out/in, link on records the user may update | none | all entity maintainers |
+| View documents | download, preview, documents workspace search (filtered by read on linked records) | none | all users with entity read |
+| Administer document management | `/v1/docs/document-types`, `/file-types`, `/parameters`, force-release, view quarantined, retention preview | with legal-hold management (wave 48 duty) | Document administrator |
+| Maintain alert rules | `/v1/alerts/rules*` own rules | none | all users |
+| Administer alerts | org-wide rules, suspend/resume any rule, alert statistics | none | Business administrator |
+| Maintain standard texts | `/v1/texts*`, Standard texts screen | none | Communications administrator, Business administrator |
+| Platform observability | Grafana, Tempo, Loki (Keycloak SSO group) | log access may expose payload fragments; lint keeps PII out of spans | Platform engineer, SRE |
+
+### 0.5.18 Message catalog
+
+| Code | Severity | User text | Cause | Remediation | Raised by |
+|---|---|---|---|---|---|
+| NSQ-0501 | error | Number sequence {code} is not in use | `in_use=false` (409 SEQUENCE_NOT_IN_USE) | mark in use or bind another sequence | BR-5.5 |
+| NSQ-0502 | error | Number sequence {code} is exhausted at {largest} | SEQUENCE_EXHAUSTED (409) | raise `largest` or enable wrap where legal | BR-5.6 |
+| NSQ-0503 | warning | Number sequence {code} is {pct}% consumed | exhaustion threshold | plan a new range | BR-5.6 |
+| NSQ-0504 | error | {code} is manual: supply a number | `manual=true` without number | enter the number | BR-5.5 |
+| NSQ-0505 | error | Number {n} already used in {code} for scope {scope} | manual duplicate | choose another number | BR-5.5 |
+| NSQ-0506 | error | Next number cannot be lowered for {code} | `allow_to_lower=false` | none (gap-free protection) | BR-5.3 |
+| NSQ-0507 | error | Formatted number exceeds 40 characters | format length | shorten segments | FR-5.8 |
+| AUD-0501 | error (page) | Audit chain broken for tenant {tenant} at seq {seq} | hash mismatch | follow runbook; anchoring frozen | BR-5.7, FR-5.11 |
+| AUD-0502 | warning | Audit is {s} s behind; recent changes may not show yet | consumer lag | none; wait | FR-5.10 |
+| UIX-0501 | error | This record was changed by {user} at {time}; reload or overwrite | optimistic lock (409) | reload, or overwrite with permission | 0.5.6 rules |
+| UIX-0502 | error | {n} fields need attention | client/server validation summary | jump to each field | FR-5.6 |
+| UIX-0503 | error | Bulk edit is limited to {max} rows | `ui.bulk_edit.max_rows` | narrow the selection | FR-5.3 |
+| UIX-0504 | info | Bulk edit of {n} rows started as job {run}; you will be notified | above batch threshold | none | 0.5.6 rules |
+| UIX-0505 | warning | Module {remote} failed to load; other areas still work | remote load failure | retry; platform rolls back pin | FR-5.1 |
+| IOX-0501 | error | Row {row}, column {column}: {message} | import validation | fix and re-import or use partial | FR-5.15 |
+| IOX-0502 | info | This file was already imported (import {id}) | same sha256 | none | BR-5.11 |
+| IOX-0503 | error | Import exceeds {max} rows | `io.max_import_rows` | split the file | FR-5.15 |
+| DOC-0501 | error | File exceeds the {max} MB limit for document type {type} | size check | compress or split | FR-5.16 |
+| DOC-0502 | error | File type .{ext} is not allowed | blocked or not in allowed list | convert to an allowed type | FR-5.16 |
+| DOC-0503 | error | File quarantined: malware detected ({signature}) | scan result | contact the sender; file is not downloadable | FR-5.16, BR-5.12 |
+| DOC-0504 | error | Checked out by {user} since {time}; new versions are blocked | check-out lock (423) | ask {user} to check in, or request a release | BR-5.12 |
+| DOC-0505 | error | Document is under legal hold and cannot be deleted or purged | legal hold | none | BR-5.12 |
+| DOC-0506 | warning | Preview not available for this file type | FileType.preview=none | download to view | FR-5.16 |
+| DOC-0507 | warning | Text could not be extracted; the document is not content-searchable | extraction failure (scanned image, encrypted PDF) | OCR arrives in wave 18 capture | FR-5.16 |
+| ALR-0501 | info | Alert: {subject} | rule fired | open the record | FR-5.17 |
+| ALR-0502 | error | You cannot create an alert on {field}: you do not have read access to it | field mask | choose another field | BR-5.14 |
+| ALR-0503 | error | Due-date rules require a date or datetime field | wrong field type | choose a date field | FR-5.17 |
+| ALR-0504 | warning | {n} recipients were skipped because they cannot read {entity} | recipient lacks read | adjust recipients | FR-5.17 |
+| ALR-0505 | warning | Alert rule {name} was suspended after {n} alerts in one hour | runaway rule | narrow the filter and resume | FR-5.17 |
+| STX-0501 | error | Standard text {code} has no version in {language} or the fallback language | missing translation | add the language version | FR-5.18 |
+| STX-0502 | error | Unknown placeholder `{{placeholder}}` in {code} | publish validation | correct the placeholder | BR-5.15 |
+| STX-0503 | error | {code} is used by {n} published templates or layouts and cannot be retired | where-used check | update the references first | FR-5.18 |
+
+### 0.5.19 Performance budgets and capacity
+
+| Operation | Volume assumption | Latency target (p50 / p95 / p99) | Throughput target | Storage growth per year | Index / partition strategy | Degradation behavior under 3× load |
+|---|---|---|---|---|---|---|
+| Shell first contentful paint | 5,000 users, 2 sessions/day | 0.8 s / 1.5 s / 2.5 s (10 Mbps) | CDN-cached assets | n/a | remotes cached by digest | static assets unaffected |
+| Form load (metadata + record) | 200 k/day, peak 100/s | 250 ms / 800 ms / 1.5 s | 300/s | n/a | form definition ETag cache | p95 ≤ 2 s; skeleton rendering |
+| Global search | 50 k/day, peak 30/s | 80 ms / 300 ms / 600 ms | 100/s | title + content index ≈ 2 GB/tenant/year | GIN on `tsvector` per entity; attachment content GIN | results truncated to 20; timeouts at 1 s return partial |
+| Gap-free allocation | 50 k/day per sequence, peak 500/s | 5 ms / 15 ms / 30 ms | 500/s per sequence | `allocation` ≈ 18 M rows/year for a busy sequence | `(sequence_id, number)` unique; monthly cleanup of used rows > 13 months to archive | row-lock queueing; p99 rises to ≈ 90 ms, no gaps |
+| Buffered allocation | 2,000/s across pods | 0.1 ms / 1 ms / 2 ms | 2,000/s | none | in-memory block | block refill contention; still < 5 ms |
+| Audit capture (commit → visible) | 5 M changed rows/day/tenant, peak 2,000/s | 500 ms / 2 s / 5 s | 3,000 rows/s with 12 consumers | ≈ 1.8 B entries/year at peak volume (≈ 900 GB) | monthly partitions; `(tenant_id, entity, record_id, occurred_at desc)` | lag grows; `AuditLagHigh` at 10 s; no loss (Kafka retention 7 days) |
+| Record history query | 20 k/day | 30 ms / 120 ms / 300 ms | 50/s | — | same index, partition pruning by date | paging at 100 entries |
+| Import 100 k rows | 50/day/tenant | 2 min / 5 min / 8 min | 400 rows/s per job | staging transient | batch insert 1,000 rows | jobs queue by priority |
+| Attachment upload (20 MB) | 20 k/day/tenant, peak 20/s | 1 s / 4 s / 8 s to `scanning`; ≤ 30 s to `available` | 100 MB/s per tenant to object storage | ≈ 4 TB/year/tenant at 20 MB average (before dedupe) | object key per version; DB rows ≈ 7 M/year | scan queue grows; uploads still accepted |
+| Change-based alert evaluation | 500 rules/tenant over the audit stream | 1 s / 5 s / 10 s event → alert | 3,000 changes/s | `alert_event` ≈ 10 M rows/year | rules indexed by (entity, field) in memory; events by (tenant_id, recipient_id, read_at) | lag; suspension of runaway rules |
+| Trace ingestion | 2 k spans/s per service at 10% sampling | n/a | 50 k spans/s per collector gateway | Tempo ≈ 5 TB/year (14-day retention by default) | object storage backend | collector drops lowest-priority spans; `OTelCollectorDropping` |
+
+### 0.5.20 Localization and compliance hooks
+
+- Number sequences and fiscal law: gap-free continuous numbering is the hook for invoice-numbering rules (EU VAT Directive Art. 226(2) "sequential number", France and Italy chronological numbering, Mexico CFDI folio series, India GST invoice series ≤ 16 characters per financial year). Country packs (wave 48) ship sequence templates per document type (format, `reset_on_year`, scope `legal_entity_fiscal_period` from wave 6) and validate `continuous=true` for fiscal documents of their country; the extension point is the sequence template + decision table `NumberingPolicy` (FR-3.13).
+- Audit retention: defaults 10/3 years; country packs raise minimums (Germany GoBD 10 years for booking records, France 6–10, US SOX 7); `audit.retention_years.*` can only be raised by a country pack, not lowered below its minimum.
+- Document retention: retention classes per document type are the hook for GoBD/HGB §257, US IRS records retention and similar rules; legal hold (wave 48) overrides purge; archive storage class with object lock satisfies WORM requirements where mandated.
+- Privacy: audit stores SHA-256 digests for `pii=sensitive` fields; erasure requests (wave 48) pseudonymize actor display names in the viewer but never rewrite audit rows (lawful basis: legal obligation, GDPR Art. 17(3)(b)); attachments linked to an erased subject are listed for the privacy officer; alert events and personalization are deleted on erasure.
+- Language and formats: shell strings, form labels, alert subjects and standard texts are resolved per user locale; English ships in wave 5, wave 48 label packs add languages; right-to-left layout support is a wave 48 deliverable but the shell uses CSS logical properties from wave 5. Date, number and currency formatting follow `ui.user_defaults` via `Intl` APIs.
+- Calendar: due-date alerts and year segments use the legal entity time zone; fiscal-period scopes arrive in wave 6.
+- Accessibility law: WCAG 2.1 AA (FR-5.5) covers EN 301 549 (EU Accessibility Act, from 2025-06-28) and US Section 508 for the generated UI.
+- E-invoicing: attachments with `restriction=external` and document type "E-invoice original" are the storage hook for wave 35 Peppol/Factur-X archives (original XML retained unchanged, sha256 recorded).
+
+### 0.5.21 Coverage closure
+
+| Register row (inventory section + AX form or SAP T-code) | Status before | Disposition | Note |
+|---|---|---|---|
+| AX §12.29.1 Organization administration → Alerts (org-level alert rules) (register row 82) | GAP | ADDED as FR-5.17 | org-wide rules (`org_wide=true`) maintained by Administer alerts |
+| AX §12.29.4 Organization administration → Setup: Alerts → Alert rules (change-based, due-date; event rule setup, alert email templates) (register row 88) | GAP | ADDED as FR-5.17 | rule kinds per FR-5.17; email via wave 4 templates (FR-4.14) |
+| AX §12.30.3 System administration → Periodic: Alerts → Change-based alerts / Due date alerts (batch processors) (register row 91) | GAP | ADDED as FR-5.17 | change-based evaluated continuously from CDC; due-date daily job (0.5.16) |
+| AX §12.31.1 Home / role centers / workflow → Alerts (My alerts / Notification list) (register row 94) | GAP | ADDED as FR-5.17 | shell Alerts bell and list (0.5.6), `ui.alert_event` |
+| AX §12.31.2 Home / role centers / workflow → Inquiries: Alert inquiry (alerts by rule/user) (register row 95) | GAP | ADDED as FR-5.17 | My alerts / Alert inquiry and Alert rule statistics (0.5.14) |
+| AX §12.31.3 Home / role centers / workflow → Periodic: Alerts → Process change-based alerts / Due-date alerts (register row 98) | GAP | ADDED as FR-5.17 | same jobs as row 91 |
+| AX §12.31.4 Home / role centers / workflow → Setup: Alerts → Alert rules (field/record changes, due date; subject/message; recipients; organization-wide) / Alert rule templates (register row 100) | GAP | ADDED as FR-5.17 | rule templates = `MessageTemplate` codes; "Notify me when…" creates a rule from a field |
+| AX §12.29.1 Organization administration → Document management → Document handling (attachments on any record), Document types, File types (`DocuView`, `DocuType`) (register row 235) | PARTIAL-5 | ADDED as FR-5.16 | `Attachment`, `DocumentType`, `FileType` entities |
+| AX §12.29.2 Organization administration → Document management inquiries (documents by type/record) (register row 243) | PARTIAL-5 | ADDED as FR-5.16 | Documents by type / record inquiry (0.5.14) |
+| AX §12.29.3 Organization administration → Periodic: Document management → Archive documents / Purge by retention (register row 249) | PARTIAL-5 | ADDED as FR-5.16 | retention job (0.5.16), BR-5.12, legal hold |
+| AX §12.29.4 Organization administration → Setup: Document management parameters (archive directory, SharePoint, file types, max size), Document types (file, note, URL, image, template; group; location), Active document tables, File types (register row 252) | PARTIAL-5 | ADDED as FR-5.16 | parameters in 0.5.13; `active_entities[]` = active document tables; location = object storage or database; SharePoint location is not a storage backend (see row 253) |
+| AX §12.29.4 Organization administration → Setup: Document management → OneDrive/SharePoint integration (D365), Attachment migration (register row 253) | PARTIAL-5 | ADDED as FR-5.16 | S3-compatible storage with customer bucket (`bucket_ref`) and attachment migration from `DocuRef`/`DocuValue` and SharePoint paths (0.5.11); live SharePoint/OneDrive storage as a document location is not offered — files are copied into object storage at migration, and a `url` document type links to SharePoint items |
+| AX §12.30.1 System administration → Document handling (link) (register row 264) | PARTIAL-5 | ADDED as FR-5.16 | same capability as row 235 |
+| AX §12.30.4 System administration → Setup: Document management (link) (register row 270) | PARTIAL-5 | ADDED as FR-5.16 | same as row 252 |
+| AX §12.31.1 Home / role centers / workflow → Document handling on any record (`DocuView`) (register row 273) | PARTIAL-5 | ADDED as FR-5.16 | attachments panel on every generated detail page (0.5.6) |
+| SAP §13.31 Cross-Application → SO10 / SO72 / SE75 (text objects/IDs): standard texts, text management (register row 349) | PARTIAL-5 | ADDED as FR-5.18 | register proposed wave 46 text blocks; added here because wave 4 templates (FR-4.14) and wave 46 layouts both consume it; layouts reference by code |
+| SAP §13.35 DMS → CV01N originals (check-in/check-out, KPro storage categories, viewer, conversion) (register row 377) | PARTIAL-5 | ADDED as FR-5.16 | check-out/check-in, multiple versions per attachment, storage locations, previews; native CAD 2D/3D viewing is dropped (PLM keeps CAD; wave 9 engineering change links PLM documents by URL type) |
+| SAP §13.35 DMS → Periodic: CV conversion runs (originals → PDF/neutral formats) (register row 389) | PARTIAL-5 | ADDED as FR-5.16 | attachment scan and preview job (Office → PDF, PDF first page, image thumbnails); CAD neutral-format conversion dropped with the viewer |
+| SAP §13.35 DMS → Customizing: DC30 workstation applications (file types, viewer/editor, conversion) (TDWP) (register row 394) | PARTIAL-5 | ADDED as FR-5.16 | `FileType` (mime, max size, preview method, extract_text, blocked) |
+| SAP §13.35 DMS → Customizing: full-text search activation (TREX/HANA) for originals (register row 398) | PARTIAL-5 | ADDED as FR-5.16 | text extraction to Postgres `tsvector`, searchable from global search and the documents inquiry; OCR of scanned images is wave 18 |

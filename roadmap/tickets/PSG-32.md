@@ -40,6 +40,8 @@ Fix versions: v1.0
 3. Offline queue with conflict resolution; session/device management
 4. Voice picking adapter and RFID (EPC) read integration points
 5. Label printing (ZPL) via print service
+6. Automation adapter for AS/RS, conveyors and sorters (MFS telegrams via the wave-25 edge gateway)
+7. Printer and output-queue management: device types, queue failover, document routing rules, browser printing
 
 **Deploy.** Mobile app published to the demo warehouse devices; print service live.
 

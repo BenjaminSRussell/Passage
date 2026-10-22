@@ -39,6 +39,9 @@ Fix versions: v1.0
 3. Asset budgeting and CIP/under-construction from projects
 4. Lease accounting (IFRS 16/ASC 842): lease schedules, ROU asset and liability postings
 5. Physical asset inventory with barcode and reconciliation
+6. Asset additions/component records and insurance policies with insured-value index series
+7. Group assets for pooled tax depreciation (US GAA, DE Sammelposten, UK pools)
+8. Capital appropriation requests with variants and value-based approval feeding depreciation forecast and budgeting
 
 **Deploy.** Fixed assets workspace; demo entity's assets migrated with opening net book values.
 

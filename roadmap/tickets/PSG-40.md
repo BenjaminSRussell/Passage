@@ -40,6 +40,10 @@ Fix versions: v1.0
 3. Consolidation: group structures, ownership %, elimination rules (IC balances, profit in inventory), currency translation (IAS 21), minority interest
 4. Consolidated statements via financial reporting (wave 15) with drill to entity
 5. Transfer-pricing documentation hooks
+6. Centralized payments (pay/receive on behalf of) and intercompany charges for expenses, timesheets and vendor invoice lines with transfer prices
+7. Intercompany on-hand visibility and intercompany planning groups with sequenced MRP
+8. Reclassification and balance-sheet regrouping rules (entity and group level) and two-sided IC elimination with thresholds
+9. Consolidation of investments (first/subsequent, ownership change, divestiture, equity method), top-side group journals, consolidation monitor with validation rules
 
 **Deploy.** Intercompany and consolidation workspaces live; demo group (3 entities, 2 currencies) consolidated.
 

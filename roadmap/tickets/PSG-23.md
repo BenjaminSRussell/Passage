@@ -40,6 +40,9 @@ Fix versions: v1.0
 3. Capacity load views by resource/group/period; bottleneck detection
 4. Scheduling optimization option via OR-Tools CP-SAT (minimize lateness/makespan)
 5. Integration: schedule dates flow to production orders and master planning
+6. Resource networks (allowed resource transitions with max wait) as scheduler constraints
+7. Campaign planning with setup matrix sequencing, changeover/cleanout orders and campaign cleanout cost allocation
+8. Block planning: capacity blocks restricted by product/batch attribute conditions
 
 **Deploy.** Scheduling workspace with Gantt for the demo plant.
 

@@ -39,6 +39,10 @@ Fix versions: v1.0
 3. Rebate agreements and accrual calculation (settlement in wave 30)
 4. Price simulation and explain (which conditions applied), mass price updates
 5. Commission calculation hooks
+6. Vendor rebate, broker and royalty agreements with accrual on purchase/sales invoices and period claims settled through AP (wave 19)
+7. Commission transactions and posting: sales groups/reps with shares, commission customer/item groups, revenue or margin basis, settlement export to AP/payroll
+8. Trade promotion funds with budget/usage tracking and promotion planning with baseline, lift and actuals
+9. Free goods (inclusive/exclusive), commodity index pricing runs, and retroactive rebate accrual with delta settlement (VBOF)
 
 **Deploy.** Pricing workspace; demo customers and price lists configured.
 

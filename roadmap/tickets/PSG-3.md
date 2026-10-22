@@ -40,6 +40,8 @@ Fix versions: v1.0
 3. Extension mechanism: customer-layer entity extensions (extra fields, enum values, hooks) stored as metadata, applied without code changes
 4. Metadata registry service with versioning and diff
 5. Field-level attributes: required, unique, default, computed, visibility, PII-flag, audit-flag
+6. Decision tables and rule sets (BRF+ equivalent): typed columns, hit policies, effective-dated rows, customer-layer overrides via extension packages, evaluate/explain API used by hooks and workflow conditions
+7. Usage metering: nightly named-user and principal counts per tenant, legal entity and role, API requests and row counts per entity, Usage report with CSV export (licensing input, never enforced)
 
 **Deploy.** Metadata registry + generator in the pipeline; the first three generated entities (Tenant, LegalEntity, User) replace hand-written code.
 

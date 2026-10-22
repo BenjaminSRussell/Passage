@@ -42,6 +42,8 @@ Fix versions: v1.0
 3. Temporal cluster for workflows; SDKs for Go/TS; approval workflow template (submit → approve/reject/delegate/escalate with SLA timers)
 4. Batch job framework: scheduled/recurring jobs with partitioning, checkpoints, retry and a job monitor UI
 5. Workflow designer: configuration-driven approval chains per entity (e.g. purchase requisition by amount band)
+6. Notify service: SMTP/HTTP-API provider adapters, per-tenant sender identity with verification, outbound message queue with distributor job, retries, bounce handling and outbound status inquiry
+7. Message templates (per language, sys/customer layers, placeholders from metadata and workflow context) and per-user notification preferences (in-app/email, digests, quiet hours)
 
 **Deploy.** Kafka, Debezium, Temporal, schema registry, and job monitor UI running in dev; the metadata registry emits entity-changed events.
 

@@ -20,6 +20,13 @@ Cash and bank, fixed assets, cost accounting and budgeting, standard-cost varian
 - Cash positioning (intraday camt.052) and cash flow forecasting from AP/AR/payroll/projects
 - In-house banking basics: intercompany netting, cash pooling
 - Bank connectivity adapters (SFTP/EBICS/Open-Banking API) with secure key management (Vault)
+- Treasury instruments: customer bills of exchange and vendor promissory notes (draw/remit/protest/settle) and postdated checks (customer and vendor)
+- Cash journal / petty cash desks with business transactions, daily count and close, cash book
+- Bank fee analysis from camt.086 against bank fee agreements
+- Treasury deals (FX spot/forward/swap, fixed-term deposits) with confirmation, settlement flows and key-date valuation; FX exposure view
+- Loan contracts (bank and intercompany) with schedules and interest accrual; GL balance interest on intercompany current accounts
+- Treasury payment requests and bank-to-bank transfers with four-eyes approval; bank chains; payment hub routing and batch monitor
+- In-house cash center basics: participant current accounts, internal payment orders, interest conditions, generated camt.053 statements (flag-gated)
 
 **Proof (testable acceptance)**
 
@@ -61,6 +68,9 @@ Treasury workspace; sandbox bank connection for the demo entity.
 - Asset budgeting and CIP/under-construction from projects
 - Lease accounting (IFRS 16/ASC 842): lease schedules, ROU asset and liability postings
 - Physical asset inventory with barcode and reconciliation
+- Asset additions/component records and insurance policies with insured-value index series
+- Group assets for pooled tax depreciation (US GAA, DE Sammelposten, UK pools)
+- Capital appropriation requests with variants and value-based approval feeding depreciation forecast and budgeting
 
 **Proof (testable acceptance)**
 
@@ -102,6 +112,10 @@ Fixed assets workspace; demo entity's assets migrated with opening net book valu
 - Cost accounting ledger: cost elements, cost objects, dimension hierarchies, allocation policies (assessment/distribution), statistical measures
 - Activity-based costing and internal orders; cost control workspace with variance analysis
 - Management reporting cubes feeding wave 46
+- Budget plan Excel worksheet templates with validated round-trip; plan generation from GL actuals, plans, FA forecast, demand forecast and position forecasts
+- Cost behavior, overhead rate and cost rollup policies; template (driver-formula) allocation; top-down distribution; cost object hierarchies
+- Budget reservation documents (earmarked funds: reservation, precommitment, blocking, revenue forecast)
+- Investment programs with position hierarchy, budget distribution, rollup and carry-forward
 
 **Proof (testable acceptance)**
 
@@ -142,6 +156,10 @@ Budgeting and cost accounting workspaces; demo entity budget loaded.
 - Variance analysis: purchase price, production (lot size, quantity, price, substitution), planned vs actual by cost component
 - Standard cost revaluation of on-hand inventory on activation
 - Cost estimate comparison and what-if simulations
+- Standard cost conversion checklist (actual to standard) with revaluation preview
+- Ad-hoc cost estimates with costing models; mixed costing over procurement alternatives; sales order cost estimates for configured/MTO lines
+- COGS and price-difference posting by cost component; parallel valuation views (legal/group/profit center)
+- Parallel inventory valuation ledgers (global inventory accounting), flag-gated
 
 **Proof (testable acceptance)**
 
@@ -182,6 +200,10 @@ Costing workspace completes; demo plant on standard cost with monthly variance r
 - Consolidation: group structures, ownership %, elimination rules (IC balances, profit in inventory), currency translation (IAS 21), minority interest
 - Consolidated statements via financial reporting (wave 15) with drill to entity
 - Transfer-pricing documentation hooks
+- Centralized payments (pay/receive on behalf of) and intercompany charges for expenses, timesheets and vendor invoice lines with transfer prices
+- Intercompany on-hand visibility and intercompany planning groups with sequenced MRP
+- Reclassification and balance-sheet regrouping rules (entity and group level) and two-sided IC elimination with thresholds
+- Consolidation of investments (first/subsequent, ownership change, divestiture, equity method), top-side group journals, consolidation monitor with validation rules
 
 **Proof (testable acceptance)**
 

@@ -40,6 +40,8 @@ Fix versions: v1.0
 3. SAP ECC/S4 connectors for KNA1/LFA1/MARA/MAST/STKO/PLKO via OData or extracted flat files
 4. Reconciliation: row counts, hash totals, sampled field compare, exception queue with re-run
 5. Dry-run and idempotent re-run; migration run ledger with lineage
+6. Copy entity data between legal entities; signed configuration data packages with diff-before-apply; recurring incremental import jobs until cutover; data templates
+7. Mapping packs for coverage-closure objects (OMTeam, VendCertification, PaymSched/T052R, KNRZE/LFZA, EcoResProductRelation, lifecycle states/T141, ASMD, CUVTAB, DRAW, ECM categories/policies, STPO alternatives, effectivity, document structures)
 
 **Deploy.** Migration workspace with run history; connectors packaged as Helm sub-charts.
 

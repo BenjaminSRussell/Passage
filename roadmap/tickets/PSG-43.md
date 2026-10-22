@@ -40,6 +40,9 @@ Fix versions: v1.0
 3. Expense management: reports, receipts (OCR), policies/per diems, approvals, credit-card feed import, reimbursement via AP
 4. Year-end forms framework (W-2/1099 structures)
 5. Payroll audit and reconciliation reports
+6. Cash advances with settlement against expense reports and travel requisitions (pre-trip approval) with variance checks
+7. Off-cycle runs (bonus, final pay, manual check, check replacement) with supplemental tax, deduction arrears recovery and overpayment claims
+8. Quarterly/annual statutory wage aggregates (941/940/SUI) reconciled to GL, and workers' compensation class codes with premium base
 
 **Deploy.** Payroll and expense workspaces; demo entity runs a payroll cycle in sandbox.
 

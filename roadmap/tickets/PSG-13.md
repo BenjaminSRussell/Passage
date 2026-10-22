@@ -39,6 +39,9 @@ Fix versions: v1.0
 3. Withholding tax (vendor and customer), 1099 / Form 26AS style reporting hooks
 4. Provider adapters: Avalara/Vertex-compatible interface + an internal rules engine as default
 5. Tax settlement job, VAT return, EU sales list, Intrastat and SAF-T extracts
+6. Intrastat master data (CN8 commodity codes, transaction codes, transport modes, ports, country properties) and an Intrastat journal with transfer, validation, compression, correction and export
+7. VAT recovery policies on expenses (recoverable % per category and country) and a foreign VAT reclaim extract
+8. Withholding tax remittance runs with challan/bank references and gap-free certificate numbering hooks for country forms
 
 **Deploy.** Tax configuration workspace; demo entities configured for US sales tax and EU VAT.
 

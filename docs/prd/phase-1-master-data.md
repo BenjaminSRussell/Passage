@@ -99,6 +99,10 @@ Out of scope: ledger period *statuses* (wave 14 owns open/closed per module), wa
 | Units of measure | UnitOfMeasure, UnitOfMeasureConversion (standard + product-specific) | T006 (CUNI), T006A | `UnitOfMeasure`, `UomConversion`; product-specific in wave 8 | full |
 | Countries / regions / languages | LogisticsAddressCountryRegion, LogisticsAddressState, LanguageTable | T005, T005S, T002 | `Country`, `Region`, `Language` | full |
 | Company-level parameters | CompanyInfo fields, Ledger (currency, calendar) | T001 fields (WAERS, PERIV, KTOPL) | `LegalEntity` fields + ledger linkage in wave 11 | partial (chart of accounts linkage arrives in wave 11) |
+| Teams and team types | OMTeam, OMTeamType, OMTeamMembershipCriterion (Organization administration → Teams) | HR OM work groups (PP01 organizational units), S/4 Responsibility Management teams (Fiori "Manage Teams and Responsibilities") | org-service `TeamType`, `Team`, `TeamMember` | full |
+| Legal entity copy / template | Legal entity copy (SysDataExport/SysDataImport), D365 "Copy into legal entity" configuration project | EC01 copy company code, EC02 copy plant (organizational object copy) | `POST /org/v1/legal-entities/{id}:copy` (FR-6.15) | improved (invariants checked at copy) |
+| Currency rounding rules | Currency form: general, price, purchase, sales rounding with round-off type normal/downward/rounding-up | TCURX decimals, OB90 rounding rules per company code and currency | `CurrencyRounding` per (currency, purpose, legal entity) (FR-6.16) | full |
+| Organization name translations | Organization translations on OMOperatingUnit / CompanyInfo | T001 / CSKT / CEPCT texts per SPRAS | `org_unit_translation` (FR-6.17) | full |
 
 ### 1.6.3 Functional requirements
 
@@ -134,6 +138,17 @@ Out of scope: ledger period *statuses* (wave 14 owns open/closed per module), wa
 - **FR-6.11 Hierarchy designer UI** — Should. The system shall provide a drag-and-drop tree editor with an effective-date slider that previews the tree as of a chosen date and highlights nodes that change between versions.
 - **FR-6.12 Seed and export** — Should. The system shall export and import the complete organization model as a versioned JSON package (used by `make demo-seed` and by the migration framework in wave 10).
 - **FR-6.13 Address validation adapter** — Could. The system shall expose an address-validation adapter interface (normalize, suggest) with a null default; third-party adapters are out of scope for this wave.
+- **FR-6.14 Teams and team types** — Should. The system shall maintain team types (code, name, allowed member kinds `user` / `party`) and teams (code unique per tenant, name, description, team type, optional owning operating unit, `effective_from`/`effective_to`, status) with members (Keycloak user id or wave-7 party id, member role `member` / `lead`, `valid_from`/`valid_to`).
+  - Teams are cross-organization groups, not hierarchy nodes; they are referenced by stewardship ownership (FR-7.11 `owner_team_id`), wave-4 work-item queues, address-book access (FR-7.18) and readiness-check assignment (FR-9.17).
+  - Limits: 5,000 teams per tenant, 2,000 members per team; membership changes publish `dev.passage.org.team.membership.changed.v1` (team_id, added[], removed[], as_of).
+  - Membership criteria (AX OMTeamMembershipCriterion) are an optional Rego filter over user attributes (e.g. `department == "D100"`), evaluated nightly by job ORG-J5; manual members are never removed by the rule.
+- **FR-6.15 Legal-entity copy from template** — Should. The system shall create a legal entity by copying an existing legal entity or a template package: number sequences (reset to start values), fiscal calendar assignment, parameters (§1.6.13), address purposes, and optionally sites and warehouses; code, name, country and accounting currency are supplied by the user.
+  - Runs as Temporal workflow `copy-le-{target_code}`; every copied object receives a new id; transactional data is never copied.
+  - Copy of a 5-site, 20-warehouse entity completes in < 30 s; the result is validated against the same invariants as a manual create before commit.
+- **FR-6.16 Currency rounding rules** — Must. The system shall store, per currency, purpose (general, price, purchase, sales, tax, cash) and optional legal entity, a rounding unit (0.000001–1,000) and method (half_even, half_up, down, up); the default is the ISO 4217 minor unit with half_even, and consumers call `GET /org/v1/currencies/{code}/round?amount=&purpose=`.
+  - Cash rounding (CHF 0.05, SEK 1.00) uses the `cash` purpose; consumed by waves 26 and 30.
+  - Legal-entity rows override tenant rows for the same (currency, purpose).
+- **FR-6.17 Organization name translations** — Should. The system shall store translated names of legal entities, operating units, sites and warehouses per BCP 47 language, with fallback to the base name; printed documents (wave 46) render the name in the document language.
 
 ### 1.6.4 Data model
 
@@ -193,6 +208,8 @@ Out of scope: ledger period *statuses* (wave 14 owns open/closed per module), wa
 
 Invariants: exactly one root per published hierarchy version; no overlapping effective ranges per hierarchy type; fiscal periods of a year tile the year with no gap or overlap; a warehouse's legal entity equals its site's legal entity; every `primary` address purpose is unique per (owner, purpose). Indexing: `hierarchy_node(version_id, org_unit_id)` unique; closure table PK (ancestor_id, descendant_id); `postal_address` GIN trigram on `formatted` for search; all tables partitioned logically by tenant_id with RLS policies, no physical partitioning in this wave.
 
+**Team / TeamMember / CurrencyRounding (FR-6.14, FR-6.16)** — team: id, tenant_id, code text(20) unique per tenant, name text(60), team_type_id FK, operating_unit_id FK null, effective_from date, effective_to date null, status (active, inactive), membership_rule text null (Rego), version; team_member: team_id, member_kind (user, party), member_id uuid, member_role (member, lead), valid_from date, valid_to date null, source (manual, rule), unique (team_id, member_kind, member_id, valid_from); currency_rounding: currency_code char(3), purpose enum, legal_entity_id uuid null, unit numeric(16,6) > 0, method enum, PK (currency_code, purpose, coalesce(legal_entity_id, nil-uuid)). org_unit_translation: owner_type, owner_id, language text(5), name text(100), PK (owner_type, owner_id, language).
+
 ### 1.6.5 APIs and events
 
 | Method | Path | Purpose | Idempotency | Auth duty |
@@ -250,6 +267,9 @@ Interaction rules: all grids support inline edit with validation on blur and a s
 - **BR-6.9** Address edits are copy-on-write: documents hold the address version id, not the address id, so a printed invoice never changes retroactively.
 - **BR-6.10** Concurrent edits use the `version` column; a stale PATCH returns 409 with the current representation; the UI offers merge or reload.
 - **BR-6.11** Deactivating a legal entity is refused while any user has it as their default entity (`ORG-LE-DEFAULT-IN-USE`).
+- **BR-6.12** A team member's validity must lie inside the team's effective range (`ORG-TEAM-MEMBER-RANGE`); a team whose `effective_to` is in the past accepts no new members (`ORG-TEAM-EXPIRED`); deactivating a team that owns parties reassigns ownership to the team lead or, with no lead, raises a stewardship item per party.
+- **BR-6.13** Rounding: `round(a, u, m) = u × R_m(a / u)` computed in numeric(28,12); half_even sends exact ties to the even multiple; a unit that is not a power-of-ten multiple of the minor unit or 0.05/0.25/0.5 multiples thereof is rejected (`ORG-CUR-ROUNDING-UNIT`).
+- **BR-6.14** Legal-entity copy keeps site and warehouse codes (unique per legal entity) and rewrites tenant-unique codes with the target code as prefix; a collision aborts the whole copy with no partial result.
 
 ### 1.6.8 Acceptance criteria
 
@@ -262,6 +282,9 @@ Interaction rules: all grids support inline edit with validation on blur and a s
 - **AC-6.7** (FR-6.5) Given warehouse WH1 under site S1 in USMF, when a PATCH attempts to set `site_id` to a site in DEMF, then 422 `ORG-WH-LE-MISMATCH`.
 - **AC-6.8** (FR-6.12) Given the demo seed package, when imported twice, then the second import reports 0 creates, 0 updates.
 - **AC-6.9** (FR-6.11) Given the designer with the slider at 2026-06-01, when a node moved only in the draft version is viewed, then it renders with a "changed" badge and the previous parent shown in a tooltip.
+- **AC-6.10** (FR-6.14, BR-6.12) Given team "MD stewards" effective 2026-01-01..2026-12-31, when a member is added with `valid_from` 2027-01-15, then 422 `ORG-TEAM-MEMBER-RANGE`; given a party owned by the team, then it appears in each current member's stewardship queue.
+- **AC-6.11** (FR-6.16, BR-6.13) Given CHF cash rounding 0.05 half_up, when 10.024 and 10.025 are rounded, then 10.00 and 10.05; given EUR general 0.01 half_even, then 2.345 → 2.34 and 2.355 → 2.36.
+- **AC-6.12** (FR-6.15) Given USMF with 2 sites, 5 warehouses and 12 number sequences, when copied to CAMF (CA, CAD), then CAMF has 2 sites, 5 warehouses, 12 sequences at their start values, 0 transactional rows, and completes in < 30 s.
 
 ### 1.6.9 Test plan and fixtures
 
@@ -316,6 +339,137 @@ Depends on: wave 2 (tenant model, RLS, OPA duties), wave 3 (entity metadata and 
 
 Open questions: (1) Should operating units be legal-entity-scoped as an option for SAP-style cost centers tied to a controlling area? Proposed default: tenant-scoped with optional default legal entity; decide by wave 11. (2) Do we store SAP special periods as adjustment periods or as flags on period 12? Proposed: adjustment periods; decide by wave 14. (3) Is UCUM the canonical UoM code set or ISO 80000? Proposed: UCUM codes with ISO display names; decide by wave 8.
 
+### 1.6.13 Parameters and setup
+
+Organization parameters live in the wave-3 metadata registry as typed settings; each row below is one setting key in `org.*`.
+
+| Parameter | Scope | Type | Default | Allowed values | Effect | AX equivalent | SAP equivalent |
+|---|---|---|---|---|---|---|---|
+| `org.le.code_pattern` | tenant | regex | `^[A-Z0-9]{2,8}$` | regex ≤ 40 chars | Validates legal entity codes (FR-6.1, BR-6.1) | DataAreaId (4 chars) on CompanyInfo | BUKRS (4 chars), OX02 |
+| `org.le.default_language` | legal entity | BCP 47 | `en-US` | seeded languages | Default UI and document language | CompanyInfo.LanguageId | T001-SPRAS |
+| `org.time_zone` | legal entity / site / warehouse | IANA zone | tenant default | IANA list | Date boundaries for postings, cut-offs, timers | Legal entities → Time zone (D365) | ADRC-TIME_ZONE on plant address, system time zone STZAC |
+| `org.le.accounting_currency` | legal entity | ISO 4217 | none (required) | active currencies | Ledger currency; immutable after first posting | Ledger form → Accounting currency | T001-WAERS (OB22 for parallel currencies) |
+| `org.le.fiscal_calendar` | legal entity | FK | none (required before wave 11 posting) | calendars with ≥ 1 generated year | Period resolution for every posting | Ledger form → Fiscal calendar | OB37 (T001-PERIV) |
+| `org.cal.opening_closing_periods` | calendar | bool | true | true / false | Generates period 0 and 99 per year (FR-6.7) | FiscalCalendar → Create year (opening/closing periods) | — (SAP uses special periods) |
+| `org.cal.special_periods` | calendar | int | 0 | 0–4 | Adds adjustment periods 13–16 (open question 2) | — | T009-ANZBP via OB29 |
+| `org.cal.week_start` | calendar | enum | Monday | Monday–Sunday | Anchors 4-4-5 / 13-period generation | FiscalCalendar week start | Week-based fiscal year variant (OB29) |
+| `org.hier.max_depth` | tenant | int | 15 | 5–25 | Publish validation (FR-6.3) | — | Standard hierarchy levels (OKEON) |
+| `org.hier.max_nodes` | tenant | int | 50,000 | 1,000–200,000 | Publish validation; `ORG_HIERARCHY_MAX_NODES` | — | — |
+| `org.hier.backdate_allowed` | hierarchy type | bool | false | true / false | When false, BR-6.3 duty is not grantable for that type | Hierarchy designer publish date rule | — |
+| `org.addr.format` | country | template | UPU-style template for US, UK, DE, FR, IN, MX, CA | template tokens `{street_1}` … `{postal_code}` | Renders `formatted` (FR-6.6) | Address setup → Address format (LogisticsAddressFormatHeading) | Address layout key T005-LANDA (ADDRESS_INTO_PRINTFORM) |
+| `org.addr.postal_check` | country | enum | strict for 7 v1 countries, off otherwise | off / warn / strict | Postal code regex enforcement | Address parameters → ZIP/postal code validation | T005 postal code check rule (OY17) |
+| `org.addr.geocoder` | tenant | adapter id | `null` | `null` / registered adapter | Geocoding hook (FR-6.6) | Address parameters → geocoding (Bing Maps, D365) | Geographical Enablement Framework / DQM |
+| `org.cur.rounding` | currency × purpose (× legal entity) | unit + method | ISO minor unit, half_even | BR-6.13 | Monetary rounding service (FR-6.16) | Currency → Rounding rules | OB90, TCURX |
+| `org.uom.decimal_precision` | unit | int | per seed (EA 0, KG 3) | 0–6 | Display rounding (BR-6.8) | Units → Decimal precision | T006-ANDEC |
+| `org.ou.number_sequence` | tenant | sequence | `OU-{#####}` | wave-5 sequences | Operating unit numbers | Organization administration parameters → Number sequences | Cost center / profit center manual keys (KS01/KE51) |
+| `org.team.rule_evaluation` | tenant | bool | false | true / false | Enables job ORG-J5 | OMTeamMembershipCriterion | — |
+| `org.switcher.all_scope` | tenant | bool | false | true / false | Allows read-only `ALL` legal-entity scope behind a duty (FR-6.10) | Cross-company queries | — |
+
+### 1.6.14 Inquiries and reports
+
+| Name | Type | Filters & parameters | Columns / measures | Source projection | AX equivalent | SAP equivalent |
+|---|---|---|---|---|---|---|
+| Legal entities | list inquiry | status, country, currency | code, name, country, currency, calendar, time zone, status | `org.legal_entity` | OMLegalEntity list; SSRS Legal entities list | OX02 overview (T001) |
+| Organization hierarchy as of date | drill-down | hierarchy type, purpose, as-of date, root node | tree, depth, node type, effective range, child count | closure table | Organization hierarchy inquiry; SSRS Organization chart | OKENN, KSH3, KCH3 |
+| Hierarchy version comparison | drill-down | type, version A, version B | added, removed, moved nodes with old/new parent | `hierarchy_node` | Hierarchy designer "view changes" | Change documents on SETHEADER/SETNODE (RSSCD100) |
+| Operating units | list inquiry | type, default legal entity, status, hierarchy membership | number, name, type, manager, legal entity, hierarchies | `org.operating_unit` | SSRS Operating units list | KS13 cost center report, KE5X profit center list |
+| Sites, warehouses and locations | list inquiry | legal entity, type, status | site, warehouse, type, address, time zone, location count | `org.site`, `org.warehouse` | InventSite / InventLocation lists | OX10 / OX09 (T001W, T001L) |
+| Fiscal periods | list inquiry | calendar, year | period no, name, start, end, type, week53 | `org.fiscal_period` | Fiscal calendars → periods | OB29 periods (T009B) |
+| Unit conversions | operational report | class, unit, product-specific yes/no | from, to, factor, offset, inverse, round-trip check | `org.uom_conversion` | SSRS Unit conversions list | CUNI (T006) |
+| Unassigned structure | KPI | legal entity | warehouses without address, legal entities without calendar, operating units in no hierarchy, sites without warehouse | integrity projection | — | 1KE1 profit center assignment monitor |
+| Address validation exceptions | operational report | country, owner type, rule | address, failed rule, owner, age | `org.postal_address` | Address validation (D365) | DQM address check results |
+| Teams and members | list inquiry | team type, as-of date, member | team, member, role, source, valid from/to | `org.team_member` | Teams (OMTeam) | Responsibility Management teams |
+| Organization change log | drill-down | entity, user, date range | field, old, new, user, timestamp | wave-5 audit | Database log (SysDatabaseLog) | Change documents (KS05, OX02 table logs) |
+
+### 1.6.15 Printed and electronic documents
+
+| Document | Trigger | Layout elements (header/line/footer fields) | Formats | Numbering sequence | Legal / retention requirement |
+|---|---|---|---|---|---|
+| Organization chart | on demand from hierarchy designer | header: hierarchy type, purpose, as-of date; body: node boxes (code, name, manager); footer: version no, printed by, timestamp | PDF, SVG | none | none |
+| Fiscal period schedule | on calendar generation or on demand | header: calendar, year, pattern; lines: period no, name, start, end, type; footer: generated by | PDF, XLSX | none | retained with ledger configuration for 10 years (HGB §257, Code de commerce L123-22) |
+| Organization model package | export (FR-6.12) | manifest (schema version, sha256, counts) + JSON bodies | JSON (electronic) | `ORGPKG-{yyyy}-{####}` | 7 years as configuration evidence |
+
+### 1.6.16 Periodic and batch jobs
+
+| Job | Schedule default | Partitioning key | Idempotency / checkpoint | Typical runtime target | Failure handling | Monitor / alert |
+|---|---|---|---|---|---|---|
+| ORG-J1 Closure-table integrity check | daily 02:00 tenant local | hierarchy_type_id | read-only; checkpoint per type | < 5 min for 10 types × 50k nodes | report only, never auto-repair; runbook "Rebuild closure table" | `org_closure_integrity_failures > 0` |
+| ORG-J2 Future-dated hierarchy activation | Temporal timer at `effective_from` 00:00 legal-entity time | version_id | one timer per version; activation idempotent | < 30 s | 5 retries with backoff, then alert; previous version stays active | activation lag > 5 min |
+| ORG-J3 Fiscal year roll-forward | daily check; generates next year 90 days before the last generated year ends | calendar_id | idempotent per (calendar, year) | < 10 s per calendar | custom-pattern calendars raise a stewardship item instead | no next year 30 days before year end |
+| ORG-J4 Address re-validation and geocode refresh | weekly Sunday 03:00 | country_code | checkpoint per 1,000 addresses | < 1 h per 1M addresses | adapter outage leaves status unchanged | adapter error rate > 20% |
+| ORG-J5 Team membership rule evaluation | nightly 01:30 | team_id | diff-based; re-run yields no change | < 10 min for 5,000 teams | rule error disables the rule and notifies the team lead | rule failures > 0 |
+| ORG-J6 Reference data refresh (ISO 3166/4217/639 updates) | quarterly, applied after admin approval | dataset | versioned package; re-apply is a no-op | < 1 min | rejected package keeps prior version | package pending > 14 days |
+
+### 1.6.17 Security duties and privileges
+
+| Duty | Privileges (entry points) | Segregation-of-duties conflicts | Default roles that include it |
+|---|---|---|---|
+| View organization | `GET /org/v1/**`; Organization administration workspace; all org list pages | none | every role |
+| Maintain legal entities | `POST/PATCH /org/v1/legal-entities`, `:copy`; Legal entities screen | Administer security roles (wave 2) | Organization administrator |
+| Maintain operating units and teams | `/org/v1/operating-units`, `/org/v1/teams`, `/org/v1/team-types`; job ORG-J5 config | none | Organization administrator, HR administrator |
+| Maintain organization hierarchies | draft create, `PUT …/nodes`; Hierarchy designer | Publish organization hierarchies for `security` purpose (maker-checker) | Organization administrator |
+| Publish organization hierarchies | `POST …:publish`; ORG-J2 timers | Maintain organization hierarchies on security-purpose types | Organization administrator lead, Security administrator |
+| Backdate organization hierarchies | publish with `effective_from` < today | Maintain organization hierarchies | Controller |
+| Maintain sites and warehouses | `/org/v1/sites`, `/warehouses`, `/locations` | none | Organization administrator, Warehouse manager |
+| Maintain fiscal calendars | `/org/v1/fiscal-calendars`, `:generate`; ORG-J3 | Close fiscal periods (wave 14) | Accounting manager |
+| Maintain reference data | countries, currencies, rounding, UoM, languages; ORG-J6 approval | none | Master data steward |
+| Administer organization | `/org/v1/export`, `/org/v1/import` | Approve migration sign-off (wave 10) | System administrator |
+
+### 1.6.18 Message catalog
+
+| Code | Severity | User text | Cause | Remediation | Raised by |
+|---|---|---|---|---|---|
+| ORG-LE-CODE-RESERVED | error | "Code {code} is reserved." | DAT, SYS or ALL used | Choose another code | BR-6.1 |
+| ORG-LE-DEFAULT-IN-USE | error | "{n} users have this legal entity as default." | Deactivation while users default to it | Change users' default entity | BR-6.11 |
+| ORG-HIER-CYCLE | error | "Moving {node} under {target} creates a cycle." | Drop onto own descendant | Drop on a non-descendant | BR-6.4 |
+| ORG-HIER-MULTI-ROOT | error | "A version must have exactly one root; found {n}." | Publish with 0 or ≥ 2 roots | Attach orphans to the root | FR-6.3 |
+| ORG-HIER-OVERLAP | error | "Effective range overlaps version {v}." | Overlapping ranges per type | Adjust `effective_from` | FR-6.3 |
+| ORG-HIER-BACKDATE-DUTY | error | "Backdated publish requires the Backdate duty and a reason." | Past `effective_from` without duty | Request duty or use today | BR-6.3 |
+| ORG-CAL-LOCKED | error | "Fiscal year {y} has postings and cannot be regenerated." | Regenerate with postings | Create adjustment periods instead | BR-6.7 |
+| ORG-CAL-GAP | error | "Periods leave a gap on {date}." | Custom boundaries not contiguous | Fix boundaries | FR-6.7 |
+| ORG-ADDR-REGION-REQUIRED | error | "Region is required for {country}." | Missing region for US/CA/IN/MX | Enter region | FR-6.6 |
+| ORG-ADDR-POSTAL-FORMAT | error | "Postal code {code} is not valid for {country}." | Regex failure in strict mode | Correct code or set mode warn | FR-6.6 |
+| ORG-WH-LE-MISMATCH | error | "Warehouse and site belong to different legal entities." | Site change across entities | Pick a site in the same entity | FR-6.5 |
+| ORG-UOM-NO-PATH | error | "No conversion from {from} to {to} within two steps." | Missing conversion | Add a conversion | FR-6.9 |
+| ORG-TEAM-MEMBER-RANGE | error | "Member validity must be inside the team's effective range." | Out-of-range dates | Adjust dates | BR-6.12 |
+| ORG-TEAM-EXPIRED | error | "Team {code} has ended." | Member added to ended team | Extend the team | BR-6.12 |
+| ORG-CUR-ROUNDING-UNIT | error | "Rounding unit {u} is not allowed for {currency}." | Unit not a permitted multiple | Use a permitted unit | BR-6.13 |
+| ORG-VERSION-CONFLICT | warning | "This record changed since you opened it." | Stale `version` | Merge or reload | BR-6.10 |
+
+### 1.6.19 Performance budgets and capacity
+
+| Operation | Volume assumption | Latency target (p50 / p95 / p99) | Throughput target | Storage growth per year | Index / partition strategy | Degradation behavior under 3× load |
+|---|---|---|---|---|---|---|
+| As-of hierarchy query | 2M/day; peak 3,000/min | 4 / 20 / 40 ms | 500 req/s per replica | closure ≈ 400k rows per 50k-node version, ~30 MB/yr | PK (ancestor_id, descendant_id) per version; partial index on published | served from current closure; p95 ≤ 40 ms; exports queued first |
+| Legal-entity switch (shell re-scope) | 20k/day; peak 200/min | 80 / 300 / 500 ms | 50 req/s | none | OPA decision cache per (user, entity) 60 s | cache hit ratio keeps p95 ≤ 600 ms |
+| Hierarchy publish (50k nodes) | 20/day | 8 / 30 / 45 s | 1 concurrent per hierarchy type | ~5 MB per version | Temporal activity; bulk insert closure | queued FIFO per type; no timeout |
+| UoM conversion | 5M/day; peak 10k/min | 1 / 5 / 10 ms | 2,000 req/s per replica | negligible | in-memory conversion graph, invalidated by event | unchanged (CPU-bound, cached) |
+| Address create with validation | 50k/day; peak 500/min | 20 / 80 / 150 ms (adapter excluded) | 100 req/s | ~200 MB per 1M addresses | GIN trigram on `formatted`; btree (owner_type, owner_id) | adapter calls skipped, status `unverified` |
+| Fiscal year generation | 100/yr | 0.5 / 2 / 5 s | n/a | < 1 MB | (calendar_id, fiscal_year, period_no) unique | unchanged |
+| Organization export package | 10/day | 2 / 10 / 20 s | 2 concurrent per tenant | 1–20 MB per package | n/a | requests beyond 2 queued |
+
+### 1.6.20 Localization and compliance hooks
+
+| Item | What varies | Country packs touching it (wave 48) | Extension point |
+|---|---|---|---|
+| Address format and postal validation | Line order, region requirement, postal regex (US ZIP+4, UK postcode, CA A1A 1A1, IN 6-digit PIN, MX 5-digit CP) | US, UK, DE, FR, IN, MX, CA in this wave; others via pack | `AddressFormatProvider` registry keyed by country |
+| Legal entity registration identifiers | DE Handelsregister (HRB + court), FR SIREN/SIRET + NAF, IN CIN + PAN + TAN, MX RFC + régimen fiscal, UK Companies House number, US EIN + state of incorporation, CA BN | all seven | typed `legal_entity_registration` list contributed by pack metadata |
+| Fiscal year conventions | IN April–March statutory year; UK companies any year end; MX statutory calendar year (CFF Art. 11); US 52/53-week allowed (IRC §441(f)) | IN, MX, US | calendar templates shipped by pack; FR-6.7 generator |
+| Currency and cash rounding | CHF/SEK cash rounding; CAD penny elimination (cash to 0.05); MXN 2 decimals; INR 2 decimals, invoice totals often to 1.00 | CA, IN | `org.cur.rounding` rows seeded by pack |
+| Holidays and time zones | Bank holidays for due-date shifting (wave 19), DST rules | all | IANA zones; holiday calendars provided as pack data, consumed by FR-9.6 and wave 19 |
+| Language of documents | FR Loi Toubon (French on documents for French counterparties); CA Quebec Charter of the French language (Bill 96) | FR, CA | FR-6.17 translations; document language on legal entity |
+| Privacy | Home addresses of persons are personal data (GDPR, UK GDPR, CCPA/CPRA, India DPDP Act 2023, Mexico LFPDPPP, PIPEDA) | all | `home` purpose flagged PII; masking per BR-7.9 |
+| Retention | Organization master and calendars kept for tenant life + 10 years (DE HGB §257 10 y, FR 10 y, US IRS 7 y, IN Companies Act §128 8 y) | all | retention class `org-config` in wave-5 audit store |
+
+### 1.6.21 Coverage closure
+
+| Register row (inventory section + AX form or SAP T-code) | Status before | Disposition | Note |
+|---|---|---|---|
+| AX §12.12.1 Human resources, Common — Teams (Org admin: Teams, Team types), OMTeam; register §12.99.4 #107 | PARTIAL-6 | ADDED as FR-6.14 | Team, team type, members, membership criteria; HR uses the same entity |
+| AX §12.12.4 Human resources, Setup — Teams → Team types, Teams, OMTeam; register §12.99.4 #114 | PARTIAL-6 | ADDED as FR-6.14 | Setup screen is the Teams list with type filter (§1.6.17 duty "Maintain operating units and teams") |
+| AX §12.29.1 Organization administration, Common — Teams / Team types, OMTeam; register §12.99.4 #232 | PARTIAL-6 | ADDED as FR-6.14 | Inquiry "Teams and members" in §1.6.14 |
+| AX §12.29.4 Organization administration, Setup — Organization → Teams / Team types; register §12.99.4 #251 | PARTIAL-6 | ADDED as FR-6.14 | Rule evaluation job ORG-J5; parameter `org.team.rule_evaluation` |
+
 ## 1.7 Wave 7: Global Party & Business Partner Model
 
 ### 1.7.1 Scope and business context
@@ -350,6 +504,13 @@ Out of scope: customer/vendor transactions and balances, bank account verificati
 | Credit management | CustTable.CreditMax, CreditRating, blocked status (CustBlocked) | KNKK credit limit (FD32), UKM in S/4 | `CreditProfile` (limit, currency, rating, hold) | partial (credit checks run in wave 27) |
 | Bank role | BankAccountTable per customer/vendor (CustBankAccount/VendBankAccount) | BP bank details BUT0BK, LFBK/KNBK | `BankRole` plus `PartyBankAccount` (IBAN/BIC format check only) | partial (verification in wave 36) |
 | Governance | Workflow on vendor changes (VendTable change proposals in D365), DirPartyTable data owner | MDG change requests, SAP workflow | Stewardship queue, change-approval workflow on protected fields | improved |
+| Vendor certifications and diversity | VendCertification, VendCertificationType (Vendors → Certification types), Diversity classifications (D365 procurement) | No ECC master field; SAP SLC/Ariba SLP supplier certificates; BP attributes | `CertificationType`, `VendorCertification`, `DiversityClassification` (FR-7.14) | full |
+| Installment / payment schedules | PaymSched, PaymSchedLine (Payment schedules form) | T052R installment terms (OBB9) linked to T052 ZTERM | `PaymentScheduleLine` on `PaymentTerm` (FR-7.15) | full |
+| One-time accounts | One-time customer/supplier (AR/AP parameters → One-time customer account / One-time supplier account; CustTable.OneTimeCustomer) | Account groups CPD/CPDL (T077D/T077K XCPDK), document data in BSEC | `one_time` role flag + document-level address (FR-7.16) | full |
+| Head office, alternate payer, permitted payee | CustTable/VendTable.InvoiceAccount, DirPartyRelationship | KNA1-KNRZE alternate payer, KNB1-KNRZB head office (branch/head office), LFA1-LNRZA, LFZA permitted payees | `PartyRelationship` (FR-7.17) | full |
+| Address books | DirAddressBook, DirAddressBookParty, address book team security (Global address book parameters) | BP authorization group BU_BEGRU, BP grouping | `AddressBook` with team access (FR-7.18) | full |
+| Customer hierarchies | TAMCustomerCategory hierarchy (D365 trade allowance) | KNVH customer hierarchy (VDH1N/VDH2N), hierarchy types OVH1 | hierarchy purpose `customer_*` over Customer roles (FR-7.19) | improved (effective-dated versions) |
+| Classification code lists and hold reasons | CustClassificationGroup, LineOfBusiness, smmSegment/smmSubsegment, SalesDistrict, Vendor/Customer hold reasons | KNA1-BRSCH industry, KNA1-KUKLA classification, KNVV-KDGRP, KNVV-BZIRK, block reasons | `ClassificationCode` lists (FR-7.20) | full |
 
 ### 1.7.3 Functional requirements
 
@@ -378,6 +539,23 @@ Out of scope: customer/vendor transactions and balances, bank account verificati
 - **FR-7.11 Stewardship queue and ownership** — Should. The system shall assign a data owner (user or team) per party and show stewards a queue of duplicates, unverified tax ids, pending changes and incomplete records (missing primary address or primary email), sorted by age.
 - **FR-7.12 Legacy import** — Must. The system shall import CustTable/VendTable/DirPartyTable and KNA1/LFA1 extracts (CSV) through the wave-5 import tool with the wave-10 mapping specs pre-seeded; duplicates found during import go to the stewardship queue rather than blocking the load.
 - **FR-7.13 Party search API** — Must. The system shall expose typeahead search returning up to 20 parties in < 100 ms p95 over 1M rows, filtered by role and legal entity.
+- **FR-7.14 Vendor certifications and diversity classifications** — Should. The system shall maintain certification types (code, name, issuing body, `requires_expiry`, `reminder_days` default 30, `attachment_required`) and vendor certifications (vendor role, type, certificate number, issuer, `valid_from`/`valid_to`, document id from FR-8.20, status) plus diversity classifications per vendor (seeded: SB, WOSB, EDWOSB, MBE, VOSB, SDVOSB, HUBZone, 8(a), LGBTBE, DOBE) each optionally linked to the certification that evidences it.
+  - Vendor groups may flag certification types as mandatory; an expired mandatory certification sets vendor hold `requisition` through job PTY-J6 and notifies the data owner.
+  - Endpoints: `POST /party/v1/vendors/{roleId}/certifications`, `GET /party/v1/certifications?status=expiring&days=30`.
+- **FR-7.15 Installment payment schedules** — Must. The system shall attach payment schedules to payment terms with 1–24 lines, each line carrying a percent or fixed amount, its own net-days or day-of-month rule and an optional cash discount; allocation modes mirror AX PaymSched: `percent`, `fixed_amount`, and `count` (N equal installments every M days or months).
+  - `GET /party/v1/payment-terms/{id}/due-date` returns one (due_date, amount, discount_date, discount_amount) tuple per installment when `amount` is supplied.
+  - SAP T052R rows (ZTERM, RATNR, RATPZ, RATZT) map one-to-one to schedule lines.
+- **FR-7.16 One-time customers and vendors** — Must. The system shall provide one or more one-time Customer and Vendor roles per legal entity (role flag `one_time = true`, from a group with `one_time_default = true`) whose payee/sold-to name, address, tax id and bank details are captured on each document instead of on the role.
+  - Consumers (purchasing 17, AP 19, sales 26, AR 30) store the captured data on the document header, the BSEC equivalent; `POST /party/v1/one-time-data:validate` runs FR-6.6 address and FR-7.4 tax-id validation and returns normalized values.
+  - One-time roles are excluded from duplicate scoring; a document counterparty name/tax id used on ≥ 3 documents in 12 months raises a "convert to regular account" stewardship item (job PTY-J7).
+- **FR-7.17 Party relationships: head office, alternate payer, permitted payee** — Must. The system shall maintain typed, effective-dated relationships between parties or roles: `invoice_account`, `head_office_of` / `branch_of`, `alternate_payer`, `permitted_payee`, `contact_for`, `parent_company` / `subsidiary_of`, plus tenant-defined types (AX DirRelationshipType).
+  - `head_office_of` carries `decentralized_processing` (KNB1-XDEZV equivalent): when false, AR/AP open items of the branch post to the head-office account in waves 19 and 30.
+  - Payment proposals (wave 19) pay only to the role's own bank accounts or to active permitted payees; adding a permitted payee is a protected-field change (FR-7.10).
+  - `head_office_of` chains are acyclic and at most 5 levels deep (`PTY-REL-CYCLE`).
+- **FR-7.18 Address books** — Should. The system shall maintain named address books (e.g. "US vendors", "EMEA customers") that group parties; a party may belong to many books; books carry team access lists (FR-6.14) enforced by OPA on party reads when the tenant enables `party.address_book_security`; each user has a default book applied to parties they create.
+- **FR-7.19 Customer hierarchies** — Should. The system shall build effective-dated customer hierarchies with purposes `customer_pricing`, `customer_rebate` and `customer_reporting` whose nodes are Customer roles, reusing the wave-6 hierarchy engine (versions, closure table, as-of API); pricing (wave 26) and rebates (wave 29) resolve ancestors as of the document date in < 20 ms p95.
+- **FR-7.20 Classification code lists and hold reasons** — Must. The system shall maintain tenant code lists for line of business, segment and subsegment, sales district, customer classification group, industry (NAICS 2022 / NACE Rev. 2.1 seeded), customer hold reasons and vendor hold reasons; role fields reference them, and every block or unblock records reason code, user, timestamp and free text.
+  - Vendor `blocked` values are extended to the AX set: none, invoice, payment, requisition, all, never (never = AX "Never", exempt from inactivity blocking job PTY-J9).
 
 ### 1.7.4 Data model
 
@@ -434,6 +612,8 @@ Out of scope: customer/vendor transactions and balances, bank account verificati
 **DuplicateCandidate / MergeCase** — candidate: id, party_a_id, party_b_id (a < b), match_weight numeric(8,4), probability, level_detail jsonb, status (open, dismissed, merged), created_at; merge_case: id, survivor_id, merged_ids uuid[], survivorship jsonb, snapshot jsonb, workflow_id, status (draft, running, awaiting_ack, completed, reverted, failed), consumer_acks jsonb.
 
 Invariants: a party with status `merged` has no active roles; `account_number` never reused after merge (merged role numbers are retained as aliases in `customer_alias`); at most one primary tax registration per (party, country); every role has a posting profile. Indexing: `party` GIN trigram on `search_name`; btree on `(tenant_id, party_type, status)`; blocking indexes on `left(search_name,4)`, `tax_registration.number`, `electronic_address.normalized`; `duplicate_candidate(status, match_weight desc)`.
+
+**VendorCertification / PaymentScheduleLine / PartyRelationship / AddressBook (FR-7.14 – FR-7.18)** — vendor_certification: id, vendor_role_id FK, certification_type_id FK, number text(60), issuer text(100), valid_from date, valid_to date (required when type requires_expiry), document_id uuid null, status (valid, expiring, expired, revoked), revoked_reason text; vendor_diversity: vendor_role_id, classification_code, certification_id null, valid_from, valid_to. payment_schedule_line: payment_term_id FK, line_no int (1–24), allocation (percent, fixed_amount, count), value numeric(18,6), net_days int, day_of_month int null, offset_months int, discount_pct numeric(5,2) null, discount_days int null. party_relationship: id, type_code FK relationship_type, from_party_id, from_role_id null, to_party_id, to_role_id null, legal_entity_id null, valid_from, valid_to, attributes jsonb (e.g. decentralized_processing); unique (type_code, from_role_id, to_role_id, valid_from). address_book: id, code text(20), name, team_ids uuid[]; address_book_party (address_book_id, party_id) PK.
 
 ### 1.7.5 APIs and events
 
@@ -495,6 +675,11 @@ Interaction rules: the create-party dialog runs dedup after name and country are
 - **BR-7.10** Deleting a party is never allowed; `inactive` parties cannot receive new roles; roles on an `inactive` party cannot be unblocked.
 - **BR-7.11** Concurrent merges touching the same party are serialized by a Temporal workflow id `merge-{tenant}-{min(party_ids)}`; the second request receives 409 with the running case id.
 - **BR-7.12** Import rows with a `likely_duplicate` candidate are loaded with status `active` and a candidate record; they are not rejected, because migrations must be complete and reviewed afterward.
+- **BR-7.13** Installment amounts: `amount_i = round(total × pct_i / 100)` using the currency's general rounding (FR-6.16); the last installment absorbs the remainder (`total − Σ previous`); percent lines must sum to exactly 100.00 (`PTY-SCHED-PCT-SUM`); each due date applies BR-7.7 to the baseline (invoice) date.
+- **BR-7.14** Certification status is computed daily: `valid` while today < `valid_to − reminder_days`; `expiring` inside the window; `expired` after `valid_to`; `revoked` only manually with reason; each change emits `dev.passage.party.certification.status.changed.v1`.
+- **BR-7.15** One-time roles cannot carry credit limits, bank accounts, tax registrations or posting-profile overrides on the role (`PTY-ONETIME-FIELD`); they cannot be merged as survivors.
+- **BR-7.16** `head_office_of` requires both ends to hold the same role type (Customer–Customer or Vendor–Vendor) in the same legal entity; changing the head office while the branch has open items is refused through a wave-30/19 callback (returns "no open items" until those waves exist).
+- **BR-7.17** A permitted payee must be an active party with at least one verified bank account; removal takes effect immediately, addition only after approval.
 
 ### 1.7.8 Acceptance criteria
 
@@ -508,6 +693,10 @@ Interaction rules: the create-party dialog runs dedup after name and country are
 - **AC-7.8** (FR-7.12) Given a 1,000-row CustTable extract with 20 duplicates of existing parties, when imported, then 1,000 roles exist, 20 duplicate candidates are open, and 0 rows are rejected for duplication.
 - **AC-7.9** (FR-7.13) Given 1M parties, when typeahead `q=acm` is called 1,000 times, then p95 < 100 ms and results are ordered by similarity then name.
 - **AC-7.10** (BR-7.9) Given a person with `dob`, when the list page is rendered by a user without `pii.read`, then the column shows `••••` and the CloudEvent payload has no `dob` key.
+- **AC-7.11** (FR-7.15, BR-7.13) Given term "3 installments 40/30/30 at net 30/60/90" and an invoice of USD 1,000.01 dated 2026-03-01, when due dates are computed, then the amounts are 400.00 / 300.00 / 300.01 and the due dates 2026-03-31 / 2026-04-30 / 2026-05-30.
+- **AC-7.12** (FR-7.14, BR-7.14) Given a vendor in group "Regulated" whose mandatory ISO 13485 certificate expires 2026-11-15 with 30 reminder days, when PTY-J6 runs on 2026-10-16, then status is `expiring` and the owner is notified; on 2026-11-16 status is `expired` and the vendor hold is `requisition`.
+- **AC-7.13** (FR-7.16, BR-7.15) Given one-time vendor OTV-USMF, when a party with an identical name is created, then no duplicate candidate references OTV-USMF; when a credit limit is set on OTV-USMF, then 422 `PTY-ONETIME-FIELD`.
+- **AC-7.14** (FR-7.17) Given branch B whose head office is H, when H is made a branch of B, then 422 `PTY-REL-CYCLE`; given permitted payee P added to vendor V, then P is not payable until the pending change is approved.
 
 ### 1.7.9 Test plan and fixtures
 
@@ -565,6 +754,145 @@ Depends on: wave 6 (legal entities, addresses, countries, number sequences per e
 
 Open questions: (1) Do Prospect roles need a number sequence or stay numberless until conversion to Customer? Proposed: numberless; decide by wave 26. (2) Is the employee role created here or only in wave 42 with HcmWorker migration? Proposed: stub here (personnel number only); decide by wave 10. (3) Which survivorship rules are tenant-configurable in v1? Proposed: order list editable, levels fixed; decide by wave 10.
 
+### 1.7.13 Parameters and setup
+
+| Parameter | Scope | Type | Default | Allowed values | Effect | AX equivalent | SAP equivalent |
+|---|---|---|---|---|---|---|---|
+| `party.dedup.mode` | tenant | enum | block_likely | off / warn / block_likely | Create behavior with candidates (FR-7.5) | Global address book parameters → Duplicate check (DirParameters) | BP duplicate check (Business Address Services / MDG matching) |
+| `party.dedup.likely_weight` | tenant | decimal | 12 | 8–20 | Likely-duplicate threshold | — | MDG match threshold |
+| `party.dedup.possible_weight` | tenant | decimal | 6 | 3–12 | Possible-duplicate threshold | — | — |
+| `party.number_sequence` | tenant | sequence | `PARTY-{########}` | wave-5 sequences | Party numbers (FR-7.1) | Global address book parameters → Number sequences (Party ID) | BP number ranges (BUCF) and groupings (BUC2) |
+| `party.customer.account_sequence` | legal entity | sequence | `CUST-{LE}-{######}` | sequences | Customer account numbers | AR parameters → Number sequences → Customer account | XDN1 number ranges per account group (OBD2) |
+| `party.vendor.account_sequence` | legal entity | sequence | `VEND-{LE}-{######}` | sequences | Vendor account numbers | AP parameters → Number sequences → Vendor account | XKN1 number ranges per account group (OBD3) |
+| `party.person.name_sequence` | tenant / country | enum | given_family | given_family / family_given / family_comma_given | Display name of persons | Name sequences (DirNameSequence) | BP name format rules per country (address layout key) |
+| `party.tax.online_validation` | tenant | bool | true | true / false | Calls VIES/TIN adapters (FR-7.4) | EU VAT number validation (D365 sales tax parameters) | VIES check on BP tax numbers (DFKKBPTAXNUM) |
+| `party.tax.cache_days` | tenant | int | 30 | 1–365 | Validation result reuse | — | — |
+| `party.protected_fields` | legal entity | field set | bank account, tax registration, credit limit, vendor payment term, remit-to address, permitted payee | any role field | Fields routed to approval (FR-7.10) | Vendor approval workflow fields (D365 AP parameters → Vendor approval) | T055F sensitive fields (S_ALR_87003378), FK08/FD08 |
+| `party.approval.sla_days` | legal entity | int (business days) | 2 | 1–10 | Escalation timer | Workflow escalation | — |
+| `party.group.mandatory_fields` | customer/vendor group | field set | primary address; tax id for organizations | role and party fields | Save-time required fields | Customer/vendor group mandatory fields (AR/AP parameters → mandatory fields) | Field status groups per account group (OBD2/OBD3, T077D/T077K) |
+| `party.group.one_time_default` | group | bool | false | true / false | Roles in group are one-time (FR-7.16) | AR/AP parameters → One-time customer/supplier | Account group one-time indicator (XCPDK) |
+| `party.customer.default_group` | legal entity | FK | none | customer groups | Default on create | AR parameters → General → Default customer group | Default account group |
+| `party.credit.check_type` | legal entity | enum | balance | off / balance / balance_incl_open_orders | Credit check basis for wave 27 | AR parameters → Credit rating → Credit limit type | OVA8 credit control (FSCM UKM in S/4) |
+| `party.merge.revert_days` | tenant | int | 30 | 0–90 | Revert window (FR-7.6) | — | — |
+| `party.cert.reminder_days` | certification type | int | 30 | 0–180 | Expiring window (BR-7.14) | Vendor certification types | — |
+| `party.address_book_security` | tenant | bool | false | true / false | Enforce book team access (FR-7.18) | Global address book parameters → Use address book security | BP authorization groups (B_BUPA_GRP) |
+| `party.inactivity_block_days` | legal entity | int | 0 (off) | 0–1,825 | PTY-J9 blocks roles without transactions | Vendor inactivation (D365 AP periodic "Vendor inactivation") | — |
+| `party.pii_masking` | tenant | bool | true | true / false | BR-7.9 masking | Personal data / privacy (D365 GDPR) | ILM blocking / end-of-purpose check |
+
+### 1.7.14 Inquiries and reports
+
+| Name | Type | Filters & parameters | Columns / measures | Source projection | AX equivalent | SAP equivalent |
+|---|---|---|---|---|---|---|
+| Global address book | list inquiry | role, legal entity, type, address book, status | party number, name, type, roles, primary address, status | `party.party` | DirPartyTableListPage | BP search, S_ALR_87012180 address list |
+| Customer list | list inquiry | legal entity, group, blocked, classification | account, name, group, terms, currency, credit limit, blocked | `party.customer_role` | CustTableListPage; SSRS Customer base data | S_ALR_87012179, XD03 |
+| Vendor list | list inquiry | legal entity, group, hold, diversity | account, name, group, terms, hold, certifications | `party.vendor_role` | VendTableListPage; SSRS Vendor base data | S_ALR_87012086, MKVZ |
+| Duplicate candidates | operational report | weight range, status, age | pair, weight, probability, level detail, age | `party.duplicate_candidate` | Duplicate check results (DirDuplicateCheck) | MDG duplicate check results |
+| Critical changes | operational report | field, legal entity, status, requester | field, old (masked), new (masked), requester, approver, SLA | `party.pending_change` | Vendor change proposals (D365) | S_ALR_87012090, S_ALR_87012183 (FK09/FD09) |
+| Payment terms and schedules | list inquiry | term code | net rule, discount tiers, installments, due-date preview | `party.payment_term` | SSRS Terms of payment list; Cash discount list | OBB8 / OBB9 listing (T052, T052R) |
+| Certification expiry | KPI | days to expiry, type, vendor group | expiring count, expired count, vendors on hold | `party.vendor_certification` | Vendor certifications (D365) | — |
+| Diversity vendor base | KPI | classification, legal entity | vendor count per classification (spend added in wave 17) | `party.vendor_diversity` | Vendor diversity (D365) | — |
+| Tax registration status | operational report | status, country, type | number, status, source, validated at | `party.tax_registration` | VAT number validation log | VIES check log |
+| Hold history | drill-down | role, reason, date range | hold, reason, user, timestamp | wave-5 audit | Customer/Vendor hold history | XD04 / XK04 change documents |
+| Relationships and head offices | list inquiry | type, party | from, to, type, validity, decentralized flag | `party.party_relationship` | Party relationships | KNA1-KNRZE / KNB1-KNRZB lists, VDH2N |
+| Merge history | drill-down | date range, status | case, survivor, merged ids, ack count, revert | `party.merge_case` | — | — |
+
+### 1.7.15 Printed and electronic documents
+
+| Document | Trigger | Layout elements (header/line/footer fields) | Formats | Numbering sequence | Legal / retention requirement |
+|---|---|---|---|---|---|
+| Party master data sheet | on demand | header: party number, name, type, primary address; lines: roles per legal entity, terms, tax ids (masked); footer: printed by, timestamp | PDF | none | none |
+| Bank-detail change confirmation | approval of a protected bank-account or permitted-payee change | header: party, role, change id; body: old/new IBAN masked to last 4, effective date, approvers; footer: callback-verification statement | PDF, email to the party's verified contact | `PCHG-{yyyy}-{#####}` | 10 years as payment-fraud control evidence (SOX ITGC) |
+| Data subject access export | privacy officer request for a person party | header: request id, subject, date; body: all personal fields, addresses, roles, processing purposes | JSON + PDF | `DSAR-{yyyy}-{####}` | respond within 1 month (GDPR Art. 12(3)), 45 days (CCPA); request log 3 years |
+| Merge certificate | merge case completed | header: case id; lines: merged ids → survivor, consumer acks; footer: operator, timestamp | PDF | merge case number | 10 years |
+| Mailing labels | none | — | — | — | none: mailing labels are CRM scope (PRD non-goal) |
+
+### 1.7.16 Periodic and batch jobs
+
+| Job | Schedule default | Partitioning key | Idempotency / checkpoint | Typical runtime target | Failure handling | Monitor / alert |
+|---|---|---|---|---|---|---|
+| PTY-J1 Full duplicate re-score | weekly Sunday 01:00 tenant local | blocking key hash (16 partitions) | candidates upserted by (a, b); checkpoint per partition | < 2 h for 1M parties on 8 workers | partition retried 3×; partial results kept | queue > 1,000 open |
+| PTY-J2 VIES re-validation | daily 04:00 | country | max 5,000 per run; cursor by `validated_at` | < 30 min | backoff on rate limit; leaves `unverified` | failure rate > 20% / 15 min |
+| PTY-J3 Stale merge sweeper | hourly | merge_case_id | idempotent | < 1 min | alerts on cases awaiting ack > 10 min | stale cases > 0 |
+| PTY-J4 Approval SLA escalation | every 15 min | legal_entity_id | Temporal timers; idempotent per task | < 1 min | escalation to approver's manager | SLA breaches per day |
+| PTY-J5 Alias usage log purge | monthly | tenant | deletes rows > 12 months | < 5 min | retried next run | none |
+| PTY-J6 Certification status update | daily 00:30 | vendor_role_id range | status recomputed; events only on change | < 10 min for 100k certificates | retried; holds applied only after status commit | expired-mandatory count |
+| PTY-J7 One-time conversion candidates | weekly | legal_entity_id | candidate upsert by normalized name/tax id | < 15 min | none | candidates created |
+| PTY-J8 Personal data end-of-purpose check | monthly | party_id range | flags candidates; never deletes without approval | < 1 h per 1M persons | report only | candidates > 0 |
+| PTY-J9 Role inactivity blocking | monthly (off by default) | legal_entity_id | idempotent; skips `never` | < 15 min | dry-run report first | blocked count |
+
+### 1.7.17 Security duties and privileges
+
+| Duty | Privileges (entry points) | Segregation-of-duties conflicts | Default roles that include it |
+|---|---|---|---|
+| View parties | `GET /party/v1/**` (PII masked); Global address book | none | every business role |
+| Maintain parties | `POST/PATCH /party/v1/parties`, tax registrations, relationships, address books | Approve master data changes | Master data steward, AR clerk, AP clerk |
+| Maintain customers | customer role endpoints; Customers workspace | Post customer payments (wave 30) | AR clerk, Sales administrator |
+| Maintain vendors | vendor role endpoints; certifications; Vendors workspace | Approve vendor invoices (wave 19), Release payments (wave 19) | AP clerk, Purchasing agent |
+| Maintain payment and delivery terms | terms, schedules, delivery terms/modes | none | AR manager, AP manager |
+| Steward master data | duplicates, stewardship queue, PTY-J1/J7 results | none | Master data steward |
+| Merge parties | merge cases, `:revert` | Maintain vendors (same party), to prevent payee substitution | Master data steward lead |
+| Approve master data changes | `pending-changes/{id}:approve/:reject` | Maintain vendors / Maintain customers (no self-approval, BR-7.8) | AP manager, Credit manager, Controller |
+| Override duplicate check | `X-Passage-Override-Duplicate` | none | Master data steward lead |
+| Read personal data | `pii.read`; DSAR export | Administer migration (bulk export risk) | Privacy officer, HR administrator |
+
+### 1.7.18 Message catalog
+
+| Code | Severity | User text | Cause | Remediation | Raised by |
+|---|---|---|---|---|---|
+| PTY-DUP-LIKELY | error | "{n} likely duplicates found." | Weight ≥ likely threshold on create | Review candidates or override with duty | FR-7.5 |
+| PTY-DUP-OVERRIDE-DUTY | error | "You are not allowed to override the duplicate check." | Override header without duty | Ask a steward | AC-7.7 |
+| PTY-TAX-FORMAT | error | "{type} {number} does not match the {country} format." | Regex failure | Correct the number | FR-7.4 |
+| PTY-TAX-CHECKDIGIT | error | "Check digit of {number} is wrong." | Algorithm failure (mod-97, mod-89, mod-36) | Correct the number | FR-7.4 |
+| PTY-TAX-UNVERIFIED | warning | "Online validation unavailable; saved as unverified." | VIES/TIN timeout | None; PTY-J2 retries | FR-7.4 |
+| PTY-ROLE-LE-HEADER | error | "Select a legal entity before adding a role." | Missing `X-Passage-LegalEntity` | Set the entity | FR-7.2 |
+| PTY-ROLE-GROUP-MISSING | error | "Group {code} does not exist in {entity}." | Unknown group | Create or pick a group | FR-7.3 |
+| PTY-MERGE-RUNNING | error | "Merge case {id} is already running for this party." | Concurrent merge | Wait for the running case | BR-7.11 |
+| PTY-MERGE-REVERT-BLOCKED | error | "{service} cannot split post-merge transactions." | Consumer refuses revert | Correct manually | BR-7.2 |
+| PTY-PENDING-SELF-APPROVAL | error | "You cannot approve your own change." | Requester = approver | Second approver | BR-7.8 |
+| PTY-TERM-DISCOUNT-AFTER-DUE | error | "Discount date is after the due date." | Invalid term | Fix days | BR-7.7 |
+| PTY-SCHED-PCT-SUM | error | "Installment percentages total {x}, not 100." | Percent lines ≠ 100 | Adjust lines | BR-7.13 |
+| PTY-ONETIME-FIELD | error | "One-time accounts cannot hold {field}." | Forbidden field on one-time role | Capture on the document | BR-7.15 |
+| PTY-REL-CYCLE | error | "This relationship creates a cycle: {path}." | Head-office loop | Choose another head office | FR-7.17 |
+| PTY-CERT-EXPIRED | warning | "Mandatory certificate {type} expired on {date}; vendor on hold." | BR-7.14 | Upload renewed certificate | FR-7.14 |
+| PTY-INACTIVE-ROLE | error | "Party is inactive; roles cannot be added or unblocked." | BR-7.10 | Reactivate the party | BR-7.10 |
+| PTY-SEARCH-MIN-CHARS | info | "Type at least 2 characters." | Short query | Type more | FR-7.13 |
+
+### 1.7.19 Performance budgets and capacity
+
+| Operation | Volume assumption | Latency target (p50 / p95 / p99) | Throughput target | Storage growth per year | Index / partition strategy | Degradation behavior under 3× load |
+|---|---|---|---|---|---|---|
+| Party create with dedup | 5k/day; peak 200/min (imports via bulk path) | 120 / 400 / 800 ms | 50 req/s | ~2 KB per party; 1M parties ≈ 2 GB incl. indexes | GIN trigram `search_name`; blocking indexes | scoring moves to async; create returns 202 with candidates later |
+| Typeahead search | 500k/day; peak 2,000/min | 25 / 100 / 180 ms | 300 req/s per replica | none | trigram + (tenant_id, status) | result cap drops 20 → 10 |
+| Single-party scoring | per create/update | 60 / 300 / 500 ms at 1M | 100/s on 2 workers | candidates ~5% of parties | blocking keys | queue grows; HPA to 6 workers |
+| Weekly full re-score | 1M parties | — | 140 parties/s per worker | — | 16 hash partitions | runtime extends; no user impact |
+| Due-date / schedule computation | 2M/day from AR/AP | 1 / 3 / 6 ms | 2,000 req/s | none | term cache | unchanged |
+| Merge workflow | 50/day | 20 s / 5 min / 15 min (ack-bound) | 10 concurrent | snapshot ~50 KB per case | workflow id per min(party) | queued; acks are the bottleneck |
+| VIES validation | 5k/day | 300 ms / 2 s / 5 s (external) | 20 concurrent | cache rows | — | `unverified` returned immediately |
+
+### 1.7.20 Localization and compliance hooks
+
+| Item | What varies | Country packs touching it (wave 48) | Extension point |
+|---|---|---|---|
+| Tax identifiers | US EIN/SSN (masked) and 1099 vendor flag (box type consumed by wave 19); UK VAT (HMRC VAT API after VIES exit) and UTR; DE USt-IdNr and Steuernummer; FR TVA intracommunautaire and SIREN/SIRET; IN GSTIN (state code + PAN) and PAN; MX RFC with CFDI 4.0 receptor data (régimen fiscal, código postal); CA BN with GST/HST and QST | all seven | `TaxIdValidator` registry; `TaxIdAdapter` (VIES, HMRC, IRS TIN Matching, GSTN, SAT LCO) |
+| Name and address conventions | Person name order, Hindi/Devanagari names, Spanish double surnames (MX), Quebec bilingual | IN, MX, CA | `party.person.name_sequence`; transliteration attribute |
+| Diversity classifications | US SBA programs (8(a), HUBZone, WOSB, SDVOSB); CA Indigenous business registry; UK none statutory | US, CA | classification code list seeded by pack |
+| Payment term conventions | FR LME late-payment cap (60 days from invoice or 45 days end of month, Code de commerce L441-10); DE §286 BGB 30-day default; IN MSMED Act 45-day limit for MSE suppliers; UK Late Payment Act | FR, DE, IN, UK | term validation rule per country pack (warn on terms exceeding statutory maximum) |
+| Privacy and retention | GDPR/UK GDPR erasure vs retention (HGB/AO 10 y for accounting-relevant data), CCPA/CPRA, DPDP Act 2023, LFPDPPP ARCO rights, PIPEDA | all | PII flags (BR-7.9), DSAR export, PTY-J8 end-of-purpose check |
+| Sanctions screening | OFAC SDN (US), UK OFSI, EU consolidated list on vendor/customer create | all | screening adapter interface (wave 48 compliance) called at role creation; result stored on role |
+
+### 1.7.21 Coverage closure
+
+| Register row (inventory section + AX form or SAP T-code) | Status before | Disposition | Note |
+|---|---|---|---|
+| AX §12.16.1 Procurement and sourcing, Common — Vendor certifications / Vendor diversity (D365), VendCertification; register §12.99.4 #158 | PARTIAL-7 | ADDED as FR-7.14 | Expiry job PTY-J6, KPI "Certification expiry" |
+| AX §12.16.4 Procurement and sourcing, Setup — Vendor certification types / Diversity classifications; register §12.99.4 #165 | PARTIAL-7 | ADDED as FR-7.14 | Parameter `party.cert.reminder_days`; seeded diversity list |
+| SAP §13.1 FI-GL Customizing — OBB8 / OBB9 Terms of payment / installment terms (T052, T052R); register §13.99.2 #17 | PARTIAL-7 | ADDED as FR-7.15 | Installments via payment schedule lines; BR-7.13 rounding |
+| SAP §13.2 FI-AP Master data — One-time vendor (account group CPD); register §13.99.2 #23 | PARTIAL-7 | ADDED as FR-7.16 | Document-level capture stored by waves 17/19 |
+| SAP §13.2 FI-AP Customizing — OBB9 Installment terms (T052R); register §13.99.2 #35 | PARTIAL-7 | ADDED as FR-7.15 | Same schedule model for vendor terms |
+| SAP §13.2 FI-AP Customizing — OBD3 "one-time account" (T077K); register §13.99.2 #37 | PARTIAL-7 | ADDED as FR-7.16 | Parameter `party.group.one_time_default` |
+| SAP §13.3 FI-AR Customizing — OBB9 Installment terms (customers) (T052R); register §13.99.2 #47 | PARTIAL-7 | ADDED as FR-7.15 | AR due dates per installment in wave 30 |
+| SAP §13.3 FI-AR Customizing — Define alternate payer / head office–branch (KNA1-KNRZE, KNB1); register §13.99.2 #50 | PARTIAL-7 | ADDED as FR-7.17 | `head_office_of` with decentralized flag; `alternate_payer`; posting effect in waves 19/30 |
+
 ## 1.8 Wave 8: Product Master, Variants & Catalogs
 
 ### 1.8.1 Scope and business context
@@ -598,6 +926,12 @@ Out of scope: on-hand, costing values and inventory postings (waves 16, 20), sal
 | GS1 identifiers | InventItemGTIN, InventItemBarcode, BarcodeSetup | MARM-EAN11, EAN category T006M (NUMTP) | `ProductIdentifier` (GTIN-8/12/13/14, SSCC generation) | improved (validation and generation) |
 | Images / documents | DocuRef attachments on EcoResProduct, product image | DMS (CV01N) links | `ProductDocument` (object storage key, type) | full |
 | Product lifecycle | D365 product lifecycle state (EcoResProductLifecycleState) | MARA-MSTAE cross-plant status, MARC-MMSTA plant status | `lifecycle_state` on Product and ReleasedProduct | full |
+| Related products | EcoResProductRelation, EcoResProductRelationType (Released product → Related products) | SD cross-selling via material determination (VB41/VB42/VB43), cross-selling profile | `ProductRelation`, `ProductRelationType` (FR-8.13) | full |
+| Configurable lifecycle states | EcoResProductLifecycleState with enabled business processes (D365) | MARA-MSTAE / MARC-MMSTA with status control table T141 (OMS4) | `LifecycleState`, `LifecycleProcessPolicy` (FR-8.14) | full |
+| Controlled group conversion | Change product dimension group / Change item model group (D365 periodic tasks), mass "Delete released products" | MM17 mass maintenance; MM06 flag for deletion; MMDE archive deletion | `group-change` and `obsolete` Temporal jobs (FR-8.15, FR-8.16) | improved (preconditions checked by callback) |
+| Service master | EcoResProduct product type Service; procurement categories for services | AC01–AC06 service master (ASMD), service categories, standard service catalog | `Product` type service with `ServiceAttributes` (FR-8.17) | full |
+| Variant tables and configuration templates | Table constraints (PCTableConstraint, user-defined/system-defined), configuration reuse | CU60–CU62 variant tables (CUVTAB/CUVTAB_VALC), CU7/CUCPT configuration templates | `DecisionTable`, `SavedConfiguration` (FR-8.18, FR-8.19) | full |
+| Document info records | DocuRef, DocuType (Document management → Document types) | CV01N–CV04N document info record (DRAW, DRAT, DRAD), DC10 document types (TDWA) | `DocumentType`, `DocumentInfoRecord`, `DocumentOriginal`, `DocumentObjectLink` (FR-8.20, FR-8.21) | full |
 
 ### 1.8.3 Functional requirements
 
@@ -622,6 +956,28 @@ Out of scope: on-hand, costing values and inventory postings (waves 16, 20), sal
 - **FR-8.10 Product lifecycle and blocking** — Must. The system shall enforce lifecycle states `draft → active → phase_out → obsolete` per product and per released product, with module-level blocks (purchase, sales, inventory, production) on released products.
 - **FR-8.11 Images and documents** — Should. The system shall attach images (max 10 MB each, 20 per product) and documents to products in object storage with a primary image used in lists.
 - **FR-8.12 Product search and catalogs** — Should. The system shall provide typeahead over product number, name, GTIN and attribute values, filtered by legal entity and category, p95 < 100 ms at 1M products, and allow catalogs as named category subtrees with a validity range.
+- **FR-8.13 Product relations** — Should. The system shall maintain relation types (seeded: accessory, cross_sell, up_sell, substitute, spare_part, consumable, same_family; tenant-extensible) with a `symmetric` flag, and relations from a product or variant to another product or variant with sort order and `valid_from`/`valid_to`.
+  - Maximum 200 relations per product; symmetric types create and delete the inverse in the same transaction.
+  - Sales order entry (waves 26–27) reads `GET /product/v1/products/{id}/relations?type=` for suggestions; event `dev.passage.product.relation.changed.v1`.
+- **FR-8.14 Configurable lifecycle states with process policies** — Must. The system shall let tenants define lifecycle states (code, name, category ∈ {draft, active, phase_out, obsolete} from FR-8.10, `default_for_new`, applies to product / released product / engineering version) and, per state, a policy of `allow`, `warn` or `block` for each business process: purchase_requisition, purchase_order, sales_quotation, sales_order, transfer_order, production_order, bom_line_use, master_planning, inventory_receipt, inventory_issue, counting, return_order.
+  - `GET /product/v1/released-products/{id}/process-policy?process=` answers in < 10 ms p95; consumers cache the result and refresh on `releasedproduct.updated.v1`.
+  - FR-8.10 boolean blocks stay as overrides (BR-8.12).
+  - Seed mirrors D365 defaults: Prototype (draft: allows bom_line_use and planning only), Active, Phase out (blocks purchase_order and master_planning, warns on sales_order), Obsolete (blocks all except inventory_issue, counting and return_order).
+  - Engineering versions (FR-9.14) carry their own state with the same policy model; the most restrictive of product, released-product and version policy applies.
+- **FR-8.15 Mass obsolete and delete of released products** — Should. The system shall run a job that sets selected released products to an obsolete-category state (validated by BR-8.1) and deletes a released product only when every registered reference callback (inventory, purchasing, sales, production, engineering, pricing) reports zero references; otherwise the item is set obsolete and reported as "obsolete instead of deleted".
+  - Max 10,000 items per run; a dry-run report precedes execution; deletion removes the released product only, never the shared product.
+- **FR-8.16 Controlled change of dimension and model groups** — Should. The system shall change the item model group, storage dimension group or tracking dimension group of selected released products at an effective date through Temporal job `group-change-{id}`, after verifying through callbacks: on-hand = 0 (wave 16), no open purchase, sales, transfer or production orders (waves 16, 17, 21, 26), and inventory closed up to the effective date for costing-method changes (wave 20).
+  - Before those waves exist the callbacks return "no references" and the change applies directly; each change writes an audit record and emits `releasedproduct.updated.v1` with `changed_fields`.
+  - This job is the only path around BR-8.5 and FR-8.3 immutability.
+- **FR-8.17 Service products** — Must. The system shall extend products of type `service` with: service category (code list with its own number sequence, e.g. `SVC-{cat}-{#####}`), service unit (hour, day, each, lump_sum, or any time-class unit), long purchasing text (≤ 4,000 characters, translatable), membership in standard service catalogs (category hierarchy role `service_catalog`), valuation class placeholder (bound in waves 11 and 20) and `requires_service_entry` flag read by purchasing (wave 17).
+  - Service products never have storage or tracking dimension groups and never use a stocked item model group (BR-8.17).
+- **FR-8.18 Configurator decision tables** — Should. The system shall maintain decision tables (columns = configuration attributes, rows = allowed value combinations; ≤ 50 columns, ≤ 100,000 rows) in a grid with CSV import/export, referenced from constraints as `table(name, attr1, …, attrN)` and pinned to the model version on activation.
+  - LO-VC variant functions (ABAP function modules) are replaced by the sanctioned expression functions `round`, `min`, `max`, `abs`, `lookup`, `concat`, `substr`.
+- **FR-8.19 Saved configurations and templates** — Should. The system shall save a solved configuration as a named `SavedConfiguration` (model id and version, selections, derived attribute values) at tenant scope or for a customer party, reuse it as the starting point of later solves, and re-validate saved configurations when a new model version activates; incompatible ones are flagged `stale` with the violated constraints.
+- **FR-8.20 Document info records and document types** — Should. The system shall maintain document types (code, name, number sequence, allowed file types, max originals default 5 / max 20, version scheme numeric or alpha, part numbering on/off, `change_controlled` flag enforced by FR-9.25, status network id from FR-9.24, attribute set from FR-8.6, allowed object-link targets: product, released product, BOM version, route version, party, ECO) and document info records (DIR: document number, part `000`, version `00`, description, status, owner, originals with object-storage key, sha256 and size ≤ 200 MB, object links, attribute values).
+  - Product images and documents from FR-8.11 become DIRs of system types `IMG` and `DOC`; the FR-8.11 endpoints are unchanged.
+  - Endpoints: `POST /product/v1/documents`, `POST /product/v1/documents/{id}/versions`, `PUT /product/v1/documents/{id}/links`.
+- **FR-8.21 Document search** — Should. The system shall search DIRs by number, description, type, status, attribute values, object link and full text of PDF, DOCX and TXT originals (text extracted at upload by a Python worker, ≤ 50 MB of text per original, Postgres `tsvector` with language-specific dictionaries), p95 < 300 ms at 2M DIRs.
 
 ### 1.8.4 Data model
 
@@ -677,6 +1033,8 @@ Out of scope: on-hand, costing values and inventory postings (waves 16, 20), sal
 **ConfigurationModel** — id, master_id, version, status (draft/active/retired), components jsonb, attributes jsonb (name, domain), constraints jsonb (expression list, ≤ 2,000), defaults jsonb. **ProductIdentifier** — id, product_id, uom_id, type (GTIN8/12/13/14, SSCC, UPC, custom), value text(18), is_primary, check_digit_valid bool.
 
 Invariants: a variant's dimension_values keys equal its master's dimension group; every released stocked product has item model group and default site/warehouse; GTIN values pass check digit; `obsolete` products have no released product in `active`. Indexing: unique `(master_id, dimension_values)` via a generated hash column; GIN trigram on `search_name`; `product_identifier(value)` unique per tenant; `released_product(legal_entity_id, item_number)` unique; attribute values in `product_attribute_value(product_id, attribute_id)` with a GIN index on a jsonb projection for filtered search.
+
+**Addendum entities (FR-8.13 – FR-8.21)** — product_relation: id, type_code FK, from_product_id, to_product_id, sort_order int, valid_from, valid_to, unique (type_code, from_product_id, to_product_id). lifecycle_state: id, code text(20), name, category enum, default_for_new bool, applies_to text[]; lifecycle_process_policy: state_id, process enum, policy (allow, warn, block), PK (state_id, process). service_attributes: product_id PK/FK, service_category_code, service_uom_id, purchasing_text_id (translation), requires_service_entry bool, valuation_class text(10) null. decision_table: id, model_id, name, columns jsonb, row_count int, version int, checksum; rows in decision_table_row (table_id, row_no, values jsonb) with a GIN index. saved_configuration: id, model_id, model_version, scope (tenant, customer), party_id null, name, selections jsonb, status (valid, stale). document_type: code PK per tenant, settings jsonb; document_info_record: id, type_code, doc_number text(25), part char(3), doc_version text(2), description text(200), status_code, owner_user_id, unique (type_code, doc_number, part, doc_version); document_original: dir_id, seq, storage_key, sha256 bytea, size_bytes, mime, text_tsv tsvector; document_object_link: dir_id, target_type, target_id. group_change_job: id, change jsonb, effective_date, status, items jsonb.
 
 ### 1.8.5 APIs and events
 
@@ -735,6 +1093,12 @@ Interaction rules: the released-products grid supports bulk edit of selected row
 - **BR-8.9** Required attributes from a category are enforced at `active` transition, not at create, so drafts can be saved incomplete.
 - **BR-8.10** Translations fall back language → base language of the tenant → product name; never empty.
 - **BR-8.11** Variant numbers longer than 40 characters are truncated to 32 plus an 8-character hash, and the full dimension values remain the lookup key.
+- **BR-8.12** Process policy precedence: an FR-8.10 block flag set to true wins; otherwise the most restrictive of the released-product state, product state and (when versions are tracked) engineering-version state applies; `warn` returns success with `PRD-LC-WARN`, `block` returns `PRD-LC-BLOCKED` naming state and process.
+- **BR-8.13** Each tenant state maps to exactly one category; transitions between states follow the BR-8.1 category machine; a state in use by any product or released product cannot be deleted; exactly one state per `applies_to` target is `default_for_new`.
+- **BR-8.14** Symmetric relations are stored as two rows created and deleted together; self-relations are rejected (`PRD-REL-SELF`); a relation to an obsolete-category product is rejected for new relations and kept for existing ones.
+- **BR-8.15** Group-change preconditions are evaluated at scheduling and again at the effective date; a product failing at the effective date is skipped with its reason code; no product is ever partially changed.
+- **BR-8.16** A new DIR version copies object links and attribute values but not originals; at most one version per (type, number, part) may be in a status with the release flag at a time.
+- **BR-8.17** Setting a storage or tracking dimension group, or a stocked item model group, on a service product is rejected (`PRD-SVC-STOCKED`).
 
 ### 1.8.8 Acceptance criteria
 
@@ -747,6 +1111,12 @@ Interaction rules: the released-products grid supports bulk edit of selected row
 - **AC-8.7** (FR-8.6) Given category "Fasteners" requiring attributes thread_pitch (decimal, 0.2–6.0 mm) and material (enum), when a product in it is activated without `material`, then 422 lists the missing attribute; with `thread_pitch = 7`, then 422 names the range.
 - **AC-8.8** (FR-8.7) Given product X with 1 BOX = 12 EA and class conversion 1 CASE = 24 EA, when converting 2 BOX → CASE, then result is 1 CASE; when converting for product Y with no product conversion, then the class conversion applies.
 - **AC-8.9** (FR-8.12) Given 1M products, when searched by a GTIN fragment, then p95 < 100 ms.
+- **AC-8.10** (FR-8.14, BR-8.12) Given state "Phase out" with purchase_order = block and sales_order = warn, when the process policy is queried for purchase_order, then `PRD-LC-BLOCKED`; for sales_order, then allowed with `PRD-LC-WARN`; with `blocked_sales = true`, then sales_order is blocked.
+- **AC-8.11** (FR-8.13, BR-8.14) Given symmetric type `substitute`, when A→B is created, then B→A exists; when B→A is deleted, then A→B is gone; when A→A is created, then 422 `PRD-REL-SELF`.
+- **AC-8.12** (FR-8.16, BR-8.15) Given 100 released products scheduled to move to model group STD effective 2026-12-01 and an on-hand callback returning 5 units for 3 of them on that date, when the job runs, then 97 are changed, 3 are skipped with `PRD-GRPCHG-ONHAND`, and 97 update events are published.
+- **AC-8.13** (FR-8.20, FR-8.21) Given the 2M-DIR fixture, when searching attribute `drawing_size = A3` with text "torque", then p95 < 300 ms; when version 01 of DRW-0000123-000 is created, then it has the 3 object links of version 00 and 0 originals.
+- **AC-8.14** (FR-8.18) Given a decision table of 10,000 allowed (frame, fork, wheel) rows, when a selection outside the table is solved, then the IIS names the table constraint and the response time is < 200 ms.
+- **AC-8.15** (FR-8.17, BR-8.17) Given service product "Calibration – hourly" in category CAL, when a tracking dimension group is assigned, then 422 `PRD-SVC-STOCKED`; its number is `SVC-CAL-00001`.
 
 ### 1.8.9 Test plan and fixtures
 
@@ -804,6 +1174,154 @@ Depends on: wave 6 (sites, warehouses, UoM classes, legal entities), wave 5 (num
 
 Open questions: (1) Should `item_number` be allowed to differ from `product_number` per entity (AX allows it)? Proposed: allowed but defaults equal; decide by wave 10. (2) Is moving-average a separate costing method or a parameter of weighted average? Proposed: separate, matching AX; decide by wave 20. (3) Catalogs: product-level or released-product-level membership? Proposed: product-level with entity filter at read; decide by wave 26.
 
+### 1.8.13 Parameters and setup
+
+| Parameter | Scope | Type | Default | Allowed values | Effect | AX equivalent | SAP equivalent |
+|---|---|---|---|---|---|---|---|
+| `product.number_mode` | tenant | enum | sequence | sequence / manual / both | How product numbers are assigned (FR-8.1) | PIM parameters → Number sequences (Product number) | Material number ranges per material type (MMNR) |
+| `product.number_pattern` | tenant | regex | `^[A-Z0-9][A-Z0-9._-]{0,39}$` | regex | Manual number validation | Product number format | OMSL material number format (TMCNM: length, leading zeros, lexicographic) |
+| `product.variant_nomenclature` | tenant / master | template | `{master}-{size}-{color}-{style}-{config}` | tokens, separators, max 40 chars | Variant numbers (FR-8.2, BR-8.11) | Product nomenclature (EcoResProductNomenclature, D365) | Material variant number assignment |
+| `product.max_variants` | tenant | int | 10,000 | 100–10,000 | Explosion cap | — | — |
+| `product.explode_checkpoint` | tenant | int | 500 | 100–2,000 | Checkpoint size | — | — |
+| `product.default_dimension_groups` | tenant / item group | FK × 3 | none | groups | Pre-fill storage/tracking groups at create | PIM parameters → default dimension groups | Material type defaults (OMS2), batch management default |
+| `product.release_profile` | legal entity × item group | FK | none | release profiles | Defaults at release (FR-8.4) | Default order settings templates / released product templates (D365) | Reference material on MM01 / material type views (T134) |
+| `product.lifecycle.default_state` | tenant × target | FK | Prototype (product), Active (released) | lifecycle states | State on create (FR-8.14) | Product lifecycle states → Default for new products | MARA-MSTAE default |
+| `product.lifecycle.process_policy` | state × process | enum | seeded per FR-8.14 | allow / warn / block | Process enablement | Product lifecycle state → enabled business processes | OMS4 material status (T141: purchasing, BOM, routing, MRP, inventory messages) |
+| `product.gs1.company_prefix` | tenant | digits | none | 6–12 digits | GTIN allocation (FR-8.9) | GTIN setup / Bar code setup | EAN categories (T006M) and EAN number ranges (W4ES) |
+| `product.barcode.symbologies` | tenant | set | EAN-13, GS1-128, DataMatrix | + UPC-A, ITF-14, Code 128, Code 39, QR | Rendering choices | Bar code setup (BarcodeSetup) | — |
+| `product.cfg.time_limit_ms` | tenant | int | 2,000 | 200–10,000 | Solver limit (BR-8.8) | Product configuration parameters (solver strategy) | Configuration profile settings (CUCO) |
+| `product.media.limits` | tenant | size / count | 10 MB, 20 per product | 1–50 MB, 1–100 | FR-8.11 limits | Product image settings | DC10 originals per document |
+| `product.translation.fallback` | tenant | BCP 47 | tenant base language | languages | BR-8.10 | Product translations | MAKT fallback to logon language |
+| `product.attr.required_enforcement` | tenant | enum | on_activate | on_create / on_activate / off | BR-8.9 | Category attribute "Mandatory" | CT04 "entry required" |
+| `product.doc.types` | tenant | records | IMG, DOC, DRW, SPC | FR-8.20 fields | Document behavior | Document types (DocuType) | DC10 (TDWA, TDWO, TDWP) |
+| `product.service.category_sequence` | service category | sequence | `SVC-{cat}-{#####}` | sequences | Service numbers (FR-8.17) | — | Service master number ranges and service categories (IMG MM-SRV) |
+| `product.relation.types` | tenant | list | 7 seeded types | + custom | FR-8.13 | Product relation types (EcoResProductRelationType) | Cross-selling profiles (SD material determination) |
+
+### 1.8.14 Inquiries and reports
+
+| Name | Type | Filters & parameters | Columns / measures | Source projection | AX equivalent | SAP equivalent |
+|---|---|---|---|---|---|---|
+| All products and masters | list inquiry | subtype, type, state, category, attribute | number, name, subtype, dimension groups, state | `product.product` | EcoResProductListPage | MM60 material list, MM03 |
+| Released products per legal entity | list inquiry | legal entity, item group, model group, state, blocks | item number, groups, units, site, warehouse, state | `product.released_product` | Released products; SSRS Item base data | MM60 by plant |
+| Variants of a master | list inquiry | master, dimension values | variant number, dimension values, released entities | `product.product` (variant) | EcoResProductVariantListPage | MM60 filtered by SATNR |
+| Incomplete products | KPI | category, legal entity | missing attributes, missing defaults, counts by category | completeness projection | Incomplete attribute report (nightly) | MM50 list of extendable materials |
+| Lifecycle and process policy | KPI | state, process | products per state, blocked processes | `released_product` × policy | Product lifecycle state inquiry (D365) | MM60 by MSTAE/MMSTA |
+| GTIN register | list inquiry | prefix, type, unit | GTIN, product, unit, primary, check digit | `product.product_identifier` | Bar codes / GTIN codes | MEAN / MARM-EAN11 list |
+| Attribute search | drill-down | attribute, value range, category | product, attribute values | attribute value projection | Product attributes inquiry | CL30N, CT06 |
+| Configuration models and solves | drill-down | model, version, date range | solves, feasible %, p95 time, IIS frequency | solve log | Configuration inquiries; SSRS Product configuration model | CU50 simulation, CUTRACE |
+| Item model and dimension group usage | list inquiry | group | products per group, costing method, flags | `product.item_model_group` | SSRS Item model group / Dimension group listings | OMS2, T134 overview |
+| Document search | list inquiry | type, status, attribute, link, text | number, part, version, description, status, links | `product.document_info_record` | Document handling (DocuView) | CV04N |
+| Product relations | list inquiry | type, product | from, to, type, validity | `product.product_relation` | Related products | VB43 material determination display |
+| Group change and obsolete job history | drill-down | job, date | items changed, skipped (reason), deleted, obsolete | job projection | Periodic task history | MM17 log |
+
+### 1.8.15 Printed and electronic documents
+
+| Document | Trigger | Layout elements (header/line/footer fields) | Formats | Numbering sequence | Legal / retention requirement |
+|---|---|---|---|---|---|
+| Product data sheet | on demand | header: product number, name, primary image; lines: attributes, units, conversions, GTINs; footer: legal entity, date, translation language | PDF, email | none | none |
+| Product barcode label | on demand or job PRD-J4 | GTIN, human-readable interpretation, description, unit, optional batch/expiry AIs for GS1-128 | PDF, ZPL (printer routing in wave 31) | none | GS1 General Specifications: symbol X-dimension, quiet zones, HRI |
+| Product catalog export | on demand per catalog | header: catalog, validity, supplier; lines: product, description, unit, GTIN, attributes, price placeholder | BMEcat 2005 XML, CSV | `CAT-{yyyy}-{####}` | none |
+| Configuration summary | solve saved as configuration | header: model, version, customer; lines: attribute selections; footer: constraint check result | PDF | saved configuration id | retained with the sales document (wave 27) |
+| GDSN item publication | none in this wave | — | — | — | GDSN data-pool synchronization deferred to wave 35 integration hub |
+
+### 1.8.16 Periodic and batch jobs
+
+| Job | Schedule default | Partitioning key | Idempotency / checkpoint | Typical runtime target | Failure handling | Monitor / alert |
+|---|---|---|---|---|---|---|
+| PRD-J1 Variant explosion | on demand | master_id | 500-row checkpoints; existing combinations skipped (BR-8.3) | 1,000 variants < 5 s; 10,000 < 60 s | resume from checkpoint | job failed |
+| PRD-J2 Incomplete-attribute report | nightly 03:00 | category_id | read-only | < 10 min at 1M products | retried next night | none |
+| PRD-J3 Orphan media sweep | weekly Saturday 02:00 | storage prefix | marks then deletes after 7 days | < 30 min | stops on storage errors | bucket errors |
+| PRD-J4 Barcode batch generation | on demand / nightly for new GTINs | product_id range | output keyed by (GTIN, symbology) | 10,000 labels < 5 min | per-item error list | failures > 1% |
+| PRD-J5 Group change conversion | at effective date (Temporal timer) | released_product_id | per-item idempotent; BR-8.15 | 1,000 items < 2 min | item skipped with reason | skipped > 0 |
+| PRD-J6 Mass obsolete / delete | on demand after dry run | legal_entity_id | per-item; delete only with zero references | 10,000 items < 10 min | item set obsolete instead | none |
+| PRD-J7 Document text extraction | on upload (queue) | original id | content hash | < 20 s per 10 MB PDF | retried 3×; DIR searchable by metadata | queue depth > 500 |
+| PRD-J8 Saved-configuration revalidation | on model activation | model_id | stale flag recomputed | 10,000 configurations < 2 min | per-item error | stale count |
+
+### 1.8.17 Security duties and privileges
+
+| Duty | Privileges (entry points) | Segregation-of-duties conflicts | Default roles that include it |
+|---|---|---|---|
+| View products | `GET /product/v1/**`; PIM workspace | none | every business role |
+| Maintain products | product create/edit, variants, attributes, relations, identifiers | none | Product manager, Master data steward |
+| Release products | `:release`, release profiles | none | Product manager, Master data steward |
+| Maintain released products | released-product edits, site defaults, blocks | none | Inventory manager, Purchasing manager |
+| Maintain product setup | item groups, model groups, dimension groups, lifecycle states and policies | Post inventory adjustments (wave 16) | Product manager lead, Cost accountant |
+| Run product group conversions | PRD-J5, PRD-J6 | Maintain product setup (maker-checker on costing-method change) | Cost accountant |
+| Configure products | configuration models, decision tables, `:solve` test | none | Product configurator modeler |
+| Maintain product categories | category hierarchies, attribute sets | none | Category manager |
+| Maintain documents | DIR create, versions, originals, links | Release engineering documents (FR-9.24) on the same DIR | Engineer, Document controller |
+| Allocate GTINs | `identifiers?allocate=true`, prefix settings | none | Master data steward |
+
+### 1.8.18 Message catalog
+
+| Code | Severity | User text | Cause | Remediation | Raised by |
+|---|---|---|---|---|---|
+| PRD-NUM-FORMAT | error | "Product number {n} does not match the pattern." | Regex failure | Correct number | FR-8.1 |
+| PRD-NUM-IMMUTABLE | error | "Product number cannot change after release." | Edit after release | Create a new product | FR-8.1 |
+| PRD-VAR-CAP | error | "Explosion would create {n} variants; limit is {max}." | Cartesian product above cap | Reduce values | FR-8.2 |
+| PRD-VAR-DIMVAL-UNKNOWN | error | "{value} is not a value of dimension {dim}." | Unknown dimension value | Add the value first | FR-8.2 |
+| PRD-RELEASE-DRAFT | error | "Draft products cannot be released." | Release of draft | Activate first | FR-8.4 |
+| PRD-RELEASE-DEFAULT-MISSING | error | "Missing {field} for {entity}/{site}." | No profile or site default | Add the default | FR-8.4 |
+| PRD-DIMGRP-LOCKED | error | "Dimension group is locked by inventory transactions." | Change after transactions | Use the group-change job | FR-8.3, BR-8.5 |
+| PRD-UOM-UNDERFLOW | error | "Conversion rounds {qty} to zero." | Precision too low | Increase precision | BR-8.6 |
+| PRD-GTIN-CHECKDIGIT | error | "GTIN {v} has an invalid check digit." | mod-10 failure | Correct GTIN | BR-8.7 |
+| PRD-GTIN-DUPLICATE | error | "GTIN {v} already belongs to {product}." | Duplicate | Use another GTIN | BR-8.7 |
+| PRD-CFG-TIMEOUT | error | "Configuration not solved within {ms} ms." | Solver limit | Simplify or retry | BR-8.8 |
+| PRD-CFG-INFEASIBLE | error | "Selections conflict: {constraints}." | IIS found | Change selections | FR-8.8 |
+| PRD-ATTR-REQUIRED | error | "Required attributes missing: {list}." | Activation incomplete | Fill attributes | BR-8.9 |
+| PRD-ATTR-RANGE | error | "{attr} must be between {min} and {max}." | Out of range | Correct value | FR-8.6 |
+| PRD-LC-BLOCKED | error | "{process} is blocked for state {state}." | Policy block | Change state or use another product | BR-8.12 |
+| PRD-LC-WARN | warning | "{process} is discouraged for state {state}." | Policy warn | Confirm | BR-8.12 |
+| PRD-REL-SELF | error | "A product cannot be related to itself." | Self-relation | Choose another product | BR-8.14 |
+| PRD-GRPCHG-ONHAND | warning | "Skipped: on-hand {qty} on {date}." | Precondition failed | Empty stock, reschedule | BR-8.15 |
+| PRD-SVC-STOCKED | error | "Service products cannot be stocked." | Stocking setup on service | Remove group | BR-8.17 |
+| PRD-DOC-ORIGINAL-LIMIT | error | "Document type {t} allows {n} originals." | Too many files | Remove a file or new version | FR-8.20 |
+
+### 1.8.19 Performance budgets and capacity
+
+| Operation | Volume assumption | Latency target (p50 / p95 / p99) | Throughput target | Storage growth per year | Index / partition strategy | Degradation behavior under 3× load |
+|---|---|---|---|---|---|---|
+| Product read | 3M/day; peak 5,000/min | 8 / 50 / 90 ms | 500 req/s per replica | ~3 KB per product + attributes | PK; (tenant_id, product_number) unique | read replicas (CNPG) absorb load |
+| Variant lookup | 10M/day from order lines | 2 / 10 / 20 ms | 2,000 req/s | none | unique (master_id, dimension hash) | unchanged |
+| Release 1,000 products × 3 entities | 20/day | 25 / 60 / 90 s | 2 concurrent per tenant | ~2 KB per released product | (legal_entity_id, item_number) unique | queued; no timeout |
+| Process-policy query | 20M/day | 1 / 10 / 20 ms | 5,000 req/s (cached) | none | in-memory policy cache | stale cache ≤ 60 s |
+| Typeahead search | 1M/day | 25 / 100 / 180 ms at 1M | 300 req/s | trigram ~1 GB at 1M | GIN trigram on search_name, GTIN | results capped at 10 |
+| Configurator solve | 20k/day; peak 100/min | 60 / 200 / 500 ms (50 constraints) | 20/s per worker | solve log ~1 KB | worker queue | HPA to 6 workers; queue > 100 alerts |
+| Document search | 50k/day | 80 / 300 / 600 ms at 2M DIRs | 50 req/s | originals 2–5 TB/yr in object storage; tsvector ~5% | GIN tsvector; attribute jsonb GIN | full-text limited to 1,000 hits |
+
+### 1.8.20 Localization and compliance hooks
+
+| Item | What varies | Country packs touching it (wave 48) | Extension point |
+|---|---|---|---|
+| Commodity and tax classification | HS/CN8 for Intrastat (DE, FR); HSN/SAC codes mandatory on IN GST invoices (6 digits above INR 5 crore turnover); SAT c_ClaveProdServ and c_ClaveUnidad on MX CFDI 4.0; UNSPSC optional | DE, FR, IN, MX | attribute sets supplied by pack; `ProductTaxClassificationHook` read by wave 13 |
+| Units and labeling | US FPLA dual metric/US customary net quantity; CA Consumer Packaging and Labelling Act bilingual; EU Directive 76/211/EEC ℮ mark | US, CA, DE, FR | unit display rules; translation requirements per country |
+| GS1 prefixes | Prefix issued by GS1 US, UK, Germany, France, India, Mexico, Canada | all | prefix per legal entity allowed |
+| Product names and descriptions | FR/CA-QC French-language requirement; MX Spanish CFDI description | FR, CA, MX | FR-8.12 translations; BR-8.10 fallback |
+| Regulated attributes | Hazardous substance data (REACH, GHS), export control classification (ECCN/EAR, EU 2021/821), RoHS | all | attribute sets contributed by wave 48 compliance packs |
+| Document retention | Technical documentation kept 10 years after last unit placed on market (EU MDR Art. 10(8), Machinery Regulation 2023/1230) | DE, FR | retention class per document type (FR-8.20) |
+
+### 1.8.21 Coverage closure
+
+| Register row (inventory section + AX form or SAP T-code) | Status before | Disposition | Note |
+|---|---|---|---|
+| AX §12.15.1 PIM, Common — Released product → Related products, EcoResProductRelation; register §12.99.4 #141 | PARTIAL-8 | ADDED as FR-8.13 | Symmetric types, sales suggestions read in waves 26–27 |
+| AX §12.15.1 PIM, Common — Released product → Product lifecycle state (D365), EcoResProductLifecycleState; register §12.99.4 #143 | PARTIAL-8 | ADDED as FR-8.14 | Per-process allow/warn/block |
+| AX §12.15.3 PIM, Periodic — Change product dimension groups / Change item model group; register §12.99.4 #146 | PARTIAL-8 | ADDED as FR-8.16 | Callback-checked conversion job PRD-J5 |
+| AX §12.15.3 PIM, Periodic — Delete released products / Mark obsolete; register §12.99.4 #147 | PARTIAL-8 | ADDED as FR-8.15 | Job PRD-J6 with reference callbacks |
+| AX §12.15.4 PIM, Setup — Product lifecycle states (D365); register §12.99.4 #148 | PARTIAL-8 | ADDED as FR-8.14 | Parameters `product.lifecycle.*` |
+| AX §12.16.4 Procurement, Setup — Categories → category vendor assignment, category questionnaires; register §12.99.4 #162 | PARTIAL-8 | DEFERRED to wave 17 | Category hierarchies exist here (FR-8.6); vendor-per-category assignment and questionnaires belong to sourcing in wave 17, as the register proposes |
+| AX §12.34.1 ECM, Common — Product lifecycle states (per version, controlling process enablement); register §12.99.4 #283 | PARTIAL-8 | ADDED as FR-8.14 | Engineering-version states applied by FR-9.14 |
+| AX §12.34.4 ECM, Setup — Product lifecycle states (enabled business processes per state, default states); register §12.99.4 #297 | PARTIAL-8 | ADDED as FR-8.14 | `default_for_new` per target |
+| SAP §13.15 MM-SRV Master data — AC01/AC02/AC03/AC04/AC06 service master; register §13.99.2 #163 | PARTIAL-8 | ADDED as FR-8.17 | Service categories, purchasing text, service catalog |
+| SAP §13.15 MM-SRV Customizing — Service master number ranges, service categories, organizational status, field selection (ASMD); register §13.99.2 #181 | PARTIAL-8 | ADDED as FR-8.17 | Number range per category; field selection via wave-3 metadata field rules |
+| SAP §13.32 LO-VC Master data — CU60/CU61/CU62/CU65/CU66/CU67 variant tables and functions; register §13.99.2 #356 | PARTIAL-8 | ADDED as FR-8.18 | Table grid added; ABAP variant functions replaced by expression functions |
+| SAP §13.32 LO-VC Master data — CU7 / CUCPT configuration templates; register §13.99.2 #359 | PARTIAL-8 | ADDED as FR-8.19 | Tenant and customer scope, stale detection |
+| SAP §13.35 DMS Master data — CV01N/CV02N/CV03N document info record; register §13.99.2 #374 | PARTIAL-8 | ADDED as FR-8.20 | Status network, ECO versioning and signatures in FR-9.24/FR-9.25 |
+| SAP §13.35 DMS Master data — CV04N find document; register §13.99.2 #375 | PARTIAL-8 | ADDED as FR-8.21 | Attribute, link and full-text search |
+| SAP §13.35 DMS Master data — Fiori Manage Documents / Manage Document Info Records; register §13.99.2 #384 | PARTIAL-8 | ADDED as FR-8.20 | Document screens in the PIM and engineering workspaces |
+| SAP §13.35 DMS Reports — CV04N document search; register §13.99.2 #385 | PARTIAL-8 | ADDED as FR-8.21 | "Document search" in §1.8.14 |
+| SAP §13.35 DMS Customizing — DC10 document types (TDWA, TDWS, TDWO, TDWP); register §13.99.2 #392 | PARTIAL-8 | ADDED as FR-8.20 | Parameter `product.doc.types` |
+
 ## 1.9 Wave 9: Engineering Data: BOMs, Routings, Resources & Change Management
 
 ### 1.9.1 Scope and business context
@@ -837,6 +1355,15 @@ Out of scope: production orders (wave 21), capacity scheduling and Gantt (wave 2
 | Engineering change | D365 ECM: EngChgRequest, EngChgOrder, product versions, impact analysis, release to legal entities | ECM: AENR change master (CC01), ECR/ECO (CC31/CC32), effectivity | `EngineeringChangeRequest`, `EngineeringChangeOrder`, Temporal workflow | full |
 | Where-used / explosion | BOMWhereUsed, BOM calculation (BOMCalcTable), BOM designer | CS11/CS12/CS13 (explosion), CS15 (where-used) | `/engineering/v1/bom:explode`, `:implode`, `:where-used` | improved (latency, as-of) |
 | Cost roll-up | BOMCalcTable, costing versions | CK11N/CK40N | structure hooks only; roll-up in wave 39 | partial by design |
+| Engineering organization and release product structure | EngChgEngineeringOrganization, EngChgReleaseProductStructure, product release policies, Open product releases (acceptance) | ALE distribution of material and BOM (BD10, BD30, distribution model BD64, status BD87); MDG-M replication | `EngineeringOrganization` flag, `ReleasePolicy`, `ReleaseSession` / `ReleaseLine` (FR-9.14 – FR-9.16) | improved (one workflow with per-line status) |
+| Product readiness | Product readiness policies and checks (D365 ECM) | No direct equivalent (MM50 extension lists, material status) | `ReadinessPolicy`, `ReadinessCheckResult` (FR-9.17) | improved |
+| Engineering categories and version nomenclature | EngChgEngineeringProductCategory, version nomenclature | Revision levels (OS13 material revision levels, CC01 revision) | `EngineeringCategory`, `VersionNomenclature` (FR-9.18) | full |
+| BOM usage and category | BOMTable (production BOM vs formula), no usage concept | STLAN usage (OS20), STLTY category M/D/E/T/K/P | `BomHeader.usage`, `BomHeader.category` (FR-9.19) | partial (order, project, equipment BOM instances in waves 27, 41, 44) |
+| Alternative items and discontinuation | Plan material substitution (D365 planned-order substitution), BOM line substitution | STPO-ALPGR alternative item group with ALPST strategy / ALPRF priority / EWAHR probability; discontinuation STPO-KZAUS / NFMAT follow-up material | `BomLine.alt_*`, `BomLine.discontinuation_*` (FR-9.20) | full (MRP logic in wave 22) |
+| Serial and parameter effectivity | Date effectivity only (BOMVersion/BOM FromDate/ToDate) | ECM effectivity types: date, serial number, parameter (IMG ECM → Effectivity) | `Effectivity` record on ECO, version and line (FR-9.21) | improved over AX, full vs SAP |
+| Super BOM and super routing | Constraint-based configuration BOM line and route operation templates (PCBOMLineTemplate, PCRouteOperationTemplate) | CS40–CS42 super BOM with selection conditions (CU01), CA01 operation dependencies | `selection_condition` and `qty_expr` on BomLine / Operation (FR-9.22) | full |
+| Engineering documents | DocuRef attached to engineering versions | DIR status network (DC20), document BOM item category D (CS01), document structures (CV11–CV15), ECM-controlled versions | DIR status network, signatures, ECO-controlled versions, document lines, structures (FR-9.23 – FR-9.26) | full |
+| CAD / PLM engineering BOM synchronization | PLM integration via Dataverse (Teamcenter, Windchill partner connectors) | ECTR Engineering Control Center (CAD BOM transfer, CAD desktop CDESK) | eBOM import contract, comparison report, polling job (FR-9.27) | partial (vendor connectors in wave 35) |
 
 ### 1.9.3 Functional requirements
 
@@ -862,6 +1389,31 @@ Out of scope: production orders (wave 21), capacity scheduling and Gantt (wave 2
 - **FR-9.11 Cycle and integrity checks** — Must. The system shall reject a line whose component's own active BOM (recursively) contains the parent (`ENG-BOM-CYCLE`), using the product-level closure table, and reject activation when any component is `obsolete`.
 - **FR-9.12 Copy and template** — Should. The system shall copy BOM and route versions to another product or site, with optional line filtering, and keep a `copied_from_version_id` lineage.
 - **FR-9.13 PLM event contract** — Could. The system shall publish ECO lifecycle events in a shape that a PLM adapter can consume and accept inbound `eco.proposed` payloads through the import tool.
+- **FR-9.14 Engineering organization and engineering products** — Must. The system shall let a legal entity be flagged `engineering_organization` (one or more per tenant); products whose engineering category (FR-9.18) has `track_versions = true` are engineering products owned by one engineering organization, and their engineering versions (version code from the nomenclature, effective range, lifecycle state from FR-8.14, attached BOM and route versions) are maintained only in that organization.
+  - Operational legal entities receive products, BOMs and routes by release (FR-9.15) and cannot edit engineering-owned fields (`ENG-OWNED-FIELD`); local fields (site defaults, local BOM site) stay editable.
+  - When the category sets `version_as_dimension = true`, the engineering version is an additional product dimension `version` so that inventory (wave 16) and orders track it (D365 "version" product dimension).
+- **FR-9.15 Release policies and release product structure** — Must. The system shall release engineering products to operational legal entities through `ReleaseSession` workflows (Temporal `release-{id}`), created manually, by job ENG-J7, or automatically on ECO release, governed by a release policy that lists what is copied: product, released-product template (FR-8.4 profile), BOM versions (copy yes/no, activate yes/no), route versions (copy yes/no, activate yes/no), attributes, default order settings, document links (FR-8.20).
+  - Each (product, entity) line moves through BR-9.13; resubmission creates a new line; a site-mapping table per receiving entity maps engineering sites to operational sites.
+  - Releasing a 1,000-component structure to 3 entities completes in < 2 min.
+- **FR-9.16 Product acceptance** — Should. The system shall let a receiving entity whose policy sets `require_acceptance = true` review release lines in "Open product releases", adjust site defaults and BOM/route site, and accept or reject with reason; accepted lines create or update the released product and activate copied versions; entities without acceptance accept automatically.
+- **FR-9.17 Product readiness policies and checks** — Must. The system shall evaluate readiness policies (per engineering category, item group or release policy) made of automated checks — item model group set, storage/tracking groups set, default order settings per site, active BOM for manufactured items, active route, tax group (wave 13 hook), coverage group (wave 22 hook), purchase price agreement (wave 17 hook), sales price (wave 26 hook), warehouse setup (wave 31 hook) — and manual checks (text, assigned user or team from FR-6.14, due in N days, mandatory flag).
+  - A released product stays in a state with category draft named `readiness_pending` (blocks transactional processes via FR-8.14) until every mandatory check is passed or not applicable, then moves to the policy's target state (default Active).
+  - Hooks of waves not yet live return `not_applicable`; checks re-evaluate on relevant events and by job ENG-J9.
+- **FR-9.18 Engineering product categories and version nomenclature** — Must. The system shall maintain engineering categories (code, name, product type, `track_versions`, `version_as_dimension`, nomenclature, default readiness policy, default release policy, attribute set, `change_controlled` = ECO mandatory) and version nomenclatures made of ordered segments: number (width, start), letter (A–Z, option to skip I and O), constant text, date (`yyyyMMdd` or `yyMM`), with separators; e.g. `V-{NN}` → V-01, V-02; `{A}` → A … Z, AA.
+- **FR-9.19 BOM usage and category** — Must. The system shall carry `usage` ∈ {production, engineering, costing, maintenance, sales, universal} (SAP STLAN 1–6) and `category` ∈ {material, document, equipment, functional_location, sales_order, project} on BOM headers; this wave maintains material and document BOMs, while equipment/functional-location (wave 44), sales-order (wave 27) and project/WBS (wave 41) BOMs reuse the same structures with an owner reference and the same explosion API.
+  - `bom:resolve` and `bom:explode` accept `usage` with a configurable fallback order (default production → universal).
+- **FR-9.20 Alternative item groups and discontinuation** — Should. The system shall store on BOM lines an alternative group (`alt_group` 2 chars, `alt_priority` 1–99, `alt_strategy` priority or usage_probability, `usage_probability_pct`) and discontinuation data (`discontinuation_group`, `discontinue_type` single or simultaneous, `follow_up_group`, `follow_up_component_id`, `discontinue_on` date); explosion returns groups unresolved with this metadata and planning (wave 22) resolves them against availability.
+- **FR-9.21 Serial and parameter effectivity** — Should. The system shall support effectivity type date (default), serial (end-item product plus serial range from–to) and parameter (tenant-defined parameters such as `model_year`, `customer_party_id`, `order_type`, with values or ranges) on ECOs and on the versions and lines they release; `bom:resolve` and `bom:explode` accept `effectivity_context` (e.g. `{"serial":"SN100045","parameters":{"model_year":2027}}`).
+  - Without context, date effectivity applies and serial/parameter-conditioned lines are excluded unless `include_unconditional = true`.
+  - Maximum 20 effectivity parameters per tenant; serial ranges compare lexicographically after zero-padding to the product's serial mask length.
+- **FR-9.22 Configurable (super) BOM and routing** — Should. The system shall let BOM lines and route operations carry a `selection_condition` in the FR-8.8 expression grammar over the parent master's configuration attributes and an optional `qty_expr` (e.g. `length_m * 2`); exploding with a solved configuration includes only lines whose condition is true and evaluates quantity expressions; activation validates conditions against the active model version (`ENG-COND-UNKNOWN-ATTR`).
+- **FR-9.23 Document and text BOM lines** — Should. The system shall add BOM line types `document` (references a DIR number/part/version, no consumption, printed on production papers in wave 21) and `text` (≤ 2,000 characters, translatable); planning and costing explosion modes skip both, `mode=full` includes them.
+- **FR-9.24 Document status network and release with electronic signature** — Should. The system shall let document types (FR-8.20) define a status network (statuses with release flag, allowed transitions, required duty, signature required, meaning text); default network `in_work → in_review → released → obsolete` plus `in_work → cancelled`; a signature transition requires Keycloak step-up re-authentication (password or WebAuthn) and records signer, printed name, timestamp, meaning and a hash of all originals, satisfying 21 CFR 11.50 (manifestation) and 11.70 (signature/record linking).
+- **FR-9.25 Document versions under ECO** — Should. For document types with `change_controlled = true`, the system shall release a new DIR version only as an affected object of an ECO; ECO release sets the new version to the released status and the previous one to obsolete in the same compensated transaction as BOM/route versions (BR-9.9); ECO impact analysis lists documents linked to the affected products.
+- **FR-9.26 Document structures and where-used** — Could. The system shall let a DIR carry a document structure (ordered child DIRs with optional item text, versioned with the parent) and answer where-used for a document across parent documents and BOM document lines (`GET /engineering/v1/documents/{id}:where-used`); cycles are rejected (`ENG-DOC-CYCLE`).
+- **FR-9.27 CAD/PLM engineering BOM synchronization contract** — Should. The system shall accept engineering BOM payloads (`ebom.published`, JSON schema in the registry: header part number and revision; lines with find number, component part number, quantity, unit, reference designators, file URIs) through the import tool or `POST /engineering/v1/ebom-imports`, resolve part numbers via product number or `ProductIdentifier` type `cad_part`, create a draft BOM version plus an ECR, and produce an eBOM-versus-active-mBOM comparison (added, removed, changed lines).
+  - Source configuration: application name (SolidWorks PDM, Inventor Vault, Teamcenter, Windchill, other), transport (SFTP or REST pull), mapping rules (unit codes, find number → line_no, phantom attribute), auto-ECR on/off; job ENG-J8 polls every 15 min.
+  - Native CAD file management and 3D viewing are not provided; vendor-specific connectors ship in wave 35.
 
 ### 1.9.4 Data model
 
@@ -919,6 +1471,8 @@ Out of scope: production orders (wave 21), capacity scheduling and Gantt (wave 2
 **EngineeringChangeOrder** — id, eco_number (sequence `ECO`), title, reason, priority, status (draft, submitted, approved, scheduled, released, rejected, cancelled), release_date, affected_versions uuid[] (draft versions to activate, with the versions they supersede), impact jsonb snapshot, workflow_id.
 
 Invariants: no two active BOM versions overlap for the same (product, site, date, qty); every active version's lines reference non-obsolete components; product closure table has no cycles; a released ECO's versions are all `active` and their predecessors `expired`; operation numbers referenced by `next_operation_no` exist in the same version. Indexing: `bom_version(product_id, site_id, effective_from, status)`; `bom_line(component_product_id)` for where-used; product closure (parent_product_id, child_product_id, depth) maintained on activation; `calendar_day(calendar_id, date)` PK.
+
+**Addendum entities (FR-9.14 – FR-9.27)** — engineering_category: id, code text(20), name, product_type, track_versions bool, version_as_dimension bool, nomenclature_id FK, readiness_policy_id FK null, release_policy_id FK null, attribute_set_id FK null, change_controlled bool. version_nomenclature: id, code, segments jsonb [{type: number|letter|constant|date, width, start, skip_io, format, text}], separator text(3). engineering_version: id, product_id, version_code text(20), effective_from, effective_to, lifecycle_state_id, engineering_le_id, unique (product_id, version_code). release_policy: id, code, copy_bom bool, activate_bom bool, copy_route bool, activate_route bool, copy_attributes bool, copy_order_settings bool, copy_documents bool, require_acceptance jsonb {legal_entity_id: bool}; release_session: id, number `REL-{yyyy}-{#####}`, created_by, source (manual, eco, job), workflow_id; release_line: session_id, product_id, engineering_version_id, legal_entity_id, status (pending, sent, accepted, rejected, failed), reason, accepted_by. readiness_policy: id, code, checks jsonb [{key, kind auto|manual, mandatory, assignee, due_days}], target_state_id, continuous bool; readiness_check_result: released_product_id, check_key, status (pending, passed, failed, not_applicable), evaluated_at, signed_by. effectivity: id, type (date, serial, parameter), product_id null, serial_from, serial_to, parameters jsonb; referenced by eco, bom_version and bom_line via effectivity_id. bom_header gains usage, category, owner_ref; bom_line gains alt_group, alt_priority, alt_strategy, usage_probability_pct, discontinuation_group, discontinue_type, follow_up_group, follow_up_component_id, discontinue_on, selection_condition text, qty_expr text, document_ref (dir_id), text_id. document_status_network: id, statuses jsonb, transitions jsonb; document_signature: dir_id, version, transition, signer_id, meaning, signed_at, originals_hash. ebom_import: id, source_code, part_number, revision, payload jsonb, status, bom_version_id, ecr_id, unique (source_code, part_number, revision).
 
 ### 1.9.5 APIs and events
 
@@ -978,6 +1532,13 @@ Interaction rules: BOM designer supports keyboard line entry (`Tab` through comp
 - **BR-9.10** A release date earlier than today requires the duty "Backdate engineering changes" and is audited; a release date more than 365 days ahead is rejected.
 - **BR-9.11** Deleting a resource is refused while any active route version requires it directly; capability-based requirements are unaffected.
 - **BR-9.12** Co-product allocation percents on a version must sum to ≤ 100; by-products carry no allocation and may have negative cost in wave 24.
+- **BR-9.13** Release line machine: `pending → sent → accepted | rejected`; `sent → failed` after 5 retries; `rejected` and `failed` are terminal for the line and resubmission creates a new line; an ECO release triggers release lines only for entities that previously accepted the product.
+- **BR-9.14** A released product is ready when every mandatory check is `passed` or `not_applicable`; a passed automated check that later fails (e.g. the BOM expired) reverts the product to `readiness_pending` only when the policy sets `continuous = true` (default false); manual checks cannot be signed by the user who created the release session.
+- **BR-9.15** Nomenclature increments: a number segment that overflows its width is rejected (`ENG-NOMEN-OVERFLOW`); letters roll Z → AA; date segments use the release date in the engineering organization's time zone; a version code is never reused for the same product.
+- **BR-9.16** Alternative groups: with `usage_probability`, probabilities in a group sum to exactly 100; with `priority`, priorities are unique in the group; a line may not be both an alternative-group member and a follow-up component in the same group (`ENG-ALT-CONFLICT`).
+- **BR-9.17** Effectivity precedence at resolution is serial > parameter > date; two serial-effective versions with overlapping ranges for the same (product, site) are rejected at ECO approval (`ENG-EFF-OVERLAP`).
+- **BR-9.18** A signature binds DIR id, version, transition and the sha256 of all originals; changing originals after signature is refused (`ENG-DOC-SIGNED`); where the type requires independent review the signer cannot be the last editor.
+- **BR-9.19** eBOM import is idempotent on (source, part number, revision): re-import updates the draft while it is still draft; once released, the same revision is rejected (`ENG-EBOM-REVISION-RELEASED`).
 
 ### 1.9.8 Acceptance criteria
 
@@ -991,6 +1552,14 @@ Interaction rules: BOM designer supports keyboard line entry (`Tab` through comp
 - **AC-9.8** (BR-9.9) Given an ECO with 3 versions where the third fails activation, when released, then none are active, the ECO returns to `approved` with the error, and the audit shows the compensation.
 - **AC-9.9** (FR-9.6) Given a 3-year calendar with 2 shifts and 10 closed days, when generated, then open-day count equals the fixture and generation < 2 s.
 - **AC-9.10** (BR-9.4) Given a line qty 3 per series 2 with scrap_var 5% and scrap_const 1, round_up quantity, when the parent qty is 7, then consumption = ceil(7/2×3×1.05 + 1) = 13.
+- **AC-9.11** (FR-9.15, FR-9.16, BR-9.13) Given engineering organization ENG1 and a policy that copies and activates BOM and route, requiring acceptance in USMF and not in DEMF, when product P version V-02 is released to both, then the DEMF line is `accepted` with active BOM and route on the mapped DEMF site and the USMF line waits in Open product releases; after acceptance, USMF has the released product and both events are published.
+- **AC-9.12** (FR-9.17, BR-9.14) Given a readiness policy with 3 automated checks and 1 mandatory manual check, when P is released to USMF, then the released product is `readiness_pending` and a sales-order policy query returns `PRD-LC-BLOCKED`; after the manual check is signed and the BOM is active, the state becomes Active.
+- **AC-9.13** (FR-9.18, BR-9.15) Given nomenclature `V-{NN}` with last version V-99, when the next version is requested, then `ENG-NOMEN-OVERFLOW`; given `{A}` with last Z, then AA.
+- **AC-9.14** (FR-9.21, BR-9.17) Given an ECO with serial effectivity SN1000–SN1999 replacing line 30, when exploding with serial SN1500, then the new component is returned; with SN2000, the old component.
+- **AC-9.15** (FR-9.22) Given a super BOM line with `frame == "carbon"` and a wheel line with `qty_expr = wheel_count`, when exploded with frame = carbon and wheel_count = 2, then only the carbon frame line appears and wheel quantity is 2.
+- **AC-9.16** (FR-9.24, FR-9.25, BR-9.18) Given change-controlled type DRW with signature on release, when version 02 is released outside an ECO, then 409 `ENG-DOC-ECO-REQUIRED`; through an ECO, a signature record is stored, version 02 is released and version 01 obsolete.
+- **AC-9.17** (FR-9.27, BR-9.19) Given an eBOM of 120 lines with 5 unknown part numbers, when imported, then a draft BOM version with 115 lines and an ECR exist, 5 lines are exceptions `ENG-EBOM-PART-UNKNOWN`, and the comparison counts equal the fixture.
+- **AC-9.18** (FR-9.20, BR-9.16) Given alternative group A1 with probabilities 60/40, when exploded, then both lines return with group metadata; when probabilities are saved as 60/30, then 422 `ENG-ALT-CONFLICT`.
 
 ### 1.9.9 Test plan and fixtures
 
@@ -1046,6 +1615,180 @@ Depends on: wave 8 (products, variants, UoM conversions, lifecycle), wave 6 (sit
 
 Open questions: (1) Should BOM lines reference product variants directly or master plus dimension expressions (AX "dimension-based" lines)? Proposed: direct variant with an optional "inherit parent dimension" flag; decide by wave 21. (2) Formula yield at header or per line? Proposed: header yield plus line scrap; decide by wave 24. (3) Do ECOs cover released-product changes (item model group) too? Proposed: no in v1; decide by wave 10.
 
+### 1.9.13 Parameters and setup
+
+| Parameter | Scope | Type | Default | Allowed values | Effect | AX equivalent | SAP equivalent |
+|---|---|---|---|---|---|---|---|
+| `eng.bom.approval_required` | tenant / site | bool | true | true / false | Activation requires approval (BR-9.1) | Inventory and warehouse management parameters → Bills of materials → BOM approval check | OS28 BOM modification parameters |
+| `eng.direct_activation` | tenant | bool | false in production tenants | true / false | Activation outside ECO (feature flag) | — (in-place BOM edits) | OS28 "ECM mandatory" setting |
+| `eng.bom.max_depth` | tenant | int | 25 | 5–25 | BR-9.6 | BOM levels setting | CS12 explosion level limit |
+| `eng.bom.max_lines` | tenant | int | 5,000 | 100–10,000 | FR-9.2 | — | — |
+| `eng.bom.usage_fallback` | tenant | list | production → universal | ordered usages | FR-9.19 resolution | — | OPJI/OPJM selection ID, OS20 usages |
+| `eng.bom.scrap_default` | item group | percent | 0 | 0–100 | Default variable scrap on new lines | BOM line ScrapVar default | OS27 default values, MARC-AUSSS assembly scrap |
+| `eng.route.time_unit` | tenant | enum | hours (4 dec) | hours / minutes | Operation time storage and display | Production control parameters → time unit | Standard value keys (OP19) |
+| `eng.route.default_link_type` | tenant | enum | soft | hard / soft | Default operation relation | RouteOpr.LinkType | PLAS relationship type |
+| `eng.cal.horizon_months` | resource group | int | 36 | 1–60 | Calendar generation window (FR-9.6) | Compose working times period | Factory calendar validity (SCAL) |
+| `eng.cal.expiry_warning_days` | tenant | int | 60 | 7–365 | Job ENG-J4 warning | Update calendars | SCAL valid-to |
+| `eng.eco.number_sequence` | tenant | sequence | `ECO-{######}` | sequences | ECO numbers | ECM parameters → Number sequences | Change number number-range object (CC01) |
+| `eng.eco.max_horizon_days` | tenant | int | 365 | 30–1,095 | BR-9.10 | — | — |
+| `eng.effectivity.types` | tenant | set | {date} | date, serial, parameter | FR-9.21 | — | IMG ECM → Effectivity types and parameters |
+| `eng.org.engineering` | legal entity | bool | false | true / false | FR-9.14 | ECM parameters → Engineering organization | — |
+| `eng.release.default_policy` | engineering category | FK | none | release policies | FR-9.15 | Product release policies | ALE distribution model (BD64) |
+| `eng.release.require_acceptance` | release policy × legal entity | bool | false | true / false | FR-9.16 | Release policy "require acceptance" | — |
+| `eng.readiness.policy` | engineering category / item group | FK | none | readiness policies | FR-9.17 | Product readiness policies | — |
+| `eng.nomenclature` | engineering category | FK | `V-{NN}` | nomenclatures | FR-9.18 | Version nomenclature | Revision levels (OS13) |
+| `eng.doc.signature_meanings` | document status | text | "Approved for release" | ≤ 100 chars | FR-9.24 | Electronic signature requirements (D365) | Digital signature strategy on DC20 status |
+| `eng.ebom.sources` | tenant | records | none | SFTP / REST source definitions | FR-9.27 | PLM integration (Dataverse) | ECTR configuration |
+| `eng.explode.cache_ttl_s` | tenant | int | 300 | 0–3,600 | Explosion cache | — | — |
+
+### 1.9.14 Inquiries and reports
+
+| Name | Type | Filters & parameters | Columns / measures | Source projection | AX equivalent | SAP equivalent |
+|---|---|---|---|---|---|---|
+| BOM versions per product | list inquiry | product, site, status, usage, date | version, site, dates, qty range, status, ECO, approved by | `engineering.bom_version` | BOM versions; SSRS BOM versions | CS03, CS05 |
+| Multi-level explosion | drill-down | product, site, date, qty, usage, effectivity context, configuration | level, line, component, qty, scrap, alt group, effectivity | explode API | BOM designer; SSRS BOM lines | CS11 / CS12 / CS13 |
+| Where-used | drill-down | component, date, levels, site | parent, level, qty, version status, top-level count | product closure | BOMWhereUsed; SSRS BOM where-used | CS15 |
+| BOM version comparison | drill-down | version A, version B | added, removed, changed fields per line | `bom_line` | Engineering version comparison (D365) | CS14 |
+| Route operations and lead time | operational report | route version, qty | op, resource req., setup, run, queue, transit, lead time | route projection | SSRS Routes / Operations listings | CA03, CA97 |
+| Resource where-used | list inquiry | resource, group, capability | route versions, operations, site | operation requirements | Resource → Route versions | CA80, CR15 |
+| Work calendar | list inquiry | calendar, date range | day, open, shifts, hours, efficiency | `calendar_day` | SSRS Calendars / Working time | SCAL, CR03 capacity |
+| ECR/ECO by status | KPI | status, priority, category, age | count, median cycle time, overdue | `engineering.eco` | Change request / change order inquiries | CC04 change master information system |
+| ECO impact report | operational report | ECO | affected products, sites, versions, documents, open-order counts (hooks) | impact snapshot | Impact analysis report | CC04, CS15 |
+| Release status (product × legal entity) | list inquiry | product, entity, status, session | line status, version, accepted by, reason | `release_line` | Release status inquiry; SSRS Product release report | BD87 IDoc status for BD10/BD30 |
+| Readiness check status | operational report | entity, policy, check, status | pending checks, assignee, due date, age | `readiness_check_result` | Readiness check status inquiry | — |
+| Engineering versions by category | list inquiry | category, product, state | version code, effective range, state, BOM/route | `engineering_version` | Engineering version inquiry | Revision level display (CC03) |
+| eBOM vs mBOM comparison | drill-down | eBOM import, active BOM | added, removed, changed lines | `ebom_import` | — | ECTR CAD BOM comparison |
+| Document structure and where-used | drill-down | DIR | children, parents, BOM document lines | document structure | — | CV13, CV15 |
+
+### 1.9.15 Printed and electronic documents
+
+| Document | Trigger | Layout elements (header/line/footer fields) | Formats | Numbering sequence | Legal / retention requirement |
+|---|---|---|---|---|---|
+| Indented BOM report | on demand, attached to ECO | header: product, version, site, effective range, usage; lines: level, line no, component, qty/series, unit, scrap, position, operation; footer: approved by, ECO, page x/y | PDF, XLSX | none | kept with ECO record |
+| Route sheet | on demand | header: product, route version, site; lines: op no, resource requirement, setup, run per qty, queue, transit; footer: lead time for reference qty | PDF | none | kept with ECO record |
+| ECR / ECO document | submission and release | header: number, title, reason, priority, release date, effectivity; lines: affected versions with diff summary, affected documents, impact counts; footer: approvals with signature manifestation | PDF, email to approvers | `ECO-{######}` | 10 years after product becomes obsolete (ISO 9001 §7.5.3; ISO 13485 §4.2.5 and 21 CFR 820 for medical-device tenants) |
+| Product release report | release session completion | header: session number, policy; lines: product, version, entity, line status, reason | PDF | `REL-{yyyy}-{#####}` | 7 years |
+| Signed engineering document rendition | released status with signature | original plus signature page: printed name, date/time (UTC and local), meaning, hash | PDF/A-2b | DIR number/part/version | per document-type retention class; 21 CFR 11.10(c) record retention |
+| Work calendar printout | on demand | calendar, month grid, shifts, closed days | PDF | none | none |
+
+### 1.9.16 Periodic and batch jobs
+
+| Job | Schedule default | Partitioning key | Idempotency / checkpoint | Typical runtime target | Failure handling | Monitor / alert |
+|---|---|---|---|---|---|---|
+| ENG-J1 Active-version overlap check | nightly 01:00 | product_id hash (8 partitions) | read-only | < 10 min at 1M versions | report only | rows > 0 |
+| ENG-J2 Version expiry | nightly 00:05 site time | site_id | sets `expired` where `effective_to` < today; idempotent | < 5 min | retried hourly | failures > 0 |
+| ENG-J3 Expiry warning digest | weekly Monday 06:00 | owner team | read-only | < 2 min | none | none |
+| ENG-J4 Calendar horizon extension | monthly 1st 02:00 | calendar_id | generate idempotent per range | < 2 s per calendar | per-calendar retry | calendars within warning window |
+| ENG-J5 Scheduled ECO release | Temporal timer at release_date 00:00 | eco_id | workflow id per ECO | < 60 s p95 | compensation BR-9.9 | ECO in `scheduled` > release_date + 10 min |
+| ENG-J6 Product closure integrity | nightly 03:30 | tenant | read-only | < 15 min | runbook "Rebuild product closure" | mismatches > 0 |
+| ENG-J7 Release product structures | every 15 min for pending sessions; on ECO release | session_id | line-level idempotent | 1,000 components × 3 entities < 2 min | line `failed` after 5 retries | failed lines > 0 |
+| ENG-J8 eBOM source poll | every 15 min | source_code | idempotent per (source, part, revision) | < 1 min per 100 payloads | payload to exceptions with reason | source unreachable 3 polls |
+| ENG-J9 Readiness evaluation | hourly and on events | legal_entity_id | recompute per (product, check) | < 5 min for 100k released products | check left `pending` | overdue manual checks |
+
+### 1.9.17 Security duties and privileges
+
+| Duty | Privileges (entry points) | Segregation-of-duties conflicts | Default roles that include it |
+|---|---|---|---|
+| View engineering data | `GET /engineering/v1/**`, explode, where-used, diff | none | every manufacturing role |
+| Maintain BOMs | BOM headers, draft versions, lines; BOM designer | Approve engineering changes on the same ECO | Design engineer |
+| Maintain routes and resources | route versions, operations, resources, calendars | none | Manufacturing engineer |
+| Activate BOM without ECO | `bom-versions/{id}:activate` | Maintain BOMs (when `change_controlled`) | Engineering manager |
+| Maintain engineering changes | ECR/ECO create, submit, eBOM import | Approve engineering changes | Design engineer, Manufacturing engineer |
+| Approve engineering changes | `ecos/{id}:approve` | Maintain engineering changes on the same ECO (no self-approval) | Engineering manager, Quality manager |
+| Release engineering changes | `ecos/{id}:release`, backdate with separate duty | none | Engineering manager |
+| Release product structures | release sessions, ENG-J7, release policies | Accept product releases in the same receiving entity | Engineering administrator |
+| Accept product releases | Open product releases accept/reject | Release product structures | Plant master data steward |
+| Maintain readiness policies and sign checks | readiness policies; manual check sign-off | sign-off conflicts with creating the release session (BR-9.14) | Plant master data steward, Quality manager |
+| Sign engineering documents | signature transitions (FR-9.24) | Maintain documents on the same DIR when independent review is required | Quality manager, Engineering manager |
+| Administer eBOM sources | `eng.ebom.sources`, ENG-J8 | none | Engineering administrator |
+
+### 1.9.18 Message catalog
+
+| Code | Severity | User text | Cause | Remediation | Raised by |
+|---|---|---|---|---|---|
+| ENG-BOM-CYCLE | error | "Adding {c} creates a cycle: {path}." | Recursive structure | Remove the line | FR-9.11 |
+| ENG-BOM-DEPTH | error | "Structure exceeds {max} levels." | Depth cap | Flatten or raise limit | BR-9.6 |
+| ENG-BOM-OVERLAP | error | "Version overlaps active version {v} for this site, date and quantity." | Overlap on activation | Adjust ranges | FR-9.1 |
+| ENG-BOM-COMP-OBSOLETE | error | "Component {c} is obsolete." | Obsolete component | Replace component | FR-9.11 |
+| ENG-BOM-PHANTOM-NOBOM | error | "Phantom {c} has no active BOM on {date}." | Phantom without BOM | Activate its BOM | BR-9.5 |
+| ENG-ROUTE-UNSATISFIED | error | "No resource satisfies operation {op} requirement {req}." | Requirement unmet | Add resource or capability | FR-9.5 |
+| ENG-ROUTE-NEXT-MISSING | error | "Next operation {n} does not exist." | Bad reference | Fix operation number | FR-9.4 |
+| ENG-ROUTE-SECONDARY-NOPRIMARY | error | "Secondary operation {op} has no primary at its join." | BR-9.7 | Add primary | BR-9.7 |
+| ENG-ECO-NOT-APPROVED | error | "ECO {n} must be approved before release." | Wrong status | Approve first | FR-9.7 |
+| ENG-ECO-BACKDATE-DUTY | error | "Backdated release requires the Backdate duty." | Past release date | Use today or request duty | BR-9.10 |
+| ENG-ECO-HORIZON | error | "Release date is more than {d} days ahead." | Horizon exceeded | Choose an earlier date | BR-9.10 |
+| ENG-RES-IN-USE | error | "Resource {r} is required by active route {v}." | Delete in use | Change routes first | BR-9.11 |
+| ENG-OWNED-FIELD | error | "{field} is owned by engineering organization {eo}." | Local edit of engineering data | Raise an ECR | FR-9.14 |
+| ENG-READINESS-PENDING | warning | "{n} readiness checks are pending." | FR-9.17 | Complete checks | FR-9.17 |
+| ENG-NOMEN-OVERFLOW | error | "Version numbering exhausted for {product}." | BR-9.15 | Change nomenclature width | BR-9.15 |
+| ENG-ALT-CONFLICT | error | "Alternative group {g} is inconsistent: {reason}." | BR-9.16 | Correct priorities/probabilities | BR-9.16 |
+| ENG-EFF-OVERLAP | error | "Serial ranges overlap with ECO {n}." | BR-9.17 | Adjust ranges | BR-9.17 |
+| ENG-COND-UNKNOWN-ATTR | error | "Condition references unknown attribute {a}." | FR-9.22 | Fix condition or model | FR-9.22 |
+| ENG-DOC-ECO-REQUIRED | error | "Document type {t} is change-controlled; release through an ECO." | FR-9.25 | Add to an ECO | FR-9.25 |
+| ENG-DOC-SIGNED | error | "Originals are locked by signature on {date}." | BR-9.18 | Create a new version | BR-9.18 |
+| ENG-EBOM-PART-UNKNOWN | warning | "Part {p} is not a known product." | FR-9.27 | Create product or map identifier | FR-9.27 |
+| ENG-EBOM-REVISION-RELEASED | error | "Revision {r} of {p} is already released." | BR-9.19 | Send a new revision | BR-9.19 |
+
+### 1.9.19 Performance budgets and capacity
+
+| Operation | Volume assumption | Latency target (p50 / p95 / p99) | Throughput target | Storage growth per year | Index / partition strategy | Degradation behavior under 3× load |
+|---|---|---|---|---|---|---|
+| Explosion (7 levels, 2,000 components) | 200k/day from planning and costing; peak 1,000/min | 120 / 500 / 900 ms | 50 req/s per replica | cache only | product closure; cache keyed by active version set | cache hit ratio rises; uncached p95 ≤ 1.2 s |
+| As-of resolve | 5M/day | 5 / 30 / 60 ms | 1,000 req/s | none | (product_id, site_id, effective_from, status) | unchanged |
+| Where-used (100k lines) | 20k/day | 60 / 300 / 600 ms | 50 req/s | none | btree bom_line(component_product_id) | levels capped at request value |
+| BOM line save with cycle check | 50k/day | 20 / 80 / 150 ms | 100 req/s | ~200 B per line; 10M lines ≈ 3 GB | closure lookup | unchanged |
+| ECO release (500 versions) | 100/day | 10 / 60 / 120 s | 5 concurrent | ECO snapshots ~100 KB | Temporal workflow | queued; timers unaffected |
+| Release session (1,000 components × 3 entities) | 50/day | 40 s / 2 min / 4 min | 4 concurrent sessions | release lines ~1 KB | session_id partition of work | lines queued, no failure |
+| eBOM import (500 lines) | 500/day | 2 / 8 / 15 s | 10 concurrent | payloads ~200 KB | unique (source, part, revision) | ENG-J8 extends poll interval to 30 min |
+
+### 1.9.20 Localization and compliance hooks
+
+| Item | What varies | Country packs touching it (wave 48) | Extension point |
+|---|---|---|---|
+| Public holidays in work calendars | US federal; UK bank holidays per nation; DE holidays per Land; FR 11 jours fériés plus Alsace-Moselle; IN national and state holidays; MX mandatory rest days (Ley Federal del Trabajo Art. 74); CA federal and provincial | all seven | `HolidayCalendarProvider` feeding FR-9.6 closed days |
+| Electronic records and signatures | US 21 CFR Part 11; EU GMP Annex 11; EU eIDAS for qualified signatures (optional) | US, DE, FR | signature policy per document type (FR-9.24) |
+| Design and change control | ISO 9001 §8.3/§8.5.6; ISO 13485 §7.3.9; 21 CFR 820 (QMSR effective 2026-02-02); EU MDR Annex II technical documentation | US, DE, FR | `change_controlled` engineering categories; ECO record retention |
+| Export control on technical data | US EAR/ITAR technical data, EU dual-use Regulation 2021/821 | US, DE, FR | export classification attribute on engineering category; access restricted through OPA attributes (wave 48) |
+| Units on drawings and BOMs | US customary vs metric | US | unit conversion (FR-6.9, FR-8.7) at display |
+| Working time | Shift patterns must respect local limits (EU Working Time Directive 2003/88/EC, IN Factories Act 1948 §51 48 h/week); enforced for workers in wave 42, warned here when calendar shifts exceed 48 h/week | DE, FR, IN | calendar validation hook (warning only) |
+
+### 1.9.21 Coverage closure
+
+| Register row (inventory section + AX form or SAP T-code) | Status before | Disposition | Note |
+|---|---|---|---|
+| AX §12.15.1 PIM, Common — Product readiness checks (D365), EcoResProductReadiness; register §12.99.4 #144 | PARTIAL-9 | ADDED as FR-9.17 | Automated and manual checks; blocks via FR-8.14 |
+| AX §12.15.4 PIM, Setup — Product readiness policies (D365); register §12.99.4 #151 | PARTIAL-9 | ADDED as FR-9.17 | Parameter `eng.readiness.policy` |
+| AX §12.34.1 ECM, Common — Release product structure, EngChgReleaseProductStructure; register §12.99.4 #280 | PARTIAL-9 | ADDED as FR-9.15 | Engineering vs operational split in FR-9.14 |
+| AX §12.34.1 ECM, Common — Product readiness checks (per LE checklist), EngChgProductReadiness; register §12.99.4 #281 | PARTIAL-9 | ADDED as FR-9.17 | Per receiving legal entity |
+| AX §12.34.1 ECM, Common — Product acceptance, EngChgProductAcceptance; register §12.99.4 #282 | PARTIAL-9 | ADDED as FR-9.16 | Open product releases screen |
+| AX §12.34.1 ECM, Common — Engineering product categories, EngChgEngineeringProductCategory; register §12.99.4 #284 | PARTIAL-9 | ADDED as FR-9.18 | Category carries nomenclature, readiness and release policies |
+| AX §12.34.2 ECM, Inquiries — Release status inquiry (product × legal entity); register §12.99.4 #286 | PARTIAL-9 | ADDED as FR-9.15 | §1.9.14 "Release status" |
+| AX §12.34.2 ECM, Inquiries — Readiness check status inquiry; register §12.99.4 #287 | PARTIAL-9 | ADDED as FR-9.17 | §1.9.14 "Readiness check status" |
+| AX §12.34.2 ECM, Reports — SSRS Product release report; register §12.99.4 #288 | PARTIAL-9 | ADDED as FR-9.15 | §1.9.15 "Product release report", rendered by wave 46 |
+| AX §12.34.3 ECM, Periodic — Release product structures (batch); register §12.99.4 #289 | PARTIAL-9 | ADDED as FR-9.15 | Job ENG-J7 |
+| AX §12.34.3 ECM, Periodic — Readiness check evaluation (batch); register §12.99.4 #290 | PARTIAL-9 | ADDED as FR-9.17 | Job ENG-J9 |
+| AX §12.34.4 ECM, Setup — Engineering organizations; register §12.99.4 #292 | PARTIAL-9 | ADDED as FR-9.14 | Parameter `eng.org.engineering` |
+| AX §12.34.4 ECM, Setup — Engineering product categories (version nomenclature, attributes, readiness policy, release policy); register §12.99.4 #293 | PARTIAL-9 | ADDED as FR-9.18 | — |
+| AX §12.34.4 ECM, Setup — Version nomenclature (number/letter/date segments); register §12.99.4 #294 | PARTIAL-9 | ADDED as FR-9.18 | BR-9.15 increment rules |
+| AX §12.34.4 ECM, Setup — Product readiness policies / readiness checks; register §12.99.4 #295 | PARTIAL-9 | ADDED as FR-9.17 | Hooks to waves 13, 17, 22, 26, 31 return not_applicable until live |
+| AX §12.34.4 ECM, Setup — Product release policies; register §12.99.4 #296 | PARTIAL-9 | ADDED as FR-9.15 | Parameter `eng.release.default_policy` |
+| SAP §13.21 PP Master data — CS51/CS52/CS53/CS61/CS62/CS63/CS71 BOM categories; register §13.99.2 #238 | PARTIAL-9 | ADDED as FR-9.19 | Usage and category on header; sales-order BOM instances in wave 27, WBS BOMs in wave 41, equipment/FL BOMs in wave 44 reuse the model |
+| SAP §13.21 PP Master data — alternative items, discontinuation / follow-up material; register §13.99.2 #243 | PARTIAL-9 | ADDED as FR-9.20 | Resolution logic in MRP wave 22 |
+| SAP §13.21 PP Customizing — OS40/OS41/OS44 ECM effectivity types (date, serial, parameter); register §13.99.2 #250 | PARTIAL-9 | ADDED as FR-9.21 | Parameter `eng.effectivity.types` |
+| SAP §13.32 LO-VC Master data — PSM / iPPE product variant structures; register §13.99.2 #360 | PARTIAL-9 | SUPERSEDED by FR-9.22 super BOM/routing with selection conditions | iPPE-specific objects (PVS nodes, access diagrams, CMP) have no equivalent; multi-level configurable structures are modeled as super BOMs over configuration attributes |
+| SAP §13.32 LO-VC Master data — VC with batch/serial effectivity, parameter effectivity; register §13.99.2 #362 | PARTIAL-9 | ADDED as FR-9.21 | Effectivity context combined with configuration in explode |
+| SAP §13.35 DMS Master data — CV11/CV12/CV13/CV15 document structure; register §13.99.2 #376 | GAP | ADDED as FR-9.26 | Structures versioned with parent DIR |
+| SAP §13.35 DMS Master data — CV01N status network with release workflow and digital signature; register §13.99.2 #378 | PARTIAL-9 | ADDED as FR-9.24 | 21 CFR 11 manifestation and linking |
+| SAP §13.35 DMS Master data — CV01N version / part / change number (ECM); register §13.99.2 #379 | PARTIAL-9 | ADDED as FR-9.25 | ECO-controlled DIR versions |
+| SAP §13.35 DMS Master data — ECTR CAD integration, CAD BOM derivation; register §13.99.2 #381 | GAP | ADDED as FR-9.27 | Contract and import path here; native CAD file management out of scope; vendor connectors deferred to wave 35 |
+| SAP §13.35 DMS Master data — Document BOM items (CS01 item category D); register §13.99.2 #382 | PARTIAL-9 | ADDED as FR-9.23 | Line types `document` and `text` |
+| SAP §13.35 DMS Master data — PLM suite (Engineering Record, PSM, Visual Enterprise, Recipe Development, Specification management, Labeling); register §13.99.2 #383 | PARTIAL-9 | DEFERRED to wave 24 | Recipe development and specifications go to wave 24 as the register proposes; global label management to wave 48; Visual Enterprise 3D viewing is out of scope; Engineering Record is covered by ECR/ECO (FR-9.7) |
+| SAP §13.35 DMS Reports — CV13 / CV15 document structure display / where-used; register §13.99.2 #386 | GAP | ADDED as FR-9.26 | §1.9.14 "Document structure and where-used" |
+| SAP §13.35 DMS Reports — ECTR reports (CAD BOM comparison); register §13.99.2 #388 | GAP | ADDED as FR-9.27 | §1.9.14 "eBOM vs mBOM comparison" |
+| SAP §13.35 DMS Periodic — ECTR sync jobs; register §13.99.2 #391 | GAP | ADDED as FR-9.27 | Job ENG-J8 |
+| SAP §13.35 DMS Customizing — DC20 document status definitions; register §13.99.2 #393 | PARTIAL-9 | ADDED as FR-9.24 | Status network per document type |
+| SAP §13.35 DMS Customizing — ECTR configuration (CAD applications, templates, BOM sync rules); register §13.99.2 #396 | GAP | ADDED as FR-9.27 | Parameter `eng.ebom.sources` |
+
 ## 1.10 Wave 10: Data Migration Framework & Legacy Connectors
 
 ### 1.10.1 Scope and business context
@@ -1078,6 +1821,9 @@ Out of scope: transactional data packs (open items, on-hand, open orders — wav
 | Run history / lineage | DMFExecution, job history | LSMW logs, LTMC run history | `MigrationRun` ledger with per-row lineage | improved |
 | Standard objects | DMF customer, vendor, product, BOM, route entities | Migration Cockpit objects Customer, Supplier, Material, BOM, Routing, Work center | Connector packs for DirParty/CustTable/VendTable/InventTable/EcoResProduct/BOM/Route and KNA1/LFA1/BUT000/MARA/MAST-STKO-STPO/PLKO-PLPO/CRHD | full for Phase 1 scope |
 | Scheduling / monitoring | Batch jobs, Data management workspace | SM37, LTMC monitor | Temporal workflows, migration workspace | full |
+| Copy data between legal entities | DMFCopyEntity (Copy entity data between companies), D365 "Copy into legal entity" | EC01/EC02 organizational object copy; LSMW cross-company reload | `copy` project type (FR-10.14) | full |
+| Configuration data packages | D365 configuration data projects, data templates, LCS asset library | Customizing transports (SE09/SE10, SCC1), BC Sets (SCPR20), cross-system viewer SCU0 | signed configuration packages with diff (FR-10.15) | improved (diff before apply) |
+| Recurring imports | D365 recurring data jobs (recurring integrations) | LSMW periodic runs, IDoc inbound processing (BD87) | scheduled incremental runs until cutover (FR-10.16) | full |
 
 ### 1.10.3 Functional requirements
 
@@ -1102,6 +1848,12 @@ Out of scope: transactional data packs (open items, on-hand, open orders — wav
 - **FR-10.11 Migration workspace** — Must. The system shall provide a workspace with project list, run history, per-stage progress, reconciliation report (downloadable as XLSX/PDF for sign-off), and exception queue.
 - **FR-10.12 Packaging** — Should. The system shall package connectors and standard mapping packs as Helm sub-charts and OCI artifacts (`passage-migration-ax`, `passage-migration-sap`) versioned independently of the core service.
 - **FR-10.13 PII handling in staging** — Must. The system shall encrypt PII-flagged staging columns at rest with a per-project key, purge staging data after a configurable retention (default 30 days after the run is signed off), and exclude PII from exception-queue exports unless the user holds `pii.read`.
+- **FR-10.14 Copy entity data between legal entities** — Should. The system shall support a project type `copy` whose source is a tenant legal entity and whose target is another legal entity in the same tenant, reusing the mapping DSL with identity rules plus key-rewrite rules (source code → target code), dry run, idempotent load and reconciliation; supported objects: customer and vendor roles, released products with site defaults, BOM and route versions, resources and calendars.
+- **FR-10.15 Configuration data packages** — Should. The system shall export setup data (the parameters of §1.6.13–§1.9.13, groups, terms, lifecycle states, document types, nomenclatures, readiness and release policies, mapping specs) as a versioned package (JSON bodies, manifest with schema version, dependency order, sha256 per file, signature by the tenant key) and import it into another tenant or environment after a dry-run diff showing create / update / unchanged per record; deletes are never applied.
+- **FR-10.16 Recurring import jobs** — Should. The system shall let a project schedule incremental `load` runs (cron, minimum interval 15 min) from a connector or a file drop (SFTP or S3-compatible object storage path) during the coexistence and cutover window, using incremental extraction (FR-10.2); scheduling stops automatically at the project's `cutover_at`.
+- **FR-10.17 Mapping packs for coverage-closure objects** — Must. The system shall extend the standard AX and SAP mapping packs, with tests, to the objects added by the phase-1 coverage closure: AX OMTeam/OMTeamMember → Team (FR-6.14); VendCertification/VendCertificationType → VendorCertification (FR-7.14); PaymSched/PaymSchedLine and SAP T052R → PaymentScheduleLine (FR-7.15); KNA1-KNRZE, KNB1-KNRZB/XDEZV, LFA1-LNRZA, LFZA and AX DirPartyRelationship → PartyRelationship (FR-7.17); DirAddressBook/DirAddressBookParty → AddressBook (FR-7.18); KNVH → customer hierarchy (FR-7.19); EcoResProductRelation → ProductRelation (FR-8.13); EcoResProductLifecycleState and MARA-MSTAE/MARC-MMSTA with T141 → LifecycleState (FR-8.14); ASMD/ASMDT → service products (FR-8.17); CUVTAB/CUVTAB_VALC → DecisionTable (FR-8.18); DRAW/DRAT/DRAD and DocuRef/DocuType → DocumentInfoRecord and links (FR-8.20); EngChgEngineeringProductCategory, version nomenclature, release and readiness policies (FR-9.15–FR-9.18); STPO ALPGR/ALPST/ALPRF/EWAHR/KZAUS/NFMAT (FR-9.20); AENR effectivity data (FR-9.21); STKO/STPO with STLTY = D document structures (FR-9.26).
+  - The STLTY = D load supersedes the "not migrated: SAP document BOMs" note in §1.9.11.
+- **FR-10.18 Data templates** — Could. The system shall let a project attach per-object default-value templates (D365 data templates / default templates per module) applied before mapping rules, so that fields absent in the source receive project-specific defaults recorded as `default_from_template` in lineage.
 
 ### 1.10.4 Data model
 
@@ -1152,6 +1904,8 @@ Out of scope: transactional data packs (open items, on-hand, open orders — wav
 **LineageEntry** — run_id, object, source_key, target_entity, target_id, content_hash, loaded_at, idempotency_key (unique). **ReconciliationResult** — run_id, object, counts jsonb, hash_totals jsonb {column: {source, target, match}}, sample jsonb {size, mismatches[]}, status.
 
 Invariants: a run's mapping versions never change after `extracting`; `loaded` rows have a lineage entry and a target_id; idempotency keys are unique across all runs; a `reconciled` status requires mismatches = 0 and rejects = 0 or all `accepted_difference`. Indexing: staging tables partitioned by `run_id` (list partitioning, dropped on purge); `(run_id, object, status)` btree; `lineage(target_entity, target_id)` for the audit tab; `lineage(idempotency_key)` unique.
+
+**Addendum entities (FR-10.14 – FR-10.18)** — migration_project gains `project_type` (migrate, copy, config_package), `source_legal_entity_id`, `target_legal_entity_id`, `cutover_at`, `schedule_cron`; key_rewrite_rule: project_id, field, from_value, to_value; config_package: id, version text(20), schema_version int, manifest jsonb, signature bytea, created_by, created_at, applied jsonb [{tenant_id, applied_at, diff_counts}]; data_template: project_id, object, defaults jsonb.
 
 ### 1.10.5 APIs and events
 
@@ -1208,6 +1962,9 @@ Interaction rules: run monitor auto-refreshes every 2 s via SSE; exception grid 
 - **BR-10.10** Dependency between objects: a party role row whose party failed in the same run is rejected with `VAL-DEP-FAILED` referencing the parent source key, not retried blindly.
 - **BR-10.11** Staging purge runs 30 days after sign-off (configurable 7–365); purge drops the run's partitions; lineage and reconciliation results are never purged.
 - **BR-10.12** Concurrency with live users: loads run as a service account under OPA with the duties of the project owner; records created carry `created_by = migration:{run_id}` for audit.
+- **BR-10.13** Copy projects rewrite every legal-entity-scoped natural key; a rewritten key that already exists in the target is rejected with `COPY-KEY-EXISTS` unless the project selects `upsert`.
+- **BR-10.14** Configuration packages apply in manifest dependency order; a package whose schema version is newer than the target's is refused (`MIG-PKG-SCHEMA-NEWER`); a package whose signature does not verify is refused (`MIG-PKG-SIGNATURE`).
+- **BR-10.15** Recurring runs never overlap (BR-10.2); a trigger that fires while a run is active is skipped and logged, never queued.
 
 ### 1.10.8 Acceptance criteria
 
@@ -1221,6 +1978,9 @@ Interaction rules: run monitor auto-refreshes every 2 s via SSE; exception grid 
 - **AC-10.8** (FR-10.2) Given the `sap-rfc` connector against the recorded RFC_READ_TABLE fixture with 600-byte rows, when extracting KNA1, then all columns are reassembled across two field groups with 0 truncation.
 - **AC-10.9** (FR-10.13) Given a signed-off run, when 30 days pass on the Temporal test clock, then staging partitions are dropped and lineage rows remain.
 - **AC-10.10** (FR-10.1) Phase 1 exit: given the synthetic AX extract of the demo manufacturer, when the full project runs, then every object is `reconciled`, the wave 6–9 workspaces show the migrated data, and the reconciliation XLSX is attached to the sign-off record.
+- **AC-10.11** (FR-10.15, BR-10.14) Given a package of 240 setup records from tenant A, when it is dry-run against tenant B where 40 records are identical and 10 differ, then the diff shows 190 create, 10 update, 40 unchanged; after apply, a second apply reports 0 changes.
+- **AC-10.12** (FR-10.14, BR-10.13) Given 500 released products in USMF, when a copy project loads them into CAMF, then the run is `reconciled`, every item number exists in CAMF, and a second run skips 500.
+- **AC-10.13** (FR-10.17) Given the mapping test suites for the 15 added objects, when CI runs, then all pass; an AX PaymSched with 3 percent lines maps to 3 schedule lines summing 100.00.
 
 ### 1.10.9 Test plan and fixtures
 
@@ -1275,3 +2035,130 @@ Depends on: waves 6, 7, 8 and 9 (bulk endpoints with `X-Passage-Dry-Run` support
 | Reconciliation sampling misses rare drift | Low | Medium | Hash totals per column catch systematic drift; widened sample on mismatch |
 
 Open questions: (1) Is the mapping DSL YAML plus a restricted expression language enough, or do packs need a plug-in hook in TypeScript? Proposed: YAML only in v1, hooks behind a flag by wave 49; decide by wave 16. (2) Should lineage be stored in each domain database (next to the record) or only in migration-db? Proposed: migration-db with the audit tab querying it; decide by wave 11. (3) Who owns sign-off on reconciliation for the phase-exit demo — product or the implementation partner persona? Proposed: both sign; decide at the phase-1 exit review.
+
+### 1.10.13 Parameters and setup
+
+| Parameter | Scope | Type | Default | Allowed values | Effect | AX equivalent | SAP equivalent |
+|---|---|---|---|---|---|---|---|
+| `mig.workers` | project | int | 8 | 1–16 | Loader partitions (FR-10.6) | Data management parameters → entity execution threads | Migration Cockpit number of background jobs |
+| `mig.batch_size` | project | int | 500 | 50–5,000 | Rows per API call | Set-based processing / bundle size | LTMC transfer package size |
+| `mig.reject_threshold_pct` | project | decimal | 0.5 | 0–10 | Load gate after validation (FR-10.4) | — | — |
+| `mig.sample_pct` | project | decimal | 1 (min 100, max 5,000 rows) | 0.1–100 | Reconciliation sample (FR-10.8) | Compare data | — |
+| `mig.widened_sample_pct` | project | decimal | 10 | 1–100 | BR-10.9 | — | — |
+| `mig.staging_retention_days` | project | int | 30 | 7–365 | Purge after sign-off (BR-10.11) | Staging cleanup (job history cleanup) | Migration Cockpit staging table deletion |
+| `mig.source.codepage` | connector | enum | UTF-8 | UTF-8, Windows-1252, ISO-8859-1, UTF-16LE, SAP 1100, SAP 1160 | Decode source bytes | Source data formats → code page | LSMW file code page, LTMC file encoding |
+| `mig.source.timezone` | connector | IANA | source server zone | IANA | `utcdatetime` / DATS+TIMS conversion | Source data formats → time zone | User / system time zone of extract |
+| `mig.retire_missing` | project | bool | false | true / false | FR-10.7 | — | — |
+| `mig.overwrite_drift` | project | bool | false | true / false | BR-10.8 | — | — |
+| `mig.allow_unreconciled_deps` | project | bool | false | true / false | Run-start dependency check | Entity sequencing | Migration object dependencies |
+| `mig.recurring.min_interval_min` | tenant | int | 15 | 15–1,440 | FR-10.16 | Recurring data jobs → recurrence | Job scheduling (SM36) |
+| `mig.cutover_at` | project | timestamptz | none | future timestamp | Stops recurring runs | — | — |
+| `mig.signoff.approvers` | project | int | 2 | 1–3 | Required signatures (§1.10.15) | — | — |
+| `mig.connector.paging` | connector | record | ax-odbc 10,000 RecIds; d365 `$top` 10,000; RFC_READ_TABLE ROWCOUNT 50,000 | per connector | Extraction page size | Entity paging / skip staging | RFC_READ_TABLE ROWCOUNT / ROWSKIPS |
+| `mig.pii_key_ring` | project | Vault path | `passage/mig/{project}` | Vault paths | FR-10.13 | — | — |
+| `mig.package.signing_key` | tenant | Vault path | `passage/config-signing` | Vault paths | FR-10.15 | — | — |
+
+### 1.10.14 Inquiries and reports
+
+| Name | Type | Filters & parameters | Columns / measures | Source projection | AX equivalent | SAP equivalent |
+|---|---|---|---|---|---|---|
+| Run history | list inquiry | project, mode, status, date | run no, mode, status, start, duration, counts | `migration_run` | Execution history (DMFExecution); job history | Migration Cockpit monitor; SM37 |
+| Run stage progress | drill-down | run, object | stage, rows, rows/s, ETA, errors | stage events | Execution details | Migration Cockpit "Monitoring" |
+| Reconciliation report | operational report (sign-off evidence) | run, object | counts per stage, hash totals per column, sample mismatches | `reconciliation_result` | Compare data results | Migration object statistics |
+| Exception queue | operational report | run, object, reason code | source key, reason, mapped payload, target response | `staging_row` (rejected, mismatched) | Staging data with errors | Migration Cockpit messages; LSMW error log |
+| Mapping catalog | list inquiry | project, object, version | rules, enum tables, tests passed, checksum | `mapping_spec` | Entity mapping inquiry | LTMOM migration object modeler |
+| Record lineage | drill-down | target entity and id | run, source object, source key, loaded at, hashes | `lineage_entry` | — | — |
+| Throughput KPI | KPI | project, object, worker | rows/s, retries, batch failures | run metrics | — | — |
+| Configuration package diff | drill-down | package, target tenant | create / update / unchanged per record | `config_package` | Configuration data project comparison | SCU0 customizing cross-system viewer |
+| Recurring schedule | list inquiry | project | next run, last result, skipped triggers | schedule projection | Recurring data jobs | SM37 |
+| Copy project summary | operational report | copy project | objects, rewritten keys, collisions | copy run | Copy entity data between companies log | EC01 log |
+
+### 1.10.15 Printed and electronic documents
+
+| Document | Trigger | Layout elements (header/line/footer fields) | Formats | Numbering sequence | Legal / retention requirement |
+|---|---|---|---|---|---|
+| Reconciliation sign-off report | `:sign-off` | header: project, run no, mode, mapping and connector versions, signers; lines: per object counts, hash totals, sample size and mismatches, accepted differences with reasons; footer: signatures, sha256 of the report | PDF, XLSX | `{project}-RUN-{run_no}` | data-conversion control evidence for SOX ITGC; retain 7 years minimum (10 years where HGB/AO applies) |
+| Exception export | on demand | run, object, reason, source key, payload (PII masked) | XLSX, CSV | none | follows staging retention |
+| Configuration package | export (FR-10.15) | manifest, dependency order, signatures | JSON (zip) | package version | 7 years as change evidence |
+| Migration evidence bundle | after sign-off | zip: sign-off report, mapping checksums, lineage summary, connector probe results | ZIP | `{project}-EVID-{run_no}` | 7–10 years with go-live audit file |
+
+### 1.10.16 Periodic and batch jobs
+
+| Job | Schedule default | Partitioning key | Idempotency / checkpoint | Typical runtime target | Failure handling | Monitor / alert |
+|---|---|---|---|---|---|---|
+| MIG-J1 Staging purge timer | hourly | run_id | drops partitions once; re-run no-op | < 1 min per run | retried next hour | purge overdue > 24 h |
+| MIG-J2 Lineage integrity | nightly 02:30 | target_entity | read-only | < 20 min for 10M lineage rows | report only | orphans > 0 |
+| MIG-J3 Recurring incremental runs | per project cron (min 15 min) | project_id | BR-10.15; incremental watermark per object | < 5 min for 10k changed rows | run `failed`, next trigger proceeds | consecutive failures ≥ 3 |
+| MIG-J4 Staging tablespace monitor | every 5 min | tablespace | read-only | < 5 s | none | usage > 80% |
+| MIG-J5 Connector credential expiry check | daily 06:00 | connector | read-only | < 1 min | none | expiry within 14 days |
+| MIG-J6 Orphaned staging partition sweep | weekly Sunday 04:00 | partition | drops partitions with no run row | < 10 min | none | orphans found |
+
+### 1.10.17 Security duties and privileges
+
+| Duty | Privileges (entry points) | Segregation-of-duties conflicts | Default roles that include it |
+|---|---|---|---|
+| View migrations | `GET /migration/v1/**` (PII masked) | none | Implementation consultant, Data migration lead, Auditor |
+| Administer migration | projects, connectors, `:test`, schedules, copy projects | Approve migration sign-off | Data migration lead |
+| Maintain migration mappings | mapping-spec upload, data templates | Approve migration sign-off | Implementation consultant |
+| Run migrations | start, cancel, rerun-exceptions | Approve migration sign-off | Data migration lead, Implementation consultant |
+| Resolve migration exceptions | `PATCH /exceptions/{rowId}`, bulk accept difference | Approve migration sign-off | Master data steward |
+| Approve migration sign-off | `:sign-off` | Run migrations, Resolve migration exceptions, Maintain migration mappings on the same project | Business process owner, Controller |
+| Apply configuration packages | config package import and apply | Maintain migration mappings (package author cannot apply to production) | System administrator |
+| Read staged personal data | `pii.read` on staging and exceptions | Administer migration | Privacy officer |
+
+### 1.10.18 Message catalog
+
+| Code | Severity | User text | Cause | Remediation | Raised by |
+|---|---|---|---|---|---|
+| MIG-RUN-ACTIVE | error | "Run {n} is already active for this project." | Second start | Wait or cancel | BR-10.2 |
+| MIG-MAP-TEST-FAIL | error | "{n} mapping tests failed for {object}." | CI or upload test failure | Fix mapping | FR-10.3 |
+| MIG-MAP-UNKNOWN-FN | error | "Unknown mapping function {fn}." | Upload validation | Use sanctioned function | FR-10.3 |
+| MAP-ENUM-UNMAPPED | error | "Value {v} of {field} has no mapping." | Enum without default | Add enum row or default | BR-10.4 |
+| MAP-PRECISION-LOSS | warning | "Rounding changed {field} by {delta}." | Scale reduction | Review target scale | BR-10.5 |
+| VAL-FK-MISSING | error | "{field} references {key}, which does not exist." | FK expectation | Load parent or fix value | FR-10.4 |
+| VAL-DEP-FAILED | error | "Parent {key} failed in this run." | Dependency failure | Fix parent row | BR-10.10 |
+| API-422 | error | "Target rejected the row: {detail}." | Business validation | Edit row | FR-10.5 |
+| TARGET-DRIFT | warning | "Target changed after load; not overwritten." | User edit after load | Set overwrite_drift or accept | BR-10.8 |
+| MIG-THRESHOLD-EXCEEDED | error | "Rejects {x}% exceed threshold {t}%." | Validation gate | Resolve rejects | FR-10.4 |
+| MIG-DEP-UNRECONCILED | error | "Dependency {object} has no reconciled run." | Run-start check | Reconcile dependency | §1.10.5 |
+| MIG-HASH-MISMATCH | warning | "Hash total differs for {column}; sample widened." | BR-10.9 | Review mismatches | BR-10.9 |
+| MIG-PKG-SCHEMA-NEWER | error | "Package schema {v} is newer than this environment." | Version skew | Upgrade target | BR-10.14 |
+| MIG-PKG-SIGNATURE | error | "Package signature is invalid." | Tampered or wrong key | Re-export | BR-10.14 |
+| COPY-KEY-EXISTS | error | "{key} already exists in {target}." | Copy collision | Choose upsert or rewrite rule | BR-10.13 |
+| MIG-CONN-AUTH | error | "Connector {c} authentication failed." | Bad credentials | Update Vault secret | FR-10.2 |
+| MIG-RFC-ROWWIDTH | info | "Rows of {table} exceed 512 bytes; read in {n} field groups." | RFC_READ_TABLE limit | none | FR-10.2 |
+
+### 1.10.19 Performance budgets and capacity
+
+| Operation | Volume assumption | Latency target (p50 / p95 / p99) | Throughput target | Storage growth per year | Index / partition strategy | Degradation behavior under 3× load |
+|---|---|---|---|---|---|---|
+| Full phase-1 load (170k master records) | 1–5 runs per project | end-to-end < 30 min | ≥ 100 rows/s per worker; 8 workers | staging ~2 KB per row, dropped after purge | staging list-partitioned by run_id | HPA to 16 workers; runtime grows linearly |
+| Extraction per connector worker | 20k rows/s target | — | 20,000 rows/s | none | source paging | backpressure on staging writes |
+| Re-run with no changes | per run | < 5 min for 170k rows | hash compare 5,000 rows/s | none | (run_id, object, status) | unchanged |
+| Run monitor update | SSE every 2 s | lag 0.5 / 2 / 4 s | 200 concurrent viewers | none | event fan-out | refresh drops to 5 s |
+| Reconciliation sample compare | 1% sample, min 100, max 5,000 per object | < 60 s per object | 500 target reads/s | results ~1 MB per run | — | sample compare serialized per object |
+| Lineage lookup (audit tab) | 50k/day | 5 / 30 / 60 ms | 200 req/s | ~150 B per loaded row; 10M rows ≈ 2 GB | (target_entity, target_id) | unchanged |
+| Configuration package apply (5,000 records) | 10/day | 20 / 60 / 120 s | 1 concurrent per tenant | packages 1–10 MB | dependency order | queued |
+
+### 1.10.20 Localization and compliance hooks
+
+| Item | What varies | Country packs touching it (wave 48) | Extension point |
+|---|---|---|---|
+| Code pages and scripts | AX 2012 non-Unicode collations (Windows-1252 for US/UK/DE/FR/MX/CA data), SAP non-Unicode code pages 1100/1160, Devanagari and other Indic scripts in IN data | IN | `mig.source.codepage`; `codepage_normalize` function |
+| Date and number formats in files | DD.MM.YYYY and decimal comma (DE, FR), DD/MM/YYYY (UK, IN, FR), MM/DD/YYYY (US), YYYY-MM-DD (CA ISO) | all | `coerce` rule with explicit format per source column |
+| Country-specific source fields | SAP KNA1-STCD1..5 meaning per country (MX RFC, IN PAN/GSTIN in J_1I fields, FR SIRET in STCD2), AX country-specific tables (e.g. Mexico CFDI fields, India tax registration) | IN, MX, FR | mapping pack overlays keyed `country: XX` layered over the base pack |
+| Data residency and transfer | GDPR Chapter V transfers, India DPDP Act 2023 cross-border rules, Mexico LFPDPPP transfer notice; staging stays in the tenant's region | all | per-tenant region pinning of migration-db; no cross-region connectors |
+| Retention and erasure | staging purge (BR-10.11); sign-off evidence kept 7–10 years; personal data in exceptions masked | all | retention classes `mig-staging`, `mig-evidence` |
+| Statutory master-data checks on load | MX RFC structure and SAT list checks, IN GSTIN state code vs address state, EU VAT format | MX, IN, DE, FR | target-API dry run (FR-10.4) runs the wave-7 validators |
+
+### 1.10.21 Coverage closure
+
+No row in the AX gap register (§12.99) or the SAP gap register (§13.99) carries wave 10 as its current or proposed wave. Every AX and SAP inventory row tagged for wave 10 is `COVERED-10`. Three of those rows are covered in the inventory but were not named in this section until now: DMFCopyEntity, D365 configuration data projects and data templates, and recurring data jobs. They are now FR-10.14, FR-10.15, FR-10.18 and FR-10.16. The table below lists register-derived consequences for this wave: migration packs needed by the capabilities that waves 6–9 added to close their register rows.
+
+| Register row (inventory section + AX form or SAP T-code) | Status before | Disposition | Note |
+|---|---|---|---|
+| (none assigned to wave 10) | — | — | 0 register rows |
+| Consequence of §1.6.21 (AX OMTeam rows #107, #114, #232, #251) | n/a (consequential) | ADDED as FR-10.17 | OMTeam / membership pack |
+| Consequence of §1.7.21 (AX #158, #165; SAP #17, #23, #35, #37, #47, #50) | n/a (consequential) | ADDED as FR-10.17 | VendCertification, PaymSched/T052R, KNRZE/KNRZB/LFZA, CPD account groups flagged one-time |
+| Consequence of §1.8.21 (AX #141, #143, #146, #147, #148, #283, #297; SAP #163, #181, #356, #359, #374, #375, #384, #385, #392) | n/a (consequential) | ADDED as FR-10.17 | EcoResProductRelation, lifecycle states/T141, ASMD, CUVTAB, DRAW/DRAT/DRAD |
+| Consequence of §1.9.21 (AX #144–#296 ECM rows; SAP #238, #243, #250, #362, #376, #378, #379, #381, #382, #386, #388, #391, #393, #396) | n/a (consequential) | ADDED as FR-10.17 | Engineering categories, policies, STPO alternative/discontinuation fields, effectivity, STLTY = D structures |

@@ -136,13 +136,24 @@ def ensure_milestones(phases):
     return out
 
 
+def issue_body(w, phases):
+    body = wave_md(w, phases).split("\n", 2)[2]  # drop the H2 title line
+    return body + "\n\n**Definition of Done:** all Proof boxes checked with CI links, Argo CD app healthy in stage, references/ADRs linked, phase-exit demo recorded if applicable."
+
+
 def ensure_issues(phases, waves, milestones):
-    existing = {i["title"]: i["number"] for i in gh_json("issue", "list", "-R", REPO, "--state", "all", "--limit", "500", "--json", "title,number")}
+    existing = {i["title"]: i for i in gh_json("issue", "list", "-R", REPO, "--state", "all", "--limit", "500", "--json", "title,number,body")}
     numbers = {}
     for w in waves:
         t = wave_title(w)
+        body = issue_body(w, phases)
         if t in existing:
-            numbers[w["n"]] = existing[t]
+            numbers[w["n"]] = existing[t]["number"]
+            # Keep the issue in step with waves.json; checked Proof boxes are the
+            # one thing people edit by hand, so never overwrite a body that has any.
+            if existing[t]["body"].strip() != body.strip() and "- [x]" not in existing[t]["body"]:
+                gh("issue", "edit", str(existing[t]["number"]), "-R", REPO, "--body", body)
+                print("updated", t)
             continue
         p = next(p for p in phases if p["phase"] == w["phase"])
         labels = ["wave", f"phase-{p['phase']}"]
@@ -150,8 +161,6 @@ def ensure_issues(phases, waves, milestones):
             labels.append("phase-exit")
         if w["n"] in (30, 50):
             labels.append("go-live")
-        body = wave_md(w, phases).split("\n", 2)[2]  # drop the H2 title line
-        body += "\n\n**Definition of Done:** all Proof boxes checked with CI links, Argo CD app healthy in stage, references/ADRs linked, phase-exit demo recorded if applicable."
         url = gh("issue", "create", "-R", REPO, "--title", t, "--body", body, "--label", ",".join(labels), "--milestone", phase_title(p))
         numbers[w["n"]] = int(url.rsplit("/", 1)[1])
         print("created", t, url)

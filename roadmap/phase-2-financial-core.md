@@ -20,6 +20,11 @@ Stand up a single append-only universal journal (one source of truth, like SAP A
 - Posting API used by all subledgers: `Post(JournalEntry)` with source-document linkage and reversal
 - Balance projection: pre-aggregated balances by account × dimension × period, rebuilt from the journal (event-sourced)
 - Journal workspace: manual journals, recurring journals, templates, approval workflow, attachments
+- Shared financial reason codes (ledger, bank, customer, vendor, fixed asset, counting) with required reversal reasons and negative-posting (storno) reversal
+- Advanced rule structures, default description templates, and voucher attachments with document types and retention classes
+- Open-item managed G/L accounts: manual clearing, post-with-clearing, reset, activation run, automatic clearing rules and tolerance groups (F-03/F-04/F.13/OBA0/OB74 parity)
+- User-defined validation rules and a dimension derivation/substitution strategy engine (OB28/OBBH/KEDR/FMDERIVE parity), including functional area for cost-of-sales accounting
+- Document splitting (dimension inheritance to balance-sheet and tax lines with zero-balance clearing) and audit-logged dimension realignment runs
 
 **Proof (testable acceptance)**
 
@@ -63,6 +68,7 @@ GL service and journal workspace live; the demo manufacturer's chart of accounts
 - Ledger groups / posting layers: a source document posts to N ledgers with per-ledger accounting principle differences
 - Foreign currency revaluation job (GL, AP, AR open items) with reversal next period
 - Currency translation for reporting currency restatement
+- Market data series (interest rates, indices, prices) with provider import, audit and date lookup in the fx service
 
 **Proof (testable acceptance)**
 
@@ -104,6 +110,9 @@ Exchange rates workspace; revaluation batch scheduled in dev; demo entity with E
 - Withholding tax (vendor and customer), 1099 / Form 26AS style reporting hooks
 - Provider adapters: Avalara/Vertex-compatible interface + an internal rules engine as default
 - Tax settlement job, VAT return, EU sales list, Intrastat and SAF-T extracts
+- Intrastat master data (CN8 commodity codes, transaction codes, transport modes, ports, country properties) and an Intrastat journal with transfer, validation, compression, correction and export
+- VAT recovery policies on expenses (recoverable % per category and country) and a foreign VAT reclaim extract
+- Withholding tax remittance runs with challan/bank references and gap-free certificate numbering hooks for country forms
 
 **Proof (testable acceptance)**
 
@@ -145,6 +154,7 @@ Tax configuration workspace; demo entities configured for US sales tax and EU VA
 - Allocation engine: fixed, basis (statistical measure), and iterative allocations with reversal
 - Accrual schemes and automatic reversals; recurring journal scheduling
 - Year-end close: P&L to retained earnings, balance carry-forward per dimension, opening transactions
+- Balance-sheet regrouping: reclassification by remaining term, vendors with debit balances and customers with credit balances, auto-reversed (FAGLF101 parity)
 
 **Proof (testable acceptance)**
 
@@ -185,6 +195,8 @@ Financial period close workspace live; demo entities close a simulated period in
 - Drill-down: statement → balance → journal lines → source document, with trace id
 - Scheduled distribution (PDF/XLSX/email), row-level security on dimensions
 - Audit trail report: who posted what, approvals, reversals, period-control overrides
+- Derived financial hierarchies over main account categories and dimension values, usable as statement rows and reporting trees
+- Standard P&L by function of expense (PL-FUNC) over the functional area dimension
 
 **Proof (testable acceptance)**
 

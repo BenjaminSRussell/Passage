@@ -40,6 +40,11 @@ Fix versions: v1.0
 3. Shipment tracking events (EDI 214/API), proof of delivery
 4. Freight reconciliation: carrier invoice vs expected charges, dispute, accrual posting
 5. Landed cost allocation to inventory (freight, duties) feeding costing
+6. Landed cost voyages with shipping containers, folios and goods-in-transit orders (estimates vs actuals)
+7. Yard management (transportation units, yard moves, detention) and driver check-in/out with gate log
+8. Dangerous-goods checks for transport (49 CFR / ADR / IMDG / IATA): segregation, ADR 1.1.3.6 points, DG shipping papers
+9. Own-fleet resources and driver-hours constraints in VRP; lane RFQ for strategic freight procurement; layer-based load plans
+10. Foreign-trade data, commercial invoice, and denied-party screening / customs filing provider hooks (providers in wave 48)
 
 **Deploy.** Transportation workspace; demo carriers and rate cards; landed cost active.
 

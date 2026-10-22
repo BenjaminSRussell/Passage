@@ -40,6 +40,11 @@ Fix versions: v1.0
 3. Lean: value streams, production flows, activities, kanban rules (manufacturing/withdrawal/fixed/event), kanban board, cards
 4. Backflush costing for lean (periodic)
 5. Recipe/formula version control integrated with engineering change
+6. Batch attribute and shelf-life inheritance (batch derivation) with derivation monitor, batch merge, and documentary batches
+7. Consolidated bulk/packed batch orders, rework batch orders, same-batch reservation and customer sellable days / batch attribute requirements
+8. Lean subcontracting: service activities on vendor work cells priced by purchase agreements with auto PO and receipt
+9. Electronic batch record with review by exception, sealed PDF/A + JSON archive, and a 21 CFR Part 11 electronic signature service (step-up re-authentication, signature strategies, signature log)
+10. Characteristic-dependent planning: attribute-constrained pegging of supply to demand
 
 **Deploy.** Process and lean workspaces enabled for a second demo plant (food/chem line).
 

@@ -39,6 +39,8 @@ Fix versions: v1.0
 3. Drill-down: statement → balance → journal lines → source document, with trace id
 4. Scheduled distribution (PDF/XLSX/email), row-level security on dimensions
 5. Audit trail report: who posted what, approvals, reversals, period-control overrides
+6. Derived financial hierarchies over main account categories and dimension values, usable as statement rows and reporting trees
+7. Standard P&L by function of expense (PL-FUNC) over the functional area dimension
 
 **Deploy.** Financial reporting workspace; nightly statement pack scheduled for the demo entities.
 

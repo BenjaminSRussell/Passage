@@ -39,6 +39,13 @@ Fix versions: v1.0
 3. Cash positioning (intraday camt.052) and cash flow forecasting from AP/AR/payroll/projects
 4. In-house banking basics: intercompany netting, cash pooling
 5. Bank connectivity adapters (SFTP/EBICS/Open-Banking API) with secure key management (Vault)
+6. Treasury instruments: customer bills of exchange and vendor promissory notes (draw/remit/protest/settle) and postdated checks (customer and vendor)
+7. Cash journal / petty cash desks with business transactions, daily count and close, cash book
+8. Bank fee analysis from camt.086 against bank fee agreements
+9. Treasury deals (FX spot/forward/swap, fixed-term deposits) with confirmation, settlement flows and key-date valuation; FX exposure view
+10. Loan contracts (bank and intercompany) with schedules and interest accrual; GL balance interest on intercompany current accounts
+11. Treasury payment requests and bank-to-bank transfers with four-eyes approval; bank chains; payment hub routing and batch monitor
+12. In-house cash center basics: participant current accounts, internal payment orders, interest conditions, generated camt.053 statements (flag-gated)
 
 **Deploy.** Treasury workspace; sandbox bank connection for the demo entity.
 

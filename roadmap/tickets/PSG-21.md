@@ -39,6 +39,8 @@ Fix versions: v1.0
 3. WIP postings and order end with cost settlement: actual vs planned → variances (material, labor, overhead)
 4. Subcontracting operations with vendor PO linkage
 5. Production order inquiry: cost roll, status log, transactions
+6. Production order split/merge with proportional WIP transfer, order change management (ECO re-explosion with change cost) and order-specific BOM/route edits
+7. Trigger points on operation feedback (insert rework operations, create rework orders), rework orders, and as-built serial/batch genealogy captured at picking and RAF
 
 **Deploy.** Production control workspace; demo plant runs its first production order end-to-end.
 

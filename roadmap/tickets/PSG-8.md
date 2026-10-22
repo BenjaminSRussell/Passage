@@ -40,6 +40,8 @@ Fix versions: v1.0
 3. Item groups, item model groups (costing method, negative inventory policy, physical/financial posting flags)
 4. Product configurator foundation: constraint-based configuration model (MiniZinc or OR-Tools) for configure-to-order
 5. GS1 identifiers (GTIN/SSCC), barcode generation, product images/documents
+6. Product relations (accessory, cross-sell, up-sell, substitute, spare part); configurable lifecycle states with per-process allow/warn/block policies; controlled group-change and mass obsolete/delete jobs
+7. Service products (service categories, purchasing text, service catalog); configurator decision tables and saved configurations; document info records with document types and full-text document search
 
 **Deploy.** Product information management workspace live; demo manufacturer's product catalog (500 items, 50 masters) loaded.
 

@@ -39,6 +39,9 @@ Fix versions: v1.0
 3. Reservations (manual/auto, FEFO/FIFO batch picking policies), blocking, quarantine
 4. Physical inventory: cycle counting plans, count sheets, variance posting
 5. Inventory status and unit conversions on movements
+6. Transfer orders with in-transit warehouse: ship/receive, under/over-delivery, picking release event, shipping and receiving documents, stock-in-transit inquiry
+7. Ownership dimension with vendor consignment (replenishment orders, ownership change journal and batch, consignment reports) and customer consignment warehouses
+8. Tag counting, periodic ABC classification, and sales-order/project segregated stock (segment dimension)
 
 **Deploy.** Inventory management workspace; demo plant stocked via opening-balance journal; on-hand inquiry live.
 

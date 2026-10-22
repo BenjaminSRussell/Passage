@@ -40,6 +40,9 @@ Fix versions: v1.0
 3. Benefits: plans, eligibility, open enrollment, life events; employee self-service and manager self-service
 4. Talent: skills, certifications, performance reviews, goals; recruitment pipeline basics
 5. HR compliance: PII vaulting, consent, retention, country-specific fields framework
+6. Courses and learning (sessions, registrations, completion to skills/certifications) and a reusable questionnaire engine
+7. Injury and illness register with OSHA 300/300A/301 data extracts, loaned items, skill mapping and gap analysis
+8. Onboarding/offboarding checklists and HR reminders, requisitions/candidates/offers, compensation planning cycles, concurrent and global assignments
 
 **Deploy.** HR workspace and employee self-service portal; demo workforce loaded.
 

@@ -39,6 +39,9 @@ Fix versions: v1.0
 3. Billing: invoice proposals by T&M, fixed-price milestones, retainers, billing rules; customer funding/grants
 4. Project accounting: WIP/accrued revenue, cost-to-complete, percentage-of-completion estimates, ledger posting profiles
 5. Project reporting: committed costs, EVM (CPI/SPI), profitability
+6. Weekly timesheets with periods, favorites, delegates, workflow by project and missing-timesheet reporting; project quotations converted to projects
+7. Customer/vendor retention terms and release, indirect cost components on hours, project interest calculation (capitalized interest IAS 23)
+8. Change orders and claims, simulation plan versions with transfer, project stock and deliveries from project, forecasts and risk/issue register
 
 **Deploy.** Projects workspace; a demo engineering-services entity runs projects alongside the manufacturer.
 

@@ -39,6 +39,7 @@ Fix versions: v1.0
 3. Ledger groups / posting layers: a source document posts to N ledgers with per-ledger accounting principle differences
 4. Foreign currency revaluation job (GL, AP, AR open items) with reversal next period
 5. Currency translation for reporting currency restatement
+6. Market data series (interest rates, indices, prices) with provider import, audit and date lookup in the fx service
 
 **Deploy.** Exchange rates workspace; revaluation batch scheduled in dev; demo entity with EUR reporting currency.
 

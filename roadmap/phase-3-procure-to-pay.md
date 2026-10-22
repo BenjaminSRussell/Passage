@@ -20,6 +20,9 @@ Inventory ledger and costing, purchasing, receiving with three-way match, accoun
 - Reservations (manual/auto, FEFO/FIFO batch picking policies), blocking, quarantine
 - Physical inventory: cycle counting plans, count sheets, variance posting
 - Inventory status and unit conversions on movements
+- Transfer orders with in-transit warehouse: ship/receive, under/over-delivery, picking release event, shipping and receiving documents, stock-in-transit inquiry
+- Ownership dimension with vendor consignment (replenishment orders, ownership change journal and batch, consignment reports) and customer consignment warehouses
+- Tag counting, periodic ABC classification, and sales-order/project segregated stock (segment dimension)
 
 **Proof (testable acceptance)**
 
@@ -60,6 +63,11 @@ Inventory management workspace; demo plant stocked via opening-balance journal; 
 - Purchase agreements (blanket) with release tracking; trade agreements/price lists for vendor pricing
 - Purchase order lifecycle with versioned change management, confirmation, charges, delivery schedules
 - Supplier output: PDF/email, EDI 850/ORDERS adapter hook (completed in wave 35)
+- Scheduling agreements with FRC/JIT releases, firm/trade-off zones and cumulative quantities
+- Reusable policy framework scoped by org hierarchy, plus worker signing limits with request workflow and annual recertification
+- Procurement catalogs with images, publication by org unit and vendor catalog import; category managers, vendor assignment and questionnaires
+- RFQ types with sealed bids, weighted scoring and amendments
+- Service PO lines with service outlines, value/contract limits and model service specifications; invoicing plans; subsequent price change (reprice) of open POs; consignment price agreements
 
 **Proof (testable acceptance)**
 
@@ -100,6 +108,9 @@ Procurement workspace live; demo vendors with price lists; purchasing policy con
 - Matching engine: 2-way/3-way, price/quantity/total tolerances, match status, exception workflow
 - Accrued purchases and GR/IR reconciliation report
 - Evaluated receipt settlement (self-billing)
+- Service entry sheets with acceptance workflow, unplanned services within limits, collective acceptance, SES-based invoice match and ERS
+- Stochastic (random-sample) invoice audit block with auditor release
+- Consignment settlement run, invoicing plan settlement run, subsequent debit/credit invoices, and one-time payee invoices
 
 **Proof (testable acceptance)**
 
@@ -140,6 +151,10 @@ Receiving and AP invoice workspaces; demo plant receives and matches invoices fo
 - Payment methods: ACH/SEPA (ISO 20022 pain.001), check printing, card, wire; positive pay export
 - Vendor payment advice (email/portal), payment status from bank (pain.002) ingestion
 - Prepayments, vendor credit notes, reversal handling
+- ACH prenotes with bank-account status lifecycle, and payment calendars with bank-holiday due-date and execution-date shifting
+- Vendor balance confirmations and AP correspondence types (statement, payment notice, open items)
+- Installment open items, noted items and guarantees, vendor-initiated direct debit mandates, and one-time payee payments
+- Vendor bank account change control: dual approval, out-of-band notification and payment cooling-off
 
 **Proof (testable acceptance)**
 
@@ -181,6 +196,10 @@ AP workspace with payment runs; demo entity pays open invoices to a sandbox bank
 - Inventory value report reconciling on-hand value to the GL inventory accounts by dimension
 - Costing versions, cost changes, revaluation
 - Supplier portal: PO acknowledgement, ASN, invoice submission, document exchange
+- Parallel inventory valuation ledgers (one costing method and currency per ledger group) with per-ledger close and value report
+- Split valuation and batch valuation (valuation type dimension with per-type accounts)
+- Inventory aging report with configurable buckets tied to the value report, and month-end snapshots
+- Supplier portal: vendor requests and prospective-vendor onboarding with questionnaires, catalog upload, service entry/timesheets, consignment view, controlled document distribution with acknowledgement
 
 **Proof (testable acceptance)**
 

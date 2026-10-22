@@ -39,6 +39,9 @@ Fix versions: v1.0
 3. Matching engine: 2-way/3-way, price/quantity/total tolerances, match status, exception workflow
 4. Accrued purchases and GR/IR reconciliation report
 5. Evaluated receipt settlement (self-billing)
+6. Service entry sheets with acceptance workflow, unplanned services within limits, collective acceptance, SES-based invoice match and ERS
+7. Stochastic (random-sample) invoice audit block with auditor release
+8. Consignment settlement run, invoicing plan settlement run, subsequent debit/credit invoices, and one-time payee invoices
 
 **Deploy.** Receiving and AP invoice workspaces; demo plant receives and matches invoices for its opening POs.
 

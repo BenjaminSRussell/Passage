@@ -41,6 +41,22 @@ Fix versions: v1.0
 3. Segregation-of-duties rules engine with conflict detection, mitigation workflow, access certification campaigns
 4. Security hardening: SOC 2 control mapping, evidence automation, pen-test remediation, secrets rotation, data residency per tenant, backup/restore drills
 5. Data privacy: GDPR/CCPA subject requests (export/erasure), retention policies, legal holds
+6. Electronic signatures (21 CFR Part 11): signature requirements, step-up re-authentication, meaning and reason codes, signature log, revocation, optional certificate signing
+7. Audit policies (duplicate, keyword, list search, sampling, threshold, aggregate) on expenses, vendor invoices, POs and journals, with violations and audit cases
+8. Process, risk and control library linked to SOC 2 controls, SoD rules, audit policies and evidence, with control tests
+9. Electronic messaging lifecycle for statutory submissions (MTD, ELSTER, EDI-TVA, GSTR, DIOT, NETFILE, FIRE) with status machine and response tracking
+10. XBRL/iXBRL and ESEF disclosure output with taxonomy registry and tagging map
+11. Denied-party and sanctions screening of parties and documents (OFAC, EU, UK OFSI, UN, BIS lists) with blocking and clearance workflow
+12. Export control and foreign trade: ECCN/HS classification, license determination and tracking, export document set and broker data (with wave 34)
+13. Origin and preference determination (USMCA, EU-UK TCA, EU PEM) from BOM roll-up and supplier declarations
+14. US pack workforce compliance (I-9, ADA, visa, union, FMLA, workers' comp class codes) and statutory outputs (EEO-1, VETS-4212, ACA 1094-C/1095-C, new-hire, OSHA 300/300A/301, Form 4562)
+15. India pack depth: GST components and reconciliation, TDS/TCS sections, challans, 26Q/27Q/27EQ returns, Form 16A, 26AS/AIS import
+16. HR legal content per country pack (DE, FR, UK, IN, MX, CA)
+17. Emergency break-glass access with time-boxed elevated sessions, reason codes, full call log and reviewer sign-off
+18. Export governance policies per data classification and read access logging for sensitive fields
+19. Masked tenant clone for test and rehearsal environments (tokenization, format-preserving randomization, date shifting)
+20. Security incident and breach notification management with per-regime deadline clocks (GDPR, UK, US state, PIPEDA, CERT-In)
+21. SOC 2 evidence store with object lock, per-control hash chain and time-boxed auditor access
 
 **Deploy.** Localization packs installed per demo entity; compliance workspace with SoD and evidence collection live.
 

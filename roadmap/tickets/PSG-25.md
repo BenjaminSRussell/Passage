@@ -41,6 +41,10 @@ Fix versions: v1.0
 3. IoT ingestion: OPC-UA/MQTT edge connector → Kafka → machine events (counts, downtime, states); OEE calculation
 4. Andon/alerts, downtime reason codes, operator feedback loop
 5. Offline-tolerant kiosk (PWA) with sync
+6. Control recipes (ISA-88 structure) sent to kiosk or process control systems via the edge connector, with control recipe monitor
+7. PI sheet designer with versioned step library (XSteps equivalent), kiosk PI sheet execution, and PI sheet archive feeding the EBR
+8. Process messages with categories, destinations (journals, quality results, EBR, Kafka, webhook), retry and monitor
+9. iot-edge connector as a deployable: signed image/Helm chart/static binary, token enrollment with mTLS certificates, versioned config, heartbeat, ringed rollout with auto-rollback, allowlisted write-back
 
 **Deploy.** Shop-floor kiosk app and IoT edge connector Helm chart deployed to the demo plant environment.
 

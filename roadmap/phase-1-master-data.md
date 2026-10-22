@@ -20,6 +20,7 @@ Model the enterprise (legal entities, sites, org hierarchies), the shared party/
 - Address book with validated postal addresses, geocoding hook, and address purposes
 - Fiscal calendars: multiple calendars, periods, period statuses per ledger
 - Reference data: countries, currencies (ISO 4217), units of measure with conversions, languages
+- Teams and team types (OMTeam) with members, effective dates and membership rules; legal-entity copy from template; currency rounding rules per purpose; organization name translations
 
 **Proof (testable acceptance)**
 
@@ -61,6 +62,8 @@ Organization administration workspace live; seed data for a demo manufacturer (3
 - Tax registration numbers with country validation (VAT, EIN, GSTIN) and VIES/IRS TIN check adapters
 - Customer and vendor groups, posting profiles (hooks for the GL), payment terms, delivery terms, credit limits
 - Data-governance: ownership, stewardship queue, change approval workflow on master data
+- Vendor certifications with expiry-driven holds and diversity classifications; installment payment schedules (PaymSched / T052R)
+- One-time customer and vendor accounts with document-level address capture; party relationships (head office/branch, alternate payer, permitted payee); address books with team security; customer hierarchies; classification code lists and hold reasons
 
 **Proof (testable acceptance)**
 
@@ -102,6 +105,8 @@ Customer, vendor and contact workspaces usable for data entry; import of a legac
 - Item groups, item model groups (costing method, negative inventory policy, physical/financial posting flags)
 - Product configurator foundation: constraint-based configuration model (MiniZinc or OR-Tools) for configure-to-order
 - GS1 identifiers (GTIN/SSCC), barcode generation, product images/documents
+- Product relations (accessory, cross-sell, up-sell, substitute, spare part); configurable lifecycle states with per-process allow/warn/block policies; controlled group-change and mass obsolete/delete jobs
+- Service products (service categories, purchasing text, service catalog); configurator decision tables and saved configurations; document info records with document types and full-text document search
 
 **Proof (testable acceptance)**
 
@@ -143,6 +148,9 @@ Product information management workspace live; demo manufacturer's product catal
 - Resources (machine, tool, labor, vendor, location), resource groups, capabilities, work calendars with shifts
 - Engineering change request/order workflow with impact analysis (where-used) and release to production
 - BOM explosion/implosion API, where-used, cost roll-up skeleton (to be completed in wave 39)
+- Engineering organizations and engineering versions; release product structure with release policies and product acceptance; product readiness policies and checks; engineering product categories with version nomenclature
+- BOM usage/category, alternative item groups and discontinuation, serial and parameter effectivity, super BOM/routing selection conditions
+- Engineering documents: document/text BOM lines, document status network with 21 CFR Part 11 signatures, ECO-controlled document versions, document structures and where-used; CAD/PLM eBOM import contract with eBOM-vs-mBOM comparison
 
 **Proof (testable acceptance)**
 
@@ -184,6 +192,8 @@ Engineering workspace; demo product line with BOMs and routings loaded; where-us
 - SAP ECC/S4 connectors for KNA1/LFA1/MARA/MAST/STKO/PLKO via OData or extracted flat files
 - Reconciliation: row counts, hash totals, sampled field compare, exception queue with re-run
 - Dry-run and idempotent re-run; migration run ledger with lineage
+- Copy entity data between legal entities; signed configuration data packages with diff-before-apply; recurring incremental import jobs until cutover; data templates
+- Mapping packs for coverage-closure objects (OMTeam, VendCertification, PaymSched/T052R, KNRZE/LFZA, EcoResProductRelation, lifecycle states/T141, ASMD, CUVTAB, DRAW, ECM categories/policies, STPO alternatives, effectivity, document structures)
 
 **Proof (testable acceptance)**
 

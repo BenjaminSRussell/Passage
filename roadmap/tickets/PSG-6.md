@@ -39,6 +39,7 @@ Fix versions: v1.0
 3. Address book with validated postal addresses, geocoding hook, and address purposes
 4. Fiscal calendars: multiple calendars, periods, period statuses per ledger
 5. Reference data: countries, currencies (ISO 4217), units of measure with conversions, languages
+6. Teams and team types (OMTeam) with members, effective dates and membership rules; legal-entity copy from template; currency rounding rules per purpose; organization name translations
 
 **Deploy.** Organization administration workspace live; seed data for a demo manufacturer (3 legal entities, 2 plants, 5 warehouses).
 

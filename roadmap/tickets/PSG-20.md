@@ -40,6 +40,10 @@ Fix versions: v1.0
 3. Inventory value report reconciling on-hand value to the GL inventory accounts by dimension
 4. Costing versions, cost changes, revaluation
 5. Supplier portal: PO acknowledgement, ASN, invoice submission, document exchange
+6. Parallel inventory valuation ledgers (one costing method and currency per ledger group) with per-ledger close and value report
+7. Split valuation and batch valuation (valuation type dimension with per-type accounts)
+8. Inventory aging report with configurable buckets tied to the value report, and month-end snapshots
+9. Supplier portal: vendor requests and prospective-vendor onboarding with questionnaires, catalog upload, service entry/timesheets, consignment view, controlled document distribution with acknowledgement
 
 **Deploy.** Costing workspace; supplier portal at supplier.<env>.passage.dev with a demo vendor login.
 

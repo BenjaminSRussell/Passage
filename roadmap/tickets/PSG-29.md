@@ -40,6 +40,9 @@ Fix versions: v1.0
 3. Subscription billing: recurring schedules, proration, usage-based lines
 4. Intercompany invoicing hook (completed in wave 40)
 5. Billing audit: invoice → shipment → order → price explanation trace
+6. Subscription groups, fee categories, period templates and indexation; expense deferral schedules with short/long-term split
+7. Customer self-billing statement reconciliation, bundle (solution) invoice lines and installment terms split into open items at post
+8. Document delivery routing per customer and document type (email/portal/print/EDI) with delivery log and resend
 
 **Deploy.** Billing workspace; demo entity invoices its shipped orders; revenue schedules visible.
 

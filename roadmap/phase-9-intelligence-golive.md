@@ -20,6 +20,11 @@ Data platform and analytics, AI copilots and agents, globalization and complianc
 - Embedded dashboards in every workspace; self-service explorer; scheduled reports; export to Excel/Power BI/Tableau
 - Operational report designer (replaces SSRS layouts) for documents: invoices, POs, packing slips, checks
 - Data catalog and lineage (OpenMetadata)
+- Print management routing: conditional original/copy destinations per document, entity and account (printer via site print agent, e-mail, e-invoice, archive, portal)
+- Standard text blocks with placeholders and language versions, form notes, and correspondence types (periodic statements, payment notices, balance confirmations)
+- Data-quality rules on catalog assets (completeness, validity, uniqueness, referential, freshness) with scorecard tiles
+- Process event log (mart.process_event) with variant explorer and OCEL 2.0/XES export
+- Archive tier: closed OLTP partitions moved to Iceberg archive with hash verification, retention-driven residence times and restore
 
 **Proof (testable acceptance)**
 
@@ -62,6 +67,8 @@ Analytics stack and embedded dashboards live across all workspaces.
 - Agent runtime (Temporal-backed) for autonomous tasks with approval gates: AP invoice coding, cash application suggestions, MRP exception triage, collections outreach, anomaly detection on journals
 - Eval harness: golden datasets per agent, accuracy/precision thresholds gating deploys; prompt/version registry; cost/token budgets per tenant
 - Responsible-AI controls: PII redaction, action logging, kill switch, model-agnostic provider layer (Claude default, Bedrock/Azure/open-weights options)
+- Knowledge retrieval tool (hybrid search over knowledge articles, docs and tenant policies) with cited copilot answers
+- Payment-date prediction model per tenant feeding collections agent and DSO forecast, gated by MAE threshold
 
 **Proof (testable acceptance)**
 
@@ -104,6 +111,22 @@ Copilot enabled in all workspaces; two agents (AP coding, cash application) runn
 - Segregation-of-duties rules engine with conflict detection, mitigation workflow, access certification campaigns
 - Security hardening: SOC 2 control mapping, evidence automation, pen-test remediation, secrets rotation, data residency per tenant, backup/restore drills
 - Data privacy: GDPR/CCPA subject requests (export/erasure), retention policies, legal holds
+- Electronic signatures (21 CFR Part 11): signature requirements, step-up re-authentication, meaning and reason codes, signature log, revocation, optional certificate signing
+- Audit policies (duplicate, keyword, list search, sampling, threshold, aggregate) on expenses, vendor invoices, POs and journals, with violations and audit cases
+- Process, risk and control library linked to SOC 2 controls, SoD rules, audit policies and evidence, with control tests
+- Electronic messaging lifecycle for statutory submissions (MTD, ELSTER, EDI-TVA, GSTR, DIOT, NETFILE, FIRE) with status machine and response tracking
+- XBRL/iXBRL and ESEF disclosure output with taxonomy registry and tagging map
+- Denied-party and sanctions screening of parties and documents (OFAC, EU, UK OFSI, UN, BIS lists) with blocking and clearance workflow
+- Export control and foreign trade: ECCN/HS classification, license determination and tracking, export document set and broker data (with wave 34)
+- Origin and preference determination (USMCA, EU-UK TCA, EU PEM) from BOM roll-up and supplier declarations
+- US pack workforce compliance (I-9, ADA, visa, union, FMLA, workers' comp class codes) and statutory outputs (EEO-1, VETS-4212, ACA 1094-C/1095-C, new-hire, OSHA 300/300A/301, Form 4562)
+- India pack depth: GST components and reconciliation, TDS/TCS sections, challans, 26Q/27Q/27EQ returns, Form 16A, 26AS/AIS import
+- HR legal content per country pack (DE, FR, UK, IN, MX, CA)
+- Emergency break-glass access with time-boxed elevated sessions, reason codes, full call log and reviewer sign-off
+- Export governance policies per data classification and read access logging for sensitive fields
+- Masked tenant clone for test and rehearsal environments (tokenization, format-preserving randomization, date shifting)
+- Security incident and breach notification management with per-regime deadline clocks (GDPR, UK, US state, PIPEDA, CERT-In)
+- SOC 2 evidence store with object lock, per-control hash chain and time-boxed auditor access
 
 **Proof (testable acceptance)**
 
@@ -146,6 +169,7 @@ Localization packs installed per demo entity; compliance workspace with SoD and 
 - Parallel-run harness: replay a legacy period's transactions into Passage and diff trial balances, inventory values and subledgers
 - Cutover runbook generator: freeze, extract, load, reconcile, go/no-go checklist, rollback plan
 - Legacy coexistence adapters for phased cutovers (entity-by-entity)
+- Project beginning balance journals: opening project transactions by category with WIP, on-account and estimate state, reconciled to the legacy project ledger
 
 **Proof (testable acceptance)**
 

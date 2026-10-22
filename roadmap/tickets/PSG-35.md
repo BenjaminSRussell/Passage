@@ -41,6 +41,10 @@ Fix versions: v1.0
 3. Integration hub: public REST/GraphQL APIs, webhooks, Kafka topic subscriptions, API catalog (Backstage), developer portal, keys and quotas
 4. iPaaS connectors: Salesforce, Shopify, Stripe reference connectors
 5. Message monitor with replay and partner SLAs
+6. Catalog punchout (cXML and SAP OCI) returning requisition lines to wave 17
+7. cXML document exchange with cXML networks (Ariba/Coupa): OrderRequest, confirmations, ship notices, invoices
+8. PLM reference connector (Teamcenter / Windchill / file drop) into engineering change requests
+9. Customer self-billing intake (EDIFACT INVOIC 389, VDA 4908) with line matching and dispute worklist
 
 **Deploy.** Integration hub + developer portal at developers.<env>.passage.dev; EDI engine connected to a partner simulator.
 

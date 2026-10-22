@@ -39,6 +39,7 @@ Fix versions: v1.0
 3. Allocation engine: fixed, basis (statistical measure), and iterative allocations with reversal
 4. Accrual schemes and automatic reversals; recurring journal scheduling
 5. Year-end close: P&L to retained earnings, balance carry-forward per dimension, opening transactions
+6. Balance-sheet regrouping: reclassification by remaining term, vendors with debit balances and customers with credit balances, auto-reversed (FAGLF101 parity)
 
 **Deploy.** Financial period close workspace live; demo entities close a simulated period in a recorded walkthrough.
 

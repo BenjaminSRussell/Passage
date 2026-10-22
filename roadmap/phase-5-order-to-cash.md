@@ -20,6 +20,10 @@ Pricing, sales orders with ATP, fulfillment, billing and revenue recognition, ac
 - Rebate agreements and accrual calculation (settlement in wave 30)
 - Price simulation and explain (which conditions applied), mass price updates
 - Commission calculation hooks
+- Vendor rebate, broker and royalty agreements with accrual on purchase/sales invoices and period claims settled through AP (wave 19)
+- Commission transactions and posting: sales groups/reps with shares, commission customer/item groups, revenue or margin basis, settlement export to AP/payroll
+- Trade promotion funds with budget/usage tracking and promotion planning with baseline, lift and actuals
+- Free goods (inclusive/exclusive), commodity index pricing runs, and retroactive rebate accrual with delta settlement (VBOF)
 
 **Proof (testable acceptance)**
 
@@ -59,6 +63,10 @@ Pricing workspace; demo customers and price lists configured.
 - Credit management: limits, aging-based rules, credit holds, release workflow
 - Order holds (credit, fraud, manual), change management, line-level status
 - Customer portal order entry and status (completed in wave 30); multi-channel order intake API
+- Supplementary items, product listing/exclusion and cross-sell/product proposals at order entry
+- Product allocation quotas and backorder processing strategies (win/gain/redistribute/fill/lose) with preview
+- Scheduling-agreement forecast/JIT releases with cumulative-quantity reconciliation (DELFOR/DELJIT mapping in wave 35)
+- Customer consignment (fill-up/issue/pick-up/return), sales-order special stock segregation, one-time customer orders and a sales-order cost-estimate hook
 
 **Proof (testable acceptance)**
 
@@ -99,6 +107,8 @@ Sales workspace live; demo customers placing orders against the demo plant's sto
 - Carrier integration abstraction (rate, label, tracking) with reference adapters (EasyPost/Shippo-style) and ASN output
 - Drop-ship and direct delivery flows, partial shipments, delivery schedules
 - Shipment tracking visible to customer portal
+- Picking workbench (grouped wave creation with preview) and packing instructions for auto-pack
+- Packaging materials with EU packaging-fee calculation/reporting and returnable transport packaging balances per customer
 
 **Proof (testable acceptance)**
 
@@ -139,6 +149,9 @@ Fulfillment workspace and mobile pick UI (basic) in the demo warehouse.
 - Subscription billing: recurring schedules, proration, usage-based lines
 - Intercompany invoicing hook (completed in wave 40)
 - Billing audit: invoice → shipment → order → price explanation trace
+- Subscription groups, fee categories, period templates and indexation; expense deferral schedules with short/long-term split
+- Customer self-billing statement reconciliation, bundle (solution) invoice lines and installment terms split into open items at post
+- Document delivery routing per customer and document type (email/portal/print/EDI) with delivery log and resend
 
 **Proof (testable acceptance)**
 
@@ -179,6 +192,11 @@ Billing workspace; demo entity invoices its shipped orders; revenue schedules vi
 - Return orders (RMA): disposition codes, return to inventory/scrap/repair, credit note, restocking charges
 - Rebate settlement from wave 26 accruals; customer statements
 - Customer portal: orders, invoices, payments (Stripe/Adyen adapter), returns, documents
+- SEPA direct debit mandates and pain.008 collection runs with pre-notification and R-transaction handling
+- Deductions workbench (match to claims, approve, deny, split, write off) and distributor chargeback claim validation
+- Correspondence framework (payment notices, open item lists, letters, email templates) and customer balance confirmations
+- Minimal collection cases (interim until wave 45), down payments and security deposits, vendor dunning, GL/intercompany interest
+- Portal guided product configuration and returnable-packaging charges
 
 **Proof (testable acceptance)**
 

@@ -20,6 +20,8 @@ Production orders and WIP, MRP/MPS, capacity and scheduling, process and lean ma
 - WIP postings and order end with cost settlement: actual vs planned → variances (material, labor, overhead)
 - Subcontracting operations with vendor PO linkage
 - Production order inquiry: cost roll, status log, transactions
+- Production order split/merge with proportional WIP transfer, order change management (ECO re-explosion with change cost) and order-specific BOM/route edits
+- Trigger points on operation feedback (insert rework operations, create rework orders), rework orders, and as-built serial/batch genealogy captured at picking and RAF
 
 **Proof (testable acceptance)**
 
@@ -60,6 +62,10 @@ Production control workspace; demo plant runs its first production order end-to-
 - Planned orders with firming, grouping, action messages (advance/postpone/cancel) and futures/delay messages
 - Forecast model: statistical baseline (ETS/Croston via a Python service) with manual override and consensus workflow
 - Explain-this-plan: pegging tree from any planned order to its driving demand
+- Simulation plans / planning scenarios (long-term planning, predictive MRP-style rough-cut) with capacity and purchase-volume evaluations and supplier forecast publishing
+- DDMRP buffers (decoupling points, buffer profiles, net-flow equation) and priority-based planning
+- Quota arrangements across vendors/own production/transfers, warehouse- and subcontractor-level planning scopes (MRP areas), and planning strategies (MTS net/gross, MTO, assemble-to-order, planning without final assembly, subassembly)
+- Shelf-life aware pegging, supply schedule workbench and inventory forecast projection
 
 **Proof (testable acceptance)**
 
@@ -101,6 +107,9 @@ Master planning workspace with a nightly plan for the demo plant.
 - Capacity load views by resource/group/period; bottleneck detection
 - Scheduling optimization option via OR-Tools CP-SAT (minimize lateness/makespan)
 - Integration: schedule dates flow to production orders and master planning
+- Resource networks (allowed resource transitions with max wait) as scheduler constraints
+- Campaign planning with setup matrix sequencing, changeover/cleanout orders and campaign cleanout cost allocation
+- Block planning: capacity blocks restricted by product/batch attribute conditions
 
 **Proof (testable acceptance)**
 
@@ -142,6 +151,11 @@ Scheduling workspace with Gantt for the demo plant.
 - Lean: value streams, production flows, activities, kanban rules (manufacturing/withdrawal/fixed/event), kanban board, cards
 - Backflush costing for lean (periodic)
 - Recipe/formula version control integrated with engineering change
+- Batch attribute and shelf-life inheritance (batch derivation) with derivation monitor, batch merge, and documentary batches
+- Consolidated bulk/packed batch orders, rework batch orders, same-batch reservation and customer sellable days / batch attribute requirements
+- Lean subcontracting: service activities on vendor work cells priced by purchase agreements with auto PO and receipt
+- Electronic batch record with review by exception, sealed PDF/A + JSON archive, and a 21 CFR Part 11 electronic signature service (step-up re-authentication, signature strategies, signature log)
+- Characteristic-dependent planning: attribute-constrained pegging of supply to demand
 
 **Proof (testable acceptance)**
 
@@ -182,6 +196,10 @@ Process and lean workspaces enabled for a second demo plant (food/chem line).
 - IoT ingestion: OPC-UA/MQTT edge connector → Kafka → machine events (counts, downtime, states); OEE calculation
 - Andon/alerts, downtime reason codes, operator feedback loop
 - Offline-tolerant kiosk (PWA) with sync
+- Control recipes (ISA-88 structure) sent to kiosk or process control systems via the edge connector, with control recipe monitor
+- PI sheet designer with versioned step library (XSteps equivalent), kiosk PI sheet execution, and PI sheet archive feeding the EBR
+- Process messages with categories, destinations (journals, quality results, EBR, Kafka, webhook), retry and monitor
+- iot-edge connector as a deployable: signed image/Helm chart/static binary, token enrollment with mTLS certificates, versioned config, heartbeat, ringed rollout with auto-rollback, allowlisted write-back
 
 **Proof (testable acceptance)**
 

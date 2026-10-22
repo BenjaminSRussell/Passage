@@ -41,6 +41,8 @@ Fix versions: v1.0
 3. Agent runtime (Temporal-backed) for autonomous tasks with approval gates: AP invoice coding, cash application suggestions, MRP exception triage, collections outreach, anomaly detection on journals
 4. Eval harness: golden datasets per agent, accuracy/precision thresholds gating deploys; prompt/version registry; cost/token budgets per tenant
 5. Responsible-AI controls: PII redaction, action logging, kill switch, model-agnostic provider layer (Claude default, Bedrock/Azure/open-weights options)
+6. Knowledge retrieval tool (hybrid search over knowledge articles, docs and tenant policies) with cited copilot answers
+7. Payment-date prediction model per tenant feeding collections agent and DSO forecast, gated by MAE threshold
 
 **Deploy.** Copilot enabled in all workspaces; two agents (AP coding, cash application) running in suggest-mode for the demo entity.
 

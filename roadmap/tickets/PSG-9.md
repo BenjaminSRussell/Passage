@@ -39,6 +39,9 @@ Fix versions: v1.0
 3. Resources (machine, tool, labor, vendor, location), resource groups, capabilities, work calendars with shifts
 4. Engineering change request/order workflow with impact analysis (where-used) and release to production
 5. BOM explosion/implosion API, where-used, cost roll-up skeleton (to be completed in wave 39)
+6. Engineering organizations and engineering versions; release product structure with release policies and product acceptance; product readiness policies and checks; engineering product categories with version nomenclature
+7. BOM usage/category, alternative item groups and discontinuation, serial and parameter effectivity, super BOM/routing selection conditions
+8. Engineering documents: document/text BOM lines, document status network with 21 CFR Part 11 signatures, ECO-controlled document versions, document structures and where-used; CAD/PLM eBOM import contract with eBOM-vs-mBOM comparison
 
 **Deploy.** Engineering workspace; demo product line with BOMs and routings loaded; where-used report live.
 
