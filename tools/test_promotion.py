@@ -45,7 +45,7 @@ class PromotionTest(unittest.TestCase):
 
         self.assertEqual(promotion.rollback(self.root, "stage"), SEED)
         values = (self.root / "deploy/helm/hello-ledger/values-stage.yaml").read_text()
-            history = (self.root / "deploy/helm/hello-ledger/history/stage.txt").read_text().splitlines()
+        history = (self.root / "deploy/helm/hello-ledger/history/stage.txt").read_text().splitlines()
         self.assertIn(f"imageDigest: {SEED}", values)
         self.assertEqual(history[-1], f"rollback {SEED}")
         self.assertIn(f"promote {NEXT}", history)
