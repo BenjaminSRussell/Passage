@@ -79,6 +79,26 @@ func TestRejectAmountOverflow(t *testing.T) {
 	}
 }
 
+func TestRejectWhenFullAndPageWindow(t *testing.T) {
+	book := NewBookMax(2)
+	if _, err := book.Post(balanced()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := book.Post(balanced()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := book.Post(balanced()); !errors.Is(err, ErrCapacity) {
+		t.Fatalf("err = %v", err)
+	}
+	page, total := book.EntriesPage(1, 1)
+	if total != 2 || len(page) != 1 || page[0].ID != 2 {
+		t.Fatalf("page=%v total=%d", page, total)
+	}
+	if got := len(book.Entries()); got != 2 {
+		t.Fatalf("entries = %d", got)
+	}
+}
+
 func TestConcurrentPostsStayBalanced(t *testing.T) {
 	book := NewBook()
 	var wg sync.WaitGroup

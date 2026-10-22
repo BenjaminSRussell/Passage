@@ -1,5 +1,3 @@
-// Package ledger is the wave-1 placeholder journal: in-memory, balanced
-// double-entry postings. Later waves replace this with the universal journal.
 package ledger
 
 import (
@@ -11,9 +9,12 @@ import (
 	"sync"
 )
 
+const MaxEntries = 1000
+
 var (
 	ErrUnbalanced  = errors.New("journal entry is not balanced")
 	ErrInvalidLine = errors.New("invalid journal line")
+	ErrCapacity    = errors.New("journal is full")
 )
 
 // Line is one debit or credit in minor currency units.
@@ -37,14 +38,22 @@ type Balance struct {
 
 // Book stores accepted entries and their account totals.
 type Book struct {
-	mu      sync.Mutex
-	nextID  int64
-	entries []Entry
-	totals  map[string]int64
+	mu         sync.Mutex
+	nextID     int64
+	entries    []Entry
+	totals     map[string]int64
+	maxEntries int
 }
 
 func NewBook() *Book {
-	return &Book{totals: map[string]int64{}}
+	return NewBookMax(MaxEntries)
+}
+
+func NewBookMax(max int) *Book {
+	if max < 1 {
+		panic("max entries must be positive")
+	}
+	return &Book{totals: map[string]int64{}, maxEntries: max}
 }
 
 // Post accepts a balanced entry. The returned entry is a copy.
@@ -55,6 +64,9 @@ func (b *Book) Post(lines []Line) (Entry, error) {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if len(b.entries) >= b.maxEntries {
+		return Entry{}, ErrCapacity
+	}
 	updated := make(map[string]int64, len(normalized))
 	for _, line := range normalized {
 		current, seen := updated[line.Account]
@@ -76,15 +88,37 @@ func (b *Book) Post(lines []Line) (Entry, error) {
 	return cloneLinesEntry(entry), nil
 }
 
-// Entries returns a copy of accepted entries.
+// Entries returns a copy of every accepted entry. The book never stores more than its cap.
 func (b *Book) Entries() []Entry {
+	limit := b.maxEntries
+	entries, _ := b.EntriesPage(0, limit)
+	return entries
+}
+
+// EntriesPage copies one window of accepted entries. total is the number stored.
+func (b *Book) EntriesPage(offset, limit int) ([]Entry, int) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	out := make([]Entry, len(b.entries))
-	for i, entry := range b.entries {
+	total := len(b.entries)
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > total {
+		offset = total
+	}
+	if limit < 1 {
+		limit = 1
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	window := b.entries[offset:end]
+	out := make([]Entry, len(window))
+	for i, entry := range window {
 		out[i] = cloneLinesEntry(entry)
 	}
-	return out
+	return out, total
 }
 
 // TrialBalance returns account balances sorted by account. The sum of

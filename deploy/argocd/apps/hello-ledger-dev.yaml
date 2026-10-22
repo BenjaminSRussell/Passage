@@ -6,7 +6,7 @@ metadata:
   annotations:
     passage.dev/image-digest: sha256:0a6d5f56e627284b7fcc07112954c0a9fc37d4b04da82a1a4f73ece26af04db5
 spec:
-  project: default
+  project: passage
   source:
     repoURL: https://github.com/BenjaminSRussell/Passage.git
     targetRevision: main

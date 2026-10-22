@@ -18,6 +18,7 @@ test:
 web-build:
 	npm ci --prefix web/shell
 	npm run build --prefix web/shell
+	npm audit --package-lock-only --audit-level=high --prefix web/shell
 
 helm-template:
 	helm template hello-ledger deploy/helm/hello-ledger -f deploy/helm/hello-ledger/values-stage.yaml > /tmp/hello-ledger.yaml
@@ -35,7 +36,7 @@ ci-negative:
 ci: lint test web-build helm-template tofu-validate ci-negative
 
 run:
-	cd services/hello-ledger && go run ./cmd/hello-ledger
+	cd services/hello-ledger && LEDGER_TOKEN=$${LEDGER_TOKEN:-local-dev-token} BIND_ADDR=$${BIND_ADDR:-127.0.0.1} go run ./cmd/hello-ledger
 
 deploy-local:
 	bash scripts/deploy-local.sh

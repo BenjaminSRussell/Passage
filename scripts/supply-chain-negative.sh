@@ -57,6 +57,13 @@ cosign sign --key "$workdir/cosign.key" --yes \
   --signing-config "$workdir/signing-config.json" \
   --allow-insecure-registry \
   "$digest"
+sbom="$workdir/sbom.spdx.json"
+SYFT_REGISTRY_INSECURE_USE_HTTP=true syft "$digest" -o spdx-json > "$sbom"
+cosign attest --key "$workdir/cosign.key" --yes \
+  --signing-config "$workdir/signing-config.json" \
+  --allow-insecure-registry --allow-http-registry \
+  --predicate "$sbom" --type spdxjson \
+  "$digest"
 COSIGN_PUBLIC_KEY="$workdir/cosign.pub" "$root/scripts/supply-chain-gate.sh" "$digest"
 
 trivy image --severity CRITICAL --exit-code 1 --ignore-unfixed --scanners vuln "$local_image"

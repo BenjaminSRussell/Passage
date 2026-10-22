@@ -33,7 +33,7 @@ make run           # hello-ledger on :8080
 make deploy-local  # k3d + Argo CD + hello-ledger (Docker required)
 ```
 
-`curl -s localhost:8080/healthz` returns the placeholder service. Post a balanced journal to `POST /v1/entries`. Promote a digest with `python3 tools/promotion.py promote stage sha256:<64 hex>` and roll it back with `python3 tools/promotion.py rollback stage`. The history log is what Argo CD syncs; `make deploy-local` is the laptop cluster.
+`curl -s localhost:8080/healthz` returns the placeholder service. `make run` listens on 127.0.0.1 and requires `Authorization: Bearer $LEDGER_TOKEN` (`local-dev-token` when the variable is unset) on `/v1/*`. Promote a digest with `python3 tools/promotion.py promote stage sha256:<64 hex>`. That checks the image signature and SPDX attestation, then writes `values-<env>.yaml` and the Argo CD annotation. Argo CD syncs those files. `history/<env>.txt` is the rollback log. `make deploy-local` is the laptop cluster.
 
 ## Working the plan
 

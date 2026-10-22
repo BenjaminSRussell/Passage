@@ -3,6 +3,6 @@
 # envs select themselves with provider_name; their provider resources are added
 # in this module when a cloud account exists, behind the same variables.
 locals {
-  k3d_command = "k3d cluster create ${var.cluster_name} --agents ${var.agent_count} --port 18080:80@loadbalancer --wait"
+  k3d_command = "k3d cluster create ${var.cluster_name} --agents ${var.agent_count} --port 18080:80@loadbalancer --k3s-arg \"--flannel-backend=host-gw@server:*\" --k3s-arg \"--disable=traefik@server:0\" --wait"
   cloud_note  = "provider ${var.provider_name} uses the cluster module interface; configure that provider's credentials before apply"
 }

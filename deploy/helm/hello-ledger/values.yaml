@@ -1,8 +1,12 @@
 replicaCount: 1
 imageRepository: ghcr.io/benjaminsrussell/passage/hello-ledger
 imageDigest: ""
-imageTag: latest
+imageTag: ""
+allowMutableTag: false
 imagePullPolicy: IfNotPresent
+auth:
+  token: ""
+  existingSecret: ""
 service:
   type: ClusterIP
   port: 80

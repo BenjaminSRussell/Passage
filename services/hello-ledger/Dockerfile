@@ -1,4 +1,5 @@
-# 1.26.0 includes the stdlib fix for CVE-2025-68121. Do not drop back to 1.22.
+# The image build uses Go 1.26.0 so the binary includes the stdlib fix for CVE-2025-68121.
+# go.mod and CI stay on Go 1.22, which matches the host toolchain used for unit tests.
 FROM golang:1.26.0-bookworm AS build
 WORKDIR /src
 COPY go.mod ./

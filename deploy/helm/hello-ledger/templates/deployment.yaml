@@ -14,10 +14,39 @@ spec:
       labels:
         app: hello-ledger
     spec:
+      {{- if and (not .Values.auth.token) (not .Values.auth.existingSecret) }}
+      {{- fail "auth.token or auth.existingSecret is required" }}
+      {{- end }}
       containers:
         - name: hello-ledger
           image: {{ include "hello-ledger.image" . | quote }}
           imagePullPolicy: {{ .Values.imagePullPolicy }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          env:
+            - name: BIND_ADDR
+              value: "0.0.0.0"
+            - name: LEDGER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auth.existingSecret | default "hello-ledger-token" }}
+                  key: token
           ports:
             - name: http
               containerPort: 8080

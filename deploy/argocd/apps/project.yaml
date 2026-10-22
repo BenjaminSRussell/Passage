@@ -1,0 +1,22 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: passage
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  description: Passage ledger applications from this repository
+  sourceRepos:
+    - https://github.com/BenjaminSRussell/Passage.git
+  destinations:
+    - namespace: passage-dev
+      server: https://kubernetes.default.svc
+    - namespace: passage-stage
+      server: https://kubernetes.default.svc
+    - namespace: passage-prod
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"

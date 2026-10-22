@@ -1,21 +1,35 @@
-// Package httpapi serves the hello-ledger placeholder HTTP API.
 package httpapi
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/BenjaminSRussell/Passage/services/hello-ledger/internal/ledger"
 )
 
-// Server is the placeholder ledger API.
+const (
+	defaultPageLimit = 50
+	maxPageLimit     = 100
+)
+
+// Server is the ledger HTTP API. Journal routes require a bearer token.
 type Server struct {
-	book *ledger.Book
+	book  *ledger.Book
+	token string
 }
 
-func NewServer() *Server {
-	return &Server{book: ledger.NewBook()}
+func NewServer(token string) *Server {
+	return newServer(token, nil)
+}
+
+func newServer(token string, book *ledger.Book) *Server {
+	if book == nil {
+		book = ledger.NewBook()
+	}
+	return &Server{book: book, token: token}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -24,7 +38,29 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/entries", s.postEntry)
 	mux.HandleFunc("GET /v1/entries", s.listEntries)
 	mux.HandleFunc("GET /v1/trial-balance", s.trialBalance)
-	return mux
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if len(r.URL.Path) >= 4 && r.URL.Path[:4] == "/v1/" && !s.authorized(r) {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) authorized(r *http.Request) bool {
+	if s.token == "" {
+		return false
+	}
+	header := r.Header.Get("Authorization")
+	const prefix = "Bearer "
+	if len(header) <= len(prefix) || header[:len(prefix)] != prefix {
+		return false
+	}
+	got := header[len(prefix):]
+	if len(got) != len(s.token) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(got), []byte(s.token)) == 1
 }
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
@@ -61,7 +97,9 @@ func (s *Server) postEntry(w http.ResponseWriter, r *http.Request) {
 	entry, err := s.book.Post(lines)
 	if err != nil {
 		status := http.StatusBadRequest
-		if !errors.Is(err, ledger.ErrUnbalanced) && !errors.Is(err, ledger.ErrInvalidLine) {
+		if errors.Is(err, ledger.ErrCapacity) {
+			status = http.StatusConflict
+		} else if !errors.Is(err, ledger.ErrUnbalanced) && !errors.Is(err, ledger.ErrInvalidLine) {
 			status = http.StatusInternalServerError
 		}
 		writeJSON(w, status, map[string]string{"error": err.Error()})
@@ -70,13 +108,43 @@ func (s *Server) postEntry(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, toEntryDTO(entry))
 }
 
-func (s *Server) listEntries(w http.ResponseWriter, _ *http.Request) {
-	entries := s.book.Entries()
+func (s *Server) listEntries(w http.ResponseWriter, r *http.Request) {
+	offset, limit, err := pageQuery(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	entries, total := s.book.EntriesPage(offset, limit)
 	out := make([]entryDTO, len(entries))
 	for i, entry := range entries {
 		out[i] = toEntryDTO(entry)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"entries": out})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"entries": out,
+		"total":   total,
+		"offset":  offset,
+		"limit":   limit,
+	})
+}
+
+func pageQuery(r *http.Request) (int, int, error) {
+	offset := 0
+	limit := defaultPageLimit
+	if raw := r.URL.Query().Get("offset"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 0 {
+			return 0, 0, errors.New("invalid offset")
+		}
+		offset = parsed
+	}
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > maxPageLimit {
+			return 0, 0, errors.New("invalid limit")
+		}
+		limit = parsed
+	}
+	return offset, limit, nil
 }
 
 func (s *Server) trialBalance(w http.ResponseWriter, _ *http.Request) {

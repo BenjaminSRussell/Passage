@@ -2,7 +2,10 @@ replicaCount: 1
 imageRepository: hello-ledger
 imageDigest: ""
 imageTag: local
+allowMutableTag: true
 imagePullPolicy: Never
+auth:
+  token: local-dev-token
 service:
-  type: LoadBalancer
+  type: ClusterIP
   port: 80

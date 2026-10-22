@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Promote or roll back the hello-ledger image digest.
 
-Updates the Helm values file, the Argo CD application annotation, and an
-append-only history log. Argo CD records the same digest changes in its own
-history after it syncs the commit.
+Writes the Helm values digest and the Argo CD annotation first. The history
+file is an append-only rollback log and is updated only after both of those
+writes succeed. Argo CD syncs the values file and the annotation, not the log.
 """
 
 import argparse
+import os
 import pathlib
 import re
+import subprocess
 import sys
 
 ENVS = ("dev", "stage", "prod")
@@ -43,32 +45,35 @@ def check_digest(digest: str) -> str:
 
 def replace_key(text: str, key: str, digest: str) -> str:
     lines = []
-    found = False
+    found = 0
     prefix = key + ":"
     for line in text.splitlines():
         stripped = line.lstrip()
         if stripped.startswith(prefix):
             indent = line[: len(line) - len(stripped)]
             lines.append(f"{indent}{key}: {digest}")
-            found = True
+            found += 1
         else:
             lines.append(line)
-    if not found:
-        raise PromotionError(f"missing {key}")
+    if found != 1:
+        raise PromotionError(f"{key} must appear exactly once, found {found}")
     return "\n".join(lines) + "\n"
 
 
 def read_key(text: str, key: str) -> str:
     prefix = key + ":"
+    found = []
     for line in text.splitlines():
         stripped = line.strip()
         if stripped.startswith(prefix):
-            return stripped.split(":", 1)[1].strip()
-    raise PromotionError(f"missing {key}")
+            found.append(stripped.split(":", 1)[1].strip())
+    if len(found) != 1:
+        raise PromotionError(f"{key} must appear exactly once, found {len(found)}")
+    return found[0]
 
 
-def history_digests(text: str) -> list[str]:
-    digests = []
+def history_events(text: str) -> list[tuple[str, str]]:
+    events = []
     for raw in text.splitlines():
         line = raw.strip()
         if not line:
@@ -76,8 +81,24 @@ def history_digests(text: str) -> list[str]:
         parts = line.split()
         if len(parts) != 2 or parts[0] not in ("promote", "rollback"):
             raise PromotionError(f"bad history line: {raw!r}")
-        digests.append(check_digest(parts[1]))
-    return digests
+        events.append((parts[0], check_digest(parts[1])))
+    return events
+
+
+def history_digests(text: str) -> list[str]:
+    return [digest for _, digest in history_events(text)]
+
+
+def stack_from(events: list[tuple[str, str]]) -> list[str]:
+    stack: list[str] = []
+    for action, digest in events:
+        if action == "promote":
+            stack.append(digest)
+            continue
+        if len(stack) < 2 or stack[-2] != digest:
+            raise PromotionError("history rollback does not match the prior digest")
+        stack.pop()
+    return stack
 
 
 def append_history(path: pathlib.Path, action: str, digest: str) -> None:
@@ -88,38 +109,76 @@ def append_history(path: pathlib.Path, action: str, digest: str) -> None:
     path.write_text(existing + f"{action} {digest}\n")
 
 
-def write_digest(root: pathlib.Path, env: str, digest: str) -> None:
-    for path, key in (
+def write_digest(root: pathlib.Path, env: str, digest: str, on_write=None) -> None:
+    targets = (
         (values_path(root, env), "imageDigest"),
         (app_path(root, env), "passage.dev/image-digest"),
-    ):
-        path.write_text(replace_key(path.read_text(), key, digest))
+    )
+    updates = []
+    for path, key in targets:
+        original = path.read_text()
+        updates.append((path, original, replace_key(original, key, digest)))
+    try:
+        for index, (path, _original, text) in enumerate(updates):
+            if on_write is not None:
+                on_write(index, path, text)
+            else:
+                path.write_text(text)
+    except Exception:
+        for path, original, _text in updates:
+            path.write_text(original)
+        raise
 
 
-def promote(root: pathlib.Path, env: str, digest: str) -> str:
+def local_registry(repository: str) -> bool:
+    host = repository.split("/", 1)[0]
+    return host == "hello-ledger" or host.startswith("127.0.0.1") or host.startswith("localhost")
+
+
+def verify_signature(root: pathlib.Path, env: str, digest: str) -> None:
+    key = os.environ.get("COSIGN_PUBLIC_KEY", "")
+    if not key or not os.path.isfile(key):
+        raise PromotionError("COSIGN_PUBLIC_KEY is required to promote")
+    repository = read_key(values_path(root, env).read_text(), "imageRepository")
+    ref = f"{repository}@{digest}"
+    flags = ["--key", key]
+    if local_registry(repository):
+        flags.extend(["--insecure-ignore-tlog", "--allow-insecure-registry"])
+    commands = (
+        ["cosign", "verify", *flags, ref],
+        ["cosign", "verify-attestation", *flags, "--type", "spdxjson", ref],
+    )
+    for command in commands:
+        result = subprocess.run(command, capture_output=True, text=True)
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout).strip()
+            raise PromotionError(f"signature verification failed for {ref}: {detail}")
+
+
+def promote(root: pathlib.Path, env: str, digest: str, verify=None, on_write=None) -> str:
     if env not in ENVS:
         raise PromotionError(f"unknown env {env}")
     digest = check_digest(digest)
     current = read_key(values_path(root, env).read_text(), "imageDigest")
     if current == digest:
         raise PromotionError(f"{env} is already at {digest}")
+    if verify is None:
+        verify = verify_signature
+    verify(root, env, digest)
+    write_digest(root, env, digest, on_write=on_write)
     append_history(history_path(root, env), "promote", digest)
-    write_digest(root, env, digest)
     return digest
 
 
-def rollback(root: pathlib.Path, env: str) -> str:
+def rollback(root: pathlib.Path, env: str, on_write=None) -> str:
     if env not in ENVS:
         raise PromotionError(f"unknown env {env}")
-    digests = history_digests(history_path(root, env).read_text())
-    if not digests:
-        raise PromotionError(f"{env} has no history")
-    current = digests[-1]
-    prior = next((digest for digest in reversed(digests[:-1]) if digest != current), None)
-    if prior is None:
+    stack = stack_from(history_events(history_path(root, env).read_text()))
+    if len(stack) < 2:
         raise PromotionError(f"{env} has no prior digest")
+    prior = stack[-2]
+    write_digest(root, env, prior, on_write=on_write)
     append_history(history_path(root, env), "rollback", prior)
-    write_digest(root, env, prior)
     return prior
 
 
