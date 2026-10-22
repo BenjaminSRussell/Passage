@@ -147,7 +147,7 @@ def ensure_issues(phases, waves, milestones):
             labels.append("go-live")
         body = wave_md(w, phases).split("\n", 2)[2]  # drop the H2 title line
         body += "\n\n**Definition of Done:** all Proof boxes checked with CI links, Argo CD app healthy in stage, references/ADRs linked, phase-exit demo recorded if applicable."
-        url = gh("issue", "create", "-R", REPO, "--title", t, "--body", body, "--label", ",".join(labels), "--milestone", str(milestones[w["phase"]]))
+        url = gh("issue", "create", "-R", REPO, "--title", t, "--body", body, "--label", ",".join(labels), "--milestone", phase_title(p))
         numbers[w["n"]] = int(url.rsplit("/", 1)[1])
         print("created", t, url)
     return numbers
