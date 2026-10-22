@@ -1,0 +1,72 @@
+[
+  {
+    "phase": 0,
+    "slug": "foundation",
+    "name": "Foundation & Platform Kernel",
+    "waves": [1, 5],
+    "intent": "Build the platform every module stands on: Kubernetes delivery pipeline, identity and tenancy, the metadata/extensibility kernel (our AOT/DDIC), Kafka eventing and workflow, audit and the UX shell. Nothing business-facing ships until this layer can deploy, observe and roll back safely."
+  },
+  {
+    "phase": 1,
+    "slug": "master-data",
+    "name": "Enterprise Structure, Master Data & Engineering Data",
+    "waves": [6, 10],
+    "intent": "Model the enterprise (legal entities, sites, org hierarchies), the shared party/business-partner model, products and variants, BOMs/routings (engineering data a manufacturer needs on day one), and the migration framework every later wave uses to load legacy AX/SAP data."
+  },
+  {
+    "phase": 2,
+    "slug": "financial-core",
+    "name": "Financial Core",
+    "waves": [11, 15],
+    "intent": "Stand up a single append-only universal journal (one source of truth, like SAP ACDOCA / AX GeneralJournalAccountEntry) with dimensions, multi-currency, parallel ledgers, tax, period close and financial reporting. Every later module posts through this engine."
+  },
+  {
+    "phase": 3,
+    "slug": "procure-to-pay",
+    "name": "Inventory & Procure-to-Pay",
+    "waves": [16, 20],
+    "intent": "Inventory ledger and costing, purchasing, receiving with three-way match, accounts payable and payments, supplier collaboration. Physical goods start moving and valuing correctly into the GL."
+  },
+  {
+    "phase": 4,
+    "slug": "manufacturing",
+    "name": "Manufacturing & Planning",
+    "waves": [21, 25],
+    "intent": "Production orders and WIP, MRP/MPS, capacity and scheduling, process and lean manufacturing, shop-floor execution and IoT. A discrete or process manufacturer can build product on Passage."
+  },
+  {
+    "phase": 5,
+    "slug": "order-to-cash",
+    "name": "Order-to-Cash",
+    "waves": [26, 30],
+    "intent": "Pricing, sales orders with ATP, fulfillment, billing and revenue recognition, accounts receivable and collections. At the end of wave 30 a manufacturer runs the full buy-make-sell-collect loop on Passage — the first go-live milestone."
+  },
+  {
+    "phase": 6,
+    "slug": "logistics",
+    "name": "Warehouse, Quality & Logistics",
+    "waves": [31, 35],
+    "intent": "Advanced warehouse management, mobile execution, quality management, transportation and B2B/EDI/e-invoicing integration."
+  },
+  {
+    "phase": 7,
+    "slug": "treasury-controlling",
+    "name": "Treasury, Assets & Controlling",
+    "waves": [36, 40],
+    "intent": "Cash and bank, fixed assets, cost accounting and budgeting, standard-cost variance analysis, intercompany and consolidation. The finance function reaches full AX/SAP parity."
+  },
+  {
+    "phase": 8,
+    "slug": "projects-people-service",
+    "name": "Projects, People & Service",
+    "waves": [41, 45],
+    "intent": "Project operations, HR core, payroll and expenses, enterprise asset management and field service."
+  },
+  {
+    "phase": 9,
+    "slug": "intelligence-golive",
+    "name": "Intelligence, Compliance & Go-Live",
+    "waves": [46, 50],
+    "intent": "Data platform and analytics, AI copilots and agents, globalization and compliance, then the migration factory, scale hardening and production cutover off AX/SAP."
+  }
+]
