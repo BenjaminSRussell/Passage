@@ -1,27 +1,24 @@
-// Package ids issues ULIDs: time-ordered, 26-char, URL-safe identifiers used
-// for every Passage primary key.
+// Package ids issues UUIDv7 identifiers: time-ordered, 128-bit, stored in
+// Postgres uuid columns. Every Passage primary key uses New(). (The
+// architecture's identifier decision: UUIDv7, not ULID.)
 package ids
 
-import (
-	"crypto/rand"
-	"sync"
-	"time"
+import "github.com/google/uuid"
 
-	"github.com/oklog/ulid/v2"
-)
-
-var (
-	mu      sync.Mutex
-	entropy = ulid.Monotonic(rand.Reader, 0)
-)
-
-// New returns a new ULID string. Monotonic within a process so ids issued in
-// the same millisecond still sort in issue order.
+// New returns a new UUIDv7 string. UUIDv7 embeds a millisecond timestamp so
+// ids sort in issue order, which keeps btree inserts append-mostly.
 func New() string {
-	mu.Lock()
-	defer mu.Unlock()
-	return ulid.MustNew(ulid.Timestamp(time.Now()), entropy).String()
+	id, err := uuid.NewV7()
+	if err != nil {
+		// NewV7 fails only if the OS entropy source fails; a process without
+		// entropy cannot safely continue issuing keys.
+		panic("ids: " + err.Error())
+	}
+	return id.String()
 }
 
-// Valid reports whether s parses as a ULID.
-func Valid(s string) bool { _, err := ulid.ParseStrict(s); return err == nil }
+// Valid reports whether s parses as a UUID of any version.
+func Valid(s string) bool { _, err := uuid.Parse(s); return err == nil }
+
+// Nil is the all-zero UUID string, used for "not set" in tests and fixtures.
+const Nil = "00000000-0000-0000-0000-000000000000"

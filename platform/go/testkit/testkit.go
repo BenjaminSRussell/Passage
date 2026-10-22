@@ -29,7 +29,7 @@ func DB(t *testing.T) *pgxpool.Pool {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	schema := "t_" + strings.ToLower(ids.New())
+	schema := "t_" + strings.ReplaceAll(ids.New(), "-", "")
 	admin, err := pgxpool.New(ctx, url)
 	if err != nil {
 		t.Fatal(err)

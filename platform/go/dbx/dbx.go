@@ -85,7 +85,11 @@ func WithTenantTx(ctx context.Context, pool *pgxpool.Pool, fn func(tx pgx.Tx) er
 	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `select set_config('app.tenant_id', $1, true)`, p.TenantID); err != nil {
+	scopes := p.LegalEntityID
+	if scopes == "" {
+		scopes = "*"
+	}
+	if _, err := tx.Exec(ctx, `select set_config('passage.tenant_id', $1, true), set_config('passage.legal_entity_scopes', $2, true)`, p.TenantID, scopes); err != nil {
 		_ = tx.Rollback(ctx)
 		return err
 	}
@@ -96,14 +100,25 @@ func WithTenantTx(ctx context.Context, pool *pgxpool.Pool, fn func(tx pgx.Tx) er
 	return tx.Commit(ctx)
 }
 
-// RLSPolicy returns the DDL that enables tenant row-level security on table.
-// Include it in the migration that creates the table.
+// RLSPolicy returns the DDL that enables tenant row-level security on table:
+// one PERMISSIVE policy (without it Postgres denies every row). Include it in
+// the migration that creates the table. The GUC is passage.tenant_id, set per
+// transaction by WithTenantTx.
 func RLSPolicy(table string) string {
 	return fmt.Sprintf(`alter table %[1]s enable row level security;
 alter table %[1]s force row level security;
-create policy %[1]s_tenant_isolation on %[1]s
-  using (tenant_id = current_setting('app.tenant_id', true)::uuid)
-  with check (tenant_id = current_setting('app.tenant_id', true)::uuid);`, table)
+create policy %[1]s_tenant_access on %[1]s as permissive
+  using (tenant_id = current_setting('passage.tenant_id', true)::uuid)
+  with check (tenant_id = current_setting('passage.tenant_id', true)::uuid);`, table)
+}
+
+// LegalEntityScopePolicy returns the additional RESTRICTIVE policy for tables
+// that carry legal_entity_id: rows are visible only inside the caller's
+// legal-entity scopes (passage.legal_entity_scopes, a comma list or '*').
+func LegalEntityScopePolicy(table string) string {
+	return fmt.Sprintf(`create policy %[1]s_legal_entity_scope on %[1]s as restrictive
+  using (current_setting('passage.legal_entity_scopes', true) = '*'
+         or legal_entity_id::text = any(string_to_array(current_setting('passage.legal_entity_scopes', true), ',')));`, table)
 }
 
 // IdempotencyDDL is the table every command-handling service creates to make

@@ -32,10 +32,10 @@ roadmap/ownership.json  wave → directories it owns. A wave edits ONLY its own 
 ## Go services
 
 - Go 1.23+, module path `github.com/BenjaminSRussell/passage/services/<name>`; `replace github.com/BenjaminSRussell/passage/platform => ../../platform/go`.
-- Allowed dependencies: the platform module and what it already pulls in (chi, pgx/v5, shopspring/decimal, oklog/ulid). Anything else needs a one-line justification in the service README.
+- Allowed dependencies: the platform module and what it already pulls in (chi, pgx/v5, shopspring/decimal, google/uuid). Anything else needs a one-line justification in the service README.
 - Every HTTP handler: decode → validate → `tenant.FromContext` → store/domain → `httpx.JSON` or `httpx.Problem`. Errors are RFC 9457 problem details with a stable `code` (e.g. `LED-0001`) listed in the service README.
 - Every state change that other contexts care about is written to the outbox in the same transaction (`outbox.Enqueue(ctx, tx, evt)`). Event types are `dev.passage.<context>.<entity>.<verb>.v1`.
-- All tables carry `tenant_id uuid not null` first and enable row-level security (`dbx.RLSPolicy` template in migrations). Money is `numeric(20,6)` + `currency char(3)`; never float.
+- All tables carry `tenant_id uuid not null` first and enable row-level security (`dbx.RLSPolicy` template in migrations, plus `dbx.LegalEntityScopePolicy` on tables that carry `legal_entity_id`). Money is `numeric(20,6)` + `currency char(3)`; never float.
 - Idempotent commands accept `Idempotency-Key` and store it (`idempotency_keys` table from `dbx.IdempotencyDDL`).
 - Tests: `internal/domain` has pure unit tests (table-driven; property tests with `pgregory.net/rapid` are encouraged — it is in the platform go.mod). Store/API tests use `testkit.DB(t)` and are skipped when `PASSAGE_TEST_DATABASE_URL` is unset. `go test ./...` must pass with and without the database.
 - `go vet ./...` clean. No `init()` side effects. No globals except constants.
