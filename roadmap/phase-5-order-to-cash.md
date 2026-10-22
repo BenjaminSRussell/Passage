@@ -35,7 +35,7 @@ Pricing workspace; demo customers and price lists configured.
 **References**
 
 - [AX 2012 trade agreements](https://learn.microsoft.com/en-us/dynamicsax-2012/appuser-itpro/about-trade-agreements)
-- [SAP SD condition technique](https://help.sap.com/docs/SAP_ERP/ac23efa7a8c1432ab4fa0c6ba7e7a84f/2c1d6e5287ca4e1b93b7f3a1a3e0e1f0.html)
+- [SAP SD condition technique](https://help.sap.com/docs/SAP_ERP)
 
 **Depends on:** wave 25
 
@@ -74,8 +74,8 @@ Sales workspace live; demo customers placing orders against the demo plant's sto
 **References**
 
 - [AX 2012 sales and marketing](https://learn.microsoft.com/en-us/dynamicsax-2012/appuser-itpro/sales-and-marketing)
-- [SAP SD sales order processing](https://help.sap.com/docs/SAP_ERP/ac23efa7a8c1432ab4fa0c6ba7e7a84f/1a1d6e5287ca4e1b93b7f3a1a3e0e1f0.html)
-- [SAP advanced ATP (aATP)](https://help.sap.com/docs/SAP_S4HANA_ON-PREMISE/2a6a1d6ef9f84bb5b5c5f0d5e0aa8c7e/6e0f6e5287ca4e1b93b7f3a1a3e0e1f0.html)
+- [SAP SD sales order processing](https://help.sap.com/docs/SAP_ERP)
+- [SAP advanced ATP (aATP)](https://help.sap.com/docs/SAP_S4HANA_ON-PREMISE)
 
 **Depends on:** wave 26
 
@@ -114,7 +114,7 @@ Fulfillment workspace and mobile pick UI (basic) in the demo warehouse.
 **References**
 
 - [AX 2012 shipping and picking](https://learn.microsoft.com/en-us/dynamicsax-2012/appuser-itpro/about-picking-and-shipping)
-- [SAP LE shipping](https://help.sap.com/docs/SAP_ERP/ac23efa7a8c1432ab4fa0c6ba7e7a84f/8c1d6e5287ca4e1b93b7f3a1a3e0e1f0.html)
+- [SAP LE shipping](https://help.sap.com/docs/SAP_ERP)
 - [GS1-128 / SSCC](https://www.gs1.org/standards/id-keys/sscc)
 
 **Depends on:** wave 27
@@ -194,7 +194,7 @@ AR/collections workspace, customer portal at customer.<env>.passage.dev, payment
 **References**
 
 - [D365 collections](https://learn.microsoft.com/en-us/dynamics365/finance/accounts-receivable/collections-overview)
-- [SAP FSCM collections & dispute management](https://help.sap.com/docs/SAP_ERP/f8f1ee2f3b9e4b1ba4bbb8ac2a6b5a2e/5d0f6e5287ca4e1b93b7f3a1a3e0e1f0.html)
+- [SAP FSCM collections & dispute management](https://help.sap.com/docs/SAP_ERP)
 - [ISO 20022 camt.053](https://www.iso20022.org/iso-20022-message-definitions)
 - [BAI2 lockbox format](https://www.bai.org/)
 

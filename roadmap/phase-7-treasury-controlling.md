@@ -35,7 +35,7 @@ Treasury workspace; sandbox bank connection for the demo entity.
 **References**
 
 - [D365 cash and bank management](https://learn.microsoft.com/en-us/dynamics365/finance/cash-bank-management/cash-bank-management-overview)
-- [SAP Cash Management](https://help.sap.com/docs/SAP_S4HANA_ON-PREMISE/2a6a1d6ef9f84bb5b5c5f0d5e0aa8c7e/b1b0f6d2b7f84d8f9c1a5a6d2e4c3b1a.html)
+- [SAP Cash Management](https://help.sap.com/docs/SAP_S4HANA_ON-PREMISE)
 - [EBICS](https://www.ebics.org/en/home)
 - [HashiCorp Vault](https://developer.hashicorp.com/vault/docs)
 
@@ -76,7 +76,7 @@ Fixed assets workspace; demo entity's assets migrated with opening net book valu
 **References**
 
 - [D365 fixed assets](https://learn.microsoft.com/en-us/dynamics365/finance/fixed-assets/fixed-assets)
-- [SAP asset accounting](https://help.sap.com/docs/SAP_S4HANA_ON-PREMISE/2a6a1d6ef9f84bb5b5c5f0d5e0aa8c7e/e1b0f6d2b7f84d8f9c1a5a6d2e4c3b1a.html)
+- [SAP asset accounting](https://help.sap.com/docs/SAP_S4HANA_ON-PREMISE)
 - [IFRS 16 leases](https://www.ifrs.org/issued-standards/list-of-standards/ifrs-16-leases/)
 - [IRS Publication 946 (MACRS)](https://www.irs.gov/publications/p946)
 
@@ -118,7 +118,7 @@ Budgeting and cost accounting workspaces; demo entity budget loaded.
 
 - [D365 cost accounting](https://learn.microsoft.com/en-us/dynamics365/finance/cost-accounting/cost-accounting-home-page)
 - [D365 budget control](https://learn.microsoft.com/en-us/dynamics365/finance/budgeting/budget-control-overview-configuration)
-- [SAP CO overhead cost controlling](https://help.sap.com/docs/SAP_ERP/f8f1ee2f3b9e4b1ba4bbb8ac2a6b5a2e/7f0f6e5287ca4e1b93b7f3a1a3e0e1f0.html)
+- [SAP CO overhead cost controlling](https://help.sap.com/docs/SAP_ERP)
 
 **Depends on:** wave 37
 
@@ -158,7 +158,7 @@ Costing workspace completes; demo plant on standard cost with monthly variance r
 
 - [AX 2012 BOM calculations and costing sheets](https://learn.microsoft.com/en-us/dynamicsax-2012/appuser-itpro/about-bom-calculations)
 - [AX 2012 production variances](https://learn.microsoft.com/en-us/dynamicsax-2012/appuser-itpro/about-production-variances)
-- [SAP product cost planning](https://help.sap.com/docs/SAP_ERP/f8f1ee2f3b9e4b1ba4bbb8ac2a6b5a2e/6a0f6e5287ca4e1b93b7f3a1a3e0e1f0.html)
+- [SAP product cost planning](https://help.sap.com/docs/SAP_ERP)
 
 **Depends on:** wave 38
 

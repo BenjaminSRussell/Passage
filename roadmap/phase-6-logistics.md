@@ -115,7 +115,7 @@ Quality workspace enabled for the demo plants; CoA generation on shipments.
 **References**
 
 - [AX 2012 quality management](https://learn.microsoft.com/en-us/dynamicsax-2012/appuser-itpro/about-quality-management)
-- [SAP QM](https://help.sap.com/docs/SAP_ERP/ac23efa7a8c1432ab4fa0c6ba7e7a84f/9b2d6e5287ca4e1b93b7f3a1a3e0e1f0.html)
+- [SAP QM](https://help.sap.com/docs/SAP_ERP)
 - [ANSI/ASQ Z1.4 sampling](https://asq.org/quality-resources/sampling)
 
 **Depends on:** wave 32

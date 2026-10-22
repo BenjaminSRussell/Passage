@@ -35,7 +35,7 @@ Inventory management workspace; demo plant stocked via opening-balance journal; 
 **References**
 
 - [AX 2012 inventory transactions and statuses](https://learn.microsoft.com/en-us/dynamicsax-2012/appuser-itpro/about-inventory-transactions)
-- [SAP MM inventory management](https://help.sap.com/docs/SAP_ERP/ac23efa7a8c1432ab4fa0c6ba7e7a84f/9c4ab8b5a4ab4a6da5e3e0a7a1b2c3d4.html)
+- [SAP MM inventory management](https://help.sap.com/docs/SAP_ERP)
 - [Apache OFBiz inventory data model](https://cwiki.apache.org/confluence/display/OFBIZ/Data+Model+Diagrams)
 
 **Depends on:** wave 15
@@ -75,7 +75,7 @@ Procurement workspace live; demo vendors with price lists; purchasing policy con
 **References**
 
 - [AX 2012 procurement and sourcing](https://learn.microsoft.com/en-us/dynamicsax-2012/appuser-itpro/procurement-and-sourcing)
-- [SAP MM purchasing](https://help.sap.com/docs/SAP_ERP/ac23efa7a8c1432ab4fa0c6ba7e7a84f/4ad9d8e40c5c4d2fa5a5a9c4a6d7a0e4.html)
+- [SAP MM purchasing](https://help.sap.com/docs/SAP_ERP)
 - [Odoo purchase module (reference flows)](https://www.odoo.com/documentation/18.0/applications/inventory_and_mrp/purchase.html)
 
 **Depends on:** wave 16
@@ -115,7 +115,7 @@ Receiving and AP invoice workspaces; demo plant receives and matches invoices fo
 **References**
 
 - [AX 2012 invoice matching](https://learn.microsoft.com/en-us/dynamicsax-2012/appuser-itpro/about-accounts-payable-invoice-matching)
-- [SAP logistics invoice verification](https://help.sap.com/docs/SAP_ERP/ac23efa7a8c1432ab4fa0c6ba7e7a84f/6c3b1c5287ca4e1b93b7f3a1a3e0e1f0.html)
+- [SAP logistics invoice verification](https://help.sap.com/docs/SAP_ERP)
 - [Peppol BIS Billing 3.0](https://docs.peppol.eu/poacc/billing/3.0/)
 
 **Depends on:** wave 17
@@ -155,7 +155,7 @@ AP workspace with payment runs; demo entity pays open invoices to a sandbox bank
 **References**
 
 - [AX 2012 accounts payable](https://learn.microsoft.com/en-us/dynamicsax-2012/appuser-itpro/accounts-payable)
-- [SAP automatic payment program](https://help.sap.com/docs/SAP_ERP/f8f1ee2f3b9e4b1ba4bbb8ac2a6b5a2e/8b0f6e5287ca4e1b93b7f3a1a3e0e1f0.html)
+- [SAP automatic payment program](https://help.sap.com/docs/SAP_ERP)
 - [ISO 20022 pain.001](https://www.iso20022.org/iso-20022-message-definitions)
 - [NACHA ACH file format](https://achdevguide.nacha.org/ach-file-overview)
 
@@ -196,7 +196,7 @@ Costing workspace; supplier portal at supplier.<env>.passage.dev with a demo ven
 **References**
 
 - [AX 2012 inventory close and costing](https://learn.microsoft.com/en-us/dynamicsax-2012/appuser-itpro/about-inventory-close)
-- [SAP material ledger / actual costing](https://help.sap.com/docs/SAP_S4HANA_ON-PREMISE/2a6a1d6ef9f84bb5b5c5f0d5e0aa8c7e/f1b0f6d2b7f84d8f9c1a5a6d2e4c3b1a.html)
+- [SAP material ledger / actual costing](https://help.sap.com/docs/SAP_S4HANA_ON-PREMISE)
 - [IAS 2 inventories](https://www.ifrs.org/issued-standards/list-of-standards/ias-2-inventories/)
 
 **Depends on:** wave 19

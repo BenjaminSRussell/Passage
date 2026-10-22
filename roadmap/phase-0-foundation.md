@@ -121,7 +121,7 @@ Metadata registry + generator in the pipeline; the first three generated entitie
 - [Atlas schema migrations](https://atlasgo.io/)
 - [OpenAPI 3.1](https://spec.openapis.org/oas/v3.1.0)
 - [AX 2012 AOT & data dictionary concepts](https://learn.microsoft.com/en-us/dynamicsax-2012/developer/data-dictionary)
-- [SAP ABAP Dictionary overview](https://help.sap.com/docs/ABAP_PLATFORM_NEW/ec1c9c8191b64b6ea0c6a5dcc5dbeaf9/cf21ea43446011d189700000e8322d00.html)
+- [SAP ABAP Dictionary overview](https://help.sap.com/docs/ABAP_PLATFORM_NEW)
 - [D365 F&O extensibility model (extensions over overlayering)](https://learn.microsoft.com/en-us/dynamics365/fin-ops-core/dev-itpro/extensibility/extensibility-home-page)
 
 **Depends on:** wave 2
@@ -208,7 +208,7 @@ Shell at app.<env>.passage.dev with the admin workspace; observability stack and
 - [OpenTelemetry](https://opentelemetry.io/docs/)
 - [WCAG 2.1](https://www.w3.org/TR/WCAG21/)
 - [AX 2012 number sequences](https://learn.microsoft.com/en-us/dynamicsax-2012/appuser-itpro/about-number-sequences)
-- [SAP change documents](https://help.sap.com/docs/SAP_NETWEAVER_750/3ee76b4eb5c44f11a5ffdd1c6e4dcc04/4d5ce0a5bbf0466aa71ae5aa8fe4ce44.html)
+- [SAP change documents](https://help.sap.com/docs/SAP_NETWEAVER_750)
 - [Jepsen](https://jepsen.io/)
 
 **Depends on:** wave 4

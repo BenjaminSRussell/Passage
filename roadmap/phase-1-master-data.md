@@ -35,7 +35,7 @@ Organization administration workspace live; seed data for a demo manufacturer (3
 **References**
 
 - [AX 2012 organization model](https://learn.microsoft.com/en-us/dynamicsax-2012/appuser-itpro/organizations-and-organizational-hierarchies)
-- [SAP enterprise structure (company code, plant, storage location)](https://help.sap.com/docs/SAP_S4HANA_ON-PREMISE/8308e6d301d54584a33cd04a9861bc52/4ad9d8e40c5c4d2fa5a5a9c4a6d7a0e4.html)
+- [SAP enterprise structure (company code, plant, storage location)](https://help.sap.com/docs/SAP_S4HANA_ON-PREMISE)
 - [ISO 4217 currency codes](https://www.iso.org/iso-4217-currency-codes.html)
 - [UCUM units of measure](https://ucum.org/)
 
@@ -76,7 +76,7 @@ Customer, vendor and contact workspaces usable for data entry; import of a legac
 **References**
 
 - [AX 2012 global address book](https://learn.microsoft.com/en-us/dynamicsax-2012/appuser-itpro/global-address-book-overview)
-- [SAP Business Partner & CVI](https://help.sap.com/docs/SAP_S4HANA_ON-PREMISE/5a0af7e5fe9849f4ae2b5c3f8c7dcfd8/cf0d1b5d0d8a4ec0b2c9a8e5d1e1d3f4.html)
+- [SAP Business Partner & CVI](https://help.sap.com/docs/SAP_S4HANA_ON-PREMISE)
 - [VIES VAT validation](https://ec.europa.eu/taxation_customs/vies/)
 - [Record linkage / Fellegi-Sunter (Splink)](https://moj-analytical-services.github.io/splink/)
 
@@ -117,7 +117,7 @@ Product information management workspace live; demo manufacturer's product catal
 **References**
 
 - [AX 2012 product information management](https://learn.microsoft.com/en-us/dynamicsax-2012/appuser-itpro/about-products)
-- [SAP material master](https://help.sap.com/docs/SAP_ERP/f8f1ee2f3b9e4b1ba4bbb8ac2a6b5a2e/5c7b7a5287ca4e1b93b7f3a1a3e0e1f0.html)
+- [SAP material master](https://help.sap.com/docs/SAP_ERP)
 - [GS1 General Specifications](https://www.gs1.org/standards/barcodes-epcrfid-id-keys/gs1-general-specifications)
 - [Google OR-Tools CP-SAT](https://developers.google.com/optimization/cp/cp_solver)
 
@@ -160,7 +160,7 @@ Engineering workspace; demo product line with BOMs and routings loaded; where-us
 - [AX 2012 BOMs and formulas](https://learn.microsoft.com/en-us/dynamicsax-2012/appuser-itpro/about-bills-of-materials-and-formulas)
 - [AX 2012 routes and operations](https://learn.microsoft.com/en-us/dynamicsax-2012/appuser-itpro/about-routes-and-operations)
 - [D365 engineering change management](https://learn.microsoft.com/en-us/dynamics365/supply-chain/engineering-change-management/product-engineering-overview)
-- [SAP PP master data (BOM, routing, work center)](https://help.sap.com/docs/SAP_ERP/ac23efa7a8c1432ab4fa0c6ba7e7a84f/0e3f6a5d8a7e4d8bb9f2a1c5e3d2b1a0.html)
+- [SAP PP master data (BOM, routing, work center)](https://help.sap.com/docs/SAP_ERP)
 
 **Depends on:** wave 8
 
@@ -200,7 +200,7 @@ Migration workspace with run history; connectors packaged as Helm sub-charts.
 
 - [D365 data management framework](https://learn.microsoft.com/en-us/dynamics365/fin-ops-core/dev-itpro/data-entities/data-entities-data-packages)
 - [AX 2012 DIXF](https://learn.microsoft.com/en-us/dynamicsax-2012/appuser-itpro/data-import-export-framework-user-guide-dixf-dmf)
-- [SAP S/4HANA Migration Cockpit](https://help.sap.com/docs/SAP_S4HANA_ON-PREMISE/29193bf0ebdd4583930b2176cb993268/8b9a7a0c4ec14c5cb2b2fd6d6d1e2c0a.html)
+- [SAP S/4HANA Migration Cockpit](https://help.sap.com/docs/SAP_S4HANA_ON-PREMISE)
 - [Great Expectations (data validation)](https://docs.greatexpectations.io/)
 
 **Depends on:** wave 7, wave 8, wave 9

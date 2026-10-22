@@ -36,7 +36,7 @@ Projects workspace; a demo engineering-services entity runs projects alongside t
 
 - [AX 2012 project management and accounting](https://learn.microsoft.com/en-us/dynamicsax-2012/appuser-itpro/project-management-and-accounting)
 - [D365 Project Operations](https://learn.microsoft.com/en-us/dynamics365/project-operations/)
-- [SAP PS](https://help.sap.com/docs/SAP_ERP/f8f1ee2f3b9e4b1ba4bbb8ac2a6b5a2e/4b0f6e5287ca4e1b93b7f3a1a3e0e1f0.html)
+- [SAP PS](https://help.sap.com/docs/SAP_ERP)
 
 **Depends on:** wave 40
 
@@ -117,7 +117,7 @@ Payroll and expense workspaces; demo entity runs a payroll cycle in sandbox.
 - [AX 2012 payroll](https://learn.microsoft.com/en-us/dynamicsax-2012/appuser-itpro/payroll)
 - [IRS Publication 15-T](https://www.irs.gov/publications/p15t)
 - [D365 expense management](https://learn.microsoft.com/en-us/dynamics365/project-operations/prod-exp/expense-overview)
-- [SAP Payroll](https://help.sap.com/docs/SAP_ERP/d6b4c4e6e8b74a5a9b3a7c5e0a1d2f3b/0a0f6e5287ca4e1b93b7f3a1a3e0e1f0.html)
+- [SAP Payroll](https://help.sap.com/docs/SAP_ERP)
 
 **Depends on:** wave 42
 
@@ -156,7 +156,7 @@ Asset management workspace; demo plant's machines maintained with preventive pla
 **References**
 
 - [D365 Asset Management](https://learn.microsoft.com/en-us/dynamics365/supply-chain/asset-management/)
-- [SAP PM](https://help.sap.com/docs/SAP_ERP/ac23efa7a8c1432ab4fa0c6ba7e7a84f/0b2d6e5287ca4e1b93b7f3a1a3e0e1f0.html)
+- [SAP PM](https://help.sap.com/docs/SAP_ERP)
 - [openMAINT (open-source CMMS)](https://www.openmaint.org/en/)
 
 **Depends on:** wave 43

@@ -35,7 +35,7 @@ Production control workspace; demo plant runs its first production order end-to-
 **References**
 
 - [AX 2012 production control](https://learn.microsoft.com/en-us/dynamicsax-2012/appuser-itpro/production-control)
-- [SAP PP production orders](https://help.sap.com/docs/SAP_ERP/ac23efa7a8c1432ab4fa0c6ba7e7a84f/3f2d6e5287ca4e1b93b7f3a1a3e0e1f0.html)
+- [SAP PP production orders](https://help.sap.com/docs/SAP_ERP)
 - [Odoo MRP (reference flows)](https://www.odoo.com/documentation/18.0/applications/inventory_and_mrp/manufacturing.html)
 
 **Depends on:** wave 20
@@ -75,7 +75,7 @@ Master planning workspace with a nightly plan for the demo plant.
 **References**
 
 - [AX 2012 master planning](https://learn.microsoft.com/en-us/dynamicsax-2012/appuser-itpro/master-planning)
-- [SAP MRP](https://help.sap.com/docs/SAP_ERP/ac23efa7a8c1432ab4fa0c6ba7e7a84f/7a3d6e5287ca4e1b93b7f3a1a3e0e1f0.html)
+- [SAP MRP](https://help.sap.com/docs/SAP_ERP)
 - [frePPLe (open-source planning)](https://frepple.com/docs/current/)
 - [statsforecast (ETS/Croston)](https://nixtlaverse.nixtla.io/statsforecast/)
 
@@ -116,7 +116,7 @@ Scheduling workspace with Gantt for the demo plant.
 **References**
 
 - [AX 2012 scheduling](https://learn.microsoft.com/en-us/dynamicsax-2012/appuser-itpro/about-scheduling)
-- [SAP PP/DS](https://help.sap.com/docs/SAP_S4HANA_ON-PREMISE/2a6a1d6ef9f84bb5b5c5f0d5e0aa8c7e/4d0f6e5287ca4e1b93b7f3a1a3e0e1f0.html)
+- [SAP PP/DS](https://help.sap.com/docs/SAP_S4HANA_ON-PREMISE)
 - [OR-Tools job-shop scheduling](https://developers.google.com/optimization/scheduling/job_shop)
 - [OR-Library job-shop instances](http://people.brunel.ac.uk/~mastjjb/jeb/orlib/jobshopinfo.html)
 
@@ -158,7 +158,7 @@ Process and lean workspaces enabled for a second demo plant (food/chem line).
 
 - [AX 2012 process manufacturing](https://learn.microsoft.com/en-us/dynamicsax-2012/appuser-itpro/process-manufacturing-production-and-logistics)
 - [AX 2012 lean manufacturing](https://learn.microsoft.com/en-us/dynamicsax-2012/appuser-itpro/lean-manufacturing)
-- [SAP PP-PI](https://help.sap.com/docs/SAP_ERP/ac23efa7a8c1432ab4fa0c6ba7e7a84f/5b2d6e5287ca4e1b93b7f3a1a3e0e1f0.html)
+- [SAP PP-PI](https://help.sap.com/docs/SAP_ERP)
 
 **Depends on:** wave 23
 

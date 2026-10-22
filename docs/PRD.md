@@ -2,11 +2,38 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.1 — for review by Ben Russell and Zach Demanche |
+| **Status** | Draft v0.2 — for review by Ben Russell and Zach Demanche |
 | **Date** | 2026-10-21 |
 | **Owners** | @BenjaminSRussell (product), @zdemanche (engineering/security) |
 | **Method** | Moonaan Scribe requirements workflow (understand → research → draft → validate → publish). Jira/Confluence research was unavailable this session; research covered public AX/SAP documentation and both owners' GitHub accounts (no prior ERP work found). |
 | **Companion** | [roadmap/waves.json](../roadmap/waves.json) is the machine-readable source for the 50 waves; [roadmap/README.md](../roadmap/README.md) is generated from it. |
+| **Thesis** | Emulate the top-tier manufacturing ERPs (S/4HANA, D365 F&SCM, Infor LN, Epicor Kinetic, IFS, Plex) feature-for-feature, then be **10× easier, faster, more accurate and more open** — see [Part 0A](prd/part-00-thesis.md). |
+
+## Document map
+
+This master document (Part 0) holds the problem, goals, scope, delivery model, phase-level requirements and NFRs. The detailed parts hold wave-level requirements and are assembled into `docs/PRD-full.md` by `scripts/build_prd.py`.
+
+| Part | File | Content |
+|---|---|---|
+| 0 | `docs/PRD.md` (this file) | Problem, goals, personas, principles, scope map, delivery model, phase-level FRs, NFRs, risks |
+| 0A | [prd/part-00-thesis.md](prd/part-00-thesis.md) | The 10× thesis: pain-point ledger (usability, speed, accuracy, openness), interoperability contract, what we keep from AX and SAP |
+| 1 | [prd/phase-0-foundation.md](prd/phase-0-foundation.md) | Waves 1–5: pipeline, identity/tenancy, metadata kernel, events/workflow, shell/audit/observability |
+| 2 | [prd/phase-1-master-data.md](prd/phase-1-master-data.md) | Waves 6–10: enterprise structure, party model, products, engineering data, migration framework |
+| 3 | [prd/phase-2-financial-core.md](prd/phase-2-financial-core.md) | Waves 11–15: universal journal, currencies/ledgers, tax, close, reporting |
+| 4 | [prd/phase-3-procure-to-pay.md](prd/phase-3-procure-to-pay.md) | Waves 16–20: inventory ledger, purchasing, receiving/matching, AP/payments, costing/supplier portal |
+| 5 | [prd/phase-4-manufacturing.md](prd/phase-4-manufacturing.md) | Waves 21–25: production orders, MRP, scheduling, process/lean, shop floor/IoT |
+| 6 | [prd/phase-5-order-to-cash.md](prd/phase-5-order-to-cash.md) | Waves 26–30: pricing, orders/ATP, fulfillment, billing/rev rec, AR/collections — go-live candidate |
+| 7 | [prd/phase-6-logistics.md](prd/phase-6-logistics.md) | Waves 31–35: WMS, mobile, quality, transportation, EDI/e-invoicing/integration hub |
+| 8 | [prd/phase-7-treasury-controlling.md](prd/phase-7-treasury-controlling.md) | Waves 36–40: cash/bank, fixed assets, budgeting/cost accounting, product costing, intercompany/consolidation |
+| 9 | [prd/phase-8-projects-people-service.md](prd/phase-8-projects-people-service.md) | Waves 41–45: projects, HR, payroll/expenses, EAM, field service |
+| 10 | [prd/phase-9-intelligence-golive.md](prd/phase-9-intelligence-golive.md) | Waves 46–50: data platform, AI agents, localization/compliance, migration factory, scale/go-live |
+| 11 | [prd/appendices.md](prd/appendices.md) | Glossary, cross-module data model, event/API conventions, security model, NFR detail, numbering, localization, testing standards, traceability, references, competitive benchmark |
+| 12 | [prd/coverage-ax.md](prd/coverage-ax.md) | Completeness oracle: every AX 2012 R3 / D365 F&SCM module → forms, inquiries/reports, periodic jobs, setup forms, each mapped to a wave or flagged GAP; gap register |
+| 13 | [prd/coverage-sap.md](prd/coverage-sap.md) | Completeness oracle: every SAP ECC / S/4 component → transactions, reports, periodic processing, IMG customizing, each mapped to a wave or flagged GAP; gap register |
+
+Each wave section follows the fixed template in [prd/TEMPLATE.md](prd/TEMPLATE.md): scope and pain points solved → AX/SAP parity map → functional requirements → data model → APIs/events → UX → business rules → acceptance criteria → test plan → deployment → migration → dependencies/risks/open questions → parameters and setup → inquiries and reports → printed/electronic documents → periodic jobs → duties and privileges → message catalog → performance budgets → localization hooks.
+
+**Completeness rule.** A wave is not specified until every row of Parts 12 and 13 that maps to it is either covered by a numbered FR in that wave's section or explicitly marked SUPERSEDED/OUT-OF-SCOPE with a reason. The gap registers (12.99, 13.99) must be empty before Phase 0 starts.
 
 ---
 
@@ -29,6 +56,8 @@ Passage is a ground-up rebuild of the complete feature surface of AX/SAP as an o
 4. **Cloud-agnostic and self-hostable**: runs on any conformant Kubernetes (EKS/GKE/AKS/bare-metal/k3d) with no provider-specific managed services in the critical path.
 5. **Extensible without forking**: customers extend entities, workflows, forms and reports through metadata and sanctioned extension points, never by overlayering code.
 6. **Financially rigorous**: a single append-only universal journal is the only source of truth; every subledger reconciles to it by automated check.
+7. **10× on four measured axes** (defined in Part 0A): easier (≤ 1/10 the clicks per task; new user productive in < 30 min), faster (MRP incremental < 2 min, continuous close, real-time statements), more accurate (zero unexplained subledger-to-GL breaks, < 0.5% duplicate master data), open (any system on the customer's network connects in < 1 day through REST/GraphQL/Kafka/webhooks/MCP/EDI/OPC-UA/SFTP with one identity and one policy engine).
+8. **Best-of-breed manufacturing**: planning, scheduling, shop floor, quality, costing and warehouse are benchmarked against S/4HANA, D365 SCM, Infor LN, Epicor Kinetic, IFS Cloud and Plex (Appendix L), not only against AX 2012.
 
 ### Non-goals (v1)
 - Replacing CRM/marketing automation suites (we integrate with Salesforce/HubSpot; a native CRM is v2).

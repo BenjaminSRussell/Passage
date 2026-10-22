@@ -35,7 +35,7 @@ GL service and journal workspace live; the demo manufacturer's chart of accounts
 
 **References**
 
-- [SAP ACDOCA universal journal](https://help.sap.com/docs/SAP_S4HANA_ON-PREMISE/2a6a1d6ef9f84bb5b5c5f0d5e0aa8c7e/ab8d1e1b5e0b4f1a8d5c0b0e2c1b7f8d.html)
+- [SAP ACDOCA universal journal](https://help.sap.com/docs/SAP_S4HANA_ON-PREMISE)
 - [AX 2012 financial dimensions & account structures](https://learn.microsoft.com/en-us/dynamicsax-2012/appuser-itpro/about-financial-dimensions-and-account-structures)
 - [TigerBeetle debit/credit ledger design](https://docs.tigerbeetle.com/concepts/debit-credit/)
 - [Modern Treasury: double-entry ledgers](https://www.moderntreasury.com/journal/accounting-for-developers-part-i)
@@ -78,7 +78,7 @@ Exchange rates workspace; revaluation batch scheduled in dev; demo entity with E
 **References**
 
 - [IAS 21 effects of changes in FX rates](https://www.ifrs.org/issued-standards/list-of-standards/ias-21-the-effects-of-changes-in-foreign-exchange-rates/)
-- [SAP parallel ledgers in New GL](https://help.sap.com/docs/SAP_ERP/f8f1ee2f3b9e4b1ba4bbb8ac2a6b5a2e/3a2d6e5287ca4e1b93b7f3a1a3e0e1f0.html)
+- [SAP parallel ledgers in New GL](https://help.sap.com/docs/SAP_ERP)
 - [AX 2012 foreign currency revaluation](https://learn.microsoft.com/en-us/dynamicsax-2012/appuser-itpro/foreign-currency-revaluation-general-ledger)
 - [ECB exchange rates API](https://data.ecb.europa.eu/help/api/overview)
 
@@ -119,7 +119,7 @@ Tax configuration workspace; demo entities configured for US sales tax and EU VA
 **References**
 
 - [AX 2012 sales tax overview](https://learn.microsoft.com/en-us/dynamicsax-2012/appuser-itpro/about-sales-tax)
-- [SAP tax determination (FI)](https://help.sap.com/docs/SAP_ERP/f8f1ee2f3b9e4b1ba4bbb8ac2a6b5a2e/a6d8e5c287ca4e1b93b7f3a1a3e0e1f0.html)
+- [SAP tax determination (FI)](https://help.sap.com/docs/SAP_ERP)
 - [OECD SAF-T](https://www.oecd.org/tax/forum-on-tax-administration/publications-and-products/guidance-for-the-standard-audit-file-tax-version-2-0.htm)
 - [Avalara AvaTax API](https://developer.avalara.com/api-reference/avatax/rest/v2/)
 
@@ -161,7 +161,7 @@ Financial period close workspace live; demo entities close a simulated period in
 
 - [D365 financial period close workspace](https://learn.microsoft.com/en-us/dynamics365/finance/general-ledger/financial-period-close-workspace)
 - [AX 2012 allocation rules](https://learn.microsoft.com/en-us/dynamicsax-2012/appuser-itpro/about-ledger-allocation-rules)
-- [SAP Financial Closing Cockpit](https://help.sap.com/docs/SAP_S4HANA_ON-PREMISE/2a6a1d6ef9f84bb5b5c5f0d5e0aa8c7e/c3b0f6d2b7f84d8f9c1a5a6d2e4c3b1a.html)
+- [SAP Financial Closing Cockpit](https://help.sap.com/docs/SAP_S4HANA_ON-PREMISE)
 
 **Depends on:** wave 13
 
@@ -200,7 +200,7 @@ Financial reporting workspace; nightly statement pack scheduled for the demo ent
 **References**
 
 - [D365 financial reporting (Management Reporter)](https://learn.microsoft.com/en-us/dynamics365/finance/general-ledger/financial-reporting-getting-started)
-- [SAP financial statement versions](https://help.sap.com/docs/SAP_ERP/f8f1ee2f3b9e4b1ba4bbb8ac2a6b5a2e/9e0f6e5287ca4e1b93b7f3a1a3e0e1f0.html)
+- [SAP financial statement versions](https://help.sap.com/docs/SAP_ERP)
 - [IAS 7 statement of cash flows](https://www.ifrs.org/issued-standards/list-of-standards/ias-7-statement-of-cash-flows/)
 
 **Depends on:** wave 14

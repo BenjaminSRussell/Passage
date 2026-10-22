@@ -10,3 +10,4 @@ __pycache__/
 *.pyc
 .terraform/
 *.tfstate*
+docs/PRD-full.html
