@@ -30,15 +30,15 @@
 
 | Event (CloudEvents type) | Producer | Consumers | Payload summary |
 |---|---|---|---|
-| `com.passage.projects.transaction.posted.v1` | projects | journal, analytics, expense (link-back) | projectId, wbsId, txType, qty, cost, salesPrice, currency, journalId |
-| `com.passage.hr.employment.changed.v1` | hr | payroll, projects (resource validity), service (technician), Keycloak sync | workerId, employmentId, action, effectiveFrom, effectiveTo |
-| `com.passage.hr.absence.approved.v1` | hr | time (wave 25), projects (availability), payroll (paid-leave earnings) | workerId, planId, from, to, hours |
-| `com.passage.payroll.run.posted.v1` | payroll | journal, bank (wave 36), analytics | payRunId, payCycleId, grossTotal, netTotal, employerTaxTotal, journalId |
-| `com.passage.expense.report.approved.v1` | expense | ap (wave 18), projects | reportId, workerId, totalAmount, currency, lines[] |
-| `com.passage.eam.request.created.v1` | eam (or IoT bridge) | service desk UI, notifications | requestId, assetId, source, severity, readingValue |
-| `com.passage.eam.workorder.completed.v1` | eam | journal (cost settlement), fixed assets, scheduling (wave 23) capacity release | workOrderId, assetId, partsCost, laborCost, downtimeMinutes |
-| `com.passage.service.sla.breached.v1` | service | notifications, analytics | caseId or workOrderId, slaType, dueAt, breachedAt |
-| `com.passage.service.dispatch.published.v1` | dispatch | technician PWA, service | scheduleDate, assignments[] (workOrderId, technicianId, start, end) |
+| `dev.passage.projects.transaction.posted.v1` | projects | journal, analytics, expense (link-back) | projectId, wbsId, txType, qty, cost, salesPrice, currency, journalId |
+| `dev.passage.hr.employment.changed.v1` | hr | payroll, projects (resource validity), service (technician), Keycloak sync | workerId, employmentId, action, effectiveFrom, effectiveTo |
+| `dev.passage.hr.absence.approved.v1` | hr | time (wave 25), projects (availability), payroll (paid-leave earnings) | workerId, planId, from, to, hours |
+| `dev.passage.payroll.run.posted.v1` | payroll | journal, bank (wave 36), analytics | payRunId, payCycleId, grossTotal, netTotal, employerTaxTotal, journalId |
+| `dev.passage.expense.report.approved.v1` | expense | ap (wave 18), projects | reportId, workerId, totalAmount, currency, lines[] |
+| `dev.passage.eam.request.created.v1` | eam (or IoT bridge) | service desk UI, notifications | requestId, assetId, source, severity, readingValue |
+| `dev.passage.eam.workorder.completed.v1` | eam | journal (cost settlement), fixed assets, scheduling (wave 23) capacity release | workOrderId, assetId, partsCost, laborCost, downtimeMinutes |
+| `dev.passage.service.sla.breached.v1` | service | notifications, analytics | caseId or workOrderId, slaType, dueAt, breachedAt |
+| `dev.passage.service.dispatch.published.v1` | dispatch | technician PWA, service | scheduleDate, assignments[] (workOrderId, technicianId, start, end) |
 
 **Phase-level risks**
 
@@ -193,10 +193,10 @@ Commands validate: journal lines must reference a project in IN_PROCESS; categor
 
 | Event | Trigger | Payload fields | Consumers |
 |---|---|---|---|
-| `com.passage.projects.transaction.posted.v1` | journal/document posted | see 8.0 | journal, analytics, expense |
-| `com.passage.projects.invoice-proposal.posted.v1` | proposal → POSTED | proposalId, invoiceId, lines[] | invoicing (wave 29), analytics |
-| `com.passage.projects.estimate.posted.v1` | estimate posted or reversed | estimateId, projectId, periodId, pocPercent, revenueThisPeriod, journalId, reversed | journal, analytics |
-| `com.passage.projects.wbs.scheduled.v1` | scheduler run | projectId, planVersionId, criticalPath[], finishDate | resource planning, notifications |
+| `dev.passage.projects.transaction.posted.v1` | journal/document posted | see 8.0 | journal, analytics, expense |
+| `dev.passage.projects.invoice-proposal.posted.v1` | proposal → POSTED | proposalId, invoiceId, lines[] | invoicing (wave 29), analytics |
+| `dev.passage.projects.estimate.posted.v1` | estimate posted or reversed | estimateId, projectId, periodId, pocPercent, revenueThisPeriod, journalId, reversed | journal, analytics |
+| `dev.passage.projects.wbs.scheduled.v1` | scheduler run | projectId, planVersionId, criticalPath[], finishDate | resource planning, notifications |
 
 ### 8.41.6 User experience
 
@@ -406,10 +406,10 @@ Validation: action effective date may be future-dated up to 365 days; terminatio
 
 | Event | Trigger | Payload | Consumers |
 |---|---|---|---|
-| `com.passage.hr.employment.changed.v1` | action applied | see 8.0 | payroll, projects, service, SCIM |
-| `com.passage.hr.position.assignment.changed.v1` | assignment start/end | workerId, positionId, validity, managerPositionId | authorization (manager roles), workflow routing |
-| `com.passage.hr.absence.approved.v1` | request approved | workerId, planId, from, to, hours | time, projects, payroll |
-| `com.passage.hr.benefit.enrollment.changed.v1` | enrollment start/end | workerId, planId, option, validity, employeeRate | payroll deductions |
+| `dev.passage.hr.employment.changed.v1` | action applied | see 8.0 | payroll, projects, service, SCIM |
+| `dev.passage.hr.position.assignment.changed.v1` | assignment start/end | workerId, positionId, validity, managerPositionId | authorization (manager roles), workflow routing |
+| `dev.passage.hr.absence.approved.v1` | request approved | workerId, planId, from, to, hours | time, projects, payroll |
+| `dev.passage.hr.benefit.enrollment.changed.v1` | enrollment start/end | workerId, planId, option, validity, employeeRate | payroll deductions |
 
 ### 8.42.6 User experience
 
@@ -603,10 +603,10 @@ Validation: calculate requires HR cutoff passed and all time registrations for t
 
 | Event | Trigger | Payload | Consumers |
 |---|---|---|---|
-| `com.passage.payroll.run.posted.v1` | GL post | see 8.0 | journal, bank, analytics |
-| `com.passage.payroll.statement.finalized.v1` | finalize | statementId, workerId, net, payDate | ESS, provider adapter |
-| `com.passage.expense.report.approved.v1` | approval | see 8.0 | ap, projects |
-| `com.passage.expense.policy.violated.v1` | BLOCK outcome at submit | reportId, lineId, ruleId, outcome | analytics, audit |
+| `dev.passage.payroll.run.posted.v1` | GL post | see 8.0 | journal, bank, analytics |
+| `dev.passage.payroll.statement.finalized.v1` | finalize | statementId, workerId, net, payDate | ESS, provider adapter |
+| `dev.passage.expense.report.approved.v1` | approval | see 8.0 | ap, projects |
+| `dev.passage.expense.policy.violated.v1` | BLOCK outcome at submit | reportId, lineId, ruleId, outcome | analytics, audit |
 
 ### 8.43.6 User experience
 
@@ -827,11 +827,11 @@ Validation: readings for cumulative counters must be ≥ last_reading else `EAM-
 
 | Event | Trigger | Payload | Consumers |
 |---|---|---|---|
-| `com.passage.eam.request.created.v1` | request created | see 8.0 | planner UI, notifications |
-| `com.passage.eam.workorder.status.changed.v1` | transition | workOrderId, from, to, at, actor | mobile, analytics |
-| `com.passage.eam.workorder.completed.v1` | COMPLETED | see 8.0 | journal, fixed assets, scheduling |
-| `com.passage.eam.counter.reading.registered.v1` | reading | counterId, assetId, value, at, source | plan scheduler, condition rules |
-| `com.passage.eam.downtime.recorded.v1` | downtime on resource | resourceId, from, to, workOrderId | scheduling (wave 23), OEE (wave 25) |
+| `dev.passage.eam.request.created.v1` | request created | see 8.0 | planner UI, notifications |
+| `dev.passage.eam.workorder.status.changed.v1` | transition | workOrderId, from, to, at, actor | mobile, analytics |
+| `dev.passage.eam.workorder.completed.v1` | COMPLETED | see 8.0 | journal, fixed assets, scheduling |
+| `dev.passage.eam.counter.reading.registered.v1` | reading | counterId, assetId, value, at, source | plan scheduler, condition rules |
+| `dev.passage.eam.downtime.recorded.v1` | downtime on resource | resourceId, from, to, workOrderId | scheduling (wave 23), OEE (wave 25) |
 
 ### 8.44.6 User experience
 
@@ -1037,11 +1037,11 @@ Validation: case creation requires a customer; dispatch run requires all WOs to 
 
 | Event | Trigger | Payload | Consumers |
 |---|---|---|---|
-| `com.passage.service.case.opened.v1` | case created | caseId, customerId, priority, agreementId, responseDue, resolutionDue | notifications, analytics |
-| `com.passage.service.sla.breached.v1` | breach monitor | see 8.0 | notifications, analytics |
-| `com.passage.service.dispatch.published.v1` | publish | see 8.0 | PWA, customer notifications |
-| `com.passage.service.workorder.completed.v1` | complete action | workOrderId, technicianId, lines[], firstTimeFix, durationMinutes | billing, inventory (truck consumption), KPIs |
-| `com.passage.service.workorder.posted.v1` | billing post | workOrderId, invoiceId, billableTotal, warrantyCost, entitlementConsumed | invoicing, analytics |
+| `dev.passage.service.case.opened.v1` | case created | caseId, customerId, priority, agreementId, responseDue, resolutionDue | notifications, analytics |
+| `dev.passage.service.sla.breached.v1` | breach monitor | see 8.0 | notifications, analytics |
+| `dev.passage.service.dispatch.published.v1` | publish | see 8.0 | PWA, customer notifications |
+| `dev.passage.service.workorder.completed.v1` | complete action | workOrderId, technicianId, lines[], firstTimeFix, durationMinutes | billing, inventory (truck consumption), KPIs |
+| `dev.passage.service.workorder.posted.v1` | billing post | workOrderId, invoiceId, billableTotal, warrantyCost, entitlementConsumed | invoicing, analytics |
 
 ### 8.45.6 User experience
 

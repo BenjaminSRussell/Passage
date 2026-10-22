@@ -41,21 +41,21 @@
 
 | Event (CloudEvents type) | Producer | Consumers | Payload summary |
 |---|---|---|---|
-| `passage.inventory.transaction.posted.v1` | inventory | costing, planning (w22), analytics | txn id, origin, product, dims, qty, issue/receipt status, physical/financial dates |
-| `passage.inventory.onhand.changed.v1` | inventory | procurement (ATP for PO), sales (w27), warehouse (w31) | product, dim hash, avail_physical, avail_ordered, delta |
-| `passage.inventory.journal.posted.v1` | inventory | ledger (reconciliation), costing | journal id, type, line count, ledger entry id |
-| `passage.procurement.requisition.approved.v1` | procurement | procurement consolidation, budget control (w38) | req id, lines, approver chain |
-| `passage.procurement.po.confirmed.v1` | procurement | inventory (OnOrder txns), supplier-portal, EDI (w35) | po id, version, lines, vendor |
-| `passage.procurement.po.version.created.v1` | procurement | supplier-portal, receiving | po id, version, diff summary |
-| `passage.receiving.receipt.posted.v1` | receiving | inventory, payables (match candidates), costing | receipt id, lines, po lines, qty, GR/IR amount |
-| `passage.payables.invoice.posted.v1` | payables | ledger, costing (PPV/invoice-cost settle), tax (w13) | invoice id, vendor, lines, match status, amounts |
-| `passage.payables.invoice.match.exception.v1` | payables | workflow (Temporal), notifications | invoice id, line, variance type, amounts |
-| `passage.payables.settlement.posted.v1` | payables | ledger, analytics | settlement id, items, discount, fx gain/loss |
-| `passage.payables.payment.sent.v1` | payables | bank connectivity (w36), supplier-portal, cash (w36) | payment id, file id, amount, method, vendor |
-| `passage.payables.payment.status.changed.v1` | payables | notifications, analytics | payment id, old/new status, pain.002 reason code |
-| `passage.costing.close.completed.v1` | costing | ledger, analytics | close id, period, adjustments, duration |
-| `passage.costing.cost.changed.v1` | costing | inventory, planning, product costing (w39) | product, site, version, old/new cost, effective date |
-| `passage.supplier.asn.submitted.v1` | supplier-portal | receiving, warehouse (w31) | asn id, po lines, expected qty, carrier |
+| `dev.passage.inventory.transaction.posted.v1` | inventory | costing, planning (w22), analytics | txn id, origin, product, dims, qty, issue/receipt status, physical/financial dates |
+| `dev.passage.inventory.onhand.changed.v1` | inventory | procurement (ATP for PO), sales (w27), warehouse (w31) | product, dim hash, avail_physical, avail_ordered, delta |
+| `dev.passage.inventory.journal.posted.v1` | inventory | ledger (reconciliation), costing | journal id, type, line count, ledger entry id |
+| `dev.passage.procurement.requisition.approved.v1` | procurement | procurement consolidation, budget control (w38) | req id, lines, approver chain |
+| `dev.passage.procurement.po.confirmed.v1` | procurement | inventory (OnOrder txns), supplier-portal, EDI (w35) | po id, version, lines, vendor |
+| `dev.passage.procurement.po.version.created.v1` | procurement | supplier-portal, receiving | po id, version, diff summary |
+| `dev.passage.receiving.receipt.posted.v1` | receiving | inventory, payables (match candidates), costing | receipt id, lines, po lines, qty, GR/IR amount |
+| `dev.passage.payables.invoice.posted.v1` | payables | ledger, costing (PPV/invoice-cost settle), tax (w13) | invoice id, vendor, lines, match status, amounts |
+| `dev.passage.payables.invoice.match.exception.v1` | payables | workflow (Temporal), notifications | invoice id, line, variance type, amounts |
+| `dev.passage.payables.settlement.posted.v1` | payables | ledger, analytics | settlement id, items, discount, fx gain/loss |
+| `dev.passage.payables.payment.sent.v1` | payables | bank connectivity (w36), supplier-portal, cash (w36) | payment id, file id, amount, method, vendor |
+| `dev.passage.payables.payment.status.changed.v1` | payables | notifications, analytics | payment id, old/new status, pain.002 reason code |
+| `dev.passage.costing.close.completed.v1` | costing | ledger, analytics | close id, period, adjustments, duration |
+| `dev.passage.costing.cost.changed.v1` | costing | inventory, planning, product costing (w39) | product, site, version, old/new cost, effective date |
+| `dev.passage.supplier.asn.submitted.v1` | supplier-portal | receiving, warehouse (w31) | asn id, po lines, expected qty, carrier |
 
 **Phase-level risks**
 
@@ -160,7 +160,7 @@ Out of scope: purchase/sales-driven transactions (waves 17–18, 27), production
 
 - **FR-16.11 Physical and financial dates** — Must. The system shall store `physical_date` (goods movement) and `financial_date` (value recognition) separately; the ledger entry uses `financial_date` and is validated against period control (wave 14) for module INVENTORY.
 
-- **FR-16.12 Daily reconciliation** — Must. The system shall run a job that compares SUM(OnHand.posted_value) by inventory account and dimension to the ledger balance projection and raises `passage.inventory.reconciliation.diff.v1` on any non-zero difference.
+- **FR-16.12 Daily reconciliation** — Must. The system shall run a job that compares SUM(OnHand.posted_value) by inventory account and dimension to the ledger balance projection and raises `dev.passage.inventory.reconciliation.diff.v1` on any non-zero difference.
 
 - **FR-16.13 Inventory transaction inquiry** — Should. The system shall provide a filterable, exportable inquiry over transactions with origin, status, dates and GL voucher drill-down.
 
@@ -254,11 +254,11 @@ Commands: `CreateJournal`, `AddLines`, `PostJournal` (validates period control, 
 
 | Event | Trigger | Payload fields | Consumers |
 |---|---|---|---|
-| `passage.inventory.transaction.posted.v1` | any transaction insert or status change | transaction_id, origin, product_id, dimension_set, qty, issue_status, receipt_status, physical_date, financial_date, cost_amount_* | costing, analytics, planning |
-| `passage.inventory.onhand.changed.v1` | OnHand row update | product_id, dimension_set, avail_physical, avail_ordered, delta_bucket, delta_qty | procurement, sales, warehouse |
-| `passage.inventory.journal.posted.v1` | journal reaches POSTED | journal_id, type, lines, ledger_entry_id, posting_date | ledger reconciliation, costing |
-| `passage.inventory.reservation.created.v1` / `.released.v1` | reservation lifecycle | reservation_id, demand, product, dims, qty, policy | sales, production |
-| `passage.inventory.reconciliation.diff.v1` | daily job finds diff ≠ 0 | account, dimension, inventory_value, ledger_balance, diff | alerting |
+| `dev.passage.inventory.transaction.posted.v1` | any transaction insert or status change | transaction_id, origin, product_id, dimension_set, qty, issue_status, receipt_status, physical_date, financial_date, cost_amount_* | costing, analytics, planning |
+| `dev.passage.inventory.onhand.changed.v1` | OnHand row update | product_id, dimension_set, avail_physical, avail_ordered, delta_bucket, delta_qty | procurement, sales, warehouse |
+| `dev.passage.inventory.journal.posted.v1` | journal reaches POSTED | journal_id, type, lines, ledger_entry_id, posting_date | ledger reconciliation, costing |
+| `dev.passage.inventory.reservation.created.v1` / `.released.v1` | reservation lifecycle | reservation_id, demand, product, dims, qty, policy | sales, production |
+| `dev.passage.inventory.reconciliation.diff.v1` | daily job finds diff ≠ 0 | account, dimension, inventory_value, ledger_balance, diff | alerting |
 
 ### 3.16.6 User experience
 
@@ -506,12 +506,12 @@ Commands: `SubmitRequisition` (account structure valid, lines ≥ 1, no closed c
 
 | Event | Trigger | Payload fields | Consumers |
 |---|---|---|---|
-| `passage.procurement.requisition.submitted.v1` / `.approved.v1` / `.rejected.v1` | workflow transitions | requisition_id, lines (product, qty, amount), total, approver chain, policy_version | notifications, budget (w38), analytics |
-| `passage.procurement.rfq.sent.v1` / `.awarded.v1` | RFQ send/award | rfq_id, vendors, lines, awarded vendor per line | supplier-portal (w20), notifications |
-| `passage.procurement.po.confirmed.v1` | confirm | po_id, version_no, vendor_id, lines (product, qty, unit, price, delivery dates, site/warehouse), totals, output channel | inventory, receiving (w18), supplier-portal, EDI (w35), analytics |
-| `passage.procurement.po.version.created.v1` | any confirmed version > 1 | po_id, version_no, patch, reapproval_required | supplier-portal, receiving |
-| `passage.procurement.po.cancelled.v1` | cancel | po_id, lines cancelled, remaining qty | inventory (cancel ORDERED), supplier-portal |
-| `passage.procurement.agreement.threshold.v1` | released ≥ 90 % or expiry < 30 d | agreement_id, line, pct, expiry | notifications |
+| `dev.passage.procurement.requisition.submitted.v1` / `.approved.v1` / `.rejected.v1` | workflow transitions | requisition_id, lines (product, qty, amount), total, approver chain, policy_version | notifications, budget (w38), analytics |
+| `dev.passage.procurement.rfq.sent.v1` / `.awarded.v1` | RFQ send/award | rfq_id, vendors, lines, awarded vendor per line | supplier-portal (w20), notifications |
+| `dev.passage.procurement.po.confirmed.v1` | confirm | po_id, version_no, vendor_id, lines (product, qty, unit, price, delivery dates, site/warehouse), totals, output channel | inventory, receiving (w18), supplier-portal, EDI (w35), analytics |
+| `dev.passage.procurement.po.version.created.v1` | any confirmed version > 1 | po_id, version_no, patch, reapproval_required | supplier-portal, receiving |
+| `dev.passage.procurement.po.cancelled.v1` | cancel | po_id, lines cancelled, remaining qty | inventory (cancel ORDERED), supplier-portal |
+| `dev.passage.procurement.agreement.threshold.v1` | released ≥ 90 % or expiry < 30 d | agreement_id, line, pct, expiry | notifications |
 
 ### 3.17.6 User experience
 
@@ -759,12 +759,12 @@ Commands: `PostReceipt` (open period, over-delivery, serial uniqueness, PO confi
 
 | Event | Trigger | Payload fields | Consumers |
 |---|---|---|---|
-| `passage.receiving.receipt.posted.v1` | receipt POSTED | receipt_id, po_id, lines (po_line, qty, dims, batch, serials, amount_acct), ledger_entry_id | inventory, payables (re-match, ERS), costing, supplier-portal |
-| `passage.receiving.receipt.corrected.v1` | correction/cancel | receipt_id, delta lines | payables, costing |
-| `passage.payables.invoice.captured.v1` | DRAFT created from adapter | invoice_id, vendor, source, confidence | notifications |
-| `passage.payables.invoice.match.exception.v1` | variance status | invoice_id, line_id, status, variances, assignee | workflow, notifications |
-| `passage.payables.invoice.posted.v1` | POSTED | invoice_id, vendor_transaction_id, lines, totals, grir cleared amounts, ledger_entry_id | ledger reconciliation, costing, tax, analytics |
-| `passage.payables.grir.cleared.v1` | GrirOpenItem CLEARED/WRITTEN_OFF | open_item_id, amounts | analytics |
+| `dev.passage.receiving.receipt.posted.v1` | receipt POSTED | receipt_id, po_id, lines (po_line, qty, dims, batch, serials, amount_acct), ledger_entry_id | inventory, payables (re-match, ERS), costing, supplier-portal |
+| `dev.passage.receiving.receipt.corrected.v1` | correction/cancel | receipt_id, delta lines | payables, costing |
+| `dev.passage.payables.invoice.captured.v1` | DRAFT created from adapter | invoice_id, vendor, source, confidence | notifications |
+| `dev.passage.payables.invoice.match.exception.v1` | variance status | invoice_id, line_id, status, variances, assignee | workflow, notifications |
+| `dev.passage.payables.invoice.posted.v1` | POSTED | invoice_id, vendor_transaction_id, lines, totals, grir cleared amounts, ledger_entry_id | ledger reconciliation, costing, tax, analytics |
+| `dev.passage.payables.grir.cleared.v1` | GrirOpenItem CLEARED/WRITTEN_OFF | open_item_id, amounts | analytics |
 
 ### 3.18.6 User experience
 
@@ -1011,12 +1011,12 @@ Commands: `CommitSettlement` (same vendor, no held items, rates available, AP pe
 
 | Event | Trigger | Payload fields | Consumers |
 |---|---|---|---|
-| `passage.payables.settlement.posted.v1` / `.reversed.v1` | settlement commit/reverse | settlement_id, vendor_id, lines (ids, applied, discount, fx_diff), ledger_entry_id | ledger reconciliation, analytics |
-| `passage.payables.proposal.approved.v1` | approval complete | proposal_id, totals by currency, payment_date | notifications |
-| `passage.payables.payment.posted.v1` | payment journal posted | payment_id, vendor, amount, method, bank account, settled items | cash (w36), analytics |
-| `passage.payables.payment.sent.v1` | file generated & marked sent | payment_id, file_id, format, end_to_end_id | bank connectivity (w36), supplier-portal (w20) |
-| `passage.payables.payment.status.changed.v1` | pain.002/NACHA return | payment_id, old_status, new_status, reason_code | notifications, supplier-portal |
-| `passage.payables.aging.reconciled.v1` | daily job | as_of, vendor_group, open_total, control_balance, diff | alerting |
+| `dev.passage.payables.settlement.posted.v1` / `.reversed.v1` | settlement commit/reverse | settlement_id, vendor_id, lines (ids, applied, discount, fx_diff), ledger_entry_id | ledger reconciliation, analytics |
+| `dev.passage.payables.proposal.approved.v1` | approval complete | proposal_id, totals by currency, payment_date | notifications |
+| `dev.passage.payables.payment.posted.v1` | payment journal posted | payment_id, vendor, amount, method, bank account, settled items | cash (w36), analytics |
+| `dev.passage.payables.payment.sent.v1` | file generated & marked sent | payment_id, file_id, format, end_to_end_id | bank connectivity (w36), supplier-portal (w20) |
+| `dev.passage.payables.payment.status.changed.v1` | pain.002/NACHA return | payment_id, old_status, new_status, reason_code | notifications, supplier-portal |
+| `dev.passage.payables.aging.reconciled.v1` | daily job | as_of, vendor_group, open_total, control_balance, diff | alerting |
 
 ### 3.19.6 User experience
 
@@ -1115,3 +1115,263 @@ Open questions:
 2. Should the proposal auto-net credit notes across currencies? Default: same currency only. Decide by wave 19 close.
 3. Card payments (virtual cards) in v1? Default: method type exists, no provider adapter until v1.x. Decide by wave 35.
 
+## 3.20 Wave 20: Inventory Costing & Supplier Collaboration
+
+### 3.20.1 Scope and business context
+
+Wave 20 makes inventory value correct. Waves 16–18 wrote `cost_amount_physical` and `cost_amount_posted` on every inventory transaction at the running estimate (receipt price, running average on issues). This wave adds the costing engine that settles issues against receipts under the item model group's method — FIFO, LIFO, weighted average (running or periodic) or standard cost — and the inventory close/recalculation job (AX InventClosing with InventSettlement and InventCostTrans; SAP material ledger period-end closing CKMLCP with CKMLPP/CKMLCR and MBEW price control S/V, MR21 price change, MR22 debit/credit) that posts `cost_amount_adjustment` rows and GL adjustments so that the inventory value report ties to the GL inventory accounts by site, warehouse, item group and financial dimension. Standard cost captures purchase price variance (PPV) on receipt and invoice. Costing versions (AX CostingVersion/InventItemPrice; SAP CK11N/CK24 marking and release for material-level prices) hold planned and standard costs by product × site with activation and revaluation of on-hand.
+
+The supplier portal (D365 vendor collaboration; SAP Ariba Supplier Network / SNC) at `supplier.<env>.passage.dev` lets vendor users acknowledge POs (accept/reject/propose changes), send ASNs, reply to RFQs (wave 17 hook), submit invoices against POs (wave 18 `:capture` source PORTAL), view payment status and advices (wave 19), and exchange documents.
+
+Out of scope: BOM cost roll-up, costing sheets and production variance decomposition (wave 39), production order WIP settlement (wave 21 uses this engine for its receipts/issues), landed cost (wave 34), cost accounting ledger (wave 38), portal e-invoicing via Peppol (wave 35), supplier onboarding/qualification workflow (v1.x).
+
+**Pain points solved (10x lens)**
+
+| Pain point in AX/SAP today | Root cause | Passage answer in this wave | Measurable 10x target |
+|---|---|---|---|
+| AX inventory close (InventClosing) takes 4–12 h for large companies, blocks posting in the period, fails on unsettled negative issues with cryptic "cannot settle" messages, and must be cancelled and re-run end to end | Single-threaded settlement per item in X++ with helper threads; whole-period scope; no incremental | Close runs as a Temporal workflow with per-product child workflows (parallelism 32), incremental from the last closed date, resumable, with a pre-check report listing items that cannot settle and why | Close duration on 1M transactions: 4–12 h → < 20 min; re-run after failure: full → incremental from checkpoint |
+| Inventory value does not tie to the GL: AX "Inventory value report" (InventValueReport) requires report configuration (InventValueReportSetup) and still differs from the GL because of manual journals and timing; SAP MB5L vs FAGLB03 differences investigated monthly | Value report computed from InventTrans; GL has postings from other sources; no per-dimension open-item relationship | Value report is a projection from `CostTransaction` rows with the GL voucher on each; daily reconciliation per inventory account × dimension; every difference row drills to the causing voucher | Monthly inventory-to-GL reconciliation: 1–3 days → < 1 h; unexplained differences: non-zero → 0 |
+| Weighted average in AX during the period uses running average per receipt, then close recalculates to periodic average, changing COGS retroactively with surprises at close; SAP MAP (VERPR) can go negative or spike on small stock with large invoice differences | Two-phase (running vs periodic) design; MAP recalculated on invoice with stock near zero | Method choice `WEIGHTED_AVG_RUNNING` (what you see during the period is final) or `WEIGHTED_AVG_PERIODIC` (explicit), with a preview of close adjustments by product before posting; guard that invoice differences on zero stock post to price difference, not to a residual unit | Unexpected COGS adjustments at close: typical 1–3 % of COGS → < 0.1 %; MAP spike incidents: tracked, target 0 |
+| Standard cost activation in AX requires costing version setup, pending prices, "Activate pending prices", then a revaluation posting that is hard to reconcile; SAP CK24 marking/release with CKM3 analysis is a multi-transaction month-end routine | Multi-step manual procedure | `CostingVersion` with pending/active state; `:activate` posts the revaluation of on-hand in one voucher and shows the per-site delta before activation | Steps to activate standard costs for a plant: 6–9 transactions → 2 (review, activate); activation latency: hours → < 2 min for 10k products |
+| Vendors call or email for PO status, ASN entry is EDI-only or re-keyed by the warehouse, invoices arrive by email PDF; D365 vendor collaboration needs Azure AD B2B guest setup per vendor user; Ariba requires a separate subscription | Portal is an add-on with separate identity | Portal built on the same APIs/events with its own Keycloak realm; vendor admin invites users self-service; ASN pre-fills receiving (wave 18) | Vendor onboarding to portal: days → < 15 min; PO acknowledgement latency: 2–5 days → < 1 day median; receipts pre-filled from ASN: 0 % → > 80 % of portal vendors' receipts |
+
+### 3.20.2 AX / SAP parity map
+
+| Capability | AX 2012 / D365 F&SCM | SAP ECC / S/4 | Passage equivalent | Parity level |
+|---|---|---|---|---|
+| Costing method per item | InventModelGroup.InventModel (FIFO, LIFO, LIFO date, Weighted avg, Weighted avg date, Standard cost, Moving average) | MBEW VPRSV (S standard / V moving average), material ledger actual costing for periodic | `ItemModelGroup.costing_method` (FIFO, LIFO, LIFO_DATE, WEIGHTED_AVG_RUNNING, WEIGHTED_AVG_PERIODIC, STANDARD, MOVING_AVG) | full |
+| Inventory close | InventClosing, InventSettlement, InventCostTrans, InventClosingRecalculation; Close and adjustment form | CKMLCP (material ledger cockpit: selection, determine sequence, single/multi-level price determination, post closing), CKMLPP/CKMLCR | `InventoryClose` workflow, `CostSettlement`, `CostTransaction` | full |
+| Recalculation | Recalculation (without closing), cancel recalculation | Material ledger price determination preview; CKM3 analysis | `:recalculate` (preview/post without closing period) | full |
+| Adjustment | Adjustment of on-hand / transactions (InventAdjOnhand, InventAdjTrans) | MR22 debit/credit material, MR21 price change | `CostAdjustment` (on-hand or transaction level) | full |
+| Standard cost / costing versions | CostingVersion, InventItemPrice (pending/active), activation, revaluation posting | Standard price STPRS, CK11N estimate, CK24 mark/release, price change document MR21, revaluation | `CostingVersion`, `ItemCost` (PENDING/ACTIVE), `:activate` with revaluation voucher | full (roll-up in w39) |
+| Purchase price variance | Standard cost variance posting types PurchPriceVariance at receipt/invoice | PRD price difference account (OBYC PRD) on GR/IR | PPV posting at receipt and invoice (wave 18 hooks) with `CostTransaction` kind PPV | full |
+| Inventory value report | InventValueReport, InventValueReportSetup, Inventory aging | MB5L (stock value), MC.9 / MB52, CKM3 | `GET /costing/value-report` with dimension grouping and GL tie-out column | improved |
+| Marking | InventTrans marking (MarkingRefInventTransOrigin) | Not standard (batch-specific valuation partial) | `marked_transaction_id` on transactions (wave 16 field) honored by settlement | full |
+| Moving average | Moving average (InventModel MovingAverage) with product cost adjustment at invoice | MAP VERPR update on GR/IR | `MOVING_AVG` with invoice-difference settlement to stock proportionally | full |
+| Vendor collaboration | D365 Vendor collaboration workspace (PO confirmation, consignment, invoices, RFQ replies) | Ariba Supplier Network, SNC/Supplier Portal | Supplier portal (PO ack, ASN, invoice, RFQ reply, payments, documents) | full |
+| ASN | D365 vendor collaboration ASN; AIF ASN inbound | ASN via EDI DESADV, SNC | `AdvanceShipNotice` → receiving expected lines | full |
+
+### 3.20.3 Functional requirements
+
+- **FR-20.1 Costing methods** — Must. The system shall value issues against receipts by the item model group's method:
+  - **FIFO**: issues settle against the oldest unsettled receipts by `financial_date`, then `physical_date`, then id. Example: receipts 100 @ 10.00 (Jan 5), 100 @ 12.00 (Jan 20); issue 150 on Jan 25 → cost = 100 × 10.00 + 50 × 12.00 = 1,600.00; remaining on-hand 50 @ 12.00 = 600.00.
+  - **LIFO**: issues settle against the newest receipts preceding the issue date (LIFO_DATE) or the newest in the period (LIFO). Same data, LIFO_DATE: 150 issue = 100 × 12.00 + 50 × 10.00 = 1,700.00; remaining 50 @ 10.00 = 500.00.
+  - **WEIGHTED_AVG_PERIODIC**: all issues in the period settle at `(opening value + Σ receipts value) / (opening qty + Σ receipts qty)`. Same data: average = 2,200 / 200 = 11.00; issue cost 1,650.00; remaining 550.00.
+  - **WEIGHTED_AVG_RUNNING**: each issue uses the average at its moment (in date order): issue on Jan 25 after both receipts = 11.00 → 1,650.00; an issue of 50 on Jan 10 would be at 10.00.
+  - **MOVING_AVG**: like running average, but invoice-price differences on already-issued quantity post to price difference (not to stock); differences on remaining stock adjust its value.
+  - **STANDARD**: all transactions at the active `ItemCost` for product × site; receipt at PO price 10.50 against standard 10.00 for 100 units posts PPV 50.00 Dr; invoice at 10.80 posts additional PPV 30.00; inventory stays 1,000.00.
+  - Settlement rows (`CostSettlement`) link issue to receipt with qty and value; `cost_amount_adjustment` on the issue = settled value − previously posted value.
+
+- **FR-20.2 Inventory close** — Must. The system shall run `InventoryClose` for a legal entity up to a close date as a Temporal workflow: pre-check (unsettled negative on-hand, missing invoices for RECEIVED-not-PURCHASED when `close_requires_invoice=true`, open count sheets), settlement per product (child workflows, parallelism configurable, default 32), adjustment postings to the ledger (one voucher per product group × account, idempotent on close id), and lock of transactions with `financial_date ≤ close_date` against cost changes.
+  - Performance: 1M transactions, 2,000 products in < 20 min on the stage sizing.
+  - Cancel close reverses adjustment vouchers and unlocks; a close cannot be cancelled if a later close exists.
+  - Close requires the INVENTORY period for the close date to be OPEN; after close completes it may be set CLOSED (wave 14).
+
+- **FR-20.3 Recalculation** — Must. The system shall run the same settlement as close without locking, posting adjustments with `kind=RECALC` reversible by the next recalculation or close; preview mode returns per-product adjustment totals without posting.
+
+- **FR-20.4 Cost transactions and value report** — Must. The system shall write a `CostTransaction` for every value-affecting event (physical posting, financial posting, invoice difference, settlement adjustment, PPV, revaluation, manual adjustment) with the ledger voucher, and serve the inventory value report (quantity and value by product, site, warehouse, item group, dimension; posted vs physical value; opening, receipts, issues, adjustments, closing) whose totals equal the ledger inventory account balances per dimension on the report date.
+  - Daily reconciliation job `costing.reconcile` emits `reconciliation.diff` on any difference.
+  - Value report for 10k products p95 < 5 s.
+
+- **FR-20.5 Costing versions and standard cost activation** — Must. The system shall maintain `CostingVersion` (type STANDARD, PLANNED; blocking flags; fallback version) with `ItemCost` rows (product, site, unit cost, cost breakdown placeholder for wave 39, effective_from, status PENDING/ACTIVE/SUPERSEDED). Activation sets ACTIVE, supersedes the previous, posts revaluation of on-hand `(new − old) × physical qty` per product × site to inventory / revaluation account, and emits `cost.changed`.
+  - Pending prices can be imported (CSV/API) and copied from the previous version with a percent change.
+  - Activation is atomic per product and idempotent per version id.
+
+- **FR-20.6 Cost adjustments** — Must. The system shall allow manual adjustments of on-hand value (per product × dimension: new unit cost or amount) and of specific receipt transactions (amount), posting to inventory / adjustment account and flowing to issues on next close.
+
+- **FR-20.7 Purchase price variance** — Must. The system shall, for STANDARD items, post PPV at receipt `(PO price − standard) × qty` and at invoice `(invoice price − PO price) × qty` (wave 18 hook), to the PPV account from the posting profile; for actual-cost methods the invoice difference adjusts the receipt's cost (`cost_amount_posted`) and flows to issues through settlement.
+
+- **FR-20.8 Marking** — Should. The system shall honor explicit marking between an issue and a receipt (set by users or by wave 21/27 processes) so settlement pairs marked transactions first regardless of method.
+
+- **FR-20.9 Supplier portal: PO acknowledgement** — Must. The portal shall show confirmed POs and versions to the vendor's users; they shall accept, reject (reason) or propose changes (date, qty, price per line) which create a `PurchaseOrderAcknowledgement`; proposed changes become a pending change on the PO for the buyer to accept (creating a new version via wave 17) or decline.
+  - SLA tracking: acknowledgement due within `ack_due_days` (default 2); overdue listed on the buyer workspace.
+
+- **FR-20.10 Supplier portal: ASN** — Must. The portal shall create an `AdvanceShipNotice` (carrier, tracking, ship date, expected arrival, packages with SSCC optional, lines with PO line, qty, batch, serials, expiry) that pre-creates ARRIVED expected lines in receiving; receipt registration from an ASN pre-fills quantities and tracking dimensions.
+
+- **FR-20.11 Supplier portal: invoices and payments** — Must. The portal shall let vendors submit invoices against received PO lines (source PORTAL into wave 18 `:capture`, structured, no OCR), view invoice match/approval status (without internal variance amounts), and see payment status, advices and remittance details from wave 19.
+
+- **FR-20.12 Supplier portal: identity and authorization** — Must. The portal shall use a separate Keycloak realm `suppliers` with vendor organizations as groups, vendor-admin self-service invitation of users (email verification, MFA optional per vendor), OPA policies scoping every query to the vendor ids the user belongs to, and rate limits (60 requests/min per user, 1,000/min per vendor).
+
+- **FR-20.13 Supplier portal: RFQ replies and documents** — Should. The portal shall accept RFQ replies (wave 17 FR-17.4) and exchange documents (certificates, contracts) with virus scanning and 25 MB size limit.
+
+- **FR-20.14 Phase-exit walkthrough** — Must. The system shall support the recorded end-to-end demo: requisition → PO → portal acknowledgement → ASN → receipt → invoice (portal) → match → payment run → close → value report tie-out, on the stage environment with the demo plant.
+
+### 3.20.4 Data model
+
+**CostTransaction**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| id | uuid | yes | |
+| inventory_transaction_id | uuid | yes | FK |
+| product_id, site_id, dimension_set_id | uuid/bytea | yes | denormalized for the report |
+| kind | enum | yes | PHYSICAL, FINANCIAL, INVOICE_DIFF, SETTLEMENT_ADJ, PPV, REVALUATION, MANUAL_ADJ, RECALC |
+| qty | numeric(28,6) | yes | 0 for value-only |
+| amount_acct | numeric(19,4) | yes | signed |
+| close_id / recalc_id | uuid | no | |
+| ledger_entry_id | uuid | yes | voucher |
+| financial_date | date | yes | |
+| created_at | timestamptz | yes | append-only |
+
+**CostSettlement**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| id | uuid | yes | |
+| close_id | uuid | yes | or recalc id |
+| issue_transaction_id, receipt_transaction_id | uuid | yes | |
+| qty_settled | numeric(28,6) | yes | > 0 |
+| value_settled_acct | numeric(19,4) | yes | |
+| method | enum | yes | method used |
+| sequence | int | yes | order of settlement for determinism |
+| cancelled (bool), cancelled_by_close_id | | no | |
+
+**InventoryClose**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| id, close_number | uuid, text | yes | |
+| legal_entity_id, close_date | uuid, date | yes | |
+| kind | enum | yes | CLOSE, RECALC, PREVIEW |
+| status | enum | yes | PRECHECK, PRECHECK_FAILED, SETTLING, POSTING, COMPLETED, CANCELLING, CANCELLED, FAILED |
+| parallelism | int | yes | default 32 |
+| products_total, products_done, settlements_count, adjustment_total_acct | int/numeric | yes | progress |
+| started_at, completed_at, duration_s | timestamptz/int | | |
+| temporal_workflow_id | text | yes | |
+
+**CostingVersion / ItemCost**: version (id, code, type STANDARD/PLANNED, status DRAFT/ACTIVE/ARCHIVED, fallback_version_id, block_activation (bool), site_scope[]); item cost (version_id, product_id, site_id, unit, unit_cost_acct, effective_from, status PENDING/ACTIVE/SUPERSEDED, activated_at, revaluation_ledger_entry_id, source MANUAL/IMPORT/COPY/ROLLUP (w39)).
+
+**PurchaseOrderAcknowledgement / AdvanceShipNotice / SupplierUser**: ack (id, po_id, version_no, vendor_user_id, response ACCEPT/REJECT/PROPOSE, reason, proposed_lines jsonb, status PENDING_BUYER/ACCEPTED/DECLINED, created_at); asn (id, asn_number, vendor_id, po_id, carrier, tracking_number, ship_date, expected_arrival, packages jsonb (sscc, weight), lines (po_line_id, qty, batch, serials[], expiry), status SUBMITTED/ARRIVED/RECEIVED/CANCELLED); supplier user (keycloak_subject, vendor_ids[], role VENDOR_ADMIN/VENDOR_USER, invited_by, mfa_enabled, last_login).
+
+Invariants: for each issue transaction Σ qty_settled over non-cancelled settlements ≤ |qty|; after a COMPLETED close every issue with `financial_date ≤ close_date` is fully settled or listed in the close exception report; Σ CostTransaction.amount_acct per inventory account = ledger balance; exactly one ACTIVE ItemCost per (STANDARD version chain, product, site); a vendor user can read only rows where vendor_id ∈ their vendor_ids (OPA + RLS policy on the `supplier` database). Indexes: CostTransaction (tenant, product_id, financial_date), (ledger_entry_id); CostSettlement (issue_transaction_id), (receipt_transaction_id); ItemCost (product_id, site_id, status).
+
+### 3.20.5 APIs and events
+
+| Method | Path | Purpose | Idempotency | Auth duty |
+|---|---|---|---|---|
+| POST | /api/v1/costing/closes | Start close (kind CLOSE/RECALC/PREVIEW) | entity+close_date+kind | InventoryCloseRun |
+| GET | /api/v1/costing/closes/{id} | Progress and exceptions | n/a | CostingInquire |
+| POST | /api/v1/costing/closes/{id}:cancel | Cancel/reverse | close id | InventoryCloseRun |
+| GET | /api/v1/costing/value-report?asOf=&groupBy=&site= | Inventory value with GL tie-out | n/a | CostingInquire |
+| POST | /api/v1/costing/adjustments | On-hand or transaction adjustment | client key | CostAdjust |
+| POST | /api/v1/costing/versions | Create costing version | client key | CostingVersionMaintain |
+| POST | /api/v1/costing/versions/{id}/item-costs:import | Import pending costs (CSV/JSON) | file hash | CostingVersionMaintain |
+| POST | /api/v1/costing/versions/{id}:activate | Activate pending costs with revaluation | version id | CostingVersionActivate |
+| GET | /api/v1/costing/products/{id}/cost?site=&date= | Current cost (used by waves 21, 27) | n/a | CostingInquire |
+| POST | /internal/v1/costing/ppv | Hook from receiving/payables for STANDARD items | source doc id | service account |
+| GET | /portal/v1/purchase-orders | Vendor's POs | n/a | portal: VendorUser |
+| POST | /portal/v1/purchase-orders/{id}:acknowledge | Accept/reject/propose | po+version | portal: VendorUser |
+| POST | /portal/v1/asns | Submit ASN | client key | portal: VendorUser |
+| POST | /portal/v1/invoices | Submit invoice (→ payables capture) | vendor invoice number | portal: VendorUser |
+| GET | /portal/v1/payments | Payment status and advices | n/a | portal: VendorUser |
+| POST | /portal/v1/users:invite | Vendor admin invites user | email | portal: VendorAdmin |
+
+Commands: `StartClose` (period open, no running close for entity, close_date ≥ last close), `ActivateVersion` (no block flag, all pending costs > 0 unless `allow_zero_cost`, site in scope), `Acknowledge` (latest version only; proposals require at least one changed line), `SubmitASN` (PO confirmed, qty ≤ remaining × (1 + over_delivery_pct), serial count = qty for serial items).
+
+| Event | Trigger | Payload fields | Consumers |
+|---|---|---|---|
+| `dev.passage.costing.close.completed.v1` / `.cancelled.v1` / `.failed.v1` | close lifecycle | close_id, entity, close_date, kind, products, settlements, adjustment_total, duration_s, exceptions_count | ledger reconciliation, notifications, analytics |
+| `dev.passage.costing.cost.changed.v1` | activation, manual adjustment affecting unit cost | product_id, site_id, version, old_cost, new_cost, effective_from, revaluation_amount | inventory (cost price cache), planning (w22), product costing (w39) |
+| `dev.passage.costing.reconciliation.diff.v1` | daily tie-out diff ≠ 0 | account, dimension, inventory_value, ledger_balance, diff, sample vouchers | alerting |
+| `dev.passage.supplier.po.acknowledged.v1` | portal ack | po_id, version, response, proposed changes | procurement (pending change), notifications |
+| `dev.passage.supplier.asn.submitted.v1` | ASN submit | asn_id, po_id, lines, expected_arrival, tracking | receiving (expected lines), warehouse (w31), notifications |
+| `dev.passage.supplier.invoice.submitted.v1` | portal invoice | invoice_id (payables), vendor_id, po_id, total | payables (already captured), notifications |
+
+### 3.20.6 User experience
+
+| Screen | Primary actions | Key fields/columns | Duty required |
+|---|---|---|---|
+| Costing workspace | Last close status, reconciliation diffs, pending costing versions, products with negative value or unsettled issues | counts, amounts, durations | CostingInquire |
+| Inventory close | Pre-check, start, monitor (progress bar per product), exceptions list, cancel | close date, kind, parallelism, exceptions (product, reason, qty) | InventoryCloseRun |
+| Inventory value report | Group by, as-of date, GL tie-out column, drill to cost transactions and vouchers, export | product, site, qty, physical value, financial value, GL balance, diff | CostingInquire |
+| Costing version / item costs | Create, import, copy with %, compare to active, activate with revaluation preview | product, site, pending cost, active cost, delta, on-hand qty, revaluation amount | CostingVersionMaintain |
+| Cost adjustment | Adjust on-hand or receipt, preview voucher, post | product, dims, qty, current value, new unit cost, delta | CostAdjust |
+| Supplier portal: home | Open POs needing ack, ASNs, invoices in progress, payments | counts, due dates | portal VendorUser |
+| Supplier portal: PO | View versions, accept/reject/propose per line, print | lines, dates, prices, version diff | portal VendorUser |
+| Supplier portal: ASN | Create from PO lines, add packages, batches/serials, submit | PO lines, qty, batch, expiry, serials, tracking | portal VendorUser |
+| Supplier portal: invoices / payments | Submit invoice from receipts, status timeline, payment advices | invoice no, amount, status, payment date, reference | portal VendorUser |
+| Supplier portal: users | Invite, deactivate, MFA | email, role, status | portal VendorAdmin |
+
+Interaction rules: the close screen refreshes progress via server-sent events every 2 s; value report defaults to the last close date; activation shows a mandatory revaluation preview with total and top-20 deltas; portal is WCAG 2.1 AA, mobile-friendly, English + German + French + Spanish strings in v1, no internal data (variance amounts, standard costs, approvals) exposed; portal file uploads scanned before storage.
+
+### 3.20.7 Business rules and edge cases
+
+- **BR-20.1** Close state machine: `PRECHECK → SETTLING → POSTING → COMPLETED`; `PRECHECK → PRECHECK_FAILED`; `SETTLING|POSTING → FAILED` (resumable); `COMPLETED → CANCELLING → CANCELLED` only when it is the latest close for the entity.
+- **BR-20.2** Settlement determinism: receipts are ordered by (financial_date, physical_date, id) and issues by (financial_date, physical_date, id); the same inputs always produce the same `CostSettlement` sequence (property-tested), so re-runs after crashes are idempotent.
+- **BR-20.3** Unsettled issues (negative on-hand at settlement time) are valued at the running average of the product × site (fallback: active standard, then last receipt cost) and listed as exceptions; a later receipt settles them at the next close with an adjustment.
+- **BR-20.4** Rounding: settlement values are computed in full precision and rounded half-even to the minor unit per settlement row; the last settlement row of a receipt absorbs the rounding residual so Σ settled value = receipt value exactly.
+- **BR-20.5** Periodic weighted average with transfers between sites: the average is per product × site (`costing_level=SITE`, default) or per product (`costing_level=ENTITY`) as configured on the item model group; transfers at site level settle like issues/receipts.
+- **BR-20.6** Invoice difference after close: an invoice posted after the receipt's period was closed posts the difference to the invoice's period as `INVOICE_DIFF` and flows to issues in the next close (never reopens a closed period).
+- **BR-20.7** Standard cost revaluation uses the physical on-hand quantity at activation time; transactions already financially posted are not restated; activation during an in-flight close is rejected (`CST-ACT-004`).
+- **BR-20.8** Close date must be ≤ today and ≥ the last completed close; transactions with `financial_date ≤ close_date` are locked against new cost adjustments except through `:cancel`.
+- **BR-20.9** Portal acknowledgement applies to the latest PO version only; a new version invalidates pending acknowledgements (status SUPERSEDED) and re-requests one.
+- **BR-20.10** ASN quantity may exceed PO remaining only within the over-delivery tolerance (wave 18); duplicate tracking number per vendor is rejected; an ASN can be cancelled until any of its lines is RECEIVED.
+- **BR-20.11** Portal invoice submission is limited to lines with received, uninvoiced quantity; the vendor cannot submit a price different from the PO price unless the buyer enabled `portal_price_override` for the vendor (creating a price-variance exception in wave 18).
+- **BR-20.12** Concurrency: close child workflows take an advisory lock per product; wave 16 journal posting for a product whose close child is settling waits up to 5 s then fails with `CST-LOCK-001` (retry); costs read by waves 21/27 are the last committed values.
+
+### 3.20.8 Acceptance criteria
+
+- **AC-20.1** (FR-20.1) Given the 100 receipt/issue sequences per method fixture, when settled by close, then every issue cost, remaining on-hand value and adjustment equals the reference workbook to the cent for FIFO, LIFO, LIFO_DATE, WEIGHTED_AVG_PERIODIC, WEIGHTED_AVG_RUNNING, MOVING_AVG and STANDARD.
+- **AC-20.2** (FR-20.1) Given the FR-20.1 example data, when closed under FIFO, LIFO_DATE and WEIGHTED_AVG_PERIODIC, then issue cost is 1,600.00, 1,700.00 and 1,650.00 and remaining value 600.00, 500.00 and 550.00.
+- **AC-20.3** (FR-20.2) Given the 1M-transaction fixture, when a close runs on stage, then it completes in < 20 min, and the value report at close date equals the GL inventory balances per site and item group with diff 0.00.
+- **AC-20.4** (FR-20.7) Given a STANDARD item at 10.00 with a PO at 10.50 and invoice at 10.80 for 100 units, when received and invoiced, then PPV postings are 50.00 and 30.00 Dr, inventory value is 1,000.00, GR/IR nets to zero.
+- **AC-20.5** (FR-20.5) Given 10,000 pending item costs, when the version is activated, then all are ACTIVE within 2 min, one revaluation voucher per site balances to `Σ (new − old) × on-hand`, and `cost.changed` is emitted per product.
+- **AC-20.6** (FR-20.2) Given a close killed during SETTLING at 40 %, when resumed, then it completes with the same settlement rows as an uninterrupted run (byte-equal export).
+- **AC-20.7** (FR-20.9) Given a confirmed PO visible in the portal, when the vendor proposes a delivery date change, then a pending change appears on the buyer's PO and accepting it creates version 2 and emits `po.version.created`.
+- **AC-20.8** (FR-20.10) Given an ASN for 2 batch-tracked lines, when the goods arrive and the receiver opens the receipt from the ASN, then quantities, batches and expiry dates are pre-filled and registration takes one confirmation.
+- **AC-20.9** (FR-20.12) Given a user of vendor A, when they request vendor B's PO by id, then the portal returns 404 and the OPA decision log records the denial.
+- **AC-20.10** (FR-20.14) Given the demo plant, when the phase-exit walkthrough is executed, then every step completes on stage and the final value report, GR/IR report and AP aging each reconcile to the GL with 0.00 difference.
+
+### 3.20.9 Test plan and fixtures
+
+Fixtures: `cost-methods-700` (100 sequences × 7 methods with reference workbook `cost_reference.xlsx` maintained by the accountant; includes negative on-hand, transfers, invoice differences, returns); `cost-1m` (reuses `inv-1m-txn` with receipts/invoices from waves 17–18 generators); `cost-std-activation-10k`; `portal-demo-vendor` (vendor with 3 users, 20 POs, 5 ASNs); `cost-ax-extract` (InventClosing, InventSettlement, InventItemPrice from USMF); `cost-sap-extract` (MBEW, CKMLHD/CKMLPP/CKMLCR samples).
+
+| Test | Type | Target | Pass criterion |
+|---|---|---|---|
+| Method correctness | unit (table-driven) | settlement engine | AC-20.1 |
+| Determinism/idempotency | property | engine | identical inputs → identical settlements; resume = uninterrupted |
+| Close performance | performance (stage) | InventoryClose | < 20 min on cost-1m |
+| Value report tie-out | E2E | value-report vs ledger | diff 0.00 after close |
+| PPV | contract | receiving/payables → costing/ppv | AC-20.4 |
+| Activation | E2E | versions:activate | AC-20.5 |
+| Portal authz | security (OPA unit + E2E) | portal APIs | AC-20.9; no cross-vendor leakage across 1,000 random requests |
+| Portal accessibility | E2E (axe) | portal screens | 0 serious/critical violations |
+| Phase-exit walkthrough | E2E (Playwright, recorded) | full flow | AC-20.10 |
+
+Reconciliation checks: Σ CostTransaction per inventory account = ledger balance; Σ settlement value per receipt = receipt value; Σ PPV cost transactions = PPV account movement; revaluation voucher = Σ item deltas × on-hand; portal invoice totals = payables captured totals.
+
+### 3.20.10 Deployment and operations
+
+Helm charts: `passage-costing` (API ×2, Temporal close workers ×4 with CPU 2 each, schema `costing` in `inventory-db`), `passage-supplier-portal` (React app served by the shell at `supplier.<env>.passage.dev`, BFF ×2 in TypeScript, CloudNativePG `supplier-db`, Keycloak realm `suppliers` provisioned by Helm hook, Envoy Gateway route with rate limiting and WAF rules). Config: `CST_CLOSE_PARALLELISM=32`, `CST_LOCK_WAIT_S=5`, `CST_LEVEL_DEFAULT=SITE`, `CST_ALLOW_ZERO_COST=false`, `PORTAL_RATE_LIMIT_USER=60`, `PORTAL_UPLOAD_MAX_MB=25`, `PORTAL_ACK_DUE_DAYS=2`. Migrations `inventory/v20.*` (costing schema), `supplier/v20.*`. Flags: `cst.moving_avg`, `cst.marking`, `portal.rfq_replies`, `portal.invoice_submit`, `portal.mfa_required`. Jobs: reconciliation daily 02:15; ack-overdue scan daily 08:00; portal inactive-user cleanup weekly. SLOs: value report p95 < 5 s; cost lookup p95 < 20 ms; close < 20 min per 1M txns; portal page load p95 < 1.5 s; portal availability 99.9 %. Alerts: reconciliation diff ≠ 0 (page); close FAILED (page); close running > 60 min (ticket); portal auth failures > 100/min from one IP (security ticket, auto-block). Runbook: resume close, cancel close, re-run reconciliation, rotate portal realm client secret, revoke vendor user. Rollback: additive migrations; costing schema can be disabled (flag `cst.enabled=false` reverts to wave 16 running estimate without data loss); portal can be taken down independently (DNS) without affecting internal flows.
+
+### 3.20.11 Migration from AX / SAP
+
+| Source | Passage entity | Notes |
+|---|---|---|
+| AX InventModelGroup.InventModel | ItemModelGroup.costing_method | FIFO→FIFO, LIFO→LIFO, LIFODate→LIFO_DATE, WeightedAvg→WEIGHTED_AVG_PERIODIC, WeightedAvgDate→WEIGHTED_AVG_RUNNING, StdCost→STANDARD, MovingAverage→MOVING_AVG |
+| AX InventItemPrice (active, PriceType Cost) per CostingVersion | ItemCost ACTIVE in version `MIG-STD` | per site; pending prices migrated as PENDING |
+| AX InventSum PostedValue / wave 16 opening | opening cost layers: one receipt layer per product × dimension at average cost | FIFO/LIFO layer detail from last InventClosing unsettled receipts (InventTrans with open qty) when available, else collapsed to one layer |
+| AX InventClosing history | not migrated | reporting only |
+| SAP MBEW (VPRSV, STPRS, VERPR, LBKUM, SALK3, PEINH) | costing_method (S→STANDARD, V→WEIGHTED_AVG_RUNNING or MOVING_AVG per decision), ItemCost (STPRS/PEINH), opening layer value SALK3 | per plant (BWKEY) → site |
+| SAP CKMLPP/CKMLCR (material ledger period values) | opening layer value when ML active | actual price of last closed period |
+| SAP MLCD / CKMLHD history | not migrated | |
+| D365 vendor collaboration users / Ariba supplier accounts | SupplierUser invitations (not credentials) | vendors re-register via invitation email |
+
+Validation: Σ opening layer value per product × site equals source value (0.01 tolerance per product, 0.00 total per account); standard costs for 200 random products equal source; costing method distribution equals source counts. Not migrated: settled cost history, SAP ML price analysis, AX recalculation logs, portal documents.
+
+### 3.20.12 Dependencies, risks, open questions
+
+Depends on: wave 16 (transactions, cost fields, marking field), wave 17 (PO prices, versions, pending changes), wave 18 (receipts, invoice differences, capture), wave 19 (payment status), wave 11–14 (posting, period control, vouchers), wave 4 (Temporal), wave 2–3 (Keycloak realms, OPA, metadata), wave 7 (vendor contacts).
+
+| Risk | Likelihood | Impact | Mitigation |
+|---|---|---|---|
+| Opening cost layers from AX/SAP are collapsed, so first FIFO/LIFO close differs from legacy | High | Medium | Document in cutover; parallel-run compare in wave 49; collapsed layer flagged in value report |
+| Close parallelism contends with daytime posting | Medium | Low | Run off-hours by default; lock wait 5 s with retry; advisory locks per product only |
+| Portal security incident | Low | High | Separate realm/DB, OPA deny-by-default, pen-test before phase exit, WAF, rate limits, audit |
+| Accountant requires LIFO by period layers (US tax) beyond LIFO_DATE | Medium | Low | Periodic LIFO pools deferred; documented as v1.x |
+
+Open questions:
+1. SAP MAP (V) maps to WEIGHTED_AVG_RUNNING or MOVING_AVG by default? Default: MOVING_AVG (closest to VERPR behavior on invoice differences). Decide by wave 20 mid-point.
+2. Should the portal expose expected payment dates (from proposals) or only executed payments? Default: executed only. Decide by wave 20 close.
+3. Costing level ENTITY vs SITE default for weighted average? Default: SITE. Decide by wave 20 mid-point with the accountant.
+4. Dollar-value LIFO pools for US tax reporting: v1.x or wave 39? Default: v1.x. Decide by wave 39 planning.

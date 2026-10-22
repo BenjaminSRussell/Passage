@@ -39,16 +39,16 @@
 
 | Event (CloudEvents type) | Producer | Consumers | Payload summary |
 |---|---|---|---|
-| `io.passage.analytics.snapshot.committed.v1` | analytics-ingest | semantic, catalog | table, snapshot_id, row_delta, max_source_lsn, watermark |
-| `io.passage.analytics.metric.reconciled.v1` | semantic | compliance, alerting | metric_id, date, semantic_value, source_value, delta, status |
-| `io.passage.agent.run.completed.v1` | agent-runtime | audit, copilot-ui, evals | run_id, agent, version, tool_calls[], tokens, outcome |
-| `io.passage.agent.approval.requested.v1` | agent-runtime | workflow inbox | run_id, action_id, proposed_change, risk_score |
-| `io.passage.ereporting.document.submitted.v1` | ereporting | AR/AP, compliance | mandate, format_version, document_ref, regulator_ack |
-| `io.passage.sod.conflict.detected.v1` | sod | compliance, workflow | user_id, rule_id, roles[], severity |
-| `io.passage.privacy.request.completed.v1` | privacy | audit | request_id, type, subject_ref, affected_domains[] |
-| `io.passage.migration.pack.reconciled.v1` | migration-factory | cutover | run_id, pack, control_totals[], status |
-| `io.passage.migration.parallelrun.diffed.v1` | migration-factory | cutover | run_id, period, variances_unexplained, variances_explained |
-| `io.passage.ops.failover.completed.v1` | platform-ops | all services (fencing) | from_region, to_region, promoted_lsn, rpo_seconds, rto_seconds |
+| `dev.passage.analytics.snapshot.committed.v1` | analytics-ingest | semantic, catalog | table, snapshot_id, row_delta, max_source_lsn, watermark |
+| `dev.passage.analytics.metric.reconciled.v1` | semantic | compliance, alerting | metric_id, date, semantic_value, source_value, delta, status |
+| `dev.passage.agent.run.completed.v1` | agent-runtime | audit, copilot-ui, evals | run_id, agent, version, tool_calls[], tokens, outcome |
+| `dev.passage.agent.approval.requested.v1` | agent-runtime | workflow inbox | run_id, action_id, proposed_change, risk_score |
+| `dev.passage.ereporting.document.submitted.v1` | ereporting | AR/AP, compliance | mandate, format_version, document_ref, regulator_ack |
+| `dev.passage.sod.conflict.detected.v1` | sod | compliance, workflow | user_id, rule_id, roles[], severity |
+| `dev.passage.privacy.request.completed.v1` | privacy | audit | request_id, type, subject_ref, affected_domains[] |
+| `dev.passage.migration.pack.reconciled.v1` | migration-factory | cutover | run_id, pack, control_totals[], status |
+| `dev.passage.migration.parallelrun.diffed.v1` | migration-factory | cutover | run_id, period, variances_unexplained, variances_explained |
+| `dev.passage.ops.failover.completed.v1` | platform-ops | all services (fencing) | from_region, to_region, promoted_lsn, rpo_seconds, rto_seconds |
 
 **Phase-level risks**
 
@@ -191,10 +191,10 @@ Query validation: ≤ 10 measures, ≤ 8 dimensions, time range ≤ 5 years at d
 
 | Event | Trigger | Payload fields | Consumers |
 |---|---|---|---|
-| `io.passage.analytics.snapshot.committed.v1` | Iceberg commit | domain, table, snapshot_id, rows_added, rows_deleted, max_lsn, watermark_ts | semantic (cache invalidation), catalog |
-| `io.passage.analytics.metric.reconciled.v1` | daily job | metric_id, tenant_id, date, semantic_value, source_value, delta, status | compliance evidence, alerting |
-| `io.passage.analytics.report.delivered.v1` | schedule run | schedule_id, run_id, format, destination, row_count, bytes | audit |
-| `io.passage.documents.template.published.v1` | version publish | template_id, version, document_type, visual_hash | print management, catalog |
+| `dev.passage.analytics.snapshot.committed.v1` | Iceberg commit | domain, table, snapshot_id, rows_added, rows_deleted, max_lsn, watermark_ts | semantic (cache invalidation), catalog |
+| `dev.passage.analytics.metric.reconciled.v1` | daily job | metric_id, tenant_id, date, semantic_value, source_value, delta, status | compliance evidence, alerting |
+| `dev.passage.analytics.report.delivered.v1` | schedule run | schedule_id, run_id, format, destination, row_count, bytes | audit |
+| `dev.passage.documents.template.published.v1` | version publish | template_id, version, document_type, visual_hash | print management, catalog |
 
 ### 9.46.6 User experience
 
@@ -395,10 +395,10 @@ Validation: run start rejects when tenant budget state HARD, kill switch active,
 
 | Event | Trigger | Payload fields | Consumers |
 |---|---|---|---|
-| `io.passage.agent.run.completed.v1` | run end | run_id, agent_id, version, status, tool_calls[], tokens, cost_usd | audit, evals, copilot |
-| `io.passage.agent.approval.requested.v1` | gate reached | run_id, action_id, tool_name, proposal, confidence, risk_score | workflow inbox |
-| `io.passage.agent.budget.threshold.v1` | 80%/100% | tenant_id, month, pct, state | alerting, admin UI |
-| `io.passage.agent.killswitch.changed.v1` | toggle | scope, active, by_user | all agent workers |
+| `dev.passage.agent.run.completed.v1` | run end | run_id, agent_id, version, status, tool_calls[], tokens, cost_usd | audit, evals, copilot |
+| `dev.passage.agent.approval.requested.v1` | gate reached | run_id, action_id, tool_name, proposal, confidence, risk_score | workflow inbox |
+| `dev.passage.agent.budget.threshold.v1` | 80%/100% | tenant_id, month, pct, state | alerting, admin UI |
+| `dev.passage.agent.killswitch.changed.v1` | toggle | scope, active, by_user | all agent workers |
 
 ### 9.47.6 User experience
 
@@ -590,11 +590,11 @@ Validation: pack install rejects if the entity's fiscal calendar is open-period 
 
 | Event | Trigger | Payload fields | Consumers |
 |---|---|---|---|
-| `io.passage.ereporting.document.submitted.v1` | regulator ack | mandate_id, format_version, document_ref, ack_id, status | AR/AP (mark invoice sent), compliance |
-| `io.passage.sod.conflict.detected.v1` | evaluation | user_id, rule_id, severity, roles[] | workflow, compliance |
-| `io.passage.sod.mitigation.approved.v1` | approval | conflict_id, approver, expires_at | audit |
-| `io.passage.privacy.request.completed.v1` | close | request_id, type, affected_domains[], delivered_at | audit |
-| `io.passage.compliance.evidence.collected.v1` | collector | control_id, evidence_id, hash | compliance UI |
+| `dev.passage.ereporting.document.submitted.v1` | regulator ack | mandate_id, format_version, document_ref, ack_id, status | AR/AP (mark invoice sent), compliance |
+| `dev.passage.sod.conflict.detected.v1` | evaluation | user_id, rule_id, severity, roles[] | workflow, compliance |
+| `dev.passage.sod.mitigation.approved.v1` | approval | conflict_id, approver, expires_at | audit |
+| `dev.passage.privacy.request.completed.v1` | close | request_id, type, affected_domains[], delivered_at | audit |
+| `dev.passage.compliance.evidence.collected.v1` | collector | control_id, evidence_id, hash | compliance UI |
 
 ### 9.48.6 User experience
 
@@ -778,10 +778,10 @@ Validation: pack run rejects extracts with `cutoff_ts` later than the legacy fre
 
 | Event | Trigger | Payload fields | Consumers |
 |---|---|---|---|
-| `io.passage.migration.pack.reconciled.v1` | reconciliation done | run_id, pack, totals_match, totals_mismatch, quarantined | cutover, notifications |
-| `io.passage.migration.parallelrun.diffed.v1` | diff done | parallel_run_id, period, unexplained_count, unexplained_amount | cutover |
-| `io.passage.cutover.step.completed.v1` | step done | plan_id, step_id, actual_duration_min, status | cutover dashboard |
-| `io.passage.cutover.decision.recorded.v1` | go/no-go | plan_id, decision, approvers[], timestamp | audit, platform-ops |
+| `dev.passage.migration.pack.reconciled.v1` | reconciliation done | run_id, pack, totals_match, totals_mismatch, quarantined | cutover, notifications |
+| `dev.passage.migration.parallelrun.diffed.v1` | diff done | parallel_run_id, period, unexplained_count, unexplained_amount | cutover |
+| `dev.passage.cutover.step.completed.v1` | step done | plan_id, step_id, actual_duration_min, status | cutover dashboard |
+| `dev.passage.cutover.decision.recorded.v1` | go/no-go | plan_id, decision, approvers[], timestamp | audit, platform-ops |
 
 ### 9.49.6 User experience
 
@@ -981,10 +981,10 @@ Validation: failover rejects if target region replication lag > 300 s unless `--
 
 | Event | Trigger | Payload fields | Consumers |
 |---|---|---|---|
-| `io.passage.ops.failover.completed.v1` | promotion done | from_region, to_region, promoted_lsn, rpo_seconds, rto_seconds | all services (reconnect), audit |
-| `io.passage.ops.tenant.provisioned.v1` | provisioning done | tenant_id, region, realm, databases[] | billing, catalog |
-| `io.passage.ops.slo.breached.v1` | SLO burn rate | slo_id, window, burn_rate, tenant_id | alerting, release gate |
-| `io.passage.ops.license.state_changed.v1` | license check | tenant_id, state, expires_at | shell banner, admin |
+| `dev.passage.ops.failover.completed.v1` | promotion done | from_region, to_region, promoted_lsn, rpo_seconds, rto_seconds | all services (reconnect), audit |
+| `dev.passage.ops.tenant.provisioned.v1` | provisioning done | tenant_id, region, realm, databases[] | billing, catalog |
+| `dev.passage.ops.slo.breached.v1` | SLO burn rate | slo_id, window, burn_rate, tenant_id | alerting, release gate |
+| `dev.passage.ops.license.state_changed.v1` | license check | tenant_id, state, expires_at | shell banner, admin |
 
 ### 9.50.6 User experience
 

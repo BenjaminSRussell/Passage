@@ -32,12 +32,12 @@
 |---|---|---|---|
 | passage.pricing.condition-record.activated.v1 | pricing | sales cache, analytics | id, type, keys, validity, version |
 | passage.pricing.rebate-accrual.posted.v1 | pricing | ledger, receivables | agreement, period, amount, journal ref |
-| passage.sales.order.confirmed.v1 | sales | planning, fulfillment, credit, analytics | order, customer, lines with confirmed dates, totals |
+| dev.passage.sales.order.confirmed.v1 | sales | planning, fulfillment, credit, analytics | order, customer, lines with confirmed dates, totals |
 | passage.sales.order-hold.applied.v1 / released.v1 | sales | fulfillment, collections, portal | order, hold type, reason, actor |
 | passage.fulfillment.packing-slip.posted.v1 | fulfillment | billing, inventory, ledger, sales, portal | slip, lines, qty, cost snapshot, journal ref |
-| passage.billing.invoice.posted.v1 | billing | receivables, revrec, ledger, pricing, portal | invoice, lines, tax, totals, due date |
-| passage.revrec.schedule.recognized.v1 | revrec | ledger, analytics | schedule line, obligation, amount, period |
-| passage.receivables.payment.applied.v1 | receivables | ledger, sales (credit), portal | payment, settlements[], residual |
+| dev.passage.billing.invoice.posted.v1 | billing | receivables, revrec, ledger, pricing, portal | invoice, lines, tax, totals, due date |
+| dev.passage.revrec.schedule.recognized.v1 | revrec | ledger, analytics | schedule line, obligation, amount, period |
+| dev.passage.receivables.payment.applied.v1 | receivables | ledger, sales (credit), portal | payment, settlements[], residual |
 | passage.receivables.customer-balance.changed.v1 | receivables | sales credit, portal | customer, balance, overdue, oldest item days, dunning level |
 | passage.receivables.return-order.dispositioned.v1 | receivables | fulfillment, billing, inventory | RMA line, disposition, qty, restocking |
 
@@ -143,9 +143,9 @@ Validation: resolve requires legal_entity_id, customer_id, currency, pricing_dat
 |---|---|---|---|
 | passage.pricing.condition-record.activated.v1 | activate / journal post | id, type, keys, currency, validity, version, journal_id, retroactive | sales cache, analytics |
 | passage.pricing.condition-record.withdrawn.v1 | withdraw / reverse | id, version, reason | sales cache |
-| passage.pricing.journal.posted.v1 | post / reverse | journal_id, line_count, reversed_journal_id | audit |
+| dev.passage.pricing.journal.posted.v1 | post / reverse | journal_id, line_count, reversed_journal_id | audit |
 | passage.pricing.rebate-accrual.posted.v1 | invoice.posted consumed | agreement_id, period_id, invoice_line_id, amount, currency, journal_posting_id | ledger, receivables |
-| passage.pricing.commission.calculated.v1 | invoice.posted consumed | invoice_line_id, sales_rep_id, basis, rate, amount | Phase 8 |
+| dev.passage.pricing.commission.calculated.v1 | invoice.posted consumed | invoice_line_id, sales_rep_id, basis, rate, amount | Phase 8 |
 
 ### 5.26.6 User experience
 
@@ -308,12 +308,12 @@ Validation: confirm rejects unpriced lines (unless manual), quantity ≤ 0, cust
 
 | Event | Trigger | Payload fields | Consumers |
 |---|---|---|---|
-| passage.sales.order.confirmed.v1 | confirm | order_id, customer_id, currency, lines[{line_id, product, dims, qty, site, warehouse, confirmed_ship_date}], totals, version | fulfillment, planning (w22), credit, analytics |
-| passage.sales.order.changed.v1 / cancelled.v1 | PATCH / cancel | order_id, version, diff[] or line_ids, reason | fulfillment, planning, portal |
-| passage.sales.atp.promised.v1 | confirm with ATP/CTP | line_id, requested, confirmed, bucket_date, source | planning, portal |
+| dev.passage.sales.order.confirmed.v1 | confirm | order_id, customer_id, currency, lines[{line_id, product, dims, qty, site, warehouse, confirmed_ship_date}], totals, version | fulfillment, planning (w22), credit, analytics |
+| dev.passage.sales.order.changed.v1 / cancelled.v1 | PATCH / cancel | order_id, version, diff[] or line_ids, reason | fulfillment, planning, portal |
+| dev.passage.sales.atp.promised.v1 | confirm with ATP/CTP | line_id, requested, confirmed, bucket_date, source | planning, portal |
 | passage.sales.order-hold.applied.v1 / released.v1 | hold lifecycle | order_id, hold_type, reason, actor, workflow_run_id | fulfillment, collections, portal |
 | passage.sales.credit-check.evaluated.v1 | any check | customer_id, order_id, rules[{id, result, value, threshold}], outcome | audit, collections |
-| passage.sales.quotation.converted.v1 | convert | quotation_id, order_id, lines | analytics, CRM |
+| dev.passage.sales.quotation.converted.v1 | convert | quotation_id, order_id, lines | analytics, CRM |
 
 ### 5.27.6 User experience
 
@@ -470,10 +470,10 @@ Validation: post requires status PACKED, no ACTIVE hold, posting date in an open
 
 | Event | Trigger | Payload fields | Consumers |
 |---|---|---|---|
-| passage.fulfillment.shipment.released.v1 | release | shipment_id, order_id, warehouse, lines | sales, analytics |
-| passage.fulfillment.pick.confirmed.v1 | pick confirm | wave_id, lines[{order_line_id, qty, dims, location}] | inventory, sales |
+| dev.passage.fulfillment.shipment.released.v1 | release | shipment_id, order_id, warehouse, lines | sales, analytics |
+| dev.passage.fulfillment.pick.confirmed.v1 | pick confirm | wave_id, lines[{order_line_id, qty, dims, location}] | inventory, sales |
 | passage.fulfillment.packing-slip.posted.v1 / cancelled.v1 | saga complete / cancel | packing_slip_id, order_id, lines[{order_line_id, qty, cost_amount, cost_snapshot_id}], journal_posting_id, posting_date | billing, sales, inventory, ledger, portal, credit |
-| passage.fulfillment.asn.issued.v1 | post | shipment_id, containers[{sscc, lines}], carrier, tracking | EDI (w35) |
+| dev.passage.fulfillment.asn.issued.v1 | post | shipment_id, containers[{sscc, lines}], carrier, tracking | EDI (w35) |
 | passage.fulfillment.shipment.tracking-updated.v1 | poll / webhook | shipment_id, tracking_number, status, event | portal, sales |
 
 ### 5.28.6 User experience
@@ -643,11 +643,11 @@ Validation: post rejects closed AR/GL period, lines without revenue account, tax
 
 | Event | Trigger | Payload fields | Consumers |
 |---|---|---|---|
-| passage.billing.invoice.posted.v1 | post | invoice_id, number, type, customer, invoice_account, currency, dates, lines[{order_line_id, product, qty, net, tax, revenue_account, obligation_id}], totals, journal_posting_id, intercompany | receivables, revrec, ledger, pricing, portal, sales |
+| dev.passage.billing.invoice.posted.v1 | post | invoice_id, number, type, customer, invoice_account, currency, dates, lines[{order_line_id, product, qty, net, tax, revenue_account, obligation_id}], totals, journal_posting_id, intercompany | receivables, revrec, ledger, pricing, portal, sales |
 | passage.billing.credit-note.posted.v1 | post | credit_note_id, original_invoice_id, lines, totals, journal_posting_id | receivables, revrec, ledger, portal |
-| passage.revrec.contract.allocated.v1 | allocate | contract_id, obligations[{id, ssp, allocated, method}] | analytics, audit |
-| passage.revrec.schedule.recognized.v1 | run / event | schedule_id, obligation_id, period_id, amount, journal_posting_id | ledger, analytics |
-| passage.billing.subscription.billed.v1 | daily job | subscription_id, invoice_id, period, proration | portal, analytics |
+| dev.passage.revrec.contract.allocated.v1 | allocate | contract_id, obligations[{id, ssp, allocated, method}] | analytics, audit |
+| dev.passage.revrec.schedule.recognized.v1 | run / event | schedule_id, obligation_id, period_id, amount, journal_posting_id | ledger, analytics |
+| dev.passage.billing.subscription.billed.v1 | daily job | subscription_id, invoice_id, period, proration | portal, analytics |
 
 ### 5.29.6 User experience
 
@@ -811,13 +811,13 @@ Validation: apply requires Σ settlements + on-account residual = payment amount
 
 | Event | Trigger | Payload fields | Consumers |
 |---|---|---|---|
-| passage.receivables.payment.received.v1 | import / manual / portal | payment_id, source, amount, currency, payer, remittance[] | matcher, analytics |
-| passage.receivables.payment.applied.v1 | apply | payment_id, settlements[{open_item_id, amount, discount, write_off, fx}], residual, journal_posting_id | ledger, sales credit, portal, collections |
+| dev.passage.receivables.payment.received.v1 | import / manual / portal | payment_id, source, amount, currency, payer, remittance[] | matcher, analytics |
+| dev.passage.receivables.payment.applied.v1 | apply | payment_id, settlements[{open_item_id, amount, discount, write_off, fx}], residual, journal_posting_id | ledger, sales credit, portal, collections |
 | passage.receivables.customer-balance.changed.v1 | any open item change | customer_id, balance, overdue, oldest_item_days, dunning_level, risk_score | sales credit, portal |
 | passage.receivables.dunning-letter.issued.v1 | issue | run_id, customer_id, level, items[], fee, document_ref | docgen, portal, sales (hold at level 4) |
-| passage.receivables.dispute.opened.v1 / resolved.v1 | dispute lifecycle | dispute_id, open_item_id, amount, reason, resolution | collections, billing, analytics |
+| dev.passage.receivables.dispute.opened.v1 / resolved.v1 | dispute lifecycle | dispute_id, open_item_id, amount, reason, resolution | collections, billing, analytics |
 | passage.receivables.return-order.authorized.v1 / dispositioned.v1 | RMA | rma_id, line, disposition, qty, restocking, credit_note_id | fulfillment, inventory, billing, portal |
-| passage.pricing.rebate.settled.v1 | settlement | agreement_id, period_id, amount, credit_note_id | ledger, receivables, analytics |
+| dev.passage.pricing.rebate.settled.v1 | settlement | agreement_id, period_id, amount, credit_note_id | ledger, receivables, analytics |
 
 ### 5.30.6 User experience
 

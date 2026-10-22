@@ -33,16 +33,16 @@
 
 | Event (CloudEvents type) | Producer | Consumers | Payload summary |
 |---|---|---|---|
-| `passage.treasury.statement.reconciled.v1` | treasury-svc | journal (wave 11), cashforecast-svc, analytics (46) | statementId, bankAccountId, matchedCount, unmatchedCount, closingBalance |
-| `passage.treasury.cashposition.updated.v1` | cashforecast-svc | dashboards, interco-svc (netting) | legalEntityId, asOf, balancesByAccount[], forecastBuckets[] |
-| `passage.assets.depreciation.posted.v1` | asset-svc | costacct-svc, analytics | runId, bookId, period, assetCount, totalAmount, journalEntryId |
-| `passage.assets.asset.disposed.v1` | asset-svc | costacct-svc, tax (wave 13) | assetId, bookId, proceeds, nbv, gainLoss |
-| `passage.budget.check.completed.v1` | budget-svc | procurement (17), AP (18), workflow | sourceDocumentId, result (pass/warn/fail), availableBefore, amount, availableAfter |
-| `passage.controlling.allocation.completed.v1` | costacct-svc | budget-svc, analytics | runId, policyId, iterations, totalIn, totalOut, residual |
-| `passage.costing.standardcost.activated.v1` | costing-svc | inventory costing (20), production (21), budget-svc | costingVersionId, itemCount, revaluationJournalId, totalRevaluation |
-| `passage.costing.variance.posted.v1` | costing-svc | costacct-svc, analytics | productionOrderId, varianceByType{lotSize,quantity,price,substitution}, byComponent[] |
-| `passage.interco.mirror.created.v1` | interco-svc | sales (27), procurement (17), consol-svc | sourceDocId, sourceEntity, mirrorDocId, mirrorEntity, type |
-| `passage.consol.run.completed.v1` | consol-svc | reporting (15), analytics | runId, groupId, period, unitCount, eliminationCount, ctaAmount |
+| `dev.passage.treasury.statement.reconciled.v1` | treasury-svc | journal (wave 11), cashforecast-svc, analytics (46) | statementId, bankAccountId, matchedCount, unmatchedCount, closingBalance |
+| `dev.passage.treasury.cashposition.updated.v1` | cashforecast-svc | dashboards, interco-svc (netting) | legalEntityId, asOf, balancesByAccount[], forecastBuckets[] |
+| `dev.passage.assets.depreciation.posted.v1` | asset-svc | costacct-svc, analytics | runId, bookId, period, assetCount, totalAmount, journalEntryId |
+| `dev.passage.assets.asset.disposed.v1` | asset-svc | costacct-svc, tax (wave 13) | assetId, bookId, proceeds, nbv, gainLoss |
+| `dev.passage.budget.check.completed.v1` | budget-svc | procurement (17), AP (18), workflow | sourceDocumentId, result (pass/warn/fail), availableBefore, amount, availableAfter |
+| `dev.passage.controlling.allocation.completed.v1` | costacct-svc | budget-svc, analytics | runId, policyId, iterations, totalIn, totalOut, residual |
+| `dev.passage.costing.standardcost.activated.v1` | costing-svc | inventory costing (20), production (21), budget-svc | costingVersionId, itemCount, revaluationJournalId, totalRevaluation |
+| `dev.passage.costing.variance.posted.v1` | costing-svc | costacct-svc, analytics | productionOrderId, varianceByType{lotSize,quantity,price,substitution}, byComponent[] |
+| `dev.passage.interco.mirror.created.v1` | interco-svc | sales (27), procurement (17), consol-svc | sourceDocId, sourceEntity, mirrorDocId, mirrorEntity, type |
+| `dev.passage.consol.run.completed.v1` | consol-svc | reporting (15), analytics | runId, groupId, period, unitCount, eliminationCount, ctaAmount |
 
 **Phase-level risks**
 
@@ -183,11 +183,11 @@ Commands: `ImportStatement` (validates schema, rejects duplicates), `RunMatching
 
 | Event | Trigger | Payload fields | Consumers |
 |---|---|---|---|
-| `passage.treasury.statement.imported.v1` | import committed | statementId, bankAccountId, lineCount, openingBalance, closingBalance | cashforecast-svc, treasury-svc matcher |
-| `passage.treasury.statement.reconciled.v1` | reconciliation closed | statementId, matchedCount, createdCount, closingBalance | journal, analytics |
-| `passage.treasury.check.voided.v1` | void | checkId, bankAccountId, number, reason | AP (19) positive pay |
-| `passage.treasury.cashposition.updated.v1` | position refresh | legalEntityId, asOf, balances[] | dashboards, interco-svc |
-| `passage.treasury.file.sent.v1` | outbound file acknowledged | connectionId, fileHash, channel, ackStatus | audit |
+| `dev.passage.treasury.statement.imported.v1` | import committed | statementId, bankAccountId, lineCount, openingBalance, closingBalance | cashforecast-svc, treasury-svc matcher |
+| `dev.passage.treasury.statement.reconciled.v1` | reconciliation closed | statementId, matchedCount, createdCount, closingBalance | journal, analytics |
+| `dev.passage.treasury.check.voided.v1` | void | checkId, bankAccountId, number, reason | AP (19) positive pay |
+| `dev.passage.treasury.cashposition.updated.v1` | position refresh | legalEntityId, asOf, balances[] | dashboards, interco-svc |
+| `dev.passage.treasury.file.sent.v1` | outbound file acknowledged | connectionId, fileHash, channel, ackStatus | audit |
 
 ### 7.36.6 User experience
 
@@ -389,10 +389,10 @@ Validation: book must be Open and period open per ledger × module (wave 14); di
 
 | Event | Trigger | Payload fields | Consumers |
 |---|---|---|---|
-| `passage.assets.asset.acquired.v1` | acquisition posted | assetId, bookIds[], cost, sourceType, sourceId | budget-svc, analytics |
-| `passage.assets.depreciation.posted.v1` | run posted | runId, bookDefinitionId, period, assetCount, totalAmount, journalEntryId | costacct-svc, analytics |
-| `passage.assets.asset.disposed.v1` | disposal posted | assetId, bookId, percentage, proceeds, nbv, gainLoss | tax, analytics |
-| `passage.assets.lease.recognized.v1` | lease activated | leaseId, liability, rouAsset, termMonths, rate | analytics |
+| `dev.passage.assets.asset.acquired.v1` | acquisition posted | assetId, bookIds[], cost, sourceType, sourceId | budget-svc, analytics |
+| `dev.passage.assets.depreciation.posted.v1` | run posted | runId, bookDefinitionId, period, assetCount, totalAmount, journalEntryId | costacct-svc, analytics |
+| `dev.passage.assets.asset.disposed.v1` | disposal posted | assetId, bookId, percentage, proceeds, nbv, gainLoss | tax, analytics |
+| `dev.passage.assets.lease.recognized.v1` | lease activated | leaseId, liability, rouAsset, termMonths, rate | analytics |
 
 ### 7.37.6 User experience
 
@@ -597,11 +597,11 @@ Validation: check requests must carry accounting date, ledger dimension and amou
 
 | Event | Trigger | Payload fields | Consumers |
 |---|---|---|---|
-| `passage.budget.register.posted.v1` | entry posted | entryId, modelId, type, lines summary | balance projector, analytics |
-| `passage.budget.check.completed.v1` | check | sourceDocumentId, lineResults[{result, available, amount}] | procurement, AP, workflow |
-| `passage.budget.encumbrance.relieved.v1` | relief | encumbranceId, amount, invoiceId, remaining | analytics |
-| `passage.controlling.allocation.completed.v1` | run complete | runId, policyId, iterations, totalIn, totalOut, residual | budget-svc, analytics |
-| `passage.controlling.costentry.created.v1` | mirror or allocation | entryId, costObjectId, elementId, amount, origin | lakehouse |
+| `dev.passage.budget.register.posted.v1` | entry posted | entryId, modelId, type, lines summary | balance projector, analytics |
+| `dev.passage.budget.check.completed.v1` | check | sourceDocumentId, lineResults[{result, available, amount}] | procurement, AP, workflow |
+| `dev.passage.budget.encumbrance.relieved.v1` | relief | encumbranceId, amount, invoiceId, remaining | analytics |
+| `dev.passage.controlling.allocation.completed.v1` | run complete | runId, policyId, iterations, totalIn, totalOut, residual | budget-svc, analytics |
+| `dev.passage.controlling.costentry.created.v1` | mirror or allocation | entryId, costObjectId, elementId, amount, origin | lakehouse |
 
 ### 7.38.6 User experience
 
@@ -800,10 +800,10 @@ Invariants: Σ CostComponentSplit.amount per calculation = unit_cost × calc_qua
 
 | Event | Trigger | Payload fields | Consumers |
 |---|---|---|---|
-| `passage.costing.calculation.completed.v1` | item rolled | calculationId, itemId, siteId, unitCost, split[] | analytics |
-| `passage.costing.rollrun.completed.v1` | mass roll finished | runId, itemCount, errorCount, durationMs | workspace |
-| `passage.costing.standardcost.activated.v1` | activation | costingVersionId, itemCount, revaluationJournalId, totalRevaluation | inventory costing, production, budget |
-| `passage.costing.variance.posted.v1` | variance computed | sourceId, type totals, byComponent[], journalEntryId | costacct-svc, analytics |
+| `dev.passage.costing.calculation.completed.v1` | item rolled | calculationId, itemId, siteId, unitCost, split[] | analytics |
+| `dev.passage.costing.rollrun.completed.v1` | mass roll finished | runId, itemCount, errorCount, durationMs | workspace |
+| `dev.passage.costing.standardcost.activated.v1` | activation | costingVersionId, itemCount, revaluationJournalId, totalRevaluation | inventory costing, production, budget |
+| `dev.passage.costing.variance.posted.v1` | variance computed | sourceId, type totals, byComponent[], journalEntryId | costacct-svc, analytics |
 
 ### 7.39.6 User experience
 
@@ -997,11 +997,11 @@ Validation: mirror saga rejects when the partner policy is inactive or the mirro
 
 | Event | Trigger | Payload fields | Consumers |
 |---|---|---|---|
-| `passage.interco.mirror.created.v1` | saga linked | icPairId, sourceDocId, sourceEntity, mirrorDocId, mirrorEntity, type | sales, procurement, analytics |
-| `passage.interco.mirror.compensated.v1` | saga failed | icPairId, failedStep, reason | workflow, alerts |
-| `passage.interco.journal.posted.v1` | IC journal both sides posted | icPairId, entityA, entityB, amount, currency, journalIds[] | reconciliation, consol-svc |
-| `passage.interco.reconciliation.flagged.v1` | mismatch | itemId, entities, difference | workspace, workflow |
-| `passage.consol.run.completed.v1` | run completed | runId, groupId, period, version, unitCount, eliminationCount, ctaAmount | reporting, analytics |
+| `dev.passage.interco.mirror.created.v1` | saga linked | icPairId, sourceDocId, sourceEntity, mirrorDocId, mirrorEntity, type | sales, procurement, analytics |
+| `dev.passage.interco.mirror.compensated.v1` | saga failed | icPairId, failedStep, reason | workflow, alerts |
+| `dev.passage.interco.journal.posted.v1` | IC journal both sides posted | icPairId, entityA, entityB, amount, currency, journalIds[] | reconciliation, consol-svc |
+| `dev.passage.interco.reconciliation.flagged.v1` | mismatch | itemId, entities, difference | workspace, workflow |
+| `dev.passage.consol.run.completed.v1` | run completed | runId, groupId, period, version, unitCount, eliminationCount, ctaAmount | reporting, analytics |
 
 ### 7.40.6 User experience
 

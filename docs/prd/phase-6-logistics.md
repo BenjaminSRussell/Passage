@@ -35,19 +35,19 @@
 
 | Event (CloudEvents type) | Producer | Consumers | Payload summary |
 |---|---|---|---|
-| com.passage.wms.work.created.v1 | wms | wms-mobile, analytics | work_id, work_type, warehouse, priority, lines[] |
-| com.passage.wms.work.completed.v1 | wms | inventory, sales-fulfillment, production | work_id, lines with from/to location, LP, qty |
-| com.passage.wms.load.shipped.v1 | wms | tms, sales-fulfillment, edi (856) | load_id, shipments[], LPs/SSCCs, carrier, ship_date |
-| com.passage.wms.receipt.registered.v1 | wms | purchasing (wave 18), quality | receipt_id, po lines, LPs, qty |
-| com.passage.quality.order.created.v1 | quality | wms (block quant), analytics | quality_order_id, trigger, item, quant_ref, sample_size |
-| com.passage.quality.usagedecision.posted.v1 | quality | wms, inventory, purchasing, production | quality_order_id, decision, accept_qty, reject_qty |
-| com.passage.quality.nonconformance.created.v1 | quality | workflow, vendor-scorecard | ncr_id, source, severity, item, vendor |
-| com.passage.tms.shipment.rated.v1 | tms | sales (freight charge), analytics | shipment_id, carrier, service, charges[], total |
-| com.passage.tms.tender.accepted.v1 | tms | wms (dock), edi (204/990) | load_id, carrier, pickup_window |
-| com.passage.tms.freightbill.matched.v1 | tms | accounts-payable (wave 19), costing (wave 20) | freight_bill_id, invoice_id, variance, landed_cost_lines[] |
-| com.passage.edi.message.received.v1 | edi | purchasing, sales, ap | partner, standard, transaction_set, control numbers, document ref |
-| com.passage.edi.message.sent.v1 | edi | analytics, integration-hub | partner, transaction_set, ack status |
-| com.passage.hub.webhook.delivered.v1 | integration-hub | analytics | subscription_id, event_id, attempt, status |
+| dev.passage.wms.work.created.v1 | wms | wms-mobile, analytics | work_id, work_type, warehouse, priority, lines[] |
+| dev.passage.wms.work.completed.v1 | wms | inventory, sales-fulfillment, production | work_id, lines with from/to location, LP, qty |
+| dev.passage.wms.load.shipped.v1 | wms | tms, sales-fulfillment, edi (856) | load_id, shipments[], LPs/SSCCs, carrier, ship_date |
+| dev.passage.wms.receipt.registered.v1 | wms | purchasing (wave 18), quality | receipt_id, po lines, LPs, qty |
+| dev.passage.quality.order.created.v1 | quality | wms (block quant), analytics | quality_order_id, trigger, item, quant_ref, sample_size |
+| dev.passage.quality.usagedecision.posted.v1 | quality | wms, inventory, purchasing, production | quality_order_id, decision, accept_qty, reject_qty |
+| dev.passage.quality.nonconformance.created.v1 | quality | workflow, vendor-scorecard | ncr_id, source, severity, item, vendor |
+| dev.passage.tms.shipment.rated.v1 | tms | sales (freight charge), analytics | shipment_id, carrier, service, charges[], total |
+| dev.passage.tms.tender.accepted.v1 | tms | wms (dock), edi (204/990) | load_id, carrier, pickup_window |
+| dev.passage.tms.freightbill.matched.v1 | tms | accounts-payable (wave 19), costing (wave 20) | freight_bill_id, invoice_id, variance, landed_cost_lines[] |
+| dev.passage.edi.message.received.v1 | edi | purchasing, sales, ap | partner, standard, transaction_set, control numbers, document ref |
+| dev.passage.edi.message.sent.v1 | edi | analytics, integration-hub | partner, transaction_set, ack status |
+| dev.passage.hub.webhook.delivered.v1 | integration-hub | analytics | subscription_id, event_id, attempt, status |
 
 **Phase-level risks**
 
@@ -198,11 +198,11 @@ Commands (CQRS): `CreateWorkFromOrderLines` validates all lines belong to one wa
 
 | Event | Trigger | Payload fields | Consumers |
 |---|---|---|---|
-| com.passage.wms.work.created.v1 | Work header committed | work_id, work_type, warehouse_id, priority, wave_id, lines[] | wms-mobile, analytics |
-| com.passage.wms.work.completed.v1 | last line confirmed | work_id, lines[{item, dims, qty, from, to, lp}], user, duration_s | inventory (post transfer), sales-fulfillment, production |
-| com.passage.wms.wave.released.v1 | workflow finished | wave_id, orders, work_count, replenishment_count, failures[] | analytics, sales-fulfillment |
-| com.passage.wms.load.shipped.v1 | load confirmed | load_id, shipment_ids, lp_ids, carrier_id, ship_datetime | tms, edi, sales-fulfillment |
-| com.passage.wms.receipt.registered.v1 | receipt committed | receipt_id, po_line_refs, lp_ids, qty by item | purchasing, quality |
+| dev.passage.wms.work.created.v1 | Work header committed | work_id, work_type, warehouse_id, priority, wave_id, lines[] | wms-mobile, analytics |
+| dev.passage.wms.work.completed.v1 | last line confirmed | work_id, lines[{item, dims, qty, from, to, lp}], user, duration_s | inventory (post transfer), sales-fulfillment, production |
+| dev.passage.wms.wave.released.v1 | workflow finished | wave_id, orders, work_count, replenishment_count, failures[] | analytics, sales-fulfillment |
+| dev.passage.wms.load.shipped.v1 | load confirmed | load_id, shipment_ids, lp_ids, carrier_id, ship_datetime | tms, edi, sales-fulfillment |
+| dev.passage.wms.receipt.registered.v1 | receipt committed | receipt_id, po_line_refs, lp_ids, qty by item | purchasing, quality |
 
 ### 6.31.6 User experience
 
@@ -408,10 +408,10 @@ Invariants: a device has at most one active session; `seq` is strictly increasin
 
 | Event | Trigger | Payload fields | Consumers |
 |---|---|---|---|
-| com.passage.mobile.flow.published.v1 | publish | flow_id, code, version, warehouses | devices (push via SSE), analytics |
-| com.passage.mobile.session.started.v1 / ended.v1 | session lifecycle | session_id, device_id, user_id, warehouse | analytics |
-| com.passage.mobile.offline.conflict.v1 | replay conflict | idempotency_key, command, reason | supervisor queue |
-| com.passage.print.job.completed.v1 | printer ack | job_id, printer, status | wms |
+| dev.passage.mobile.flow.published.v1 | publish | flow_id, code, version, warehouses | devices (push via SSE), analytics |
+| dev.passage.mobile.session.started.v1 / ended.v1 | session lifecycle | session_id, device_id, user_id, warehouse | analytics |
+| dev.passage.mobile.offline.conflict.v1 | replay conflict | idempotency_key, command, reason | supervisor queue |
+| dev.passage.print.job.completed.v1 | printer ack | job_id, printer, status | wms |
 
 ### 6.32.6 User experience
 
@@ -620,11 +620,11 @@ Commands: `CreateQualityOrderFromTrigger` validates association match and that t
 
 | Event | Trigger | Payload fields | Consumers |
 |---|---|---|---|
-| com.passage.quality.order.created.v1 | order created | quality_order_id, trigger, source_ref, item, dims, lot_qty, sample_qty | inventory (hold), wms, analytics |
-| com.passage.quality.result.recorded.v1 | result batch | quality_order_id, results[] | SPC projection |
-| com.passage.quality.usagedecision.posted.v1 | decision | quality_order_id, decision, accept_qty, reject_qty, deviation_qty, user | inventory (release/hold), wms, purchasing, production |
-| com.passage.quality.nonconformance.created.v1 | NCR | ncr_id, source, severity, item, vendor_id | vendor scorecard, workflow |
-| com.passage.quality.capa.closed.v1 | 8D closed | ncr_id, effectiveness_result | analytics |
+| dev.passage.quality.order.created.v1 | order created | quality_order_id, trigger, source_ref, item, dims, lot_qty, sample_qty | inventory (hold), wms, analytics |
+| dev.passage.quality.result.recorded.v1 | result batch | quality_order_id, results[] | SPC projection |
+| dev.passage.quality.usagedecision.posted.v1 | decision | quality_order_id, decision, accept_qty, reject_qty, deviation_qty, user | inventory (release/hold), wms, purchasing, production |
+| dev.passage.quality.nonconformance.created.v1 | NCR | ncr_id, source, severity, item, vendor_id | vendor scorecard, workflow |
+| dev.passage.quality.capa.closed.v1 | 8D closed | ncr_id, effectiveness_result | analytics |
 
 ### 6.33.6 User experience
 
@@ -855,11 +855,11 @@ Invariants: a load has at most one ACCEPTED tender; Σ allocated landed cost per
 
 | Event | Trigger | Payload fields | Consumers |
 |---|---|---|---|
-| com.passage.tms.shipment.rated.v1 | rating | shipment_id, options[{carrier, service, total, transit_days}], chosen | sales (freight charge), analytics |
-| com.passage.tms.tender.accepted.v1 / declined.v1 / expired.v1 | tender response | load_id, carrier_id, rank, rate | wms, edi (204/990), analytics |
-| com.passage.tms.tracking.event.v1 | ingest | load_id, stop_no, code, occurred_at | sales-fulfillment, customer portal |
-| com.passage.tms.freightbill.matched.v1 | match | freight_bill_id, carrier_invoice_id, variance, lines[] | AP, costing |
-| com.passage.tms.landedcost.posted.v1 | allocation posted | voyage_id, receipt_lines[{line, amount}] | costing (wave 20) |
+| dev.passage.tms.shipment.rated.v1 | rating | shipment_id, options[{carrier, service, total, transit_days}], chosen | sales (freight charge), analytics |
+| dev.passage.tms.tender.accepted.v1 / declined.v1 / expired.v1 | tender response | load_id, carrier_id, rank, rate | wms, edi (204/990), analytics |
+| dev.passage.tms.tracking.event.v1 | ingest | load_id, stop_no, code, occurred_at | sales-fulfillment, customer portal |
+| dev.passage.tms.freightbill.matched.v1 | match | freight_bill_id, carrier_invoice_id, variance, lines[] | AP, costing |
+| dev.passage.tms.landedcost.posted.v1 | allocation posted | voyage_id, receipt_lines[{line, amount}] | costing (wave 20) |
 
 ### 6.34.6 User experience
 
@@ -1070,11 +1070,11 @@ Invariants: control numbers are strictly increasing without gaps per partner/dir
 
 | Event | Trigger | Payload fields | Consumers |
 |---|---|---|---|
-| com.passage.edi.message.received.v1 | inbound parsed | partner_id, standard, transaction_set, control numbers, canonical_ref | purchasing, sales, AP, tms |
-| com.passage.edi.message.posted.v1 / failed.v1 | posting outcome | message_id, document_ref, error | monitor, tasks |
-| com.passage.edi.message.sent.v1 / acked.v1 | transmit / ack | message_id, partner_id, ack_status | analytics |
-| com.passage.einvoice.status.changed.v1 | validation/transmission | einvoice_id, invoice_id, status, clearance_id | AR/AP, customer portal |
-| com.passage.hub.webhook.delivered.v1 / deadlettered.v1 | delivery | subscription_id, event_id, attempts | analytics, alerting |
+| dev.passage.edi.message.received.v1 | inbound parsed | partner_id, standard, transaction_set, control numbers, canonical_ref | purchasing, sales, AP, tms |
+| dev.passage.edi.message.posted.v1 / failed.v1 | posting outcome | message_id, document_ref, error | monitor, tasks |
+| dev.passage.edi.message.sent.v1 / acked.v1 | transmit / ack | message_id, partner_id, ack_status | analytics |
+| dev.passage.einvoice.status.changed.v1 | validation/transmission | einvoice_id, invoice_id, status, clearance_id | AR/AP, customer portal |
+| dev.passage.hub.webhook.delivered.v1 / deadlettered.v1 | delivery | subscription_id, event_id, attempts | analytics, alerting |
 
 ### 6.35.6 User experience
 

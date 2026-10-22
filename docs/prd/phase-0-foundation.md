@@ -826,7 +826,7 @@ Rules: bulk approve is limited to 100 items per action and requires a confirmati
 - **AC-4.2** Given a 3-level chain (role → user → expression) with 4-hour SLAs, When step 2's assignee delegates and step 3 times out with `delegate_to admin`, Then the instance completes approved after simulated clock advance and the timeline shows 5 work items. (FR-4.7)
 - **AC-4.3** Given a batch job over 1,000,000 synthetic rows in 16 hash partitions, When the worker pod is killed at ~40%, Then the run resumes and ends with rows_done = 1,000,000 and no duplicate side effects. (FR-4.9)
 - **AC-4.4** Given a schema change that removes a required field, When CI registers it, Then the registry rejects it with the incompatible path. (FR-4.3)
-- **AC-4.5** Given an entity publish in the registry, When the outbox is captured, Then a topic `passage.metadata.entity.v1` message with type `dev.passage.metadata.entity.published.v1` exists within 1 s. (FR-4.11)
+- **AC-4.5** Given an entity publish in the registry, When the outbox is captured, Then a topic `dev.passage.metadata.entity.v1` message with type `dev.passage.metadata.entity.published.v1` exists within 1 s. (FR-4.11)
 - **AC-4.6** Given a submitter recalls after step 1 approved, When the action is sent, Then 409 `RECALL_NOT_ALLOWED`. (BR-4.1)
 - **AC-4.7** Given a consumer group replay from `T-1h`, When executed, Then events are redelivered and the dedupe table suppresses side effects for already-processed ids. (FR-4.12)
 - **AC-4.8** Given an exclusive job with a running instance, When a second run is requested, Then 409 `RUN_OVERLAP`. (FR-4.9)

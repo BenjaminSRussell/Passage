@@ -34,14 +34,14 @@
 | Event (CloudEvents type) | Producer | Consumers | Payload summary |
 |---|---|---|---|
 | `passage.production.order.status-changed.v1` | production | planning, scheduling, shopfloor, lean, analytics | orderId, from, to, qty, dates, actor |
-| `passage.production.journal.posted.v1` | production | inventory (w16), ledger (w11), planning | journalId, type, lines[item, qty, cost], journalEntryId |
-| `passage.production.order.settled.v1` | production | ledger, costing (w20), analytics | orderId, actualCost, plannedCost, variances[] |
-| `passage.planning.plan.completed.v1` | planning | production, purchasing (w17), scheduling | planVersionId, counts, duration, messages |
+| `dev.passage.production.journal.posted.v1` | production | inventory (w16), ledger (w11), planning | journalId, type, lines[item, qty, cost], journalEntryId |
+| `dev.passage.production.order.settled.v1` | production | ledger, costing (w20), analytics | orderId, actualCost, plannedCost, variances[] |
+| `dev.passage.planning.plan.completed.v1` | planning | production, purchasing (w17), scheduling | planVersionId, counts, duration, messages |
 | `passage.planning.planned-order.firmed.v1` | planning | production, purchasing, inventory | plannedOrderId, targetType, targetId |
-| `passage.scheduling.job.scheduled.v1` | scheduling | production, shopfloor, planning | jobId, resourceId, start, end, runId |
+| `dev.passage.scheduling.job.scheduled.v1` | scheduling | production, shopfloor, planning | jobId, resourceId, start, end, runId |
 | `passage.lean.kanban.state-changed.v1` | lean | production, inventory, shopfloor | kanbanId, from, to, handlingUnits |
-| `passage.shopfloor.registration.posted.v1` | shopfloor | production, payroll (w43) | registrationId, workerId, jobId, hours, payType |
-| `passage.shopfloor.machine.event.v1` | iot-edge → shopfloor | shopfloor (OEE), production, analytics | machineId, resourceId, kind, counts, state, ts |
+| `dev.passage.shopfloor.registration.posted.v1` | shopfloor | production, payroll (w43) | registrationId, workerId, jobId, hours, payType |
+| `dev.passage.shopfloor.machine.event.v1` | iot-edge → shopfloor | shopfloor (OEE), production, analytics | machineId, resourceId, kind, counts, state, ts |
 
 **Phase-level risks**
 
@@ -176,10 +176,10 @@ Commands: `CreateOrder` (validates product released, BOM/route active as of deli
 
 | Event | Trigger | Payload fields | Consumers |
 |---|---|---|---|
-| `passage.production.order.created.v1` | order committed | orderId, orderNumber, productId, qty, siteId, deliveryDate, originType, originId | planning, analytics |
+| `dev.passage.production.order.created.v1` | order committed | orderId, orderNumber, productId, qty, siteId, deliveryDate, originType, originId | planning, analytics |
 | `passage.production.order.status-changed.v1` | any transition | orderId, from, to, qty, startDate, endDate, actor, occurredAt | planning, scheduling, shopfloor, lean |
-| `passage.production.journal.posted.v1` | journal posted | journalId, orderId, type, postingDate, lines[{itemId, qty, unitCost, operNumber, hours}], journalEntryId | inventory, ledger, planning |
-| `passage.production.order.settled.v1` | End posted | orderId, plannedCost{material,labor,overhead,subcontract}, actualCost{…}, variances[{type,costGroup,amount}] | ledger, costing, analytics |
+| `dev.passage.production.journal.posted.v1` | journal posted | journalId, orderId, type, postingDate, lines[{itemId, qty, unitCost, operNumber, hours}], journalEntryId | inventory, ledger, planning |
+| `dev.passage.production.order.settled.v1` | End posted | orderId, plannedCost{material,labor,overhead,subcontract}, actualCost{…}, variances[{type,costGroup,amount}] | ledger, costing, analytics |
 | `passage.production.subcontract.po-requested.v1` | release of subcontract op | orderId, operNumber, vendorId, serviceItemId, qty, dueDate | purchasing |
 
 ### 4.21.6 User experience
@@ -376,11 +376,11 @@ Indexing: Requirement (plan_version_id, item_id, site_id, requirement_date); Peg
 
 | Event | Trigger | Payload fields | Consumers |
 |---|---|---|---|
-| `passage.planning.plan.started.v1` | run begins | planId, versionId, kind, scope | analytics |
-| `passage.planning.plan.completed.v1` | version becomes current | planId, versionId, itemsPlanned, plannedOrders{purchase,production,transfer}, messages, durationMs, planHash | production, purchasing, scheduling |
+| `dev.passage.planning.plan.started.v1` | run begins | planId, versionId, kind, scope | analytics |
+| `dev.passage.planning.plan.completed.v1` | version becomes current | planId, versionId, itemsPlanned, plannedOrders{purchase,production,transfer}, messages, durationMs, planHash | production, purchasing, scheduling |
 | `passage.planning.planned-order.firmed.v1` | firm | plannedOrderId, orderType, targetId, qty, dates | production, purchasing, inventory |
-| `passage.planning.message.raised.v1` | message created | requirementId, refType, refId, action, delayDays | purchasing, sales (w27), notifications |
-| `passage.planning.forecast.published.v1` | consensus approved | modelId, version, items, horizonPeriods | planning run |
+| `dev.passage.planning.message.raised.v1` | message created | requirementId, refType, refId, action, delayDays | purchasing, sales (w27), notifications |
+| `dev.passage.planning.forecast.published.v1` | consensus approved | modelId, version, items, horizonPeriods | planning run |
 
 ### 4.22.6 User experience
 
@@ -556,10 +556,10 @@ Indexing: ScheduledJob GiST exclusion constraint `EXCLUDE USING gist (resource_i
 
 | Event | Trigger | Payload fields | Consumers |
 |---|---|---|---|
-| `passage.scheduling.run.completed.v1` | run done | runId, scope, operations, makespanMinutes, totalLatenessMinutes, solverStatus | production, planning |
-| `passage.scheduling.job.scheduled.v1` | job placed/moved | jobId, orderId, operNumber, resourceId, start, end, runId, firmed | production, shopfloor |
+| `dev.passage.scheduling.run.completed.v1` | run done | runId, scope, operations, makespanMinutes, totalLatenessMinutes, solverStatus | production, planning |
+| `dev.passage.scheduling.job.scheduled.v1` | job placed/moved | jobId, orderId, operNumber, resourceId, start, end, runId, firmed | production, shopfloor |
 | `passage.scheduling.order.dates-changed.v1` | order start/end changed | orderId, start, end, lateMinutes | production, planning, sales (w27) |
-| `passage.scheduling.bottleneck.detected.v1` | load > threshold | resourceId, periods[], loadPct | notifications |
+| `dev.passage.scheduling.bottleneck.detected.v1` | load > threshold | resourceId, periods[], loadPct | notifications |
 
 ### 4.23.6 User experience
 
@@ -737,7 +737,7 @@ Indexing: Kanban (rule_id, state); KanbanJob (activity_id, state, planned_start)
 | `passage.production.batch-order.created.v1` | batch order created | orderId, formulaVersionId, batchSize, scaleFactor, coProducts[] | planning, analytics |
 | `passage.production.batch.attributes-recorded.v1` | attribute values saved | batchId, itemId, values[{attributeId, value}], potency | quality (w33), sales (w27) |
 | `passage.production.co-product.allocated.v1` | End of batch order | orderId, lines[{itemId, method, pct, amount}], byProductBurden | ledger, costing |
-| `passage.lean.kanban.created.v1` | kanban generated | kanbanId, ruleId, qty, eventRefType, eventRefId, due | production, shopfloor |
+| `dev.passage.lean.kanban.created.v1` | kanban generated | kanbanId, ruleId, qty, eventRefType, eventRefId, due | production, shopfloor |
 | `passage.lean.kanban.state-changed.v1` | job/kanban transition | kanbanId, jobId, from, to, qty, scrap, handlingUnits | production, inventory, shopfloor |
 | `passage.lean.flow-period.settled.v1` | period settled | flowId, period, materialCost, conversionCost, outputValue, variance, journalEntryId | ledger, analytics |
 
@@ -870,7 +870,7 @@ Wave 25 puts production on the floor. Operators use a touch kiosk (PWA) to clock
 - **FR-25.6 Instructions and documents** — Must. The kiosk shall show operation instructions (markdown) and attachments (PDF, images, video ≤ 50 MB) cached for offline use.
 - **FR-25.7 Pay calculation** — Must. The system shall calculate PayLines per worker-day from registrations using the worker's profile (day types, shift windows, breaks) and pay agreement rules: base, overtime after daily/weekly thresholds, shift premium, flex balance.
   - Notes: Defaults: overtime > 8.00 h/day at 1.5×, > 40.00 h/week at 1.5×, Sunday 2.0×; rounding per BR-25.2; max 24 h/day validation.
-- **FR-25.8 Approval and export** — Must. Supervisors shall approve per worker-day (bulk by team), with edits audited; approved days are locked and exported as `passage.shopfloor.payday.approved.v1` for w43 and as CSV.
+- **FR-25.8 Approval and export** — Must. Supervisors shall approve per worker-day (bulk by team), with edits audited; approved days are locked and exported as `dev.passage.shopfloor.payday.approved.v1` for w43 and as CSV.
 - **FR-25.9 IoT ingestion** — Must. The `iot-edge` connector shall subscribe to OPC-UA nodes (via `gopcua`) and MQTT topics (Mosquitto/EMQX, QoS 1), normalize to the MachineEvent schema (BR-25.4), buffer locally (SQLite ring, 24 h), and publish to Kafka topic `shopfloor.machine-events` with idempotent producer and per-machine monotonic sequence.
 - **FR-25.10 OEE** — Must. The system shall compute OEE per resource per 15-minute bucket and shift (BR-25.5) from machine events and planned time from the w23 schedule/calendar, with dashboard lag p95 < 5 s.
 - **FR-25.11 Downtime and andon** — Must. The system shall open a DowntimeRecord when a machine reports DOWN or no count for > `idle_threshold_s` (default 300), require a reason code within the kiosk, and raise an AndonAlert (kiosk banner + notification) on downtime > 10 min, scrap rate > 5% in a bucket, or quality fail.
@@ -917,11 +917,11 @@ Indexing: TimeRegistration (worker_id, started_at), (job_id), unique id (client 
 
 | Event | Trigger | Payload fields | Consumers |
 |---|---|---|---|
-| `passage.shopfloor.registration.posted.v1` | registration stored | registrationId, workerId, kind, jobId, hours, qtyGood, qtyScrap, offline | production (job card), analytics |
-| `passage.shopfloor.machine.event.v1` | edge publish | see BR-25.4 | shopfloor OEE, production, maintenance (w44) |
+| `dev.passage.shopfloor.registration.posted.v1` | registration stored | registrationId, workerId, kind, jobId, hours, qtyGood, qtyScrap, offline | production (job card), analytics |
+| `dev.passage.shopfloor.machine.event.v1` | edge publish | see BR-25.4 | shopfloor OEE, production, maintenance (w44) |
 | `passage.shopfloor.oee.bucket-updated.v1` | bucket recomputed | resourceId, bucketStart, availability, performance, quality, oee | dashboards (w46) |
-| `passage.shopfloor.andon.raised.v1` | alert condition | alertId, resourceId, kind, severity, jobId, startedAt | notifications, kiosk |
-| `passage.shopfloor.payday.approved.v1` | approval | workerId, workDate, payLines[{type, hours, multiplier, amount}], approvedBy | payroll (w43) |
+| `dev.passage.shopfloor.andon.raised.v1` | alert condition | alertId, resourceId, kind, severity, jobId, startedAt | notifications, kiosk |
+| `dev.passage.shopfloor.payday.approved.v1` | approval | workerId, workDate, payLines[{type, hours, multiplier, amount}], approvedBy | payroll (w43) |
 
 ### 4.25.6 User experience
 
@@ -941,7 +941,7 @@ Interaction rules: kiosk targets ≥ 48 px, no hover-only affordances, numeric k
 - **BR-25.1 Time attribution.** Hours for a job registration = (stopped_at − started_at) minus breaks that fall inside per the profile; bundle hours split by Σ qty_good (fallback equal split); hours rounded to 0.01 h on the job-card journal.
 - **BR-25.2 Rounding and tolerances.** Clock-in within tolerance_before_min (default 10) of shift start rounds to shift start; clock-out within tolerance_after_min (default 5) rounds to shift end; otherwise round to nearest rounding_minutes (default 1, max 15).
 - **BR-25.3 Missing clock-out.** At shift end + 4 h a missing clock-out auto-closes at shift end with flag `missing-clock-out`; the day cannot be approved until a supervisor confirms or edits.
-- **BR-25.4 Machine event schema.** CloudEvents envelope `type: passage.shopfloor.machine.event.v1`, `source: urn:passage:iot-edge:<site>:<edgeId>`, `subject: <machineId>`, `id: <machineId>-<seq>`, `time: <device ts RFC 3339>`, `datacontenttype: application/json`, `data`: `{ "machineId": "M-101", "resourceId": "uuid", "seq": 184233, "kind": "count|state|downtime|alarm|measurement", "ts": "2026-10-21T08:15:03.250Z", "goodCount": 12, "rejectCount": 1, "state": "RUNNING", "reasonCode": null, "measurement": {"name": "temp_c", "value": 71.4, "unit": "Cel"}, "jobId": null, "tags": {"line": "L1"} }`. Counts are deltas since the previous count event; absolute counters are converted at the edge with rollover detection (32-bit). Events older than 7 days or with seq ≤ last seen are dropped and counted in a metric.
+- **BR-25.4 Machine event schema.** CloudEvents envelope `type: dev.passage.shopfloor.machine.event.v1`, `source: urn:passage:iot-edge:<site>:<edgeId>`, `subject: <machineId>`, `id: <machineId>-<seq>`, `time: <device ts RFC 3339>`, `datacontenttype: application/json`, `data`: `{ "machineId": "M-101", "resourceId": "uuid", "seq": 184233, "kind": "count|state|downtime|alarm|measurement", "ts": "2026-10-21T08:15:03.250Z", "goodCount": 12, "rejectCount": 1, "state": "RUNNING", "reasonCode": null, "measurement": {"name": "temp_c", "value": 71.4, "unit": "Cel"}, "jobId": null, "tags": {"line": "L1"} }`. Counts are deltas since the previous count event; absolute counters are converted at the edge with rollover detection (32-bit). Events older than 7 days or with seq ≤ last seen are dropped and counted in a metric.
 - **BR-25.5 OEE formula (ISO 22400 aligned).** Availability = run_minutes / planned_minutes; Performance = (ideal_cycle_s × total_count / 60) / run_minutes, capped at 1.0 with an over-rate flag; Quality = good_count / total_count (1.0 if total = 0); OEE = A × P × Q. Planned minutes = scheduled open minutes minus planned downtime (category planned). Example shift: planned 480 min, unplanned down 60 → A = 0.875; ideal cycle 60 s, total 380 → P = 380 / 420 = 0.9048; good 361 → Q = 0.95; OEE = 0.7522. Buckets roll up to shift/day by summing minutes and counts, not by averaging ratios.
 - **BR-25.6 Idle detection.** No count event for idle_threshold_s while state = RUNNING flips the bucket to IDLE from the last count; a later count closes the idle gap.
 - **BR-25.7 Offline conflict resolution.** Replayed registrations are accepted in client timestamp order; a job-start for a job that was finished server-side while offline is accepted but flagged `job-finished-conflict` for supervisor review; a duplicate client UUID is a no-op; clock skew > 5 min between device and server is corrected by the offset measured at reconnect and recorded.
