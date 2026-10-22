@@ -63,6 +63,11 @@ def phase_title(p):
     return f"Phase {p['phase']}: {p['name']} (waves {p['waves'][0]}-{p['waves'][1]})"
 
 
+def phase_option(p):
+    # gh splits single-select options on commas, so the label must not contain one
+    return f"P{p['phase']} {p['name'].replace(',', ' /')}"
+
+
 def wave_md(w, phases):
     p = next(p for p in phases if p["phase"] == w["phase"])
     lines = [f"## {wave_title(w)}", "", f"**Phase {p['phase']} — {p['name']}**", "", f"**Goal.** {w['goal']}", ""]
@@ -156,7 +161,7 @@ def ensure_issues(phases, waves, milestones):
 def ensure_project_fields(phases):
     fields = {f["name"]: f for f in gh_json("project", "field-list", str(PROJECT_NUMBER), "--owner", PROJECT_OWNER, "--format", "json", "--limit", "100")["fields"]}
     if "Phase" not in fields:
-        opts = ",".join(f"P{p['phase']} {p['name']}" for p in phases)
+        opts = ",".join(phase_option(p) for p in phases)
         gh("project", "field-create", str(PROJECT_NUMBER), "--owner", PROJECT_OWNER, "--name", "Phase", "--data-type", "SINGLE_SELECT", "--single-select-options", opts)
     if "Wave" not in fields:
         gh("project", "field-create", str(PROJECT_NUMBER), "--owner", PROJECT_OWNER, "--name", "Wave", "--data-type", "NUMBER")
@@ -181,7 +186,7 @@ def ensure_project_items(phases, waves, issue_numbers, fields):
             print("added to project", t)
         p = next(p for p in phases if p["phase"] == w["phase"])
         base = ["project", "item-edit", "--project-id", project_id, "--id", item["id"]]
-        gh(*base, "--field-id", fields["Phase"]["id"], "--single-select-option-id", phase_opts[f"P{p['phase']} {p['name']}"])
+        gh(*base, "--field-id", fields["Phase"]["id"], "--single-select-option-id", phase_opts[phase_option(p)])
         gh(*base, "--field-id", fields["Wave"]["id"], "--number", str(w["n"]))
         if not item.get("gate"):
             gh(*base, "--field-id", fields["Gate"]["id"], "--single-select-option-id", gate_opts["Not started"])
