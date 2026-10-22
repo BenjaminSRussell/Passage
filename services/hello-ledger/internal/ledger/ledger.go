@@ -5,6 +5,7 @@ package ledger
 import (
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"sync"
@@ -54,11 +55,23 @@ func (b *Book) Post(lines []Line) (Entry, error) {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	updated := make(map[string]int64, len(normalized))
+	for _, line := range normalized {
+		current, seen := updated[line.Account]
+		if !seen {
+			current = b.totals[line.Account]
+		}
+		next, err := add(current, line.Debit-line.Credit)
+		if err != nil {
+			return Entry{}, err
+		}
+		updated[line.Account] = next
+	}
 	b.nextID++
 	entry := Entry{ID: b.nextID, Lines: normalized}
 	b.entries = append(b.entries, cloneLinesEntry(entry))
-	for _, line := range normalized {
-		b.totals[line.Account] += line.Debit - line.Credit
+	for account, balance := range updated {
+		b.totals[account] = balance
 	}
 	return cloneLinesEntry(entry), nil
 }
@@ -108,13 +121,30 @@ func validate(lines []Line) ([]Line, error) {
 			return nil, fmt.Errorf("%w: line amount is zero", ErrInvalidLine)
 		}
 		out[i] = Line{Account: account, Debit: line.Debit, Credit: line.Credit}
-		debit += line.Debit
-		credit += line.Credit
+		var err error
+		debit, err = add(debit, line.Debit)
+		if err != nil {
+			return nil, err
+		}
+		credit, err = add(credit, line.Credit)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if debit != credit {
 		return nil, ErrUnbalanced
 	}
 	return out, nil
+}
+
+func add(a, b int64) (int64, error) {
+	if b > 0 && a > math.MaxInt64-b {
+		return 0, fmt.Errorf("%w: amount overflow", ErrInvalidLine)
+	}
+	if b < 0 && a < math.MinInt64-b {
+		return 0, fmt.Errorf("%w: amount overflow", ErrInvalidLine)
+	}
+	return a + b, nil
 }
 
 func cloneLinesEntry(entry Entry) Entry {

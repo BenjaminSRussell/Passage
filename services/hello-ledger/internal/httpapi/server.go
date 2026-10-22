@@ -49,6 +49,7 @@ func (s *Server) postEntry(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Lines []lineDTO `json:"lines"`
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return

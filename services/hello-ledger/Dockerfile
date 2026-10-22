@@ -1,4 +1,5 @@
-FROM golang:1.22-bookworm AS build
+# 1.26.0 includes the stdlib fix for CVE-2025-68121. Do not drop back to 1.22.
+FROM golang:1.26.0-bookworm AS build
 WORKDIR /src
 COPY go.mod ./
 COPY cmd ./cmd

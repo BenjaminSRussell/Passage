@@ -23,7 +23,7 @@ fi
 
 kubectl config use-context k3d-passage
 kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
-kubectl apply -n argocd --server-side -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+kubectl apply -n argocd --server-side -f https://raw.githubusercontent.com/argoproj/argo-cd/v3.5.6/manifests/install.yaml
 kubectl -n argocd rollout status deploy/argocd-server --timeout=300s
 
 docker build -t hello-ledger:local services/hello-ledger

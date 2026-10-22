@@ -2,6 +2,7 @@ package ledger
 
 import (
 	"errors"
+	"math"
 	"sync"
 	"testing"
 )
@@ -59,6 +60,22 @@ func TestRejectInvalidLines(t *testing.T) {
 		if _, err := book.Post(lines); !errors.Is(err, ErrInvalidLine) {
 			t.Fatalf("case %d err = %v", i, err)
 		}
+	}
+}
+
+func TestRejectAmountOverflow(t *testing.T) {
+	book := NewBook()
+	_, err := book.Post([]Line{
+		{Account: "Cash", Debit: math.MaxInt64, Credit: 0},
+		{Account: "Revenue", Debit: 0, Credit: math.MaxInt64},
+		{Account: "Cash", Debit: 1, Credit: 0},
+		{Account: "Revenue", Debit: 0, Credit: 1},
+	})
+	if !errors.Is(err, ErrInvalidLine) {
+		t.Fatalf("err = %v", err)
+	}
+	if len(book.Entries()) != 0 {
+		t.Fatal("overflowing entry was stored")
 	}
 }
 
