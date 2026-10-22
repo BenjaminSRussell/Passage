@@ -1,0 +1,32 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/shell/package-lock.json
+      - name: Install delivery CLIs
+        run: bash scripts/install-dev-tools.sh
+      - name: Lint, test, chart, cluster module, negative gate
+        run: make ci
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install supply-chain CLIs
+        run: bash scripts/install-dev-tools.sh
+      - name: Block an unsigned image, then admit a signed one
+        run: bash scripts/supply-chain-negative.sh

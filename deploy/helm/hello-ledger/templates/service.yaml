@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello-ledger
+  labels:
+    app: hello-ledger
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    app: hello-ledger
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http

@@ -1,0 +1,8 @@
+replicaCount: 1
+imageRepository: hello-ledger
+imageDigest: ""
+imageTag: local
+imagePullPolicy: Never
+service:
+  type: LoadBalancer
+  port: 80

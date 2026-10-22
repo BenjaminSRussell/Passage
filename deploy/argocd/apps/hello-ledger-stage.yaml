@@ -1,0 +1,25 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hello-ledger-stage
+  namespace: argocd
+  annotations:
+    passage.dev/image-digest: sha256:0a6d5f56e627284b7fcc07112954c0a9fc37d4b04da82a1a4f73ece26af04db5
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/BenjaminSRussell/Passage.git
+    targetRevision: main
+    path: deploy/helm/hello-ledger
+    helm:
+      valueFiles:
+        - values-stage.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: passage-stage
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

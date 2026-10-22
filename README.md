@@ -22,6 +22,19 @@ Kubernetes (cloud-agnostic) · Go + TypeScript + Python services · Postgres per
 | 40 | Finance parity: group consolidation |
 | 50 | **Production go-live + v1.0** |
 
+## Develop
+
+Wave 1 is the delivery baseline: `hello-ledger` (Go), `platform-bff` (Node), the React shell, Helm, Argo CD app-of-apps, and an OpenTofu cluster module.
+
+```bash
+make tools         # helm, tofu, k3d, kubectl, syft, trivy, cosign
+make ci            # lint, unit tests, shell build, chart render, tofu validate, negative gate
+make run           # hello-ledger on :8080
+make deploy-local  # k3d + Argo CD + hello-ledger (Docker required)
+```
+
+`curl -s localhost:8080/healthz` returns the placeholder service. Post a balanced journal to `POST /v1/entries`. Promote a digest with `python3 tools/promotion.py promote stage sha256:<64 hex>` and roll it back with `python3 tools/promotion.py rollback stage`. The history log is what Argo CD syncs; `make deploy-local` is the laptop cluster.
+
 ## Working the plan
 
 1. Each wave is a GitHub issue labeled `wave` and `phase-N`; every 5th wave is `phase-exit`.

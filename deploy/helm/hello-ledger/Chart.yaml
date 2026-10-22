@@ -1,0 +1,6 @@
+apiVersion: v2
+name: hello-ledger
+description: Placeholder ledger service that proves the Passage delivery path.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

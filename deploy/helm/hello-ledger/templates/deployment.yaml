@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello-ledger
+  labels:
+    app: hello-ledger
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: hello-ledger
+  template:
+    metadata:
+      labels:
+        app: hello-ledger
+    spec:
+      containers:
+        - name: hello-ledger
+          image: {{ include "hello-ledger.image" . | quote }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http

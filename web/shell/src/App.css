@@ -1,0 +1,73 @@
+:root {
+  color: #1c1917;
+  background: #f6f3ee;
+  font-family: "Iowan Old Style", Palatino, "Palatino Linotype", serif;
+}
+
+body {
+  margin: 0;
+}
+
+main {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 4rem;
+}
+
+.eyebrow {
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+h1 {
+  font-size: 2.5rem;
+  margin: 0;
+}
+
+.lede {
+  margin-top: 0.5rem;
+}
+
+section {
+  margin-top: 1.5rem;
+  padding: 1rem 1.25rem;
+  background: #fff;
+  border: 1px solid #e7e0d6;
+}
+
+h2 {
+  font-size: 1rem;
+  margin: 0 0 0.75rem;
+}
+
+.actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+button {
+  font: inherit;
+  background: #1c1917;
+  color: #fff;
+  border: 0;
+  padding: 0.55rem 0.8rem;
+  cursor: pointer;
+}
+
+button:last-child {
+  background: #fff;
+  color: #1c1917;
+  border: 1px solid #1c1917;
+}
+
+.error {
+  color: #9f1239;
+}
+
+ul {
+  margin: 0;
+  padding-left: 1.2rem;
+}
