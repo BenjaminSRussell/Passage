@@ -1,0 +1,64 @@
+// Package testkit gives integration tests a Postgres pool scoped to a fresh
+// schema. Tests call DB(t) and are skipped when PASSAGE_TEST_DATABASE_URL is
+// unset, so `go test ./...` always passes on a laptop without Postgres.
+package testkit
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
+)
+
+// EnvURL is the environment variable that enables database tests.
+const EnvURL = "PASSAGE_TEST_DATABASE_URL"
+
+// DB returns a pool whose search_path is a throwaway schema, dropped on cleanup.
+func DB(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	url := os.Getenv(EnvURL)
+	if url == "" {
+		t.Skipf("%s not set; skipping database test", EnvURL)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	schema := "t_" + strings.ToLower(ids.New())
+	admin, err := pgxpool.New(ctx, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := admin.Exec(ctx, "create schema "+schema); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ := pgxpool.ParseConfig(url)
+	cfg.ConnConfig.RuntimeParams["search_path"] = schema
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		pool.Close()
+		_, _ = admin.Exec(context.Background(), "drop schema "+schema+" cascade")
+		admin.Close()
+	})
+	return pool
+}
+
+// Ctx returns a context carrying a test principal for tenantID with the given duties.
+func Ctx(tenantID string, duties ...string) context.Context {
+	p := tenant.Principal{TenantID: tenantID, LegalEntityID: "le-test", UserID: "user-test", Duties: map[string]struct{}{}}
+	for _, d := range duties {
+		p.Duties[d] = struct{}{}
+	}
+	return tenant.With(context.Background(), p)
+}
+
+// TenantID returns a deterministic UUID for tests: 00000000-0000-0000-0000-00000000000N.
+func TenantID(n int) string { return fmt.Sprintf("00000000-0000-0000-0000-%012d", n) }

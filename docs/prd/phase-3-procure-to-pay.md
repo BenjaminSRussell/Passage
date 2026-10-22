@@ -609,3 +609,509 @@ Open questions:
 2. Gap-free PO numbering per legal entity by default? Default: off (sequence with gaps allowed); on for countries requiring it. Decide by wave 18.
 3. Scheduling-agreement delivery schedules from MRP: wave 22 or wave 17 manual only? Default: manual only now. Decide by wave 21.
 
+## 3.18 Wave 18: Receiving, Product Receipts & Three-Way Match
+
+### 3.18.1 Scope and business context
+
+Wave 18 closes the physical and financial loop on a purchase order. Receiving moves a PO line's inventory transaction from ORDERED through ARRIVED (arrival journal, SAP inbound delivery VL31N), REGISTERED (registration, SAP GR to quality/blocked stock) to RECEIVED by posting a product receipt (AX VendPackingSlipJour/VendPackingSlipTrans, SAP MKPF/MSEG movement type 101 with EKBE history). The product receipt posts inventory value against the GR/IR accrual account (AX "Purchase, accrual" / "Accrued purchases" in the posting profile, SAP WRX GR/IR clearing via OBYC). A vendor invoice (AX VendInvoiceInfoTable/VendInvoiceInfoLine pending invoice → VendInvoiceJour/VendInvoiceTrans; SAP RBKP/RSEG via MIRO) is captured manually, from an OCR/AP-automation adapter, or (wave 35) as UBL/Peppol, and the matching engine compares invoice price, quantity and total to PO and receipt within tolerances (AX price tolerance per item/vendor, quantity tolerance, invoice totals tolerance; SAP tolerance keys PP, DQ, BD, AN/AP, DW, KW). Matched invoices post the vendor liability (VendTrans / BSIK) and clear GR/IR; exceptions route to a Temporal resolution workflow. Evaluated receipt settlement (ERS / MRRL) generates invoices from receipts for vendors flagged for self-billing.
+
+Out of scope: payment (wave 19), warehouse-directed put-away and license plates (wave 31), quality orders on receipt (wave 33), landed cost (wave 34), Peppol transport (wave 35), invoice-cost adjustments to inventory beyond the direct posting (wave 20 settles invoice-receipt cost differences), non-PO expense invoices with GL distribution (included here as 0-way "invoice register" with coding, approval by wave 4 workflow).
+
+**Pain points solved (10x lens)**
+
+| Pain point in AX/SAP today | Root cause | Passage answer in this wave | Measurable 10x target |
+|---|---|---|---|
+| AX pending vendor invoice form (VendInvoiceInfoTable) runs "Match product receipts" as a dialog, then matching icons update only after "Update match status"; users re-key invoice lines from paper; SAP MIRO proposes lines but the tolerance log (RBKP block indicator, MRBR release) is a separate transaction | Matching is a form-triggered class (VendInvoiceMatch), not an engine; capture is manual | Matching engine runs on every invoice save and on every receipt posting (re-match candidates), status visible inline; OCR adapter pre-fills lines; `MatchResult` per line with variances | Invoice entry time: 4–6 min → < 60 s; manual re-match steps: 3 → 0 |
+| GR/IR reconciliation: AX "Accrued purchases" report and SAP MR11 (GR/IR maintenance) plus F.19 regrouping are month-end chores; differences hide for months | GR/IR balance is an account balance with no per-PO-line open-item ledger in AX; SAP EKBE requires MR11 to clear residuals | `GrirOpenItem` per PO line × receipt, cleared by invoice line; GR/IR report = Σ open items and must equal the account balance (daily reconciliation) | Month-end GR/IR effort: 4–8 h → < 15 min; unexplained residual: non-zero → 0 |
+| Receipt posting latency: AX product receipt via PurchFormLetter_PackingSlip takes 10–40 s per receipt; SAP MIGO posts in ~1 s but inventory valuation updates MBEW synchronously causing lock waits (table lock on MBEW/MARD during month-end) | Document class chain and serialized valuation updates | Receipt posting is one inventory `transactions:apply` + one ledger `Post`; value updated per transaction, no material-level lock | Receipt post p95: 10–40 s (AX) / lock waits at close (SAP) → < 1.5 s, no cross-document locks |
+| Tolerance configuration: AX has three separate forms (price tolerance per item/vendor/company, quantity tolerance on item, totals tolerance in parameters) with "Allow price tolerance" flags scattered; SAP OMR6 tolerance keys use cryptic codes and a company-code-level default | Settings scattered without a single evaluation order | One `MatchingPolicy` entity with ordered scopes (vendor×item > vendor > item > entity) and explicit percent/absolute limits, previewable with "test an invoice" | Time to configure and verify a tolerance change: 1–2 h with testing → 5 min with the policy tester |
+| ERS/self-billing in AX requires a batch "Generate invoices from product receipts"; SAP MRRL is a batch run; both mis-handle partial receipts with price changes | Batch design; invoice creation decoupled from the receipt event | ERS invoice created by the `receipt.posted` consumer within seconds using the price at receipt date and locked PO price | ERS invoice latency: nightly batch → < 10 s; ERS price mismatches: tracked, target 0 |
+
+### 3.18.2 AX / SAP parity map
+
+| Capability | AX 2012 / D365 F&SCM | SAP ECC / S/4 | Passage equivalent | Parity level |
+|---|---|---|---|---|
+| Arrival / registration | Arrival overview (WMSArrivalOverview), arrival journal (WMSJournalTable type Reception), registration (InventTransRegister) | Inbound delivery VL31N, GR into blocked stock (103/105), quality inspection stock | `Arrival` (ARRIVED), `Registration` (REGISTERED) steps on ReceiptLine; arrival overview screen | full |
+| Product receipt | PurchFormLetter_PackingSlip → VendPackingSlipJour/Trans, InventTrans Received, ledger posting PurchPackingSlip/accrual | MIGO 101 → MKPF/MSEG, EKBE (VGABE 1), GR/IR via WRX, inventory BSX | `ProductReceipt`/`ReceiptLine`; RECEIVED transactions; ledger entry Dr inventory / Cr GR/IR | full |
+| Receipt reversal / correction | Product receipt correction, cancel (VendPackingSlipJour cancel) | 102 reversal, MBST cancel document | `:correct` (new receipt with delta qty), `:cancel` (full reversal) | full |
+| Vendor invoice (PO) | VendInvoiceInfoTable/Line (pending), VendInvoiceJour/Trans (posted), invoice register/approval journals | MIRO → RBKP/RSEG, EKBE VGABE 2; invoice park MIR7 | `VendorInvoice`/`VendorInvoiceLine` (DRAFT → POSTED) | full |
+| Non-PO invoice | Invoice journal (LedgerJournalTrans type VendInvoiceRegister / Vend), invoice register + approval | FB60, MIRO without PO | `VendorInvoice` kind EXPENSE with GL distribution lines | full |
+| Matching | VendInvoiceMatch, match status (VendInvoiceMatchingStatus), price/qty/totals tolerances (VendInvoicePriceTolerance, InventTable quantity tolerance, Accounts payable parameters) | LIV tolerance keys OMR6 (PP, DQ, BD, AN, AP, DW, KW, ST, VP), blocking indicator RBKP ZLSPR, MRBR release | `MatchingEngine`, `MatchingPolicy`, `MatchResult`; exception workflow | full |
+| Accrued purchases / GR/IR | Accrued purchases report (PurchAccrual), posting types PurchaseAccrual/PurchasePackingSlip | GR/IR clearing WRX, MR11, F.19, MB5S | `GrirOpenItem`, GR/IR report | improved |
+| ERS | Vendor self-billing: "Generate invoices from product receipts" (PurchFormLetter with VendInvoiceInfoTable auto) | MRRL evaluated receipt settlement, LFM1 XERSY | `ErsPolicy` on vendor; consumer creates invoice from receipt | full |
+| Invoice capture adapters | Invoice capture (D365 add-in), AIF VendVendInvoiceService | OpenText VIM, SAP Invoice Management, IDoc INVOIC | `POST /invoices:capture` with OCR adapter interface (JSON), UBL mapping stub | partial (Peppol w35) |
+| Charges allocation at invoice | MarkupTrans allocation on invoice | Unplanned delivery costs, planned conditions FRA1 | `Charge` allocation rules applied to invoice lines | full |
+| Period control AP | Ledger calendar module Accounts payable | OB52 posting periods account type K | wave 14 period control module AP at `:post` | full |
+
+### 3.18.3 Functional requirements
+
+- **FR-18.1 Arrival and registration** — Must. The system shall record arrival (ARRIVED) with carrier, packing slip number, pallet count and expected PO lines, then registration (REGISTERED) with quantity, batch, serial, location and inventory status, for any confirmed PO line with remaining quantity.
+  - Over-receipt beyond `qty × (1 + over_delivery_pct)` (item default 0 %, policy per vendor×item) is rejected with `RCV-OVR-001`; under-delivery below `under_delivery_pct` closes the line only if `close_short=true`.
+  - Serial-tracked lines require one serial per unit; duplicate serial rejected by inventory (`INV-SER-001`).
+
+- **FR-18.2 Product receipt posting** — Must. The system shall post a `ProductReceipt` for registered or directly received quantities, moving inventory transactions to RECEIVED, writing `cost_amount_physical = qty × PO unit price (converted to accounting currency at the receipt date rate) + ITEM charges`, and posting Dr inventory (posting profile) / Cr GR/IR accrual through `Post(JournalEntry)` with idempotency key = receipt id.
+  - For category (non-stock) lines the debit goes to the line's expense account; GR/IR credit is unchanged.
+  - A `GrirOpenItem` is created per receipt line with amount in transaction and accounting currency.
+  - Receipt date must be in an open INVENTORY period; packing slip number unique per vendor (`RCV-DUP-001`).
+
+- **FR-18.3 Receipt correction and cancellation** — Must. The system shall support correction (delta quantity, positive or negative) and cancellation (full reversal) of a posted receipt while the receipt line has not been invoiced; invoiced lines require an invoice credit first.
+
+- **FR-18.4 Vendor invoice capture** — Must. The system shall create a `VendorInvoice` in DRAFT from manual entry, from the capture adapter (`:capture` JSON with header fields, lines, confidence scores, page images) or from ERS, with vendor, invoice number, dates, currency, totals, lines linked to PO lines and/or receipt lines, charges, tax groups.
+  - Duplicate check: same vendor + invoice number (case-insensitive, whitespace-stripped) within 24 months → `AP-DUP-001`.
+  - Lines may be proposed from open receipts (3-way) or open PO lines (2-way); proposal fills qty = uninvoiced received qty.
+  - Expense invoices (no PO) carry GL distribution lines validated by account structure.
+
+- **FR-18.5 Matching policy** — Must. The system shall evaluate a `MatchingPolicy` resolved by scope precedence vendor×item > vendor > item > legal entity with fields: `match_level` (NONE, TWO_WAY, THREE_WAY), `price_tol_pct` (default 2.0), `price_tol_abs` (default 25.00 acct ccy per line), `qty_tol_pct` (default 5.0), `total_tol_pct` (default 1.0), `total_tol_abs` (default 50.00), `small_diff_abs` (default 0.50, auto-posted to small-differences account), `price_tol_mode` (UPPER_ONLY / BOTH), `date_tol_days` (0 = off).
+  - A line passes price if `|invoice_unit_price − po_unit_price| ≤ max(po_price × pct, abs)` (lower prices always pass in UPPER_ONLY).
+  - A line passes quantity (3-way) if `invoice_qty ≤ received_uninvoiced_qty × (1 + qty_tol_pct/100)`; 2-way compares to PO remaining qty.
+  - Total passes if `|invoice_total − Σ matched line totals − charges − tax| ≤ max(total_tol_pct, total_tol_abs)`.
+
+- **FR-18.6 Matching engine and status** — Must. The system shall compute `MatchResult` per line and header with statuses `NOT_MATCHED`, `MATCHED`, `PRICE_VARIANCE`, `QTY_VARIANCE`, `TOTAL_VARIANCE`, `NO_RECEIPT`, `WAITING_RECEIPT`; header status is the worst line status; the engine re-runs automatically when a receipt posts for a referenced PO line.
+  - Engine is pure (inputs → result) and exposed at `POST /matching:evaluate` for the policy tester.
+  - Price variance within tolerance posts the difference to the purchase price variance account (standard-cost items, wave 20 PPV) or to inventory/expense (actual-cost items).
+
+- **FR-18.7 Exception workflow** — Must. The system shall start a Temporal `InvoiceMatchException` workflow for any invoice with a variance status, assigning to the buyer of the PO (price) or receiving supervisor (quantity) with actions: accept variance (post with reason code), request credit note, adjust PO price (creates PO version via wave 17), wait for receipt (timer, re-evaluate), reject invoice.
+  - SLA 3 business days then escalation to AP manager; all actions audited on the invoice.
+
+- **FR-18.8 Invoice posting** — Must. The system shall post a matched or accepted invoice: Dr GR/IR (clearing `GrirOpenItem` to the invoiced amount) or Dr expense/inventory (2-way/expense), Dr tax recoverable (wave 13), Cr vendor control account (posting profile) creating a `VendorTransaction` open item with due date and cash discount date per payment terms, moving PO inventory transactions to PURCHASED for invoiced quantity and setting `cost_amount_posted` from the invoice.
+  - Idempotency key = invoice id; AP period must be open; posting date ≠ invoice date allowed (both stored).
+  - Differences between receipt value and invoice value for stock items post to inventory (actual cost methods) or PPV (standard), and are recorded on the transaction as `cost_amount_adjustment` for wave 20.
+
+- **FR-18.9 GR/IR reconciliation** — Must. The system shall provide the GR/IR report listing open items (received not invoiced, invoiced not received) by vendor, PO, line, age, with totals that equal the GR/IR ledger balance; a daily job emits `reconciliation.diff` if they differ.
+
+- **FR-18.10 Evaluated receipt settlement** — Must. The system shall, for vendors with `ers_enabled`, create and post an invoice from each receipt within 10 s using PO price and the vendor's ERS invoice number format (`ERS-{receipt_number}`), tax per PO line, and send the self-billing document to the vendor.
+
+- **FR-18.11 Charges on receipt and invoice** — Must. The system shall allocate header charges to lines by the rule on the charge (QTY, AMOUNT, LINES) at invoice posting, with ITEM-type charges capitalized into `cost_amount_posted`.
+
+- **FR-18.12 Invoice credit notes** — Should. The system shall create a credit note (negative invoice) referencing an invoice and optionally a receipt correction; it posts the reverse entries and creates a negative `VendorTransaction` for wave 19 settlement.
+
+- **FR-18.13 Receiving workspace and mobile receipt** — Should. The system shall provide a receiving workspace (expected today, overdue, registered not posted) and a PWA receipt screen scanning PO number, product GTIN and batch/serial barcodes (GS1 parsing from wave 8).
+
+### 3.18.4 Data model
+
+**ProductReceipt / ReceiptLine**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| id, receipt_number | uuid, text | yes | sequence `RCV-` |
+| vendor_id, po_id | uuid | yes | one PO per receipt (multi-PO receipts split) |
+| packing_slip_number | text | yes | unique per vendor |
+| receipt_date, posting_date | date | yes | inventory physical/financial dates |
+| status | enum | yes | ARRIVED, REGISTERED, POSTED, CORRECTED, CANCELLED |
+| ledger_entry_id | uuid | no | |
+| exchange_rate | numeric(18,8) | yes | PO currency → accounting at receipt_date |
+| line: po_line_id, schedule_id, qty, unit, dimension_set_id, batch_id, serial_ids[], inventory_status, unit_price (from PO), amount_txn, amount_acct, charges_item_amount, inventory_transaction_id, invoiced_qty, grir_open_item_id | | | |
+
+**VendorInvoice / VendorInvoiceLine / MatchResult**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| id, internal_number | uuid, text | yes | sequence `VI-` |
+| vendor_id, invoice_vendor_id | uuid | yes | |
+| vendor_invoice_number | text | yes | duplicate check |
+| kind | enum | yes | PO, EXPENSE, CREDIT_NOTE, ERS |
+| invoice_date, posting_date, due_date, discount_date | date | yes/no | from payment terms |
+| currency, exchange_rate | text, numeric | yes | |
+| status | enum | yes | DRAFT, IN_MATCHING, EXCEPTION, APPROVED, POSTED, REJECTED, CANCELLED |
+| match_status | enum | yes | header worst-of |
+| subtotal, charges_total, tax_total, total, total_entered | numeric(19,4) | yes | `total_entered` keyed from paper; must equal computed total within small_diff |
+| source | enum | yes | MANUAL, OCR, UBL, ERS, PORTAL |
+| capture_confidence | numeric(5,2) | no | from adapter |
+| ledger_entry_id, vendor_transaction_id | uuid | no | after post |
+| line: po_line_id, receipt_line_id, product_id/description, qty, unit, unit_price, line_amount, tax_group_id, item_tax_group_id, gl_account_id (expense), dimension_default_id, charges_allocated | | | |
+| match_result: line_id, policy_id, price_variance_amt, price_variance_pct, qty_variance, total_variance, status, evaluated_at, accepted_by, reason_code | | | |
+
+**GrirOpenItem**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| id | uuid | yes | |
+| po_line_id, receipt_line_id | uuid | yes | |
+| vendor_id | uuid | yes | |
+| received_qty, invoiced_qty | numeric | yes | |
+| received_amount_acct, invoiced_amount_acct | numeric(19,4) | yes | |
+| status | enum | yes | OPEN, PARTIAL, CLEARED, WRITTEN_OFF |
+| cleared_at | timestamptz | no | |
+
+**MatchingPolicy**: id, scope (ENTITY, ITEM, VENDOR, VENDOR_ITEM), vendor_id, product_id, match_level, price_tol_pct, price_tol_abs, qty_tol_pct, total_tol_pct, total_tol_abs, small_diff_abs, price_tol_mode, date_tol_days, valid_from, valid_to.
+
+Invariants: Σ GrirOpenItem (received − invoiced) in accounting currency = GR/IR ledger balance; receipt line `invoiced_qty ≤ qty`; invoice POSTED implies every line has MATCHED or accepted status; VendorTransaction amount = invoice total in transaction currency. Indexes: receipts (tenant, vendor, packing_slip_number) unique; invoices (tenant, vendor_id, lower(vendor_invoice_number)) unique partial where status ≠ CANCELLED; GrirOpenItem (po_line_id, status).
+
+### 3.18.5 APIs and events
+
+| Method | Path | Purpose | Idempotency | Auth duty |
+|---|---|---|---|---|
+| POST | /api/v1/receiving/arrivals | Record arrival | client key | ReceivingMaintain |
+| POST | /api/v1/receiving/receipts | Create receipt (register lines) | client key | ReceivingMaintain |
+| POST | /api/v1/receiving/receipts/{id}:post | Post product receipt | receipt id | ReceivingPost |
+| POST | /api/v1/receiving/receipts/{id}:correct | Delta correction | receipt id + seq | ReceivingPost |
+| POST | /api/v1/receiving/receipts/{id}:cancel | Reverse | receipt id | ReceivingPost |
+| POST | /api/v1/payables/invoices | Create invoice (manual) | client key | VendorInvoiceMaintain |
+| POST | /api/v1/payables/invoices:capture | Adapter/OCR intake | adapter doc id | service account / VendorInvoiceCapture |
+| POST | /api/v1/payables/invoices/{id}:propose-lines | Propose from receipts/PO | n/a | VendorInvoiceMaintain |
+| POST | /api/v1/payables/invoices/{id}:match | Run matching now | n/a | VendorInvoiceMaintain |
+| POST | /api/v1/payables/invoices/{id}:post | Post | invoice id | VendorInvoicePost |
+| POST | /api/v1/payables/matching:evaluate | Policy tester (pure) | n/a | MatchingPolicyMaintain |
+| GET | /api/v1/payables/grir?vendor=&age_gt= | GR/IR open items | n/a | APInquire |
+| POST | /api/v1/payables/invoices/{id}/exceptions/{line}:accept | Accept variance | line+reason | InvoiceExceptionResolve |
+
+Commands: `PostReceipt` (open period, over-delivery, serial uniqueness, PO confirmed, exchange rate exists), `PostInvoice` (AP period open, match status acceptable, totals within small_diff, tax calculated, duplicate check), `AcceptVariance` (reason code required, amount ≤ approver limit from policy).
+
+| Event | Trigger | Payload fields | Consumers |
+|---|---|---|---|
+| `passage.receiving.receipt.posted.v1` | receipt POSTED | receipt_id, po_id, lines (po_line, qty, dims, batch, serials, amount_acct), ledger_entry_id | inventory, payables (re-match, ERS), costing, supplier-portal |
+| `passage.receiving.receipt.corrected.v1` | correction/cancel | receipt_id, delta lines | payables, costing |
+| `passage.payables.invoice.captured.v1` | DRAFT created from adapter | invoice_id, vendor, source, confidence | notifications |
+| `passage.payables.invoice.match.exception.v1` | variance status | invoice_id, line_id, status, variances, assignee | workflow, notifications |
+| `passage.payables.invoice.posted.v1` | POSTED | invoice_id, vendor_transaction_id, lines, totals, grir cleared amounts, ledger_entry_id | ledger reconciliation, costing, tax, analytics |
+| `passage.payables.grir.cleared.v1` | GrirOpenItem CLEARED/WRITTEN_OFF | open_item_id, amounts | analytics |
+
+### 3.18.6 User experience
+
+| Screen | Primary actions | Key fields/columns | Duty required |
+|---|---|---|---|
+| Receiving workspace | Expected today/overdue, arrivals, registered-not-posted, post | PO, vendor, line, expected qty, arrived qty | ReceivingMaintain |
+| Receipt (desktop + PWA) | Scan PO/GTIN/batch/serial, register, post, print receipt label | lines with remaining qty, batch/serial entry, location, status | ReceivingMaintain |
+| Vendor invoice | Enter/review captured header, propose lines, match status badges, resolve, post | header, lines with PO/receipt links, variance columns, totals vs entered | VendorInvoiceMaintain |
+| Invoice exception task | Accept, request credit, adjust PO, wait, reject | variance detail, policy limits, history | InvoiceExceptionResolve |
+| Matching policy + tester | Create policy rows, "test an invoice" | scopes, tolerances, sample invoice result | MatchingPolicyMaintain |
+| GR/IR report | Filter by age/vendor, drill to PO/receipt/invoice, write-off | open items, totals vs ledger balance | APInquire |
+
+Interaction rules: captured fields with confidence < 0.85 are highlighted and require explicit confirmation; totals-entered vs computed difference shown live; keyboard: Ctrl+M match, Ctrl+P post; PWA receipt supports camera scan and offline registration queue; bulk post of registered receipts; personalization of invoice line columns.
+
+### 3.18.7 Business rules and edge cases
+
+- **BR-18.1** Receipt state machine: `ARRIVED → REGISTERED → POSTED`; `POSTED → CORRECTED` (new correction receipt, original unchanged); `POSTED → CANCELLED` only if invoiced_qty = 0 on all lines; `ARRIVED|REGISTERED → CANCELLED` releases inventory statuses back to ORDERED.
+- **BR-18.2** Invoice state machine: `DRAFT → IN_MATCHING → (MATCHED→) APPROVED → POSTED`; `IN_MATCHING → EXCEPTION → APPROVED|REJECTED`; `DRAFT|EXCEPTION → CANCELLED`; POSTED is terminal (reverse via credit note).
+- **BR-18.3** Price comparison uses PO unit price in PO currency normalized to invoice price unit; invoice in a different currency than the PO is compared after conversion at the invoice date rate and flagged `currency_mismatch=true` (always exception unless policy allows).
+- **BR-18.4** Quantity tolerance applies to over-invoicing only; under-invoicing leaves the receipt line partially open (`PARTIAL`) for a later invoice.
+- **BR-18.5** Small differences: if the header total variance ≤ `small_diff_abs` the difference posts to the small-differences account and the invoice is MATCHED; the amount is recorded on `MatchResult`.
+- **BR-18.6** Rounding: variance percent computed on unrounded values and compared at 4 decimals; amounts rounded half-even to minor unit; the GR/IR clearing amount is the receipt-side accounting amount for the invoiced quantity (pro-rata, rounded), so GR/IR residual after full invoicing of a line is exactly 0.
+- **BR-18.7** Receipt date rate vs invoice date rate: GR/IR is cleared at the receipt-side accounting amount; the difference between invoice accounting amount and that clearing amount posts to inventory/expense (not FX gain/loss), matching SAP KDM/AX exchange adjustment on purchase.
+- **BR-18.8** Concurrency: posting a receipt and an invoice for the same PO line serializes on the PO line row lock (`SELECT … FOR UPDATE` on `purchase_order_line`); the invoice's matching always sees the committed receipt state.
+- **BR-18.9** ERS invoices skip matching (status MATCHED by construction) and are blocked if the PO price has changed since receipt until a buyer confirms the price.
+- **BR-18.10** Invoice posting date in a closed AP period is rejected (`PER-AP-001`) even when the invoice date is open; the user may change posting date to the first open day with an audit note.
+- **BR-18.11** Invoice vendor ≠ ordering vendor (factoring) is allowed when the ordering vendor's `invoice_account` points to the invoice vendor; the VendorTransaction belongs to the invoice vendor.
+- **BR-18.12** Credit note quantity cannot exceed invoiced quantity on the referenced line; posting a credit note re-opens the GR/IR item and reverts inventory transaction status from PURCHASED to RECEIVED for that quantity.
+
+### 3.18.8 Acceptance criteria
+
+- **AC-18.1** (FR-18.5, FR-18.6) Given the 200-scenario matching fixture, when each invoice is evaluated and posted, then every match status, variance amount and ledger posting equals the expected row (0 mismatches).
+- **AC-18.2** (FR-18.2, FR-18.8) Given 1,000 random PO lines received then fully invoiced at PO price, when GR/IR open items and the ledger balance are compared, then both are 0.00.
+- **AC-18.3** (FR-18.1) Given a serial-tracked PO line of 3 units, when serials S1, S2, S2 are registered, then registration fails on the duplicate and records S1, S2 only after correction.
+- **AC-18.4** (FR-18.8) Given AP period 2026-08 closed, when an invoice with posting date 2026-08-15 is posted, then it is rejected with `PER-AP-001` and no VendorTransaction or ledger entry exists.
+- **AC-18.5** (FR-18.5) Given policy price_tol_pct 2 and price_tol_abs 25 and a PO price 100.00 USD, when an invoice line at 101.50 is matched, then status MATCHED with price variance 1.50 posted to PPV/inventory; at 103.00 status PRICE_VARIANCE and an exception workflow starts.
+- **AC-18.6** (FR-18.7) Given a PRICE_VARIANCE exception, when the buyer accepts with reason "AGREED", then the invoice posts, the variance posts to the variance account, and the audit shows actor, reason and amount.
+- **AC-18.7** (FR-18.10) Given an ERS vendor, when a receipt of 50 units at 10.00 EUR posts, then an invoice `ERS-{receipt}` of 500.00 EUR plus tax is posted within 10 s and a self-billing PDF is emailed.
+- **AC-18.8** (FR-18.3) Given a posted receipt of 100 with 40 invoiced, when a correction of −70 is attempted, then it is rejected; −60 succeeds and GR/IR open item received_qty becomes 40.
+- **AC-18.9** (FR-18.4) Given an invoice captured with confidence 0.6 on the total field, when opened, then the field is flagged and posting is blocked until confirmed.
+- **AC-18.10** (FR-18.9) Given a manual journal posted to the GR/IR account, when the daily GR/IR reconciliation runs, then a diff event with the journal amount is emitted.
+
+### 3.18.9 Test plan and fixtures
+
+Fixtures: `match-200` (200 invoice scenarios CSV with expected status/postings, authored with the reviewing accountant; covers over/under-delivery, price up/down, multi-receipt, partial, currency mismatch, small difference, ERS, credit note); `grir-1000` (1,000 PO lines generated); `rcv-serial-batch` (tracked items); `ap-period-closed`; `ocr-samples` (25 invoice JSON payloads with confidence scores).
+
+| Test | Type | Target | Pass criterion |
+|---|---|---|---|
+| Matching engine | unit (table-driven) | matching:evaluate | match-200 all pass |
+| Tolerance monotonicity | property | engine | increasing invoice price never moves status from variance to matched |
+| GR/IR zero | E2E | receipt+invoice flow | AC-18.2 |
+| Receipt → inventory | contract | inventory apply | RECEIVED qty and cost equal receipt |
+| Invoice → ledger | contract | Post | balanced entry; accounts per posting profile |
+| Period control | contract | invoices:post | AC-18.4 |
+| ERS latency | E2E | receipt.posted consumer | < 10 s p95 |
+| Receipt post latency | performance (k6, 200 receipts/min) | receipts:post | p95 < 1.5 s |
+| PWA scan | E2E (Playwright) | receipt screen | GS1 barcode → line, batch, serial filled |
+
+Reconciliation checks: Σ GrirOpenItem = GR/IR ledger balance; Σ VendorTransaction created in period = Σ invoice totals posted; Σ receipt amount_acct = Δ inventory account from receipts; invoiced_qty on receipt lines = Σ invoice line qty referencing them.
+
+### 3.18.10 Deployment and operations
+
+Helm charts: `passage-procurement` gains the receiving module (same Postgres, separate Deployment `receiving-api` ×2); `passage-payables` (API ×3, matching worker ×2, Temporal worker ×2, CloudNativePG `payables-db`, outbox connector). Config: `AP_SMALL_DIFF_DEFAULT=0.50`, `AP_PRICE_TOL_PCT=2.0`, `AP_QTY_TOL_PCT=5.0`, `AP_DUP_WINDOW_MONTHS=24`, `AP_EXCEPTION_SLA_DAYS=3`, `RCV_OVER_DELIVERY_PCT=0`. Migrations `procurement/v18.*`, `payables/v18.*`. Flags: `ap.ocr_adapter`, `ap.ers`, `ap.ubl_intake` (w35), `rcv.pwa`. Jobs: GR/IR reconciliation daily 02:30; exception SLA timers (Temporal); ERS consumer (Kafka consumer group `payables-ers`). SLOs: receipt post p95 < 1.5 s; invoice post p95 < 2 s; matching evaluate p95 < 100 ms; event lag < 5 s. Alerts: GR/IR diff ≠ 0 (page); exception backlog > 50 (ticket); ERS consumer lag > 100 messages. Runbook: re-run match for invoice set, reprocess failed capture payloads from DLQ topic `payables.capture.dlq`, write off GR/IR residual with approval. Rollback: additive migrations; disable `ap.ers` consumer; invoices in EXCEPTION are unaffected by rollback of the matching worker.
+
+### 3.18.11 Migration from AX / SAP
+
+| Source | Passage entity | Notes |
+|---|---|---|
+| AX VendPackingSlipJour/Trans for open PO lines (received not invoiced) | ProductReceipt POSTED + GrirOpenItem | amount from VendPackingSlipTrans value; creates GR/IR opening balance matched to GL migration |
+| AX VendInvoiceInfoTable (pending invoices) | VendorInvoice DRAFT | re-matched on load |
+| AX VendInvoicePriceTolerance, InventTable tolerance fields, AP parameters | MatchingPolicy rows | scope mapping: item+vendor → VENDOR_ITEM etc. |
+| AX VendTable self-billing flags | Vendor `ers_enabled` | |
+| SAP EKBE VGABE 1 without matching VGABE 2 (GR not IR) | ProductReceipt + GrirOpenItem | WRX balance per PO item |
+| SAP RBKP/RSEG parked (RBSTAT A/B) or blocked (ZLSPR) | VendorInvoice DRAFT / EXCEPTION | |
+| SAP OMR6 tolerance keys (T169G) PP, DQ, BD, AN/AP | MatchingPolicy ENTITY scope | PP → price_tol; DQ → qty_tol; BD → small_diff; AN/AP → total_tol |
+| SAP LFM1 XERSY | ers_enabled | |
+
+Validation: GR/IR opening Σ equals GL migrated balance per legal entity; count of open receipt lines equals source; parked invoices re-matched produce the same block/no-block result as SAP for a 50-invoice sample. Not migrated: posted invoice history (becomes VendorTransaction open items in wave 19 migration; line detail stays in lakehouse), MRBR release logs, AX invoice register journals already approved (post before cutover).
+
+### 3.18.12 Dependencies, risks, open questions
+
+Depends on: wave 17 (PO lines, versions, charges), wave 16 (transaction steps, serial/batch), wave 11–14 (posting profiles, currency, tax, period control), wave 4 (Temporal workflows), wave 8 (GS1 parsing).
+
+| Risk | Likelihood | Impact | Mitigation |
+|---|---|---|---|
+| Accountant disagrees with GR/IR FX treatment (BR-18.7) | Medium | Medium | Confirm with accountant in match-200 review before posting logic is frozen |
+| OCR adapter quality varies; low-confidence fields | High | Low | Confidence threshold gating; no auto-post below 0.95 |
+| Multi-PO invoices | Medium | Low | Supported by line-level PO links; receipts stay one PO per document |
+
+Open questions:
+1. Auto-post invoices with 100 % match and confidence ≥ 0.95 without human review? Default: configurable per vendor, off by default. Decide by wave 19.
+2. Should quantity tolerance also apply to under-invoicing close-out (auto-close residual GR/IR)? Default: no; manual write-off. Decide by wave 20.
+3. Non-PO invoice approval: route by GL account owner or by amount only? Default: amount bands reuse of the wave 17 policy. Decide by wave 18 mid-point.
+
+## 3.19 Wave 19: Accounts Payable, Settlement & Payments
+
+### 3.19.1 Scope and business context
+
+Wave 19 turns posted vendor invoices into paid liabilities. Invoices from wave 18 are open items (AX VendTrans with VendTransOpen; SAP BSIK) that settle against payments, credit notes and prepayments (AX VendSettlement / SpecTrans marking; SAP clearing to BSAK with BSE_CLR, F-53/F-44). A payment proposal (AX LedgerJournalTrans payment journal with VendPaymProposal; SAP F110 proposal run producing REGUH/REGUP) selects items by due date and cash discount, applies holds, approves, generates payment media (ISO 20022 pain.001 for SEPA/ACH-via-ISO, NACHA for US ACH, check print, positive pay file; SAP DMEE / PMW, AX payment formats via ER), posts the payment to the bank clearing account and vendor control account, and ingests bank status (pain.002) to update payment status. Prepayments, credit notes, reversals and vendor aging complete the AP subledger.
+
+Out of scope: bank statement reconciliation and cash positioning (wave 36, which consumes this wave's payment events), bank connectivity transport (wave 36; this wave writes files to an object store path and exposes them for download), customer-side settlement (wave 30), 1099/withholding statutory reporting beyond withholding calculation (wave 13 provides calculation; reporting in wave 48), intercompany payments (wave 40).
+
+**Pain points solved (10x lens)**
+
+| Pain point in AX/SAP today | Root cause | Passage answer in this wave | Measurable 10x target |
+|---|---|---|---|
+| AX payment proposal (VendPaymProposal) runs as a modal dialog from the payment journal, locks the journal while running, and must be re-run from scratch to change selection; SAP F110 parameters → proposal → edit proposal → payment run → print is five screens, with proposal logs (REGUP exceptions) read in a separate list | Proposal is a transient batch producing journal lines; no proposal entity | `PaymentProposal` is a persisted entity with selection criteria, line-level include/exclude, holds, and re-selection diff; approve → run is one action | Screens per payment run: 5–7 → 2; time from "select" to "approved file": 45 min → < 5 min |
+| Settlement in AX via "Settle open transactions" (CustVendOpenTransManager) silently computes discount and FX differences; users discover realized gain/loss or discount-lost postings only in the ledger; SAP F-53 shows the clearing document but FX difference accounts (OB09) are hidden until posted | No preview of settlement postings | `POST /settlements:preview` returns the exact journal (discount, FX gain/loss, write-off) before commit; UI shows it inline | Unexpected settlement postings found at month-end: typical 5–20/month → 0; review time per settlement: 2 min → 10 s |
+| Payment formats: AX requires Electronic Reporting configurations per bank (hundreds of nodes), SAP DMEE trees; a bank-specific tag change takes a consultant day | Format defined in a proprietary tree editor | Canonical pain.001.001.09 generator with per-bank profile overrides as JSON (≤ 20 keys), validated against the XSD in CI and a bank harness | Time to onboard a new bank profile: 2–5 days → < 2 h; file rejections at bank: tracked, target < 0.1 % |
+| Payment run idempotency: AX journal posting interrupted mid-batch leaves half-posted lines and a generated file; re-posting can pay twice; SAP F110 "restart" needs SM37 analysis | No durable workflow; file generation and posting are separate steps without a shared idempotent record | Temporal `PaymentRun` workflow with idempotency keys per open item; file is derived from posted payments, never the reverse | Duplicate payments from crash/retry: non-zero historical → 0 by test |
+| Vendor aging in AX (VendAgingReport) is an SSRS batch over VendTrans; SAP S_ALR_87012078 runs minutes for large vendors; neither reconciles to the control account automatically | Report computed from open items with no tie to GL | Aging served from the `VendorTransaction` projection with bucket config; daily job asserts Σ open = AP control balance per vendor group | Aging report time: 2–10 min → < 2 s; monthly AP-to-GL reconciliation: 2 h → automated, 0 diff |
+
+### 3.19.2 AX / SAP parity map
+
+| Capability | AX 2012 / D365 F&SCM | SAP ECC / S/4 | Passage equivalent | Parity level |
+|---|---|---|---|---|
+| Vendor open items | VendTrans, VendTransOpen; Vendor transactions form; VendTable balance | BSIK (open), BSAK (cleared), FBL1N | `VendorTransaction` with `open_amount`; vendor transactions screen | full |
+| Settlement | VendSettlement, CustVendOpenTransManager (Settle open transactions), marking (SpecTrans), partial settlement, cross-rate | Clearing F-44/F-53/F-51, residual/partial payment, BSE_CLR, AUGBL | `Settlement`, `SettlementLine`; manual, during payment, automatic | full |
+| Cash discount | CashDisc (terms), VendTrans CashDiscDate, discount taken/lost accounts, "use cash discount" normal/always/never | Payment terms T052 ZBD1T/ZBD1P, SKTO/SKE accounts, OBXU/OBXV | `PaymentTerms` (wave 7) extended with discount tiers; settlement algorithm | full |
+| FX on settlement | Exchange adjustment realized gain/loss (LedgerParameters, CurrencyExchangeAdjustment) | OB09 realized gain/loss accounts, KDF | realized gain/loss in settlement journal (wave 12 accounts) | full |
+| Payment journal / proposal | LedgerJournalTable type Payment, LedgerJournalTrans, VendPaymProposal (by due date / cash discount / both), VendPaymModeTable (method of payment), payment specification, CustVendPaymJournal | F110 (FBZP config), REGUH/REGUP, payment methods T042Z, house banks FI12 | `PaymentProposal`, `PaymentMethod`, `Payment`, `PaymentRun` (Temporal) | full |
+| Payment media | ER formats (ISO 20022 credit transfer, NACHA CCD/CTX, check layout), VendOutPaym classes | DMEE/PMW formats, F110 print program RFFOUS_T, check lot FCHI | `PaymentFile` generators: pain.001.001.09, NACHA (PPD/CCD/CTX), check PDF + MICR, positive pay CSV | full |
+| Bank status ingestion | Return file import (ER pain.002), payment status | pain.002 via bank communication management (BCM) | `POST /payments/status:ingest` pain.002 parser | full |
+| Positive pay | Positive pay format (BankPositivePayExport) | Not standard (custom/BCM) | positive pay CSV per bank profile | full |
+| Prepayments | Prepayment invoice on PO (PurchPrepayTable), prepayment journal with posting profile | Down payment request F-47, down payment F-48 (special G/L A), clearing F-54 | `Prepayment` (PO-linked or free) with separate posting profile, applied at invoice posting or settlement | full |
+| Credit notes and reversal | Negative invoice, reversal (TransactionReversal), void check | Credit memo MIRO/FB65, reverse FB08, void FCH8/FCH9 | wave 18 credit note; `Payment:reverse`, `Payment:void` | full |
+| Vendor aging | Vendor aging report (VendAgingReport), aging period definitions | Aging S_ALR_87012078, due date analysis | `GET /aging` with bucket definitions; ties to control account | improved |
+| Withholding tax at payment | Withholding tax (TaxWithhold*) calculated at payment | Extended withholding at payment (T059P) | wave 13 withholding engine invoked in settlement; posts withholding payable | full |
+| Payment advice | Vendor payment advice (print management) | Payment advice RFFOAVIS | email/portal advice PDF with settled invoices | full |
+
+### 3.19.3 Functional requirements
+
+- **FR-19.1 Vendor open items** — Must. The system shall maintain a `VendorTransaction` for every posted invoice, credit note, payment and prepayment with `amount_txn`, `amount_acct`, `open_amount_txn`, `open_amount_acct`, `due_date`, `discount_date`, `discount_amount`, `status` (OPEN, PARTIALLY_SETTLED, SETTLED), and a `hold` flag with reason.
+  - Open amount is updated only by settlement rows; `Σ open_amount_acct` per posting profile account equals the AP control balance (daily assertion).
+  - Vendor balance query p95 < 50 ms for vendors with ≤ 100k transactions.
+
+- **FR-19.2 Settlement algorithm** — Must. The system shall settle a set of credit-side items (payment, credit note, prepayment) against debit-side items (invoices) per vendor with the following algorithm, previewable before commit:
+  1. Order target invoices by `settlement_priority` (user marks first, then due_date ASC, then amount DESC).
+  2. For each invoice, `discount = round(invoice_amount_txn × discount_pct, minor)` if `settlement_date ≤ discount_date` (or terms are `ALWAYS`), else 0; for partial settlement, discount is pro-rated by `settled/invoice_amount` unless policy `discount_on_partial=false`.
+  3. `applied_txn = min(available_credit, open_amount_txn − discount)`; invoice open amount reduces by `applied_txn + discount` (discount closes the item only when `applied_txn = open − discount`).
+  4. Accounting amounts: `applied_acct_invoice = applied_txn × invoice_rate`, `applied_acct_credit = applied_txn × credit_rate`; `fx_diff = applied_acct_credit − applied_acct_invoice`; positive = realized loss for a vendor payable, negative = realized gain (wave 12 accounts).
+  5. If a residual `|open_amount_txn| ≤ write_off_limit` (default 1.00 in transaction currency) and `auto_write_off=true`, post the residual to the write-off account and close the item.
+  6. Cross-currency settlement (credit currency ≠ invoice currency) converts both to accounting currency at their own rates; the settlement unit is accounting currency; residuals follow step 5.
+  7. Withholding (wave 13) is computed on `applied_txn` and reduces the payment, posting withholding payable.
+  - Worked example: invoice 1,000.00 EUR posted at 1.1000 USD/EUR (1,100.00 USD), terms 2 % 10 net 30, paid on day 8 at rate 1.0800. Discount = 20.00 EUR. Applied = 980.00 EUR. Invoice-side acct = 980 × 1.10 = 1,078.00 USD; discount acct = 20 × 1.10 = 22.00; payment acct = 980 × 1.08 = 1,058.40. Journal: Dr AP control 1,100.00; Cr bank clearing 1,058.40; Cr discount taken 22.00; Cr realized FX gain 19.60. Balanced to the cent.
+
+- **FR-19.3 Payment terms and discounts** — Must. The system shall compute `due_date` and up to two discount tiers (e.g., 2/10, 1/20, net 30) from the wave 7 payment terms, with `discount_basis` (gross, net of tax) and `use_cash_discount` (NORMAL, ALWAYS, NEVER) per vendor.
+
+- **FR-19.4 Payment proposal** — Must. The system shall create a `PaymentProposal` from criteria (legal entity, vendor range/group, method of payment, due date to, discount date to, selection rule BY_DUE_DATE / BY_DISCOUNT / BOTH, minimum/maximum payment, currency, bank account), listing candidate open items with proposed amount and discount, excluding held vendors/items, and allowing line-level include/exclude, amount change and reselection with diff.
+  - Discount optimization: when `BY_DISCOUNT`, items whose discount date is within `discount_lookahead_days` (default 7) are included; annualized discount value vs `cost_of_capital_pct` (default 8 %) decides early payment when `optimize=true`.
+  - Proposal approval uses the wave 4 workflow with amount bands (default: > 100,000 USD two approvers).
+
+- **FR-19.5 Payment run** — Must. The system shall execute an approved proposal as a Temporal `PaymentRun` workflow: for each vendor group create `Payment` records (one per vendor × currency × bank account × method), settle items (FR-19.2), post the payment journal (Dr AP control, Cr bank clearing per method), generate the `PaymentFile`, and mark payments SENT.
+  - Each activity is idempotent on `(proposal_id, vendor_transaction_id)`; a resumed run skips already-settled items and already-generated files; the file is regenerated from posted payments if missing.
+  - Throughput target: 10,000 open items settled and 2,000 payments generated in < 5 minutes.
+
+- **FR-19.6 ISO 20022 pain.001** — Must. The system shall generate pain.001.001.09 files validated against the XSD with the following mapping:
+  - `GrpHdr/MsgId` = `PaymentFile.file_number` (≤ 35 chars); `CreDtTm` = generation timestamp; `NbOfTxs` = count of CdtTrfTxInf; `CtrlSum` = Σ InstdAmt; `InitgPty/Nm` = legal entity name; `InitgPty/Id/OrgId/Othr/Id` = bank-assigned customer id from bank profile.
+  - `PmtInf` per (debtor account × execution date × method): `PmtInfId` = `{file_number}-{seq}`; `PmtMtd` = `TRF`; `BtchBookg` = profile `batch_booking` (default true); `PmtTpInf/SvcLvl/Cd` = `SEPA` for SEPA profiles else `NURG`/`URGP`; `ReqdExctnDt/Dt` = payment date; `Dbtr/Nm`, `Dbtr/PstlAdr` = legal entity; `DbtrAcct/Id/IBAN` (or `Othr/Id` for non-IBAN) = bank account; `DbtrAgt/FinInstnId/BICFI` = bank BIC; `ChrgBr` = `SLEV` (SEPA) or profile default `SHAR`.
+  - `CdtTrfTxInf` per Payment: `PmtId/InstrId` = payment number; `PmtId/EndToEndId` = payment number (≤ 35 chars, alphanumeric); `Amt/InstdAmt @Ccy` = amount and currency; `CdtrAgt/FinInstnId/BICFI` = vendor bank BIC (omitted when IBAN-only SEPA and profile allows); `Cdtr/Nm` = vendor name (≤ 140 chars, transliterated to the Latin character set required by the bank profile); `Cdtr/PstlAdr/Ctry` plus structured address when profile requires; `CdtrAcct/Id/IBAN` or `Othr/Id` + `CdtrAgt/.../ClrSysMmbId` for routing-number countries; `RmtInf/Ustrd` = concatenated invoice numbers (≤ 140 chars) or `RmtInf/Strd/RfrdDocInf/Nb` + `RfrdDocAmt` per settled invoice when `structured_remittance=true`; `Purp/Cd` = `SUPP`.
+  - AX/SAP lineage: REGUH ZBNKN/ZBNKL → CdtrAcct, REGUH VBLNR → EndToEndId, REGUP BELNR → RfrdDocInf/Nb; AX LedgerJournalTrans PaymReference → EndToEndId.
+
+- **FR-19.7 NACHA, checks, positive pay** — Must. The system shall generate NACHA files (file header 1, batch header 5 with SEC code PPD/CCD/CTX, entry detail 6, addenda 7 for CTX remittance, batch control 8, file control 9, blocking factor 10, 94-char records, hash of routing numbers), check PDFs with MICR line and check number from a check lot, and positive pay CSV (bank account, check number, amount, payee, issue date, void flag) per bank profile.
+
+- **FR-19.8 Payment status and pain.002** — Must. The system shall ingest pain.002.001.10 status reports and map `GrpSts`/`TxSts` (ACCP, ACSC, ACSP, PDNG, RJCT) with `StsRsnInf/Rsn/Cd` (AC01, AC04, AM04, …) to payment statuses, moving RJCT payments to REJECTED, reversing settlement and re-opening items; NACHA returns (R01–R85) map likewise.
+
+- **FR-19.9 Payment reversal and void** — Must. The system shall reverse a posted payment (new journal, settlement undone, items re-opened, file not regenerated) and void a check (check status VOID, positive pay void record), with reason codes and audit.
+
+- **FR-19.10 Prepayments** — Must. The system shall post prepayment invoices (PO-linked, with prepayment posting profile and tax) and prepayment journals; at vendor invoice posting or manual settlement the prepayment applies against the invoice, reclassifying from the prepayment account to AP control.
+
+- **FR-19.11 Vendor aging** — Must. The system shall produce aging by vendor/group with configurable buckets (default 0–30, 31–60, 61–90, 91–180, > 180 by due date or document date), as of any date, in transaction and accounting currency; totals tie to the AP control account per vendor group (daily job + report footer).
+
+- **FR-19.12 Payment advice** — Should. The system shall email (or publish to the portal, wave 20) a payment advice PDF per payment listing settled invoices, discounts and withholding.
+
+- **FR-19.13 Holds** — Should. The system shall support vendor-level holds (INVOICE, PAYMENT, ALL, from wave 7 status) and item-level holds with release date; held items are excluded from proposals and listed on the AP workspace.
+
+- **FR-19.14 Automatic settlement** — Could. The system shall optionally settle credit notes against the oldest open invoices of the same vendor at posting (`auto_settle_credit_notes`).
+
+### 3.19.4 Data model
+
+**VendorTransaction**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| id, voucher | uuid, text | yes | ledger entry voucher |
+| vendor_id, legal_entity_id | uuid | yes | |
+| type | enum | yes | INVOICE, CREDIT_NOTE, PAYMENT, PREPAYMENT, PREPAYMENT_INVOICE, WRITE_OFF, FX_ADJ |
+| source_id | uuid | yes | invoice/payment id |
+| document_date, posting_date, due_date, discount_date, discount_date_2 | date | yes/no | |
+| currency, exchange_rate | text, numeric(18,8) | yes | |
+| amount_txn, amount_acct | numeric(19,4) | yes | signed (invoice negative = credit to vendor) |
+| open_amount_txn, open_amount_acct | numeric(19,4) | yes | |
+| discount_amount, discount_amount_2 | numeric(19,4) | no | |
+| status | enum | yes | OPEN, PARTIALLY_SETTLED, SETTLED |
+| hold_reason, hold_release_date | text, date | no | |
+| posting_profile_id, control_account_id | uuid | yes | |
+| payment_method_id, bank_account_id (vendor) | uuid | no | default from vendor |
+
+**Settlement / SettlementLine**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| id, settlement_number | uuid, text | yes | |
+| vendor_id, settlement_date | uuid, date | yes | |
+| kind | enum | yes | MANUAL, PAYMENT_RUN, AUTO, REVERSAL |
+| ledger_entry_id | uuid | yes | discount/FX/write-off/withholding postings |
+| reversed_by_id | uuid | no | |
+| line: credit_transaction_id, debit_transaction_id, applied_txn, applied_acct_debit, applied_acct_credit, discount_txn, discount_acct, fx_diff_acct, write_off_txn, withholding_txn, closes_debit (bool), closes_credit (bool) | | | |
+
+**PaymentProposal / Payment / PaymentFile**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| proposal: id, number, criteria (jsonb), status (DRAFT, SELECTED, IN_APPROVAL, APPROVED, RUNNING, COMPLETED, CANCELLED), payment_date, bank_account_id, method_id, total_by_currency (jsonb), approved_by[] | | | |
+| proposal_line: proposal_id, vendor_transaction_id, proposed_txn, discount_txn, included (bool), hold (bool), exclusion_reason | | | |
+| payment: id, payment_number, proposal_id, vendor_id, vendor_bank_account_id, method_id, currency, amount_txn, amount_acct, payment_date, status (CREATED, POSTED, SENT, ACCEPTED, SETTLED_AT_BANK, REJECTED, REVERSED, VOID), end_to_end_id, check_number, settlement_id, ledger_entry_id, file_id, status_reason_code | | | |
+| file: id, file_number, format (PAIN001, NACHA, CHECK_PDF, POSITIVE_PAY), bank_profile_id, generated_at, payment_count, control_sum, sha256, storage_uri, status (GENERATED, DOWNLOADED, TRANSMITTED, ACKNOWLEDGED, REJECTED) | | | |
+
+**PaymentMethod / BankProfile**: method (id, code, type TRANSFER/ACH/CHECK/CARD/WIRE, format, bank_account_id, clearing_account_id, check_lot_id, grace_days, cutoff_time); bank profile (id, bank, format variant SEPA/CH/UK/US, overrides jsonb ≤ 20 keys: charge bearer, batch booking, BIC required, structured remittance, char set, max Ustrd length).
+
+Invariants: for every settlement line `applied_acct_credit − applied_acct_debit − fx_diff_acct = 0`; `Σ settlement lines applied on a transaction ≤ |amount|`; transaction SETTLED ⇔ open_amount = 0; `PaymentFile.control_sum = Σ payments in file`; one Payment per (proposal, vendor, currency, bank account, method). Indexes: VendorTransaction (tenant, vendor_id, status, due_date), (control_account_id, status); payments (proposal_id), (end_to_end_id) unique; settlements by transaction ids.
+
+### 3.19.5 APIs and events
+
+| Method | Path | Purpose | Idempotency | Auth duty |
+|---|---|---|---|---|
+| GET | /api/v1/payables/vendors/{id}/transactions?status=open | Open items | n/a | APInquire |
+| POST | /api/v1/payables/settlements:preview | Compute settlement journal | n/a | APSettle |
+| POST | /api/v1/payables/settlements | Commit manual settlement | client key | APSettle |
+| POST | /api/v1/payables/settlements/{id}:reverse | Reverse | settlement id | APSettle |
+| POST | /api/v1/payables/payment-proposals | Create and select | client key | PaymentProposalMaintain |
+| POST | /api/v1/payables/payment-proposals/{id}:reselect | Re-run selection with diff | proposal id + criteria hash | PaymentProposalMaintain |
+| PATCH | /api/v1/payables/payment-proposals/{id}/lines/{lineId} | Include/exclude/amount | ETag | PaymentProposalMaintain |
+| POST | /api/v1/payables/payment-proposals/{id}:submit | Start approval | proposal id | PaymentProposalMaintain |
+| POST | /api/v1/payables/payment-proposals/{id}:run | Execute PaymentRun | proposal id | PaymentRunExecute |
+| GET | /api/v1/payables/payment-files/{id}/content | Download file | n/a | PaymentFileDownload |
+| POST | /api/v1/payables/payments/status:ingest | pain.002 / NACHA return intake | message id | service account / PaymentStatusIngest |
+| POST | /api/v1/payables/payments/{id}:reverse | Reverse payment | payment id | APSettle |
+| POST | /api/v1/payables/payments/{id}:void | Void check | payment id | APSettle |
+| POST | /api/v1/payables/prepayments | Prepayment invoice/journal | client key | VendorInvoicePost |
+| GET | /api/v1/payables/aging?asOf=&by=due|document&buckets= | Aging | n/a | APInquire |
+
+Commands: `CommitSettlement` (same vendor, no held items, rates available, AP period open, Σ applied ≤ available credit), `RunPayment` (proposal APPROVED, bank account active, cutoff time, vendor bank account validated — IBAN mod-97, ABA checksum), `IngestStatus` (file matches known MsgId/OrgnlEndToEndId; unknown ids → DLQ).
+
+| Event | Trigger | Payload fields | Consumers |
+|---|---|---|---|
+| `passage.payables.settlement.posted.v1` / `.reversed.v1` | settlement commit/reverse | settlement_id, vendor_id, lines (ids, applied, discount, fx_diff), ledger_entry_id | ledger reconciliation, analytics |
+| `passage.payables.proposal.approved.v1` | approval complete | proposal_id, totals by currency, payment_date | notifications |
+| `passage.payables.payment.posted.v1` | payment journal posted | payment_id, vendor, amount, method, bank account, settled items | cash (w36), analytics |
+| `passage.payables.payment.sent.v1` | file generated & marked sent | payment_id, file_id, format, end_to_end_id | bank connectivity (w36), supplier-portal (w20) |
+| `passage.payables.payment.status.changed.v1` | pain.002/NACHA return | payment_id, old_status, new_status, reason_code | notifications, supplier-portal |
+| `passage.payables.aging.reconciled.v1` | daily job | as_of, vendor_group, open_total, control_balance, diff | alerting |
+
+### 3.19.6 User experience
+
+| Screen | Primary actions | Key fields/columns | Duty required |
+|---|---|---|---|
+| AP workspace | Due this week, discounts expiring, held items, proposals awaiting approval, rejected payments | counts, amounts by currency | APInquire |
+| Vendor transactions | Filter open/all, settle (opens preview), hold/release, view voucher | document, dates, amounts, open, discount available, status | APInquire / APSettle |
+| Settlement dialog | Mark items, set date, preview journal, commit | credit/debit items, applied, discount, FX diff, write-off, resulting journal | APSettle |
+| Payment proposal | Criteria form, selection grid, include/exclude, reselect diff, submit, run | vendor, item, due, discount, proposed amount, hold reason | PaymentProposalMaintain |
+| Payment run monitor | Progress, failures, retry, download files, advices | payments by status, file list, control sums | PaymentRunExecute |
+| Payment files / bank profiles | Download, mark transmitted, configure profile overrides, test generate | format, bank, count, control sum, status | PaymentFileDownload / BankProfileMaintain |
+| Aging | Bucket view, drill to items, export | vendor group, buckets, total, control balance, diff | APInquire |
+
+Interaction rules: settlement preview updates within 300 ms of marking an item; proposal grid supports multi-select include/exclude and keyboard navigation; amounts always shown with currency code; approvals from shell inbox; bank profile editor validates with a sample file generation and XSD check before save; personalization of buckets and columns.
+
+### 3.19.7 Business rules and edge cases
+
+- **BR-19.1** Payment state machine: `CREATED → POSTED → SENT → ACCEPTED → SETTLED_AT_BANK`; `SENT|ACCEPTED → REJECTED` (settlement reversed, items re-opened, payment stays for audit); `POSTED|SENT → REVERSED` (manual); `SENT (check) → VOID`. Proposal: `DRAFT → SELECTED → IN_APPROVAL → APPROVED → RUNNING → COMPLETED`; `IN_APPROVAL → SELECTED` on rejection; `DRAFT|SELECTED → CANCELLED`.
+- **BR-19.2** Discount eligibility uses `settlement_date` (payment date), not run date; a proposal with payment_date ≤ discount_date takes the discount even if generated after it; `use_cash_discount=ALWAYS` takes it regardless of date, `NEVER` never.
+- **BR-19.3** Partial payment discount: default `discount_on_partial=true` pro-rata; residual item keeps the remaining discount entitlement with the same discount date.
+- **BR-19.4** Rounding: discount and FX amounts rounded half-even to the currency minor unit; the FX difference is computed as the balancing figure so the settlement journal always balances by construction; any rounding residual ≤ 0.01 in accounting currency posts to the rounding account (wave 12).
+- **BR-19.5** Cross-currency: when credit and debit currencies differ, `applied` is expressed in accounting currency; the transaction-currency open amounts are reduced by `applied_acct / own_rate`; residual below `write_off_limit` closes the item.
+- **BR-19.6** Settlement in a closed AP period is rejected; reversal posts in the current open period with a reversal voucher referencing the original.
+- **BR-19.7** Concurrency: settlement locks VendorTransaction rows in ascending id order; a payment run and a manual settlement on the same item serialize; the loser sees `AP-SET-009 item no longer open` and the proposal line is marked excluded with reason.
+- **BR-19.8** Idempotency: `PaymentRun` activities key on `(proposal_id, vendor_transaction_id)`; the file activity keys on `(proposal_id, bank_account_id, method_id, payment_date)` and is deterministic (same payments → same bytes except `CreDtTm`), so a regenerated file is byte-identical in content fields and carries the same `MsgId`.
+- **BR-19.9** `EndToEndId` and `MsgId` are restricted to `[A-Za-z0-9/-?:().,'+ ]` ≤ 35 chars; vendor names are transliterated per bank profile (e.g., `ß → ss`); failure to transliterate rejects the payment line before file generation.
+- **BR-19.10** Minimum payment amount (default 1.00) and negative vendor balance: a vendor whose included items net to ≤ 0 is excluded from the proposal with reason `NET_CREDIT`; credit notes are settled against invoices inside the proposal before amounts are computed.
+- **BR-19.11** Prepayment applied at invoice posting cannot exceed the invoice total; the remainder stays open as a prepayment transaction.
+- **BR-19.12** Rejected payment (pain.002 RJCT AC01 invalid account) re-opens items with a `hold_reason=BANK_DETAILS` on the vendor's bank account until corrected.
+
+### 3.19.8 Acceptance criteria
+
+- **AC-19.1** (FR-19.2) Given the 300-scenario settlement fixture, when each scenario is previewed and committed, then discount, FX gain/loss, write-off and withholding amounts and accounts equal expected values for all 300, and every settlement journal balances.
+- **AC-19.2** (FR-19.2) Given the worked example in FR-19.2, when settled, then the journal lines are exactly Dr AP 1,100.00; Cr bank clearing 1,058.40; Cr discount 22.00; Cr FX gain 19.60.
+- **AC-19.3** (FR-19.6) Given a proposal of 50 SEPA payments, when the run completes, then the pain.001.001.09 file validates against the XSD, `CtrlSum` equals Σ amounts, and the bank test harness returns ACCP for all 50.
+- **AC-19.4** (FR-19.5) Given a run of 2,000 payments killed after 1,200 payments are posted, when the workflow resumes, then exactly 2,000 payments exist, no item is settled twice, and the file contains 2,000 transactions.
+- **AC-19.5** (FR-19.11) Given open items across 3 vendor groups, when aging is run as of today, then Σ buckets per group equals the AP control account balance per posting profile and the daily job emits diff = 0.
+- **AC-19.6** (FR-19.4) Given an invoice with 2 % discount expiring in 5 days and cost of capital 8 %, when a BY_DISCOUNT proposal with optimize=true runs, then the item is included with the discount (annualized 2 % × 365/20 ≈ 36.5 % > 8 %).
+- **AC-19.7** (FR-19.8) Given a SENT payment, when a pain.002 with TxSts RJCT and Rsn AC01 is ingested, then the payment is REJECTED, its settlement reversed, the invoice re-opened with hold BANK_DETAILS, and `payment.status.changed` emitted.
+- **AC-19.8** (FR-19.7) Given 10 US vendors paid by ACH CCD, when the NACHA file is generated, then record counts, block count (multiple of 10), entry hash and total debit/credit match the file control record and a NACHA validator passes.
+- **AC-19.9** (FR-19.10) Given a PO prepayment of 300.00 USD and a later invoice of 1,000.00 USD, when the invoice posts, then 300.00 is applied, AP open = 700.00, and the prepayment account is reduced by 300.00.
+- **AC-19.10** (FR-19.9) Given a posted check payment, when voided, then the check status is VOID, the positive pay file contains a void record, items are re-opened, and the payment journal is reversed.
+
+### 3.19.9 Test plan and fixtures
+
+Fixtures: `ap-settle-300` (300 scenarios authored with the accountant: full/partial, discount taken/lost/always, cross-currency, write-off, withholding, prepayment, credit note netting); `ap-pain001-bank-profiles` (SEPA, UK, CH, US-ISO) with expected XML; `ap-nacha-10`; `ap-aging-demo` (3 vendor groups, 5,000 items); `ap-pain002-samples` (ACCP, RJCT codes); `ap-crash-run` (2,000 payments with injected failure).
+
+| Test | Type | Target | Pass criterion |
+|---|---|---|---|
+| Settlement scenarios | unit (table-driven) | settlement engine | AC-19.1 |
+| Settlement balances | property | engine | random items/rates/dates: journal always balances; Σ applied ≤ credit |
+| pain.001 XSD | contract | file generator | valid against `pain.001.001.09.xsd` for all profiles |
+| Bank harness | E2E | sandbox bank | ACCP for fixture file |
+| NACHA validator | unit | NACHA generator | AC-19.8 |
+| Run idempotency | E2E (Temporal test server with activity failure injection) | PaymentRun | AC-19.4 |
+| Aging ties | E2E | aging job | AC-19.5 |
+| Status ingest | unit | pain.002 parser | all codes map; unknown → DLQ |
+| Proposal throughput | performance | 10k items | < 5 min run, p95 settle activity < 50 ms |
+
+Reconciliation checks: Σ VendorTransaction.open_amount_acct per control account = ledger balance; Σ payments POSTED per bank clearing account = ledger clearing balance; Σ file control sums = Σ payments SENT; settlement discount Σ = discount account movement for the period.
+
+### 3.19.10 Deployment and operations
+
+Helm chart `passage-payables` extended: payment-run Temporal worker ×2, file generator worker ×2, object store bucket `passage-payment-files` (S3-compatible, server-side encryption, 7-year retention, write-once). Config: `AP_WRITE_OFF_LIMIT=1.00`, `AP_DISCOUNT_LOOKAHEAD_DAYS=7`, `AP_COST_OF_CAPITAL_PCT=8`, `AP_MIN_PAYMENT=1.00`, `AP_FILE_RETENTION_DAYS=2555`. Migrations `payables/v19.*`. Flags: `ap.nacha`, `ap.checks`, `ap.positive_pay`, `ap.auto_settle_credit_notes`, `ap.structured_remittance`. Jobs: aging reconciliation daily 03:00; discount-expiry digest daily 07:00; pain.002 poller (wave 36 replaces with bank connectivity). SLOs: settlement preview p95 < 300 ms; proposal selection of 10k items < 10 s; file generation < 30 s for 2,000 payments. Alerts: aging diff ≠ 0 (page); payment run failed activity > 3 retries (page); files generated but not downloaded/transmitted within 4 h (ticket); rejected payments > 1 % of a run (ticket). Runbook: resume stuck run (Temporal), regenerate file, reverse payment, correct vendor bank account and re-propose. Rollback: additive migrations; payment files already transmitted are not affected; disable `ap.*` format flags to stop generation.
+
+### 3.19.11 Migration from AX / SAP
+
+| Source | Passage entity | Notes |
+|---|---|---|
+| AX VendTrans + VendTransOpen (open items) | VendorTransaction OPEN/PARTIALLY_SETTLED | AmountCur/AmountMST → amount_txn/acct; VendTransOpen.AmountCur → open; CashDiscDate, DueDate; vendor balance Σ must equal migrated AP control |
+| AX VendSettlement history | not migrated | closed history in lakehouse |
+| AX VendPaymModeTable, VendPaymModeSpec | PaymentMethod | ER format name → format enum |
+| AX BankAccountTable (vendor bank accounts, VendBankAccount) | vendor bank accounts (wave 7 role data) | IBAN/BIC/ABA validated on load |
+| AX CashDisc, PaymTerm | PaymentTerms discount tiers | |
+| AX LedgerJournalTrans open payment journals | not migrated | post or delete before cutover |
+| SAP BSIK (open vendor items) | VendorTransaction | DMBTR/WRBTR, ZFBDT+ZBD1T → due/discount dates, ZLSPR → hold; UMSKZ A → PREPAYMENT |
+| SAP T042Z/T042E (payment methods), FBZP house banks | PaymentMethod, bank accounts | |
+| SAP LFBK (vendor bank details) | vendor bank accounts | |
+| SAP REGUH/REGUP of unexecuted F110 proposals | not migrated | complete or delete before cutover |
+| SAP T052 payment terms | PaymentTerms | |
+
+Validation: Σ open items per vendor and per control account equals the source trial balance at cutover (0.00 difference); count of open items equals source; 100 random vendors' bank details re-validated. Not migrated: cleared items (BSAK, settled VendTrans), check registers (void history), positive pay history, payment files.
+
+### 3.19.12 Dependencies, risks, open questions
+
+Depends on: wave 18 (VendorTransaction creation), wave 12 (rates, realized gain/loss accounts, rounding), wave 13 (withholding), wave 14 (AP period control), wave 7 (vendor bank accounts, terms, holds), wave 4 (Temporal, approvals), wave 36 for bank transport (forward dependency; this wave uses file download).
+
+| Risk | Likelihood | Impact | Mitigation |
+|---|---|---|---|
+| Bank-specific pain.001 variants exceed the 20-key profile model | Medium | Medium | Profile model reviewed against 4 banks' implementation guides; escape hatch: XSLT post-processor per profile |
+| Accountant rejects discount-on-partial default | Low | Low | Policy flag; fixture covers both |
+| Payment file leakage (contains bank details) | Low | High | Object store with per-tenant prefix, OPA-gated download, audit on every download, no email attachment of files |
+
+Open questions:
+1. pain.001 version: .09 (2019) as default or .03 for banks still on the older schema? Default: .09 with profile override to .03. Decide by wave 19 mid-point.
+2. Should the proposal auto-net credit notes across currencies? Default: same currency only. Decide by wave 19 close.
+3. Card payments (virtual cards) in v1? Default: method type exists, no provider adapter until v1.x. Decide by wave 35.
+

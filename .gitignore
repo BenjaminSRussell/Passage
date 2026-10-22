@@ -11,3 +11,5 @@ __pycache__/
 .terraform/
 *.tfstate*
 docs/PRD-full.html
+node_modules/
+apps/*/dist/
