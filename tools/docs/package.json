@@ -1,0 +1,10 @@
+{
+  "name": "@passage/docs-tools",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "description": "Markdown → HTML renderer used by scripts/build_prd.py",
+  "dependencies": {
+    "marked": "14.1.2"
+  }
+}

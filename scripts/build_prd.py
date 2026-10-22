@@ -71,19 +71,6 @@ def main():
         render_pdf(out)
 
 
-CSS = """
-body{font-family:-apple-system,Helvetica,Arial,sans-serif;font-size:10.5pt;line-height:1.4;max-width:none;margin:0;color:#111}
-h1{font-size:20pt;border-bottom:2px solid #333;padding-bottom:4px;margin-top:28pt;page-break-before:always}
-h1:first-of-type{page-break-before:avoid}
-h2{font-size:15pt;margin-top:20pt;border-bottom:1px solid #999}
-h3{font-size:12.5pt;margin-top:14pt} h4{font-size:11pt}
-table{border-collapse:collapse;width:100%;font-size:9pt;margin:8pt 0;page-break-inside:auto}
-th,td{border:1px solid #bbb;padding:3px 5px;vertical-align:top;text-align:left}
-th{background:#eee} tr{page-break-inside:avoid}
-code{font-family:Menlo,monospace;font-size:8.5pt;background:#f4f4f4;padding:0 2px}
-pre{background:#f4f4f4;padding:6px;font-size:8.5pt;white-space:pre-wrap;border:1px solid #ddd}
-@page{size:A4;margin:16mm 14mm}
-"""
 
 CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 
@@ -92,9 +79,10 @@ def render_pdf(md_path):
     """Markdown -> HTML (marked, via npx) -> PDF (headless Chrome). No pandoc/LaTeX needed."""
     html_path = md_path.with_suffix(".html")
     pdf_path = md_path.with_suffix(".pdf")
-    body = subprocess.run(["npx", "--yes", "marked", "--gfm", "-i", str(md_path)], capture_output=True, text=True, check=True).stdout
-    body = body.replace("\\newpage", '<div style="page-break-after:always"></div>')
-    html_path.write_text(f"<!doctype html><html><head><meta charset='utf-8'><title>Passage PRD</title><style>{CSS}</style></head><body>{body}</body></html>")
+    tool = ROOT / "tools" / "docs"
+    if not (tool / "node_modules").exists():
+        subprocess.run(["npm", "install", "--silent"], cwd=tool, check=True)
+    subprocess.run(["node", str(tool / "md2html.mjs"), str(md_path), str(html_path), "Passage PRD"], check=True)
     chrome = CHROME if pathlib.Path(CHROME).exists() else shutil.which("google-chrome") or shutil.which("chromium")
     if not chrome:
         print("Chrome not found; wrote HTML only:", html_path.relative_to(ROOT), file=sys.stderr)
