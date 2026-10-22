@@ -4,6 +4,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"math/big"
 	"net/http"
 	"strconv"
 
@@ -154,12 +155,16 @@ func (s *Server) trialBalance(w http.ResponseWriter, _ *http.Request) {
 		Balance int64  `json:"balance"`
 	}
 	rows := make([]row, len(balances))
-	var total int64
+	total := new(big.Int)
 	for i, balance := range balances {
 		rows[i] = row{Account: balance.Account, Balance: balance.Balance}
-		total += balance.Balance
+		total.Add(total, big.NewInt(balance.Balance))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"accounts": rows, "total": total})
+	if !total.IsInt64() {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "trial balance total overflow"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"accounts": rows, "total": total.Int64()})
 }
 
 func toEntryDTO(entry ledger.Entry) entryDTO {

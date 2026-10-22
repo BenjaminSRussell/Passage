@@ -43,18 +43,23 @@ export default function App() {
   }, [refresh]);
 
   async function post(body) {
-    const res = await fetch("/api/v1/entries", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const payload = await res.json();
-    if (!res.ok) {
-      setMessage(payload.error || "rejected");
-    } else {
-      setMessage(`Posted entry ${payload.id}`);
+    try {
+      const res = await fetch("/api/v1/entries", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const payload = await res.json();
+      if (!res.ok) {
+        setMessage(payload.error || "rejected");
+      } else {
+        setMessage(`Posted entry ${payload.id}`);
+      }
+      await refresh();
+    } catch (err) {
+      setMessage("");
+      setError(err instanceof Error ? err.message : String(err));
     }
-    await refresh();
   }
 
   return (
@@ -64,7 +69,9 @@ export default function App() {
       <p className="lede">hello-ledger placeholder. Postings must balance.</p>
       <section>
         <h2>Service</h2>
-        {error ? <p className="error">{error}</p> : null}
+        <div role="status" aria-live="polite">
+          {error ? <p className="error">{error}</p> : null}
+        </div>
         {health ? (
           <p>
             {health.service}: {health.status}
@@ -83,7 +90,9 @@ export default function App() {
             Post unbalanced journal
           </button>
         </div>
-        {message ? <p className="message">{message}</p> : null}
+        <div role="status" aria-live="polite">
+          {message ? <p className="message">{message}</p> : null}
+        </div>
       </section>
       <section>
         <h2>Trial balance</h2>

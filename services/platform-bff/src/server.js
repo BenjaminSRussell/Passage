@@ -18,7 +18,8 @@ const isMain = process.argv[1] && process.argv[1].endsWith("server.js");
 if (isMain) {
   const port = Number(process.env.PORT || 8081);
   const server = createServer();
-  server.listen(port, "0.0.0.0", () => {
-    console.log(`platform-bff listening on ${port}`);
+  const bind = process.env.BIND_ADDR || "127.0.0.1";
+  server.listen(port, bind, () => {
+    console.log(`platform-bff listening on ${bind}:${port}`);
   });
 }

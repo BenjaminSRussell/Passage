@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"encoding/json"
+	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -107,6 +109,55 @@ func TestUnbalancedPostIsRejected(t *testing.T) {
 	}
 	if !strings.Contains(body.Error, "not balanced") {
 		t.Fatalf("error = %q", body.Error)
+	}
+}
+
+func TestTrialBalanceTotalDoesNotWrap(t *testing.T) {
+	ts := newTS(t, nil)
+	postMax := func(debitAccount, creditAccount string) {
+		t.Helper()
+		body := fmt.Sprintf(`{
+			"lines": [
+				{"account": %q, "debit": %d, "credit": 0},
+				{"account": %q, "debit": 0, "credit": %d}
+			]
+		}`, debitAccount, math.MaxInt64, creditAccount, math.MaxInt64)
+		posted, err := http.DefaultClient.Do(authedRequest(t, http.MethodPost, ts.URL+"/v1/entries", body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		posted.Body.Close()
+		if posted.StatusCode != http.StatusCreated {
+			t.Fatalf("post %s/%s status = %d", debitAccount, creditAccount, posted.StatusCode)
+		}
+	}
+	postMax("Cash", "Revenue")
+	postMax("Bank", "Sales")
+	balanceRes, err := http.DefaultClient.Do(authedRequest(t, http.MethodGet, ts.URL+"/v1/trial-balance", ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer balanceRes.Body.Close()
+	var decoded struct {
+		Total int64 `json:"total"`
+	}
+	if err := json.NewDecoder(balanceRes.Body).Decode(&decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Total != 0 {
+		t.Fatalf("total = %d", decoded.Total)
+	}
+}
+
+func TestInvalidJSONIsRejected(t *testing.T) {
+	ts := newTS(t, nil)
+	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodPost, ts.URL+"/v1/entries", `{`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d", res.StatusCode)
 	}
 }
 
