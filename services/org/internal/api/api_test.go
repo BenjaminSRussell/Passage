@@ -30,6 +30,9 @@ func (f *fakeStore) CreateLegalEntity(_ context.Context, in store.LegalEntity, k
 		return store.LegalEntity{}, f.err
 	}
 	if replay, ok := f.byKey[key]; ok && key != "" {
+		if replay.Code != in.Code || replay.Name != in.Name || replay.Country != in.Country || replay.Currency != in.Currency {
+			return store.LegalEntity{}, httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeIdempotencyReuse, "reused")
+		}
 		return replay, nil
 	}
 	in.ID, in.Status, in.Version, in.CreatedAt = "id-1", "active", 1, time.Unix(0, 0).UTC()
@@ -142,9 +145,13 @@ func TestCreateLegalEntity_ReplayReturnsOriginal(t *testing.T) {
 		return rec
 	}
 	first := post(validBody)
-	replay := post(`{"code":"US02","name":"Other","country":"US","currency":"USD"}`)
+	replay := post(validBody)
 	if first.Code != http.StatusCreated || replay.Code != http.StatusCreated || first.Body.String() != replay.Body.String() || len(f.entities) != 1 {
 		t.Fatalf("replay must return the original entity: %d %s / %d %s, rows %d", first.Code, first.Body, replay.Code, replay.Body, len(f.entities))
+	}
+	reuse := post(`{"code":"US02","name":"Other","country":"US","currency":"USD"}`)
+	if reuse.Code != http.StatusUnprocessableEntity || !strings.Contains(reuse.Body.String(), store.CodeIdempotencyReuse) || len(f.entities) != 1 {
+		t.Fatalf("different body under same key must be 422 %s: %d %s", store.CodeIdempotencyReuse, reuse.Code, reuse.Body)
 	}
 }
 

@@ -17,9 +17,10 @@ import (
 )
 
 const (
-	MaxPageSize         = 100
-	CodeLegalEntityCode = "ORG-LE-CODE-DUPLICATE"
-	uniqueViolation     = "23505"
+	MaxPageSize          = 100
+	CodeLegalEntityCode  = "ORG-LE-CODE-DUPLICATE"
+	CodeIdempotencyReuse = "idempotency_key_reuse"
+	uniqueViolation      = "23505"
 )
 
 type LegalEntity struct {
@@ -76,6 +77,9 @@ func (s *Postgres) CreateLegalEntity(ctx context.Context, in LegalEntity, idempo
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
 		return LegalEntity{}, httpx.NewProblem(http.StatusConflict, CodeLegalEntityCode, "a legal entity with this code already exists")
+	}
+	if err == nil && key != nil && (e.Code != in.Code || e.Name != in.Name || e.Country != in.Country || e.Currency != in.Currency) {
+		return LegalEntity{}, httpx.NewProblem(http.StatusUnprocessableEntity, CodeIdempotencyReuse, "Idempotency-Key was already used with a different request body")
 	}
 	return e, err
 }

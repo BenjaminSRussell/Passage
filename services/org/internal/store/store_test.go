@@ -30,11 +30,14 @@ func TestPostgres_TenantIsolationIdempotencyAndDuplicateCode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	replay, err := s.CreateLegalEntity(ctx, store.LegalEntity{Code: "US02", Name: "Other", Country: "US", Currency: "USD"}, "key-1")
-	if err != nil || replay.ID != first.ID || replay.Code != "US01" {
+	replay, err := s.CreateLegalEntity(ctx, in, "key-1")
+	if err != nil || replay.ID != first.ID {
 		t.Fatalf("idempotent replay must return the original entity, got %+v, %v", replay, err)
 	}
 	var problem *httpx.Problem
+	if _, err := s.CreateLegalEntity(ctx, store.LegalEntity{Code: "US02", Name: "Other", Country: "US", Currency: "USD"}, "key-1"); !errors.As(err, &problem) || problem.Code != store.CodeIdempotencyReuse {
+		t.Fatalf("reused key with different body must be %s, got %v", store.CodeIdempotencyReuse, err)
+	}
 	if _, err := s.CreateLegalEntity(ctx, in, "key-2"); !errors.As(err, &problem) || problem.Code != store.CodeLegalEntityCode {
 		t.Fatalf("duplicate code must be %s, got %v", store.CodeLegalEntityCode, err)
 	}
