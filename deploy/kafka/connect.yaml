@@ -1,0 +1,110 @@
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaUser
+metadata:
+  name: debezium
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: passage
+spec:
+  authentication:
+    type: scram-sha-512
+  authorization:
+    type: simple
+    acls:
+      - resource: {type: topic, name: passage.platform., patternType: prefix}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage-connect-, patternType: prefix}
+        operations: [Create, Describe, Read, Write, DescribeConfigs]
+      - resource: {type: group, name: passage-connect, patternType: literal}
+        operations: [Read, Describe]
+      - resource: {type: cluster}
+        operations: [IdempotentWrite]
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaConnect
+metadata:
+  name: passage-connect
+  namespace: kafka
+  annotations:
+    strimzi.io/use-connector-resources: "true"
+spec:
+  version: 4.0.0
+  replicas: 2
+  bootstrapServers: passage-kafka-bootstrap:9093
+  tls:
+    trustedCertificates:
+      - secretName: passage-cluster-ca-cert
+        pattern: "*.crt"
+  authentication:
+    type: scram-sha-512
+    username: debezium
+    passwordSecret:
+      secretName: debezium
+      password: password
+  config:
+    group.id: passage-connect
+    offset.storage.topic: passage-connect-offsets
+    config.storage.topic: passage-connect-configs
+    status.storage.topic: passage-connect-status
+    offset.storage.replication.factor: 3
+    config.storage.replication.factor: 3
+    status.storage.replication.factor: 3
+    config.providers: secrets
+    config.providers.secrets.class: io.strimzi.kafka.KubernetesSecretConfigProvider
+  build:
+    output:
+      type: docker
+      image: ghcr.io/benjaminsrussell/passage-connect:debezium-3
+      pushSecret: ghcr-push
+    plugins:
+      - name: debezium-postgres
+        artifacts:
+          - type: maven
+            group: io.debezium
+            artifact: debezium-connector-postgres
+            version: 3.0.7.Final
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaConnector
+metadata:
+  name: outbox-batch
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: passage-connect
+spec:
+  class: io.debezium.connector.postgresql.PostgresConnector
+  tasksMax: 1
+  config:
+    plugin.name: pgoutput
+    database.hostname: postgres.batch.svc
+    database.port: 5432
+    database.user: ${secrets:kafka/debezium-cdc:username}
+    database.password: ${secrets:kafka/debezium-cdc:password}
+    database.dbname: passage_platform
+    topic.prefix: passage.platform
+    slot.name: passage_outbox_batch
+    table.include.list: public.outbox
+    tombstones.on.delete: false
+    topic.creation.default.replication.factor: 3
+    topic.creation.default.partitions: 12
+    topic.creation.default.cleanup.policy: delete
+    topic.creation.default.retention.ms: 2592000000
+    topic.creation.groups: machineevent
+    topic.creation.machineevent.include: passage\.manufacturing\.machineevent
+    topic.creation.machineevent.partitions: 48
+    topic.creation.machineevent.replication.factor: 3
+    topic.creation.machineevent.cleanup.policy: delete
+    topic.creation.machineevent.retention.ms: 604800000
+    transforms: outbox
+    transforms.outbox.type: io.debezium.transforms.outbox.EventRouter
+    transforms.outbox.table.field.event.id: id
+    transforms.outbox.table.field.event.key: partition_key
+    transforms.outbox.table.field.event.payload: payload
+    transforms.outbox.route.by.field: aggregate_type
+    transforms.outbox.route.topic.replacement: passage.platform.${routedByValue}
+    key.converter: org.apache.kafka.connect.storage.StringConverter
+    value.converter: io.debezium.converters.CloudEventsConverter
+    value.converter.serializer.type: json
+    value.converter.data.serializer.type: json
+    producer.override.acks: all
+    producer.override.enable.idempotence: true
