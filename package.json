@@ -1,0 +1,9 @@
+{
+  "name": "passage",
+  "private": true,
+  "description": "Repo-level scripts only (no dependencies, no workspaces). `typecheck` is the baseline Moonaan generate-code asserts on a fresh worktree before generating: go vet across every Go module.",
+  "scripts": {
+    "typecheck": "make vet",
+    "test": "make test-go"
+  }
+}
