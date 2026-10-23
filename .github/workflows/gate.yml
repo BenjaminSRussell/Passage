@@ -1,0 +1,63 @@
+name: gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+
+concurrency:
+  group: gate-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      go: ${{ steps.filter.outputs.go }}
+      web: ${{ steps.filter.outputs.web }}
+      run: ${{ steps.filter.outputs.go == 'true' || steps.filter.outputs.web == 'true' || steps.filter.outputs.charts == 'true' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - id: filter
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d
+        with:
+          filters: |
+            go:
+              - 'platform/go/**'
+              - 'services/**'
+              - '.github/workflows/**'
+            web:
+              - 'apps/web/**'
+              - '.github/workflows/**'
+            charts:
+              - 'services/**/charts/**'
+              - 'deploy/**'
+
+  ci:
+    needs: changes
+    if: needs.changes.outputs.run == 'true' || startsWith(github.ref, 'refs/tags/')
+    uses: ./.github/workflows/ci.yml
+    with:
+      go: ${{ needs.changes.outputs.go == 'true' || startsWith(github.ref, 'refs/tags/') }}
+      web: ${{ needs.changes.outputs.web == 'true' }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+
+  gate:
+    if: always()
+    needs: [changes, ci]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Fail unless every upstream job succeeded or was skipped
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          CI: ${{ needs.ci.result }}
+        run: |
+          [ "$CHANGES" = "success" ] || { echo "changes detection: $CHANGES"; exit 1; }
+          case "$CI" in success|skipped) ;; *) echo "ci: $CI"; exit 1 ;; esac

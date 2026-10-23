@@ -1,0 +1,76 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hello-ledger
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init
+  namespace: hello-ledger
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+data:
+  10-app-role.sh: |
+    psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" <<SQL
+    CREATE ROLE passage_app LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD '$APP_PASSWORD';
+    GRANT ALL ON SCHEMA public TO passage_app;
+    SQL
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: hello-ledger
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:17-alpine
+          env:
+            - { name: POSTGRES_USER, value: passage }
+            - { name: POSTGRES_DB, value: hello }
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: hello-ledger-db, key: POSTGRES_PASSWORD }
+            - name: APP_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: hello-ledger-db, key: APP_PASSWORD }
+          ports:
+            - { name: pg, containerPort: 5432 }
+          readinessProbe:
+            exec:
+              command: [pg_isready, -U, passage, -d, hello]
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+            - { name: init, mountPath: /docker-entrypoint-initdb.d }
+      volumes:
+        - name: init
+          configMap: { name: postgres-init, defaultMode: 365 }
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: hello-ledger
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  selector:
+    app.kubernetes.io/name: postgres
+  ports:
+    - { name: pg, port: 5432, targetPort: pg }

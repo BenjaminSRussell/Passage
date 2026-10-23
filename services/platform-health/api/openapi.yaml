@@ -1,0 +1,100 @@
+openapi: 3.1.0
+info:
+  title: hello-ledger
+  version: 0.1.0
+  description: Placeholder service that proves the delivery path end to end.
+servers:
+  - url: https://app.local.passage.dev
+paths:
+  /v1/hello-ledger/entries:
+    post:
+      operationId: createEntry
+      x-passage-duty: hello.write
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateEntry' }
+      responses:
+        '201':
+          description: Entry created, or the original entry on an Idempotency-Key replay.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Entry' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listEntries
+      x-passage-duty: hello.read
+      responses:
+        '200':
+          description: Newest entries for the caller's tenant, at most 100.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Entry' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /healthz:
+    get:
+      operationId: liveness
+      x-passage-duty: public
+      responses:
+        '200': { description: Process is alive. }
+  /readyz:
+    get:
+      operationId: readiness
+      x-passage-duty: public
+      responses:
+        '200': { description: Database reachable. }
+        '503': { description: Database unreachable. }
+  /metrics:
+    get:
+      operationId: metrics
+      x-passage-duty: public
+      description: Served on the admin port (9090), never through the ingress.
+      responses:
+        '200':
+          description: Prometheus text exposition.
+          content:
+            text/plain:
+              schema: { type: string }
+components:
+  schemas:
+    CreateEntry:
+      type: object
+      additionalProperties: false
+      required: [message]
+      properties:
+        message: { type: string, minLength: 1, maxLength: 280 }
+    Entry:
+      type: object
+      required: [id, message, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        message: { type: string }
+        createdAt: { type: string, format: date-time }
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string }
+        traceId: { type: string }
+  responses:
+    Problem:
+      description: RFC 9457 problem details.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }

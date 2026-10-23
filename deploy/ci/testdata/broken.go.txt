@@ -1,0 +1,5 @@
+package lint
+
+import "fmt"
+
+func Broken() string { return fmt.Sprintf("%d", "not a number") }
