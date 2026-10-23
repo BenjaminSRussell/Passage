@@ -156,3 +156,19 @@ func TestOpenAPIDocumentsEveryRoute(t *testing.T) {
 		t.Error("openapi.yaml does not document /metrics")
 	}
 }
+
+func TestEntries_InvalidLegalEntityHeader(t *testing.T) {
+	for _, header := range []string{"foo", testkit.TenantID(1) + "," + testkit.TenantID(2)} {
+		for _, method := range []string{http.MethodPost, http.MethodGet} {
+			r, _ := newRouter(&fakeStore{})
+			req := httptest.NewRequest(method, "/v1/hello-ledger/entries", strings.NewReader(`{"message":"hi"}`))
+			req.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
+			req.Header.Set("X-Passage-Legal-Entity", header)
+			rec := httptest.NewRecorder()
+			r.ServeHTTP(rec, req)
+			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "COM-0001") {
+				t.Fatalf("%s legal entity %q: got %d %s; want 400 COM-0001", method, header, rec.Code, rec.Body.String())
+			}
+		}
+	}
+}

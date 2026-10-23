@@ -117,5 +117,9 @@ func validTenant(w http.ResponseWriter, r *http.Request) bool {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnauthorized, "AUTH-0001", "missing or malformed tenant"))
 		return false
 	}
+	if p.LegalEntityID != "" && !ids.Valid(p.LegalEntityID) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", "legal entity must be a single UUID"))
+		return false
+	}
 	return true
 }

@@ -1,9 +1,11 @@
 package store_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/platform-health/internal/store"
 	"github.com/BenjaminSRussell/passage/services/platform-health/migrations"
@@ -11,7 +13,7 @@ import (
 
 func TestPostgres_TenantIsolationAndIdempotency(t *testing.T) {
 	pool := testkit.DB(t)
-	ctx := testkit.Ctx(testkit.TenantID(1))
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: testkit.TenantID(9)})
 	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +38,7 @@ func TestPostgres_TenantIsolationAndIdempotency(t *testing.T) {
 	if err != nil || len(own) != 1 {
 		t.Fatalf("tenant 1 list = %v, %v; want 1 entry", own, err)
 	}
-	other, err := s.List(testkit.Ctx(testkit.TenantID(2)))
+	other, err := s.List(tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(2), LegalEntityID: testkit.TenantID(9)}))
 	if err != nil || len(other) != 0 {
 		t.Fatalf("tenant 2 must see no rows, got %v, %v", other, err)
 	}
