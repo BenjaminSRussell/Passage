@@ -11,7 +11,7 @@
 | HIGH-severity-older-than-14-days gate and `.vuln-exceptions.yaml` (FR-1.6) | not built | CI fails on CRITICAL only; the exception file format is slice 2 |
 | gitleaks gate (FR-1.11) | not built | slice 2 |
 | Vault and External Secrets Operator | not built | dev and local use a Secret created by `deploy-local`; no secret value is in Git |
-| CloudNativePG, `passage_app` role without BYPASSRLS | not built | dev uses a single in-cluster Postgres whose superuser bypasses RLS; RLS is exercised by store tests only against a non-superuser role |
+| CloudNativePG | not built | dev uses a single in-cluster Postgres; the service connects as the non-superuser `passage_app` role (no BYPASSRLS) created by an init script, and List also filters by tenant_id |
 | Root `make deploy-local` | handoff | root `Makefile` is outside wave 1 ownership; add `deploy-local: ; $(MAKE) -C deploy deploy-local` there |
 | Branch protection requiring `gate` | handoff | repository setting |
 | `deploy/envs/dev/apps/hello-ledger.yaml` digest | placeholder | the all-zero digest is not a real image; CI pushes `ghcr.io/<owner>/hello-ledger` and the promotion work in slice 2 writes the real digest |

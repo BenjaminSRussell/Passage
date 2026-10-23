@@ -7,6 +7,6 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -buildid=" -o /out/hello-le
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/hello-ledger /hello-ledger
-USER nonroot:nonroot
+USER 65532:65532
 EXPOSE 8080 9090
 ENTRYPOINT ["/hello-ledger"]

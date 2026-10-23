@@ -24,6 +24,7 @@ func TestDeliveryFilesCarryRequiredContent(t *testing.T) {
 		file string
 		want []string
 	}{
+		{"services/platform-health/Dockerfile", []string{"USER 65532:65532"}},
 		{"deploy/Makefile", []string{"deploy-local:", "tofu", "k3d image import", "root-local.yaml"}},
 		{"deploy/tofu/cluster/main.tf", []string{"precondition", `helm_release" "argocd"`, `helm_release" "cert_manager"`}},
 		{"services/platform-health/NOT-IMPLEMENTED.md", []string{"Deliverable 1", "slice 2 of PSG-1", "Root `make deploy-local`"}},

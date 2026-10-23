@@ -53,9 +53,10 @@ func (s *Postgres) Create(ctx context.Context, message, idempotencyKey string) (
 }
 
 func (s *Postgres) List(ctx context.Context) ([]Entry, error) {
+	p, _ := tenant.FromContext(ctx)
 	entries := []Entry{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `select id, message, created_at from hello_entry order by created_at desc, id desc limit $1`, listLimit)
+		rows, err := tx.Query(ctx, `select id, message, created_at from hello_entry where tenant_id = $1 order by created_at desc, id desc limit $2`, p.TenantID, listLimit)
 		if err != nil {
 			return err
 		}

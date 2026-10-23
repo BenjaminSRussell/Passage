@@ -53,6 +53,7 @@ func do(r http.Handler, method, path, body string, withTenant bool) *httptest.Re
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	if withTenant {
 		req.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
+		req.Header.Set("X-Passage-Duties", "hello.write,hello.read")
 	}
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
@@ -121,16 +122,60 @@ func TestProbes(t *testing.T) {
 	}
 }
 
-func TestMetricsCountBusinessOperations(t *testing.T) {
+func TestEntriesRequireDuty(t *testing.T) {
+	tests := []struct {
+		name, method, duties string
+		wantStatus           int
+	}{
+		{"create without duty", http.MethodPost, "", http.StatusForbidden},
+		{"create with read duty only", http.MethodPost, "hello.read", http.StatusForbidden},
+		{"list without duty", http.MethodGet, "", http.StatusForbidden},
+		{"list with write duty only", http.MethodGet, "hello.write", http.StatusForbidden},
+		{"create with write duty", http.MethodPost, "hello.write", http.StatusCreated},
+		{"list with read duty", http.MethodGet, "hello.read", http.StatusOK},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r, _ := newRouter(&fakeStore{})
+			req := httptest.NewRequest(tc.method, "/v1/hello-ledger/entries", strings.NewReader(`{"message":"hi"}`))
+			req.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
+			req.Header.Set("X-Passage-Duties", tc.duties)
+			rec := httptest.NewRecorder()
+			r.ServeHTTP(rec, req)
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("got %d %s; want %d", rec.Code, rec.Body.String(), tc.wantStatus)
+			}
+			if tc.wantStatus == http.StatusForbidden && !strings.Contains(rec.Body.String(), "AUTH-0003") {
+				t.Fatalf("want AUTH-0003, got %s", rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestMetricsCountBusinessOperationsAndHTTP(t *testing.T) {
 	f := &fakeStore{}
 	r, a := newRouter(f)
-	do(r, http.MethodPost, "/v1/hello-ledger/entries", `{"message":"hi"}`, true)
+	h := a.Instrument(r)
+	do(h, http.MethodPost, "/v1/hello-ledger/entries", `{"message":"hi"}`, true)
 	f.err = errors.New("boom")
-	do(r, http.MethodPost, "/v1/hello-ledger/entries", `{"message":"hi"}`, true)
+	do(h, http.MethodPost, "/v1/hello-ledger/entries", `{"message":"hi"}`, true)
+	do(h, http.MethodPost, "/v1/hello-ledger/entries", `{}`, false)
+	do(h, http.MethodGet, "/healthz", "", false)
+	do(h, http.MethodGet, "/nope", "", false)
 
 	rec := httptest.NewRecorder()
 	a.Metrics().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
-	for _, want := range []string{"hello_ledger_entries_created_total 1", "hello_ledger_entries_failed_total 1", "hello_ledger_http_requests_total 2"} {
+	for _, want := range []string{
+		"# TYPE hello_ledger_entries_created_total counter",
+		"hello_ledger_entries_created_total 1",
+		"hello_ledger_entries_failed_total 1",
+		`hello_ledger_http_requests_total{route="/v1/hello-ledger/entries",status="201"} 1`,
+		`hello_ledger_http_requests_total{route="/v1/hello-ledger/entries",status="500"} 1`,
+		`hello_ledger_http_requests_total{route="/healthz",status="200"} 1`,
+		`hello_ledger_http_requests_total{route="unmatched",status="401"} 2`,
+		`hello_ledger_http_request_duration_seconds_count{route="/v1/hello-ledger/entries"} 2`,
+		`hello_ledger_http_request_duration_seconds_bucket{route="/healthz",le="+Inf"} 1`,
+	} {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Fatalf("metrics missing %q in %s", want, rec.Body.String())
 		}
@@ -163,6 +208,7 @@ func TestEntries_InvalidLegalEntityHeader(t *testing.T) {
 			r, _ := newRouter(&fakeStore{})
 			req := httptest.NewRequest(method, "/v1/hello-ledger/entries", strings.NewReader(`{"message":"hi"}`))
 			req.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
+			req.Header.Set("X-Passage-Duties", "hello.write,hello.read")
 			req.Header.Set("X-Passage-Legal-Entity", header)
 			rec := httptest.NewRecorder()
 			r.ServeHTTP(rec, req)

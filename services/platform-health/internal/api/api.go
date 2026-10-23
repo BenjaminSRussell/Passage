@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
@@ -23,42 +24,35 @@ const (
 	maxMessageLength = 280
 	readyTimeout     = 500 * time.Millisecond
 	idempotencyKey   = "Idempotency-Key"
+	dutyWrite        = "hello.write"
+	dutyRead         = "hello.read"
 )
 
 type API struct {
-	store    store.Store
-	created  atomic.Int64
-	failed   atomic.Int64
-	requests atomic.Int64
+	store   store.Store
+	created atomic.Int64
+	failed  atomic.Int64
+	http    requestMetrics
 }
 
 type createRequest struct {
 	Message string `json:"message"`
 }
 
-func New(s store.Store) *API { return &API{store: s} }
+func New(s store.Store) *API { return &API{store: s, http: newRequestMetrics()} }
 
 func (a *API) Register(r chi.Router) {
-	r.Group(func(g chi.Router) {
-		g.Use(a.countRequests)
-		g.Get("/readyz", a.ready)
-		g.Post("/v1/hello-ledger/entries", a.create)
-		g.Get("/v1/hello-ledger/entries", a.list)
-	})
+	r.Get("/readyz", a.ready)
+	r.With(authz.RequireDuty(dutyWrite)).Post("/v1/hello-ledger/entries", a.create)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/hello-ledger/entries", a.list)
 }
 
 func (a *API) Metrics() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-		fmt.Fprintf(w, "hello_ledger_entries_created_total %d\nhello_ledger_entries_failed_total %d\nhello_ledger_http_requests_total %d\n",
-			a.created.Load(), a.failed.Load(), a.requests.Load())
-	})
-}
-
-func (a *API) countRequests(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		a.requests.Add(1)
-		next.ServeHTTP(w, r)
+		fmt.Fprintf(w, "# HELP hello_ledger_entries_created_total Entries created.\n# TYPE hello_ledger_entries_created_total counter\nhello_ledger_entries_created_total %d\n", a.created.Load())
+		fmt.Fprintf(w, "# HELP hello_ledger_entries_failed_total Entry creations that failed in the store.\n# TYPE hello_ledger_entries_failed_total counter\nhello_ledger_entries_failed_total %d\n", a.failed.Load())
+		a.http.write(w)
 	})
 }
 

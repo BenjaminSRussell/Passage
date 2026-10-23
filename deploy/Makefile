@@ -15,10 +15,11 @@ deploy-local:
 	k3d image import $(IMAGE) -c $(CLUSTER)
 	kubectl --context k3d-$(CLUSTER) create namespace hello-ledger --dry-run=client -o yaml | kubectl --context k3d-$(CLUSTER) apply -f -
 	kubectl --context k3d-$(CLUSTER) -n hello-ledger get secret hello-ledger-db >/dev/null 2>&1 || { \
-		pw=$$(openssl rand -hex 16); \
+		pw=$$(openssl rand -hex 16); apw=$$(openssl rand -hex 16); \
 		kubectl --context k3d-$(CLUSTER) -n hello-ledger create secret generic hello-ledger-db \
 			--from-literal=POSTGRES_PASSWORD=$$pw \
-			--from-literal=DATABASE_URL="postgres://passage:$$pw@postgres:5432/hello?sslmode=disable"; }
+			--from-literal=APP_PASSWORD=$$apw \
+			--from-literal=DATABASE_URL="postgres://passage_app:$$apw@postgres:5432/hello?sslmode=disable"; }
 	sed "s|targetRevision: main|targetRevision: $(REVISION)|" argocd/root-local.yaml | kubectl --context k3d-$(CLUSTER) apply -f -
 	sed "s|targetRevision: main|targetRevision: $(REVISION)|" argocd/hello-ledger-local.yaml | kubectl --context k3d-$(CLUSTER) apply -f -
 	until kubectl --context k3d-$(CLUSTER) -n hello-ledger get deploy/hello-ledger >/dev/null 2>&1; do sleep 5; done
