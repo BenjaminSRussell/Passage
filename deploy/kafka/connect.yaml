@@ -1,4 +1,26 @@
 apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaUser
+metadata:
+  name: debezium
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: passage
+spec:
+  authentication:
+    type: scram-sha-512
+  authorization:
+    type: simple
+    acls:
+      - resource: {type: topic, name: passage.platform., patternType: prefix}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage-connect-, patternType: prefix}
+        operations: [Create, Describe, Read, Write, DescribeConfigs]
+      - resource: {type: group, name: passage-connect, patternType: literal}
+        operations: [Read, Describe]
+      - resource: {type: cluster}
+        operations: [IdempotentWrite]
+---
+apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaConnect
 metadata:
   name: passage-connect
@@ -61,8 +83,12 @@ spec:
     database.dbname: passage_platform
     topic.prefix: passage.platform
     slot.name: passage_outbox_batch
-    table.include.list: batch.outbox
+    table.include.list: public.outbox
     tombstones.on.delete: false
+    topic.creation.default.replication.factor: 3
+    topic.creation.default.partitions: 12
+    topic.creation.default.cleanup.policy: delete
+    topic.creation.default.retention.ms: 604800000
     transforms: outbox
     transforms.outbox.type: io.debezium.transforms.outbox.EventRouter
     transforms.outbox.table.field.event.id: id
