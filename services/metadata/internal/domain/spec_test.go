@@ -67,6 +67,7 @@ func TestValidate_InputDomain(t *testing.T) {
 		{"non numeric default", entityWith("{name: a, type: int32, default: \"1; drop\"}"), "MET-0005"},
 		{"decimal scale 13", entityWith("{name: a, type: decimal, precision: 20, scale: 13}"), "MET-0006"},
 		{"string without length", entityWith("{name: a, type: string}"), "MET-0006"},
+		{"money currency column clash", entityWith("{name: credit_limit, type: money}\n  - {name: credit_limit_currency, type: string, length: 3}"), "MET-0009"},
 		{"reserved field name", entityWith("{name: tenant_id, type: uuid}"), "MET-0009"},
 		{"enum code in extension range", "name: Foo\ndomain: test\ntable_group: main\nenums:\n  - {name: E, values: [{name: a, code: 1000}]}\nfields:\n  - {name: a, type: enum, enum: E}\n", "MET-0007"},
 		{"entity name too long", strings.Replace(entityWith("{name: a, type: bool}"), "Foo", "F"+strings.Repeat("a", 48), 1), "MET-0003"},

@@ -202,6 +202,11 @@ func Validate(e *Entity) []Violation {
 			add(p+".default", "MET-0005", "%s", msg)
 		}
 	}
+	for i, f := range e.Fields {
+		if _, clash := fields[f.Name+"_currency"]; f.Type == "money" && clash {
+			add(fmt.Sprintf("fields[%d].name", i), "MET-0009", "money field %q generates column %q that another field declares", f.Name, f.Name+"_currency")
+		}
+	}
 	for i, t := range e.TitleFields {
 		if f, ok := fields[t]; !ok || f.Type != "string" {
 			add(fmt.Sprintf("title_fields[%d]", i), "MET-0008", "title field %q must be a declared string field", t)

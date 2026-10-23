@@ -1,6 +1,8 @@
 package domain_test
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -128,5 +130,29 @@ func TestDiff_AdditiveV2ClientContract(t *testing.T) {
 	}
 	if !strings.Contains(out2.Client, `status?: "active" | "blocked" | "preferred"`) {
 		t.Error("v2 client must widen the enum union")
+	}
+}
+
+func TestCompareVersions_PublishedBaselineGate(t *testing.T) {
+	published, _ := filepath.Glob("../../testdata/published/*.yaml")
+	if len(published) != 10 {
+		t.Fatalf("expected 10 published baselines, found %d", len(published))
+	}
+	load := func(path string) *domain.Entity {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		e, err := domain.Parse(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return e
+	}
+	for _, path := range published {
+		current := load(filepath.Join("../../testdata/entities/_reference", filepath.Base(path)))
+		if err := domain.CompareVersions(load(path), current); err != nil {
+			t.Errorf("%s: %v", filepath.Base(path), err)
+		}
 	}
 }

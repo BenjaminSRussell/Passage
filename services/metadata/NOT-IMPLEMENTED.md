@@ -17,3 +17,4 @@
 | Tenant, LegalEntity, User replacing hand-written code | not applicable yet | PSG-2 is not in the repository; definitions exist as reference fixtures |
 | CI chart lint, image and golangci lines for metadata | handoff | `.github/workflows/` and `deploy/` are wave 1 owned |
 | Fixtures at `metadata/entities/_reference` | relocated | outside wave 3 ownership; they live in `testdata/entities/_reference` |
+| AC3: breaking-change gate in CI | built | `TestCompareVersions_PublishedBaselineGate` compares `testdata/published` (frozen) with `testdata/entities/_reference`; a breaking edit fails with MET-0201 unless `breaking: true`; publishing a new version means updating the baseline in the same PR |

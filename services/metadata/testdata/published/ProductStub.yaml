@@ -1,0 +1,9 @@
+name: ProductStub
+domain: product
+table_group: main
+title_fields: [sku]
+fields:
+  - {name: sku, type: string, length: 40, required: true, unique: true}
+  - {name: description, type: text}
+  - {name: uom, type: string, length: 8, required: true}
+  - {name: active, type: bool, required: true, default: "true"}
