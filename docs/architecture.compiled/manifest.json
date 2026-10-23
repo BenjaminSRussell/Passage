@@ -1,0 +1,248 @@
+{
+  "version": 2,
+  "source": {
+    "path": "/Users/benjaminrussell/Desktop/Passage/docs/architecture.md",
+    "sha256": "7db7f82e96857e353ac37e56b7ac6e071d41f4aeae66d4061201f93d8fc1e12f",
+    "lines": 7844
+  },
+  "plugin_version": "2.17.7",
+  "created": "2026-10-23",
+  "spine": "spine.md",
+  "contracts": "contracts.json",
+  "components": [
+    {
+      "name": "Platform Kernel",
+      "slug": "platform-kernel",
+      "file": "components/platform-kernel.md",
+      "keywords": ["platform/go", "httpx", "dbx", "outbox.Enqueue", "ledgerclient", "idempotency middleware", "IdempotencyDDL", "testkit", "SET LOCAL", "problem details", "healthz", "readyz", "NFR-SEC2"],
+      "aliases": ["kernel", "platform/go", "shared Go library"],
+      "jira": { "epics": [], "labels": [] },
+      "depends_on": []
+    },
+    {
+      "name": "Edge and Identity",
+      "slug": "edge-identity",
+      "file": "components/edge-identity.md",
+      "keywords": ["Envoy Gateway", "Keycloak", "OPA", "Rego", "rate limit", "ext_authz", "realm", "SCIM", "step-up", "requires_acr", "Valkey", "_internal realm", "NFR-SEC1"],
+      "aliases": ["gateway", "IdP", "authn", "authz", "SSO"],
+      "jira": { "epics": [], "labels": [] },
+      "depends_on": ["platform-kernel", "platform"]
+    },
+    {
+      "name": "Platform",
+      "slug": "platform",
+      "file": "components/platform.md",
+      "keywords": ["tenant", "user-roles", "duties", "privileges", "SoD", "entity-definitions", "number-sequences", "audit-entries", "audit chain", "jobs", "workflow-instances", "tasks", "attachments", "privacy-requests", "FR-0.2", "FR-0.3", "FR-0.5", "FR-1.1", "FR-9.3"],
+      "aliases": ["platform-ts", "metadata registry", "admin"],
+      "jira": { "epics": [], "labels": [] },
+      "depends_on": ["platform-kernel", "edge-identity", "eventing-backbone"]
+    },
+    {
+      "name": "Party",
+      "slug": "party",
+      "file": "components/party.md",
+      "keywords": ["party", "customer", "vendor", "duplicate-candidates", "parties:match", "party.merged", "credit-limit", "bank-accounts", "tax-registrations", "reveal", "FR-1.2", "wave 7"],
+      "aliases": ["party-ts", "master data parties", "business partner"],
+      "jira": { "epics": [], "labels": [] },
+      "depends_on": ["platform-kernel", "platform", "ledger"]
+    },
+    {
+      "name": "Product",
+      "slug": "product",
+      "file": "components/product.md",
+      "keywords": ["BOM", "bom-versions", "explosion", "where-used", "change-orders", "ECO", "routing", "released-products", "GTIN", "configurations:solve", "variants", "FR-1.3", "FR-1.4"],
+      "aliases": ["product-ts", "product-py", "item master", "engineering"],
+      "jira": { "epics": [], "labels": [] },
+      "depends_on": ["platform-kernel", "platform"]
+    },
+    {
+      "name": "Ledger",
+      "slug": "ledger",
+      "file": "components/ledger.md",
+      "keywords": ["ledger.Post", "journal-entries:post", "journal_line", "gl_seq", "period-controls", "balances", "trial-balance", "tax:determine", "statements:run", "consolidations", "exchange-rates", "FR-2.1", "FR-2.2", "FR-2.3", "FR-2.4", "FR-2.5", "FR-7.3", "FR-7.5"],
+      "aliases": ["general ledger", "GL", "universal journal", "finance"],
+      "jira": { "epics": [], "labels": [] },
+      "depends_on": ["platform-kernel", "platform", "eventing-backbone"]
+    },
+    {
+      "name": "Inventory",
+      "slug": "inventory",
+      "file": "components/inventory.md",
+      "keywords": ["inventory_transaction", "on_hand", "valuation_reservation", "cost-layers", "costing-versions", "cost-closes", "reservations", "quality-orders", "nonconformances", "inventory_insufficient", "FR-3.1", "FR-3.5", "FR-6.3", "FR-7.4"],
+      "aliases": ["stock", "costing", "quality management"],
+      "jira": { "epics": [], "labels": [] },
+      "depends_on": ["platform-kernel", "ledger", "product", "eventing-backbone"]
+    },
+    {
+      "name": "Procurement",
+      "slug": "procurement",
+      "file": "components/procurement.md",
+      "keywords": ["purchase-orders", "product-receipts", "vendor-invoices", "match-results", "GR/IR", "payment-proposals", "payment-files", "settlements", "ap_open_item", "supplier portal", "FR-3.2", "FR-3.3", "FR-3.4"],
+      "aliases": ["procurement-ts", "purchasing", "AP", "accounts payable"],
+      "jira": { "epics": [], "labels": [] },
+      "depends_on": ["platform-kernel", "ledger", "inventory", "party", "product", "treasury", "eventing-backbone"]
+    },
+    {
+      "name": "Manufacturing",
+      "slug": "manufacturing",
+      "file": "components/manufacturing.md",
+      "keywords": ["production-orders", "report-as-finished", "planning-runs", "MRP", "pegging", "schedules", "kanban", "machine-events", "OEE", "production settlement", "FR-4.1", "FR-4.2", "FR-4.3", "FR-4.4", "FR-4.5"],
+      "aliases": ["manufacturing-ts", "manufacturing-py", "production", "shop floor planning"],
+      "jira": { "epics": [], "labels": [] },
+      "depends_on": ["platform-kernel", "ledger", "inventory", "product", "eventing-backbone"]
+    },
+    {
+      "name": "Sales",
+      "slug": "sales",
+      "file": "components/sales.md",
+      "keywords": ["sales-orders", "prices:resolve", "atp:check", "shipments", "customer-invoices", "cash-applications", "dunning-runs", "return-orders", "rebate-agreements", "revenue recognition", "FR-5.1", "FR-5.2", "FR-5.3", "FR-5.4", "FR-5.5"],
+      "aliases": ["sales-ts", "order to cash", "AR", "accounts receivable", "customer portal API"],
+      "jira": { "epics": [], "labels": [] },
+      "depends_on": ["platform-kernel", "ledger", "inventory", "party", "product", "warehouse", "eventing-backbone"]
+    },
+    {
+      "name": "Warehouse",
+      "slug": "warehouse",
+      "file": "components/warehouse.md",
+      "keywords": ["license-plates", "waves", "work:next", "loads", "route-plans:solve", "labels:render", "freight-invoices", "replenishment-runs", "mobile/sync", "FR-6.1", "FR-6.2", "FR-6.4"],
+      "aliases": ["warehouse-ts", "warehouse-py", "WMS", "logistics"],
+      "jira": { "epics": [], "labels": [] },
+      "depends_on": ["platform-kernel", "inventory", "sales", "procurement", "eventing-backbone"]
+    },
+    {
+      "name": "Treasury",
+      "slug": "treasury",
+      "file": "components/treasury.md",
+      "keywords": ["bank-statements:import", "auto-reconcile", "cash-positions", "cash-forecasts", "payment-submissions", "fixed-assets", "depreciation-runs", "leases", "checks", "FR-7.1", "FR-7.2"],
+      "aliases": ["bank", "cash management", "fixed assets"],
+      "jira": { "epics": [], "labels": [] },
+      "depends_on": ["platform-kernel", "ledger", "procurement", "eventing-backbone"]
+    },
+    {
+      "name": "Workforce",
+      "slug": "workforce",
+      "file": "components/workforce.md",
+      "keywords": ["payroll-runs", "pay-statements", "absence-requests", "positions", "expense-reports", "card-feeds:import", "worker_secure", "ViewSensitivePayroll", "FR-8.2", "FR-8.3"],
+      "aliases": ["workforce-ts", "HR", "payroll", "HCM"],
+      "jira": { "epics": [], "labels": [] },
+      "depends_on": ["platform-kernel", "ledger", "procurement", "party", "eventing-backbone"]
+    },
+    {
+      "name": "Projects",
+      "slug": "projects",
+      "file": "components/projects.md",
+      "keywords": ["hour-journals", "invoice-proposals", "wip-runs", "evm", "maintenance-work-orders", "service-work-orders", "dispatch:optimize", "installed base", "condition-triggers", "FR-8.1", "FR-8.4", "FR-8.5"],
+      "aliases": ["projects-ts", "projects-py", "project accounting", "field service", "maintenance"],
+      "jira": { "epics": [], "labels": [] },
+      "depends_on": ["platform-kernel", "ledger", "sales", "workforce", "manufacturing", "eventing-backbone"]
+    },
+    {
+      "name": "Integration",
+      "slug": "integration",
+      "file": "components/integration.md",
+      "keywords": ["webhook-subscriptions", "webhook-deliveries", "X-Passage-Signature", "edi-messages", "partner-profiles", "AS2", "e-invoices", "event-egress", "event-replays", "message-monitor", "FR-6.5"],
+      "aliases": ["integration-ts", "EDI", "Peppol", "webhooks", "developer portal"],
+      "jira": { "epics": [], "labels": [] },
+      "depends_on": ["platform-kernel", "platform", "eventing-backbone", "migration-framework"]
+    },
+    {
+      "name": "Migration Framework",
+      "slug": "migration-framework",
+      "file": "components/migration-framework.md",
+      "keywords": ["migration-runs", "xref", "control_total", "MD-PARTY", "TX-GL-OPEN", "AX 2012", "SAP ECC", "parallel-run-diffs", "mapping DSL", "FR-1.5", "FR-9.4", "NFR-D6"],
+      "aliases": ["data migration", "AX migration", "SAP migration", "cutover"],
+      "jira": { "epics": [], "labels": [] },
+      "depends_on": ["integration", "platform", "ledger"]
+    },
+    {
+      "name": "Analytics",
+      "slug": "analytics",
+      "file": "components/analytics.md",
+      "keywords": ["analytics/query", "Cube", "Iceberg", "lakehouse", "dashboards", "document-templates", "Trino", "ClickHouse", "dbt", "REC-19", "FR-9.1", "NFR-P10"],
+      "aliases": ["analytics-ts", "semantic layer", "BI", "data platform"],
+      "jira": { "epics": [], "labels": [] },
+      "depends_on": ["platform-kernel", "eventing-backbone", "platform"]
+    },
+    {
+      "name": "Agents",
+      "slug": "agents",
+      "file": "components/agents.md",
+      "keywords": ["MCP gateway", "copilot", "agents/mcp", "kill-switch", "agent runs", "approvals", "ap_coding", "cash_application", "retrieval_chunk", "pgvector", "eval harness", "model-serving-py", "FR-9.2", "NFR-SEC6"],
+      "aliases": ["agents-ts", "agents-py", "AI copilot", "governed agents"],
+      "jira": { "epics": [], "labels": [] },
+      "depends_on": ["platform-kernel", "platform", "edge-identity", "analytics", "eventing-backbone"]
+    },
+    {
+      "name": "web-bff",
+      "slug": "web-bff",
+      "file": "components/web-bff.md",
+      "keywords": ["/bff/login", "/bff/callback", "/bff/v1/me", "/bff/v1/permissions", "/bff/v1/stream", "/bff/v1/search", "token handler", "__Host-passage_sid", "X-Passage-CSRF", "GraphQL", "SSE"],
+      "aliases": ["bff-ts", "web-bff-ts", "browser session BFF"],
+      "jira": { "epics": [], "labels": [] },
+      "depends_on": ["platform", "edge-identity"]
+    },
+    {
+      "name": "device-bff",
+      "slug": "device-bff",
+      "file": "components/device-bff.md",
+      "keywords": ["/bff/v1/sync", "/bff/v1/packets", "device enroll", "worker-session", "badge PIN", "offline replay", "passage-kiosk", "device-bff-ts", "commandId"],
+      "aliases": ["device-bff-ts", "kiosk BFF", "scanner BFF"],
+      "jira": { "epics": [], "labels": [] },
+      "depends_on": ["platform", "edge-identity", "manufacturing", "warehouse", "projects"]
+    },
+    {
+      "name": "portal-bff",
+      "slug": "portal-bff",
+      "file": "components/portal-bff.md",
+      "keywords": ["persisted queries", "portal-bff-ts", "supplier portal session", "customer portal session", "passage-portal-supplier", "passage-portal-customer", "graphql read model"],
+      "aliases": ["portal-bff-ts", "external portal BFF"],
+      "jira": { "epics": [], "labels": [] },
+      "depends_on": ["procurement", "sales", "party", "projects", "edge-identity"]
+    },
+    {
+      "name": "Web Shell",
+      "slug": "web-shell",
+      "file": "components/web-shell.md",
+      "keywords": ["apps/web", "module federation", "module.ts", "PassageModule", "entityRoutes", "@passage/forms", "LookupField", "saved views", "approvals inbox", "LegalEntitySwitcher", "env.json", "WCAG 2.1 AA"],
+      "aliases": ["shell", "frontend", "React shell", "module remotes", "MFE"],
+      "jira": { "epics": [], "labels": [] },
+      "depends_on": ["web-bff", "platform", "edge-identity"]
+    },
+    {
+      "name": "PWA Apps",
+      "slug": "pwa-apps",
+      "file": "components/pwa-apps.md",
+      "keywords": ["shopfloor kiosk", "warehouse-mobile", "technician app", "supplier-portal", "customer-portal", "@passage/offline", "QueuedCommand", "FlowRunner", "GS1 scanning", "offline queue", "touch targets"],
+      "aliases": ["mobile apps", "kiosk", "scanner app", "portals UI"],
+      "jira": { "epics": [], "labels": [] },
+      "depends_on": ["device-bff", "portal-bff", "manufacturing", "warehouse", "projects"]
+    },
+    {
+      "name": "Eventing Backbone",
+      "slug": "eventing-backbone",
+      "file": "components/eventing-backbone.md",
+      "keywords": ["outbox", "consumer_inbox", "Debezium", "Kafka topics", "CloudEvents", "DLQ", "schema registry", "Apicurio", "saga", "signalWithStart", "event replay", "FR-0.4", "NFR-D5"],
+      "aliases": ["events", "async backbone", "messaging", "Kafka"],
+      "jira": { "epics": [], "labels": [] },
+      "depends_on": ["platform-kernel"]
+    },
+    {
+      "name": "Testing and Reconciliation",
+      "slug": "testing-reconciliation",
+      "file": "components/testing-reconciliation.md",
+      "keywords": ["reconcile-daily", "REC-01", "reconciliation endpoints", "property tests", "golden files", "Pact", "Playwright", "axe", "k6", "go-live simulation", "merge gates", "REVIEW.yaml", "NFR-D1", "NFR-ACC1"],
+      "aliases": ["QA", "test strategy", "CI gates", "E2E", "reconciliation suite"],
+      "jira": { "epics": [], "labels": [] },
+      "depends_on": ["platform-kernel", "ledger", "deployment-cicd"]
+    },
+    {
+      "name": "Deployment and CI/CD",
+      "slug": "deployment-cicd",
+      "file": "components/deployment-cicd.md",
+      "keywords": ["Helm", "Argo CD", "Argo Rollouts", "k3d", "cosign", "SBOM", "ownership.json", "gate workflow", "CloudNativePG", "OpenTofu", "Vault External Secrets", "FR-0.1", "FR-9.5", "NFR-A5", "NFR-PT2"],
+      "aliases": ["infrastructure", "DevOps", "GitOps", "CI", "monorepo"],
+      "jira": { "epics": [], "labels": [] },
+      "depends_on": ["platform-kernel"]
+    }
+  ]
+}

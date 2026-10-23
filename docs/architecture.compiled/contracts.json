@@ -1,0 +1,959 @@
+{
+  "version": 1,
+  "source": {
+    "sha256": "7db7f82e96857e353ac37e56b7ac6e071d41f4aeae66d4061201f93d8fc1e12f"
+  },
+  "contracts": [
+    {
+      "id": "event-envelope",
+      "kind": "event-envelope",
+      "severity": "blocker",
+      "mustContain": [
+        "specversion",
+        "id",
+        "source",
+        "type",
+        "subject",
+        "time",
+        "datacontenttype",
+        "dataschema",
+        "tenantid",
+        "correlationid",
+        "causationid",
+        "traceparent",
+        "actor",
+        "sequence",
+        "data"
+      ],
+      "mustNotContain": [],
+      "mustMatch": [],
+      "source": "components/eventing-backbone.md#Interfaces"
+    },
+    {
+      "id": "event-type-pattern",
+      "kind": "event-type",
+      "severity": "blocker",
+      "mustContain": [],
+      "mustNotContain": [],
+      "mustMatch": [
+        "dev\\.passage\\.[a-z]+\\.[a-z0-9]+\\.[a-z0-9]+\\.v[0-9]+"
+      ],
+      "source": "components/eventing-backbone.md#Interfaces"
+    },
+    {
+      "id": "topic-naming",
+      "kind": "key-shape",
+      "severity": "major",
+      "mustContain": [],
+      "mustNotContain": [],
+      "mustMatch": [
+        "passage\\.[a-z]+\\.[a-z]+"
+      ],
+      "source": "components/eventing-backbone.md#Interfaces"
+    },
+    {
+      "id": "endpoint-prefix-v1",
+      "kind": "endpoint-prefix",
+      "severity": "blocker",
+      "mustContain": [],
+      "mustNotContain": [],
+      "mustMatch": [
+        "['\\\"`]/v1/"
+      ],
+      "source": "spine.md#Naming Conventions"
+    },
+    {
+      "id": "problem-details-fields",
+      "kind": "error-envelope",
+      "severity": "blocker",
+      "mustContain": [
+        "type",
+        "title",
+        "status",
+        "detail",
+        "instance",
+        "code",
+        "serviceCode",
+        "traceId",
+        "errors",
+        "application/problem+json"
+      ],
+      "mustNotContain": [],
+      "mustMatch": [],
+      "source": "spine.md#Cross-Cutting Non-Negotiables"
+    },
+    {
+      "id": "error-codes",
+      "kind": "error-envelope",
+      "severity": "major",
+      "mustContain": [
+        "unbalanced_entry",
+        "period_closed",
+        "dimension_invalid",
+        "validation_failed",
+        "unique_violation",
+        "state_transition_invalid",
+        "conflict_version",
+        "idempotency_key_reuse",
+        "idempotency_in_progress",
+        "forbidden_duty",
+        "forbidden_tenant",
+        "sod_conflict",
+        "approval_required",
+        "inventory_insufficient",
+        "rate_limited",
+        "upstream_unavailable"
+      ],
+      "mustNotContain": [],
+      "mustMatch": [],
+      "source": "components/ledger.md#Interfaces"
+    },
+    {
+      "id": "auth-jwt",
+      "kind": "auth",
+      "severity": "blocker",
+      "mustContain": [
+        "passage-api",
+        "RS256"
+      ],
+      "mustNotContain": [],
+      "mustMatch": [],
+      "source": "components/platform-kernel.md#Interfaces"
+    },
+    {
+      "id": "auth-duty-annotation",
+      "kind": "auth",
+      "severity": "blocker",
+      "mustContain": [
+        "x-passage-duty"
+      ],
+      "mustNotContain": [],
+      "mustMatch": [],
+      "source": "spine.md#Naming Conventions"
+    },
+    {
+      "id": "auth-opa-decision",
+      "kind": "auth",
+      "severity": "major",
+      "mustContain": [],
+      "mustNotContain": [],
+      "mustMatch": [
+        "passage[./]authz"
+      ],
+      "source": "components/platform-kernel.md#Interfaces"
+    },
+    {
+      "id": "auth-step-up",
+      "kind": "auth",
+      "severity": "major",
+      "mustContain": [
+        "requires_acr"
+      ],
+      "mustNotContain": [],
+      "mustMatch": [],
+      "source": "components/edge-identity.md#Interfaces"
+    },
+    {
+      "id": "auth-headers",
+      "kind": "auth",
+      "severity": "major",
+      "mustContain": [
+        "X-Passage-Subject-Token",
+        "Passage-Legal-Entity",
+        "X-Passage-Tenant"
+      ],
+      "mustNotContain": [],
+      "mustMatch": [],
+      "source": "components/ledger.md#Interfaces"
+    },
+    {
+      "id": "tenant-guc",
+      "kind": "other",
+      "severity": "blocker",
+      "mustContain": [
+        "passage.tenant_id",
+        "passage.legal_entity_ids",
+        "passage.actor"
+      ],
+      "mustNotContain": [
+        "app.tenant_id"
+      ],
+      "mustMatch": [],
+      "source": "components/platform-kernel.md#Gotchas & Constraints"
+    },
+    {
+      "id": "posting-idempotency-key",
+      "kind": "key-shape",
+      "severity": "blocker",
+      "mustContain": [],
+      "mustNotContain": [],
+      "mustMatch": [
+        "post:[a-z]+:[a-z]+:"
+      ],
+      "source": "components/ledger.md#Interfaces"
+    },
+    {
+      "id": "valuation-reservation-key",
+      "kind": "key-shape",
+      "severity": "major",
+      "mustContain": [
+        "document_type",
+        "document_id",
+        "purpose"
+      ],
+      "mustNotContain": [],
+      "mustMatch": [],
+      "source": "components/inventory.md#Data Ownership"
+    },
+    {
+      "id": "posting-request-registry",
+      "kind": "key-shape",
+      "severity": "major",
+      "mustContain": [
+        "posting_request",
+        "idempotency_key",
+        "journal_entry_id",
+        "document_number"
+      ],
+      "mustNotContain": [],
+      "mustMatch": [],
+      "source": "components/ledger.md#Data Ownership"
+    },
+    {
+      "id": "rls-policies",
+      "kind": "other",
+      "severity": "blocker",
+      "mustContain": [
+        "tenant_access",
+        "legal_entity_scope"
+      ],
+      "mustNotContain": [],
+      "mustMatch": [
+        "FORCE\\s+ROW\\s+LEVEL\\s+SECURITY"
+      ],
+      "source": "spine.md#Cross-Cutting Non-Negotiables"
+    },
+    {
+      "id": "retention-audit-classes",
+      "kind": "retention-ttl",
+      "severity": "major",
+      "mustContain": [
+        "retention_class",
+        "fiscal_7y",
+        "standard_3y",
+        "agent_7y"
+      ],
+      "mustNotContain": [],
+      "mustMatch": [],
+      "source": "components/platform.md#Data Ownership"
+    },
+    {
+      "id": "retention-idempotency",
+      "kind": "retention-ttl",
+      "severity": "major",
+      "mustContain": [
+        "expires_at",
+        "locked_until"
+      ],
+      "mustNotContain": [],
+      "mustMatch": [],
+      "source": "components/platform-kernel.md#Interfaces"
+    },
+    {
+      "id": "retention-valuation-reservation",
+      "kind": "retention-ttl",
+      "severity": "major",
+      "mustContain": [
+        "expires_at",
+        "valuation_reservation"
+      ],
+      "mustNotContain": [],
+      "mustMatch": [],
+      "source": "components/inventory.md#Data Ownership"
+    },
+    {
+      "id": "audited-reveal",
+      "kind": "endpoint-annotation",
+      "severity": "blocker",
+      "mustContain": [
+        "audit_event",
+        "pii_payload"
+      ],
+      "mustNotContain": [],
+      "mustMatch": [],
+      "source": "components/platform-kernel.md#Data Ownership"
+    },
+    {
+      "id": "audited-export",
+      "kind": "endpoint-annotation",
+      "severity": "major",
+      "mustContain": [
+        "audit_event",
+        "passage_export_rows_total"
+      ],
+      "mustNotContain": [],
+      "mustMatch": [],
+      "source": "components/platform.md#Gotchas & Constraints"
+    },
+    {
+      "id": "approval-required-workflow",
+      "kind": "endpoint-annotation",
+      "severity": "major",
+      "mustContain": [
+        "approval_required",
+        "workflow-instances"
+      ],
+      "mustNotContain": [],
+      "mustMatch": [],
+      "source": "components/party.md#Interfaces"
+    },
+    {
+      "id": "idempotency-key-custom-methods",
+      "kind": "endpoint-annotation",
+      "severity": "blocker",
+      "mustContain": [
+        "Idempotency-Key"
+      ],
+      "mustNotContain": [],
+      "mustMatch": [],
+      "source": "components/platform-kernel.md#Interfaces"
+    },
+    {
+      "id": "if-match-concurrency",
+      "kind": "endpoint-annotation",
+      "severity": "major",
+      "mustContain": [
+        "If-Match",
+        "ETag",
+        "conflict_version"
+      ],
+      "mustNotContain": [],
+      "mustMatch": [],
+      "source": "components/platform-kernel.md#Interfaces"
+    },
+    {
+      "id": "payload-procurement.productreceipt.posted",
+      "kind": "event-payload",
+      "severity": "blocker",
+      "mustContain": [
+        "productReceiptId",
+        "documentNumber",
+        "legalEntityId",
+        "vendorId",
+        "purchaseOrderId",
+        "postingDate",
+        "lines"
+      ],
+      "mustNotContain": [
+        "productReceiptId: null",
+        "postingDate: null"
+      ],
+      "mustMatch": [],
+      "source": "components/procurement.md#Events Produced"
+    },
+    {
+      "id": "payload-sales.shipment.posted",
+      "kind": "event-payload",
+      "severity": "blocker",
+      "mustContain": [
+        "shipmentId",
+        "documentNumber",
+        "legalEntityId",
+        "customerId",
+        "salesOrderIds",
+        "shipmentDate",
+        "shippedQty",
+        "stocked"
+      ],
+      "mustNotContain": [
+        "shipmentId: null",
+        "shipmentDate: null"
+      ],
+      "mustMatch": [],
+      "source": "components/sales.md#Events Produced"
+    },
+    {
+      "id": "payload-inventory.transaction.posted",
+      "kind": "event-payload",
+      "severity": "blocker",
+      "mustContain": [
+        "transactionId",
+        "productId",
+        "direction",
+        "referenceType",
+        "referenceId",
+        "quantity",
+        "journalEntryId",
+        "glSeq",
+        "reservationId"
+      ],
+      "mustNotContain": [
+        "journalEntryId: null",
+        "glSeq: null",
+        "reservationId: null"
+      ],
+      "mustMatch": [],
+      "source": "components/inventory.md#Events Produced"
+    },
+    {
+      "id": "payload-inventory.transaction.rejected",
+      "kind": "event-payload",
+      "severity": "major",
+      "mustContain": [
+        "referenceType",
+        "referenceId",
+        "causedByEventId",
+        "reasonCode",
+        "retryable",
+        "reservationId"
+      ],
+      "mustNotContain": [
+        "reasonCode: null",
+        "reservationId: null"
+      ],
+      "mustMatch": [],
+      "source": "components/inventory.md#Events Produced"
+    },
+    {
+      "id": "payload-ledger.journalentry.posted",
+      "kind": "event-payload",
+      "severity": "blocker",
+      "mustContain": [
+        "journalEntryId",
+        "documentNumber",
+        "ledgers",
+        "legalEntityId",
+        "entryType",
+        "postingDate",
+        "fiscalYear",
+        "periodNo",
+        "sourceDocument",
+        "idempotencyKey",
+        "lineCount"
+      ],
+      "mustNotContain": [
+        "journalEntryId: null",
+        "postingDate: null"
+      ],
+      "mustMatch": [],
+      "source": "components/ledger.md#Events Produced"
+    },
+    {
+      "id": "payload-procurement.vendorinvoice.posted",
+      "kind": "event-payload",
+      "severity": "blocker",
+      "mustContain": [
+        "vendorInvoiceId",
+        "documentNumber",
+        "vendorInvoiceNumber",
+        "vendorId",
+        "total",
+        "matchResultId",
+        "journalEntryId",
+        "apOpenItemId"
+      ],
+      "mustNotContain": [
+        "journalEntryId: null",
+        "apOpenItemId: null"
+      ],
+      "mustMatch": [],
+      "source": "components/procurement.md#Events Produced"
+    },
+    {
+      "id": "payload-sales.invoice.posted",
+      "kind": "event-payload",
+      "severity": "blocker",
+      "mustContain": [
+        "invoiceId",
+        "documentNumber",
+        "customerId",
+        "total",
+        "creditNote",
+        "journalEntryId",
+        "arOpenItemId"
+      ],
+      "mustNotContain": [
+        "journalEntryId: null",
+        "arOpenItemId: null"
+      ],
+      "mustMatch": [],
+      "source": "components/sales.md#Events Produced"
+    },
+    {
+      "id": "payload-sales.salesorder.confirmed",
+      "kind": "event-payload",
+      "severity": "major",
+      "mustContain": [
+        "salesOrderId",
+        "documentNumber",
+        "legalEntityId",
+        "customerId",
+        "currency",
+        "total",
+        "lines"
+      ],
+      "mustNotContain": [
+        "salesOrderId: null",
+        "customerId: null"
+      ],
+      "mustMatch": [],
+      "source": "components/sales.md#Events Produced"
+    },
+    {
+      "id": "payload-procurement.purchaseorder.confirmed",
+      "kind": "event-payload",
+      "severity": "major",
+      "mustContain": [
+        "purchaseOrderId",
+        "documentNumber",
+        "version",
+        "legalEntityId",
+        "vendorId",
+        "total",
+        "lines",
+        "confirmedAt"
+      ],
+      "mustNotContain": [
+        "purchaseOrderId: null",
+        "vendorId: null"
+      ],
+      "mustMatch": [],
+      "source": "components/procurement.md#Events Produced"
+    },
+    {
+      "id": "payload-manufacturing.productionorder.reportedasfinished",
+      "kind": "event-payload",
+      "severity": "blocker",
+      "mustContain": [
+        "productionOrderId",
+        "rafId",
+        "legalEntityId",
+        "productId",
+        "goodQty",
+        "scrapQty",
+        "receiptDims",
+        "isFinal",
+        "backflushedComponents",
+        "wipCostAtReport"
+      ],
+      "mustNotContain": [
+        "rafId: null",
+        "goodQty: null"
+      ],
+      "mustMatch": [],
+      "source": "components/manufacturing.md#Events Produced"
+    },
+    {
+      "id": "payload-sales.payment.applied",
+      "kind": "event-payload",
+      "severity": "major",
+      "mustContain": [
+        "cashApplicationId",
+        "receiptNumber",
+        "customerId",
+        "amount",
+        "unappliedAmount",
+        "journalEntryId",
+        "applications"
+      ],
+      "mustNotContain": [
+        "journalEntryId: null",
+        "cashApplicationId: null"
+      ],
+      "mustMatch": [],
+      "source": "components/sales.md#Events Produced"
+    },
+    {
+      "id": "payload-party.party.merged",
+      "kind": "event-payload",
+      "severity": "blocker",
+      "mustContain": [
+        "mergeId",
+        "survivorPartyId",
+        "mergedPartyIds",
+        "roleIdMap",
+        "mergedAt"
+      ],
+      "mustNotContain": [
+        "survivorPartyId: null",
+        "roleIdMap: null"
+      ],
+      "mustMatch": [],
+      "source": "components/party.md#Events Produced"
+    },
+    {
+      "id": "payload-ledger.periodcontrol.changed",
+      "kind": "event-payload",
+      "severity": "major",
+      "mustContain": [
+        "ledgerId",
+        "module",
+        "fiscalYear",
+        "periodNo",
+        "previousStatus",
+        "newStatus",
+        "effectiveFrom",
+        "changedBy"
+      ],
+      "mustNotContain": [
+        "newStatus: null",
+        "periodNo: null"
+      ],
+      "mustMatch": [],
+      "source": "components/ledger.md#Events Produced"
+    },
+    {
+      "id": "payload-platform.workflowtask.completed",
+      "kind": "event-payload",
+      "severity": "major",
+      "mustContain": [
+        "taskId",
+        "workflowId",
+        "workflowType",
+        "taskType",
+        "outcome",
+        "decidedBy",
+        "decidedAt",
+        "subject"
+      ],
+      "mustNotContain": [
+        "taskId: null",
+        "outcome: null"
+      ],
+      "mustMatch": [],
+      "source": "components/platform.md#Events Produced"
+    },
+    {
+      "id": "payload-workforce.payrollrun.posted",
+      "kind": "event-payload",
+      "severity": "major",
+      "mustContain": [
+        "payrollRunId",
+        "legalEntityId",
+        "employeeCount",
+        "totals",
+        "journalEntryId",
+        "paymentBatchId"
+      ],
+      "mustNotContain": [
+        "journalEntryId: null",
+        "totals: null"
+      ],
+      "mustMatch": [],
+      "source": "components/workforce.md#Events Produced"
+    },
+    {
+      "id": "status-gl-posting",
+      "kind": "status-map",
+      "severity": "major",
+      "mustContain": [
+        "pending",
+        "posted",
+        "rejected",
+        "not_required",
+        "gl_posting_status"
+      ],
+      "mustNotContain": [],
+      "mustMatch": [],
+      "source": "components/inventory.md#Data Ownership"
+    },
+    {
+      "id": "status-valuation-reservation",
+      "kind": "status-map",
+      "severity": "major",
+      "mustContain": [
+        "reserved",
+        "finalized",
+        "rejected",
+        "cancelled",
+        "expired"
+      ],
+      "mustNotContain": [],
+      "mustMatch": [],
+      "source": "components/inventory.md#Data Ownership"
+    },
+    {
+      "id": "status-period-control",
+      "kind": "status-map",
+      "severity": "major",
+      "mustContain": [
+        "open",
+        "on_hold",
+        "closed",
+        "permanently_closed"
+      ],
+      "mustNotContain": [],
+      "mustMatch": [],
+      "source": "components/ledger.md#Data Ownership"
+    },
+    {
+      "id": "status-production-order",
+      "kind": "status-map",
+      "severity": "major",
+      "mustContain": [
+        "created",
+        "estimated",
+        "scheduled",
+        "released",
+        "started",
+        "reported_finished",
+        "ended",
+        "cancelled"
+      ],
+      "mustNotContain": [],
+      "mustMatch": [],
+      "source": "components/manufacturing.md#Data Ownership"
+    },
+    {
+      "id": "status-job",
+      "kind": "status-map",
+      "severity": "major",
+      "mustContain": [
+        "queued",
+        "running",
+        "succeeded",
+        "failed",
+        "cancelled"
+      ],
+      "mustNotContain": [],
+      "mustMatch": [],
+      "source": "components/platform.md#Data Ownership"
+    },
+    {
+      "id": "status-agent-run",
+      "kind": "status-map",
+      "severity": "major",
+      "mustContain": [
+        "PLANNING",
+        "ACTING",
+        "AWAITING_APPROVAL",
+        "COMMITTED",
+        "REJECTED",
+        "FAILED",
+        "KILLED"
+      ],
+      "mustNotContain": [],
+      "mustMatch": [],
+      "source": "components/agents.md#Gotchas & Constraints"
+    },
+    {
+      "id": "status-sales-order",
+      "kind": "status-map",
+      "severity": "minor",
+      "mustContain": [
+        "draft",
+        "quoted",
+        "open",
+        "confirmed",
+        "partially_shipped",
+        "shipped",
+        "invoiced",
+        "closed",
+        "cancelled"
+      ],
+      "mustNotContain": [],
+      "mustMatch": [],
+      "source": "components/sales.md#Data Ownership"
+    },
+    {
+      "id": "status-purchase-order",
+      "kind": "status-map",
+      "severity": "minor",
+      "mustContain": [
+        "draft",
+        "in_review",
+        "approved",
+        "confirmed",
+        "received",
+        "invoiced",
+        "closed",
+        "cancelled"
+      ],
+      "mustNotContain": [],
+      "mustMatch": [],
+      "source": "components/procurement.md#Data Ownership"
+    },
+    {
+      "id": "outbox-inbox-tables",
+      "kind": "other",
+      "severity": "blocker",
+      "mustContain": [
+        "outbox",
+        "partition_key",
+        "aggregate_type",
+        "payload",
+        "headers",
+        "consumer_inbox",
+        "event_id"
+      ],
+      "mustNotContain": [],
+      "mustMatch": [],
+      "source": "components/eventing-backbone.md#Data Ownership"
+    },
+    {
+      "id": "dlq-record-headers",
+      "kind": "other",
+      "severity": "major",
+      "mustContain": [
+        "dlq-error-class",
+        "dlq-attempts",
+        "dlq-first-failed-at",
+        "dlq-consumer",
+        "dlq-origin-topic",
+        "dlq-origin-partition",
+        "dlq-origin-offset"
+      ],
+      "mustNotContain": [],
+      "mustMatch": [],
+      "source": "components/eventing-backbone.md#Interfaces"
+    },
+    {
+      "id": "webhook-signature",
+      "kind": "other",
+      "severity": "major",
+      "mustContain": [
+        "X-Passage-Signature",
+        "HMAC"
+      ],
+      "mustNotContain": [],
+      "mustMatch": [],
+      "source": "components/integration.md#Interfaces"
+    },
+    {
+      "id": "ledger-post-request",
+      "kind": "other",
+      "severity": "blocker",
+      "mustContain": [
+        "legalEntityId",
+        "postingDate",
+        "documentDate",
+        "source",
+        "documentType",
+        "documentId",
+        "purpose",
+        "rateType",
+        "lines",
+        "journal-entries:post"
+      ],
+      "mustNotContain": [],
+      "mustMatch": [],
+      "source": "components/ledger.md#Interfaces"
+    },
+    {
+      "id": "log-fields",
+      "kind": "other",
+      "severity": "major",
+      "mustContain": [
+        "timestamp",
+        "level",
+        "message",
+        "service",
+        "correlationId"
+      ],
+      "mustNotContain": [
+        "console.log",
+        "fmt.Println"
+      ],
+      "mustMatch": [],
+      "source": "components/platform-kernel.md#Gotchas & Constraints"
+    },
+    {
+      "id": "health-endpoints",
+      "kind": "other",
+      "severity": "major",
+      "mustContain": [
+        "/healthz",
+        "/readyz"
+      ],
+      "mustNotContain": [
+        "/health/liveness",
+        "/health/readiness"
+      ],
+      "mustMatch": [],
+      "source": "components/platform-kernel.md#Interfaces"
+    },
+    {
+      "id": "money-quantity-shape",
+      "kind": "other",
+      "severity": "major",
+      "mustContain": [
+        "amount",
+        "currency",
+        "unit"
+      ],
+      "mustNotContain": [],
+      "mustMatch": [],
+      "source": "components/platform-kernel.md#Gotchas & Constraints"
+    },
+    {
+      "id": "bff-session-cookies",
+      "kind": "auth",
+      "severity": "blocker",
+      "mustContain": [
+        "__Host-passage_sid",
+        "X-Passage-CSRF",
+        "HttpOnly",
+        "SameSite"
+      ],
+      "mustNotContain": [],
+      "mustMatch": [],
+      "source": "components/web-bff.md#Interfaces"
+    },
+    {
+      "id": "async-job-202",
+      "kind": "other",
+      "severity": "major",
+      "mustContain": [
+        "jobId",
+        "statusUrl",
+        "estimatedCompletionSeconds"
+      ],
+      "mustNotContain": [],
+      "mustMatch": [],
+      "source": "components/platform.md#Gotchas & Constraints"
+    },
+    {
+      "id": "mcp-gateway-path",
+      "kind": "other",
+      "severity": "major",
+      "mustContain": [
+        "/v1/agents/mcp"
+      ],
+      "mustNotContain": [],
+      "mustMatch": [],
+      "source": "components/agents.md#Interfaces"
+    },
+    {
+      "id": "llm-request-params",
+      "kind": "other",
+      "severity": "major",
+      "mustContain": [
+        "output_config"
+      ],
+      "mustNotContain": [
+        "temperature",
+        "top_p",
+        "top_k",
+        "budget_tokens"
+      ],
+      "mustMatch": [],
+      "source": "components/agents.md#Gotchas & Constraints"
+    },
+    {
+      "id": "offline-queued-command",
+      "kind": "other",
+      "severity": "major",
+      "mustContain": [
+        "aggregateKey",
+        "actorSub",
+        "occurredAt",
+        "ifMatch",
+        "commandId",
+        "deviceId"
+      ],
+      "mustNotContain": [],
+      "mustMatch": [],
+      "source": "components/pwa-apps.md#Interfaces"
+    }
+  ]
+}
