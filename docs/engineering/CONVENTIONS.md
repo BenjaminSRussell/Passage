@@ -27,7 +27,7 @@ roadmap/ownership.json  wave → directories it owns. A wave edits ONLY its own 
 
 ## Ownership rule (hard)
 
-`roadmap/ownership.json` maps each wave to the directories it owns. An agent working wave N creates and edits files only under those paths. It never edits `platform/`, another wave's service, `apps/web/src/shell`, root config, or another wave's chart. If it needs something from another wave that does not exist yet, it codes against the interface described in that wave's PRD section and ships a small in-package fake behind an interface — never a cross-directory edit.
+`roadmap/ownership.json` maps each wave to the directories it owns. An agent working wave N creates and edits files only under those paths. It never edits `platform/` (owned by the kernel, wave 0 — raise a handoff row instead), another wave's service, `apps/web/src/shell`, root config, or another wave's chart. If it needs something from another wave that does not exist yet, it codes against the interface described in that wave's PRD section and ships a small in-package fake behind an interface — never a cross-directory edit.
 
 ## Go services
 
