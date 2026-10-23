@@ -26,7 +26,7 @@ Store tests run only when `PASSAGE_TEST_DATABASE_URL` is set, against a role wit
 | Operation | Duty |
 |---|---|
 | `POST /v1/org/legal-entities` (optional `Idempotency-Key`) | `org.legal-entity.write` |
-| `GET /v1/org/legal-entities` | `org.read` |
+| `GET /v1/org/legal-entities` (`limit` max 100, `cursor`; returns `{items, nextCursor}`) | `org.read` |
 | `GET /v1/org/uom/convert?from=&to=&qty=` | any authenticated principal |
 | `GET /healthz`, `GET /readyz` (database ping, 503 when down), `GET /metrics` on the admin port | public |
 

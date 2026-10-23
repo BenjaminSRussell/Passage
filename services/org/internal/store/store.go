@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	listLimit           = 100
+	MaxPageSize         = 100
 	CodeLegalEntityCode = "ORG-LE-CODE-DUPLICATE"
 	uniqueViolation     = "23505"
 )
@@ -33,9 +33,14 @@ type LegalEntity struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
+type LegalEntityPage struct {
+	Items    []LegalEntity `json:"items"`
+	NextCode string        `json:"-"`
+}
+
 type Store interface {
 	CreateLegalEntity(ctx context.Context, in LegalEntity, idempotencyKey string) (LegalEntity, error)
-	ListLegalEntities(ctx context.Context) ([]LegalEntity, error)
+	ListLegalEntities(ctx context.Context, afterCode string, limit int) (LegalEntityPage, error)
 	Ping(ctx context.Context) error
 }
 
@@ -75,11 +80,11 @@ func (s *Postgres) CreateLegalEntity(ctx context.Context, in LegalEntity, idempo
 	return e, err
 }
 
-func (s *Postgres) ListLegalEntities(ctx context.Context) ([]LegalEntity, error) {
+func (s *Postgres) ListLegalEntities(ctx context.Context, afterCode string, limit int) (LegalEntityPage, error) {
 	p, _ := tenant.FromContext(ctx)
-	entities := []LegalEntity{}
+	page := LegalEntityPage{Items: []LegalEntity{}}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `select `+legalEntityColumns+` from legal_entity where tenant_id = $1 order by code limit $2`, p.TenantID, listLimit)
+		rows, err := tx.Query(ctx, `select `+legalEntityColumns+` from legal_entity where tenant_id = $1 and code > $2 order by code limit $3`, p.TenantID, afterCode, limit+1)
 		if err != nil {
 			return err
 		}
@@ -89,9 +94,13 @@ func (s *Postgres) ListLegalEntities(ctx context.Context) ([]LegalEntity, error)
 			if err != nil {
 				return err
 			}
-			entities = append(entities, e)
+			page.Items = append(page.Items, e)
 		}
 		return rows.Err()
 	})
-	return entities, err
+	if len(page.Items) > limit {
+		page.Items = page.Items[:limit]
+		page.NextCode = page.Items[limit-1].Code
+	}
+	return page, err
 }

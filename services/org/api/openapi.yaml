@@ -34,14 +34,29 @@ paths:
     get:
       operationId: listLegalEntities
       x-passage-duty: org.read
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100, default: 100 }
+        - name: cursor
+          in: query
+          required: false
+          schema: { type: string }
       responses:
         '200':
-          description: Legal entities of the caller's tenant visible to the caller's legal-entity scope, at most 100.
+          description: One page of legal entities of the caller's tenant visible to the caller's legal-entity scope, ordered by code. Pass nextCursor as cursor for the next page.
           content:
             application/json:
               schema:
-                type: array
-                items: { $ref: '#/components/schemas/LegalEntity' }
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/LegalEntity' }
+                  nextCursor: { type: string }
+        '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }

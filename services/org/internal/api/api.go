@@ -2,11 +2,13 @@ package api
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -57,6 +59,11 @@ type createLegalEntityRequest struct {
 	Currency string `json:"currency"`
 }
 
+type listResponse struct {
+	Items      []store.LegalEntity `json:"items"`
+	NextCursor string              `json:"nextCursor,omitempty"`
+}
+
 type convertResponse struct {
 	From     string          `json:"from"`
 	To       string          `json:"to"`
@@ -95,6 +102,10 @@ func (a *API) createLegalEntity(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
 	}
+	if p, _ := tenant.FromContext(r.Context()); p.LegalEntityID != "" {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "a legal-entity-scoped caller cannot create legal entities"))
+		return
+	}
 	var req createLegalEntityRequest
 	if err := httpx.Decode(r, &req); err != nil {
 		httpx.Fail(w, r, err)
@@ -122,13 +133,43 @@ func (a *API) listLegalEntities(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
 	}
-	entities, err := a.store.ListLegalEntities(r.Context())
+	limit, after, err := pageParams(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	page, err := a.store.ListLegalEntities(r.Context(), after, limit)
 	if err != nil {
 		slog.Error("list legal entities failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, entities)
+	body := listResponse{Items: page.Items}
+	if page.NextCode != "" {
+		body.NextCursor = base64.RawURLEncoding.EncodeToString([]byte(page.NextCode))
+	}
+	httpx.JSON(w, http.StatusOK, body)
+}
+
+func pageParams(r *http.Request) (int, string, error) {
+	q := r.URL.Query()
+	limit := store.MaxPageSize
+	if raw := q.Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > store.MaxPageSize {
+			return 0, "", httpx.NewProblem(http.StatusBadRequest, "COM-0001", fmt.Sprintf("limit must be 1 to %d", store.MaxPageSize))
+		}
+		limit = n
+	}
+	after := ""
+	if raw := q.Get("cursor"); raw != "" {
+		decoded, err := base64.RawURLEncoding.DecodeString(raw)
+		if err != nil {
+			return 0, "", httpx.NewProblem(http.StatusBadRequest, "COM-0001", "cursor is invalid")
+		}
+		after = string(decoded)
+	}
+	return limit, after, nil
 }
 
 func (a *API) convert(w http.ResponseWriter, r *http.Request) {

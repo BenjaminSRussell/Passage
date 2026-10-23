@@ -41,12 +41,34 @@ func TestPostgres_TenantIsolationIdempotencyAndDuplicateCode(t *testing.T) {
 	if err := s.Ping(ctx); err != nil {
 		t.Fatal(err)
 	}
-	own, err := s.ListLegalEntities(ctx)
-	if err != nil || len(own) != 1 {
+	own, err := s.ListLegalEntities(ctx, "", store.MaxPageSize)
+	if err != nil || len(own.Items) != 1 {
 		t.Fatalf("tenant 1 list = %v, %v; want 1 entity", own, err)
 	}
-	other, err := s.ListLegalEntities(principalContext(2))
-	if err != nil || len(other) != 0 {
+	other, err := s.ListLegalEntities(principalContext(2), "", store.MaxPageSize)
+	if err != nil || len(other.Items) != 0 {
 		t.Fatalf("tenant 2 must see no rows, got %v, %v", other, err)
+	}
+}
+
+func TestPostgres_ListPagesPastFirstPage(t *testing.T) {
+	pool := testkit.DB(t)
+	ctx := principalContext(3)
+	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	s := store.New(pool)
+	for _, code := range []string{"E1", "E2", "E3"} {
+		if _, err := s.CreateLegalEntity(ctx, store.LegalEntity{Code: code, Name: code, Country: "US", Currency: "USD"}, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, err := s.ListLegalEntities(ctx, "", 2)
+	if err != nil || len(first.Items) != 2 || first.NextCode != "E2" {
+		t.Fatalf("first page = %+v, %v", first, err)
+	}
+	second, err := s.ListLegalEntities(ctx, first.NextCode, 2)
+	if err != nil || len(second.Items) != 1 || second.Items[0].Code != "E3" || second.NextCode != "" {
+		t.Fatalf("second page = %+v, %v", second, err)
 	}
 }

@@ -41,11 +41,21 @@ func (f *fakeStore) CreateLegalEntity(_ context.Context, in store.LegalEntity, k
 	return in, nil
 }
 
-func (f *fakeStore) ListLegalEntities(context.Context) ([]store.LegalEntity, error) {
+func (f *fakeStore) ListLegalEntities(_ context.Context, after string, limit int) (store.LegalEntityPage, error) {
 	if f.err != nil {
-		return nil, f.err
+		return store.LegalEntityPage{}, f.err
 	}
-	return append([]store.LegalEntity{}, f.entities...), nil
+	page := store.LegalEntityPage{Items: []store.LegalEntity{}}
+	for _, e := range f.entities {
+		if e.Code > after {
+			page.Items = append(page.Items, e)
+		}
+	}
+	if len(page.Items) > limit {
+		page.Items = page.Items[:limit]
+		page.NextCode = page.Items[limit-1].Code
+	}
+	return page, nil
 }
 
 func (f *fakeStore) Ping(context.Context) error { return f.pingErr }
@@ -102,7 +112,7 @@ func TestLegalEntities(t *testing.T) {
 		{"create duplicate code", &fakeStore{err: httpx.NewProblem(http.StatusConflict, store.CodeLegalEntityCode, "exists")}, http.MethodPost, validBody, allDuties, true, http.StatusConflict, store.CodeLegalEntityCode},
 		{"create without duty", &fakeStore{}, http.MethodPost, validBody, "org.read", true, http.StatusForbidden, "AUTH-0003"},
 		{"list without duty", &fakeStore{}, http.MethodGet, "", "org.legal-entity.write", true, http.StatusForbidden, "AUTH-0003"},
-		{"list empty is array", &fakeStore{}, http.MethodGet, "", allDuties, true, http.StatusOK, "[]"},
+		{"list empty is array", &fakeStore{}, http.MethodGet, "", allDuties, true, http.StatusOK, `"items":[]`},
 		{"list store error", &fakeStore{err: errors.New("boom")}, http.MethodGet, "", allDuties, true, http.StatusInternalServerError, "COM-0500"},
 	}
 	for _, tc := range tests {
@@ -248,5 +258,36 @@ func TestOpenAPIDocumentsEveryRoute(t *testing.T) {
 	}
 	if !strings.Contains(string(spec), "\n  /metrics:") {
 		t.Error("openapi.yaml does not document /metrics")
+	}
+}
+
+func TestScopedCallerCannotCreateLegalEntity(t *testing.T) {
+	r, _ := newRouter(&fakeStore{})
+	req := httptest.NewRequest(http.MethodPost, legalEntities, strings.NewReader(validBody))
+	req.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
+	req.Header.Set("X-Passage-Legal-Entity", testkit.TenantID(2))
+	req.Header.Set("X-Passage-Duties", allDuties)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "AUTH-0003") {
+		t.Fatalf("got %d %s; want 403 AUTH-0003", rec.Code, rec.Body.String())
+	}
+}
+
+func TestListLegalEntitiesPagesByCursor(t *testing.T) {
+	f := &fakeStore{entities: []store.LegalEntity{{Code: "A1"}, {Code: "B2"}, {Code: "C3"}}}
+	r, _ := newRouter(f)
+	first := do(r, http.MethodGet, legalEntities+"?limit=2", "", allDuties, true)
+	if first.Code != http.StatusOK || !strings.Contains(first.Body.String(), `"B2"`) || strings.Contains(first.Body.String(), `"C3"`) || !strings.Contains(first.Body.String(), `"nextCursor":"QjI"`) {
+		t.Fatalf("first page = %d %s", first.Code, first.Body.String())
+	}
+	second := do(r, http.MethodGet, legalEntities+"?limit=2&cursor=QjI", "", allDuties, true)
+	if !strings.Contains(second.Body.String(), `"C3"`) || strings.Contains(second.Body.String(), "nextCursor") {
+		t.Fatalf("second page = %d %s", second.Code, second.Body.String())
+	}
+	for _, bad := range []string{"?limit=0", "?limit=101", "?limit=x", "?cursor=!!"} {
+		if rec := do(r, http.MethodGet, legalEntities+bad, "", allDuties, true); rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s = %d; want 400", bad, rec.Code)
+		}
 	}
 }
