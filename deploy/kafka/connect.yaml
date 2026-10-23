@@ -88,7 +88,13 @@ spec:
     topic.creation.default.replication.factor: 3
     topic.creation.default.partitions: 12
     topic.creation.default.cleanup.policy: delete
-    topic.creation.default.retention.ms: 604800000
+    topic.creation.default.retention.ms: 2592000000
+    topic.creation.groups: machineevent
+    topic.creation.machineevent.include: passage\.manufacturing\.machineevent
+    topic.creation.machineevent.partitions: 48
+    topic.creation.machineevent.replication.factor: 3
+    topic.creation.machineevent.cleanup.policy: delete
+    topic.creation.machineevent.retention.ms: 604800000
     transforms: outbox
     transforms.outbox.type: io.debezium.transforms.outbox.EventRouter
     transforms.outbox.table.field.event.id: id
