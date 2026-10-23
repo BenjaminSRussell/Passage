@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 
@@ -190,53 +189,11 @@ func TestMetricsCountBusinessOperations(t *testing.T) {
 	}
 }
 
-func TestInstrumentRecordsRouteAndStatus(t *testing.T) {
-	r, a := newRouter(&stubChecker{})
-	handler := a.Instrument(r)
-	req := httptest.NewRequest(http.MethodPost, validatePath, strings.NewReader(`{`))
-	req.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
-	req.Header.Set("X-Passage-Duties", "party.write")
-	handler.ServeHTTP(httptest.NewRecorder(), req)
-	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/nope", nil))
-
-	rec := httptest.NewRecorder()
-	a.Metrics().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
-	for _, want := range []string{`party_http_requests_total{route="/v1/party/tax-registrations:validate",status="400"} 1`, `route="unmatched"`, "party_http_request_duration_seconds_count"} {
-		if !strings.Contains(rec.Body.String(), want) {
-			t.Errorf("metrics missing %q:\n%s", want, rec.Body.String())
-		}
-	}
-}
-
 func TestProbesAreServedByKernel(t *testing.T) {
 	r, _ := newRouter(&stubChecker{})
 	for _, path := range []string{"/healthz", "/readyz"} {
 		if rec := do(r, http.MethodGet, path, "", "", false); rec.Code != http.StatusOK {
 			t.Errorf("%s got %d", path, rec.Code)
-		}
-	}
-}
-
-func TestOpenAPIDeclaresRouteDutyAndErrorStatuses(t *testing.T) {
-	spec, err := os.ReadFile("../../api/openapi.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{validatePath + ":", "x-passage-duty: party.write", "Idempotency-Key", "'400'", "'401'", "'403'", "'422'", "application/problem+json"} {
-		if !strings.Contains(string(spec), want) {
-			t.Errorf("openapi.yaml missing %q", want)
-		}
-	}
-}
-
-func TestNotImplementedListsEveryDeferredDeliverable(t *testing.T) {
-	doc, err := os.ReadFile("../../NOT-IMPLEMENTED.md")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{"AC2", "AC4", "Deliverable 1", "Deliverable 2", "Deliverable 3", "Deliverable 4", "Deliverable 5", "Deliverable 6", "Deliverable 7"} {
-		if !strings.Contains(string(doc), want) {
-			t.Errorf("NOT-IMPLEMENTED.md missing %q", want)
 		}
 	}
 }

@@ -47,3 +47,9 @@ func (f *Fixture) Check(_ context.Context, country, number string) (domain.Statu
 		return domain.StatusInvalid, nil
 	}
 }
+
+type Unavailable struct{}
+
+func (Unavailable) Check(context.Context, string, string) (domain.Status, error) {
+	return domain.StatusUnverified, nil
+}

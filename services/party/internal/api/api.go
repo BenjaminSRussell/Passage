@@ -32,7 +32,6 @@ type API struct {
 	statuses map[domain.Status]*atomic.Int64
 	rejected atomic.Int64
 	failures atomic.Int64
-	http     requestMetrics
 }
 
 type validateRequest struct {
@@ -63,7 +62,7 @@ func (c loggedChecker) Check(ctx context.Context, country, number string) (domai
 }
 
 func New(checker domain.Checker) *API {
-	a := &API{statuses: map[domain.Status]*atomic.Int64{}, http: newRequestMetrics()}
+	a := &API{statuses: map[domain.Status]*atomic.Int64{}}
 	for _, s := range reportedStatuses {
 		a.statuses[s] = new(atomic.Int64)
 	}
@@ -84,7 +83,6 @@ func (a *API) Metrics() http.Handler {
 		}
 		fmt.Fprintf(w, "# HELP party_tax_validations_rejected_total Validations rejected for a bad request or format.\n# TYPE party_tax_validations_rejected_total counter\nparty_tax_validations_rejected_total %d\n", a.rejected.Load())
 		fmt.Fprintf(w, "# HELP party_tax_checker_failures_total Checker calls that failed and left the registration unverified.\n# TYPE party_tax_checker_failures_total counter\nparty_tax_checker_failures_total %d\n", a.failures.Load())
-		a.http.write(w)
 	})
 }
 

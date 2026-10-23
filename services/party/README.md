@@ -38,4 +38,6 @@ No database is needed in this slice.
 
 ## Metrics
 
-`party_tax_validations_total{status}`, `party_tax_validations_rejected_total`, `party_tax_checker_failures_total`, `party_http_requests_total`, `party_http_request_duration_seconds`.
+`party_tax_validations_total{status}`, `party_tax_validations_rejected_total`, `party_tax_checker_failures_total`.
+
+VAT numbers are format-checked only: without a live VIES client the validation status is `unverified`. `VIES_FIXTURE=1` swaps in the recorded test fixture for dev and test; never set it in production.

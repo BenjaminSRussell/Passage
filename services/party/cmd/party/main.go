@@ -10,6 +10,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/services/party/internal/api"
+	"github.com/BenjaminSRussell/passage/services/party/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/party/internal/vies"
 )
 
@@ -38,9 +39,9 @@ func newLogger(w io.Writer) *slog.Logger {
 }
 
 func run(ctx context.Context, getenv func(string) string) error {
-	checker, err := vies.Recorded()
+	checker, err := newChecker(getenv)
 	if err != nil {
-		return fmt.Errorf("load VIES fixture: %w", err)
+		return err
 	}
 	a := api.New(checker)
 	router := httpx.NewRouter()
@@ -51,9 +52,20 @@ func run(ctx context.Context, getenv func(string) string) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	errs := make(chan error, 2)
-	go func() { errs <- httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), a.Instrument(router)) }()
+	go func() { errs <- httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), router) }()
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "ADMIN_ADDR", defaultAdminAddr), admin) }()
 	return <-errs
+}
+
+func newChecker(getenv func(string) string) (domain.Checker, error) {
+	if getenv("VIES_FIXTURE") != "1" {
+		return vies.Unavailable{}, nil
+	}
+	checker, err := vies.Recorded()
+	if err != nil {
+		return nil, fmt.Errorf("load VIES fixture: %w", err)
+	}
+	return checker, nil
 }
 
 func addr(getenv func(string) string, key, fallback string) string {

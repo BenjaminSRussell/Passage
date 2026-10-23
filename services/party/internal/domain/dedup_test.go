@@ -113,7 +113,7 @@ func TestDedupPrecisionAndRecallOnSeededParties(t *testing.T) {
 	}
 }
 
-func TestFindCandidatesMatchesPairScan(t *testing.T) {
+func TestFindCandidatesFindsPlantedDuplicate(t *testing.T) {
 	records, _ := seededDataset()
 	probe := records[seededParties-1]
 	candidates := domain.FindCandidates(records, probe)

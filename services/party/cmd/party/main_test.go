@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/BenjaminSRussell/passage/services/party/internal/domain"
 )
 
 func freeAddr(t *testing.T) string {
@@ -90,6 +92,19 @@ func TestLoggerEmitsKernelLogFields(t *testing.T) {
 	for _, key := range []string{"timestamp", "level", "message", "service", "correlationId"} {
 		if _, ok := line[key]; !ok {
 			t.Errorf("log line missing %q: %s", key, out.String())
+		}
+	}
+}
+
+func TestNewCheckerDefaultsToUnverifiedAndOptsIntoFixture(t *testing.T) {
+	for env, want := range map[string]domain.Status{"": domain.StatusUnverified, "1": domain.StatusValid} {
+		checker, err := newChecker(func(string) string { return env })
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, _ := checker.Check(context.Background(), "DE", "123456789")
+		if got != want {
+			t.Errorf("VIES_FIXTURE=%q got %s want %s", env, got, want)
 		}
 	}
 }

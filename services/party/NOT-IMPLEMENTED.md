@@ -4,7 +4,7 @@
 |---|---|---|
 | AC1 dedup precision and recall | built | `internal/domain/dedup.go`; `dedup_test.go` seeds 10k parties with 500 planted duplicates. The PRD fixture `parties-10k.jsonl` is not in the repo, so the generator lives in the test |
 | AC2 merge with atomic reference rewrite and integrity audit | slice 2 of PSG-7 | needs migrations, store, outbox and `party.party.merged.v1` |
-| AC3 VIES adapter against recorded fixture | built | `internal/vies` and `internal/vies/testdata/vies-recorded.json`; the fixture is a small hand-assembled stand-in for the PRD's 200-number recording |
+| AC3 VIES adapter against recorded fixture | built | `internal/vies` and `internal/vies/testdata/vies-recorded.json`; the fixture is a small hand-assembled stand-in for the PRD's 200-number recording and is served only when `VIES_FIXTURE=1`; by default VAT is format-checked and reported `unverified` |
 | AC4 credit-limit change approval with Temporal test | slice 2 of PSG-7 | needs customer persistence, `pending_change` and a workflow engine decision; `go.temporal.io/sdk` is not in the kernel and needs README justification |
 | Deliverable 1: persisted parties and roles | slice 2 of PSG-7 | no store, migrations or RLS yet |
 | Deliverable 2: merge workflow and survivorship, `:match` endpoint | slice 2 of PSG-7 | needs the party store; the scoring engine is built |

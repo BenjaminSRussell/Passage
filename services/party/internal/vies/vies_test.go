@@ -86,3 +86,10 @@ func TestNewFixtureRejectsMalformedJSON(t *testing.T) {
 		t.Fatal("expected decode error")
 	}
 }
+
+func TestUnavailableReportsUnverified(t *testing.T) {
+	status, err := vies.Unavailable{}.Check(context.Background(), "DE", "123456789")
+	if err != nil || status != domain.StatusUnverified {
+		t.Fatalf("got %s, %v", status, err)
+	}
+}
