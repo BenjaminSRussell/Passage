@@ -1,0 +1,12 @@
+name: JournalLineStub
+domain: ledger
+table_group: transaction
+per_legal_entity: true
+fields:
+  - {name: journal_entry_id, type: uuid, required: true}
+  - {name: account, type: string, length: 16, required: true}
+  - {name: amount, type: decimal, precision: 20, scale: 6, required: true}
+  - {name: posting_date, type: date, required: true}
+  - {name: memo, type: string, length: 255}
+indexes:
+  - {fields: [journal_entry_id]}

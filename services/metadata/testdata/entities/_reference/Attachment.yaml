@@ -1,0 +1,11 @@
+name: Attachment
+domain: platform
+table_group: main
+title_fields: [file_name]
+fields:
+  - {name: owner_id, type: uuid, required: true}
+  - {name: file_name, type: string, length: 255, required: true}
+  - {name: size_bytes, type: int64, required: true}
+  - {name: content_type, type: string, length: 100, required: true}
+indexes:
+  - {fields: [owner_id]}
