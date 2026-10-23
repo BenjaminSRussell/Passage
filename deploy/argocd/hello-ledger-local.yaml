@@ -1,0 +1,26 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hello-ledger
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/BenjaminSRussell/Passage.git
+    targetRevision: main
+    path: services/platform-health/charts/hello-ledger
+    helm:
+      valuesObject:
+        image:
+          repository: passage-local/hello-ledger
+          tag: local
+        migrateOnStart: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: hello-ledger
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

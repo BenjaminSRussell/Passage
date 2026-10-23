@@ -1,0 +1,37 @@
+name: ci-negative
+
+on:
+  pull_request:
+    paths: ['deploy/ci/**', '.github/workflows/ci*.yml', '.github/workflows/gate.yml']
+  push:
+    branches: [main]
+    paths: ['deploy/ci/**', '.github/workflows/ci*.yml', '.github/workflows/gate.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  injected-failures-are-caught:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: services/platform-health
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: '1.23'
+          cache-dependency-path: '**/go.sum'
+      - name: Inject a lint error and a failing test
+        run: |
+          mkdir -p internal/negcheck/lint internal/negcheck/test
+          cp ../../deploy/ci/testdata/broken.go.txt internal/negcheck/lint/broken.go
+          cp ../../deploy/ci/testdata/broken_test.go.txt internal/negcheck/test/broken_test.go
+      - name: go vet must reject the injected lint error
+        run: |
+          if out=$(go vet ./internal/negcheck/lint/ 2>&1); then echo "go vet accepted the injected lint error"; exit 1; fi
+          grep -q "format %d" <<<"$out" || { echo "vet failed for the wrong reason: $out"; exit 1; }
+      - name: go test must reject the injected failing test
+        run: |
+          if out=$(go test ./internal/negcheck/test/ 2>&1); then echo "go test accepted the injected failing test"; exit 1; fi
+          grep -q "injected failure" <<<"$out" || { echo "test failed for the wrong reason: $out"; exit 1; }

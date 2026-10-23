@@ -1,0 +1,5 @@
+package negtest
+
+import "testing"
+
+func TestInjectedFailure(t *testing.T) { t.Fatal("injected failure") }
