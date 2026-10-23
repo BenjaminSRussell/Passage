@@ -1,0 +1,6 @@
+name: Foo
+domain: test
+table_group: main
+bogus: 1
+fields:
+  - {name: a, type: bool}

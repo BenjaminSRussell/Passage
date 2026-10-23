@@ -1,0 +1,5 @@
+name: vendor
+domain: test
+table_group: main
+fields:
+  - {name: a, type: bool}

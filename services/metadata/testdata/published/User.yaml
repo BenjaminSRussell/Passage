@@ -1,0 +1,14 @@
+name: User
+domain: platform
+table_group: main
+title_fields: [display_name]
+fields:
+  - {name: subject, type: string, length: 128, required: true, unique: true}
+  - {name: display_name, type: string, length: 120, required: true}
+  - {name: email, type: string, length: 254, pii: personal}
+  - {name: principal_type, type: enum, enum: PrincipalType, required: true, default: human}
+  - {name: active, type: bool, required: true, default: "true"}
+enums:
+  - {name: PrincipalType, values: [{name: human, code: 1}, {name: service, code: 2}, {name: agent, code: 3}]}
+indexes:
+  - {fields: [email], where: email is not null}

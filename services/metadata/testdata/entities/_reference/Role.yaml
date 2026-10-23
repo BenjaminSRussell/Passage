@@ -1,0 +1,7 @@
+name: Role
+domain: platform
+table_group: reference
+title_fields: [code]
+fields:
+  - {name: code, type: string, length: 48, required: true, unique: true}
+  - {name: name, type: string, length: 120, required: true}

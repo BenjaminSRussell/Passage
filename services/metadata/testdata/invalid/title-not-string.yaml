@@ -1,0 +1,6 @@
+name: Foo
+domain: test
+table_group: main
+title_fields: [qty]
+fields:
+  - {name: qty, type: int32}

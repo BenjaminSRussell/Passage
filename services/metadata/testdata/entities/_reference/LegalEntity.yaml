@@ -1,0 +1,9 @@
+name: LegalEntity
+domain: platform
+table_group: main
+title_fields: [name]
+fields:
+  - {name: code, type: string, length: 16, required: true, unique: true}
+  - {name: name, type: string, length: 120, required: true}
+  - {name: base_currency, type: string, length: 3, required: true}
+  - {name: country, type: string, length: 2, required: true}

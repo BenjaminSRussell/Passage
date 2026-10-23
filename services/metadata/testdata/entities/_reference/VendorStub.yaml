@@ -1,0 +1,17 @@
+name: VendorStub
+domain: vendor
+table_group: main
+per_legal_entity: true
+title_fields: [account, name]
+fields:
+  - {name: account, type: string, length: 20, required: true, unique: true}
+  - {name: name, type: string, length: 120, required: true}
+  - {name: status, type: enum, enum: VendorStatus, required: true, default: active}
+  - {name: credit_limit, type: money}
+  - {name: tax_id, type: string, length: 32, pii: sensitive, visibility: advanced}
+enums:
+  - {name: VendorStatus, values: [{name: active, code: 1}, {name: blocked, code: 2}, {name: preferred, code: 3}]}
+indexes:
+  - {fields: [name]}
+hooks:
+  - {name: validateWrite, expr: "name != ''"}

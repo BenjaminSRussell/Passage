@@ -1,0 +1,10 @@
+name: Tenant
+domain: platform
+table_group: main
+title_fields: [slug]
+fields:
+  - {name: slug, type: string, length: 63, required: true, unique: true}
+  - {name: region, type: string, length: 32, required: true}
+  - {name: tier, type: enum, enum: Tier, required: true, default: starter}
+enums:
+  - {name: Tier, values: [{name: starter, code: 1}, {name: professional, code: 2}, {name: enterprise, code: 3}]}

@@ -1,0 +1,5 @@
+name: Foo
+domain: test
+table_group: main
+fields:
+  - {name: 'a"; drop table x;--', type: bool}

@@ -1,0 +1,9 @@
+name: Address
+domain: platform
+table_group: main
+fields:
+  - {name: line1, type: string, length: 120, required: true}
+  - {name: line2, type: string, length: 120}
+  - {name: city, type: string, length: 60}
+  - {name: postal_code, type: string, length: 20}
+  - {name: country, type: string, length: 2, required: true}

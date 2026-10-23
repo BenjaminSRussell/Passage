@@ -1,0 +1,9 @@
+name: Note
+domain: platform
+table_group: main
+soft_delete: true
+fields:
+  - {name: body, type: text, required: true}
+  - {name: author_id, type: uuid, required: true}
+relations:
+  - {from_field: author_id, to_entity: User, to_field: id, on_delete: restrict}
