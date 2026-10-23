@@ -1,0 +1,252 @@
+package api_test
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+
+	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/testkit"
+	"github.com/BenjaminSRussell/passage/services/org/internal/api"
+	"github.com/BenjaminSRussell/passage/services/org/internal/store"
+)
+
+type fakeStore struct {
+	err      error
+	pingErr  error
+	entities []store.LegalEntity
+	byKey    map[string]store.LegalEntity
+}
+
+func (f *fakeStore) CreateLegalEntity(_ context.Context, in store.LegalEntity, key string) (store.LegalEntity, error) {
+	if f.err != nil {
+		return store.LegalEntity{}, f.err
+	}
+	if replay, ok := f.byKey[key]; ok && key != "" {
+		return replay, nil
+	}
+	in.ID, in.Status, in.Version, in.CreatedAt = "id-1", "active", 1, time.Unix(0, 0).UTC()
+	f.entities = append(f.entities, in)
+	if f.byKey == nil {
+		f.byKey = map[string]store.LegalEntity{}
+	}
+	f.byKey[key] = in
+	return in, nil
+}
+
+func (f *fakeStore) ListLegalEntities(context.Context) ([]store.LegalEntity, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return append([]store.LegalEntity{}, f.entities...), nil
+}
+
+func (f *fakeStore) Ping(context.Context) error { return f.pingErr }
+
+func newRouter(f *fakeStore) (*chi.Mux, *api.API) {
+	a := api.New(f)
+	r := httpx.NewRouter()
+	a.Register(r)
+	return r, a
+}
+
+func do(r http.Handler, method, path, body, duties string, withTenant bool) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	if withTenant {
+		req.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
+		req.Header.Set("X-Passage-Duties", duties)
+	}
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	return rec
+}
+
+const (
+	legalEntities = "/v1/org/legal-entities"
+	allDuties     = "org.read,org.legal-entity.write"
+	validBody     = `{"code":"US01","name":"Passage US","country":"US","currency":"USD"}`
+)
+
+func TestLegalEntities(t *testing.T) {
+	tests := []struct {
+		name       string
+		store      *fakeStore
+		method     string
+		body       string
+		duties     string
+		withTenant bool
+		wantStatus int
+		wantBody   string
+	}{
+		{"create ok", &fakeStore{}, http.MethodPost, validBody, allDuties, true, http.StatusCreated, `"code":"US01"`},
+		{"create without tenant", &fakeStore{}, http.MethodPost, validBody, "", false, http.StatusUnauthorized, "AUTH-0001"},
+		{"list without tenant", &fakeStore{}, http.MethodGet, "", "", false, http.StatusUnauthorized, "AUTH-0001"},
+		{"create malformed body", &fakeStore{}, http.MethodPost, `{`, allDuties, true, http.StatusBadRequest, "COM-0001"},
+		{"create unknown field", &fakeStore{}, http.MethodPost, `{"code":"US01","x":1}`, allDuties, true, http.StatusBadRequest, "COM-0001"},
+		{"create number code", &fakeStore{}, http.MethodPost, `{"code":5}`, allDuties, true, http.StatusBadRequest, "COM-0001"},
+		{"create empty body object", &fakeStore{}, http.MethodPost, `{}`, allDuties, true, http.StatusBadRequest, `"code"`},
+		{"create null body", &fakeStore{}, http.MethodPost, `null`, allDuties, true, http.StatusBadRequest, "COM-0001"},
+		{"create lowercase code", &fakeStore{}, http.MethodPost, `{"code":"us01","name":"n","country":"US","currency":"USD"}`, allDuties, true, http.StatusBadRequest, `"code"`},
+		{"create reserved code", &fakeStore{}, http.MethodPost, `{"code":"SYS","name":"n","country":"US","currency":"USD"}`, allDuties, true, http.StatusBadRequest, `"code"`},
+		{"create bad country", &fakeStore{}, http.MethodPost, `{"code":"US01","name":"n","country":"USA","currency":"USD"}`, allDuties, true, http.StatusBadRequest, `"country"`},
+		{"create bad currency", &fakeStore{}, http.MethodPost, `{"code":"US01","name":"n","country":"US","currency":"US"}`, allDuties, true, http.StatusBadRequest, `"currency"`},
+		{"create blank name", &fakeStore{}, http.MethodPost, `{"code":"US01","name":"  ","country":"US","currency":"USD"}`, allDuties, true, http.StatusBadRequest, `"name"`},
+		{"create store error hides detail", &fakeStore{err: errors.New("pg secret detail")}, http.MethodPost, validBody, allDuties, true, http.StatusInternalServerError, "COM-0500"},
+		{"create duplicate code", &fakeStore{err: httpx.NewProblem(http.StatusConflict, store.CodeLegalEntityCode, "exists")}, http.MethodPost, validBody, allDuties, true, http.StatusConflict, store.CodeLegalEntityCode},
+		{"create without duty", &fakeStore{}, http.MethodPost, validBody, "org.read", true, http.StatusForbidden, "AUTH-0003"},
+		{"list without duty", &fakeStore{}, http.MethodGet, "", "org.legal-entity.write", true, http.StatusForbidden, "AUTH-0003"},
+		{"list empty is array", &fakeStore{}, http.MethodGet, "", allDuties, true, http.StatusOK, "[]"},
+		{"list store error", &fakeStore{err: errors.New("boom")}, http.MethodGet, "", allDuties, true, http.StatusInternalServerError, "COM-0500"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r, _ := newRouter(tc.store)
+			rec := do(r, tc.method, legalEntities, tc.body, tc.duties, tc.withTenant)
+			if rec.Code != tc.wantStatus || !strings.Contains(rec.Body.String(), tc.wantBody) {
+				t.Fatalf("got %d %s; want %d containing %s", rec.Code, rec.Body.String(), tc.wantStatus, tc.wantBody)
+			}
+			if tc.wantStatus == http.StatusInternalServerError && strings.Contains(rec.Body.String(), "secret") {
+				t.Fatalf("internal detail leaked: %s", rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestCreateLegalEntity_ReplayReturnsOriginal(t *testing.T) {
+	f := &fakeStore{}
+	r, _ := newRouter(f)
+	post := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, legalEntities, strings.NewReader(body))
+		req.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
+		req.Header.Set("X-Passage-Duties", allDuties)
+		req.Header.Set("Idempotency-Key", "key-1")
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+		return rec
+	}
+	first := post(validBody)
+	replay := post(`{"code":"US02","name":"Other","country":"US","currency":"USD"}`)
+	if first.Code != http.StatusCreated || replay.Code != http.StatusCreated || first.Body.String() != replay.Body.String() || len(f.entities) != 1 {
+		t.Fatalf("replay must return the original entity: %d %s / %d %s, rows %d", first.Code, first.Body, replay.Code, replay.Body, len(f.entities))
+	}
+}
+
+func TestLegalEntities_InvalidLegalEntityHeader(t *testing.T) {
+	r, _ := newRouter(&fakeStore{})
+	for _, method := range []string{http.MethodPost, http.MethodGet} {
+		req := httptest.NewRequest(method, legalEntities, strings.NewReader(validBody))
+		req.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
+		req.Header.Set("X-Passage-Duties", allDuties)
+		req.Header.Set("X-Passage-Legal-Entity", "foo")
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "COM-0001") {
+			t.Fatalf("%s: got %d %s; want 400 COM-0001", method, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+func TestConvert(t *testing.T) {
+	tests := []struct {
+		name       string
+		query      string
+		withTenant bool
+		wantStatus int
+		wantBody   string
+	}{
+		{"kilograms to grams", "from=kg&to=g&qty=2.5", true, http.StatusOK, `"quantity":"2500"`},
+		{"offset conversion", "from=C&to=F&qty=100", true, http.StatusOK, `"quantity":"212"`},
+		{"same unit", "from=kg&to=kg&qty=7", true, http.StatusOK, `"quantity":"7"`},
+		{"without tenant", "from=kg&to=g&qty=1", false, http.StatusUnauthorized, "AUTH-0001"},
+		{"missing qty", "from=kg&to=g", true, http.StatusBadRequest, "COM-0001"},
+		{"non numeric qty", "from=kg&to=g&qty=abc", true, http.StatusBadRequest, "COM-0001"},
+		{"NaN qty", "from=kg&to=g&qty=NaN", true, http.StatusBadRequest, "COM-0001"},
+		{"huge exponent qty", "from=kg&to=g&qty=1e999", true, http.StatusBadRequest, "COM-0001"},
+		{"missing from", "to=g&qty=1", true, http.StatusBadRequest, "COM-0001"},
+		{"missing to", "from=kg&qty=1", true, http.StatusBadRequest, "COM-0001"},
+		{"unknown unit", "from=kg&to=furlong&qty=1", true, http.StatusUnprocessableEntity, "ORG-UOM-NO-PATH"},
+		{"cross class", "from=kg&to=m&qty=1", true, http.StatusUnprocessableEntity, "ORG-UOM-NO-PATH"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r, _ := newRouter(&fakeStore{})
+			rec := do(r, http.MethodGet, "/v1/org/uom/convert?"+tc.query, "", "", tc.withTenant)
+			if rec.Code != tc.wantStatus || !strings.Contains(rec.Body.String(), tc.wantBody) {
+				t.Fatalf("got %d %s; want %d containing %s", rec.Code, rec.Body.String(), tc.wantStatus, tc.wantBody)
+			}
+		})
+	}
+}
+
+func TestProbes(t *testing.T) {
+	down := &fakeStore{pingErr: errors.New("db down")}
+	tests := []struct {
+		name       string
+		store      *fakeStore
+		path       string
+		wantStatus int
+	}{
+		{"readyz ok", &fakeStore{}, "/readyz", http.StatusOK},
+		{"readyz fails closed when database is down", down, "/readyz", http.StatusServiceUnavailable},
+		{"healthz stays up when database is down", down, "/healthz", http.StatusOK},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r, _ := newRouter(tc.store)
+			rec := do(r, http.MethodGet, tc.path, "", "", false)
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("got %d, want %d", rec.Code, tc.wantStatus)
+			}
+			if tc.wantStatus == http.StatusServiceUnavailable && !strings.Contains(rec.Body.String(), `"status":"unavailable"`) {
+				t.Fatalf("unexpected body %s", rec.Body)
+			}
+		})
+	}
+}
+
+func TestMetricsCountBusinessOperations(t *testing.T) {
+	f := &fakeStore{}
+	r, a := newRouter(f)
+	do(r, http.MethodPost, legalEntities, validBody, allDuties, true)
+	f.err = errors.New("boom")
+	do(r, http.MethodPost, legalEntities, validBody, allDuties, true)
+
+	rec := httptest.NewRecorder()
+	a.Metrics().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	for _, want := range []string{
+		"# TYPE org_legal_entities_created_total counter",
+		"org_legal_entities_created_total 1",
+		"org_legal_entities_failed_total 1",
+	} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("metrics missing %q in %s", want, rec.Body.String())
+		}
+	}
+}
+
+func TestOpenAPIDocumentsEveryRoute(t *testing.T) {
+	spec, err := os.ReadFile("../../api/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, _ := newRouter(&fakeStore{})
+	err = chi.Walk(r, func(_, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		if !strings.Contains(string(spec), "\n  "+route+":") {
+			t.Errorf("openapi.yaml does not document %s", route)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(spec), "\n  /metrics:") {
+		t.Error("openapi.yaml does not document /metrics")
+	}
+}
