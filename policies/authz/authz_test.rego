@@ -39,6 +39,15 @@ test_view_vendors_cannot_put if {
 	result == {"allow": false, "duty_missing": "Maintain vendors"}
 }
 
+test_missing_vendor_get_duty_is_least_privileged if {
+	result := decision with input as {
+		"subject": {"tenant_id": "tenant-a", "user_id": "user-a"},
+		"action": "GET",
+		"resource": "/v1/vendors/vendor-a",
+	}
+	result == {"allow": false, "duty_missing": "View vendors"}
+}
+
 test_unknown_duty_denied if {
 	result := decision with input as {
 		"subject": {"tenant_id": "tenant-a", "user_id": "user-a"},

@@ -26,10 +26,25 @@ decision := {"allow": false, "duty_missing": missing_duty} if {
 		path_matches(permission.resource, input.resource)
 	}
 	count(candidates) > 0
-	missing_duty := sort(candidates)[0]
+	sizes := {duty_permission_count(duty) |
+		some duty in candidates
+	}
+	smallest_size := min(sizes)
+	least_privileged := {duty |
+		some duty in candidates
+		duty_permission_count(duty) == smallest_size
+	}
+	missing_duty := sort(least_privileged)[0]
 }
 
 default decision := {"allow": false}
+
+duty_permission_count(duty) := total if {
+	counts := [count(permission.methods) |
+		some permission in data.duties[duty].permissions
+	]
+	total := sum(counts)
+}
 
 path_matches(prefix, path) if path == prefix
 
