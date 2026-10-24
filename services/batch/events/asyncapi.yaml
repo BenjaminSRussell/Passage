@@ -1,0 +1,129 @@
+asyncapi: 3.0.0
+info:
+  title: batch
+  version: 0.1.0
+channels:
+  passage.workflow.instance:
+    address: passage.workflow.instance
+    messages:
+      submitted:
+        $ref: '#/components/messages/instanceSubmitted'
+      completed:
+        $ref: '#/components/messages/instanceCompleted'
+  passage.workflow.workitem:
+    address: passage.workflow.workitem
+    messages:
+      assigned:
+        $ref: '#/components/messages/workitemAssigned'
+      escalated:
+        $ref: '#/components/messages/workitemEscalated'
+  passage.batch.run:
+    address: passage.batch.run
+    messages:
+      started:
+        $ref: '#/components/messages/runStarted'
+      completed:
+        $ref: '#/components/messages/runCompleted'
+      failed:
+        $ref: '#/components/messages/runFailed'
+  passage.notify.message:
+    address: passage.notify.message
+    messages:
+      sent:
+        $ref: '#/components/messages/messageSent'
+operations:
+  onInstanceSubmitted:
+    action: send
+    channel: { $ref: '#/channels/passage.workflow.instance' }
+    messages:
+      - $ref: '#/channels/passage.workflow.instance/messages/submitted'
+  onWorkItemAssigned:
+    action: send
+    channel: { $ref: '#/channels/passage.workflow.workitem' }
+    messages:
+      - $ref: '#/channels/passage.workflow.workitem/messages/assigned'
+  onRunCompleted:
+    action: send
+    channel: { $ref: '#/channels/passage.batch.run' }
+    messages:
+      - $ref: '#/channels/passage.batch.run/messages/completed'
+  onMessageSent:
+    action: send
+    channel: { $ref: '#/channels/passage.notify.message' }
+    messages:
+      - $ref: '#/channels/passage.notify.message/messages/sent'
+components:
+  messages:
+    instanceSubmitted:
+      name: submitted
+      payload:
+        type: object
+        required: [instance_id, entity, record_id]
+        properties:
+          instance_id: { type: string }
+          entity: { type: string }
+          record_id: { type: string }
+      x-passage-type: dev.passage.workflow.instance.submitted.v1
+    instanceCompleted:
+      name: completed
+      payload:
+        type: object
+        required: [instance_id, outcome]
+        properties:
+          instance_id: { type: string }
+          outcome: { type: string }
+      x-passage-type: dev.passage.workflow.instance.completed.v1
+    workitemAssigned:
+      name: assigned
+      payload:
+        type: object
+        required: [workitem_id, instance_id, assignee_id]
+        properties:
+          workitem_id: { type: string }
+          instance_id: { type: string }
+          assignee_id: { type: string }
+      x-passage-type: dev.passage.workflow.workitem.assigned.v1
+    workitemEscalated:
+      name: escalated
+      payload:
+        type: object
+        required: [workitem_id]
+        properties:
+          workitem_id: { type: string }
+      x-passage-type: dev.passage.workflow.workitem.escalated.v1
+    runStarted:
+      name: started
+      payload:
+        type: object
+        required: [job_code, run_id]
+        properties:
+          job_code: { type: string }
+          run_id: { type: string }
+      x-passage-type: dev.passage.batch.run.started.v1
+    runCompleted:
+      name: completed
+      payload:
+        type: object
+        required: [job_code, run_id]
+        properties:
+          job_code: { type: string }
+          run_id: { type: string }
+      x-passage-type: dev.passage.batch.run.completed.v1
+    runFailed:
+      name: failed
+      payload:
+        type: object
+        required: [job_code, run_id]
+        properties:
+          job_code: { type: string }
+          run_id: { type: string }
+      x-passage-type: dev.passage.batch.run.failed.v1
+    messageSent:
+      name: sent
+      payload:
+        type: object
+        required: [message_id, channel]
+        properties:
+          message_id: { type: string }
+          channel: { type: string }
+      x-passage-type: dev.passage.notify.message.sent.v1

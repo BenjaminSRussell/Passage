@@ -1,0 +1,293 @@
+openapi: 3.1.0
+info:
+  title: batch
+  version: 0.1.0
+  description: Event backbone, approval workflow, batch jobs and notify (Wave 04).
+servers:
+  - url: https://app.local.passage.dev
+paths:
+  /v1/workflows/definitions:
+    post:
+      operationId: saveWorkflowDefinition
+      x-passage-duty: workflow.write
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/Definition' } } }
+      responses:
+        '201': { description: Definition saved. }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/workflows/instances:
+    post:
+      operationId: submitInstance
+      x-passage-duty: workflow.write
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/Submit' } } }
+      responses:
+        '201': { description: Instance submitted. }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/workflows/instances/{id}:
+    get:
+      operationId: getInstance
+      x-passage-duty: workflow.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Instance. }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/workflows/instances/{id}/actions:
+    post:
+      operationId: instanceAction
+      x-passage-duty: workflow.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/Action' } } }
+      responses:
+        '200': { description: Action applied. }
+        '409': { description: Recall not allowed after approval (WFL-0401). }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/workitems:
+    get:
+      operationId: listWorkItems
+      x-passage-duty: workflow.approve
+      parameters:
+        - { name: assignee, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string } }
+      responses:
+        '200': { description: Inbox. }
+  /v1/workitems/{id}/actions:
+    post:
+      operationId: actOnWorkItem
+      x-passage-duty: workflow.approve
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/Action' } } }
+      responses:
+        '200': { description: Work item updated. }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/batch/jobs:
+    post:
+      operationId: saveJob
+      x-passage-duty: batch.write
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/Job' } } }
+      responses:
+        '201': { description: Job saved. }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/batch/jobs/{code}:
+    get:
+      operationId: getJob
+      x-passage-duty: batch.read
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Job. }
+  /v1/batch/jobs/{code}/runs:
+    post:
+      operationId: startRun
+      x-passage-duty: batch.write
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+        - { name: Idempotency-Key, in: header, schema: { type: string } }
+      requestBody:
+        content: { application/json: { schema: { type: object, properties: { rows: { type: integer } } } } }
+      responses:
+        '201': { description: Run started. }
+        '409': { description: Exclusive job overlap (WFL-0409). }
+  /v1/batch/runs/{id}:
+    get:
+      operationId: getRun
+      x-passage-duty: batch.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Run. }
+  /v1/notify/templates:
+    post:
+      operationId: publishTemplate
+      x-passage-duty: notify.write
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/Template' } } }
+      responses:
+        '201': { description: Template published. }
+        '400': { description: Unknown placeholder (NTF-0406). }
+  /v1/notify/messages:
+    get:
+      operationId: listMessages
+      x-passage-duty: notify.read
+      parameters:
+        - { name: status, in: query, schema: { type: string } }
+      responses:
+        '200': { description: Outbound messages. }
+    post:
+      operationId: enqueueMessage
+      x-passage-duty: notify.send
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/Message' } } }
+      responses:
+        '202': { description: Queued. }
+  /v1/notify/messages/{id}/retry:
+    post:
+      operationId: retryMessage
+      x-passage-duty: notify.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Retry queued. }
+  /v1/notify/preferences/me:
+    put:
+      operationId: putMyPreference
+      x-passage-duty: notify.write
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/Preference' } } }
+      responses:
+        '200': { description: Preference saved. }
+  /v1/events/topics:
+    get:
+      operationId: listTopics
+      x-passage-duty: events.read
+      responses:
+        '200': { description: Topic catalog. }
+  /v1/events/asyncapi/{domain}:
+    get:
+      operationId: getAsyncAPI
+      x-passage-duty: events.read
+      parameters:
+        - { name: domain, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: AsyncAPI document. }
+  /v1/events/schemas/{type}:
+    get:
+      operationId: getSchema
+      x-passage-duty: events.read
+      parameters:
+        - { name: type, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Schema. }
+    post:
+      operationId: registerSchema
+      x-passage-duty: events.write
+      parameters:
+        - { name: type, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object } } }
+      responses:
+        '201': { description: Registered. }
+        '409': { description: Incompatible schema (EVT-0401). }
+  /v1/events/replay:
+    post:
+      operationId: replayTopic
+      x-passage-duty: batch.write
+      responses:
+        '202': { description: Replay accepted. }
+  /healthz:
+    get:
+      operationId: liveness
+      x-passage-duty: public
+      responses:
+        '200': { description: Process is alive. }
+  /readyz:
+    get:
+      operationId: readiness
+      x-passage-duty: public
+      responses:
+        '200': { description: Database reachable. }
+        '503': { description: Database unreachable. }
+components:
+  schemas:
+    Definition:
+      type: object
+      additionalProperties: false
+      required: [entity, legalEntityId, steps]
+      properties:
+        entity: { type: string }
+        legalEntityId: { type: string, format: uuid }
+        commentRequired: { type: boolean }
+        adminUserId: { type: string, format: uuid }
+        steps: { type: array, items: { type: object } }
+    Submit:
+      type: object
+      additionalProperties: false
+      required: [entity, recordId, legalEntityId]
+      properties:
+        entity: { type: string }
+        recordId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        assignees: { type: array, items: { type: string, format: uuid } }
+    Action:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      properties:
+        kind: { type: string, enum: [approve, reject, delegate, request_change, recall, cancel] }
+        comment: { type: string }
+        delegate: { type: string }
+    Job:
+      type: object
+      additionalProperties: false
+      required: [code, handler]
+      properties:
+        code: { type: string }
+        handler: { type: string }
+        partitionCount: { type: integer }
+        concurrency: { type: integer }
+        exclusive: { type: boolean }
+        status: { type: string }
+        partitionStrategy: { type: string }
+        priority: { type: string }
+        id: { type: string }
+    Template:
+      type: object
+      additionalProperties: false
+      required: [code, channel, language, subject, body]
+      properties:
+        code: { type: string }
+        channel: { type: string, enum: [email, in_app, webhook] }
+        language: { type: string }
+        layer: { type: string }
+        version: { type: integer }
+        subject: { type: string }
+        body: { type: string }
+        allowedPlaceholders: { type: array, items: { type: string } }
+    Message:
+      type: object
+      additionalProperties: false
+      properties:
+        channel: { type: string }
+        recipientUserId: { type: string, format: uuid }
+        recipientAddress: { type: string }
+        templateCode: { type: string }
+        subject: { type: string }
+        body: { type: string }
+    Preference:
+      type: object
+      additionalProperties: false
+      required: [eventClass, channels]
+      properties:
+        userId: { type: string, format: uuid }
+        eventClass: { type: string }
+        channels: { type: array, items: { type: string } }
+        digest: { type: string, enum: [none, daily, weekly] }
+  responses:
+    Problem:
+      description: RFC 9457 problem details
+      content:
+        application/problem+json:
+          schema:
+            type: object
+            required: [type, title, status, code]
+            properties:
+              type: { type: string }
+              title: { type: string }
+              status: { type: integer }
+              code: { type: string }
+              detail: { type: string }

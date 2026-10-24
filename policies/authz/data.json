@@ -13,9 +13,23 @@
     "Maintain entity metadata": {"permissions": [{"resource": "/v1/metadata", "methods": ["GET", "POST", "PUT", "DELETE"]}]},
     "Apply extensions": {"permissions": [{"resource": "/v1/extensions", "methods": ["GET", "POST", "PUT"]}]},
     "Maintain workflows": {"permissions": [{"resource": "/v1/workflows", "methods": ["GET", "POST", "PUT", "DELETE"]}]},
-    "Approve workflow": {"permissions": [{"resource": "/v1/work-items", "methods": ["POST"]}]},
-    "Maintain batch jobs": {"permissions": [{"resource": "/v1/batch/jobs", "methods": ["GET", "POST", "PUT", "DELETE"]}]},
-    "View batch history": {"permissions": [{"resource": "/v1/batch/history", "methods": ["GET"]}]},
+    "Submit for approval": {"permissions": [{"resource": "/v1/workflows/instances", "methods": ["POST"]}]},
+    "Approve workflow": {"permissions": [{"resource": "/v1/workitems", "methods": ["GET", "POST"]}]},
+    "Maintain batch jobs": {"permissions": [
+      {"resource": "/v1/batch/jobs", "methods": ["GET", "POST", "PUT", "DELETE"]},
+      {"resource": "/v1/events/replay", "methods": ["POST"]}
+    ]},
+    "View batch history": {"permissions": [
+      {"resource": "/v1/batch/runs", "methods": ["GET"]},
+      {"resource": "/v1/events/topics", "methods": ["GET"]}
+    ]},
+    "Maintain message templates": {"permissions": [{"resource": "/v1/notify/templates", "methods": ["GET", "POST", "PUT"]}]},
+    "Maintain notification settings": {"permissions": [
+      {"resource": "/v1/notify/settings", "methods": ["GET", "PUT", "POST"]},
+      {"resource": "/v1/notify/preferences", "methods": ["GET", "PUT"]}
+    ]},
+    "View outbound messages": {"permissions": [{"resource": "/v1/notify/messages", "methods": ["GET"]}]},
+    "Send notifications": {"permissions": [{"resource": "/v1/notify/messages", "methods": ["POST"]}]},
     "View number sequences": {"permissions": [{"resource": "/v1/numbering", "methods": ["GET"]}]},
     "Maintain number sequences": {"permissions": [{"resource": "/v1/numbering", "methods": ["GET", "POST"]}]},
     "View audit log": {"permissions": [{"resource": "/v1/audit", "methods": ["GET"]}]},
