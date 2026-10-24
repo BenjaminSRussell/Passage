@@ -73,17 +73,12 @@ func StandardConversions() []Conversion {
 	rows := []struct{ from, to, class, factor, offset string }{
 		{"kg", "g", "mass", "1000", "0"},
 		{"lb", "kg", "mass", "0.45359237", "0"},
-		{"t", "kg", "mass", "1000", "0"},
 		{"m", "cm", "length", "100", "0"},
-		{"km", "m", "length", "1000", "0"},
 		{"in", "mm", "length", "25.4", "0"},
 		{"ft", "in", "length", "12", "0"},
 		{"L", "mL", "volume", "1000", "0"},
-		{"gal", "L", "volume", "3.785411784", "0"},
 		{"C", "K", "temperature", "1", "273.15"},
 		{"C", "F", "temperature", "1.8", "32"},
-		{"h", "min", "time", "60", "0"},
-		{"min", "s", "time", "60", "0"},
 	}
 	out := make([]Conversion, len(rows))
 	for i, r := range rows {

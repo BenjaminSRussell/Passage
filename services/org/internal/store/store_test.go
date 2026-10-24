@@ -17,13 +17,17 @@ func principalContext(n int) context.Context {
 	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(n)})
 }
 
-func TestPostgres_TenantIsolationIdempotencyAndDuplicateCode(t *testing.T) {
+func newStore(t *testing.T, n int) (*store.Postgres, context.Context) {
 	pool := testkit.DB(t)
-	ctx := principalContext(1)
+	ctx := principalContext(n)
 	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
-	s := store.New(pool)
+	return store.New(pool), ctx
+}
+
+func TestPostgres_TenantIsolationIdempotencyAndDuplicateCode(t *testing.T) {
+	s, ctx := newStore(t, 1)
 	in := store.LegalEntity{Code: "US01", Name: "Passage US", Country: "US", Currency: "USD"}
 
 	first, err := s.CreateLegalEntity(ctx, in, "key-1")
@@ -55,12 +59,7 @@ func TestPostgres_TenantIsolationIdempotencyAndDuplicateCode(t *testing.T) {
 }
 
 func TestPostgres_ListPagesPastFirstPage(t *testing.T) {
-	pool := testkit.DB(t)
-	ctx := principalContext(3)
-	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
-		t.Fatal(err)
-	}
-	s := store.New(pool)
+	s, ctx := newStore(t, 3)
 	for _, code := range []string{"E1", "E2", "E3"} {
 		if _, err := s.CreateLegalEntity(ctx, store.LegalEntity{Code: code, Name: code, Country: "US", Currency: "USD"}, ""); err != nil {
 			t.Fatal(err)

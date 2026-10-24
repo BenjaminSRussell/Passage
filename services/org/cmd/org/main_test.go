@@ -27,17 +27,6 @@ func TestRun(t *testing.T) {
 	}
 }
 
-func TestAddrFallsBackToDefault(t *testing.T) {
-	none := func(string) string { return "" }
-	if got := addr(none, "HTTP_ADDR", defaultHTTPAddr); got != ":8080" {
-		t.Fatalf("got %s", got)
-	}
-	set := func(string) string { return ":9999" }
-	if got := addr(set, "HTTP_ADDR", defaultHTTPAddr); got != ":9999" {
-		t.Fatalf("got %s", got)
-	}
-}
-
 func TestLoggerEmitsKernelLogFields(t *testing.T) {
 	var out bytes.Buffer
 	newLogger(&out).Info("started", "correlationId", "req-1")

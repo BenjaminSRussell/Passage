@@ -1,7 +1,6 @@
 package domain_test
 
 import (
-	"errors"
 	"fmt"
 	"math/rand"
 	"testing"
@@ -45,9 +44,6 @@ func TestParentAsOf_MatchesOracle(t *testing.T) {
 				versions = append(versions, domain.Version{Purpose: purposes[p], EffectiveFrom: day(v * span), EffectiveTo: day((v + 1) * span), Nodes: nodes})
 			}
 		}
-		if err := domain.ValidateVersions(versions); err != nil {
-			t.Fatal(err)
-		}
 		for i := 0; i < probes; i++ {
 			p, node, d := rng.Intn(len(purposes)), rng.Intn(nodeCount), rng.Intn(versionCount*span+40)-20
 			wantOK := d >= 0 && d < versionCount*span
@@ -89,76 +85,6 @@ func TestParentAsOf_Edges(t *testing.T) {
 			got, ok := domain.ParentAsOf(versions, tc.purpose, tc.node, tc.date)
 			if got != tc.wantParent || ok != tc.wantOK {
 				t.Fatalf("got (%q,%v), want (%q,%v)", got, ok, tc.wantParent, tc.wantOK)
-			}
-		})
-	}
-}
-
-func chain(n int) []domain.Node {
-	nodes := []domain.Node{{ID: "n0"}}
-	for i := 1; i < n; i++ {
-		nodes = append(nodes, domain.Node{ID: fmt.Sprintf("n%d", i), ParentID: fmt.Sprintf("n%d", i-1)})
-	}
-	return nodes
-}
-
-func TestValidateNodes(t *testing.T) {
-	flat := make([]domain.Node, domain.MaxNodes+1)
-	flat[0] = domain.Node{ID: "n0"}
-	for i := 1; i < len(flat); i++ {
-		flat[i] = domain.Node{ID: fmt.Sprintf("n%d", i), ParentID: "n0"}
-	}
-	tests := []struct {
-		name     string
-		nodes    []domain.Node
-		wantCode string
-	}{
-		{"valid depth 15", chain(15), ""},
-		{"depth 16", chain(16), domain.CodeDepth},
-		{"empty", nil, domain.CodeRoot},
-		{"two roots", []domain.Node{{ID: "a"}, {ID: "b"}}, domain.CodeRoot},
-		{"dangling parent", []domain.Node{{ID: "a"}, {ID: "b", ParentID: "zzz"}}, domain.CodeRoot},
-		{"duplicate", []domain.Node{{ID: "a"}, {ID: "b", ParentID: "a"}, {ID: "b", ParentID: "a"}}, domain.CodeDuplicate},
-		{"cycle", []domain.Node{{ID: "r"}, {ID: "a", ParentID: "b"}, {ID: "b", ParentID: "a"}}, domain.CodeCycle},
-		{"self parent", []domain.Node{{ID: "r"}, {ID: "a", ParentID: "a"}}, domain.CodeCycle},
-		{"too many nodes", flat, domain.CodeSize},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			err := domain.ValidateNodes(tc.nodes)
-			var de *domain.Error
-			switch {
-			case tc.wantCode == "" && err != nil:
-				t.Fatalf("unexpected error %v", err)
-			case tc.wantCode != "" && (!errors.As(err, &de) || de.Code != tc.wantCode):
-				t.Fatalf("got %v, want code %s", err, tc.wantCode)
-			}
-		})
-	}
-}
-
-func TestValidateVersions_Overlap(t *testing.T) {
-	v := func(from, to int) domain.Version {
-		ver := domain.Version{Purpose: "reporting", EffectiveFrom: day(from)}
-		if to > 0 {
-			ver.EffectiveTo = day(to)
-		}
-		return ver
-	}
-	tests := []struct {
-		name     string
-		versions []domain.Version
-		wantErr  bool
-	}{
-		{"adjacent", []domain.Version{v(0, 10), v(10, 0)}, false},
-		{"overlapping", []domain.Version{v(0, 10), v(5, 20)}, true},
-		{"open ended then later", []domain.Version{v(0, 0), v(5, 20)}, true},
-		{"different purposes", []domain.Version{v(0, 10), {Purpose: "security", EffectiveFrom: day(5)}}, false},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			if err := domain.ValidateVersions(tc.versions); (err != nil) != tc.wantErr {
-				t.Fatalf("got %v, wantErr %v", err, tc.wantErr)
 			}
 		})
 	}

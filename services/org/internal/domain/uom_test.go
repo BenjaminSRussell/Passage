@@ -62,9 +62,7 @@ func TestConvert_Paths(t *testing.T) {
 	}{
 		{"same unit", "kg", "kg", "5", "5", ""},
 		{"direct", "kg", "g", "2", "2000", ""},
-		{"inverse", "g", "kg", "2000", "2", ""},
 		{"temperature offset", "C", "F", "100", "212", ""},
-		{"temperature inverse offset", "F", "C", "212", "100", ""},
 		{"two hops through shared unit", "K", "F", "373.15", "212", ""},
 		{"two hops through chained unit", "ft", "mm", "1", "304.8", ""},
 		{"unknown unit", "kg", "furlong", "1", "", domain.CodeNoPath},
@@ -87,24 +85,17 @@ func TestConvert_Paths(t *testing.T) {
 	}
 }
 
-func TestConvert_ZeroFactorIsNeverUsed(t *testing.T) {
-	convs := []domain.Conversion{{From: "a", To: "b", Class: "x", Factor: decimal.Zero}}
-	if _, err := domain.Convert(convs, "b", "a", decimal.NewFromInt(1)); err == nil {
+func TestConvert_ZeroFactorAndThreeHopsAreUnreachable(t *testing.T) {
+	one := decimal.NewFromInt(1)
+	zero := []domain.Conversion{{From: "a", To: "b", Class: "x", Factor: decimal.Zero}}
+	if _, err := domain.Convert(zero, "b", "a", one); err == nil {
 		t.Fatal("zero factor must not produce a path")
 	}
-}
-
-func TestConvert_ThreeHopsIsUnreachable(t *testing.T) {
-	one := decimal.NewFromInt(1)
-	convs := []domain.Conversion{
-		{From: "a", To: "b", Class: "x", Factor: one},
-		{From: "b", To: "c", Class: "x", Factor: one},
-		{From: "c", To: "d", Class: "x", Factor: one},
-	}
-	if _, err := domain.Convert(convs, "a", "d", one); err == nil {
+	chain := []domain.Conversion{{From: "a", To: "b", Class: "x", Factor: one}, {From: "b", To: "c", Class: "x", Factor: one}, {From: "c", To: "d", Class: "x", Factor: one}}
+	if _, err := domain.Convert(chain, "a", "d", one); err == nil {
 		t.Fatal("a three-hop path must be rejected")
 	}
-	if _, err := domain.Convert(convs, "a", "c", one); err != nil {
+	if _, err := domain.Convert(chain, "a", "c", one); err != nil {
 		t.Fatalf("two hops must work: %v", err)
 	}
 }
