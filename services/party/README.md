@@ -1,6 +1,6 @@
 # party
 
-Global party and business partner service (PSG-7). This slice delivers the Fellegi-Sunter duplicate engine, tax registration validation with a VIES adapter, and the deployable skeleton. See `NOT-IMPLEMENTED.md` for everything else.
+Global party and business partner service (PSG-7). This slice delivers the Fellegi-Sunter duplicate engine, tax registration format validation, and the deployable skeleton. See `NOT-IMPLEMENTED.md` for everything else.
 
 ## Run
 
@@ -40,4 +40,4 @@ No database is needed in this slice.
 
 `party_tax_validations_total{status}`, `party_tax_validations_rejected_total`, `party_tax_checker_failures_total`.
 
-VAT numbers are format-checked only: without a live VIES client the validation status is `unverified`. `VIES_FIXTURE=1` swaps in the recorded test fixture for dev and test; never set it in production.
+VAT numbers are format-checked only and return `unverified`; this slice has no VIES client.

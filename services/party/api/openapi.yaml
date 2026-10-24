@@ -10,7 +10,7 @@ paths:
     post:
       operationId: validateTaxRegistration
       x-passage-duty: party.write
-      description: Format-checks a tax number, then asks the VIES adapter for VAT numbers. An adapter outage or timeout yields validationStatus unverified, never an error.
+      description: Format-checks tax numbers. VAT returns validationStatus unverified until VIES integration is implemented.
       parameters:
         - name: Idempotency-Key
           in: header

@@ -153,6 +153,24 @@ func TestFindCandidatesEdgeCases(t *testing.T) {
 	}
 }
 
+func TestFindDuplicatePairsBoundsDenseNameBlocks(t *testing.T) {
+	records := make([]domain.PartyRecord, 1000)
+	for i := range records {
+		records[i] = domain.PartyRecord{
+			ID: fmt.Sprintf("p%04d", i), Type: "organization",
+			Name: fmt.Sprintf("Common entity %04d", i), TaxID: fmt.Sprintf("%09d", i),
+			Street: fmt.Sprintf("Street %04d", i), Postal: fmt.Sprintf("%05d", i), Country: "US",
+		}
+	}
+	got := domain.FindDuplicatePairs(records)
+	if len(got) == 0 {
+		t.Fatal("dense name block produced no candidates")
+	}
+	if len(got) > len(records)*64 {
+		t.Fatalf("dense name block produced %d pairs; expected bounded neighbor comparisons", len(got))
+	}
+}
+
 func TestNormalize(t *testing.T) {
 	tests := []struct{ in, want string }{
 		{"  ACME,  Foods Ltd. ", "acme foods ltd"},

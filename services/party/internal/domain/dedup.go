@@ -13,6 +13,7 @@ const (
 	ClassLikely             = "likely_duplicate"
 	ClassPossible           = "possible"
 	namePrefixLen           = 4
+	maxNameBlockNeighbors   = 64
 	strongJW                = 0.92
 	weakJW                  = 0.85
 )
@@ -204,9 +205,22 @@ func FindDuplicatePairs(records []PartyRecord) []Match {
 	}
 	seen := map[[2]int]bool{}
 	var matches []Match
-	for _, members := range blocks {
+	for key, members := range blocks {
+		if strings.HasPrefix(key, "n:") {
+			sort.Slice(members, func(i, j int) bool {
+				a, b := Normalize(records[members[i]].Name), Normalize(records[members[j]].Name)
+				if a == b {
+					return records[members[i]].ID < records[members[j]].ID
+				}
+				return a < b
+			})
+		}
 		for x, i := range members {
-			for _, j := range members[x+1:] {
+			end := len(members)
+			if strings.HasPrefix(key, "n:") && end > x+1+maxNameBlockNeighbors {
+				end = x + 1 + maxNameBlockNeighbors
+			}
+			for _, j := range members[x+1 : end] {
 				pair := [2]int{i, j}
 				if seen[pair] {
 					continue

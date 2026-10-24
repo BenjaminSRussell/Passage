@@ -4,11 +4,11 @@
 |---|---|---|
 | AC1 dedup precision and recall | built | `internal/domain/dedup.go`; `dedup_test.go` seeds 10k parties with 500 planted duplicates. The PRD fixture `parties-10k.jsonl` is not in the repo, so the generator lives in the test |
 | AC2 merge with atomic reference rewrite and integrity audit | slice 2 of PSG-7 | needs migrations, store, outbox and `party.party.merged.v1` |
-| AC3 VIES adapter against recorded fixture | built | `internal/vies` and `internal/vies/testdata/vies-recorded.json`; the fixture is a small hand-assembled stand-in for the PRD's 200-number recording and is served only when `VIES_FIXTURE=1`; by default VAT is format-checked and reported `unverified` |
+| AC3 VAT results against recorded VIES responses | not built | No VIES protocol client or authentic recorded responses; VAT is format-checked and reported `unverified` |
 | AC4 credit-limit change approval with Temporal test | slice 2 of PSG-7 | needs customer persistence, `pending_change` and a workflow engine decision; `go.temporal.io/sdk` is not in the kernel and needs README justification |
 | Deliverable 1: persisted parties and roles | slice 2 of PSG-7 | no store, migrations or RLS yet |
 | Deliverable 2: merge workflow and survivorship, `:match` endpoint | slice 2 of PSG-7 | needs the party store; the scoring engine is built |
-| Deliverable 3: tax numbers | partly built | VAT (EU), EIN and GSTIN format checks and the VIES fixture adapter. Not built: live VIES HTTP client, 30-day cache, alert after 3 consecutive timeouts, IRS TIN and GSTN lookups, UK mod-97, ABN, CNPJ, RFC, UTR |
+| Deliverable 3: tax numbers | partly built | VAT (EU), EIN and GSTIN format checks. Not built: VIES protocol client and cache, alert after 3 consecutive timeouts, IRS TIN and GSTN lookups, UK mod-97, ABN, CNPJ, RFC, UTR |
 | Deliverable 4: groups, posting profiles, payment and delivery terms, credit limits | slice 2 of PSG-7 | needs persistence; posting profile references the ledger |
 | Deliverable 5: data governance, stewardship queue, change approval | slice 2 of PSG-7 | needs persistence and the workflow engine |
 | Deliverable 6: vendor certifications, diversity classes, installment schedules | later slice of PSG-7 | needs persistence |

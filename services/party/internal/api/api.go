@@ -81,17 +81,19 @@ func (a *API) Metrics() http.Handler {
 		for _, s := range reportedStatuses {
 			fmt.Fprintf(w, "party_tax_validations_total{status=%q} %d\n", s, a.statuses[s].Load())
 		}
-		fmt.Fprintf(w, "# HELP party_tax_validations_rejected_total Validations rejected for a bad request or format.\n# TYPE party_tax_validations_rejected_total counter\nparty_tax_validations_rejected_total %d\n", a.rejected.Load())
+		fmt.Fprintf(w, "# HELP party_tax_validations_rejected_total Tax validation requests rejected for malformed requests, tenant context, or tax format.\n# TYPE party_tax_validations_rejected_total counter\nparty_tax_validations_rejected_total %d\n", a.rejected.Load())
 		fmt.Fprintf(w, "# HELP party_tax_checker_failures_total Checker calls that failed and left the registration unverified.\n# TYPE party_tax_checker_failures_total counter\nparty_tax_checker_failures_total %d\n", a.failures.Load())
 	})
 }
 
 func (a *API) validate(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
+		a.rejected.Add(1)
 		return
 	}
 	var req validateRequest
 	if err := httpx.Decode(r, &req); err != nil {
+		a.rejected.Add(1)
 		httpx.Fail(w, r, err)
 		return
 	}
@@ -103,6 +105,10 @@ func (a *API) validate(w http.ResponseWriter, r *http.Request) {
 		a.rejected.Add(1)
 		httpx.Fail(w, r, formatProblem(err))
 		return
+	}
+	if _, ok := a.statuses[status]; !ok {
+		slog.Error("tax checker returned unknown status", "status", status)
+		status = domain.StatusUnverified
 	}
 	a.statuses[status].Add(1)
 	httpx.JSON(w, http.StatusOK, validateResponse{

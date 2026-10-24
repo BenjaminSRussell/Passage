@@ -14,7 +14,6 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/party/internal/api"
 	"github.com/BenjaminSRussell/passage/services/party/internal/domain"
-	"github.com/BenjaminSRussell/passage/services/party/internal/vies"
 )
 
 const validatePath = "/v1/party/tax-registrations:validate"
@@ -149,24 +148,6 @@ func TestValidateRejectsMalformedTenant(t *testing.T) {
 	}
 }
 
-func TestValidateAgainstRecordedFixture(t *testing.T) {
-	fixture, err := vies.Recorded()
-	if err != nil {
-		t.Fatal(err)
-	}
-	r, _ := newRouter(fixture)
-	tests := []struct{ body, want string }{
-		{`{"type":"VAT","country":"DE","number":"DE123456789"}`, `"validationStatus":"valid"`},
-		{`{"type":"VAT","country":"DE","number":"DE987654321"}`, `"validationStatus":"invalid"`},
-		{`{"type":"VAT","country":"DE","number":"DE555555555"}`, `"validationStatus":"unverified"`},
-	}
-	for _, tc := range tests {
-		if rec := do(r, http.MethodPost, validatePath, tc.body, "party.write", true); !strings.Contains(rec.Body.String(), tc.want) {
-			t.Errorf("%s: got %s", tc.body, rec.Body.String())
-		}
-	}
-}
-
 func TestMetricsCountBusinessOperations(t *testing.T) {
 	checker := &stubChecker{status: domain.StatusValid}
 	r, a := newRouter(checker)
@@ -174,18 +155,33 @@ func TestMetricsCountBusinessOperations(t *testing.T) {
 	checker.status, checker.err = "", errors.New("vies down")
 	do(r, http.MethodPost, validatePath, `{"type":"VAT","country":"DE","number":"DE123456789"}`, "party.write", true)
 	do(r, http.MethodPost, validatePath, `{"type":"VAT","country":"DE","number":"bad"}`, "party.write", true)
+	do(r, http.MethodPost, validatePath, `{`, "party.write", true)
+	do(r, http.MethodPost, validatePath, `{"type":"EIN","number":"12-3456789"}`, "party.write", false)
 
 	rec := httptest.NewRecorder()
 	a.Metrics().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	for _, want := range []string{
 		`party_tax_validations_total{status="valid"} 1`,
 		`party_tax_validations_total{status="unverified"} 1`,
-		`party_tax_validations_rejected_total 1`,
+		`party_tax_validations_rejected_total 3`,
 		`party_tax_checker_failures_total 1`,
 	} {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Errorf("metrics missing %q:\n%s", want, rec.Body.String())
 		}
+	}
+}
+
+func TestUnknownCheckerStatusCountsAsUnverified(t *testing.T) {
+	r, a := newRouter(&stubChecker{status: domain.Status("unexpected")})
+	rec := do(r, http.MethodPost, validatePath, `{"type":"VAT","country":"DE","number":"DE123456789"}`, "party.write", true)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"validationStatus":"unverified"`) {
+		t.Fatalf("got %d %s", rec.Code, rec.Body.String())
+	}
+	metrics := httptest.NewRecorder()
+	a.Metrics().ServeHTTP(metrics, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if !strings.Contains(metrics.Body.String(), `party_tax_validations_total{status="unverified"} 1`) {
+		t.Fatalf("unexpected status was not counted as unverified: %s", metrics.Body.String())
 	}
 }
 
