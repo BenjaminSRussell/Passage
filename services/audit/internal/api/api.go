@@ -71,8 +71,8 @@ func (a *API) Register(r chi.Router) {
 func (a *API) Metrics() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-		fmt.Fprintf(w, "# HELP audit_changes_applied_total Field changes appended.\n# TYPE audit_changes_applied_total counter\naudit_changes_applied_total %d\n", a.applied.Load())
-		fmt.Fprintf(w, "# HELP audit_changes_failed_total Failed ingest calls.\n# TYPE audit_changes_failed_total counter\naudit_changes_failed_total %d\n", a.failed.Load())
+		_, _ = fmt.Fprintf(w, "# HELP audit_changes_applied_total Field changes appended.\n# TYPE audit_changes_applied_total counter\naudit_changes_applied_total %d\n", a.applied.Load())
+		_, _ = fmt.Fprintf(w, "# HELP audit_changes_failed_total Failed ingest calls.\n# TYPE audit_changes_failed_total counter\naudit_changes_failed_total %d\n", a.failed.Load())
 	})
 }
 

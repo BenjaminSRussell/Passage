@@ -57,8 +57,8 @@ func (a *API) Register(r chi.Router) {
 func (a *API) Metrics() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-		fmt.Fprintf(w, "# HELP numbering_allocated_total Numbers issued.\n# TYPE numbering_allocated_total counter\nnumbering_allocated_total %d\n", a.allocated.Load())
-		fmt.Fprintf(w, "# HELP numbering_failed_total Failed allocations or creates.\n# TYPE numbering_failed_total counter\nnumbering_failed_total %d\n", a.failed.Load())
+		_, _ = fmt.Fprintf(w, "# HELP numbering_allocated_total Numbers issued.\n# TYPE numbering_allocated_total counter\nnumbering_allocated_total %d\n", a.allocated.Load())
+		_, _ = fmt.Fprintf(w, "# HELP numbering_failed_total Failed allocations or creates.\n# TYPE numbering_failed_total counter\nnumbering_failed_total %d\n", a.failed.Load())
 	})
 }
 

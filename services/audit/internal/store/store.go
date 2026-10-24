@@ -119,12 +119,21 @@ func fireAlerts(ctx context.Context, tx pgx.Tx, tenantID string, change domain.C
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	var rules []domain.AlertRule
 	for rows.Next() {
 		var rule domain.AlertRule
 		if err := rows.Scan(&rule.ID, &rule.Entity, &rule.Field, &rule.Kind); err != nil {
+			rows.Close()
 			return err
 		}
+		rules = append(rules, rule)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	for _, rule := range rules {
 		if !domain.Match(rule, change) {
 			continue
 		}
@@ -134,7 +143,7 @@ func fireAlerts(ctx context.Context, tx pgx.Tx, tenantID string, change domain.C
 			return err
 		}
 	}
-	return rows.Err()
+	return nil
 }
 
 // Query returns field changes for one record, oldest first.
