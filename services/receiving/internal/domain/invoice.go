@@ -29,10 +29,9 @@ type VendorInvoice struct {
 	Lines         []PostLine
 }
 
-func clearingFor(item GrirItem, qty decimal.Decimal) money.Amount {
-	remaining := item.ReceivedQty.Sub(item.InvoicedQty)
-	if qty.Equal(remaining) {
-		return money.Amount{Value: item.OpenAmount(), Currency: item.ReceivedAmount.Currency}
+func clearingFor(item GrirItem, qty decimal.Decimal, exhausts bool, clearedInInvoice decimal.Decimal) money.Amount {
+	if exhausts {
+		return money.Amount{Value: item.OpenAmount().Sub(clearedInInvoice), Currency: item.ReceivedAmount.Currency}
 	}
 	return roundedMoney(item.ReceivedAmount.Value.Mul(qty).Div(item.ReceivedQty), item.ReceivedAmount.Currency)
 }
@@ -58,6 +57,7 @@ func PostInvoice(ctx context.Context, in VendorInvoice, periods PeriodControl, l
 		RateType:       "spot",
 	}
 	claimed := map[*GrirItem]decimal.Decimal{}
+	cleared := map[*GrirItem]decimal.Decimal{}
 	clearings := make([]money.Amount, len(in.Lines))
 	payable := money.Amount{Value: decimal.Zero, Currency: in.Currency}
 	for i, l := range in.Lines {
@@ -68,7 +68,9 @@ func PostInvoice(ctx context.Context, in VendorInvoice, periods PeriodControl, l
 		if claimed[l.Item].GreaterThan(l.Item.ReceivedQty.Sub(l.Item.InvoicedQty)) {
 			return JournalEntry{}, fail(CodeOverInvoice, "invoice line %d exceeds received uninvoiced quantity", i+1)
 		}
-		clearings[i] = clearingFor(*l.Item, l.Qty)
+		exhausts := claimed[l.Item].Equal(l.Item.ReceivedQty.Sub(l.Item.InvoicedQty))
+		clearings[i] = clearingFor(*l.Item, l.Qty, exhausts, cleared[l.Item])
+		cleared[l.Item] = cleared[l.Item].Add(clearings[i].Value)
 		amount := roundedMoney(l.Qty.Mul(l.UnitPrice), in.Currency)
 		payable.Value = payable.Value.Add(amount.Value)
 		entry.Lines = append(entry.Lines, JournalLine{Account: profile.GRIR, Amount: clearings[i]})

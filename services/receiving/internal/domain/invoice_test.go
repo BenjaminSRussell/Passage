@@ -126,3 +126,15 @@ func TestPostInvoice_BalancedAndVariancePosting(t *testing.T) {
 		})
 	}
 }
+
+func TestPostInvoice_SplitLinesExhaustingItemClearExactRemainder(t *testing.T) {
+	item := grirItem("3", "1")
+	in := invoiceFor(item, "1", "1", august15)
+	in.Lines = append(in.Lines, in.Lines[0], in.Lines[0])
+	if _, err := domain.PostInvoice(context.Background(), in, domain.FakePeriods{Status: domain.PeriodOpen}, &domain.FakeLedger{}, testProfile); err != nil {
+		t.Fatal(err)
+	}
+	if !item.OpenAmount().IsZero() || !item.InvoicedQty.Equal(dec("3")) {
+		t.Fatalf("open %s invoiced %s, want 0 and 3", item.OpenAmount(), item.InvoicedQty)
+	}
+}
