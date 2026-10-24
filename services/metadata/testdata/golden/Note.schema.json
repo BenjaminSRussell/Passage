@@ -1,0 +1,1 @@
+{"$id":"https://passage.dev/schemas/platform/Note","$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"authorId":{"format":"uuid","type":"string"},"body":{"type":"string"}},"required":["body","authorId"],"title":"Note","type":"object"}

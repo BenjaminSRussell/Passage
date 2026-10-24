@@ -1,0 +1,118 @@
+openapi: 3.1.0
+info:
+  title: Passage Metadata Registry API
+  version: 1.0.0
+paths:
+  /v1/metadata/entities:
+    post:
+      operationId: publishEntity
+      x-passage-duty: metadata.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Entity' }
+      responses:
+        '201': { description: Published metadata version }
+        '409': { $ref: '#/components/responses/Problem' }
+  /v1/metadata/entities/{entity}/schema:
+    get:
+      operationId: getEffectiveEntitySchema
+      x-passage-duty: metadata.read
+      parameters:
+        - { name: entity, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Effective JSON Schema 2020-12 contract
+          content:
+            application/schema+json:
+              schema: { type: object }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/metadata/extensions:
+    post:
+      operationId: applyEntityExtension
+      x-passage-duty: metadata.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Extension' }
+      responses:
+        '201': { description: Atomically applied extension version }
+        '400': { $ref: '#/components/responses/Problem' }
+  /v1/metadata/rules/evaluate:
+    post:
+      operationId: evaluateDecisionTable
+      x-passage-duty: metadata.read
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [table, input] }
+      responses:
+        '200': { description: Typed outputs and matched-row explanation }
+        '400': { $ref: '#/components/responses/Problem' }
+  /v1/data/{entity}:
+    parameters:
+      - { name: entity, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: listGeneratedEntityRecords
+      x-passage-duty: metadata.data.read
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
+      responses:
+        '200':
+          description: Generated entity records
+          content:
+            application/json:
+              schema: { type: array, items: { type: object } }
+    post:
+      operationId: createGeneratedEntityRecord
+      x-passage-duty: metadata.data.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '201': { description: Generated entity record }
+        '400': { $ref: '#/components/responses/Problem' }
+components:
+  schemas:
+    Entity:
+      type: object
+      required: [name, domain, table_group, fields]
+      properties:
+        name: { type: string }
+        domain: { type: string }
+        table_group: { type: string }
+        fields: { type: array, items: { type: object } }
+        enums: { type: array, items: { type: object } }
+        relations: { type: array, items: { type: object } }
+        indexes: { type: array, items: { type: object } }
+        hooks: { type: array, items: { type: object } }
+    Extension:
+      type: object
+      required: [name, entity]
+      properties:
+        name: { type: string }
+        entity: { type: string }
+        fields: { type: array, items: { type: object } }
+        enum_values: { type: array, items: { type: object } }
+        hooks: { type: array, items: { type: object } }
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        code: { type: string }
+        detail: { type: string }
+        traceId: { type: string }
+  responses:
+    Problem:
+      description: RFC 9457 problem details
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }

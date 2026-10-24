@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://passage.dev/schemas/metadata/entity.v1.json",
+  "title": "Passage Entity Definition v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "domain", "table_group", "fields"],
+  "properties": {
+    "name": { "type": "string", "pattern": "^[A-Z][A-Za-z0-9]{0,47}$" },
+    "domain": { "type": "string", "pattern": "^[a-z][a-z0-9]{0,31}$" },
+    "table_group": {
+      "enum": ["main", "group", "transaction", "worksheet_header", "worksheet_line", "parameter", "reference"]
+    },
+    "per_legal_entity": { "type": "boolean", "default": false },
+    "soft_delete": { "type": "boolean", "default": false },
+    "breaking": { "type": "boolean", "default": false },
+    "audit": { "type": "boolean", "default": false },
+    "title_fields": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/fieldName" },
+      "uniqueItems": true
+    },
+    "fields": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/field" }
+    },
+    "enums": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/enum" }
+    },
+    "relations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/relation" }
+    },
+    "indexes": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/index" }
+    },
+    "hooks": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/hook" }
+    }
+  },
+  "$defs": {
+    "fieldName": {
+      "type": "string",
+      "maxLength": 48,
+      "pattern": "^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$"
+    },
+    "field": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "type"],
+      "properties": {
+        "name": { "$ref": "#/$defs/fieldName" },
+        "type": {
+          "enum": ["string", "text", "int32", "int64", "decimal", "money", "bool", "date", "datetime", "time", "uuid", "enum", "json", "bytes"]
+        },
+        "length": { "type": "integer", "minimum": 1, "maximum": 4000 },
+        "precision": { "type": "integer", "minimum": 1, "maximum": 38 },
+        "scale": { "type": "integer", "minimum": 0, "maximum": 12 },
+        "enum": { "type": "string" },
+        "required": { "type": "boolean" },
+        "unique": { "type": "boolean" },
+        "default": { "type": "string" },
+        "computed": { "type": "string" },
+        "visibility": { "enum": ["", "always", "advanced", "hidden"] },
+        "pii": { "enum": ["", "none", "personal", "sensitive"] },
+        "audit": { "type": "boolean" },
+        "label": { "type": "string" }
+      }
+    },
+    "enum": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "values"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[A-Z][A-Za-z0-9]{0,47}$" },
+        "values": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "code"],
+            "properties": {
+              "name": { "$ref": "#/$defs/fieldName" },
+              "code": { "type": "integer", "minimum": 0, "maximum": 999 },
+              "label": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "relation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from_field", "to_entity", "to_field"],
+      "properties": {
+        "from_field": { "$ref": "#/$defs/fieldName" },
+        "to_entity": { "type": "string", "pattern": "^[A-Z][A-Za-z0-9]{0,47}$" },
+        "to_field": { "$ref": "#/$defs/fieldName" },
+        "on_delete": { "enum": ["", "restrict", "cascade", "set_null"] }
+      }
+    },
+    "index": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fields"],
+      "properties": {
+        "fields": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/fieldName" } },
+        "unique": { "type": "boolean" },
+        "where": { "type": "string" }
+      }
+    },
+    "hook": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "expr"],
+      "properties": {
+        "name": { "enum": ["initValue", "validateField", "validateWrite", "validateDelete", "afterWrite", "afterDelete"] },
+        "expr": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

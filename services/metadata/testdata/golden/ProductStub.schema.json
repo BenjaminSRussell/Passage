@@ -1,0 +1,1 @@
+{"$id":"https://passage.dev/schemas/product/ProductStub","$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"active":{"default":"true","type":"boolean"},"description":{"type":"string"},"sku":{"maxLength":40,"type":"string"},"uom":{"maxLength":8,"type":"string"}},"required":["sku","uom"],"title":"ProductStub","type":"object"}
