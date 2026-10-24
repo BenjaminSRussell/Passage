@@ -3,7 +3,7 @@ package authz
 import rego.v1
 
 test_all_seeded_duties_allow_their_declared_permissions if {
-	count(data.duties) == 22
+	count(data.duties) == 32
 	every duty, spec in data.duties {
 		count(spec.permissions) > 0
 		every permission in spec.permissions {
@@ -76,6 +76,24 @@ test_neighbor_path_does_not_match if {
 	}
 		with data.assignments as {"tenant-a": {"user-a": ["Maintain vendors"]}}
 	result.allow == false
+}
+
+test_view_products_can_get_but_not_post if {
+	allowed := decision with input as {
+		"subject": {"tenant_id": "tenant-a", "user_id": "user-a"},
+		"action": "GET",
+		"resource": "/v1/product/products/p1",
+	}
+		with data.assignments as {"tenant-a": {"user-a": ["View products"]}}
+	allowed.allow
+
+	denied := decision with input as {
+		"subject": {"tenant_id": "tenant-a", "user_id": "user-a"},
+		"action": "POST",
+		"resource": "/v1/product/products",
+	}
+		with data.assignments as {"tenant-a": {"user-a": ["View products"]}}
+	denied == {"allow": false, "duty_missing": "Maintain products"}
 }
 
 test_missing_identity_denied if {

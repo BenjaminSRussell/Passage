@@ -8,6 +8,8 @@ bin/
 .DS_Store
 __pycache__/
 *.pyc
+*.egg-info/
+.pytest_cache/
 .terraform/
 *.tfstate*
 docs/PRD-full.html

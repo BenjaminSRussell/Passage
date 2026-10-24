@@ -27,6 +27,16 @@
     "Maintain tenants": {"permissions": [{"resource": "/v1/tenants", "methods": ["GET", "POST", "PATCH"]}]},
     "Maintain legal entities": {"permissions": [{"resource": "/v1/legal-entities", "methods": ["GET", "POST", "PATCH"]}]},
     "Maintain saved views": {"permissions": [{"resource": "/v1/saved-views", "methods": ["GET", "POST", "PUT", "DELETE"]}]},
-    "Maintain hello ledger": {"permissions": [{"resource": "/v1/hello-ledger", "methods": ["GET", "POST", "PUT", "DELETE"]}]}
+    "Maintain hello ledger": {"permissions": [{"resource": "/v1/hello-ledger", "methods": ["GET", "POST", "PUT", "DELETE"]}]},
+    "View products": {"permissions": [{"resource": "/v1/product", "methods": ["GET"]}]},
+    "Maintain products": {"permissions": [{"resource": "/v1/product/products", "methods": ["GET", "POST", "PATCH", "PUT", "DELETE"]}]},
+    "Release products": {"permissions": [{"resource": "/v1/product/releases", "methods": ["POST"]}]},
+    "Maintain released products": {"permissions": [{"resource": "/v1/product/released-products", "methods": ["GET", "PATCH", "PUT"]}]},
+    "Maintain product setup": {"permissions": [{"resource": "/v1/product/setup", "methods": ["GET", "POST", "PATCH", "PUT", "DELETE"]}]},
+    "Configure products": {"permissions": [{"resource": "/v1/product/configuration-models", "methods": ["GET", "POST", "PATCH"]}]},
+    "Maintain product categories": {"permissions": [{"resource": "/v1/product/categories", "methods": ["GET", "POST", "PATCH", "PUT", "DELETE"]}]},
+    "Maintain documents": {"permissions": [{"resource": "/v1/product/documents", "methods": ["GET", "POST", "PATCH", "PUT"]}]},
+    "Allocate GTINs": {"permissions": [{"resource": "/v1/product/gtins", "methods": ["GET", "POST"]}]},
+    "Run product group conversions": {"permissions": [{"resource": "/v1/product/jobs", "methods": ["POST"]}]}
   }
 }
