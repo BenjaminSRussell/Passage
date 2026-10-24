@@ -94,3 +94,18 @@ BEGIN
   END LOOP;
 END
 $$;
+
+DO $$
+BEGIN
+  EXECUTE format('GRANT USAGE ON SCHEMA %I TO passage_app', current_schema());
+END
+$$;
+GRANT SELECT, INSERT, UPDATE, DELETE ON
+  receiving_receipt,
+  receiving_receipt_line,
+  receiving_serial,
+  receiving_grir_open_item,
+  idempotency_keys,
+  outbox,
+  consumer_inbox
+TO passage_app;

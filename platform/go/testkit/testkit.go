@@ -20,6 +20,9 @@ import (
 // EnvURL is the environment variable that enables database tests.
 const EnvURL = "PASSAGE_TEST_DATABASE_URL"
 
+// EnvAppURL is the application-role database URL used by RLS integration tests.
+const EnvAppURL = "PASSAGE_TEST_APP_DATABASE_URL"
+
 // DB returns a pool whose search_path is a throwaway schema, dropped on cleanup.
 func DB(t *testing.T) *pgxpool.Pool {
 	t.Helper()
@@ -49,6 +52,36 @@ func DB(t *testing.T) *pgxpool.Pool {
 		admin.Close()
 	})
 	return pool
+}
+
+// DBWithApp returns admin and application-role pools sharing a throwaway schema.
+// The admin pool applies migrations; assertions and application queries use app.
+func DBWithApp(t *testing.T) (*pgxpool.Pool, *pgxpool.Pool) {
+	t.Helper()
+	admin := DB(t)
+	appURL := os.Getenv(EnvAppURL)
+	if appURL == "" {
+		t.Fatalf("%s must be set for an RLS database test", EnvAppURL)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	var schema string
+	if err := admin.QueryRow(ctx, "select current_schema()").Scan(&schema); err != nil {
+		t.Fatal(err)
+	}
+	appConfig, err := pgxpool.ParseConfig(appURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	appConfig.ConnConfig.RuntimeParams["search_path"] = schema
+	app, err := pgxpool.NewWithConfig(ctx, appConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		app.Close()
+	})
+	return admin, app
 }
 
 // Ctx returns a context carrying a test principal for tenantID with the given duties.

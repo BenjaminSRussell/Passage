@@ -30,10 +30,16 @@ func TestPing(t *testing.T) {
 }
 
 func TestMigrationsApplyWithRLS(t *testing.T) {
-	pool := testkit.DB(t)
+	admin, pool := testkit.DBWithApp(t)
 	ctx := tenant.With(context.Background(), principal(1))
-	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
+	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
 		t.Fatal(err)
+	}
+	var currentUser string
+	var roleSuper, roleBypass bool
+	metadataErr := pool.QueryRow(ctx, `select current_user, r.rolsuper, r.rolbypassrls from pg_roles r where r.rolname = current_user`).Scan(&currentUser, &roleSuper, &roleBypass)
+	if metadataErr != nil || currentUser != "passage_app" || roleSuper || roleBypass {
+		t.Fatalf("RLS test must use non-bypass passage_app role: user=%q super=%v bypass=%v err=%v", currentUser, roleSuper, roleBypass, metadataErr)
 	}
 	tables := []string{"receiving_receipt", "receiving_receipt_line", "receiving_serial", "receiving_grir_open_item", "idempotency_keys", "outbox", "consumer_inbox"}
 	for _, table := range tables {
