@@ -138,3 +138,17 @@ func TestPostInvoice_SplitLinesExhaustingItemClearExactRemainder(t *testing.T) {
 		t.Fatalf("open %s invoiced %s, want 0 and 3", item.OpenAmount(), item.InvoicedQty)
 	}
 }
+
+func TestPostInvoice_CurrencyMismatchRejected(t *testing.T) {
+	item := grirItem("10", "5")
+	in := invoiceFor(item, "10", "5", august15)
+	in.Currency = "EUR"
+	ledger := &domain.FakeLedger{}
+	_, err := domain.PostInvoice(context.Background(), in, domain.FakePeriods{Status: domain.PeriodOpen}, ledger, testProfile)
+	if got := codeOf(t, err); got != domain.CodeInvalidReceipt {
+		t.Fatalf("code %s", got)
+	}
+	if len(ledger.Entries) != 0 || !item.InvoicedQty.IsZero() {
+		t.Fatalf("rejection must not touch ledger or GR/IR")
+	}
+}

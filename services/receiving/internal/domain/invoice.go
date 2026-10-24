@@ -64,6 +64,9 @@ func PostInvoice(ctx context.Context, in VendorInvoice, periods PeriodControl, l
 		if l.Qty.Sign() <= 0 {
 			return JournalEntry{}, fail(CodeInvalidReceipt, "invoice line %d quantity must be positive", i+1)
 		}
+		if l.Item.ReceivedAmount.Currency != in.Currency {
+			return JournalEntry{}, fail(CodeInvalidReceipt, "invoice line %d currency %s differs from receipt currency %s", i+1, in.Currency, l.Item.ReceivedAmount.Currency)
+		}
 		claimed[l.Item] = claimed[l.Item].Add(l.Qty)
 		if claimed[l.Item].GreaterThan(l.Item.ReceivedQty.Sub(l.Item.InvoicedQty)) {
 			return JournalEntry{}, fail(CodeOverInvoice, "invoice line %d exceeds received uninvoiced quantity", i+1)
