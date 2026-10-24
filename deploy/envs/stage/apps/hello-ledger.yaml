@@ -1,0 +1,30 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hello-ledger-stage
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/BenjaminSRussell/Passage.git
+    targetRevision: main
+    path: services/platform-health/charts/hello-ledger
+    helm:
+      valuesObject:
+        image:
+          repository: ghcr.io/benjaminsrussell/hello-ledger
+          digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+        migrateOnStart: true
+        ingress:
+          enabled: true
+          host: stage.passage.dev
+          clusterIssuer: passage-stage-ca
+  destination:
+    name: stage
+    namespace: hello-ledger
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
