@@ -1,0 +1,153 @@
+openapi: 3.1.0
+info:
+  title: product
+  version: 0.1.0
+  description: Product master, variants, released products, GS1 identifiers and configurator.
+servers:
+  - url: https://app.local.passage.dev
+paths:
+  /v1/product/products:
+    post:
+      operationId: createProduct
+      x-passage-duty: product.write
+      parameters:
+        - { name: Idempotency-Key, in: header, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateProduct' } } }
+      responses:
+        '201': { description: Product created. }
+        default: { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listProducts
+      x-passage-duty: product.read
+      responses:
+        '200': { description: Products and masters. }
+  /v1/product/products/{id}:
+    get:
+      operationId: getProduct
+      x-passage-duty: product.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Product with variant summary. }
+  /v1/product/products/{id}/variants:explode:
+    post:
+      operationId: explodeVariants
+      x-passage-duty: product.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Created and skipped counts. }
+  /v1/product/products/{id}/variants:lookup:
+    get:
+      operationId: lookupVariant
+      x-passage-duty: product.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: size, in: query, schema: { type: string } }
+        - { name: color, in: query, schema: { type: string } }
+        - { name: style, in: query, schema: { type: string } }
+      responses:
+        '200': { description: Matching variant. }
+  /v1/product/releases:
+    post:
+      operationId: releaseProduct
+      x-passage-duty: product.release
+      responses:
+        '201': { description: Released product. }
+  /v1/product/released-products/{id}/site-defaults/{siteId}:
+    get:
+      operationId: resolveSiteDefault
+      x-passage-duty: product.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: siteId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Cascaded site default. }
+    put:
+      operationId: putSiteDefault
+      x-passage-duty: product.released.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: siteId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Site default replaced. }
+  /v1/product/released-products/{id}/process-policy:
+    get:
+      operationId: processPolicy
+      x-passage-duty: product.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: process, in: query, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Allow or warn. }
+        '422': { description: Blocked. }
+  /v1/product/gtins:validate:
+    post:
+      operationId: validateGTIN
+      x-passage-duty: product.read
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [value], properties: { value: { type: string } } } } }
+      responses:
+        '200': { description: Check digit valid. }
+        '422': { description: Invalid check digit. }
+  /v1/product/configuration-models/{id}:solve:
+    post:
+      operationId: solveConfiguration
+      x-passage-duty: product.configure
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Feasible assignment. }
+        '422': { description: Infeasible; IIS listed. }
+  /v1/product/uom/convert:
+    get:
+      operationId: convertUnit
+      x-passage-duty: product.read
+      parameters:
+        - { name: product, in: query, schema: { type: string } }
+        - { name: from, in: query, required: true, schema: { type: string } }
+        - { name: to, in: query, required: true, schema: { type: string } }
+        - { name: qty, in: query, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Converted quantity. }
+  /healthz:
+    get:
+      operationId: liveness
+      x-passage-duty: public
+      responses:
+        '200': { description: Process is alive. }
+  /readyz:
+    get:
+      operationId: readiness
+      x-passage-duty: public
+      responses:
+        '200': { description: Database reachable. }
+        '503': { description: Database unreachable. }
+components:
+  schemas:
+    CreateProduct:
+      type: object
+      additionalProperties: false
+      required: [productNumber, name, baseUom]
+      properties:
+        productNumber: { type: string, pattern: '^[A-Z0-9][A-Z0-9._-]{0,39}$' }
+        subtype: { type: string, enum: [product, master] }
+        productType: { type: string, enum: [item, service] }
+        name: { type: string }
+        description: { type: string }
+        searchName: { type: string }
+        baseUom: { type: string }
+        dimensionGroupId: { type: string, format: uuid }
+        lifecycleState: { type: string }
+        service: { type: object }
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties: { type: { type: string }, title: { type: string }, status: { type: integer }, detail: { type: string }, instance: { type: string }, code: { type: string }, traceId: { type: string }, errors: { type: object, additionalProperties: { type: string } } }
+  responses:
+    Problem:
+      description: RFC 9457 problem details
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }

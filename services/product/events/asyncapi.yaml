@@ -1,0 +1,154 @@
+asyncapi: 3.0.0
+info:
+  title: product
+  version: 0.1.0
+channels:
+  passage.product.product:
+    address: passage.product.product
+    messages:
+      created:
+        $ref: '#/components/messages/created'
+      released:
+        $ref: '#/components/messages/released'
+  passage.product.variant:
+    address: passage.product.variant
+    messages:
+      created:
+        $ref: '#/components/messages/variantCreated'
+  passage.product.releasedproduct:
+    address: passage.product.releasedproduct
+    messages:
+      updated:
+        $ref: '#/components/messages/releasedUpdated'
+  passage.product.identifier:
+    address: passage.product.identifier
+    messages:
+      added:
+        $ref: '#/components/messages/identifierAdded'
+  passage.product.configuration:
+    address: passage.product.configuration
+    messages:
+      solved:
+        $ref: '#/components/messages/solved'
+  passage.product.relation:
+    address: passage.product.relation
+    messages:
+      changed:
+        $ref: '#/components/messages/relationChanged'
+operations:
+  onCreated:
+    action: send
+    channel: { $ref: '#/channels/passage.product.product' }
+    messages: [{ $ref: '#/channels/passage.product.product/messages/created' }]
+  onReleased:
+    action: send
+    channel: { $ref: '#/channels/passage.product.product' }
+    messages: [{ $ref: '#/channels/passage.product.product/messages/released' }]
+  onVariantCreated:
+    action: send
+    channel: { $ref: '#/channels/passage.product.variant' }
+    messages: [{ $ref: '#/channels/passage.product.variant/messages/created' }]
+  onReleasedUpdated:
+    action: send
+    channel: { $ref: '#/channels/passage.product.releasedproduct' }
+    messages: [{ $ref: '#/channels/passage.product.releasedproduct/messages/updated' }]
+  onIdentifierAdded:
+    action: send
+    channel: { $ref: '#/channels/passage.product.identifier' }
+    messages: [{ $ref: '#/channels/passage.product.identifier/messages/added' }]
+  onSolved:
+    action: send
+    channel: { $ref: '#/channels/passage.product.configuration' }
+    messages: [{ $ref: '#/channels/passage.product.configuration/messages/solved' }]
+  onRelationChanged:
+    action: send
+    channel: { $ref: '#/channels/passage.product.relation' }
+    messages: [{ $ref: '#/channels/passage.product.relation/messages/changed' }]
+components:
+  messages:
+    created:
+      name: created
+      title: Product created
+      payload:
+        type: object
+        required: [productId, productNumber, subtype, productType, baseUom]
+        properties:
+          productId: { type: string, format: uuid }
+          productNumber: { type: string }
+          subtype: { type: string }
+          productType: { type: string }
+          baseUom: { type: string }
+      x-passage-type: dev.passage.product.product.created.v1
+    released:
+      name: released
+      title: Product released to a legal entity
+      payload:
+        type: object
+        required: [productId, releasedProductId, legalEntityId, itemNumber]
+        properties:
+          productId: { type: string }
+          releasedProductId: { type: string }
+          legalEntityId: { type: string }
+          itemNumber: { type: string }
+          itemGroupId: { type: string }
+          itemModelGroupId: { type: string }
+          defaultSiteId: { type: string }
+          defaultWarehouseId: { type: string }
+      x-passage-type: dev.passage.product.product.released.v1
+    variantCreated:
+      name: variantCreated
+      title: Variant explosion checkpoint
+      payload:
+        type: object
+        required: [masterId, variantIds]
+        properties:
+          masterId: { type: string }
+          variantIds: { type: array, items: { type: string } }
+          dimensionValues: { type: array, items: { type: object } }
+      x-passage-type: dev.passage.product.variant.created.v1
+    releasedUpdated:
+      name: releasedUpdated
+      title: Released product updated
+      payload:
+        type: object
+        required: [releasedProductId]
+        properties:
+          releasedProductId: { type: string }
+          changedFields: { type: array, items: { type: string } }
+          lifecycleState: { type: string }
+          blocks: { type: object, additionalProperties: { type: boolean } }
+      x-passage-type: dev.passage.product.releasedproduct.updated.v1
+    identifierAdded:
+      name: identifierAdded
+      title: GS1 identifier stored
+      payload:
+        type: object
+        required: [productId, type, value]
+        properties:
+          productId: { type: string }
+          type: { type: string }
+          value: { type: string }
+          uomId: { type: string }
+      x-passage-type: dev.passage.product.identifier.added.v1
+    solved:
+      name: solved
+      title: Configuration solved
+      payload:
+        type: object
+        properties:
+          modelId: { type: string }
+          masterId: { type: string }
+          selections: { type: object }
+          resultProductId: { type: string }
+      x-passage-type: dev.passage.product.configuration.solved.v1
+    relationChanged:
+      name: relationChanged
+      title: Product relation created or deleted
+      payload:
+        type: object
+        properties:
+          fromProductId: { type: string }
+          toProductId: { type: string }
+          typeCode: { type: string }
+          action: { type: string }
+      x-passage-type: dev.passage.product.relation.changed.v1
