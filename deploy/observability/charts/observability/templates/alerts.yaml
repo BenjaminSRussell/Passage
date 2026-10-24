@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-alerts
+  labels:
+    app.kubernetes.io/name: observability
+data:
+  passage-slo.yaml: |-
+    groups:
+      - name: passage.slo
+        rules:
+          - alert: PassageAvailabilityBurn
+            expr: sum(rate(http_requests_total{status=~"5.."}[5m])) / sum(rate(http_requests_total[5m])) > 0.001
+            for: 5m
+            labels:
+              severity: {{ .Values.pagerDuty.severity | quote }}
+            annotations:
+              summary: Error budget burn on Passage HTTP
+          - alert: PassageLatencyP95
+            expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le)) * 1000 > {{ .Values.slo.latencyP95Ms }}
+            for: 10m
+            labels:
+              severity: {{ .Values.pagerDuty.severity | quote }}
+            annotations:
+              summary: p95 latency exceeds the Passage SLO
+{{- if .Values.pagerDuty.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-alertmanager
+  labels:
+    app.kubernetes.io/name: observability
+data:
+  alertmanager.yaml: |-
+    route:
+      receiver: pagerduty
+      group_by: [alertname, service]
+    receivers:
+      - name: pagerduty
+        pagerduty_configs:
+          - routing_key_file: /etc/alertmanager/secrets/{{ .Values.pagerDuty.routingKeyKey }}
+            severity: {{ .Values.pagerDuty.severity | quote }}
+            description: '{{ "{{" }} .CommonAnnotations.summary {{ "}}" }}'
+{{- end }}

@@ -1,0 +1,118 @@
+openapi: 3.1.0
+info:
+  title: audit
+  version: 0.1.0
+  description: Append-only field-level audit log with a hash chain. CDC ingest is the wave-4 seam.
+servers:
+  - url: https://app.local.passage.dev
+paths:
+  /v1/audit/changes:
+    post:
+      operationId: ingestChange
+      x-passage-duty: audit.write
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/Change' } } }
+      responses:
+        '202':
+          description: Change recorded on the hash chain.
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/audit/records/{entity}/{recordId}:
+    get:
+      operationId: queryRecord
+      x-passage-duty: audit.read
+      parameters:
+        - { name: entity, in: path, required: true, schema: { type: string } }
+        - { name: recordId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Field changes for the record, oldest first.
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/Record' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/audit/alert-rules:
+    post:
+      operationId: createAlertRule
+      x-passage-duty: audit.write
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/AlertRule' } } }
+      responses:
+        '201': { description: Rule created. }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/audit/alerts:
+    get:
+      operationId: listAlerts
+      x-passage-duty: audit.read
+      responses:
+        '200': { description: Alert inbox. }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/audit/texts/expand:
+    post:
+      operationId: expandText
+      x-passage-duty: authenticated
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [body], properties: { body: { type: string }, vars: { type: object, additionalProperties: { type: string } } } } } }
+      responses:
+        '200': { description: Placeholders replaced. }
+        default: { $ref: '#/components/responses/Problem' }
+  /healthz:
+    get:
+      operationId: liveness
+      x-passage-duty: public
+      responses:
+        '200': { description: Process is alive. }
+  /readyz:
+    get:
+      operationId: readiness
+      x-passage-duty: public
+      responses:
+        '200': { description: Database reachable. }
+        '503': { description: Database unreachable. }
+components:
+  schemas:
+    Change:
+      type: object
+      additionalProperties: false
+      required: [entity, recordId, field]
+      properties:
+        entity: { type: string }
+        recordId: { type: string }
+        field: { type: string }
+        oldValue: { type: string }
+        newValue: { type: string }
+        userId: { type: string }
+        traceId: { type: string }
+        occurredAt: { type: string, format: date-time }
+    Record:
+      type: object
+      required: [entity, recordId, field, userId, traceId, occurredAt]
+      properties:
+        id: { type: string }
+        entity: { type: string }
+        recordId: { type: string }
+        field: { type: string }
+        oldValue: { type: string }
+        newValue: { type: string }
+        userId: { type: string }
+        traceId: { type: string }
+        occurredAt: { type: string, format: date-time }
+        hash: { type: string }
+    AlertRule:
+      type: object
+      additionalProperties: false
+      required: [entity]
+      properties:
+        entity: { type: string }
+        field: { type: string }
+        kind: { type: string, enum: [change, due_date] }
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties: { type: { type: string }, title: { type: string }, status: { type: integer }, detail: { type: string }, instance: { type: string }, code: { type: string }, traceId: { type: string }, errors: { type: object, additionalProperties: { type: string } } }
+  responses:
+    Problem:
+      description: RFC 9457 problem details.
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }

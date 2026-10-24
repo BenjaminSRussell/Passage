@@ -1,0 +1,17 @@
+grafana:
+  dashboardFolder: passage-slo
+tempo:
+  endpoint: http://tempo.observability.svc:3200
+loki:
+  endpoint: http://loki.observability.svc:3100
+prometheus:
+  endpoint: http://prometheus.observability.svc:9090
+pagerDuty:
+  enabled: true
+  routingKeySecret: pagerduty
+  routingKeyKey: routing-key
+  severity: error
+slo:
+  availability: "99.9"
+  latencyP95Ms: 50
+  errorRate: "0.1"
