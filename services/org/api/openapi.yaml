@@ -1,0 +1,84 @@
+openapi: 3.1.0
+info:
+  title: org
+  version: 0.1.0
+  description: Organization service. Slice 1 covers legal entities and unit-of-measure conversion.
+servers:
+  - url: https://app.local.passage.dev
+paths:
+  /v1/org/legal-entities:
+    post:
+      operationId: createLegalEntity
+      x-passage-duty: org.legal-entity.write
+      parameters:
+        - { name: Idempotency-Key, in: header, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateLegalEntity' } } }
+      responses:
+        '201':
+          description: Legal entity created, or the original entity on an Idempotency-Key replay.
+          content: { application/json: { schema: { $ref: '#/components/schemas/LegalEntity' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listLegalEntities
+      x-passage-duty: org.read
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: One page of legal entities of the caller's tenant visible to the caller's legal-entity scope, ordered by code. Pass nextCursor as cursor for the next page.
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/LegalEntity' } }, nextCursor: { type: string } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/uom/convert:
+    get:
+      operationId: convertUnit
+      x-passage-duty: authenticated
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string } }
+        - { name: to, in: query, required: true, schema: { type: string } }
+        - { name: qty, in: query, required: true, schema: { type: string, description: Finite decimal } }
+      responses:
+        '200':
+          description: Quantity converted, rounded to 12 decimals.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Conversion' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /healthz:
+    get:
+      operationId: liveness
+      x-passage-duty: public
+      responses:
+        '200': { description: Process is alive. }
+  /readyz:
+    get:
+      operationId: readiness
+      x-passage-duty: public
+      responses:
+        '200': { description: Database reachable. }
+        '503': { description: Database unreachable. }
+components:
+  schemas:
+    CreateLegalEntity:
+      type: object
+      additionalProperties: false
+      required: [code, name, country, currency]
+      properties: { code: { type: string, pattern: '^[A-Z0-9]{2,8}$', description: Not DAT SYS or ALL }, name: { type: string, minLength: 1, maxLength: 120 }, country: { type: string, pattern: '^[A-Z]{2}$' }, currency: { type: string, pattern: '^[A-Z]{3}$' } }
+    LegalEntity:
+      type: object
+      required: [id, code, name, country, currency, status, version, createdAt]
+      properties: { id: { type: string, format: uuid }, code: { type: string }, name: { type: string }, country: { type: string }, currency: { type: string }, status: { type: string, enum: [active, inactive] }, version: { type: integer }, createdAt: { type: string, format: date-time } }
+    Conversion:
+      type: object
+      required: [from, to, quantity]
+      properties: { from: { type: string }, to: { type: string }, quantity: { type: string, description: Decimal string } }
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties: { type: { type: string }, title: { type: string }, status: { type: integer }, detail: { type: string }, instance: { type: string }, code: { type: string }, traceId: { type: string }, errors: { type: object, additionalProperties: { type: string } } }
+  responses:
+    Problem:
+      description: RFC 9457 problem details.
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
