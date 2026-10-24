@@ -1,0 +1,13 @@
+image:
+  repository: ghcr.io/benjaminsrussell/passage-workflow
+  digest: ""
+  tag: ""
+  pullPolicy: IfNotPresent
+replicaCount: 1
+temporal:
+  address: temporal-frontend.temporal.svc:7233
+  namespace: passage
+  taskQueue: passage-approvals
+resources:
+  requests: { cpu: 50m, memory: 128Mi }
+  limits: { cpu: 500m, memory: 512Mi }

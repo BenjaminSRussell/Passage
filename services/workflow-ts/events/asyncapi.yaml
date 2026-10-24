@@ -1,0 +1,27 @@
+asyncapi: 3.0.0
+info:
+  title: Passage metadata event contract
+  version: 1.0.0
+  description: Narrow Wave 03 boundary consumed by Wave 04 schema registration.
+servers:
+  kafka:
+    host: passage-kafka-bootstrap.kafka.svc:9093
+    protocol: kafka-secure
+channels:
+  entityDefinition:
+    address: passage.platform.entitydefinition
+    messages:
+      changed:
+        $ref: '#/components/messages/EntityDefinitionChanged'
+operations:
+  receiveEntityDefinitionChanged:
+    action: receive
+    channel:
+      $ref: '#/channels/entityDefinition'
+components:
+  messages:
+    EntityDefinitionChanged:
+      name: dev.passage.platform.entitydefinition.changed.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: ../schemas/current/platform.entitydefinition.changed.v1.json

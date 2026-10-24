@@ -1,0 +1,24 @@
+import { createElement } from "react";
+import type { PassageModule } from "../registry";
+import { DesignerPage, InboxPage, JobMonitorPage, TemplatesPage, WorkflowHome } from "./pages";
+
+const workflow: PassageModule = {
+  id: "workflow",
+  title: "Workflow and batch",
+  routes: [
+    { path: "/workflow", element: createElement(WorkflowHome) },
+    { path: "/workflow/inbox", element: createElement(InboxPage) },
+    { path: "/workflow/designer", element: createElement(DesignerPage) },
+    { path: "/workflow/jobs", element: createElement(JobMonitorPage) },
+    { path: "/workflow/templates", element: createElement(TemplatesPage) },
+  ],
+  nav: [
+    { label: "Workflow", to: "/workflow", duty: "workflow.read" },
+    { label: "Inbox", to: "/workflow/inbox", duty: "workflow.approve" },
+    { label: "Designer", to: "/workflow/designer", duty: "workflow.write" },
+    { label: "Job monitor", to: "/workflow/jobs", duty: "batch.read" },
+    { label: "Templates", to: "/workflow/templates", duty: "notify.write" },
+  ],
+};
+
+export default workflow;

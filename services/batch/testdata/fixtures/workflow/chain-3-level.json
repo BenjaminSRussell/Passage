@@ -1,0 +1,8 @@
+{
+  "entity": "purchaserequisition",
+  "levels": [
+    { "id": "manager", "assigneeType": "role", "assignee": "manager", "sla": "PT4H" },
+    { "id": "director", "assigneeType": "user", "assignee": "bob", "sla": "PT4H" },
+    { "id": "controller", "assigneeType": "expression", "assignee": "record.controller", "sla": "PT4H", "escalationAction": "delegate_to", "escalationTarget": "admin" }
+  ]
+}

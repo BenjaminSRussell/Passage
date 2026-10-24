@@ -1,0 +1,41 @@
+server:
+  replicaCount: 2
+  config:
+    numHistoryShards: 512
+    persistence:
+      default:
+        driver: sql
+        sql:
+          driver: postgres12
+          host: temporal-postgres-rw.temporal.svc
+          port: 5432
+          database: temporal
+          user: temporal
+          existingSecret: temporal-database
+          maxConns: 20
+          maxConnLifetime: 1h
+      visibility:
+        driver: sql
+        sql:
+          driver: postgres12
+          host: temporal-postgres-rw.temporal.svc
+          port: 5432
+          database: temporal_visibility
+          user: temporal
+          existingSecret: temporal-database
+          maxConns: 20
+          maxConnLifetime: 1h
+cassandra:
+  enabled: false
+mysql:
+  enabled: false
+postgresql:
+  enabled: false
+elasticsearch:
+  enabled: false
+prometheus:
+  enabled: false
+grafana:
+  enabled: false
+web:
+  enabled: true
