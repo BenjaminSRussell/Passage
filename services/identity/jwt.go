@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -74,11 +75,11 @@ type JWTVerifier struct {
 // NewJWTVerifier creates a verifier pinned to one tenant issuer and JWKS URL.
 func NewJWTVerifier(issuer, audience, tenantID, jwksURL string, client *http.Client) (*JWTVerifier, error) {
 	issuerURL, err := url.Parse(issuer)
-	if err != nil || (issuerURL.Scheme != "http" && issuerURL.Scheme != "https") || issuerURL.Host == "" || issuerURL.User != nil || issuerURL.RawQuery != "" || issuerURL.Fragment != "" {
+	if err != nil || !validIdentityURL(issuerURL) {
 		return nil, errors.New("invalid JWT issuer URL")
 	}
 	keyURL, err := url.Parse(jwksURL)
-	if err != nil || (keyURL.Scheme != "http" && keyURL.Scheme != "https") || keyURL.Host == "" || keyURL.User != nil || keyURL.RawQuery != "" || keyURL.Fragment != "" {
+	if err != nil || !validIdentityURL(keyURL) {
 		return nil, errors.New("invalid JWKS URL")
 	}
 	if audience == "" || tenantID == "" {
@@ -88,6 +89,27 @@ func NewJWTVerifier(issuer, audience, tenantID, jwksURL string, client *http.Cli
 		client = &http.Client{Timeout: 2 * time.Second}
 	}
 	return &JWTVerifier{issuer: strings.TrimRight(issuer, "/"), audience: audience, tenantID: tenantID, jwksURL: jwksURL, client: client}, nil
+}
+
+// validIdentityURL requires TLS for identity-provider endpoints, except for
+// loopback HTTP endpoints used by local development and tests. This prevents
+// an on-path attacker from replacing JWKS keys for a remote HTTP endpoint.
+func validIdentityURL(endpoint *url.URL) bool {
+	if endpoint == nil || endpoint.Host == "" || endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" {
+		return false
+	}
+	if endpoint.Scheme == "https" {
+		return true
+	}
+	if endpoint.Scheme != "http" {
+		return false
+	}
+	host := endpoint.Hostname()
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // Middleware validates a bearer token, binds its verified sub/tid claims into

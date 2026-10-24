@@ -19,6 +19,28 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 )
 
+func TestJWTVerifierRequiresHTTPSForRemoteIdentityEndpoints(t *testing.T) {
+	tests := []struct {
+		name    string
+		issuer  string
+		jwksURL string
+		wantErr bool
+	}{
+		{name: "remote HTTP issuer", issuer: "http://id.example/tenant-a", jwksURL: "https://id.example/keys", wantErr: true},
+		{name: "remote HTTP JWKS", issuer: "https://id.example/tenant-a", jwksURL: "http://keys.example/jwks", wantErr: true},
+		{name: "loopback HTTP JWKS for local development", issuer: "https://id.example/tenant-a", jwksURL: "http://127.0.0.1:8080/jwks"},
+		{name: "HTTPS endpoints", issuer: "https://id.example/tenant-a", jwksURL: "https://id.example/keys"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewJWTVerifier(tt.issuer, "passage-api", "tenant-a", tt.jwksURL, nil)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("NewJWTVerifier() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestJWTMiddlewareVerifiesClaimsAndBindsTrustedPrincipal(t *testing.T) {
 	verifier, privateKey, jwks := newTestJWTVerifier(t)
 	defer jwks.Close()
