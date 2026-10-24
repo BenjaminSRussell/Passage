@@ -23,7 +23,7 @@ Run: `DATABASE_URL=postgres://... MIGRATE_ON_START=true go run ./cmd/numbering`.
 
 Contract: `api/openapi.yaml`. Event: `dev.passage.numbering.sequence.allocated.v1`. The legal-entity header is `X-Passage-Legal-Entity`.
 
-Wave 2 OPA seed data names `/v1/number-sequences`; this service follows the `/v1/<context>/<collection>` spine. Wire-up is a handoff to wave 2.
+OPA duties `View number sequences` (GET) and `Maintain number sequences` (GET, POST) authorize `/v1/numbering` and its child paths.
 
 ## Error codes
 
