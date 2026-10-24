@@ -126,10 +126,10 @@ func validateRuleValue(kind string, value any) error {
 			return fmt.Errorf("must be a string")
 		}
 	case "bool":
-		switch value.(type) {
+		switch value := value.(type) {
 		case bool:
 		case string:
-			if _, err := strconv.ParseBool(value.(string)); err != nil {
+			if _, err := strconv.ParseBool(value); err != nil {
 				return fmt.Errorf("must be a boolean")
 			}
 		default:

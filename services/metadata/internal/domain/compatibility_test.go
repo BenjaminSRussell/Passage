@@ -25,13 +25,10 @@ func TestDiffCatchesPublishedContractChanges(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			old := vendor(t)
+			next := vendor(t)
 			if tt.name == "relation target" {
 				old.Fields = append(old.Fields, domain.Field{Name: "owner_id", Type: "uuid"})
 				old.Relations = []domain.Relation{{FromField: "owner_id", ToEntity: "Person", ToField: "id", OnDelete: "restrict"}}
-			}
-			next := vendor(t)
-			if tt.name == "relation target" {
-				next = old
 				copyEntity := *old
 				copyEntity.Relations = append([]domain.Relation(nil), old.Relations...)
 				next = &copyEntity

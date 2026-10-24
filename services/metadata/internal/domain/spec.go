@@ -251,15 +251,15 @@ func Validate(e *Entity) []Violation {
 }
 
 func defaultProblem(e *Entity, f Field) string {
-	switch {
-	case f.Default == "":
+	switch f.Default {
+	case "":
 		return ""
-	case f.Default == "now()":
+	case "now()":
 		if f.Type != "date" && f.Type != "datetime" {
 			return "now() requires a date or datetime field"
 		}
 		return ""
-	case f.Default == "current_user()":
+	case "current_user()":
 		if f.Type != "string" {
 			return "current_user() requires a string field"
 		}

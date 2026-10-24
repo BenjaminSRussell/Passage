@@ -61,7 +61,7 @@ func request(t *testing.T, client *http.Client, method, url, body string, duties
 
 func body(t *testing.T, res *http.Response) []byte {
 	t.Helper()
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	data, err := io.ReadAll(res.Body)
 	if err != nil {
 		t.Fatal(err)
