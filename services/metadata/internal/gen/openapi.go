@@ -28,7 +28,9 @@ func openAPI(e *domain.Entity) (string, error) {
 		return op
 	}
 	entityRef, inputRef := ref("schemas", e.Name), ref("schemas", e.Name+"Input")
+	patchRef := ref("schemas", e.Name+"Patch")
 	body := obj{"required": true, "content": obj{"application/json": obj{"schema": inputRef}}}
+	patchBody := obj{"required": true, "content": obj{"application/json": obj{"schema": patchRef}}}
 	responses := func(status string, r obj) obj { return obj{status: r, "default": problem} }
 	etagged := jsonBody(entityRef)
 	etagged["headers"] = obj{"ETag": obj{"schema": obj{"type": "string"}}}
@@ -50,7 +52,10 @@ func openAPI(e *domain.Entity) (string, error) {
 		for _, p := range props(e, f) {
 			inputProps[p.Wire], entityProps[p.Wire] = p.Schema, p.Schema
 			if f.Required {
-				inputRequired, entityRequired = append(inputRequired, p.Wire), append(entityRequired, p.Wire)
+				entityRequired = append(entityRequired, p.Wire)
+				if f.Default == "" && f.Computed == "" {
+					inputRequired = append(inputRequired, p.Wire)
+				}
 			}
 		}
 	}
@@ -68,7 +73,7 @@ func openAPI(e *domain.Entity) (string, error) {
 			},
 			path + "/{id}": obj{
 				"get":    operation("get", "read", obj{"parameters": []obj{idParam}, "responses": responses("200", etagged)}),
-				"patch":  operation("update", "write", obj{"parameters": []obj{idParam, ref("parameters", "IfMatch")}, "requestBody": body, "responses": patchResponses}),
+				"patch":  operation("update", "write", obj{"parameters": []obj{idParam, ref("parameters", "IfMatch")}, "requestBody": patchBody, "responses": patchResponses}),
 				"delete": operation("remove", "delete", obj{"parameters": []obj{idParam, ref("parameters", "IfMatch")}, "responses": responses("204", obj{"description": "Deleted"})}),
 			},
 		},
@@ -81,6 +86,7 @@ func openAPI(e *domain.Entity) (string, error) {
 			"schemas": obj{
 				e.Name:           obj{"type": "object", "required": entityRequired, "properties": entityProps},
 				e.Name + "Input": obj{"type": "object", "required": inputRequired, "properties": inputProps, "additionalProperties": false},
+				e.Name + "Patch": obj{"type": "object", "properties": inputProps, "additionalProperties": false, "minProperties": 1},
 				"Problem": obj{"type": "object", "required": []string{"type", "title", "status", "code", "traceId"}, "properties": obj{
 					"type": obj{"type": "string"}, "title": obj{"type": "string"}, "status": obj{"type": "integer"},
 					"detail": obj{"type": "string"}, "instance": obj{"type": "string"}, "code": obj{"type": "string"},

@@ -1,0 +1,1 @@
+{"$id":"https://passage.dev/schemas/platform/Role","$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"code":{"maxLength":48,"type":"string"},"name":{"maxLength":120,"type":"string"}},"required":["code","name"],"title":"Role","type":"object"}
