@@ -1,0 +1,98 @@
+openapi: 3.1.0
+info:
+  title: numbering
+  version: 0.1.0
+  description: Per-legal-entity number sequences with gap-free allocation for fiscal documents.
+servers:
+  - url: https://app.local.passage.dev
+paths:
+  /v1/numbering/sequences:
+    post:
+      operationId: createSequence
+      x-passage-duty: numbering.write
+      parameters:
+        - { name: Idempotency-Key, in: header, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateSequence' } } }
+      responses:
+        '201':
+          description: Sequence created, or the original on an Idempotency-Key replay.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Sequence' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/numbering/sequences/{code}:
+    get:
+      operationId: getSequence
+      x-passage-duty: numbering.read
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Sequence definition.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Sequence' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/numbering/sequences/{code}/next:
+    post:
+      operationId: allocateNext
+      x-passage-duty: numbering.write
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+        - { name: Idempotency-Key, in: header, schema: { type: string } }
+      responses:
+        '200':
+          description: Next value. Gap-free sequences never skip or repeat.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Issued' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /healthz:
+    get:
+      operationId: liveness
+      x-passage-duty: public
+      responses:
+        '200': { description: Process is alive. }
+  /readyz:
+    get:
+      operationId: readiness
+      x-passage-duty: public
+      responses:
+        '200': { description: Database reachable. }
+        '503': { description: Database unreachable. }
+components:
+  schemas:
+    CreateSequence:
+      type: object
+      additionalProperties: false
+      required: [code, name, format, legalEntityId, mode]
+      properties:
+        code: { type: string }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        format: { type: string, description: 'Exactly one {######} or {000000} token' }
+        legalEntityId: { type: string, format: uuid }
+        mode: { type: string, enum: [gap_free, continuous, non_continuous] }
+        startFrom: { type: integer, minimum: 1, default: 1 }
+    Sequence:
+      type: object
+      required: [id, code, name, format, legalEntityId, mode, startFrom]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        format: { type: string }
+        legalEntityId: { type: string, format: uuid }
+        mode: { type: string, enum: [gap_free, continuous, non_continuous] }
+        startFrom: { type: integer }
+    Issued:
+      type: object
+      required: [value, formatted, sequence, legalEntityId]
+      properties:
+        value: { type: integer }
+        formatted: { type: string }
+        sequence: { type: string }
+        legalEntityId: { type: string, format: uuid }
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties: { type: { type: string }, title: { type: string }, status: { type: integer }, detail: { type: string }, instance: { type: string }, code: { type: string }, traceId: { type: string }, errors: { type: object, additionalProperties: { type: string } } }
+  responses:
+    Problem:
+      description: RFC 9457 problem details.
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
