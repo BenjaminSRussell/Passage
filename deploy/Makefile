@@ -5,8 +5,10 @@ REPO_ROOT := $(abspath ..)
 CLUSTER := passage-local
 IMAGE := passage-local/hello-ledger:local
 REVISION ?= main
+PYTHON ?= python3
+IMAGE_DIGEST ?=
 
-.PHONY: deploy-local destroy-local
+.PHONY: deploy-local destroy-local promote-stage rollback-stage test-stage-release
 
 deploy-local:
 	tofu -chdir=tofu/cluster init -input=false
@@ -28,3 +30,13 @@ deploy-local:
 
 destroy-local:
 	tofu -chdir=tofu/cluster destroy -input=false -auto-approve
+
+promote-stage:
+	@test -n "$(IMAGE_DIGEST)" || { echo "Usage: make -C deploy promote-stage IMAGE_DIGEST=sha256:<64 lowercase hex characters>" >&2; exit 2; }
+	$(PYTHON) scripts/stage_release.py promote --to stage --digest "$(IMAGE_DIGEST)"
+
+rollback-stage:
+	$(PYTHON) scripts/stage_release.py rollback --env stage
+
+test-stage-release:
+	$(PYTHON) -m unittest discover -s scripts -p 'test_*.py' -v
