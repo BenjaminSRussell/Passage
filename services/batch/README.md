@@ -48,6 +48,6 @@ OPA duties `Maintain workflows`, `Approve workflow`, `Maintain batch jobs`, `Vie
 
 `internal/jobs.Runner` splits a finite row range into deterministic partitions. Each row effect, idempotency marker and checkpoint is committed in one store transaction. The 1,000,000-row test kills the first run at row 400,000 and resumes without duplicates.
 
-Reserved handlers `product.explode` and `product.group-change` are the Wave 08 handoff: the product service still runs those jobs in-process with 500-row outbox batches.
+Reserved handlers: `product.explode` and `product.group-change` (Wave 08 still runs those in-process with 500-row outbox batches) and `metadata.usage` (Wave 03 collector, scheduled here when metadata enqueues it). The metadata registry publish path does not yet write `dev.passage.metadata.entity.published.v1`; this service already catalogs that type.
 
 Metrics: `batch_submitted_total`, `batch_failed_total`. Extra Go dependency: `github.com/go-chi/chi/v5` (HTTP router, same as every other service).

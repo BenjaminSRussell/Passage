@@ -127,4 +127,7 @@ func TestProductJobCodes(t *testing.T) {
 	if len(got) != 2 || got[0] != "product.explode" {
 		t.Fatalf("%v", got)
 	}
+	if got := MetadataJobCodes(); len(got) != 1 || got[0] != "metadata.usage" {
+		t.Fatalf("%v", got)
+	}
 }

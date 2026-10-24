@@ -263,3 +263,9 @@ func FinishInstance(inst Instance, approved bool, reason string) Instance {
 func ProductJobCodes() []string {
 	return []string{"product.explode", "product.group-change"}
 }
+
+// MetadataJobCodes are Wave 03 collectors this engine can schedule.
+// The metadata service still invokes them in-process until it enqueues here.
+func MetadataJobCodes() []string {
+	return []string{"metadata.usage"}
+}
