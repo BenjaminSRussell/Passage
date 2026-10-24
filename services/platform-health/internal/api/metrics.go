@@ -60,7 +60,7 @@ func (m *requestMetrics) observe(route string, status int, seconds float64) {
 func (m *requestMetrics) write(w io.Writer) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	fmt.Fprint(w, "# HELP hello_ledger_http_requests_total HTTP requests by route and status.\n# TYPE hello_ledger_http_requests_total counter\n")
+	_, _ = fmt.Fprint(w, "# HELP hello_ledger_http_requests_total HTTP requests by route and status.\n# TYPE hello_ledger_http_requests_total counter\n")
 	keys := make([]requestKey, 0, len(m.requests))
 	for k := range m.requests {
 		keys = append(keys, k)
@@ -72,9 +72,9 @@ func (m *requestMetrics) write(w io.Writer) {
 		return keys[i].status < keys[j].status
 	})
 	for _, k := range keys {
-		fmt.Fprintf(w, "hello_ledger_http_requests_total{route=%q,status=\"%d\"} %d\n", k.route, k.status, m.requests[k])
+		_, _ = fmt.Fprintf(w, "hello_ledger_http_requests_total{route=%q,status=\"%d\"} %d\n", k.route, k.status, m.requests[k])
 	}
-	fmt.Fprint(w, "# HELP hello_ledger_http_request_duration_seconds HTTP request latency by route.\n# TYPE hello_ledger_http_request_duration_seconds histogram\n")
+	_, _ = fmt.Fprint(w, "# HELP hello_ledger_http_request_duration_seconds HTTP request latency by route.\n# TYPE hello_ledger_http_request_duration_seconds histogram\n")
 	routes := make([]string, 0, len(m.latency))
 	for route := range m.latency {
 		routes = append(routes, route)
@@ -83,11 +83,11 @@ func (m *requestMetrics) write(w io.Writer) {
 	for _, route := range routes {
 		l := m.latency[route]
 		for i, bound := range latencyBounds {
-			fmt.Fprintf(w, "hello_ledger_http_request_duration_seconds_bucket{route=%q,le=\"%s\"} %d\n", route, strconv.FormatFloat(bound, 'g', -1, 64), l.buckets[i])
+			_, _ = fmt.Fprintf(w, "hello_ledger_http_request_duration_seconds_bucket{route=%q,le=\"%s\"} %d\n", route, strconv.FormatFloat(bound, 'g', -1, 64), l.buckets[i])
 		}
-		fmt.Fprintf(w, "hello_ledger_http_request_duration_seconds_bucket{route=%q,le=\"+Inf\"} %d\n", route, l.count)
-		fmt.Fprintf(w, "hello_ledger_http_request_duration_seconds_sum{route=%q} %g\n", route, l.sum)
-		fmt.Fprintf(w, "hello_ledger_http_request_duration_seconds_count{route=%q} %d\n", route, l.count)
+		_, _ = fmt.Fprintf(w, "hello_ledger_http_request_duration_seconds_bucket{route=%q,le=\"+Inf\"} %d\n", route, l.count)
+		_, _ = fmt.Fprintf(w, "hello_ledger_http_request_duration_seconds_sum{route=%q} %g\n", route, l.sum)
+		_, _ = fmt.Fprintf(w, "hello_ledger_http_request_duration_seconds_count{route=%q} %d\n", route, l.count)
 	}
 }
 
