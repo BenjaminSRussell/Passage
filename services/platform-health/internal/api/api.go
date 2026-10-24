@@ -50,8 +50,8 @@ func (a *API) Register(r chi.Router) {
 func (a *API) Metrics() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-		fmt.Fprintf(w, "# HELP hello_ledger_entries_created_total Entries created.\n# TYPE hello_ledger_entries_created_total counter\nhello_ledger_entries_created_total %d\n", a.created.Load())
-		fmt.Fprintf(w, "# HELP hello_ledger_entries_failed_total Entry creations that failed in the store.\n# TYPE hello_ledger_entries_failed_total counter\nhello_ledger_entries_failed_total %d\n", a.failed.Load())
+		_, _ = fmt.Fprintf(w, "# HELP hello_ledger_entries_created_total Entries created.\n# TYPE hello_ledger_entries_created_total counter\nhello_ledger_entries_created_total %d\n", a.created.Load())
+		_, _ = fmt.Fprintf(w, "# HELP hello_ledger_entries_failed_total Entry creations that failed in the store.\n# TYPE hello_ledger_entries_failed_total counter\nhello_ledger_entries_failed_total %d\n", a.failed.Load())
 		a.http.write(w)
 	})
 }

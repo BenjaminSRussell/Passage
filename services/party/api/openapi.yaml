@@ -1,0 +1,95 @@
+openapi: 3.1.0
+info:
+  title: party
+  version: 0.1.0
+  description: Global party and business partner service. This slice exposes tax registration validation.
+servers:
+  - url: https://app.local.passage.dev
+paths:
+  /v1/party/tax-registrations:validate:
+    post:
+      operationId: validateTaxRegistration
+      x-passage-duty: party.write
+      description: Format-checks tax numbers. VAT returns validationStatus unverified until VIES integration is implemented.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Accepted for custom-method uniformity; the operation is read-only and stores nothing.
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ValidateTaxRegistration' }
+      responses:
+        '200':
+          description: Validation result.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaxValidation' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /healthz:
+    get:
+      operationId: liveness
+      x-passage-duty: public
+      responses:
+        '200': { description: Process is alive. }
+  /readyz:
+    get:
+      operationId: readiness
+      x-passage-duty: public
+      responses:
+        '200': { description: Service is ready. This slice has no runtime dependency. }
+  /metrics:
+    get:
+      operationId: metrics
+      x-passage-duty: public
+      description: Served on the admin port (9090), never through the ingress.
+      responses:
+        '200':
+          description: Prometheus text exposition.
+          content:
+            text/plain:
+              schema: { type: string }
+components:
+  schemas:
+    ValidateTaxRegistration:
+      type: object
+      additionalProperties: false
+      required: [type, number]
+      properties:
+        type: { type: string, enum: [VAT, EIN, GSTIN] }
+        country: { type: string, description: ISO 3166-1 alpha-2 code of an EU member state; required for VAT. }
+        number: { type: string, minLength: 1 }
+    TaxValidation:
+      type: object
+      required: [type, number, validationStatus]
+      properties:
+        type: { type: string, enum: [VAT, EIN, GSTIN] }
+        country: { type: string }
+        number: { type: string, description: Normalized number. }
+        validationStatus: { type: string, enum: [valid, invalid, unverified, format_only] }
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string }
+        serviceCode: { type: string }
+        traceId: { type: string }
+        errors: { type: object, additionalProperties: { type: string } }
+  responses:
+    Problem:
+      description: RFC 9457 problem details.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }

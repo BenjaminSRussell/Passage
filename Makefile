@@ -3,9 +3,9 @@ GO_MODULES := $(shell find platform/go services -name go.mod -not -path '*/node_
 TS_PACKAGES := $(shell find apps services -maxdepth 2 -name package.json -not -path '*/node_modules/*' -exec dirname {} \; 2>/dev/null)
 PY_PACKAGES := $(shell find services -maxdepth 2 -name pyproject.toml -exec dirname {} \; 2>/dev/null)
 
-.PHONY: test test-go test-ts test-py vet lint-charts roadmap prd
+.PHONY: test test-go test-ts test-py vet lint-charts roadmap prd deploy-local destroy-local check-deploy-local
 
-test: test-go test-ts test-py
+test: test-go test-ts test-py check-deploy-local
 
 test-go:
 	@for m in $(GO_MODULES); do echo "== go test $$m"; (cd $$m && go test ./... ) || exit 1; done
@@ -27,3 +27,17 @@ roadmap:
 
 prd:
 	python3 scripts/build_prd.py --pdf
+
+# Wave 1 owns the local deployment implementation under deploy/; keep the
+# repository entry point here so `make deploy-local` works from the root.
+deploy-local:
+	$(MAKE) -C deploy deploy-local
+
+destroy-local:
+	$(MAKE) -C deploy destroy-local
+
+# Validate both Makefiles and the forwarding path without touching Docker,
+# k3d, kubectl or OpenTofu resources.
+check-deploy-local:
+	@$(MAKE) --no-print-directory --dry-run deploy-local >/dev/null
+	@echo "root deploy-local forwarding target parses successfully"
