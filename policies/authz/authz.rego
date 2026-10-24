@@ -7,7 +7,7 @@ default allow := false
 allow if {
 	input.subject.tenant_id != ""
 	input.subject.user_id != ""
-	some duty in input.subject.duties
+	some duty in data.assignments[input.subject.tenant_id][input.subject.user_id]
 	some permission in data.duties[duty].permissions
 	input.action in permission.methods
 	path_matches(permission.resource, input.resource)

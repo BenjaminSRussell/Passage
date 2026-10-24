@@ -1,4 +1,5 @@
 {
+  "assignments": {},
   "duties": {
     "Maintain users": {"permissions": [{"resource": "/v1/identity/users", "methods": ["GET", "POST", "PATCH"]}]},
     "Maintain security roles": {"permissions": [

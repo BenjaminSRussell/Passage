@@ -18,18 +18,29 @@ func TestOPAClientSendsPrincipalAndUsesDecision(t *testing.T) {
 		if r.URL.Path != "/v1/data/authz/decision" || r.Method != http.MethodPost {
 			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
 		}
-		var body struct {
-			Input opaInput `json:"input"`
-		}
+		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
+		inputBody := body["input"].(map[string]any)
+		subjectBody := inputBody["subject"].(map[string]any)
+		if _, ok := subjectBody["duties"]; ok {
+			t.Error("OPA input must not contain caller-provided duties")
+		}
+		encodedInput, err := json.Marshal(body["input"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var input opaInput
+		if err := json.Unmarshal(encodedInput, &input); err != nil {
+			t.Fatal(err)
+		}
 		want := opaInput{
-			Subject: opaSubject{TenantID: "tenant-a", LegalEntityID: "le-a", UserID: "user-a", Duties: []string{"Maintain vendors", "View vendors"}},
+			Subject: opaSubject{TenantID: "tenant-a", LegalEntityID: "le-a", UserID: "user-a"},
 			Action:  http.MethodPut, Resource: "/v1/vendors/vendor-a",
 		}
-		if !reflect.DeepEqual(body.Input, want) {
-			t.Errorf("input = %#v, want %#v", body.Input, want)
+		if !reflect.DeepEqual(input, want) {
+			t.Errorf("input = %#v, want %#v", input, want)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"result":{"allow":true}}`))
@@ -42,7 +53,7 @@ func TestOPAClientSendsPrincipalAndUsesDecision(t *testing.T) {
 	}
 	allowed, err := client.Allow(context.Background(), tenant.Principal{
 		TenantID: "tenant-a", LegalEntityID: "le-a", UserID: "user-a",
-		Duties: map[string]struct{}{"View vendors": {}, "Maintain vendors": {}},
+		Duties: map[string]struct{}{"Forged duty": {}},
 	}, http.MethodPut, "/v1/vendors/vendor-a")
 	if err != nil || !allowed {
 		t.Fatalf("Allow() = %v, %v", allowed, err)
@@ -119,7 +130,8 @@ func TestRequireOPAUsesExpectedHTTPStatuses(t *testing.T) {
 			)
 			req := httptest.NewRequest(http.MethodPut, "/v1/vendors/1", nil)
 			if tt.principal {
-				req = req.WithContext(tenant.With(req.Context(), tenant.Principal{TenantID: "t", UserID: "u"}))
+				ctx := tenant.With(req.Context(), tenant.Principal{TenantID: "t", UserID: "u"})
+				req = req.WithContext(context.WithValue(ctx, verifiedPrincipalKey{}, true))
 			}
 			resp := httptest.NewRecorder()
 			handler.ServeHTTP(resp, req)

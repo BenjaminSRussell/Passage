@@ -10,7 +10,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"sort"
 	"strings"
 	"time"
 
@@ -51,10 +50,9 @@ type opaInput struct {
 }
 
 type opaSubject struct {
-	TenantID      string   `json:"tenant_id"`
-	LegalEntityID string   `json:"legal_entity_id,omitempty"`
-	UserID        string   `json:"user_id"`
-	Duties        []string `json:"duties"`
+	TenantID      string `json:"tenant_id"`
+	LegalEntityID string `json:"legal_entity_id,omitempty"`
+	UserID        string `json:"user_id"`
 }
 
 type opaResponse struct {
@@ -84,17 +82,10 @@ func (c *OPAClient) Decide(ctx context.Context, p tenant.Principal, action, reso
 	if c == nil || c.client == nil || p.TenantID == "" || p.UserID == "" || action == "" || resource == "" {
 		return Decision{}, errors.New("incomplete OPA authorization input")
 	}
-	duties := make([]string, 0, len(p.Duties))
-	for duty := range p.Duties {
-		if duty != "" {
-			duties = append(duties, duty)
-		}
-	}
-	sort.Strings(duties)
 	body, err := json.Marshal(struct {
 		Input opaInput `json:"input"`
 	}{Input: opaInput{
-		Subject: opaSubject{TenantID: p.TenantID, LegalEntityID: p.LegalEntityID, UserID: p.UserID, Duties: duties},
+		Subject: opaSubject{TenantID: p.TenantID, LegalEntityID: p.LegalEntityID, UserID: p.UserID},
 		Action:  action, Resource: resource,
 	}})
 	if err != nil {
@@ -132,6 +123,10 @@ func (c *OPAClient) Decide(ctx context.Context, p tenant.Principal, action, reso
 func RequireOPA(client *OPAClient, action, resource string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if verified, _ := r.Context().Value(verifiedPrincipalKey{}).(bool); !verified {
+				httpx.Fail(w, r, httpx.NewProblem(http.StatusUnauthorized, "AUTH-0001", "no verified principal"))
+				return
+			}
 			principal, ok := tenant.FromContext(r.Context())
 			if !ok {
 				httpx.Fail(w, r, httpx.NewProblem(http.StatusUnauthorized, "AUTH-0001", "no principal"))
