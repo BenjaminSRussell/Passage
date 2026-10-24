@@ -29,7 +29,10 @@ export function MetadataForm({ entity }: MetadataFormProps) {
     const controller = new AbortController();
     setSchema(undefined);
     setError("");
-    fetch(`/api/v1/metadata/entities/${encodeURIComponent(entity)}/schema`, { signal: controller.signal })
+    fetch(`/api/v1/metadata/entities/${encodeURIComponent(entity)}/schema`, {
+      signal: controller.signal,
+      headers: apiHeaders(),
+    })
       .then(async (response) => {
         if (!response.ok) throw new Error(`Schema request failed (${response.status})`);
         return (await response.json()) as EntitySchema;
@@ -59,7 +62,7 @@ export function MetadataForm({ entity }: MetadataFormProps) {
     }
     const response = await fetch(`/api/v1/data/${encodeURIComponent(entity)}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { ...apiHeaders(), "Content-Type": "application/json" },
       body: JSON.stringify(input),
     });
     if (!response.ok) {
@@ -125,4 +128,13 @@ function inputType(field: FieldSchema) {
 
 function humanize(value: string) {
   return value.replace(/([A-Z])/g, " $1").replace(/^./, (letter) => letter.toUpperCase());
+}
+
+function apiHeaders(): Record<string, string> {
+  if (!import.meta.env.DEV) return {};
+  return {
+    "X-Passage-Tenant": "00000000-0000-0000-0000-000000000001",
+    "X-Passage-User": "00000000-0000-0000-0000-000000000002",
+    "X-Passage-Duties": "metadata.read,metadata.write,metadata.data.read,metadata.data.write",
+  };
 }
