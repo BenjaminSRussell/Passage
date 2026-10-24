@@ -1,0 +1,148 @@
+id: bicycle
+attributes:
+  - {name: frame, domain: [aluminum, carbon, steel, titanium]}
+  - {name: fork, domain: [rigid, suspension]}
+  - {name: wheel, domain: ["26", "275", "29", "700"]}
+  - {name: gear, domain: ["1", "8", "11", "12"]}
+  - {name: color, domain: [black, red, blue, green, white]}
+  - {name: brake, domain: [rim, disc, hydraulic]}
+  - {name: tire, domain: [slick, knobby, gravel]}
+  - {name: size, domain: [S, M, L, XL]}
+  - {name: handlebar, domain: [drop, flat, riser]}
+  - {name: saddle, domain: [sport, comfort, racing]}
+  - {name: pedal, domain: [platform, clipless]}
+  - {name: motor, domain: [none, hub, mid]}
+defaults: {color: black, motor: none}
+tables:
+  - name: frame_fork_wheel
+    columns: [frame, fork, wheel]
+    rows:
+      - [aluminum, rigid, "26"]
+      - [aluminum, rigid, "275"]
+      - [aluminum, rigid, "29"]
+      - [aluminum, rigid, "700"]
+      - [aluminum, suspension, "26"]
+      - [aluminum, suspension, "275"]
+      - [aluminum, suspension, "29"]
+      - [aluminum, suspension, "700"]
+      - [carbon, rigid, "275"]
+      - [carbon, rigid, "29"]
+      - [carbon, rigid, "700"]
+      - [carbon, suspension, "275"]
+      - [carbon, suspension, "29"]
+      - [carbon, suspension, "700"]
+      - [steel, rigid, "26"]
+      - [steel, rigid, "275"]
+      - [steel, rigid, "29"]
+      - [steel, rigid, "700"]
+      - [titanium, rigid, "26"]
+      - [titanium, rigid, "275"]
+      - [titanium, rigid, "29"]
+      - [titanium, rigid, "700"]
+      - [titanium, suspension, "26"]
+      - [titanium, suspension, "275"]
+      - [titanium, suspension, "29"]
+      - [titanium, suspension, "700"]
+constraints:
+  - {name: c1, kind: implies, left: frame, right: carbon, then: {kind: in, left: brake, values: [disc, hydraulic]}}
+  - {name: c2, kind: implies, left: frame, right: steel, then: {kind: eq, left: fork, right: rigid}}
+  - {name: c3, kind: implies, left: frame, right: titanium, then: {kind: in, left: brake, values: [disc, hydraulic]}}
+  - {name: c4, kind: implies, left: wheel, right: "26", then: {kind: eq, left: tire, right: knobby}}
+  - {name: c5, kind: implies, left: wheel, right: "700", then: {kind: in, left: handlebar, values: [drop, flat]}}
+  - {name: c6, kind: implies, left: motor, right: hub, then: {kind: in, left: brake, values: [disc, hydraulic]}}
+  - {name: c7, kind: implies, left: motor, right: mid, then: {kind: eq, left: brake, right: hydraulic}}
+  - {name: c8, kind: implies, left: saddle, right: racing, then: {kind: in, left: handlebar, values: [drop]}}
+  - {name: c9, kind: implies, left: tire, right: slick, then: {kind: in, left: wheel, values: ["700", "29"]}}
+  - {name: c10, kind: implies, left: gear, right: "1", then: {kind: in, left: frame, values: [steel, aluminum]}}
+  - {name: c11, kind: neq, left: color, right: white}
+  - {name: c12, kind: in, left: size, values: [S, M, L, XL]}
+  - {name: c13, kind: implies, left: frame, right: carbon, then: {kind: in, left: saddle, values: [sport, racing, comfort]}}
+  - {name: c14, kind: implies, left: handlebar, right: drop, then: {kind: in, left: wheel, values: ["700", "29"]}}
+  - {name: c15, kind: implies, left: pedal, right: clipless, then: {kind: in, left: saddle, values: [sport, racing]}}
+  - {name: c16, kind: implies, left: motor, right: none, then: {kind: in, left: gear, values: ["1", "8", "11", "12"]}}
+  - {name: c17, kind: implies, left: frame, right: aluminum, then: {kind: in, left: fork, values: [rigid, suspension]}}
+  - {name: c18, kind: implies, left: brake, right: rim, then: {kind: eq, left: motor, right: none}}
+  - {name: c19, kind: implies, left: tire, right: gravel, then: {kind: in, left: wheel, values: ["700", "275"]}}
+  - {name: c20, kind: implies, left: size, right: S, then: {kind: in, left: frame, values: [aluminum, carbon, steel]}}
+  - {name: c21, kind: in, left: color, values: [black, red, blue, green, white]}
+  - {name: c22, kind: implies, left: wheel, right: "29", then: {kind: in, left: tire, values: [knobby, slick]}}
+  - {name: c23, kind: implies, left: wheel, right: "275", then: {kind: in, left: tire, values: [knobby, gravel]}}
+  - {name: c24, kind: implies, left: gear, right: "12", then: {kind: in, left: frame, values: [carbon, aluminum, titanium]}}
+  - {name: c25, kind: implies, left: gear, right: "11", then: {kind: in, left: brake, values: [disc, hydraulic, rim]}}
+  - {name: c26, kind: implies, left: color, right: red, then: {kind: in, left: frame, values: [carbon, aluminum, steel, titanium]}}
+  - {name: c27, kind: implies, left: color, right: blue, then: {kind: in, left: saddle, values: [sport, comfort, racing]}}
+  - {name: c28, kind: implies, left: color, right: green, then: {kind: in, left: tire, values: [knobby, gravel, slick]}}
+  - {name: c29, kind: implies, left: handlebar, right: riser, then: {kind: in, left: fork, values: [suspension, rigid]}}
+  - {name: c30, kind: implies, left: handlebar, right: flat, then: {kind: in, left: saddle, values: [sport, comfort, racing]}}
+  - {name: c31, kind: implies, left: saddle, right: comfort, then: {kind: in, left: pedal, values: [platform, clipless]}}
+  - {name: c32, kind: implies, left: saddle, right: sport, then: {kind: in, left: handlebar, values: [drop, flat, riser]}}
+  - {name: c33, kind: implies, left: fork, right: suspension, then: {kind: in, left: tire, values: [knobby, gravel, slick]}}
+  - {name: c34, kind: implies, left: fork, right: rigid, then: {kind: in, left: wheel, values: ["26", "275", "29", "700"]}}
+  - {name: c35, kind: implies, left: brake, right: disc, then: {kind: in, left: wheel, values: ["26", "275", "29", "700"]}}
+  - {name: c36, kind: implies, left: brake, right: hydraulic, then: {kind: in, left: frame, values: [carbon, aluminum, titanium, steel]}}
+  - {name: c37, kind: implies, left: motor, right: hub, then: {kind: in, left: wheel, values: ["26", "275", "29", "700"]}}
+  - {name: c38, kind: implies, left: motor, right: mid, then: {kind: in, left: frame, values: [aluminum, carbon]}}
+  - {name: c39, kind: implies, left: size, right: XL, then: {kind: in, left: frame, values: [aluminum, steel, titanium, carbon]}}
+  - {name: c40, kind: implies, left: size, right: M, then: {kind: in, left: saddle, values: [sport, comfort, racing]}}
+  - {name: c41, kind: implies, left: size, right: L, then: {kind: in, left: handlebar, values: [drop, flat, riser]}}
+  - {name: c42, kind: implies, left: pedal, right: platform, then: {kind: in, left: saddle, values: [sport, comfort, racing]}}
+  - {name: c43, kind: implies, left: tire, right: knobby, then: {kind: in, left: fork, values: [rigid, suspension]}}
+  - {name: c44, kind: implies, left: frame, right: steel, then: {kind: in, left: color, values: [black, red, blue, green]}}
+  - {name: c45, kind: implies, left: frame, right: titanium, then: {kind: in, left: color, values: [black, blue, green, red]}}
+  - {name: c46, kind: implies, left: gear, right: "8", then: {kind: in, left: brake, values: [rim, disc, hydraulic]}}
+  - {name: c47, kind: implies, left: wheel, right: "26", then: {kind: in, left: handlebar, values: [flat, riser]}}
+  - {name: c48, kind: in, left: motor, values: [none, hub, mid]}
+  - {name: c49, kind: in, left: frame, values: [aluminum, carbon, steel, titanium]}
+  - {name: c50, kind: table, table: frame_fork_wheel, attrs: [frame, fork, wheel]}
+valid:
+  - {frame: aluminum, fork: rigid, wheel: "29", tire: slick, brake: disc, handlebar: flat, saddle: sport, pedal: platform, gear: "11", size: M, motor: none, color: black}
+  - {frame: carbon, fork: rigid, wheel: "700", tire: slick, brake: hydraulic, handlebar: drop, saddle: racing, pedal: clipless, gear: "12", size: M, motor: none, color: red}
+  - {frame: steel, fork: rigid, wheel: "26", tire: knobby, brake: rim, handlebar: flat, saddle: comfort, pedal: platform, gear: "1", size: L, motor: none, color: black}
+  - {frame: titanium, fork: rigid, wheel: "29", tire: slick, brake: disc, handlebar: flat, saddle: sport, pedal: clipless, gear: "12", size: L, motor: none, color: blue}
+  - {frame: aluminum, fork: suspension, wheel: "275", tire: knobby, brake: disc, handlebar: riser, saddle: comfort, pedal: platform, gear: "8", size: M, motor: none, color: green}
+  - {frame: carbon, fork: suspension, wheel: "29", tire: knobby, brake: hydraulic, handlebar: flat, saddle: sport, pedal: clipless, gear: "12", size: L, motor: none, color: black}
+  - {frame: aluminum, fork: rigid, wheel: "700", tire: gravel, brake: disc, handlebar: drop, saddle: sport, pedal: clipless, gear: "11", size: M, motor: none, color: red}
+  - {frame: aluminum, fork: rigid, wheel: "29", tire: slick, brake: hydraulic, handlebar: flat, saddle: sport, pedal: platform, gear: "12", size: XL, motor: mid, color: black}
+  - {frame: aluminum, fork: suspension, wheel: "29", tire: knobby, brake: disc, handlebar: flat, saddle: sport, pedal: platform, gear: "8", size: S, motor: hub, color: red}
+  - {frame: carbon, fork: rigid, wheel: "700", tire: slick, brake: disc, handlebar: drop, saddle: racing, pedal: clipless, gear: "11", size: S, motor: none, color: blue}
+invalid:
+  - {frame: carbon, brake: rim}
+  - {frame: steel, fork: suspension}
+  - {wheel: "26", tire: slick}
+  - {motor: mid, brake: rim}
+  - {motor: hub, brake: rim}
+  - {saddle: racing, handlebar: flat}
+  - {tire: slick, wheel: "26"}
+  - {gear: "1", frame: carbon}
+  - {handlebar: drop, wheel: "26"}
+  - {pedal: clipless, saddle: comfort}
+  - {motor: mid, frame: steel}
+  - {motor: mid, frame: titanium}
+  - {frame: carbon, wheel: "26"}
+  - {color: white}
+  - {wheel: "26", handlebar: drop}
+  - {frame: steel, brake: rim, motor: hub}
+  - {gear: "12", frame: steel}
+  - {tire: gravel, wheel: "26"}
+  - {tire: gravel, wheel: "29"}
+  - {saddle: racing, handlebar: riser}
+  - {frame: titanium, brake: rim}
+  - {wheel: "700", handlebar: riser}
+  - {size: S, frame: titanium}
+  - {motor: mid, brake: disc}
+  - {frame: carbon, brake: rim, fork: rigid}
+  - {wheel: "26", tire: gravel}
+  - {gear: "1", frame: titanium}
+  - {pedal: clipless, saddle: comfort, handlebar: flat}
+  - {handlebar: drop, wheel: "275"}
+  - {frame: steel, fork: suspension, wheel: "29"}
+  - {motor: hub, brake: rim, wheel: "29"}
+  - {tire: slick, wheel: "275"}
+  - {frame: carbon, wheel: "26", fork: rigid}
+  - {saddle: racing, handlebar: flat, wheel: "700"}
+  - {color: white, frame: aluminum}
+  - {motor: mid, frame: steel, brake: hydraulic}
+  - {wheel: "26", tire: slick, frame: aluminum}
+  - {gear: "12", frame: steel, fork: rigid}
+  - {frame: titanium, brake: rim, fork: rigid}
+  - {handlebar: drop, wheel: "26", tire: knobby}

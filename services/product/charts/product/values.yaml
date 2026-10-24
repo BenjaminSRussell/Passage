@@ -1,0 +1,9 @@
+image: { repository: ghcr.io/benjaminsrussell/product, digest: "", tag: "", pullPolicy: IfNotPresent }
+databaseSecret: product-db
+migrateOnStart: false
+replicaCount: 2
+resources:
+  requests: { cpu: 50m, memory: 64Mi }
+  limits: { cpu: 1, memory: 1Gi }
+serviceMonitor: { enabled: false }
+configuratorURL: ""

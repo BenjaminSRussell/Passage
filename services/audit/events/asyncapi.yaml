@@ -1,0 +1,34 @@
+asyncapi: 3.0.0
+info:
+  title: audit
+  version: 0.1.0
+channels:
+  passage.audit.change:
+    address: passage.audit.change
+    messages:
+      recorded:
+        $ref: '#/components/messages/recorded'
+operations:
+  onRecorded:
+    action: send
+    channel:
+      $ref: '#/channels/passage.audit.change'
+    messages:
+      - $ref: '#/channels/passage.audit.change/messages/recorded'
+components:
+  messages:
+    recorded:
+      name: recorded
+      title: Field change recorded
+      payload:
+        type: object
+        required: [entity, recordId, field, userId, traceId]
+        properties:
+          entity: { type: string }
+          recordId: { type: string }
+          field: { type: string }
+          oldValue: { type: string }
+          newValue: { type: string }
+          userId: { type: string }
+          traceId: { type: string }
+      x-passage-type: dev.passage.audit.change.recorded.v1

@@ -1,0 +1,153 @@
+openapi: 3.1.0
+info:
+  title: payables
+  version: 0.1.0
+  description: Accounts payable settlement and payments (wave 19). This slice ships the stateless settlement preview.
+servers:
+  - url: https://api.passage.dev
+paths:
+  /v1/payables/settlements:preview:
+    post:
+      operationId: previewSettlement
+      x-passage-duty: settlement.read
+      description: Computes discount, FX difference, write-off and the balanced settlement journal for one credit against a vendor's open invoices. Writes nothing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SettlementRequest' }
+      responses:
+        '200':
+          description: Settlement lines, journal and unapplied credit.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SettlementResult' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /healthz:
+    get:
+      operationId: liveness
+      x-passage-duty: public
+      responses:
+        '200': { description: Process is alive. }
+  /readyz:
+    get:
+      operationId: readiness
+      x-passage-duty: public
+      responses:
+        '200': { description: Database reachable. }
+        '503': { description: Database unreachable. }
+  /metrics:
+    get:
+      operationId: metrics
+      x-passage-duty: public
+      description: Served on the admin port (9090), never through the ingress.
+      responses:
+        '200':
+          description: Prometheus text exposition.
+          content:
+            text/plain:
+              schema: { type: string }
+components:
+  schemas:
+    DecimalString:
+      type: string
+      pattern: '^[0-9]+(\.[0-9]+)?$'
+      maxLength: 28
+    SettlementRequest:
+      type: object
+      additionalProperties: false
+      required: [settlementDate, accountingCurrency, credit, invoices]
+      properties:
+        settlementDate: { type: string, format: date }
+        accountingCurrency: { type: string, pattern: '^[A-Z]{3}$' }
+        credit:
+          type: object
+          additionalProperties: false
+          required: [currency, amount]
+          properties:
+            currency: { type: string, pattern: '^[A-Z]{3}$' }
+            amount: { $ref: '#/components/schemas/DecimalString' }
+            rate: { $ref: '#/components/schemas/DecimalString' }
+        invoices:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, currency, amount, dueDate]
+            properties:
+              id: { type: string, minLength: 1, maxLength: 64 }
+              currency: { type: string, pattern: '^[A-Z]{3}$' }
+              amount: { $ref: '#/components/schemas/DecimalString' }
+              openAmount: { $ref: '#/components/schemas/DecimalString' }
+              rate: { $ref: '#/components/schemas/DecimalString' }
+              dueDate: { type: string, format: date }
+              discountPct: { $ref: '#/components/schemas/DecimalString' }
+              discountDate: { type: string, format: date }
+              alwaysDiscount: { type: boolean }
+              marked: { type: boolean }
+        policy:
+          type: object
+          additionalProperties: false
+          properties:
+            discountOnPartial: { type: boolean }
+            autoWriteOff: { type: boolean }
+            writeOffLimit: { $ref: '#/components/schemas/DecimalString' }
+    Money:
+      type: object
+      required: [amount, currency]
+      properties:
+        amount: { type: string }
+        currency: { type: string }
+    SettlementResult:
+      type: object
+      required: [lines, journal, creditRemaining]
+      properties:
+        lines:
+          type: array
+          items:
+            type: object
+            required: [invoiceId, applied, discount, writeOff, appliedAccounting, fxDifference, openAfter, status]
+            properties:
+              invoiceId: { type: string }
+              applied: { $ref: '#/components/schemas/Money' }
+              discount: { $ref: '#/components/schemas/Money' }
+              writeOff: { $ref: '#/components/schemas/Money' }
+              appliedAccounting: { $ref: '#/components/schemas/Money' }
+              fxDifference: { $ref: '#/components/schemas/Money' }
+              openAfter: { $ref: '#/components/schemas/Money' }
+              status: { type: string, enum: [SETTLED, PARTIALLY_SETTLED] }
+        journal:
+          type: array
+          items:
+            type: object
+            required: [account, side, amount]
+            properties:
+              account: { type: string, enum: [ap_control, bank_clearing, discount_taken, write_off, fx_gain, fx_loss] }
+              side: { type: string, enum: [debit, credit] }
+              amount: { $ref: '#/components/schemas/Money' }
+        creditRemaining: { $ref: '#/components/schemas/Money' }
+    Problem:
+      type: object
+      required: [type, title, status, code, serviceCode]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string }
+        serviceCode: { type: string }
+        traceId: { type: string }
+        errors: { type: object, additionalProperties: { type: string } }
+  responses:
+    Problem:
+      description: RFC 9457 problem details.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }

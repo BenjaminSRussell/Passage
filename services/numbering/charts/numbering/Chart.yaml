@@ -1,0 +1,6 @@
+apiVersion: v2
+name: numbering
+description: Passage number sequence service
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

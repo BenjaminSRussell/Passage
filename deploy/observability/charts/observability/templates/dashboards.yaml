@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-slo-dashboard
+  labels:
+    grafana_dashboard: "1"
+    app.kubernetes.io/name: observability
+data:
+  passage-slo.json: |-
+    {
+      "title": "Passage SLOs",
+      "uid": "passage-slo",
+      "schemaVersion": 39,
+      "timezone": "utc",
+      "panels": [
+        {
+          "type": "stat",
+          "title": "Availability",
+          "targets": [{ "expr": "sum(rate(http_requests_total{status!~\"5..\"}[5m])) / sum(rate(http_requests_total[5m]))" }]
+        },
+        {
+          "type": "stat",
+          "title": "p95 latency ms",
+          "targets": [{ "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le)) * 1000" }]
+        },
+        {
+          "type": "timeseries",
+          "title": "Trace hops (gateway to kafka)",
+          "datasource": { "type": "tempo", "uid": "tempo" },
+          "targets": [{ "query": "{ resource.service.name =~ \"web-shell|gateway|audit|postgres|audit-cdc\" }" }]
+        }
+      ]
+    }
