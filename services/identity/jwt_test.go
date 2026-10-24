@@ -169,8 +169,8 @@ func newTestJWTVerifier(t *testing.T) (*JWTVerifier, *rsa.PrivateKey, *httptest.
 	if err != nil {
 		t.Fatal(err)
 	}
-	modulus := base64.RawURLEncoding.EncodeToString(key.PublicKey.N.Bytes())
-	exponent := base64.RawURLEncoding.EncodeToString(big.NewInt(int64(key.PublicKey.E)).Bytes())
+	modulus := base64.RawURLEncoding.EncodeToString(key.N.Bytes())
+	exponent := base64.RawURLEncoding.EncodeToString(big.NewInt(int64(key.E)).Bytes())
 	jwks := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(jwksDocument{Keys: []jwk{{KeyType: "RSA", KeyID: "key-1", Use: "sig", Alg: "RS256", Modulus: modulus, Exponent: exponent}}})

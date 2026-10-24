@@ -100,7 +100,7 @@ func (c *OPAClient) Decide(ctx context.Context, p tenant.Principal, action, reso
 	if err != nil {
 		return Decision{}, fmt.Errorf("query OPA: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return Decision{}, fmt.Errorf("query OPA: status %d", resp.StatusCode)
 	}
