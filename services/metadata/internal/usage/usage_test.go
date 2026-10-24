@@ -39,14 +39,23 @@ func TestCollectAggregatesNamedUsersPrincipalsRequestsAndRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 2 {
+	if len(rows) != 3 {
 		t.Fatalf("rows = %#v", rows)
 	}
-	if rows[0].NamedUsers != 2 || rows[0].Principals != 3 {
-		t.Fatalf("principal usage = %#v", rows[0])
+	var buyer, entity usage.Row
+	for _, row := range rows {
+		if row.Role == "buyer" {
+			buyer = row
+		}
+		if row.Entity == "Vendor" {
+			entity = row
+		}
 	}
-	if rows[1].Requests != 1 || rows[1].RowsRead != 3 || rows[1].RowsStored != 42 {
-		t.Fatalf("entity usage = %#v", rows[1])
+	if buyer.NamedUsers != 2 || buyer.Principals != 2 {
+		t.Fatalf("principal usage = %#v", buyer)
+	}
+	if entity.Requests != 1 || entity.RowsRead != 3 || entity.RowsStored != 42 {
+		t.Fatalf("entity usage = %#v", entity)
 	}
 }
 

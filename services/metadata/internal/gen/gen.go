@@ -12,19 +12,27 @@ import (
 	"github.com/BenjaminSRussell/passage/services/metadata/internal/domain"
 )
 
-// Output is the three artifacts generated for one entity.
+// Output is the artifacts generated for one entity.
 type Output struct {
-	Migration string
-	OpenAPI   string
-	Client    string
+	Migration  string
+	OpenAPI    string
+	Client     string
+	JSONSchema string
+	Domain     string
+	Repository string
+	Handlers   string
 }
 
 // Files maps artifact file names to contents for the entity.
 func (o Output) Files(name string) map[string]string {
 	return map[string]string{
-		name + ".sql":          o.Migration,
-		name + ".openapi.json": o.OpenAPI,
-		name + ".client.ts":    o.Client,
+		name + ".sql":           o.Migration,
+		name + ".openapi.json":  o.OpenAPI,
+		name + ".client.ts":     o.Client,
+		name + ".schema.json":   o.JSONSchema,
+		name + ".domain.go":     o.Domain,
+		name + ".repository.go": o.Repository,
+		name + ".handlers.go":   o.Handlers,
 	}
 }
 
@@ -41,7 +49,15 @@ func Generate(e *domain.Entity) (Output, error) {
 	if err != nil {
 		return Output{}, fmt.Errorf("entity %q: %w", e.Name, err)
 	}
-	return Output{Migration: migrationSQL(e), OpenAPI: doc, Client: tsClient(e)}, nil
+	schema, err := JSONSchema(e)
+	if err != nil {
+		return Output{}, fmt.Errorf("entity %q: %w", e.Name, err)
+	}
+	domainModel, repository, handlers := goRuntime(e)
+	return Output{
+		Migration: migrationSQL(e), OpenAPI: doc, Client: tsClient(e), JSONSchema: schema,
+		Domain: domainModel, Repository: repository, Handlers: handlers,
+	}, nil
 }
 
 // LoadDir parses every *.yaml entity definition in dir, in file-name order.
@@ -97,7 +113,7 @@ func plural(word string) string {
 	switch {
 	case strings.HasSuffix(word, "s"), strings.HasSuffix(word, "x"):
 		return word + "es"
-	case strings.HasSuffix(word, "y") && !strings.ContainsAny(word[len(word)-2:len(word)-1], "aeiou"):
+	case len(word) > 1 && strings.HasSuffix(word, "y") && !strings.ContainsAny(word[len(word)-2:len(word)-1], "aeiou"):
 		return word[:len(word)-1] + "ies"
 	}
 	return word + "s"

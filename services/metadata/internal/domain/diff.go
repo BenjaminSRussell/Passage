@@ -18,6 +18,15 @@ func Diff(old, next *Entity) []Change {
 		old = &Entity{}
 	}
 	var out []Change
+	if !firstPublish && old.Name != next.Name {
+		out = append(out, Change{"name", "entity.name_changed", true})
+	}
+	if !firstPublish && old.Domain != next.Domain {
+		out = append(out, Change{"domain", "entity.domain_changed", true})
+	}
+	if !firstPublish && old.PerLegalEntity != next.PerLegalEntity {
+		out = append(out, Change{"per_legal_entity", "entity.scope_changed", true})
+	}
 	oldFields := map[string]Field{}
 	for _, f := range old.Fields {
 		oldFields[f.Name] = f
@@ -47,10 +56,21 @@ func Diff(old, next *Entity) []Change {
 		}
 	}
 	for _, oe := range old.Enums {
+		nextIndex := slices.IndexFunc(next.Enums, func(enum Enum) bool { return enum.Name == oe.Name })
+		if nextIndex < 0 {
+			out = append(out, Change{"enums." + oe.Name, "enum.removed", true})
+			continue
+		}
+		nextEnum := next.Enums[nextIndex]
 		names := next.EnumNames(oe.Name)
 		for _, v := range oe.Values {
 			if !slices.Contains(names, v.Name) {
 				out = append(out, Change{"enums." + oe.Name + "." + v.Name, "enum.value_removed", true})
+				continue
+			}
+			nextValue := nextEnum.Values[slices.IndexFunc(nextEnum.Values, func(candidate EnumValue) bool { return candidate.Name == v.Name })]
+			if nextValue.Code != v.Code {
+				out = append(out, Change{"enums." + oe.Name + "." + v.Name + ".code", "enum.code_changed", true})
 			}
 		}
 	}
@@ -62,8 +82,34 @@ func Diff(old, next *Entity) []Change {
 			}
 		}
 	}
-	if len(old.Indexes) != len(next.Indexes) {
-		out = append(out, Change{"indexes", "indexes.changed", false})
+	for i, oldIndex := range old.Indexes {
+		if i >= len(next.Indexes) {
+			out = append(out, Change{"indexes", "index.removed", false})
+			continue
+		}
+		nextIndex := next.Indexes[i]
+		if !reflect.DeepEqual(oldIndex.Fields, nextIndex.Fields) || oldIndex.Where != nextIndex.Where {
+			out = append(out, Change{"indexes", "index.definition_changed", true})
+		} else if !oldIndex.Unique && nextIndex.Unique {
+			out = append(out, Change{"indexes", "index.unique_added", true})
+		} else if oldIndex.Unique && !nextIndex.Unique {
+			out = append(out, Change{"indexes", "index.unique_removed", false})
+		}
+	}
+	for i := len(old.Indexes); i < len(next.Indexes); i++ {
+		out = append(out, Change{"indexes", "index.added", next.Indexes[i].Unique && !firstPublish})
+	}
+	for i, relation := range old.Relations {
+		if i >= len(next.Relations) {
+			out = append(out, Change{"relations", "relation.removed", true})
+			continue
+		}
+		if !reflect.DeepEqual(relation, next.Relations[i]) {
+			out = append(out, Change{"relations", "relation.changed", true})
+		}
+	}
+	if len(next.Relations) > len(old.Relations) {
+		out = append(out, Change{"relations", "relation.added", false})
 	}
 	return out
 }

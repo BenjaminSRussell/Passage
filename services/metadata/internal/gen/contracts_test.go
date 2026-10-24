@@ -27,10 +27,10 @@ func TestGenerateEmitsRuntimeArtifacts(t *testing.T) {
 	}
 	files := out.Files("Vendor")
 	for name, fragment := range map[string]string{
-		"Vendor.schema.json":    `"$schema":"https://json-schema.org/draft/2020-12/schema"`,
-		"Vendor.domain.go":      "type Vendor struct",
-		"Vendor.repository.go":  "type VendorRepository interface",
-		"Vendor.handlers.go":    "func RegisterVendorRoutes",
+		"Vendor.schema.json":   `"$schema":"https://json-schema.org/draft/2020-12/schema"`,
+		"Vendor.domain.go":     "type Vendor struct",
+		"Vendor.repository.go": "type VendorRepository interface",
+		"Vendor.handlers.go":   "func RegisterVendorRoutes",
 	} {
 		if !strings.Contains(files[name], fragment) {
 			t.Errorf("%s does not contain %q:\n%s", name, fragment, files[name])

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: metadata
+description: Passage metadata registry and generated entity runtime
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

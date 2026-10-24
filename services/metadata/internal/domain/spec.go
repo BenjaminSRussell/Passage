@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -13,7 +14,7 @@ import (
 
 const (
 	entityNamePattern  = `^[A-Z][A-Za-z0-9]{0,47}$`
-	fieldNamePattern   = `^[a-z][a-z0-9_]{0,47}$`
+	fieldNamePattern   = `^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$`
 	domainPattern      = `^[a-z][a-z0-9]{0,31}$`
 	wherePattern       = `^([a-z][a-z0-9_]{0,47}) is (not )?null$`
 	numberPattern      = `^-?[0-9]{1,18}(\.[0-9]{1,12})?$`
@@ -24,65 +25,65 @@ const (
 )
 
 type Entity struct {
-	Name           string     `yaml:"name"`
-	Domain         string     `yaml:"domain"`
-	TableGroup     string     `yaml:"table_group"`
-	PerLegalEntity bool       `yaml:"per_legal_entity"`
-	SoftDelete     bool       `yaml:"soft_delete"`
-	Breaking       bool       `yaml:"breaking"`
-	Audit          bool       `yaml:"audit"`
-	TitleFields    []string   `yaml:"title_fields"`
-	Fields         []Field    `yaml:"fields"`
-	Enums          []Enum     `yaml:"enums"`
-	Relations      []Relation `yaml:"relations"`
-	Indexes        []Index    `yaml:"indexes"`
-	Hooks          []Hook     `yaml:"hooks"`
+	Name           string     `json:"name" yaml:"name"`
+	Domain         string     `json:"domain" yaml:"domain"`
+	TableGroup     string     `json:"table_group" yaml:"table_group"`
+	PerLegalEntity bool       `json:"per_legal_entity" yaml:"per_legal_entity"`
+	SoftDelete     bool       `json:"soft_delete" yaml:"soft_delete"`
+	Breaking       bool       `json:"breaking" yaml:"breaking"`
+	Audit          bool       `json:"audit" yaml:"audit"`
+	TitleFields    []string   `json:"title_fields,omitempty" yaml:"title_fields"`
+	Fields         []Field    `json:"fields" yaml:"fields"`
+	Enums          []Enum     `json:"enums,omitempty" yaml:"enums"`
+	Relations      []Relation `json:"relations,omitempty" yaml:"relations"`
+	Indexes        []Index    `json:"indexes,omitempty" yaml:"indexes"`
+	Hooks          []Hook     `json:"hooks,omitempty" yaml:"hooks"`
 }
 
 type Field struct {
-	Name       string `yaml:"name"`
-	Type       string `yaml:"type"`
-	Length     int    `yaml:"length"`
-	Precision  int    `yaml:"precision"`
-	Scale      int    `yaml:"scale"`
-	Enum       string `yaml:"enum"`
-	Required   bool   `yaml:"required"`
-	Unique     bool   `yaml:"unique"`
-	Default    string `yaml:"default"`
-	Computed   string `yaml:"computed"`
-	Visibility string `yaml:"visibility"`
-	PII        string `yaml:"pii"`
-	Audit      *bool  `yaml:"audit"`
-	Label      string `yaml:"label"`
+	Name       string `json:"name" yaml:"name"`
+	Type       string `json:"type" yaml:"type"`
+	Length     int    `json:"length,omitempty" yaml:"length"`
+	Precision  int    `json:"precision,omitempty" yaml:"precision"`
+	Scale      int    `json:"scale,omitempty" yaml:"scale"`
+	Enum       string `json:"enum,omitempty" yaml:"enum"`
+	Required   bool   `json:"required,omitempty" yaml:"required"`
+	Unique     bool   `json:"unique,omitempty" yaml:"unique"`
+	Default    string `json:"default,omitempty" yaml:"default"`
+	Computed   string `json:"computed,omitempty" yaml:"computed"`
+	Visibility string `json:"visibility,omitempty" yaml:"visibility"`
+	PII        string `json:"pii,omitempty" yaml:"pii"`
+	Audit      *bool  `json:"audit,omitempty" yaml:"audit"`
+	Label      string `json:"label,omitempty" yaml:"label"`
 }
 
 type Enum struct {
-	Name   string      `yaml:"name"`
-	Values []EnumValue `yaml:"values"`
+	Name   string      `json:"name" yaml:"name"`
+	Values []EnumValue `json:"values" yaml:"values"`
 }
 
 type EnumValue struct {
-	Name  string `yaml:"name"`
-	Code  int    `yaml:"code"`
-	Label string `yaml:"label"`
+	Name  string `json:"name" yaml:"name"`
+	Code  int    `json:"code" yaml:"code"`
+	Label string `json:"label,omitempty" yaml:"label"`
 }
 
 type Relation struct {
-	FromField string `yaml:"from_field"`
-	ToEntity  string `yaml:"to_entity"`
-	ToField   string `yaml:"to_field"`
-	OnDelete  string `yaml:"on_delete"`
+	FromField string `json:"from_field" yaml:"from_field"`
+	ToEntity  string `json:"to_entity" yaml:"to_entity"`
+	ToField   string `json:"to_field" yaml:"to_field"`
+	OnDelete  string `json:"on_delete" yaml:"on_delete"`
 }
 
 type Index struct {
-	Fields []string `yaml:"fields"`
-	Unique bool     `yaml:"unique"`
-	Where  string   `yaml:"where"`
+	Fields []string `json:"fields" yaml:"fields"`
+	Unique bool     `json:"unique,omitempty" yaml:"unique"`
+	Where  string   `json:"where,omitempty" yaml:"where"`
 }
 
 type Hook struct {
-	Name string `yaml:"name"`
-	Expr string `yaml:"expr"`
+	Name string `json:"name" yaml:"name"`
+	Expr string `json:"expr" yaml:"expr"`
 }
 
 type Violation struct {
@@ -96,7 +97,7 @@ func (v Violation) Error() string {
 }
 
 func Parse(data []byte) (*Entity, error) {
-	dec := yaml.NewDecoder(strings.NewReader(string(data)))
+	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	var e Entity
 	if err := dec.Decode(&e); err != nil {
@@ -172,7 +173,7 @@ func Validate(e *Entity) []Violation {
 	fields := map[string]Field{}
 	for i, f := range e.Fields {
 		p := fmt.Sprintf("fields[%d]", i)
-		if !matches(fieldNamePattern, f.Name) {
+		if len(f.Name) > 48 || !matches(fieldNamePattern, f.Name) {
 			add(p+".name", "MET-0003", "field name must match %s", fieldNamePattern)
 		} else if _, dup := fields[f.Name]; dup || isReserved(f.Name) {
 			add(p+".name", "MET-0009", "field name %q is duplicate or reserved", f.Name)

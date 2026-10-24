@@ -29,7 +29,12 @@ func TestGenerate_GoldenReferenceEntities(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for name, content := range out.Files(e.Name) {
+		goldenFiles := map[string]string{
+			e.Name + ".sql":          out.Migration,
+			e.Name + ".openapi.json": out.OpenAPI,
+			e.Name + ".client.ts":    out.Client,
+		}
+		for name, content := range goldenFiles {
 			path := filepath.Join(goldenDir, name)
 			if os.Getenv("UPDATE_GOLDEN") == "1" {
 				if err := os.WriteFile(path, []byte(content), 0o644); err != nil {

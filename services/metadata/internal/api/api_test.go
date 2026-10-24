@@ -5,16 +5,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
-	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/metadata/internal/api"
 	"github.com/BenjaminSRussell/passage/services/metadata/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/metadata/internal/registry"
@@ -124,6 +126,9 @@ func TestBreakingPublishFailsLoudly(t *testing.T) {
 }
 
 func TestGeneratedAPIThreeNodesSustainsThousandReadsPerSecond(t *testing.T) {
+	previousLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	defer slog.SetDefault(previousLogger)
 	store := registry.NewMemory()
 	tenantID := testkit.TenantID(1)
 	if _, err := store.Publish(testkit.Ctx(tenantID), tenantID, vendorDefinition()); err != nil {
@@ -138,21 +143,24 @@ func TestGeneratedAPIThreeNodesSustainsThousandReadsPerSecond(t *testing.T) {
 	}
 
 	const requests = 1000
+	const workers = 20
 	durations := make([]time.Duration, requests)
 	start := time.Now()
 	var wg sync.WaitGroup
-	wg.Add(requests)
-	for i := 0; i < requests; i++ {
-		go func(i int) {
+	wg.Add(workers)
+	for worker := 0; worker < workers; worker++ {
+		go func(worker int) {
 			defer wg.Done()
-			began := time.Now()
-			res := request(t, nodes[i%len(nodes)].Client(), http.MethodGet, nodes[i%len(nodes)].URL+"/v1/data/Vendor", "", "metadata.data.read")
-			_ = body(t, res)
-			if res.StatusCode != http.StatusOK {
-				t.Errorf("request %d status=%d", i, res.StatusCode)
+			for i := worker; i < requests; i += workers {
+				began := time.Now()
+				res := request(t, nodes[i%len(nodes)].Client(), http.MethodGet, nodes[i%len(nodes)].URL+"/v1/data/Vendor", "", "metadata.data.read")
+				_ = body(t, res)
+				if res.StatusCode != http.StatusOK {
+					t.Errorf("request %d status=%d", i, res.StatusCode)
+				}
+				durations[i] = time.Since(began)
 			}
-			durations[i] = time.Since(began)
-		}(i)
+		}(worker)
 	}
 	wg.Wait()
 	elapsed := time.Since(start)
@@ -160,11 +168,7 @@ func TestGeneratedAPIThreeNodesSustainsThousandReadsPerSecond(t *testing.T) {
 		t.Fatalf("throughput %.0f rps < 1000 rps (%s)", rate, elapsed)
 	}
 	sorted := append([]time.Duration(nil), durations...)
-	for i := 1; i < len(sorted); i++ {
-		for j := i; j > 0 && sorted[j] < sorted[j-1]; j-- {
-			sorted[j], sorted[j-1] = sorted[j-1], sorted[j]
-		}
-	}
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
 	p95 := sorted[(len(sorted)*95/100)-1]
 	if p95 >= 50*time.Millisecond {
 		t.Fatalf("p95=%s, want <50ms; elapsed=%s", p95, elapsed)
