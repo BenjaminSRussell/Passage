@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"sort"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -25,7 +23,6 @@ import (
 const (
 	readyTimeout   = 500 * time.Millisecond
 	dutySettleRead = "settlement.read"
-	unmatchedRoute = "unmatched"
 )
 
 type Pinger interface {
@@ -37,13 +34,6 @@ type API struct {
 	now      func() time.Time
 	previews atomic.Int64
 	failed   atomic.Int64
-	mu       sync.Mutex
-	requests map[requestKey]int64
-}
-
-type requestKey struct {
-	route  string
-	status int
 }
 
 type problemBody struct {
@@ -66,7 +56,7 @@ var problemSlugs = map[string]string{
 }
 
 func New(db Pinger, now func() time.Time) *API {
-	return &API{db: db, now: now, requests: map[requestKey]int64{}}
+	return &API{db: db, now: now}
 }
 
 func (a *API) Register(r chi.Router) {
@@ -158,42 +148,7 @@ func validTenant(w http.ResponseWriter, r *http.Request) bool {
 func (a *API) Metrics() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-		fmt.Fprintf(w, "# HELP payables_settlement_previews_total Settlement previews computed.\n# TYPE payables_settlement_previews_total counter\npayables_settlement_previews_total %d\n", a.previews.Load())
-		fmt.Fprintf(w, "# HELP payables_settlement_preview_failures_total Settlement previews rejected or failed.\n# TYPE payables_settlement_preview_failures_total counter\npayables_settlement_preview_failures_total %d\n", a.failed.Load())
-		a.mu.Lock()
-		defer a.mu.Unlock()
-		keys := make([]requestKey, 0, len(a.requests))
-		for k := range a.requests {
-			keys = append(keys, k)
-		}
-		sort.Slice(keys, func(i, j int) bool {
-			if keys[i].route != keys[j].route {
-				return keys[i].route < keys[j].route
-			}
-			return keys[i].status < keys[j].status
-		})
-		fmt.Fprint(w, "# HELP payables_http_requests_total HTTP requests by route and status.\n# TYPE payables_http_requests_total counter\n")
-		for _, k := range keys {
-			fmt.Fprintf(w, "payables_http_requests_total{route=%q,status=\"%d\"} %d\n", k.route, k.status, a.requests[k])
-		}
-	})
-}
-
-func (a *API) Instrument(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
-		rctx := chi.NewRouteContext()
-		next.ServeHTTP(ww, r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx)))
-		route := rctx.RoutePattern()
-		if route == "" {
-			route = unmatchedRoute
-		}
-		status := ww.Status()
-		if status == 0 {
-			status = http.StatusOK
-		}
-		a.mu.Lock()
-		a.requests[requestKey{route, status}]++
-		a.mu.Unlock()
+		fmt.Fprintf(w, "# TYPE payables_settlement_previews_total counter\npayables_settlement_previews_total %d\n", a.previews.Load())
+		fmt.Fprintf(w, "# TYPE payables_settlement_preview_failures_total counter\npayables_settlement_preview_failures_total %d\n", a.failed.Load())
 	})
 }

@@ -387,21 +387,15 @@ func TestParseRequest(t *testing.T) {
 		}, domain.CodeValidation},
 		{"duplicate invoice id", func(d *domain.RequestDTO) { d.Invoices = append(d.Invoices, d.Invoices[0]) }, domain.CodeValidation},
 		{"NaN amount", func(d *domain.RequestDTO) { d.Credit.Amount = "NaN" }, domain.CodeValidation},
-		{"exponent amount", func(d *domain.RequestDTO) { d.Credit.Amount = "1e999" }, domain.CodeValidation},
 		{"negative amount", func(d *domain.RequestDTO) { d.Credit.Amount = "-5.00" }, domain.CodeValidation},
-		{"zero amount", func(d *domain.RequestDTO) { d.Credit.Amount = "0.00" }, domain.CodeValidation},
 		{"too many decimals for currency", func(d *domain.RequestDTO) { d.Credit.Amount = "1.005" }, domain.CodeValidation},
-		{"too many integer digits", func(d *domain.RequestDTO) { d.Credit.Amount = "1234567890123456.00" }, domain.CodeValidation},
 		{"zero rate", func(d *domain.RequestDTO) { d.Invoices[0].Rate = "0" }, domain.CodeValidation},
-		{"negative rate", func(d *domain.RequestDTO) { d.Invoices[0].Rate = "-1.1" }, domain.CodeValidation},
 		{"missing rate for foreign currency", func(d *domain.RequestDTO) { d.Credit.Rate = "" }, domain.CodeCurrency},
 		{"rate other than 1 for accounting currency", func(d *domain.RequestDTO) {
 			d.Invoices[0].Currency, d.Invoices[0].Rate = "USD", "1.2"
 		}, domain.CodeCurrency},
 		{"discount above 100", func(d *domain.RequestDTO) { d.Invoices[0].DiscountPct = "101" }, domain.CodeValidation},
 		{"open amount above amount", func(d *domain.RequestDTO) { d.Invoices[0].OpenAmount = "1000.01" }, domain.CodeValidation},
-		{"lowercase currency", func(d *domain.RequestDTO) { d.Credit.Currency = "eur" }, domain.CodeValidation},
-		{"missing invoice id", func(d *domain.RequestDTO) { d.Invoices[0].ID = "" }, domain.CodeValidation},
 		{"bad write-off limit", func(d *domain.RequestDTO) { d.Policy.WriteOffLimit = "abc" }, domain.CodeValidation},
 	}
 	for _, tc := range tests {

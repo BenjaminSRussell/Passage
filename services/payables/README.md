@@ -39,4 +39,4 @@ Problem bodies from this service carry `code` (a stable slug such as `validation
 
 ## Metrics
 
-`payables_settlement_previews_total`, `payables_settlement_preview_failures_total`, `payables_http_requests_total`. No Prometheus client dependency: counters are stdlib atomics rendered as text.
+`payables_settlement_previews_total`, `payables_settlement_preview_failures_total` (stdlib atomics rendered as text).
