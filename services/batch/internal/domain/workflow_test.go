@@ -80,8 +80,9 @@ func TestThreeLevelChainDelegationAndSLA(t *testing.T) {
 	}
 	inst := Instance{SubmittedBy: "req", Status: InstanceSubmitted, CurrentStep: 1}
 	items := []WorkItem{{ID: "w1", Step: 1, AssigneeID: "alice", Status: ItemPending}}
+	var err error
 
-	inst, items[0], err := ApplyAction(inst, items[0], def, Action{Kind: "approve", Actor: "alice"})
+	inst, items[0], err = ApplyAction(inst, items[0], def, Action{Kind: "approve", Actor: "alice"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +97,8 @@ func TestThreeLevelChainDelegationAndSLA(t *testing.T) {
 		t.Fatal(err)
 	}
 	items = append(items, WorkItem{ID: "w4", Step: 3, AssigneeID: "carol", Status: ItemPending})
-	inst, items[3], target := Escalate(inst, items[3], def.Steps[2], def.AdminUserID)
+	var target string
+	inst, items[3], target = Escalate(inst, items[3], def.Steps[2], def.AdminUserID)
 	if target != "admin" || items[3].Status != ItemEscalated {
 		t.Fatalf("escalate = %s %+v", target, items[3])
 	}

@@ -4,8 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
@@ -200,7 +198,6 @@ func TestMigrationsApplyWithRLS(t *testing.T) {
 	if len(items) != 0 {
 		t.Fatalf("tenant 2 saw %d items", len(items))
 	}
-	_ = pool
 }
 
 func asProblem(err error, dest **httpx.Problem) bool {

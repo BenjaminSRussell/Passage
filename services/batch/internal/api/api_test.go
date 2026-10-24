@@ -25,7 +25,6 @@ type fakeStore struct {
 	items   []store.WorkItem
 	job     store.Job
 	run     store.Run
-	tpl     store.Template
 	msg     store.Message
 	schema  schema.JSONSchema
 	overlap bool
