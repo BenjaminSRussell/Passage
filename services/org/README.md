@@ -41,6 +41,7 @@ Contract: `api/openapi.yaml`. Paths follow the architecture spine (`/v1/<context
 | AUTH-0001 | 401 | missing or malformed tenant |
 | AUTH-0003 | 403 | duty missing |
 | ORG-LE-CODE-DUPLICATE | 409 | legal-entity code already used in the tenant |
+| idempotency_key_reuse | 422 | Idempotency-Key reused with a different body |
 | ORG-UOM-NO-PATH | 422 | no conversion within two hops inside one unit class |
 | ORG-HIER-CYCLE, ORG-HIER-ROOT, ORG-HIER-DUPLICATE, ORG-HIER-DEPTH, ORG-HIER-SIZE, ORG-HIER-OVERLAP | domain | returned by `domain.ValidateNodes` and `ValidateVersions`; no endpoint publishes hierarchies yet |
 
