@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.passage.dev/dev.passage.platform.entitydefinition.changed.v1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "specversion",
+    "id",
+    "source",
+    "type",
+    "subject",
+    "time",
+    "tenantid",
+    "sequence",
+    "data"
+  ],
+  "properties": {
+    "specversion": { "type": "string", "enum": ["1.0"] },
+    "id": { "type": "string" },
+    "source": { "type": "string" },
+    "type": {
+      "type": "string",
+      "enum": ["dev.passage.platform.entitydefinition.changed.v1"]
+    },
+    "subject": { "type": "string" },
+    "time": { "type": "string" },
+    "tenantid": { "type": "string" },
+    "sequence": { "type": "number" },
+    "dataschema": { "type": "string" },
+    "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entityName", "version"],
+      "properties": {
+        "entityName": { "type": "string" },
+        "version": { "type": "number" },
+        "schemaUrl": { "type": "string" }
+      }
+    }
+  }
+}
