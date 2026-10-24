@@ -121,7 +121,8 @@ func TestAddRejects(t *testing.T) {
 		{"short currency", Rate{Type: "SPOT", From: "EU", To: "USD", ValidFrom: date("2026-03-01"), Value: dec("1")}, ErrInvalidRate},
 		{"lowercase currency", Rate{Type: "SPOT", From: "eur", To: "USD", ValidFrom: date("2026-03-01"), Value: dec("1")}, ErrInvalidRate},
 		{"unknown type", Rate{Type: "NOPE", From: "EUR", To: "USD", ValidFrom: date("2026-03-01"), Value: dec("1")}, ErrInvalidRate},
-		{"future valid from", Rate{Type: "SPOT", From: "EUR", To: "USD", ValidFrom: date("2026-04-01"), Value: dec("1")}, ErrFutureRate},
+		{"empty id", Rate{Type: "SPOT", From: "EUR", To: "USD", ValidFrom: date("2026-03-01"), Value: dec("1")}, ErrInvalidRate},
+		{"future valid from", Rate{ID: "rf", Type: "SPOT", From: "EUR", To: "USD", ValidFrom: date("2026-04-01"), Value: dec("1")}, ErrFutureRate},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -133,6 +134,14 @@ func TestAddRejects(t *testing.T) {
 				t.Fatalf("rejected row was added")
 			}
 		})
+	}
+}
+
+func TestAddRejectsDuplicateID(t *testing.T) {
+	b := testBook(t)
+	err := b.Add(Rate{ID: "r1", Type: "SPOT", From: "EUR", To: "USD", ValidFrom: date("2026-03-01"), Value: dec("1.1")})
+	if !errors.Is(err, ErrInvalidRate) || len(b.rates) != 4 {
+		t.Fatalf("err = %v rows = %d", err, len(b.rates))
 	}
 }
 

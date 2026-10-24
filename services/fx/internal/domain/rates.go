@@ -83,6 +83,14 @@ func (b *Book) Add(r Rate) error {
 	if r.Value.Sign() <= 0 {
 		return fmt.Errorf("%w: value must be positive", ErrInvalidRate)
 	}
+	if r.ID == "" {
+		return fmt.Errorf("%w: id required", ErrInvalidRate)
+	}
+	for _, o := range b.rates {
+		if o.ID == r.ID {
+			return fmt.Errorf("%w: duplicate id %q", ErrInvalidRate, r.ID)
+		}
+	}
 	r.ValidFrom = day(r.ValidFrom)
 	if r.ValidFrom.After(b.now) {
 		return fmt.Errorf("%w: valid from %s", ErrFutureRate, r.ValidFrom.Format(time.DateOnly))
