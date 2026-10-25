@@ -69,6 +69,8 @@ type Store interface {
 	CreateLocation(ctx context.Context, in Location, idempotencyKey string) (Location, error)
 	GetLocation(ctx context.Context, id string) (Location, error)
 	ListLocations(ctx context.Context, f LocationFilter, after SiteKey, limit int) (LocationPage, error)
+	CreateAddress(ctx context.Context, in Address, idempotencyKey string) (Address, error)
+	GetAddress(ctx context.Context, id string) (Address, error)
 	ListReference(ctx context.Context, kind ReferenceKind, f ReferenceFilter) ([]ReferenceItem, error)
 	GetReference(ctx context.Context, kind ReferenceKind, code string) (ReferenceItem, error)
 	SetReferenceStatus(ctx context.Context, kind ReferenceKind, code, status string) (ReferenceItem, error)

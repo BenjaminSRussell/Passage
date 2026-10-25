@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: org
-  version: 0.7.0
-  description: Organization service. Covers legal entities, operating units, sites, warehouses, locations, unit-of-measure conversion, and the platform-owned reference sets (countries, currencies, regions, languages) with tenant-level deactivation.
+  version: 0.8.0
+  description: Organization service. Covers legal entities, operating units, sites, warehouses, locations, postal addresses with purposes, unit-of-measure conversion, and the platform-owned reference sets (countries, currencies, regions, languages) with tenant-level deactivation.
 servers:
   - url: https://app.local.passage.dev
 paths:
@@ -269,6 +269,31 @@ paths:
           description: One location. A malformed id, an unknown id and a location outside the caller's legal-entity scope are all 404 ORG-LOC-NOT-FOUND.
           content: { application/json: { schema: { $ref: '#/components/schemas/Location' } } }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/org/addresses:
+    post:
+      operationId: createAddress
+      x-passage-duty: org.address.write
+      parameters:
+        - { name: Idempotency-Key, in: header, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateAddress' } } }
+      responses:
+        '201':
+          description: Address created (first version), or the original address on an Idempotency-Key replay. Country and region rules come from the seeded country rows; coordinates are set only when the geocoder finds the address, otherwise geoStatus is unverified. 400 COM-0001 for a field error. 409 ORG-ADDR-PRIMARY-DUPLICATE when the owner already has a primary address for a purpose. 422 ORG-ADDR-OWNER-INVALID, ORG-ADDR-COUNTRY-INVALID, ORG-ADDR-REGION-UNKNOWN, ORG-ADDR-REGION-REQUIRED or ORG-ADDR-POSTAL-FORMAT, with the failing fields in errors; 422 idempotency_key_reuse when the key was used with a different body.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Address' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/addresses/{id}:
+    get:
+      operationId: getAddress
+      x-passage-duty: org.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The current version of the address with its purposes. A malformed id, an unknown id and an address outside the caller's legal-entity scope are all 404 ORG-ADDR-NOT-FOUND.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Address' } } }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/org/countries:
     get:
       operationId: listCountries
@@ -531,6 +556,20 @@ components:
       type: object
       required: [items]
       properties: { items: { type: array, items: { $ref: '#/components/schemas/Location' } }, nextCursor: { type: string } }
+    AddressPurpose:
+      type: object
+      required: [purpose]
+      additionalProperties: false
+      properties: { purpose: { type: string, enum: [business, delivery, invoice, remit_to, service, home, other] }, primary: { type: boolean, default: false, description: At most one primary address per owner and purpose } }
+    CreateAddress:
+      type: object
+      additionalProperties: false
+      required: [ownerType, ownerId, countryCode, city, street1, purposes]
+      properties: { ownerType: { type: string, enum: [legal_entity, operating_unit, site, warehouse, location, party] }, ownerId: { type: string, format: uuid }, countryCode: { type: string, pattern: '^[A-Z]{2}$', description: Upper-cased on save }, regionCode: { type: string, pattern: '^[A-Z0-9]{1,3}$', description: ISO 3166-2 suffix, for example CA for US-CA }, city: { type: string, minLength: 1, maxLength: 60 }, postalCode: { type: string, maxLength: 12 }, street1: { type: string, minLength: 1, maxLength: 100 }, street2: { type: string, maxLength: 100 }, street3: { type: string, maxLength: 100 }, building: { type: string, maxLength: 20 }, poBox: { type: string, maxLength: 20 }, validFrom: { type: string, format: date }, purposes: { type: array, minItems: 1, maxItems: 7, items: { $ref: '#/components/schemas/AddressPurpose' } } }
+    Address:
+      type: object
+      required: [id, versionId, ownerType, ownerId, countryCode, city, street1, geoStatus, formatted, purposes, validFrom, createdAt]
+      properties: { id: { type: string, format: uuid, description: Stable across versions }, versionId: { type: string, format: uuid }, ownerType: { type: string, enum: [legal_entity, operating_unit, site, warehouse, location, party] }, ownerId: { type: string, format: uuid }, legalEntityId: { type: string, format: uuid }, countryCode: { type: string }, regionCode: { type: string }, city: { type: string }, postalCode: { type: string }, street1: { type: string }, street2: { type: string }, street3: { type: string }, building: { type: string }, poBox: { type: string }, latitude: { type: string }, longitude: { type: string }, geoStatus: { type: string, enum: [unverified, geocoded] }, formatted: { type: string }, purposes: { type: array, items: { $ref: '#/components/schemas/AddressPurpose' } }, validFrom: { type: string, format: date }, validTo: { type: string, format: date }, createdAt: { type: string, format: date-time } }
     ReferenceStatusChange:
       type: object
       additionalProperties: false
