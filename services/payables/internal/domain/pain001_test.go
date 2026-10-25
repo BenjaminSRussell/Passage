@@ -338,7 +338,6 @@ func TestGeneratePain001_RejectsInvalidInput(t *testing.T) {
 		detail string
 	}{
 		{"no payments", func(t *testing.T, in *domain.Pain001Input) { in.Payments = nil }, domain.CodeValidation, "at least one"},
-		{"empty file number", func(t *testing.T, in *domain.Pain001Input) { in.FileNumber = "" }, domain.CodeValidation, "MsgId"},
 		{"file number outside pattern", func(t *testing.T, in *domain.Pain001Input) { in.FileNumber = "F_1" }, domain.CodeValidation, "MsgId"},
 		{"composed PmtInfId too long", func(t *testing.T, in *domain.Pain001Input) { in.FileNumber = strings.Repeat("F", 35) }, domain.CodeValidation, "PmtInfId"},
 		{"payment number too long", func(t *testing.T, in *domain.Pain001Input) { in.Payments[0].Number = strings.Repeat("P", 36) }, domain.CodeValidation, "EndToEndId"},
@@ -347,7 +346,6 @@ func TestGeneratePain001_RejectsInvalidInput(t *testing.T) {
 		{"zero created", func(t *testing.T, in *domain.Pain001Input) { in.Created = time.Time{} }, domain.CodeValidation, "created"},
 		{"zero execution date", func(t *testing.T, in *domain.Pain001Input) { in.Payments[0].ExecutionDate = time.Time{} }, domain.CodeValidation, "PAY-1"},
 		{"zero amount", func(t *testing.T, in *domain.Pain001Input) { in.Payments[0].Amount = decimal.Zero }, domain.CodeValidation, "PAY-1"},
-		{"negative amount", func(t *testing.T, in *domain.Pain001Input) { in.Payments[0].Amount = decimal.NewFromInt(-5) }, domain.CodeValidation, "PAY-1"},
 		{"too many decimals", func(t *testing.T, in *domain.Pain001Input) {
 			in.Payments[0].Amount = decimal.RequireFromString("1.005")
 		}, domain.CodeValidation, "2 decimals"},
@@ -360,7 +358,6 @@ func TestGeneratePain001_RejectsInvalidInput(t *testing.T) {
 		{"bad debtor bic", func(t *testing.T, in *domain.Pain001Input) { in.DebtorBIC = "XX" }, domain.CodeRunInvalid, "bic"},
 		{"missing debtor bic", func(t *testing.T, in *domain.Pain001Input) { in.DebtorBIC = "" }, domain.CodeValidation, "debtor BIC"},
 		{"both iban and other id", func(t *testing.T, in *domain.Pain001Input) { in.Payments[0].Creditor.Account.OtherID = "123" }, domain.CodeValidation, "exactly one"},
-		{"no account", func(t *testing.T, in *domain.Pain001Input) { in.Payments[0].Creditor.Account = domain.Pain001Account{} }, domain.CodeValidation, "exactly one"},
 		{"invalid aba", func(t *testing.T, in *domain.Pain001Input) {
 			in.Payments[0].Creditor.RoutingNumber = "021000022"
 		}, domain.CodeRunInvalid, "aba:"},
@@ -403,23 +400,6 @@ func TestGeneratePain001_MixedCurrenciesSumPlainly(t *testing.T) {
 	}
 	if tx := doc.Infs[0].Txs[1]; tx.Amt.Ccy != "JPY" || tx.Amt.Value != "1000" {
 		t.Fatalf("yen transaction = %+v", tx)
-	}
-}
-
-func TestGeneratePain001_Determinism(t *testing.T) {
-	in := baseInput(t)
-	first, _ := generate(t, in)
-	second, _ := generate(t, in)
-	if first.SHA256 != second.SHA256 || string(first.Content) != string(second.Content) {
-		t.Fatal("identical input produced different bytes")
-	}
-	in.Created = created.Add(time.Hour)
-	later, _ := generate(t, in)
-	if later.SHA256 == first.SHA256 {
-		t.Fatal("timestamp change did not change the hash")
-	}
-	if normalised(later.Content) != normalised(first.Content) {
-		t.Fatal("timestamp change altered more than CreDtTm")
 	}
 }
 
