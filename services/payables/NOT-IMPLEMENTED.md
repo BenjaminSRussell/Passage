@@ -1,21 +1,23 @@
-# Not implemented in PSG-19 slice A
+# Not implemented in PSG-19 slices 1 to 3
 
-Slice A ships the settlement engine, the preview endpoint, the service skeleton and the web module stub.
+Slice A ships the settlement engine, the preview endpoint, the service skeleton and the web module stub. Slice 3a (PSG-1903) adds the positive pay CSV generator and the payment and prenote state machines as pure domain code.
 
 | Deliverable or AC | Status | Reason |
 |---|---|---|
 | AC1: 300 settlement scenarios | built | `TestSettle_Grid300` checks 300 generated scenarios against an exact-rational oracle; no accountant-reviewed fixtures exist |
-| AC2: pain.001 XSD validation | slice 2b | needs the pain.001.001.09 generator, vendored XSD and `xmllint` contract test; this slice delivers only the bank profile and charset inputs |
+| AC2: pain.001 XSD validation | slice 3c | needs the pain.001.001.09 generator, vendored XSD and `xmllint` contract test; this slice delivers only the bank profile and charset inputs |
 | AC3: aging reconciles to AP control | slice C | needs migrations, a store and the PSG-18 vendor projection |
 | AC4: idempotent payment run (Temporal) | slice D | needs the run workflow, a store and a Temporal SDK decision |
 | Deliverable 1: store, commit, aging, withholding | partial | preview computes settlement; persistence is slice C; withholding engine is wave 13 |
 | Deliverable 2, Deliverables 5 to 8, Deliverable 9: proposals, holds, approvals, prepayments, reversal, prenotes, calendars, confirmations, installments, mandates, bank account change | slice C and D | need the store, the wave 4 workflow and wave 7 calendars and terms |
 | Deliverable 3 item 1 and AC1: IBAN, BIC, ABA validators, `PaymentMethod`, `BankProfile` | built | `internal/domain/bank.go`; `CARD` is accepted as a type with no media format; domain codes `AP-RUN-002` and `AP-FIL-001` are not yet mapped to HTTP |
 | AC3: charset transliteration (`Transliterate`) | built | `internal/domain/translit.go`, hand table; unmapped letters reject with `AP-FIL-001` instead of being dropped |
-| pain.001.001.09 generator, XSD vendoring (pain.001 and pain.002) and conformance test | slice 2b | ticket items 2 and 3; CI image `xmllint` availability is unconfirmed and CI configuration is outside the owned paths |
-| NACHA ACH generator with prenotes, positive pay CSV | slice 2c | ticket items 4 and 5 |
-| pain.002 and NACHA return parsing, payment and prenote state machines (AC01 `BANK_DETAILS` hold, AP-STS-002) | slice 2d | ticket item 6 |
-| `POST /v1/payables/payment-files:preview`, `POST /v1/payables/payments/status:parse`, OpenAPI, `problemSlugs` and status mapping, metrics | slice 2e | ticket item 7 |
+| pain.001.001.09 generator, XSD vendoring (pain.001 and pain.002) and conformance test | slice 3c | ticket items 2 and 3; CI image `xmllint` availability is unconfirmed and CI configuration is outside the owned paths |
+| Positive pay CSV generator (`GeneratePositivePay`, account masking) | built | `internal/domain/positivepay.go`; pure function, not yet reachable over HTTP |
+| NACHA ACH generator with prenotes | slice 3b | ticket item 3 |
+| Payment (BR-19.1) and prenote (BR-19.13) state machines (`TransitionPayment`, `TransitionPrenote`) | built | `internal/domain/status.go`; pure functions, not yet reachable over HTTP |
+| pain.002 and NACHA return parsing (AC01 `BANK_DETAILS` hold, AP-STS-001, AP-STS-002) | slice 3d | ticket item 5 |
+| `POST /v1/payables/payment-files:preview`, `POST /v1/payables/payments/status:parse`, OpenAPI, `problemSlugs` and status mapping, metrics | slice 3e | ticket item 6 |
 | Check PDF with MICR (E-13B) line, check lots, amount in words | deferred | needs a PDF renderer decision and check stock layouts |
 | Payment advice PDF and email or portal delivery (FR-19.12) | deferred | needs wave 15 templates and the wave 20 portal |
 | Bank test harness ACCP for 50 SEPA payments | external | needs a sandbox bank |
