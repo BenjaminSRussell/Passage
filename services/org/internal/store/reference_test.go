@@ -253,6 +253,12 @@ func TestSeedReference_PlatformRowsAreSeededOnceAndReadOnlyForTenants(t *testing
 		if got := count(tctx, "select count(*) from country where code = 'US' and region_required"); got != 1 {
 			t.Errorf("tenant %d US rows = %d, want 1", n, got)
 		}
+		if got := count(tctx, "select count(*) from region where code = 'US-CA' and country_code = 'US'"); got != 1 {
+			t.Errorf("tenant %d US-CA rows = %d, want 1", n, got)
+		}
+		if got := count(tctx, "select count(*) from language where code = 'fr'"); got != 1 {
+			t.Errorf("tenant %d fr rows = %d, want 1", n, got)
+		}
 	}
 
 	tenant1 := principalContext(1)
