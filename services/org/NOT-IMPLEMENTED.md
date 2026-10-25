@@ -1,8 +1,8 @@
-# Not implemented in PSG-6 slice 13
+# Not implemented in PSG-6 slice 14
 
 | Deliverable or AC | Status | Reason |
 |---|---|---|
-| Deliverable 1: LegalEntity | partial | create, list with filters, get, versioned PATCH, name history and the 500-per-tenant cap are built; `primary_address_id` wiring is the next address slice now that the address table exists, and deactivation refused while users default to the entity (BR-6.11 `ORG-LE-DEFAULT-IN-USE`) is a handoff |
+| Deliverable 1: LegalEntity | partial | create, list with filters, get, versioned PATCH, name history and the 500-per-tenant cap are built; deactivation refused while users default to the entity (BR-6.11 `ORG-LE-DEFAULT-IN-USE`) is a handoff |
 | Deliverable 1: effective-dated hierarchies (AC1) | domain only | `domain.ParentAsOf` is tested against a 1,000-node, 5-purpose oracle; hierarchy tables, closure table, cycle, depth, size and overlap validation, draft/publish/supersede endpoints are slice 2 |
 | Deliverable 2: hierarchy designer UI and legal-entity switch re-scoping list pages (AC2) | slice 2 of PSG-6 | line budget; `apps/web/src/modules/org/` is not created |
 | Deliverable 4: fiscal calendars (AC4) | slice 2 of PSG-6 | line budget; `internal/domain/fiscal.go` and `testdata/fiscal-patterns/` are next; period statuses per ledger belong to wave 14 |
@@ -25,8 +25,9 @@
 | BR-6.11 ORG-LE-DEFAULT-IN-USE (refuse deactivation while users default to the entity) | handoff | users' default legal entity is held by the identity/shell waves (2, 5), outside wave 6 ownership; org needs a read API or event for it |
 | Operating-unit numbers from the wave-5 sequence (org.ou.number_sequence OU-{#####}) | later slice of PSG-6 | codes are caller-supplied; needs a services/numbering client |
 | Operating-unit CSV bulk import and the hierarchy-membership list filter | later slice of PSG-6 | import belongs to the web module slice; the filter needs hierarchy persistence |
-| Site, warehouse and location addresses, default warehouse on site create, fiscal-calendar assignment | later slice of PSG-6 | the address table exists (PSG-612) but wiring `address_id` into sites, warehouses and locations and their created events (null today) is the next address slice; fiscal calendars are not built |
-| Location PATCH (name, type, status) and the location.updated event | later slice of PSG-6 | line budget; locations are create, list and read only in PSG-611 |
+| Default warehouse on site create, fiscal-calendar assignment | later slice of PSG-6 | fiscal calendars are not built; a default warehouse needs its own create contract on POST /v1/org/sites |
+| address_id in site.created, warehouse.created and location.created events | not built | an address needs its owner's id, so the pointer is set by PATCH after create and announced in the *.updated event's changed_fields; inline address on create is not built |
+| Shared addresses (a warehouse pointing at its site's address) | not built | PSG-614 accepts only a current address owned by the record itself (ORG-ADDR-NOT-OWNED) |
 | Refuse moving a warehouse to another site once inventory transactions reference it (FR-6.5) | not built | inventory transactions are wave 16; it needs a reference-count read from that wave |
 | handoff delivered: services/product/NOT-IMPLEMENTED.md row "Org site/warehouse membership check" | done in PSG-610 | GET /v1/org/sites/{id} and GET /v1/org/warehouses/{id} (with siteId and legalEntityId) let product check a site or warehouse id; wiring the product client is wave 8's own work |
 | Future-dated address versions (validFrom after today) and as-of address reads | later slice of PSG-6 | PSG-613 limits a revision's validFrom to between the current version's validFrom and today, so the open version is always the one in force |

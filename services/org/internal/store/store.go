@@ -37,6 +37,7 @@ type LegalEntity struct {
 	TimeZone           string    `json:"timeZone"`
 	DefaultLanguage    string    `json:"defaultLanguage"`
 	RegistrationNumber *string   `json:"registrationNumber,omitempty"`
+	PrimaryAddressID   *string   `json:"primaryAddressId,omitempty"`
 	Status             string    `json:"status"`
 	Version            int       `json:"version"`
 	CreatedAt          time.Time `json:"createdAt"`
@@ -69,6 +70,7 @@ type Store interface {
 	CreateLocation(ctx context.Context, in Location, idempotencyKey string) (Location, error)
 	GetLocation(ctx context.Context, id string) (Location, error)
 	ListLocations(ctx context.Context, f LocationFilter, after SiteKey, limit int) (LocationPage, error)
+	UpdateLocation(ctx context.Context, id string, version int, in LocationPatch) (Location, error)
 	CreateAddress(ctx context.Context, in Address, idempotencyKey string) (Address, error)
 	GetAddress(ctx context.Context, id string) (Address, error)
 	ReviseAddress(ctx context.Context, id, versionID string, next Address) (Address, error)
@@ -86,11 +88,11 @@ func New(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
 
 func (s *Postgres) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 
-const legalEntityColumns = "id, code, name, country, currency, time_zone, default_language, registration_number, status, version, created_at, updated_at"
+const legalEntityColumns = "id, code, name, country, currency, time_zone, default_language, registration_number, primary_address_id, status, version, created_at, updated_at"
 
 func scanLegalEntity(row pgx.Row, extra ...any) (LegalEntity, error) {
 	var e LegalEntity
-	err := row.Scan(append([]any{&e.ID, &e.Code, &e.Name, &e.Country, &e.Currency, &e.TimeZone, &e.DefaultLanguage, &e.RegistrationNumber, &e.Status, &e.Version, &e.CreatedAt, &e.UpdatedAt}, extra...)...)
+	err := row.Scan(append([]any{&e.ID, &e.Code, &e.Name, &e.Country, &e.Currency, &e.TimeZone, &e.DefaultLanguage, &e.RegistrationNumber, &e.PrimaryAddressID, &e.Status, &e.Version, &e.CreatedAt, &e.UpdatedAt}, extra...)...)
 	return e, err
 }
 

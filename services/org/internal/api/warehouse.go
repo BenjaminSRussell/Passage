@@ -182,6 +182,7 @@ func (a *API) updateWarehouse(w http.ResponseWriter, r *http.Request, id string)
 	if req.Type != nil && !warehouseType(*req.Type) {
 		fields["type"] = invalidWarehouseTy
 	}
+	optionalID(fields, "addressId", req.AddressID, true)
 	if req.SiteID != nil {
 		canonical := canonicalID(*req.SiteID)
 		req.SiteID = &canonical

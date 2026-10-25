@@ -3,7 +3,9 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -21,7 +23,7 @@ const (
 	CodeLocationCodeDuplicate    = "ORG-LOC-CODE-DUPLICATE"
 	CodeLocationWarehouseInvalid = "ORG-LOC-WAREHOUSE-INVALID"
 	defaultLocationType          = "storage"
-	locationColumns              = "id, legal_entity_id, warehouse_id, code, name, type, status, version, created_at, updated_at"
+	locationColumns              = "id, legal_entity_id, warehouse_id, code, name, type, status, address_id, version, created_at, updated_at"
 )
 
 type Location struct {
@@ -32,9 +34,17 @@ type Location struct {
 	Name          string    `json:"name"`
 	Type          string    `json:"type"`
 	Status        string    `json:"status"`
+	AddressID     *string   `json:"addressId,omitempty"`
 	Version       int       `json:"version"`
 	CreatedAt     time.Time `json:"createdAt"`
 	UpdatedAt     time.Time `json:"updatedAt"`
+}
+
+type LocationPatch struct {
+	Name      *string `json:"name"`
+	Type      *string `json:"type"`
+	Status    *string `json:"status"`
+	AddressID *string `json:"addressId"`
 }
 
 type LocationFilter struct{ LegalEntityID, WarehouseID, Type, Status string }
@@ -46,7 +56,7 @@ type LocationPage struct {
 
 func scanLocation(row pgx.Row, extra ...any) (Location, error) {
 	var l Location
-	err := row.Scan(append([]any{&l.ID, &l.LegalEntityID, &l.WarehouseID, &l.Code, &l.Name, &l.Type, &l.Status, &l.Version, &l.CreatedAt, &l.UpdatedAt}, extra...)...)
+	err := row.Scan(append([]any{&l.ID, &l.LegalEntityID, &l.WarehouseID, &l.Code, &l.Name, &l.Type, &l.Status, &l.AddressID, &l.Version, &l.CreatedAt, &l.UpdatedAt}, extra...)...)
 	return l, err
 }
 
@@ -174,4 +184,62 @@ func (s *Postgres) ListLocations(ctx context.Context, f LocationFilter, after Si
 		page.Next = &SiteKey{Code: last.Code, ID: last.ID}
 	}
 	return page, err
+}
+
+func (in LocationPatch) apply(location Location) (Location, []string) {
+	var changed []string
+	if in.Name != nil && *in.Name != location.Name {
+		location.Name = *in.Name
+		changed = append(changed, "name")
+	}
+	if in.Status != nil && *in.Status != location.Status {
+		location.Status = *in.Status
+		changed = append(changed, "status")
+	}
+	if in.Type != nil && *in.Type != location.Type {
+		location.Type = *in.Type
+		changed = append(changed, "type")
+	}
+	var addressChanged bool
+	if location.AddressID, addressChanged = applyID(location.AddressID, in.AddressID); addressChanged {
+		changed = append(changed, "address_id")
+	}
+	return location, changed
+}
+
+func (s *Postgres) UpdateLocation(ctx context.Context, id string, version int, in LocationPatch) (Location, error) {
+	p, _ := tenant.FromContext(ctx)
+	var location Location
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		current, err := scanLocation(tx.QueryRow(ctx, `select `+locationColumns+` from location where tenant_id = $1 and id = $2 for update`, p.TenantID, id))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return locationNotFound()
+		}
+		if err != nil {
+			return err
+		}
+		location = current
+		if current.Version != version {
+			return httpx.NewProblem(http.StatusConflict, CodeVersionConflict, fmt.Sprintf("current version is %d", current.Version))
+		}
+		next, changed := in.apply(current)
+		if len(changed) == 0 {
+			return nil
+		}
+		if slices.Contains(changed, "address_id") && next.AddressID != nil {
+			if err := checkOwnedAddress(ctx, tx, p.TenantID, "location", id, *next.AddressID, "addressId"); err != nil {
+				return err
+			}
+		}
+		location, err = scanLocation(tx.QueryRow(ctx, `update location set name = $3, type = $4, status = $5, address_id = $6, version = version + 1, updated_at = now()
+			where tenant_id = $1 and id = $2 returning `+locationColumns, p.TenantID, id, next.Name, next.Type, next.Status, next.AddressID))
+		if err != nil {
+			return err
+		}
+		return enqueue(ctx, tx, "location", id, orgevents.LocationUpdated, p.TenantID, orgevents.LocationUpdatedData{ID: id, ChangedFields: changed, Version: location.Version})
+	})
+	if err != nil {
+		return Location{}, err
+	}
+	return location, nil
 }

@@ -63,6 +63,7 @@ type API struct {
 	warehouseCreated atomic.Int64
 	warehouseUpdated atomic.Int64
 	locationCreated  atomic.Int64
+	locationUpdated  atomic.Int64
 	addressCreated   atomic.Int64
 	addressRevised   atomic.Int64
 	geocoder         domain.Geocoder
@@ -154,6 +155,7 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP org_warehouses_created_total Warehouses created.\n# TYPE org_warehouses_created_total counter\norg_warehouses_created_total %d\n", a.warehouseCreated.Load())
 		fmt.Fprintf(w, "# HELP org_warehouses_updated_total Warehouse updates that bumped the version.\n# TYPE org_warehouses_updated_total counter\norg_warehouses_updated_total %d\n", a.warehouseUpdated.Load())
 		fmt.Fprintf(w, "# HELP org_locations_created_total Locations created.\n# TYPE org_locations_created_total counter\norg_locations_created_total %d\n", a.locationCreated.Load())
+		fmt.Fprintf(w, "# HELP org_locations_updated_total Location updates that bumped the version.\n# TYPE org_locations_updated_total counter\norg_locations_updated_total %d\n", a.locationUpdated.Load())
 		fmt.Fprintf(w, "# HELP org_addresses_created_total Postal addresses created.\n# TYPE org_addresses_created_total counter\norg_addresses_created_total %d\n", a.addressCreated.Load())
 		fmt.Fprintf(w, "# HELP org_addresses_revised_total Postal address versions created by edits.\n# TYPE org_addresses_revised_total counter\norg_addresses_revised_total %d\n", a.addressRevised.Load())
 	})
@@ -291,6 +293,7 @@ func (a *API) updateLegalEntity(w http.ResponseWriter, r *http.Request, id strin
 	if req.Status != nil && !validStatus(*req.Status) {
 		fields["status"] = "must be active or inactive"
 	}
+	optionalID(fields, "primaryAddressId", req.PrimaryAddressID, true)
 	if len(fields) > 0 {
 		p := httpx.NewProblem(http.StatusBadRequest, "COM-0001", validationDetail)
 		p.Errors = fields

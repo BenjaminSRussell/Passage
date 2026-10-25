@@ -30,6 +30,11 @@ type createLocationRequest struct {
 	Type        *string `json:"type"`
 }
 
+type updateLocationRequest struct {
+	Version *int `json:"version"`
+	store.LocationPatch
+}
+
 type locationList struct {
 	Items      []store.Location `json:"items"`
 	NextCursor string           `json:"nextCursor,omitempty"`
@@ -47,6 +52,7 @@ func (a *API) registerLocations(r chi.Router) {
 	r.With(authz.RequireDuty(dutySite)).Post(locations, a.createLocation)
 	r.With(authz.RequireDuty(dutyRead)).Get(locations, a.listLocations)
 	r.With(authz.RequireDuty(dutyRead)).Get(locations+"/{id}", locationRoute(a.getLocation))
+	r.With(authz.RequireDuty(dutySite)).Patch(locations+"/{id}", locationRoute(a.updateLocation))
 }
 
 func (a *API) createLocation(w http.ResponseWriter, r *http.Request) {
@@ -152,6 +158,43 @@ func (a *API) getLocation(w http.ResponseWriter, r *http.Request, id string) {
 		slog.Error("get location failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)
 		return
+	}
+	httpx.JSON(w, http.StatusOK, location)
+}
+
+func (a *API) updateLocation(w http.ResponseWriter, r *http.Request, id string) {
+	var req updateLocationRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if req.Name != nil {
+		trimmed := strings.TrimSpace(*req.Name)
+		req.Name = &trimmed
+	}
+	fields := validateShared(req.Name, nil, nil, nil)
+	if req.Version == nil || *req.Version < 1 {
+		fields["version"] = "is required and must be at least 1"
+	}
+	if req.Type != nil && !locationType(*req.Type) {
+		fields["type"] = invalidLocationTy
+	}
+	if req.Status != nil && !validStatus(*req.Status) {
+		fields["status"] = "must be active or inactive"
+	}
+	optionalID(fields, "addressId", req.AddressID, true)
+	if len(fields) > 0 {
+		validationFailed(w, r, fields)
+		return
+	}
+	location, err := a.store.UpdateLocation(r.Context(), id, *req.Version, req.LocationPatch)
+	if err != nil {
+		slog.Error("update location failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.Fail(w, r, err)
+		return
+	}
+	if location.Version != *req.Version {
+		a.locationUpdated.Add(1)
 	}
 	httpx.JSON(w, http.StatusOK, location)
 }

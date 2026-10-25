@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -24,7 +25,7 @@ const (
 	CodeWarehouseLegalEntityMismatch = "ORG-WH-LE-MISMATCH"
 	foreignKeyViolation              = "23503"
 	defaultWarehouseType             = "standard"
-	warehouseColumns                 = "id, legal_entity_id, site_id, code, name, type, time_zone, status, version, created_at, updated_at"
+	warehouseColumns                 = "id, legal_entity_id, site_id, code, name, type, time_zone, status, address_id, version, created_at, updated_at"
 )
 
 type Warehouse struct {
@@ -36,17 +37,19 @@ type Warehouse struct {
 	Type          string    `json:"type"`
 	TimeZone      string    `json:"timeZone"`
 	Status        string    `json:"status"`
+	AddressID     *string   `json:"addressId,omitempty"`
 	Version       int       `json:"version"`
 	CreatedAt     time.Time `json:"createdAt"`
 	UpdatedAt     time.Time `json:"updatedAt"`
 }
 
 type WarehousePatch struct {
-	SiteID   *string `json:"siteId"`
-	Name     *string `json:"name"`
-	Type     *string `json:"type"`
-	TimeZone *string `json:"timeZone"`
-	Status   *string `json:"status"`
+	SiteID    *string `json:"siteId"`
+	Name      *string `json:"name"`
+	Type      *string `json:"type"`
+	TimeZone  *string `json:"timeZone"`
+	Status    *string `json:"status"`
+	AddressID *string `json:"addressId"`
 }
 
 type WarehouseFilter struct{ LegalEntityID, SiteID, Type, Status string }
@@ -58,7 +61,7 @@ type WarehousePage struct {
 
 func scanWarehouse(row pgx.Row, extra ...any) (Warehouse, error) {
 	var w Warehouse
-	err := row.Scan(append([]any{&w.ID, &w.LegalEntityID, &w.SiteID, &w.Code, &w.Name, &w.Type, &w.TimeZone, &w.Status, &w.Version, &w.CreatedAt, &w.UpdatedAt}, extra...)...)
+	err := row.Scan(append([]any{&w.ID, &w.LegalEntityID, &w.SiteID, &w.Code, &w.Name, &w.Type, &w.TimeZone, &w.Status, &w.AddressID, &w.Version, &w.CreatedAt, &w.UpdatedAt}, extra...)...)
 	return w, err
 }
 
@@ -220,6 +223,10 @@ func (in WarehousePatch) apply(warehouse Warehouse) (Warehouse, []string) {
 		warehouse.Type = *in.Type
 		changed = append(changed, "type")
 	}
+	var addressChanged bool
+	if warehouse.AddressID, addressChanged = applyID(warehouse.AddressID, in.AddressID); addressChanged {
+		changed = append(changed, "address_id")
+	}
 	return warehouse, changed
 }
 
@@ -254,8 +261,13 @@ func (s *Postgres) UpdateWarehouse(ctx context.Context, id string, version int, 
 		if len(changed) == 0 {
 			return nil
 		}
-		warehouse, err = scanWarehouse(tx.QueryRow(ctx, `update warehouse set site_id = $3, name = $4, type = $5, time_zone = $6, status = $7, version = version + 1, updated_at = now()
-			where tenant_id = $1 and id = $2 returning `+warehouseColumns, p.TenantID, id, next.SiteID, next.Name, next.Type, next.TimeZone, next.Status))
+		if slices.Contains(changed, "address_id") && next.AddressID != nil {
+			if err := checkOwnedAddress(ctx, tx, p.TenantID, "warehouse", id, *next.AddressID, "addressId"); err != nil {
+				return err
+			}
+		}
+		warehouse, err = scanWarehouse(tx.QueryRow(ctx, `update warehouse set site_id = $3, name = $4, type = $5, time_zone = $6, status = $7, address_id = $8, version = version + 1, updated_at = now()
+			where tenant_id = $1 and id = $2 returning `+warehouseColumns, p.TenantID, id, next.SiteID, next.Name, next.Type, next.TimeZone, next.Status, next.AddressID))
 		if err != nil {
 			return err
 		}

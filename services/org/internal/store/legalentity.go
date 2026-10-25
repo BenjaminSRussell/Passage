@@ -30,6 +30,7 @@ type LegalEntityPatch struct {
 	TimeZone           *string `json:"timeZone"`
 	DefaultLanguage    *string `json:"defaultLanguage"`
 	RegistrationNumber *string `json:"registrationNumber"`
+	PrimaryAddressID   *string `json:"primaryAddressId"`
 	Status             *string `json:"status"`
 }
 
@@ -122,6 +123,10 @@ func (in LegalEntityPatch) apply(e LegalEntity) (LegalEntity, []string) {
 		e.RegistrationNumber = &registration
 		changed = append(changed, "registration_number")
 	}
+	var addressChanged bool
+	if e.PrimaryAddressID, addressChanged = applyID(e.PrimaryAddressID, in.PrimaryAddressID); addressChanged {
+		changed = append(changed, "primary_address_id")
+	}
 	slices.Sort(changed)
 	return e, changed
 }
@@ -150,6 +155,11 @@ func (s *Postgres) UpdateLegalEntity(ctx context.Context, id string, version int
 				return err
 			}
 		}
+		if slices.Contains(changed, "primary_address_id") && next.PrimaryAddressID != nil {
+			if err := checkOwnedAddress(ctx, tx, p.TenantID, "legal_entity", id, *next.PrimaryAddressID, "primaryAddressId"); err != nil {
+				return err
+			}
+		}
 		if slices.Contains(changed, "name") {
 			if _, err := tx.Exec(ctx, `update legal_entity_name set valid_to = now() where tenant_id = $1 and legal_entity_id = $2 and valid_to is null`, p.TenantID, id); err != nil {
 				return err
@@ -158,8 +168,8 @@ func (s *Postgres) UpdateLegalEntity(ctx context.Context, id string, version int
 				return err
 			}
 		}
-		e, err = scanLegalEntity(tx.QueryRow(ctx, `update legal_entity set name = $3, time_zone = $4, default_language = $5, registration_number = $6, status = $7, version = version + 1, updated_at = now()
-			where tenant_id = $1 and id = $2 returning `+legalEntityColumns, p.TenantID, id, next.Name, next.TimeZone, next.DefaultLanguage, next.RegistrationNumber, next.Status))
+		e, err = scanLegalEntity(tx.QueryRow(ctx, `update legal_entity set name = $3, time_zone = $4, default_language = $5, registration_number = $6, status = $7, primary_address_id = $8, version = version + 1, updated_at = now()
+			where tenant_id = $1 and id = $2 returning `+legalEntityColumns, p.TenantID, id, next.Name, next.TimeZone, next.DefaultLanguage, next.RegistrationNumber, next.Status, next.PrimaryAddressID))
 		if err != nil {
 			return err
 		}

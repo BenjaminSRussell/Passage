@@ -25,6 +25,7 @@ const (
 	CodeAddressRegionUnknown    = "ORG-ADDR-REGION-UNKNOWN"
 	CodeAddressPrimaryDuplicate = "ORG-ADDR-PRIMARY-DUPLICATE"
 	CodeAddressValidFrom        = "ORG-ADDR-VALID-FROM-INVALID"
+	CodeAddressNotOwned         = "ORG-ADDR-NOT-OWNED"
 	addressPrimaryIndex         = "address_purpose_primary"
 	addressColumns              = `address_id, id, owner_type, owner_id, legal_entity_id, country_code, region_code, city, postal_code, street_1, street_2, street_3,
 		building, po_box, latitude, longitude, geo_status, formatted, to_char(valid_from, 'YYYY-MM-DD'), to_char(valid_to, 'YYYY-MM-DD'), created_at`
@@ -76,6 +77,18 @@ func addressProblem(status int, code, detail, field, rule string) error {
 	p := httpx.NewProblem(status, code, detail)
 	p.Errors = map[string]string{field: rule}
 	return p
+}
+
+func checkOwnedAddress(ctx context.Context, tx pgx.Tx, tenantID, ownerType, ownerID, addressID, field string) error {
+	var owned bool
+	if err := tx.QueryRow(ctx, `select exists (select 1 from postal_address where tenant_id = $1 and address_id = $2 and owner_type = $3 and owner_id = $4 and valid_to is null)`,
+		tenantID, addressID, ownerType, ownerID).Scan(&owned); err != nil {
+		return err
+	}
+	if owned {
+		return nil
+	}
+	return addressProblem(http.StatusUnprocessableEntity, CodeAddressNotOwned, "address is unknown, closed or not owned by this "+ownerType, field, "must be a current address owned by this record")
 }
 
 func orEmpty(s *string) string {

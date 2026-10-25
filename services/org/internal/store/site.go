@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -22,7 +23,7 @@ const (
 	CodeSiteCodeDuplicate      = "ORG-SITE-CODE-DUPLICATE"
 	CodeSiteLegalEntityInvalid = "ORG-SITE-LEGAL-ENTITY-INVALID"
 	CodeSiteInUse              = "ORG-SITE-IN-USE"
-	siteColumns                = "id, legal_entity_id, code, name, time_zone, status, version, created_at, updated_at"
+	siteColumns                = "id, legal_entity_id, code, name, time_zone, status, address_id, version, created_at, updated_at"
 )
 
 type Site struct {
@@ -32,15 +33,17 @@ type Site struct {
 	Name          string    `json:"name"`
 	TimeZone      string    `json:"timeZone"`
 	Status        string    `json:"status"`
+	AddressID     *string   `json:"addressId,omitempty"`
 	Version       int       `json:"version"`
 	CreatedAt     time.Time `json:"createdAt"`
 	UpdatedAt     time.Time `json:"updatedAt"`
 }
 
 type SitePatch struct {
-	Name     *string `json:"name"`
-	TimeZone *string `json:"timeZone"`
-	Status   *string `json:"status"`
+	Name      *string `json:"name"`
+	TimeZone  *string `json:"timeZone"`
+	Status    *string `json:"status"`
+	AddressID *string `json:"addressId"`
 }
 
 type SiteFilter struct{ LegalEntityID, Status string }
@@ -54,7 +57,7 @@ type SitePage struct {
 
 func scanSite(row pgx.Row, extra ...any) (Site, error) {
 	var s Site
-	err := row.Scan(append([]any{&s.ID, &s.LegalEntityID, &s.Code, &s.Name, &s.TimeZone, &s.Status, &s.Version, &s.CreatedAt, &s.UpdatedAt}, extra...)...)
+	err := row.Scan(append([]any{&s.ID, &s.LegalEntityID, &s.Code, &s.Name, &s.TimeZone, &s.Status, &s.AddressID, &s.Version, &s.CreatedAt, &s.UpdatedAt}, extra...)...)
 	return s, err
 }
 
@@ -180,6 +183,10 @@ func (in SitePatch) apply(site Site) (Site, []string) {
 		site.TimeZone = *in.TimeZone
 		changed = append(changed, "time_zone")
 	}
+	var addressChanged bool
+	if site.AddressID, addressChanged = applyID(site.AddressID, in.AddressID); addressChanged {
+		changed = append(changed, "address_id")
+	}
 	return site, changed
 }
 
@@ -213,8 +220,13 @@ func (s *Postgres) UpdateSite(ctx context.Context, id string, version int, in Si
 				return inUse
 			}
 		}
-		site, err = scanSite(tx.QueryRow(ctx, `update site set name = $3, status = $4, time_zone = $5, version = version + 1, updated_at = now()
-			where tenant_id = $1 and id = $2 returning `+siteColumns, p.TenantID, id, next.Name, next.Status, next.TimeZone))
+		if slices.Contains(changed, "address_id") && next.AddressID != nil {
+			if err := checkOwnedAddress(ctx, tx, p.TenantID, "site", id, *next.AddressID, "addressId"); err != nil {
+				return err
+			}
+		}
+		site, err = scanSite(tx.QueryRow(ctx, `update site set name = $3, status = $4, time_zone = $5, address_id = $6, version = version + 1, updated_at = now()
+			where tenant_id = $1 and id = $2 returning `+siteColumns, p.TenantID, id, next.Name, next.Status, next.TimeZone, next.AddressID))
 		if err != nil {
 			return err
 		}
