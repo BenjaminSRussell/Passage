@@ -30,6 +30,8 @@ type fakeStore struct {
 	byKey               map[string]store.LegalEntity
 	refs                map[string]store.ReferenceItem
 	ous                 []store.OperatingUnit
+	ouFilter            store.OperatingUnitFilter
+	compareArgs         [2]int
 	ouCalls             int
 	sites               []store.Site
 	siteCalls           int
@@ -219,7 +221,8 @@ func (f *fakeStore) GetOperatingUnit(_ context.Context, id string) (store.Operat
 	return *u, nil
 }
 
-func (f *fakeStore) ListOperatingUnits(_ context.Context, _ store.OperatingUnitFilter, after store.OperatingUnitKey, limit int) (store.OperatingUnitPage, error) {
+func (f *fakeStore) ListOperatingUnits(_ context.Context, filter store.OperatingUnitFilter, after store.OperatingUnitKey, limit int) (store.OperatingUnitPage, error) {
+	f.ouFilter = filter
 	if f.err != nil {
 		return store.OperatingUnitPage{}, f.err
 	}
@@ -977,6 +980,14 @@ func (f *fakeStore) HierarchyAsOf(_ context.Context, typeID string, date time.Ti
 		return store.HierarchyAsOf{}, f.err
 	}
 	return store.HierarchyAsOf{HierarchyTypeID: typeID, Date: date.Format("2006-01-02"), OrgUnitID: orgUnitID, Ancestors: []store.AsOfRelative{}, Descendants: []store.AsOfRelative{}}, nil
+}
+
+func (f *fakeStore) CompareHierarchyVersions(_ context.Context, typeID string, fromNo, toNo int) (store.HierarchyComparison, error) {
+	f.compareArgs = [2]int{fromNo, toNo}
+	if f.err != nil {
+		return store.HierarchyComparison{}, f.err
+	}
+	return store.HierarchyComparison{HierarchyTypeID: typeID, FromVersionNo: fromNo, ToVersionNo: toNo, Added: []store.HierarchyChange{}, Removed: []store.HierarchyChange{}, Moved: []store.HierarchyMove{}}, nil
 }
 
 func (f *fakeStore) GetHierarchyType(_ context.Context, id string) (store.HierarchyType, error) {

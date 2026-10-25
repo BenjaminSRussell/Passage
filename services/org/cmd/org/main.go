@@ -8,10 +8,12 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/services/org/internal/api"
+	"github.com/BenjaminSRussell/passage/services/org/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/org/internal/store"
 	"github.com/BenjaminSRussell/passage/services/org/migrations"
 )
@@ -45,6 +47,10 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if databaseURL == "" {
 		return errors.New("DATABASE_URL is required")
 	}
+	limits, err := treeLimits(getenv)
+	if err != nil {
+		return err
+	}
 	pool, err := dbx.Connect(ctx, databaseURL)
 	if err != nil {
 		return fmt.Errorf("connect database: %w", err)
@@ -58,7 +64,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 			return fmt.Errorf("seed reference data: %w", err)
 		}
 	}
-	a := api.New(store.New(pool))
+	a := api.New(store.New(pool).WithTreeLimits(limits))
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()
@@ -77,4 +83,27 @@ func addr(getenv func(string) string, key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func treeLimits(getenv func(string) string) (domain.TreeLimits, error) {
+	limits := domain.DefaultTreeLimits
+	for _, setting := range []struct {
+		name     string
+		min, max int
+		target   *int
+	}{
+		{"ORG_HIERARCHY_MAX_NODES", 1000, 200000, &limits.MaxNodes},
+		{"ORG_HIERARCHY_MAX_DEPTH", 5, 25, &limits.MaxDepth},
+	} {
+		raw := getenv(setting.name)
+		if raw == "" {
+			continue
+		}
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < setting.min || n > setting.max {
+			return limits, fmt.Errorf("%s must be an integer from %d to %d, got %q", setting.name, setting.min, setting.max, raw)
+		}
+		*setting.target = n
+	}
+	return limits, nil
 }

@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: org
   version: 0.13.0
-  description: Organization service. Covers legal entities, operating units, sites, warehouses, locations, postal addresses with purposes, fiscal calendars with idempotent year generation and the period read, hierarchy types and draft hierarchy versions with validated node sets (error codes ORG-HIER-CYCLE, ORG-HIER-MULTI-ROOT, ORG-HIER-DUPLICATE-NODE, ORG-HIER-PARENT-UNKNOWN, ORG-HIER-DEPTH, ORG-HIER-SIZE, ORG-HIER-NODE-UNKNOWN, ORG-HIER-TYPE-NOT-FOUND, ORG-HIER-TYPE-CODE-DUPLICATE, ORG-HIER-VERSION-NOT-FOUND, ORG-HIER-DRAFT-EXISTS, ORG-HIER-VERSION-IMMUTABLE, ORG-HIER-OVERLAP, ORG-HIER-BACKDATE-DUTY, ORG-HIER-NO-VERSION, ORG-HIER-NODE-ABSENT, ORG-HIER-MAKER-CHECKER) with the version list, publish, supersede, the closure table and the as-of query, unit-of-measure conversion, and the platform-owned reference sets (countries, currencies, regions, languages) with tenant-level deactivation.
+  description: Organization service. Covers legal entities, operating units, sites, warehouses, locations, postal addresses with purposes, fiscal calendars with idempotent year generation and the period read, hierarchy types and draft hierarchy versions with validated node sets (error codes ORG-HIER-CYCLE, ORG-HIER-MULTI-ROOT, ORG-HIER-DUPLICATE-NODE, ORG-HIER-PARENT-UNKNOWN, ORG-HIER-DEPTH, ORG-HIER-SIZE, ORG-HIER-NODE-UNKNOWN, ORG-HIER-TYPE-NOT-FOUND, ORG-HIER-TYPE-CODE-DUPLICATE, ORG-HIER-VERSION-NOT-FOUND, ORG-HIER-DRAFT-EXISTS, ORG-HIER-VERSION-IMMUTABLE, ORG-HIER-OVERLAP, ORG-HIER-BACKDATE-DUTY, ORG-HIER-NO-VERSION, ORG-HIER-NODE-ABSENT, ORG-HIER-MAKER-CHECKER) with the version list, publish, supersede, the closure table, the as-of query and the version comparison, unit-of-measure conversion, and the platform-owned reference sets (countries, currencies, regions, languages) with tenant-level deactivation.
 servers:
   - url: https://app.local.passage.dev
 paths:
@@ -96,10 +96,15 @@ paths:
         - { name: type, in: query, schema: { type: string, enum: [department, cost_center, business_unit, value_stream] } }
         - { name: defaultLegalEntityId, in: query, schema: { type: string, format: uuid } }
         - { name: status, in: query, schema: { type: string, enum: [active, inactive] } }
+        - { name: hierarchyTypeId, in: query, schema: { type: string, format: uuid }, description: Return only operating units that are nodes of the version of this hierarchy type in force on asOf (published or superseded, never a draft) }
+        - { name: asOf, in: query, schema: { type: string, format: date }, description: Allowed only together with hierarchyTypeId; defaults to today (UTC) }
       responses:
         '200':
-          description: One page of the tenant's operating units, ordered by type then code; legal-entity-scoped callers see every unit. Pass nextCursor as cursor for the next page. A bad filter or cursor is 400 COM-0001.
+          description: One page of the tenant's operating units, ordered by type then code; legal-entity-scoped callers see every unit. Pass nextCursor as cursor for the next page. A bad filter or cursor is 400 COM-0001, including a malformed hierarchyTypeId or asOf and asOf without hierarchyTypeId. A type with no version in force on asOf gives an empty list.
           content: { application/json: { schema: { $ref: '#/components/schemas/OperatingUnitList' } } }
+        '404':
+          description: ORG-HIER-TYPE-NOT-FOUND when hierarchyTypeId names no hierarchy type of the tenant.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/org/operating-units/{id}:
     get:
@@ -408,6 +413,19 @@ paths:
         '200':
           description: The node's position in the non-draft version in force on date; superseded versions answer for dates inside their closed range. ancestors run nearest first, descendants by depth then orgUnitId. 400 COM-0001 naming date or node. 404 ORG-HIER-TYPE-NOT-FOUND for a malformed, unknown or other tenant's id. 404 ORG-HIER-NO-VERSION when no version is in force on date. 404 ORG-HIER-NODE-ABSENT when the node is not in that version.
           content: { application/json: { schema: { $ref: '#/components/schemas/HierarchyAsOf' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/hierarchy-types/{id}/compare:
+    get:
+      operationId: compareHierarchyVersions
+      x-passage-duty: org.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: from, in: query, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: to, in: query, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200':
+          description: The nodes added, removed and moved between version numbers from and to, each list ordered by orgUnitId and never null. Any statuses may be compared, including a draft, and from may equal to. A moved subtree reports only its root. 400 COM-0001 naming from or to. 403 AUTH-0003 without org.read. 404 ORG-HIER-TYPE-NOT-FOUND for a malformed, unknown or other tenant's id. 404 ORG-HIER-VERSION-NOT-FOUND when the type has no version with that number.
+          content: { application/json: { schema: { $ref: '#/components/schemas/HierarchyComparison' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/org/locations:
     post:
@@ -848,6 +866,18 @@ components:
       type: object
       required: [hierarchyTypeId, purposes, versionId, versionNo, effectiveFrom, effectiveTo, date, orgUnitId, kind, parentOrgUnitId, ancestors, descendants]
       properties: { hierarchyTypeId: { type: string, format: uuid }, purposes: { type: array, items: { type: string } }, versionId: { type: string, format: uuid }, versionNo: { type: integer, minimum: 1 }, effectiveFrom: { type: string, format: date }, effectiveTo: { type: [string, 'null'], format: date }, date: { type: string, format: date }, orgUnitId: { type: string, format: uuid }, kind: { type: string, enum: [legal_entity, operating_unit] }, parentOrgUnitId: { type: [string, 'null'], format: uuid }, ancestors: { type: array, items: { $ref: '#/components/schemas/HierarchyRelative' } }, descendants: { type: array, items: { $ref: '#/components/schemas/HierarchyRelative' } } }
+    HierarchyChange:
+      type: object
+      required: [orgUnitId, kind, parentOrgUnitId]
+      properties: { orgUnitId: { type: string, format: uuid }, kind: { type: string, enum: [legal_entity, operating_unit] }, parentOrgUnitId: { type: [string, 'null'], format: uuid } }
+    HierarchyMove:
+      type: object
+      required: [orgUnitId, kind, oldParentOrgUnitId, newParentOrgUnitId]
+      properties: { orgUnitId: { type: string, format: uuid }, kind: { type: string, enum: [legal_entity, operating_unit] }, oldParentOrgUnitId: { type: [string, 'null'], format: uuid }, newParentOrgUnitId: { type: [string, 'null'], format: uuid } }
+    HierarchyComparison:
+      type: object
+      required: [hierarchyTypeId, fromVersionNo, toVersionNo, added, removed, moved]
+      properties: { hierarchyTypeId: { type: string, format: uuid }, fromVersionNo: { type: integer, minimum: 1 }, toVersionNo: { type: integer, minimum: 1 }, added: { type: array, items: { $ref: '#/components/schemas/HierarchyChange' } }, removed: { type: array, items: { $ref: '#/components/schemas/HierarchyChange' } }, moved: { type: array, items: { $ref: '#/components/schemas/HierarchyMove' } } }
     CreateLocation:
       type: object
       additionalProperties: false

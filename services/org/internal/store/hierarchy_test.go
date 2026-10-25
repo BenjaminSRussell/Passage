@@ -782,3 +782,77 @@ func TestPostgres_HierarchyMakerChecker(t *testing.T) {
 		t.Fatalf("get editedBy = %v, %v", fetched.EditedBy, err)
 	}
 }
+
+func TestPostgres_CompareHierarchyVersions(t *testing.T) {
+	s, ctx, _ := lifecycleStore(t)
+	units := createHierarchyUnits(t, s, ctx)
+	typeID := mustCreateHierarchyType(t, s, ctx, "REP").ID
+	mustPublish(t, s, ctx, draftWithNodes(t, s, ctx, typeID, units.nodes()), day(2026, 1, 1))
+	added := mustCreateUnit(t, s, ctx, unit("department", "NEW")).ID
+	v2Nodes := []store.HierarchyNode{
+		{OrgUnitID: units.legalEntity},
+		{OrgUnitID: added, ParentOrgUnitID: &units.legalEntity, SortOrder: 1},
+		{OrgUnitID: units.first, ParentOrgUnitID: &added, SortOrder: 2},
+	}
+	draft := mustCreateDraft(t, s, ctx, typeID)
+	if _, err := s.ReplaceHierarchyNodes(ctx, draft.ID, draft.Version, v2Nodes, editor); err != nil {
+		t.Fatal(err)
+	}
+	empty := store.HierarchyComparison{HierarchyTypeID: typeID, FromVersionNo: 1, ToVersionNo: 1, Added: []store.HierarchyChange{}, Removed: []store.HierarchyChange{}, Moved: []store.HierarchyMove{}}
+	tests := []struct {
+		name     string
+		from, to int
+		want     store.HierarchyComparison
+	}{
+		{"published to draft", 1, 2, store.HierarchyComparison{HierarchyTypeID: typeID, FromVersionNo: 1, ToVersionNo: 2,
+			Added:   []store.HierarchyChange{{OrgUnitID: added, Kind: "operating_unit", ParentOrgUnitID: &units.legalEntity}},
+			Removed: []store.HierarchyChange{{OrgUnitID: units.second, Kind: "operating_unit", ParentOrgUnitID: &units.legalEntity}},
+			Moved:   []store.HierarchyMove{{OrgUnitID: units.first, Kind: "operating_unit", OldParentOrgUnitID: &units.legalEntity, NewParentOrgUnitID: &added}}}},
+		{"mirror", 2, 1, store.HierarchyComparison{HierarchyTypeID: typeID, FromVersionNo: 2, ToVersionNo: 1,
+			Added:   []store.HierarchyChange{{OrgUnitID: units.second, Kind: "operating_unit", ParentOrgUnitID: &units.legalEntity}},
+			Removed: []store.HierarchyChange{{OrgUnitID: added, Kind: "operating_unit", ParentOrgUnitID: &units.legalEntity}},
+			Moved:   []store.HierarchyMove{{OrgUnitID: units.first, Kind: "operating_unit", OldParentOrgUnitID: &added, NewParentOrgUnitID: &units.legalEntity}}}},
+		{"same version", 1, 1, empty},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := s.CompareHierarchyVersions(ctx, typeID, tc.from, tc.to)
+			if err != nil || !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("got %+v, %v; want %+v", got, err, tc.want)
+			}
+		})
+	}
+	if _, err := s.CompareHierarchyVersions(ctx, typeID, 1, 9); problemCode(t, err) != store.CodeHierarchyVersionNotFound {
+		t.Fatalf("unknown version error = %v", err)
+	}
+	if _, err := s.CompareHierarchyVersions(ctx, ids.New(), 1, 2); problemCode(t, err) != store.CodeHierarchyTypeNotFound {
+		t.Fatalf("unknown type error = %v", err)
+	}
+	if _, err := s.CompareHierarchyVersions(principalContext(2), typeID, 1, 2); problemCode(t, err) != store.CodeHierarchyTypeNotFound {
+		t.Fatalf("other tenant error = %v", err)
+	}
+}
+
+func TestPostgres_HierarchyHonoursConfiguredTreeLimits(t *testing.T) {
+	s, ctx, _ := lifecycleStore(t)
+	limited := s.WithTreeLimits(domain.TreeLimits{MaxDepth: 2, MaxNodes: 3})
+	units := createHierarchyUnits(t, limited, ctx)
+	extra := mustCreateUnit(t, limited, ctx, unit("department", "EXTRA")).ID
+	typeID := mustCreateHierarchyType(t, limited, ctx, "REP").ID
+	draft := mustCreateDraft(t, limited, ctx, typeID)
+	four := append(units.nodes(), store.HierarchyNode{OrgUnitID: extra, ParentOrgUnitID: &units.legalEntity, SortOrder: 3})
+	for _, tc := range []struct {
+		name  string
+		nodes []store.HierarchyNode
+		code  string
+	}{{"four nodes", four, domain.CodeHierarchySize}, {"depth-3 chain", units.deepNodes(), domain.CodeHierarchyDepth}} {
+		_, err := limited.ReplaceHierarchyNodes(ctx, draft.ID, draft.Version, tc.nodes, editor)
+		var de *domain.Error
+		if !errors.As(err, &de) || de.Code != tc.code {
+			t.Fatalf("%s error = %v; want %s", tc.name, err, tc.code)
+		}
+	}
+	if _, err := s.ReplaceHierarchyNodes(ctx, draft.ID, draft.Version, units.deepNodes(), editor); err != nil {
+		t.Fatalf("default limits must accept the chain: %v", err)
+	}
+}

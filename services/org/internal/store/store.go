@@ -91,15 +91,27 @@ type Store interface {
 	ReplaceHierarchyNodes(ctx context.Context, id string, version int, nodes []HierarchyNode, editedBy string) (HierarchyVersion, error)
 	PublishHierarchyVersion(ctx context.Context, id string, version int, effectiveFrom time.Time, reason, idempotencyKey, publishedBy string, backdated bool) (HierarchyVersion, error)
 	HierarchyAsOf(ctx context.Context, typeID string, date time.Time, orgUnitID string) (HierarchyAsOf, error)
+	CompareHierarchyVersions(ctx context.Context, typeID string, fromNo, toNo int) (HierarchyComparison, error)
 	ListReference(ctx context.Context, kind ReferenceKind, f ReferenceFilter) ([]ReferenceItem, error)
 	GetReference(ctx context.Context, kind ReferenceKind, code string) (ReferenceItem, error)
 	SetReferenceStatus(ctx context.Context, kind ReferenceKind, code, status string) (ReferenceItem, error)
 	Ping(ctx context.Context) error
 }
 
-type Postgres struct{ pool *pgxpool.Pool }
+type Postgres struct {
+	pool   *pgxpool.Pool
+	limits domain.TreeLimits
+}
 
-func New(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
+func New(pool *pgxpool.Pool) *Postgres {
+	return &Postgres{pool: pool, limits: domain.DefaultTreeLimits}
+}
+
+func (s *Postgres) WithTreeLimits(l domain.TreeLimits) *Postgres {
+	limited := *s
+	limited.limits = l
+	return &limited
+}
 
 func (s *Postgres) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 

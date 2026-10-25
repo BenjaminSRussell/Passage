@@ -7,7 +7,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/services/org/internal/store"
 )
 
@@ -79,6 +81,56 @@ func TestOperatingUnits(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestOperatingUnits_HierarchyFilter(t *testing.T) {
+	const typeID = "00000000-0000-0000-0000-0000000000aa"
+	base := operatingUnits + "?hierarchyTypeId=" + typeID
+	rejected := []struct{ name, path, field string }{
+		{"bad type id", operatingUnits + "?hierarchyTypeId=bogus", `"hierarchyTypeId"`},
+		{"impossible month", base + "&asOf=2026-13-01", `"asOf"`},
+		{"datetime", base + "&asOf=2026-03-01T00:00:00Z", `"asOf"`},
+		{"as of alone", operatingUnits + "?asOf=2026-03-01", `"asOf"`},
+		{"bad as of alone", operatingUnits + "?asOf=nope", `"asOf"`},
+	}
+	for _, tc := range rejected {
+		t.Run(tc.name, func(t *testing.T) {
+			f := seededUnits()
+			rec := do(routerAt(f), http.MethodGet, tc.path, "", unitDuties, true)
+			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "COM-0001") || !strings.Contains(rec.Body.String(), tc.field) || f.ouFilter != (store.OperatingUnitFilter{}) {
+				t.Fatalf("got %d %s; want 400 on %s with no store call", rec.Code, rec.Body.String(), tc.field)
+			}
+		})
+	}
+	t.Run("as of defaults to today", func(t *testing.T) {
+		f := seededUnits()
+		if rec := do(routerAt(f), http.MethodGet, base, "", unitDuties, true); rec.Code != http.StatusOK {
+			t.Fatalf("got %d %s", rec.Code, rec.Body.String())
+		}
+		if want := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC); f.ouFilter.HierarchyTypeID != typeID || !f.ouFilter.AsOf.Equal(want) {
+			t.Fatalf("filter = %+v; want the type and %s", f.ouFilter, want)
+		}
+	})
+	t.Run("explicit as of reaches the store", func(t *testing.T) {
+		f := seededUnits()
+		do(routerAt(f), http.MethodGet, base+"&asOf=2026-08-01&type=department", "", unitDuties, true)
+		if want := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC); !f.ouFilter.AsOf.Equal(want) || f.ouFilter.Type != "department" {
+			t.Fatalf("filter = %+v", f.ouFilter)
+		}
+	})
+	t.Run("no hierarchy filter leaves the filter zero", func(t *testing.T) {
+		f := seededUnits()
+		do(routerAt(f), http.MethodGet, operatingUnits, "", unitDuties, true)
+		if f.ouFilter.HierarchyTypeID != "" {
+			t.Fatalf("filter = %+v", f.ouFilter)
+		}
+	})
+	t.Run("unknown type", func(t *testing.T) {
+		f := &fakeStore{err: httpx.NewProblem(http.StatusNotFound, store.CodeHierarchyTypeNotFound, "hierarchy type not found")}
+		if rec := do(routerAt(f), http.MethodGet, base, "", unitDuties, true); rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "ORG-HIER-TYPE-NOT-FOUND") {
+			t.Fatalf("got %d %s", rec.Code, rec.Body.String())
+		}
+	})
 }
 
 func TestOperatingUnits_StoreErrorHidesInternals(t *testing.T) {
