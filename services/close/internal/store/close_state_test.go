@@ -207,6 +207,54 @@ func TestReopenDueTenants(t *testing.T) {
 	}
 }
 
+func TestReopenDueTenants_OwnerWithoutBypassRLS(t *testing.T) {
+	admin, app := migrated(t)
+	ctx := context.Background()
+	owner := "close_sweeper_" + strings.ToLower(strings.ReplaceAll(t.Name(), "/", "_"))
+	if len(owner) > 60 {
+		owner = owner[:60]
+	}
+	var schema string
+	if err := admin.QueryRow(ctx, `select current_schema()`).Scan(&schema); err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{
+		`create role ` + owner + ` nosuperuser nobypassrls`,
+		`grant usage on schema ` + schema + ` to ` + owner,
+		`grant select on reopen_expiry to ` + owner,
+		`alter function close_reopen_due_tenants() owner to ` + owner,
+	} {
+		if _, err := admin.Exec(ctx, stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+	t.Cleanup(func() {
+		_, _ = admin.Exec(ctx, `alter function close_reopen_due_tenants() owner to current_user`)
+		_, _ = admin.Exec(ctx, `drop role if exists `+owner)
+	})
+	if _, err := admin.Exec(ctx,
+		`insert into period_status(tenant_id, legal_entity_id, ledger_id, fiscal_period_id, module, status, reopen_expires_at, changed_by) values($1,$2,$3,$4,'gl','open',now() - interval '1 hour','t')`,
+		testkit.TenantID(1), entityID, ledgerID, periodID); err != nil {
+		t.Fatal(err)
+	}
+	var due []string
+	rows, err := app.Query(ctx, `select * from close_reopen_due_tenants()`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		due = append(due, id)
+	}
+	if len(due) != 1 || due[0] != testkit.TenantID(1) {
+		t.Fatalf("due tenants = %v, want only tenant 1", due)
+	}
+}
+
 func idempotentStore(t *testing.T) (*pgxpool.Pool, *pgxpool.Pool, *store.Postgres) {
 	admin, app := migrated(t)
 	return admin, app, store.New(app)

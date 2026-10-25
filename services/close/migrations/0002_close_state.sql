@@ -136,9 +136,44 @@ BEGIN
   END LOOP;
 END
 $$;
+CREATE TABLE IF NOT EXISTS reopen_expiry (
+  tenant_id uuid NOT NULL,
+  ledger_id uuid NOT NULL,
+  fiscal_period_id uuid NOT NULL,
+  module text NOT NULL,
+  reopen_expires_at timestamptz NOT NULL,
+  PRIMARY KEY (tenant_id, ledger_id, fiscal_period_id, module)
+);
+CREATE INDEX IF NOT EXISTS reopen_expiry_due ON reopen_expiry (reopen_expires_at);
+CREATE OR REPLACE FUNCTION period_status_track_reopen_expiry() RETURNS trigger
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path FROM CURRENT
+  AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    DELETE FROM reopen_expiry WHERE tenant_id = OLD.tenant_id AND ledger_id = OLD.ledger_id AND fiscal_period_id = OLD.fiscal_period_id AND module = OLD.module;
+    RETURN OLD;
+  END IF;
+  IF NEW.reopen_expires_at IS NULL OR NEW.status NOT IN ('open', 'on_hold') THEN
+    DELETE FROM reopen_expiry WHERE tenant_id = NEW.tenant_id AND ledger_id = NEW.ledger_id AND fiscal_period_id = NEW.fiscal_period_id AND module = NEW.module;
+  ELSE
+    INSERT INTO reopen_expiry(tenant_id, ledger_id, fiscal_period_id, module, reopen_expires_at)
+    VALUES (NEW.tenant_id, NEW.ledger_id, NEW.fiscal_period_id, NEW.module, NEW.reopen_expires_at)
+    ON CONFLICT (tenant_id, ledger_id, fiscal_period_id, module) DO UPDATE SET reopen_expires_at = EXCLUDED.reopen_expires_at;
+  END IF;
+  RETURN NEW;
+END
+$$;
+REVOKE ALL ON FUNCTION period_status_track_reopen_expiry() FROM PUBLIC;
+DROP TRIGGER IF EXISTS period_status_reopen_expiry ON period_status;
+CREATE TRIGGER period_status_reopen_expiry AFTER INSERT OR UPDATE OR DELETE ON period_status
+  FOR EACH ROW EXECUTE FUNCTION period_status_track_reopen_expiry();
+INSERT INTO reopen_expiry(tenant_id, ledger_id, fiscal_period_id, module, reopen_expires_at)
+  SELECT tenant_id, ledger_id, fiscal_period_id, module, reopen_expires_at FROM period_status
+  WHERE reopen_expires_at IS NOT NULL AND status IN ('open', 'on_hold')
+ON CONFLICT DO NOTHING;
 CREATE OR REPLACE FUNCTION close_reopen_due_tenants() RETURNS SETOF uuid
   LANGUAGE sql STABLE SECURITY DEFINER SET search_path FROM CURRENT
-  AS $$ SELECT DISTINCT tenant_id FROM period_status WHERE reopen_expires_at <= now() AND status IN ('open', 'on_hold') $$;
+  AS $$ SELECT DISTINCT tenant_id FROM reopen_expiry WHERE reopen_expires_at <= now() $$;
 REVOKE ALL ON FUNCTION close_reopen_due_tenants() FROM PUBLIC;
 DO $$
 BEGIN
