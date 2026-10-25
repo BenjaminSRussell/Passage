@@ -31,6 +31,36 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /v1/receiving/arrivals:
+    post:
+      operationId: createArrival
+      x-passage-duty: ReceivingMaintain
+      description: Records a vendor delivery at the dock in state ARRIVED. PO line facts come in the body. A repeated Idempotency-Key with the same body replays the stored response.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 255 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ArrivalRequest' }
+      responses:
+        '201':
+          description: Receipt in state ARRIVED.
+          headers:
+            Location: { schema: { type: string }, description: '/v1/receiving/receipts/{id}' }
+            Idempotent-Replayed: { schema: { type: string, enum: ['true'] }, description: Present on replays only. }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Receipt' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001 validation, with errors naming each field.' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '409': { $ref: '#/components/responses/Problem', description: 'RCV-DUP-001 packing slip already used for the vendor; COM-0410 key in flight (Retry-After: 1).' }
+        '422': { $ref: '#/components/responses/Problem', description: 'COM-0409 idempotency key reused with a different request.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
   /healthz:
     get:
       operationId: liveness
@@ -120,6 +150,80 @@ components:
           minItems: 1
           maxItems: 500
           items: { $ref: '#/components/schemas/Line' }
+    ArrivalLine:
+      type: object
+      additionalProperties: false
+      required: [poLineId, productId, orderedRemaining, unitPrice, unit]
+      properties:
+        poLineId: { type: string, format: uuid }
+        productId: { type: string, format: uuid }
+        orderedRemaining: { type: number, exclusiveMinimum: 0 }
+        overDeliveryPct: { type: number, minimum: 0, maximum: 100, default: 0 }
+        unitPrice: { type: number, minimum: 0 }
+        unit: { type: string, minLength: 1, maxLength: 16 }
+        batchTracked: { type: boolean, default: false }
+        serialTracked: { type: boolean, default: false }
+    ArrivalRequest:
+      type: object
+      additionalProperties: false
+      required: [vendorId, purchaseOrderId, legalEntityId, packingSlip, receiptDate, currency, lines]
+      properties:
+        vendorId: { type: string, format: uuid }
+        purchaseOrderId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        packingSlip: { type: string, minLength: 1, maxLength: 64 }
+        carrier: { type: string, maxLength: 128 }
+        palletCount: { type: integer, minimum: 0 }
+        receiptDate: { type: string, format: date }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        exchangeRate: { type: number, exclusiveMinimum: 0, default: 1 }
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items: { $ref: '#/components/schemas/ArrivalLine' }
+    ReceiptLine:
+      type: object
+      required: [lineNo, poLineId, productId, orderedRemaining, overDeliveryPct, unitPrice, unit, batchTracked, serialTracked, qty, batch, serials, locationId, inventoryStatus, amount, amountAcct]
+      properties:
+        lineNo: { type: integer }
+        poLineId: { type: string, format: uuid }
+        productId: { type: string, format: uuid }
+        orderedRemaining: { type: string }
+        overDeliveryPct: { type: string }
+        unitPrice: { type: string }
+        unit: { type: string }
+        batchTracked: { type: boolean }
+        serialTracked: { type: boolean }
+        qty: { type: string }
+        batch: { type: string }
+        serials: { type: array, items: { type: string } }
+        locationId: { type: string }
+        inventoryStatus: { type: string }
+        amount: { type: [string, 'null'], description: Null until posted. }
+        amountAcct: { type: [string, 'null'], description: Null until posted. }
+    Receipt:
+      type: object
+      required: [id, receiptNumber, state, vendorId, purchaseOrderId, legalEntityId, packingSlip, carrier, receiptDate, currency, exchangeRate, createdAt, lines]
+      properties:
+        id: { type: string, format: uuid }
+        receiptNumber: { type: string, pattern: '^RCV-\d{8}$' }
+        state: { type: string }
+        vendorId: { type: string, format: uuid }
+        purchaseOrderId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        packingSlip: { type: string }
+        carrier: { type: string }
+        palletCount: { type: integer }
+        receiptDate: { type: string, format: date }
+        currency: { type: string }
+        exchangeRate: { type: string }
+        postingDate: { type: string, format: date }
+        ledgerEntryId: { type: string }
+        createdAt: { type: string, format: date-time }
+        lines:
+          type: array
+          items: { $ref: '#/components/schemas/ReceiptLine' }
     Status:
       type: string
       enum: [NOT_MATCHED, MATCHED, PRICE_VARIANCE, QTY_VARIANCE, TOTAL_VARIANCE, NO_RECEIPT, WAITING_RECEIPT]

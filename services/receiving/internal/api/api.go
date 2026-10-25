@@ -25,6 +25,7 @@ import (
 const (
 	readyTimeout       = 500 * time.Millisecond
 	dutyMatchingPolicy = "MatchingPolicyMaintain"
+	dutyReceiving      = "ReceivingMaintain"
 	maxLines           = 500
 	maxMagnitude       = 1e12
 	maxExponent        = 12
@@ -32,10 +33,12 @@ const (
 )
 
 type API struct {
-	store     store.Store
-	evaluated atomic.Int64
-	rejected  atomic.Int64
-	http      requestMetrics
+	store      store.Store
+	evaluated  atomic.Int64
+	rejected   atomic.Int64
+	arrived    atomic.Int64
+	registered atomic.Int64
+	http       requestMetrics
 }
 
 func New(s store.Store) *API { return &API{store: s, http: newRequestMetrics()} }
@@ -43,6 +46,7 @@ func New(s store.Store) *API { return &API{store: s, http: newRequestMetrics()} 
 func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
 	r.With(authz.RequireDuty(dutyMatchingPolicy)).Post("/v1/receiving/matching:evaluate", a.evaluate)
+	r.With(authz.RequireDuty(dutyReceiving)).Post("/v1/receiving/arrivals", a.idempotent(a.arrive))
 }
 
 func (a *API) Metrics() http.Handler {
@@ -50,6 +54,8 @@ func (a *API) Metrics() http.Handler {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 		fmt.Fprintf(w, "# HELP receiving_matches_evaluated_total Invoices evaluated by the matching engine.\n# TYPE receiving_matches_evaluated_total counter\nreceiving_matches_evaluated_total %d\n", a.evaluated.Load())
 		fmt.Fprintf(w, "# HELP receiving_evaluate_rejected_total Evaluate requests rejected by validation.\n# TYPE receiving_evaluate_rejected_total counter\nreceiving_evaluate_rejected_total %d\n", a.rejected.Load())
+		fmt.Fprintf(w, "# HELP receiving_receipts_arrived_total Receipts recorded at arrival.\n# TYPE receiving_receipts_arrived_total counter\nreceiving_receipts_arrived_total %d\n", a.arrived.Load())
+		fmt.Fprintf(w, "# HELP receiving_receipts_registered_total Receipts registered, including direct receipts.\n# TYPE receiving_receipts_registered_total counter\nreceiving_receipts_registered_total %d\n", a.registered.Load())
 		a.http.write(w)
 	})
 }
