@@ -14,11 +14,15 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/api"
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/store"
 )
 
 const evaluatePath = "/v1/receiving/matching:evaluate"
 
-type fakeStore struct{ pingErr error }
+type fakeStore struct {
+	store.Store
+	pingErr error
+}
 
 func (f fakeStore) Ping(context.Context) error { return f.pingErr }
 
