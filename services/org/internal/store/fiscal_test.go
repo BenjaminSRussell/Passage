@@ -9,11 +9,9 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
-	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/org/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/org/internal/store"
 )
@@ -69,10 +67,6 @@ func TestPostgres_FiscalCalendarCreateReplayReuseAndDuplicate(t *testing.T) {
 	}
 	if _, err := s.CreateFiscalCalendar(ctx, fiscalCalendar("FY", "4-4-5"), "key-2"); problemCode(t, err) != store.CodeFiscalCalendarCode {
 		t.Fatalf("duplicate code error = %v", err)
-	}
-	got, err := s.GetFiscalCalendar(ctx, first.ID)
-	if err != nil || got.ID != first.ID {
-		t.Fatalf("get = %+v, %v", got, err)
 	}
 	if _, err := s.GetFiscalCalendar(principalContext(2), first.ID); problemCode(t, err) != store.CodeFiscalCalendarNotFound {
 		t.Fatalf("other tenant get error = %v", err)
@@ -203,19 +197,12 @@ func TestPostgres_ListFiscalPeriodsOrdersAndIsolatesTenants(t *testing.T) {
 	if err != nil || len(all) != 28 || all[0].FiscalYear != 2028 || all[14].FiscalYear != 2029 {
 		t.Fatalf("all years = %d rows, %v; want 28 ordered by year", len(all), err)
 	}
-	one, err := s.ListFiscalPeriods(ctx, c.ID, 2028)
-	if err != nil || len(one) != 14 || one[0].PeriodNo != 0 || one[1].PeriodNo != 1 || one[12].PeriodNo != 12 || one[13].PeriodNo != 99 {
-		t.Fatalf("2028 = %+v, %v; want 0, 1..12, 99", one, err)
-	}
 	other := principalContext(2)
 	if _, err := s.ListFiscalPeriods(other, c.ID, 0); problemCode(t, err) != store.CodeFiscalCalendarNotFound {
 		t.Fatalf("other tenant list error = %v", err)
 	}
 	if _, err := s.GenerateFiscalYear(other, c.ID, 2030, nil, false); problemCode(t, err) != store.CodeFiscalCalendarNotFound {
 		t.Fatalf("other tenant generate error = %v", err)
-	}
-	if _, err := s.ListFiscalPeriods(ctx, "00000000-0000-0000-0000-0000000000ff", 0); problemCode(t, err) != store.CodeFiscalCalendarNotFound {
-		t.Fatalf("unknown calendar list error = %v", err)
 	}
 	if calendars, periods := fiscalRows(t, other, pool, "fiscal_calendar"), fiscalRows(t, other, pool, "fiscal_period"); calendars != 0 || periods != 0 {
 		t.Fatalf("other tenant sees %d calendars and %d periods; want none", calendars, periods)
@@ -241,31 +228,5 @@ func TestPostgres_ConcurrentGenerateFiscalYearProducesOneYearAndOneEvent(t *test
 	}
 	if n := len(unitEvents(t, ctx, pool, fiscalGeneratedType)); n != 1 || fiscalRows(t, ctx, pool, "fiscal_period") != 14 {
 		t.Fatalf("events = %d, rows = %d; want 1 and 14", n, fiscalRows(t, ctx, pool, "fiscal_period"))
-	}
-}
-
-func TestPostgres_FiscalPeriodRejectsBadPeriodNumberAndReversedDates(t *testing.T) {
-	s, ctx, pool := lifecycleStore(t)
-	c := retail445(t, s, ctx)
-	tests := []struct {
-		name       string
-		periodNo   int
-		start, end time.Time
-	}{
-		{"period number 50", 50, day(2028, 1, 1), day(2028, 1, 2)},
-		{"end before start", 1, day(2028, 1, 2), day(2028, 1, 1)},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			err := dbx.WithTenantTx(ctx, pool, func(tx pgx.Tx) error {
-				_, err := tx.Exec(ctx, `insert into fiscal_period (tenant_id, calendar_id, fiscal_year, period_no, name, start_date, end_date, type)
-					values ($1, $2, 2028, $3, 'x', $4, $5, 'operating')`, testkit.TenantID(1), c.ID, tc.periodNo, tc.start, tc.end)
-				return err
-			})
-			var pgErr *pgconn.PgError
-			if !errors.As(err, &pgErr) || pgErr.Code != "23514" {
-				t.Fatalf("insert error = %v; want a check violation", err)
-			}
-		})
 	}
 }

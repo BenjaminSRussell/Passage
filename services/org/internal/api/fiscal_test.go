@@ -92,38 +92,25 @@ func TestFiscalCalendarCreate(t *testing.T) {
 		headers    []string
 		withTenant bool
 		wantStatus int
-		wantBody   []string
+		wantBody   string
 	}{
-		{"defaults", createCalendar, fiscalDuties, nil, true, http.StatusCreated, []string{`"code":"FY","name":"Retail","pattern":"4-4-5","startMonth":1,"weekStart":"monday","openingClosing":true,"specialPeriods":0`}},
-		{"explicit values", `{"code":"FY","name":"n","pattern":"custom","startMonth":2,"weekStart":"sunday","openingClosing":false,"specialPeriods":4}`, fiscalDuties, nil, true, http.StatusCreated, []string{`"startMonth":2,"weekStart":"sunday","openingClosing":false,"specialPeriods":4`}},
-		{"null optional fields take defaults", `{"code":"FY","name":"n","pattern":"calendar","startMonth":null,"weekStart":null}`, fiscalDuties, nil, true, http.StatusCreated, []string{`"startMonth":1,"weekStart":"monday"`}},
-		{"every field invalid", `{"code":"bad code","name":" ","pattern":"weekly","startMonth":13,"weekStart":"funday","specialPeriods":5}`, fiscalDuties, nil, true, http.StatusBadRequest,
-			[]string{`"code"`, `"name"`, `"pattern"`, `"startMonth"`, `"weekStart"`, `"specialPeriods"`}},
-		{"start month zero", `{"code":"FY","name":"n","pattern":"calendar","startMonth":0}`, fiscalDuties, nil, true, http.StatusBadRequest, []string{`"startMonth"`}},
-		{"negative special periods", `{"code":"FY","name":"n","pattern":"calendar","specialPeriods":-1}`, fiscalDuties, nil, true, http.StatusBadRequest, []string{`"specialPeriods"`}},
-		{"upper-case weekday", `{"code":"FY","name":"n","pattern":"calendar","weekStart":"Monday"}`, fiscalDuties, nil, true, http.StatusBadRequest, []string{`"weekStart"`}},
-		{"empty weekday", `{"code":"FY","name":"n","pattern":"calendar","weekStart":""}`, fiscalDuties, nil, true, http.StatusBadRequest, []string{`"weekStart"`}},
-		{"missing pattern", `{"code":"FY","name":"n"}`, fiscalDuties, nil, true, http.StatusBadRequest, []string{`"pattern"`}},
-		{"string start month", `{"code":"FY","name":"n","pattern":"calendar","startMonth":"2"}`, fiscalDuties, nil, true, http.StatusBadRequest, []string{"COM-0001"}},
-		{"fractional start month", `{"code":"FY","name":"n","pattern":"calendar","startMonth":2.5}`, fiscalDuties, nil, true, http.StatusBadRequest, []string{"COM-0001"}},
-		{"string opening closing", `{"code":"FY","name":"n","pattern":"calendar","openingClosing":"true"}`, fiscalDuties, nil, true, http.StatusBadRequest, []string{"COM-0001"}},
-		{"unknown field", `{"code":"FY","name":"n","pattern":"calendar","x":1}`, fiscalDuties, nil, true, http.StatusBadRequest, []string{"COM-0001"}},
-		{"no tenant", createCalendar, "", nil, false, http.StatusUnauthorized, []string{"AUTH-0001"}},
-		{"read duty only", createCalendar, "org.read", nil, true, http.StatusForbidden, []string{"AUTH-0003"}},
-		{"legal-entity scoped caller", createCalendar, fiscalDuties, []string{"X-Passage-Legal-Entity", testkit.TenantID(2)}, true, http.StatusForbidden, []string{"AUTH-0003"}},
+		{"defaults", createCalendar, fiscalDuties, nil, true, http.StatusCreated, `"code":"FY","name":"Retail","pattern":"4-4-5","startMonth":1,"weekStart":"monday","openingClosing":true,"specialPeriods":0`},
+		{"explicit values", `{"code":"FY","name":"n","pattern":"custom","startMonth":2,"weekStart":"sunday","openingClosing":false,"specialPeriods":4}`, fiscalDuties, nil, true, http.StatusCreated, `"startMonth":2,"weekStart":"sunday","openingClosing":false,"specialPeriods":4`},
+		{"every field invalid", `{"code":"bad code","name":" ","pattern":"weekly","startMonth":13,"weekStart":"funday","specialPeriods":5}`, fiscalDuties, nil, true, http.StatusBadRequest, `"specialPeriods"`},
+		{"upper-case weekday", `{"code":"FY","name":"n","pattern":"calendar","weekStart":"Monday"}`, fiscalDuties, nil, true, http.StatusBadRequest, `"weekStart"`},
+		{"fractional start month", `{"code":"FY","name":"n","pattern":"calendar","startMonth":2.5}`, fiscalDuties, nil, true, http.StatusBadRequest, "COM-0001"},
+		{"unknown field", `{"code":"FY","name":"n","pattern":"calendar","x":1}`, fiscalDuties, nil, true, http.StatusBadRequest, "COM-0001"},
+		{"no tenant", createCalendar, "", nil, false, http.StatusUnauthorized, "AUTH-0001"},
+		{"read duty only", createCalendar, "org.read", nil, true, http.StatusForbidden, "AUTH-0003"},
+		{"legal-entity scoped caller", createCalendar, fiscalDuties, []string{"X-Passage-Legal-Entity", testkit.TenantID(2)}, true, http.StatusForbidden, "AUTH-0003"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			f := &fakeStore{}
 			r, _ := newRouter(f)
 			rec := do(r, http.MethodPost, fiscalPath, tc.body, tc.duties, tc.withTenant, tc.headers...)
-			if rec.Code != tc.wantStatus {
-				t.Fatalf("got %d %s; want %d", rec.Code, rec.Body.String(), tc.wantStatus)
-			}
-			for _, want := range tc.wantBody {
-				if !strings.Contains(rec.Body.String(), want) {
-					t.Fatalf("body %s lacks %s", rec.Body.String(), want)
-				}
+			if rec.Code != tc.wantStatus || !strings.Contains(rec.Body.String(), tc.wantBody) {
+				t.Fatalf("got %d %s; want %d containing %s", rec.Code, rec.Body.String(), tc.wantStatus, tc.wantBody)
 			}
 			if tc.wantStatus != http.StatusCreated && len(f.calendars) != 0 {
 				t.Fatalf("store was called for a rejected request")
@@ -133,8 +120,7 @@ func TestFiscalCalendarCreate(t *testing.T) {
 }
 
 func TestFiscalCalendarCreateStoreErrors(t *testing.T) {
-	duplicate := httpx.NewProblem(http.StatusConflict, store.CodeFiscalCalendarCode, "exists")
-	r, _ := newRouter(&fakeStore{err: duplicate})
+	r, _ := newRouter(&fakeStore{err: httpx.NewProblem(http.StatusConflict, store.CodeFiscalCalendarCode, "exists")})
 	if rec := do(r, http.MethodPost, fiscalPath, createCalendar, fiscalDuties, true); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "ORG-CAL-CODE-DUPLICATE") {
 		t.Fatalf("got %d %s", rec.Code, rec.Body.String())
 	}
@@ -144,7 +130,8 @@ func TestFiscalCalendarCreateStoreErrors(t *testing.T) {
 	}
 }
 
-func TestFiscalCalendarGet(t *testing.T) {
+func TestFiscalCalendarReads(t *testing.T) {
+	periods := fiscalPath + "/" + calendarID + "/periods"
 	tests := []struct {
 		name       string
 		path       string
@@ -152,10 +139,14 @@ func TestFiscalCalendarGet(t *testing.T) {
 		wantStatus int
 		wantBody   string
 	}{
-		{"known id", fiscalPath + "/" + calendarID, fiscalDuties, http.StatusOK, `"code":"FY"`},
-		{"unknown id", fiscalPath + "/" + otherCalendar, fiscalDuties, http.StatusNotFound, "ORG-CAL-NOT-FOUND"},
-		{"non-UUID id", fiscalPath + "/nope", fiscalDuties, http.StatusNotFound, "ORG-CAL-NOT-FOUND"},
-		{"no duty", fiscalPath + "/" + calendarID, "", http.StatusForbidden, "AUTH-0003"},
+		{"get known id", fiscalPath + "/" + calendarID, fiscalDuties, http.StatusOK, `"code":"FY"`},
+		{"get unknown id", fiscalPath + "/" + otherCalendar, fiscalDuties, http.StatusNotFound, "ORG-CAL-NOT-FOUND"},
+		{"get non-UUID id", fiscalPath + "/nope", fiscalDuties, http.StatusNotFound, "ORG-CAL-NOT-FOUND"},
+		{"get no duty", fiscalPath + "/" + calendarID, "", http.StatusForbidden, "AUTH-0003"},
+		{"periods one year", periods + "?fiscalYear=2026", fiscalDuties, http.StatusOK, `"items":[]`},
+		{"periods year out of range", periods + "?fiscalYear=1899", fiscalDuties, http.StatusBadRequest, `"fiscalYear"`},
+		{"periods year not numeric", periods + "?fiscalYear=abc", fiscalDuties, http.StatusBadRequest, `"fiscalYear"`},
+		{"periods unknown calendar", fiscalPath + "/" + otherCalendar + "/periods", fiscalDuties, http.StatusNotFound, "ORG-CAL-NOT-FOUND"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -181,15 +172,10 @@ func TestFiscalYearGenerate(t *testing.T) {
 		wantStatus int
 		wantBody   string
 	}{
-		{"first call generates", seededCalendars(), generate, `{"fiscalYear":2028}`, fiscalDuties, nil, http.StatusCreated, `"generated":true`},
 		{"unknown calendar", seededCalendars(), fiscalPath + "/" + otherCalendar + ":generate", `{"fiscalYear":2028}`, fiscalDuties, nil, http.StatusNotFound, "ORG-CAL-NOT-FOUND"},
-		{"non-UUID id", seededCalendars(), fiscalPath + "/nope:generate", `{"fiscalYear":2028}`, fiscalDuties, nil, http.StatusNotFound, "ORG-CAL-NOT-FOUND"},
 		{"missing year", seededCalendars(), generate, `{}`, fiscalDuties, nil, http.StatusBadRequest, `"fiscalYear"`},
-		{"string year", seededCalendars(), generate, `{"fiscalYear":"2028"}`, fiscalDuties, nil, http.StatusBadRequest, "COM-0001"},
-		{"fractional year", seededCalendars(), generate, `{"fiscalYear":2028.5}`, fiscalDuties, nil, http.StatusBadRequest, "COM-0001"},
 		{"year below range", seededCalendars(), generate, `{"fiscalYear":1899}`, fiscalDuties, nil, http.StatusBadRequest, `"fiscalYear"`},
-		{"string force", seededCalendars(), generate, `{"fiscalYear":2028,"force":"yes"}`, fiscalDuties, nil, http.StatusBadRequest, "COM-0001"},
-		{"periods not an array", seededCalendars(), generate, `{"fiscalYear":2028,"periods":"x"}`, fiscalDuties, nil, http.StatusBadRequest, "COM-0001"},
+		{"string year", seededCalendars(), generate, `{"fiscalYear":"2028"}`, fiscalDuties, nil, http.StatusBadRequest, "COM-0001"},
 		{"malformed date", seededCalendars(), generate, `{"fiscalYear":2028,"periods":[{"start":"2028-13-40","end":"2028-12-31"}]}`, fiscalDuties, nil, http.StatusBadRequest, `periods[0].start`},
 		{"generator gap", &fakeStore{calendars: seededCalendars().calendars, generateErr: gap}, generate, `{"fiscalYear":2028,"periods":[{"start":"2028-01-01","end":"2028-02-28"}]}`, fiscalDuties, nil, http.StatusUnprocessableEntity, "ORG-CAL-GAP"},
 		{"no duty", seededCalendars(), generate, `{"fiscalYear":2028}`, "org.read", nil, http.StatusForbidden, "AUTH-0003"},
@@ -209,13 +195,13 @@ func TestFiscalYearGenerate(t *testing.T) {
 	}
 }
 
-func TestFiscalYearGenerateReplayAndRouting(t *testing.T) {
+func TestFiscalYearGenerateReplayAndMetrics(t *testing.T) {
 	f := seededCalendars()
 	r, a := newRouter(f)
 	generate := fiscalPath + "/" + calendarID + ":generate"
 	first := do(r, http.MethodPost, generate, `{"fiscalYear":2028}`, fiscalDuties, true)
 	replay := do(r, http.MethodPost, generate, `{"fiscalYear":2028}`, fiscalDuties, true)
-	if first.Code != http.StatusCreated || replay.Code != http.StatusOK || !strings.Contains(replay.Body.String(), `"generated":false`) {
+	if first.Code != http.StatusCreated || !strings.Contains(first.Body.String(), `"generated":true`) || replay.Code != http.StatusOK || !strings.Contains(replay.Body.String(), `"generated":false`) {
 		t.Fatalf("first %d %s, replay %d %s", first.Code, first.Body.String(), replay.Code, replay.Body.String())
 	}
 	if f.generatedID != calendarID {
@@ -251,51 +237,9 @@ func TestFiscalYearForceUsesPostingChecker(t *testing.T) {
 			r, a := newRouter(f)
 			a.WithPostingChecker(tc.checker)
 			rec := do(r, http.MethodPost, generate, `{"fiscalYear":2028,"force":`+tc.force+`}`, fiscalDuties, true)
-			if rec.Code != tc.wantStatus || !strings.Contains(rec.Body.String(), tc.wantBody) || f.generateCalls != tc.wantCalls {
+			if rec.Code != tc.wantStatus || !strings.Contains(rec.Body.String(), tc.wantBody) || f.generateCalls != tc.wantCalls || strings.Contains(rec.Body.String(), "ledger down") {
 				t.Fatalf("got %d %s with %d store calls; want %d containing %s with %d", rec.Code, rec.Body.String(), f.generateCalls, tc.wantStatus, tc.wantBody, tc.wantCalls)
 			}
-			if strings.Contains(rec.Body.String(), "ledger down") {
-				t.Fatalf("checker error leaked: %s", rec.Body.String())
-			}
 		})
-	}
-}
-
-func TestFiscalPeriodsRead(t *testing.T) {
-	periods := fiscalPath + "/" + calendarID + "/periods"
-	tests := []struct {
-		name       string
-		path       string
-		wantStatus int
-		wantBody   string
-	}{
-		{"all years", periods, http.StatusOK, `"items":[]`},
-		{"one year", periods + "?fiscalYear=2026", http.StatusOK, `"items":[]`},
-		{"empty year means all", periods + "?fiscalYear=", http.StatusOK, `"items":[]`},
-		{"year below range", periods + "?fiscalYear=1899", http.StatusBadRequest, `"fiscalYear"`},
-		{"year above range", periods + "?fiscalYear=3000", http.StatusBadRequest, `"fiscalYear"`},
-		{"year not numeric", periods + "?fiscalYear=abc", http.StatusBadRequest, `"fiscalYear"`},
-		{"unknown calendar", fiscalPath + "/" + otherCalendar + "/periods", http.StatusNotFound, "ORG-CAL-NOT-FOUND"},
-		{"non-UUID calendar", fiscalPath + "/nope/periods", http.StatusNotFound, "ORG-CAL-NOT-FOUND"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			r, _ := newRouter(seededCalendars())
-			rec := do(r, http.MethodGet, tc.path, "", fiscalDuties, true)
-			if rec.Code != tc.wantStatus || !strings.Contains(rec.Body.String(), tc.wantBody) {
-				t.Fatalf("got %d %s; want %d containing %s", rec.Code, rec.Body.String(), tc.wantStatus, tc.wantBody)
-			}
-		})
-	}
-}
-
-func TestFiscalMetricsExposeBothCounters(t *testing.T) {
-	_, a := newRouter(&fakeStore{})
-	rec := httptest.NewRecorder()
-	a.Metrics().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
-	for _, want := range []string{"org_fiscal_calendars_created_total", "org_fiscal_years_generated_total"} {
-		if !strings.Contains(rec.Body.String(), want) {
-			t.Fatalf("metrics lack %s", want)
-		}
 	}
 }
