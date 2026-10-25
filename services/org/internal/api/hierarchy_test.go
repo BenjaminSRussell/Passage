@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/org/internal/domain"
@@ -150,6 +151,125 @@ func TestHierarchyMetrics(t *testing.T) {
 	metrics := httptest.NewRecorder()
 	a.Metrics().ServeHTTP(metrics, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	for _, want := range []string{"org_hierarchy_types_created_total 1", "org_hierarchy_drafts_created_total 1", "org_hierarchy_node_sets_replaced_total 1"} {
+		if !strings.Contains(metrics.Body.String(), want) {
+			t.Fatalf("metrics lack %q: %s", want, metrics.Body.String())
+		}
+	}
+}
+
+const (
+	publishPath      = "/v1/org/hierarchy-versions/" + hierarchyVersionID + ":publish"
+	asOfPath         = hierarchyTypesPath + "/" + hierarchyTypeID + "/as-of"
+	publishDuties    = "org.read,org.hierarchy.publish"
+	backdateDuties   = publishDuties + ",org.hierarchy.backdate"
+	pinnedToday      = "2026-03-01"
+	longReason       = "Correcting the reporting structure"
+	backdatedBody    = `{"version":1,"effectiveFrom":"2025-12-01","reason":"` + longReason + `"}`
+	forwardBody      = `{"version":1,"effectiveFrom":"2026-04-01"}`
+	backdateDutyCode = "ORG-HIER-BACKDATE-DUTY"
+)
+
+func routerAt(f *fakeStore) http.Handler {
+	r, a := newRouter(f)
+	a.SetClock(func() time.Time { return time.Date(2026, 3, 1, 15, 0, 0, 0, time.UTC) })
+	return r
+}
+
+func TestHierarchyPublish(t *testing.T) {
+	scoped := []string{"X-Passage-Legal-Entity", testkit.TenantID(2)}
+	tests := []struct {
+		name          string
+		path          string
+		body          string
+		duties        string
+		headers       []string
+		withTenant    bool
+		wantStatus    int
+		wantBody      string
+		wantCalls     int
+		wantBackdated bool
+	}{
+		{"published", publishPath, forwardBody, publishDuties, nil, true, http.StatusOK, `"status":"published","effectiveFrom":"2026-04-01"`, 1, false},
+		{"today is not backdated", publishPath, `{"version":1,"effectiveFrom":"` + pinnedToday + `"}`, publishDuties, nil, true, http.StatusOK, `"status":"published"`, 1, false},
+		{"write duty alone", publishPath, forwardBody, hierarchyDuties, nil, true, http.StatusForbidden, "AUTH-0003", 0, false},
+		{"no tenant", publishPath, forwardBody, "", nil, false, http.StatusUnauthorized, "AUTH-0001", 0, false},
+		{"scoped caller", publishPath, forwardBody, publishDuties, scoped, true, http.StatusForbidden, "AUTH-0003", 0, false},
+		{"malformed id", "/v1/org/hierarchy-versions/nope:publish", forwardBody, publishDuties, nil, true, http.StatusNotFound, "ORG-HIER-VERSION-NOT-FOUND", 0, false},
+		{"missing version", publishPath, `{"effectiveFrom":"2026-04-01"}`, publishDuties, nil, true, http.StatusBadRequest, `"version"`, 0, false},
+		{"missing date", publishPath, `{"version":1}`, publishDuties, nil, true, http.StatusBadRequest, `"effectiveFrom"`, 0, false},
+		{"malformed date", publishPath, `{"version":1,"effectiveFrom":"2026-13-01"}`, publishDuties, nil, true, http.StatusBadRequest, `"effectiveFrom"`, 0, false},
+		{"numeric date", publishPath, `{"version":1,"effectiveFrom":20260401}`, publishDuties, nil, true, http.StatusBadRequest, "COM-0001", 0, false},
+		{"short reason when not backdated", publishPath, `{"version":1,"effectiveFrom":"2026-04-01","reason":"too short"}`, publishDuties, nil, true, http.StatusBadRequest, `"reason"`, 0, false},
+		{"long reason when not backdated", publishPath, `{"version":1,"effectiveFrom":"2026-04-01","reason":"` + strings.Repeat("x", 501) + `"}`, publishDuties, nil, true, http.StatusBadRequest, `"reason"`, 0, false},
+		{"reason kept when not backdated", publishPath, `{"version":1,"effectiveFrom":"2026-04-01","reason":"` + longReason + `"}`, publishDuties, nil, true, http.StatusOK, `"publishReason":"` + longReason + `"`, 1, false},
+		{"unknown field", publishPath, `{"version":1,"effectiveFrom":"2026-04-01","extra":1}`, publishDuties, nil, true, http.StatusBadRequest, "COM-0001", 0, false},
+		{"backdated without the duty", publishPath, backdatedBody, publishDuties, nil, true, http.StatusForbidden, backdateDutyCode, 0, false},
+		{"backdated with the duty", publishPath, backdatedBody, backdateDuties, nil, true, http.StatusOK, `"publishedBy"`, 1, true},
+		{"backdate duty without publish duty", publishPath, backdatedBody, "org.read,org.hierarchy.backdate", nil, true, http.StatusForbidden, "AUTH-0003", 0, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeStore{}
+			rec := do(routerAt(f), http.MethodPost, tc.path, tc.body, tc.duties, tc.withTenant, tc.headers...)
+			if rec.Code != tc.wantStatus || !strings.Contains(rec.Body.String(), tc.wantBody) {
+				t.Fatalf("got %d %s; want %d containing %s", rec.Code, rec.Body.String(), tc.wantStatus, tc.wantBody)
+			}
+			if f.publishCalls != tc.wantCalls || f.publishBackdated != tc.wantBackdated {
+				t.Fatalf("store calls = %d backdated = %v; want %d and %v", f.publishCalls, f.publishBackdated, tc.wantCalls, tc.wantBackdated)
+			}
+		})
+	}
+}
+
+func TestHierarchyPublishMapsStoreErrorsAndForwardsUser(t *testing.T) {
+	f := &fakeStore{}
+	do(routerAt(f), http.MethodPost, publishPath, forwardBody, publishDuties, true, "X-Passage-User", "user-7")
+	if f.publishedBy != "user-7" {
+		t.Fatalf("publishedBy = %q; want the principal user id", f.publishedBy)
+	}
+	rec := do(routerAt(&fakeStore{err: &domain.Error{Code: domain.CodeHierarchyMultiRoot, Detail: "A version must have exactly one root; found 0."}}), http.MethodPost, publishPath, forwardBody, publishDuties, true)
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "ORG-HIER-MULTI-ROOT") {
+		t.Fatalf("got %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHierarchyAsOf(t *testing.T) {
+	tests := []struct {
+		name       string
+		path       string
+		duties     string
+		wantStatus int
+		wantBody   string
+	}{
+		{"answers", asOfPath + "?date=2026-02-01&node=" + unitA, "org.read", http.StatusOK, `"orgUnitId":"` + unitA + `","kind":"","parentOrgUnitId":null,"ancestors":[],"descendants":[]`},
+		{"uppercase node is canonicalised", asOfPath + "?date=2026-02-01&node=" + strings.ToUpper(unitA), "org.read", http.StatusOK, `"orgUnitId":"` + unitA + `"`},
+		{"missing date", asOfPath + "?node=" + unitA, "org.read", http.StatusBadRequest, `"date"`},
+		{"malformed date", asOfPath + "?date=2026-02-30&node=" + unitA, "org.read", http.StatusBadRequest, `"date"`},
+		{"datetime", asOfPath + "?date=2026-02-01T00:00:00Z&node=" + unitA, "org.read", http.StatusBadRequest, `"date"`},
+		{"missing node", asOfPath + "?date=2026-02-01", "org.read", http.StatusBadRequest, `"node"`},
+		{"non-uuid node", asOfPath + "?date=2026-02-01&node=x", "org.read", http.StatusBadRequest, `"node"`},
+		{"malformed type id", hierarchyTypesPath + "/nope/as-of?date=2026-02-01&node=" + unitA, "org.read", http.StatusNotFound, "ORG-HIER-TYPE-NOT-FOUND"},
+		{"without org.read", asOfPath + "?date=2026-02-01&node=" + unitA, "org.hierarchy.write", http.StatusForbidden, "AUTH-0003"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r, _ := newRouter(&fakeStore{})
+			rec := do(r, http.MethodGet, tc.path, "", tc.duties, true)
+			if rec.Code != tc.wantStatus || !strings.Contains(rec.Body.String(), tc.wantBody) {
+				t.Fatalf("got %d %s; want %d containing %s", rec.Code, rec.Body.String(), tc.wantStatus, tc.wantBody)
+			}
+		})
+	}
+}
+
+func TestHierarchyPublishAndAsOfMetrics(t *testing.T) {
+	r, a := newRouter(&fakeStore{})
+	do(r, http.MethodPost, publishPath, forwardBody, backdateDuties, true)
+	do(r, http.MethodGet, asOfPath+"?date=2026-02-01&node="+unitA, "", "org.read", true)
+	do(r, http.MethodGet, asOfPath+"?date=bad&node="+unitA, "", "org.read", true)
+	metrics := httptest.NewRecorder()
+	a.Metrics().ServeHTTP(metrics, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	for _, want := range []string{"org_hierarchy_versions_published_total 1", "org_hierarchy_as_of_queries_total 1"} {
 		if !strings.Contains(metrics.Body.String(), want) {
 			t.Fatalf("metrics lack %q: %s", want, metrics.Body.String())
 		}

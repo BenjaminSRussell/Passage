@@ -18,10 +18,12 @@ var (
 	CurrencyRoundingChanged = events.Type(Context, "currencyrounding", "changed", 1)
 	AddressChanged          = events.Type(Context, "address", "changed", 1)
 	FiscalCalendarGenerated = events.Type(Context, "fiscalcalendar", "generated", 1)
+
+	HierarchyVersionActivated = events.Type(Context, "hierarchyversion", "activated", 1)
 )
 
 func All() []string {
-	return []string{LegalEntityCreated, LegalEntityUpdated, OperatingUnitCreated, OperatingUnitUpdated, SiteCreated, SiteUpdated, WarehouseCreated, WarehouseUpdated, LocationCreated, LocationUpdated, CurrencyRoundingChanged, AddressChanged, FiscalCalendarGenerated}
+	return []string{LegalEntityCreated, LegalEntityUpdated, OperatingUnitCreated, OperatingUnitUpdated, SiteCreated, SiteUpdated, WarehouseCreated, WarehouseUpdated, LocationCreated, LocationUpdated, CurrencyRoundingChanged, AddressChanged, FiscalCalendarGenerated, HierarchyVersionActivated}
 }
 
 type LegalEntityCreatedData struct {
@@ -116,4 +118,15 @@ type FiscalCalendarGeneratedData struct {
 	CalendarID string             `json:"calendar_id"`
 	FiscalYear int                `json:"fiscal_year"`
 	Periods    []FiscalPeriodData `json:"periods"`
+}
+
+type HierarchyVersionActivatedData struct {
+	HierarchyTypeID     string   `json:"hierarchy_type_id"`
+	Purposes            []string `json:"purposes"`
+	VersionID           string   `json:"version_id"`
+	VersionNo           int      `json:"version_no"`
+	EffectiveFrom       string   `json:"effective_from"`
+	NodeCount           int      `json:"node_count"`
+	SupersededVersionID *string  `json:"superseded_version_id"`
+	BackdateReason      *string  `json:"backdate_reason"`
 }

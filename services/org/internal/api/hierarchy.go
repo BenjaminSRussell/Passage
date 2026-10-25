@@ -7,17 +7,22 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/org/internal/store"
 )
 
 const (
 	dutyHierarchy      = "org.hierarchy.write"
+	dutyPublish        = "org.hierarchy.publish"
+	dutyBackdate       = "org.hierarchy.backdate"
 	hierarchyTypes     = "/v1/org/hierarchy-types"
 	hierarchyVersions  = "/v1/org/hierarchy-versions"
 	maxNodeShapeErrors = 20
@@ -41,10 +46,18 @@ type replaceHierarchyNodesRequest struct {
 	} `json:"nodes"`
 }
 
+type publishHierarchyVersionRequest struct {
+	Version       *int   `json:"version"`
+	EffectiveFrom string `json:"effectiveFrom"`
+	Reason        string `json:"reason"`
+}
+
 func (a *API) registerHierarchies(r chi.Router) {
 	r.With(authz.RequireDuty(dutyHierarchy)).Post(hierarchyTypes, a.createHierarchyType)
 	r.With(authz.RequireDuty(dutyHierarchy)).Post(hierarchyTypes+"/{id}/versions", hierarchyRoute(store.CodeHierarchyTypeNotFound, "hierarchy type not found", a.createHierarchyDraft))
 	r.With(authz.RequireDuty(dutyHierarchy)).Put(hierarchyVersions+"/{id}/nodes", hierarchyRoute(store.CodeHierarchyVersionNotFound, "hierarchy version not found", a.replaceHierarchyNodes))
+	r.With(authz.RequireDuty(dutyPublish)).Post(hierarchyVersions+"/{id}:publish", hierarchyRoute(store.CodeHierarchyVersionNotFound, "hierarchy version not found", a.publishHierarchyVersion))
+	r.With(authz.RequireDuty(dutyRead)).Get(hierarchyTypes+"/{id}/as-of", hierarchyRoute(store.CodeHierarchyTypeNotFound, "hierarchy type not found", a.hierarchyAsOf))
 }
 
 func hierarchyRoute(notFoundCode, notFoundDetail string, next func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
@@ -178,4 +191,68 @@ func (a *API) replaceHierarchyNodes(w http.ResponseWriter, r *http.Request, id s
 	}
 	a.hierarchyNodesReplaced.Add(1)
 	httpx.JSON(w, http.StatusOK, updated)
+}
+
+func (a *API) publishHierarchyVersion(w http.ResponseWriter, r *http.Request, id string) {
+	if rejectScopedCaller(w, r, "publish hierarchy versions") {
+		return
+	}
+	var req publishHierarchyVersionRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	fields := map[string]string{}
+	if req.Version == nil {
+		fields["version"] = "is required"
+	}
+	effectiveFrom, err := time.Parse(dateLayout, req.EffectiveFrom)
+	if err != nil {
+		fields["effectiveFrom"] = "must be a date in YYYY-MM-DD form"
+	}
+	reason := strings.TrimSpace(req.Reason)
+	today := a.now().UTC().Truncate(24 * time.Hour)
+	backdated := err == nil && effectiveFrom.Before(today)
+	if length := utf8.RuneCountInString(reason); !backdated && reason != "" && (length < 10 || length > 500) {
+		fields["reason"] = "must be 10 to 500 characters"
+	}
+	if len(fields) > 0 {
+		validationFailed(w, r, fields)
+		return
+	}
+	principal, _ := tenant.FromContext(r.Context())
+	if backdated && !principal.HasDuty(dutyBackdate) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, store.CodeHierarchyBackdateDuty, "Backdated publish requires the Backdate duty and a reason."))
+		return
+	}
+	published, err := a.store.PublishHierarchyVersion(r.Context(), id, *req.Version, effectiveFrom, reason, r.Header.Get(idempotencyKey), principal.UserID, backdated)
+	if err != nil {
+		slog.Error("publish hierarchy version failed", "err", err, "versionId", id, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.Fail(w, r, problemFrom(err))
+		return
+	}
+	a.hierarchyVersionsPublished.Add(1)
+	httpx.JSON(w, http.StatusOK, published)
+}
+
+func (a *API) hierarchyAsOf(w http.ResponseWriter, r *http.Request, id string) {
+	query := r.URL.Query()
+	date, err := time.Parse(dateLayout, query.Get("date"))
+	if err != nil {
+		badQuery(w, r, "date", "must be a date in YYYY-MM-DD form")
+		return
+	}
+	node := query.Get("node")
+	if !canonicalUUID(node) {
+		badQuery(w, r, "node", "must be a UUID")
+		return
+	}
+	result, err := a.store.HierarchyAsOf(r.Context(), id, date, strings.ToLower(node))
+	if err != nil {
+		slog.Error("hierarchy as-of failed", "err", err, "typeId", id, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.Fail(w, r, err)
+		return
+	}
+	a.hierarchyAsOfQueries.Add(1)
+	httpx.JSON(w, http.StatusOK, result)
 }

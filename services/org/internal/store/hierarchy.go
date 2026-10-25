@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -16,6 +18,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/org/internal/domain"
+	orgevents "github.com/BenjaminSRussell/passage/services/org/internal/events"
 )
 
 const (
@@ -25,8 +28,14 @@ const (
 	CodeHierarchyDraftExists      = "ORG-HIER-DRAFT-EXISTS"
 	CodeHierarchyVersionImmutable = "ORG-HIER-VERSION-IMMUTABLE"
 	CodeHierarchyNodeUnknown      = "ORG-HIER-NODE-UNKNOWN"
+	CodeHierarchyOverlap          = "ORG-HIER-OVERLAP"
+	CodeHierarchyBackdateDuty     = "ORG-HIER-BACKDATE-DUTY"
+	CodeHierarchyNoVersion        = "ORG-HIER-NO-VERSION"
+	CodeHierarchyNodeAbsent       = "ORG-HIER-NODE-ABSENT"
+	minPublishReason              = 10
+	maxPublishReason              = 500
 	hierarchyTypeColumns          = "id, code, name, purposes, backdate_allowed, status, version, created_at, updated_at"
-	hierarchyVersionColumns       = "id, hierarchy_type_id, version_no, status, effective_from, effective_to, node_count, copied_from_version_id, version, created_at, updated_at"
+	hierarchyVersionColumns       = "id, hierarchy_type_id, version_no, status, effective_from, effective_to, node_count, copied_from_version_id, version, created_at, updated_at, published_at, published_by, publish_reason"
 	hierarchyOneDraftIndex        = "hierarchy_version_one_draft"
 	kindLegalEntity               = "legal_entity"
 	kindOperatingUnit             = "operating_unit"
@@ -63,6 +72,9 @@ type HierarchyVersion struct {
 	Version             int             `json:"version"`
 	CreatedAt           time.Time       `json:"createdAt"`
 	UpdatedAt           time.Time       `json:"updatedAt"`
+	PublishedAt         *time.Time      `json:"publishedAt"`
+	PublishedBy         *string         `json:"publishedBy"`
+	PublishReason       *string         `json:"publishReason"`
 	Nodes               []HierarchyNode `json:"nodes"`
 }
 
@@ -123,7 +135,7 @@ func loadHierarchyVersion(ctx context.Context, tx pgx.Tx, tenantID, id string, l
 	var v HierarchyVersion
 	var from, to *time.Time
 	err := tx.QueryRow(ctx, `select `+hierarchyVersionColumns+` from hierarchy_version where tenant_id = $1 and id = $2`+lock, tenantID, id).
-		Scan(&v.ID, &v.HierarchyTypeID, &v.VersionNo, &v.Status, &from, &to, &v.NodeCount, &v.CopiedFromVersionID, &v.Version, &v.CreatedAt, &v.UpdatedAt)
+		Scan(&v.ID, &v.HierarchyTypeID, &v.VersionNo, &v.Status, &from, &to, &v.NodeCount, &v.CopiedFromVersionID, &v.Version, &v.CreatedAt, &v.UpdatedAt, &v.PublishedAt, &v.PublishedBy, &v.PublishReason)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return v, hierarchyVersionNotFound()
 	}
@@ -324,4 +336,217 @@ func (s *Postgres) ReplaceHierarchyNodes(ctx context.Context, id string, version
 		return err
 	})
 	return v, err
+}
+
+type AsOfRelative struct {
+	OrgUnitID string `json:"orgUnitId"`
+	Depth     int    `json:"depth"`
+}
+
+type HierarchyAsOf struct {
+	HierarchyTypeID string         `json:"hierarchyTypeId"`
+	Purposes        []string       `json:"purposes"`
+	VersionID       string         `json:"versionId"`
+	VersionNo       int            `json:"versionNo"`
+	EffectiveFrom   string         `json:"effectiveFrom"`
+	EffectiveTo     *string        `json:"effectiveTo"`
+	Date            string         `json:"date"`
+	OrgUnitID       string         `json:"orgUnitId"`
+	Kind            string         `json:"kind"`
+	ParentOrgUnitID *string        `json:"parentOrgUnitId"`
+	Ancestors       []AsOfRelative `json:"ancestors"`
+	Descendants     []AsOfRelative `json:"descendants"`
+}
+
+func (s *Postgres) PublishHierarchyVersion(ctx context.Context, id string, version int, effectiveFrom time.Time, reason, idempotencyKey, publishedBy string, backdated bool) (HierarchyVersion, error) {
+	p, _ := tenant.FromContext(ctx)
+	reason = strings.TrimSpace(reason)
+	var v HierarchyVersion
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var typeID string
+		err := tx.QueryRow(ctx, `select hierarchy_type_id from hierarchy_version where tenant_id = $1 and id = $2`, p.TenantID, id).Scan(&typeID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return hierarchyVersionNotFound()
+		}
+		if err != nil {
+			return err
+		}
+		var backdateAllowed bool
+		var purposes []string
+		if err := tx.QueryRow(ctx, `select backdate_allowed, purposes from hierarchy_type where tenant_id = $1 and id = $2 for update`, p.TenantID, typeID).Scan(&backdateAllowed, &purposes); err != nil {
+			return err
+		}
+		if idempotencyKey != "" {
+			var existingID string
+			var existingFrom *time.Time
+			err := tx.QueryRow(ctx, `select id, effective_from from hierarchy_version where tenant_id = $1 and publish_idempotency_key = $2`, p.TenantID, idempotencyKey).Scan(&existingID, &existingFrom)
+			if err == nil {
+				if existingID != id || existingFrom == nil || !existingFrom.Equal(effectiveFrom) {
+					return idempotencyReuse()
+				}
+				v, err = loadHierarchyVersion(ctx, tx, p.TenantID, id, "")
+				return err
+			}
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+		}
+		current, err := loadHierarchyVersion(ctx, tx, p.TenantID, id, " for update")
+		if err != nil {
+			return err
+		}
+		if current.Status != "draft" {
+			return httpx.NewProblem(http.StatusConflict, CodeHierarchyVersionImmutable, "only a draft hierarchy version can be published")
+		}
+		if current.Version != version {
+			return httpx.NewProblem(http.StatusConflict, CodeVersionConflict, fmt.Sprintf("current version is %d", current.Version))
+		}
+		if backdated {
+			if length := utf8.RuneCountInString(reason); !backdateAllowed || length < minPublishReason || length > maxPublishReason {
+				return httpx.NewProblem(http.StatusForbidden, CodeHierarchyBackdateDuty, "Backdated publish requires the Backdate duty and a reason.")
+			}
+		}
+		pairs := make([]domain.Node, len(current.Nodes))
+		for i, n := range current.Nodes {
+			pairs[i] = domain.Node{ID: n.OrgUnitID}
+			if n.ParentOrgUnitID != nil {
+				pairs[i].ParentID = *n.ParentOrgUnitID
+			}
+		}
+		if err := domain.ValidateTree(pairs, domain.DefaultTreeLimits); err != nil {
+			return err
+		}
+		var predecessorID string
+		var predecessorNo int
+		var predecessorFrom time.Time
+		var predecessorTo *time.Time
+		err = tx.QueryRow(ctx, `select id, version_no, effective_from, effective_to from hierarchy_version
+			where tenant_id = $1 and hierarchy_type_id = $2 and status <> 'draft' order by effective_from desc limit 1`, p.TenantID, typeID).
+			Scan(&predecessorID, &predecessorNo, &predecessorFrom, &predecessorTo)
+		hasPredecessor := err == nil
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if hasPredecessor && !effectiveFrom.After(predecessorFrom) {
+			return httpx.NewProblem(http.StatusConflict, CodeHierarchyOverlap, fmt.Sprintf("Effective range overlaps version %d.", predecessorNo))
+		}
+		var superseded *string
+		if hasPredecessor && predecessorTo == nil {
+			if _, err := tx.Exec(ctx, `update hierarchy_version set effective_to = $3, status = 'superseded', version = version + 1, updated_at = now() where tenant_id = $1 and id = $2`,
+				p.TenantID, predecessorID, effectiveFrom); err != nil {
+				return err
+			}
+			superseded = &predecessorID
+		}
+		var storedReason, key *string
+		if reason != "" {
+			storedReason = &reason
+		}
+		if idempotencyKey != "" {
+			key = &idempotencyKey
+		}
+		if _, err := tx.Exec(ctx, `update hierarchy_version set status = 'published', effective_from = $3, effective_to = null, published_at = now(), published_by = $4, publish_reason = $5,
+			publish_idempotency_key = $6, version = version + 1, updated_at = now() where tenant_id = $1 and id = $2`,
+			p.TenantID, id, effectiveFrom, publishedBy, storedReason, key); err != nil {
+			return err
+		}
+		if err := writeHierarchyClosure(ctx, tx, p.TenantID, id, domain.Closure(pairs)); err != nil {
+			return err
+		}
+		var backdateReason *string
+		if backdated {
+			backdateReason = storedReason
+		}
+		if err := enqueue(ctx, tx, "hierarchyversion", id, orgevents.HierarchyVersionActivated, p.TenantID, orgevents.HierarchyVersionActivatedData{
+			HierarchyTypeID: typeID, Purposes: purposes, VersionID: id, VersionNo: current.VersionNo, EffectiveFrom: effectiveFrom.Format(fiscalDateLayout),
+			NodeCount: len(current.Nodes), SupersededVersionID: superseded, BackdateReason: backdateReason,
+		}); err != nil {
+			return err
+		}
+		v, err = loadHierarchyVersion(ctx, tx, p.TenantID, id, "")
+		return err
+	})
+	return v, err
+}
+
+func writeHierarchyClosure(ctx context.Context, tx pgx.Tx, tenantID, versionID string, rows []domain.ClosureRow) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	ancestors, descendants, depths := make([]string, len(rows)), make([]string, len(rows)), make([]int32, len(rows))
+	for i, r := range rows {
+		ancestors[i], descendants[i], depths[i] = r.AncestorID, r.DescendantID, int32(r.Depth)
+	}
+	_, err := tx.Exec(ctx, `insert into hierarchy_closure (tenant_id, version_id, ancestor_org_unit_id, descendant_org_unit_id, depth)
+		select $1::uuid, $2::uuid, c.ancestor::uuid, c.descendant::uuid, c.depth
+		from unnest($3::text[], $4::text[], $5::int[]) as c(ancestor, descendant, depth)`, tenantID, versionID, ancestors, descendants, depths)
+	return err
+}
+
+func (s *Postgres) HierarchyAsOf(ctx context.Context, typeID string, date time.Time, orgUnitID string) (HierarchyAsOf, error) {
+	p, _ := tenant.FromContext(ctx)
+	out := HierarchyAsOf{HierarchyTypeID: typeID, Date: date.Format(fiscalDateLayout), OrgUnitID: orgUnitID, Ancestors: []AsOfRelative{}, Descendants: []AsOfRelative{}}
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var versionID *string
+		var versionNo *int
+		var from, to *time.Time
+		err := tx.QueryRow(ctx, `select t.purposes, v.id, v.version_no, v.effective_from, v.effective_to
+			from hierarchy_type t
+			left join hierarchy_version v on v.tenant_id = t.tenant_id and v.hierarchy_type_id = t.id and v.status <> 'draft'
+				and v.effective_from <= $3 and (v.effective_to is null or $3 < v.effective_to)
+			where t.tenant_id = $1 and t.id = $2`, p.TenantID, typeID, date).Scan(&out.Purposes, &versionID, &versionNo, &from, &to)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return hierarchyTypeNotFound()
+		}
+		if err != nil {
+			return err
+		}
+		if versionID == nil {
+			return httpx.NewProblem(http.StatusNotFound, CodeHierarchyNoVersion, "no hierarchy version is in force on "+out.Date)
+		}
+		out.VersionID, out.VersionNo, out.EffectiveFrom, out.EffectiveTo = *versionID, *versionNo, *formatDate(from), formatDate(to)
+		rows, err := tx.Query(ctx, `select n.org_unit_kind, p.org_unit_id, c.ancestor_org_unit_id, c.depth
+			from hierarchy_node n
+			left join hierarchy_node p on p.tenant_id = n.tenant_id and p.version_id = n.version_id and p.id = n.parent_node_id
+			left join hierarchy_closure c on c.tenant_id = n.tenant_id and c.version_id = n.version_id and c.descendant_org_unit_id = n.org_unit_id
+			where n.tenant_id = $1 and n.version_id = $2 and n.org_unit_id = $3 order by c.depth`, p.TenantID, *versionID, orgUnitID)
+		if err != nil {
+			return err
+		}
+		found := false
+		for rows.Next() {
+			var ancestor *string
+			var depth *int
+			if err := rows.Scan(&out.Kind, &out.ParentOrgUnitID, &ancestor, &depth); err != nil {
+				rows.Close()
+				return err
+			}
+			found = true
+			if ancestor != nil {
+				out.Ancestors = append(out.Ancestors, AsOfRelative{OrgUnitID: *ancestor, Depth: *depth})
+			}
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if !found {
+			return httpx.NewProblem(http.StatusNotFound, CodeHierarchyNodeAbsent, "org unit "+orgUnitID+" is not in the hierarchy version in force on "+out.Date)
+		}
+		rows, err = tx.Query(ctx, `select descendant_org_unit_id, depth from hierarchy_closure
+			where tenant_id = $1 and version_id = $2 and ancestor_org_unit_id = $3 order by depth, descendant_org_unit_id`, p.TenantID, *versionID, orgUnitID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var r AsOfRelative
+			if err := rows.Scan(&r.OrgUnitID, &r.Depth); err != nil {
+				return err
+			}
+			out.Descendants = append(out.Descendants, r)
+		}
+		return rows.Err()
+	})
+	return out, err
 }

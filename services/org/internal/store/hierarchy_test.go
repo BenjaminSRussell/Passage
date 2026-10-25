@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -14,6 +16,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/services/org/internal/domain"
+	orgevents "github.com/BenjaminSRussell/passage/services/org/internal/events"
 	"github.com/BenjaminSRussell/passage/services/org/internal/store"
 )
 
@@ -294,5 +297,260 @@ func TestPostgres_HierarchyNodeRejectsDuplicateOrgUnitPerVersion(t *testing.T) {
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) || pgErr.Code != "23505" {
 		t.Fatalf("duplicate org_unit_id insert error = %v; want unique violation", err)
+	}
+}
+
+const publisher = "user-1"
+
+func (u hierarchyUnits) deepNodes() []store.HierarchyNode {
+	nodes := u.nodes()
+	nodes[2].ParentOrgUnitID = &u.first
+	return nodes
+}
+
+func draftWithNodes(t *testing.T, s *store.Postgres, ctx context.Context, typeID string, nodes []store.HierarchyNode) store.HierarchyVersion {
+	t.Helper()
+	draft := mustCreateDraft(t, s, ctx, typeID)
+	replaced, err := s.ReplaceHierarchyNodes(ctx, draft.ID, draft.Version, nodes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return replaced
+}
+
+func publish(s *store.Postgres, ctx context.Context, v store.HierarchyVersion, from time.Time) (store.HierarchyVersion, error) {
+	return s.PublishHierarchyVersion(ctx, v.ID, v.Version, from, "", "", publisher, false)
+}
+
+func mustPublish(t *testing.T, s *store.Postgres, ctx context.Context, v store.HierarchyVersion, from time.Time) store.HierarchyVersion {
+	t.Helper()
+	published, err := publish(s, ctx, v, from)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return published
+}
+
+func versionState(t *testing.T, ctx context.Context, pool *pgxpool.Pool, id string) (status string, effectiveTo *time.Time, version int) {
+	t.Helper()
+	err := dbx.WithTenantTx(ctx, pool, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `select status, effective_to, version from hierarchy_version where id = $1`, id).Scan(&status, &effectiveTo, &version)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return status, effectiveTo, version
+}
+
+func TestPostgres_HierarchyPublishWritesClosureEventAndReplaysIdempotently(t *testing.T) {
+	s, ctx, pool := lifecycleStore(t)
+	units := createHierarchyUnits(t, s, ctx)
+	draft := draftWithNodes(t, s, ctx, mustCreateHierarchyType(t, s, ctx, "REP").ID, units.deepNodes())
+	from := day(2026, 1, 1)
+	published, err := s.PublishHierarchyVersion(ctx, draft.ID, draft.Version, from, "", "pub-key", publisher, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if published.Status != "published" || *published.EffectiveFrom != "2026-01-01" || published.EffectiveTo != nil || published.Version != draft.Version+1 ||
+		published.PublishedAt == nil || *published.PublishedBy != publisher || published.PublishReason != nil || len(published.Nodes) != 3 {
+		t.Fatalf("published = %+v", published)
+	}
+	if rows := fiscalRows(t, ctx, pool, "hierarchy_closure"); rows != 3 {
+		t.Fatalf("closure rows = %d; want 3 (sum of depths of a chain of three)", rows)
+	}
+	replay, err := s.PublishHierarchyVersion(ctx, draft.ID, draft.Version, from, "", "pub-key", publisher, false)
+	if err != nil || replay.Version != published.Version || !reflect.DeepEqual(replay.PublishedAt, published.PublishedAt) {
+		t.Fatalf("replay = %+v, %v; want the published representation unchanged", replay, err)
+	}
+	if _, err := s.PublishHierarchyVersion(ctx, draft.ID, draft.Version, day(2026, 2, 1), "", "pub-key", publisher, false); problemCode(t, err) != store.CodeIdempotencyReuse {
+		t.Fatalf("same key with another date error = %v", err)
+	}
+	next := mustCreateDraft(t, s, ctx, published.HierarchyTypeID)
+	if _, err := s.PublishHierarchyVersion(ctx, next.ID, next.Version, day(2026, 3, 1), "", "pub-key", publisher, false); problemCode(t, err) != store.CodeIdempotencyReuse {
+		t.Fatalf("same key on another version error = %v", err)
+	}
+	events := unitEvents(t, ctx, pool, orgevents.HierarchyVersionActivated)
+	if len(events) != 1 {
+		t.Fatalf("activated events = %d; want exactly one", len(events))
+	}
+	e := events[0]
+	if e["version_id"] != draft.ID || e["hierarchy_type_id"] != draft.HierarchyTypeID || e["version_no"] != float64(1) || e["effective_from"] != "2026-01-01" ||
+		e["node_count"] != float64(3) || e["superseded_version_id"] != nil || e["backdate_reason"] != nil || !reflect.DeepEqual(e["purposes"], []any{"reporting", "security"}) {
+		t.Fatalf("event data = %+v", e)
+	}
+}
+
+func TestPostgres_HierarchyPublishSupersedesAndRejectsOverlap(t *testing.T) {
+	s, ctx, pool := lifecycleStore(t)
+	units := createHierarchyUnits(t, s, ctx)
+	typeID := mustCreateHierarchyType(t, s, ctx, "REP").ID
+	first := mustPublish(t, s, ctx, draftWithNodes(t, s, ctx, typeID, units.nodes()), day(2026, 1, 1))
+	second := mustPublish(t, s, ctx, mustCreateDraft(t, s, ctx, typeID), day(2026, 6, 1))
+	status, to, version := versionState(t, ctx, pool, first.ID)
+	if status != "superseded" || to == nil || !to.Equal(day(2026, 6, 1)) || version != first.Version+1 {
+		t.Fatalf("predecessor = %s %v v%d; want superseded until 2026-06-01 with a bumped version", status, to, version)
+	}
+	if second.Status != "published" || second.EffectiveTo != nil {
+		t.Fatalf("successor = %+v", second)
+	}
+	if events := unitEvents(t, ctx, pool, orgevents.HierarchyVersionActivated); events[1]["superseded_version_id"] != first.ID {
+		t.Fatalf("second event = %+v; want superseded_version_id %s", events[1], first.ID)
+	}
+	third := mustCreateDraft(t, s, ctx, typeID)
+	for _, from := range []time.Time{day(2026, 6, 1), day(2026, 5, 1), day(2025, 1, 1)} {
+		_, err := publish(s, ctx, third, from)
+		if problemCode(t, err) != store.CodeHierarchyOverlap {
+			t.Fatalf("publish from %s error = %v; want overlap", from.Format("2006-01-02"), err)
+		}
+	}
+	if status, _, v := versionState(t, ctx, pool, third.ID); status != "draft" || v != third.Version {
+		t.Fatalf("rejected draft = %s v%d; want unchanged", status, v)
+	}
+	if status, _, v := versionState(t, ctx, pool, second.ID); status != "published" || v != second.Version {
+		t.Fatalf("latest = %s v%d; want unchanged", status, v)
+	}
+	if _, err := publish(s, ctx, third, day(2026, 5, 1)); err == nil || !strings.Contains(err.Error(), "overlaps version 2") {
+		t.Fatalf("overlap detail = %v; want the overlapped version number", err)
+	}
+}
+
+func TestPostgres_HierarchyPublishRejections(t *testing.T) {
+	s, ctx, pool := lifecycleStore(t)
+	units := createHierarchyUnits(t, s, ctx)
+	typeID := mustCreateHierarchyType(t, s, ctx, "REP").ID
+	draft := draftWithNodes(t, s, ctx, typeID, units.nodes())
+	stale := draft
+	stale.Version--
+	if _, err := publish(s, ctx, stale, day(2026, 1, 1)); problemCode(t, err) != store.CodeVersionConflict {
+		t.Fatalf("stale version error = %v", err)
+	}
+	published := mustPublish(t, s, ctx, draft, day(2026, 1, 1))
+	if _, err := publish(s, ctx, published, day(2026, 2, 1)); problemCode(t, err) != store.CodeHierarchyVersionImmutable {
+		t.Fatalf("republish error = %v", err)
+	}
+	if _, err := s.PublishHierarchyVersion(ctx, ids.New(), 1, day(2026, 2, 1), "", "", publisher, false); problemCode(t, err) != store.CodeHierarchyVersionNotFound {
+		t.Fatalf("unknown version error = %v", err)
+	}
+	if _, err := s.PublishHierarchyVersion(principalContext(2), draft.ID, 1, day(2026, 2, 1), "", "", publisher, false); problemCode(t, err) != store.CodeHierarchyVersionNotFound {
+		t.Fatalf("other tenant error = %v", err)
+	}
+	empty := mustCreateDraft(t, s, ctx, mustCreateHierarchyType(t, s, ctx, "EMPTY").ID)
+	_, err := publish(s, ctx, empty, day(2026, 1, 1))
+	var de *domain.Error
+	if !errors.As(err, &de) || de.Code != domain.CodeHierarchyMultiRoot {
+		t.Fatalf("empty draft error = %v; want %s", err, domain.CodeHierarchyMultiRoot)
+	}
+	if status, _, _ := versionState(t, ctx, pool, empty.ID); status != "draft" {
+		t.Fatalf("empty draft status = %s", status)
+	}
+}
+
+func TestPostgres_HierarchyPublishBackdateChecks(t *testing.T) {
+	s, ctx, pool := lifecycleStore(t)
+	units := createHierarchyUnits(t, s, ctx)
+	strict := mustCreateHierarchyType(t, s, ctx, "STRICT")
+	open := hierarchyType("OPEN")
+	open.BackdateAllowed = true
+	openType, err := s.CreateHierarchyType(ctx, open, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const reason = "Correcting the reporting structure"
+	strictDraft := draftWithNodes(t, s, ctx, strict.ID, units.nodes())
+	first := mustPublish(t, s, ctx, draftWithNodes(t, s, ctx, openType.ID, units.nodes()), day(2026, 1, 1))
+	draft := mustCreateDraft(t, s, ctx, openType.ID)
+	tests := []struct {
+		name    string
+		version store.HierarchyVersion
+		from    time.Time
+		reason  string
+		code    string
+	}{
+		{"type forbids backdating", strictDraft, day(2025, 12, 1), reason, store.CodeHierarchyBackdateDuty},
+		{"reason of nine characters", draft, day(2026, 2, 1), "123456789", store.CodeHierarchyBackdateDuty},
+		{"no reason", draft, day(2026, 2, 1), "", store.CodeHierarchyBackdateDuty},
+		{"reason over 500 characters", draft, day(2026, 2, 1), string(make([]rune, 501)), store.CodeHierarchyBackdateDuty},
+		{"allowed but overlapping", draft, day(2025, 12, 1), reason, store.CodeHierarchyOverlap},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := s.PublishHierarchyVersion(ctx, tc.version.ID, tc.version.Version, tc.from, tc.reason, "", publisher, true)
+			if problemCode(t, err) != tc.code {
+				t.Fatalf("error = %v; want %s", err, tc.code)
+			}
+			if status, _, v := versionState(t, ctx, pool, tc.version.ID); status != "draft" || v != tc.version.Version {
+				t.Fatalf("version = %s v%d after a refusal; want the draft unchanged", status, v)
+			}
+		})
+	}
+	if status, _, _ := versionState(t, ctx, pool, first.ID); status != "published" {
+		t.Fatalf("predecessor status = %s after refusals", status)
+	}
+	published, err := s.PublishHierarchyVersion(ctx, draft.ID, draft.Version, day(2026, 2, 1), "  "+reason+"  ", "", publisher, true)
+	if err != nil || published.PublishReason == nil || *published.PublishReason != reason {
+		t.Fatalf("backdated publish = %+v, %v; want the trimmed reason stored", published, err)
+	}
+	events := unitEvents(t, ctx, pool, orgevents.HierarchyVersionActivated)
+	if len(events) != 2 || events[1]["backdate_reason"] != reason {
+		t.Fatalf("events = %+v; want the backdate reason on the second", events)
+	}
+}
+
+func TestPostgres_HierarchyAsOfAnswersFromTheVersionInForce(t *testing.T) {
+	s, ctx, _ := lifecycleStore(t)
+	units := createHierarchyUnits(t, s, ctx)
+	typeID := mustCreateHierarchyType(t, s, ctx, "REP").ID
+	first := mustPublish(t, s, ctx, draftWithNodes(t, s, ctx, typeID, units.deepNodes()), day(2026, 1, 1))
+	second := mustPublish(t, s, ctx, draftWithNodes(t, s, ctx, typeID, units.nodes()), day(2026, 6, 1))
+	pending := mustCreateDraft(t, s, ctx, typeID)
+	if pending.Status != "draft" {
+		t.Fatal("expected an open draft")
+	}
+	root, err := s.HierarchyAsOf(ctx, typeID, day(2026, 3, 1), units.legalEntity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantDown := []store.AsOfRelative{{OrgUnitID: units.first, Depth: 1}, {OrgUnitID: units.second, Depth: 2}}
+	if root.VersionID != first.ID || root.VersionNo != 1 || root.EffectiveFrom != "2026-01-01" || *root.EffectiveTo != "2026-06-01" || root.Kind != "legal_entity" ||
+		root.ParentOrgUnitID != nil || len(root.Ancestors) != 0 || root.Ancestors == nil || !reflect.DeepEqual(root.Descendants, wantDown) {
+		t.Fatalf("root in the superseded range = %+v", root)
+	}
+	leaf, err := s.HierarchyAsOf(ctx, typeID, day(2026, 1, 1), units.second)
+	wantUp := []store.AsOfRelative{{OrgUnitID: units.first, Depth: 1}, {OrgUnitID: units.legalEntity, Depth: 2}}
+	if err != nil || leaf.Kind != "operating_unit" || *leaf.ParentOrgUnitID != units.first || !reflect.DeepEqual(leaf.Ancestors, wantUp) || len(leaf.Descendants) != 0 {
+		t.Fatalf("leaf on the first day = %+v, %v", leaf, err)
+	}
+	later, err := s.HierarchyAsOf(ctx, typeID, day(2026, 6, 1), units.second)
+	if err != nil || later.VersionID != second.ID || later.EffectiveTo != nil || *later.ParentOrgUnitID != units.legalEntity || len(later.Ancestors) != 1 {
+		t.Fatalf("leaf on the supersede day = %+v, %v; want the successor", later, err)
+	}
+	if _, err := s.HierarchyAsOf(ctx, typeID, day(2025, 12, 31), units.second); problemCode(t, err) != store.CodeHierarchyNoVersion {
+		t.Fatalf("date before the first version error = %v", err)
+	}
+	if _, err := s.HierarchyAsOf(ctx, typeID, day(2026, 3, 1), ids.New()); problemCode(t, err) != store.CodeHierarchyNodeAbsent {
+		t.Fatalf("absent node error = %v", err)
+	}
+	if _, err := s.HierarchyAsOf(ctx, ids.New(), day(2026, 3, 1), units.second); problemCode(t, err) != store.CodeHierarchyTypeNotFound {
+		t.Fatalf("unknown type error = %v", err)
+	}
+	if _, err := s.HierarchyAsOf(principalContext(2), typeID, day(2026, 3, 1), units.second); problemCode(t, err) != store.CodeHierarchyTypeNotFound {
+		t.Fatalf("other tenant error = %v", err)
+	}
+	draftOnly := mustCreateHierarchyType(t, s, ctx, "DRAFT")
+	mustCreateDraft(t, s, ctx, draftOnly.ID)
+	if _, err := s.HierarchyAsOf(ctx, draftOnly.ID, day(2026, 3, 1), units.second); problemCode(t, err) != store.CodeHierarchyNoVersion {
+		t.Fatalf("draft-only type error = %v; drafts are never in force", err)
+	}
+}
+
+func TestPostgres_HierarchyClosureIsTenantIsolated(t *testing.T) {
+	s, ctx, pool := lifecycleStore(t)
+	units := createHierarchyUnits(t, s, ctx)
+	mustPublish(t, s, ctx, draftWithNodes(t, s, ctx, mustCreateHierarchyType(t, s, ctx, "REP").ID, units.nodes()), day(2026, 1, 1))
+	if n := fiscalRows(t, principalContext(2), pool, "hierarchy_closure"); n != 0 {
+		t.Fatalf("other tenant reads %d closure rows", n)
+	}
+	if n := fiscalRows(t, ctx, pool, "hierarchy_closure"); n != 2 {
+		t.Fatalf("owner reads %d closure rows; want 2", n)
 	}
 }

@@ -37,6 +37,11 @@ channels:
     messages:
       generated:
         $ref: '#/components/messages/fiscalCalendarGenerated'
+  passage.org.hierarchyversion:
+    address: passage.org.hierarchyversion
+    messages:
+      activated:
+        $ref: '#/components/messages/hierarchyVersionActivated'
   passage.org.location:
     address: passage.org.location
     messages:
@@ -91,6 +96,10 @@ operations:
     action: send
     channel: { $ref: '#/channels/passage.org.fiscalcalendar' }
     messages: [{ $ref: '#/channels/passage.org.fiscalcalendar/messages/generated' }]
+  onHierarchyVersionActivated:
+    action: send
+    channel: { $ref: '#/channels/passage.org.hierarchyversion' }
+    messages: [{ $ref: '#/channels/passage.org.hierarchyversion/messages/activated' }]
   onLocationCreated:
     action: send
     channel: { $ref: '#/channels/passage.org.location' }
@@ -267,6 +276,23 @@ components:
                 type: { type: string, enum: [opening, operating, closing, adjustment] }
                 week53: { type: boolean }
       x-passage-type: dev.passage.org.fiscalcalendar.generated.v1
+    hierarchyVersionActivated:
+      name: activated
+      title: Hierarchy version activated
+      description: Emitted when a draft hierarchy version is published, also for a future effective_from; the activation timer at effective_from is not built.
+      payload:
+        type: object
+        required: [hierarchy_type_id, purposes, version_id, version_no, effective_from, node_count, superseded_version_id, backdate_reason]
+        properties:
+          hierarchy_type_id: { type: string, format: uuid }
+          purposes: { type: array, items: { type: string } }
+          version_id: { type: string, format: uuid }
+          version_no: { type: integer }
+          effective_from: { type: string, format: date }
+          node_count: { type: integer }
+          superseded_version_id: { type: [string, 'null'], format: uuid }
+          backdate_reason: { type: [string, 'null'], description: The audit reason of a backdated publish. }
+      x-passage-type: dev.passage.org.hierarchyversion.activated.v1
     currencyRoundingChanged:
       name: changed
       title: Currency rounding rule changed

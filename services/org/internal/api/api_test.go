@@ -47,6 +47,9 @@ type fakeStore struct {
 	generateErr         error
 	generatedID         string
 	hierarchyNodes      []store.HierarchyNode
+	publishCalls        int
+	publishBackdated    bool
+	publishedBy         string
 }
 
 func (f *fakeStore) reference(kind store.ReferenceKind, code string) (store.ReferenceItem, bool) {
@@ -947,4 +950,20 @@ func (f *fakeStore) ReplaceHierarchyNodes(_ context.Context, id string, version 
 	}
 	f.hierarchyNodes = nodes
 	return store.HierarchyVersion{ID: id, VersionNo: 1, Status: "draft", NodeCount: len(nodes), Version: version + 1, Nodes: nodes}, nil
+}
+
+func (f *fakeStore) PublishHierarchyVersion(_ context.Context, id string, version int, effectiveFrom time.Time, reason, _, publishedBy string, backdated bool) (store.HierarchyVersion, error) {
+	f.publishCalls, f.publishBackdated, f.publishedBy = f.publishCalls+1, backdated, publishedBy
+	if f.err != nil {
+		return store.HierarchyVersion{}, f.err
+	}
+	from := effectiveFrom.Format("2006-01-02")
+	return store.HierarchyVersion{ID: id, VersionNo: 1, Status: "published", EffectiveFrom: &from, Version: version + 1, PublishedBy: &publishedBy, PublishReason: &reason, Nodes: []store.HierarchyNode{}}, nil
+}
+
+func (f *fakeStore) HierarchyAsOf(_ context.Context, typeID string, date time.Time, orgUnitID string) (store.HierarchyAsOf, error) {
+	if f.err != nil {
+		return store.HierarchyAsOf{}, f.err
+	}
+	return store.HierarchyAsOf{HierarchyTypeID: typeID, Date: date.Format("2006-01-02"), OrgUnitID: orgUnitID, Ancestors: []store.AsOfRelative{}, Descendants: []store.AsOfRelative{}}, nil
 }

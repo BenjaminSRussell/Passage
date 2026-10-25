@@ -69,6 +69,8 @@ type addressList struct {
 
 func (a *API) SetGeocoder(g domain.Geocoder) { a.geocoder = g }
 
+func (a *API) SetClock(now func() time.Time) { a.now = now }
+
 func (a *API) registerAddresses(r chi.Router) {
 	r.With(authz.RequireDuty(dutyAddress)).Post(addresses, a.createAddress)
 	r.With(authz.RequireDuty(dutyAddress)).Patch(addresses+"/{id}", addressRoute(a.updateAddress))
