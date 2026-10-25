@@ -168,54 +168,93 @@ func (s *Postgres) RecordedSerials(ctx context.Context, productIDs []string) (ma
 	return recorded, err
 }
 
-func (s *Postgres) CreateArrival(ctx context.Context, in Receipt) (Receipt, error) {
-	tenantID, err := tenantOf(ctx)
-	if err != nil {
-		return Receipt{}, err
-	}
+func prepareArrival(in Receipt) Receipt {
 	if in.ID == "" {
 		in.ID = ids.New()
 	}
 	if in.ExchangeRate.Sign() == 0 {
 		in.ExchangeRate = decimal.NewFromInt(1)
 	}
+	return in
+}
+
+func insertArrival(ctx context.Context, tx pgx.Tx, tenantID string, in Receipt) error {
+	number, err := allocateNumber(ctx, tx, tenantID)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO receiving_receipt (tenant_id, id, legal_entity_id, vendor_id, purchase_order_id, packing_slip, state, receipt_date,
+		receipt_number, carrier, pallet_count, currency, exchange_rate, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, 'ARRIVED', $7, $8, NULLIF($9, ''), $10, NULLIF($11, ''), $12, now())`,
+		tenantID, in.ID, in.LegalEntityID, in.VendorID, in.PurchaseOrderID, in.PackingSlip, in.Date,
+		number, in.Carrier, in.PalletCount, in.Currency, in.ExchangeRate); err != nil {
+		return err
+	}
+	rows := make([][]any, len(in.Lines))
+	for i, l := range in.Lines {
+		lineNo, currency := l.LineNo, l.Currency
+		if lineNo == 0 {
+			lineNo = i + 1
+		}
+		if currency == "" {
+			currency = in.Currency
+		}
+		rows[i] = []any{tenantID, in.ID, lineNo, in.LegalEntityID, l.ProductID, l.OrderedRemaining, l.UnitPrice, currency,
+			l.POLineID, l.Unit, l.OrderedRemaining, l.OverDeliveryPct, l.BatchTracked, l.SerialTracked}
+	}
+	return execBatch(ctx, tx, `INSERT INTO receiving_receipt_line (tenant_id, receipt_id, line_no, legal_entity_id, product_id, qty, unit_price, currency,
+		po_line_id, unit, ordered_remaining, over_delivery_pct, batch_tracked, serial_tracked)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9, '')::uuid, NULLIF($10, ''), $11, $12, $13, $14)`, rows)
+}
+
+func (s *Postgres) mapWriteError(ctx context.Context, tenantID string, in Receipt, err error) error {
+	switch {
+	case isUnique(err, packingSlipConstraint):
+		return s.duplicateSlip(ctx, tenantID, in)
+	case isUnique(err, serialConstraint):
+		return &domain.Error{Code: domain.CodeDuplicateSerial, Detail: "a serial is already recorded for the product"}
+	}
+	return err
+}
+
+func (s *Postgres) CreateArrival(ctx context.Context, in Receipt) (Receipt, error) {
+	tenantID, err := tenantOf(ctx)
+	if err != nil {
+		return Receipt{}, err
+	}
+	in = prepareArrival(in)
 	var out Receipt
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		number, err := allocateNumber(ctx, tx, tenantID)
-		if err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `INSERT INTO receiving_receipt (tenant_id, id, legal_entity_id, vendor_id, purchase_order_id, packing_slip, state, receipt_date,
-			receipt_number, carrier, pallet_count, currency, exchange_rate, updated_at)
-			VALUES ($1, $2, $3, $4, $5, $6, 'ARRIVED', $7, $8, NULLIF($9, ''), $10, NULLIF($11, ''), $12, now())`,
-			tenantID, in.ID, in.LegalEntityID, in.VendorID, in.PurchaseOrderID, in.PackingSlip, in.Date,
-			number, in.Carrier, in.PalletCount, in.Currency, in.ExchangeRate); err != nil {
-			return err
-		}
-		rows := make([][]any, len(in.Lines))
-		for i, l := range in.Lines {
-			lineNo, currency := l.LineNo, l.Currency
-			if lineNo == 0 {
-				lineNo = i + 1
-			}
-			if currency == "" {
-				currency = in.Currency
-			}
-			rows[i] = []any{tenantID, in.ID, lineNo, in.LegalEntityID, l.ProductID, l.OrderedRemaining, l.UnitPrice, currency,
-				l.POLineID, l.Unit, l.OrderedRemaining, l.OverDeliveryPct, l.BatchTracked, l.SerialTracked}
-		}
-		if err := execBatch(ctx, tx, `INSERT INTO receiving_receipt_line (tenant_id, receipt_id, line_no, legal_entity_id, product_id, qty, unit_price, currency,
-			po_line_id, unit, ordered_remaining, over_delivery_pct, batch_tracked, serial_tracked)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9, '')::uuid, NULLIF($10, ''), $11, $12, $13, $14)`, rows); err != nil {
+		if err := insertArrival(ctx, tx, tenantID, in); err != nil {
 			return err
 		}
 		out, err = loadReceipt(ctx, tx, tenantID, in.ID, false)
 		return err
 	})
-	if isUnique(err, packingSlipConstraint) {
-		return Receipt{}, s.duplicateSlip(ctx, tenantID, in)
+	if err != nil {
+		return Receipt{}, s.mapWriteError(ctx, tenantID, in, err)
 	}
-	return out, err
+	return out, nil
+}
+
+func (s *Postgres) DirectReceipt(ctx context.Context, in Receipt, fn RegisterFunc) (Receipt, error) {
+	tenantID, err := tenantOf(ctx)
+	if err != nil {
+		return Receipt{}, err
+	}
+	in = prepareArrival(in)
+	var out Receipt
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		if err := insertArrival(ctx, tx, tenantID, in); err != nil {
+			return err
+		}
+		out, err = registerTx(ctx, tx, tenantID, in.ID, fn)
+		return err
+	})
+	if err != nil {
+		return Receipt{}, s.mapWriteError(ctx, tenantID, in, err)
+	}
+	return out, nil
 }
 
 func (s *Postgres) duplicateSlip(ctx context.Context, tenantID string, in Receipt) error {
@@ -234,58 +273,62 @@ func (s *Postgres) duplicateSlip(ctx context.Context, tenantID string, in Receip
 	return dup
 }
 
+func registerTx(ctx context.Context, tx pgx.Tx, tenantID, id string, fn RegisterFunc) (Receipt, error) {
+	current, err := loadReceipt(ctx, tx, tenantID, id, true)
+	if err != nil {
+		return Receipt{}, err
+	}
+	productIDs := make([]string, len(current.Lines))
+	for i, l := range current.Lines {
+		productIDs[i] = l.ProductID
+	}
+	recorded, err := recordedSerials(ctx, tx, tenantID, productIDs)
+	if err != nil {
+		return Receipt{}, err
+	}
+	lines, err := fn(current, recorded)
+	if err != nil {
+		return Receipt{}, err
+	}
+	tag, err := tx.Exec(ctx, `UPDATE receiving_receipt SET state = 'REGISTERED', updated_at = now() WHERE tenant_id = $1 AND id = $2 AND state = 'ARRIVED'`, tenantID, id)
+	if err != nil {
+		return Receipt{}, err
+	}
+	if tag.RowsAffected() != 1 {
+		return Receipt{}, &domain.Error{Code: domain.CodeInvalidTransition, Detail: fmt.Sprintf("receipt %s is not ARRIVED", id)}
+	}
+	var lineRows, serialRows [][]any
+	for _, l := range lines {
+		lineRows = append(lineRows, []any{tenantID, id, l.LineNo, l.Qty, l.Batch, l.LocationID, l.InventoryStatus})
+		for _, serial := range l.Serials {
+			serialRows = append(serialRows, []any{tenantID, l.ProductID, serial, current.LegalEntityID, id, l.LineNo})
+		}
+	}
+	if err := execBatch(ctx, tx, `UPDATE receiving_receipt_line SET qty = $4, batch = NULLIF($5, ''), location_id = NULLIF($6, '')::uuid,
+		inventory_status = COALESCE(NULLIF($7, ''), 'AVAILABLE') WHERE tenant_id = $1 AND receipt_id = $2 AND line_no = $3`, lineRows); err != nil {
+		return Receipt{}, err
+	}
+	if err := execBatch(ctx, tx, `INSERT INTO receiving_serial (tenant_id, product_id, serial, legal_entity_id, receipt_id, line_no)
+		VALUES ($1, $2, $3, $4, $5, $6)`, serialRows); err != nil {
+		return Receipt{}, err
+	}
+	return loadReceipt(ctx, tx, tenantID, id, false)
+}
+
 func (s *Postgres) Register(ctx context.Context, id string, fn RegisterFunc) (Receipt, error) {
 	tenantID, err := tenantOf(ctx)
 	if err != nil {
 		return Receipt{}, err
 	}
 	var out Receipt
-	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		current, err := loadReceipt(ctx, tx, tenantID, id, true)
-		if err != nil {
-			return err
-		}
-		productIDs := make([]string, len(current.Lines))
-		for i, l := range current.Lines {
-			productIDs[i] = l.ProductID
-		}
-		recorded, err := recordedSerials(ctx, tx, tenantID, productIDs)
-		if err != nil {
-			return err
-		}
-		lines, err := fn(current, recorded)
-		if err != nil {
-			return err
-		}
-		tag, err := tx.Exec(ctx, `UPDATE receiving_receipt SET state = 'REGISTERED', updated_at = now() WHERE tenant_id = $1 AND id = $2 AND state = 'ARRIVED'`, tenantID, id)
-		if err != nil {
-			return err
-		}
-		if tag.RowsAffected() != 1 {
-			return &domain.Error{Code: domain.CodeInvalidTransition, Detail: fmt.Sprintf("receipt %s is not ARRIVED", id)}
-		}
-		var lineRows, serialRows [][]any
-		for _, l := range lines {
-			lineRows = append(lineRows, []any{tenantID, id, l.LineNo, l.Qty, l.Batch, l.LocationID, l.InventoryStatus})
-			for _, serial := range l.Serials {
-				serialRows = append(serialRows, []any{tenantID, l.ProductID, serial, current.LegalEntityID, id, l.LineNo})
-			}
-		}
-		if err := execBatch(ctx, tx, `UPDATE receiving_receipt_line SET qty = $4, batch = NULLIF($5, ''), location_id = NULLIF($6, '')::uuid,
-			inventory_status = COALESCE(NULLIF($7, ''), 'AVAILABLE') WHERE tenant_id = $1 AND receipt_id = $2 AND line_no = $3`, lineRows); err != nil {
-			return err
-		}
-		if err := execBatch(ctx, tx, `INSERT INTO receiving_serial (tenant_id, product_id, serial, legal_entity_id, receipt_id, line_no)
-			VALUES ($1, $2, $3, $4, $5, $6)`, serialRows); err != nil {
-			return err
-		}
-		out, err = loadReceipt(ctx, tx, tenantID, id, false)
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) (err error) {
+		out, err = registerTx(ctx, tx, tenantID, id, fn)
 		return err
 	})
-	if isUnique(err, serialConstraint) {
-		return Receipt{}, &domain.Error{Code: domain.CodeDuplicateSerial, Detail: "a serial is already recorded for the product"}
+	if err != nil {
+		return Receipt{}, s.mapWriteError(ctx, tenantID, Receipt{}, err)
 	}
-	return out, err
+	return out, nil
 }
 
 func (s *Postgres) Post(ctx context.Context, id string, fn PostFunc) (Receipt, error) {

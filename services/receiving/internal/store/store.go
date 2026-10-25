@@ -90,12 +90,19 @@ type PostFunc func(Receipt) (PostOutcome, error)
 type Store interface {
 	Ping(ctx context.Context) error
 	CreateArrival(ctx context.Context, in Receipt) (Receipt, error)
+	DirectReceipt(ctx context.Context, in Receipt, fn RegisterFunc) (Receipt, error)
 	RecordedSerials(ctx context.Context, productIDs []string) (map[domain.SerialKey]struct{}, error)
 	Register(ctx context.Context, id string, fn RegisterFunc) (Receipt, error)
 	Post(ctx context.Context, id string, fn PostFunc) (Receipt, error)
 	GetReceipt(ctx context.Context, id string) (Receipt, error)
 	ListReceipts(ctx context.Context, f ReceiptFilter) ([]Receipt, error)
+	ListGrir(ctx context.Context, f GrirFilter) (GrirPage, error)
+	ClaimKey(ctx context.Context, key, hash string, lockFor time.Duration) (ClaimResult, error)
+	CompleteKey(ctx context.Context, key string, status int, body []byte) error
+	ReleaseKey(ctx context.Context, key string) error
 }
+
+var _ Store = (*Postgres)(nil)
 
 type Postgres struct{ pool *pgxpool.Pool }
 
