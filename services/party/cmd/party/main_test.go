@@ -8,6 +8,8 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -38,9 +40,32 @@ func get(t *testing.T, url string) (int, string) {
 	return 0, ""
 }
 
+func TestRun_RejectsMissingOrUnparseableDatabaseURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		env     map[string]string
+		wantErr string
+	}{
+		{"missing database url", map[string]string{}, "DATABASE_URL is required"},
+		{"unparseable database url", map[string]string{"DATABASE_URL": "://bad"}, "connect database"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := run(context.Background(), func(k string) string { return tc.env[k] })
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("got %v, want error containing %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestRunServesProbesAndMetricsThenStopsOnCancel(t *testing.T) {
+	databaseURL := os.Getenv("PASSAGE_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("PASSAGE_TEST_DATABASE_URL not set; skipping database-backed serve test")
+	}
 	httpAddr, adminAddr := freeAddr(t), freeAddr(t)
-	env := map[string]string{"HTTP_ADDR": httpAddr, "ADMIN_ADDR": adminAddr}
+	env := map[string]string{"HTTP_ADDR": httpAddr, "ADMIN_ADDR": adminAddr, "DATABASE_URL": databaseURL}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- run(ctx, func(k string) string { return env[k] }) }()

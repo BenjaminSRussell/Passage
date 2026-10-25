@@ -29,8 +29,16 @@ func (s *stubChecker) Check(context.Context, string, string) (domain.Status, err
 	return s.status, s.err
 }
 
+type stubPinger struct{ err error }
+
+func (p stubPinger) Ping(context.Context) error { return p.err }
+
 func newRouter(c domain.Checker) (*chi.Mux, *api.API) {
-	a := api.New(c)
+	return newRouterWithPinger(c, stubPinger{})
+}
+
+func newRouterWithPinger(c domain.Checker, p api.Pinger) (*chi.Mux, *api.API) {
+	a := api.New(c, p)
 	r := httpx.NewRouter()
 	a.Register(r)
 	return r, a
@@ -184,6 +192,17 @@ func TestUnknownCheckerStatusCountsAsUnverified(t *testing.T) {
 	a.Metrics().ServeHTTP(metrics, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	if !strings.Contains(metrics.Body.String(), `party_tax_validations_total{status="unverified"} 1`) {
 		t.Fatalf("unexpected status was not counted as unverified: %s", metrics.Body.String())
+	}
+}
+
+func TestReadyz_ReturnsUnavailableWhenPingFails(t *testing.T) {
+	r, _ := newRouterWithPinger(&stubChecker{}, stubPinger{err: errors.New("database down")})
+	rec := do(r, http.MethodGet, "/readyz", "", "", false)
+	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), `"status":"unavailable"`) {
+		t.Fatalf("got %d %s", rec.Code, rec.Body.String())
+	}
+	if healthz := do(r, http.MethodGet, "/healthz", "", "", false); healthz.Code != http.StatusOK {
+		t.Fatalf("liveness must not depend on the database, got %d", healthz.Code)
 	}
 }
 

@@ -44,7 +44,8 @@ paths:
       operationId: readiness
       x-passage-duty: public
       responses:
-        '200': { description: Service is ready. This slice has no runtime dependency. }
+        '200': { description: Service is ready; the database answered a ping. }
+        '503': { description: The database did not answer a ping within 500 ms. Body is {"status":"unavailable"}. }
   /metrics:
     get:
       operationId: metrics
