@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"sync"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -108,6 +109,28 @@ func TestPostgres_HierarchyTypeCreateReplayReuseAndDuplicate(t *testing.T) {
 	}
 	if _, err := s.CreateHierarchyType(ctx, hierarchyType("REP"), "key-2"); problemCode(t, err) != store.CodeHierarchyTypeCode {
 		t.Fatalf("duplicate code error = %v", err)
+	}
+}
+
+func TestPostgres_HierarchyTypeConcurrentSameKeyReturnsOneType(t *testing.T) {
+	s, ctx, _ := lifecycleStore(t)
+	const callers = 8
+	typeIDs := make([]string, callers)
+	errs := make([]error, callers)
+	var wg sync.WaitGroup
+	for i := range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			created, err := s.CreateHierarchyType(ctx, hierarchyType("RACE"), "race-key")
+			typeIDs[i], errs[i] = created.ID, err
+		}()
+	}
+	wg.Wait()
+	for i := range callers {
+		if errs[i] != nil || typeIDs[i] != typeIDs[0] {
+			t.Fatalf("caller %d = %q, %v; want the same type id %q", i, typeIDs[i], errs[i], typeIDs[0])
+		}
 	}
 }
 

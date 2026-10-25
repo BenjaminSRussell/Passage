@@ -104,7 +104,9 @@ func (s *Postgres) CreateHierarchyType(ctx context.Context, in HierarchyType, id
 		}
 		var err error
 		t, err = scanHierarchyType(tx.QueryRow(ctx, `insert into hierarchy_type (tenant_id, id, code, name, purposes, backdate_allowed, idempotency_key)
-			values ($1, $2, $3, $4, $5, $6, $7) returning `+hierarchyTypeColumns, p.TenantID, ids.New(), in.Code, in.Name, in.Purposes, in.BackdateAllowed, key))
+			values ($1, $2, $3, $4, $5, $6, $7)
+			on conflict (tenant_id, idempotency_key) do update set version = hierarchy_type.version
+			returning `+hierarchyTypeColumns, p.TenantID, ids.New(), in.Code, in.Name, in.Purposes, in.BackdateAllowed, key))
 		return err
 	})
 	var pgErr *pgconn.PgError
