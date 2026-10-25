@@ -57,6 +57,7 @@ type createLegalEntityRequest struct {
 	Name     string `json:"name"`
 	Country  string `json:"country"`
 	Currency string `json:"currency"`
+	TimeZone string `json:"timeZone"`
 }
 
 type listResponse struct {
@@ -111,7 +112,7 @@ func (a *API) createLegalEntity(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
-	in := store.LegalEntity{Code: req.Code, Name: strings.TrimSpace(req.Name), Country: req.Country, Currency: req.Currency}
+	in := store.LegalEntity{Code: req.Code, Name: strings.TrimSpace(req.Name), Country: req.Country, Currency: req.Currency, TimeZone: req.TimeZone}
 	if fields := validateLegalEntity(in); len(fields) > 0 {
 		p := httpx.NewProblem(http.StatusBadRequest, "COM-0001", validationDetail)
 		p.Errors = fields
@@ -212,6 +213,9 @@ func validateLegalEntity(in store.LegalEntity) map[string]string {
 	}
 	if !currencyCode.MatchString(in.Currency) {
 		fields["currency"] = "must be an ISO 4217 alpha-3 code"
+	}
+	if _, err := time.LoadLocation(in.TimeZone); err != nil || in.TimeZone == "" || in.TimeZone == "Local" {
+		fields["timeZone"] = "must be an IANA time zone name"
 	}
 	return fields
 }

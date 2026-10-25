@@ -6,15 +6,18 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
+	pevents "github.com/BenjaminSRussell/passage/platform/events"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/org/internal/api"
+	orgevents "github.com/BenjaminSRussell/passage/services/org/internal/events"
 	"github.com/BenjaminSRussell/passage/services/org/internal/store"
 )
 
@@ -84,7 +87,7 @@ func do(r http.Handler, method, path, body, duties string, withTenant bool, head
 const (
 	legalEntities = "/v1/org/legal-entities"
 	allDuties     = "org.read,org.legal-entity.write"
-	validBody     = `{"code":"US01","name":"Passage US","country":"US","currency":"USD"}`
+	validBody     = `{"code":"US01","name":"Passage US","country":"US","currency":"USD","timeZone":"UTC"}`
 )
 
 func TestLegalEntities(t *testing.T) {
@@ -102,9 +105,13 @@ func TestLegalEntities(t *testing.T) {
 		{"create without tenant", &fakeStore{}, http.MethodPost, validBody, "", false, http.StatusUnauthorized, "AUTH-0001"},
 		{"create malformed body", &fakeStore{}, http.MethodPost, `{`, allDuties, true, http.StatusBadRequest, "COM-0001"},
 		{"create unknown field", &fakeStore{}, http.MethodPost, `{"code":"US01","x":1}`, allDuties, true, http.StatusBadRequest, "COM-0001"},
-		{"create reserved code", &fakeStore{}, http.MethodPost, `{"code":"SYS","name":"n","country":"US","currency":"USD"}`, allDuties, true, http.StatusBadRequest, `"code"`},
+		{"create reserved code", &fakeStore{}, http.MethodPost, `{"code":"SYS","name":"n","country":"US","currency":"USD","timeZone":"UTC"}`, allDuties, true, http.StatusBadRequest, `"code"`},
 		{"create bad country and currency", &fakeStore{}, http.MethodPost, `{"code":"US01","name":"n","country":"USA","currency":"US"}`, allDuties, true, http.StatusBadRequest, `"currency"`},
-		{"create blank name", &fakeStore{}, http.MethodPost, `{"code":"US01","name":"  ","country":"US","currency":"USD"}`, allDuties, true, http.StatusBadRequest, `"name"`},
+		{"create missing time zone", &fakeStore{}, http.MethodPost, `{"code":"US01","name":"n","country":"US","currency":"USD"}`, allDuties, true, http.StatusBadRequest, `"timeZone"`},
+		{"create unknown time zone", &fakeStore{}, http.MethodPost, `{"code":"US01","name":"n","country":"US","currency":"USD","timeZone":"Mars/Base"}`, allDuties, true, http.StatusBadRequest, `"timeZone"`},
+		{"create local time zone", &fakeStore{}, http.MethodPost, `{"code":"US01","name":"n","country":"US","currency":"USD","timeZone":"Local"}`, allDuties, true, http.StatusBadRequest, `"timeZone"`},
+		{"create numeric time zone", &fakeStore{}, http.MethodPost, `{"code":"US01","name":"n","country":"US","currency":"USD","timeZone":5}`, allDuties, true, http.StatusBadRequest, "COM-0001"},
+		{"create blank name", &fakeStore{}, http.MethodPost, `{"code":"US01","name":"  ","country":"US","currency":"USD","timeZone":"UTC"}`, allDuties, true, http.StatusBadRequest, `"name"`},
 		{"create store error hides detail", &fakeStore{err: errors.New("pg secret detail")}, http.MethodPost, validBody, allDuties, true, http.StatusInternalServerError, "COM-0500"},
 		{"create duplicate code", &fakeStore{err: httpx.NewProblem(http.StatusConflict, store.CodeLegalEntityCode, "exists")}, http.MethodPost, validBody, allDuties, true, http.StatusConflict, store.CodeLegalEntityCode},
 		{"create without duty", &fakeStore{}, http.MethodPost, validBody, "org.read", true, http.StatusForbidden, "AUTH-0003"},
@@ -234,6 +241,26 @@ func TestOpenAPIDocumentsEveryRoute(t *testing.T) {
 		}
 		return nil
 	})
+}
+
+func TestAsyncAPIDeclaresEveryEvent(t *testing.T) {
+	spec, err := os.ReadFile("../../events/asyncapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	declared := map[string]bool{}
+	for _, m := range regexp.MustCompile(`x-passage-type: (\S+)`).FindAllStringSubmatch(string(spec), -1) {
+		declared[m[1]] = true
+	}
+	for _, typ := range orgevents.All() {
+		if !pevents.ValidType(typ) || !declared[typ] {
+			t.Errorf("%s must be valid and declared in asyncapi.yaml", typ)
+		}
+		delete(declared, typ)
+	}
+	for typ := range declared {
+		t.Errorf("asyncapi.yaml declares %s which events.All() does not list", typ)
+	}
 }
 
 func TestScopedCallerCannotCreateLegalEntity(t *testing.T) {
