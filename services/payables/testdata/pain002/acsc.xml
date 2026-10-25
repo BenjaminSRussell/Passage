@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:pain.002.001.10">
+  <CstmrPmtStsRpt>
+    <GrpHdr>
+      <MsgId>STS-ACSC-1</MsgId>
+      <CreDtTm>2026-11-03T08:00:00Z</CreDtTm>
+    </GrpHdr>
+    <OrgnlGrpInfAndSts>
+      <OrgnlMsgId>SEPA50-F1</OrgnlMsgId>
+      <OrgnlMsgNmId>pain.001.001.09</OrgnlMsgNmId>
+    </OrgnlGrpInfAndSts>
+    <OrgnlPmtInfAndSts>
+      <OrgnlPmtInfId>SEPA50-F1-1</OrgnlPmtInfId>
+      <TxInfAndSts>
+        <OrgnlInstrId>SEPA-0004</OrgnlInstrId>
+        <OrgnlEndToEndId>SEPA-0004</OrgnlEndToEndId>
+        <TxSts>ACSC</TxSts>
+      </TxInfAndSts>
+    </OrgnlPmtInfAndSts>
+  </CstmrPmtStsRpt>
+</Document>

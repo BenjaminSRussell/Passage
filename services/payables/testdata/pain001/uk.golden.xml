@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:pain.001.001.09">
+  <CstmrCdtTrfInitn>
+    <GrpHdr>
+      <MsgId>UK-F1</MsgId>
+      <CreDtTm>2026-10-25T09:30:00Z</CreDtTm>
+      <NbOfTxs>3</NbOfTxs>
+      <CtrlSum>3148.50</CtrlSum>
+      <InitgPty>
+        <Nm>Passage UK Ltd</Nm>
+      </InitgPty>
+    </GrpHdr>
+    <PmtInf>
+      <PmtInfId>UK-F1-1</PmtInfId>
+      <PmtMtd>TRF</PmtMtd>
+      <BtchBookg>true</BtchBookg>
+      <NbOfTxs>3</NbOfTxs>
+      <CtrlSum>3148.50</CtrlSum>
+      <PmtTpInf>
+        <SvcLvl>
+          <Cd>NURG</Cd>
+        </SvcLvl>
+      </PmtTpInf>
+      <ReqdExctnDt>
+        <Dt>2026-11-02</Dt>
+      </ReqdExctnDt>
+      <Dbtr>
+        <Nm>Passage UK Ltd</Nm>
+        <PstlAdr>
+          <StrtNm>10 Downing Place</StrtNm>
+          <PstCd>SW1A 2AA</PstCd>
+          <TwnNm>London</TwnNm>
+          <Ctry>GB</Ctry>
+        </PstlAdr>
+      </Dbtr>
+      <DbtrAcct>
+        <Id>
+          <IBAN>GB29NWBK60161331926819</IBAN>
+        </Id>
+      </DbtrAcct>
+      <DbtrAgt>
+        <FinInstnId>
+          <BICFI>NWBKGB2L</BICFI>
+        </FinInstnId>
+      </DbtrAgt>
+      <ChrgBr>SHAR</ChrgBr>
+      <CdtTrfTxInf>
+        <PmtId>
+          <InstrId>UK-001</InstrId>
+          <EndToEndId>UK-001</EndToEndId>
+        </PmtId>
+        <Amt>
+          <InstdAmt Ccy="GBP">999.00</InstdAmt>
+        </Amt>
+        <Cdtr>
+          <Nm>Example Supplies Ltd</Nm>
+          <PstlAdr>
+            <StrtNm>1 High Street</StrtNm>
+            <PstCd>EC1A 1BB</PstCd>
+            <TwnNm>London</TwnNm>
+            <Ctry>GB</Ctry>
+          </PstlAdr>
+        </Cdtr>
+        <CdtrAcct>
+          <Id>
+            <IBAN>GB29NWBK60161331926819</IBAN>
+          </Id>
+        </CdtrAcct>
+        <Purp>
+          <Cd>SUPP</Cd>
+        </Purp>
+        <RmtInf>
+          <Ustrd>UK-INV-1</Ustrd>
+        </RmtInf>
+      </CdtTrfTxInf>
+      <CdtTrfTxInf>
+        <PmtId>
+          <InstrId>UK-002</InstrId>
+          <EndToEndId>UK-002</EndToEndId>
+        </PmtId>
+        <Amt>
+          <InstdAmt Ccy="GBP">1049.50</InstdAmt>
+        </Amt>
+        <Cdtr>
+          <Nm>Sample Components PLC</Nm>
+          <PstlAdr>
+            <StrtNm>22 Baker Street</StrtNm>
+            <PstCd>NW1 6XE</PstCd>
+            <TwnNm>London</TwnNm>
+            <Ctry>GB</Ctry>
+          </PstlAdr>
+        </Cdtr>
+        <CdtrAcct>
+          <Id>
+            <IBAN>GB72222222222222222222</IBAN>
+          </Id>
+        </CdtrAcct>
+        <Purp>
+          <Cd>SUPP</Cd>
+        </Purp>
+        <RmtInf>
+          <Ustrd>UK-INV-2</Ustrd>
+        </RmtInf>
+      </CdtTrfTxInf>
+      <CdtTrfTxInf>
+        <PmtId>
+          <InstrId>UK-003</InstrId>
+          <EndToEndId>UK-003</EndToEndId>
+        </PmtId>
+        <Amt>
+          <InstdAmt Ccy="GBP">1100.00</InstdAmt>
+        </Amt>
+        <Cdtr>
+          <Nm>Demo Services Ltd</Nm>
+          <PstlAdr>
+            <StrtNm>3 Queen Street</StrtNm>
+            <PstCd>M2 5HD</PstCd>
+            <TwnNm>Manchester</TwnNm>
+            <Ctry>GB</Ctry>
+          </PstlAdr>
+        </Cdtr>
+        <CdtrAcct>
+          <Id>
+            <IBAN>GB02333333333333333333</IBAN>
+          </Id>
+        </CdtrAcct>
+        <Purp>
+          <Cd>SUPP</Cd>
+        </Purp>
+        <RmtInf>
+          <Ustrd>UK-INV-3</Ustrd>
+        </RmtInf>
+      </CdtTrfTxInf>
+    </PmtInf>
+  </CstmrCdtTrfInitn>
+</Document>

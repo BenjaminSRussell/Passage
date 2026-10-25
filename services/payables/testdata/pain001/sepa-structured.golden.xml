@@ -1,0 +1,254 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:pain.001.001.09">
+  <CstmrCdtTrfInitn>
+    <GrpHdr>
+      <MsgId>SEPASTR-1</MsgId>
+      <CreDtTm>2026-10-25T09:30:00Z</CreDtTm>
+      <NbOfTxs>5</NbOfTxs>
+      <CtrlSum>1361.10</CtrlSum>
+      <InitgPty>
+        <Nm>Passage Holding GmbH</Nm>
+      </InitgPty>
+    </GrpHdr>
+    <PmtInf>
+      <PmtInfId>SEPASTR-1-1</PmtInfId>
+      <PmtMtd>TRF</PmtMtd>
+      <BtchBookg>true</BtchBookg>
+      <NbOfTxs>5</NbOfTxs>
+      <CtrlSum>1361.10</CtrlSum>
+      <PmtTpInf>
+        <SvcLvl>
+          <Cd>SEPA</Cd>
+        </SvcLvl>
+      </PmtTpInf>
+      <ReqdExctnDt>
+        <Dt>2026-11-02</Dt>
+      </ReqdExctnDt>
+      <Dbtr>
+        <Nm>Passage Holding GmbH</Nm>
+        <PstlAdr>
+          <StrtNm>Friedrichstrasse 100</StrtNm>
+          <PstCd>10117</PstCd>
+          <TwnNm>Berlin</TwnNm>
+          <Ctry>DE</Ctry>
+        </PstlAdr>
+      </Dbtr>
+      <DbtrAcct>
+        <Id>
+          <IBAN>DE89370400440532013000</IBAN>
+        </Id>
+      </DbtrAcct>
+      <DbtrAgt>
+        <FinInstnId>
+          <BICFI>COBADEFFXXX</BICFI>
+        </FinInstnId>
+      </DbtrAgt>
+      <ChrgBr>SLEV</ChrgBr>
+      <CdtTrfTxInf>
+        <PmtId>
+          <InstrId>STR-001</InstrId>
+          <EndToEndId>STR-001</EndToEndId>
+        </PmtId>
+        <Amt>
+          <InstdAmt Ccy="EUR">250.00</InstdAmt>
+        </Amt>
+        <Cdtr>
+          <Nm>Muller Strasse GmbH</Nm>
+          <PstlAdr>
+            <Ctry>DE</Ctry>
+          </PstlAdr>
+        </Cdtr>
+        <CdtrAcct>
+          <Id>
+            <IBAN>DE63111111111111111111</IBAN>
+          </Id>
+        </CdtrAcct>
+        <Purp>
+          <Cd>SUPP</Cd>
+        </Purp>
+        <RmtInf>
+          <Strd>
+            <RfrdDocInf>
+              <Nb>RG-1-A</Nb>
+            </RfrdDocInf>
+            <RfrdDocAmt>
+              <RmtdAmt Ccy="EUR">100.00</RmtdAmt>
+            </RfrdDocAmt>
+          </Strd>
+          <Strd>
+            <RfrdDocInf>
+              <Nb>RG-1-B</Nb>
+            </RfrdDocInf>
+            <RfrdDocAmt>
+              <RmtdAmt Ccy="EUR">150.00</RmtdAmt>
+            </RfrdDocAmt>
+          </Strd>
+        </RmtInf>
+      </CdtTrfTxInf>
+      <CdtTrfTxInf>
+        <PmtId>
+          <InstrId>STR-002</InstrId>
+          <EndToEndId>STR-002</EndToEndId>
+        </PmtId>
+        <Amt>
+          <InstdAmt Ccy="EUR">261.11</InstdAmt>
+        </Amt>
+        <Cdtr>
+          <Nm>Societe Generale Equipements</Nm>
+          <PstlAdr>
+            <Ctry>FR</Ctry>
+          </PstlAdr>
+        </Cdtr>
+        <CdtrAcct>
+          <Id>
+            <IBAN>FR3722222222222222222222222</IBAN>
+          </Id>
+        </CdtrAcct>
+        <Purp>
+          <Cd>SUPP</Cd>
+        </Purp>
+        <RmtInf>
+          <Strd>
+            <RfrdDocInf>
+              <Nb>RG-2-A</Nb>
+            </RfrdDocInf>
+            <RfrdDocAmt>
+              <RmtdAmt Ccy="EUR">105.00</RmtdAmt>
+            </RfrdDocAmt>
+          </Strd>
+          <Strd>
+            <RfrdDocInf>
+              <Nb>RG-2-B</Nb>
+            </RfrdDocInf>
+            <RfrdDocAmt>
+              <RmtdAmt Ccy="EUR">156.11</RmtdAmt>
+            </RfrdDocAmt>
+          </Strd>
+        </RmtInf>
+      </CdtTrfTxInf>
+      <CdtTrfTxInf>
+        <PmtId>
+          <InstrId>STR-003</InstrId>
+          <EndToEndId>STR-003</EndToEndId>
+        </PmtId>
+        <Amt>
+          <InstdAmt Ccy="EUR">272.22</InstdAmt>
+        </Amt>
+        <Cdtr>
+          <Nm>Oresund AEro Akerstrom AB</Nm>
+          <PstlAdr>
+            <Ctry>SE</Ctry>
+          </PstlAdr>
+        </Cdtr>
+        <CdtrAcct>
+          <Id>
+            <IBAN>SE2933333333333333333333</IBAN>
+          </Id>
+        </CdtrAcct>
+        <Purp>
+          <Cd>SUPP</Cd>
+        </Purp>
+        <RmtInf>
+          <Strd>
+            <RfrdDocInf>
+              <Nb>RG-3-A</Nb>
+            </RfrdDocInf>
+            <RfrdDocAmt>
+              <RmtdAmt Ccy="EUR">110.00</RmtdAmt>
+            </RfrdDocAmt>
+          </Strd>
+          <Strd>
+            <RfrdDocInf>
+              <Nb>RG-3-B</Nb>
+            </RfrdDocInf>
+            <RfrdDocAmt>
+              <RmtdAmt Ccy="EUR">162.22</RmtdAmt>
+            </RfrdDocAmt>
+          </Strd>
+        </RmtInf>
+      </CdtTrfTxInf>
+      <CdtTrfTxInf>
+        <PmtId>
+          <InstrId>STR-004</InstrId>
+          <EndToEndId>STR-004</EndToEndId>
+        </PmtId>
+        <Amt>
+          <InstdAmt Ccy="EUR">283.33</InstdAmt>
+        </Amt>
+        <Cdtr>
+          <Nm>Fabrica Senor Nunez S.L.</Nm>
+          <PstlAdr>
+            <Ctry>ES</Ctry>
+          </PstlAdr>
+        </Cdtr>
+        <CdtrAcct>
+          <Id>
+            <IBAN>ES9144444444444444444444</IBAN>
+          </Id>
+        </CdtrAcct>
+        <Purp>
+          <Cd>SUPP</Cd>
+        </Purp>
+        <RmtInf>
+          <Strd>
+            <RfrdDocInf>
+              <Nb>RG-4-A</Nb>
+            </RfrdDocInf>
+            <RfrdDocAmt>
+              <RmtdAmt Ccy="EUR">115.00</RmtdAmt>
+            </RfrdDocAmt>
+          </Strd>
+          <Strd>
+            <RfrdDocInf>
+              <Nb>RG-4-B</Nb>
+            </RfrdDocInf>
+            <RfrdDocAmt>
+              <RmtdAmt Ccy="EUR">168.33</RmtdAmt>
+            </RfrdDocAmt>
+          </Strd>
+        </RmtInf>
+      </CdtTrfTxInf>
+      <CdtTrfTxInf>
+        <PmtId>
+          <InstrId>STR-005</InstrId>
+          <EndToEndId>STR-005</EndToEndId>
+        </PmtId>
+        <Amt>
+          <InstdAmt Ccy="EUR">294.44</InstdAmt>
+        </Amt>
+        <Cdtr>
+          <Nm>Lodz Zaklady Zolc Sp. z o.o.</Nm>
+          <PstlAdr>
+            <Ctry>PL</Ctry>
+          </PstlAdr>
+        </Cdtr>
+        <CdtrAcct>
+          <Id>
+            <IBAN>PL58555555555555555555555555</IBAN>
+          </Id>
+        </CdtrAcct>
+        <Purp>
+          <Cd>SUPP</Cd>
+        </Purp>
+        <RmtInf>
+          <Strd>
+            <RfrdDocInf>
+              <Nb>RG-5-A</Nb>
+            </RfrdDocInf>
+            <RfrdDocAmt>
+              <RmtdAmt Ccy="EUR">120.00</RmtdAmt>
+            </RfrdDocAmt>
+          </Strd>
+          <Strd>
+            <RfrdDocInf>
+              <Nb>RG-5-B</Nb>
+            </RfrdDocInf>
+            <RfrdDocAmt>
+              <RmtdAmt Ccy="EUR">174.44</RmtdAmt>
+            </RfrdDocAmt>
+          </Strd>
+        </RmtInf>
+      </CdtTrfTxInf>
+    </PmtInf>
+  </CstmrCdtTrfInitn>
+</Document>

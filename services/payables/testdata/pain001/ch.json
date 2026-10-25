@@ -1,0 +1,106 @@
+{
+  "fileNumber": "CH-F1",
+  "created": "2026-10-25T09:30:00Z",
+  "debtor": {
+    "name": "Passage Schweiz AG",
+    "address": {
+      "streetName": "Paradeplatz 1",
+      "postCode": "8001",
+      "townName": "Zurich",
+      "country": "CH"
+    }
+  },
+  "debtorAccount": {
+    "iban": "CH9300762011623852957"
+  },
+  "debtorBic": "UBSWCHZH",
+  "profile": {
+    "variant": "CH",
+    "overrides": {
+      "bic_required": true
+    }
+  },
+  "payments": [
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-02",
+      "number": "CH-001",
+      "amount": "2500",
+      "currency": "CHF",
+      "creditor": {
+        "name": "Beispiel Handels AG",
+        "address": {
+          "streetName": "Bahnhofstrasse 1",
+          "postCode": "8001",
+          "townName": "Zurich",
+          "country": "CH"
+        },
+        "iban": "CH9300762011623852957",
+        "bic": "UBSWCHZH"
+      },
+      "invoices": [
+        {
+          "number": "CH-INV-1",
+          "amount": "2500"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-02",
+      "number": "CH-002",
+      "amount": "2577.77",
+      "currency": "CHF",
+      "creditor": {
+        "name": "Exemple Fournitures SA",
+        "address": {
+          "streetName": "Rue du Rhone 5",
+          "postCode": "1204",
+          "townName": "Geneva",
+          "country": "CH"
+        },
+        "iban": "CH0822222222222222222",
+        "bic": "CRESCHZZ"
+      },
+      "invoices": [
+        {
+          "number": "CH-INV-2",
+          "amount": "2577.77"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-02",
+      "number": "CH-003",
+      "amount": "2655.54",
+      "currency": "CHF",
+      "creditor": {
+        "name": "Esempio Servizi SA",
+        "address": {
+          "streetName": "Via Nassa 3",
+          "postCode": "6900",
+          "townName": "Lugano",
+          "country": "CH"
+        },
+        "iban": "CH9133333333333333333",
+        "bic": "POFICHBE"
+      },
+      "invoices": [
+        {
+          "number": "CH-INV-3",
+          "amount": "2655.54"
+        }
+      ]
+    }
+  ]
+}

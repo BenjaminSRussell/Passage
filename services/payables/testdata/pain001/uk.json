@@ -1,0 +1,106 @@
+{
+  "fileNumber": "UK-F1",
+  "created": "2026-10-25T09:30:00Z",
+  "debtor": {
+    "name": "Passage UK Ltd",
+    "address": {
+      "streetName": "10 Downing Place",
+      "postCode": "SW1A 2AA",
+      "townName": "London",
+      "country": "GB"
+    }
+  },
+  "debtorAccount": {
+    "iban": "GB29NWBK60161331926819"
+  },
+  "debtorBic": "NWBKGB2L",
+  "profile": {
+    "variant": "UK",
+    "overrides": {
+      "structured_address_required": true
+    }
+  },
+  "payments": [
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-02",
+      "number": "UK-001",
+      "amount": "999",
+      "currency": "GBP",
+      "creditor": {
+        "name": "Example Supplies Ltd",
+        "address": {
+          "streetName": "1 High Street",
+          "postCode": "EC1A 1BB",
+          "townName": "London",
+          "country": "GB"
+        },
+        "iban": "GB29NWBK60161331926819",
+        "bic": "NWBKGB2L"
+      },
+      "invoices": [
+        {
+          "number": "UK-INV-1",
+          "amount": "999"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-02",
+      "number": "UK-002",
+      "amount": "1049.5",
+      "currency": "GBP",
+      "creditor": {
+        "name": "Sample Components PLC",
+        "address": {
+          "streetName": "22 Baker Street",
+          "postCode": "NW1 6XE",
+          "townName": "London",
+          "country": "GB"
+        },
+        "iban": "GB72222222222222222222",
+        "bic": "NWBKGB2L"
+      },
+      "invoices": [
+        {
+          "number": "UK-INV-2",
+          "amount": "1049.5"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-02",
+      "number": "UK-003",
+      "amount": "1100",
+      "currency": "GBP",
+      "creditor": {
+        "name": "Demo Services Ltd",
+        "address": {
+          "streetName": "3 Queen Street",
+          "postCode": "M2 5HD",
+          "townName": "Manchester",
+          "country": "GB"
+        },
+        "iban": "GB02333333333333333333",
+        "bic": "NWBKGB2L"
+      },
+      "invoices": [
+        {
+          "number": "UK-INV-3",
+          "amount": "1100"
+        }
+      ]
+    }
+  ]
+}

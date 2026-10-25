@@ -1,0 +1,176 @@
+{
+  "fileNumber": "SEPASTR-1",
+  "created": "2026-10-25T09:30:00Z",
+  "debtor": {
+    "name": "Passage Holding GmbH",
+    "address": {
+      "streetName": "Friedrichstraße 100",
+      "postCode": "10117",
+      "townName": "Berlin",
+      "country": "DE"
+    }
+  },
+  "debtorAccount": {
+    "iban": "DE89370400440532013000"
+  },
+  "debtorBic": "COBADEFFXXX",
+  "profile": {
+    "variant": "SEPA",
+    "overrides": {
+      "structured_remittance": true,
+      "bic_required": false
+    }
+  },
+  "payments": [
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-02",
+      "number": "STR-001",
+      "amount": "250",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Müller Straße GmbH",
+        "address": {
+          "streetName": "Hauptstraße 1",
+          "postCode": "10115",
+          "townName": "Berlin",
+          "country": "DE"
+        },
+        "iban": "DE63111111111111111111"
+      },
+      "invoices": [
+        {
+          "number": "RG-1-A",
+          "amount": "100"
+        },
+        {
+          "number": "RG-1-B",
+          "amount": "150"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-02",
+      "number": "STR-002",
+      "amount": "261.11",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Société Générale Équipements",
+        "address": {
+          "streetName": "12 Rue de Rivoli",
+          "postCode": "75001",
+          "townName": "Paris",
+          "country": "FR"
+        },
+        "iban": "FR3722222222222222222222222"
+      },
+      "invoices": [
+        {
+          "number": "RG-2-A",
+          "amount": "105"
+        },
+        {
+          "number": "RG-2-B",
+          "amount": "156.11"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-02",
+      "number": "STR-003",
+      "amount": "272.22",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Øresund Ærø Åkerström AB",
+        "address": {
+          "streetName": "Storgatan 5",
+          "postCode": "11122",
+          "townName": "Stockholm",
+          "country": "SE"
+        },
+        "iban": "SE2933333333333333333333"
+      },
+      "invoices": [
+        {
+          "number": "RG-3-A",
+          "amount": "110"
+        },
+        {
+          "number": "RG-3-B",
+          "amount": "162.22"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-02",
+      "number": "STR-004",
+      "amount": "283.33",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Fábrica Señor Núñez S.L.",
+        "address": {
+          "streetName": "Calle Mayor 7",
+          "postCode": "28013",
+          "townName": "Madrid",
+          "country": "ES"
+        },
+        "iban": "ES9144444444444444444444"
+      },
+      "invoices": [
+        {
+          "number": "RG-4-A",
+          "amount": "115"
+        },
+        {
+          "number": "RG-4-B",
+          "amount": "168.33"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-02",
+      "number": "STR-005",
+      "amount": "294.44",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Łódź Zakłady Żółć Sp. z o.o.",
+        "address": {
+          "streetName": "ul. Piotrkowska 10",
+          "postCode": "90-001",
+          "townName": "Łódź",
+          "country": "PL"
+        },
+        "iban": "PL58555555555555555555555555"
+      },
+      "invoices": [
+        {
+          "number": "RG-5-A",
+          "amount": "120"
+        },
+        {
+          "number": "RG-5-B",
+          "amount": "174.44"
+        }
+      ]
+    }
+  ]
+}
