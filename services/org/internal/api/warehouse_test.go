@@ -64,6 +64,8 @@ func TestWarehouses(t *testing.T) {
 		{"patch missing version", seededWarehouses(), http.MethodPatch, warehousesPath + "/" + warehouseID1, `{"name":"x"}`, siteDuties, true, http.StatusBadRequest, `"version"`},
 		{"patch malformed site", seededWarehouses(), http.MethodPatch, warehousesPath + "/" + warehouseID1, `{"version":1,"siteId":"x"}`, siteDuties, true, http.StatusBadRequest, `"siteId"`},
 		{"patch site in another legal entity", seededWarehouses(), http.MethodPatch, warehousesPath + "/" + warehouseID1, `{"version":1,"siteId":"` + siteOtherLE + `"}`, siteDuties, true, http.StatusUnprocessableEntity, "ORG-WH-LE-MISMATCH"},
+		{"create uppercase site id", seededSites(), http.MethodPost, warehousesPath, warehouseBody(strings.ToUpper(siteID1), "w1"), siteDuties, true, http.StatusCreated, `"siteId":"` + siteID1 + `"`},
+		{"patch uppercase site in another legal entity", seededWarehouses(), http.MethodPatch, warehousesPath + "/" + warehouseID1, `{"version":1,"siteId":"` + strings.ToUpper(siteOtherLE) + `"}`, siteDuties, true, http.StatusUnprocessableEntity, "ORG-WH-LE-MISMATCH"},
 		{"patch without duty", seededWarehouses(), http.MethodPatch, warehousesPath + "/" + warehouseID1, `{"version":1}`, "org.read", true, http.StatusForbidden, "AUTH-0003"},
 	}
 	for _, tc := range tests {

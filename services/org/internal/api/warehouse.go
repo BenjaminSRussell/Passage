@@ -61,7 +61,7 @@ func (a *API) createWarehouse(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
-	in := store.Warehouse{SiteID: req.SiteID, Code: strings.ToUpper(req.Code), Name: strings.TrimSpace(req.Name)}
+	in := store.Warehouse{SiteID: canonicalID(req.SiteID), Code: strings.ToUpper(req.Code), Name: strings.TrimSpace(req.Name)}
 	fields := validateShared(&in.Name, req.TimeZone, nil, nil)
 	if req.TimeZone != nil {
 		in.TimeZone = *req.TimeZone
@@ -72,7 +72,7 @@ func (a *API) createWarehouse(w http.ResponseWriter, r *http.Request) {
 			fields["type"] = invalidWarehouseTy
 		}
 	}
-	if !ids.Valid(in.SiteID) {
+	if !canonicalUUID(in.SiteID) {
 		fields["siteId"] = "is required and must be a UUID"
 	}
 	if !siteCode.MatchString(in.Code) {
@@ -182,8 +182,12 @@ func (a *API) updateWarehouse(w http.ResponseWriter, r *http.Request, id string)
 	if req.Type != nil && !warehouseType(*req.Type) {
 		fields["type"] = invalidWarehouseTy
 	}
-	if req.SiteID != nil && !ids.Valid(*req.SiteID) {
-		fields["siteId"] = "must be a UUID"
+	if req.SiteID != nil {
+		canonical := canonicalID(*req.SiteID)
+		req.SiteID = &canonical
+		if !canonicalUUID(canonical) {
+			fields["siteId"] = "must be a UUID"
+		}
 	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
@@ -200,3 +204,7 @@ func (a *API) updateWarehouse(w http.ResponseWriter, r *http.Request, id string)
 	}
 	httpx.JSON(w, http.StatusOK, warehouse)
 }
+
+func canonicalID(id string) string { return strings.ToLower(strings.TrimSpace(id)) }
+
+func canonicalUUID(id string) bool { return len(id) == 36 && ids.Valid(id) }
