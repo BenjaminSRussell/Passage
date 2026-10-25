@@ -1,0 +1,21 @@
+package domain
+
+const (
+	CodeInvalidTransition   = "CLOSE-0001"
+	CodeBusy                = "CLOSE-0002"
+	CodeBlockedByDependency = "CLOSE-0003"
+	CodeValidation          = "CLOSE-0004"
+	CodePeriodClosed        = "LEDGER-0013"
+	CodePeriodOnHold        = "LEDGER-0014"
+	CodeNoConvergence       = "ALLOC-0001"
+	CodeZeroBasis           = "ALLOC-0002"
+)
+
+type Error struct {
+	Code   string
+	Detail string
+}
+
+func (e *Error) Error() string { return e.Code + ": " + e.Detail }
+
+func fail(code, detail string) *Error { return &Error{Code: code, Detail: detail} }

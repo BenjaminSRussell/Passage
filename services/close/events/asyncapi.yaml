@@ -1,0 +1,34 @@
+asyncapi: 3.0.0
+info:
+  title: close
+  version: 0.1.0
+  description: Declared channel only. No publisher ships in this slice; the outbox publisher arrives with the state-changing period endpoints.
+channels:
+  passage.close.period:
+    address: passage.close.period
+    messages:
+      statusChanged:
+        $ref: '#/components/messages/statusChanged'
+operations:
+  onStatusChanged:
+    action: send
+    channel:
+      $ref: '#/channels/passage.close.period'
+    messages:
+      - $ref: '#/channels/passage.close.period/messages/statusChanged'
+components:
+  messages:
+    statusChanged:
+      name: statusChanged
+      title: Period status changed
+      payload:
+        type: object
+        required: [ledgerId, module, fiscalPeriodId, previousStatus, newStatus, changedBy]
+        properties:
+          ledgerId: { type: string, format: uuid }
+          module: { type: string }
+          fiscalPeriodId: { type: string, format: uuid }
+          previousStatus: { type: string, enum: [open, on_hold, closed, permanently_closed] }
+          newStatus: { type: string, enum: [open, on_hold, closed, permanently_closed] }
+          changedBy: { type: string }
+      x-passage-type: dev.passage.close.period.statuschanged.v1

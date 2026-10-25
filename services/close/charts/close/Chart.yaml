@@ -1,0 +1,6 @@
+apiVersion: v2
+name: close
+description: Period close, year-end and allocations
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

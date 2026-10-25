@@ -1,0 +1,13 @@
+{
+  "allocate": [
+    {"name": "rent split 3/5/2", "source": "10000.01", "scale": 2, "shares": [{"key": "A", "weight": "3"}, {"key": "B", "weight": "5"}, {"key": "C", "weight": "2"}], "want": {"A": "3000.00", "B": "5000.01", "C": "2000.00"}},
+    {"name": "thirds residual to first largest", "source": "100.00", "scale": 2, "shares": [{"key": "A", "weight": "1"}, {"key": "B", "weight": "1"}, {"key": "C", "weight": "1"}], "want": {"A": "33.34", "B": "33.33", "C": "33.33"}},
+    {"name": "statistical weights", "source": "1000.00", "scale": 2, "shares": [{"key": "A", "weight": "2.5"}, {"key": "B", "weight": "7.5"}], "want": {"A": "250.00", "B": "750.00"}},
+    {"name": "zero source", "source": "0", "scale": 2, "shares": [{"key": "A", "weight": "1"}, {"key": "B", "weight": "1"}], "want": {"A": "0.00", "B": "0.00"}},
+    {"name": "zero decimal currency", "source": "100", "scale": 0, "shares": [{"key": "A", "weight": "1"}, {"key": "B", "weight": "1"}, {"key": "C", "weight": "1"}], "want": {"A": "34", "B": "33", "C": "33"}},
+    {"name": "negative source", "source": "-100.00", "scale": 2, "shares": [{"key": "A", "weight": "1"}, {"key": "B", "weight": "1"}, {"key": "C", "weight": "1"}], "want": {"A": "-33.34", "B": "-33.33", "C": "-33.33"}}
+  ],
+  "reciprocal": [
+    {"name": "two departments 10 percent each way", "direct": ["1000.00", "500.00"], "matrix": [["0", "0.1"], ["0.1", "0"]], "scale": 2, "want": ["1060.61", "606.06"]}
+  ]
+}
