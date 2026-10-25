@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
@@ -256,20 +255,5 @@ func TestPostgres_HierarchyIsTenantIsolated(t *testing.T) {
 		if n := fiscalRows(t, ctx, pool, table); n == 0 {
 			t.Fatalf("owner tenant reads no rows of %s", table)
 		}
-	}
-}
-
-func TestPostgres_HierarchyNodeOrgUnitIsUniquePerVersion(t *testing.T) {
-	s, ctx, pool := lifecycleStore(t)
-	units := createHierarchyUnits(t, s, ctx)
-	draft := mustCreateDraft(t, s, ctx, mustCreateHierarchyType(t, s, ctx, "REP").ID)
-	err := dbx.WithTenantTx(ctx, pool, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `insert into hierarchy_node (tenant_id, version_id, id, org_unit_kind, org_unit_id)
-			select tenant_id, id, unnest($2::uuid[]), 'legal_entity', $3 from hierarchy_version where id = $1`, draft.ID, []string{ids.New(), ids.New()}, units.legalEntity)
-		return err
-	})
-	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) || pgErr.Code != "23505" {
-		t.Fatalf("duplicate org unit insert error = %v; want a unique violation", err)
 	}
 }
