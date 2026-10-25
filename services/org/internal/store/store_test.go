@@ -21,12 +21,20 @@ func principalContext(n int) context.Context {
 	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(n)})
 }
 
+func seed(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
+	t.Helper()
+	if err := store.SeedReference(ctx, pool, migrations.Reference); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func newStore(t *testing.T, n int) (*store.Postgres, context.Context) {
 	pool := testkit.DB(t)
 	ctx := principalContext(n)
 	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
+	seed(t, ctx, pool)
 	return store.New(pool), ctx
 }
 
@@ -52,11 +60,11 @@ func TestPostgres_TenantIsolationIdempotencyAndDuplicateCode(t *testing.T) {
 	if err := s.Ping(ctx); err != nil {
 		t.Fatal(err)
 	}
-	own, err := s.ListLegalEntities(ctx, "", store.MaxPageSize)
+	own, err := s.ListLegalEntities(ctx, store.LegalEntityFilter{}, "", store.MaxPageSize)
 	if err != nil || len(own.Items) != 1 {
 		t.Fatalf("tenant 1 list = %v, %v; want 1 entity", own, err)
 	}
-	other, err := s.ListLegalEntities(principalContext(2), "", store.MaxPageSize)
+	other, err := s.ListLegalEntities(principalContext(2), store.LegalEntityFilter{}, "", store.MaxPageSize)
 	if err != nil || len(other.Items) != 0 {
 		t.Fatalf("tenant 2 must see no rows, got %v, %v", other, err)
 	}
@@ -69,11 +77,11 @@ func TestPostgres_ListPagesPastFirstPage(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	first, err := s.ListLegalEntities(ctx, "", 2)
+	first, err := s.ListLegalEntities(ctx, store.LegalEntityFilter{}, "", 2)
 	if err != nil || len(first.Items) != 2 || first.NextCode != "E2" {
 		t.Fatalf("first page = %+v, %v", first, err)
 	}
-	second, err := s.ListLegalEntities(ctx, first.NextCode, 2)
+	second, err := s.ListLegalEntities(ctx, store.LegalEntityFilter{}, first.NextCode, 2)
 	if err != nil || len(second.Items) != 1 || second.Items[0].Code != "E3" || second.NextCode != "" {
 		t.Fatalf("second page = %+v, %v", second, err)
 	}
@@ -125,6 +133,7 @@ func TestPostgres_CreateLegalEntityEnqueuesInSameTx(t *testing.T) {
 	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
+	seed(t, ctx, pool)
 	s := store.New(pool)
 	in := store.LegalEntity{Code: "US01", Name: "Passage US", Country: "US", Currency: "USD", TimeZone: "America/Chicago"}
 
@@ -173,6 +182,7 @@ func TestPostgres_CreateLegalEntityRollsBackWhenOutboxFails(t *testing.T) {
 	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
+	seed(t, ctx, pool)
 	if _, err := pool.Exec(ctx, `alter table outbox add constraint outbox_reject check (false)`); err != nil {
 		t.Fatal(err)
 	}
@@ -197,6 +207,7 @@ func TestPostgres_OutboxIsTenantIsolated(t *testing.T) {
 	if err := dbx.Migrate(ctxA, admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
+	seed(t, ctxA, admin)
 	if _, err := store.New(app).CreateLegalEntity(ctxA, store.LegalEntity{Code: "US01", Name: "n", Country: "US", Currency: "USD", TimeZone: "UTC"}, ""); err != nil {
 		t.Fatal(err)
 	}

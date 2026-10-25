@@ -1,6 +1,6 @@
 # org
 
-Organization service for Passage (wave 6). Slice 1 ships legal entities, the pure hierarchy as-of logic and unit-of-measure conversion. Create also writes `dev.passage.org.legalentity.created.v1` to the `outbox` table in the same transaction (an Idempotency-Key replay writes none); events are declared in `events/asyncapi.yaml`. Everything else is listed in `NOT-IMPLEMENTED.md`.
+Organization service for Passage (wave 6). Slice 1 ships legal entities, the pure hierarchy as-of logic and unit-of-measure conversion. Create also writes `dev.passage.org.legalentity.created.v1` to the `outbox` table in the same transaction (an Idempotency-Key replay writes none), and PATCH writes `dev.passage.org.legalentity.updated.v1` with `{id, changed_fields, version}` in the same transaction when a value changed; events are declared in `events/asyncapi.yaml`. Everything else is listed in `NOT-IMPLEMENTED.md`.
 
 Run: `DATABASE_URL=postgres://... MIGRATE_ON_START=true go run ./cmd/org`. Test: `go vet ./... && go test ./...`; store tests need `PASSAGE_TEST_DATABASE_URL` (role without BYPASSRLS).
 
@@ -20,8 +20,10 @@ Countries, currencies, regions and languages are platform-owned rows under the `
 
 | Operation | Duty |
 |---|---|
-| `POST /v1/org/legal-entities` (required `timeZone`, IANA name; optional `Idempotency-Key`) | `org.legal-entity.write` |
-| `GET /v1/org/legal-entities` (`limit` max 100, `cursor`; returns `{items, nextCursor}`) | `org.read` |
+| `POST /v1/org/legal-entities` (required `timeZone`, IANA name; optional `defaultLanguage` default `en-US`, `registrationNumber`, `Idempotency-Key`; country, currency and language must be active; 500 per tenant) | `org.legal-entity.write` |
+| `GET /v1/org/legal-entities` (`limit` max 100, `cursor`; filters `status` active or inactive, `country`, `currency`; returns `{items, nextCursor}`) | `org.read` |
+| `PATCH /v1/org/legal-entities/{id}` (body `version` required, optional `name`, `timeZone`, `defaultLanguage`, `registrationNumber`, `status`; code, country, currency immutable) | `org.legal-entity.write` |
+| `GET /v1/org/legal-entities/{id}`, `GET /v1/org/legal-entities/{id}/names` (name history) | `org.read` |
 | `GET /v1/org/{countries,currencies,regions,languages}` (`status` active or inactive; `country` for regions; returns `{items}`) and `GET /v1/org/{countries,currencies,regions,languages}/{code}` | `org.read` |
 | `PATCH /v1/org/{countries,currencies,regions,languages}/{code}` (body `{"status":"active"\|"inactive"}`; not for legal-entity-scoped callers) | `org.reference.write` |
 | `GET /v1/org/uom/convert?from=&to=&qty=` | any authenticated principal |
@@ -36,8 +38,11 @@ Contract: `api/openapi.yaml`. Paths follow the architecture spine (`/v1/<context
 | COM-0001 | 400 | malformed body, unknown field, failed field validation (`errors` names the fields), bad `from`, `to` or `qty`, unknown `timeZone` |
 | AUTH-0001, AUTH-0003, COM-0500 | 401, 403, 500 | missing tenant, duty missing, internal error with hidden detail |
 | ORG-LE-CODE-DUPLICATE | 409 | legal-entity code already used in the tenant |
+| ORG-LE-CODE-RESERVED | 400 | legal-entity code is DAT, SYS or ALL |
+| ORG-LE-NOT-FOUND, ORG-VERSION-CONFLICT | 404, 409 | unknown, malformed or out-of-scope legal-entity id; stale version |
+| ORG-LE-REFERENCE-INACTIVE, ORG-LE-LIMIT | 422 | country, currency or default language unknown or inactive for the tenant; 500 legal entities already |
 | idempotency_key_reuse | 422 | Idempotency-Key reused with a different body |
 | ORG-REF-NOT-FOUND | 404 | unknown reference code |
 | ORG-UOM-NO-PATH | 422 | no conversion within two hops inside one unit class |
 
-Metrics: `org_legal_entities_created_total`, `org_legal_entities_failed_total`, `org_reference_status_changed_total` (stdlib atomics rendered as text).
+Metrics: `org_legal_entities_created_total`, `org_legal_entities_failed_total`, `org_legal_entities_updated_total`, `org_reference_status_changed_total` (stdlib atomics rendered as text).

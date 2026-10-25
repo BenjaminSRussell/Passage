@@ -26,3 +26,9 @@ type LegalEntityCreatedData struct {
 	AccountingCurrency string `json:"accounting_currency"`
 	TimeZone           string `json:"time_zone"`
 }
+
+type LegalEntityUpdatedData struct {
+	ID            string   `json:"id"`
+	ChangedFields []string `json:"changed_fields"`
+	Version       int      `json:"version"`
+}
