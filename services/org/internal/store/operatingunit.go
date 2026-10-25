@@ -76,12 +76,8 @@ func nilIfEmpty(s *string) *string {
 }
 
 func checkDefaultLegalEntity(ctx context.Context, tx pgx.Tx, tenantID, id string) error {
-	var status string
-	err := tx.QueryRow(ctx, `select status from legal_entity where tenant_id = $1 and id = $2`, tenantID, id).Scan(&status)
-	if err == nil && status == "active" {
-		return nil
-	}
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+	_, ok, err := activeLegalEntity(ctx, tx, tenantID, id)
+	if err != nil || ok {
 		return err
 	}
 	p := httpx.NewProblem(http.StatusUnprocessableEntity, CodeOULegalEntityInvalid, "default legal entity is unknown or inactive")

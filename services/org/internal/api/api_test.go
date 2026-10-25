@@ -24,13 +24,15 @@ import (
 )
 
 type fakeStore struct {
-	err      error
-	pingErr  error
-	entities []store.LegalEntity
-	byKey    map[string]store.LegalEntity
-	refs     map[string]store.ReferenceItem
-	ous      []store.OperatingUnit
-	ouCalls  int
+	err       error
+	pingErr   error
+	entities  []store.LegalEntity
+	byKey     map[string]store.LegalEntity
+	refs      map[string]store.ReferenceItem
+	ous       []store.OperatingUnit
+	ouCalls   int
+	sites     []store.Site
+	siteCalls int
 }
 
 func (f *fakeStore) reference(kind store.ReferenceKind, code string) (store.ReferenceItem, bool) {
@@ -223,6 +225,75 @@ func (f *fakeStore) UpdateOperatingUnit(_ context.Context, id string, version in
 		u.Version++
 	}
 	return *u, nil
+}
+
+func (f *fakeStore) CreateSite(_ context.Context, in store.Site, _ string) (store.Site, error) {
+	if f.err != nil {
+		return store.Site{}, f.err
+	}
+	for _, s := range f.sites {
+		if s.LegalEntityID == in.LegalEntityID && s.Code == in.Code {
+			return store.Site{}, httpx.NewProblem(http.StatusConflict, store.CodeSiteCodeDuplicate, "duplicate")
+		}
+	}
+	in.ID, in.Status, in.Version = fmt.Sprintf("00000000-0000-0000-0000-%012d", len(f.sites)+1), "active", 1
+	f.sites = append(f.sites, in)
+	return in, nil
+}
+
+func (f *fakeStore) lookupSite(id string) (*store.Site, error) {
+	f.siteCalls++
+	if f.err != nil {
+		return nil, f.err
+	}
+	for i := range f.sites {
+		if f.sites[i].ID == id {
+			return &f.sites[i], nil
+		}
+	}
+	return nil, httpx.NewProblem(http.StatusNotFound, store.CodeSiteNotFound, "site not found")
+}
+
+func (f *fakeStore) GetSite(_ context.Context, id string) (store.Site, error) {
+	s, err := f.lookupSite(id)
+	if err != nil {
+		return store.Site{}, err
+	}
+	return *s, nil
+}
+
+func (f *fakeStore) ListSites(_ context.Context, _ store.SiteFilter, after store.SiteKey, limit int) (store.SitePage, error) {
+	if f.err != nil {
+		return store.SitePage{}, f.err
+	}
+	page := store.SitePage{Items: []store.Site{}}
+	sorted := slices.Clone(f.sites)
+	slices.SortFunc(sorted, func(a, b store.Site) int { return strings.Compare(a.Code+"/"+a.ID, b.Code+"/"+b.ID) })
+	for _, s := range sorted {
+		if s.Code+"/"+s.ID > after.Code+"/"+after.ID {
+			page.Items = append(page.Items, s)
+		}
+	}
+	if len(page.Items) > limit {
+		page.Items = page.Items[:limit]
+		page.Next = &store.SiteKey{Code: page.Items[limit-1].Code, ID: page.Items[limit-1].ID}
+	}
+	return page, nil
+}
+
+func (f *fakeStore) UpdateSite(_ context.Context, id string, version int, in store.SitePatch) (store.Site, error) {
+	s, err := f.lookupSite(id)
+	if err != nil {
+		return store.Site{}, err
+	}
+	if s.Version != version {
+		return store.Site{}, httpx.NewProblem(http.StatusConflict, store.CodeVersionConflict, fmt.Sprintf("current version is %d", s.Version))
+	}
+	if in.Name != nil && *in.Name != s.Name {
+		s.Name = *in.Name
+		s.Version++
+	}
+	return *s, nil
 }
 
 func (f *fakeStore) Ping(context.Context) error { return f.pingErr }

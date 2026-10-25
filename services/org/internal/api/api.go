@@ -58,6 +58,8 @@ type API struct {
 	referenceChanged atomic.Int64
 	ouCreated        atomic.Int64
 	ouUpdated        atomic.Int64
+	siteCreated      atomic.Int64
+	siteUpdated      atomic.Int64
 }
 
 type createLegalEntityRequest struct {
@@ -117,6 +119,7 @@ func (a *API) Register(r chi.Router) {
 		return map[string]any{"items": names}, err
 	}))
 	a.registerOperatingUnits(r)
+	a.registerSites(r)
 	r.Get("/v1/org/uom/convert", a.convert)
 	for _, c := range referenceCollections {
 		base := "/v1/org/" + c.collection
@@ -135,6 +138,8 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP org_reference_status_changed_total Reference rows whose tenant status was set.\n# TYPE org_reference_status_changed_total counter\norg_reference_status_changed_total %d\n", a.referenceChanged.Load())
 		fmt.Fprintf(w, "# HELP org_operating_units_created_total Operating units created.\n# TYPE org_operating_units_created_total counter\norg_operating_units_created_total %d\n", a.ouCreated.Load())
 		fmt.Fprintf(w, "# HELP org_operating_units_updated_total Operating unit updates that bumped the version.\n# TYPE org_operating_units_updated_total counter\norg_operating_units_updated_total %d\n", a.ouUpdated.Load())
+		fmt.Fprintf(w, "# HELP org_sites_created_total Sites created.\n# TYPE org_sites_created_total counter\norg_sites_created_total %d\n", a.siteCreated.Load())
+		fmt.Fprintf(w, "# HELP org_sites_updated_total Site updates that bumped the version.\n# TYPE org_sites_updated_total counter\norg_sites_updated_total %d\n", a.siteUpdated.Load())
 	})
 }
 
