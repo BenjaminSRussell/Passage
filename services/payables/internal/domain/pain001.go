@@ -517,6 +517,9 @@ func buildRemittance(p Pain001Payment, o Overrides) (*xmlRemittance, error) {
 	}
 	out := &xmlRemittance{}
 	for _, inv := range p.Invoices {
+		if len(inv.Number) > maxReferenceLen {
+			return nil, invalid("payment %s: invoice number exceeds %d characters", p.Number, maxReferenceLen)
+		}
 		amount, err := formatAmount(p.Number, inv.Amount, p.Currency)
 		if err != nil {
 			return nil, err

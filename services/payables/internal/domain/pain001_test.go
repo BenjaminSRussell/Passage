@@ -375,6 +375,10 @@ func TestGeneratePain001_RejectsInvalidInput(t *testing.T) {
 			in.Payments[0].Creditor.Party.Address.TownName = ""
 		}, domain.CodeValidation, "town name"},
 		{"invoice number outside charset", func(t *testing.T, in *domain.Pain001Input) { in.Payments[0].Invoices[0].Number = "RG-Ü1" }, domain.CodeValidation, "invoice number"},
+		{"structured invoice number too long", func(t *testing.T, in *domain.Pain001Input) {
+			in.Profile = profileFor(t, domain.VariantSEPA, map[string]string{"structured_remittance": "true"})
+			in.Payments[0].Invoices[0].Number = strings.Repeat("I", 36)
+		}, domain.CodeValidation, "invoice number exceeds"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
