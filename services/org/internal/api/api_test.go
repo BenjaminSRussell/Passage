@@ -3,10 +3,12 @@ package api_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -27,6 +29,8 @@ type fakeStore struct {
 	entities []store.LegalEntity
 	byKey    map[string]store.LegalEntity
 	refs     map[string]store.ReferenceItem
+	ous      []store.OperatingUnit
+	ouCalls  int
 }
 
 func (f *fakeStore) reference(kind store.ReferenceKind, code string) (store.ReferenceItem, bool) {
@@ -150,6 +154,75 @@ func (f *fakeStore) ListLegalEntities(_ context.Context, _ store.LegalEntityFilt
 		page.NextCode = page.Items[limit-1].Code
 	}
 	return page, nil
+}
+
+func (f *fakeStore) CreateOperatingUnit(_ context.Context, in store.OperatingUnit, _ string) (store.OperatingUnit, error) {
+	if f.err != nil {
+		return store.OperatingUnit{}, f.err
+	}
+	for _, u := range f.ous {
+		if u.Type == in.Type && u.Code == in.Code {
+			return store.OperatingUnit{}, httpx.NewProblem(http.StatusConflict, store.CodeOUCodeDuplicate, "duplicate")
+		}
+	}
+	in.ID, in.Status, in.Version = fmt.Sprintf("00000000-0000-0000-0000-%012d", len(f.ous)+1), "active", 1
+	f.ous = append(f.ous, in)
+	return in, nil
+}
+
+func (f *fakeStore) lookupOperatingUnit(id string) (*store.OperatingUnit, error) {
+	f.ouCalls++
+	if f.err != nil {
+		return nil, f.err
+	}
+	for i := range f.ous {
+		if f.ous[i].ID == id {
+			return &f.ous[i], nil
+		}
+	}
+	return nil, httpx.NewProblem(http.StatusNotFound, store.CodeOUNotFound, "operating unit not found")
+}
+
+func (f *fakeStore) GetOperatingUnit(_ context.Context, id string) (store.OperatingUnit, error) {
+	u, err := f.lookupOperatingUnit(id)
+	if err != nil {
+		return store.OperatingUnit{}, err
+	}
+	return *u, nil
+}
+
+func (f *fakeStore) ListOperatingUnits(_ context.Context, _ store.OperatingUnitFilter, after store.OperatingUnitKey, limit int) (store.OperatingUnitPage, error) {
+	if f.err != nil {
+		return store.OperatingUnitPage{}, f.err
+	}
+	page := store.OperatingUnitPage{Items: []store.OperatingUnit{}}
+	sorted := slices.Clone(f.ous)
+	slices.SortFunc(sorted, func(a, b store.OperatingUnit) int { return strings.Compare(a.Type+"/"+a.Code, b.Type+"/"+b.Code) })
+	for _, u := range sorted {
+		if u.Type+"/"+u.Code > after.Type+"/"+after.Code {
+			page.Items = append(page.Items, u)
+		}
+	}
+	if len(page.Items) > limit {
+		page.Items = page.Items[:limit]
+		page.Next = &store.OperatingUnitKey{Type: page.Items[limit-1].Type, Code: page.Items[limit-1].Code}
+	}
+	return page, nil
+}
+
+func (f *fakeStore) UpdateOperatingUnit(_ context.Context, id string, version int, in store.OperatingUnitPatch) (store.OperatingUnit, error) {
+	u, err := f.lookupOperatingUnit(id)
+	if err != nil {
+		return store.OperatingUnit{}, err
+	}
+	if u.Version != version {
+		return store.OperatingUnit{}, httpx.NewProblem(http.StatusConflict, store.CodeVersionConflict, "current version is 1")
+	}
+	if in.Name != nil && *in.Name != u.Name {
+		u.Name = *in.Name
+		u.Version++
+	}
+	return *u, nil
 }
 
 func (f *fakeStore) Ping(context.Context) error { return f.pingErr }

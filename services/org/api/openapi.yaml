@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: org
-  version: 0.3.0
-  description: Organization service. Covers legal entities, unit-of-measure conversion, and the platform-owned reference sets (countries, currencies, regions, languages) with tenant-level deactivation.
+  version: 0.4.0
+  description: Organization service. Covers legal entities, operating units, unit-of-measure conversion, and the platform-owned reference sets (countries, currencies, regions, languages) with tenant-level deactivation.
 servers:
   - url: https://app.local.passage.dev
 paths:
@@ -72,6 +72,58 @@ paths:
           content:
             application/json:
               schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/LegalEntityName' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/operating-units:
+    post:
+      operationId: createOperatingUnit
+      x-passage-duty: org.operating-unit.write
+      parameters:
+        - { name: Idempotency-Key, in: header, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateOperatingUnit' } } }
+      responses:
+        '201':
+          description: Operating unit created, or the original unit on an Idempotency-Key replay. 400 COM-0001 for a field error. 409 ORG-OU-CODE-DUPLICATE when the code exists for the type. 422 ORG-OU-LEGAL-ENTITY-INVALID when the default legal entity is unknown, inactive or outside the caller's scope. 422 idempotency_key_reuse when the key was used with a different body.
+          content: { application/json: { schema: { $ref: '#/components/schemas/OperatingUnit' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listOperatingUnits
+      x-passage-duty: org.read
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: type, in: query, schema: { type: string, enum: [department, cost_center, business_unit, value_stream] } }
+        - { name: defaultLegalEntityId, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [active, inactive] } }
+      responses:
+        '200':
+          description: One page of the tenant's operating units, ordered by type then code; legal-entity-scoped callers see every unit. Pass nextCursor as cursor for the next page. A bad filter or cursor is 400 COM-0001.
+          content: { application/json: { schema: { $ref: '#/components/schemas/OperatingUnitList' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/operating-units/{id}:
+    get:
+      operationId: getOperatingUnit
+      x-passage-duty: org.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: One operating unit. A malformed id and an unknown id are both 404 ORG-OU-NOT-FOUND.
+          content: { application/json: { schema: { $ref: '#/components/schemas/OperatingUnit' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    patch:
+      operationId: updateOperatingUnit
+      x-passage-duty: org.operating-unit.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/UpdateOperatingUnit' } } }
+      responses:
+        '200':
+          description: The operating unit. A stale version is 409 ORG-VERSION-CONFLICT. A request that changes no value returns the stored unit with the same version and emits no event. An empty defaultLegalEntityId or managerPartyId clears it. 400 COM-0001 for a field error or managerPartyId on a unit that is not a cost_center. 404 ORG-OU-NOT-FOUND. 422 ORG-OU-LEGAL-ENTITY-INVALID for an unknown, inactive or out-of-scope default legal entity.
+          content: { application/json: { schema: { $ref: '#/components/schemas/OperatingUnit' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/org/countries:
     get:
@@ -268,6 +320,24 @@ components:
       type: object
       required: [name, validFrom]
       properties: { name: { type: string }, validFrom: { type: string, format: date-time }, validTo: { type: string, format: date-time } }
+    CreateOperatingUnit:
+      type: object
+      additionalProperties: false
+      required: [type, code, name]
+      properties: { type: { type: string, enum: [department, cost_center, business_unit, value_stream] }, code: { type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{1,19}$', description: Upper-cased on save; unique within the tenant and type }, name: { type: string, minLength: 1, maxLength: 120 }, defaultLegalEntityId: { type: string, format: uuid }, managerPartyId: { type: string, format: uuid, description: Allowed for cost_center only } }
+    OperatingUnit:
+      type: object
+      required: [id, type, code, name, status, version, createdAt, updatedAt]
+      properties: { id: { type: string, format: uuid }, type: { type: string, enum: [department, cost_center, business_unit, value_stream] }, code: { type: string }, name: { type: string }, defaultLegalEntityId: { type: string, format: uuid }, managerPartyId: { type: string, format: uuid }, status: { type: string, enum: [active, inactive] }, version: { type: integer }, createdAt: { type: string, format: date-time }, updatedAt: { type: string, format: date-time } }
+    UpdateOperatingUnit:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties: { version: { type: integer, minimum: 1 }, name: { type: string, minLength: 1, maxLength: 120 }, status: { type: string, enum: [active, inactive] }, defaultLegalEntityId: { type: string, description: A UUID, or an empty string to clear }, managerPartyId: { type: string, description: A UUID for a cost_center, or an empty string to clear } }
+    OperatingUnitList:
+      type: object
+      required: [items]
+      properties: { items: { type: array, items: { $ref: '#/components/schemas/OperatingUnit' } }, nextCursor: { type: string } }
     ReferenceStatusChange:
       type: object
       additionalProperties: false

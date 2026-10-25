@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: org
-  version: 0.1.0
+  version: 0.2.0
   description: CloudEvents 1.0 envelope from platform/go/events; payloads below are the data member.
 channels:
   passage.org.legalentity:
@@ -16,6 +16,8 @@ channels:
     messages:
       created:
         $ref: '#/components/messages/operatingUnitCreated'
+      updated:
+        $ref: '#/components/messages/operatingUnitUpdated'
   passage.org.site:
     address: passage.org.site
     messages:
@@ -49,6 +51,10 @@ operations:
     action: send
     channel: { $ref: '#/channels/passage.org.operatingunit' }
     messages: [{ $ref: '#/channels/passage.org.operatingunit/messages/created' }]
+  onOperatingUnitUpdated:
+    action: send
+    channel: { $ref: '#/channels/passage.org.operatingunit' }
+    messages: [{ $ref: '#/channels/passage.org.operatingunit/messages/updated' }]
   onSiteCreated:
     action: send
     channel: { $ref: '#/channels/passage.org.site' }
@@ -104,6 +110,17 @@ components:
           code: { type: string }
           name: { type: string }
       x-passage-type: dev.passage.org.operatingunit.created.v1
+    operatingUnitUpdated:
+      name: updated
+      title: Operating unit updated
+      payload:
+        type: object
+        required: [id, changed_fields, version]
+        properties:
+          id: { type: string, format: uuid }
+          changed_fields: { type: array, items: { type: string } }
+          version: { type: integer }
+      x-passage-type: dev.passage.org.operatingunit.updated.v1
     siteCreated:
       name: created
       title: Site created
