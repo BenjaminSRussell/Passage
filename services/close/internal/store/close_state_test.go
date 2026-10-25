@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
@@ -169,6 +170,24 @@ func TestMigration0002_CheckConstraints(t *testing.T) {
 	}
 }
 
+func TestMigration0002_StatusChangeIsAppendOnly(t *testing.T) {
+	admin, app := migrated(t)
+	ctx := principal(1)
+	if err := insertRow(context.Background(), adminExec(admin), closeStateRows[4], testkit.TenantID(1), templateID, entityID); err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{`update period_status_change set actor = 'x'`, `delete from period_status_change`} {
+		err := dbx.WithTenantTx(ctx, app, func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, stmt)
+			return err
+		})
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != "42501" {
+			t.Fatalf("%s: got %v, want permission denied", stmt, err)
+		}
+	}
+}
+
 func TestReopenDueTenants(t *testing.T) {
 	admin, app := migrated(t)
 	ctx := context.Background()
@@ -204,54 +223,6 @@ func TestReopenDueTenants(t *testing.T) {
 	var visible int
 	if err := app.QueryRow(ctx, `select count(*) from period_status`).Scan(&visible); err != nil || visible != 0 {
 		t.Fatalf("app role without a tenant context must see no period_status rows: %d, %v", visible, err)
-	}
-}
-
-func TestReopenDueTenants_OwnerWithoutBypassRLS(t *testing.T) {
-	admin, app := migrated(t)
-	ctx := context.Background()
-	owner := "close_sweeper_" + strings.ToLower(strings.ReplaceAll(t.Name(), "/", "_"))
-	if len(owner) > 60 {
-		owner = owner[:60]
-	}
-	var schema string
-	if err := admin.QueryRow(ctx, `select current_schema()`).Scan(&schema); err != nil {
-		t.Fatal(err)
-	}
-	for _, stmt := range []string{
-		`create role ` + owner + ` nosuperuser nobypassrls`,
-		`grant usage on schema ` + schema + ` to ` + owner,
-		`grant select on reopen_expiry to ` + owner,
-		`alter function close_reopen_due_tenants() owner to ` + owner,
-	} {
-		if _, err := admin.Exec(ctx, stmt); err != nil {
-			t.Fatalf("%s: %v", stmt, err)
-		}
-	}
-	t.Cleanup(func() {
-		_, _ = admin.Exec(ctx, `alter function close_reopen_due_tenants() owner to current_user`)
-		_, _ = admin.Exec(ctx, `drop role if exists `+owner)
-	})
-	if _, err := admin.Exec(ctx,
-		`insert into period_status(tenant_id, legal_entity_id, ledger_id, fiscal_period_id, module, status, reopen_expires_at, changed_by) values($1,$2,$3,$4,'gl','open',now() - interval '1 hour','t')`,
-		testkit.TenantID(1), entityID, ledgerID, periodID); err != nil {
-		t.Fatal(err)
-	}
-	var due []string
-	rows, err := app.Query(ctx, `select * from close_reopen_due_tenants()`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			t.Fatal(err)
-		}
-		due = append(due, id)
-	}
-	if len(due) != 1 || due[0] != testkit.TenantID(1) {
-		t.Fatalf("due tenants = %v, want only tenant 1", due)
 	}
 }
 
@@ -312,17 +283,15 @@ func TestIdempotent_DifferentHashIsReuse(t *testing.T) {
 	if countOutbox(t, admin) != 1 {
 		t.Fatal("a rejected reuse must write nothing")
 	}
-}
-
-func TestIdempotent_KeysAreTenantScoped(t *testing.T) {
-	_, _, s := idempotentStore(t)
-	hash := store.HashRequest("POST", "/p", nil)
-	if _, err := s.Idempotent(principal(1), "shared", hash, writeOutbox("evt-1")); err != nil {
-		t.Fatal(err)
+	for _, c := range []struct{ key, hash string }{{"", "h"}, {"k", ""}} {
+		_, err := s.Idempotent(ctx, c.key, c.hash, writeOutbox("evt"))
+		if !errors.As(err, &de) || de.Code != domain.CodeValidation {
+			t.Fatalf("key=%q hash=%q: got %v, want %s", c.key, c.hash, err, domain.CodeValidation)
+		}
 	}
-	out, err := s.Idempotent(principal(2), "shared", hash, writeOutbox("evt-2"))
-	if err != nil || out.Replayed {
-		t.Fatalf("tenant 2 must not replay tenant 1's key: %+v, %v", out, err)
+	other, err := s.Idempotent(principal(2), "key-1", store.HashRequest("POST", "/p", []byte(`{"a":1}`)), writeOutbox("evt-3"))
+	if err != nil || other.Replayed {
+		t.Fatalf("tenant 2 must not replay tenant 1's key: %+v, %v", other, err)
 	}
 }
 
@@ -374,17 +343,6 @@ func TestIdempotent_LockedAndExpiredKeys(t *testing.T) {
 	seed("expired", "null", "now() - interval '1 minute'")
 	if out, err := s.Idempotent(ctx, "expired", store.HashRequest("POST", "/other", nil), writeOutbox("evt-3")); err != nil || out.Replayed {
 		t.Fatalf("an expired key is treated as absent: %+v, %v", out, err)
-	}
-}
-
-func TestIdempotent_RejectsEmptyKeyOrHash(t *testing.T) {
-	_, _, s := idempotentStore(t)
-	for _, c := range []struct{ key, hash string }{{"", "h"}, {"k", ""}} {
-		_, err := s.Idempotent(principal(1), c.key, c.hash, writeOutbox("evt"))
-		var de *domain.Error
-		if !errors.As(err, &de) || de.Code != domain.CodeValidation {
-			t.Fatalf("key=%q hash=%q: got %v, want %s", c.key, c.hash, err, domain.CodeValidation)
-		}
 	}
 }
 

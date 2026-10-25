@@ -184,11 +184,11 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON
   period_status,
   outbox,
   idempotency_keys,
-  period_status_change,
   period_reopen_request,
   close_template,
   close_template_task,
   close_run,
   close_task
 TO passage_app;
+GRANT SELECT, INSERT ON period_status_change TO passage_app;
 GRANT EXECUTE ON FUNCTION close_reopen_due_tenants() TO passage_app;
