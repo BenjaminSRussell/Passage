@@ -26,7 +26,7 @@ Calendars are tenant-level and persisted in `fiscal_calendar` and `fiscal_period
 
 Hierarchies are tenant-level configuration, scoped by tenant only. `POST /v1/org/hierarchy-types` creates a type with its purposes. `POST /v1/org/hierarchy-types/{id}/versions` opens a draft version; a type has at most one open draft (`ORG-HIER-DRAFT-EXISTS`), and the draft starts as a copy of the type's latest published version, or empty when none exists. `PUT /v1/org/hierarchy-versions/{id}/nodes` replaces the draft's whole node set under the optimistic `version` lock; published versions are immutable.
 
-Every node set is checked structurally before it is stored: at most 50,000 nodes, each org unit once, known parents, no cycle, exactly one root and at most 15 levels. Publish, overlap checks and the as-of read are a later slice.
+Every node set is checked structurally before it is stored: at most 50,000 nodes, each org unit once, known parents, no cycle, exactly one root and at most 15 levels. `POST /v1/org/hierarchy-versions/{id}:publish` (body `version`, `effectiveFrom`, optional `reason`; `Idempotency-Key`) publishes a draft. The version must come after the type's latest published version (`ORG-HIER-OVERLAP`), which is superseded with its range closed at `effectiveFrom`; the stored node set is re-validated, and the closure table (one row per ancestor-descendant pair, no self pairs) is written in the same transaction as the `dev.passage.org.hierarchyversion.activated.v1` event. A publish with `effectiveFrom` before today (UTC) is backdated: it needs the `org.hierarchy.backdate` duty, a type with `backdateAllowed` and a `reason` of 10 to 500 characters, or it is refused with `ORG-HIER-BACKDATE-DUTY` before any state changes. `GET /v1/org/hierarchy-types/{id}/as-of?date=&node=` returns the node's parent, ancestors and descendants in the non-draft version in force on that date; superseded versions answer for dates inside their closed range.
 
 ## API
 
@@ -51,6 +51,8 @@ Every node set is checked structurally before it is stored: at most 50,000 nodes
 | `GET /v1/org/addresses` (`ownerType`, `ownerId` required; `purpose`, `limit`, `cursor`; the owner's current addresses as `{items, nextCursor}`) | `org.read` |
 | `GET /v1/org/operating-units` (`limit`, `cursor`; filters `type`, `defaultLegalEntityId`, `status`; returns `{items, nextCursor}`) and `GET /v1/org/operating-units/{id}` | `org.read` |
 | `POST /v1/org/hierarchy-types` (body `code`, `name`, `purposes`; optional `backdateAllowed`, `Idempotency-Key`), `POST /v1/org/hierarchy-types/{id}/versions` (`Idempotency-Key`, no body) and `PUT /v1/org/hierarchy-versions/{id}/nodes` (body `version`, `nodes`) | `org.hierarchy.write` |
+| `POST /v1/org/hierarchy-versions/{id}:publish` (body `version`, `effectiveFrom`; optional `reason`, `Idempotency-Key`; not for legal-entity-scoped callers; a backdated `effectiveFrom` also needs `org.hierarchy.backdate`) | `org.hierarchy.publish` |
+| `GET /v1/org/hierarchy-types/{id}/as-of?date=&node=` | `org.read` |
 | `GET /v1/org/{countries,currencies,regions,languages}` (`status` active or inactive; `country` for regions; returns `{items}`) and `GET /v1/org/{countries,currencies,regions,languages}/{code}` | `org.read` |
 | `PATCH /v1/org/{countries,currencies,regions,languages}/{code}` (body `{"status":"active"\|"inactive"}`; not for legal-entity-scoped callers) | `org.reference.write` |
 | `GET /v1/org/uom/convert?from=&to=&qty=` | any authenticated principal |
@@ -69,7 +71,9 @@ Contract: `api/openapi.yaml`. Paths follow the architecture spine (`/v1/<context
 | ORG-CAL-LOCKED | 409 | `force` regeneration of a fiscal year the ledger reports postings for |
 | ORG-CAL-PATTERN, ORG-CAL-GAP, ORG-CAL-OVERLAP | 422 | unusable calendar spec or custom ranges that do not tile the year |
 | ORG-HIER-TYPE-NOT-FOUND, ORG-HIER-VERSION-NOT-FOUND | 404 | hierarchy type or version unknown, malformed id or another tenant's |
-| ORG-HIER-TYPE-CODE-DUPLICATE, ORG-HIER-DRAFT-EXISTS, ORG-HIER-VERSION-IMMUTABLE | 409 | type code already used; the type has an open draft; the version is not a draft |
+| ORG-HIER-TYPE-CODE-DUPLICATE, ORG-HIER-DRAFT-EXISTS, ORG-HIER-VERSION-IMMUTABLE, ORG-HIER-OVERLAP | 409 | type code already used; the type has an open draft; the version is not a draft; the effective range does not start after the latest published version |
+| ORG-HIER-BACKDATE-DUTY | 403 | backdated publish without the backdate duty, on a type that forbids it or without a 10 to 500 character reason |
+| ORG-HIER-NO-VERSION, ORG-HIER-NODE-ABSENT | 404 | no non-draft version in force on the as-of date; the node is not in that version |
 | ORG-HIER-SIZE, ORG-HIER-DUPLICATE-NODE, ORG-HIER-PARENT-UNKNOWN, ORG-HIER-CYCLE, ORG-HIER-MULTI-ROOT, ORG-HIER-DEPTH, ORG-HIER-NODE-UNKNOWN | 422 | node set fails structural validation, or an org unit is neither a legal entity nor an operating unit |
 | COM-0503 | 503 | the ledger posting check failed, so `force` is refused |
 | ORG-LE-CODE-DUPLICATE | 409 | legal-entity code already used in the tenant |

@@ -11,6 +11,11 @@ const (
 	CodeHierarchySize          = "ORG-HIER-SIZE"
 )
 
+type ClosureRow struct {
+	AncestorID, DescendantID string
+	Depth                    int
+}
+
 type TreeLimits struct{ MaxDepth, MaxNodes int }
 
 var DefaultTreeLimits = TreeLimits{MaxDepth: 15, MaxNodes: 50000}
@@ -106,4 +111,19 @@ func depths(parent []int) []int {
 		}
 	}
 	return depth
+}
+
+func Closure(nodes []Node) []ClosureRow {
+	index := make(map[string]int, len(nodes))
+	for i, n := range nodes {
+		index[n.ID] = i
+	}
+	var rows []ClosureRow
+	for _, n := range nodes {
+		for depth, parentID := 1, n.ParentID; parentID != ""; depth++ {
+			rows = append(rows, ClosureRow{AncestorID: parentID, DescendantID: n.ID, Depth: depth})
+			parentID = nodes[index[parentID]].ParentID
+		}
+	}
+	return rows
 }

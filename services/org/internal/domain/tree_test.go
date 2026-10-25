@@ -3,6 +3,7 @@ package domain_test
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 
 	"pgregory.net/rapid"
@@ -86,6 +87,84 @@ func TestValidateTreeRandomTrees(t *testing.T) {
 		var de *domain.Error
 		if err := domain.ValidateTree(nodes, limits); !errors.As(err, &de) || de.Code != domain.CodeHierarchyCycle {
 			t.Fatalf("re-parenting %s under its descendant %s: got %v; want %s", nodes[ancestor].ID, nodes[descendant].ID, err, domain.CodeHierarchyCycle)
+		}
+	})
+}
+
+func TestClosure(t *testing.T) {
+	var chainRows []domain.ClosureRow
+	for i := 1; i < 15; i++ {
+		for d := 1; d <= i; d++ {
+			chainRows = append(chainRows, domain.ClosureRow{AncestorID: fmt.Sprintf("n%d", i-d), DescendantID: fmt.Sprintf("n%d", i), Depth: d})
+		}
+	}
+	star := []domain.Node{{ID: "r"}}
+	var starRows []domain.ClosureRow
+	for i := range 5 {
+		id := fmt.Sprintf("c%d", i)
+		star = append(star, domain.Node{ID: id, ParentID: "r"})
+		starRows = append(starRows, domain.ClosureRow{AncestorID: "r", DescendantID: id, Depth: 1})
+	}
+	mixed := []domain.Node{{ID: "a", ParentID: "r"}, {ID: "r"}, {ID: "b", ParentID: "a"}, {ID: "c", ParentID: "b"}, {ID: "d", ParentID: "r"}}
+	tests := []struct {
+		name  string
+		nodes []domain.Node
+		want  []domain.ClosureRow
+		sum   int
+	}{
+		{"empty", nil, nil, 0},
+		{"single root", []domain.Node{{ID: "r"}}, nil, 0},
+		{"chain of 15", chain(15), chainRows, 105},
+		{"wide star", star, starRows, 5},
+		{"mixed tree in shuffled input order", mixed, []domain.ClosureRow{
+			{"r", "a", 1},
+			{"a", "b", 1}, {"r", "b", 2},
+			{"b", "c", 1}, {"a", "c", 2}, {"r", "c", 3},
+			{"r", "d", 1},
+		}, 7},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := domain.Closure(tc.nodes)
+			if len(got) != tc.sum || !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("Closure = %v (%d rows); want %v (%d rows)", got, len(got), tc.want, tc.sum)
+			}
+		})
+	}
+}
+
+func TestClosureRandomTrees(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		size := rapid.IntRange(1, 200).Draw(t, "size")
+		nodes := make([]domain.Node, size)
+		parent := make([]int, size)
+		depth := make([]int, size)
+		sum := 0
+		for i := range nodes {
+			nodes[i].ID = fmt.Sprintf("n%d", i)
+			if i > 0 {
+				parent[i] = rapid.IntRange(0, i-1).Draw(t, "parent")
+				nodes[i].ParentID = nodes[parent[i]].ID
+				depth[i] = depth[parent[i]] + 1
+			}
+			sum += depth[i]
+		}
+		rows := domain.Closure(nodes)
+		if len(rows) != sum {
+			t.Fatalf("%d rows; want the sum of depths %d", len(rows), sum)
+		}
+		byID := make(map[string]int, size)
+		for i, n := range nodes {
+			byID[n.ID] = i
+		}
+		for _, row := range rows {
+			at := byID[row.DescendantID]
+			for range row.Depth {
+				at = parent[at]
+			}
+			if row.Depth < 1 || nodes[at].ID != row.AncestorID {
+				t.Fatalf("row %+v: walking %d parents from %s reaches %s", row, row.Depth, row.DescendantID, nodes[at].ID)
+			}
 		}
 	})
 }
