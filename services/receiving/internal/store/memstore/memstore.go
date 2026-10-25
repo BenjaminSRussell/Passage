@@ -375,6 +375,15 @@ func (s *Store) CompleteKey(ctx context.Context, key string, status int, body []
 	})
 }
 
+func (s *Store) ExpireKey(ctx context.Context, key string) error {
+	return s.with(ctx, func(t *tenantData) error {
+		if c := t.keys[key]; c != nil {
+			c.expiresAt = time.Now().Add(-time.Hour)
+		}
+		return nil
+	})
+}
+
 func (s *Store) ReleaseKey(ctx context.Context, key string) error {
 	return s.with(ctx, func(t *tenantData) error {
 		delete(t.keys, key)
