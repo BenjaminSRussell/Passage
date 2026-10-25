@@ -1,0 +1,11 @@
+apiVersion: v2
+name: migration
+description: Passage data migration framework for AX and SAP extract, map, load and reconcile
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+dependencies:
+  - name: connectors
+    version: 0.1.0
+    repository: file://charts/connectors
+    condition: connectors.enabled

@@ -1,0 +1,6 @@
+ax:
+  enabled: false
+  credentialsSecret: ""
+sap:
+  enabled: false
+  credentialsSecret: ""
