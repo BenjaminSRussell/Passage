@@ -22,6 +22,12 @@ Countries, currencies, regions and languages are platform-owned rows under the `
 
 Calendars are tenant-level and persisted in `fiscal_calendar` and `fiscal_period`. `POST /v1/org/fiscal-calendars` (duty `org.fiscal-calendar.write`, `Idempotency-Key`) creates one with the defaults `startMonth` 1, `weekStart` `monday`, `openingClosing` true and `specialPeriods` 0; `GET /v1/org/fiscal-calendars/{id}` reads it. `POST /v1/org/fiscal-calendars/{id}:generate` with `{fiscalYear, force?, periods?}` writes the year's periods and emits `fiscalcalendar.generated` (201, `generated` true). Calling it again for the same calendar and year is a replay: 200, `generated` false, the stored periods, no write and no event. `force` replaces the rows and emits a second event, but first asks the `PostingChecker`: postings answer 409 `ORG-CAL-LOCKED`, a checker failure answers 503 `COM-0503`. Until the ledger exists the checker reports no postings. `periods` is required for a `custom` calendar and rejected for any other pattern (`ORG-CAL-PATTERN`). `GET /v1/org/fiscal-calendars/{id}/periods?fiscalYear=` returns the periods in order 0, operating, adjustment, 99.
 
+## Hierarchies
+
+Hierarchies are tenant-level configuration, scoped by tenant only. `POST /v1/org/hierarchy-types` creates a type with its purposes. `POST /v1/org/hierarchy-types/{id}/versions` opens a draft version; a type has at most one open draft (`ORG-HIER-DRAFT-EXISTS`), and the draft starts as a copy of the type's latest published version, or empty when none exists. `PUT /v1/org/hierarchy-versions/{id}/nodes` replaces the draft's whole node set under the optimistic `version` lock; published versions are immutable.
+
+Every node set is checked structurally before it is stored: at most 50,000 nodes, each org unit once, known parents, no cycle, exactly one root and at most 15 levels. Publish, overlap checks and the as-of read are a later slice.
+
 ## API
 
 | Operation | Duty |
