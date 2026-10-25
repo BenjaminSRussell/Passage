@@ -61,7 +61,7 @@ func TestValidateTree(t *testing.T) {
 	}
 }
 
-func TestValidateTreeRandomTreesAreValid(t *testing.T) {
+func TestValidateTreeRandomTrees(t *testing.T) {
 	limits := domain.TreeLimits{MaxDepth: 300, MaxNodes: 300}
 	rapid.Check(t, func(t *rapid.T) {
 		size := rapid.IntRange(3, 300).Draw(t, "size")
@@ -76,6 +76,16 @@ func TestValidateTreeRandomTreesAreValid(t *testing.T) {
 		}
 		if err := domain.ValidateTree(nodes, limits); err != nil {
 			t.Fatalf("random tree rejected: %v", err)
+		}
+		descendant := rapid.IntRange(0, size-1).Draw(t, "descendant")
+		ancestor := descendant
+		for hops := rapid.IntRange(0, size).Draw(t, "hops"); hops > 0 && ancestor != 0; hops-- {
+			ancestor = parent[ancestor]
+		}
+		nodes[ancestor].ParentID = nodes[descendant].ID
+		var de *domain.Error
+		if err := domain.ValidateTree(nodes, limits); !errors.As(err, &de) || de.Code != domain.CodeHierarchyCycle {
+			t.Fatalf("re-parenting %s under its descendant %s: got %v; want %s", nodes[ancestor].ID, nodes[descendant].ID, err, domain.CodeHierarchyCycle)
 		}
 	})
 }

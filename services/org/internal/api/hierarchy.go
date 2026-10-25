@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"slices"
 	"strings"
@@ -160,8 +161,8 @@ func (a *API) replaceHierarchyNodes(w http.ResponseWriter, r *http.Request, id s
 			nodes[i].ParentOrgUnitID = &parent
 		}
 		if n.SortOrder != nil {
-			if nodes[i].SortOrder = *n.SortOrder; nodes[i].SortOrder < 0 {
-				reject(key+"sortOrder", "must be 0 or greater")
+			if nodes[i].SortOrder = *n.SortOrder; nodes[i].SortOrder < 0 || nodes[i].SortOrder > math.MaxInt32 {
+				reject(key+"sortOrder", "must be between 0 and 2147483647")
 			}
 		}
 	}

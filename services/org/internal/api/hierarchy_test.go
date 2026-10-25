@@ -103,6 +103,7 @@ func TestHierarchyReplaceNodes(t *testing.T) {
 		{"non-uuid version id", "/v1/org/hierarchy-versions/nope/nodes", valid, hierarchyDuties, nil, http.StatusNotFound, "ORG-HIER-VERSION-NOT-FOUND"},
 		{"non-uuid org unit", nodesPath, `{"version":1,"nodes":[{"orgUnitId":"x"}]}`, hierarchyDuties, nil, http.StatusBadRequest, `"nodes[0].orgUnitId"`},
 		{"non-uuid parent", nodesPath, fmt.Sprintf(`{"version":1,"nodes":[{"orgUnitId":%q,"parentOrgUnitId":"x"}]}`, unitA), hierarchyDuties, nil, http.StatusBadRequest, `"nodes[0].parentOrgUnitId"`},
+		{"oversized sort order", nodesPath, fmt.Sprintf(`{"version":1,"nodes":[{"orgUnitId":%q,"sortOrder":2147483648}]}`, unitA), hierarchyDuties, nil, http.StatusBadRequest, `"nodes[0].sortOrder"`},
 		{"negative sort order", nodesPath, fmt.Sprintf(`{"version":1,"nodes":[{"orgUnitId":%q,"sortOrder":-1}]}`, unitA), hierarchyDuties, nil, http.StatusBadRequest, `"nodes[0].sortOrder"`},
 		{"missing version", nodesPath, `{"nodes":[]}`, hierarchyDuties, nil, http.StatusBadRequest, `"version"`},
 		{"string for version", nodesPath, `{"version":"1","nodes":[]}`, hierarchyDuties, nil, http.StatusBadRequest, "COM-0001"},
