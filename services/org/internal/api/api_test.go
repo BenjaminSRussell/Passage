@@ -54,6 +54,11 @@ type fakeStore struct {
 	publishCalls        int
 	publishBackdated    bool
 	publishedBy         string
+	draftEditor         string
+	replaceEditor       string
+	hierarchyVersions   []store.HierarchyVersionSummary
+	versionFilter       store.HierarchyVersionFilter
+	versionAfter        int
 }
 
 func (f *fakeStore) reference(kind store.ReferenceKind, code string) (store.ReferenceItem, bool) {
@@ -941,14 +946,16 @@ func (f *fakeStore) CreateHierarchyType(_ context.Context, in store.HierarchyTyp
 	return in, nil
 }
 
-func (f *fakeStore) CreateHierarchyDraft(_ context.Context, typeID, _ string) (store.HierarchyVersion, error) {
+func (f *fakeStore) CreateHierarchyDraft(_ context.Context, typeID, _, editedBy string) (store.HierarchyVersion, error) {
+	f.draftEditor = editedBy
 	if f.err != nil {
 		return store.HierarchyVersion{}, f.err
 	}
 	return store.HierarchyVersion{ID: hierarchyVersionID, HierarchyTypeID: typeID, VersionNo: 1, Status: "draft", Version: 1, Nodes: []store.HierarchyNode{}}, nil
 }
 
-func (f *fakeStore) ReplaceHierarchyNodes(_ context.Context, id string, version int, nodes []store.HierarchyNode) (store.HierarchyVersion, error) {
+func (f *fakeStore) ReplaceHierarchyNodes(_ context.Context, id string, version int, nodes []store.HierarchyNode, editedBy string) (store.HierarchyVersion, error) {
+	f.replaceEditor = editedBy
 	if f.err != nil {
 		return store.HierarchyVersion{}, f.err
 	}
@@ -988,6 +995,19 @@ func (f *fakeStore) ListHierarchyTypes(_ context.Context, filter store.Hierarchy
 	if len(page.Items) > limit {
 		page.Items = page.Items[:limit]
 		page.NextCode = page.Items[limit-1].Code
+	}
+	return page, nil
+}
+
+func (f *fakeStore) ListHierarchyVersions(_ context.Context, _ string, filter store.HierarchyVersionFilter, after, limit int) (store.HierarchyVersionPage, error) {
+	f.versionFilter, f.versionAfter = filter, after
+	if f.err != nil {
+		return store.HierarchyVersionPage{}, f.err
+	}
+	page := store.HierarchyVersionPage{Items: append([]store.HierarchyVersionSummary{}, f.hierarchyVersions...)}
+	if len(page.Items) > limit {
+		page.Items = page.Items[:limit]
+		page.NextVersionNo = page.Items[limit-1].VersionNo
 	}
 	return page, nil
 }

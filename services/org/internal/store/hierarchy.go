@@ -30,12 +30,13 @@ const (
 	CodeHierarchyNodeUnknown      = "ORG-HIER-NODE-UNKNOWN"
 	CodeHierarchyOverlap          = "ORG-HIER-OVERLAP"
 	CodeHierarchyBackdateDuty     = "ORG-HIER-BACKDATE-DUTY"
+	CodeHierarchyMakerChecker     = "ORG-HIER-MAKER-CHECKER"
 	CodeHierarchyNoVersion        = "ORG-HIER-NO-VERSION"
 	CodeHierarchyNodeAbsent       = "ORG-HIER-NODE-ABSENT"
 	minPublishReason              = 10
 	maxPublishReason              = 500
 	hierarchyTypeColumns          = "id, code, name, purposes, backdate_allowed, status, version, created_at, updated_at"
-	hierarchyVersionColumns       = "id, hierarchy_type_id, version_no, status, effective_from, effective_to, node_count, copied_from_version_id, version, created_at, updated_at, published_at, published_by, publish_reason"
+	hierarchyVersionColumns       = "id, hierarchy_type_id, version_no, status, effective_from, effective_to, node_count, copied_from_version_id, version, created_at, updated_at, published_at, published_by, publish_reason, edited_by"
 	hierarchyOneDraftIndex        = "hierarchy_version_one_draft"
 	kindLegalEntity               = "legal_entity"
 	kindOperatingUnit             = "operating_unit"
@@ -75,7 +76,33 @@ type HierarchyVersion struct {
 	PublishedAt         *time.Time      `json:"publishedAt"`
 	PublishedBy         *string         `json:"publishedBy"`
 	PublishReason       *string         `json:"publishReason"`
+	EditedBy            *string         `json:"editedBy"`
 	Nodes               []HierarchyNode `json:"nodes"`
+}
+
+type HierarchyVersionSummary struct {
+	ID                  string     `json:"id"`
+	HierarchyTypeID     string     `json:"hierarchyTypeId"`
+	VersionNo           int        `json:"versionNo"`
+	Status              string     `json:"status"`
+	EffectiveFrom       *string    `json:"effectiveFrom"`
+	EffectiveTo         *string    `json:"effectiveTo"`
+	NodeCount           int        `json:"nodeCount"`
+	CopiedFromVersionID *string    `json:"copiedFromVersionId"`
+	Version             int        `json:"version"`
+	CreatedAt           time.Time  `json:"createdAt"`
+	UpdatedAt           time.Time  `json:"updatedAt"`
+	PublishedAt         *time.Time `json:"publishedAt"`
+	PublishedBy         *string    `json:"publishedBy"`
+	PublishReason       *string    `json:"publishReason"`
+	EditedBy            *string    `json:"editedBy"`
+}
+
+type HierarchyVersionFilter struct{ Status string }
+
+type HierarchyVersionPage struct {
+	Items         []HierarchyVersionSummary
+	NextVersionNo int `json:"-"`
 }
 
 func hierarchyTypeNotFound() error {
@@ -178,6 +205,40 @@ func (s *Postgres) ListHierarchyTypes(ctx context.Context, f HierarchyTypeFilter
 	return page, err
 }
 
+func (s *Postgres) ListHierarchyVersions(ctx context.Context, typeID string, f HierarchyVersionFilter, afterVersionNo, limit int) (HierarchyVersionPage, error) {
+	p, _ := tenant.FromContext(ctx)
+	page := HierarchyVersionPage{Items: []HierarchyVersionSummary{}}
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var found string
+		if err := tx.QueryRow(ctx, `select id from hierarchy_type where tenant_id = $1 and id = $2`, p.TenantID, typeID).Scan(&found); errors.Is(err, pgx.ErrNoRows) {
+			return hierarchyTypeNotFound()
+		} else if err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, `select `+hierarchyVersionColumns+` from hierarchy_version where tenant_id = $1 and hierarchy_type_id = $2
+			and ($3::text = '' or status = $3) and ($4::int = 0 or version_no < $4) order by version_no desc limit $5`, p.TenantID, typeID, f.Status, afterVersionNo, limit+1)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var v HierarchyVersionSummary
+			var from, to *time.Time
+			if err := rows.Scan(&v.ID, &v.HierarchyTypeID, &v.VersionNo, &v.Status, &from, &to, &v.NodeCount, &v.CopiedFromVersionID, &v.Version, &v.CreatedAt, &v.UpdatedAt, &v.PublishedAt, &v.PublishedBy, &v.PublishReason, &v.EditedBy); err != nil {
+				return err
+			}
+			v.EffectiveFrom, v.EffectiveTo = formatDate(from), formatDate(to)
+			page.Items = append(page.Items, v)
+		}
+		return rows.Err()
+	})
+	if len(page.Items) > limit {
+		page.Items = page.Items[:limit]
+		page.NextVersionNo = page.Items[limit-1].VersionNo
+	}
+	return page, err
+}
+
 func (s *Postgres) GetHierarchyVersion(ctx context.Context, id string) (HierarchyVersion, error) {
 	p, _ := tenant.FromContext(ctx)
 	var v HierarchyVersion
@@ -211,7 +272,7 @@ func loadHierarchyVersion(ctx context.Context, tx pgx.Tx, tenantID, id string, l
 	var v HierarchyVersion
 	var from, to *time.Time
 	err := tx.QueryRow(ctx, `select `+hierarchyVersionColumns+` from hierarchy_version where tenant_id = $1 and id = $2`+lock, tenantID, id).
-		Scan(&v.ID, &v.HierarchyTypeID, &v.VersionNo, &v.Status, &from, &to, &v.NodeCount, &v.CopiedFromVersionID, &v.Version, &v.CreatedAt, &v.UpdatedAt, &v.PublishedAt, &v.PublishedBy, &v.PublishReason)
+		Scan(&v.ID, &v.HierarchyTypeID, &v.VersionNo, &v.Status, &from, &to, &v.NodeCount, &v.CopiedFromVersionID, &v.Version, &v.CreatedAt, &v.UpdatedAt, &v.PublishedAt, &v.PublishedBy, &v.PublishReason, &v.EditedBy)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return v, hierarchyVersionNotFound()
 	}
@@ -270,7 +331,7 @@ func writeHierarchyNodes(ctx context.Context, tx pgx.Tx, tenantID, versionID str
 	return err
 }
 
-func (s *Postgres) CreateHierarchyDraft(ctx context.Context, typeID, idempotencyKey string) (HierarchyVersion, error) {
+func (s *Postgres) CreateHierarchyDraft(ctx context.Context, typeID, idempotencyKey, editedBy string) (HierarchyVersion, error) {
 	p, _ := tenant.FromContext(ctx)
 	var v HierarchyVersion
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
@@ -310,8 +371,8 @@ func (s *Postgres) CreateHierarchyDraft(ctx context.Context, typeID, idempotency
 			key = &idempotencyKey
 		}
 		versionID := ids.New()
-		if _, err := tx.Exec(ctx, `insert into hierarchy_version (tenant_id, id, hierarchy_type_id, version_no, copied_from_version_id, idempotency_key) values ($1, $2, $3, $4, $5, $6)`,
-			p.TenantID, versionID, typeID, versionNo, source, key); err != nil {
+		if _, err := tx.Exec(ctx, `insert into hierarchy_version (tenant_id, id, hierarchy_type_id, version_no, copied_from_version_id, idempotency_key, edited_by) values ($1, $2, $3, $4, $5, $6, $7)`,
+			p.TenantID, versionID, typeID, versionNo, source, key, editedBy); err != nil {
 			return err
 		}
 		var copied []HierarchyNode
@@ -372,7 +433,7 @@ func resolveOrgUnitKinds(ctx context.Context, tx pgx.Tx, tenantID string, nodes 
 	return nil
 }
 
-func (s *Postgres) ReplaceHierarchyNodes(ctx context.Context, id string, version int, nodes []HierarchyNode) (HierarchyVersion, error) {
+func (s *Postgres) ReplaceHierarchyNodes(ctx context.Context, id string, version int, nodes []HierarchyNode, editedBy string) (HierarchyVersion, error) {
 	p, _ := tenant.FromContext(ctx)
 	var v HierarchyVersion
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
@@ -405,7 +466,7 @@ func (s *Postgres) ReplaceHierarchyNodes(ctx context.Context, id string, version
 		if err := writeHierarchyNodes(ctx, tx, p.TenantID, id, nodes); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `update hierarchy_version set node_count = $3, version = version + 1, updated_at = now() where tenant_id = $1 and id = $2`, p.TenantID, id, len(nodes)); err != nil {
+		if _, err := tx.Exec(ctx, `update hierarchy_version set node_count = $3, edited_by = $4, version = version + 1, updated_at = now() where tenant_id = $1 and id = $2`, p.TenantID, id, len(nodes), editedBy); err != nil {
 			return err
 		}
 		v, err = loadHierarchyVersion(ctx, tx, p.TenantID, id, "")
@@ -476,6 +537,9 @@ func (s *Postgres) PublishHierarchyVersion(ctx context.Context, id string, versi
 		}
 		if current.Version != version {
 			return httpx.NewProblem(http.StatusConflict, CodeVersionConflict, fmt.Sprintf("current version is %d", current.Version))
+		}
+		if slices.Contains(purposes, "security") && current.EditedBy != nil && *current.EditedBy == publishedBy {
+			return httpx.NewProblem(http.StatusForbidden, CodeHierarchyMakerChecker, "A security-purpose hierarchy must be published by someone other than its last editor.")
 		}
 		if backdated {
 			if length := utf8.RuneCountInString(reason); !backdateAllowed || length < minPublishReason || length > maxPublishReason {

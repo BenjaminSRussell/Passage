@@ -396,3 +396,76 @@ func TestHierarchyDraftDelete(t *testing.T) {
 		})
 	}
 }
+
+func TestHierarchyVersionList(t *testing.T) {
+	scoped := []string{"X-Passage-Legal-Entity", testkit.TenantID(2)}
+	versionsPath := hierarchyTypesPath + "/" + hierarchyTypeID + "/versions"
+	seeded := []store.HierarchyVersionSummary{{VersionNo: 3}, {VersionNo: 2}, {VersionNo: 1}}
+	tests := []struct {
+		name       string
+		path       string
+		duties     string
+		headers    []string
+		withTenant bool
+		wantStatus int
+		wantBody   string
+	}{
+		{"list", versionsPath, "org.read", nil, true, http.StatusOK, `"versionNo":3`},
+		{"summary has no nodes key", versionsPath, "org.read", nil, true, http.StatusOK, `"editedBy":null}`},
+		{"scoped caller may read", versionsPath, "org.read", scoped, true, http.StatusOK, `"versionNo":1`},
+		{"pages by version number", versionsPath + "?limit=2", "org.read", nil, true, http.StatusOK, `"nextCursor":"Mg"`},
+		{"without duty", versionsPath, "org.hierarchy.write", nil, true, http.StatusForbidden, "AUTH-0003"},
+		{"without tenant", versionsPath, "", nil, false, http.StatusUnauthorized, "AUTH-0001"},
+		{"malformed type id", hierarchyTypesPath + "/nope/versions", "org.read", nil, true, http.StatusNotFound, "ORG-HIER-TYPE-NOT-FOUND"},
+		{"bad status", versionsPath + "?status=bogus", "org.read", nil, true, http.StatusBadRequest, `"status"`},
+		{"wrong-case status", versionsPath + "?status=Draft", "org.read", nil, true, http.StatusBadRequest, `"status"`},
+		{"zero limit", versionsPath + "?limit=0", "org.read", nil, true, http.StatusBadRequest, "COM-0001"},
+		{"non-base64 cursor", versionsPath + "?cursor=***", "org.read", nil, true, http.StatusBadRequest, "COM-0001"},
+		{"non-integer cursor", versionsPath + "?cursor=YWJj", "org.read", nil, true, http.StatusBadRequest, `"cursor"`},
+		{"zero cursor", versionsPath + "?cursor=MA", "org.read", nil, true, http.StatusBadRequest, `"cursor"`},
+		{"negative cursor", versionsPath + "?cursor=LTM", "org.read", nil, true, http.StatusBadRequest, `"cursor"`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r, _ := newRouter(&fakeStore{hierarchyVersions: seeded})
+			rec := do(r, http.MethodGet, tc.path, "", tc.duties, tc.withTenant, tc.headers...)
+			if rec.Code != tc.wantStatus || !strings.Contains(rec.Body.String(), tc.wantBody) || (tc.wantStatus == http.StatusOK && strings.Contains(rec.Body.String(), `"nodes"`)) {
+				t.Fatalf("got %d %s; want %d containing %s and no nodes key", rec.Code, rec.Body.String(), tc.wantStatus, tc.wantBody)
+			}
+		})
+	}
+}
+
+func TestHierarchyVersionListPassesFilterAndCursorToTheStore(t *testing.T) {
+	f := &fakeStore{}
+	r, _ := newRouter(f)
+	rec := do(r, http.MethodGet, hierarchyTypesPath+"/"+hierarchyTypeID+"/versions?status=draft&cursor=Mw", "", "org.read", true)
+	if rec.Code != http.StatusOK || f.versionFilter.Status != "draft" || f.versionAfter != 3 || !strings.Contains(rec.Body.String(), `"items":[]`) {
+		t.Fatalf("got %d %s filter=%+v after=%d", rec.Code, rec.Body.String(), f.versionFilter, f.versionAfter)
+	}
+}
+
+func TestHierarchyMakerChecker(t *testing.T) {
+	f := &fakeStore{}
+	r, a := newRouter(f)
+	a.SetClock(func() time.Time { return time.Date(2026, 3, 1, 15, 0, 0, 0, time.UTC) })
+	user := []string{"X-Passage-User", "user-7"}
+	do(r, http.MethodPost, hierarchyTypesPath+"/"+hierarchyTypeID+"/versions", "", hierarchyDuties, true, user...)
+	do(r, http.MethodPut, "/v1/org/hierarchy-versions/"+hierarchyVersionID+"/nodes", `{"version":1,"nodes":[]}`, hierarchyDuties, true, user...)
+	if f.draftEditor != "user-7" || f.replaceEditor != "user-7" {
+		t.Fatalf("editors = %q and %q; want the principal user id", f.draftEditor, f.replaceEditor)
+	}
+	refused := httpx.NewProblem(http.StatusForbidden, store.CodeHierarchyMakerChecker, "A security-purpose hierarchy must be published by someone other than its last editor.")
+	f.err = refused
+	rec := do(r, http.MethodPost, publishPath, forwardBody, publishDuties, true, user...)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "ORG-HIER-MAKER-CHECKER") || f.publishedBy != "user-7" {
+		t.Fatalf("got %d %s publishedBy=%q", rec.Code, rec.Body.String(), f.publishedBy)
+	}
+	f.err = nil
+	do(r, http.MethodPost, publishPath, forwardBody, publishDuties, true, user...)
+	metrics := httptest.NewRecorder()
+	a.Metrics().ServeHTTP(metrics, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if !strings.Contains(metrics.Body.String(), "org_hierarchy_publish_maker_checker_refused_total 1") {
+		t.Fatalf("metrics = %s", metrics.Body.String())
+	}
+}
