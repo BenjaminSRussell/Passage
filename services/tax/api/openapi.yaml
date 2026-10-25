@@ -1,0 +1,26 @@
+openapi: 3.0.3
+info:
+  title: Passage Tax
+  version: 0.1.0
+paths:
+  /v1/tax/calculate:
+    post:
+      operationId: calculateTax
+      x-passage-duty: Calculate tax
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Calculation result with per-line taxes and determination trace
+        "400":
+          description: Validation problem (COM-0001)
+        "401":
+          description: Missing or malformed tenant (AUTH-0001)
+        "403":
+          description: Caller lacks the Calculate tax duty
+        "422":
+          description: Tax rule problem (TAX-0001 to TAX-0008)
