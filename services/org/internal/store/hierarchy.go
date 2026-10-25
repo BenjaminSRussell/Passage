@@ -131,6 +131,82 @@ func (s *Postgres) CreateHierarchyType(ctx context.Context, in HierarchyType, id
 	return t, err
 }
 
+type HierarchyTypeFilter struct{ Purpose, Status string }
+
+type HierarchyTypePage struct {
+	Items    []HierarchyType
+	NextCode string `json:"-"`
+}
+
+func (s *Postgres) GetHierarchyType(ctx context.Context, id string) (HierarchyType, error) {
+	p, _ := tenant.FromContext(ctx)
+	var t HierarchyType
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var err error
+		t, err = scanHierarchyType(tx.QueryRow(ctx, `select `+hierarchyTypeColumns+` from hierarchy_type where tenant_id = $1 and id = $2`, p.TenantID, id))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return hierarchyTypeNotFound()
+		}
+		return err
+	})
+	return t, err
+}
+
+func (s *Postgres) ListHierarchyTypes(ctx context.Context, f HierarchyTypeFilter, afterCode string, limit int) (HierarchyTypePage, error) {
+	p, _ := tenant.FromContext(ctx)
+	page := HierarchyTypePage{Items: []HierarchyType{}}
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select `+hierarchyTypeColumns+` from hierarchy_type where tenant_id = $1 and code > $2
+			and ($3::text = '' or $3 = any(purposes)) and ($4::text = '' or status = $4) order by code limit $5`, p.TenantID, afterCode, f.Purpose, f.Status, limit+1)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			t, err := scanHierarchyType(rows)
+			if err != nil {
+				return err
+			}
+			page.Items = append(page.Items, t)
+		}
+		return rows.Err()
+	})
+	if len(page.Items) > limit {
+		page.Items = page.Items[:limit]
+		page.NextCode = page.Items[limit-1].Code
+	}
+	return page, err
+}
+
+func (s *Postgres) GetHierarchyVersion(ctx context.Context, id string) (HierarchyVersion, error) {
+	p, _ := tenant.FromContext(ctx)
+	var v HierarchyVersion
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var err error
+		v, err = loadHierarchyVersion(ctx, tx, p.TenantID, id, "")
+		return err
+	})
+	return v, err
+}
+
+func (s *Postgres) DeleteHierarchyDraft(ctx context.Context, id string, version int) error {
+	p, _ := tenant.FromContext(ctx)
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		current, err := loadHierarchyVersion(ctx, tx, p.TenantID, id, " for update")
+		if err != nil {
+			return err
+		}
+		if current.Status != "draft" {
+			return httpx.NewProblem(http.StatusConflict, CodeHierarchyVersionImmutable, "only a draft hierarchy version can be deleted")
+		}
+		if current.Version != version {
+			return httpx.NewProblem(http.StatusConflict, CodeVersionConflict, fmt.Sprintf("current version is %d", current.Version))
+		}
+		_, err = tx.Exec(ctx, `delete from hierarchy_version where tenant_id = $1 and id = $2`, p.TenantID, id)
+		return err
+	})
+}
+
 func loadHierarchyVersion(ctx context.Context, tx pgx.Tx, tenantID, id string, lock string) (HierarchyVersion, error) {
 	var v HierarchyVersion
 	var from, to *time.Time

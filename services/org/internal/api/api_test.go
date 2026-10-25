@@ -47,6 +47,10 @@ type fakeStore struct {
 	generateErr         error
 	generatedID         string
 	hierarchyNodes      []store.HierarchyNode
+	hierarchyTypes      []store.HierarchyType
+	typeFilter          store.HierarchyTypeFilter
+	typeAfter           string
+	deleteCalls         int
 	publishCalls        int
 	publishBackdated    bool
 	publishedBy         string
@@ -966,4 +970,36 @@ func (f *fakeStore) HierarchyAsOf(_ context.Context, typeID string, date time.Ti
 		return store.HierarchyAsOf{}, f.err
 	}
 	return store.HierarchyAsOf{HierarchyTypeID: typeID, Date: date.Format("2006-01-02"), OrgUnitID: orgUnitID, Ancestors: []store.AsOfRelative{}, Descendants: []store.AsOfRelative{}}, nil
+}
+
+func (f *fakeStore) GetHierarchyType(_ context.Context, id string) (store.HierarchyType, error) {
+	if f.err != nil {
+		return store.HierarchyType{}, f.err
+	}
+	return store.HierarchyType{ID: id, Code: "REP", Name: "Reporting", Purposes: []string{"reporting"}, Status: "active", Version: 1}, nil
+}
+
+func (f *fakeStore) ListHierarchyTypes(_ context.Context, filter store.HierarchyTypeFilter, afterCode string, limit int) (store.HierarchyTypePage, error) {
+	f.typeFilter, f.typeAfter = filter, afterCode
+	if f.err != nil {
+		return store.HierarchyTypePage{}, f.err
+	}
+	page := store.HierarchyTypePage{Items: append([]store.HierarchyType{}, f.hierarchyTypes...)}
+	if len(page.Items) > limit {
+		page.Items = page.Items[:limit]
+		page.NextCode = page.Items[limit-1].Code
+	}
+	return page, nil
+}
+
+func (f *fakeStore) GetHierarchyVersion(_ context.Context, id string) (store.HierarchyVersion, error) {
+	if f.err != nil {
+		return store.HierarchyVersion{}, f.err
+	}
+	return store.HierarchyVersion{ID: id, VersionNo: 1, Status: "draft", Version: 1, Nodes: []store.HierarchyNode{}}, nil
+}
+
+func (f *fakeStore) DeleteHierarchyDraft(context.Context, string, int) error {
+	f.deleteCalls++
+	return f.err
 }

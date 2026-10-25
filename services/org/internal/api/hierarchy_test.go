@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/org/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/org/internal/store"
@@ -277,3 +279,120 @@ func TestHierarchyPublishAndAsOfMetrics(t *testing.T) {
 }
 
 var _ store.Store = (*fakeStore)(nil)
+
+func TestHierarchyTypeReads(t *testing.T) {
+	scoped := []string{"X-Passage-Legal-Entity", testkit.TenantID(2)}
+	seeded := []store.HierarchyType{{Code: "A1"}, {Code: "B2"}, {Code: "C3"}}
+	tests := []struct {
+		name       string
+		path       string
+		duties     string
+		headers    []string
+		withTenant bool
+		wantStatus int
+		wantBody   string
+	}{
+		{"get", hierarchyTypesPath + "/" + hierarchyTypeID, "org.read", nil, true, http.StatusOK, `"code":"REP"`},
+		{"get by scoped caller", hierarchyTypesPath + "/" + hierarchyTypeID, "org.read", scoped, true, http.StatusOK, `"code":"REP"`},
+		{"get malformed id", hierarchyTypesPath + "/nope", "org.read", nil, true, http.StatusNotFound, "ORG-HIER-TYPE-NOT-FOUND"},
+		{"get without duty", hierarchyTypesPath + "/" + hierarchyTypeID, "org.hierarchy.write", nil, true, http.StatusForbidden, "AUTH-0003"},
+		{"list without duty", hierarchyTypesPath, "org.hierarchy.write", nil, true, http.StatusForbidden, "AUTH-0003"},
+		{"list without tenant", hierarchyTypesPath, "", nil, false, http.StatusUnauthorized, "AUTH-0001"},
+		{"list by scoped caller", hierarchyTypesPath, "org.read", scoped, true, http.StatusOK, `"code":"C3"`},
+		{"list pages", hierarchyTypesPath + "?limit=2", "org.read", nil, true, http.StatusOK, `"nextCursor":"QjI"`},
+		{"list bad purpose", hierarchyTypesPath + "?purpose=bogus", "org.read", nil, true, http.StatusBadRequest, `"purpose"`},
+		{"list wrong-case purpose", hierarchyTypesPath + "?purpose=Reporting", "org.read", nil, true, http.StatusBadRequest, `"purpose"`},
+		{"list bad status", hierarchyTypesPath + "?status=bogus", "org.read", nil, true, http.StatusBadRequest, `"status"`},
+		{"list zero limit", hierarchyTypesPath + "?limit=0", "org.read", nil, true, http.StatusBadRequest, "COM-0001"},
+		{"list bad cursor", hierarchyTypesPath + "?cursor=***", "org.read", nil, true, http.StatusBadRequest, "COM-0001"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r, _ := newRouter(&fakeStore{hierarchyTypes: seeded})
+			rec := do(r, http.MethodGet, tc.path, "", tc.duties, tc.withTenant, tc.headers...)
+			if rec.Code != tc.wantStatus || !strings.Contains(rec.Body.String(), tc.wantBody) {
+				t.Fatalf("got %d %s; want %d containing %s", rec.Code, rec.Body.String(), tc.wantStatus, tc.wantBody)
+			}
+		})
+	}
+}
+
+func TestHierarchyTypeListPassesFiltersAndCursorToTheStore(t *testing.T) {
+	f := &fakeStore{}
+	r, _ := newRouter(f)
+	rec := do(r, http.MethodGet, hierarchyTypesPath+"?purpose=security&status=active&cursor=QjI", "", "org.read", true)
+	if rec.Code != http.StatusOK || f.typeFilter != (store.HierarchyTypeFilter{Purpose: "security", Status: "active"}) || f.typeAfter != "B2" || !strings.Contains(rec.Body.String(), `"items":[]`) {
+		t.Fatalf("got %d %s filter=%+v after=%q", rec.Code, rec.Body.String(), f.typeFilter, f.typeAfter)
+	}
+}
+
+func TestHierarchyVersionGet(t *testing.T) {
+	tests := []struct {
+		name       string
+		path       string
+		duties     string
+		wantStatus int
+		wantBody   string
+	}{
+		{"get", hierarchyVersionPath, "org.read", http.StatusOK, `"status":"draft"`},
+		{"malformed id", "/v1/org/hierarchy-versions/nope", "org.read", http.StatusNotFound, "ORG-HIER-VERSION-NOT-FOUND"},
+		{"publish suffix is not an id", hierarchyVersionPath + ":publish", "org.read", http.StatusNotFound, "ORG-HIER-VERSION-NOT-FOUND"},
+		{"without duty", hierarchyVersionPath, "org.hierarchy.write", http.StatusForbidden, "AUTH-0003"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r, _ := newRouter(&fakeStore{})
+			rec := do(r, http.MethodGet, tc.path, "", tc.duties, true)
+			if rec.Code != tc.wantStatus || !strings.Contains(rec.Body.String(), tc.wantBody) {
+				t.Fatalf("got %d %s; want %d containing %s", rec.Code, rec.Body.String(), tc.wantStatus, tc.wantBody)
+			}
+		})
+	}
+}
+
+const hierarchyVersionPath = "/v1/org/hierarchy-versions/" + hierarchyVersionID
+
+func TestHierarchyDraftDelete(t *testing.T) {
+	scoped := []string{"X-Passage-Legal-Entity", testkit.TenantID(2)}
+	tests := []struct {
+		name       string
+		path       string
+		duties     string
+		headers    []string
+		err        error
+		wantStatus int
+		wantBody   string
+		wantCalls  int
+	}{
+		{"deleted", hierarchyVersionPath + "?version=3", hierarchyDuties, nil, nil, http.StatusNoContent, "", 1},
+		{"missing version", hierarchyVersionPath, hierarchyDuties, nil, nil, http.StatusBadRequest, `"version"`, 0},
+		{"empty version", hierarchyVersionPath + "?version=", hierarchyDuties, nil, nil, http.StatusBadRequest, `"version"`, 0},
+		{"non-integer version", hierarchyVersionPath + "?version=abc", hierarchyDuties, nil, nil, http.StatusBadRequest, `"version"`, 0},
+		{"fractional version", hierarchyVersionPath + "?version=1.5", hierarchyDuties, nil, nil, http.StatusBadRequest, `"version"`, 0},
+		{"overflowing version", hierarchyVersionPath + "?version=99999999999999999999", hierarchyDuties, nil, nil, http.StatusBadRequest, `"version"`, 0},
+		{"malformed id", "/v1/org/hierarchy-versions/nope?version=1", hierarchyDuties, nil, nil, http.StatusNotFound, "ORG-HIER-VERSION-NOT-FOUND", 0},
+		{"read duty only", hierarchyVersionPath + "?version=1", "org.read", nil, nil, http.StatusForbidden, "AUTH-0003", 0},
+		{"legal-entity scoped caller", hierarchyVersionPath + "?version=1", hierarchyDuties, scoped, nil, http.StatusForbidden, "AUTH-0003", 0},
+		{"store conflict passes through", hierarchyVersionPath + "?version=1", hierarchyDuties, nil, httpx.NewProblem(http.StatusConflict, store.CodeHierarchyVersionImmutable, "published"), http.StatusConflict, "ORG-HIER-VERSION-IMMUTABLE", 1},
+		{"store failure is hidden", hierarchyVersionPath + "?version=1", hierarchyDuties, nil, errors.New("db down"), http.StatusInternalServerError, "COM-0500", 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeStore{err: tc.err}
+			r, a := newRouter(f)
+			rec := do(r, http.MethodDelete, tc.path, "", tc.duties, true, tc.headers...)
+			if rec.Code != tc.wantStatus || !strings.Contains(rec.Body.String(), tc.wantBody) || f.deleteCalls != tc.wantCalls {
+				t.Fatalf("got %d %q calls=%d; want %d containing %q calls=%d", rec.Code, rec.Body.String(), f.deleteCalls, tc.wantStatus, tc.wantBody, tc.wantCalls)
+			}
+			metrics := httptest.NewRecorder()
+			a.Metrics().ServeHTTP(metrics, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+			want := "org_hierarchy_drafts_deleted_total 0"
+			if tc.wantStatus == http.StatusNoContent {
+				want = "org_hierarchy_drafts_deleted_total 1"
+			}
+			if !strings.Contains(metrics.Body.String(), want) {
+				t.Fatalf("metrics lack %q: %s", want, metrics.Body.String())
+			}
+		})
+	}
+}

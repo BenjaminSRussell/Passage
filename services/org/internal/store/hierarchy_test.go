@@ -554,3 +554,107 @@ func TestPostgres_HierarchyClosureIsTenantIsolated(t *testing.T) {
 		t.Fatalf("owner reads %d closure rows; want 2", n)
 	}
 }
+
+func TestPostgres_HierarchyTypeGetListFilterAndTenantIsolation(t *testing.T) {
+	s, ctx, _ := lifecycleStore(t)
+	for code, purposes := range map[string][]string{"A1": {"reporting"}, "B2": {"security"}, "C3": {"procurement", "security"}} {
+		if _, err := s.CreateHierarchyType(ctx, store.HierarchyType{Code: code, Name: code, Purposes: purposes}, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, err := s.ListHierarchyTypes(ctx, store.HierarchyTypeFilter{}, "", 2)
+	if err != nil || len(first.Items) != 2 || first.Items[0].Code != "A1" || first.Items[1].Code != "B2" || first.NextCode != "B2" {
+		t.Fatalf("first page = %+v, %v", first, err)
+	}
+	second, err := s.ListHierarchyTypes(ctx, store.HierarchyTypeFilter{}, first.NextCode, 2)
+	if err != nil || len(second.Items) != 1 || second.Items[0].Code != "C3" || second.NextCode != "" {
+		t.Fatalf("second page = %+v, %v", second, err)
+	}
+	secure, err := s.ListHierarchyTypes(ctx, store.HierarchyTypeFilter{Purpose: "security", Status: "active"}, "", 10)
+	if err != nil || len(secure.Items) != 2 || secure.Items[0].Code != "B2" || secure.Items[1].Code != "C3" {
+		t.Fatalf("security types = %+v, %v", secure, err)
+	}
+	inactive, err := s.ListHierarchyTypes(ctx, store.HierarchyTypeFilter{Status: "inactive"}, "", 10)
+	if err != nil || inactive.Items == nil || len(inactive.Items) != 0 {
+		t.Fatalf("inactive types = %+v, %v; want an empty non-nil page", inactive, err)
+	}
+	got, err := s.GetHierarchyType(ctx, second.Items[0].ID)
+	if err != nil || !reflect.DeepEqual(got, second.Items[0]) {
+		t.Fatalf("get = %+v, %v; want %+v", got, err, second.Items[0])
+	}
+	if _, err := s.GetHierarchyType(ctx, ids.New()); problemCode(t, err) != store.CodeHierarchyTypeNotFound {
+		t.Fatalf("unknown type error = %v", err)
+	}
+	other := principalContext(2)
+	if _, err := s.GetHierarchyType(other, got.ID); problemCode(t, err) != store.CodeHierarchyTypeNotFound {
+		t.Fatalf("other tenant get error = %v", err)
+	}
+	if page, err := s.ListHierarchyTypes(other, store.HierarchyTypeFilter{}, "", 10); err != nil || len(page.Items) != 0 {
+		t.Fatalf("other tenant list = %+v, %v", page, err)
+	}
+}
+
+func TestPostgres_HierarchyVersionGetMatchesWriteResults(t *testing.T) {
+	s, ctx, _ := lifecycleStore(t)
+	units := createHierarchyUnits(t, s, ctx)
+	replaced := draftWithNodes(t, s, ctx, mustCreateHierarchyType(t, s, ctx, "REP").ID, units.nodes())
+	got, err := s.GetHierarchyVersion(ctx, replaced.ID)
+	if err != nil || !reflect.DeepEqual(got, replaced) {
+		t.Fatalf("draft get = %+v, %v; want %+v", got, err, replaced)
+	}
+	published := mustPublish(t, s, ctx, replaced, day(2026, 1, 1))
+	got, err = s.GetHierarchyVersion(ctx, replaced.ID)
+	if err != nil || got.Status != "published" || got.PublishedAt == nil || got.PublishedBy == nil || *got.PublishedBy != publisher || !reflect.DeepEqual(got, published) {
+		t.Fatalf("published get = %+v, %v; want %+v", got, err, published)
+	}
+	if _, err := s.GetHierarchyVersion(ctx, ids.New()); problemCode(t, err) != store.CodeHierarchyVersionNotFound {
+		t.Fatalf("unknown version error = %v", err)
+	}
+	if _, err := s.GetHierarchyVersion(principalContext(2), replaced.ID); problemCode(t, err) != store.CodeHierarchyVersionNotFound {
+		t.Fatalf("other tenant get error = %v", err)
+	}
+}
+
+func TestPostgres_HierarchyDraftDelete(t *testing.T) {
+	s, ctx, pool := lifecycleStore(t)
+	units := createHierarchyUnits(t, s, ctx)
+	typeID := mustCreateHierarchyType(t, s, ctx, "REP").ID
+	published := mustPublish(t, s, ctx, draftWithNodes(t, s, ctx, typeID, units.nodes()), day(2026, 1, 1))
+	draft := draftWithNodes(t, s, ctx, typeID, units.deepNodes())
+	if storedNodeCount(t, ctx, pool, draft.ID) == 0 {
+		t.Fatal("the draft has no nodes to cascade")
+	}
+	if err := s.DeleteHierarchyDraft(ctx, draft.ID, draft.Version+1); problemCode(t, err) != store.CodeVersionConflict {
+		t.Fatalf("stale version error = %v", err)
+	}
+	if err := s.DeleteHierarchyDraft(principalContext(2), draft.ID, draft.Version); problemCode(t, err) != store.CodeHierarchyVersionNotFound {
+		t.Fatalf("other tenant delete error = %v", err)
+	}
+	if err := s.DeleteHierarchyDraft(ctx, ids.New(), 1); problemCode(t, err) != store.CodeHierarchyVersionNotFound {
+		t.Fatalf("unknown version error = %v", err)
+	}
+	if _, err := s.GetHierarchyVersion(ctx, draft.ID); err != nil {
+		t.Fatalf("a refused delete removed the draft: %v", err)
+	}
+	if err := s.DeleteHierarchyDraft(ctx, draft.ID, draft.Version); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetHierarchyVersion(ctx, draft.ID); problemCode(t, err) != store.CodeHierarchyVersionNotFound {
+		t.Fatalf("deleted draft error = %v", err)
+	}
+	if n := storedNodeCount(t, ctx, pool, draft.ID); n != 0 {
+		t.Fatalf("%d nodes survive the deleted draft", n)
+	}
+	reopened := mustCreateDraft(t, s, ctx, typeID)
+	if reopened.VersionNo != draft.VersionNo {
+		t.Fatalf("new draft number = %d; want the freed %d", reopened.VersionNo, draft.VersionNo)
+	}
+	closureBefore := fiscalRows(t, ctx, pool, "hierarchy_closure")
+	if err := s.DeleteHierarchyDraft(ctx, published.ID, published.Version); problemCode(t, err) != store.CodeHierarchyVersionImmutable {
+		t.Fatalf("published delete error = %v", err)
+	}
+	status, _, version := versionState(t, ctx, pool, published.ID)
+	if status != "published" || version != published.Version || fiscalRows(t, ctx, pool, "hierarchy_closure") != closureBefore || closureBefore == 0 || storedNodeCount(t, ctx, pool, published.ID) != len(units.nodes()) {
+		t.Fatalf("refused delete changed the published version: %s v%d", status, version)
+	}
+}
