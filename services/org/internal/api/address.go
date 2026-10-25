@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -55,11 +56,25 @@ type createAddressRequest struct {
 	Purposes    []addressPurposeRequest `json:"purposes"`
 }
 
+type updateAddressRequest struct {
+	VersionID string `json:"versionId"`
+	ValidFrom string `json:"validFrom"`
+	store.AddressPatch
+}
+
+type addressList struct {
+	Items      []store.Address `json:"items"`
+	NextCursor string          `json:"nextCursor,omitempty"`
+}
+
 func (a *API) SetGeocoder(g domain.Geocoder) { a.geocoder = g }
 
 func (a *API) registerAddresses(r chi.Router) {
 	r.With(authz.RequireDuty(dutyAddress)).Post(addresses, a.createAddress)
+	r.With(authz.RequireDuty(dutyAddress)).Patch(addresses+"/{id}", addressRoute(a.updateAddress))
+	r.With(authz.RequireDuty(dutyRead)).Get(addresses, a.listAddresses)
 	r.With(authz.RequireDuty(dutyRead)).Get(addresses+"/{id}", addressRoute(a.getAddress))
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/org/address-versions/{id}", addressRoute(a.getAddressVersion))
 }
 
 func optionalText(s string) *string {
@@ -117,6 +132,26 @@ func (req createAddressRequest) validate() map[string]string {
 	return fields
 }
 
+func (req createAddressRequest) toAddress() store.Address {
+	in := store.Address{OwnerType: req.OwnerType, OwnerID: req.OwnerID, CountryCode: req.CountryCode, RegionCode: optionalText(req.RegionCode), City: req.City,
+		PostalCode: optionalText(req.PostalCode), Street1: req.Street1, Street2: optionalText(req.Street2), Street3: optionalText(req.Street3),
+		Building: optionalText(req.Building), POBox: optionalText(req.POBox), GeoStatus: geoUnchecked, ValidFrom: req.ValidFrom}
+	for _, purpose := range req.Purposes {
+		in.Purposes = append(in.Purposes, store.AddressPurpose{Purpose: purpose.Purpose, Primary: purpose.Primary})
+	}
+	return in
+}
+
+func (a *API) geocodeAddress(r *http.Request, req createAddressRequest, in *store.Address) {
+	geocode, err := a.geocoder.Geocode(r.Context(), domain.PostalAddress{CountryCode: req.CountryCode, RegionCode: req.RegionCode, City: req.City, PostalCode: req.PostalCode,
+		Street1: req.Street1, Street2: req.Street2, Street3: req.Street3, Building: req.Building, POBox: req.POBox})
+	if err != nil {
+		slog.Warn("geocoding failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+	} else if geocode.Found {
+		in.Latitude, in.Longitude, in.GeoStatus = &geocode.Latitude, &geocode.Longitude, "geocoded"
+	}
+}
+
 func (a *API) createAddress(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
@@ -131,19 +166,8 @@ func (a *API) createAddress(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
-	in := store.Address{OwnerType: req.OwnerType, OwnerID: req.OwnerID, CountryCode: req.CountryCode, RegionCode: optionalText(req.RegionCode), City: req.City,
-		PostalCode: optionalText(req.PostalCode), Street1: req.Street1, Street2: optionalText(req.Street2), Street3: optionalText(req.Street3),
-		Building: optionalText(req.Building), POBox: optionalText(req.POBox), GeoStatus: geoUnchecked, ValidFrom: req.ValidFrom}
-	for _, purpose := range req.Purposes {
-		in.Purposes = append(in.Purposes, store.AddressPurpose{Purpose: purpose.Purpose, Primary: purpose.Primary})
-	}
-	geocode, err := a.geocoder.Geocode(r.Context(), domain.PostalAddress{CountryCode: req.CountryCode, RegionCode: req.RegionCode, City: req.City, PostalCode: req.PostalCode,
-		Street1: req.Street1, Street2: req.Street2, Street3: req.Street3, Building: req.Building, POBox: req.POBox})
-	if err != nil {
-		slog.Warn("geocoding failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
-	} else if geocode.Found {
-		in.Latitude, in.Longitude, in.GeoStatus = &geocode.Latitude, &geocode.Longitude, "geocoded"
-	}
+	in := req.toAddress()
+	a.geocodeAddress(r, req, &in)
 	address, err := a.store.CreateAddress(r.Context(), in, r.Header.Get(idempotencyKey))
 	if err != nil {
 		slog.Error("create address failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
@@ -176,4 +200,126 @@ func (a *API) getAddress(w http.ResponseWriter, r *http.Request, id string) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, address)
+}
+
+func (req *updateAddressRequest) normalize() {
+	req.VersionID, req.ValidFrom = canonicalID(req.VersionID), strings.TrimSpace(req.ValidFrom)
+	for _, field := range []*string{req.CountryCode, req.RegionCode, req.City, req.PostalCode, req.Street1, req.Street2, req.Street3, req.Building, req.POBox} {
+		if field != nil {
+			*field = strings.TrimSpace(*field)
+		}
+	}
+	for _, field := range []*string{req.CountryCode, req.RegionCode} {
+		if field != nil {
+			*field = strings.ToUpper(*field)
+		}
+	}
+}
+
+func textOf(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+func (a *API) updateAddress(w http.ResponseWriter, r *http.Request, id string) {
+	var req updateAddressRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	req.normalize()
+	if !canonicalUUID(req.VersionID) {
+		badQuery(w, r, "versionId", "is required and must be a UUID")
+		return
+	}
+	current, err := a.store.GetAddress(r.Context(), id)
+	if err != nil {
+		slog.Error("get address failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.Fail(w, r, err)
+		return
+	}
+	if current.VersionID != req.VersionID {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, store.CodeVersionConflict, "current version is "+current.VersionID))
+		return
+	}
+	merged, changed := req.AddressPatch.Apply(current)
+	merge := createAddressRequest{OwnerType: merged.OwnerType, OwnerID: merged.OwnerID, CountryCode: merged.CountryCode, RegionCode: textOf(merged.RegionCode), City: merged.City,
+		PostalCode: textOf(merged.PostalCode), Street1: merged.Street1, Street2: textOf(merged.Street2), Street3: textOf(merged.Street3), Building: textOf(merged.Building),
+		POBox: textOf(merged.POBox), ValidFrom: req.ValidFrom}
+	for _, purpose := range merged.Purposes {
+		merge.Purposes = append(merge.Purposes, addressPurposeRequest{Purpose: purpose.Purpose, Primary: purpose.Primary})
+	}
+	merge.normalize()
+	if fields := merge.validate(); len(fields) > 0 {
+		validationFailed(w, r, fields)
+		return
+	}
+	if !changed && req.ValidFrom == "" {
+		httpx.JSON(w, http.StatusOK, current)
+		return
+	}
+	next := merge.toAddress()
+	if next.SamePostal(current) {
+		next.Latitude, next.Longitude, next.GeoStatus = current.Latitude, current.Longitude, current.GeoStatus
+	} else {
+		a.geocodeAddress(r, merge, &next)
+	}
+	revised, err := a.store.ReviseAddress(r.Context(), id, req.VersionID, next)
+	if err != nil {
+		slog.Error("revise address failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.Fail(w, r, err)
+		return
+	}
+	a.addressRevised.Add(1)
+	httpx.JSON(w, http.StatusOK, revised)
+}
+
+func (a *API) getAddressVersion(w http.ResponseWriter, r *http.Request, id string) {
+	address, err := a.store.GetAddressVersion(r.Context(), id)
+	if err != nil {
+		slog.Error("get address version failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, address)
+}
+
+func (a *API) listAddresses(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	limit, cursor, err := pageParams(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	q := r.URL.Query()
+	f := store.AddressFilter{OwnerType: q.Get("ownerType"), OwnerID: canonicalID(q.Get("ownerId")), Purpose: q.Get("purpose")}
+	for _, c := range []struct {
+		field, rule string
+		invalid     bool
+	}{
+		{"ownerType", "must be legal_entity, operating_unit, site, warehouse, location or party", !slices.Contains(addressOwnerTypes, f.OwnerType)},
+		{"ownerId", "is required and must be a UUID", !canonicalUUID(f.OwnerID)},
+		{"purpose", "must be one of " + strings.Join(domain.AddressPurposes, ", "), f.Purpose != "" && !domain.ValidPurpose(f.Purpose)},
+		{"cursor", "is invalid", cursor != "" && !canonicalUUID(cursor)},
+	} {
+		if c.invalid {
+			badQuery(w, r, c.field, c.rule)
+			return
+		}
+	}
+	page, err := a.store.ListAddresses(r.Context(), f, cursor, limit)
+	if err != nil {
+		slog.Error("list addresses failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.Fail(w, r, err)
+		return
+	}
+	body := addressList{Items: page.Items}
+	if page.NextID != "" {
+		body.NextCursor = base64.RawURLEncoding.EncodeToString([]byte(page.NextID))
+	}
+	httpx.JSON(w, http.StatusOK, body)
 }

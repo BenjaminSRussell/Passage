@@ -1,8 +1,10 @@
 package api_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -138,6 +140,156 @@ func TestAddresses_Get(t *testing.T) {
 	}
 	if rec := do(r, http.MethodGet, addressesPath+"/00000000-0000-0000-0003-000000000001", "", "org.site.write", true); rec.Code != http.StatusForbidden {
 		t.Fatalf("get without org.read = %d", rec.Code)
+	}
+}
+
+const (
+	stubVersionID  = "00000000-0000-0000-0003-000000000001"
+	staleVersionID = "00000000-0000-0000-0003-0000000000ee"
+	firstAddress   = addressesPath + "/00000000-0000-0000-0003-000000000001"
+)
+
+func patchBody(versionID string, overrides ...string) string {
+	body := `{"versionId":"` + versionID + `"`
+	for i := 0; i+1 < len(overrides); i += 2 {
+		body += `,"` + overrides[i] + `":` + overrides[i+1]
+	}
+	return body + "}"
+}
+
+func seededAddress(t *testing.T, geocoder stubGeocoder) (*fakeStore, http.Handler, func(string, string) *httptest.ResponseRecorder) {
+	t.Helper()
+	f := &fakeStore{}
+	r, a := newRouter(f)
+	a.SetGeocoder(geocoder)
+	if rec := do(r, http.MethodPost, addressesPath, addressBody(), addressDuties, true); rec.Code != http.StatusCreated {
+		t.Fatalf("seed = %d %s", rec.Code, rec.Body)
+	}
+	return f, r, func(path, body string) *httptest.ResponseRecorder {
+		return do(r, http.MethodPatch, path, body, addressDuties, true)
+	}
+}
+
+func TestAddresses_Patch(t *testing.T) {
+	found := stubGeocoder{result: domain.Geocode{Latitude: decimal.RequireFromString("37.789"), Longitude: decimal.RequireFromString("-122.394"), Found: true}}
+	f, _, patch := seededAddress(t, found)
+	rec := patch(firstAddress, patchBody(stubVersionID, "city", `"Oakland"`))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"city":"Oakland"`) || strings.Contains(rec.Body.String(), `"versionId":"`+stubVersionID+`"`) || f.reviseCalls != 1 {
+		t.Fatalf("patch city = %d %s, reviseCalls %d", rec.Code, rec.Body, f.reviseCalls)
+	}
+}
+
+func TestAddresses_PatchPurposesOnlyKeepsGeocode(t *testing.T) {
+	f := &fakeStore{}
+	r, a := newRouter(f)
+	a.SetGeocoder(stubGeocoder{result: domain.Geocode{Latitude: decimal.RequireFromString("37.789"), Longitude: decimal.RequireFromString("-122.394"), Found: true}})
+	do(r, http.MethodPost, addressesPath, addressBody(), addressDuties, true)
+	a.SetGeocoder(stubGeocoder{err: errors.New("must not be called")})
+	rec := do(r, http.MethodPatch, firstAddress, patchBody(stubVersionID, "purposes", `[{"purpose":"business","primary":true},{"purpose":"invoice"}]`), addressDuties, true)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"latitude":"37.789"`) || !strings.Contains(rec.Body.String(), `"geoStatus":"geocoded"`) || !strings.Contains(rec.Body.String(), `"purpose":"invoice"`) {
+		t.Fatalf("purposes-only patch = %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestAddresses_PatchGeocoderErrorStaysUnverified(t *testing.T) {
+	_, _, patch := seededAddress(t, stubGeocoder{err: errors.New("down")})
+	rec := patch(firstAddress, patchBody(stubVersionID, "postalCode", `"94106"`))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"geoStatus":"unverified"`) {
+		t.Fatalf("patch with geocoder error = %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestAddresses_PatchRejections(t *testing.T) {
+	for _, tc := range []struct {
+		name, path, body string
+		status           int
+		want             string
+		revises          int
+	}{
+		{"no-op", firstAddress, patchBody(stubVersionID, "city", `"San Francisco"`, "purposes", `[{"purpose":"business","primary":true}]`), http.StatusOK, `"city":"San Francisco"`, 0},
+		{"stale versionId", firstAddress, patchBody(staleVersionID, "city", `"Oakland"`), http.StatusConflict, "ORG-VERSION-CONFLICT", 0},
+		{"missing versionId", firstAddress, `{"city":"Oakland"}`, http.StatusBadRequest, `"versionId"`, 0},
+		{"non-UUID versionId", firstAddress, patchBody("nope"), http.StatusBadRequest, `"versionId"`, 0},
+		{"ownerId in body", firstAddress, patchBody(stubVersionID, "ownerId", `"`+ownerUUID+`"`), http.StatusBadRequest, "COM-0001", 0},
+		{"empty city", firstAddress, patchBody(stubVersionID, "city", `""`), http.StatusBadRequest, `"city"`, 0},
+		{"bad validFrom", firstAddress, patchBody(stubVersionID, "validFrom", `"2026-13-01"`), http.StatusBadRequest, `"validFrom"`, 0},
+		{"empty purposes", firstAddress, patchBody(stubVersionID, "purposes", `[]`), http.StatusBadRequest, `"purposes"`, 0},
+		{"unknown id", addressesPath + "/00000000-0000-0000-0003-0000000000ff", patchBody(stubVersionID, "city", `"Oakland"`), http.StatusNotFound, "ORG-ADDR-NOT-FOUND", 0},
+		{"malformed id", addressesPath + "/nope", patchBody(stubVersionID, "city", `"Oakland"`), http.StatusNotFound, "ORG-ADDR-NOT-FOUND", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, _, patch := seededAddress(t, stubGeocoder{})
+			rec := patch(tc.path, tc.body)
+			if rec.Code != tc.status || !strings.Contains(rec.Body.String(), tc.want) || f.reviseCalls != tc.revises {
+				t.Fatalf("%s = %d %s, reviseCalls %d; want %d containing %q", tc.name, rec.Code, rec.Body, f.reviseCalls, tc.status, tc.want)
+			}
+		})
+	}
+	r, _ := newRouter(&fakeStore{})
+	if rec := do(r, http.MethodPatch, firstAddress, patchBody(stubVersionID), "org.read", true); rec.Code != http.StatusForbidden {
+		t.Fatalf("patch without duty = %d", rec.Code)
+	}
+	if rec := do(r, http.MethodPatch, firstAddress, patchBody(stubVersionID), "", false); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("patch without tenant = %d", rec.Code)
+	}
+}
+
+func TestAddresses_VersionAndList(t *testing.T) {
+	f, r, _ := seededAddress(t, stubGeocoder{})
+	versions := "/v1/org/address-versions/"
+	if rec := do(r, http.MethodGet, versions+stubVersionID, "", addressDuties, true); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"city":"San Francisco"`) {
+		t.Fatalf("get version = %d %s", rec.Code, rec.Body)
+	}
+	calls := f.addressCalls
+	if rec := do(r, http.MethodGet, versions+"nope", "", addressDuties, true); rec.Code != http.StatusNotFound || f.addressCalls != calls {
+		t.Fatalf("malformed version id = %d, store calls %d -> %d", rec.Code, calls, f.addressCalls)
+	}
+	if rec := do(r, http.MethodGet, versions+stubVersionID, "", "org.site.write", true); rec.Code != http.StatusForbidden {
+		t.Fatalf("version without org.read = %d", rec.Code)
+	}
+	owner := "?ownerType=warehouse&ownerId=" + ownerUUID
+	for _, tc := range []struct {
+		name, query string
+		status      int
+		want        string
+	}{
+		{"known owner", owner, http.StatusOK, `"items":[{`},
+		{"other owner", "?ownerType=warehouse&ownerId=" + stubVersionID, http.StatusOK, `"items":[]`},
+		{"missing ownerId", "?ownerType=warehouse", http.StatusBadRequest, `"ownerId"`},
+		{"ownerType vendor", "?ownerType=vendor&ownerId=" + ownerUUID, http.StatusBadRequest, `"ownerType"`},
+		{"purpose billing", owner + "&purpose=billing", http.StatusBadRequest, `"purpose"`},
+		{"non-UUID cursor", owner + "&cursor=bm9wZQ", http.StatusBadRequest, `"cursor"`},
+	} {
+		if rec := do(r, http.MethodGet, addressesPath+tc.query, "", addressDuties, true); rec.Code != tc.status || !strings.Contains(rec.Body.String(), tc.want) {
+			t.Fatalf("list %s = %d %s", tc.name, rec.Code, rec.Body)
+		}
+	}
+	if rec := do(r, http.MethodGet, addressesPath+owner, "", "org.site.write", true); rec.Code != http.StatusForbidden {
+		t.Fatalf("list without org.read = %d", rec.Code)
+	}
+}
+
+func TestAddresses_ReviseFailureIsLoggedWithCorrelationId(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	defer slog.SetDefault(previous)
+	f, _, patch := seededAddress(t, stubGeocoder{})
+	f.err = errors.New("db down")
+	rec := patch(firstAddress, patchBody(stubVersionID, "city", `"Oakland"`))
+	if rec.Code != http.StatusInternalServerError || !strings.Contains(logs.String(), "revise address failed") || !strings.Contains(logs.String(), "correlationId") {
+		t.Fatalf("patch = %d, logs %s", rec.Code, logs.String())
+	}
+}
+
+func TestAddresses_MetricsCountRevisions(t *testing.T) {
+	r, a := newRouter(&fakeStore{})
+	do(r, http.MethodPost, addressesPath, addressBody(), addressDuties, true)
+	do(r, http.MethodPatch, firstAddress, patchBody(stubVersionID, "city", `"Oakland"`), addressDuties, true)
+	rec := httptest.NewRecorder()
+	a.Metrics().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if !strings.Contains(rec.Body.String(), "org_addresses_revised_total 1") {
+		t.Fatalf("metrics missing the revision counter in %s", rec.Body.String())
 	}
 }
 

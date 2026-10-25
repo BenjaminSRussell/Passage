@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: org
-  version: 0.6.0
+  version: 0.6.1
   description: CloudEvents 1.0 envelope from platform/go/events; payloads below are the data member.
 channels:
   passage.org.legalentity:
@@ -206,6 +206,7 @@ components:
     addressChanged:
       name: changed
       title: Address changed
+      description: Emitted for every new address version, on create and on every PATCH.
       payload:
         type: object
         required: [address_id, version_id, owner_type, owner_id, purposes, valid_from]

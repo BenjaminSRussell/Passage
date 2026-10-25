@@ -39,6 +39,7 @@ type fakeStore struct {
 	locationCalls  int
 	addresses      []store.Address
 	addressCalls   int
+	reviseCalls    int
 }
 
 func (f *fakeStore) reference(kind store.ReferenceKind, code string) (store.ReferenceItem, bool) {
@@ -475,6 +476,51 @@ func (f *fakeStore) GetAddress(_ context.Context, id string) (store.Address, err
 		}
 	}
 	return store.Address{}, httpx.NewProblem(http.StatusNotFound, store.CodeAddressNotFound, "address not found")
+}
+
+func (f *fakeStore) ReviseAddress(_ context.Context, id, versionID string, next store.Address) (store.Address, error) {
+	f.reviseCalls++
+	if f.err != nil {
+		return store.Address{}, f.err
+	}
+	for i, a := range f.addresses {
+		if a.ID != id {
+			continue
+		}
+		if a.VersionID != versionID {
+			return store.Address{}, httpx.NewProblem(http.StatusConflict, store.CodeVersionConflict, "current version is "+a.VersionID)
+		}
+		next.ID, next.Formatted, next.ValidFrom = a.ID, "formatted", "2026-02-01"
+		next.VersionID = fmt.Sprintf("00000000-0000-0000-0005-%012d", f.reviseCalls)
+		f.addresses[i] = next
+		return next, nil
+	}
+	return store.Address{}, httpx.NewProblem(http.StatusNotFound, store.CodeAddressNotFound, "address not found")
+}
+
+func (f *fakeStore) GetAddressVersion(_ context.Context, versionID string) (store.Address, error) {
+	f.addressCalls++
+	for _, a := range f.addresses {
+		if a.VersionID == versionID {
+			return a, nil
+		}
+	}
+	return store.Address{}, httpx.NewProblem(http.StatusNotFound, store.CodeAddressNotFound, "address not found")
+}
+
+func (f *fakeStore) ListAddresses(_ context.Context, filter store.AddressFilter, afterID string, limit int) (store.AddressPage, error) {
+	page := store.AddressPage{Items: []store.Address{}}
+	for _, a := range f.addresses {
+		if a.OwnerType != filter.OwnerType || a.OwnerID != filter.OwnerID || a.ID <= afterID {
+			continue
+		}
+		if len(page.Items) == limit {
+			page.NextID = page.Items[limit-1].ID
+			break
+		}
+		page.Items = append(page.Items, a)
+	}
+	return page, nil
 }
 
 func (f *fakeStore) Ping(context.Context) error { return f.pingErr }
