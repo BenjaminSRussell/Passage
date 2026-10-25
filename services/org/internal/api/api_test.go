@@ -35,6 +35,8 @@ type fakeStore struct {
 	siteCalls      int
 	warehouses     []store.Warehouse
 	warehouseCalls int
+	locations      []store.Location
+	locationCalls  int
 }
 
 func (f *fakeStore) reference(kind store.ReferenceKind, code string) (store.ReferenceItem, bool) {
@@ -291,6 +293,13 @@ func (f *fakeStore) UpdateSite(_ context.Context, id string, version int, in sto
 	if s.Version != version {
 		return store.Site{}, httpx.NewProblem(http.StatusConflict, store.CodeVersionConflict, fmt.Sprintf("current version is %d", s.Version))
 	}
+	if in.Status != nil && *in.Status == "inactive" {
+		for _, w := range f.warehouses {
+			if w.SiteID == id && w.Status == "active" {
+				return store.Site{}, httpx.NewProblem(http.StatusConflict, store.CodeSiteInUse, "active warehouses reference this site")
+			}
+		}
+	}
 	if in.Name != nil && *in.Name != s.Name {
 		s.Name = *in.Name
 		s.Version++
@@ -385,6 +394,65 @@ func (f *fakeStore) UpdateWarehouse(_ context.Context, id string, version int, i
 		w.Version++
 	}
 	return *w, nil
+}
+
+func (f *fakeStore) CreateLocation(_ context.Context, in store.Location, _ string) (store.Location, error) {
+	if f.err != nil {
+		return store.Location{}, f.err
+	}
+	var warehouse *store.Warehouse
+	for i := range f.warehouses {
+		if f.warehouses[i].ID == in.WarehouseID {
+			warehouse = &f.warehouses[i]
+		}
+	}
+	if warehouse == nil {
+		return store.Location{}, httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeLocationWarehouseInvalid, "warehouse invalid")
+	}
+	for _, l := range f.locations {
+		if l.WarehouseID == in.WarehouseID && l.Code == in.Code {
+			return store.Location{}, httpx.NewProblem(http.StatusConflict, store.CodeLocationCodeDuplicate, "duplicate")
+		}
+	}
+	in.LegalEntityID, in.Status, in.Version = warehouse.LegalEntityID, "active", 1
+	in.ID = fmt.Sprintf("00000000-0000-0000-0002-%012d", len(f.locations)+1)
+	if in.Type == "" {
+		in.Type = "storage"
+	}
+	f.locations = append(f.locations, in)
+	return in, nil
+}
+
+func (f *fakeStore) GetLocation(_ context.Context, id string) (store.Location, error) {
+	f.locationCalls++
+	if f.err != nil {
+		return store.Location{}, f.err
+	}
+	for _, l := range f.locations {
+		if l.ID == id {
+			return l, nil
+		}
+	}
+	return store.Location{}, httpx.NewProblem(http.StatusNotFound, store.CodeLocationNotFound, "location not found")
+}
+
+func (f *fakeStore) ListLocations(_ context.Context, _ store.LocationFilter, after store.SiteKey, limit int) (store.LocationPage, error) {
+	if f.err != nil {
+		return store.LocationPage{}, f.err
+	}
+	page := store.LocationPage{Items: []store.Location{}}
+	sorted := slices.Clone(f.locations)
+	slices.SortFunc(sorted, func(a, b store.Location) int { return strings.Compare(a.Code+"/"+a.ID, b.Code+"/"+b.ID) })
+	for _, l := range sorted {
+		if l.Code+"/"+l.ID > after.Code+"/"+after.ID {
+			page.Items = append(page.Items, l)
+		}
+	}
+	if len(page.Items) > limit {
+		page.Items = page.Items[:limit]
+		page.Next = &store.SiteKey{Code: page.Items[limit-1].Code, ID: page.Items[limit-1].ID}
+	}
+	return page, nil
 }
 
 func (f *fakeStore) Ping(context.Context) error { return f.pingErr }

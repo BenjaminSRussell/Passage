@@ -71,6 +71,14 @@ type WarehouseCreatedData struct {
 	AddressID     *string `json:"address_id"`
 }
 
+type LocationCreatedData struct {
+	ID            string  `json:"id"`
+	LegalEntityID string  `json:"legal_entity_id"`
+	ParentID      *string `json:"parent_id"`
+	Type          *string `json:"type"`
+	AddressID     *string `json:"address_id"`
+}
+
 type WarehouseUpdatedData struct {
 	ID            string   `json:"id"`
 	ChangedFields []string `json:"changed_fields"`
