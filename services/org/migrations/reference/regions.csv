@@ -1,0 +1,139 @@
+code,country_code,name
+US-AL,US,Alabama
+US-AK,US,Alaska
+US-AZ,US,Arizona
+US-AR,US,Arkansas
+US-CA,US,California
+US-CO,US,Colorado
+US-CT,US,Connecticut
+US-DE,US,Delaware
+US-FL,US,Florida
+US-GA,US,Georgia
+US-HI,US,Hawaii
+US-ID,US,Idaho
+US-IL,US,Illinois
+US-IN,US,Indiana
+US-IA,US,Iowa
+US-KS,US,Kansas
+US-KY,US,Kentucky
+US-LA,US,Louisiana
+US-ME,US,Maine
+US-MD,US,Maryland
+US-MA,US,Massachusetts
+US-MI,US,Michigan
+US-MN,US,Minnesota
+US-MS,US,Mississippi
+US-MO,US,Missouri
+US-MT,US,Montana
+US-NE,US,Nebraska
+US-NV,US,Nevada
+US-NH,US,New Hampshire
+US-NJ,US,New Jersey
+US-NM,US,New Mexico
+US-NY,US,New York
+US-NC,US,North Carolina
+US-ND,US,North Dakota
+US-OH,US,Ohio
+US-OK,US,Oklahoma
+US-OR,US,Oregon
+US-PA,US,Pennsylvania
+US-RI,US,Rhode Island
+US-SC,US,South Carolina
+US-SD,US,South Dakota
+US-TN,US,Tennessee
+US-TX,US,Texas
+US-UT,US,Utah
+US-VT,US,Vermont
+US-VA,US,Virginia
+US-WA,US,Washington
+US-WV,US,West Virginia
+US-WI,US,Wisconsin
+US-WY,US,Wyoming
+US-DC,US,District of Columbia
+US-AS,US,American Samoa
+US-GU,US,Guam
+US-MP,US,Northern Mariana Islands
+US-PR,US,Puerto Rico
+US-UM,US,United States Minor Outlying Islands
+US-VI,US,"Virgin Islands, U.S."
+CA-AB,CA,Alberta
+CA-BC,CA,British Columbia
+CA-MB,CA,Manitoba
+CA-NB,CA,New Brunswick
+CA-NL,CA,Newfoundland and Labrador
+CA-NS,CA,Nova Scotia
+CA-NT,CA,Northwest Territories
+CA-NU,CA,Nunavut
+CA-ON,CA,Ontario
+CA-PE,CA,Prince Edward Island
+CA-QC,CA,Quebec
+CA-SK,CA,Saskatchewan
+CA-YT,CA,Yukon
+IN-AN,IN,Andaman and Nicobar Islands
+IN-AP,IN,Andhra Pradesh
+IN-AR,IN,Arunachal Pradesh
+IN-AS,IN,Assam
+IN-BR,IN,Bihar
+IN-CH,IN,Chandigarh
+IN-CG,IN,Chhattisgarh
+IN-DH,IN,Dadra and Nagar Haveli and Daman and Diu
+IN-DL,IN,Delhi
+IN-GA,IN,Goa
+IN-GJ,IN,Gujarat
+IN-HR,IN,Haryana
+IN-HP,IN,Himachal Pradesh
+IN-JK,IN,Jammu and Kashmir
+IN-JH,IN,Jharkhand
+IN-KA,IN,Karnataka
+IN-KL,IN,Kerala
+IN-LA,IN,Ladakh
+IN-LD,IN,Lakshadweep
+IN-MP,IN,Madhya Pradesh
+IN-MH,IN,Maharashtra
+IN-MN,IN,Manipur
+IN-ML,IN,Meghalaya
+IN-MZ,IN,Mizoram
+IN-NL,IN,Nagaland
+IN-OD,IN,Odisha
+IN-PB,IN,Punjab
+IN-PY,IN,Puducherry
+IN-RJ,IN,Rajasthan
+IN-SK,IN,Sikkim
+IN-TN,IN,Tamil Nadu
+IN-TS,IN,Telangana
+IN-TR,IN,Tripura
+IN-UP,IN,Uttar Pradesh
+IN-UT,IN,Uttarakhand
+IN-WB,IN,West Bengal
+MX-AGU,MX,Aguascalientes
+MX-BCN,MX,Baja California
+MX-BCS,MX,Baja California Sur
+MX-CAM,MX,Campeche
+MX-CHP,MX,Chiapas
+MX-CHH,MX,Chihuahua
+MX-CMX,MX,Ciudad de México
+MX-COA,MX,Coahuila
+MX-COL,MX,Colima
+MX-DUR,MX,Durango
+MX-GUA,MX,Guanajuato
+MX-GRO,MX,Guerrero
+MX-HID,MX,Hidalgo
+MX-JAL,MX,Jalisco
+MX-MEX,MX,México
+MX-MIC,MX,Michoacán
+MX-MOR,MX,Morelos
+MX-NAY,MX,Nayarit
+MX-NLE,MX,Nuevo León
+MX-OAX,MX,Oaxaca
+MX-PUE,MX,Puebla
+MX-QUE,MX,Querétaro
+MX-ROO,MX,Quintana Roo
+MX-SLP,MX,San Luis Potosí
+MX-SIN,MX,Sinaloa
+MX-SON,MX,Sonora
+MX-TAB,MX,Tabasco
+MX-TAM,MX,Tamaulipas
+MX-TLA,MX,Tlaxcala
+MX-VER,MX,Veracruz
+MX-YUC,MX,Yucatán
+MX-ZAC,MX,Zacatecas
