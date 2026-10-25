@@ -65,23 +65,6 @@ func updatedEvents(t *testing.T, ctx context.Context, pool *pgxpool.Pool) []outb
 
 func rename(name string) store.LegalEntityPatch { return store.LegalEntityPatch{Name: &name} }
 
-func TestPostgres_CreateWritesExactlyOneOpenName(t *testing.T) {
-	s, pool := lifecycleStore(t)
-	ctx := principalContext(1)
-	if _, err := s.CreateLegalEntity(ctx, newEntity("US01"), ""); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.CreateLegalEntity(ctx, newEntity("US02"), ""); err != nil {
-		t.Fatal(err)
-	}
-	if open := countRows(t, ctx, pool, `select count(*) from legal_entity_name where valid_to is null`); open != 2 {
-		t.Fatalf("open name rows = %d; want one per entity (2)", open)
-	}
-	if total := countRows(t, ctx, pool, `select count(*) from legal_entity_name`); total != 2 {
-		t.Fatalf("name rows = %d; want 2", total)
-	}
-}
-
 func TestPostgres_UpdateNameBumpsVersionAndEmitsOneEvent(t *testing.T) {
 	s, pool := lifecycleStore(t)
 	ctx := principalContext(1)

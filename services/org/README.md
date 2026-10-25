@@ -20,11 +20,11 @@ Countries, currencies, regions and languages are platform-owned rows under the `
 
 | Operation | Duty |
 |---|---|
-| `POST /v1/org/legal-entities` (required `timeZone`, IANA name; optional `defaultLanguage` default `en-US`, `registrationNumber`, `Idempotency-Key`; code is upper-cased; country, currency and language must be active for the tenant; at most 500 per tenant) | `org.legal-entity.write` |
+| `POST /v1/org/legal-entities` (required `timeZone`, IANA name; optional `defaultLanguage` default `en-US`, `registrationNumber`, `Idempotency-Key`; country, currency and language must be active; 500 per tenant) | `org.legal-entity.write` |
 | `GET /v1/org/legal-entities` (`limit` max 100, `cursor`; filters `status` active or inactive, `country`, `currency`; returns `{items, nextCursor}`) | `org.read` |
 | `GET /v1/org/legal-entities/{id}` | `org.read` |
-| `PATCH /v1/org/legal-entities/{id}` (body `version` required, optional `name`, `timeZone`, `defaultLanguage`, `registrationNumber`, `status`; code, country and currency are immutable; emits `legalentity.updated` only when a value changed) | `org.legal-entity.write` |
-| `GET /v1/org/legal-entities/{id}/names` (name history, newest first; returns `{items}`) | `org.read` |
+| `PATCH /v1/org/legal-entities/{id}` (body `version` required, optional `name`, `timeZone`, `defaultLanguage`, `registrationNumber`, `status`; code, country, currency immutable) | `org.legal-entity.write` |
+| `GET /v1/org/legal-entities/{id}/names` (name history) | `org.read` |
 | `GET /v1/org/{countries,currencies,regions,languages}` (`status` active or inactive; `country` for regions; returns `{items}`) and `GET /v1/org/{countries,currencies,regions,languages}/{code}` | `org.read` |
 | `PATCH /v1/org/{countries,currencies,regions,languages}/{code}` (body `{"status":"active"\|"inactive"}`; not for legal-entity-scoped callers) | `org.reference.write` |
 | `GET /v1/org/uom/convert?from=&to=&qty=` | any authenticated principal |
