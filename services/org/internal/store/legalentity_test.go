@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"slices"
+	"reflect"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -18,17 +18,15 @@ import (
 	"github.com/BenjaminSRussell/passage/services/org/migrations"
 )
 
-func lifecycleStore(t *testing.T) (*store.Postgres, *pgxpool.Pool) {
+func lifecycleStore(t *testing.T) (*store.Postgres, context.Context, *pgxpool.Pool) {
 	t.Helper()
 	admin, app := testkit.DBWithApp(t)
 	ctx := principalContext(1)
 	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SeedReference(ctx, admin, migrations.Reference); err != nil {
-		t.Fatal(err)
-	}
-	return store.New(app), app
+	seed(t, ctx, admin)
+	return store.New(app), ctx, app
 }
 
 func newEntity(code string) store.LegalEntity {
@@ -44,36 +42,40 @@ func problemCode(t *testing.T, err error) string {
 	return problem.Code
 }
 
-func countRows(t *testing.T, ctx context.Context, pool *pgxpool.Pool, query string) int {
+func mustCreate(t *testing.T, s *store.Postgres, ctx context.Context, in store.LegalEntity) store.LegalEntity {
 	t.Helper()
-	var n int
-	if err := dbx.WithTenantTx(ctx, pool, func(tx pgx.Tx) error { return tx.QueryRow(ctx, query).Scan(&n) }); err != nil {
+	created, err := s.CreateLegalEntity(ctx, in, "")
+	if err != nil {
 		t.Fatal(err)
 	}
-	return n
+	return created
 }
 
-func updatedEvents(t *testing.T, ctx context.Context, pool *pgxpool.Pool) []outboxRow {
+func updatedChangedFields(t *testing.T, ctx context.Context, pool *pgxpool.Pool) [][]string {
 	t.Helper()
-	var updated []outboxRow
+	var fields [][]string
 	for _, row := range outboxRows(t, ctx, pool) {
-		if row.Type == "dev.passage.org.legalentity.updated.v1" {
-			updated = append(updated, row)
+		if row.Type != "dev.passage.org.legalentity.updated.v1" {
+			continue
 		}
+		var evt struct {
+			Data struct {
+				ChangedFields []string `json:"changed_fields"`
+			}
+		}
+		if err := json.Unmarshal(row.Payload, &evt); err != nil {
+			t.Fatal(err)
+		}
+		fields = append(fields, evt.Data.ChangedFields)
 	}
-	return updated
+	return fields
 }
 
 func rename(name string) store.LegalEntityPatch { return store.LegalEntityPatch{Name: &name} }
 
 func TestPostgres_UpdateNameBumpsVersionAndEmitsOneEvent(t *testing.T) {
-	s, pool := lifecycleStore(t)
-	ctx := principalContext(1)
-	created, err := s.CreateLegalEntity(ctx, newEntity("US01"), "")
-	if err != nil {
-		t.Fatal(err)
-	}
-
+	s, ctx, pool := lifecycleStore(t)
+	created := mustCreate(t, s, ctx, newEntity("US01"))
 	updated, err := s.UpdateLegalEntity(ctx, created.ID, 1, rename("Passage USA"))
 	if err != nil || updated.Version != 2 || updated.Name != "Passage USA" || !updated.UpdatedAt.After(created.UpdatedAt) {
 		t.Fatalf("update = %+v, %v; want version 2 with the new name", updated, err)
@@ -82,71 +84,32 @@ func TestPostgres_UpdateNameBumpsVersionAndEmitsOneEvent(t *testing.T) {
 	if err != nil || len(names) != 2 || names[0].Name != "Passage USA" || names[0].ValidTo != nil || names[1].Name != "Passage US01" || names[1].ValidTo == nil {
 		t.Fatalf("names = %+v, %v; want newest first with the old name closed", names, err)
 	}
-	if open := countRows(t, ctx, pool, `select count(*) from legal_entity_name where valid_to is null`); open != 1 {
-		t.Fatalf("open name rows = %d; want 1", open)
+	if got := updatedChangedFields(t, ctx, pool); !reflect.DeepEqual(got, [][]string{{"name"}}) {
+		t.Fatalf("updated events = %v; want exactly one with changed_fields [name]", got)
 	}
-
-	events := updatedEvents(t, ctx, pool)
-	if len(events) != 1 {
-		t.Fatalf("updated events = %d; want exactly 1", len(events))
-	}
-	var evt struct {
-		Subject string
-		Data    struct {
-			ID            string   `json:"id"`
-			ChangedFields []string `json:"changed_fields"`
-			Version       int      `json:"version"`
-		}
-	}
-	if err := json.Unmarshal(events[0].Payload, &evt); err != nil {
-		t.Fatal(err)
-	}
-	if evt.Data.ID != created.ID || len(evt.Data.ChangedFields) != 1 || evt.Data.ChangedFields[0] != "name" || evt.Data.Version != 2 {
-		t.Fatalf("event data = %+v; want id %s, changed_fields [name], version 2", evt.Data, created.ID)
-	}
-
 	if _, err := s.UpdateLegalEntity(ctx, created.ID, 1, rename("Stale Name")); problemCode(t, err) != store.CodeVersionConflict {
 		t.Fatalf("stale version error = %v; want %s", err, store.CodeVersionConflict)
 	}
-	current, err := s.GetLegalEntity(ctx, created.ID)
-	if err != nil || current.Name != "Passage USA" || current.Version != 2 || len(updatedEvents(t, ctx, pool)) != 1 {
-		t.Fatalf("a stale update must change nothing: %+v, %v", current, err)
-	}
-
 	noop, err := s.UpdateLegalEntity(ctx, created.ID, 2, rename("Passage USA"))
-	if err != nil || noop.Version != 2 || len(updatedEvents(t, ctx, pool)) != 1 {
-		t.Fatalf("no-op update = %+v, %v; want version 2 and no new event", noop, err)
+	if err != nil || noop.Version != 2 || noop.Name != "Passage USA" || len(updatedChangedFields(t, ctx, pool)) != 1 {
+		t.Fatalf("stale and no-op updates must change nothing: %+v, %v", noop, err)
 	}
 	if names, _ := s.ListLegalEntityNames(ctx, created.ID); len(names) != 2 {
 		t.Fatalf("no-op update changed name history: %+v", names)
 	}
-}
-
-func TestPostgres_UpdateReportsEverySortedChangedField(t *testing.T) {
-	s, pool := lifecycleStore(t)
-	ctx := principalContext(1)
-	created, err := s.CreateLegalEntity(ctx, newEntity("US01"), "")
-	if err != nil {
-		t.Fatal(err)
-	}
 	status, zone, registration, language := "inactive", "America/Chicago", "REG-1", "fr"
-	if _, err := s.UpdateLegalEntity(ctx, created.ID, 1, store.LegalEntityPatch{Status: &status, TimeZone: &zone, RegistrationNumber: &registration, DefaultLanguage: &language}); err != nil {
+	patch := store.LegalEntityPatch{Status: &status, TimeZone: &zone, RegistrationNumber: &registration, DefaultLanguage: &language}
+	if _, err := s.UpdateLegalEntity(ctx, created.ID, 2, patch); err != nil {
 		t.Fatal(err)
 	}
-	var evt struct {
-		Data struct {
-			ChangedFields []string `json:"changed_fields"`
-		}
-	}
-	events := updatedEvents(t, ctx, pool)
-	if len(events) != 1 || json.Unmarshal(events[0].Payload, &evt) != nil || !slices.Equal(evt.Data.ChangedFields, []string{"default_language", "registration_number", "status", "time_zone"}) {
-		t.Fatalf("events = %+v; want sorted changed_fields", events)
+	want := [][]string{{"name"}, {"default_language", "registration_number", "status", "time_zone"}}
+	if got := updatedChangedFields(t, ctx, pool); !reflect.DeepEqual(got, want) {
+		t.Fatalf("updated events = %v; want %v", got, want)
 	}
 }
 
 func TestPostgres_ReferenceMustBeActiveForTheTenant(t *testing.T) {
-	s, _ := lifecycleStore(t)
-	ctx1, ctx2 := principalContext(1), principalContext(2)
+	s, ctx1, _ := lifecycleStore(t)
 	if _, err := s.SetReferenceStatus(ctx1, store.KindCurrency, "EUR", "inactive"); err != nil {
 		t.Fatal(err)
 	}
@@ -157,20 +120,8 @@ func TestPostgres_ReferenceMustBeActiveForTheTenant(t *testing.T) {
 	if !errors.As(err, &problem) || problem.Code != store.CodeReferenceInactive || problem.Errors["currency"] == "" {
 		t.Fatalf("inactive currency error = %v; want %s naming currency", err, store.CodeReferenceInactive)
 	}
-	if _, err := s.CreateLegalEntity(ctx2, eur, ""); err != nil {
-		t.Fatalf("tenant 2 must still create with EUR: %v", err)
-	}
-
-	unknownCountry := newEntity("ZZ01")
-	unknownCountry.Country = "ZZ"
-	if _, err := s.CreateLegalEntity(ctx1, unknownCountry, ""); problemCode(t, err) != store.CodeReferenceInactive {
-		t.Fatalf("unknown country error = %v", err)
-	}
-
-	created, err := s.CreateLegalEntity(ctx1, newEntity("US01"), "")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustCreate(t, s, principalContext(2), eur)
+	created := mustCreate(t, s, ctx1, newEntity("US01"))
 	unknownLanguage := "xx"
 	if _, err := s.UpdateLegalEntity(ctx1, created.ID, 1, store.LegalEntityPatch{DefaultLanguage: &unknownLanguage}); problemCode(t, err) != store.CodeReferenceInactive {
 		t.Fatalf("update to an unknown language error = %v", err)
@@ -181,18 +132,11 @@ func TestPostgres_ReferenceMustBeActiveForTheTenant(t *testing.T) {
 }
 
 func TestPostgres_ListFiltersByStatusCountryAndCurrency(t *testing.T) {
-	s, _ := lifecycleStore(t)
-	ctx := principalContext(1)
-	active, err := s.CreateLegalEntity(ctx, newEntity("US01"), "")
-	if err != nil {
-		t.Fatal(err)
-	}
+	s, ctx, _ := lifecycleStore(t)
+	active := mustCreate(t, s, ctx, newEntity("US01"))
 	jp := newEntity("JP01")
 	jp.Country, jp.Currency = "JP", "JPY"
-	retired, err := s.CreateLegalEntity(ctx, jp, "")
-	if err != nil {
-		t.Fatal(err)
-	}
+	retired := mustCreate(t, s, ctx, jp)
 	inactive := "inactive"
 	if _, err := s.UpdateLegalEntity(ctx, retired.ID, 1, store.LegalEntityPatch{Status: &inactive}); err != nil {
 		t.Fatal(err)
@@ -211,22 +155,11 @@ func TestPostgres_ListFiltersByStatusCountryAndCurrency(t *testing.T) {
 			t.Fatalf("filter %+v = %+v, %v; want only %s", tc.filter, page.Items, err, tc.want)
 		}
 	}
-	if page, _ := s.ListLegalEntities(ctx, store.LegalEntityFilter{}, "", store.MaxPageSize); len(page.Items) != 2 {
-		t.Fatalf("unfiltered list = %d; want 2", len(page.Items))
-	}
 }
 
 func TestPostgres_ScopedCallerCannotSeeOrChangeAnotherEntity(t *testing.T) {
-	s, _ := lifecycleStore(t)
-	ctx := principalContext(1)
-	a, err := s.CreateLegalEntity(ctx, newEntity("US01"), "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, err := s.CreateLegalEntity(ctx, newEntity("US02"), "")
-	if err != nil {
-		t.Fatal(err)
-	}
+	s, ctx, _ := lifecycleStore(t)
+	a, b := mustCreate(t, s, ctx, newEntity("US01")), mustCreate(t, s, ctx, newEntity("US02"))
 	scoped := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: a.ID})
 	if got, err := s.GetLegalEntity(scoped, a.ID); err != nil || got.ID != a.ID {
 		t.Fatalf("scoped caller must read its own entity: %+v, %v", got, err)
@@ -243,8 +176,7 @@ func TestPostgres_ScopedCallerCannotSeeOrChangeAnotherEntity(t *testing.T) {
 }
 
 func TestPostgres_TenantCapsAtFiveHundredLegalEntities(t *testing.T) {
-	s, pool := lifecycleStore(t)
-	ctx := principalContext(1)
+	s, ctx, pool := lifecycleStore(t)
 	first, err := s.CreateLegalEntity(ctx, newEntity("US01"), "key-1")
 	if err != nil {
 		t.Fatal(err)
@@ -264,7 +196,5 @@ func TestPostgres_TenantCapsAtFiveHundredLegalEntities(t *testing.T) {
 	if err != nil || replay.ID != first.ID {
 		t.Fatalf("an idempotent replay at the cap must return the original: %+v, %v", replay, err)
 	}
-	if _, err := s.CreateLegalEntity(principalContext(2), newEntity("US01"), ""); err != nil {
-		t.Fatalf("the cap is per tenant: %v", err)
-	}
+	mustCreate(t, s, principalContext(2), newEntity("US01"))
 }

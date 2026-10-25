@@ -21,15 +21,20 @@ func principalContext(n int) context.Context {
 	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(n)})
 }
 
+func seed(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
+	t.Helper()
+	if err := store.SeedReference(ctx, pool, migrations.Reference); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func newStore(t *testing.T, n int) (*store.Postgres, context.Context) {
 	pool := testkit.DB(t)
 	ctx := principalContext(n)
 	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SeedReference(ctx, pool, migrations.Reference); err != nil {
-		t.Fatal(err)
-	}
+	seed(t, ctx, pool)
 	return store.New(pool), ctx
 }
 
@@ -128,9 +133,7 @@ func TestPostgres_CreateLegalEntityEnqueuesInSameTx(t *testing.T) {
 	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SeedReference(ctx, pool, migrations.Reference); err != nil {
-		t.Fatal(err)
-	}
+	seed(t, ctx, pool)
 	s := store.New(pool)
 	in := store.LegalEntity{Code: "US01", Name: "Passage US", Country: "US", Currency: "USD", TimeZone: "America/Chicago"}
 
@@ -179,9 +182,7 @@ func TestPostgres_CreateLegalEntityRollsBackWhenOutboxFails(t *testing.T) {
 	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SeedReference(ctx, pool, migrations.Reference); err != nil {
-		t.Fatal(err)
-	}
+	seed(t, ctx, pool)
 	if _, err := pool.Exec(ctx, `alter table outbox add constraint outbox_reject check (false)`); err != nil {
 		t.Fatal(err)
 	}
@@ -206,9 +207,7 @@ func TestPostgres_OutboxIsTenantIsolated(t *testing.T) {
 	if err := dbx.Migrate(ctxA, admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SeedReference(ctxA, admin, migrations.Reference); err != nil {
-		t.Fatal(err)
-	}
+	seed(t, ctxA, admin)
 	if _, err := store.New(app).CreateLegalEntity(ctxA, store.LegalEntity{Code: "US01", Name: "n", Country: "US", Currency: "USD", TimeZone: "UTC"}, ""); err != nil {
 		t.Fatal(err)
 	}

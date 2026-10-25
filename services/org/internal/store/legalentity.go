@@ -26,11 +26,11 @@ const (
 )
 
 type LegalEntityPatch struct {
-	Name               *string
-	TimeZone           *string
-	DefaultLanguage    *string
-	RegistrationNumber *string
-	Status             *string
+	Name               *string `json:"name"`
+	TimeZone           *string `json:"timeZone"`
+	DefaultLanguage    *string `json:"defaultLanguage"`
+	RegistrationNumber *string `json:"registrationNumber"`
+	Status             *string `json:"status"`
 }
 
 type LegalEntityName struct {
@@ -173,66 +173,17 @@ func (s *Postgres) UpdateLegalEntity(ctx context.Context, id string, version int
 
 func (s *Postgres) ListLegalEntityNames(ctx context.Context, id string) ([]LegalEntityName, error) {
 	p, _ := tenant.FromContext(ctx)
-	names := []LegalEntityName{}
+	var names []LegalEntityName
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		var exists bool
-		if err := tx.QueryRow(ctx, `select exists (select 1 from legal_entity where tenant_id = $1 and id = $2)`, p.TenantID, id).Scan(&exists); err != nil {
-			return err
-		}
-		if !exists {
-			return legalEntityNotFound()
-		}
 		rows, err := tx.Query(ctx, `select name, valid_from, valid_to from legal_entity_name where tenant_id = $1 and legal_entity_id = $2 order by valid_from desc`, p.TenantID, id)
 		if err != nil {
 			return err
 		}
-		defer rows.Close()
-		for rows.Next() {
-			var n LegalEntityName
-			if err := rows.Scan(&n.Name, &n.ValidFrom, &n.ValidTo); err != nil {
-				return err
-			}
-			names = append(names, n)
-		}
-		return rows.Err()
+		names, err = pgx.CollectRows(rows, pgx.RowToStructByPos[LegalEntityName])
+		return err
 	})
-	if err != nil {
-		return nil, err
+	if err == nil && len(names) == 0 {
+		return nil, legalEntityNotFound()
 	}
-	return names, nil
-}
-
-func (s *Postgres) ListLegalEntities(ctx context.Context, f LegalEntityFilter, afterCode string, limit int) (LegalEntityPage, error) {
-	p, _ := tenant.FromContext(ctx)
-	page := LegalEntityPage{Items: []LegalEntity{}}
-	query := `select ` + legalEntityColumns + ` from legal_entity where tenant_id = $1 and code > $2`
-	args := []any{p.TenantID, afterCode}
-	for _, c := range []struct{ column, value string }{{"status", f.Status}, {"country", f.Country}, {"currency", f.Currency}} {
-		if c.value != "" {
-			args = append(args, c.value)
-			query += fmt.Sprintf(" and %s = $%d", c.column, len(args))
-		}
-	}
-	args = append(args, limit+1)
-	query += fmt.Sprintf(" order by code limit $%d", len(args))
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, query, args...)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			e, err := scanLegalEntity(rows)
-			if err != nil {
-				return err
-			}
-			page.Items = append(page.Items, e)
-		}
-		return rows.Err()
-	})
-	if len(page.Items) > limit {
-		page.Items = page.Items[:limit]
-		page.NextCode = page.Items[limit-1].Code
-	}
-	return page, err
+	return names, err
 }

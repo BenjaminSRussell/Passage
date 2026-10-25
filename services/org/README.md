@@ -22,9 +22,8 @@ Countries, currencies, regions and languages are platform-owned rows under the `
 |---|---|
 | `POST /v1/org/legal-entities` (required `timeZone`, IANA name; optional `defaultLanguage` default `en-US`, `registrationNumber`, `Idempotency-Key`; country, currency and language must be active; 500 per tenant) | `org.legal-entity.write` |
 | `GET /v1/org/legal-entities` (`limit` max 100, `cursor`; filters `status` active or inactive, `country`, `currency`; returns `{items, nextCursor}`) | `org.read` |
-| `GET /v1/org/legal-entities/{id}` | `org.read` |
 | `PATCH /v1/org/legal-entities/{id}` (body `version` required, optional `name`, `timeZone`, `defaultLanguage`, `registrationNumber`, `status`; code, country, currency immutable) | `org.legal-entity.write` |
-| `GET /v1/org/legal-entities/{id}/names` (name history) | `org.read` |
+| `GET /v1/org/legal-entities/{id}`, `GET /v1/org/legal-entities/{id}/names` (name history) | `org.read` |
 | `GET /v1/org/{countries,currencies,regions,languages}` (`status` active or inactive; `country` for regions; returns `{items}`) and `GET /v1/org/{countries,currencies,regions,languages}/{code}` | `org.read` |
 | `PATCH /v1/org/{countries,currencies,regions,languages}/{code}` (body `{"status":"active"\|"inactive"}`; not for legal-entity-scoped callers) | `org.reference.write` |
 | `GET /v1/org/uom/convert?from=&to=&qty=` | any authenticated principal |
@@ -40,10 +39,8 @@ Contract: `api/openapi.yaml`. Paths follow the architecture spine (`/v1/<context
 | AUTH-0001, AUTH-0003, COM-0500 | 401, 403, 500 | missing tenant, duty missing, internal error with hidden detail |
 | ORG-LE-CODE-DUPLICATE | 409 | legal-entity code already used in the tenant |
 | ORG-LE-CODE-RESERVED | 400 | legal-entity code is DAT, SYS or ALL |
-| ORG-LE-NOT-FOUND | 404 | unknown legal entity, malformed id, or outside the caller's legal-entity scope |
-| ORG-VERSION-CONFLICT | 409 | stale version; re-read with GET |
-| ORG-LE-REFERENCE-INACTIVE | 422 | country, currency or default language is unknown or inactive for the tenant (`errors` names the field) |
-| ORG-LE-LIMIT | 422 | the tenant already has 500 legal entities |
+| ORG-LE-NOT-FOUND, ORG-VERSION-CONFLICT | 404, 409 | unknown, malformed or out-of-scope legal-entity id; stale version |
+| ORG-LE-REFERENCE-INACTIVE, ORG-LE-LIMIT | 422 | country, currency or default language unknown or inactive for the tenant; 500 legal entities already |
 | idempotency_key_reuse | 422 | Idempotency-Key reused with a different body |
 | ORG-REF-NOT-FOUND | 404 | unknown reference code |
 | ORG-UOM-NO-PATH | 422 | no conversion within two hops inside one unit class |

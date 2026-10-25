@@ -25,7 +25,7 @@ const (
 	CodeIdempotencyReuse = "idempotency_key_reuse"
 	uniqueViolation      = "23505"
 	eventSource          = "org"
-	defaultLanguage      = "en-US"
+	DefaultLanguage      = "en-US"
 )
 
 type LegalEntity struct {
@@ -85,7 +85,7 @@ func enqueue(ctx context.Context, tx pgx.Tx, aggregateType, aggregateID, eventTy
 func (s *Postgres) CreateLegalEntity(ctx context.Context, in LegalEntity, idempotencyKey string) (LegalEntity, error) {
 	p, _ := tenant.FromContext(ctx)
 	if in.DefaultLanguage == "" {
-		in.DefaultLanguage = defaultLanguage
+		in.DefaultLanguage = DefaultLanguage
 	}
 	var key *string
 	if idempotencyKey != "" {
@@ -134,4 +134,31 @@ func (s *Postgres) CreateLegalEntity(ctx context.Context, in LegalEntity, idempo
 		return LegalEntity{}, httpx.NewProblem(http.StatusUnprocessableEntity, CodeIdempotencyReuse, "Idempotency-Key was already used with a different request body")
 	}
 	return e, err
+}
+
+func (s *Postgres) ListLegalEntities(ctx context.Context, f LegalEntityFilter, afterCode string, limit int) (LegalEntityPage, error) {
+	p, _ := tenant.FromContext(ctx)
+	page := LegalEntityPage{Items: []LegalEntity{}}
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select `+legalEntityColumns+` from legal_entity where tenant_id = $1 and code > $2
+			and ($3::text = '' or status = $3) and ($4::text = '' or country = $4) and ($5::text = '' or currency = $5) order by code limit $6`,
+			p.TenantID, afterCode, f.Status, f.Country, f.Currency, limit+1)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			e, err := scanLegalEntity(rows)
+			if err != nil {
+				return err
+			}
+			page.Items = append(page.Items, e)
+		}
+		return rows.Err()
+	})
+	if len(page.Items) > limit {
+		page.Items = page.Items[:limit]
+		page.NextCode = page.Items[limit-1].Code
+	}
+	return page, err
 }
