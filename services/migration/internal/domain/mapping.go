@@ -27,8 +27,10 @@ const (
 )
 
 const (
-	maxDecimalScale = 6
-	dateLayout      = "2006-01-02"
+	maxDecimalScale      = 6
+	maxDecimalExponent   = 14
+	maxDecimalScaleGuard = 64
+	dateLayout           = "2006-01-02"
 )
 
 var maxDecimalMagnitude = decimal.New(1, 14)

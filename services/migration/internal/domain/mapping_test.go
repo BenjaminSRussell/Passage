@@ -46,6 +46,8 @@ func TestApply_Rules(t *testing.T) {
 		{"decimal 1e14 rejected", rule(domain.TypeDecimal), map[string]any{"src": "100000000000000"}, nil, domain.CodeMapRange, false},
 		{"decimal negative 1e14 rejected", rule(domain.TypeDecimal), map[string]any{"src": "-1e14"}, nil, domain.CodeMapRange, false},
 		{"decimal just under limit", rule(domain.TypeDecimal), map[string]any{"src": "99999999999999.999999"}, "99999999999999.999999", "", false},
+		{"decimal huge positive exponent rejected", rule(domain.TypeDecimal), map[string]any{"src": "1e9999999"}, nil, domain.CodeMapRange, false},
+		{"decimal huge negative exponent rejected", rule(domain.TypeDecimal), map[string]any{"src": "1e-9999999"}, nil, domain.CodeMapRange, false},
 		{"decimal NaN", rule(domain.TypeDecimal), map[string]any{"src": "NaN"}, nil, domain.CodeMapCoerce, false},
 		{"decimal object", rule(domain.TypeDecimal), map[string]any{"src": map[string]any{"a": 1}}, nil, domain.CodeMapCoerce, false},
 		{"date iso", rule(domain.TypeDate), map[string]any{"src": "2024-02-29"}, "2024-02-29", "", false},
