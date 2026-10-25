@@ -15,18 +15,19 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/api"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/store"
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/store/memstore"
 )
 
 const evaluatePath = "/v1/receiving/matching:evaluate"
 
-type fakeStore struct {
-	store.Store
+type pingStore struct {
+	*memstore.Store
 	pingErr error
 }
 
-func (f fakeStore) Ping(context.Context) error { return f.pingErr }
+func (f pingStore) Ping(context.Context) error { return f.pingErr }
 
-func newRouter(s fakeStore) (*chi.Mux, *api.API) {
+func newRouter(s store.Store) (*chi.Mux, *api.API) {
 	a := api.New(s)
 	r := httpx.NewRouter()
 	a.Register(r)
@@ -85,7 +86,7 @@ func TestEvaluate(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			r, _ := newRouter(fakeStore{})
+			r, _ := newRouter(memstore.New())
 			rec := do(r, http.MethodPost, evaluatePath, tc.body, tc.duties, tc.withTenant)
 			if rec.Code != tc.wantStatus || !strings.Contains(rec.Body.String(), tc.wantBody) {
 				t.Fatalf("got %d %s; want %d containing %s", rec.Code, rec.Body.String(), tc.wantStatus, tc.wantBody)
@@ -95,7 +96,7 @@ func TestEvaluate(t *testing.T) {
 }
 
 func TestEvaluate_RejectsOverlongLineList(t *testing.T) {
-	r, _ := newRouter(fakeStore{})
+	r, _ := newRouter(memstore.New())
 	lines := strings.TrimSuffix(strings.Repeat(line+",", 501), ",")
 	rec := do(r, http.MethodPost, evaluatePath, body(lines), "MatchingPolicyMaintain", true)
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"lines"`) {
@@ -104,14 +105,14 @@ func TestEvaluate_RejectsOverlongLineList(t *testing.T) {
 }
 
 func TestProbes(t *testing.T) {
-	down := fakeStore{pingErr: errors.New("db down")}
+	down := pingStore{Store: memstore.New(), pingErr: errors.New("db down")}
 	tests := []struct {
 		name       string
-		store      fakeStore
+		store      store.Store
 		path       string
 		wantStatus int
 	}{
-		{"readyz ok", fakeStore{}, "/readyz", http.StatusOK},
+		{"readyz ok", memstore.New(), "/readyz", http.StatusOK},
 		{"readyz fails closed when database is down", down, "/readyz", http.StatusServiceUnavailable},
 		{"healthz stays up when database is down", down, "/healthz", http.StatusOK},
 	}
@@ -130,7 +131,7 @@ func TestProbes(t *testing.T) {
 }
 
 func TestMetricsCountBusinessOperationsAndHTTP(t *testing.T) {
-	r, a := newRouter(fakeStore{})
+	r, a := newRouter(memstore.New())
 	h := a.Instrument(r)
 	do(h, http.MethodPost, evaluatePath, body(line), "MatchingPolicyMaintain", true)
 	do(h, http.MethodPost, evaluatePath, `{`, "MatchingPolicyMaintain", true)
@@ -157,7 +158,7 @@ func TestOpenAPIDocumentsEveryRoute(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, _ := newRouter(fakeStore{})
+	r, _ := newRouter(memstore.New())
 	err = chi.Walk(r, func(_, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
 		if !strings.Contains(string(spec), "\n  "+route+":") {
 			t.Errorf("openapi.yaml does not document %s", route)
