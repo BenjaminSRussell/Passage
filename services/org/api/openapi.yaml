@@ -160,7 +160,7 @@ paths:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
         '200':
-          description: One site. A malformed id, an unknown id and a site outside the caller's legal-entity scope are all 404 ORG-SITE-NOT-FOUND. 409 ORG-SITE-IN-USE when the patch sets status inactive while an active warehouse references the site.
+          description: One site. A malformed id, an unknown id and a site outside the caller's legal-entity scope are all 404 ORG-SITE-NOT-FOUND.
           content: { application/json: { schema: { $ref: '#/components/schemas/Site' } } }
         default: { $ref: '#/components/responses/Problem' }
     patch:
@@ -173,7 +173,7 @@ paths:
         content: { application/json: { schema: { $ref: '#/components/schemas/UpdateSite' } } }
       responses:
         '200':
-          description: The site. A stale version is 409 ORG-VERSION-CONFLICT. A request that changes no value returns the stored site with the same version and emits no event. 400 COM-0001 for a field error, or for legalEntityId or code, which are immutable. 404 ORG-SITE-NOT-FOUND.
+          description: The site. A stale version is 409 ORG-VERSION-CONFLICT. A request that changes no value returns the stored site with the same version and emits no event. 400 COM-0001 for a field error, or for legalEntityId or code, which are immutable. 404 ORG-SITE-NOT-FOUND. 409 ORG-SITE-IN-USE when the patch sets status inactive while an active warehouse references the site.
           content: { application/json: { schema: { $ref: '#/components/schemas/Site' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/org/warehouses:
