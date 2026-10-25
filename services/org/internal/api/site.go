@@ -175,6 +175,7 @@ func (a *API) updateSite(w http.ResponseWriter, r *http.Request, id string) {
 	if req.Status != nil && !validStatus(*req.Status) {
 		fields["status"] = "must be active or inactive"
 	}
+	optionalID(fields, "addressId", req.AddressID, true)
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
 		return

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: org
-  version: 0.9.0
+  version: 0.10.0
   description: Organization service. Covers legal entities, operating units, sites, warehouses, locations, postal addresses with purposes, unit-of-measure conversion, and the platform-owned reference sets (countries, currencies, regions, languages) with tenant-level deactivation.
 servers:
   - url: https://app.local.passage.dev
@@ -57,7 +57,7 @@ paths:
         content: { application/json: { schema: { $ref: '#/components/schemas/UpdateLegalEntity' } } }
       responses:
         '200':
-          description: The legal entity. A stale version is 409 ORG-VERSION-CONFLICT. A request that changes no value returns the stored entity with the same version and emits no event. Changing the default language to an unknown or inactive language is 422 ORG-LE-REFERENCE-INACTIVE.
+          description: The legal entity. A stale version is 409 ORG-VERSION-CONFLICT. A request that changes no value returns the stored entity with the same version and emits no event. Changing the default language to an unknown or inactive language is 422 ORG-LE-REFERENCE-INACTIVE. 400 COM-0001 for a field error. 404 ORG-LE-NOT-FOUND. 422 ORG-ADDR-NOT-OWNED, naming the field in errors, when the address pointer is not a current address owned by this record; an old version id, another owner's address and an address outside the caller's scope all fail. 403 AUTH-0003 without the duty.
           content: { application/json: { schema: { $ref: '#/components/schemas/LegalEntity' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/org/legal-entities/{id}/names:
@@ -173,7 +173,7 @@ paths:
         content: { application/json: { schema: { $ref: '#/components/schemas/UpdateSite' } } }
       responses:
         '200':
-          description: The site. A stale version is 409 ORG-VERSION-CONFLICT. A request that changes no value returns the stored site with the same version and emits no event. 400 COM-0001 for a field error, or for legalEntityId or code, which are immutable. 404 ORG-SITE-NOT-FOUND. 409 ORG-SITE-IN-USE when the patch sets status inactive while an active warehouse references the site.
+          description: The site. A stale version is 409 ORG-VERSION-CONFLICT. A request that changes no value returns the stored site with the same version and emits no event. 400 COM-0001 for a field error, or for legalEntityId or code, which are immutable. 404 ORG-SITE-NOT-FOUND. 409 ORG-SITE-IN-USE when the patch sets status inactive while an active warehouse references the site. 422 ORG-ADDR-NOT-OWNED, naming the field in errors, when the address pointer is not a current address owned by this record; an old version id, another owner's address and an address outside the caller's scope all fail. 403 AUTH-0003 without the duty.
           content: { application/json: { schema: { $ref: '#/components/schemas/Site' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/org/warehouses:
@@ -226,7 +226,7 @@ paths:
         content: { application/json: { schema: { $ref: '#/components/schemas/UpdateWarehouse' } } }
       responses:
         '200':
-          description: The warehouse. A stale version is 409 ORG-VERSION-CONFLICT. A request that changes no value returns the stored warehouse with the same version and emits no event. 400 COM-0001 for a field error, or for legalEntityId or code, which are immutable. 404 ORG-WH-NOT-FOUND. 422 ORG-WH-SITE-INVALID when the new site is unknown, inactive or outside the caller's scope; 422 ORG-WH-LE-MISMATCH when the new site belongs to another legal entity.
+          description: The warehouse. A stale version is 409 ORG-VERSION-CONFLICT. A request that changes no value returns the stored warehouse with the same version and emits no event. 400 COM-0001 for a field error, or for legalEntityId or code, which are immutable. 404 ORG-WH-NOT-FOUND. 422 ORG-WH-SITE-INVALID when the new site is unknown, inactive or outside the caller's scope; 422 ORG-WH-LE-MISMATCH when the new site belongs to another legal entity. 422 ORG-ADDR-NOT-OWNED, naming the field in errors, when the address pointer is not a current address owned by this record; an old version id, another owner's address and an address outside the caller's scope all fail. 403 AUTH-0003 without the duty.
           content: { application/json: { schema: { $ref: '#/components/schemas/Warehouse' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/org/locations:
@@ -267,6 +267,19 @@ paths:
       responses:
         '200':
           description: One location. A malformed id, an unknown id and a location outside the caller's legal-entity scope are all 404 ORG-LOC-NOT-FOUND.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Location' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    patch:
+      operationId: updateLocation
+      x-passage-duty: org.site.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/UpdateLocation' } } }
+      responses:
+        '200':
+          description: The location. A stale version is 409 ORG-VERSION-CONFLICT. A request that changes no value returns the stored location with the same version and emits no event. 400 COM-0001 for a field error, or for warehouseId or code, which are immutable. 404 ORG-LOC-NOT-FOUND for a malformed, unknown or out-of-scope id. 422 ORG-ADDR-NOT-OWNED, naming the field in errors, when the address pointer is not a current address owned by this record; an old version id, another owner's address and an address outside the caller's scope all fail. 403 AUTH-0003 without the duty.
           content: { application/json: { schema: { $ref: '#/components/schemas/Location' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/org/addresses:
@@ -517,12 +530,12 @@ components:
     LegalEntity:
       type: object
       required: [id, code, name, country, currency, timeZone, defaultLanguage, status, version, createdAt, updatedAt]
-      properties: { defaultLanguage: { type: string }, registrationNumber: { type: string }, updatedAt: { type: string, format: date-time }, id: { type: string, format: uuid }, code: { type: string }, name: { type: string }, country: { type: string }, currency: { type: string }, timeZone: { type: string }, status: { type: string, enum: [active, inactive] }, version: { type: integer }, createdAt: { type: string, format: date-time } }
+      properties: { primaryAddressId: { type: [string, 'null'], format: uuid, description: The stable address_id of the legal entity's primary address; follows address revisions. }, defaultLanguage: { type: string }, registrationNumber: { type: string }, updatedAt: { type: string, format: date-time }, id: { type: string, format: uuid }, code: { type: string }, name: { type: string }, country: { type: string }, currency: { type: string }, timeZone: { type: string }, status: { type: string, enum: [active, inactive] }, version: { type: integer }, createdAt: { type: string, format: date-time } }
     UpdateLegalEntity:
       type: object
       additionalProperties: false
       required: [version]
-      properties: { version: { type: integer, minimum: 1 }, name: { type: string, minLength: 1, maxLength: 120 }, timeZone: { type: string, description: IANA time zone name }, defaultLanguage: { type: string, pattern: '^[a-z]{2}(-[A-Z]{2})?$' }, registrationNumber: { type: string, maxLength: 40 }, status: { type: string, enum: [active, inactive] } }
+      properties: { version: { type: integer, minimum: 1 }, name: { type: string, minLength: 1, maxLength: 120 }, timeZone: { type: string, description: IANA time zone name }, defaultLanguage: { type: string, pattern: '^[a-z]{2}(-[A-Z]{2})?$' }, registrationNumber: { type: string, maxLength: 40 }, status: { type: string, enum: [active, inactive] }, primaryAddressId: { type: string, description: A UUID of a current address owned by the legal entity, or an empty string to clear } }
     LegalEntityName:
       type: object
       required: [name, validFrom]
@@ -553,12 +566,12 @@ components:
     Site:
       type: object
       required: [id, legalEntityId, code, name, timeZone, status, version, createdAt, updatedAt]
-      properties: { id: { type: string, format: uuid }, legalEntityId: { type: string, format: uuid }, code: { type: string }, name: { type: string }, timeZone: { type: string }, status: { type: string, enum: [active, inactive] }, version: { type: integer }, createdAt: { type: string, format: date-time }, updatedAt: { type: string, format: date-time } }
+      properties: { id: { type: string, format: uuid }, legalEntityId: { type: string, format: uuid }, code: { type: string }, name: { type: string }, timeZone: { type: string }, status: { type: string, enum: [active, inactive] }, addressId: { type: [string, 'null'], format: uuid, description: The stable address_id of a current address owned by the site; follows address revisions. }, version: { type: integer }, createdAt: { type: string, format: date-time }, updatedAt: { type: string, format: date-time } }
     UpdateSite:
       type: object
       additionalProperties: false
       required: [version]
-      properties: { version: { type: integer, minimum: 1 }, name: { type: string, minLength: 1, maxLength: 120 }, timeZone: { type: string, description: IANA time zone name }, status: { type: string, enum: [active, inactive] } }
+      properties: { version: { type: integer, minimum: 1 }, name: { type: string, minLength: 1, maxLength: 120 }, timeZone: { type: string, description: IANA time zone name }, status: { type: string, enum: [active, inactive] }, addressId: { type: string, description: A UUID of a current address owned by the site, or an empty string to clear } }
     SiteList:
       type: object
       required: [items]
@@ -571,12 +584,12 @@ components:
     Warehouse:
       type: object
       required: [id, legalEntityId, siteId, code, name, type, timeZone, status, version, createdAt, updatedAt]
-      properties: { id: { type: string, format: uuid }, legalEntityId: { type: string, format: uuid }, siteId: { type: string, format: uuid }, code: { type: string }, name: { type: string }, type: { type: string, enum: [standard, transit, quarantine, subcontractor] }, timeZone: { type: string }, status: { type: string, enum: [active, inactive] }, version: { type: integer }, createdAt: { type: string, format: date-time }, updatedAt: { type: string, format: date-time } }
+      properties: { id: { type: string, format: uuid }, legalEntityId: { type: string, format: uuid }, siteId: { type: string, format: uuid }, code: { type: string }, name: { type: string }, type: { type: string, enum: [standard, transit, quarantine, subcontractor] }, timeZone: { type: string }, status: { type: string, enum: [active, inactive] }, addressId: { type: [string, 'null'], format: uuid, description: The stable address_id of a current address owned by the warehouse; follows address revisions. }, version: { type: integer }, createdAt: { type: string, format: date-time }, updatedAt: { type: string, format: date-time } }
     UpdateWarehouse:
       type: object
       additionalProperties: false
       required: [version]
-      properties: { version: { type: integer, minimum: 1 }, siteId: { type: string, format: uuid, description: A site in the same legal entity }, name: { type: string, minLength: 1, maxLength: 120 }, type: { type: string, enum: [standard, transit, quarantine, subcontractor] }, timeZone: { type: string, description: IANA time zone name }, status: { type: string, enum: [active, inactive] } }
+      properties: { version: { type: integer, minimum: 1 }, siteId: { type: string, format: uuid, description: A site in the same legal entity }, name: { type: string, minLength: 1, maxLength: 120 }, type: { type: string, enum: [standard, transit, quarantine, subcontractor] }, timeZone: { type: string, description: IANA time zone name }, status: { type: string, enum: [active, inactive] }, addressId: { type: string, description: A UUID of a current address owned by the warehouse, or an empty string to clear } }
     WarehouseList:
       type: object
       required: [items]
@@ -589,7 +602,12 @@ components:
     Location:
       type: object
       required: [id, legalEntityId, warehouseId, code, name, type, status, version, createdAt, updatedAt]
-      properties: { id: { type: string, format: uuid }, legalEntityId: { type: string, format: uuid }, warehouseId: { type: string, format: uuid }, code: { type: string }, name: { type: string }, type: { type: string, enum: [storage, receiving, shipping, quarantine] }, status: { type: string, enum: [active, inactive] }, version: { type: integer }, createdAt: { type: string, format: date-time }, updatedAt: { type: string, format: date-time } }
+      properties: { id: { type: string, format: uuid }, legalEntityId: { type: string, format: uuid }, warehouseId: { type: string, format: uuid }, code: { type: string }, name: { type: string }, type: { type: string, enum: [storage, receiving, shipping, quarantine] }, status: { type: string, enum: [active, inactive] }, addressId: { type: [string, 'null'], format: uuid, description: The stable address_id of a current address owned by the location; follows address revisions. }, version: { type: integer }, createdAt: { type: string, format: date-time }, updatedAt: { type: string, format: date-time } }
+    UpdateLocation:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties: { version: { type: integer, minimum: 1 }, name: { type: string, minLength: 1, maxLength: 120 }, type: { type: string, enum: [storage, receiving, shipping, quarantine] }, status: { type: string, enum: [active, inactive] }, addressId: { type: string, description: A UUID of a current address owned by the location, or an empty string to clear } }
     LocationList:
       type: object
       required: [items]

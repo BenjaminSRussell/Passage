@@ -24,22 +24,23 @@ import (
 )
 
 type fakeStore struct {
-	err            error
-	pingErr        error
-	entities       []store.LegalEntity
-	byKey          map[string]store.LegalEntity
-	refs           map[string]store.ReferenceItem
-	ous            []store.OperatingUnit
-	ouCalls        int
-	sites          []store.Site
-	siteCalls      int
-	warehouses     []store.Warehouse
-	warehouseCalls int
-	locations      []store.Location
-	locationCalls  int
-	addresses      []store.Address
-	addressCalls   int
-	reviseCalls    int
+	err                 error
+	pingErr             error
+	entities            []store.LegalEntity
+	byKey               map[string]store.LegalEntity
+	refs                map[string]store.ReferenceItem
+	ous                 []store.OperatingUnit
+	ouCalls             int
+	sites               []store.Site
+	siteCalls           int
+	warehouses          []store.Warehouse
+	warehouseCalls      int
+	locations           []store.Location
+	locationCalls       int
+	locationUpdateCalls int
+	addresses           []store.Address
+	addressCalls        int
+	reviseCalls         int
 }
 
 func (f *fakeStore) reference(kind store.ReferenceKind, code string) (store.ReferenceItem, bool) {
@@ -439,6 +440,25 @@ func (f *fakeStore) GetLocation(_ context.Context, id string) (store.Location, e
 	return store.Location{}, httpx.NewProblem(http.StatusNotFound, store.CodeLocationNotFound, "location not found")
 }
 
+func (f *fakeStore) UpdateLocation(_ context.Context, id string, version int, in store.LocationPatch) (store.Location, error) {
+	f.locationUpdateCalls++
+	for i := range f.locations {
+		l := &f.locations[i]
+		if l.ID != id {
+			continue
+		}
+		if l.Version != version {
+			return store.Location{}, httpx.NewProblem(http.StatusConflict, store.CodeVersionConflict, fmt.Sprintf("current version is %d", l.Version))
+		}
+		if in.Name != nil && *in.Name != l.Name {
+			l.Name = *in.Name
+			l.Version++
+		}
+		return *l, nil
+	}
+	return store.Location{}, httpx.NewProblem(http.StatusNotFound, store.CodeLocationNotFound, "location not found")
+}
+
 func (f *fakeStore) ListLocations(_ context.Context, _ store.LocationFilter, after store.SiteKey, limit int) (store.LocationPage, error) {
 	if f.err != nil {
 		return store.LocationPage{}, f.err
@@ -619,6 +639,8 @@ func TestLegalEntityLifecycleRoutes(t *testing.T) {
 		{"patch name", seededStore(), http.MethodPatch, byID, `{"version":1,"name":"Passage USA"}`, allDuties, true, http.StatusOK, `"version":2`},
 		{"patch no change keeps version", seededStore(), http.MethodPatch, byID, `{"version":1,"name":"Passage US"}`, allDuties, true, http.StatusOK, `"version":1`},
 		{"patch unknown field code", seededStore(), http.MethodPatch, byID, `{"version":1,"code":"X1"}`, allDuties, true, http.StatusBadRequest, "COM-0001"},
+		{"patch bad primary address id", seededStore(), http.MethodPatch, byID, `{"version":1,"primaryAddressId":"abc"}`, allDuties, true, http.StatusBadRequest, `"primaryAddressId"`},
+		{"patch clearing primary address id accepted", seededStore(), http.MethodPatch, byID, `{"version":1,"primaryAddressId":""}`, allDuties, true, http.StatusOK, `"version":1`},
 		{"patch missing version", seededStore(), http.MethodPatch, byID, `{"name":"x"}`, allDuties, true, http.StatusBadRequest, `"version"`},
 		{"patch bad status", seededStore(), http.MethodPatch, byID, `{"version":1,"status":"deleted"}`, allDuties, true, http.StatusBadRequest, `"status"`},
 		{"patch stale version", seededStore(), http.MethodPatch, byID, `{"version":7,"name":"x"}`, allDuties, true, http.StatusConflict, "ORG-VERSION-CONFLICT"},

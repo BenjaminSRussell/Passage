@@ -54,6 +54,20 @@ func TestLocations(t *testing.T) {
 		{"list bad type", seededLocations(), http.MethodGet, locationsPath + "?type=picking", "", siteDuties, true, http.StatusBadRequest, `"type"`},
 		{"list bad cursor", seededLocations(), http.MethodGet, locationsPath + "?cursor=Zm9v", "", siteDuties, true, http.StatusBadRequest, `"cursor"`},
 		{"list without tenant", seededLocations(), http.MethodGet, locationsPath, "", "", false, http.StatusUnauthorized, "AUTH-0001"},
+		{"patch name", seededLocations(), http.MethodPatch, locationsPath + "/" + locationID1, `{"version":1,"name":"Renamed"}`, siteDuties, true, http.StatusOK, `"version":2`},
+		{"patch no-op keeps version", seededLocations(), http.MethodPatch, locationsPath + "/" + locationID1, `{"version":1,"name":"One"}`, siteDuties, true, http.StatusOK, `"version":1`},
+		{"patch stale version", seededLocations(), http.MethodPatch, locationsPath + "/" + locationID1, `{"version":7,"name":"x"}`, siteDuties, true, http.StatusConflict, "ORG-VERSION-CONFLICT"},
+		{"patch missing version", seededLocations(), http.MethodPatch, locationsPath + "/" + locationID1, `{"name":"x"}`, siteDuties, true, http.StatusBadRequest, `"version"`},
+		{"patch bad type", seededLocations(), http.MethodPatch, locationsPath + "/" + locationID1, `{"version":1,"type":"bin"}`, siteDuties, true, http.StatusBadRequest, `"type"`},
+		{"patch bad status", seededLocations(), http.MethodPatch, locationsPath + "/" + locationID1, `{"version":1,"status":"closed"}`, siteDuties, true, http.StatusBadRequest, `"status"`},
+		{"patch empty name", seededLocations(), http.MethodPatch, locationsPath + "/" + locationID1, `{"version":1,"name":""}`, siteDuties, true, http.StatusBadRequest, `"name"`},
+		{"patch bad address id", seededLocations(), http.MethodPatch, locationsPath + "/" + locationID1, `{"version":1,"addressId":"abc"}`, siteDuties, true, http.StatusBadRequest, `"addressId"`},
+		{"patch clearing address id accepted", seededLocations(), http.MethodPatch, locationsPath + "/" + locationID1, `{"version":1,"addressId":""}`, siteDuties, true, http.StatusOK, `"version":1`},
+		{"patch warehouse rejected", seededLocations(), http.MethodPatch, locationsPath + "/" + locationID1, `{"version":1,"warehouseId":"` + warehouseID1 + `"}`, siteDuties, true, http.StatusBadRequest, "COM-0001"},
+		{"patch code rejected", seededLocations(), http.MethodPatch, locationsPath + "/" + locationID1, `{"version":1,"code":"X1"}`, siteDuties, true, http.StatusBadRequest, "COM-0001"},
+		{"patch without duty", seededLocations(), http.MethodPatch, locationsPath + "/" + locationID1, `{"version":1}`, "org.read", true, http.StatusForbidden, "AUTH-0003"},
+		{"patch without tenant", seededLocations(), http.MethodPatch, locationsPath + "/" + locationID1, `{"version":1}`, "", false, http.StatusUnauthorized, "AUTH-0001"},
+		{"patch malformed id", seededLocations(), http.MethodPatch, locationsPath + "/nope", `{"version":1}`, siteDuties, true, http.StatusNotFound, "ORG-LOC-NOT-FOUND"},
 		{"site deactivation refused while a warehouse is active", seededWarehouses(), http.MethodPatch, sitesPath + "/" + siteID1, `{"version":1,"status":"inactive"}`, siteDuties, true, http.StatusConflict, "ORG-SITE-IN-USE"},
 	}
 	for _, tc := range tests {
@@ -63,7 +77,7 @@ func TestLocations(t *testing.T) {
 			if rec.Code != tc.wantStatus || !strings.Contains(rec.Body.String(), tc.wantBody) {
 				t.Fatalf("%s = %d %s, want %d containing %q", tc.name, rec.Code, rec.Body, tc.wantStatus, tc.wantBody)
 			}
-			if strings.HasSuffix(tc.path, "/nope") && tc.store.locationCalls != 0 {
+			if strings.HasSuffix(tc.path, "/nope") && (tc.store.locationCalls != 0 || tc.store.locationUpdateCalls != 0) {
 				t.Fatalf("malformed id reached the store")
 			}
 		})
@@ -77,5 +91,16 @@ func TestLocations_MetricsCountCreates(t *testing.T) {
 	a.Metrics().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	if !strings.Contains(rec.Body.String(), "org_locations_created_total 1") {
 		t.Fatalf("metrics missing the location counter in %s", rec.Body.String())
+	}
+}
+
+func TestLocations_MetricsCountVersionBumps(t *testing.T) {
+	r, a := newRouter(seededLocations())
+	do(r, http.MethodPatch, locationsPath+"/"+locationID1, `{"version":1,"name":"Renamed"}`, siteDuties, true)
+	do(r, http.MethodPatch, locationsPath+"/"+locationID1, `{"version":2,"name":"Renamed"}`, siteDuties, true)
+	rec := httptest.NewRecorder()
+	a.Metrics().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if !strings.Contains(rec.Body.String(), "org_locations_updated_total 1") {
+		t.Fatalf("metrics missing the location update counter in %s", rec.Body.String())
 	}
 }

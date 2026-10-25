@@ -61,6 +61,8 @@ func TestWarehouses(t *testing.T) {
 		{"list bad cursor", seededWarehouses(), http.MethodGet, warehousesPath + "?cursor=Zm9v", "", siteDuties, true, http.StatusBadRequest, `"cursor"`},
 		{"patch name", seededWarehouses(), http.MethodPatch, warehousesPath + "/" + warehouseID1, `{"version":1,"name":"Renamed"}`, siteDuties, true, http.StatusOK, `"version":2`},
 		{"patch code rejected", seededWarehouses(), http.MethodPatch, warehousesPath + "/" + warehouseID1, `{"version":1,"code":"X1"}`, siteDuties, true, http.StatusBadRequest, "COM-0001"},
+		{"patch bad address id", seededWarehouses(), http.MethodPatch, warehousesPath + "/" + warehouseID1, `{"version":1,"addressId":"abc"}`, siteDuties, true, http.StatusBadRequest, `"addressId"`},
+		{"patch clearing address id accepted", seededWarehouses(), http.MethodPatch, warehousesPath + "/" + warehouseID1, `{"version":1,"addressId":""}`, siteDuties, true, http.StatusOK, `"version":1`},
 		{"patch missing version", seededWarehouses(), http.MethodPatch, warehousesPath + "/" + warehouseID1, `{"name":"x"}`, siteDuties, true, http.StatusBadRequest, `"version"`},
 		{"patch malformed site", seededWarehouses(), http.MethodPatch, warehousesPath + "/" + warehouseID1, `{"version":1,"siteId":"x"}`, siteDuties, true, http.StatusBadRequest, `"siteId"`},
 		{"patch site in another legal entity", seededWarehouses(), http.MethodPatch, warehousesPath + "/" + warehouseID1, `{"version":1,"siteId":"` + siteOtherLE + `"}`, siteDuties, true, http.StatusUnprocessableEntity, "ORG-WH-LE-MISMATCH"},

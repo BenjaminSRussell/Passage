@@ -65,6 +65,8 @@ func TestSites(t *testing.T) {
 		{"patch name", seededSites(), http.MethodPatch, sitesPath + "/" + siteID1, `{"version":1,"name":"Renamed"}`, siteDuties, true, http.StatusOK, `"version":2`},
 		{"patch code rejected", seededSites(), http.MethodPatch, sitesPath + "/" + siteID1, `{"version":1,"code":"X1"}`, siteDuties, true, http.StatusBadRequest, "COM-0001"},
 		{"patch legal entity rejected", seededSites(), http.MethodPatch, sitesPath + "/" + siteID1, `{"version":1,"legalEntityId":"` + siteLE2 + `"}`, siteDuties, true, http.StatusBadRequest, "COM-0001"},
+		{"patch bad address id", seededSites(), http.MethodPatch, sitesPath + "/" + siteID1, `{"version":1,"addressId":"abc"}`, siteDuties, true, http.StatusBadRequest, `"addressId"`},
+		{"patch clearing address id accepted", seededSites(), http.MethodPatch, sitesPath + "/" + siteID1, `{"version":1,"addressId":""}`, siteDuties, true, http.StatusOK, `"version":1`},
 		{"patch missing version", seededSites(), http.MethodPatch, sitesPath + "/" + siteID1, `{"name":"x"}`, siteDuties, true, http.StatusBadRequest, `"version"`},
 		{"patch bad status", seededSites(), http.MethodPatch, sitesPath + "/" + siteID1, `{"version":1,"status":"deleted"}`, siteDuties, true, http.StatusBadRequest, `"status"`},
 		{"patch stale version", seededSites(), http.MethodPatch, sitesPath + "/" + siteID1, `{"version":7,"name":"x"}`, siteDuties, true, http.StatusConflict, "ORG-VERSION-CONFLICT"},
