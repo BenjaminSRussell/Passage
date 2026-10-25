@@ -81,3 +81,36 @@ func counterIDs() func() string {
 		return fmt.Sprintf("00000000-0000-7000-8000-%012d", n)
 	}
 }
+
+var entityMappingJSON = map[string]string{
+	"customer": customerMappingJSON,
+	"vendor":   `{"entity":"vendor","version":1,"fields":[{"source":"AccountNum","target":"accountNumber","type":"string","required":true},{"source":"Name","target":"name","type":"string"},{"source":"Currency","target":"currency","type":"string","required":true}]}`,
+	"item":     `{"entity":"item","version":1,"fields":[{"source":"ItemId","target":"sku","type":"string","required":true},{"source":"ItemName","target":"name","type":"string"},{"source":"Weight","target":"weight","type":"int"}]}`,
+	"bom":      `{"entity":"bom","version":1,"fields":[{"source":"BOMId","target":"bomNumber","type":"string","required":true},{"source":"ItemId","target":"parentSku","type":"string","required":true},{"source":"Qty","target":"quantity","type":"decimal","required":true}]}`,
+}
+
+func newPipelines(set axSet) map[string]*domain.Pipeline {
+	rows := map[string][]domain.Record{"customer": set.Customers, "vendor": set.Vendors, "item": set.Items, "bom": set.BOMs}
+	pipelines := map[string]*domain.Pipeline{}
+	for entity, r := range rows {
+		pipelines[entity], _, _ = newPipeline(r)
+	}
+	return pipelines
+}
+
+func loadAll(t testing.TB, pipelines map[string]*domain.Pipeline) map[string]domain.Report {
+	t.Helper()
+	reports := map[string]domain.Report{}
+	for entity, p := range pipelines {
+		m, err := domain.ParseMapping([]byte(entityMappingJSON[entity]))
+		if err != nil {
+			t.Fatal(err)
+		}
+		rep, err := p.Run(context.Background(), domain.RunSpec{SourceSystem: system, Entity: entity, Mapping: m})
+		if err != nil {
+			t.Fatalf("%s: %v", entity, err)
+		}
+		reports[entity] = rep
+	}
+	return reports
+}

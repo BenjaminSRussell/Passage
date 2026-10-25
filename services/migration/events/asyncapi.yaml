@@ -1,0 +1,7 @@
+asyncapi: 3.0.0
+info:
+  title: migration
+  version: 0.1.0
+  description: The migration framework publishes and consumes no domain events. Target contexts emit their own events when rows are loaded through their public batch APIs.
+channels: {}
+operations: {}

@@ -15,15 +15,15 @@ const (
 )
 
 type Check struct {
-	Name   string
-	OK     bool
-	Detail string
+	Name   string `json:"name"`
+	OK     bool   `json:"ok"`
+	Detail string `json:"detail"`
 }
 
 type ReconcileReport struct {
-	Source int
-	Target int
-	Checks []Check
+	Source int     `json:"source"`
+	Target int     `json:"target"`
+	Checks []Check `json:"checks"`
 }
 
 func (r ReconcileReport) OK() bool {

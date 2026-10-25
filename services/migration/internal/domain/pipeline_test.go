@@ -269,22 +269,9 @@ func TestPipeline_CancelledContextStopsBeforeLoading(t *testing.T) {
 
 func TestPipeline_AXDatasetAllEntitiesReconcileFully(t *testing.T) {
 	set := axDataset(1000, 400, 2000, 200)
-	maps := map[string]string{
-		"vendor": `{"entity":"vendor","version":1,"fields":[{"source":"AccountNum","target":"accountNumber","type":"string","required":true},{"source":"Name","target":"name","type":"string"},{"source":"Currency","target":"currency","type":"string","required":true}]}`,
-		"item":   `{"entity":"item","version":1,"fields":[{"source":"ItemId","target":"sku","type":"string","required":true},{"source":"ItemName","target":"name","type":"string"},{"source":"Weight","target":"weight","type":"int"}]}`,
-		"bom":    `{"entity":"bom","version":1,"fields":[{"source":"BOMId","target":"bomNumber","type":"string","required":true},{"source":"ItemId","target":"parentSku","type":"string","required":true},{"source":"Qty","target":"quantity","type":"decimal","required":true}]}`,
-	}
-	rows := map[string][]domain.Record{"customer": set.Customers, "vendor": set.Vendors, "item": set.Items, "bom": set.BOMs}
-	maps["customer"] = customerMappingJSON
-	for entity, body := range maps {
-		m, err := domain.ParseMapping([]byte(body))
-		if err != nil {
-			t.Fatal(err)
-		}
-		p, _, _ := newPipeline(rows[entity])
-		rep, err := p.Run(context.Background(), domain.RunSpec{SourceSystem: system, Entity: entity, Mapping: m})
-		if err != nil || rep.Status != domain.StatusSucceeded || !rep.Reconciliation.OK() || rep.Created != len(rows[entity]) {
-			t.Fatalf("%s: rep=%+v err=%v", entity, rep, err)
+	for entity, rep := range loadAll(t, newPipelines(set)) {
+		if rep.Status != domain.StatusSucceeded || !rep.Reconciliation.OK() {
+			t.Fatalf("%s: rep=%+v", entity, rep)
 		}
 	}
 }

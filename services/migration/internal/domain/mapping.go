@@ -54,7 +54,11 @@ type Mapping struct {
 	Fields  []FieldRule `json:"fields"`
 }
 
-type Reject struct{ Field, Code, Detail string }
+type Reject struct {
+	Field  string `json:"field"`
+	Code   string `json:"code"`
+	Detail string `json:"detail"`
+}
 
 func ParseMapping(data []byte) (Mapping, error) {
 	var m Mapping

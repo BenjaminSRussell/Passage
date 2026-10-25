@@ -1,0 +1,134 @@
+openapi: 3.1.0
+info:
+  title: migration
+  version: 0.1.0
+  description: Data migration framework. Runs execute synchronously inside the request until the Temporal worker (wave 4) takes over; the 202 body already carries the job envelope.
+servers:
+  - url: https://app.local.passage.dev
+paths:
+  /v1/integration/migration-runs:
+    post:
+      operationId: createMigrationRun
+      x-passage-duty: migration.run
+      parameters:
+        - { name: Idempotency-Key, in: header, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateMigrationRun' } } }
+      responses:
+        '202':
+          description: Run recorded, or the original run on an Idempotency-Key replay. Rejected rows are listed in the exception queue, not failed.
+          headers:
+            Location: { schema: { type: string } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/MigrationRunAccepted' } } }
+        '501':
+          description: MIG-BACKEND-NOT-CONFIGURED, no extract and load backend is wired in this deployment.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/migration-runs/{id}:
+    get:
+      operationId: getMigrationRun
+      x-passage-duty: migration.run
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Counts, rejects and reconciliation of the run.
+          content: { application/json: { schema: { $ref: '#/components/schemas/MigrationRun' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/migration-runs/{id}:rerun:
+    post:
+      operationId: rerunMigrationRun
+      x-passage-duty: migration.run
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, schema: { type: string } }
+      responses:
+        '202':
+          description: A new run, linked by parentRunId, that reprocesses only the exception queue of the original run. Unchanged rows are never reloaded.
+          headers:
+            Location: { schema: { type: string } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/MigrationRunAccepted' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/parallel-run-diffs:
+    post:
+      operationId: createParallelRunDiff
+      x-passage-duty: migration.run
+      responses:
+        '501':
+          description: MIG-PARALLEL-RUN-DEFERRED, the parallel-run diff harness belongs to wave 49.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /healthz:
+    get:
+      operationId: liveness
+      x-passage-duty: public
+      responses:
+        '200': { description: Process is alive. }
+  /readyz:
+    get:
+      operationId: readiness
+      x-passage-duty: public
+      responses:
+        '200': { description: Database reachable. }
+        '503': { description: Database unreachable. }
+components:
+  responses:
+    Problem:
+      description: RFC 9457 problem. 400 COM-0001, 401 AUTH-0001, 403 AUTH-0003, 404 AUTH-0404, 422 idempotency_key_reuse or MIG-MAP-*.
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+  schemas:
+    CreateMigrationRun:
+      type: object
+      additionalProperties: false
+      required: [sourceSystem, mode, mapping]
+      properties:
+        sourceSystem: { type: string, enum: [ax2012, d365fo, sap_ecc, sap_s4] }
+        mode: { type: string, enum: [rehearsal, cutover, delta] }
+        dryRun: { type: boolean }
+        mapping: { type: object, description: Mapping DSL document with entity, version and fields. }
+    MigrationRunAccepted:
+      type: object
+      required: [jobId, statusUrl, estimatedCompletionSeconds, run]
+      properties:
+        jobId: { type: string, format: uuid }
+        statusUrl: { type: string }
+        estimatedCompletionSeconds: { type: integer }
+        run: { $ref: '#/components/schemas/MigrationRun' }
+    MigrationRun:
+      type: object
+      required: [id, sourceSystem, mode, entity, status, dryRun, mappingVersion, counts, rejects, absent, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        sourceSystem: { type: string }
+        mode: { type: string }
+        entity: { type: string }
+        status: { type: string, enum: [succeeded, partial, failed] }
+        dryRun: { type: boolean }
+        mappingVersion: { type: integer }
+        parentRunId: { type: string, format: uuid }
+        counts:
+          type: object
+          required: [extracted, mapped, created, updated, unchanged, rejected]
+          properties: { extracted: { type: integer }, mapped: { type: integer }, created: { type: integer }, updated: { type: integer }, unchanged: { type: integer }, rejected: { type: integer } }
+        rejects:
+          type: array
+          items:
+            type: object
+            required: [sourceKey, rejects]
+            properties:
+              sourceKey: { type: string }
+              rejects: { type: array, items: { type: object, required: [field, code, detail], properties: { field: { type: string }, code: { type: string }, detail: { type: string } } } }
+        absent: { type: array, items: { type: string }, description: Source keys loaded earlier and missing from this extract; never deleted. }
+        reconciliation:
+          type: object
+          required: [source, target, checks]
+          properties:
+            source: { type: integer }
+            target: { type: integer }
+            checks: { type: array, items: { type: object, required: [name, ok, detail], properties: { name: { type: string, enum: [row_count, hash_total, sample_compare] }, ok: { type: boolean }, detail: { type: string } } } }
+        createdAt: { type: string, format: date-time }
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties: { type: { type: string }, title: { type: string }, status: { type: integer }, detail: { type: string }, instance: { type: string }, code: { type: string }, serviceCode: { type: string, description: Reserved by the architecture envelope; the platform kernel does not populate it yet. }, traceId: { type: string }, errors: { type: object, additionalProperties: { type: string } } }

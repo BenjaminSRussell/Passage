@@ -68,8 +68,8 @@ type RunSpec struct {
 }
 
 type RowReject struct {
-	SourceKey string
-	Rejects   []Reject
+	SourceKey string   `json:"sourceKey"`
+	Rejects   []Reject `json:"rejects"`
 }
 
 type LedgerEntry struct {
@@ -81,17 +81,17 @@ type LedgerEntry struct {
 }
 
 type Report struct {
-	Status         string
-	DryRun         bool
-	Extracted      int
-	Mapped         int
-	Created        int
-	Updated        int
-	Unchanged      int
-	Rejects        []RowReject
-	Ledger         []LedgerEntry
-	Absent         []string
-	Reconciliation *ReconcileReport
+	Status         string           `json:"status"`
+	DryRun         bool             `json:"dryRun"`
+	Extracted      int              `json:"extracted"`
+	Mapped         int              `json:"mapped"`
+	Created        int              `json:"created"`
+	Updated        int              `json:"updated"`
+	Unchanged      int              `json:"unchanged"`
+	Rejects        []RowReject      `json:"rejects"`
+	Ledger         []LedgerEntry    `json:"-"`
+	Absent         []string         `json:"absent"`
+	Reconciliation *ReconcileReport `json:"reconciliation,omitempty"`
 }
 
 type Pipeline struct {
