@@ -75,6 +75,8 @@ func roundHalfEven(q decimal.Decimal) decimal.Decimal {
 	return floor.Add(decimal.NewFromInt(1))
 }
 
+// ValidateUnit accepts a unit from 0.000001 to 1000 that is a power of ten no finer
+// than 10^-minorUnits, or 5 or 25 times a power of ten.
 func ValidateUnit(unit decimal.Decimal, minorUnits int32) error {
 	if minorUnits < 0 || minorUnits > 4 {
 		return &Error{Code: CodeRoundingUnit, Detail: fmt.Sprintf("minor units %d are outside 0 to 4", minorUnits)}
@@ -84,16 +86,25 @@ func ValidateUnit(unit decimal.Decimal, minorUnits int32) error {
 	}
 	coefficient := new(big.Int).Set(unit.Coefficient())
 	remainder := new(big.Int)
+	exponent := unit.Exponent()
 	for {
 		quotient, rem := new(big.Int).QuoRem(coefficient, ten, remainder)
 		if rem.Sign() != 0 {
 			break
 		}
 		coefficient = quotient
+		exponent++
 	}
-	switch coefficient.Int64() {
-	case 1, 5, 25:
-		return nil
+	if coefficient.IsInt64() {
+		switch coefficient.Int64() {
+		case 1:
+			if exponent >= -minorUnits {
+				return nil
+			}
+			return &Error{Code: CodeRoundingUnit, Detail: fmt.Sprintf("unit %s is finer than the currency minor unit", unit)}
+		case 5, 25:
+			return nil
+		}
 	}
 	return &Error{Code: CodeRoundingUnit, Detail: fmt.Sprintf("unit %s must be a power of ten or 0.05, 0.25 or 0.5 times one", unit)}
 }
