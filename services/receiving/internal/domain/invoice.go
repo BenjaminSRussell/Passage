@@ -86,7 +86,7 @@ func PostInvoice(ctx context.Context, in VendorInvoice, periods PeriodControl, l
 		}
 	}
 	entry.Lines = append(entry.Lines, JournalLine{Account: profile.VendorControl, Amount: payable.Neg()})
-	if err := ledger.Post(ctx, entry); err != nil {
+	if _, err := ledger.Post(ctx, entry); err != nil {
 		slog.ErrorContext(ctx, "invoice ledger post failed", "err", err, "invoiceId", in.ID)
 		return JournalEntry{}, fmt.Errorf("post invoice %s: %w", in.ID, err)
 	}

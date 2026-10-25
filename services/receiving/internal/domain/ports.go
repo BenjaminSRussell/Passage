@@ -2,6 +2,8 @@ package domain
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -10,6 +12,8 @@ import (
 )
 
 const LedgerPostPath = "/v1/ledger/journal-entries:post"
+
+var ErrPeriodClosed = errors.New("ledger period closed")
 
 type PeriodStatus string
 
@@ -54,7 +58,7 @@ type PeriodControl interface {
 }
 
 type LedgerPoster interface {
-	Post(ctx context.Context, entry JournalEntry) error
+	Post(ctx context.Context, entry JournalEntry) (string, error)
 }
 
 type FakePeriods struct {
@@ -69,12 +73,12 @@ type FakeLedger struct {
 	Err     error
 }
 
-func (f *FakeLedger) Post(_ context.Context, entry JournalEntry) error {
+func (f *FakeLedger) Post(_ context.Context, entry JournalEntry) (string, error) {
 	if f.Err != nil {
-		return f.Err
+		return "", f.Err
 	}
 	f.Entries = append(f.Entries, entry)
-	return nil
+	return fmt.Sprintf("fake-entry-%d", len(f.Entries)), nil
 }
 
 func (f *FakeLedger) Balance(account string) decimal.Decimal {
