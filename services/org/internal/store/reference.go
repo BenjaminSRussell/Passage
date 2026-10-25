@@ -26,6 +26,8 @@ var (
 	currencyISO = regexp.MustCompile(`^[A-Z]{3}$`)
 	numericISO  = regexp.MustCompile(`^[0-9]{3}$`)
 	minorUnits  = regexp.MustCompile(`^[0-4]$`)
+	regionCode  = regexp.MustCompile(`^[A-Z]{2}-[A-Z0-9]{1,3}$`)
+	languageISO = regexp.MustCompile(`^[a-z]{2}$`)
 )
 
 type dataset struct {
@@ -38,6 +40,8 @@ type dataset struct {
 var datasets = []dataset{
 	{"countries.csv", "country", []string{"code", "name", "region_required", "postal_regex"}, parseCountry},
 	{"currencies.csv", "currency", []string{"code", "numeric_code", "name", "minor_units"}, parseCurrency},
+	{"regions.csv", "region", []string{"code", "country_code", "name"}, parseRegion},
+	{"languages.csv", "language", []string{"code", "name"}, parseLanguage},
 }
 
 func parseCountry(rec []string) ([]any, error) {
@@ -75,6 +79,32 @@ func parseCurrency(rec []string) ([]any, error) {
 	}
 	units, _ := strconv.Atoi(rec[3])
 	return []any{rec[0], rec[1], rec[2], units}, nil
+}
+
+func parseRegion(rec []string) ([]any, error) {
+	if !regionCode.MatchString(rec[0]) {
+		return nil, fmt.Errorf("code %q is not an ISO 3166-2 code", rec[0])
+	}
+	if !countryCode.MatchString(rec[1]) {
+		return nil, fmt.Errorf("country_code %q is not two uppercase letters", rec[1])
+	}
+	if rec[0][:2] != rec[1] {
+		return nil, fmt.Errorf("code %q does not start with country_code %q", rec[0], rec[1])
+	}
+	if rec[2] == "" {
+		return nil, errors.New("name is empty")
+	}
+	return []any{rec[0], rec[1], rec[2]}, nil
+}
+
+func parseLanguage(rec []string) ([]any, error) {
+	if !languageISO.MatchString(rec[0]) {
+		return nil, fmt.Errorf("code %q is not two lowercase letters", rec[0])
+	}
+	if rec[1] == "" {
+		return nil, errors.New("name is empty")
+	}
+	return []any{rec[0], rec[1]}, nil
 }
 
 func ParseReference(files fs.FS, file string) ([][]any, error) {

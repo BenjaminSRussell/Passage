@@ -14,7 +14,7 @@ Run: `DATABASE_URL=postgres://... MIGRATE_ON_START=true go run ./cmd/org`. Test:
 
 ## Reference data
 
-Countries and currencies are platform-owned rows under the `sys` tenant (`00000000-0000-0000-0000-000000000000`): every tenant can read them, no tenant can insert, update or delete them. The data lives in `migrations/reference/countries.csv` and `currencies.csv`, embedded as `migrations.Reference`, and `store.SeedReference` loads it after the migrations when `MIGRATE_ON_START=true`. A malformed row fails the whole file with `<file> line <n>: <reason>`; re-running the seed changes nothing.
+Countries, currencies, regions and languages are platform-owned rows under the `sys` tenant (`00000000-0000-0000-0000-000000000000`): every tenant can read them, no tenant can insert, update or delete them. The data lives in `migrations/reference/countries.csv`, `currencies.csv`, `regions.csv` and `languages.csv`, embedded as `migrations.Reference`, and `store.SeedReference` loads it after the migrations when `MIGRATE_ON_START=true`. Regions cover US, CA, IN and MX as full ISO 3166-2 codes (`US-CA`). A malformed row fails the whole file with `<file> line <n>: <reason>`; re-running the seed changes nothing.
 
 ## API
 

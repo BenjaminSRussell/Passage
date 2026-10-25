@@ -23,12 +23,18 @@ const (
 	currencyHeader = "code,numeric_code,name,minor_units\n"
 	validCountry   = "US,United States,true,^[0-9]{5}$\n"
 	validCurrency  = "USD,840,US Dollar,2\n"
+	regionHeader   = "code,country_code,name\n"
+	languageHeader = "code,name\n"
+	validRegion    = "US-CA,US,California\n"
+	validLanguage  = "en,English\n"
 )
 
-func referenceFiles(countries, currencies string) fstest.MapFS {
+func referenceFiles(countries, currencies, regions, languages string) fstest.MapFS {
 	return fstest.MapFS{
 		"reference/countries.csv":  {Data: []byte(countries)},
 		"reference/currencies.csv": {Data: []byte(currencies)},
+		"reference/regions.csv":    {Data: []byte(regions)},
+		"reference/languages.csv":  {Data: []byte(languages)},
 	}
 }
 
@@ -102,22 +108,100 @@ func TestReferenceData_CommittedCurrencies(t *testing.T) {
 	}
 }
 
+func TestReferenceData_CommittedRegions(t *testing.T) {
+	required := map[string]bool{}
+	for _, row := range committed(t, "countries.csv") {
+		if row[2].(bool) {
+			required[row[0].(string)] = true
+		}
+	}
+	codes, perCountry := map[string]bool{}, map[string]int{}
+	for _, row := range committed(t, "regions.csv") {
+		code, country := row[0].(string), row[1].(string)
+		if codes[code] {
+			t.Fatalf("duplicate region %s", code)
+		}
+		if !required[country] {
+			t.Fatalf("region %s: country %s is not region_required in countries.csv", code, country)
+		}
+		codes[code] = true
+		perCountry[country]++
+	}
+	if len(codes) != 138 {
+		t.Fatalf("regions = %d, want 138", len(codes))
+	}
+	for country, want := range map[string]int{"US": 57, "CA": 13, "IN": 36, "MX": 32} {
+		if perCountry[country] != want {
+			t.Errorf("%s regions = %d, want %d", country, perCountry[country], want)
+		}
+	}
+	for country := range required {
+		if perCountry[country] == 0 {
+			t.Errorf("region_required country %s has no regions", country)
+		}
+	}
+	for _, code := range []string{"US-CA", "CA-ON", "IN-MH", "MX-CMX"} {
+		if !codes[code] {
+			t.Errorf("missing region %s", code)
+		}
+	}
+	for _, code := range []string{"IN-DD", "IN-DN", "MX-DIF"} {
+		if codes[code] {
+			t.Errorf("retired region %s must be absent", code)
+		}
+	}
+}
+
+func TestReferenceData_CommittedLanguages(t *testing.T) {
+	codes := map[string]bool{}
+	for _, row := range committed(t, "languages.csv") {
+		code := row[0].(string)
+		if codes[code] {
+			t.Fatalf("duplicate language %s", code)
+		}
+		codes[code] = true
+	}
+	if len(codes) != 183 {
+		t.Fatalf("languages = %d, want 183", len(codes))
+	}
+	for _, code := range []string{"en", "fr", "de", "es", "ja", "zh", "hi", "ar"} {
+		if !codes[code] {
+			t.Errorf("missing language %s", code)
+		}
+	}
+	for _, code := range []string{"iw", "in", "ji", "jw", "mo", "sh"} {
+		if codes[code] {
+			t.Errorf("deprecated language %s must be absent", code)
+		}
+	}
+}
+
 func TestSeedReference_RejectsMalformedFilesBeforeAnyWrite(t *testing.T) {
+	validCountries, validCurrencies := countryHeader+validCountry, currencyHeader+validCurrency
+	validRegions, validLanguages := regionHeader+validRegion, languageHeader+validLanguage
 	cases := []struct {
-		name, countries, currencies, want string
+		name, countries, currencies, regions, languages, want string
 	}{
-		{"wrong header", "code,name\nUS,United States\n", validCurrency, "countries.csv line 1"},
-		{"empty file", "", validCurrency, "countries.csv line 1"},
-		{"bad code", countryHeader + validCountry + "us,Nowhere,false,\n", validCurrency, "countries.csv line 3"},
-		{"region_required maybe", countryHeader + validCountry + "CA,Canada,maybe,\n", validCurrency, "countries.csv line 3"},
-		{"uncompilable regex", countryHeader + validCountry + "CA,Canada,true,(\n", validCurrency, "countries.csv line 3"},
-		{"short row", countryHeader + validCountry + "CA,Canada\n", validCurrency, "countries.csv line 3"},
-		{"minor_units 5", countryHeader + validCountry, currencyHeader + validCurrency + "XXA,001,Bad,5\n", "currencies.csv line 3"},
-		{"non-numeric numeric_code", countryHeader + validCountry, currencyHeader + validCurrency + "EUR,97x,Euro,2\n", "currencies.csv line 3"},
+		{"wrong header", "code,name\nUS,United States\n", validCurrencies, validRegions, validLanguages, "countries.csv line 1"},
+		{"empty file", "", validCurrencies, validRegions, validLanguages, "countries.csv line 1"},
+		{"bad code", validCountries + "us,Nowhere,false,\n", validCurrencies, validRegions, validLanguages, "countries.csv line 3"},
+		{"region_required maybe", validCountries + "CA,Canada,maybe,\n", validCurrencies, validRegions, validLanguages, "countries.csv line 3"},
+		{"uncompilable regex", validCountries + "CA,Canada,true,(\n", validCurrencies, validRegions, validLanguages, "countries.csv line 3"},
+		{"short row", validCountries + "CA,Canada\n", validCurrencies, validRegions, validLanguages, "countries.csv line 3"},
+		{"minor_units 5", validCountries, validCurrencies + "XXA,001,Bad,5\n", validRegions, validLanguages, "currencies.csv line 3"},
+		{"non-numeric numeric_code", validCountries, validCurrencies + "EUR,97x,Euro,2\n", validRegions, validLanguages, "currencies.csv line 3"},
+		{"region code without hyphen", validCountries, validCurrencies, validRegions + "USCA,US,California\n", validLanguages, "regions.csv line 3"},
+		{"region prefix mismatch", validCountries, validCurrencies, validRegions + "US-CA,CA,California\n", validLanguages, "regions.csv line 3"},
+		{"region name empty", validCountries, validCurrencies, validRegions + "US-NY,US,\n", validLanguages, "regions.csv line 3"},
+		{"region wrong header", validCountries, validCurrencies, "code,name\nUS-CA,California\n", validLanguages, "regions.csv line 1"},
+		{"language upper case", validCountries, validCurrencies, validRegions, validLanguages + "EN,English\n", "languages.csv line 3"},
+		{"language three letters", validCountries, validCurrencies, validRegions, validLanguages + "eng,English\n", "languages.csv line 3"},
+		{"language name empty", validCountries, validCurrencies, validRegions, validLanguages + "fr,\n", "languages.csv line 3"},
+		{"language wrong header", validCountries, validCurrencies, validRegions, "iso,name\nen,English\n", "languages.csv line 1"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := store.SeedReference(context.Background(), nil, referenceFiles(tc.countries, tc.currencies))
+			err := store.SeedReference(context.Background(), nil, referenceFiles(tc.countries, tc.currencies, tc.regions, tc.languages))
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("error = %v, want it to contain %q", err, tc.want)
 			}
@@ -149,17 +233,16 @@ func TestSeedReference_PlatformRowsAreSeededOnceAndReadOnlyForTenants(t *testing
 	}
 
 	var secured int
-	if err := pool.QueryRow(ctx, `select count(*) from pg_class where relname = any('{country,currency,reference_status}')
-		and relnamespace = current_schema()::regnamespace and relrowsecurity and relforcerowsecurity`).Scan(&secured); err != nil || secured != 3 {
-		t.Fatalf("tables with forced RLS = %d, %v; want 3", secured, err)
+	if err := pool.QueryRow(ctx, `select count(*) from pg_class where relname = any('{country,currency,region,language,reference_status}')
+		and relnamespace = current_schema()::regnamespace and relrowsecurity and relforcerowsecurity`).Scan(&secured); err != nil || secured != 5 {
+		t.Fatalf("tables with forced RLS = %d, %v; want 5", secured, err)
 	}
 
 	sys := tenant.With(ctx, tenant.Principal{TenantID: store.SysTenantID})
-	if got, want := count(sys, "select count(*) from country where tenant_id = $1", store.SysTenantID), len(committed(t, "countries.csv")); got != want {
-		t.Fatalf("sys countries = %d, want %d", got, want)
-	}
-	if got, want := count(sys, "select count(*) from currency where tenant_id = $1", store.SysTenantID), len(committed(t, "currencies.csv")); got != want {
-		t.Fatalf("sys currencies = %d, want %d", got, want)
+	for _, d := range []struct{ table, file string }{{"country", "countries.csv"}, {"currency", "currencies.csv"}, {"region", "regions.csv"}, {"language", "languages.csv"}} {
+		if got, want := count(sys, "select count(*) from "+d.table+" where tenant_id = $1", store.SysTenantID), len(committed(t, d.file)); got != want {
+			t.Fatalf("sys %s rows = %d, want %d", d.table, got, want)
+		}
 	}
 
 	for _, n := range []int{1, 2} {
@@ -170,10 +253,16 @@ func TestSeedReference_PlatformRowsAreSeededOnceAndReadOnlyForTenants(t *testing
 		if got := count(tctx, "select count(*) from country where code = 'US' and region_required"); got != 1 {
 			t.Errorf("tenant %d US rows = %d, want 1", n, got)
 		}
+		if got := count(tctx, "select count(*) from region where code = 'US-CA' and country_code = 'US'"); got != 1 {
+			t.Errorf("tenant %d US-CA rows = %d, want 1", n, got)
+		}
+		if got := count(tctx, "select count(*) from language where code = 'fr'"); got != 1 {
+			t.Errorf("tenant %d fr rows = %d, want 1", n, got)
+		}
 	}
 
 	tenant1 := principalContext(1)
-	for _, statement := range []string{"update currency set name = 'x' where code = 'USD'", "delete from country where code = 'US'"} {
+	for _, statement := range []string{"update currency set name = 'x' where code = 'USD'", "delete from country where code = 'US'", "update language set name = 'x' where code = 'en'", "delete from region where code = 'US-CA'"} {
 		var affected int64
 		if err := inTx(tenant1, func(tx pgx.Tx) error {
 			tag, err := tx.Exec(tenant1, statement)
@@ -190,6 +279,13 @@ func TestSeedReference_PlatformRowsAreSeededOnceAndReadOnlyForTenants(t *testing
 	})
 	if !errors.As(err, &pgErr) || pgErr.Code != "42501" {
 		t.Fatalf("insert under the sys tenant = %v, want SQLSTATE 42501", err)
+	}
+	err = inTx(tenant1, func(tx pgx.Tx) error {
+		_, err := tx.Exec(tenant1, "insert into language (tenant_id, code, name) values ($1, 'zz', 'x')", store.SysTenantID)
+		return err
+	})
+	if !errors.As(err, &pgErr) || pgErr.Code != "42501" {
+		t.Fatalf("language insert under the sys tenant = %v, want SQLSTATE 42501", err)
 	}
 
 	if err := inTx(tenant1, func(tx pgx.Tx) error {
