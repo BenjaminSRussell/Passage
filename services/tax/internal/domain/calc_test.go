@@ -1,9 +1,11 @@
 package domain_test
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
 	"sort"
 	"testing"
 
@@ -429,75 +431,51 @@ func ratsOf(t *testing.T, amounts []string) []*big.Rat {
 	return out
 }
 
+type specJSON struct {
+	Name string `json:"name"`
+	Pct  string `json:"pct"`
+	Seq  int    `json:"seq"`
+}
+
 type scenarioSet struct {
-	region     string
-	currency   string
-	exp        int
-	stacks     [][]spec
-	amountSets [][]string
-	roundings  []string
-	modes      []string
-	wantCount  int
+	Region     string       `json:"region"`
+	Currency   string       `json:"currency"`
+	Exp        int          `json:"exp"`
+	Stacks     [][]specJSON `json:"stacks"`
+	AmountSets [][]string   `json:"amountSets"`
+	Roundings  []string     `json:"roundings"`
+	Modes      []string     `json:"modes"`
+	WantCount  int          `json:"wantCount"`
+}
+
+func loadMatrix(t *testing.T) []scenarioSet {
+	t.Helper()
+	raw, err := os.ReadFile("../../testdata/matrix500.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var file struct {
+		Provenance string        `json:"provenance"`
+		Sets       []scenarioSet `json:"sets"`
+	}
+	if err := json.Unmarshal(raw, &file); err != nil || file.Provenance == "" {
+		t.Fatalf("matrix file invalid: %v provenance=%q", err, file.Provenance)
+	}
+	return file.Sets
 }
 
 func TestMatrix500(t *testing.T) {
-	sets := []scenarioSet{
-		{
-			region: "US", currency: "USD", exp: 2, wantCount: 200,
-			stacks: [][]spec{
-				{{name: "ST", pct: "6.25"}},
-				{{name: "ST", pct: "4"}, {name: "CO", pct: "1.5"}},
-				{{name: "ST", pct: "6.25"}, {name: "CO", pct: "1.5"}, {name: "CI", pct: "0.5"}},
-				{{name: "ST", pct: "7"}, {name: "CO", pct: "2.25"}, {name: "CI", pct: "0.875"}},
-				{{name: "ST", pct: "2.9"}, {name: "CO", pct: "0.1"}},
-			},
-			amountSets: [][]string{{"100.00"}, {"19.99"}, {"0.01"}, {"1234.56"}, {"33.33", "33.33", "33.33"}, {"9.99", "9.99"},
-				{"0.50", "0.50", "0.50", "0.50"}, {"-75.25"}, {"49.95", "50.05", "12.34"}, {"1000000.00"}},
-			roundings: []string{domain.RoundPerLine, domain.RoundPerDocument},
-			modes:     []string{"domestic"},
-		},
-		{
-			region: "EU", currency: "EUR", exp: 2, wantCount: 180,
-			stacks: [][]spec{
-				{{name: "VAT", pct: "19"}}, {{name: "VAT", pct: "7"}}, {{name: "VAT", pct: "20"}},
-				{{name: "VAT", pct: "5.5"}}, {{name: "VAT", pct: "21"}}, {{name: "VAT", pct: "23"}, {name: "LOC", pct: "0.5"}},
-			},
-			amountSets: [][]string{{"119.00"}, {"33.33", "33.33", "33.33"}, {"0.99", "14.99"}, {"250.00", "-40.00"}, {"8.88"}},
-			roundings:  []string{domain.RoundPerDocument},
-			modes:      []string{"domestic", "reverse_charge", "exempt"},
-		},
-		{
-			region: "IN", currency: "INR", exp: 2, wantCount: 70,
-			stacks: [][]spec{
-				{{name: "CGST", pct: "9"}, {name: "SGST", pct: "9"}}, {{name: "IGST", pct: "18"}}, {{name: "GST", pct: "5"}},
-				{{name: "GST", pct: "12"}}, {{name: "GST", pct: "28"}, {name: "CESS", pct: "12", seq: 1}},
-				{{name: "CGST", pct: "2.5"}, {name: "SGST", pct: "2.5"}}, {{name: "GST", pct: "18"}, {name: "CESS", pct: "1", seq: 1}},
-			},
-			amountSets: [][]string{{"1180.00"}, {"999.99", "0.01"}, {"500.00", "250.00", "125.00"}, {"12345.67"}, {"3.33", "3.33", "3.33"}},
-			roundings:  []string{domain.RoundPerLine},
-			modes:      []string{"domestic"},
-		},
-		{
-			region: "CA", currency: "CAD", exp: 2, wantCount: 50,
-			stacks: [][]spec{
-				{{name: "GST", pct: "5"}}, {{name: "HST", pct: "13"}}, {{name: "GST", pct: "5"}, {name: "PST", pct: "7"}},
-				{{name: "GST", pct: "5"}, {name: "QST", pct: "9.975", seq: 1}}, {{name: "HST", pct: "15"}},
-			},
-			amountSets: [][]string{{"100.00"}, {"29.99", "29.99"}, {"0.10", "0.20", "0.30"}, {"4567.89"}, {"59.97"}},
-			roundings:  []string{domain.RoundPerDocument},
-			modes:      []string{"domestic"},
-		},
-	}
+	sets := loadMatrix(t)
 	total := 0
 	for _, set := range sets {
 		count := 0
-		for si, stack := range set.stacks {
-			for ai, amounts := range set.amountSets {
+		for si, stack := range set.Stacks {
+			for ai, amounts := range set.AmountSets {
 				for _, inclusive := range []bool{false, true} {
-					for _, rounding := range set.roundings {
-						for _, mode := range set.modes {
+					for _, rounding := range set.Roundings {
+						for _, mode := range set.Modes {
 							count++
-							name := fmt.Sprintf("%s/stack%d/amounts%d/incl=%v/%s/%s", set.region, si, ai, inclusive, rounding, mode)
+							name := fmt.Sprintf("%s/stack%d/amounts%d/incl=%v/%s/%s", set.Region, si, ai, inclusive, rounding, mode)
 							t.Run(name, func(t *testing.T) {
 								runScenario(t, set, stack, amounts, inclusive, rounding, mode)
 							})
@@ -506,8 +484,8 @@ func TestMatrix500(t *testing.T) {
 				}
 			}
 		}
-		if count != set.wantCount {
-			t.Fatalf("%s grid has %d scenarios, want %d", set.region, count, set.wantCount)
+		if count != set.WantCount {
+			t.Fatalf("%s grid has %d scenarios, want %d", set.Region, count, set.WantCount)
 		}
 		total += count
 	}
@@ -516,9 +494,12 @@ func TestMatrix500(t *testing.T) {
 	}
 }
 
-func runScenario(t *testing.T, set scenarioSet, stack []spec, amounts []string, inclusive bool, rounding, mode string) {
+func runScenario(t *testing.T, set scenarioSet, stack []specJSON, amounts []string, inclusive bool, rounding, mode string) {
 	t.Helper()
-	specs := append([]spec(nil), stack...)
+	specs := make([]spec, len(stack))
+	for i, sj := range stack {
+		specs[i] = spec{name: sj.Name, pct: sj.Pct, seq: sj.Seq}
+	}
 	direction := domain.DirOutput
 	if mode == "reverse_charge" {
 		direction = domain.DirInput
@@ -527,34 +508,30 @@ func runScenario(t *testing.T, set scenarioSet, stack []spec, amounts []string, 
 		}
 	}
 	cfg := buildConfig(rounding, specs...)
-	doc := buildDoc(set.currency, direction, inclusive, amounts...)
-	if mode == "exempt" {
-		doc.Party.Certificate = "CERT"
-		names := make([]string, len(specs))
-		for i, s := range specs {
-			names[i] = s.name
+	if mode == "rate_history" {
+		for i := range cfg.Codes {
+			current := cfg.Codes[i].Rates[0]
+			current.ValidFrom = domain.Day("2026-01-01")
+			cfg.Codes[i].Rates = []domain.Rate{{ValidFrom: domain.Day("2020-01-01"), ValidTo: domain.Day("2025-12-31"), RatePct: domain.D("1")}, current}
 		}
-		cfg.Exemptions = []domain.Exemption{{Number: "CERT", Codes: names, ValidFrom: domain.Day("2026-01-01")}}
 	}
+	doc := buildDoc(set.Currency, direction, inclusive, amounts...)
 	res, err := domain.Calculate(doc, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	charged := mode == "domestic"
-	want := oracle(ratsOf(t, amounts), inclusive, charged, rounding == domain.RoundPerDocument, specs, set.exp)
-	if mode == "exempt" {
-		want = oracle(ratsOf(t, amounts), false, false, false, nil, set.exp)
-	}
+	charged := mode == "domestic" || mode == "rate_history"
+	want := oracle(ratsOf(t, amounts), inclusive, charged, rounding == domain.RoundPerDocument, specs, set.Exp)
 	for i, line := range res.Lines {
-		mustEqual(t, "base", line.Base, want.bases[i].FloatString(set.exp))
+		mustEqual(t, "base", line.Base, want.bases[i].FloatString(set.Exp))
 		wantTaxes := want.taxes[i]
 		if mode == "reverse_charge" {
 			if len(line.Taxes) != 2*len(wantTaxes) {
 				t.Fatalf("line %d has %d taxes, want %d", i, len(line.Taxes), 2*len(wantTaxes))
 			}
 			for j, w := range wantTaxes {
-				mustEqual(t, "output leg", line.Taxes[2*j].TaxAmount, w.FloatString(set.exp))
-				mustEqual(t, "input leg", line.Taxes[2*j+1].TaxAmount, w.FloatString(set.exp))
+				mustEqual(t, "output leg", line.Taxes[2*j].TaxAmount, w.FloatString(set.Exp))
+				mustEqual(t, "input leg", line.Taxes[2*j+1].TaxAmount, w.FloatString(set.Exp))
 			}
 			continue
 		}
@@ -562,7 +539,7 @@ func runScenario(t *testing.T, set scenarioSet, stack []spec, amounts []string, 
 			t.Fatalf("line %d has %d taxes, want %d", i, len(line.Taxes), len(wantTaxes))
 		}
 		for j, w := range wantTaxes {
-			mustEqual(t, "tax "+line.Taxes[j].Code, line.Taxes[j].TaxAmount, w.FloatString(set.exp))
+			mustEqual(t, "tax "+line.Taxes[j].Code, line.Taxes[j].TaxAmount, w.FloatString(set.Exp))
 		}
 	}
 }

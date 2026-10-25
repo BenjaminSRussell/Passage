@@ -21,7 +21,7 @@ DATABASE_URL=postgres://... go run ./cmd/tax
 
 ## API
 
-`POST /v1/tax/calculate` (duty `Calculate tax`), `GET /healthz`, `GET /readyz` (database ping, 503 when down), `GET /metrics` on the admin port. The browser reaches it as `/api/v1/tax/calculate`; the BFF rewrites the prefix. Contract: `api/openapi.yaml`.
+`POST /v1/tax/calculate` (duty `Calculate tax`), `GET /healthz`, `GET /readyz` (database ping, 503 when down), `GET /metrics` on the admin port. The browser reaches it as `/api/v1/tax/calculate`; the BFF rewrites the prefix. Request and response shapes are in `internal/domain/model.go`; `api/openapi.yaml` is a minimal duty-annotated stub; the full contract is slice B.
 
 The request carries the document and an inline `config` (tax groups, item groups, codes with effective-dated rates, exemption certificates) because no tax store exists yet. Order of operations follows PRD BR-13.1; every step writes to `determination_trace`. Amounts and percentages are decimal strings with at most 6 decimal places.
 

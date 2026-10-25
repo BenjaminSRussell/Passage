@@ -74,12 +74,12 @@ func TestSettle_MismatchBlocks(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			poster := &recordingPoster{}
 			s, err := domain.Settle(tc.txns, january, 0, tc.gl)
+			if err == nil {
+				_ = domain.PostSettlement(context.Background(), poster, "s1", s)
+			}
 			var de *domain.Error
 			if !errors.As(err, &de) || de.Code != domain.CodeSettlementMismatch {
 				t.Fatalf("got %v, want %s", err, domain.CodeSettlementMismatch)
-			}
-			if err == nil {
-				_ = domain.PostSettlement(context.Background(), poster, "s1", s)
 			}
 			if len(poster.keys) != 0 {
 				t.Fatalf("posted despite mismatch: %v", poster.keys)

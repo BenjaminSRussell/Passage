@@ -1,0 +1,49 @@
+{
+  "provenance": "generated parameter grid checked against an independent exact-rational oracle in calc_test.go; stack rates follow published US state/county/city, EU VAT, IN GST/IGST/CESS and CA GST/HST/PST/QST schedules; NOT yet accountant-reviewed (open item: named accountant, see NOT-IMPLEMENTED.md)",
+  "sets": [
+    {
+      "region": "US", "currency": "USD", "exp": 2, "wantCount": 200,
+      "stacks": [
+        [{"name": "ST", "pct": "6.25"}],
+        [{"name": "ST", "pct": "4"}, {"name": "CO", "pct": "1.5"}],
+        [{"name": "ST", "pct": "6.25"}, {"name": "CO", "pct": "1.5"}, {"name": "CI", "pct": "0.5"}],
+        [{"name": "ST", "pct": "7"}, {"name": "CO", "pct": "2.25"}, {"name": "CI", "pct": "0.875"}],
+        [{"name": "ST", "pct": "2.9"}, {"name": "CO", "pct": "0.1"}]
+      ],
+      "amountSets": [["100.00"], ["19.99"], ["0.01"], ["1234.56"], ["33.33", "33.33", "33.33"], ["9.99", "9.99"], ["0.50", "0.50", "0.50", "0.50"], ["-75.25"], ["49.95", "50.05", "12.34"], ["1000000.00"]],
+      "roundings": ["per_line", "per_document"],
+      "modes": ["domestic"]
+    },
+    {
+      "region": "EU", "currency": "EUR", "exp": 2, "wantCount": 180,
+      "stacks": [
+        [{"name": "VAT", "pct": "19"}], [{"name": "VAT", "pct": "7"}], [{"name": "VAT", "pct": "20"}],
+        [{"name": "VAT", "pct": "5.5"}], [{"name": "VAT", "pct": "21"}], [{"name": "VAT", "pct": "23"}, {"name": "LOC", "pct": "0.5"}]
+      ],
+      "amountSets": [["119.00"], ["33.33", "33.33", "33.33"], ["0.99", "14.99"], ["250.00", "-40.00"], ["8.88"]],
+      "roundings": ["per_document"],
+      "modes": ["domestic", "reverse_charge", "rate_history"]
+    },
+    {
+      "region": "IN", "currency": "INR", "exp": 2, "wantCount": 70,
+      "stacks": [
+        [{"name": "CGST", "pct": "9"}, {"name": "SGST", "pct": "9"}], [{"name": "IGST", "pct": "18"}], [{"name": "IGST", "pct": "5"}],
+        [{"name": "IGST", "pct": "12"}], [{"name": "IGST", "pct": "28"}, {"name": "CESS", "pct": "12", "seq": 1}],
+        [{"name": "CGST", "pct": "2.5"}, {"name": "SGST", "pct": "2.5"}], [{"name": "IGST", "pct": "18"}, {"name": "CESS", "pct": "1", "seq": 1}]
+      ],
+      "amountSets": [["1180.00"], ["999.99", "0.01"], ["500.00", "250.00", "125.00"], ["12345.67"], ["3.33", "3.33", "3.33"]],
+      "roundings": ["per_line"],
+      "modes": ["domestic"]
+    },
+    {
+      "region": "CA", "currency": "CAD", "exp": 2, "wantCount": 50,
+      "stacks": [
+        [{"name": "GST", "pct": "5"}], [{"name": "HST", "pct": "13"}], [{"name": "GST", "pct": "5"}, {"name": "PST", "pct": "7"}],
+        [{"name": "GST", "pct": "5"}, {"name": "QST", "pct": "9.975", "seq": 1}], [{"name": "HST", "pct": "15"}]
+      ],
+      "amountSets": [["100.00"], ["29.99", "29.99"], ["0.10", "0.20", "0.30"], ["4567.89"], ["59.97"]],
+      "roundings": ["per_document"],
+      "modes": ["domestic"]
+    }
+  ]
+}

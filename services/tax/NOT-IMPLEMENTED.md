@@ -4,11 +4,11 @@ Slice A ships the tax engine, provider failover, settlement reconciliation, the 
 
 | Deliverable or AC | Status | Reason |
 |---|---|---|
-| AC1: tax matrix of 500 scenarios | built | `TestMatrix500` checks 500 generated scenarios (US 200, EU 180, IN 70, CA 50) against an exact-rational oracle; community-sourced, accountant-reviewed fixtures do not exist in the tree and the named accountant is an open architecture item |
-| AC2: settlement reconciles to the GL tax accounts | partial | `Settle` reconciles to the cent against the `GLMovement` interface (tested with a fake); the real GL arrives with wave 11 `services/ledger/` |
+| AC1: tax matrix of 500 scenarios | partial | `TestMatrix500` runs 500 scenarios from `testdata/matrix500.json` (US 200, EU 180, IN 70, CA 50; state+county+city stacks, IN IGST/CESS, effective-dated rate history, reverse charge) against an exact-rational oracle; bracket, cap, exemption and certificate cases are asserted in `TestCalculate_Table` and `TestCalculate_Mechanisms`. OPEN ITEM: community sourcing and accountant sign-off are not done; the named accountant is an open architecture item |
+| AC2: settlement reconciles to the GL tax accounts | partial | `Settle` reconciles to the cent against the `GLMovement` interface, proven with a fake only; no production `GLMovement`, store or caller of `Settle`/`PostSettlement` exists until wave 11 `services/ledger/` and slice B. OPEN ITEM: real GL reconciliation is unmet |
 | AC3: provider failover | partial | `CalculateWithFailover` falls back within 2 s and flags the document (TAX-0007); the `tax.provider.fallback.v1` event and recommit queue need the store and outbox (slice B) |
 | AC4: SAF-T export validates against the OECD XSD | slice B | needs the vendored OECD XSD, an XSD validator dependency with README justification, and ledger and party data |
-| AC6: contracts and chart | partial | `api/openapi.yaml` covers the calculate endpoint; AsyncAPI, Helm chart and Dockerfile are slice B (no events or deployment artefacts yet) |
+| AC6: contracts and chart | partial | `api/openapi.yaml` is a minimal duty-annotated stub; full OpenAPI schemas, AsyncAPI, Helm chart and Dockerfile are slice B (no events or deployment artefacts yet) |
 | Deliverable 1: determination model | partial | groups x item groups, effective-dated rates, exemption certificates and brackets are in the engine; the jurisdiction hierarchy and persistence are slice B |
 | Deliverable 2: calculation | built | inclusive and exclusive, compound, rounding, reverse charge, use tax, partial recoverability |
 | Deliverable 3: withholding tax and reporting hooks | slice B | needs the store and the BR-13.8 withholding engine |
