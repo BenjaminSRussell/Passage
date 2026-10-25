@@ -75,6 +75,7 @@ type API struct {
 	hierarchyTypeCreated   atomic.Int64
 	hierarchyDraftCreated  atomic.Int64
 	hierarchyNodesReplaced atomic.Int64
+	hierarchyDraftsDeleted atomic.Int64
 
 	hierarchyVersionsPublished atomic.Int64
 	hierarchyAsOfQueries       atomic.Int64
@@ -176,6 +177,7 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP org_fiscal_years_generated_total Fiscal years generated or regenerated; idempotent replays are not counted.\n# TYPE org_fiscal_years_generated_total counter\norg_fiscal_years_generated_total %d\n", a.fiscalYearGenerated.Load())
 		fmt.Fprintf(w, "# HELP org_hierarchy_types_created_total Hierarchy types created.\n# TYPE org_hierarchy_types_created_total counter\norg_hierarchy_types_created_total %d\n", a.hierarchyTypeCreated.Load())
 		fmt.Fprintf(w, "# HELP org_hierarchy_drafts_created_total Draft hierarchy versions created.\n# TYPE org_hierarchy_drafts_created_total counter\norg_hierarchy_drafts_created_total %d\n", a.hierarchyDraftCreated.Load())
+		fmt.Fprintf(w, "# HELP org_hierarchy_drafts_deleted_total Draft hierarchy versions deleted.\n# TYPE org_hierarchy_drafts_deleted_total counter\norg_hierarchy_drafts_deleted_total %d\n", a.hierarchyDraftsDeleted.Load())
 		fmt.Fprintf(w, "# HELP org_hierarchy_node_sets_replaced_total Draft hierarchy node sets replaced.\n# TYPE org_hierarchy_node_sets_replaced_total counter\norg_hierarchy_node_sets_replaced_total %d\n", a.hierarchyNodesReplaced.Load())
 		fmt.Fprintf(w, "# HELP org_hierarchy_versions_published_total Hierarchy versions published; idempotent replays are counted.\n# TYPE org_hierarchy_versions_published_total counter\norg_hierarchy_versions_published_total %d\n", a.hierarchyVersionsPublished.Load())
 		fmt.Fprintf(w, "# HELP org_hierarchy_as_of_queries_total Hierarchy as-of queries answered.\n# TYPE org_hierarchy_as_of_queries_total counter\norg_hierarchy_as_of_queries_total %d\n", a.hierarchyAsOfQueries.Load())

@@ -82,6 +82,10 @@ type Store interface {
 	GenerateFiscalYear(ctx context.Context, id string, year int, custom []domain.DateRange, force bool) (FiscalYear, error)
 	ListFiscalPeriods(ctx context.Context, id string, year int) ([]FiscalPeriod, error)
 	CreateHierarchyType(ctx context.Context, in HierarchyType, idempotencyKey string) (HierarchyType, error)
+	GetHierarchyType(ctx context.Context, id string) (HierarchyType, error)
+	ListHierarchyTypes(ctx context.Context, f HierarchyTypeFilter, afterCode string, limit int) (HierarchyTypePage, error)
+	GetHierarchyVersion(ctx context.Context, id string) (HierarchyVersion, error)
+	DeleteHierarchyDraft(ctx context.Context, id string, version int) error
 	CreateHierarchyDraft(ctx context.Context, typeID, idempotencyKey string) (HierarchyVersion, error)
 	ReplaceHierarchyNodes(ctx context.Context, id string, version int, nodes []HierarchyNode) (HierarchyVersion, error)
 	PublishHierarchyVersion(ctx context.Context, id string, version int, effectiveFrom time.Time, reason, idempotencyKey, publishedBy string, backdated bool) (HierarchyVersion, error)

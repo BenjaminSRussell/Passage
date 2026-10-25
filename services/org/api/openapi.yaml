@@ -284,6 +284,19 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/FiscalPeriodList' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/org/hierarchy-types:
+    get:
+      operationId: listHierarchyTypes
+      x-passage-duty: org.read
+      parameters:
+        - { name: purpose, in: query, schema: { type: string, enum: [reporting, procurement, expenditure, security, centralized_payments, custom] } }
+        - { name: status, in: query, schema: { type: string, enum: [active, inactive] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: One page of hierarchy types ordered by code; purpose matches types whose purposes contain it. Types are tenant-wide, so a legal-entity-scoped caller reads them too. Pass nextCursor as cursor for the next page. 400 COM-0001 naming purpose, status, limit or cursor. 403 AUTH-0003 without org.read.
+          content: { application/json: { schema: { $ref: '#/components/schemas/HierarchyTypePage' } } }
+        default: { $ref: '#/components/responses/Problem' }
     post:
       operationId: createHierarchyType
       x-passage-duty: org.hierarchy.write
@@ -297,6 +310,17 @@ paths:
           description: Hierarchy type created, or the original type on an Idempotency-Key replay. Types are tenant-level. 400 COM-0001 naming code, name or purposes. 409 ORG-HIER-TYPE-CODE-DUPLICATE. 422 idempotency_key_reuse when the key was used with a different body. 403 AUTH-0003 without the duty or for a legal-entity-scoped caller.
           content: { application/json: { schema: { $ref: '#/components/schemas/HierarchyType' } } }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/org/hierarchy-types/{id}:
+    get:
+      operationId: getHierarchyType
+      x-passage-duty: org.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The hierarchy type. A legal-entity-scoped caller may read it. 403 AUTH-0003 without org.read. 404 ORG-HIER-TYPE-NOT-FOUND for a malformed, unknown or other tenant's id.
+          content: { application/json: { schema: { $ref: '#/components/schemas/HierarchyType' } } }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/org/hierarchy-types/{id}/versions:
     post:
       operationId: createHierarchyDraft
@@ -308,6 +332,27 @@ paths:
         '201':
           description: A draft version numbered one above the type's highest version, with the node set copied from the published version with the latest effective_from, or empty when none is published. The request has no body. Replaying the key for the same type returns the same draft. 404 ORG-HIER-TYPE-NOT-FOUND for a malformed, unknown or other tenant's id. 409 ORG-HIER-DRAFT-EXISTS when the type already has an open draft. 422 idempotency_key_reuse when the key belongs to another type. 403 AUTH-0003 without the duty or for a legal-entity-scoped caller.
           content: { application/json: { schema: { $ref: '#/components/schemas/HierarchyVersion' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/hierarchy-versions/{id}:
+    get:
+      operationId: getHierarchyVersion
+      x-passage-duty: org.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The version with its nodes ordered by sortOrder, in the same representation publish returns; a published version carries publishedAt and publishedBy. 403 AUTH-0003 without org.read. 404 ORG-HIER-VERSION-NOT-FOUND for a malformed, unknown or other tenant's id.
+          content: { application/json: { schema: { $ref: '#/components/schemas/HierarchyVersion' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    delete:
+      operationId: deleteHierarchyDraft
+      x-passage-duty: org.hierarchy.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: version, in: query, required: true, schema: { type: integer }, description: The draft's current optimistic-lock version }
+      responses:
+        '204':
+          description: The draft and its nodes are deleted; no body and no event. Deleting the open draft frees the type's draft slot, and the next draft's versionNo is one above the highest remaining, so a deleted draft's versionNo may be reused. 400 COM-0001 naming version when it is missing or not an integer. 403 AUTH-0003 without org.hierarchy.write or for a legal-entity-scoped caller. 404 ORG-HIER-VERSION-NOT-FOUND for a malformed, unknown or other tenant's id. 409 ORG-HIER-VERSION-IMMUTABLE for a version that is not a draft, left unchanged; 409 ORG-VERSION-CONFLICT for a stale version.
         default: { $ref: '#/components/responses/Problem' }
   /v1/org/hierarchy-versions/{id}/nodes:
     put:
@@ -751,6 +796,10 @@ components:
       type: object
       required: [id, code, name, purposes, backdateAllowed, status, version, createdAt, updatedAt]
       properties: { id: { type: string, format: uuid }, code: { type: string }, name: { type: string }, purposes: { type: array, items: { type: string, enum: [reporting, procurement, expenditure, security, centralized_payments, custom] } }, backdateAllowed: { type: boolean }, status: { type: string, enum: [active, inactive] }, version: { type: integer }, createdAt: { type: string, format: date-time }, updatedAt: { type: string, format: date-time } }
+    HierarchyTypePage:
+      type: object
+      required: [items]
+      properties: { items: { type: array, items: { $ref: '#/components/schemas/HierarchyType' } }, nextCursor: { type: string } }
     HierarchyNode:
       type: object
       required: [orgUnitId, kind, parentOrgUnitId, sortOrder]

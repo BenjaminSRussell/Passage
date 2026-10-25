@@ -1,11 +1,13 @@
 package api
 
 import (
+	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"math"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -57,6 +59,10 @@ func (a *API) registerHierarchies(r chi.Router) {
 	r.With(authz.RequireDuty(dutyHierarchy)).Post(hierarchyTypes+"/{id}/versions", hierarchyRoute(store.CodeHierarchyTypeNotFound, "hierarchy type not found", a.createHierarchyDraft))
 	r.With(authz.RequireDuty(dutyHierarchy)).Put(hierarchyVersions+"/{id}/nodes", hierarchyRoute(store.CodeHierarchyVersionNotFound, "hierarchy version not found", a.replaceHierarchyNodes))
 	r.With(authz.RequireDuty(dutyPublish)).Post(hierarchyVersions+"/{id}:publish", hierarchyRoute(store.CodeHierarchyVersionNotFound, "hierarchy version not found", a.publishHierarchyVersion))
+	r.With(authz.RequireDuty(dutyRead)).Get(hierarchyTypes, a.listHierarchyTypes)
+	r.With(authz.RequireDuty(dutyRead)).Get(hierarchyTypes+"/{id}", hierarchyRoute(store.CodeHierarchyTypeNotFound, "hierarchy type not found", a.getHierarchyType))
+	r.With(authz.RequireDuty(dutyRead)).Get(hierarchyVersions+"/{id}", hierarchyRoute(store.CodeHierarchyVersionNotFound, "hierarchy version not found", a.getHierarchyVersion))
+	r.With(authz.RequireDuty(dutyHierarchy)).Delete(hierarchyVersions+"/{id}", hierarchyRoute(store.CodeHierarchyVersionNotFound, "hierarchy version not found", a.deleteHierarchyDraft))
 	r.With(authz.RequireDuty(dutyRead)).Get(hierarchyTypes+"/{id}/as-of", hierarchyRoute(store.CodeHierarchyTypeNotFound, "hierarchy type not found", a.hierarchyAsOf))
 }
 
@@ -255,4 +261,81 @@ func (a *API) hierarchyAsOf(w http.ResponseWriter, r *http.Request, id string) {
 	}
 	a.hierarchyAsOfQueries.Add(1)
 	httpx.JSON(w, http.StatusOK, result)
+}
+
+func (a *API) listHierarchyTypes(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	limit, after, err := pageParams(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	q := r.URL.Query()
+	f := store.HierarchyTypeFilter{Purpose: q.Get("purpose"), Status: q.Get("status")}
+	for _, c := range []struct {
+		field, rule string
+		invalid     bool
+	}{
+		{"purpose", "must be one of " + strings.Join(hierarchyPurposes, ", "), f.Purpose != "" && !slices.Contains(hierarchyPurposes, f.Purpose)},
+		{"status", "must be active or inactive", f.Status != "" && !validStatus(f.Status)},
+	} {
+		if c.invalid {
+			badQuery(w, r, c.field, c.rule)
+			return
+		}
+	}
+	page, err := a.store.ListHierarchyTypes(r.Context(), f, after, limit)
+	if err != nil {
+		slog.Error("list hierarchy types failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.Fail(w, r, err)
+		return
+	}
+	body := struct {
+		Items      []store.HierarchyType `json:"items"`
+		NextCursor string                `json:"nextCursor,omitempty"`
+	}{Items: page.Items}
+	if page.NextCode != "" {
+		body.NextCursor = base64.RawURLEncoding.EncodeToString([]byte(page.NextCode))
+	}
+	httpx.JSON(w, http.StatusOK, body)
+}
+
+func (a *API) getHierarchyType(w http.ResponseWriter, r *http.Request, id string) {
+	t, err := a.store.GetHierarchyType(r.Context(), id)
+	if err != nil {
+		slog.Error("get hierarchy type failed", "err", err, "typeId", id, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, t)
+}
+
+func (a *API) getHierarchyVersion(w http.ResponseWriter, r *http.Request, id string) {
+	v, err := a.store.GetHierarchyVersion(r.Context(), id)
+	if err != nil {
+		slog.Error("get hierarchy version failed", "err", err, "versionId", id, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, v)
+}
+
+func (a *API) deleteHierarchyDraft(w http.ResponseWriter, r *http.Request, id string) {
+	if rejectScopedCaller(w, r, "delete hierarchy versions") {
+		return
+	}
+	version, err := strconv.Atoi(r.URL.Query().Get("version"))
+	if err != nil {
+		badQuery(w, r, "version", "must be an integer")
+		return
+	}
+	if err := a.store.DeleteHierarchyDraft(r.Context(), id, version); err != nil {
+		slog.Error("delete hierarchy draft failed", "err", err, "versionId", id, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.Fail(w, r, err)
+		return
+	}
+	a.hierarchyDraftsDeleted.Add(1)
+	w.WriteHeader(http.StatusNoContent)
 }
