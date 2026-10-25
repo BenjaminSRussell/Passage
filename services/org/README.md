@@ -22,6 +22,10 @@ Countries, currencies, regions and languages are platform-owned rows under the `
 
 Calendars are tenant-level and persisted in `fiscal_calendar` and `fiscal_period`. `POST /v1/org/fiscal-calendars` (duty `org.fiscal-calendar.write`, `Idempotency-Key`) creates one with the defaults `startMonth` 1, `weekStart` `monday`, `openingClosing` true and `specialPeriods` 0; `GET /v1/org/fiscal-calendars/{id}` reads it. `POST /v1/org/fiscal-calendars/{id}:generate` with `{fiscalYear, force?, periods?}` writes the year's periods and emits `fiscalcalendar.generated` (201, `generated` true). Calling it again for the same calendar and year is a replay: 200, `generated` false, the stored periods, no write and no event. `force` replaces the rows and emits a second event, but first asks the `PostingChecker`: postings answer 409 `ORG-CAL-LOCKED`, a checker failure answers 503 `COM-0503`. Until the ledger exists the checker reports no postings. `periods` is required for a `custom` calendar and rejected for any other pattern (`ORG-CAL-PATTERN`). `GET /v1/org/fiscal-calendars/{id}/periods?fiscalYear=` returns the periods in order 0, operating, adjustment, 99.
 
+## Hierarchies
+
+Hierarchies are tenant-level and persisted in `hierarchy_type`, `hierarchy_version` and `hierarchy_node`. `POST /v1/org/hierarchy-types` (duty `org.hierarchy.write`, `Idempotency-Key`) creates a type with a code, a name, one to six distinct `purposes` (reporting, procurement, expenditure, security, centralized_payments, custom) and `backdateAllowed` (default false). `POST /v1/org/hierarchy-types/{id}/versions` takes no body and creates the draft, numbered one above the type's highest version. A type has at most one open draft (409 `ORG-HIER-DRAFT-EXISTS`). The draft starts as a copy of the published version with the latest `effective_from`, or empty when none is published. `PUT /v1/org/hierarchy-versions/{id}/nodes` replaces the whole node set of a draft with `{version, nodes: [{orgUnitId, parentOrgUnitId?, sortOrder?}]}`. A stale `version` is 409 `ORG-VERSION-CONFLICT`, and a published version is 409 `ORG-HIER-VERSION-IMMUTABLE`. `domain.ValidateTree` checks the set in this order: size, duplicate node, unknown parent, cycle, exactly one root and depth (15 levels, 50,000 nodes). The store then resolves each `orgUnitId` to a legal entity or an operating unit and sets `kind`. A rejected request writes nothing. Publish, overlap checks, the closure table and the as-of API are a later slice.
+
 ## API
 
 | Operation | Duty |
@@ -44,6 +48,7 @@ Calendars are tenant-level and persisted in `fiscal_calendar` and `fiscal_period
 | `GET /v1/org/address-versions/{id}` (any version of an address by its `versionId`, current or closed) | `org.read` |
 | `GET /v1/org/addresses` (`ownerType`, `ownerId` required; `purpose`, `limit`, `cursor`; the owner's current addresses as `{items, nextCursor}`) | `org.read` |
 | `GET /v1/org/operating-units` (`limit`, `cursor`; filters `type`, `defaultLegalEntityId`, `status`; returns `{items, nextCursor}`) and `GET /v1/org/operating-units/{id}` | `org.read` |
+| `POST /v1/org/hierarchy-types` (body `code`, `name`, `purposes`; optional `backdateAllowed`, `Idempotency-Key`), `POST /v1/org/hierarchy-types/{id}/versions` (`Idempotency-Key`, no body) and `PUT /v1/org/hierarchy-versions/{id}/nodes` (body `version`, `nodes`) | `org.hierarchy.write` |
 | `GET /v1/org/{countries,currencies,regions,languages}` (`status` active or inactive; `country` for regions; returns `{items}`) and `GET /v1/org/{countries,currencies,regions,languages}/{code}` | `org.read` |
 | `PATCH /v1/org/{countries,currencies,regions,languages}/{code}` (body `{"status":"active"\|"inactive"}`; not for legal-entity-scoped callers) | `org.reference.write` |
 | `GET /v1/org/uom/convert?from=&to=&qty=` | any authenticated principal |
@@ -61,6 +66,9 @@ Contract: `api/openapi.yaml`. Paths follow the architecture spine (`/v1/<context
 | ORG-CAL-CODE-DUPLICATE | 409 | fiscal-calendar code already used in the tenant |
 | ORG-CAL-LOCKED | 409 | `force` regeneration of a fiscal year the ledger reports postings for |
 | ORG-CAL-PATTERN, ORG-CAL-GAP, ORG-CAL-OVERLAP | 422 | unusable calendar spec or custom ranges that do not tile the year |
+| ORG-HIER-TYPE-NOT-FOUND, ORG-HIER-VERSION-NOT-FOUND | 404 | hierarchy type or version unknown, malformed id or another tenant's |
+| ORG-HIER-TYPE-CODE-DUPLICATE, ORG-HIER-DRAFT-EXISTS, ORG-HIER-VERSION-IMMUTABLE | 409 | type code already used; the type has an open draft; the version is not a draft |
+| ORG-HIER-SIZE, ORG-HIER-DUPLICATE-NODE, ORG-HIER-PARENT-UNKNOWN, ORG-HIER-CYCLE, ORG-HIER-MULTI-ROOT, ORG-HIER-DEPTH, ORG-HIER-NODE-UNKNOWN | 422 | node set fails structural validation, or an org unit is neither a legal entity nor an operating unit |
 | COM-0503 | 503 | the ledger posting check failed, so `force` is refused |
 | ORG-LE-CODE-DUPLICATE | 409 | legal-entity code already used in the tenant |
 | ORG-LE-CODE-RESERVED | 400 | legal-entity code is DAT, SYS or ALL |

@@ -46,6 +46,7 @@ type fakeStore struct {
 	generateCalls       int
 	generateErr         error
 	generatedID         string
+	hierarchyNodes      []store.HierarchyNode
 }
 
 func (f *fakeStore) reference(kind store.ReferenceKind, code string) (store.ReferenceItem, bool) {
@@ -923,4 +924,27 @@ func TestReference_DeactivatedRowIsFilteredByStatus(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), `"code":"USD"`) || strings.Contains(rec.Body.String(), `"code":"JPY"`) {
 		t.Fatalf("inactive list = %s", rec.Body.String())
 	}
+}
+
+func (f *fakeStore) CreateHierarchyType(_ context.Context, in store.HierarchyType, _ string) (store.HierarchyType, error) {
+	if f.err != nil {
+		return store.HierarchyType{}, f.err
+	}
+	in.ID, in.Status, in.Version = hierarchyTypeID, "active", 1
+	return in, nil
+}
+
+func (f *fakeStore) CreateHierarchyDraft(_ context.Context, typeID, _ string) (store.HierarchyVersion, error) {
+	if f.err != nil {
+		return store.HierarchyVersion{}, f.err
+	}
+	return store.HierarchyVersion{ID: hierarchyVersionID, HierarchyTypeID: typeID, VersionNo: 1, Status: "draft", Version: 1, Nodes: []store.HierarchyNode{}}, nil
+}
+
+func (f *fakeStore) ReplaceHierarchyNodes(_ context.Context, id string, version int, nodes []store.HierarchyNode) (store.HierarchyVersion, error) {
+	if f.err != nil {
+		return store.HierarchyVersion{}, f.err
+	}
+	f.hierarchyNodes = nodes
+	return store.HierarchyVersion{ID: id, VersionNo: 1, Status: "draft", NodeCount: len(nodes), Version: version + 1, Nodes: nodes}, nil
 }
