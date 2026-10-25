@@ -14,6 +14,8 @@
 | Deliverable 4: `cumulative_no_reversal` method, run table, posting, reversal entries, batch schedule | not built | posting and run state are owned by `services/ledger` (PSG-11 absent) |
 | Deliverable 5: currency translation (CTA) | slice 3 of PSG-12 | line budget; posting side needs `services/ledger` |
 | Deliverable 6: market data series | PSG-1202 slice 2d | migration `0002`, domain, store and API |
+| Temporal schedule for provider imports | PSG-1202 slice 2c | needs provider adapters; CronJob fallback is in slice 2e |
+| ECB SDW market data series adapter | PSG-1202 slice 2d | deferred with the market data series |
 | AC4: provider outage fallback and alert, import run log store | PSG-1202 slice 2c | needs provider adapters and the degraded event |
 | Demo entity with EUR reporting currency | handoff | needs `services/ledger` and `services/org` waves |
 | OpenAPI, AsyncAPI, route/event contract test, Helm chart `passage-fx`, CronJobs, PrometheusRule, Dockerfile, `cmd/fx` | PSG-1202 slice 2e | no HTTP surface yet |
