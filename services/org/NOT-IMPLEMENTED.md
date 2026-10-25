@@ -1,11 +1,13 @@
-# Not implemented in PSG-6 slice 14
+# Not implemented in PSG-6 slice 15
 
 | Deliverable or AC | Status | Reason |
 |---|---|---|
 | Deliverable 1: LegalEntity | partial | create, list with filters, get, versioned PATCH, name history and the 500-per-tenant cap are built; deactivation refused while users default to the entity (BR-6.11 `ORG-LE-DEFAULT-IN-USE`) is a handoff |
 | Deliverable 1: effective-dated hierarchies (AC1) | domain only | `domain.ParentAsOf` is tested against a 1,000-node, 5-purpose oracle; hierarchy tables, closure table, cycle, depth, size and overlap validation, draft/publish/supersede endpoints are slice 2 |
 | Deliverable 2: hierarchy designer UI and legal-entity switch re-scoping list pages (AC2) | slice 2 of PSG-6 | line budget; `apps/web/src/modules/org/` is not created |
-| Deliverable 4: fiscal calendars (AC4) | slice 2 of PSG-6 | line budget; `internal/domain/fiscal.go` and `testdata/fiscal-patterns/` are next; period statuses per ledger belong to wave 14 |
+| Deliverable 4: fiscal calendars | domain only | domain.GenerateYear and ProveContiguous cover calendar, 4-4-5, 4-5-4, 5-4-4, 13-period and custom patterns with opening, closing and special periods; AC4 is proved by golden fixtures in testdata/fiscal-patterns/; tables fiscal_calendar and fiscal_period, POST /v1/org/fiscal-calendars, :generate (idempotent per calendar and year, ORG-CAL-LOCKED via a ledger callback) and the period grid read are a later slice of PSG-6; period statuses per ledger belong to wave 14 |
+| Fiscal-pattern fixtures for 2025, 2027 and 2028 beyond 4-4-5-2028 (§1.6.9 lists five patterns for 2025–2028) | later slice of PSG-6 | data files get their own slice; PSG-615 commits the six fixtures that AC4 and the pattern tests need |
+| ORG-CAL-PATTERN and ORG-CAL-OVERLAP | domain only | new codes not in the §1.6.18 catalog; no route returns them until the fiscal-calendar API slice |
 | Deliverable 5: reference data | partial | UoM conversion is built (AC3) over a built-in conversion set in `domain.StandardConversions`; countries, currencies, regions (US, CA, IN, MX) and languages are seeded (tables `country`, `currency`, `region`, `language`, `reference_status`; loader `store.SeedReference`); the read API (`GET /v1/org/{countries,currencies,regions,languages}[/{code}]`) and tenant deactivation (`PATCH …/{code}`, table `reference_status`) are built; the `uom_conversion` table is a later slice of PSG-6 |
 | Deliverable 6: teams, team types, memberships | slice 2 of PSG-6 | line budget; membership criteria need OPA/Rego, which is not present |
 | Deliverable 6: legal-entity copy from template, currency rounding rules, organization name translations | slice 2 of PSG-6 | copy needs Temporal (wave 4) and will sit behind an interface with an in-package fake; the rest is line budget |
