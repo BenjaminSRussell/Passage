@@ -16,6 +16,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/outbox"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/BenjaminSRussell/passage/services/org/internal/domain"
 	orgevents "github.com/BenjaminSRussell/passage/services/org/internal/events"
 )
 
@@ -76,6 +77,10 @@ type Store interface {
 	ReviseAddress(ctx context.Context, id, versionID string, next Address) (Address, error)
 	GetAddressVersion(ctx context.Context, versionID string) (Address, error)
 	ListAddresses(ctx context.Context, f AddressFilter, afterID string, limit int) (AddressPage, error)
+	CreateFiscalCalendar(ctx context.Context, in FiscalCalendar, idempotencyKey string) (FiscalCalendar, error)
+	GetFiscalCalendar(ctx context.Context, id string) (FiscalCalendar, error)
+	GenerateFiscalYear(ctx context.Context, id string, year int, custom []domain.DateRange, force bool) (FiscalYear, error)
+	ListFiscalPeriods(ctx context.Context, id string, year int) ([]FiscalPeriod, error)
 	ListReference(ctx context.Context, kind ReferenceKind, f ReferenceFilter) ([]ReferenceItem, error)
 	GetReference(ctx context.Context, kind ReferenceKind, code string) (ReferenceItem, error)
 	SetReferenceStatus(ctx context.Context, kind ReferenceKind, code, status string) (ReferenceItem, error)

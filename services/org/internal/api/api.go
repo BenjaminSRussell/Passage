@@ -67,6 +67,10 @@ type API struct {
 	addressCreated   atomic.Int64
 	addressRevised   atomic.Int64
 	geocoder         domain.Geocoder
+
+	fiscalCalendarCreated atomic.Int64
+	fiscalYearGenerated   atomic.Int64
+	postings              PostingChecker
 }
 
 type createLegalEntityRequest struct {
@@ -114,7 +118,7 @@ type convertResponse struct {
 }
 
 func New(s store.Store) *API {
-	return &API{store: s, conversions: domain.StandardConversions(), geocoder: domain.NullGeocoder{}}
+	return &API{store: s, conversions: domain.StandardConversions(), geocoder: domain.NullGeocoder{}, postings: noPostings{}}
 }
 
 func (a *API) Register(r chi.Router) {
@@ -132,6 +136,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerWarehouses(r)
 	a.registerLocations(r)
 	a.registerAddresses(r)
+	a.registerFiscalCalendars(r)
 	r.Get("/v1/org/uom/convert", a.convert)
 	for _, c := range referenceCollections {
 		base := "/v1/org/" + c.collection
@@ -158,6 +163,8 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP org_locations_updated_total Location updates that bumped the version.\n# TYPE org_locations_updated_total counter\norg_locations_updated_total %d\n", a.locationUpdated.Load())
 		fmt.Fprintf(w, "# HELP org_addresses_created_total Postal addresses created.\n# TYPE org_addresses_created_total counter\norg_addresses_created_total %d\n", a.addressCreated.Load())
 		fmt.Fprintf(w, "# HELP org_addresses_revised_total Postal address versions created by edits.\n# TYPE org_addresses_revised_total counter\norg_addresses_revised_total %d\n", a.addressRevised.Load())
+		fmt.Fprintf(w, "# HELP org_fiscal_calendars_created_total Fiscal calendars created.\n# TYPE org_fiscal_calendars_created_total counter\norg_fiscal_calendars_created_total %d\n", a.fiscalCalendarCreated.Load())
+		fmt.Fprintf(w, "# HELP org_fiscal_years_generated_total Fiscal years generated or regenerated; idempotent replays are not counted.\n# TYPE org_fiscal_years_generated_total counter\norg_fiscal_years_generated_total %d\n", a.fiscalYearGenerated.Load())
 	})
 }
 

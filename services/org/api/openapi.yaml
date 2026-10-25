@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: org
-  version: 0.10.0
-  description: Organization service. Covers legal entities, operating units, sites, warehouses, locations, postal addresses with purposes, unit-of-measure conversion, and the platform-owned reference sets (countries, currencies, regions, languages) with tenant-level deactivation.
+  version: 0.11.0
+  description: Organization service. Covers legal entities, operating units, sites, warehouses, locations, postal addresses with purposes, fiscal calendars with idempotent year generation and the period read, unit-of-measure conversion, and the platform-owned reference sets (countries, currencies, regions, languages) with tenant-level deactivation.
 servers:
   - url: https://app.local.passage.dev
 paths:
@@ -228,6 +228,60 @@ paths:
         '200':
           description: The warehouse. A stale version is 409 ORG-VERSION-CONFLICT. A request that changes no value returns the stored warehouse with the same version and emits no event. 400 COM-0001 for a field error, or for legalEntityId or code, which are immutable. 404 ORG-WH-NOT-FOUND. 422 ORG-WH-SITE-INVALID when the new site is unknown, inactive or outside the caller's scope; 422 ORG-WH-LE-MISMATCH when the new site belongs to another legal entity. 422 ORG-ADDR-NOT-OWNED, naming the field in errors, when the address pointer is not a current address owned by this record; an old version id, another owner's address and an address outside the caller's scope all fail. 403 AUTH-0003 without the duty.
           content: { application/json: { schema: { $ref: '#/components/schemas/Warehouse' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/fiscal-calendars:
+    post:
+      operationId: createFiscalCalendar
+      x-passage-duty: org.fiscal-calendar.write
+      parameters:
+        - { name: Idempotency-Key, in: header, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateFiscalCalendar' } } }
+      responses:
+        '201':
+          description: Fiscal calendar created, or the original calendar on an Idempotency-Key replay. Calendars are tenant-level. 400 COM-0001 naming code, name, pattern, startMonth, weekStart or specialPeriods. 409 ORG-CAL-CODE-DUPLICATE. 422 idempotency_key_reuse when the key was used with a different body. 403 AUTH-0003 without the duty or for a legal-entity-scoped caller.
+          content: { application/json: { schema: { $ref: '#/components/schemas/FiscalCalendar' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/fiscal-calendars/{id}:
+    get:
+      operationId: getFiscalCalendar
+      x-passage-duty: org.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: One fiscal calendar. A malformed id, an unknown id and another tenant's id are all 404 ORG-CAL-NOT-FOUND.
+          content: { application/json: { schema: { $ref: '#/components/schemas/FiscalCalendar' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/fiscal-calendars/{id}:generate:
+    post:
+      operationId: generateFiscalYear
+      x-passage-duty: org.fiscal-calendar.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/GenerateFiscalYear' } } }
+      responses:
+        '200':
+          description: Idempotent replay. The year already exists and force was not set, so the stored periods are returned with generated false, nothing is written and no event is emitted.
+          content: { application/json: { schema: { $ref: '#/components/schemas/FiscalYear' } } }
+        '201':
+          description: The year was generated, or regenerated with force, and one fiscalcalendar.generated event was emitted. 400 COM-0001 for a missing or non-integer fiscalYear or a malformed date. 404 ORG-CAL-NOT-FOUND. 409 ORG-CAL-LOCKED when force is set and the ledger reports postings in the year. 422 ORG-CAL-PATTERN when periods are missing on a custom calendar or sent to another pattern; 422 ORG-CAL-GAP or ORG-CAL-OVERLAP when custom periods do not tile the year. 503 COM-0503 when the ledger posting check fails. 403 AUTH-0003 without the duty or for a legal-entity-scoped caller.
+          content: { application/json: { schema: { $ref: '#/components/schemas/FiscalYear' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/fiscal-calendars/{id}/periods:
+    get:
+      operationId: listFiscalPeriods
+      x-passage-duty: org.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: fiscalYear, in: query, schema: { type: integer, minimum: 1900, maximum: 2999 } }
+      responses:
+        '200':
+          description: Periods ordered by fiscal year then period number (0, operating, adjustment, 99); every generated year when fiscalYear is omitted, an empty list when none is generated. 400 COM-0001 for a fiscalYear outside 1900 to 2999. 404 ORG-CAL-NOT-FOUND.
+          content: { application/json: { schema: { $ref: '#/components/schemas/FiscalPeriodList' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/org/locations:
     post:
@@ -594,6 +648,32 @@ components:
       type: object
       required: [items]
       properties: { items: { type: array, items: { $ref: '#/components/schemas/Warehouse' } }, nextCursor: { type: string } }
+    CreateFiscalCalendar:
+      type: object
+      additionalProperties: false
+      required: [code, name, pattern]
+      properties: { code: { type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{0,9}$', description: Upper-cased on save; unique within the tenant }, name: { type: string, minLength: 1, maxLength: 120 }, pattern: { type: string, enum: [calendar, 4-4-5, 4-5-4, 5-4-4, 13-period, custom] }, startMonth: { type: integer, minimum: 1, maximum: 12, default: 1 }, weekStart: { type: string, enum: [sunday, monday, tuesday, wednesday, thursday, friday, saturday], default: monday }, openingClosing: { type: boolean, default: true }, specialPeriods: { type: integer, minimum: 0, maximum: 4, default: 0 } }
+    FiscalCalendar:
+      type: object
+      required: [id, code, name, pattern, startMonth, weekStart, openingClosing, specialPeriods, status, version, createdAt, updatedAt]
+      properties: { id: { type: string, format: uuid }, code: { type: string }, name: { type: string }, pattern: { type: string, enum: [calendar, 4-4-5, 4-5-4, 5-4-4, 13-period, custom] }, startMonth: { type: integer }, weekStart: { type: string, enum: [sunday, monday, tuesday, wednesday, thursday, friday, saturday] }, openingClosing: { type: boolean }, specialPeriods: { type: integer }, status: { type: string, enum: [active, inactive] }, version: { type: integer }, createdAt: { type: string, format: date-time }, updatedAt: { type: string, format: date-time } }
+    GenerateFiscalYear:
+      type: object
+      additionalProperties: false
+      required: [fiscalYear]
+      properties: { fiscalYear: { type: integer, minimum: 1900, maximum: 2999 }, force: { type: boolean, default: false, description: Replace an existing year; refused with ORG-CAL-LOCKED when the ledger reports postings }, periods: { type: array, description: 'Required for a custom calendar, rejected for any other pattern', items: { type: object, additionalProperties: false, required: [start, end], properties: { start: { type: string, format: date }, end: { type: string, format: date } } } } }
+    FiscalPeriod:
+      type: object
+      required: [fiscalYear, periodNo, name, startDate, endDate, type, week53]
+      properties: { fiscalYear: { type: integer }, periodNo: { type: integer }, name: { type: string }, startDate: { type: string, format: date }, endDate: { type: string, format: date }, type: { type: string, enum: [opening, operating, closing, adjustment] }, week53: { type: boolean } }
+    FiscalYear:
+      type: object
+      required: [calendarId, fiscalYear, generated, periods]
+      properties: { calendarId: { type: string, format: uuid }, fiscalYear: { type: integer }, generated: { type: boolean }, periods: { type: array, items: { $ref: '#/components/schemas/FiscalPeriod' } } }
+    FiscalPeriodList:
+      type: object
+      required: [items]
+      properties: { items: { type: array, items: { $ref: '#/components/schemas/FiscalPeriod' } } }
     CreateLocation:
       type: object
       additionalProperties: false

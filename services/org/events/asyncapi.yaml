@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: org
-  version: 0.7.0
+  version: 0.8.0
   description: CloudEvents 1.0 envelope from platform/go/events; payloads below are the data member.
 channels:
   passage.org.legalentity:
@@ -32,6 +32,11 @@ channels:
         $ref: '#/components/messages/warehouseCreated'
       updated:
         $ref: '#/components/messages/warehouseUpdated'
+  passage.org.fiscalcalendar:
+    address: passage.org.fiscalcalendar
+    messages:
+      generated:
+        $ref: '#/components/messages/fiscalCalendarGenerated'
   passage.org.location:
     address: passage.org.location
     messages:
@@ -82,6 +87,10 @@ operations:
     action: send
     channel: { $ref: '#/channels/passage.org.warehouse' }
     messages: [{ $ref: '#/channels/passage.org.warehouse/messages/updated' }]
+  onFiscalCalendarGenerated:
+    action: send
+    channel: { $ref: '#/channels/passage.org.fiscalcalendar' }
+    messages: [{ $ref: '#/channels/passage.org.fiscalcalendar/messages/generated' }]
   onLocationCreated:
     action: send
     channel: { $ref: '#/channels/passage.org.location' }
@@ -235,6 +244,29 @@ components:
           purposes: { type: array, items: { type: string, enum: [business, delivery, invoice, remit_to, service, home, other] } }
           valid_from: { type: string, format: date }
       x-passage-type: dev.passage.org.address.changed.v1
+    fiscalCalendarGenerated:
+      name: generated
+      title: Fiscal year generated
+      description: Emitted when a fiscal year's periods are first generated and again on every forced regeneration; an idempotent replay emits nothing.
+      payload:
+        type: object
+        required: [calendar_id, fiscal_year, periods]
+        properties:
+          calendar_id: { type: string, format: uuid }
+          fiscal_year: { type: integer }
+          periods:
+            type: array
+            items:
+              type: object
+              required: [period_no, name, start_date, end_date, type, week53]
+              properties:
+                period_no: { type: integer }
+                name: { type: string }
+                start_date: { type: string, format: date }
+                end_date: { type: string, format: date }
+                type: { type: string, enum: [opening, operating, closing, adjustment] }
+                week53: { type: boolean }
+      x-passage-type: dev.passage.org.fiscalcalendar.generated.v1
     currencyRoundingChanged:
       name: changed
       title: Currency rounding rule changed

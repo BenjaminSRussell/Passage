@@ -41,6 +41,11 @@ type fakeStore struct {
 	addresses           []store.Address
 	addressCalls        int
 	reviseCalls         int
+	calendars           []store.FiscalCalendar
+	generatedYears      map[string]bool
+	generateCalls       int
+	generateErr         error
+	generatedID         string
 }
 
 func (f *fakeStore) reference(kind store.ReferenceKind, code string) (store.ReferenceItem, bool) {
