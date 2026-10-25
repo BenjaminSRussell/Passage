@@ -1,0 +1,88 @@
+asyncapi: 3.0.0
+info:
+  title: engineering
+  version: 0.1.0
+channels:
+  passage.engineering.bomversion:
+    address: passage.engineering.bomversion
+    messages:
+      activated: { $ref: '#/components/messages/bomVersionActivated' }
+      expired: { $ref: '#/components/messages/bomVersionExpired' }
+  passage.engineering.eco:
+    address: passage.engineering.eco
+    messages:
+      submitted: { $ref: '#/components/messages/ecoSubmitted' }
+      approved: { $ref: '#/components/messages/ecoApproved' }
+      released: { $ref: '#/components/messages/ecoReleased' }
+operations:
+  onBomVersionActivated:
+    action: send
+    channel: { $ref: '#/channels/passage.engineering.bomversion' }
+    messages: [{ $ref: '#/channels/passage.engineering.bomversion/messages/activated' }]
+  onBomVersionExpired:
+    action: send
+    channel: { $ref: '#/channels/passage.engineering.bomversion' }
+    messages: [{ $ref: '#/channels/passage.engineering.bomversion/messages/expired' }]
+  onEcoSubmitted:
+    action: send
+    channel: { $ref: '#/channels/passage.engineering.eco' }
+    messages: [{ $ref: '#/channels/passage.engineering.eco/messages/submitted' }]
+  onEcoApproved:
+    action: send
+    channel: { $ref: '#/channels/passage.engineering.eco' }
+    messages: [{ $ref: '#/channels/passage.engineering.eco/messages/approved' }]
+  onEcoReleased:
+    action: send
+    channel: { $ref: '#/channels/passage.engineering.eco' }
+    messages: [{ $ref: '#/channels/passage.engineering.eco/messages/released' }]
+components:
+  messages:
+    bomVersionActivated:
+      name: bomVersionActivated
+      title: BOM version became active
+      payload:
+        type: object
+        required: [bomVersionId, productId, effectiveFrom, lineCount]
+        properties:
+          bomVersionId: { type: string }
+          productId: { type: string }
+          siteId: { type: string }
+          effectiveFrom: { type: string, format: date }
+          effectiveTo: { type: string, format: date }
+          lineCount: { type: integer }
+          supersedesVersionId: { type: string }
+      x-passage-type: dev.passage.engineering.bomversion.activated.v1
+    bomVersionExpired:
+      name: bomVersionExpired
+      title: BOM version expired by an ECO
+      payload:
+        type: object
+        required: [bomVersionId, effectiveTo, ecoId]
+        properties:
+          bomVersionId: { type: string }
+          effectiveTo: { type: string, format: date }
+          ecoId: { type: string }
+      x-passage-type: dev.passage.engineering.bomversion.expired.v1
+    ecoSubmitted: &eco
+      name: ecoSubmitted
+      title: ECO submitted for approval
+      payload:
+        type: object
+        required: [ecoId, ecoNumber, affectedVersions]
+        properties:
+          ecoId: { type: string }
+          ecoNumber: { type: string }
+          affectedVersions: { type: array, items: { type: string } }
+          releaseDate: { type: string, format: date }
+          approverId: { type: string }
+      x-passage-type: dev.passage.engineering.eco.submitted.v1
+    ecoApproved:
+      <<: *eco
+      name: ecoApproved
+      title: ECO approved
+      x-passage-type: dev.passage.engineering.eco.approved.v1
+    ecoReleased:
+      <<: *eco
+      name: ecoReleased
+      title: ECO released to production
+      x-passage-type: dev.passage.engineering.eco.released.v1

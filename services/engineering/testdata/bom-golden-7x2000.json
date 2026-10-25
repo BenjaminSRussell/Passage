@@ -1,0 +1,9 @@
+{
+ "requestQty": "10",
+ "asOf": "2026-03-01",
+ "bomLines": 2000,
+ "treeNodes": 1994,
+ "flatCount": 1444,
+ "totalQuantity": "99049444",
+ "sha256": "85dcd17f3eb4cc6a2678d6884c949dc8dccf3d9c23874e196288e34be4deeb3f"
+}
