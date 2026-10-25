@@ -1,6 +1,10 @@
 package domain
 
-import "time"
+import (
+	"cmp"
+	"slices"
+	"time"
+)
 
 const CodeNoPath = "ORG-UOM-NO-PATH"
 
@@ -34,4 +38,43 @@ func ParentAsOf(versions []Version, purpose, orgUnitID string, date time.Time) (
 		return "", false
 	}
 	return "", false
+}
+
+type NodeChange struct{ ID, ParentID string }
+
+type NodeMove struct{ ID, OldParentID, NewParentID string }
+
+type Comparison struct {
+	Added   []NodeChange
+	Removed []NodeChange
+	Moved   []NodeMove
+}
+
+func CompareNodes(from, to []Node) Comparison {
+	fromParents, toParents := parentMap(from), parentMap(to)
+	out := Comparison{Added: []NodeChange{}, Removed: []NodeChange{}, Moved: []NodeMove{}}
+	for id, parent := range toParents {
+		if old, ok := fromParents[id]; !ok {
+			out.Added = append(out.Added, NodeChange{ID: id, ParentID: parent})
+		} else if old != parent {
+			out.Moved = append(out.Moved, NodeMove{ID: id, OldParentID: old, NewParentID: parent})
+		}
+	}
+	for id, parent := range fromParents {
+		if _, ok := toParents[id]; !ok {
+			out.Removed = append(out.Removed, NodeChange{ID: id, ParentID: parent})
+		}
+	}
+	slices.SortFunc(out.Added, func(a, b NodeChange) int { return cmp.Compare(a.ID, b.ID) })
+	slices.SortFunc(out.Removed, func(a, b NodeChange) int { return cmp.Compare(a.ID, b.ID) })
+	slices.SortFunc(out.Moved, func(a, b NodeMove) int { return cmp.Compare(a.ID, b.ID) })
+	return out
+}
+
+func parentMap(nodes []Node) map[string]string {
+	parents := make(map[string]string, len(nodes))
+	for _, n := range nodes {
+		parents[n.ID] = n.ParentID
+	}
+	return parents
 }

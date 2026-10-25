@@ -264,6 +264,47 @@ func TestHierarchyAsOf(t *testing.T) {
 	}
 }
 
+func TestHierarchyCompare(t *testing.T) {
+	comparePath := hierarchyTypesPath + "/" + hierarchyTypeID + "/compare"
+	tests := []struct {
+		name       string
+		path       string
+		duties     string
+		withTenant bool
+		err        error
+		wantStatus int
+		wantBody   string
+	}{
+		{"no changes gives empty arrays", comparePath + "?from=1&to=2", "org.read", true, nil, http.StatusOK, `"fromVersionNo":1,"toVersionNo":2,"added":[],"removed":[],"moved":[]`},
+		{"same version", comparePath + "?from=3&to=3", "org.read", true, nil, http.StatusOK, `"fromVersionNo":3,"toVersionNo":3`},
+		{"missing from", comparePath + "?to=2", "org.read", true, nil, http.StatusBadRequest, `"from"`},
+		{"missing to", comparePath + "?from=1", "org.read", true, nil, http.StatusBadRequest, `"to"`},
+		{"zero to", comparePath + "?from=1&to=0", "org.read", true, nil, http.StatusBadRequest, `"to"`},
+		{"negative from", comparePath + "?from=-1&to=2", "org.read", true, nil, http.StatusBadRequest, `"from"`},
+		{"non-numeric to", comparePath + "?from=1&to=abc", "org.read", true, nil, http.StatusBadRequest, `"to"`},
+		{"fractional from", comparePath + "?from=1.5&to=2", "org.read", true, nil, http.StatusBadRequest, `"from"`},
+		{"malformed type id", hierarchyTypesPath + "/nope/compare?from=1&to=2", "org.read", true, nil, http.StatusNotFound, "ORG-HIER-TYPE-NOT-FOUND"},
+		{"without org.read", comparePath + "?from=1&to=2", "org.hierarchy.write", true, nil, http.StatusForbidden, "AUTH-0003"},
+		{"no tenant", comparePath + "?from=1&to=2", "", false, nil, http.StatusUnauthorized, "AUTH-0001"},
+		{"unknown version", comparePath + "?from=1&to=9", "org.read", true, httpx.NewProblem(http.StatusNotFound, store.CodeHierarchyVersionNotFound, "hierarchy version not found"), http.StatusNotFound, "ORG-HIER-VERSION-NOT-FOUND"},
+		{"store failure hides internals", comparePath + "?from=1&to=2", "org.read", true, errors.New("pq: secret"), http.StatusInternalServerError, "COM-0500"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeStore{err: tc.err}
+			rec := do(routerAt(f), http.MethodGet, tc.path, "", tc.duties, tc.withTenant, "X-Passage-Legal-Entity", testkit.TenantID(2))
+			if rec.Code != tc.wantStatus || !strings.Contains(rec.Body.String(), tc.wantBody) || strings.Contains(rec.Body.String(), "secret") {
+				t.Fatalf("got %d %s; want %d containing %s", rec.Code, rec.Body.String(), tc.wantStatus, tc.wantBody)
+			}
+		})
+	}
+	f := &fakeStore{}
+	do(routerAt(f), http.MethodGet, comparePath+"?from=4&to=7", "", "org.read", true)
+	if f.compareArgs != [2]int{4, 7} {
+		t.Fatalf("store received %v; want the parsed version numbers", f.compareArgs)
+	}
+}
+
 func TestHierarchyPublishAndAsOfMetrics(t *testing.T) {
 	r, a := newRouter(&fakeStore{})
 	do(r, http.MethodPost, publishPath, forwardBody, backdateDuties, true)

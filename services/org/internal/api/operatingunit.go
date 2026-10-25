@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
@@ -125,7 +126,12 @@ func (a *API) listOperatingUnits(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	q := r.URL.Query()
-	f := store.OperatingUnitFilter{Type: q.Get("type"), DefaultLegalEntityID: q.Get("defaultLegalEntityId"), Status: q.Get("status")}
+	f := store.OperatingUnitFilter{Type: q.Get("type"), DefaultLegalEntityID: q.Get("defaultLegalEntityId"), Status: q.Get("status"), HierarchyTypeID: q.Get("hierarchyTypeId")}
+	asOf, asOfErr := a.now().UTC().Truncate(24*time.Hour), error(nil)
+	if raw := q.Get("asOf"); raw != "" {
+		asOf, asOfErr = time.Parse(dateLayout, raw)
+	}
+	f.AsOf = asOf
 	for _, c := range []struct {
 		field, rule string
 		invalid     bool
@@ -133,6 +139,9 @@ func (a *API) listOperatingUnits(w http.ResponseWriter, r *http.Request) {
 		{"type", "must be department, cost_center, business_unit or value_stream", f.Type != "" && !slices.Contains(operatingUnitTypes, f.Type)},
 		{"defaultLegalEntityId", "must be a UUID", f.DefaultLegalEntityID != "" && !ids.Valid(f.DefaultLegalEntityID)},
 		{"status", "must be active or inactive", f.Status != "" && !validStatus(f.Status)},
+		{"hierarchyTypeId", "must be a UUID", f.HierarchyTypeID != "" && !ids.Valid(f.HierarchyTypeID)},
+		{"asOf", "must be a date in YYYY-MM-DD form", asOfErr != nil},
+		{"asOf", "is allowed only together with hierarchyTypeId", q.Get("asOf") != "" && f.HierarchyTypeID == ""},
 	} {
 		if c.invalid {
 			badQuery(w, r, c.field, c.rule)

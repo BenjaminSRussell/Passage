@@ -35,6 +35,10 @@ spec:
                   key: DATABASE_URL
             - name: MIGRATE_ON_START
               value: {{ .Values.migrateOnStart | quote }}
+            - name: ORG_HIERARCHY_MAX_NODES
+              value: {{ .Values.hierarchy.maxNodes | quote }}
+            - name: ORG_HIERARCHY_MAX_DEPTH
+              value: {{ .Values.hierarchy.maxDepth | quote }}
           ports:
             - { name: http, containerPort: 8080 }
             - { name: admin, containerPort: 9090 }

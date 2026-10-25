@@ -49,6 +49,8 @@ type OperatingUnitFilter struct {
 	Type                 string
 	DefaultLegalEntityID string
 	Status               string
+	HierarchyTypeID      string
+	AsOf                 time.Time
 }
 
 type OperatingUnitKey struct{ Type, Code string }
@@ -148,9 +150,20 @@ func (s *Postgres) ListOperatingUnits(ctx context.Context, f OperatingUnitFilter
 	p, _ := tenant.FromContext(ctx)
 	page := OperatingUnitPage{Items: []OperatingUnit{}}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		if f.HierarchyTypeID != "" {
+			var found string
+			if err := tx.QueryRow(ctx, `select id from hierarchy_type where tenant_id = $1 and id::text = lower($2)`, p.TenantID, f.HierarchyTypeID).Scan(&found); errors.Is(err, pgx.ErrNoRows) {
+				return hierarchyTypeNotFound()
+			} else if err != nil {
+				return err
+			}
+		}
 		rows, err := tx.Query(ctx, `select `+operatingUnitColumns+` from operating_unit where tenant_id = $1 and (type, code) > ($2, $3)
 			and ($4::text = '' or type = $4) and ($5::text = '' or default_legal_entity_id::text = lower($5)) and ($6::text = '' or status = $6)
-			order by type, code limit $7`, p.TenantID, after.Type, after.Code, f.Type, f.DefaultLegalEntityID, f.Status, limit+1)
+			and ($8::text = '' or exists (select 1 from hierarchy_node n join hierarchy_version v on v.tenant_id = n.tenant_id and v.id = n.version_id
+				where n.tenant_id = $1 and n.org_unit_id = operating_unit.id and n.org_unit_kind = 'operating_unit' and v.hierarchy_type_id::text = lower($8)
+				and v.status in ('published', 'superseded') and v.effective_from <= $9::date and (v.effective_to is null or v.effective_to > $9::date)))
+			order by type, code limit $7`, p.TenantID, after.Type, after.Code, f.Type, f.DefaultLegalEntityID, f.Status, limit+1, f.HierarchyTypeID, f.AsOf)
 		if err != nil {
 			return err
 		}

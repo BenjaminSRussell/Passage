@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/org/internal/store"
@@ -207,5 +209,77 @@ func TestPostgres_ManagerPartyIsForCostCentersOnly(t *testing.T) {
 	costCenter.ManagerPartyID = &party
 	if got := mustCreateUnit(t, s, ctx, costCenter); got.ManagerPartyID == nil || *got.ManagerPartyID != party {
 		t.Fatalf("cost center manager = %+v", got)
+	}
+}
+
+func TestPostgres_ListOperatingUnitsHierarchyFilter(t *testing.T) {
+	s, ctx, _ := lifecycleStore(t)
+	root := mustCreate(t, s, ctx, newEntity("US01")).ID
+	a, b, c := mustCreateUnit(t, s, ctx, unit("department", "A1")).ID, mustCreateUnit(t, s, ctx, unit("department", "B1")).ID, mustCreateUnit(t, s, ctx, unit("cost_center", "C1")).ID
+	tree := func(unitIDs ...string) []store.HierarchyNode {
+		nodes := []store.HierarchyNode{{OrgUnitID: root}}
+		for i, id := range unitIDs {
+			nodes = append(nodes, store.HierarchyNode{OrgUnitID: id, ParentOrgUnitID: &root, SortOrder: i + 1})
+		}
+		return nodes
+	}
+	typeID := mustCreateHierarchyType(t, s, ctx, "REP").ID
+	mustPublish(t, s, ctx, draftWithNodes(t, s, ctx, typeID, tree(a, b)), day(2026, 1, 1))
+	mustPublish(t, s, ctx, draftWithNodes(t, s, ctx, typeID, tree(b, c)), day(2026, 7, 1))
+	mustCreateDraft(t, s, ctx, typeID)
+	draft, err := s.ListHierarchyVersions(ctx, typeID, store.HierarchyVersionFilter{Status: "draft"}, 0, 1)
+	if err != nil || len(draft.Items) != 1 {
+		t.Fatalf("draft = %+v, %v", draft, err)
+	}
+	if _, err := s.ReplaceHierarchyNodes(ctx, draft.Items[0].ID, draft.Items[0].Version, tree(a), editor); err != nil {
+		t.Fatal(err)
+	}
+	codes := func(f store.OperatingUnitFilter, after store.OperatingUnitKey, limit int) ([]string, *store.OperatingUnitKey) {
+		t.Helper()
+		page, err := s.ListOperatingUnits(ctx, f, after, limit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := []string{}
+		for _, u := range page.Items {
+			out = append(out, u.Code)
+		}
+		return out, page.Next
+	}
+	for _, tc := range []struct {
+		asOf time.Time
+		want []string
+	}{
+		{day(2026, 3, 1), []string{"A1", "B1"}},
+		{day(2026, 8, 1), []string{"C1", "B1"}},
+		{day(2026, 7, 1), []string{"C1", "B1"}},
+		{day(2025, 6, 1), []string{}},
+	} {
+		got, _ := codes(store.OperatingUnitFilter{HierarchyTypeID: typeID, AsOf: tc.asOf}, store.OperatingUnitKey{}, store.MaxPageSize)
+		if !reflect.DeepEqual(got, tc.want) {
+			t.Fatalf("asOf %s = %v; want %v", tc.asOf.Format("2006-01-02"), got, tc.want)
+		}
+	}
+	f := store.OperatingUnitFilter{HierarchyTypeID: typeID, AsOf: day(2026, 8, 1), Type: "department"}
+	if got, _ := codes(f, store.OperatingUnitKey{}, store.MaxPageSize); !reflect.DeepEqual(got, []string{"B1"}) {
+		t.Fatalf("with type = %v", got)
+	}
+	f.Type = ""
+	first, next := codes(f, store.OperatingUnitKey{}, 1)
+	if !reflect.DeepEqual(first, []string{"C1"}) || next == nil {
+		t.Fatalf("first page = %v, %v", first, next)
+	}
+	if second, next := codes(f, *next, 1); !reflect.DeepEqual(second, []string{"B1"}) || next != nil {
+		t.Fatalf("second page = %v, %v", second, next)
+	}
+	if _, err := s.ListOperatingUnits(ctx, store.OperatingUnitFilter{HierarchyTypeID: ids.New(), AsOf: day(2026, 8, 1)}, store.OperatingUnitKey{}, 10); problemCode(t, err) != store.CodeHierarchyTypeNotFound {
+		t.Fatalf("unknown type error = %v", err)
+	}
+	if _, err := s.ListOperatingUnits(principalContext(2), store.OperatingUnitFilter{HierarchyTypeID: typeID, AsOf: day(2026, 8, 1)}, store.OperatingUnitKey{}, 10); problemCode(t, err) != store.CodeHierarchyTypeNotFound {
+		t.Fatalf("other tenant error = %v", err)
+	}
+	empty := mustCreateHierarchyType(t, s, ctx, "EMPTY").ID
+	if got, _ := codes(store.OperatingUnitFilter{HierarchyTypeID: empty, AsOf: day(2026, 8, 1)}, store.OperatingUnitKey{}, 10); len(got) != 0 {
+		t.Fatalf("type without versions = %v", got)
 	}
 }

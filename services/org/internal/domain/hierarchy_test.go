@@ -2,7 +2,9 @@ package domain_test
 
 import (
 	"fmt"
+	"maps"
 	"math/rand"
+	"reflect"
 	"testing"
 	"time"
 
@@ -88,4 +90,80 @@ func TestParentAsOf_Edges(t *testing.T) {
 			}
 		})
 	}
+}
+
+func nodes(pairs ...string) []domain.Node {
+	out := make([]domain.Node, 0, len(pairs)/2)
+	for i := 0; i < len(pairs); i += 2 {
+		out = append(out, domain.Node{ID: pairs[i], ParentID: pairs[i+1]})
+	}
+	return out
+}
+
+func TestCompareNodes(t *testing.T) {
+	base := nodes("a", "", "b", "a", "c", "a", "d", "c")
+	tests := []struct {
+		name     string
+		from, to []domain.Node
+		want     domain.Comparison
+	}{
+		{"identical", base, base, domain.Comparison{Added: []domain.NodeChange{}, Removed: []domain.NodeChange{}, Moved: []domain.NodeMove{}}},
+		{"added under existing parent", base, append(nodes("e", "b"), base...), domain.Comparison{Added: []domain.NodeChange{{ID: "e", ParentID: "b"}}, Removed: []domain.NodeChange{}, Moved: []domain.NodeMove{}}},
+		{"leaf removed", base, nodes("a", "", "b", "a", "c", "a"), domain.Comparison{Added: []domain.NodeChange{}, Removed: []domain.NodeChange{{ID: "d", ParentID: "c"}}, Moved: []domain.NodeMove{}}},
+		{"subtree re-parented reports only its root", base, nodes("a", "", "b", "a", "c", "b", "d", "c"), domain.Comparison{Added: []domain.NodeChange{}, Removed: []domain.NodeChange{}, Moved: []domain.NodeMove{{ID: "c", OldParentID: "a", NewParentID: "b"}}}},
+		{"root change moves old root under new root", nodes("a", "", "b", "a"), nodes("z", "", "a", "z", "b", "a"), domain.Comparison{Added: []domain.NodeChange{{ID: "z"}}, Removed: []domain.NodeChange{}, Moved: []domain.NodeMove{{ID: "a", NewParentID: "z"}}}},
+		{"from empty adds every node sorted", nil, nodes("b", "a", "a", ""), domain.Comparison{Added: []domain.NodeChange{{ID: "a"}, {ID: "b", ParentID: "a"}}, Removed: []domain.NodeChange{}, Moved: []domain.NodeMove{}}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := domain.CompareNodes(tc.from, tc.to); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("got %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+func randomTree(t *rapid.T, label string) map[string]string {
+	size := rapid.IntRange(0, 30).Draw(t, label+"Size")
+	parents := make(map[string]string, size)
+	for i := 0; i < size; i++ {
+		parent := ""
+		if i > 0 && rapid.Bool().Draw(t, label+"HasParent") {
+			parent = fmt.Sprintf("u%d", rapid.IntRange(0, i-1).Draw(t, label+"Parent"))
+		}
+		parents[fmt.Sprintf("u%d", i)] = parent
+	}
+	return parents
+}
+
+func asNodes(parents map[string]string) []domain.Node {
+	out := make([]domain.Node, 0, len(parents))
+	for id, parent := range parents {
+		out = append(out, domain.Node{ID: id, ParentID: parent})
+	}
+	return out
+}
+
+func TestCompareNodes_Properties(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		from, to := randomTree(t, "from"), randomTree(t, "to")
+		same := domain.CompareNodes(asNodes(from), asNodes(from))
+		if len(same.Added)+len(same.Removed)+len(same.Moved) != 0 {
+			t.Fatalf("self comparison not empty: %+v", same)
+		}
+		diff := domain.CompareNodes(asNodes(from), asNodes(to))
+		applied := maps.Clone(from)
+		for _, n := range diff.Removed {
+			delete(applied, n.ID)
+		}
+		for _, n := range diff.Added {
+			applied[n.ID] = n.ParentID
+		}
+		for _, m := range diff.Moved {
+			applied[m.ID] = m.NewParentID
+		}
+		if !maps.Equal(applied, to) {
+			t.Fatalf("applied %v, want %v", applied, to)
+		}
+	})
 }

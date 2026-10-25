@@ -66,6 +66,7 @@ func (a *API) registerHierarchies(r chi.Router) {
 	r.With(authz.RequireDuty(dutyHierarchy)).Delete(hierarchyVersions+"/{id}", hierarchyRoute(store.CodeHierarchyVersionNotFound, "hierarchy version not found", a.deleteHierarchyDraft))
 	r.With(authz.RequireDuty(dutyRead)).Get(hierarchyTypes+"/{id}/versions", hierarchyRoute(store.CodeHierarchyTypeNotFound, "hierarchy type not found", a.listHierarchyVersions))
 	r.With(authz.RequireDuty(dutyRead)).Get(hierarchyTypes+"/{id}/as-of", hierarchyRoute(store.CodeHierarchyTypeNotFound, "hierarchy type not found", a.hierarchyAsOf))
+	r.With(authz.RequireDuty(dutyRead)).Get(hierarchyTypes+"/{id}/compare", hierarchyRoute(store.CodeHierarchyTypeNotFound, "hierarchy type not found", a.compareHierarchyVersions))
 }
 
 func hierarchyRoute(notFoundCode, notFoundDetail string, next func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
@@ -268,6 +269,26 @@ func (a *API) hierarchyAsOf(w http.ResponseWriter, r *http.Request, id string) {
 		return
 	}
 	a.hierarchyAsOfQueries.Add(1)
+	httpx.JSON(w, http.StatusOK, result)
+}
+
+func (a *API) compareHierarchyVersions(w http.ResponseWriter, r *http.Request, id string) {
+	query := r.URL.Query()
+	var versionNos [2]int
+	for i, field := range []string{"from", "to"} {
+		n, err := strconv.Atoi(query.Get(field))
+		if err != nil || n < 1 {
+			badQuery(w, r, field, "must be a positive integer")
+			return
+		}
+		versionNos[i] = n
+	}
+	result, err := a.store.CompareHierarchyVersions(r.Context(), id, versionNos[0], versionNos[1])
+	if err != nil {
+		slog.Error("compare hierarchy versions failed", "err", err, "typeId", id, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.Fail(w, r, err)
+		return
+	}
 	httpx.JSON(w, http.StatusOK, result)
 }
 

@@ -454,7 +454,7 @@ func (s *Postgres) ReplaceHierarchyNodes(ctx context.Context, id string, version
 				pairs[i].ParentID = *n.ParentOrgUnitID
 			}
 		}
-		if err := domain.ValidateTree(pairs, domain.DefaultTreeLimits); err != nil {
+		if err := domain.ValidateTree(pairs, s.limits); err != nil {
 			return err
 		}
 		if err := resolveOrgUnitKinds(ctx, tx, p.TenantID, nodes); err != nil {
@@ -553,7 +553,7 @@ func (s *Postgres) PublishHierarchyVersion(ctx context.Context, id string, versi
 				pairs[i].ParentID = *n.ParentOrgUnitID
 			}
 		}
-		if err := domain.ValidateTree(pairs, domain.DefaultTreeLimits); err != nil {
+		if err := domain.ValidateTree(pairs, s.limits); err != nil {
 			return err
 		}
 		var predecessorID string
@@ -687,6 +687,91 @@ func (s *Postgres) HierarchyAsOf(ctx context.Context, typeID string, date time.T
 			out.Descendants = append(out.Descendants, r)
 		}
 		return rows.Err()
+	})
+	return out, err
+}
+
+type HierarchyChange struct {
+	OrgUnitID       string  `json:"orgUnitId"`
+	Kind            string  `json:"kind"`
+	ParentOrgUnitID *string `json:"parentOrgUnitId"`
+}
+
+type HierarchyMove struct {
+	OrgUnitID          string  `json:"orgUnitId"`
+	Kind               string  `json:"kind"`
+	OldParentOrgUnitID *string `json:"oldParentOrgUnitId"`
+	NewParentOrgUnitID *string `json:"newParentOrgUnitId"`
+}
+
+type HierarchyComparison struct {
+	HierarchyTypeID string            `json:"hierarchyTypeId"`
+	FromVersionNo   int               `json:"fromVersionNo"`
+	ToVersionNo     int               `json:"toVersionNo"`
+	Added           []HierarchyChange `json:"added"`
+	Removed         []HierarchyChange `json:"removed"`
+	Moved           []HierarchyMove   `json:"moved"`
+}
+
+func loadHierarchyVersionByNo(ctx context.Context, tx pgx.Tx, tenantID, typeID string, versionNo int) (HierarchyVersion, error) {
+	var id string
+	err := tx.QueryRow(ctx, `select id from hierarchy_version where tenant_id = $1 and hierarchy_type_id = $2 and version_no = $3`, tenantID, typeID, versionNo).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return HierarchyVersion{}, hierarchyVersionNotFound()
+	}
+	if err != nil {
+		return HierarchyVersion{}, err
+	}
+	return loadHierarchyVersion(ctx, tx, tenantID, id, "")
+}
+
+func domainNodes(nodes []HierarchyNode) ([]domain.Node, map[string]string) {
+	out, kinds := make([]domain.Node, len(nodes)), make(map[string]string, len(nodes))
+	for i, n := range nodes {
+		out[i] = domain.Node{ID: n.OrgUnitID, ParentID: deref(n.ParentOrgUnitID)}
+		kinds[n.OrgUnitID] = n.Kind
+	}
+	return out, kinds
+}
+
+func parentPointer(id string) *string {
+	if id == "" {
+		return nil
+	}
+	return &id
+}
+
+func (s *Postgres) CompareHierarchyVersions(ctx context.Context, typeID string, fromNo, toNo int) (HierarchyComparison, error) {
+	p, _ := tenant.FromContext(ctx)
+	out := HierarchyComparison{HierarchyTypeID: typeID, FromVersionNo: fromNo, ToVersionNo: toNo, Added: []HierarchyChange{}, Removed: []HierarchyChange{}, Moved: []HierarchyMove{}}
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var found string
+		if err := tx.QueryRow(ctx, `select id from hierarchy_type where tenant_id = $1 and id = $2`, p.TenantID, typeID).Scan(&found); errors.Is(err, pgx.ErrNoRows) {
+			return hierarchyTypeNotFound()
+		} else if err != nil {
+			return err
+		}
+		from, err := loadHierarchyVersionByNo(ctx, tx, p.TenantID, typeID, fromNo)
+		if err != nil {
+			return err
+		}
+		to, err := loadHierarchyVersionByNo(ctx, tx, p.TenantID, typeID, toNo)
+		if err != nil {
+			return err
+		}
+		fromNodes, fromKinds := domainNodes(from.Nodes)
+		toNodes, toKinds := domainNodes(to.Nodes)
+		diff := domain.CompareNodes(fromNodes, toNodes)
+		for _, n := range diff.Added {
+			out.Added = append(out.Added, HierarchyChange{OrgUnitID: n.ID, Kind: toKinds[n.ID], ParentOrgUnitID: parentPointer(n.ParentID)})
+		}
+		for _, n := range diff.Removed {
+			out.Removed = append(out.Removed, HierarchyChange{OrgUnitID: n.ID, Kind: fromKinds[n.ID], ParentOrgUnitID: parentPointer(n.ParentID)})
+		}
+		for _, m := range diff.Moved {
+			out.Moved = append(out.Moved, HierarchyMove{OrgUnitID: m.ID, Kind: toKinds[m.ID], OldParentOrgUnitID: parentPointer(m.OldParentID), NewParentOrgUnitID: parentPointer(m.NewParentID)})
+		}
+		return nil
 	})
 	return out, err
 }
