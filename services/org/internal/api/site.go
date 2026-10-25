@@ -93,7 +93,7 @@ func (a *API) listSites(w http.ResponseWriter, r *http.Request) {
 	var after store.SiteKey
 	if cursor != "" {
 		var ok bool
-		if after.Code, after.ID, ok = strings.Cut(cursor, "/"); !ok || !ids.Valid(after.ID) {
+		if after, ok = decodeCodeCursor(cursor); !ok {
 			badQuery(w, r, "cursor", "is invalid")
 			return
 		}
@@ -120,9 +120,18 @@ func (a *API) listSites(w http.ResponseWriter, r *http.Request) {
 	}
 	body := siteList{Items: page.Items}
 	if page.Next != nil {
-		body.NextCursor = base64.RawURLEncoding.EncodeToString([]byte(page.Next.Code + "/" + page.Next.ID))
+		body.NextCursor = encodeCodeCursor(*page.Next)
 	}
 	httpx.JSON(w, http.StatusOK, body)
+}
+
+func encodeCodeCursor(key store.SiteKey) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(key.Code + "/" + key.ID))
+}
+
+func decodeCodeCursor(cursor string) (store.SiteKey, bool) {
+	code, id, ok := strings.Cut(cursor, "/")
+	return store.SiteKey{Code: code, ID: id}, ok && ids.Valid(id)
 }
 
 func siteRoute(next func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {

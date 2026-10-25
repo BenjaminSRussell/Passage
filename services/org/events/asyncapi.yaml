@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: org
-  version: 0.3.0
+  version: 0.4.0
   description: CloudEvents 1.0 envelope from platform/go/events; payloads below are the data member.
 channels:
   passage.org.legalentity:
@@ -30,6 +30,8 @@ channels:
     messages:
       created:
         $ref: '#/components/messages/warehouseCreated'
+      updated:
+        $ref: '#/components/messages/warehouseUpdated'
   passage.org.location:
     address: passage.org.location
     messages:
@@ -69,6 +71,10 @@ operations:
     action: send
     channel: { $ref: '#/channels/passage.org.warehouse' }
     messages: [{ $ref: '#/channels/passage.org.warehouse/messages/created' }]
+  onWarehouseUpdated:
+    action: send
+    channel: { $ref: '#/channels/passage.org.warehouse' }
+    messages: [{ $ref: '#/channels/passage.org.warehouse/messages/updated' }]
   onLocationCreated:
     action: send
     channel: { $ref: '#/channels/passage.org.location' }
@@ -160,10 +166,21 @@ components:
         properties:
           id: { type: string, format: uuid }
           legal_entity_id: { type: string, format: uuid }
-          parent_id: { type: [string, 'null'], format: uuid }
-          type: { type: [string, 'null'] }
+          parent_id: { type: [string, 'null'], format: uuid, description: The site id. }
+          type: { type: [string, 'null'], description: 'standard, transit, quarantine or subcontractor' }
           address_id: { type: [string, 'null'], format: uuid, description: Null until the address slice. }
       x-passage-type: dev.passage.org.warehouse.created.v1
+    warehouseUpdated:
+      name: updated
+      title: Warehouse updated
+      payload:
+        type: object
+        required: [id, changed_fields, version]
+        properties:
+          id: { type: string, format: uuid }
+          changed_fields: { type: array, items: { type: string } }
+          version: { type: integer }
+      x-passage-type: dev.passage.org.warehouse.updated.v1
     locationCreated:
       name: created
       title: Location created

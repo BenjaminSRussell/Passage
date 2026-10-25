@@ -12,12 +12,13 @@ var (
 	SiteCreated             = events.Type(Context, "site", "created", 1)
 	SiteUpdated             = events.Type(Context, "site", "updated", 1)
 	WarehouseCreated        = events.Type(Context, "warehouse", "created", 1)
+	WarehouseUpdated        = events.Type(Context, "warehouse", "updated", 1)
 	LocationCreated         = events.Type(Context, "location", "created", 1)
 	CurrencyRoundingChanged = events.Type(Context, "currencyrounding", "changed", 1)
 )
 
 func All() []string {
-	return []string{LegalEntityCreated, LegalEntityUpdated, OperatingUnitCreated, OperatingUnitUpdated, SiteCreated, SiteUpdated, WarehouseCreated, LocationCreated, CurrencyRoundingChanged}
+	return []string{LegalEntityCreated, LegalEntityUpdated, OperatingUnitCreated, OperatingUnitUpdated, SiteCreated, SiteUpdated, WarehouseCreated, WarehouseUpdated, LocationCreated, CurrencyRoundingChanged}
 }
 
 type LegalEntityCreatedData struct {
@@ -57,6 +58,20 @@ type SiteCreatedData struct {
 }
 
 type SiteUpdatedData struct {
+	ID            string   `json:"id"`
+	ChangedFields []string `json:"changed_fields"`
+	Version       int      `json:"version"`
+}
+
+type WarehouseCreatedData struct {
+	ID            string  `json:"id"`
+	LegalEntityID string  `json:"legal_entity_id"`
+	ParentID      *string `json:"parent_id"`
+	Type          *string `json:"type"`
+	AddressID     *string `json:"address_id"`
+}
+
+type WarehouseUpdatedData struct {
 	ID            string   `json:"id"`
 	ChangedFields []string `json:"changed_fields"`
 	Version       int      `json:"version"`

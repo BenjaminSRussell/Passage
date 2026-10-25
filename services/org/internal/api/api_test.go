@@ -24,15 +24,17 @@ import (
 )
 
 type fakeStore struct {
-	err       error
-	pingErr   error
-	entities  []store.LegalEntity
-	byKey     map[string]store.LegalEntity
-	refs      map[string]store.ReferenceItem
-	ous       []store.OperatingUnit
-	ouCalls   int
-	sites     []store.Site
-	siteCalls int
+	err            error
+	pingErr        error
+	entities       []store.LegalEntity
+	byKey          map[string]store.LegalEntity
+	refs           map[string]store.ReferenceItem
+	ous            []store.OperatingUnit
+	ouCalls        int
+	sites          []store.Site
+	siteCalls      int
+	warehouses     []store.Warehouse
+	warehouseCalls int
 }
 
 func (f *fakeStore) reference(kind store.ReferenceKind, code string) (store.ReferenceItem, bool) {
@@ -294,6 +296,95 @@ func (f *fakeStore) UpdateSite(_ context.Context, id string, version int, in sto
 		s.Version++
 	}
 	return *s, nil
+}
+
+func (f *fakeStore) CreateWarehouse(_ context.Context, in store.Warehouse, _ string) (store.Warehouse, error) {
+	if f.err != nil {
+		return store.Warehouse{}, f.err
+	}
+	var site *store.Site
+	for i := range f.sites {
+		if f.sites[i].ID == in.SiteID {
+			site = &f.sites[i]
+		}
+	}
+	if site == nil {
+		return store.Warehouse{}, httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeWarehouseSiteInvalid, "site invalid")
+	}
+	for _, w := range f.warehouses {
+		if w.LegalEntityID == site.LegalEntityID && w.Code == in.Code {
+			return store.Warehouse{}, httpx.NewProblem(http.StatusConflict, store.CodeWarehouseCodeDuplicate, "duplicate")
+		}
+	}
+	in.LegalEntityID, in.Status, in.Version = site.LegalEntityID, "active", 1
+	in.ID = fmt.Sprintf("00000000-0000-0000-0001-%012d", len(f.warehouses)+1)
+	if in.Type == "" {
+		in.Type = "standard"
+	}
+	f.warehouses = append(f.warehouses, in)
+	return in, nil
+}
+
+func (f *fakeStore) lookupWarehouse(id string) (*store.Warehouse, error) {
+	f.warehouseCalls++
+	if f.err != nil {
+		return nil, f.err
+	}
+	for i := range f.warehouses {
+		if f.warehouses[i].ID == id {
+			return &f.warehouses[i], nil
+		}
+	}
+	return nil, httpx.NewProblem(http.StatusNotFound, store.CodeWarehouseNotFound, "warehouse not found")
+}
+
+func (f *fakeStore) GetWarehouse(_ context.Context, id string) (store.Warehouse, error) {
+	w, err := f.lookupWarehouse(id)
+	if err != nil {
+		return store.Warehouse{}, err
+	}
+	return *w, nil
+}
+
+func (f *fakeStore) ListWarehouses(_ context.Context, _ store.WarehouseFilter, after store.SiteKey, limit int) (store.WarehousePage, error) {
+	if f.err != nil {
+		return store.WarehousePage{}, f.err
+	}
+	page := store.WarehousePage{Items: []store.Warehouse{}}
+	sorted := slices.Clone(f.warehouses)
+	slices.SortFunc(sorted, func(a, b store.Warehouse) int { return strings.Compare(a.Code+"/"+a.ID, b.Code+"/"+b.ID) })
+	for _, w := range sorted {
+		if w.Code+"/"+w.ID > after.Code+"/"+after.ID {
+			page.Items = append(page.Items, w)
+		}
+	}
+	if len(page.Items) > limit {
+		page.Items = page.Items[:limit]
+		page.Next = &store.SiteKey{Code: page.Items[limit-1].Code, ID: page.Items[limit-1].ID}
+	}
+	return page, nil
+}
+
+func (f *fakeStore) UpdateWarehouse(_ context.Context, id string, version int, in store.WarehousePatch) (store.Warehouse, error) {
+	w, err := f.lookupWarehouse(id)
+	if err != nil {
+		return store.Warehouse{}, err
+	}
+	if w.Version != version {
+		return store.Warehouse{}, httpx.NewProblem(http.StatusConflict, store.CodeVersionConflict, fmt.Sprintf("current version is %d", w.Version))
+	}
+	if in.SiteID != nil {
+		for _, s := range f.sites {
+			if s.ID == *in.SiteID && s.LegalEntityID != w.LegalEntityID {
+				return store.Warehouse{}, httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeWarehouseLegalEntityMismatch, "mismatch")
+			}
+		}
+	}
+	if in.Name != nil && *in.Name != w.Name {
+		w.Name = *in.Name
+		w.Version++
+	}
+	return *w, nil
 }
 
 func (f *fakeStore) Ping(context.Context) error { return f.pingErr }
