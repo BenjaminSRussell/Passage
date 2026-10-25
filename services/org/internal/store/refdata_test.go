@@ -107,6 +107,12 @@ func TestPostgres_ReferenceStatusRepeatAndUnknownCodeWriteNoExtraRows(t *testing
 	if _, err := s.SetReferenceStatus(ctx, store.KindCurrency, "ZZZ", "inactive"); !errors.As(err, &problem) || problem.Code != store.CodeReferenceNotFound || rows("ZZZ") != 0 {
 		t.Fatalf("unknown code = %v, rows %d; want %s and no row", err, rows("ZZZ"), store.CodeReferenceNotFound)
 	}
+	if _, err := s.SetReferenceStatus(ctx, store.KindCurrency, "USD ", "inactive"); !errors.As(err, &problem) || problem.Code != store.CodeReferenceNotFound || rows("USD ") != 0 {
+		t.Fatalf("padded code = %v, rows %d; want %s and no row", err, rows("USD "), store.CodeReferenceNotFound)
+	}
+	if _, err := s.GetReference(ctx, store.KindCurrency, "USD "); !errors.As(err, &problem) || problem.Status != 404 {
+		t.Fatalf("padded get = %v; want 404", err)
+	}
 	if _, err := s.GetReference(ctx, store.KindRegion, "US-ZZ"); !errors.As(err, &problem) || problem.Status != 404 {
 		t.Fatalf("unknown region = %v; want 404", err)
 	}

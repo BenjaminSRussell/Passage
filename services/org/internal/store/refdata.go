@@ -66,7 +66,7 @@ func queryReference(ctx context.Context, q querier, kind ReferenceKind, tenantID
 	query := `select b.code, b.name, coalesce(s.status, b.status)` + spec.columns + ` from ` + spec.table + ` b
 		left join reference_status s on s.tenant_id = $1 and s.kind = $2 and s.code = b.code
 		where b.tenant_id = $3`
-	for _, c := range []struct{ column, value string }{{"b.code", code}, {"b.country_code", f.Country}, {"coalesce(s.status, b.status)", f.Status}} {
+	for _, c := range []struct{ column, value string }{{"b.code::text", code}, {"b.country_code", f.Country}, {"coalesce(s.status, b.status)", f.Status}} {
 		if c.value == "" || (c.column == "b.country_code" && kind != KindRegion) {
 			continue
 		}
@@ -128,7 +128,7 @@ func (s *Postgres) SetReferenceStatus(ctx context.Context, kind ReferenceKind, c
 			return fmt.Errorf("unknown reference kind %q", kind)
 		}
 		var exists bool
-		if err := tx.QueryRow(ctx, `select exists (select 1 from `+spec.table+` where tenant_id = $1 and code = $2)`, SysTenantID, code).Scan(&exists); err != nil {
+		if err := tx.QueryRow(ctx, `select exists (select 1 from `+spec.table+` where tenant_id = $1 and code::text = $2)`, SysTenantID, code).Scan(&exists); err != nil {
 			return err
 		}
 		if !exists {
