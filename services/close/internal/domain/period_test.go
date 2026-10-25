@@ -73,9 +73,16 @@ func TestPostingPaths_ManualGLAllowedWhenOnlyAPClosed(t *testing.T) {
 	}
 }
 
-func TestModuleForSource_UnknownMapsToAll(t *testing.T) {
-	if got := domain.ModuleForSource("mystery"); got != domain.ModuleAll {
-		t.Fatalf("got %s, want all", got)
+func TestPostingPaths_UnmappedSourceRejectedWhenAnyModuleClosed(t *testing.T) {
+	paths := []string{"manual", "ap", "ar", "inv", "fa", "proj", "tax", "bank", "payroll", "cash", "prod", "reversal", "migration", "batch", "unknown-system", ""}
+	rows := []domain.Row{{Module: domain.ModuleAll, Status: domain.StatusOpen}, {Module: domain.ModuleAP, Status: domain.StatusClosed}}
+	for _, system := range paths {
+		module := domain.ModuleForSource(system)
+		_, err := domain.Decide(rows, module, "")
+		wantClosed := module == domain.ModuleAP || module == domain.ModuleAll
+		if wantClosed != (code(err) == domain.CodePeriodClosed) {
+			t.Errorf("posting path %q (module %s): got %v", system, module, err)
+		}
 	}
 }
 

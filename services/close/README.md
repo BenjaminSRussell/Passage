@@ -24,7 +24,7 @@ Store tests need `PASSAGE_TEST_DATABASE_URL` and `PASSAGE_TEST_APP_DATABASE_URL`
 
 `period_status` holds one row per ledger, fiscal period and module (`all`, `gl`, `ap`, `ar`, `inventory`, `assets`, `cash`, `production`, `projects`, `tax`, `bank`, `payroll`) with status `open`, `on_hold`, `closed` or `permanently_closed`.
 
-`domain.Decide(rows, module, group)` implements BR-14.1. The module row wins, else the `all` row, else the period is never opened. `open` allows. `on_hold` allows only the row's allowed group (LEDGER-0014). Everything else, including never opened, rejects (LEDGER-0013). `domain.ModuleForSource` maps `source.system` to a module; `manual` posts to `gl` and unknown systems check `all`.
+`domain.Decide(rows, module, group)` implements BR-14.1. The module row wins, else the `all` row, else the period is never opened. `open` allows. `on_hold` allows only the row's allowed group (LEDGER-0014). Everything else, including never opened, rejects (LEDGER-0013). `domain.ModuleForSource` maps `source.system` to a module; `manual` posts to `gl`; unknown or omitted systems are rejected if any module row is closed.
 
 The ledger (wave 11) enforces the rule inside its posting transaction by reading the rows with `store.PeriodRows` (`select ... for share`) and calling `Decide`, or by calling `POST /v1/close/period-statuses:check`. Reversal, migration and batch posts keep their original source system and use the same decision. `TestPostingPaths_ClosedRejected` is the closed-period contract test over every path.
 

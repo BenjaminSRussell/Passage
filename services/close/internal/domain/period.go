@@ -1,5 +1,7 @@
 package domain
 
+import "errors"
+
 type Module string
 
 const (
@@ -63,7 +65,31 @@ func Resolve(rows []Row, module Module) Row {
 }
 
 func Decide(rows []Row, module Module, group string) (Status, error) {
-	row := Resolve(rows, module)
+	if module != ModuleAll {
+		return decideRow(Resolve(rows, module), module, group)
+	}
+	candidates := rows
+	if len(candidates) == 0 {
+		candidates = []Row{{Module: ModuleAll, Status: StatusNeverOpened}}
+	}
+	result := StatusOpen
+	var held error
+	for _, row := range candidates {
+		status, err := decideRow(row, module, group)
+		var de *Error
+		switch {
+		case errors.As(err, &de) && de.Code == CodePeriodClosed:
+			return status, err
+		case err != nil:
+			held, result = err, status
+		case status == StatusOnHold && held == nil:
+			result = status
+		}
+	}
+	return result, held
+}
+
+func decideRow(row Row, module Module, group string) (Status, error) {
 	switch row.Status {
 	case StatusOpen:
 		return row.Status, nil
