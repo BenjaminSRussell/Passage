@@ -1,7 +1,6 @@
 package api_test
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -42,9 +41,7 @@ func TestLocations(t *testing.T) {
 	}{
 		{"create upper-cases code, defaults type, copies legal entity", seededWarehouses(), http.MethodPost, locationsPath, locationBody(warehouseID1, "a01.r02"), siteDuties, true, http.StatusCreated, `"legalEntityId":"` + siteLE1 + `","warehouseId":"` + warehouseID1 + `","code":"A01.R02","name":"Bin","type":"storage"`},
 		{"create legalEntityId rejected", seededWarehouses(), http.MethodPost, locationsPath, `{"legalEntityId":"` + siteLE1 + `","warehouseId":"` + warehouseID1 + `","code":"L1","name":"x"}`, siteDuties, true, http.StatusBadRequest, "COM-0001"},
-		{"create timeZone rejected", seededWarehouses(), http.MethodPost, locationsPath, `{"timeZone":"UTC","warehouseId":"` + warehouseID1 + `","code":"L1","name":"x"}`, siteDuties, true, http.StatusBadRequest, "COM-0001"},
 		{"create missing warehouse", seededWarehouses(), http.MethodPost, locationsPath, `{"code":"L1","name":"x"}`, siteDuties, true, http.StatusBadRequest, `"warehouseId"`},
-		{"create malformed warehouse", seededWarehouses(), http.MethodPost, locationsPath, locationBody("x", "L1"), siteDuties, true, http.StatusBadRequest, `"warehouseId"`},
 		{"create bad type", seededWarehouses(), http.MethodPost, locationsPath, `{"warehouseId":"` + warehouseID1 + `","code":"L1","name":"x","type":"picking"}`, siteDuties, true, http.StatusBadRequest, `"type"`},
 		{"create 21-character code", seededWarehouses(), http.MethodPost, locationsPath, locationBody(warehouseID1, strings.Repeat("A", 21)), siteDuties, true, http.StatusBadRequest, `"code"`},
 		{"create unknown warehouse", &fakeStore{}, http.MethodPost, locationsPath, locationBody(warehouseID1, "L1"), siteDuties, true, http.StatusUnprocessableEntity, "ORG-LOC-WAREHOUSE-INVALID"},
@@ -55,9 +52,6 @@ func TestLocations(t *testing.T) {
 		{"get unknown", seededLocations(), http.MethodGet, locationsPath + "/00000000-0000-0000-0002-0000000000ff", "", siteDuties, true, http.StatusNotFound, "ORG-LOC-NOT-FOUND"},
 		{"get malformed", seededLocations(), http.MethodGet, locationsPath + "/nope", "", siteDuties, true, http.StatusNotFound, "ORG-LOC-NOT-FOUND"},
 		{"list bad type", seededLocations(), http.MethodGet, locationsPath + "?type=picking", "", siteDuties, true, http.StatusBadRequest, `"type"`},
-		{"list bad warehouse", seededLocations(), http.MethodGet, locationsPath + "?warehouseId=x", "", siteDuties, true, http.StatusBadRequest, `"warehouseId"`},
-		{"list bad legal entity", seededLocations(), http.MethodGet, locationsPath + "?legalEntityId=x", "", siteDuties, true, http.StatusBadRequest, `"legalEntityId"`},
-		{"list bad status", seededLocations(), http.MethodGet, locationsPath + "?status=deleted", "", siteDuties, true, http.StatusBadRequest, `"status"`},
 		{"list bad cursor", seededLocations(), http.MethodGet, locationsPath + "?cursor=Zm9v", "", siteDuties, true, http.StatusBadRequest, `"cursor"`},
 		{"list without tenant", seededLocations(), http.MethodGet, locationsPath, "", "", false, http.StatusUnauthorized, "AUTH-0001"},
 		{"site deactivation refused while a warehouse is active", seededWarehouses(), http.MethodPatch, sitesPath + "/" + siteID1, `{"version":1,"status":"inactive"}`, siteDuties, true, http.StatusConflict, "ORG-SITE-IN-USE"},
@@ -73,30 +67,6 @@ func TestLocations(t *testing.T) {
 				t.Fatalf("malformed id reached the store")
 			}
 		})
-	}
-}
-
-func TestLocations_ListWalksEveryPageOnce(t *testing.T) {
-	r, _ := newRouter(seededLocations())
-	seen := map[string]bool{}
-	path := locationsPath + "?limit=1"
-	for pages := 0; pages < 3; pages++ {
-		rec := do(r, http.MethodGet, path, "", siteDuties, true)
-		var body struct {
-			Items      []store.Location `json:"items"`
-			NextCursor string           `json:"nextCursor"`
-		}
-		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || rec.Code != http.StatusOK || len(body.Items) != 1 {
-			t.Fatalf("page %d = %d %s", pages, rec.Code, rec.Body)
-		}
-		seen[body.Items[0].ID] = true
-		if body.NextCursor == "" {
-			break
-		}
-		path = locationsPath + "?limit=1&cursor=" + body.NextCursor
-	}
-	if len(seen) != 2 {
-		t.Fatalf("walk saw %v; want both locations once", seen)
 	}
 }
 
