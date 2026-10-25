@@ -1,4 +1,4 @@
-# Not implemented in PSG-6 slice 2 (PSG-602 outbox foundation)
+# Not implemented in PSG-6 slice 3
 
 | Deliverable or AC | Status | Reason |
 |---|---|---|
@@ -19,6 +19,7 @@
 | PSG-602 item 6: operating units | later slice of PSG-602 | split from the outbox slice for the line budget |
 | PSG-602 item 7: sites, warehouses, locations | later slice of PSG-602 | split from the outbox slice for the line budget |
 | PSG-602 item 8: OpenAPI route-parity and AsyncAPI parse contract tests, per-aggregate metrics, chart appVersion bump | later slice of PSG-602 | this slice checks asyncapi declarations by substring because go.mod has no YAML parser |
+| PSG-603 item 5 delivered (`domain.Round`, `ValidateUnit`, `ParseMethod`); items 1-4, 6, 7: reference tables and API, persisted UoM, rounding persistence and API, contracts, metrics and docs | follow-up slices of PSG-603 | line budget; the seed CSVs alone exceed one slice, and the rounding domain functions are not yet reachable from a route |
 | Outbox relay (Debezium connector for `outbox`) | not built | Kafka and Debezium are wave 4; `outbox` and `idempotency_keys` tables exist with RLS, only `outbox` is written |
 | Jobs ORG-J1 to ORG-J6, Debezium connector; demo seed `ORG_SEED_PACKAGE=demo-manufacturer` | not built | Temporal and Kafka are wave 4; the seed needs sites and warehouses |
 | Argo CD Application, ingress, image registry entry, Kubernetes Secret `org-db`, database `passage_org` and `passage_app` role | handoff | `deploy/` and CI are outside wave 6 ownership |
