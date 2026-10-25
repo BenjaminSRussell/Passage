@@ -21,6 +21,7 @@ const (
 	CodeSiteNotFound           = "ORG-SITE-NOT-FOUND"
 	CodeSiteCodeDuplicate      = "ORG-SITE-CODE-DUPLICATE"
 	CodeSiteLegalEntityInvalid = "ORG-SITE-LEGAL-ENTITY-INVALID"
+	CodeSiteInUse              = "ORG-SITE-IN-USE"
 	siteColumns                = "id, legal_entity_id, code, name, time_zone, status, version, created_at, updated_at"
 )
 
@@ -200,6 +201,17 @@ func (s *Postgres) UpdateSite(ctx context.Context, id string, version int, in Si
 		next, changed := in.apply(current)
 		if len(changed) == 0 {
 			return nil
+		}
+		if current.Status == "active" && next.Status == "inactive" {
+			var active int
+			if err := tx.QueryRow(ctx, `select count(*) from warehouse where tenant_id = $1 and site_id = $2 and status = 'active'`, p.TenantID, id).Scan(&active); err != nil {
+				return err
+			}
+			if active > 0 {
+				inUse := httpx.NewProblem(http.StatusConflict, CodeSiteInUse, fmt.Sprintf("%d active warehouses reference this site.", active))
+				inUse.Errors = map[string]string{"status": "deactivate or move the site's active warehouses first"}
+				return inUse
+			}
 		}
 		site, err = scanSite(tx.QueryRow(ctx, `update site set name = $3, status = $4, time_zone = $5, version = version + 1, updated_at = now()
 			where tenant_id = $1 and id = $2 returning `+siteColumns, p.TenantID, id, next.Name, next.Status, next.TimeZone))

@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: org
-  version: 0.4.0
+  version: 0.5.0
   description: CloudEvents 1.0 envelope from platform/go/events; payloads below are the data member.
 channels:
   passage.org.legalentity:
@@ -190,8 +190,8 @@ components:
         properties:
           id: { type: string, format: uuid }
           legal_entity_id: { type: string, format: uuid }
-          parent_id: { type: [string, 'null'], format: uuid }
-          type: { type: [string, 'null'] }
+          parent_id: { type: [string, 'null'], format: uuid, description: The warehouse id. }
+          type: { type: [string, 'null'], description: 'storage, receiving, shipping or quarantine' }
           address_id: { type: [string, 'null'], format: uuid, description: Null until the address slice. }
       x-passage-type: dev.passage.org.location.created.v1
     currencyRoundingChanged:
