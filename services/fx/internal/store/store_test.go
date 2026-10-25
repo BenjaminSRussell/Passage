@@ -245,3 +245,16 @@ func TestRLSHidesOtherTenantRates(t *testing.T) {
 		t.Fatalf("tenant 2 must not post against tenant 1 rate type: %v", err)
 	}
 }
+
+func TestPostRatesStoresValidFromAsUTCDate(t *testing.T) {
+	s, pool, ctx := migrated(t)
+	now := time.Now().UTC()
+	offset := in("manual", "1.1")
+	offset.ValidFrom = time.Date(now.Year(), now.Month(), now.Day(), 23, 0, 0, 0, time.UTC).In(time.FixedZone("plus14", 14*3600))
+	if _, err := s.PostRates(ctx, []store.RateInput{offset}); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(t, ctx, pool, `select count(*) from exchange_rate where valid_from = (now() at time zone 'utc')::date`); n != 1 {
+		t.Fatalf("rows stored at UTC today = %d, want 1", n)
+	}
+}

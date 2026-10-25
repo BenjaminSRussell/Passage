@@ -241,7 +241,8 @@ func (s *Postgres) PostRates(ctx context.Context, in []RateInput) ([]Posted, err
 }
 
 func postOne(ctx context.Context, tx pgx.Tx, p tenant.Principal, typeID string, r RateInput) (Posted, error) {
-	date := time.Date(r.ValidFrom.Year(), r.ValidFrom.Month(), r.ValidFrom.Day(), 0, 0, 0, 0, time.UTC)
+	v := r.ValidFrom.UTC()
+	date := time.Date(v.Year(), v.Month(), v.Day(), 0, 0, 0, 0, time.UTC)
 	rows, err := tx.Query(ctx, `select id, version, source, superseded_by is null from exchange_rate
 		where tenant_id=$1 and rate_type_id=$2 and from_currency=$3 and to_currency=$4 and valid_from=$5
 		order by version for update`, p.TenantID, typeID, r.From, r.To, date)
