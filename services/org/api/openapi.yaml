@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: org
-  version: 0.4.0
-  description: Organization service. Covers legal entities, operating units, unit-of-measure conversion, and the platform-owned reference sets (countries, currencies, regions, languages) with tenant-level deactivation.
+  version: 0.5.0
+  description: Organization service. Covers legal entities, operating units, sites, unit-of-measure conversion, and the platform-owned reference sets (countries, currencies, regions, languages) with tenant-level deactivation.
 servers:
   - url: https://app.local.passage.dev
 paths:
@@ -124,6 +124,57 @@ paths:
         '200':
           description: The operating unit. A stale version is 409 ORG-VERSION-CONFLICT. A request that changes no value returns the stored unit with the same version and emits no event. An empty defaultLegalEntityId or managerPartyId clears it. 400 COM-0001 for a field error or managerPartyId on a unit that is not a cost_center. 404 ORG-OU-NOT-FOUND. 422 ORG-OU-LEGAL-ENTITY-INVALID for an unknown, inactive or out-of-scope default legal entity.
           content: { application/json: { schema: { $ref: '#/components/schemas/OperatingUnit' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/sites:
+    post:
+      operationId: createSite
+      x-passage-duty: org.site.write
+      parameters:
+        - { name: Idempotency-Key, in: header, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateSite' } } }
+      responses:
+        '201':
+          description: Site created, or the original site on an Idempotency-Key replay. The time zone defaults to the legal entity's. 400 COM-0001 for a field error. 409 ORG-SITE-CODE-DUPLICATE when the code exists in the legal entity. 422 ORG-SITE-LEGAL-ENTITY-INVALID when the legal entity is unknown, inactive or outside the caller's scope. 422 idempotency_key_reuse when the key was used with a different body.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Site' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listSites
+      x-passage-duty: org.read
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [active, inactive] } }
+      responses:
+        '200':
+          description: One page of sites ordered by code then id; a legal-entity-scoped caller sees only that legal entity's sites. Pass nextCursor as cursor for the next page. A bad filter or cursor is 400 COM-0001.
+          content: { application/json: { schema: { $ref: '#/components/schemas/SiteList' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/sites/{id}:
+    get:
+      operationId: getSite
+      x-passage-duty: org.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: One site. A malformed id, an unknown id and a site outside the caller's legal-entity scope are all 404 ORG-SITE-NOT-FOUND.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Site' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    patch:
+      operationId: updateSite
+      x-passage-duty: org.site.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/UpdateSite' } } }
+      responses:
+        '200':
+          description: The site. A stale version is 409 ORG-VERSION-CONFLICT. A request that changes no value returns the stored site with the same version and emits no event. 400 COM-0001 for a field error, or for legalEntityId or code, which are immutable. 404 ORG-SITE-NOT-FOUND.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Site' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/org/countries:
     get:
@@ -338,6 +389,24 @@ components:
       type: object
       required: [items]
       properties: { items: { type: array, items: { $ref: '#/components/schemas/OperatingUnit' } }, nextCursor: { type: string } }
+    CreateSite:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId, code, name]
+      properties: { legalEntityId: { type: string, format: uuid }, code: { type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{0,9}$', description: Upper-cased on save; unique within the legal entity }, name: { type: string, minLength: 1, maxLength: 120 }, timeZone: { type: string, description: IANA time zone name; defaults to the legal entity's } }
+    Site:
+      type: object
+      required: [id, legalEntityId, code, name, timeZone, status, version, createdAt, updatedAt]
+      properties: { id: { type: string, format: uuid }, legalEntityId: { type: string, format: uuid }, code: { type: string }, name: { type: string }, timeZone: { type: string }, status: { type: string, enum: [active, inactive] }, version: { type: integer }, createdAt: { type: string, format: date-time }, updatedAt: { type: string, format: date-time } }
+    UpdateSite:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties: { version: { type: integer, minimum: 1 }, name: { type: string, minLength: 1, maxLength: 120 }, timeZone: { type: string, description: IANA time zone name }, status: { type: string, enum: [active, inactive] } }
+    SiteList:
+      type: object
+      required: [items]
+      properties: { items: { type: array, items: { $ref: '#/components/schemas/Site' } }, nextCursor: { type: string } }
     ReferenceStatusChange:
       type: object
       additionalProperties: false
