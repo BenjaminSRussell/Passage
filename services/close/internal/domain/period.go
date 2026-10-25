@@ -69,8 +69,8 @@ func Decide(rows []Row, module Module, group string) (Status, error) {
 		return decideRow(Resolve(rows, module), module, group)
 	}
 	candidates := rows
-	if len(candidates) == 0 {
-		candidates = []Row{{Module: ModuleAll, Status: StatusNeverOpened}}
+	if !hasModule(rows, ModuleAll) {
+		candidates = append(append([]Row{}, rows...), Row{Module: ModuleAll, Status: StatusNeverOpened})
 	}
 	result := StatusOpen
 	var held error
@@ -87,6 +87,15 @@ func Decide(rows []Row, module Module, group string) (Status, error) {
 		}
 	}
 	return result, held
+}
+
+func hasModule(rows []Row, module Module) bool {
+	for _, r := range rows {
+		if r.Module == module {
+			return true
+		}
+	}
+	return false
 }
 
 func decideRow(row Row, module Module, group string) (Status, error) {

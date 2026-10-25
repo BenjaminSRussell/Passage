@@ -53,6 +53,13 @@ func TestDecide_ModuleRowOverridesAll(t *testing.T) {
 	}
 }
 
+func TestDecide_AllWithoutAllRowIsNeverOpened(t *testing.T) {
+	rows := []domain.Row{{Module: domain.ModuleGL, Status: domain.StatusOpen}}
+	if _, err := domain.Decide(rows, domain.ModuleAll, ""); code(err) != domain.CodePeriodClosed {
+		t.Fatalf("ALL without an ALL row must be never_opened: %v", err)
+	}
+}
+
 func TestPostingPaths_ClosedRejected(t *testing.T) {
 	paths := []string{"manual", "ap", "ar", "inv", "fa", "proj", "tax", "bank", "payroll", "cash", "prod", "reversal", "migration", "batch", "unknown-system", ""}
 	closed := []domain.Row{{Module: domain.ModuleAll, Status: domain.StatusClosed}}
