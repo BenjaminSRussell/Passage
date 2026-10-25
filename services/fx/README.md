@@ -10,8 +10,6 @@ go vet ./...
 go test ./...
 ```
 
-Store tests need `PASSAGE_TEST_DATABASE_URL` (and `PASSAGE_TEST_APP_DATABASE_URL` for the RLS test); they skip without it.
-
 ## What is built
 
 - `rates.go`: append-only rate book, lookup order exact, inverse (only when the rate type allows it), triangulation through a reference currency, else missing.

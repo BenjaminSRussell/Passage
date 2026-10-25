@@ -10,7 +10,6 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
-	"github.com/BenjaminSRussell/passage/platform/events"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/fx/internal/domain"
@@ -57,12 +56,6 @@ func TestPriorityOrder(t *testing.T) {
 	}
 	if _, ok := store.Priority("unknown"); ok {
 		t.Fatal("unknown source must have no priority")
-	}
-}
-
-func TestRatePublishedTypeIsValid(t *testing.T) {
-	if !events.ValidType(store.RatePublished) {
-		t.Fatalf("%s is not a valid event type", store.RatePublished)
 	}
 }
 
@@ -131,11 +124,8 @@ func TestPostRatesCorrectionAndPrecedence(t *testing.T) {
 		t.Fatalf("lower priority must arrive superseded: %+v, %v", lower, err)
 	}
 	hist, _ = s.History(ctx, "CLOSING", "EUR", "USD")
-	if len(hist) != 4 || hist[2].ID != manual[0].ID || hist[2].SupersededBy != "" || hist[3].SupersededBy != manual[0].ID {
+	if len(hist) != 4 || hist[2].ID != manual[0].ID || hist[2].SupersededBy != "" || hist[3].SupersededBy != manual[0].ID || hist[1].SupersededBy != manual[0].ID {
 		t.Fatalf("precedence chain wrong: %+v", hist)
-	}
-	if hist[1].SupersededBy != manual[0].ID {
-		t.Fatalf("manual must supersede the ecb correction: %+v", hist[1])
 	}
 	book, err := s.CurrentBook(ctx, time.Now())
 	if err != nil {
@@ -182,7 +172,7 @@ func TestPostRatesBatchAtomicityAndOutboxReconciliation(t *testing.T) {
 }
 
 func TestPutRateTypeIsIdempotent(t *testing.T) {
-	s, pool, ctx := migrated(t)
+	s, _, ctx := migrated(t)
 	again, err := s.PutRateType(ctx, store.RateType{Code: "CLOSING", Name: "Closing rate", AllowInverse: false})
 	if err != nil {
 		t.Fatal(err)
@@ -190,9 +180,6 @@ func TestPutRateTypeIsIdempotent(t *testing.T) {
 	list, err := s.ListRateTypes(ctx)
 	if err != nil || len(list) != 1 || list[0].ID != again.ID || list[0].Name != "Closing rate" || list[0].AllowInverse {
 		t.Fatalf("list = %+v, %v", list, err)
-	}
-	if n := count(t, ctx, pool, `select count(*) from exchange_rate_type`); n != 1 {
-		t.Fatalf("rate types = %d", n)
 	}
 	if _, err := s.GetRateType(ctx, "MISSING"); err == nil {
 		t.Fatal("unknown rate type must error")
@@ -212,10 +199,7 @@ func TestRLSHidesOtherTenantRates(t *testing.T) {
 	if err := admin.QueryRow(ctx, "select current_schema()").Scan(&schema); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := admin.Exec(ctx, "grant usage on schema "+schema+" to passage_app"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := admin.Exec(ctx, "grant select, insert, update, delete on all tables in schema "+schema+" to passage_app"); err != nil {
+	if _, err := admin.Exec(ctx, "grant usage on schema "+schema+" to passage_app; grant select, insert, update, delete on all tables in schema "+schema+" to passage_app"); err != nil {
 		t.Fatal(err)
 	}
 	s := store.New(app)

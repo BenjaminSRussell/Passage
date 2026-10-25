@@ -15,8 +15,6 @@
 | Deliverable 5: currency translation (CTA) | slice 3 of PSG-12 | line budget; posting side needs `services/ledger` |
 | Deliverable 6: market data series | PSG-1202 slice 2d | migration `0002`, domain, store and API |
 | AC4: provider outage fallback and alert, import run log store | PSG-1202 slice 2c | needs provider adapters and the degraded event |
-| Temporal schedule for provider imports | deferred | CronJobs in slice 2e are the interim scheduler |
-| ECB SDW market data series adapter | deferred | series import via CSV shape only in slice 2d |
 | Demo entity with EUR reporting currency | handoff | needs `services/ledger` and `services/org` waves |
 | OpenAPI, AsyncAPI, route/event contract test, Helm chart `passage-fx`, CronJobs, PrometheusRule, Dockerfile, `cmd/fx` | PSG-1202 slice 2e | no HTTP surface yet |
 | Web workspace `apps/web/src/modules/fx/` | slice 4 of PSG-12 | depends on the API |

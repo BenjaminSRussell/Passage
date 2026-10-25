@@ -142,17 +142,13 @@ func (s *Postgres) PutRateType(ctx context.Context, in RateType) (RateType, erro
 		return RateType{}, invalid("rate type code and name are required")
 	}
 	p, _ := tenant.FromContext(ctx)
-	var provider *string
-	if in.Provider != "" {
-		provider = &in.Provider
-	}
 	var out RateType
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
 		out, err = scanType(tx.QueryRow(ctx, `insert into exchange_rate_type (tenant_id, id, code, name, allow_inverse, provider, created_by)
-			values ($1,$2,$3,$4,$5,$6,$7)
+			values ($1,$2,$3,$4,$5,nullif($6,''),$7)
 			on conflict (tenant_id, code) do update set name = excluded.name, allow_inverse = excluded.allow_inverse, provider = excluded.provider
-			returning `+typeColumns, p.TenantID, ids.New(), in.Code, in.Name, in.AllowInverse, provider, p.UserID))
+			returning `+typeColumns, p.TenantID, ids.New(), in.Code, in.Name, in.AllowInverse, in.Provider, p.UserID))
 		return err
 	})
 	return out, err
@@ -249,17 +245,12 @@ func postOne(ctx context.Context, tx pgx.Tx, p tenant.Principal, typeID string, 
 	if err != nil {
 		return Posted{}, err
 	}
-	var existing []keyRow
-	for rows.Next() {
+	existing, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (keyRow, error) {
 		var k keyRow
-		if err := rows.Scan(&k.id, &k.version, &k.source, &k.current); err != nil {
-			rows.Close()
-			return Posted{}, err
-		}
-		existing = append(existing, k)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
+		err := row.Scan(&k.id, &k.version, &k.source, &k.current)
+		return k, err
+	})
+	if err != nil {
 		return Posted{}, err
 	}
 	out := Posted{ID: ids.New(), Version: 1}
@@ -278,14 +269,10 @@ func postOne(ctx context.Context, tx pgx.Tx, p tenant.Principal, typeID string, 
 			out.Superseded = true
 		}
 	}
-	var hash any
-	if r.PayloadHash != nil {
-		hash = r.PayloadHash
-	}
 	if _, err := tx.Exec(ctx, `insert into exchange_rate
 		(tenant_id, id, rate_type_id, from_currency, to_currency, valid_from, version, rate, source, provider_timestamp, payload_hash, superseded_by, created_by)
 		values ($1,$2,$3,$4,$5,$6,$7,$8::numeric,$9,$10,$11,$12,$13)`,
-		p.TenantID, out.ID, typeID, r.From, r.To, date, out.Version, r.Rate.String(), r.Source, r.ProviderTimestamp, hash, supersededBy, p.UserID); err != nil {
+		p.TenantID, out.ID, typeID, r.From, r.To, date, out.Version, r.Rate.String(), r.Source, r.ProviderTimestamp, r.PayloadHash, supersededBy, p.UserID); err != nil {
 		return Posted{}, err
 	}
 	if current != nil && supersededBy == nil {
