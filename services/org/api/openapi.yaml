@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: org
-  version: 0.1.0
-  description: Organization service. Slice 1 covers legal entities and unit-of-measure conversion.
+  version: 0.2.0
+  description: Organization service. Covers legal entities, unit-of-measure conversion, and the platform-owned reference sets (countries, currencies, regions, languages) with tenant-level deactivation.
 servers:
   - url: https://app.local.passage.dev
 paths:
@@ -32,6 +32,155 @@ paths:
           content:
             application/json:
               schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/LegalEntity' } }, nextCursor: { type: string } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/countries:
+    get:
+      operationId: listCountries
+      x-passage-duty: org.read
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [active, inactive] } }
+      responses:
+        '200':
+          description: Every country with its status for the caller's tenant, ordered by code.
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/Country' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/countries/{code}:
+    get:
+      operationId: getCountry
+      x-passage-duty: org.read
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: One country with its status for the caller's tenant.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Country' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    patch:
+      operationId: setCountryStatus
+      x-passage-duty: org.reference.write
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ReferenceStatusChange' } } }
+      responses:
+        '200':
+          description: The country with its new status for the caller's tenant; repeating the current status changes nothing. Rejected for legal-entity-scoped callers.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Country' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/currencies:
+    get:
+      operationId: listCurrencies
+      x-passage-duty: org.read
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [active, inactive] } }
+      responses:
+        '200':
+          description: Every currency with its status for the caller's tenant, ordered by code.
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/Currency' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/currencies/{code}:
+    get:
+      operationId: getCurrency
+      x-passage-duty: org.read
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: One currency with its status for the caller's tenant.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Currency' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    patch:
+      operationId: setCurrencyStatus
+      x-passage-duty: org.reference.write
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ReferenceStatusChange' } } }
+      responses:
+        '200':
+          description: The currency with its new status for the caller's tenant; repeating the current status changes nothing. Rejected for legal-entity-scoped callers.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Currency' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/regions:
+    get:
+      operationId: listRegions
+      x-passage-duty: org.read
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [active, inactive] } }
+        - { name: country, in: query, schema: { type: string, pattern: '^[A-Z]{2}$' } }
+      responses:
+        '200':
+          description: Every region with its status for the caller's tenant, ordered by code.
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/Region' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/regions/{code}:
+    get:
+      operationId: getRegion
+      x-passage-duty: org.read
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: One region with its status for the caller's tenant.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Region' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    patch:
+      operationId: setRegionStatus
+      x-passage-duty: org.reference.write
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ReferenceStatusChange' } } }
+      responses:
+        '200':
+          description: The region with its new status for the caller's tenant; repeating the current status changes nothing. Rejected for legal-entity-scoped callers.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Region' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/languages:
+    get:
+      operationId: listLanguages
+      x-passage-duty: org.read
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [active, inactive] } }
+      responses:
+        '200':
+          description: Every language with its status for the caller's tenant, ordered by code.
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/Language' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/languages/{code}:
+    get:
+      operationId: getLanguage
+      x-passage-duty: org.read
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: One language with its status for the caller's tenant.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Language' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    patch:
+      operationId: setLanguageStatus
+      x-passage-duty: org.reference.write
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ReferenceStatusChange' } } }
+      responses:
+        '200':
+          description: The language with its new status for the caller's tenant; repeating the current status changes nothing. Rejected for legal-entity-scoped callers.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Language' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/org/uom/convert:
     get:
@@ -70,6 +219,27 @@ components:
       type: object
       required: [id, code, name, country, currency, timeZone, status, version, createdAt]
       properties: { id: { type: string, format: uuid }, code: { type: string }, name: { type: string }, country: { type: string }, currency: { type: string }, timeZone: { type: string }, status: { type: string, enum: [active, inactive] }, version: { type: integer }, createdAt: { type: string, format: date-time } }
+    ReferenceStatusChange:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties: { status: { type: string, enum: [active, inactive] } }
+    Country:
+      type: object
+      required: [code, name, status]
+      properties: { code: { type: string }, name: { type: string }, status: { type: string, enum: [active, inactive] }, regionRequired: { type: boolean }, postalRegex: { type: string } }
+    Currency:
+      type: object
+      required: [code, name, status, numericCode, minorUnits]
+      properties: { code: { type: string }, name: { type: string }, status: { type: string, enum: [active, inactive] }, numericCode: { type: string }, minorUnits: { type: integer, minimum: 0, maximum: 4 } }
+    Region:
+      type: object
+      required: [code, name, status, countryCode]
+      properties: { code: { type: string }, name: { type: string }, status: { type: string, enum: [active, inactive] }, countryCode: { type: string } }
+    Language:
+      type: object
+      required: [code, name, status]
+      properties: { code: { type: string }, name: { type: string }, status: { type: string, enum: [active, inactive] } }
     Conversion:
       type: object
       required: [from, to, quantity]

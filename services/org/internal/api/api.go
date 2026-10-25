@@ -31,6 +31,7 @@ const (
 	idempotencyKey   = "Idempotency-Key"
 	dutyRead         = "org.read"
 	dutyLegalEntity  = "org.legal-entity.write"
+	dutyReference    = "org.reference.write"
 	maxNameLength    = 120
 	maxQuantityExp   = 18
 	minQuantityExp   = -24
@@ -50,6 +51,8 @@ type API struct {
 	conversions []domain.Conversion
 	created     atomic.Int64
 	failed      atomic.Int64
+
+	referenceChanged atomic.Int64
 }
 
 type createLegalEntityRequest struct {
@@ -58,6 +61,24 @@ type createLegalEntityRequest struct {
 	Country  string `json:"country"`
 	Currency string `json:"currency"`
 	TimeZone string `json:"timeZone"`
+}
+
+type referenceStatusRequest struct {
+	Status string `json:"status"`
+}
+
+type referenceList struct {
+	Items []store.ReferenceItem `json:"items"`
+}
+
+var referenceCollections = []struct {
+	collection string
+	kind       store.ReferenceKind
+}{
+	{"countries", store.KindCountry},
+	{"currencies", store.KindCurrency},
+	{"regions", store.KindRegion},
+	{"languages", store.KindLanguage},
 }
 
 type listResponse struct {
@@ -78,6 +99,12 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyLegalEntity)).Post("/v1/org/legal-entities", a.createLegalEntity)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/org/legal-entities", a.listLegalEntities)
 	r.Get("/v1/org/uom/convert", a.convert)
+	for _, c := range referenceCollections {
+		base := "/v1/org/" + c.collection
+		r.With(authz.RequireDuty(dutyRead)).Get(base, a.listReference(c.kind))
+		r.With(authz.RequireDuty(dutyRead)).Get(base+"/{code}", a.getReference(c.kind))
+		r.With(authz.RequireDuty(dutyReference)).Patch(base+"/{code}", a.patchReference(c.kind))
+	}
 }
 
 func (a *API) Metrics() http.Handler {
@@ -85,6 +112,7 @@ func (a *API) Metrics() http.Handler {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 		fmt.Fprintf(w, "# HELP org_legal_entities_created_total Legal entities created.\n# TYPE org_legal_entities_created_total counter\norg_legal_entities_created_total %d\n", a.created.Load())
 		fmt.Fprintf(w, "# HELP org_legal_entities_failed_total Legal entity creations that failed in the store.\n# TYPE org_legal_entities_failed_total counter\norg_legal_entities_failed_total %d\n", a.failed.Load())
+		fmt.Fprintf(w, "# HELP org_reference_status_changed_total Reference rows whose tenant status was set.\n# TYPE org_reference_status_changed_total counter\norg_reference_status_changed_total %d\n", a.referenceChanged.Load())
 	})
 }
 
@@ -150,6 +178,83 @@ func (a *API) listLegalEntities(w http.ResponseWriter, r *http.Request) {
 		body.NextCursor = base64.RawURLEncoding.EncodeToString([]byte(page.NextCode))
 	}
 	httpx.JSON(w, http.StatusOK, body)
+}
+
+func validStatus(status string) bool { return status == "active" || status == "inactive" }
+
+func badQuery(w http.ResponseWriter, r *http.Request, field, rule string) {
+	p := httpx.NewProblem(http.StatusBadRequest, "COM-0001", validationDetail)
+	p.Errors = map[string]string{field: rule}
+	httpx.Fail(w, r, p)
+}
+
+func (a *API) listReference(kind store.ReferenceKind) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !validTenant(w, r) {
+			return
+		}
+		q := r.URL.Query()
+		f := store.ReferenceFilter{Country: q.Get("country"), Status: q.Get("status")}
+		if f.Status != "" && !validStatus(f.Status) {
+			badQuery(w, r, "status", "must be active or inactive")
+			return
+		}
+		if f.Country != "" && (kind != store.KindRegion || !countryCode.MatchString(f.Country)) {
+			badQuery(w, r, "country", "must be two upper-case letters and is accepted for regions only")
+			return
+		}
+		items, err := a.store.ListReference(r.Context(), kind, f)
+		if err != nil {
+			slog.Error("list reference failed", "err", err, "kind", kind, "correlationId", middleware.GetReqID(r.Context()))
+			httpx.Fail(w, r, err)
+			return
+		}
+		httpx.JSON(w, http.StatusOK, referenceList{Items: items})
+	}
+}
+
+func (a *API) getReference(kind store.ReferenceKind) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !validTenant(w, r) {
+			return
+		}
+		item, err := a.store.GetReference(r.Context(), kind, chi.URLParam(r, "code"))
+		if err != nil {
+			slog.Error("get reference failed", "err", err, "kind", kind, "correlationId", middleware.GetReqID(r.Context()))
+			httpx.Fail(w, r, err)
+			return
+		}
+		httpx.JSON(w, http.StatusOK, item)
+	}
+}
+
+func (a *API) patchReference(kind store.ReferenceKind) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !validTenant(w, r) {
+			return
+		}
+		if p, _ := tenant.FromContext(r.Context()); p.LegalEntityID != "" {
+			httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "a legal-entity-scoped caller cannot change reference status"))
+			return
+		}
+		var req referenceStatusRequest
+		if err := httpx.Decode(r, &req); err != nil {
+			httpx.Fail(w, r, err)
+			return
+		}
+		if !validStatus(req.Status) {
+			badQuery(w, r, "status", "must be active or inactive")
+			return
+		}
+		item, err := a.store.SetReferenceStatus(r.Context(), kind, chi.URLParam(r, "code"), req.Status)
+		if err != nil {
+			slog.Error("set reference status failed", "err", err, "kind", kind, "correlationId", middleware.GetReqID(r.Context()))
+			httpx.Fail(w, r, err)
+			return
+		}
+		a.referenceChanged.Add(1)
+		httpx.JSON(w, http.StatusOK, item)
+	}
 }
 
 func pageParams(r *http.Request) (int, string, error) {

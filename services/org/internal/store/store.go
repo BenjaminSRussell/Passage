@@ -47,6 +47,9 @@ type LegalEntityPage struct {
 type Store interface {
 	CreateLegalEntity(ctx context.Context, in LegalEntity, idempotencyKey string) (LegalEntity, error)
 	ListLegalEntities(ctx context.Context, afterCode string, limit int) (LegalEntityPage, error)
+	ListReference(ctx context.Context, kind ReferenceKind, f ReferenceFilter) ([]ReferenceItem, error)
+	GetReference(ctx context.Context, kind ReferenceKind, code string) (ReferenceItem, error)
+	SetReferenceStatus(ctx context.Context, kind ReferenceKind, code, status string) (ReferenceItem, error)
 	Ping(ctx context.Context) error
 }
 
