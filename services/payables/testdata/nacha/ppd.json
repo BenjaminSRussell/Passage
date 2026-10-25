@@ -1,0 +1,59 @@
+{
+  "fileNumber": "000001",
+  "created": "2026-03-02T14:30:00Z",
+  "fileIdModifier": "A",
+  "destinationRouting": "011000015",
+  "destinationName": "Example Federal Reserve",
+  "originId": "0210000210",
+  "originName": "Example Origin Bank",
+  "companyName": "Passage Test Co",
+  "companyId": "1234567890",
+  "entryDescription": "VENDOR PAY",
+  "odfiRouting": "021000021",
+  "entries": [
+    {
+      "secCode": "PPD",
+      "effectiveDate": "2026-03-04",
+      "paymentNumber": "PAY-0001",
+      "accountType": "CHECKING",
+      "routingNumber": "011000015",
+      "accountNumber": "9000000037",
+      "amount": "250.00",
+      "currency": "USD",
+      "individualId": "VEND0001",
+      "name": "Vendor 1 Supply",
+      "invoices": [
+        {
+          "number": "INV-1",
+          "amount": "250.00"
+        }
+      ]
+    },
+    {
+      "secCode": "PPD",
+      "effectiveDate": "2026-03-04",
+      "paymentNumber": "PAY-0002",
+      "accountType": "SAVINGS",
+      "routingNumber": "026009593",
+      "accountNumber": "9000000074",
+      "amount": "75.25",
+      "currency": "USD",
+      "individualId": "VEND0002",
+      "name": "Vendor 2 Supply",
+      "invoices": []
+    },
+    {
+      "secCode": "PPD",
+      "effectiveDate": "2026-03-04",
+      "paymentNumber": "PAY-0003",
+      "accountType": "CHECKING",
+      "routingNumber": "121000358",
+      "accountNumber": "9000000111",
+      "amount": "1200.00",
+      "currency": "USD",
+      "individualId": "VEND0003",
+      "name": "Vendor 3 Supply",
+      "invoices": []
+    }
+  ]
+}

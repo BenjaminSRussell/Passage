@@ -1,0 +1,172 @@
+{
+  "fileNumber": "000001",
+  "created": "2026-03-02T14:30:00Z",
+  "fileIdModifier": "A",
+  "destinationRouting": "011000015",
+  "destinationName": "Example Federal Reserve",
+  "originId": "0210000210",
+  "originName": "Example Origin Bank",
+  "companyName": "Passage Test Co",
+  "companyId": "1234567890",
+  "entryDescription": "VENDOR PAY",
+  "odfiRouting": "021000021",
+  "entries": [
+    {
+      "secCode": "CCD",
+      "effectiveDate": "2026-03-04",
+      "paymentNumber": "PAY-0001",
+      "accountType": "CHECKING",
+      "routingNumber": "011000015",
+      "accountNumber": "9000000037",
+      "amount": "101.50",
+      "currency": "USD",
+      "individualId": "VEND0001",
+      "name": "Vendor 1 Supply",
+      "invoices": []
+    },
+    {
+      "secCode": "CCD",
+      "effectiveDate": "2026-03-04",
+      "paymentNumber": "PAY-0002",
+      "accountType": "SAVINGS",
+      "routingNumber": "026009593",
+      "accountNumber": "9000000074",
+      "amount": "102.50",
+      "currency": "USD",
+      "individualId": "VEND0002",
+      "name": "Vendor 2 Supply",
+      "invoices": []
+    },
+    {
+      "secCode": "CCD",
+      "effectiveDate": "2026-03-04",
+      "paymentNumber": "PAY-0003",
+      "accountType": "CHECKING",
+      "routingNumber": "121000358",
+      "accountNumber": "9000000111",
+      "amount": "113.50",
+      "currency": "USD",
+      "individualId": "VEND0003",
+      "name": "Vendor 3 Supply",
+      "invoices": [
+        {
+          "number": "INV-0003",
+          "amount": "103.50"
+        },
+        {
+          "number": "INV-0003-B",
+          "amount": "10.00"
+        }
+      ]
+    },
+    {
+      "secCode": "CCD",
+      "effectiveDate": "2026-03-04",
+      "paymentNumber": "PAY-0004",
+      "accountType": "SAVINGS",
+      "routingNumber": "021000021",
+      "accountNumber": "9000000148",
+      "amount": "104.50",
+      "currency": "USD",
+      "individualId": "VEND0004",
+      "name": "Vendor 4 Supply",
+      "invoices": []
+    },
+    {
+      "secCode": "CCD",
+      "effectiveDate": "2026-03-04",
+      "paymentNumber": "PAY-0005",
+      "accountType": "CHECKING",
+      "routingNumber": "011000015",
+      "accountNumber": "9000000185",
+      "amount": "105.50",
+      "currency": "USD",
+      "individualId": "VEND0005",
+      "name": "Vendor 5 Supply",
+      "invoices": []
+    },
+    {
+      "secCode": "CCD",
+      "effectiveDate": "2026-03-04",
+      "paymentNumber": "PAY-0006",
+      "accountType": "SAVINGS",
+      "routingNumber": "026009593",
+      "accountNumber": "9000000222",
+      "amount": "116.50",
+      "currency": "USD",
+      "individualId": "VEND0006",
+      "name": "Vendor 6 Supply",
+      "invoices": [
+        {
+          "number": "INV-0006",
+          "amount": "106.50"
+        },
+        {
+          "number": "INV-0006-B",
+          "amount": "10.00"
+        }
+      ]
+    },
+    {
+      "secCode": "CCD",
+      "effectiveDate": "2026-03-05",
+      "paymentNumber": "PAY-0007",
+      "accountType": "CHECKING",
+      "routingNumber": "121000358",
+      "accountNumber": "9000000259",
+      "amount": "107.50",
+      "currency": "USD",
+      "individualId": "VEND0007",
+      "name": "Vendor 7 Supply",
+      "invoices": []
+    },
+    {
+      "secCode": "CCD",
+      "effectiveDate": "2026-03-05",
+      "paymentNumber": "PAY-0008",
+      "accountType": "SAVINGS",
+      "routingNumber": "021000021",
+      "accountNumber": "9000000296",
+      "amount": "108.50",
+      "currency": "USD",
+      "individualId": "VEND0008",
+      "name": "Vendor 8 Supply",
+      "invoices": []
+    },
+    {
+      "secCode": "CCD",
+      "effectiveDate": "2026-03-05",
+      "paymentNumber": "PAY-0009",
+      "accountType": "CHECKING",
+      "routingNumber": "011000015",
+      "accountNumber": "9000000333",
+      "amount": "119.50",
+      "currency": "USD",
+      "individualId": "VEND0009",
+      "name": "Vendor 9 Supply",
+      "invoices": [
+        {
+          "number": "INV-0009",
+          "amount": "109.50"
+        },
+        {
+          "number": "INV-0009-B",
+          "amount": "10.00"
+        }
+      ]
+    },
+    {
+      "secCode": "CCD",
+      "effectiveDate": "2026-03-05",
+      "paymentNumber": "PAY-0010",
+      "accountType": "SAVINGS",
+      "routingNumber": "026009593",
+      "accountNumber": "9000000370",
+      "amount": "110.50",
+      "currency": "USD",
+      "individualId": "VEND0010",
+      "name": "Vendor 10 Supply",
+      "invoices": []
+    }
+  ]
+}
