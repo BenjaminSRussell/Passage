@@ -72,6 +72,7 @@ type Receipt struct {
 	Date          time.Time
 	State         ReceiptState
 	Lines         []ReceiptLine
+	LedgerEntryID string
 }
 
 type GrirItem struct {
@@ -162,9 +163,11 @@ func (r Receipt) Post(ctx context.Context, ledger LedgerPoster, profile PostingP
 			ReceivedAmount: amount, ClearedAmount: money.Amount{Value: decimal.Zero, Currency: amount.Currency},
 		})
 	}
-	if err := ledger.Post(ctx, entry); err != nil {
+	entryID, err := ledger.Post(ctx, entry)
+	if err != nil {
 		slog.ErrorContext(ctx, "receipt ledger post failed", "err", err, "receiptId", r.ID)
 		return r, nil, fmt.Errorf("post receipt %s: %w", r.ID, err)
 	}
+	next.LedgerEntryID = entryID
 	return next, items, nil
 }

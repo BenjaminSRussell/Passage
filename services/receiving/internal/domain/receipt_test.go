@@ -137,3 +137,12 @@ func TestReceiptPost_LedgerFailureKeepsStateAndWrapsError(t *testing.T) {
 		t.Fatalf("got state %s items %v err %v", next.State, items, err)
 	}
 }
+
+func TestReceiptPost_StoresLedgerEntryID(t *testing.T) {
+	r := receiptWith(domain.ReceiptLine{LineNo: 1, ProductID: "p", Qty: dec("1"), OrderedRemaining: dec("1")})
+	r.State = domain.Registered
+	next, _, err := r.Post(context.Background(), &domain.FakeLedger{}, testProfile)
+	if err != nil || next.LedgerEntryID != "fake-entry-1" {
+		t.Fatalf("got id %q err %v", next.LedgerEntryID, err)
+	}
+}
