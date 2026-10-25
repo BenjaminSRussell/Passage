@@ -71,6 +71,10 @@ type API struct {
 	fiscalCalendarCreated atomic.Int64
 	fiscalYearGenerated   atomic.Int64
 	postings              PostingChecker
+
+	hierarchyTypeCreated   atomic.Int64
+	hierarchyDraftCreated  atomic.Int64
+	hierarchyNodesReplaced atomic.Int64
 }
 
 type createLegalEntityRequest struct {
@@ -137,6 +141,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerLocations(r)
 	a.registerAddresses(r)
 	a.registerFiscalCalendars(r)
+	a.registerHierarchies(r)
 	r.Get("/v1/org/uom/convert", a.convert)
 	for _, c := range referenceCollections {
 		base := "/v1/org/" + c.collection
@@ -165,6 +170,9 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP org_addresses_revised_total Postal address versions created by edits.\n# TYPE org_addresses_revised_total counter\norg_addresses_revised_total %d\n", a.addressRevised.Load())
 		fmt.Fprintf(w, "# HELP org_fiscal_calendars_created_total Fiscal calendars created.\n# TYPE org_fiscal_calendars_created_total counter\norg_fiscal_calendars_created_total %d\n", a.fiscalCalendarCreated.Load())
 		fmt.Fprintf(w, "# HELP org_fiscal_years_generated_total Fiscal years generated or regenerated; idempotent replays are not counted.\n# TYPE org_fiscal_years_generated_total counter\norg_fiscal_years_generated_total %d\n", a.fiscalYearGenerated.Load())
+		fmt.Fprintf(w, "# HELP org_hierarchy_types_created_total Hierarchy types created.\n# TYPE org_hierarchy_types_created_total counter\norg_hierarchy_types_created_total %d\n", a.hierarchyTypeCreated.Load())
+		fmt.Fprintf(w, "# HELP org_hierarchy_drafts_created_total Draft hierarchy versions created.\n# TYPE org_hierarchy_drafts_created_total counter\norg_hierarchy_drafts_created_total %d\n", a.hierarchyDraftCreated.Load())
+		fmt.Fprintf(w, "# HELP org_hierarchy_node_sets_replaced_total Draft hierarchy node sets replaced.\n# TYPE org_hierarchy_node_sets_replaced_total counter\norg_hierarchy_node_sets_replaced_total %d\n", a.hierarchyNodesReplaced.Load())
 	})
 }
 
