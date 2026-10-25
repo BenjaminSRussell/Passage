@@ -33,6 +33,14 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.databaseSecret }}
                   key: DATABASE_URL
+            - name: CLOSE_REOPEN_DEFAULT_DAYS
+              value: {{ .Values.config.reopenDefaultDays | quote }}
+            - name: CLOSE_REOPEN_APPROVERS
+              value: {{ .Values.config.reopenApprovers | quote }}
+            - name: CLOSE_LOCK_WAIT_MS
+              value: {{ .Values.config.lockWaitMs | quote }}
+            - name: CLOSE_REOPEN_SWEEP_INTERVAL
+              value: {{ .Values.config.reopenSweepInterval | quote }}
           ports:
             - { name: http, containerPort: 8080 }
             - { name: admin, containerPort: 9090 }

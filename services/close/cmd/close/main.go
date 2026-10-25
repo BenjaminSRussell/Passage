@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
+	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
@@ -47,7 +49,54 @@ func addr(getenv func(string) string, key, fallback string) string {
 	return fallback
 }
 
+type config struct {
+	reopenDefaultDays int
+	reopenApprovers   int
+	lockWaitMS        int
+	reopenSweepEvery  time.Duration
+}
+
+func intSetting(getenv func(string) string, key string, fallback, min, max int) (int, error) {
+	raw := getenv(key)
+	if raw == "" {
+		return fallback, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < min || n > max {
+		return 0, fmt.Errorf("%s must be an integer from %d to %d, got %q", key, min, max, raw)
+	}
+	return n, nil
+}
+
+func loadConfig(getenv func(string) string) (config, error) {
+	var cfg config
+	var err error
+	if cfg.reopenDefaultDays, err = intSetting(getenv, "CLOSE_REOPEN_DEFAULT_DAYS", 3, 1, 30); err != nil {
+		return config{}, err
+	}
+	if cfg.reopenApprovers, err = intSetting(getenv, "CLOSE_REOPEN_APPROVERS", 2, 2, 3); err != nil {
+		return config{}, err
+	}
+	if cfg.lockWaitMS, err = intSetting(getenv, "CLOSE_LOCK_WAIT_MS", 5000, 1000, 30000); err != nil {
+		return config{}, err
+	}
+	cfg.reopenSweepEvery = time.Minute
+	if raw := getenv("CLOSE_REOPEN_SWEEP_INTERVAL"); raw != "" {
+		d, err := time.ParseDuration(raw)
+		if err != nil || d <= 0 {
+			return config{}, fmt.Errorf("CLOSE_REOPEN_SWEEP_INTERVAL must be a positive duration such as 1m, got %q", raw)
+		}
+		cfg.reopenSweepEvery = d
+	}
+	return cfg, nil
+}
+
 func run(ctx context.Context, getenv func(string) string) error {
+	cfg, err := loadConfig(getenv)
+	if err != nil {
+		return err
+	}
+	slog.Info("close configuration", "reopenDefaultDays", cfg.reopenDefaultDays, "reopenApprovers", cfg.reopenApprovers, "lockWaitMs", cfg.lockWaitMS, "reopenSweepInterval", cfg.reopenSweepEvery.String())
 	databaseURL := getenv("DATABASE_URL")
 	if databaseURL == "" {
 		return errors.New("DATABASE_URL is required")

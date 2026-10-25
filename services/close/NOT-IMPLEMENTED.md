@@ -10,9 +10,10 @@ Slice A ships period control, the allocation, year-end and checklist engines, th
 | AC4 / Deliverable 2: close checklist | partial | template DAG, instantiation across entities and dependency enforcement ship; templates, runs, tasks HTTP API, assignees, due dates, persistence and the status board are slice B |
 | Deliverable 4: accrual schemes, automatic reversals, recurring journals | slice B | line budget; needs the ledger and a scheduler |
 | Deliverable 6: balance-sheet regrouping | slice B | line budget; needs balances from the ledger |
-| Config knobs (reopen expiry days, lock wait, allocation iteration cap) | slice B | nothing consumes them yet; the iteration cap is a parameter of `Reciprocal` |
+| Config knobs `CLOSE_REOPEN_DEFAULT_DAYS`, `CLOSE_REOPEN_APPROVERS`, `CLOSE_LOCK_WAIT_MS`, `CLOSE_REOPEN_SWEEP_INTERVAL` | PSG-1402 follow-up slices | validated at startup and logged; no handler or sweeper consumes them until the transition, reopen and sweeper slices |
+| `ALLOC_MAX_ITERATIONS` | slice 3+ | no consumer; the iteration cap is a parameter of `Reciprocal` |
 | Events through the outbox | slice B | no state-changing endpoint ships; the AsyncAPI file declares the channel |
-| Idempotency-Key | slice B | the only endpoint is read-only |
+| Idempotency-Key | PSG-1402 follow-up slices | `store.Idempotent` and the `idempotency_keys` table ship with migration `0002`; the header check and the 422/409 mapping ship with the first write endpoint |
 | JWT validation, step-up MFA, OPA | wave 2 | the gateway validates tokens; services trust tenant headers |
 | `serviceCode` on 401 and 403 bodies from kernel middleware | kernel handoff | tenant and authz middleware live in `platform/go` |
 | GUC names `passage.legal_entity_ids` and `passage.actor` | kernel handoff | `dbx.WithTenantTx` sets `passage.tenant_id` and `passage.legal_entity_scopes`; the policies use what the kernel sets |

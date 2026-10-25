@@ -9,6 +9,7 @@ const (
 	CodePeriodOnHold        = "LEDGER-0014"
 	CodeNoConvergence       = "ALLOC-0001"
 	CodeZeroBasis           = "ALLOC-0002"
+	CodeIdempotencyReuse    = "COM-0409"
 )
 
 type Error struct {
