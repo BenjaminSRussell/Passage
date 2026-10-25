@@ -1,0 +1,68 @@
+{
+  "fileNumber": "000001",
+  "created": "2026-03-02T14:30:00Z",
+  "fileIdModifier": "A",
+  "destinationRouting": "011000015",
+  "destinationName": "Example Federal Reserve",
+  "originId": "0210000210",
+  "originName": "Example Origin Bank",
+  "companyName": "Passage Test Co",
+  "companyId": "1234567890",
+  "entryDescription": "VENDOR PAY",
+  "odfiRouting": "021000021",
+  "prenote": true,
+  "entries": [
+    {
+      "secCode": "CCD",
+      "effectiveDate": "2026-03-04",
+      "paymentNumber": "PAY-0001",
+      "accountType": "CHECKING",
+      "routingNumber": "011000015",
+      "accountNumber": "9000000037",
+      "amount": "",
+      "currency": "USD",
+      "individualId": "VEND0001",
+      "name": "Vendor 1 Supply",
+      "invoices": []
+    },
+    {
+      "secCode": "CCD",
+      "effectiveDate": "2026-03-04",
+      "paymentNumber": "PAY-0002",
+      "accountType": "CHECKING",
+      "routingNumber": "026009593",
+      "accountNumber": "9000000074",
+      "amount": "0.00",
+      "currency": "USD",
+      "individualId": "VEND0002",
+      "name": "Vendor 2 Supply",
+      "invoices": []
+    },
+    {
+      "secCode": "CCD",
+      "effectiveDate": "2026-03-04",
+      "paymentNumber": "PAY-0003",
+      "accountType": "SAVINGS",
+      "routingNumber": "121000358",
+      "accountNumber": "9000000111",
+      "amount": "",
+      "currency": "USD",
+      "individualId": "VEND0003",
+      "name": "Vendor 3 Supply",
+      "invoices": []
+    },
+    {
+      "secCode": "CCD",
+      "effectiveDate": "2026-03-04",
+      "paymentNumber": "PAY-0004",
+      "accountType": "SAVINGS",
+      "routingNumber": "021000021",
+      "accountNumber": "9000000148",
+      "amount": "0.00",
+      "currency": "USD",
+      "individualId": "VEND0004",
+      "name": "Vendor 4 Supply",
+      "invoices": []
+    }
+  ]
+}
