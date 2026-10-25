@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -119,6 +121,91 @@ func TestPostgres_XrefPersistsTargetIDAndIsolatesTenants(t *testing.T) {
 	}
 	if keys, _ := x.Keys(principalContext(2), "ax2012", "customer"); len(keys) != 0 {
 		t.Fatalf("tenant 2 keys = %v", keys)
+	}
+}
+
+func TestPostgres_DryRunLedgerWithoutTargetIDsIsSaved(t *testing.T) {
+	s := newStore(t)
+	ctx := principalContext(1)
+	run := sampleRun()
+	run.DryRun = true
+	run.Report.DryRun = true
+	run.Report.Ledger = []domain.LedgerEntry{
+		{SourceKey: "C1", IdempotencyKey: "i1", ContentHash: "h1", Action: domain.ActionCreated},
+		{SourceKey: "C2", TargetID: "00000000-0000-7000-8000-000000000002", IdempotencyKey: "i2", ContentHash: "h2", Action: domain.ActionUpdated},
+	}
+	saved, err := s.SaveRun(ctx, run, "dry-1")
+	if err != nil || !saved.DryRun {
+		t.Fatalf("dry run save = %+v, %v", saved, err)
+	}
+}
+
+func TestPostgres_XrefBatchRoundTripKeepsFirstTargetID(t *testing.T) {
+	x := newStore(t).Xref()
+	ctx := principalContext(1)
+	first := "00000000-0000-7000-8000-000000000001"
+	if err := x.PutMany(ctx, "ax2012", "customer", []domain.XrefItem{
+		{SourceKey: "C1", Entry: domain.XrefEntry{TargetID: first}},
+		{SourceKey: "C2", Entry: domain.XrefEntry{TargetID: "00000000-0000-7000-8000-000000000002"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := x.PutMany(ctx, "ax2012", "customer", []domain.XrefItem{{SourceKey: "C1", Entry: domain.XrefEntry{TargetID: "00000000-0000-7000-8000-0000000000ff", ContentHash: "h"}}}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := x.GetMany(ctx, "ax2012", "customer", []string{"C1", "C2", "C9"})
+	if err != nil || len(got) != 2 || got["C1"].TargetID != first || got["C1"].ContentHash != "h" {
+		t.Fatalf("GetMany = %+v, %v", got, err)
+	}
+	if other, err := x.GetMany(principalContext(2), "ax2012", "customer", []string{"C1"}); err != nil || len(other) != 0 {
+		t.Fatalf("tenant 2 GetMany = %+v, %v", other, err)
+	}
+	if err := x.PutMany(ctx, "ax2012", "customer", nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+type generatedExtractor struct{ n int }
+
+func (e generatedExtractor) Extract(context.Context, string) ([]domain.Record, error) {
+	rows := make([]domain.Record, e.n)
+	for i := range rows {
+		id := fmt.Sprintf("I%07d", i)
+		rows[i] = domain.Record{Key: id, Fields: map[string]any{"id": id}}
+	}
+	return rows, nil
+}
+
+func TestPostgres_FullSizeLoadMeetsTimeBudgetAndRerunsUnchanged(t *testing.T) {
+	if testing.Short() {
+		t.Skip("full-size Postgres load skipped under -short")
+	}
+	const rows = 180_000
+	s := newStore(t)
+	ctx := principalContext(1)
+	mapping, err := domain.ParseMapping([]byte(`{"entity":"item","version":1,"fields":[{"source":"id","target":"sku","type":"string","required":true}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	loader := domain.NewMemLoader()
+	n := 0
+	p := &domain.Pipeline{Extractor: generatedExtractor{rows}, Loader: loader, Reader: loader, Xref: s.Xref(), IDGen: func() string {
+		n++
+		return fmt.Sprintf("00000000-0000-7000-8000-%012d", n)
+	}}
+	run := domain.RunSpec{SourceSystem: "ax2012", Entity: "item", Mapping: mapping}
+
+	start := time.Now()
+	first, err := p.Run(ctx, run)
+	if err != nil || first.Status != domain.StatusSucceeded || first.Created != rows {
+		t.Fatalf("first run status=%s created=%d err=%v", first.Status, first.Created, err)
+	}
+	if elapsed := time.Since(start); elapsed >= 30*time.Minute {
+		t.Fatalf("load took %s", elapsed)
+	}
+	second, err := p.Run(ctx, run)
+	if err != nil || second.Unchanged != rows || second.Created != 0 || second.Updated != 0 {
+		t.Fatalf("rerun unchanged=%d created=%d updated=%d err=%v", second.Unchanged, second.Created, second.Updated, err)
 	}
 }
 

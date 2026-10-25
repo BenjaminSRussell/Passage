@@ -176,6 +176,9 @@ func coerce(f FieldRule, text string) (any, *Reject) {
 		if err != nil {
 			return bad(CodeMapCoerce, "is not a decimal")
 		}
+		if exp := d.Exponent(); exp > maxDecimalExponent || exp < -maxDecimalScaleGuard {
+			return bad(CodeMapRange, "exceeds scale 6 or magnitude 1e14")
+		}
 		if !d.Round(maxDecimalScale).Equal(d) || d.Abs().GreaterThanOrEqual(maxDecimalMagnitude) {
 			return bad(CodeMapRange, "exceeds scale 6 or magnitude 1e14")
 		}

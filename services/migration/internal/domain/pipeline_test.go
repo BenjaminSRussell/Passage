@@ -245,8 +245,29 @@ func TestPipeline_SourceRowsMissingSinceLastRunAreReportedNotDeleted(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rep.Absent) != 1 || rep.Absent[0] != "C000002" || len(loader.Rows) != 3 {
-		t.Fatalf("absent=%v loaded=%d", rep.Absent, len(loader.Rows))
+	if len(rep.Absent) != 1 || rep.Absent[0] != "C000002" || len(loader.Rows) != 3 || rep.Status != domain.StatusSucceeded || !rep.Reconciliation.OK() {
+		t.Fatalf("absent=%v loaded=%d status=%s reconciliation=%+v", rep.Absent, len(loader.Rows), rep.Status, rep.Reconciliation)
+	}
+}
+
+func TestPipeline_SecondSourceSystemReconcilesOnItsOwnKeys(t *testing.T) {
+	p, _, loader := newPipeline(axDataset(3, 0, 0, 0).Customers)
+	if _, err := p.Run(context.Background(), spec(t)); err != nil {
+		t.Fatal(err)
+	}
+	sap := axDataset(2, 0, 0, 0).Customers
+	for i := range sap {
+		sap[i].Key = "S" + sap[i].Key
+	}
+	p.Extractor = sliceExtractor{rows: sap}
+	second := spec(t)
+	second.SourceSystem = "sap_ecc"
+	rep, err := p.Run(context.Background(), second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Status != domain.StatusSucceeded || rep.Created != 2 || len(loader.Rows) != 5 || rep.Reconciliation.Source != 2 || rep.Reconciliation.Target != 2 {
+		t.Fatalf("status=%s created=%d loaded=%d reconciliation=%+v", rep.Status, rep.Created, len(loader.Rows), rep.Reconciliation)
 	}
 }
 

@@ -307,3 +307,20 @@ func TestMetrics_CountRunsRowsAndRejects(t *testing.T) {
 		}
 	}
 }
+
+func TestCreateRun_DryRunRecordsLedgerWithoutLoading(t *testing.T) {
+	loader := domain.NewMemLoader()
+	r := router(store.NewMem(), rowsExtractor{records()}, loader)
+	dryBody := strings.Replace(body, `"mode":"rehearsal",`, `"mode":"rehearsal","dryRun":true,`, 1)
+	rec := do(r, http.MethodPost, runsPath, dryBody, duties, true)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	}
+	got := decode(t, rec)
+	if got.Run.Counts["created"] != 2 || len(loader.Rows) != 0 {
+		t.Fatalf("dry run created=%d loaded=%d", got.Run.Counts["created"], len(loader.Rows))
+	}
+	if again := do(r, http.MethodGet, got.StatusURL, "", duties, true); again.Code != http.StatusOK {
+		t.Fatalf("dry run must be retrievable, got %d %s", again.Code, again.Body)
+	}
+}

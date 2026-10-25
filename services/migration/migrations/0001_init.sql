@@ -35,7 +35,7 @@ CREATE TABLE migration.run_ledger (
   tenant_id uuid NOT NULL,
   run_id uuid NOT NULL,
   source_key text NOT NULL,
-  target_id uuid NOT NULL,
+  target_id uuid,
   idempotency_key text NOT NULL,
   content_hash text NOT NULL,
   action text NOT NULL CHECK (action IN ('created', 'updated', 'unchanged')),

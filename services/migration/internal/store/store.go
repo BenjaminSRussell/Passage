@@ -110,7 +110,7 @@ func insertLedger(ctx context.Context, tx pgx.Tx, tenantID, runID string, ledger
 		keys[i], targets[i], idem[i], hashes[i], actions[i] = e.SourceKey, e.TargetID, e.IdempotencyKey, e.ContentHash, e.Action
 	}
 	_, err := tx.Exec(ctx, `insert into migration.run_ledger (tenant_id, run_id, source_key, target_id, idempotency_key, content_hash, action)
-		select $1, $2, l.source_key, l.target_id::uuid, l.idempotency_key, l.content_hash, l.action
+		select $1, $2, l.source_key, nullif(l.target_id, '')::uuid, l.idempotency_key, l.content_hash, l.action
 		from unnest($3::text[], $4::text[], $5::text[], $6::text[], $7::text[]) as l(source_key, target_id, idempotency_key, content_hash, action)`,
 		tenantID, runID, keys, targets, idem, hashes, actions)
 	return err
@@ -171,6 +171,50 @@ func (x pgXref) Put(ctx context.Context, k domain.XrefKey, e domain.XrefEntry) e
 			on conflict (tenant_id, source_system, source_entity, source_key)
 			do update set content_hash = excluded.content_hash, updated_at = now()`,
 			p.TenantID, k.SourceSystem, k.Entity, k.SourceKey, e.TargetID, e.ContentHash)
+		return err
+	})
+}
+
+func (x pgXref) GetMany(ctx context.Context, sourceSystem, entity string, sourceKeys []string) (map[string]domain.XrefEntry, error) {
+	p, _ := tenant.FromContext(ctx)
+	found := make(map[string]domain.XrefEntry, len(sourceKeys))
+	err := dbx.WithTenantTx(ctx, x.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select source_key, target_id::text, content_hash from migration.xref
+			where tenant_id = $1 and source_system = $2 and source_entity = $3 and source_key = any($4)`,
+			p.TenantID, sourceSystem, entity, sourceKeys)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var key string
+			var e domain.XrefEntry
+			if err := rows.Scan(&key, &e.TargetID, &e.ContentHash); err != nil {
+				return err
+			}
+			found[key] = e
+		}
+		return rows.Err()
+	})
+	return found, err
+}
+
+func (x pgXref) PutMany(ctx context.Context, sourceSystem, entity string, items []domain.XrefItem) error {
+	if len(items) == 0 {
+		return nil
+	}
+	p, _ := tenant.FromContext(ctx)
+	keys, targets, hashes := make([]string, len(items)), make([]string, len(items)), make([]string, len(items))
+	for i, it := range items {
+		keys[i], targets[i], hashes[i] = it.SourceKey, it.Entry.TargetID, it.Entry.ContentHash
+	}
+	return dbx.WithTenantTx(ctx, x.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `insert into migration.xref (tenant_id, source_system, source_entity, source_key, target_id, content_hash)
+			select $1, $2, $3, i.source_key, i.target_id::uuid, i.content_hash
+			from unnest($4::text[], $5::text[], $6::text[]) as i(source_key, target_id, content_hash)
+			on conflict (tenant_id, source_system, source_entity, source_key)
+			do update set content_hash = excluded.content_hash, updated_at = now()`,
+			p.TenantID, sourceSystem, entity, keys, targets, hashes)
 		return err
 	})
 }

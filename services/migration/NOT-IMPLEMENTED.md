@@ -12,7 +12,7 @@
 | Deliverable 6: copy between legal entities, signed configuration packages, recurring incremental jobs, data templates | slice 3 of PSG-10 | line budget; recurring jobs need Temporal (wave 4) behind an interface; data templates can reuse `tools/importexport` |
 | Deliverable 7: coverage-closure mapping packs | slice 3 of PSG-10 | needs verified table mappings |
 | Real batch-API `TargetLoader` and the extractor wiring in `cmd/migration` | slice 3 of PSG-10 | needs target contexts' `:batch` endpoints (PSG-7, PSG-8, PSG-9); `api.NotConfigured` makes `POST /migration-runs` answer 501 until then |
-| AC1: 50k customers, 20k vendors, 100k items, 10k BOMs in under 30 minutes | partial | `TestScale_FullSizeAXDatasetLoadsReconcilesAndRerunsWithoutChanges` proves the in-memory pipeline reconciles 100% in seconds; the Postgres xref path and real loader are unmeasured |
+| AC1: 50k customers, 20k vendors, 100k items, 10k BOMs in under 30 minutes | partial | `TestScale_FullSizeAXDatasetLoadsReconcilesAndRerunsWithoutChanges` proves the in-memory pipeline reconciles 100% in seconds; xref lookups and writes are batched (1000 per statement) and `TestPostgres_FullSizeLoadMeetsTimeBudgetAndRerunsUnchanged` measures 180k rows through the Postgres xref path when `PASSAGE_TEST_DATABASE_URL` is set; the real loader is unmeasured |
 | AC4: demo manufacturer migrated from a synthetic AX extract | partial | the synthetic AX dataset loads and reconciles through the pipeline against `MemLoader`; live target loading waits on the real loader |
 | Asynchronous execution of runs | wave 4 | runs execute in the request; Temporal and `platform.job` rows are not present |
 | `POST /v1/integration/parallel-run-diffs` | wave 49 | route answers 501 `MIG-PARALLEL-RUN-DEFERRED` |

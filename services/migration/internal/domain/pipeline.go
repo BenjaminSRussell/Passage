@@ -53,9 +53,16 @@ type XrefKey struct{ SourceSystem, Entity, SourceKey string }
 
 type XrefEntry struct{ TargetID, ContentHash string }
 
+type XrefItem struct {
+	SourceKey string
+	Entry     XrefEntry
+}
+
 type XrefStore interface {
 	Get(ctx context.Context, k XrefKey) (XrefEntry, bool, error)
 	Put(ctx context.Context, k XrefKey, e XrefEntry) error
+	GetMany(ctx context.Context, sourceSystem, entity string, sourceKeys []string) (map[string]XrefEntry, error)
+	PutMany(ctx context.Context, sourceSystem, entity string, items []XrefItem) error
 	Keys(ctx context.Context, sourceSystem, entity string) ([]string, error)
 }
 
@@ -105,7 +112,7 @@ type Pipeline struct {
 type pending struct {
 	entry  LedgerEntry
 	item   LoadItem
-	key    XrefKey
+	key    string
 	action string
 }
 
@@ -135,8 +142,7 @@ func (p *Pipeline) Run(ctx context.Context, spec RunSpec) (Report, error) {
 	}
 	rep.Extracted = len(rows)
 	seen := make(map[string]bool, len(rows))
-	var expected []Record
-	var todo []pending
+	var mapped []Record
 	for _, r := range rows {
 		if spec.OnlyKeys != nil && !spec.OnlyKeys[r.Key] {
 			continue
@@ -152,13 +158,17 @@ func (p *Pipeline) Run(ctx context.Context, spec RunSpec) (Report, error) {
 			continue
 		}
 		rep.Mapped++
-		expected = append(expected, Record{r.Key, out})
-		hash := ContentHash(out)
-		xk := XrefKey{spec.SourceSystem, spec.Entity, r.Key}
-		x, found, err := p.Xref.Get(ctx, xk)
-		if err != nil {
-			return rep, fmt.Errorf("xref get %s: %w", spec.Entity, err)
-		}
+		mapped = append(mapped, Record{r.Key, out})
+	}
+	known, err := p.knownXrefs(ctx, spec, mapped)
+	if err != nil {
+		return rep, err
+	}
+	var todo []pending
+	var reserve []XrefItem
+	for _, r := range mapped {
+		hash := ContentHash(r.Fields)
+		x, found := known[r.Key]
 		idemKey := IdempotencyKey(spec.SourceSystem, spec.Entity, r.Key, hash)
 		if found && x.ContentHash == hash {
 			rep.Unchanged++
@@ -171,9 +181,7 @@ func (p *Pipeline) Run(ctx context.Context, spec RunSpec) (Report, error) {
 		}
 		if !found && !spec.DryRun {
 			x.TargetID = p.IDGen()
-			if err := p.Xref.Put(ctx, xk, XrefEntry{TargetID: x.TargetID}); err != nil {
-				return rep, fmt.Errorf("xref put %s: %w", spec.Entity, err)
-			}
+			reserve = append(reserve, XrefItem{r.Key, XrefEntry{TargetID: x.TargetID}})
 		}
 		entry := LedgerEntry{r.Key, x.TargetID, idemKey, hash, action}
 		if spec.DryRun {
@@ -181,7 +189,10 @@ func (p *Pipeline) Run(ctx context.Context, spec RunSpec) (Report, error) {
 			rep.Ledger = append(rep.Ledger, entry)
 			continue
 		}
-		todo = append(todo, pending{entry, LoadItem{x.TargetID, r.Key, idemKey, out}, xk, action})
+		todo = append(todo, pending{entry, LoadItem{x.TargetID, r.Key, idemKey, r.Fields}, r.Key, action})
+	}
+	if err := p.putXrefs(ctx, spec, reserve); err != nil {
+		return rep, err
 	}
 	failed, err := p.load(ctx, spec, &rep, todo)
 	if err != nil {
@@ -197,7 +208,7 @@ func (p *Pipeline) Run(ctx context.Context, spec RunSpec) (Report, error) {
 		if err != nil {
 			return rep, fmt.Errorf("read target %s: %w", spec.Entity, err)
 		}
-		rec := Reconcile(expected, target, reconcileSample, reconcileSeed)
+		rec := Reconcile(mapped, onlyKeys(target, mapped), reconcileSample, reconcileSeed)
 		rep.Reconciliation = &rec
 		failed = failed || !rec.OK()
 	}
@@ -210,6 +221,48 @@ func (p *Pipeline) Run(ctx context.Context, spec RunSpec) (Report, error) {
 		rep.Status = StatusSucceeded
 	}
 	return rep, nil
+}
+
+func (p *Pipeline) knownXrefs(ctx context.Context, spec RunSpec, rows []Record) (map[string]XrefEntry, error) {
+	known := make(map[string]XrefEntry, len(rows))
+	for start := 0; start < len(rows); start += MaxBatch {
+		batch := rows[start:min(start+MaxBatch, len(rows))]
+		keys := make([]string, len(batch))
+		for i, r := range batch {
+			keys[i] = r.Key
+		}
+		got, err := p.Xref.GetMany(ctx, spec.SourceSystem, spec.Entity, keys)
+		if err != nil {
+			return nil, fmt.Errorf("xref get %s: %w", spec.Entity, err)
+		}
+		for k, e := range got {
+			known[k] = e
+		}
+	}
+	return known, nil
+}
+
+func (p *Pipeline) putXrefs(ctx context.Context, spec RunSpec, items []XrefItem) error {
+	for start := 0; start < len(items); start += MaxBatch {
+		if err := p.Xref.PutMany(ctx, spec.SourceSystem, spec.Entity, items[start:min(start+MaxBatch, len(items))]); err != nil {
+			return fmt.Errorf("xref put %s: %w", spec.Entity, err)
+		}
+	}
+	return nil
+}
+
+func onlyKeys(target, expected []Record) []Record {
+	want := make(map[string]bool, len(expected))
+	for _, r := range expected {
+		want[r.Key] = true
+	}
+	scoped := make([]Record, 0, len(expected))
+	for _, r := range target {
+		if want[r.Key] {
+			scoped = append(scoped, r)
+		}
+	}
+	return scoped
 }
 
 func (p *Pipeline) Rerun(ctx context.Context, spec RunSpec, prev Report) (Report, error) {
@@ -247,16 +300,18 @@ func (p *Pipeline) load(ctx context.Context, spec RunSpec, rep *Report, todo []p
 				results[i].Code = CodeLoadFailed
 			}
 		}
+		var loaded []XrefItem
 		for i, b := range batch {
 			if code := results[i].Code; code != "" {
 				rep.Rejects = append(rep.Rejects, RowReject{b.entry.SourceKey, []Reject{{"", code, "target did not accept the row"}}})
 				continue
 			}
-			if err := p.Xref.Put(ctx, b.key, XrefEntry{b.entry.TargetID, b.entry.ContentHash}); err != nil {
-				return failed, fmt.Errorf("xref put %s: %w", spec.Entity, err)
-			}
+			loaded = append(loaded, XrefItem{b.key, XrefEntry{b.entry.TargetID, b.entry.ContentHash}})
 			rep.count(b.action)
 			rep.Ledger = append(rep.Ledger, b.entry)
+		}
+		if err := p.putXrefs(ctx, spec, loaded); err != nil {
+			return failed, err
 		}
 	}
 	return failed, nil
@@ -292,6 +347,25 @@ func (m *MemXref) Get(_ context.Context, k XrefKey) (XrefEntry, bool, error) {
 func (m *MemXref) Put(_ context.Context, k XrefKey, e XrefEntry) error {
 	m.Puts++
 	m.Entries[k] = e
+	return nil
+}
+
+func (m *MemXref) GetMany(_ context.Context, sourceSystem, entity string, sourceKeys []string) (map[string]XrefEntry, error) {
+	out := make(map[string]XrefEntry, len(sourceKeys))
+	for _, k := range sourceKeys {
+		if e, ok := m.Entries[XrefKey{sourceSystem, entity, k}]; ok {
+			out[k] = e
+		}
+	}
+	return out, nil
+}
+
+func (m *MemXref) PutMany(ctx context.Context, sourceSystem, entity string, items []XrefItem) error {
+	for _, it := range items {
+		if err := m.Put(ctx, XrefKey{sourceSystem, entity, it.SourceKey}, it.Entry); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
