@@ -366,3 +366,74 @@ func TestListReceiptsKeysetFiltersAndLegalEntityScope(t *testing.T) {
 		t.Fatalf("page2=%+v err=%v, want the remaining two starting at %s", page2, err, page1[2].ID)
 	}
 }
+
+func TestDirectReceiptRegistersInOneTx(t *testing.T) {
+	st := setup(t).st
+	p := principal(1)
+	r, err := st.DirectReceipt(ctxOf(p), arrival(p, "PS-D1"), registerWith("S1", "S2", "S3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Number != "RCV-00000001" || r.State != domain.Registered || len(r.Lines[0].Serials) != 3 || !r.Lines[0].Qty.Equal(decimal.NewFromInt(3)) {
+		t.Fatalf("direct receipt not registered in one step: %+v", r)
+	}
+	next, err := st.CreateArrival(ctxOf(p), arrival(p, "PS-D2"))
+	if err != nil || next.Number != "RCV-00000002" {
+		t.Fatalf("next number=%q err=%v, want RCV-00000002", next.Number, err)
+	}
+}
+
+func TestDirectReceiptFailuresLeaveNothingAndBurnNoNumber(t *testing.T) {
+	e := setup(t)
+	st, count := e.st, e.count
+	p := principal(1)
+	registered(t, st, p, "PS-0", "S9")
+	before := count(p, "receiving_receipt")
+	rejected := &domain.Error{Code: domain.CodeOverDelivery, Detail: "too many"}
+	cases := []struct {
+		name string
+		fn   store.RegisterFunc
+		code string
+	}{
+		{"duplicate serial in request", registerWith("S1", "S1", "S2"), domain.CodeDuplicateSerial},
+		{"serial already recorded", registerWith("S9"), domain.CodeDuplicateSerial},
+		{"register func rejects", func(store.Receipt, map[domain.SerialKey]struct{}) ([]store.Line, error) { return nil, rejected }, domain.CodeOverDelivery},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := st.DirectReceipt(ctxOf(p), arrival(p, "PS-F"), c.fn)
+			var de *domain.Error
+			if !errors.As(err, &de) || de.Code != c.code {
+				t.Fatalf("err=%v, want %s", err, c.code)
+			}
+			if got := count(p, "receiving_receipt"); got != before {
+				t.Fatalf("receipt rows=%d, want %d", got, before)
+			}
+		})
+	}
+	r, err := st.CreateArrival(ctxOf(p), arrival(p, "PS-NEXT"))
+	if err != nil || r.Number != "RCV-00000002" {
+		t.Fatalf("number=%q err=%v, want RCV-00000002 (failed direct receipts burn no number)", r.Number, err)
+	}
+}
+
+func TestDirectReceiptDuplicatePackingSlip(t *testing.T) {
+	st := setup(t).st
+	p := principal(1)
+	first, err := st.DirectReceipt(ctxOf(p), arrival(p, "PS-1"), registerWith("S1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.DirectReceipt(ctxOf(p), arrival(p, "PS-1"), registerWith("S2"))
+	var dup *store.DuplicatePackingSlipError
+	if !errors.As(err, &dup) || dup.ReceiptNumber != first.Number {
+		t.Fatalf("err=%v, want DuplicatePackingSlipError naming %s", err, first.Number)
+	}
+}
+
+func TestDirectReceiptRequiresPrincipal(t *testing.T) {
+	st := setup(t).st
+	if _, err := st.DirectReceipt(context.Background(), arrival(principal(1), "PS-1"), registerWith("S1")); err == nil {
+		t.Fatal("want error without a principal")
+	}
+}
