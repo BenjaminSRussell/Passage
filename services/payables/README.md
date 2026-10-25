@@ -30,6 +30,8 @@ The preview settles one credit against open invoices per PRD FR-19.2: priority o
 |---|---|---|
 | PAY-0001 | 400 | invalid field: date, decimal string, currency, discount, duplicate or empty invoices |
 | PAY-0002 | 422 | rate missing for a foreign currency, or not 1 for the accounting currency |
+| AP-RUN-002 | n/a | bank identifier failed validation (`iban`, `bic` or `aba` named in the detail); domain code, not yet reachable over HTTP |
+| AP-FIL-001 | n/a | payment name has a character outside the profile charset after transliteration; domain code, not yet reachable over HTTP |
 | COM-0001 | 400 | malformed body, unknown field or wrong JSON type |
 | COM-0500 | 500 | internal error, detail hidden |
 | AUTH-0001 | 401 | missing or malformed tenant (kernel header middleware) |

@@ -5,12 +5,24 @@ Slice A ships the settlement engine, the preview endpoint, the service skeleton 
 | Deliverable or AC | Status | Reason |
 |---|---|---|
 | AC1: 300 settlement scenarios | built | `TestSettle_Grid300` checks 300 generated scenarios against an exact-rational oracle; no accountant-reviewed fixtures exist |
-| AC2: pain.001 XSD validation | slice B | line budget; needs a generator, vendored XSD and validator |
+| AC2: pain.001 XSD validation | slice 2b | needs the pain.001.001.09 generator, vendored XSD and `xmllint` contract test; this slice delivers only the bank profile and charset inputs |
 | AC3: aging reconciles to AP control | slice C | needs migrations, a store and the PSG-18 vendor projection |
 | AC4: idempotent payment run (Temporal) | slice D | needs the run workflow, a store and a Temporal SDK decision |
 | Deliverable 1: store, commit, aging, withholding | partial | preview computes settlement; persistence is slice C; withholding engine is wave 13 |
 | Deliverable 2, Deliverables 5 to 8, Deliverable 9: proposals, holds, approvals, prepayments, reversal, prenotes, calendars, confirmations, installments, mandates, bank account change | slice C and D | need the store, the wave 4 workflow and wave 7 calendars and terms |
-| Deliverables 3, 4: ACH/SEPA pain.001, checks, card, wire, positive pay, advice, pain.002 | slice B | line budget |
+| Deliverable 3 item 1 and AC1: IBAN, BIC, ABA validators, `PaymentMethod`, `BankProfile` | built | `internal/domain/bank.go`; `CARD` is accepted as a type with no media format; domain codes `AP-RUN-002` and `AP-FIL-001` are not yet mapped to HTTP |
+| AC3: charset transliteration (`Transliterate`) | built | `internal/domain/translit.go`, hand table; unmapped letters reject with `AP-FIL-001` instead of being dropped |
+| pain.001.001.09 generator, XSD vendoring (pain.001 and pain.002) and conformance test | slice 2b | ticket items 2 and 3; CI image `xmllint` availability is unconfirmed and CI configuration is outside the owned paths |
+| NACHA ACH generator with prenotes, positive pay CSV | slice 2c | ticket items 4 and 5 |
+| pain.002 and NACHA return parsing, payment and prenote state machines (AC01 `BANK_DETAILS` hold, AP-STS-002) | slice 2d | ticket item 6 |
+| `POST /v1/payables/payment-files:preview`, `POST /v1/payables/payments/status:parse`, OpenAPI, `problemSlugs` and status mapping, metrics | slice 2e | ticket item 7 |
+| Check PDF with MICR (E-13B) line, check lots, amount in words | deferred | needs a PDF renderer decision and check stock layouts |
+| Payment advice PDF and email or portal delivery (FR-19.12) | deferred | needs wave 15 templates and the wave 20 portal |
+| Bank test harness ACCP for 50 SEPA payments | external | needs a sandbox bank |
+| `pain001Version` `001.001.03` profile override | deferred | rejected with "not supported in this slice" |
+| Card provider adapter | deferred | PRD open question 3: no provider adapter until v1.x |
+| Object-store `passage-payment-files` bucket and `GET /payment-files/{id}/content` | deferred | needs the store slice and a wave 1 deploy handoff |
+| `POST /payments/status:ingest` persistence and DLQ | deferred | needs the store slice |
 | Ledger posting via `ledger.Post` | slice D | key `post:payables:settlement:<id>:settle`; the event context name (`payables` vs `procurement`) must be settled first |
 | Tables, RLS, outbox events, Idempotency-Key | slice C | the preview writes nothing |
 | JWT validation, step-up MFA, OPA | wave 2 | the gateway validates tokens; services trust tenant headers |
