@@ -1,4 +1,4 @@
-# Not implemented in PSG-6 slice 12
+# Not implemented in PSG-6 slice 13
 
 | Deliverable or AC | Status | Reason |
 |---|---|---|
@@ -29,7 +29,8 @@
 | Location PATCH (name, type, status) and the location.updated event | later slice of PSG-6 | line budget; locations are create, list and read only in PSG-611 |
 | Refuse moving a warehouse to another site once inventory transactions reference it (FR-6.5) | not built | inventory transactions are wave 16; it needs a reference-count read from that wave |
 | handoff delivered: services/product/NOT-IMPLEMENTED.md row "Org site/warehouse membership check" | done in PSG-610 | GET /v1/org/sites/{id} and GET /v1/org/warehouses/{id} (with siteId and legalEntityId) let product check a site or warehouse id; wiring the product client is wave 8's own work |
-| Address edit as copy-on-write versions (PATCH closes the current version, inserts the next), GET by version id, list addresses by owner | later slice of PSG-6 | line budget; PSG-612 builds create and read of the first version |
+| Future-dated address versions (validFrom after today) and as-of address reads | later slice of PSG-6 | PSG-613 limits a revision's validFrom to between the current version's validFrom and today, so the open version is always the one in force |
+| Purpose history per address version | not built | address_purpose is keyed by address_id; a closed version reports the address's current purposes, and each version's purposes are recorded in its address.changed event |
 | GIN trigram index on postal_address.formatted and address search | later slice of PSG-6 | needs the pg_trgm extension in the org database |
 | Address-validation adapter (FR-6.13 normalize, suggest) and ORG_GEOCODER configuration | later slice of PSG-6 | only the null geocoder exists; configuration waits for a real adapter |
 | Fixture testdata/addresses-7-countries.csv (140 valid, 70 invalid) | later slice of PSG-6 | data file gets its own slice; PSG-612 covers the rules with table-driven cases |
