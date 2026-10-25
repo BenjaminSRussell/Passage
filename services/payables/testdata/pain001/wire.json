@@ -1,0 +1,58 @@
+{
+  "fileNumber": "WIRE-F1",
+  "created": "2026-10-25T09:30:00Z",
+  "debtor": {
+    "name": "Passage Holding Inc",
+    "address": {
+      "streetName": "1 Market Street",
+      "postCode": "94105",
+      "townName": "San Francisco",
+      "country": "US"
+    }
+  },
+  "debtorAccount": {
+    "otherId": "000123456789"
+  },
+  "debtorBic": "CHASUS33",
+  "profile": {
+    "variant": "US",
+    "overrides": {
+      "charset": "ascii",
+      "structured_remittance": true,
+      "initiating_party_id": "PASSAGEUS01"
+    }
+  },
+  "payments": [
+    {
+      "method": {
+        "type": "WIRE",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-02",
+      "number": "WIRE-001",
+      "amount": "1250000.00",
+      "currency": "USD",
+      "creditor": {
+        "name": "Acme Supply Co",
+        "address": {
+          "streetName": "100 Main Street",
+          "postCode": "10001",
+          "townName": "New York",
+          "country": "US"
+        },
+        "otherId": "000111222333",
+        "routingNumber": "021000021"
+      },
+      "invoices": [
+        {
+          "number": "WIRE-INV-1",
+          "amount": "750000.00"
+        },
+        {
+          "number": "WIRE-INV-2",
+          "amount": "500000.00"
+        }
+      ]
+    }
+  ]
+}

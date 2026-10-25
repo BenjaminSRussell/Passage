@@ -1,0 +1,134 @@
+{
+  "fileNumber": "US-F1",
+  "created": "2026-10-25T09:30:00Z",
+  "debtor": {
+    "name": "Passage Holding Inc",
+    "address": {
+      "streetName": "1 Market Street",
+      "postCode": "94105",
+      "townName": "San Francisco",
+      "country": "US"
+    }
+  },
+  "debtorAccount": {
+    "otherId": "000123456789"
+  },
+  "debtorBic": "CHASUS33",
+  "profile": {
+    "variant": "US",
+    "overrides": {
+      "charset": "ascii",
+      "initiating_party_id": "PASSAGEUS01"
+    }
+  },
+  "payments": [
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-02",
+      "number": "US-001",
+      "amount": "1500",
+      "currency": "USD",
+      "creditor": {
+        "name": "Acme Supply Co",
+        "address": {
+          "streetName": "100 Main Street",
+          "postCode": "10001",
+          "townName": "New York",
+          "country": "US"
+        },
+        "otherId": "000111222333",
+        "routingNumber": "021000021"
+      },
+      "invoices": [
+        {
+          "number": "US-INV-1",
+          "amount": "1500"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-02",
+      "number": "US-002",
+      "amount": "1523.45",
+      "currency": "USD",
+      "creditor": {
+        "name": "Example Widgets LLC",
+        "address": {
+          "streetName": "200 Main Street",
+          "postCode": "10001",
+          "townName": "New York",
+          "country": "US"
+        },
+        "otherId": "000444555666",
+        "routingNumber": "011000015"
+      },
+      "invoices": [
+        {
+          "number": "US-INV-2",
+          "amount": "1523.45"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-03",
+      "number": "US-003",
+      "amount": "1546.9",
+      "currency": "USD",
+      "creditor": {
+        "name": "Sample Logistics Inc",
+        "address": {
+          "streetName": "300 Main Street",
+          "postCode": "10001",
+          "townName": "New York",
+          "country": "US"
+        },
+        "otherId": "000777888999",
+        "routingNumber": "021000021"
+      },
+      "invoices": [
+        {
+          "number": "US-INV-3",
+          "amount": "1546.9"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-03",
+      "number": "US-004",
+      "amount": "1570.35",
+      "currency": "USD",
+      "creditor": {
+        "name": "Demo Hardware Corp",
+        "address": {
+          "streetName": "400 Main Street",
+          "postCode": "10001",
+          "townName": "New York",
+          "country": "US"
+        },
+        "otherId": "000123123123",
+        "routingNumber": "011000015"
+      },
+      "invoices": [
+        {
+          "number": "US-INV-4",
+          "amount": "1570.35"
+        }
+      ]
+    }
+  ]
+}

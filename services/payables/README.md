@@ -10,6 +10,10 @@ go vet ./... && go test ./...
 DATABASE_URL=postgres://... go run ./cmd/payables
 ```
 
+## Test data
+
+`testdata/xsd/` holds the official pain.001.001.09 and pain.002.001.10 schemas, vendored verbatim (`SOURCE.md` records origin, date and sha256; never edit them). `testdata/pain001/` holds one JSON input and one `.golden.xml` per bank profile; `testdata/pain002/` holds hand-written status reports. Regenerate the pain.001 goldens with `go test ./internal/domain -run Golden -update`; never edit a golden by hand. The XSD contract tests need `xmllint` (libxml2-utils) on `PATH` and skip with an explicit message when it is absent.
+
 ## Configuration
 
 | Variable | Meaning |
@@ -32,6 +36,9 @@ The preview settles one credit against open invoices per PRD FR-19.2: priority o
 | PAY-0002 | 422 | rate missing for a foreign currency, or not 1 for the accounting currency |
 | AP-RUN-002 | n/a | bank identifier failed validation (`iban`, `bic` or `aba` named in the detail); domain code, not yet reachable over HTTP |
 | AP-FIL-001 | n/a | payment name has a character outside the profile charset after transliteration; domain code, not yet reachable over HTTP |
+| AP-FIL-002 | n/a | generated pain.001 failed XSD validation (`xmllint` line mapped by `ParseXmllintLine`); domain code, not yet reachable over HTTP |
+| AP-STS-001 | n/a | bank rejected a payment in a pain.002 report; domain code, not yet reachable over HTTP |
+| AP-STS-002 | n/a | pain.002 names a message or end-to-end id the caller does not know; domain code, not yet reachable over HTTP |
 | COM-0001 | 400 | malformed body, unknown field or wrong JSON type |
 | COM-0500 | 500 | internal error, detail hidden |
 | AUTH-0001 | 401 | missing or malformed tenant (kernel header middleware) |

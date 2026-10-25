@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:pain.001.001.09">
+  <CstmrCdtTrfInitn>
+    <GrpHdr>
+      <MsgId>WIRE-F1</MsgId>
+      <CreDtTm>2026-10-25T09:30:00Z</CreDtTm>
+      <NbOfTxs>1</NbOfTxs>
+      <CtrlSum>1250000.00</CtrlSum>
+      <InitgPty>
+        <Nm>Passage Holding Inc</Nm>
+        <Id>
+          <OrgId>
+            <Othr>
+              <Id>PASSAGEUS01</Id>
+            </Othr>
+          </OrgId>
+        </Id>
+      </InitgPty>
+    </GrpHdr>
+    <PmtInf>
+      <PmtInfId>WIRE-F1-1</PmtInfId>
+      <PmtMtd>TRF</PmtMtd>
+      <BtchBookg>true</BtchBookg>
+      <NbOfTxs>1</NbOfTxs>
+      <CtrlSum>1250000.00</CtrlSum>
+      <PmtTpInf>
+        <SvcLvl>
+          <Cd>URGP</Cd>
+        </SvcLvl>
+      </PmtTpInf>
+      <ReqdExctnDt>
+        <Dt>2026-11-02</Dt>
+      </ReqdExctnDt>
+      <Dbtr>
+        <Nm>Passage Holding Inc</Nm>
+        <PstlAdr>
+          <StrtNm>1 Market Street</StrtNm>
+          <PstCd>94105</PstCd>
+          <TwnNm>San Francisco</TwnNm>
+          <Ctry>US</Ctry>
+        </PstlAdr>
+      </Dbtr>
+      <DbtrAcct>
+        <Id>
+          <Othr>
+            <Id>000123456789</Id>
+          </Othr>
+        </Id>
+      </DbtrAcct>
+      <DbtrAgt>
+        <FinInstnId>
+          <BICFI>CHASUS33</BICFI>
+        </FinInstnId>
+      </DbtrAgt>
+      <ChrgBr>SHAR</ChrgBr>
+      <CdtTrfTxInf>
+        <PmtId>
+          <InstrId>WIRE-001</InstrId>
+          <EndToEndId>WIRE-001</EndToEndId>
+        </PmtId>
+        <Amt>
+          <InstdAmt Ccy="USD">1250000.00</InstdAmt>
+        </Amt>
+        <CdtrAgt>
+          <FinInstnId>
+            <ClrSysMmbId>
+              <ClrSysId>
+                <Cd>USABA</Cd>
+              </ClrSysId>
+              <MmbId>021000021</MmbId>
+            </ClrSysMmbId>
+          </FinInstnId>
+        </CdtrAgt>
+        <Cdtr>
+          <Nm>Acme Supply Co</Nm>
+          <PstlAdr>
+            <Ctry>US</Ctry>
+          </PstlAdr>
+        </Cdtr>
+        <CdtrAcct>
+          <Id>
+            <Othr>
+              <Id>000111222333</Id>
+            </Othr>
+          </Id>
+        </CdtrAcct>
+        <Purp>
+          <Cd>SUPP</Cd>
+        </Purp>
+        <RmtInf>
+          <Strd>
+            <RfrdDocInf>
+              <Nb>WIRE-INV-1</Nb>
+            </RfrdDocInf>
+            <RfrdDocAmt>
+              <RmtdAmt Ccy="USD">750000.00</RmtdAmt>
+            </RfrdDocAmt>
+          </Strd>
+          <Strd>
+            <RfrdDocInf>
+              <Nb>WIRE-INV-2</Nb>
+            </RfrdDocInf>
+            <RfrdDocAmt>
+              <RmtdAmt Ccy="USD">500000.00</RmtdAmt>
+            </RfrdDocAmt>
+          </Strd>
+        </RmtInf>
+      </CdtTrfTxInf>
+    </PmtInf>
+  </CstmrCdtTrfInitn>
+</Document>

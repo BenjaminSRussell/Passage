@@ -1,0 +1,1776 @@
+{
+  "fileNumber": "SEPA50-F1",
+  "created": "2026-10-25T09:30:00Z",
+  "debtor": {
+    "name": "Passage Holding GmbH",
+    "address": {
+      "streetName": "Friedrichstraße 100",
+      "postCode": "10117",
+      "townName": "Berlin",
+      "country": "DE"
+    }
+  },
+  "debtorAccount": {
+    "iban": "DE89370400440532013000"
+  },
+  "debtorBic": "COBADEFFXXX",
+  "profile": {
+    "variant": "SEPA",
+    "overrides": {
+      "bic_required": true,
+      "max_ustrd_length": 40
+    }
+  },
+  "payments": [
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-02",
+      "number": "SEPA-0001",
+      "amount": "1000",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Müller Straße GmbH",
+        "address": {
+          "streetName": "Hauptstraße 1",
+          "postCode": "10115",
+          "townName": "Berlin",
+          "country": "DE"
+        },
+        "iban": "DE63111111111111111111",
+        "bic": "COBADEFFXXX"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026000-DE",
+          "amount": "200.00"
+        },
+        {
+          "number": "INV-2026001-DE",
+          "amount": "200.00"
+        },
+        {
+          "number": "INV-2026002-DE",
+          "amount": "200.00"
+        },
+        {
+          "number": "INV-2026003-DE",
+          "amount": "200.00"
+        },
+        {
+          "number": "INV-2026004-DE",
+          "amount": "200.00"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-02",
+      "number": "SEPA-0002",
+      "amount": "1079.32",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Société Générale Équipements",
+        "address": {
+          "streetName": "12 Rue de Rivoli",
+          "postCode": "75001",
+          "townName": "Paris",
+          "country": "FR"
+        },
+        "iban": "FR3722222222222222222222222",
+        "bic": "BNPAFRPPXXX"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026010-FR",
+          "amount": "539.66"
+        },
+        {
+          "number": "INV-2026011-FR",
+          "amount": "539.66"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-02",
+      "number": "SEPA-0003",
+      "amount": "1158.64",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Øresund Ærø Åkerström AB",
+        "address": {
+          "streetName": "Storgatan 5",
+          "postCode": "11122",
+          "townName": "Stockholm",
+          "country": "SE"
+        },
+        "iban": "SE2933333333333333333333",
+        "bic": "ESSESESS"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026020-SE",
+          "amount": "386.21"
+        },
+        {
+          "number": "INV-2026021-SE",
+          "amount": "386.21"
+        },
+        {
+          "number": "INV-2026022-SE",
+          "amount": "386.22"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-02",
+      "number": "SEPA-0004",
+      "amount": "1237.96",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Fábrica Señor Núñez S.L.",
+        "address": {
+          "streetName": "Calle Mayor 7",
+          "postCode": "28013",
+          "townName": "Madrid",
+          "country": "ES"
+        },
+        "iban": "ES9144444444444444444444",
+        "bic": "BSCHESMM"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026030-ES",
+          "amount": "309.49"
+        },
+        {
+          "number": "INV-2026031-ES",
+          "amount": "309.49"
+        },
+        {
+          "number": "INV-2026032-ES",
+          "amount": "309.49"
+        },
+        {
+          "number": "INV-2026033-ES",
+          "amount": "309.49"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-02",
+      "number": "SEPA-0005",
+      "amount": "1317.28",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Łódź Zakłady Żółć Sp. z o.o.",
+        "address": {
+          "streetName": "ul. Piotrkowska 10",
+          "postCode": "90-001",
+          "townName": "Łódź",
+          "country": "PL"
+        },
+        "iban": "PL58555555555555555555555555",
+        "bic": "PKOPPLPW"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026040-PL",
+          "amount": "1317.28"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-02",
+      "number": "SEPA-0006",
+      "amount": "1396.6",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Example Trading BV",
+        "address": {
+          "streetName": "Kalverstraat 3",
+          "postCode": "1012NX",
+          "townName": "Amsterdam",
+          "country": "NL"
+        },
+        "iban": "NL5666666666666666",
+        "bic": "INGBNL2A"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026050-NL",
+          "amount": "279.32"
+        },
+        {
+          "number": "INV-2026051-NL",
+          "amount": "279.32"
+        },
+        {
+          "number": "INV-2026052-NL",
+          "amount": "279.32"
+        },
+        {
+          "number": "INV-2026053-NL",
+          "amount": "279.32"
+        },
+        {
+          "number": "INV-2026054-NL",
+          "amount": "279.32"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-02",
+      "number": "SEPA-0007",
+      "amount": "1475.92",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Sample Supplies NV",
+        "address": {
+          "streetName": "Rue Neuve 2",
+          "postCode": "1000",
+          "townName": "Brussels",
+          "country": "BE"
+        },
+        "iban": "BE92777777777777",
+        "bic": "GEBABEBB"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026060-BE",
+          "amount": "491.97"
+        },
+        {
+          "number": "INV-2026061-BE",
+          "amount": "491.97"
+        },
+        {
+          "number": "INV-2026062-BE",
+          "amount": "491.98"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-02",
+      "number": "SEPA-0008",
+      "amount": "1555.24",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Demo Parts GmbH",
+        "address": {
+          "streetName": "Graben 4",
+          "postCode": "1010",
+          "townName": "Vienna",
+          "country": "AT"
+        },
+        "iban": "AT098888888888888888",
+        "bic": "BKAUATWW"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026070-AT",
+          "amount": "388.81"
+        },
+        {
+          "number": "INV-2026071-AT",
+          "amount": "388.81"
+        },
+        {
+          "number": "INV-2026072-AT",
+          "amount": "388.81"
+        },
+        {
+          "number": "INV-2026073-AT",
+          "amount": "388.81"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-02",
+      "number": "SEPA-0009",
+      "amount": "1634.56",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Placeholder Metals SpA",
+        "address": {
+          "streetName": "Via Roma 9",
+          "postCode": "00184",
+          "townName": "Rome",
+          "country": "IT"
+        },
+        "iban": "IT1399999999999999999999999",
+        "bic": "BCITITMM"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026080-IT",
+          "amount": "1634.56"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-02",
+      "number": "SEPA-0010",
+      "amount": "1713.88",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Acme Nordic Oy",
+        "address": {
+          "streetName": "Esplanadi 6",
+          "postCode": "00100",
+          "townName": "Helsinki",
+          "country": "FI"
+        },
+        "iban": "FI6710101010101010",
+        "bic": "NDEAFIHH"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026090-FI",
+          "amount": "856.94"
+        },
+        {
+          "number": "INV-2026091-FI",
+          "amount": "856.94"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-02",
+      "number": "SEPA-0011",
+      "amount": "1793.2",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Test Freight ApS",
+        "address": {
+          "streetName": "Nyhavn 8",
+          "postCode": "1051",
+          "townName": "Copenhagen",
+          "country": "DK"
+        },
+        "iban": "DK5611111111111111",
+        "bic": "DABADKKK"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026100-DK",
+          "amount": "358.64"
+        },
+        {
+          "number": "INV-2026101-DK",
+          "amount": "358.64"
+        },
+        {
+          "number": "INV-2026102-DK",
+          "amount": "358.64"
+        },
+        {
+          "number": "INV-2026103-DK",
+          "amount": "358.64"
+        },
+        {
+          "number": "INV-2026104-DK",
+          "amount": "358.64"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-02",
+      "number": "SEPA-0012",
+      "amount": "1872.52",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Fixture Tools AG",
+        "address": {
+          "streetName": "Königsallee 11",
+          "postCode": "40212",
+          "townName": "Düsseldorf",
+          "country": "DE"
+        },
+        "iban": "DE39121212121212121212",
+        "bic": "DEUTDEDDXXX"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026110-DE",
+          "amount": "468.13"
+        },
+        {
+          "number": "INV-2026111-DE",
+          "amount": "468.13"
+        },
+        {
+          "number": "INV-2026112-DE",
+          "amount": "468.13"
+        },
+        {
+          "number": "INV-2026113-DE",
+          "amount": "468.13"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-02",
+      "number": "SEPA-0013",
+      "amount": "1051.84",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Müller Straße GmbH",
+        "address": {
+          "streetName": "Hauptstraße 1",
+          "postCode": "10115",
+          "townName": "Berlin",
+          "country": "DE"
+        },
+        "iban": "DE63111111111111111111",
+        "bic": "COBADEFFXXX"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026120-DE",
+          "amount": "1051.84"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-02",
+      "number": "SEPA-0014",
+      "amount": "1131.16",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Société Générale Équipements",
+        "address": {
+          "streetName": "12 Rue de Rivoli",
+          "postCode": "75001",
+          "townName": "Paris",
+          "country": "FR"
+        },
+        "iban": "FR3722222222222222222222222",
+        "bic": "BNPAFRPPXXX"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026130-FR",
+          "amount": "565.58"
+        },
+        {
+          "number": "INV-2026131-FR",
+          "amount": "565.58"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-02",
+      "number": "SEPA-0015",
+      "amount": "1210.48",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Øresund Ærø Åkerström AB",
+        "address": {
+          "streetName": "Storgatan 5",
+          "postCode": "11122",
+          "townName": "Stockholm",
+          "country": "SE"
+        },
+        "iban": "SE2933333333333333333333",
+        "bic": "ESSESESS"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026140-SE",
+          "amount": "403.49"
+        },
+        {
+          "number": "INV-2026141-SE",
+          "amount": "403.49"
+        },
+        {
+          "number": "INV-2026142-SE",
+          "amount": "403.50"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-02",
+      "number": "SEPA-0016",
+      "amount": "1289.8",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Fábrica Señor Núñez S.L.",
+        "address": {
+          "streetName": "Calle Mayor 7",
+          "postCode": "28013",
+          "townName": "Madrid",
+          "country": "ES"
+        },
+        "iban": "ES9144444444444444444444",
+        "bic": "BSCHESMM"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026150-ES",
+          "amount": "257.96"
+        },
+        {
+          "number": "INV-2026151-ES",
+          "amount": "257.96"
+        },
+        {
+          "number": "INV-2026152-ES",
+          "amount": "257.96"
+        },
+        {
+          "number": "INV-2026153-ES",
+          "amount": "257.96"
+        },
+        {
+          "number": "INV-2026154-ES",
+          "amount": "257.96"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-02",
+      "number": "SEPA-0017",
+      "amount": "1369.12",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Łódź Zakłady Żółć Sp. z o.o.",
+        "address": {
+          "streetName": "ul. Piotrkowska 10",
+          "postCode": "90-001",
+          "townName": "Łódź",
+          "country": "PL"
+        },
+        "iban": "PL58555555555555555555555555",
+        "bic": "PKOPPLPW"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026160-PL",
+          "amount": "1369.12"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-02",
+      "number": "SEPA-0018",
+      "amount": "1448.44",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Example Trading BV",
+        "address": {
+          "streetName": "Kalverstraat 3",
+          "postCode": "1012NX",
+          "townName": "Amsterdam",
+          "country": "NL"
+        },
+        "iban": "NL5666666666666666",
+        "bic": "INGBNL2A"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026170-NL",
+          "amount": "724.22"
+        },
+        {
+          "number": "INV-2026171-NL",
+          "amount": "724.22"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-02",
+      "number": "SEPA-0019",
+      "amount": "1527.76",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Sample Supplies NV",
+        "address": {
+          "streetName": "Rue Neuve 2",
+          "postCode": "1000",
+          "townName": "Brussels",
+          "country": "BE"
+        },
+        "iban": "BE92777777777777",
+        "bic": "GEBABEBB"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026180-BE",
+          "amount": "509.25"
+        },
+        {
+          "number": "INV-2026181-BE",
+          "amount": "509.25"
+        },
+        {
+          "number": "INV-2026182-BE",
+          "amount": "509.26"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-02",
+      "number": "SEPA-0020",
+      "amount": "1607.08",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Demo Parts GmbH",
+        "address": {
+          "streetName": "Graben 4",
+          "postCode": "1010",
+          "townName": "Vienna",
+          "country": "AT"
+        },
+        "iban": "AT098888888888888888",
+        "bic": "BKAUATWW"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026190-AT",
+          "amount": "401.77"
+        },
+        {
+          "number": "INV-2026191-AT",
+          "amount": "401.77"
+        },
+        {
+          "number": "INV-2026192-AT",
+          "amount": "401.77"
+        },
+        {
+          "number": "INV-2026193-AT",
+          "amount": "401.77"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-03",
+      "number": "SEPA-0021",
+      "amount": "1686.4",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Placeholder Metals SpA",
+        "address": {
+          "streetName": "Via Roma 9",
+          "postCode": "00184",
+          "townName": "Rome",
+          "country": "IT"
+        },
+        "iban": "IT1399999999999999999999999",
+        "bic": "BCITITMM"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026200-IT",
+          "amount": "337.28"
+        },
+        {
+          "number": "INV-2026201-IT",
+          "amount": "337.28"
+        },
+        {
+          "number": "INV-2026202-IT",
+          "amount": "337.28"
+        },
+        {
+          "number": "INV-2026203-IT",
+          "amount": "337.28"
+        },
+        {
+          "number": "INV-2026204-IT",
+          "amount": "337.28"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-03",
+      "number": "SEPA-0022",
+      "amount": "1765.72",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Acme Nordic Oy",
+        "address": {
+          "streetName": "Esplanadi 6",
+          "postCode": "00100",
+          "townName": "Helsinki",
+          "country": "FI"
+        },
+        "iban": "FI6710101010101010",
+        "bic": "NDEAFIHH"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026210-FI",
+          "amount": "882.86"
+        },
+        {
+          "number": "INV-2026211-FI",
+          "amount": "882.86"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-03",
+      "number": "SEPA-0023",
+      "amount": "1845.04",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Test Freight ApS",
+        "address": {
+          "streetName": "Nyhavn 8",
+          "postCode": "1051",
+          "townName": "Copenhagen",
+          "country": "DK"
+        },
+        "iban": "DK5611111111111111",
+        "bic": "DABADKKK"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026220-DK",
+          "amount": "615.01"
+        },
+        {
+          "number": "INV-2026221-DK",
+          "amount": "615.01"
+        },
+        {
+          "number": "INV-2026222-DK",
+          "amount": "615.02"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-03",
+      "number": "SEPA-0024",
+      "amount": "1024.36",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Fixture Tools AG",
+        "address": {
+          "streetName": "Königsallee 11",
+          "postCode": "40212",
+          "townName": "Düsseldorf",
+          "country": "DE"
+        },
+        "iban": "DE39121212121212121212",
+        "bic": "DEUTDEDDXXX"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026230-DE",
+          "amount": "256.09"
+        },
+        {
+          "number": "INV-2026231-DE",
+          "amount": "256.09"
+        },
+        {
+          "number": "INV-2026232-DE",
+          "amount": "256.09"
+        },
+        {
+          "number": "INV-2026233-DE",
+          "amount": "256.09"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-03",
+      "number": "SEPA-0025",
+      "amount": "1103.68",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Müller Straße GmbH",
+        "address": {
+          "streetName": "Hauptstraße 1",
+          "postCode": "10115",
+          "townName": "Berlin",
+          "country": "DE"
+        },
+        "iban": "DE63111111111111111111",
+        "bic": "COBADEFFXXX"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026240-DE",
+          "amount": "1103.68"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-03",
+      "number": "SEPA-0026",
+      "amount": "1183",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Société Générale Équipements",
+        "address": {
+          "streetName": "12 Rue de Rivoli",
+          "postCode": "75001",
+          "townName": "Paris",
+          "country": "FR"
+        },
+        "iban": "FR3722222222222222222222222",
+        "bic": "BNPAFRPPXXX"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026250-FR",
+          "amount": "236.60"
+        },
+        {
+          "number": "INV-2026251-FR",
+          "amount": "236.60"
+        },
+        {
+          "number": "INV-2026252-FR",
+          "amount": "236.60"
+        },
+        {
+          "number": "INV-2026253-FR",
+          "amount": "236.60"
+        },
+        {
+          "number": "INV-2026254-FR",
+          "amount": "236.60"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-03",
+      "number": "SEPA-0027",
+      "amount": "1262.32",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Øresund Ærø Åkerström AB",
+        "address": {
+          "streetName": "Storgatan 5",
+          "postCode": "11122",
+          "townName": "Stockholm",
+          "country": "SE"
+        },
+        "iban": "SE2933333333333333333333",
+        "bic": "ESSESESS"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026260-SE",
+          "amount": "420.77"
+        },
+        {
+          "number": "INV-2026261-SE",
+          "amount": "420.77"
+        },
+        {
+          "number": "INV-2026262-SE",
+          "amount": "420.78"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-03",
+      "number": "SEPA-0028",
+      "amount": "1341.64",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Fábrica Señor Núñez S.L.",
+        "address": {
+          "streetName": "Calle Mayor 7",
+          "postCode": "28013",
+          "townName": "Madrid",
+          "country": "ES"
+        },
+        "iban": "ES9144444444444444444444",
+        "bic": "BSCHESMM"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026270-ES",
+          "amount": "335.41"
+        },
+        {
+          "number": "INV-2026271-ES",
+          "amount": "335.41"
+        },
+        {
+          "number": "INV-2026272-ES",
+          "amount": "335.41"
+        },
+        {
+          "number": "INV-2026273-ES",
+          "amount": "335.41"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-03",
+      "number": "SEPA-0029",
+      "amount": "1420.96",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Łódź Zakłady Żółć Sp. z o.o.",
+        "address": {
+          "streetName": "ul. Piotrkowska 10",
+          "postCode": "90-001",
+          "townName": "Łódź",
+          "country": "PL"
+        },
+        "iban": "PL58555555555555555555555555",
+        "bic": "PKOPPLPW"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026280-PL",
+          "amount": "1420.96"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-03",
+      "number": "SEPA-0030",
+      "amount": "1500.28",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Example Trading BV",
+        "address": {
+          "streetName": "Kalverstraat 3",
+          "postCode": "1012NX",
+          "townName": "Amsterdam",
+          "country": "NL"
+        },
+        "iban": "NL5666666666666666",
+        "bic": "INGBNL2A"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026290-NL",
+          "amount": "750.14"
+        },
+        {
+          "number": "INV-2026291-NL",
+          "amount": "750.14"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-03",
+      "number": "SEPA-0031",
+      "amount": "1579.6",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Sample Supplies NV",
+        "address": {
+          "streetName": "Rue Neuve 2",
+          "postCode": "1000",
+          "townName": "Brussels",
+          "country": "BE"
+        },
+        "iban": "BE92777777777777",
+        "bic": "GEBABEBB"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026300-BE",
+          "amount": "315.92"
+        },
+        {
+          "number": "INV-2026301-BE",
+          "amount": "315.92"
+        },
+        {
+          "number": "INV-2026302-BE",
+          "amount": "315.92"
+        },
+        {
+          "number": "INV-2026303-BE",
+          "amount": "315.92"
+        },
+        {
+          "number": "INV-2026304-BE",
+          "amount": "315.92"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-03",
+      "number": "SEPA-0032",
+      "amount": "1658.92",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Demo Parts GmbH",
+        "address": {
+          "streetName": "Graben 4",
+          "postCode": "1010",
+          "townName": "Vienna",
+          "country": "AT"
+        },
+        "iban": "AT098888888888888888",
+        "bic": "BKAUATWW"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026310-AT",
+          "amount": "414.73"
+        },
+        {
+          "number": "INV-2026311-AT",
+          "amount": "414.73"
+        },
+        {
+          "number": "INV-2026312-AT",
+          "amount": "414.73"
+        },
+        {
+          "number": "INV-2026313-AT",
+          "amount": "414.73"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-03",
+      "number": "SEPA-0033",
+      "amount": "1738.24",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Placeholder Metals SpA",
+        "address": {
+          "streetName": "Via Roma 9",
+          "postCode": "00184",
+          "townName": "Rome",
+          "country": "IT"
+        },
+        "iban": "IT1399999999999999999999999",
+        "bic": "BCITITMM"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026320-IT",
+          "amount": "1738.24"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-03",
+      "number": "SEPA-0034",
+      "amount": "1817.56",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Acme Nordic Oy",
+        "address": {
+          "streetName": "Esplanadi 6",
+          "postCode": "00100",
+          "townName": "Helsinki",
+          "country": "FI"
+        },
+        "iban": "FI6710101010101010",
+        "bic": "NDEAFIHH"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026330-FI",
+          "amount": "908.78"
+        },
+        {
+          "number": "INV-2026331-FI",
+          "amount": "908.78"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-03",
+      "number": "SEPA-0035",
+      "amount": "1896.88",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Test Freight ApS",
+        "address": {
+          "streetName": "Nyhavn 8",
+          "postCode": "1051",
+          "townName": "Copenhagen",
+          "country": "DK"
+        },
+        "iban": "DK5611111111111111",
+        "bic": "DABADKKK"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026340-DK",
+          "amount": "632.29"
+        },
+        {
+          "number": "INV-2026341-DK",
+          "amount": "632.29"
+        },
+        {
+          "number": "INV-2026342-DK",
+          "amount": "632.30"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-03",
+      "number": "SEPA-0036",
+      "amount": "1076.2",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Fixture Tools AG",
+        "address": {
+          "streetName": "Königsallee 11",
+          "postCode": "40212",
+          "townName": "Düsseldorf",
+          "country": "DE"
+        },
+        "iban": "DE39121212121212121212",
+        "bic": "DEUTDEDDXXX"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026350-DE",
+          "amount": "215.24"
+        },
+        {
+          "number": "INV-2026351-DE",
+          "amount": "215.24"
+        },
+        {
+          "number": "INV-2026352-DE",
+          "amount": "215.24"
+        },
+        {
+          "number": "INV-2026353-DE",
+          "amount": "215.24"
+        },
+        {
+          "number": "INV-2026354-DE",
+          "amount": "215.24"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-03",
+      "number": "SEPA-0037",
+      "amount": "1155.52",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Müller Straße GmbH",
+        "address": {
+          "streetName": "Hauptstraße 1",
+          "postCode": "10115",
+          "townName": "Berlin",
+          "country": "DE"
+        },
+        "iban": "DE63111111111111111111",
+        "bic": "COBADEFFXXX"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026360-DE",
+          "amount": "1155.52"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-03",
+      "number": "SEPA-0038",
+      "amount": "1234.84",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Société Générale Équipements",
+        "address": {
+          "streetName": "12 Rue de Rivoli",
+          "postCode": "75001",
+          "townName": "Paris",
+          "country": "FR"
+        },
+        "iban": "FR3722222222222222222222222",
+        "bic": "BNPAFRPPXXX"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026370-FR",
+          "amount": "617.42"
+        },
+        {
+          "number": "INV-2026371-FR",
+          "amount": "617.42"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-04",
+      "number": "SEPA-0039",
+      "amount": "1314.16",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Øresund Ærø Åkerström AB",
+        "address": {
+          "streetName": "Storgatan 5",
+          "postCode": "11122",
+          "townName": "Stockholm",
+          "country": "SE"
+        },
+        "iban": "SE2933333333333333333333",
+        "bic": "ESSESESS"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026380-SE",
+          "amount": "438.05"
+        },
+        {
+          "number": "INV-2026381-SE",
+          "amount": "438.05"
+        },
+        {
+          "number": "INV-2026382-SE",
+          "amount": "438.06"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-04",
+      "number": "SEPA-0040",
+      "amount": "1393.48",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Fábrica Señor Núñez S.L.",
+        "address": {
+          "streetName": "Calle Mayor 7",
+          "postCode": "28013",
+          "townName": "Madrid",
+          "country": "ES"
+        },
+        "iban": "ES9144444444444444444444",
+        "bic": "BSCHESMM"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026390-ES",
+          "amount": "348.37"
+        },
+        {
+          "number": "INV-2026391-ES",
+          "amount": "348.37"
+        },
+        {
+          "number": "INV-2026392-ES",
+          "amount": "348.37"
+        },
+        {
+          "number": "INV-2026393-ES",
+          "amount": "348.37"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-04",
+      "number": "SEPA-0041",
+      "amount": "1472.8",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Łódź Zakłady Żółć Sp. z o.o.",
+        "address": {
+          "streetName": "ul. Piotrkowska 10",
+          "postCode": "90-001",
+          "townName": "Łódź",
+          "country": "PL"
+        },
+        "iban": "PL58555555555555555555555555",
+        "bic": "PKOPPLPW"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026400-PL",
+          "amount": "294.56"
+        },
+        {
+          "number": "INV-2026401-PL",
+          "amount": "294.56"
+        },
+        {
+          "number": "INV-2026402-PL",
+          "amount": "294.56"
+        },
+        {
+          "number": "INV-2026403-PL",
+          "amount": "294.56"
+        },
+        {
+          "number": "INV-2026404-PL",
+          "amount": "294.56"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-04",
+      "number": "SEPA-0042",
+      "amount": "1552.12",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Example Trading BV",
+        "address": {
+          "streetName": "Kalverstraat 3",
+          "postCode": "1012NX",
+          "townName": "Amsterdam",
+          "country": "NL"
+        },
+        "iban": "NL5666666666666666",
+        "bic": "INGBNL2A"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026410-NL",
+          "amount": "776.06"
+        },
+        {
+          "number": "INV-2026411-NL",
+          "amount": "776.06"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-04",
+      "number": "SEPA-0043",
+      "amount": "1631.44",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Sample Supplies NV",
+        "address": {
+          "streetName": "Rue Neuve 2",
+          "postCode": "1000",
+          "townName": "Brussels",
+          "country": "BE"
+        },
+        "iban": "BE92777777777777",
+        "bic": "GEBABEBB"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026420-BE",
+          "amount": "543.81"
+        },
+        {
+          "number": "INV-2026421-BE",
+          "amount": "543.81"
+        },
+        {
+          "number": "INV-2026422-BE",
+          "amount": "543.82"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-04",
+      "number": "SEPA-0044",
+      "amount": "1710.76",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Demo Parts GmbH",
+        "address": {
+          "streetName": "Graben 4",
+          "postCode": "1010",
+          "townName": "Vienna",
+          "country": "AT"
+        },
+        "iban": "AT098888888888888888",
+        "bic": "BKAUATWW"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026430-AT",
+          "amount": "427.69"
+        },
+        {
+          "number": "INV-2026431-AT",
+          "amount": "427.69"
+        },
+        {
+          "number": "INV-2026432-AT",
+          "amount": "427.69"
+        },
+        {
+          "number": "INV-2026433-AT",
+          "amount": "427.69"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-04",
+      "number": "SEPA-0045",
+      "amount": "1790.08",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Placeholder Metals SpA",
+        "address": {
+          "streetName": "Via Roma 9",
+          "postCode": "00184",
+          "townName": "Rome",
+          "country": "IT"
+        },
+        "iban": "IT1399999999999999999999999",
+        "bic": "BCITITMM"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026440-IT",
+          "amount": "1790.08"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-04",
+      "number": "SEPA-0046",
+      "amount": "1869.4",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Acme Nordic Oy",
+        "address": {
+          "streetName": "Esplanadi 6",
+          "postCode": "00100",
+          "townName": "Helsinki",
+          "country": "FI"
+        },
+        "iban": "FI6710101010101010",
+        "bic": "NDEAFIHH"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026450-FI",
+          "amount": "373.88"
+        },
+        {
+          "number": "INV-2026451-FI",
+          "amount": "373.88"
+        },
+        {
+          "number": "INV-2026452-FI",
+          "amount": "373.88"
+        },
+        {
+          "number": "INV-2026453-FI",
+          "amount": "373.88"
+        },
+        {
+          "number": "INV-2026454-FI",
+          "amount": "373.88"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-04",
+      "number": "SEPA-0047",
+      "amount": "1048.72",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Test Freight ApS",
+        "address": {
+          "streetName": "Nyhavn 8",
+          "postCode": "1051",
+          "townName": "Copenhagen",
+          "country": "DK"
+        },
+        "iban": "DK5611111111111111",
+        "bic": "DABADKKK"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026460-DK",
+          "amount": "349.57"
+        },
+        {
+          "number": "INV-2026461-DK",
+          "amount": "349.57"
+        },
+        {
+          "number": "INV-2026462-DK",
+          "amount": "349.58"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-04",
+      "number": "SEPA-0048",
+      "amount": "1128.04",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Fixture Tools AG",
+        "address": {
+          "streetName": "Königsallee 11",
+          "postCode": "40212",
+          "townName": "Düsseldorf",
+          "country": "DE"
+        },
+        "iban": "DE39121212121212121212",
+        "bic": "DEUTDEDDXXX"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026470-DE",
+          "amount": "282.01"
+        },
+        {
+          "number": "INV-2026471-DE",
+          "amount": "282.01"
+        },
+        {
+          "number": "INV-2026472-DE",
+          "amount": "282.01"
+        },
+        {
+          "number": "INV-2026473-DE",
+          "amount": "282.01"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-04",
+      "number": "SEPA-0049",
+      "amount": "1207.36",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Müller Straße GmbH",
+        "address": {
+          "streetName": "Hauptstraße 1",
+          "postCode": "10115",
+          "townName": "Berlin",
+          "country": "DE"
+        },
+        "iban": "DE63111111111111111111",
+        "bic": "COBADEFFXXX"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026480-DE",
+          "amount": "1207.36"
+        }
+      ]
+    },
+    {
+      "method": {
+        "type": "TRANSFER",
+        "format": "PAIN001"
+      },
+      "executionDate": "2026-11-04",
+      "number": "SEPA-0050",
+      "amount": "1286.68",
+      "currency": "EUR",
+      "creditor": {
+        "name": "Société Générale Équipements",
+        "address": {
+          "streetName": "12 Rue de Rivoli",
+          "postCode": "75001",
+          "townName": "Paris",
+          "country": "FR"
+        },
+        "iban": "FR3722222222222222222222222",
+        "bic": "BNPAFRPPXXX"
+      },
+      "invoices": [
+        {
+          "number": "INV-2026490-FR",
+          "amount": "643.34"
+        },
+        {
+          "number": "INV-2026491-FR",
+          "amount": "643.34"
+        }
+      ]
+    }
+  ]
+}
