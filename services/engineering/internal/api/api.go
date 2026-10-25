@@ -623,8 +623,24 @@ func (a *API) releaseEco(w http.ResponseWriter, r *http.Request) {
 	}
 	plan, err := eco.Release(record.Versions, nil, a.today())
 	if err != nil {
+		if eco.State == domain.EcoRejected && previous != domain.EcoRejected {
+			if persistErr := a.store.ReleaseEco(r.Context(), eco, previous, domain.ReleasePlan{}); persistErr != nil {
+				a.fail(w, r, "persist eco rejection", persistErr, &a.ecosFailed)
+				return
+			}
+		}
 		a.fail(w, r, "release eco", err, &a.ecosFailed)
 		return
+	}
+	if len(plan.Activate) > 0 {
+		snapshot, err := a.store.Catalog(r.Context(), plan.ActivatedComponents(), false)
+		if err == nil {
+			err = plan.CheckCycles(snapshot)
+		}
+		if err != nil {
+			a.fail(w, r, "check eco cycles", err, &a.ecosFailed)
+			return
+		}
 	}
 	if err := a.store.ReleaseEco(r.Context(), eco, previous, plan); err != nil {
 		a.fail(w, r, "persist eco release", err, &a.ecosFailed)

@@ -534,7 +534,6 @@ func TestReleaseEco_Rejections(t *testing.T) {
 	unavailable := approverFunc(func(context.Context, string) (domain.Decision, error) {
 		return domain.Decision{}, errors.New("workflow down")
 	})
-	rejects := approverFunc(func(context.Context, string) (domain.Decision, error) { return domain.Decision{Actor: "bob"}, nil })
 	tests := []struct {
 		name       string
 		store      *fakeStore
@@ -544,7 +543,6 @@ func TestReleaseEco_Rejections(t *testing.T) {
 		wantBody   string
 	}{
 		{"approver unavailable fails closed", &fakeStore{record: releasableRecord(domain.EcoSubmitted, time.Time{})}, unavailable, allDuties, http.StatusConflict, domain.CodeEcoState},
-		{"approver rejects", &fakeStore{record: releasableRecord(domain.EcoSubmitted, time.Time{})}, rejects, allDuties, http.StatusUnprocessableEntity, domain.CodeEcoNotApproved},
 		{"already released", &fakeStore{record: releasableRecord(domain.EcoReleased, time.Time{})}, approves, allDuties, http.StatusUnprocessableEntity, domain.CodeEcoNotApproved},
 		{"cancelled eco", &fakeStore{record: releasableRecord(domain.EcoCancelled, time.Time{})}, approves, allDuties, http.StatusUnprocessableEntity, domain.CodeEcoNotApproved},
 		{"release date in the past", &fakeStore{record: releasableRecord(domain.EcoSubmitted, day("2026-01-01"))}, approves, allDuties, http.StatusUnprocessableEntity, domain.CodeEcoDate},
@@ -568,9 +566,37 @@ func TestReleaseEco_Rejections(t *testing.T) {
 
 func TestReleaseEco_ApproverUnavailable_FailsClosed(t *testing.T) {
 	f := &fakeStore{record: releasableRecord(domain.EcoSubmitted, time.Time{})}
-	r, _ := newRouter(f, approverFunc(func(context.Context, string) (domain.Decision, error) { return domain.Decision{}, nil }))
-	if rec := release(r, allDuties); rec.Code != http.StatusUnprocessableEntity || len(f.released) != 0 {
-		t.Fatalf("a deny-all approver must block release: %d %s %+v", rec.Code, rec.Body, f.released)
+	r, _ := newRouter(f, approverFunc(func(context.Context, string) (domain.Decision, error) {
+		return domain.Decision{}, errors.New("no workflow")
+	}))
+	if rec := release(r, allDuties); rec.Code != http.StatusConflict || len(f.released) != 0 {
+		t.Fatalf("an unavailable approver must block release without a state change: %d %s %+v", rec.Code, rec.Body, f.released)
+	}
+}
+
+func TestReleaseEco_ApproverRejection_IsPersisted(t *testing.T) {
+	f := &fakeStore{record: releasableRecord(domain.EcoSubmitted, time.Time{})}
+	r, _ := newRouter(f, approverFunc(func(context.Context, string) (domain.Decision, error) { return domain.Decision{Actor: "bob"}, nil }))
+	rec := release(r, allDuties)
+	if rec.Code != http.StatusUnprocessableEntity || len(f.released) != 1 || f.released[0].eco.State != domain.EcoRejected || len(f.released[0].plan.Activate) != 0 {
+		t.Fatalf("rejection = %d %s %+v", rec.Code, rec.Body, f.released)
+	}
+}
+
+func TestReleaseEco_ActivationCycleIsRefused(t *testing.T) {
+	f := &fakeStore{record: releasableRecord(domain.EcoSubmitted, time.Time{}), catalog: store.Snapshot{"WHEEL": {activeVersion("W1", "WHEEL", "2025-01-01", "", oneLine(1, "BIKE", 1))}}}
+	r, _ := newRouter(f, approves)
+	if rec := release(r, allDuties); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), domain.CodeBomCycle) || len(f.released) != 0 {
+		t.Fatalf("cycle = %d %s %+v", rec.Code, rec.Body, f.released)
+	}
+}
+
+func TestReleaseEco_ScheduledEcoReleasesLate(t *testing.T) {
+	f := &fakeStore{record: releasableRecord(domain.EcoScheduled, day("2026-06-20"))}
+	r, _ := newRouter(f, approves)
+	rec := release(r, allDuties)
+	if rec.Code != http.StatusOK || len(f.released) != 1 || f.released[0].plan.Activate[0].EffectiveFrom.Format("2006-01-02") != "2026-07-01" {
+		t.Fatalf("late scheduled release = %d %s %+v", rec.Code, rec.Body, f.released)
 	}
 }
 

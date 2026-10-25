@@ -23,10 +23,12 @@ const (
 	defaultAdminAddr = ":9090"
 )
 
+var errApproverNotConfigured = errors.New("no ECO approval workflow is configured")
+
 type failClosedApprover struct{}
 
 func (failClosedApprover) Decide(context.Context, string) (domain.Decision, error) {
-	return domain.Decision{}, nil
+	return domain.Decision{}, errApproverNotConfigured
 }
 
 func main() {

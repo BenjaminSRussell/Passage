@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -43,7 +44,7 @@ func TestLoggerEmitsKernelLogFields(t *testing.T) {
 
 func TestFailClosedApproverNeverApproves(t *testing.T) {
 	d, err := failClosedApprover{}.Decide(context.Background(), "eco-1")
-	if err != nil || d.Approved {
-		t.Fatalf("got %+v, %v; want an unapproved decision", d, err)
+	if !errors.Is(err, errApproverNotConfigured) || d.Approved {
+		t.Fatalf("got %+v, %v; want an unapproved decision and errApproverNotConfigured", d, err)
 	}
 }

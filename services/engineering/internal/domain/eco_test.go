@@ -160,6 +160,23 @@ func TestEcoReleaseRefusals(t *testing.T) {
 		{"unknown version", &domain.Eco{ID: "e", State: domain.EcoApproved, Replaces: []domain.Replacement{{OldVersionID: "nope", NewVersionID: "V2"}}}, releaseFixture(), nil, "2026-07-01", domain.CodeEcoDryRun, domain.EcoApproved},
 		{"overlap with another active version", ecoIn(domain.EcoApproved, "2026-07-01"), overlapping, nil, "2026-07-01", domain.CodeEcoDryRun, domain.EcoApproved},
 	}
+	endedDraft := releaseFixture()
+	endedDraft[1].EffectiveTo = date("2026-03-01")
+	for _, tt := range []struct {
+		name     string
+		eco      *domain.Eco
+		versions []domain.BomVersion
+	}{{"draft ends before the release date", ecoIn(domain.EcoApproved, "2026-07-01"), endedDraft}} {
+		tests = append(tests, struct {
+			name     string
+			eco      *domain.Eco
+			versions []domain.BomVersion
+			obsolete func(string) bool
+			today    string
+			want     string
+			state    domain.EcoState
+		}{tt.name, tt.eco, tt.versions, nil, "2026-07-01", domain.CodeEcoDryRun, domain.EcoApproved})
+	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			plan, err := tt.eco.Release(tt.versions, tt.obsolete, date(tt.today))
@@ -167,5 +184,23 @@ func TestEcoReleaseRefusals(t *testing.T) {
 				t.Fatalf("err = %v, state = %s, plan = %+v", err, tt.eco.State, plan)
 			}
 		})
+	}
+}
+
+func TestEcoReleaseNeverLengthensAnEndedVersion(t *testing.T) {
+	versions := releaseFixture()
+	versions[0].EffectiveTo = date("2026-03-31")
+	e := ecoIn(domain.EcoApproved, "2026-07-01")
+	plan, err := e.Release(versions, nil, date("2026-07-01"))
+	if err != nil || plan.Expire[0].EffectiveTo != date("2026-03-31") {
+		t.Fatalf("err %v expired %+v, want effective_to kept at 2026-03-31", err, plan.Expire)
+	}
+}
+
+func TestEcoScheduledReleasesOnALaterDay(t *testing.T) {
+	e := ecoIn(domain.EcoScheduled, "2026-06-20")
+	plan, err := e.Release(releaseFixture(), nil, date("2026-07-01"))
+	if err != nil || e.State != domain.EcoReleased || plan.Activate[0].EffectiveFrom != date("2026-07-01") {
+		t.Fatalf("err %v state %s plan %+v, want released with the late day as effective date", err, e.State, plan)
 	}
 }

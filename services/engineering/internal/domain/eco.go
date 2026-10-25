@@ -89,14 +89,15 @@ func (e *Eco) Release(versions []BomVersion, obsolete func(product string) bool,
 	if e.State != EcoApproved && e.State != EcoScheduled {
 		return ReleasePlan{}, errf(CodeEcoNotApproved, "ECO %s must be approved before release.", e.Number)
 	}
+	today = day(today)
 	date := day(e.ReleaseDate)
-	if e.ReleaseDate.IsZero() {
-		date = day(today)
+	if e.ReleaseDate.IsZero() || (date.Before(today) && e.State == EcoScheduled) {
+		date = today
 	}
 	switch {
-	case date.Before(day(today)):
+	case date.Before(today):
 		return ReleasePlan{}, errf(CodeEcoDate, "release date %s is in the past", date.Format(dateLayout))
-	case date.After(day(today)):
+	case date.After(today):
 		if e.State == EcoApproved {
 			return ReleasePlan{}, e.Transition(EcoScheduled)
 		}
@@ -130,12 +131,18 @@ func (e *Eco) dryRun(versions []BomVersion, obsolete func(string) bool, date tim
 		if date.AddDate(0, 0, -1).Before(old.EffectiveFrom) {
 			return ReleasePlan{}, errf(CodeEcoDryRun, "version %s cannot expire before it starts", old.ID)
 		}
+		if !nw.EffectiveTo.IsZero() && nw.EffectiveTo.Before(date) {
+			return ReleasePlan{}, errf(CodeEcoDryRun, "version %s ends on %s, before the release date %s", nw.ID, nw.EffectiveTo.Format(dateLayout), date.Format(dateLayout))
+		}
 		for _, l := range nw.Lines {
 			if obsolete != nil && obsolete(l.ComponentProductID) {
 				return ReleasePlan{}, errf(CodeEcoDryRun, "%s", errf(CodeBomCompObsolete, "Component %s is obsolete.", l.ComponentProductID).Error())
 			}
 		}
-		old.Status, old.EffectiveTo = StatusExpired, date.AddDate(0, 0, -1)
+		old.Status = StatusExpired
+		if expiry := date.AddDate(0, 0, -1); old.EffectiveTo.IsZero() || old.EffectiveTo.After(expiry) {
+			old.EffectiveTo = expiry
+		}
 		nw.Status, nw.EffectiveFrom = StatusActive, date
 		activated = append(activated, ni)
 		plan.Expire = append(plan.Expire, *old)
@@ -147,6 +154,27 @@ func (e *Eco) dryRun(versions []BomVersion, obsolete func(string) bool, date tim
 		}
 	}
 	return plan, nil
+}
+
+func (p ReleasePlan) ActivatedComponents() []string {
+	var out []string
+	for _, v := range p.Activate {
+		for _, l := range v.Lines {
+			out = append(out, l.ComponentProductID)
+		}
+	}
+	return out
+}
+
+func (p ReleasePlan) CheckCycles(cat Catalog) error {
+	for _, v := range p.Activate {
+		for _, l := range v.Lines {
+			if err := CheckCycle(cat, v.ProductID, l.ComponentProductID, v.EffectiveFrom); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (p ReleasePlan) ActivatedEvents() []events.BomVersionActivatedData {
