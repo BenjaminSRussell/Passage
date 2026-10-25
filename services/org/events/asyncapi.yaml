@@ -1,0 +1,158 @@
+asyncapi: 3.0.0
+info:
+  title: org
+  version: 0.1.0
+  description: CloudEvents 1.0 envelope from platform/go/events; payloads below are the data member.
+channels:
+  passage.org.legalentity:
+    address: passage.org.legalentity
+    messages:
+      created:
+        $ref: '#/components/messages/legalEntityCreated'
+      updated:
+        $ref: '#/components/messages/legalEntityUpdated'
+  passage.org.operatingunit:
+    address: passage.org.operatingunit
+    messages:
+      created:
+        $ref: '#/components/messages/operatingUnitCreated'
+  passage.org.site:
+    address: passage.org.site
+    messages:
+      created:
+        $ref: '#/components/messages/siteCreated'
+  passage.org.warehouse:
+    address: passage.org.warehouse
+    messages:
+      created:
+        $ref: '#/components/messages/warehouseCreated'
+  passage.org.location:
+    address: passage.org.location
+    messages:
+      created:
+        $ref: '#/components/messages/locationCreated'
+  passage.org.currencyrounding:
+    address: passage.org.currencyrounding
+    messages:
+      changed:
+        $ref: '#/components/messages/currencyRoundingChanged'
+operations:
+  onLegalEntityCreated:
+    action: send
+    channel: { $ref: '#/channels/passage.org.legalentity' }
+    messages: [{ $ref: '#/channels/passage.org.legalentity/messages/created' }]
+  onLegalEntityUpdated:
+    action: send
+    channel: { $ref: '#/channels/passage.org.legalentity' }
+    messages: [{ $ref: '#/channels/passage.org.legalentity/messages/updated' }]
+  onOperatingUnitCreated:
+    action: send
+    channel: { $ref: '#/channels/passage.org.operatingunit' }
+    messages: [{ $ref: '#/channels/passage.org.operatingunit/messages/created' }]
+  onSiteCreated:
+    action: send
+    channel: { $ref: '#/channels/passage.org.site' }
+    messages: [{ $ref: '#/channels/passage.org.site/messages/created' }]
+  onWarehouseCreated:
+    action: send
+    channel: { $ref: '#/channels/passage.org.warehouse' }
+    messages: [{ $ref: '#/channels/passage.org.warehouse/messages/created' }]
+  onLocationCreated:
+    action: send
+    channel: { $ref: '#/channels/passage.org.location' }
+    messages: [{ $ref: '#/channels/passage.org.location/messages/created' }]
+  onCurrencyRoundingChanged:
+    action: send
+    channel: { $ref: '#/channels/passage.org.currencyrounding' }
+    messages: [{ $ref: '#/channels/passage.org.currencyrounding/messages/changed' }]
+components:
+  messages:
+    legalEntityCreated:
+      name: created
+      title: Legal entity created
+      payload:
+        type: object
+        required: [id, code, name, country_code, accounting_currency, time_zone]
+        properties:
+          id: { type: string, format: uuid }
+          code: { type: string }
+          name: { type: string }
+          country_code: { type: string }
+          accounting_currency: { type: string }
+          time_zone: { type: string }
+      x-passage-type: dev.passage.org.legalentity.created.v1
+    legalEntityUpdated:
+      name: updated
+      title: Legal entity updated
+      payload:
+        type: object
+        required: [id, changed_fields, version]
+        properties:
+          id: { type: string, format: uuid }
+          changed_fields: { type: array, items: { type: string } }
+          version: { type: integer }
+      x-passage-type: dev.passage.org.legalentity.updated.v1
+    operatingUnitCreated:
+      name: created
+      title: Operating unit created
+      payload:
+        type: object
+        required: [id, type, code, name]
+        properties:
+          id: { type: string, format: uuid }
+          type: { type: string }
+          code: { type: string }
+          name: { type: string }
+      x-passage-type: dev.passage.org.operatingunit.created.v1
+    siteCreated:
+      name: created
+      title: Site created
+      payload:
+        type: object
+        required: [id, legal_entity_id, parent_id, type, address_id]
+        properties:
+          id: { type: string, format: uuid }
+          legal_entity_id: { type: string, format: uuid }
+          parent_id: { type: [string, 'null'], format: uuid }
+          type: { type: [string, 'null'] }
+          address_id: { type: [string, 'null'], format: uuid, description: Null until the address slice. }
+      x-passage-type: dev.passage.org.site.created.v1
+    warehouseCreated:
+      name: created
+      title: Warehouse created
+      payload:
+        type: object
+        required: [id, legal_entity_id, parent_id, type, address_id]
+        properties:
+          id: { type: string, format: uuid }
+          legal_entity_id: { type: string, format: uuid }
+          parent_id: { type: [string, 'null'], format: uuid }
+          type: { type: [string, 'null'] }
+          address_id: { type: [string, 'null'], format: uuid, description: Null until the address slice. }
+      x-passage-type: dev.passage.org.warehouse.created.v1
+    locationCreated:
+      name: created
+      title: Location created
+      payload:
+        type: object
+        required: [id, legal_entity_id, parent_id, type, address_id]
+        properties:
+          id: { type: string, format: uuid }
+          legal_entity_id: { type: string, format: uuid }
+          parent_id: { type: [string, 'null'], format: uuid }
+          type: { type: [string, 'null'] }
+          address_id: { type: [string, 'null'], format: uuid, description: Null until the address slice. }
+      x-passage-type: dev.passage.org.location.created.v1
+    currencyRoundingChanged:
+      name: changed
+      title: Currency rounding rule changed
+      payload:
+        type: object
+        required: [currency_code, purpose, unit, method]
+        properties:
+          currency_code: { type: string }
+          purpose: { type: string }
+          legal_entity_id: { type: [string, 'null'], format: uuid }
+          unit: { type: string }
+          method: { type: string }
+      x-passage-type: dev.passage.org.currencyrounding.changed.v1

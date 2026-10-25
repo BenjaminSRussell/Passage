@@ -11,9 +11,12 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/events"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/outbox"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
+	orgevents "github.com/BenjaminSRussell/passage/services/org/internal/events"
 )
 
 const (
@@ -21,6 +24,7 @@ const (
 	CodeLegalEntityCode  = "ORG-LE-CODE-DUPLICATE"
 	CodeIdempotencyReuse = "idempotency_key_reuse"
 	uniqueViolation      = "23505"
+	eventSource          = "org"
 )
 
 type LegalEntity struct {
@@ -29,6 +33,7 @@ type LegalEntity struct {
 	Name      string    `json:"name"`
 	Country   string    `json:"country"`
 	Currency  string    `json:"currency"`
+	TimeZone  string    `json:"timeZone"`
 	Status    string    `json:"status"`
 	Version   int       `json:"version"`
 	CreatedAt time.Time `json:"createdAt"`
@@ -51,12 +56,20 @@ func New(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
 
 func (s *Postgres) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 
-const legalEntityColumns = "id, code, name, country, currency, status, version, created_at"
+const legalEntityColumns = "id, code, name, country, currency, time_zone, status, version, created_at"
 
-func scanLegalEntity(row pgx.Row) (LegalEntity, error) {
+func scanLegalEntity(row pgx.Row, extra ...any) (LegalEntity, error) {
 	var e LegalEntity
-	err := row.Scan(&e.ID, &e.Code, &e.Name, &e.Country, &e.Currency, &e.Status, &e.Version, &e.CreatedAt)
+	err := row.Scan(append([]any{&e.ID, &e.Code, &e.Name, &e.Country, &e.Currency, &e.TimeZone, &e.Status, &e.Version, &e.CreatedAt}, extra...)...)
 	return e, err
+}
+
+func enqueue(ctx context.Context, tx pgx.Tx, aggregateType, aggregateID, eventType, tenantID string, data any) error {
+	evt, err := events.New(eventType, eventSource, aggregateID, tenantID, data)
+	if err != nil {
+		return err
+	}
+	return outbox.Enqueue(ctx, tx, aggregateType, aggregateID, evt)
 }
 
 func (s *Postgres) CreateLegalEntity(ctx context.Context, in LegalEntity, idempotencyKey string) (LegalEntity, error) {
@@ -67,18 +80,24 @@ func (s *Postgres) CreateLegalEntity(ctx context.Context, in LegalEntity, idempo
 	}
 	var e LegalEntity
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var inserted bool
 		var err error
-		e, err = scanLegalEntity(tx.QueryRow(ctx, `insert into legal_entity (tenant_id, id, code, name, country, currency, idempotency_key)
-			values ($1, $2, $3, $4, $5, $6, $7)
+		e, err = scanLegalEntity(tx.QueryRow(ctx, `insert into legal_entity (tenant_id, id, code, name, country, currency, time_zone, idempotency_key)
+			values ($1, $2, $3, $4, $5, $6, $7, $8)
 			on conflict (tenant_id, idempotency_key) do update set version = legal_entity.version
-			returning `+legalEntityColumns, p.TenantID, ids.New(), in.Code, in.Name, in.Country, in.Currency, key))
-		return err
+			returning `+legalEntityColumns+`, (xmax = 0)`, p.TenantID, ids.New(), in.Code, in.Name, in.Country, in.Currency, in.TimeZone, key), &inserted)
+		if err != nil || !inserted {
+			return err
+		}
+		return enqueue(ctx, tx, "legalentity", e.ID, orgevents.LegalEntityCreated, p.TenantID, orgevents.LegalEntityCreatedData{
+			ID: e.ID, Code: e.Code, Name: e.Name, CountryCode: e.Country, AccountingCurrency: e.Currency, TimeZone: e.TimeZone,
+		})
 	})
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
 		return LegalEntity{}, httpx.NewProblem(http.StatusConflict, CodeLegalEntityCode, "a legal entity with this code already exists")
 	}
-	if err == nil && key != nil && (e.Code != in.Code || e.Name != in.Name || e.Country != in.Country || e.Currency != in.Currency) {
+	if err == nil && key != nil && (e.Code != in.Code || e.Name != in.Name || e.Country != in.Country || e.Currency != in.Currency || e.TimeZone != in.TimeZone) {
 		return LegalEntity{}, httpx.NewProblem(http.StatusUnprocessableEntity, CodeIdempotencyReuse, "Idempotency-Key was already used with a different request body")
 	}
 	return e, err

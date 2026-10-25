@@ -64,12 +64,12 @@ components:
     CreateLegalEntity:
       type: object
       additionalProperties: false
-      required: [code, name, country, currency]
-      properties: { code: { type: string, pattern: '^[A-Z0-9]{2,8}$', description: Not DAT SYS or ALL }, name: { type: string, minLength: 1, maxLength: 120 }, country: { type: string, pattern: '^[A-Z]{2}$' }, currency: { type: string, pattern: '^[A-Z]{3}$' } }
+      required: [code, name, country, currency, timeZone]
+      properties: { code: { type: string, pattern: '^[A-Z0-9]{2,8}$', description: Not DAT SYS or ALL }, name: { type: string, minLength: 1, maxLength: 120 }, country: { type: string, pattern: '^[A-Z]{2}$' }, currency: { type: string, pattern: '^[A-Z]{3}$' }, timeZone: { type: string, description: IANA time zone name } }
     LegalEntity:
       type: object
-      required: [id, code, name, country, currency, status, version, createdAt]
-      properties: { id: { type: string, format: uuid }, code: { type: string }, name: { type: string }, country: { type: string }, currency: { type: string }, status: { type: string, enum: [active, inactive] }, version: { type: integer }, createdAt: { type: string, format: date-time } }
+      required: [id, code, name, country, currency, timeZone, status, version, createdAt]
+      properties: { id: { type: string, format: uuid }, code: { type: string }, name: { type: string }, country: { type: string }, currency: { type: string }, timeZone: { type: string }, status: { type: string, enum: [active, inactive] }, version: { type: integer }, createdAt: { type: string, format: date-time } }
     Conversion:
       type: object
       required: [from, to, quantity]
