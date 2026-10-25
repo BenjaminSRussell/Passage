@@ -7,3 +7,11 @@ replicaCount: 1
 resources:
   requests: { cpu: 50m, memory: 64Mi }
   limits: { cpu: 250m, memory: 128Mi }
+existingSecret: party-db
+migrateOnStart: false
+numberingUrl: ""
+config:
+  PARTY_DEDUP_LIKELY_WEIGHT: "12"
+  PARTY_DEDUP_POSSIBLE_WEIGHT: "6"
+  PARTY_VIES_TIMEOUT_MS: "5000"
+serviceMonitor: { enabled: false }

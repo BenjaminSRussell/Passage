@@ -2,14 +2,19 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
 
+	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/services/party/internal/api"
+	"github.com/BenjaminSRussell/passage/services/party/internal/store"
 	"github.com/BenjaminSRussell/passage/services/party/internal/vies"
+	"github.com/BenjaminSRussell/passage/services/party/migrations"
 )
 
 const (
@@ -37,7 +42,26 @@ func newLogger(w io.Writer) *slog.Logger {
 }
 
 func run(ctx context.Context, getenv func(string) string) error {
-	a := api.New(vies.Unavailable{})
+	databaseURL := getenv("DATABASE_URL")
+	if databaseURL == "" {
+		return errors.New("DATABASE_URL is required")
+	}
+	pool, err := dbx.Connect(ctx, databaseURL)
+	if err != nil {
+		slog.Error("database connect failed", "err", err)
+		return fmt.Errorf("connect database: %w", err)
+	}
+	defer pool.Close()
+	slog.Info("database connected")
+	if getenv("MIGRATE_ON_START") == "true" {
+		slog.Info("migrations starting")
+		if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
+			slog.Error("migrations failed", "err", err)
+			return fmt.Errorf("migrate: %w", err)
+		}
+		slog.Info("migrations applied")
+	}
+	a := api.New(vies.Unavailable{}, store.New(pool))
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()

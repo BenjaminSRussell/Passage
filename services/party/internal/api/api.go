@@ -21,13 +21,17 @@ import (
 
 const (
 	checkTimeout = 5 * time.Second
+	readyTimeout = 500 * time.Millisecond
 	dutyWrite    = "party.write"
 	codeInvalid  = "PTY-0001"
 )
 
 var reportedStatuses = []domain.Status{domain.StatusValid, domain.StatusInvalid, domain.StatusUnverified, domain.StatusFormatOnly}
 
+type Pinger interface{ Ping(context.Context) error }
+
 type API struct {
+	pinger   Pinger
 	checker  loggedChecker
 	statuses map[domain.Status]*atomic.Int64
 	rejected atomic.Int64
@@ -61,8 +65,8 @@ func (c loggedChecker) Check(ctx context.Context, country, number string) (domai
 	return status, err
 }
 
-func New(checker domain.Checker) *API {
-	a := &API{statuses: map[domain.Status]*atomic.Int64{}}
+func New(checker domain.Checker, pinger Pinger) *API {
+	a := &API{pinger: pinger, statuses: map[domain.Status]*atomic.Int64{}}
 	for _, s := range reportedStatuses {
 		a.statuses[s] = new(atomic.Int64)
 	}
@@ -71,6 +75,7 @@ func New(checker domain.Checker) *API {
 }
 
 func (a *API) Register(r chi.Router) {
+	r.Get("/readyz", a.ready)
 	r.With(authz.RequireDuty(dutyWrite)).Post("/v1/party/tax-registrations:validate", a.validate)
 }
 
@@ -84,6 +89,17 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP party_tax_validations_rejected_total Tax validation requests rejected for malformed requests, tenant context, or tax format.\n# TYPE party_tax_validations_rejected_total counter\nparty_tax_validations_rejected_total %d\n", a.rejected.Load())
 		fmt.Fprintf(w, "# HELP party_tax_checker_failures_total Checker calls that failed and left the registration unverified.\n# TYPE party_tax_checker_failures_total counter\nparty_tax_checker_failures_total %d\n", a.failures.Load())
 	})
+}
+
+func (a *API) ready(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), readyTimeout)
+	defer cancel()
+	if err := a.pinger.Ping(ctx); err != nil {
+		slog.Error("readiness check failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.JSON(w, http.StatusServiceUnavailable, map[string]string{"status": "unavailable"})
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]string{"status": "ready"})
 }
 
 func (a *API) validate(w http.ResponseWriter, r *http.Request) {
