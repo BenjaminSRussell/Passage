@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: org
-  version: 0.5.0
+  version: 0.6.0
   description: CloudEvents 1.0 envelope from platform/go/events; payloads below are the data member.
 channels:
   passage.org.legalentity:
@@ -37,6 +37,11 @@ channels:
     messages:
       created:
         $ref: '#/components/messages/locationCreated'
+  passage.org.address:
+    address: passage.org.address
+    messages:
+      changed:
+        $ref: '#/components/messages/addressChanged'
   passage.org.currencyrounding:
     address: passage.org.currencyrounding
     messages:
@@ -79,6 +84,10 @@ operations:
     action: send
     channel: { $ref: '#/channels/passage.org.location' }
     messages: [{ $ref: '#/channels/passage.org.location/messages/created' }]
+  onAddressChanged:
+    action: send
+    channel: { $ref: '#/channels/passage.org.address' }
+    messages: [{ $ref: '#/channels/passage.org.address/messages/changed' }]
   onCurrencyRoundingChanged:
     action: send
     channel: { $ref: '#/channels/passage.org.currencyrounding' }
@@ -194,6 +203,20 @@ components:
           type: { type: [string, 'null'], description: 'storage, receiving, shipping or quarantine' }
           address_id: { type: [string, 'null'], format: uuid, description: Null until the address slice. }
       x-passage-type: dev.passage.org.location.created.v1
+    addressChanged:
+      name: changed
+      title: Address changed
+      payload:
+        type: object
+        required: [address_id, version_id, owner_type, owner_id, purposes, valid_from]
+        properties:
+          address_id: { type: string, format: uuid, description: Stable across versions. }
+          version_id: { type: string, format: uuid, description: The postal_address row that documents hold. }
+          owner_type: { type: string, enum: [legal_entity, operating_unit, site, warehouse, location, party] }
+          owner_id: { type: string, format: uuid }
+          purposes: { type: array, items: { type: string, enum: [business, delivery, invoice, remit_to, service, home, other] } }
+          valid_from: { type: string, format: date }
+      x-passage-type: dev.passage.org.address.changed.v1
     currencyRoundingChanged:
       name: changed
       title: Currency rounding rule changed

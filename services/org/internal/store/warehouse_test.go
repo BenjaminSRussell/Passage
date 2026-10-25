@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/services/org/internal/store"
@@ -33,6 +34,7 @@ func mustCreateWarehouse(t *testing.T, s *store.Postgres, ctx context.Context, i
 
 type warehouseWorld struct {
 	s           *store.Postgres
+	pool        *pgxpool.Pool
 	ctx         context.Context
 	usmf, demf  store.LegalEntity
 	s1, s1b, s2 store.Site
@@ -44,7 +46,7 @@ type warehouseWorld struct {
 func newWarehouseWorld(t *testing.T) warehouseWorld {
 	t.Helper()
 	s, ctx, pool := lifecycleStore(t)
-	w := warehouseWorld{s: s, ctx: ctx}
+	w := warehouseWorld{s: s, ctx: ctx, pool: pool}
 	w.usmf, w.demf = mustCreate(t, s, ctx, newEntity("USMF")), mustCreate(t, s, ctx, newEntity("DEMF"))
 	w.s1, w.s1b = mustCreateSite(t, s, ctx, newSite(w.usmf.ID, "S1")), mustCreateSite(t, s, ctx, newSite(w.usmf.ID, "S1B"))
 	w.s2 = mustCreateSite(t, s, ctx, newSite(w.demf.ID, "S2"))

@@ -37,6 +37,8 @@ type fakeStore struct {
 	warehouseCalls int
 	locations      []store.Location
 	locationCalls  int
+	addresses      []store.Address
+	addressCalls   int
 }
 
 func (f *fakeStore) reference(kind store.ReferenceKind, code string) (store.ReferenceItem, bool) {
@@ -453,6 +455,26 @@ func (f *fakeStore) ListLocations(_ context.Context, _ store.LocationFilter, aft
 		page.Next = &store.SiteKey{Code: page.Items[limit-1].Code, ID: page.Items[limit-1].ID}
 	}
 	return page, nil
+}
+
+func (f *fakeStore) CreateAddress(_ context.Context, in store.Address, _ string) (store.Address, error) {
+	if f.err != nil {
+		return store.Address{}, f.err
+	}
+	in.ID = fmt.Sprintf("00000000-0000-0000-0003-%012d", len(f.addresses)+1)
+	in.VersionID, in.Formatted, in.ValidFrom = in.ID, "formatted", "2026-01-01"
+	f.addresses = append(f.addresses, in)
+	return in, nil
+}
+
+func (f *fakeStore) GetAddress(_ context.Context, id string) (store.Address, error) {
+	f.addressCalls++
+	for _, a := range f.addresses {
+		if a.ID == id {
+			return a, nil
+		}
+	}
+	return store.Address{}, httpx.NewProblem(http.StatusNotFound, store.CodeAddressNotFound, "address not found")
 }
 
 func (f *fakeStore) Ping(context.Context) error { return f.pingErr }
