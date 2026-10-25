@@ -24,6 +24,7 @@ import (
 
 const (
 	readyTimeout      = 500 * time.Millisecond
+	runTimeout        = 35 * time.Minute
 	idempotencyHeader = "Idempotency-Key"
 	dutyRun           = "migration.run"
 	runsPath          = "/v1/integration/migration-runs"
@@ -179,7 +180,8 @@ func (a *API) rerun(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) execute(w http.ResponseWriter, r *http.Request, run store.Run, mapping domain.Mapping, prev *domain.Report) {
-	ctx := r.Context()
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), runTimeout)
+	defer cancel()
 	key := r.Header.Get(idempotencyHeader)
 	if key != "" {
 		existing, found, err := a.store.RunByKey(ctx, key)
@@ -208,6 +210,8 @@ func (a *API) execute(w http.ResponseWriter, r *http.Request, run store.Run, map
 		httpx.Fail(w, r, err)
 		return
 	}
+	started := time.Now()
+	slog.InfoContext(ctx, "migration run started", "correlationId", middleware.GetReqID(ctx), "entity", run.Entity, "sourceSystem", run.SourceSystem, "mode", run.Mode, "dryRun", run.DryRun, "parentRunId", run.ParentRunID)
 	pipeline := domain.Pipeline{Extractor: backend.Extractor, Loader: backend.Loader, Reader: backend.Reader, Xref: a.store.Xref(), IDGen: ids.New}
 	spec := domain.RunSpec{SourceSystem: run.SourceSystem, Entity: run.Entity, Mapping: mapping, DryRun: run.DryRun}
 	if prev != nil {
@@ -228,6 +232,9 @@ func (a *API) execute(w http.ResponseWriter, r *http.Request, run store.Run, map
 		httpx.Fail(w, r, err)
 		return
 	}
+	slog.InfoContext(ctx, "migration run finished", "correlationId", middleware.GetReqID(ctx), "runId", saved.ID, "entity", run.Entity, "sourceSystem", run.SourceSystem, "mode", run.Mode,
+		"dryRun", run.DryRun, "status", run.Report.Status, "extracted", run.Report.Extracted, "created", run.Report.Created, "updated", run.Report.Updated,
+		"unchanged", run.Report.Unchanged, "rejected", len(run.Report.Rejects), "reconciliationOK", run.Report.Reconciliation == nil || run.Report.Reconciliation.OK(), "durationMs", time.Since(started).Milliseconds())
 	a.runs.Add(1)
 	a.loaded.Add(int64(run.Report.Created + run.Report.Updated))
 	a.rejected.Add(int64(len(run.Report.Rejects)))

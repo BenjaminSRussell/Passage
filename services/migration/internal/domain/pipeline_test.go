@@ -1,8 +1,11 @@
 package domain_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/BenjaminSRussell/passage/services/migration/internal/domain"
@@ -293,6 +296,52 @@ func TestPipeline_AXDatasetAllEntitiesReconcileFully(t *testing.T) {
 	for entity, rep := range loadAll(t, newPipelines(set)) {
 		if rep.Status != domain.StatusSucceeded || !rep.Reconciliation.OK() {
 			t.Fatalf("%s: rep=%+v", entity, rep)
+		}
+	}
+}
+
+type racingXref struct{ *domain.MemXref }
+
+func (r racingXref) Reserve(ctx context.Context, sourceSystem, entity string, items []domain.XrefItem) (map[string]string, error) {
+	for _, it := range items {
+		r.Entries[domain.XrefKey{SourceSystem: sourceSystem, Entity: entity, SourceKey: it.SourceKey}] = domain.XrefEntry{TargetID: "won-" + it.SourceKey}
+	}
+	return r.MemXref.Reserve(ctx, sourceSystem, entity, items)
+}
+
+func TestPipeline_LosingReservationLoadsUnderWinningTargetID(t *testing.T) {
+	p, xref, loader := newPipeline(axDataset(2, 0, 0, 0).Customers)
+	p.Xref = racingXref{xref}
+	rep, err := p.Run(context.Background(), spec(t))
+	if err != nil || rep.Created != 2 {
+		t.Fatalf("rep=%+v err=%v", rep, err)
+	}
+	for id, item := range loader.Rows {
+		if id != "won-"+item.SourceKey {
+			t.Fatalf("row %s loaded under %s, not the reserved id", item.SourceKey, id)
+		}
+	}
+	for _, e := range rep.Ledger {
+		if e.TargetID != "won-"+e.SourceKey {
+			t.Fatalf("ledger %s carries %s", e.SourceKey, e.TargetID)
+		}
+	}
+}
+
+func TestPipeline_LoaderFailureIsLoggedWithCause(t *testing.T) {
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	p, _, loader := newPipeline(axDataset(2, 0, 0, 0).Customers)
+	loader.Err = errors.New("target unreachable")
+	rep, err := p.Run(context.Background(), spec(t))
+	if err != nil || rep.Status != domain.StatusFailed {
+		t.Fatalf("rep=%+v err=%v", rep, err)
+	}
+	for _, want := range []string{"target load batch failed", "target unreachable", `"batchSize":2`, `"entity":"customer"`} {
+		if !strings.Contains(logs.String(), want) {
+			t.Errorf("logs missing %q:\n%s", want, logs.String())
 		}
 	}
 }

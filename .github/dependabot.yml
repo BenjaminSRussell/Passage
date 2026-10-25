@@ -1,0 +1,17 @@
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /services/migration
+    schedule: { interval: weekly }
+  - package-ecosystem: gomod
+    directory: /platform/go
+    schedule: { interval: weekly }
+  - package-ecosystem: gomod
+    directory: /tools/connectors
+    schedule: { interval: weekly }
+  - package-ecosystem: docker
+    directory: /services/migration
+    schedule: { interval: weekly }
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }

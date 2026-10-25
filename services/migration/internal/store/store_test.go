@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -165,6 +166,43 @@ func TestPostgres_XrefBatchRoundTripKeepsFirstTargetID(t *testing.T) {
 	}
 }
 
+func TestPostgres_ConcurrentReservationsAgreeOnTargetIDsAndKeepHashes(t *testing.T) {
+	x := newStore(t).Xref()
+	ctx := principalContext(1)
+	loaded := domain.XrefItem{SourceKey: "C0", Entry: domain.XrefEntry{TargetID: "00000000-0000-7000-8000-0000000000a0", ContentHash: "loaded"}}
+	if err := x.PutMany(ctx, "ax2012", "customer", []domain.XrefItem{loaded}); err != nil {
+		t.Fatal(err)
+	}
+	const racers = 8
+	results := make([]map[string]string, racers)
+	errs := make([]error, racers)
+	var wg sync.WaitGroup
+	for i := 0; i < racers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			mine := fmt.Sprintf("00000000-0000-7000-8000-%012x", i+1)
+			results[i], errs[i] = x.Reserve(ctx, "ax2012", "customer", []domain.XrefItem{
+				{SourceKey: "C0", Entry: domain.XrefEntry{TargetID: "00000000-0000-7000-8000-0000000000ff"}},
+				{SourceKey: "C1", Entry: domain.XrefEntry{TargetID: mine}},
+			})
+		}()
+	}
+	wg.Wait()
+	for i := 0; i < racers; i++ {
+		if errs[i] != nil {
+			t.Fatal(errs[i])
+		}
+		if results[i]["C1"] != results[0]["C1"] || results[i]["C0"] != loaded.Entry.TargetID {
+			t.Fatalf("racer %d saw %+v, racer 0 saw %+v", i, results[i], results[0])
+		}
+	}
+	got, err := x.GetMany(ctx, "ax2012", "customer", []string{"C0"})
+	if err != nil || got["C0"].ContentHash != "loaded" {
+		t.Fatalf("reservation overwrote loaded hash: %+v, %v", got, err)
+	}
+}
+
 type generatedExtractor struct{ n int }
 
 func (e generatedExtractor) Extract(context.Context, string) ([]domain.Record, error) {
@@ -229,11 +267,6 @@ func TestPostgres_RLSHidesOtherTenantsAndRequiresTenantWideScope(t *testing.T) {
 	t.Cleanup(drop)
 	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
 		t.Fatal(err)
-	}
-	for _, grant := range []string{"grant usage on schema migration to passage_app", "grant select, insert, update, delete on all tables in schema migration to passage_app"} {
-		if _, err := admin.Exec(ctx, grant); err != nil {
-			t.Fatal(err)
-		}
 	}
 	app := store.New(pool)
 	one := principalContext(1)

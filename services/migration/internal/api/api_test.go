@@ -1,12 +1,15 @@
 package api_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -322,5 +325,51 @@ func TestCreateRun_DryRunRecordsLedgerWithoutLoading(t *testing.T) {
 	}
 	if again := do(r, http.MethodGet, got.StatusURL, "", duties, true); again.Code != http.StatusOK {
 		t.Fatalf("dry run must be retrievable, got %d %s", again.Code, again.Body)
+	}
+}
+
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func TestCreateRun_ClientDisconnectStillRecordsRunAndLogsLifecycle(t *testing.T) {
+	logs := &syncBuffer{}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	s := store.NewMem()
+	loader := domain.NewMemLoader()
+	r := router(s, rowsExtractor{records()}, loader)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequest(http.MethodPost, runsPath, strings.NewReader(body)).WithContext(ctx)
+	req.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
+	req.Header.Set("X-Passage-Duties", duties)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	got := decode(t, rec)
+	if rec.Code != http.StatusAccepted || got.Run.Counts["created"] != 2 || len(loader.Rows) != 2 {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	}
+	if _, err := s.GetRun(context.Background(), got.Run.ID); err != nil {
+		t.Fatalf("run not recorded after client disconnect: %v", err)
+	}
+	for _, want := range []string{"migration run started", "migration run finished", `"runId":"` + got.Run.ID + `"`, `"status":"partial"`, `"created":2`} {
+		if !strings.Contains(logs.String(), want) {
+			t.Errorf("logs missing %q:\n%s", want, logs.String())
+		}
 	}
 }

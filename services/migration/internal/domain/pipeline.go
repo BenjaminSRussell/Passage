@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 )
@@ -63,6 +64,7 @@ type XrefStore interface {
 	Put(ctx context.Context, k XrefKey, e XrefEntry) error
 	GetMany(ctx context.Context, sourceSystem, entity string, sourceKeys []string) (map[string]XrefEntry, error)
 	PutMany(ctx context.Context, sourceSystem, entity string, items []XrefItem) error
+	Reserve(ctx context.Context, sourceSystem, entity string, items []XrefItem) (map[string]string, error)
 	Keys(ctx context.Context, sourceSystem, entity string) ([]string, error)
 }
 
@@ -191,8 +193,14 @@ func (p *Pipeline) Run(ctx context.Context, spec RunSpec) (Report, error) {
 		}
 		todo = append(todo, pending{entry, LoadItem{x.TargetID, r.Key, idemKey, r.Fields}, r.Key, action})
 	}
-	if err := p.putXrefs(ctx, spec, reserve); err != nil {
+	won, err := p.reserveXrefs(ctx, spec, reserve)
+	if err != nil {
 		return rep, err
+	}
+	for i := range todo {
+		if id, ok := won[todo[i].key]; ok {
+			todo[i].item.TargetID, todo[i].entry.TargetID = id, id
+		}
 	}
 	failed, err := p.load(ctx, spec, &rep, todo)
 	if err != nil {
@@ -251,6 +259,20 @@ func (p *Pipeline) putXrefs(ctx context.Context, spec RunSpec, items []XrefItem)
 	return nil
 }
 
+func (p *Pipeline) reserveXrefs(ctx context.Context, spec RunSpec, items []XrefItem) (map[string]string, error) {
+	won := make(map[string]string, len(items))
+	for start := 0; start < len(items); start += MaxBatch {
+		got, err := p.Xref.Reserve(ctx, spec.SourceSystem, spec.Entity, items[start:min(start+MaxBatch, len(items))])
+		if err != nil {
+			return nil, fmt.Errorf("xref reserve %s: %w", spec.Entity, err)
+		}
+		for k, id := range got {
+			won[k] = id
+		}
+	}
+	return won, nil
+}
+
 func onlyKeys(target, expected []Record) []Record {
 	want := make(map[string]bool, len(expected))
 	for _, r := range expected {
@@ -294,6 +316,8 @@ func (p *Pipeline) load(ctx context.Context, spec RunSpec, rep *Report, todo []p
 		}
 		results, err := p.Loader.LoadBatch(ctx, spec.Entity, items)
 		if err != nil || len(results) != len(batch) {
+			slog.ErrorContext(ctx, "target load batch failed", "err", err, "entity", spec.Entity, "sourceSystem", spec.SourceSystem,
+				"batchStart", start, "batchSize", len(batch), "resultCount", len(results), "resultCountMismatch", err == nil)
 			failed = true
 			results = make([]LoadResult, len(batch))
 			for i := range results {
@@ -367,6 +391,21 @@ func (m *MemXref) PutMany(ctx context.Context, sourceSystem, entity string, item
 		}
 	}
 	return nil
+}
+
+func (m *MemXref) Reserve(_ context.Context, sourceSystem, entity string, items []XrefItem) (map[string]string, error) {
+	won := make(map[string]string, len(items))
+	for _, it := range items {
+		k := XrefKey{sourceSystem, entity, it.SourceKey}
+		e, ok := m.Entries[k]
+		if !ok {
+			m.Puts++
+			e = it.Entry
+			m.Entries[k] = e
+		}
+		won[it.SourceKey] = e.TargetID
+	}
+	return won, nil
 }
 
 func (m *MemXref) Keys(_ context.Context, sourceSystem, entity string) ([]string, error) {

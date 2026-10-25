@@ -219,6 +219,43 @@ func (x pgXref) PutMany(ctx context.Context, sourceSystem, entity string, items 
 	})
 }
 
+func (x pgXref) Reserve(ctx context.Context, sourceSystem, entity string, items []domain.XrefItem) (map[string]string, error) {
+	won := make(map[string]string, len(items))
+	if len(items) == 0 {
+		return won, nil
+	}
+	p, _ := tenant.FromContext(ctx)
+	keys, targets := make([]string, len(items)), make([]string, len(items))
+	for i, it := range items {
+		keys[i], targets[i] = it.SourceKey, it.Entry.TargetID
+	}
+	err := dbx.WithTenantTx(ctx, x.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `insert into migration.xref (tenant_id, source_system, source_entity, source_key, target_id)
+			select $1, $2, $3, i.source_key, i.target_id::uuid
+			from unnest($4::text[], $5::text[]) as i(source_key, target_id)
+			on conflict (tenant_id, source_system, source_entity, source_key) do nothing`,
+			p.TenantID, sourceSystem, entity, keys, targets); err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, `select source_key, target_id::text from migration.xref
+			where tenant_id = $1 and source_system = $2 and source_entity = $3 and source_key = any($4)`,
+			p.TenantID, sourceSystem, entity, keys)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var key, id string
+			if err := rows.Scan(&key, &id); err != nil {
+				return err
+			}
+			won[key] = id
+		}
+		return rows.Err()
+	})
+	return won, err
+}
+
 func (x pgXref) Keys(ctx context.Context, sourceSystem, entity string) ([]string, error) {
 	p, _ := tenant.FromContext(ctx)
 	var keys []string

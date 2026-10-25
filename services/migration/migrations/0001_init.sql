@@ -66,3 +66,12 @@ CREATE POLICY run_ledger_tenant_access ON migration.run_ledger AS PERMISSIVE
   WITH CHECK (tenant_id = current_setting('passage.tenant_id', true)::uuid);
 CREATE POLICY run_ledger_legal_entity_scope ON migration.run_ledger AS RESTRICTIVE
   USING (current_setting('passage.legal_entity_scopes', true) = '*');
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'passage_app') THEN
+    GRANT USAGE ON SCHEMA migration TO passage_app;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON migration.run, migration.xref, migration.run_ledger TO passage_app;
+  END IF;
+END
+$$;
