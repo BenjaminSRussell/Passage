@@ -18,7 +18,7 @@ const (
 
 var (
 	ErrRateMissing = errors.New("LEDGER_RATE_MISSING")
-	ErrFutureRate  = errors.New("FX_RATE_FUTURE")
+	ErrFutureRate  = errors.New("FX_RATE_DATE_FUTURE")
 	ErrInvalidRate = errors.New("FX_RATE_INVALID")
 )
 
