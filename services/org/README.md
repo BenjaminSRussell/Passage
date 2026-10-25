@@ -22,10 +22,6 @@ Countries, currencies, regions and languages are platform-owned rows under the `
 
 Calendars are tenant-level and persisted in `fiscal_calendar` and `fiscal_period`. `POST /v1/org/fiscal-calendars` (duty `org.fiscal-calendar.write`, `Idempotency-Key`) creates one with the defaults `startMonth` 1, `weekStart` `monday`, `openingClosing` true and `specialPeriods` 0; `GET /v1/org/fiscal-calendars/{id}` reads it. `POST /v1/org/fiscal-calendars/{id}:generate` with `{fiscalYear, force?, periods?}` writes the year's periods and emits `fiscalcalendar.generated` (201, `generated` true). Calling it again for the same calendar and year is a replay: 200, `generated` false, the stored periods, no write and no event. `force` replaces the rows and emits a second event, but first asks the `PostingChecker`: postings answer 409 `ORG-CAL-LOCKED`, a checker failure answers 503 `COM-0503`. Until the ledger exists the checker reports no postings. `periods` is required for a `custom` calendar and rejected for any other pattern (`ORG-CAL-PATTERN`). `GET /v1/org/fiscal-calendars/{id}/periods?fiscalYear=` returns the periods in order 0, operating, adjustment, 99.
 
-## Hierarchies
-
-Hierarchies are tenant-level (`hierarchy_type`, `hierarchy_version`, `hierarchy_node`), written with duty `org.hierarchy.write`. A type has at most one open draft (409 `ORG-HIER-DRAFT-EXISTS`), copied from the latest published version. `PUT .../nodes` replaces a draft's whole node set; `domain.ValidateTree` checks size, duplicate node, unknown parent, cycle, single root and depth (15 levels, 50,000 nodes), and a stale `version` is 409 `ORG-VERSION-CONFLICT`. Publish, overlap checks, the closure table and the as-of API are a later slice.
-
 ## API
 
 | Operation | Duty |
