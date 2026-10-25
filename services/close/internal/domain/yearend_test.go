@@ -1,0 +1,180 @@
+package domain_test
+
+import (
+	"encoding/json"
+	"os"
+	"testing"
+
+	"github.com/shopspring/decimal"
+	"pgregory.net/rapid"
+
+	"github.com/BenjaminSRussell/passage/services/close/internal/domain"
+)
+
+type expectedEntry struct {
+	Account    string
+	Dimensions string
+	Amount     decimal.Decimal
+}
+
+type yearFixture struct {
+	RetainedEarnings           string
+	Periods                    []struct{ Balances []domain.Balance }
+	NetIncomeDebit             decimal.Decimal
+	ExpectedOpeningByDimension []expectedEntry
+	ExpectedOpeningCombined    []expectedEntry
+}
+
+func loadYear(t *testing.T) (yearFixture, []domain.Balance) {
+	t.Helper()
+	raw, err := os.ReadFile("../../testdata/fy-12-periods.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var f yearFixture
+	if err := json.Unmarshal(raw, &f); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Periods) != 12 {
+		t.Fatalf("fixture has %d periods, want 12", len(f.Periods))
+	}
+	type k struct{ account, dimensions string }
+	sums := map[k]domain.Balance{}
+	var order []k
+	for _, p := range f.Periods {
+		for _, b := range p.Balances {
+			key := k{b.Account, b.Dimensions}
+			if cur, ok := sums[key]; ok {
+				b.Amount = b.Amount.Add(cur.Amount)
+			} else {
+				order = append(order, key)
+			}
+			sums[key] = b
+		}
+	}
+	annual := make([]domain.Balance, 0, len(order))
+	for _, key := range order {
+		annual = append(annual, sums[key])
+	}
+	return f, annual
+}
+
+func assertEntries(t *testing.T, got []domain.Entry, want []expectedEntry) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("got %d entries, want %d: %+v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i].Account != want[i].Account || got[i].Dimensions != want[i].Dimensions || !got[i].Amount.Equal(want[i].Amount) {
+			t.Errorf("entry %d: got %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestCloseYear_TwelvePeriods(t *testing.T) {
+	f, annual := loadYear(t)
+	ye, err := domain.CloseYear(annual, f.RetainedEarnings, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertEntries(t, ye.Opening, f.ExpectedOpeningByDimension)
+	net := decimal.Zero
+	for _, e := range ye.Closing {
+		if e.Account == f.RetainedEarnings {
+			net = net.Add(e.Amount)
+		}
+	}
+	if !net.Equal(f.NetIncomeDebit) {
+		t.Errorf("retained earnings moved by %s, want %s", net, f.NetIncomeDebit)
+	}
+	for _, e := range ye.Opening {
+		if e.Account == "4000" || e.Account == "5000" || e.Account == "6000" {
+			t.Errorf("profit and loss account %s must open at zero, got %s", e.Account, e.Amount)
+		}
+	}
+}
+
+func TestCloseYear_RetainDimensions(t *testing.T) {
+	f, annual := loadYear(t)
+	ye, err := domain.CloseYear(annual, f.RetainedEarnings, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertEntries(t, ye.Opening, f.ExpectedOpeningCombined)
+}
+
+func TestCloseYear_Errors(t *testing.T) {
+	pl := domain.Balance{Account: "4000", Class: domain.ClassProfitLoss, Amount: decimal.NewFromInt(-5)}
+	bs := domain.Balance{Account: "1000", Class: domain.ClassBalanceSheet, Amount: decimal.NewFromInt(5)}
+	tests := []struct {
+		name     string
+		balances []domain.Balance
+		re       string
+		wantErr  bool
+	}{
+		{"empty balances", nil, "", false},
+		{"missing retained earnings account", []domain.Balance{pl, bs}, "", true},
+		{"unbalanced", []domain.Balance{pl}, "3000", true},
+		{"unknown class", []domain.Balance{{Account: "9", Class: "zz", Amount: decimal.Zero}}, "3000", true},
+		{"retained earnings classed as profit and loss", []domain.Balance{{Account: "3000", Class: domain.ClassProfitLoss, Amount: decimal.Zero}}, "3000", true},
+		{"balanced", []domain.Balance{pl, bs}, "3000", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ye, err := domain.CloseYear(tc.balances, tc.re, true)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tc.wantErr)
+			}
+			if tc.wantErr && (len(ye.Closing) != 0 || len(ye.Opening) != 0) {
+				t.Fatalf("failure must return no proposals, got %+v", ye)
+			}
+		})
+	}
+}
+
+func TestVerifyOpening_DetectsMismatch(t *testing.T) {
+	f, annual := loadYear(t)
+	ye, err := domain.CloseYear(annual, f.RetainedEarnings, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ye.Opening[0].Amount = ye.Opening[0].Amount.Add(decimal.NewFromInt(1))
+	if err := domain.VerifyOpening(annual, f.RetainedEarnings, ye); err == nil {
+		t.Fatal("tampered opening balance must be rejected")
+	}
+}
+
+func TestCloseYear_Property(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		n := rapid.IntRange(1, 12).Draw(t, "accounts")
+		var balances []domain.Balance
+		total := decimal.Zero
+		for i := 0; i < n; i++ {
+			amount := decimal.New(rapid.Int64Range(-1_000_000, 1_000_000).Draw(t, "amount"), -2)
+			class := domain.ClassBalanceSheet
+			if rapid.Bool().Draw(t, "pl") {
+				class = domain.ClassProfitLoss
+			}
+			balances = append(balances, domain.Balance{
+				Account: string(rune('a' + i)), Class: class,
+				Dimensions: rapid.SampledFrom([]string{"", "dept=A", "dept=B"}).Draw(t, "dims"), Amount: amount,
+			})
+			total = total.Add(amount)
+		}
+		balances = append(balances, domain.Balance{Account: "cash", Class: domain.ClassBalanceSheet, Amount: total.Neg()})
+		ye, err := domain.CloseYear(balances, "re", rapid.Bool().Draw(t, "retainDimensions"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		closing, opening := decimal.Zero, decimal.Zero
+		for _, e := range ye.Closing {
+			closing = closing.Add(e.Amount)
+		}
+		for _, e := range ye.Opening {
+			opening = opening.Add(e.Amount)
+		}
+		if !closing.IsZero() || !opening.IsZero() {
+			t.Fatalf("closing sums to %s and opening to %s, both must be zero", closing, opening)
+		}
+	})
+}

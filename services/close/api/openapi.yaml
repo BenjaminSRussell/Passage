@@ -1,0 +1,95 @@
+openapi: 3.1.0
+info:
+  title: close
+  version: 0.1.0
+  description: Period control, close checklist, allocations and year-end (wave 14). This slice ships the period-control decision endpoint the ledger posting API calls.
+servers:
+  - url: https://api.passage.dev
+paths:
+  /v1/close/period-statuses:check:
+    post:
+      operationId: checkPeriodStatus
+      x-passage-duty: period.check
+      description: Decides whether a posting from the given source system may enter the fiscal period. Resolution order is the module row, then the ALL row, then never opened (rejected). Read-only; the ledger also checks inside its posting transaction.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PeriodCheckRequest' }
+      responses:
+        '200':
+          description: Posting allowed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PeriodCheckResult' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /healthz:
+    get:
+      operationId: liveness
+      x-passage-duty: public
+      responses:
+        '200': { description: Process is alive. }
+  /readyz:
+    get:
+      operationId: readiness
+      x-passage-duty: public
+      responses:
+        '200': { description: Database reachable. }
+        '503': { description: Database unreachable. }
+  /metrics:
+    get:
+      operationId: metrics
+      x-passage-duty: public
+      description: Served on the admin port (9090), never through the ingress.
+      responses:
+        '200':
+          description: Prometheus text exposition.
+          content:
+            text/plain:
+              schema: { type: string }
+components:
+  schemas:
+    PeriodCheckRequest:
+      type: object
+      additionalProperties: false
+      required: [ledgerId, fiscalPeriodId, postingDate]
+      properties:
+        ledgerId: { type: string, format: uuid }
+        fiscalPeriodId: { type: string, format: uuid }
+        postingDate: { type: string, format: date }
+        sourceSystem:
+          type: string
+          description: manual, gl, ap, ar, inv, fa, proj, tax, bank, payroll, cash or prod. Any other value, including empty, checks the ALL module.
+        groupId:
+          type: string
+          description: User group of the poster; the only way through an on_hold period.
+    PeriodCheckResult:
+      type: object
+      required: [allowed, module, status]
+      properties:
+        allowed: { type: boolean, const: true }
+        module: { type: string, enum: [all, gl, ap, ar, inventory, assets, cash, production, projects, tax, bank, payroll] }
+        status: { type: string, enum: [open, on_hold] }
+    Problem:
+      type: object
+      required: [type, title, status, code, serviceCode]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string }
+        serviceCode: { type: string }
+        traceId: { type: string }
+        errors: { type: object, additionalProperties: { type: string } }
+  responses:
+    Problem:
+      description: RFC 9457 problem details (application/problem+json). 422 LEDGER-0013 period closed or never opened; 403 LEDGER-0014 period on hold; 400 CLOSE-0004 or COM-0001 validation.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
