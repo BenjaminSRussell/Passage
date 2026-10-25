@@ -54,6 +54,9 @@ func run(ctx context.Context, getenv func(string) string) error {
 		if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
 			return fmt.Errorf("migrate: %w", err)
 		}
+		if err := store.SeedReference(ctx, pool, migrations.Reference); err != nil {
+			return fmt.Errorf("seed reference data: %w", err)
+		}
 	}
 	a := api.New(store.New(pool))
 	router := httpx.NewRouter()

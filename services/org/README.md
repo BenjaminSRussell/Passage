@@ -12,6 +12,10 @@ Run: `DATABASE_URL=postgres://... MIGRATE_ON_START=true go run ./cmd/org`. Test:
 | `MIGRATE_ON_START` | `true` applies embedded migrations at start (dev only) |
 | `HTTP_ADDR`, `ADMIN_ADDR` | default `:8080`, and `:9090` serving `/metrics` only |
 
+## Reference data
+
+Countries and currencies are platform-owned rows under the `sys` tenant (`00000000-0000-0000-0000-000000000000`): every tenant can read them, no tenant can insert, update or delete them. The data lives in `migrations/reference/countries.csv` and `currencies.csv`, embedded as `migrations.Reference`, and `store.SeedReference` loads it after the migrations when `MIGRATE_ON_START=true`. A malformed row fails the whole file with `<file> line <n>: <reason>`; re-running the seed changes nothing.
+
 ## API
 
 | Operation | Duty |
