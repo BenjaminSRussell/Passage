@@ -333,26 +333,6 @@ func usesComponent(v BomVersion, component string, asOf time.Time) bool {
 	return false
 }
 
-func TopLevelProducts(tree []*UsedBy) []string {
-	seen := map[string]bool{}
-	var walk func(nodes []*UsedBy)
-	walk = func(nodes []*UsedBy) {
-		for _, n := range nodes {
-			if len(n.Parents) == 0 {
-				seen[n.ProductID] = true
-			}
-			walk(n.Parents)
-		}
-	}
-	walk(tree)
-	out := make([]string, 0, len(seen))
-	for p := range seen {
-		out = append(out, p)
-	}
-	sort.Strings(out)
-	return out
-}
-
 func RollupCost(flat []FlatLine, unitCost map[string]money.Amount, currency string) (money.Amount, []string, error) {
 	var priced []money.Amount
 	var missing []string
