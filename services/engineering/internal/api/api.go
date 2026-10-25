@@ -1,0 +1,690 @@
+package api
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"strconv"
+	"strings"
+	"sync/atomic"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+	"github.com/shopspring/decimal"
+
+	"github.com/BenjaminSRussell/passage/platform/authz"
+	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/BenjaminSRussell/passage/services/engineering/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/engineering/internal/store"
+)
+
+const (
+	readyTimeout     = 500 * time.Millisecond
+	idempotencyKey   = "Idempotency-Key"
+	dutyRead         = "engineering.read"
+	dutyBomWrite     = "engineering.bom.write"
+	dutyEcoApprove   = "engineering.eco.approve"
+	dateLayout       = "2006-01-02"
+	validationDetail = "request failed validation"
+	maxIDLength      = 64
+	maxLines         = 5000
+	maxOperations    = 500
+	maxNumberLength  = 40
+	maxDecimalExp    = 15
+	minDecimalExp    = -12
+)
+
+var (
+	maxDecimal = decimal.New(1, maxDecimalExp)
+	lineTypes  = map[string]bool{domain.LineItem: true, domain.LinePhantom: true, domain.LineCoProduct: true, domain.LineByProduct: true}
+)
+
+type API struct {
+	store        store.Store
+	approver     domain.Approver
+	now          func() time.Time
+	bomCreated   atomic.Int64
+	bomFailed    atomic.Int64
+	ecosReleased atomic.Int64
+	ecosFailed   atomic.Int64
+	explosions   atomic.Int64
+}
+
+func New(s store.Store, approver domain.Approver, now func() time.Time) *API {
+	return &API{store: s, approver: approver, now: now}
+}
+
+func (a *API) Register(r chi.Router) {
+	r.Get("/readyz", a.ready)
+	r.With(authz.RequireDuty(dutyBomWrite)).Post("/v1/engineering/bom-versions", a.createBomVersion)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/bom-versions", a.listBomVersions)
+	r.With(authz.RequireDuty(dutyRead)).Post("/v1/engineering/boms:explode", a.explode)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/boms:where-used", a.whereUsed)
+	r.With(authz.RequireDuty(dutyRead)).Post("/v1/engineering/routes:lead-time", a.leadTime)
+	r.With(authz.RequireDuty(dutyBomWrite)).Post("/v1/engineering/ecos", a.createEco)
+	r.With(authz.RequireDuty(dutyEcoApprove)).Post("/v1/engineering/ecos/{id}:release", a.releaseEco)
+}
+
+func (a *API) Metrics() http.Handler {
+	counters := []struct {
+		name, help string
+		value      *atomic.Int64
+	}{
+		{"engineering_bom_versions_created_total", "BOM versions created.", &a.bomCreated},
+		{"engineering_bom_versions_failed_total", "BOM requests that failed in the store or domain with an unexpected error.", &a.bomFailed},
+		{"engineering_ecos_released_total", "ECOs released to production.", &a.ecosReleased},
+		{"engineering_ecos_failed_total", "ECO requests that failed in the store or domain with an unexpected error.", &a.ecosFailed},
+		{"engineering_explosions_total", "BOM explosions served.", &a.explosions},
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		for _, c := range counters {
+			fmt.Fprintf(w, "# HELP %[1]s %[2]s\n# TYPE %[1]s counter\n%[1]s %[3]d\n", c.name, c.help, c.value.Load())
+		}
+	})
+}
+
+func (a *API) ready(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), readyTimeout)
+	defer cancel()
+	if err := a.store.Ping(ctx); err != nil {
+		slog.ErrorContext(r.Context(), "readiness check failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.JSON(w, http.StatusServiceUnavailable, map[string]string{"status": "unavailable"})
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]string{"status": "ready"})
+}
+
+type bomLineBody struct {
+	LineNo             int              `json:"lineNo,omitempty"`
+	ComponentProductID string           `json:"componentProductId"`
+	Quantity           decimal.Decimal  `json:"quantity"`
+	Series             *decimal.Decimal `json:"series,omitempty"`
+	LineType           string           `json:"lineType,omitempty"`
+	ScrapConst         decimal.Decimal  `json:"scrapConst"`
+	ScrapVarPct        decimal.Decimal  `json:"scrapVarPct"`
+	RoundUp            string           `json:"roundUp,omitempty"`
+	EffectiveFrom      string           `json:"effectiveFrom,omitempty"`
+	EffectiveTo        string           `json:"effectiveTo,omitempty"`
+}
+
+type bomVersionBody struct {
+	ID            string           `json:"id,omitempty"`
+	ProductID     string           `json:"productId"`
+	SiteID        string           `json:"siteId,omitempty"`
+	EffectiveFrom string           `json:"effectiveFrom"`
+	EffectiveTo   string           `json:"effectiveTo,omitempty"`
+	FromQty       *decimal.Decimal `json:"fromQty,omitempty"`
+	ToQty         *decimal.Decimal `json:"toQty,omitempty"`
+	Status        string           `json:"status,omitempty"`
+	Lines         []bomLineBody    `json:"lines,omitempty"`
+}
+
+type page[T any] struct {
+	Items      []T    `json:"items"`
+	NextCursor string `json:"nextCursor,omitempty"`
+}
+
+func finite(ds ...decimal.Decimal) bool {
+	for _, d := range ds {
+		if d.Exponent() < minDecimalExp || d.Exponent() > maxDecimalExp || !d.Abs().LessThan(maxDecimal) {
+			return false
+		}
+	}
+	return true
+}
+
+func parseDate(s string) (time.Time, bool) {
+	t, err := time.Parse(dateLayout, s)
+	return t, err == nil
+}
+
+func formatDate(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Format(dateLayout)
+}
+
+func optionalDate(field, raw string, fields map[string]string) time.Time {
+	if raw == "" {
+		return time.Time{}
+	}
+	t, ok := parseDate(raw)
+	if !ok {
+		fields[field] = "must be a date as YYYY-MM-DD"
+	}
+	return t
+}
+
+func validID(field, value string, fields map[string]string) {
+	if n := len(strings.TrimSpace(value)); n == 0 || n > maxIDLength {
+		fields[field] = fmt.Sprintf("must be 1 to %d characters", maxIDLength)
+	}
+}
+
+func (b bomVersionBody) toDomain() (domain.BomVersion, map[string]string) {
+	fields := map[string]string{}
+	validID("productId", b.ProductID, fields)
+	v := domain.BomVersion{ID: ids.New(), ProductID: b.ProductID, SiteID: b.SiteID, FromQty: b.FromQty, ToQty: b.ToQty, Status: b.Status}
+	if v.Status == "" {
+		v.Status = domain.StatusDraft
+	}
+	if v.Status != domain.StatusDraft && v.Status != domain.StatusActive {
+		fields["status"] = "must be draft or active"
+	}
+	var ok bool
+	if v.EffectiveFrom, ok = parseDate(b.EffectiveFrom); !ok {
+		fields["effectiveFrom"] = "is required as YYYY-MM-DD"
+	}
+	v.EffectiveTo = optionalDate("effectiveTo", b.EffectiveTo, fields)
+	if !v.EffectiveTo.IsZero() && v.EffectiveTo.Before(v.EffectiveFrom) {
+		fields["effectiveTo"] = "must not be before effectiveFrom"
+	}
+	for field, q := range map[string]*decimal.Decimal{"fromQty": b.FromQty, "toQty": b.ToQty} {
+		if q != nil && (q.IsNegative() || !finite(*q)) {
+			fields[field] = "must be a non-negative decimal"
+		}
+	}
+	if b.FromQty != nil && b.ToQty != nil && b.FromQty.GreaterThan(*b.ToQty) {
+		fields["toQty"] = "must not be below fromQty"
+	}
+	if len(b.Lines) == 0 || len(b.Lines) > maxLines {
+		fields["lines"] = fmt.Sprintf("must contain 1 to %d lines", maxLines)
+	}
+	seen := map[int]bool{}
+	for i, lb := range b.Lines {
+		line, problem := lb.toDomain(i)
+		if problem != "" {
+			fields[fmt.Sprintf("lines[%d]", i)] = problem
+		} else if seen[line.LineNo] {
+			fields[fmt.Sprintf("lines[%d]", i)] = "lineNo is duplicated"
+		}
+		seen[line.LineNo] = true
+		v.Lines = append(v.Lines, line)
+	}
+	return v, fields
+}
+
+func (lb bomLineBody) toDomain(index int) (domain.BomLine, string) {
+	line := domain.BomLine{
+		LineNo: lb.LineNo, ComponentProductID: lb.ComponentProductID, Quantity: lb.Quantity, Series: decimal.NewFromInt(1),
+		LineType: lb.LineType, ScrapConst: lb.ScrapConst, ScrapVarPct: lb.ScrapVarPct, RoundUp: lb.RoundUp,
+	}
+	if line.LineNo == 0 {
+		line.LineNo = index + 1
+	}
+	if lb.Series != nil {
+		line.Series = *lb.Series
+	}
+	if line.LineType == "" {
+		line.LineType = domain.LineItem
+	}
+	dates := map[string]string{}
+	line.EffectiveFrom, line.EffectiveTo = optionalDate("effectiveFrom", lb.EffectiveFrom, dates), optionalDate("effectiveTo", lb.EffectiveTo, dates)
+	switch {
+	case len(dates) > 0:
+		return line, "effectiveFrom and effectiveTo must be dates as YYYY-MM-DD"
+	case !line.EffectiveTo.IsZero() && line.EffectiveTo.Before(line.EffectiveFrom):
+		return line, "effectiveTo must not be before effectiveFrom"
+	case !lineTypes[line.LineType] || (line.RoundUp != "" && line.RoundUp != domain.RoundUpQuantity):
+		return line, "lineType or roundUp is not recognised"
+	case len(strings.TrimSpace(line.ComponentProductID)) == 0 || len(line.ComponentProductID) > maxIDLength:
+		return line, fmt.Sprintf("componentProductId must be 1 to %d characters", maxIDLength)
+	case !finite(line.Quantity, line.Series, line.ScrapConst, line.ScrapVarPct):
+		return line, "quantities must be decimals within range"
+	}
+	if err := domain.ValidateLine(line); err != nil {
+		return line, err.Error()
+	}
+	return line, ""
+}
+
+func bodyFromVersion(v domain.BomVersion) bomVersionBody {
+	body := bomVersionBody{
+		ID: v.ID, ProductID: v.ProductID, SiteID: v.SiteID, EffectiveFrom: formatDate(v.EffectiveFrom), EffectiveTo: formatDate(v.EffectiveTo),
+		FromQty: v.FromQty, ToQty: v.ToQty, Status: v.Status,
+	}
+	for _, l := range v.Lines {
+		series := l.Series
+		body.Lines = append(body.Lines, bomLineBody{
+			LineNo: l.LineNo, ComponentProductID: l.ComponentProductID, Quantity: l.Quantity, Series: &series, LineType: l.LineType,
+			ScrapConst: l.ScrapConst, ScrapVarPct: l.ScrapVarPct, RoundUp: l.RoundUp, EffectiveFrom: formatDate(l.EffectiveFrom), EffectiveTo: formatDate(l.EffectiveTo),
+		})
+	}
+	return body
+}
+
+func checkVersion(v domain.BomVersion) func(store.Snapshot) error {
+	return func(existing store.Snapshot) error {
+		for _, l := range v.Lines {
+			if err := domain.CheckCycle(existing, v.ProductID, l.ComponentProductID, v.EffectiveFrom); err != nil {
+				return err
+			}
+		}
+		if v.Status == domain.StatusActive {
+			return domain.CheckNoOverlap(existing.VersionsFor(v.ProductID), v)
+		}
+		return nil
+	}
+}
+
+func (a *API) createBomVersion(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	var body bomVersionBody
+	if err := httpx.Decode(r, &body); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	version, fields := body.toDomain()
+	if len(fields) > 0 {
+		invalid(w, r, fields)
+		return
+	}
+	created, err := a.store.CreateBomVersion(r.Context(), version, store.Idem{Key: r.Header.Get(idempotencyKey), Hash: hashOf(body)}, checkVersion(version))
+	if err != nil {
+		a.fail(w, r, "create bom version", err, &a.bomFailed)
+		return
+	}
+	a.bomCreated.Add(1)
+	httpx.JSON(w, http.StatusCreated, bodyFromVersion(created))
+}
+
+func (a *API) listBomVersions(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	limit, after, err := pageParams(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	result, err := a.store.ListBomVersions(r.Context(), after, limit)
+	if err != nil {
+		a.fail(w, r, "list bom versions", err, &a.bomFailed)
+		return
+	}
+	body := page[bomVersionBody]{Items: make([]bomVersionBody, len(result.Items))}
+	for i, v := range result.Items {
+		body.Items[i] = bodyFromVersion(v)
+	}
+	if result.NextID != "" {
+		body.NextCursor = base64.RawURLEncoding.EncodeToString([]byte(result.NextID))
+	}
+	httpx.JSON(w, http.StatusOK, body)
+}
+
+func pageParams(r *http.Request) (int, string, error) {
+	q := r.URL.Query()
+	limit := store.MaxPageSize
+	if raw := q.Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > store.MaxPageSize {
+			return 0, "", httpx.NewProblem(http.StatusBadRequest, "COM-0001", fmt.Sprintf("limit must be 1 to %d", store.MaxPageSize))
+		}
+		limit = n
+	}
+	after := ""
+	if raw := q.Get("cursor"); raw != "" {
+		decoded, err := base64.RawURLEncoding.DecodeString(raw)
+		if err != nil || !ids.Valid(string(decoded)) {
+			return 0, "", httpx.NewProblem(http.StatusBadRequest, "COM-0001", "cursor is invalid")
+		}
+		after = string(decoded)
+	}
+	return limit, after, nil
+}
+
+type explodeRequest struct {
+	ProductID string           `json:"productId"`
+	SiteID    string           `json:"siteId"`
+	AsOf      string           `json:"asOf"`
+	Quantity  *decimal.Decimal `json:"quantity"`
+	Levels    int              `json:"levels"`
+}
+
+type nodeBody struct {
+	ProductID string          `json:"productId"`
+	LineNo    int             `json:"lineNo,omitempty"`
+	Level     int             `json:"level"`
+	Quantity  decimal.Decimal `json:"quantity"`
+	Children  []nodeBody      `json:"children,omitempty"`
+}
+
+type flatBody struct {
+	ProductID string          `json:"productId"`
+	Quantity  decimal.Decimal `json:"quantity"`
+}
+
+type explosionBody struct {
+	Root nodeBody   `json:"root"`
+	Flat []flatBody `json:"flat"`
+}
+
+func bodyFromNode(n *domain.Node) nodeBody {
+	body := nodeBody{ProductID: n.ProductID, LineNo: n.LineNo, Level: n.Level, Quantity: n.Quantity}
+	for _, c := range n.Children {
+		body.Children = append(body.Children, bodyFromNode(c))
+	}
+	return body
+}
+
+func (a *API) explode(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	var req explodeRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	fields := map[string]string{}
+	validID("productId", req.ProductID, fields)
+	asOf := a.today()
+	if req.AsOf != "" {
+		var ok bool
+		if asOf, ok = parseDate(req.AsOf); !ok {
+			fields["asOf"] = "must be a date as YYYY-MM-DD"
+		}
+	}
+	quantity := decimal.NewFromInt(1)
+	if req.Quantity != nil {
+		quantity = *req.Quantity
+	}
+	if !finite(quantity) {
+		fields["quantity"] = "must be a decimal within range"
+	}
+	if len(fields) > 0 {
+		invalid(w, r, fields)
+		return
+	}
+	levels := req.Levels
+	if levels == 0 {
+		levels = domain.MaxLevels
+	}
+	snapshot, err := a.store.Catalog(r.Context(), []string{req.ProductID}, false)
+	if err != nil {
+		a.fail(w, r, "load bom catalog", err, &a.bomFailed)
+		return
+	}
+	result, err := domain.Explode(snapshot, domain.ExplodeRequest{ProductID: req.ProductID, SiteID: req.SiteID, AsOf: asOf, Quantity: quantity, Levels: levels})
+	if err != nil {
+		a.fail(w, r, "explode bom", err, &a.bomFailed)
+		return
+	}
+	a.explosions.Add(1)
+	body := explosionBody{Root: bodyFromNode(result.Root), Flat: make([]flatBody, len(result.Flat))}
+	for i, f := range result.Flat {
+		body.Flat[i] = flatBody{ProductID: f.ProductID, Quantity: f.Quantity}
+	}
+	httpx.JSON(w, http.StatusOK, body)
+}
+
+type usedByBody struct {
+	ProductID string       `json:"productId"`
+	VersionID string       `json:"versionId"`
+	SiteID    string       `json:"siteId,omitempty"`
+	Level     int          `json:"level"`
+	Parents   []usedByBody `json:"parents,omitempty"`
+}
+
+func bodyFromUsedBy(u *domain.UsedBy) usedByBody {
+	body := usedByBody{ProductID: u.ProductID, VersionID: u.VersionID, SiteID: u.SiteID, Level: u.Level}
+	for _, p := range u.Parents {
+		body.Parents = append(body.Parents, bodyFromUsedBy(p))
+	}
+	return body
+}
+
+func (a *API) whereUsed(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	q := r.URL.Query()
+	fields := map[string]string{}
+	validID("component", q.Get("component"), fields)
+	asOf := a.today()
+	if raw := q.Get("asOf"); raw != "" {
+		var ok bool
+		if asOf, ok = parseDate(raw); !ok {
+			fields["asOf"] = "must be a date as YYYY-MM-DD"
+		}
+	}
+	levels := domain.MaxLevels
+	if raw := q.Get("levels"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > domain.MaxLevels {
+			fields["levels"] = fmt.Sprintf("must be 1 to %d", domain.MaxLevels)
+		}
+		levels = n
+	}
+	if len(fields) > 0 {
+		invalid(w, r, fields)
+		return
+	}
+	snapshot, err := a.store.Catalog(r.Context(), []string{q.Get("component")}, true)
+	if err != nil {
+		a.fail(w, r, "load where-used catalog", err, &a.bomFailed)
+		return
+	}
+	used, err := domain.WhereUsed(snapshot, q.Get("component"), asOf, levels)
+	if err != nil {
+		a.fail(w, r, "where-used", err, &a.bomFailed)
+		return
+	}
+	body := page[usedByBody]{Items: make([]usedByBody, len(used))}
+	for i, u := range used {
+		body.Items[i] = bodyFromUsedBy(u)
+	}
+	httpx.JSON(w, http.StatusOK, body)
+}
+
+type leadTimeRequest struct {
+	Operations  []domain.RouteOperation `json:"operations"`
+	Quantity    decimal.Decimal         `json:"quantity"`
+	HoursPerDay decimal.Decimal         `json:"hoursPerDay"`
+}
+
+type leadTimeBody struct {
+	Hours        decimal.Decimal `json:"hours"`
+	CalendarDays int             `json:"calendarDays"`
+}
+
+func (a *API) leadTime(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	var req leadTimeRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	fields := map[string]string{}
+	if len(req.Operations) == 0 || len(req.Operations) > maxOperations {
+		fields["operations"] = fmt.Sprintf("must contain 1 to %d operations", maxOperations)
+	}
+	if !finite(req.Quantity, req.HoursPerDay) {
+		fields["quantity"] = "quantity and hoursPerDay must be decimals within range"
+	}
+	for _, o := range req.Operations {
+		if !finite(o.SetupH, o.RunH, o.ProcessQty, o.QueueBeforeH, o.QueueAfterH, o.TransitH, o.EfficiencyPct) {
+			fields["operations"] = "operation times must be decimals within range"
+		}
+	}
+	if len(fields) > 0 {
+		invalid(w, r, fields)
+		return
+	}
+	result, err := domain.LeadTime(req.Operations, req.Quantity, req.HoursPerDay)
+	if err != nil {
+		a.fail(w, r, "route lead time", err, &a.bomFailed)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, leadTimeBody{Hours: result.Hours, CalendarDays: result.CalendarDays})
+}
+
+type replacementBody struct {
+	OldVersionID string `json:"oldVersionId"`
+	NewVersionID string `json:"newVersionId"`
+}
+
+type ecoBody struct {
+	ID          string            `json:"id,omitempty"`
+	Number      string            `json:"number"`
+	State       string            `json:"state,omitempty"`
+	ReleaseDate string            `json:"releaseDate,omitempty"`
+	DecidedBy   string            `json:"decidedBy,omitempty"`
+	Replaces    []replacementBody `json:"replaces"`
+}
+
+func bodyFromEco(e domain.Eco) ecoBody {
+	body := ecoBody{ID: e.ID, Number: e.Number, State: string(e.State), ReleaseDate: formatDate(e.ReleaseDate), DecidedBy: e.DecidedBy, Replaces: make([]replacementBody, len(e.Replaces))}
+	for i, r := range e.Replaces {
+		body.Replaces[i] = replacementBody{OldVersionID: r.OldVersionID, NewVersionID: r.NewVersionID}
+	}
+	return body
+}
+
+func (b ecoBody) toDomain() (domain.Eco, map[string]string) {
+	fields := map[string]string{}
+	number := strings.TrimSpace(b.Number)
+	if n := len(number); n == 0 || n > maxNumberLength {
+		fields["number"] = fmt.Sprintf("must be 1 to %d characters", maxNumberLength)
+	}
+	eco := domain.Eco{ID: ids.New(), Number: number, State: domain.EcoSubmitted}
+	eco.ReleaseDate = optionalDate("releaseDate", b.ReleaseDate, fields)
+	if len(b.Replaces) == 0 || len(b.Replaces) > maxLines {
+		fields["replaces"] = fmt.Sprintf("must contain 1 to %d replacements", maxLines)
+	}
+	seen := map[string]bool{}
+	for _, r := range b.Replaces {
+		if !ids.Valid(r.OldVersionID) || !ids.Valid(r.NewVersionID) || r.OldVersionID == r.NewVersionID || seen[r.NewVersionID] {
+			fields["replaces"] = "each replacement needs two different valid version ids and a new version used once"
+		}
+		seen[r.NewVersionID] = true
+		eco.Replaces = append(eco.Replaces, domain.Replacement{OldVersionID: r.OldVersionID, NewVersionID: r.NewVersionID})
+	}
+	return eco, fields
+}
+
+func (a *API) createEco(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	var body ecoBody
+	if err := httpx.Decode(r, &body); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	eco, fields := body.toDomain()
+	if len(fields) > 0 {
+		invalid(w, r, fields)
+		return
+	}
+	created, err := a.store.CreateEco(r.Context(), eco, store.Idem{Key: r.Header.Get(idempotencyKey), Hash: hashOf(body)})
+	if err != nil {
+		a.fail(w, r, "create eco", err, &a.ecosFailed)
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, bodyFromEco(created))
+}
+
+func (a *API) releaseEco(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if !ids.Valid(id) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", "ECO id must be a UUID"))
+		return
+	}
+	record, err := a.store.GetEco(r.Context(), id)
+	if err != nil {
+		a.fail(w, r, "load eco", err, &a.ecosFailed)
+		return
+	}
+	eco, previous := record.Eco, record.Eco.State
+	if eco.State == domain.EcoSubmitted {
+		if err := eco.Review(r.Context(), a.approver); err != nil {
+			a.fail(w, r, "review eco", err, &a.ecosFailed)
+			return
+		}
+	}
+	plan, err := eco.Release(record.Versions, nil, a.today())
+	if err != nil {
+		a.fail(w, r, "release eco", err, &a.ecosFailed)
+		return
+	}
+	if err := a.store.ReleaseEco(r.Context(), eco, previous, plan); err != nil {
+		a.fail(w, r, "persist eco release", err, &a.ecosFailed)
+		return
+	}
+	if eco.State == domain.EcoReleased {
+		a.ecosReleased.Add(1)
+	}
+	httpx.JSON(w, http.StatusOK, bodyFromEco(eco))
+}
+
+func (a *API) today() time.Time {
+	y, m, d := a.now().UTC().Date()
+	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+}
+
+func (a *API) fail(w http.ResponseWriter, r *http.Request, operation string, err error, failures *atomic.Int64) {
+	var de *domain.Error
+	var problem *httpx.Problem
+	switch {
+	case errors.As(err, &de):
+		slog.WarnContext(r.Context(), operation+" rejected", "code", de.Code, "detail", de.Detail, "correlationId", middleware.GetReqID(r.Context()))
+		err = problemFrom(de)
+	case errors.As(err, &problem) && problem.Status < http.StatusInternalServerError:
+	default:
+		failures.Add(1)
+		slog.ErrorContext(r.Context(), operation+" failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+	}
+	httpx.Fail(w, r, err)
+}
+
+func problemFrom(de *domain.Error) *httpx.Problem {
+	status := http.StatusUnprocessableEntity
+	if de.Code == domain.CodeEcoState {
+		status = http.StatusConflict
+	}
+	return httpx.NewProblem(status, de.Code, de.Detail)
+}
+
+func invalid(w http.ResponseWriter, r *http.Request, fields map[string]string) {
+	p := httpx.NewProblem(http.StatusBadRequest, "COM-0001", validationDetail)
+	p.Errors = fields
+	httpx.Fail(w, r, p)
+}
+
+func hashOf(v any) string {
+	raw, _ := json.Marshal(v)
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
+}
+
+func validTenant(w http.ResponseWriter, r *http.Request) bool {
+	p, ok := tenant.FromContext(r.Context())
+	if !ok || !ids.Valid(p.TenantID) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnauthorized, "AUTH-0001", "missing or malformed tenant"))
+		return false
+	}
+	if p.LegalEntityID != "" && !ids.Valid(p.LegalEntityID) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", "legal entity must be a single UUID"))
+		return false
+	}
+	return true
+}

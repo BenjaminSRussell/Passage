@@ -1,0 +1,6 @@
+apiVersion: v2
+name: engineering
+description: Passage engineering data service for BOMs, routings and engineering change orders
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
