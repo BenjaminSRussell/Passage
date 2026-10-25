@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: org
-  version: 0.12.0
-  description: Organization service. Covers legal entities, operating units, sites, warehouses, locations, postal addresses with purposes, fiscal calendars with idempotent year generation and the period read, hierarchy types and draft hierarchy versions with validated node sets (error codes ORG-HIER-CYCLE, ORG-HIER-MULTI-ROOT, ORG-HIER-DUPLICATE-NODE, ORG-HIER-PARENT-UNKNOWN, ORG-HIER-DEPTH, ORG-HIER-SIZE, ORG-HIER-NODE-UNKNOWN, ORG-HIER-TYPE-NOT-FOUND, ORG-HIER-TYPE-CODE-DUPLICATE, ORG-HIER-VERSION-NOT-FOUND, ORG-HIER-DRAFT-EXISTS, ORG-HIER-VERSION-IMMUTABLE, ORG-HIER-OVERLAP, ORG-HIER-BACKDATE-DUTY, ORG-HIER-NO-VERSION, ORG-HIER-NODE-ABSENT) with publish, supersede, the closure table and the as-of query, unit-of-measure conversion, and the platform-owned reference sets (countries, currencies, regions, languages) with tenant-level deactivation.
+  version: 0.13.0
+  description: Organization service. Covers legal entities, operating units, sites, warehouses, locations, postal addresses with purposes, fiscal calendars with idempotent year generation and the period read, hierarchy types and draft hierarchy versions with validated node sets (error codes ORG-HIER-CYCLE, ORG-HIER-MULTI-ROOT, ORG-HIER-DUPLICATE-NODE, ORG-HIER-PARENT-UNKNOWN, ORG-HIER-DEPTH, ORG-HIER-SIZE, ORG-HIER-NODE-UNKNOWN, ORG-HIER-TYPE-NOT-FOUND, ORG-HIER-TYPE-CODE-DUPLICATE, ORG-HIER-VERSION-NOT-FOUND, ORG-HIER-DRAFT-EXISTS, ORG-HIER-VERSION-IMMUTABLE, ORG-HIER-OVERLAP, ORG-HIER-BACKDATE-DUTY, ORG-HIER-NO-VERSION, ORG-HIER-NODE-ABSENT, ORG-HIER-MAKER-CHECKER) with the version list, publish, supersede, the closure table and the as-of query, unit-of-measure conversion, and the platform-owned reference sets (countries, currencies, regions, languages) with tenant-level deactivation.
 servers:
   - url: https://app.local.passage.dev
 paths:
@@ -322,6 +322,19 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/HierarchyType' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/org/hierarchy-types/{id}/versions:
+    get:
+      operationId: listHierarchyVersions
+      x-passage-duty: org.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [draft, published, superseded] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: One page of the type's versions without nodes, newest versionNo first; an empty items array for a type with no versions. A legal-entity-scoped caller reads them too. Pass nextCursor as cursor for the next page. 400 COM-0001 naming status, limit or cursor (the cursor must be a positive version number). 403 AUTH-0003 without org.read. 404 ORG-HIER-TYPE-NOT-FOUND for a malformed, unknown or other tenant's id.
+          content: { application/json: { schema: { $ref: '#/components/schemas/HierarchyVersionPage' } } }
+        default: { $ref: '#/components/responses/Problem' }
     post:
       operationId: createHierarchyDraft
       x-passage-duty: org.hierarchy.write
@@ -380,7 +393,7 @@ paths:
         content: { application/json: { schema: { $ref: '#/components/schemas/PublishHierarchyVersion' } } }
       responses:
         '200':
-          description: The published version with its nodes, or the original on an Idempotency-Key replay. Superseding the latest earlier version closes its range at effectiveFrom. 400 COM-0001 naming version, effectiveFrom or reason (a reason of a non-backdated publish must be 10 to 500 characters). 403 AUTH-0003 without the duty or for a legal-entity-scoped caller. 403 ORG-HIER-BACKDATE-DUTY when effectiveFrom is before today (UTC) and the caller lacks org.hierarchy.backdate, the type forbids backdating or the reason is not 10 to 500 characters; no version changes state. 404 ORG-HIER-VERSION-NOT-FOUND for a malformed, unknown or other tenant's id. 409 ORG-HIER-VERSION-IMMUTABLE for a version that is not a draft; 409 ORG-VERSION-CONFLICT for a stale version; 409 ORG-HIER-OVERLAP when effectiveFrom is not after the latest published version's. 422 ORG-HIER-MULTI-ROOT, ORG-HIER-CYCLE, ORG-HIER-DUPLICATE-NODE, ORG-HIER-DEPTH or ORG-HIER-SIZE when the stored node set is invalid, including an empty one. 422 idempotency_key_reuse when the key belongs to another version or date. Emits dev.passage.org.hierarchyversion.activated.v1 in the same transaction, also for a future effectiveFrom.
+          description: The published version with its nodes, or the original on an Idempotency-Key replay. Superseding the latest earlier version closes its range at effectiveFrom. 400 COM-0001 naming version, effectiveFrom or reason (a reason of a non-backdated publish must be 10 to 500 characters). 403 AUTH-0003 without the duty or for a legal-entity-scoped caller. 403 ORG-HIER-MAKER-CHECKER when the type has the security purpose and the caller is the draft's last editor (editedBy); the version stays a draft, no closure rows are written and no event is emitted; a draft whose editedBy is null, created before this rule, is not blocked, and types without the security purpose are unaffected. 403 ORG-HIER-BACKDATE-DUTY when effectiveFrom is before today (UTC) and the caller lacks org.hierarchy.backdate, the type forbids backdating or the reason is not 10 to 500 characters; no version changes state. 404 ORG-HIER-VERSION-NOT-FOUND for a malformed, unknown or other tenant's id. 409 ORG-HIER-VERSION-IMMUTABLE for a version that is not a draft; 409 ORG-VERSION-CONFLICT for a stale version; 409 ORG-HIER-OVERLAP when effectiveFrom is not after the latest published version's. 422 ORG-HIER-MULTI-ROOT, ORG-HIER-CYCLE, ORG-HIER-DUPLICATE-NODE, ORG-HIER-DEPTH or ORG-HIER-SIZE when the stored node set is invalid, including an empty one. 422 idempotency_key_reuse when the key belongs to another version or date. Emits dev.passage.org.hierarchyversion.activated.v1 in the same transaction, also for a future effectiveFrom.
           content: { application/json: { schema: { $ref: '#/components/schemas/HierarchyVersion' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/org/hierarchy-types/{id}/as-of:
@@ -806,8 +819,17 @@ components:
       properties: { orgUnitId: { type: string, format: uuid }, kind: { type: string, enum: [legal_entity, operating_unit] }, parentOrgUnitId: { type: [string, 'null'], format: uuid }, sortOrder: { type: integer, minimum: 0 } }
     HierarchyVersion:
       type: object
-      required: [id, hierarchyTypeId, versionNo, status, effectiveFrom, effectiveTo, nodeCount, copiedFromVersionId, version, createdAt, updatedAt, publishedAt, publishedBy, publishReason, nodes]
-      properties: { id: { type: string, format: uuid }, hierarchyTypeId: { type: string, format: uuid }, versionNo: { type: integer, minimum: 1 }, status: { type: string, enum: [draft, published, superseded] }, effectiveFrom: { type: [string, 'null'], format: date }, effectiveTo: { type: [string, 'null'], format: date }, nodeCount: { type: integer }, copiedFromVersionId: { type: [string, 'null'], format: uuid }, version: { type: integer, description: Optimistic lock; send it back on the next PUT }, createdAt: { type: string, format: date-time }, updatedAt: { type: string, format: date-time }, publishedAt: { type: [string, 'null'], format: date-time }, publishedBy: { type: [string, 'null'] }, publishReason: { type: [string, 'null'] }, nodes: { type: array, items: { $ref: '#/components/schemas/HierarchyNode' } } }
+      required: [id, hierarchyTypeId, versionNo, status, effectiveFrom, effectiveTo, nodeCount, copiedFromVersionId, version, createdAt, updatedAt, publishedAt, publishedBy, publishReason, editedBy, nodes]
+      properties: { id: { type: string, format: uuid }, hierarchyTypeId: { type: string, format: uuid }, versionNo: { type: integer, minimum: 1 }, status: { type: string, enum: [draft, published, superseded] }, effectiveFrom: { type: [string, 'null'], format: date }, effectiveTo: { type: [string, 'null'], format: date }, nodeCount: { type: integer }, copiedFromVersionId: { type: [string, 'null'], format: uuid }, version: { type: integer, description: Optimistic lock; send it back on the next PUT }, createdAt: { type: string, format: date-time }, updatedAt: { type: string, format: date-time }, publishedAt: { type: [string, 'null'], format: date-time }, publishedBy: { type: [string, 'null'] }, publishReason: { type: [string, 'null'] }, editedBy: { type: [string, 'null'], description: The user who created or last replaced the nodes of the draft; null for a draft created before the maker-checker rule }, nodes: { type: array, items: { $ref: '#/components/schemas/HierarchyNode' } } }
+    HierarchyVersionSummary:
+      type: object
+      description: A HierarchyVersion without its nodes
+      required: [id, hierarchyTypeId, versionNo, status, effectiveFrom, effectiveTo, nodeCount, copiedFromVersionId, version, createdAt, updatedAt, publishedAt, publishedBy, publishReason, editedBy]
+      properties: { id: { type: string, format: uuid }, hierarchyTypeId: { type: string, format: uuid }, versionNo: { type: integer, minimum: 1 }, status: { type: string, enum: [draft, published, superseded] }, effectiveFrom: { type: [string, 'null'], format: date }, effectiveTo: { type: [string, 'null'], format: date }, nodeCount: { type: integer }, copiedFromVersionId: { type: [string, 'null'], format: uuid }, version: { type: integer }, createdAt: { type: string, format: date-time }, updatedAt: { type: string, format: date-time }, publishedAt: { type: [string, 'null'], format: date-time }, publishedBy: { type: [string, 'null'] }, publishReason: { type: [string, 'null'] }, editedBy: { type: [string, 'null'] } }
+    HierarchyVersionPage:
+      type: object
+      required: [items]
+      properties: { items: { type: array, items: { $ref: '#/components/schemas/HierarchyVersionSummary' } }, nextCursor: { type: string } }
     ReplaceHierarchyNodes:
       type: object
       additionalProperties: false

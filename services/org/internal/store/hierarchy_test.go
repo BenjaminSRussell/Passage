@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -35,7 +36,7 @@ func mustCreateHierarchyType(t *testing.T, s *store.Postgres, ctx context.Contex
 
 func mustCreateDraft(t *testing.T, s *store.Postgres, ctx context.Context, typeID string) store.HierarchyVersion {
 	t.Helper()
-	draft, err := s.CreateHierarchyDraft(ctx, typeID, "")
+	draft, err := s.CreateHierarchyDraft(ctx, typeID, "", editor)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,25 +141,25 @@ func TestPostgres_HierarchyTypeConcurrentSameKeyReturnsOneType(t *testing.T) {
 func TestPostgres_HierarchyDraftNumberingReplayAndOneOpenDraft(t *testing.T) {
 	s, ctx, _ := lifecycleStore(t)
 	ht := mustCreateHierarchyType(t, s, ctx, "REP")
-	first, err := s.CreateHierarchyDraft(ctx, ht.ID, "draft-key")
+	first, err := s.CreateHierarchyDraft(ctx, ht.ID, "draft-key", editor)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if first.VersionNo != 1 || first.Status != "draft" || first.NodeCount != 0 || first.CopiedFromVersionID != nil || first.EffectiveFrom != nil || first.Nodes == nil || len(first.Nodes) != 0 || first.Version != 1 {
 		t.Fatalf("first draft = %+v", first)
 	}
-	if _, err := s.CreateHierarchyDraft(ctx, ht.ID, "other-key"); problemCode(t, err) != store.CodeHierarchyDraftExists {
+	if _, err := s.CreateHierarchyDraft(ctx, ht.ID, "other-key", editor); problemCode(t, err) != store.CodeHierarchyDraftExists {
 		t.Fatalf("second draft error = %v", err)
 	}
-	replay, err := s.CreateHierarchyDraft(ctx, ht.ID, "draft-key")
+	replay, err := s.CreateHierarchyDraft(ctx, ht.ID, "draft-key", editor)
 	if err != nil || replay.ID != first.ID {
 		t.Fatalf("replay = %+v, %v; want the first draft", replay, err)
 	}
 	other := mustCreateHierarchyType(t, s, ctx, "PROC")
-	if _, err := s.CreateHierarchyDraft(ctx, other.ID, "draft-key"); problemCode(t, err) != store.CodeIdempotencyReuse {
+	if _, err := s.CreateHierarchyDraft(ctx, other.ID, "draft-key", editor); problemCode(t, err) != store.CodeIdempotencyReuse {
 		t.Fatalf("same key for another type error = %v", err)
 	}
-	if _, err := s.CreateHierarchyDraft(ctx, ids.New(), ""); problemCode(t, err) != store.CodeHierarchyTypeNotFound {
+	if _, err := s.CreateHierarchyDraft(ctx, ids.New(), "", editor); problemCode(t, err) != store.CodeHierarchyTypeNotFound {
 		t.Fatalf("unknown type error = %v", err)
 	}
 }
@@ -167,7 +168,7 @@ func TestPostgres_HierarchyReplaceResolvesKindsBumpsVersionAndReconciles(t *test
 	s, ctx, pool := lifecycleStore(t)
 	units := createHierarchyUnits(t, s, ctx)
 	draft := mustCreateDraft(t, s, ctx, mustCreateHierarchyType(t, s, ctx, "REP").ID)
-	replaced, err := s.ReplaceHierarchyNodes(ctx, draft.ID, 1, units.nodes())
+	replaced, err := s.ReplaceHierarchyNodes(ctx, draft.ID, 1, units.nodes(), editor)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,11 +184,11 @@ func TestPostgres_HierarchyReplaceResolvesKindsBumpsVersionAndReconciles(t *test
 	if stored := storedNodeCount(t, ctx, pool, draft.ID); stored != replaced.NodeCount {
 		t.Fatalf("node_count %d != stored nodes %d", replaced.NodeCount, stored)
 	}
-	again, err := s.ReplaceHierarchyNodes(ctx, draft.ID, 2, units.nodes())
+	again, err := s.ReplaceHierarchyNodes(ctx, draft.ID, 2, units.nodes(), editor)
 	if err != nil || again.Version != 3 || !reflect.DeepEqual(nodeProjection(again.Nodes), nodeProjection(replaced.Nodes)) {
 		t.Fatalf("replay = %+v, %v; want the same node set at version 3", again, err)
 	}
-	if _, err := s.ReplaceHierarchyNodes(ctx, draft.ID, 1, units.nodes()); problemCode(t, err) != store.CodeVersionConflict {
+	if _, err := s.ReplaceHierarchyNodes(ctx, draft.ID, 1, units.nodes(), editor); problemCode(t, err) != store.CodeVersionConflict {
 		t.Fatalf("stale version error = %v", err)
 	}
 }
@@ -196,7 +197,7 @@ func TestPostgres_HierarchyReplaceRejectsAndKeepsNodes(t *testing.T) {
 	s, ctx, pool := lifecycleStore(t)
 	units := createHierarchyUnits(t, s, ctx)
 	draft := mustCreateDraft(t, s, ctx, mustCreateHierarchyType(t, s, ctx, "REP").ID)
-	good, err := s.ReplaceHierarchyNodes(ctx, draft.ID, 1, units.nodes())
+	good, err := s.ReplaceHierarchyNodes(ctx, draft.ID, 1, units.nodes(), editor)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +215,7 @@ func TestPostgres_HierarchyReplaceRejectsAndKeepsNodes(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := s.ReplaceHierarchyNodes(ctx, draft.ID, good.Version, tc.nodes)
+			_, err := s.ReplaceHierarchyNodes(ctx, draft.ID, good.Version, tc.nodes, editor)
 			var de *domain.Error
 			var code string
 			if errors.As(err, &de) {
@@ -230,7 +231,7 @@ func TestPostgres_HierarchyReplaceRejectsAndKeepsNodes(t *testing.T) {
 			}
 		})
 	}
-	reloaded, err := s.ReplaceHierarchyNodes(ctx, draft.ID, good.Version, units.nodes())
+	reloaded, err := s.ReplaceHierarchyNodes(ctx, draft.ID, good.Version, units.nodes(), editor)
 	if err != nil || reloaded.Version != good.Version+1 {
 		t.Fatalf("version after rejections = %+v, %v; want only the accepted replace to bump it", reloaded, err)
 	}
@@ -241,11 +242,11 @@ func TestPostgres_HierarchyDraftCopiesLatestPublishedAndPublishedIsImmutable(t *
 	units := createHierarchyUnits(t, s, ctx)
 	ht := mustCreateHierarchyType(t, s, ctx, "REP")
 	first := mustCreateDraft(t, s, ctx, ht.ID)
-	if _, err := s.ReplaceHierarchyNodes(ctx, first.ID, 1, units.nodes()); err != nil {
+	if _, err := s.ReplaceHierarchyNodes(ctx, first.ID, 1, units.nodes(), editor); err != nil {
 		t.Fatal(err)
 	}
 	publishVersion(t, ctx, pool, first.ID, "2026-01-01")
-	if _, err := s.ReplaceHierarchyNodes(ctx, first.ID, 2, units.nodes()); problemCode(t, err) != store.CodeHierarchyVersionImmutable {
+	if _, err := s.ReplaceHierarchyNodes(ctx, first.ID, 2, units.nodes(), editor); problemCode(t, err) != store.CodeHierarchyVersionImmutable {
 		t.Fatalf("replace on a published version error = %v", err)
 	}
 	next := mustCreateDraft(t, s, ctx, ht.ID)
@@ -265,14 +266,14 @@ func TestPostgres_HierarchyIsTenantIsolated(t *testing.T) {
 	units := createHierarchyUnits(t, s, ctx)
 	ht := mustCreateHierarchyType(t, s, ctx, "REP")
 	draft := mustCreateDraft(t, s, ctx, ht.ID)
-	if _, err := s.ReplaceHierarchyNodes(ctx, draft.ID, 1, units.nodes()); err != nil {
+	if _, err := s.ReplaceHierarchyNodes(ctx, draft.ID, 1, units.nodes(), editor); err != nil {
 		t.Fatal(err)
 	}
 	other := principalContext(2)
-	if _, err := s.ReplaceHierarchyNodes(other, draft.ID, 2, units.nodes()); problemCode(t, err) != store.CodeHierarchyVersionNotFound {
+	if _, err := s.ReplaceHierarchyNodes(other, draft.ID, 2, units.nodes(), editor); problemCode(t, err) != store.CodeHierarchyVersionNotFound {
 		t.Fatalf("other tenant replace error = %v", err)
 	}
-	if _, err := s.CreateHierarchyDraft(other, ht.ID, ""); problemCode(t, err) != store.CodeHierarchyTypeNotFound {
+	if _, err := s.CreateHierarchyDraft(other, ht.ID, "", editor); problemCode(t, err) != store.CodeHierarchyTypeNotFound {
 		t.Fatalf("other tenant draft error = %v", err)
 	}
 	for _, table := range []string{"hierarchy_type", "hierarchy_version", "hierarchy_node"} {
@@ -300,7 +301,10 @@ func TestPostgres_HierarchyNodeRejectsDuplicateOrgUnitPerVersion(t *testing.T) {
 	}
 }
 
-const publisher = "user-1"
+const (
+	publisher = "user-1"
+	editor    = "user-test"
+)
 
 func (u hierarchyUnits) deepNodes() []store.HierarchyNode {
 	nodes := u.nodes()
@@ -311,7 +315,7 @@ func (u hierarchyUnits) deepNodes() []store.HierarchyNode {
 func draftWithNodes(t *testing.T, s *store.Postgres, ctx context.Context, typeID string, nodes []store.HierarchyNode) store.HierarchyVersion {
 	t.Helper()
 	draft := mustCreateDraft(t, s, ctx, typeID)
-	replaced, err := s.ReplaceHierarchyNodes(ctx, draft.ID, draft.Version, nodes)
+	replaced, err := s.ReplaceHierarchyNodes(ctx, draft.ID, draft.Version, nodes, editor)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -656,5 +660,125 @@ func TestPostgres_HierarchyDraftDelete(t *testing.T) {
 	status, _, version := versionState(t, ctx, pool, published.ID)
 	if status != "published" || version != published.Version || fiscalRows(t, ctx, pool, "hierarchy_closure") != closureBefore || closureBefore == 0 || storedNodeCount(t, ctx, pool, published.ID) != len(units.nodes()) {
 		t.Fatalf("refused delete changed the published version: %s v%d", status, version)
+	}
+}
+
+func TestPostgres_HierarchyVersionList(t *testing.T) {
+	s, ctx, _ := lifecycleStore(t)
+	units := createHierarchyUnits(t, s, ctx)
+	typeID := mustCreateHierarchyType(t, s, ctx, "REP").ID
+	mustPublish(t, s, ctx, draftWithNodes(t, s, ctx, typeID, units.nodes()), day(2026, 1, 1))
+	mustPublish(t, s, ctx, draftWithNodes(t, s, ctx, typeID, units.deepNodes()), day(2026, 2, 1))
+	draftWithNodes(t, s, ctx, typeID, units.nodes())
+	numbers := func(page store.HierarchyVersionPage) (got []int) {
+		for _, v := range page.Items {
+			got = append(got, v.VersionNo)
+		}
+		return got
+	}
+	all, err := s.ListHierarchyVersions(ctx, typeID, store.HierarchyVersionFilter{}, 0, 10)
+	if err != nil || !reflect.DeepEqual(numbers(all), []int{3, 2, 1}) || all.NextVersionNo != 0 {
+		t.Fatalf("list = %v next %d, %v; want 3, 2, 1", numbers(all), all.NextVersionNo, err)
+	}
+	raw, _ := json.Marshal(all.Items[0])
+	if strings.Contains(string(raw), `"nodes"`) || !strings.Contains(string(raw), `"editedBy":"`+editor+`"`) || all.Items[2].Status != "superseded" || all.Items[1].Status != "published" {
+		t.Fatalf("summary json = %s statuses = %s %s", raw, all.Items[2].Status, all.Items[1].Status)
+	}
+	drafts, err := s.ListHierarchyVersions(ctx, typeID, store.HierarchyVersionFilter{Status: "draft"}, 0, 10)
+	if err != nil || !reflect.DeepEqual(numbers(drafts), []int{3}) {
+		t.Fatalf("draft list = %v, %v", numbers(drafts), err)
+	}
+	var paged []int
+	for after, pages := 0, 0; ; pages++ {
+		page, err := s.ListHierarchyVersions(ctx, typeID, store.HierarchyVersionFilter{}, after, 1)
+		if err != nil || pages > 3 {
+			t.Fatalf("page %d: %v", pages, err)
+		}
+		paged = append(paged, numbers(page)...)
+		if after = page.NextVersionNo; after == 0 {
+			break
+		}
+	}
+	if !reflect.DeepEqual(paged, []int{3, 2, 1}) {
+		t.Fatalf("paged = %v; want 3, 2, 1 with no cursor on the last page", paged)
+	}
+	if _, err := s.ListHierarchyVersions(ctx, ids.New(), store.HierarchyVersionFilter{}, 0, 10); problemCode(t, err) != store.CodeHierarchyTypeNotFound {
+		t.Fatalf("unknown type error = %v", err)
+	}
+	if _, err := s.ListHierarchyVersions(principalContext(2), typeID, store.HierarchyVersionFilter{}, 0, 10); problemCode(t, err) != store.CodeHierarchyTypeNotFound {
+		t.Fatalf("other tenant error = %v", err)
+	}
+}
+
+func TestPostgres_HierarchyMakerChecker(t *testing.T) {
+	s, ctx, pool := lifecycleStore(t)
+	units := createHierarchyUnits(t, s, ctx)
+	securityType, err := s.CreateHierarchyType(ctx, store.HierarchyType{Code: "SEC", Name: "Security", Purposes: []string{"security"}}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reportingType, err := s.CreateHierarchyType(ctx, store.HierarchyType{Code: "RPT", Name: "Reporting", Purposes: []string{"reporting"}}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	publishAs := func(v store.HierarchyVersion, user string) (store.HierarchyVersion, error) {
+		return s.PublishHierarchyVersion(ctx, v.ID, v.Version, day(2026, time.Month(1+v.VersionNo), 1), "", "", user, false)
+	}
+	closureRows := func(versionID string) (n int) {
+		err := dbx.WithTenantTx(ctx, pool, func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `select count(*) from hierarchy_closure where version_id = $1`, versionID).Scan(&n)
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	draft := draftWithNodes(t, s, ctx, securityType.ID, units.nodes())
+	if draft.EditedBy == nil || *draft.EditedBy != editor {
+		t.Fatalf("editedBy = %v; want %s", draft.EditedBy, editor)
+	}
+	if _, err := publishAs(draft, editor); problemCode(t, err) != store.CodeHierarchyMakerChecker {
+		t.Fatalf("editor publish error = %v; want the maker-checker refusal", err)
+	}
+	status, _, version := versionState(t, ctx, pool, draft.ID)
+	if status != "draft" || version != draft.Version || closureRows(draft.ID) != 0 {
+		t.Fatalf("after refusal status = %s version = %d closure rows = %d", status, version, closureRows(draft.ID))
+	}
+	got, err := publishAs(draft, publisher)
+	if err != nil || got.Status != "published" {
+		t.Fatalf("other user publish = %+v, %v", got, err)
+	}
+
+	reporting := draftWithNodes(t, s, ctx, reportingType.ID, units.nodes())
+	if got, err := publishAs(reporting, editor); err != nil || got.Status != "published" {
+		t.Fatalf("reporting type same-user publish = %+v, %v", got, err)
+	}
+
+	handed := mustCreateDraft(t, s, ctx, securityType.ID)
+	replaced, err := s.ReplaceHierarchyNodes(ctx, handed.ID, handed.Version, units.deepNodes(), publisher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := publishAs(replaced, publisher); problemCode(t, err) != store.CodeHierarchyMakerChecker {
+		t.Fatalf("last editor publish error = %v", err)
+	}
+	if got, err := publishAs(replaced, editor); err != nil || got.Status != "published" {
+		t.Fatalf("original editor publish after hand-over = %+v, %v", got, err)
+	}
+
+	legacy := mustCreateDraft(t, s, ctx, securityType.ID)
+	err = dbx.WithTenantTx(ctx, pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `update hierarchy_version set edited_by = null where id = $1`, legacy.ID)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := publishAs(legacy, editor); err != nil || got.Status != "published" || got.EditedBy != nil {
+		t.Fatalf("null editor publish = %+v, %v", got, err)
+	}
+	fetched, err := s.GetHierarchyVersion(ctx, draft.ID)
+	if err != nil || fetched.EditedBy == nil || *fetched.EditedBy != editor {
+		t.Fatalf("get editedBy = %v, %v", fetched.EditedBy, err)
 	}
 }

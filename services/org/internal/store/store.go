@@ -84,10 +84,11 @@ type Store interface {
 	CreateHierarchyType(ctx context.Context, in HierarchyType, idempotencyKey string) (HierarchyType, error)
 	GetHierarchyType(ctx context.Context, id string) (HierarchyType, error)
 	ListHierarchyTypes(ctx context.Context, f HierarchyTypeFilter, afterCode string, limit int) (HierarchyTypePage, error)
+	ListHierarchyVersions(ctx context.Context, typeID string, f HierarchyVersionFilter, afterVersionNo, limit int) (HierarchyVersionPage, error)
 	GetHierarchyVersion(ctx context.Context, id string) (HierarchyVersion, error)
 	DeleteHierarchyDraft(ctx context.Context, id string, version int) error
-	CreateHierarchyDraft(ctx context.Context, typeID, idempotencyKey string) (HierarchyVersion, error)
-	ReplaceHierarchyNodes(ctx context.Context, id string, version int, nodes []HierarchyNode) (HierarchyVersion, error)
+	CreateHierarchyDraft(ctx context.Context, typeID, idempotencyKey, editedBy string) (HierarchyVersion, error)
+	ReplaceHierarchyNodes(ctx context.Context, id string, version int, nodes []HierarchyNode, editedBy string) (HierarchyVersion, error)
 	PublishHierarchyVersion(ctx context.Context, id string, version int, effectiveFrom time.Time, reason, idempotencyKey, publishedBy string, backdated bool) (HierarchyVersion, error)
 	HierarchyAsOf(ctx context.Context, typeID string, date time.Time, orgUnitID string) (HierarchyAsOf, error)
 	ListReference(ctx context.Context, kind ReferenceKind, f ReferenceFilter) ([]ReferenceItem, error)

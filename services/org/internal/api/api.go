@@ -77,9 +77,10 @@ type API struct {
 	hierarchyNodesReplaced atomic.Int64
 	hierarchyDraftsDeleted atomic.Int64
 
-	hierarchyVersionsPublished atomic.Int64
-	hierarchyAsOfQueries       atomic.Int64
-	now                        func() time.Time
+	hierarchyVersionsPublished   atomic.Int64
+	hierarchyAsOfQueries         atomic.Int64
+	hierarchyMakerCheckerRefused atomic.Int64
+	now                          func() time.Time
 }
 
 type createLegalEntityRequest struct {
@@ -181,6 +182,7 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP org_hierarchy_node_sets_replaced_total Draft hierarchy node sets replaced.\n# TYPE org_hierarchy_node_sets_replaced_total counter\norg_hierarchy_node_sets_replaced_total %d\n", a.hierarchyNodesReplaced.Load())
 		fmt.Fprintf(w, "# HELP org_hierarchy_versions_published_total Hierarchy versions published; idempotent replays are counted.\n# TYPE org_hierarchy_versions_published_total counter\norg_hierarchy_versions_published_total %d\n", a.hierarchyVersionsPublished.Load())
 		fmt.Fprintf(w, "# HELP org_hierarchy_as_of_queries_total Hierarchy as-of queries answered.\n# TYPE org_hierarchy_as_of_queries_total counter\norg_hierarchy_as_of_queries_total %d\n", a.hierarchyAsOfQueries.Load())
+		fmt.Fprintf(w, "# HELP org_hierarchy_publish_maker_checker_refused_total Security-purpose hierarchy publishes refused because the publisher was the last editor.\n# TYPE org_hierarchy_publish_maker_checker_refused_total counter\norg_hierarchy_publish_maker_checker_refused_total %d\n", a.hierarchyMakerCheckerRefused.Load())
 	})
 }
 

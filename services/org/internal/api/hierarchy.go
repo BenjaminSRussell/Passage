@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -63,6 +64,7 @@ func (a *API) registerHierarchies(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRead)).Get(hierarchyTypes+"/{id}", hierarchyRoute(store.CodeHierarchyTypeNotFound, "hierarchy type not found", a.getHierarchyType))
 	r.With(authz.RequireDuty(dutyRead)).Get(hierarchyVersions+"/{id}", hierarchyRoute(store.CodeHierarchyVersionNotFound, "hierarchy version not found", a.getHierarchyVersion))
 	r.With(authz.RequireDuty(dutyHierarchy)).Delete(hierarchyVersions+"/{id}", hierarchyRoute(store.CodeHierarchyVersionNotFound, "hierarchy version not found", a.deleteHierarchyDraft))
+	r.With(authz.RequireDuty(dutyRead)).Get(hierarchyTypes+"/{id}/versions", hierarchyRoute(store.CodeHierarchyTypeNotFound, "hierarchy type not found", a.listHierarchyVersions))
 	r.With(authz.RequireDuty(dutyRead)).Get(hierarchyTypes+"/{id}/as-of", hierarchyRoute(store.CodeHierarchyTypeNotFound, "hierarchy type not found", a.hierarchyAsOf))
 }
 
@@ -133,7 +135,8 @@ func (a *API) createHierarchyDraft(w http.ResponseWriter, r *http.Request, id st
 	if rejectScopedCaller(w, r, "create hierarchy versions") {
 		return
 	}
-	draft, err := a.store.CreateHierarchyDraft(r.Context(), id, r.Header.Get(idempotencyKey))
+	principal, _ := tenant.FromContext(r.Context())
+	draft, err := a.store.CreateHierarchyDraft(r.Context(), id, r.Header.Get(idempotencyKey), principal.UserID)
 	if err != nil {
 		slog.Error("create hierarchy draft failed", "err", err, "typeId", id, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)
@@ -189,7 +192,8 @@ func (a *API) replaceHierarchyNodes(w http.ResponseWriter, r *http.Request, id s
 		validationFailed(w, r, fields)
 		return
 	}
-	updated, err := a.store.ReplaceHierarchyNodes(r.Context(), id, *req.Version, nodes)
+	principal, _ := tenant.FromContext(r.Context())
+	updated, err := a.store.ReplaceHierarchyNodes(r.Context(), id, *req.Version, nodes, principal.UserID)
 	if err != nil {
 		slog.Error("replace hierarchy nodes failed", "err", err, "versionId", id, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, problemFrom(err))
@@ -234,6 +238,10 @@ func (a *API) publishHierarchyVersion(w http.ResponseWriter, r *http.Request, id
 	published, err := a.store.PublishHierarchyVersion(r.Context(), id, *req.Version, effectiveFrom, reason, r.Header.Get(idempotencyKey), principal.UserID, backdated)
 	if err != nil {
 		slog.Error("publish hierarchy version failed", "err", err, "versionId", id, "correlationId", middleware.GetReqID(r.Context()))
+		var problem *httpx.Problem
+		if errors.As(err, &problem) && problem.Code == store.CodeHierarchyMakerChecker {
+			a.hierarchyMakerCheckerRefused.Add(1)
+		}
 		httpx.Fail(w, r, problemFrom(err))
 		return
 	}
@@ -298,6 +306,40 @@ func (a *API) listHierarchyTypes(w http.ResponseWriter, r *http.Request) {
 	}{Items: page.Items}
 	if page.NextCode != "" {
 		body.NextCursor = base64.RawURLEncoding.EncodeToString([]byte(page.NextCode))
+	}
+	httpx.JSON(w, http.StatusOK, body)
+}
+
+func (a *API) listHierarchyVersions(w http.ResponseWriter, r *http.Request, id string) {
+	limit, cursor, err := pageParams(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	after := 0
+	if cursor != "" {
+		if after, err = strconv.Atoi(cursor); err != nil || after < 1 {
+			badQuery(w, r, "cursor", "must be a positive version number cursor")
+			return
+		}
+	}
+	status := r.URL.Query().Get("status")
+	if status != "" && !slices.Contains([]string{"draft", "published", "superseded"}, status) {
+		badQuery(w, r, "status", "must be draft, published or superseded")
+		return
+	}
+	page, err := a.store.ListHierarchyVersions(r.Context(), id, store.HierarchyVersionFilter{Status: status}, after, limit)
+	if err != nil {
+		slog.Error("list hierarchy versions failed", "err", err, "typeId", id, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.Fail(w, r, err)
+		return
+	}
+	body := struct {
+		Items      []store.HierarchyVersionSummary `json:"items"`
+		NextCursor string                          `json:"nextCursor,omitempty"`
+	}{Items: page.Items}
+	if page.NextVersionNo > 0 {
+		body.NextCursor = base64.RawURLEncoding.EncodeToString([]byte(strconv.Itoa(page.NextVersionNo)))
 	}
 	httpx.JSON(w, http.StatusOK, body)
 }
