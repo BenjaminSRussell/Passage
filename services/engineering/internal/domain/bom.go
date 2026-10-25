@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/money"
+	"github.com/BenjaminSRussell/passage/services/engineering/internal/events"
 	"github.com/shopspring/decimal"
 )
 
@@ -23,6 +24,7 @@ const (
 	RoundUpQuantity = "quantity"
 
 	MaxLevels = 25
+	MaxNodes  = 100000
 )
 
 var hundred = decimal.NewFromInt(100)
@@ -157,6 +159,14 @@ type walker struct {
 	flat   map[string]decimal.Decimal
 	onPath map[string]bool
 	path   []string
+	nodes  int
+}
+
+func (w *walker) spend() error {
+	if w.nodes++; w.nodes > MaxNodes {
+		return errf(CodeBomTooLarge, "explosion exceeds %d nodes", MaxNodes)
+	}
+	return nil
 }
 
 func Explode(cat Catalog, req ExplodeRequest) (Explosion, error) {
@@ -200,6 +210,9 @@ func (w *walker) descend(product string, v BomVersion, qty decimal.Decimal, leve
 			continue
 		}
 		if err := ValidateLine(line); err != nil {
+			return nil, err
+		}
+		if err := w.spend(); err != nil {
 			return nil, err
 		}
 		comp := line.ComponentProductID
@@ -289,11 +302,36 @@ func CheckNoOverlap(existing []BomVersion, candidate BomVersion) error {
 	return nil
 }
 
+func CheckDirectActivation(existing []BomVersion, candidate BomVersion) error {
+	if candidate.Status != StatusActive {
+		return nil
+	}
+	for _, other := range existing {
+		if other.ID != candidate.ID && other.ProductID == candidate.ProductID && other.SiteID == candidate.SiteID {
+			return errf(CodeBomEcoRequired, "%s already has a version for this site; create a draft and release it through an ECO.", candidate.ProductID)
+		}
+	}
+	return nil
+}
+
+func (v BomVersion) ActivatedEvent(supersedes string) events.BomVersionActivatedData {
+	data := events.BomVersionActivatedData{
+		BomVersionID: v.ID, ProductID: v.ProductID, SiteID: v.SiteID,
+		EffectiveFrom: v.EffectiveFrom.Format(dateLayout), LineCount: len(v.Lines), SupersedesVersionID: supersedes,
+	}
+	if !v.EffectiveTo.IsZero() {
+		to := v.EffectiveTo.Format(dateLayout)
+		data.EffectiveTo = &to
+	}
+	return data
+}
+
 func WhereUsed(cat Catalog, component string, asOf time.Time, levels int) ([]*UsedBy, error) {
 	if levels < 1 || levels > MaxLevels {
 		return nil, errf(CodeBomLevels, "levels must be between 1 and %d", MaxLevels)
 	}
 	onPath := map[string]bool{component: true}
+	nodes := 0
 	var walk func(comp string, level int) ([]*UsedBy, error)
 	walk = func(comp string, level int) ([]*UsedBy, error) {
 		var out []*UsedBy
@@ -303,6 +341,9 @@ func WhereUsed(cat Catalog, component string, asOf time.Time, levels int) ([]*Us
 			}
 			if onPath[v.ProductID] {
 				return nil, errf(CodeBomCycle, "%s uses itself through %s", v.ProductID, comp)
+			}
+			if nodes++; nodes > MaxNodes {
+				return nil, errf(CodeBomTooLarge, "where-used exceeds %d nodes", MaxNodes)
 			}
 			node := &UsedBy{ProductID: v.ProductID, VersionID: v.ID, SiteID: v.SiteID, Level: level}
 			if level < levels {

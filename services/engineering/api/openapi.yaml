@@ -95,7 +95,7 @@ paths:
         - { $ref: '#/components/parameters/IdempotencyKey' }
       responses:
         '200':
-          description: ECO approved and released. Old versions expire the day before the release date and new versions become active in one transaction. A future release date schedules the ECO. Releasing again returns ENG-ECO-NOT-APPROVED or ENG-ECO-STATE without side effects.
+          description: ECO approved and released. Old versions expire the day before the release date and new versions become active in one transaction. A future release date schedules the ECO. Releasing an already released ECO returns it unchanged with no side effects, so a retry under the same Idempotency-Key is safe. An unavailable approval service is 503 ENG-ECO-APPROVER-UNAVAILABLE and leaves the ECO unchanged.
           content: { application/json: { schema: { $ref: '#/components/schemas/Eco' } } }
         default: { $ref: '#/components/responses/Problem' }
   /healthz:

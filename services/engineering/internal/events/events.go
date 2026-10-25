@@ -1,14 +1,11 @@
 package events
 
 const (
-	BomVersionActivated   = "dev.passage.engineering.bomversion.activated.v1"
-	BomVersionExpired     = "dev.passage.engineering.bomversion.expired.v1"
-	RouteVersionActivated = "dev.passage.engineering.routeversion.activated.v1"
-	EcoSubmitted          = "dev.passage.engineering.eco.submitted.v1"
-	EcoApproved           = "dev.passage.engineering.eco.approved.v1"
-	EcoReleased           = "dev.passage.engineering.eco.released.v1"
-	ResourceChanged       = "dev.passage.engineering.resource.changed.v1"
-	CalendarGenerated     = "dev.passage.engineering.calendar.generated.v1"
+	BomVersionActivated = "dev.passage.engineering.bomversion.activated.v1"
+	BomVersionExpired   = "dev.passage.engineering.bomversion.expired.v1"
+	EcoSubmitted        = "dev.passage.engineering.eco.submitted.v1"
+	EcoApproved         = "dev.passage.engineering.eco.approved.v1"
+	EcoReleased         = "dev.passage.engineering.eco.released.v1"
 )
 
 type BomVersionActivatedData struct {
@@ -27,37 +24,10 @@ type BomVersionExpiredData struct {
 	EcoID        string `json:"ecoId"`
 }
 
-type RouteOperationRef struct {
-	No           int      `json:"no"`
-	Requirements []string `json:"requirements"`
-}
-
-type RouteVersionActivatedData struct {
-	RouteVersionID string              `json:"routeVersionId"`
-	ProductID      string              `json:"productId"`
-	SiteID         string              `json:"siteId,omitempty"`
-	Operations     []RouteOperationRef `json:"operations"`
-}
-
 type EcoData struct {
 	EcoID            string   `json:"ecoId"`
 	EcoNumber        string   `json:"ecoNumber"`
 	AffectedVersions []string `json:"affectedVersions"`
 	ReleaseDate      string   `json:"releaseDate,omitempty"`
 	ApproverID       string   `json:"approverId,omitempty"`
-}
-
-type ResourceChangedData struct {
-	ResourceID    string   `json:"resourceId"`
-	SiteID        string   `json:"siteId"`
-	CalendarID    string   `json:"calendarId"`
-	EfficiencyPct string   `json:"efficiencyPct"`
-	ChangedFields []string `json:"changedFields"`
-}
-
-type CalendarGeneratedData struct {
-	CalendarID string `json:"calendarId"`
-	From       string `json:"from"`
-	To         string `json:"to"`
-	OpenDays   int    `json:"openDays"`
 }

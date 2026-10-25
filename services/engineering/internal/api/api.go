@@ -57,39 +57,24 @@ type API struct {
 	ecosReleased atomic.Int64
 	ecosFailed   atomic.Int64
 	explosions   atomic.Int64
+	stats        routeStats
 }
 
 func New(s store.Store, approver domain.Approver, now func() time.Time) *API {
-	return &API{store: s, approver: approver, now: now}
+	return &API{store: s, approver: approver, now: now, stats: routeStats{routes: map[string]*routeStat{}}}
 }
 
 func (a *API) Register(r chi.Router) {
-	r.Get("/readyz", a.ready)
-	r.With(authz.RequireDuty(dutyBomWrite)).Post("/v1/engineering/bom-versions", a.createBomVersion)
-	r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/bom-versions", a.listBomVersions)
-	r.With(authz.RequireDuty(dutyRead)).Post("/v1/engineering/boms:explode", a.explode)
-	r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/boms:where-used", a.whereUsed)
-	r.With(authz.RequireDuty(dutyRead)).Post("/v1/engineering/routes:lead-time", a.leadTime)
-	r.With(authz.RequireDuty(dutyBomWrite)).Post("/v1/engineering/ecos", a.createEco)
-	r.With(authz.RequireDuty(dutyEcoApprove)).Post("/v1/engineering/ecos/{id}:release", a.releaseEco)
-}
-
-func (a *API) Metrics() http.Handler {
-	counters := []struct {
-		name, help string
-		value      *atomic.Int64
-	}{
-		{"engineering_bom_versions_created_total", "BOM versions created.", &a.bomCreated},
-		{"engineering_bom_versions_failed_total", "BOM requests that failed in the store or domain with an unexpected error.", &a.bomFailed},
-		{"engineering_ecos_released_total", "ECOs released to production.", &a.ecosReleased},
-		{"engineering_ecos_failed_total", "ECO requests that failed in the store or domain with an unexpected error.", &a.ecosFailed},
-		{"engineering_explosions_total", "BOM explosions served.", &a.explosions},
-	}
-	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-		for _, c := range counters {
-			fmt.Fprintf(w, "# HELP %[1]s %[2]s\n# TYPE %[1]s counter\n%[1]s %[3]d\n", c.name, c.help, c.value.Load())
-		}
+	r.Group(func(r chi.Router) {
+		r.Use(a.instrument)
+		r.Get("/readyz", a.ready)
+		r.With(authz.RequireDuty(dutyBomWrite)).Post("/v1/engineering/bom-versions", a.createBomVersion)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/bom-versions", a.listBomVersions)
+		r.With(authz.RequireDuty(dutyRead)).Post("/v1/engineering/boms:explode", a.explode)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/boms:where-used", a.whereUsed)
+		r.With(authz.RequireDuty(dutyRead)).Post("/v1/engineering/routes:lead-time", a.leadTime)
+		r.With(authz.RequireDuty(dutyBomWrite)).Post("/v1/engineering/ecos", a.createEco)
+		r.With(authz.RequireDuty(dutyEcoApprove)).Post("/v1/engineering/ecos/{id}:release", a.releaseEco)
 	})
 }
 
@@ -271,10 +256,13 @@ func checkVersion(v domain.BomVersion) func(store.Snapshot) error {
 				return err
 			}
 		}
-		if v.Status == domain.StatusActive {
-			return domain.CheckNoOverlap(existing.VersionsFor(v.ProductID), v)
+		if v.Status != domain.StatusActive {
+			return nil
 		}
-		return nil
+		if err := domain.CheckNoOverlap(existing.VersionsFor(v.ProductID), v); err != nil {
+			return err
+		}
+		return domain.CheckDirectActivation(existing.VersionsFor(v.ProductID), v)
 	}
 }
 
@@ -615,13 +603,17 @@ func (a *API) releaseEco(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	eco, previous := record.Eco, record.Eco.State
+	if previous == domain.EcoReleased {
+		httpx.JSON(w, http.StatusOK, bodyFromEco(eco))
+		return
+	}
 	if eco.State == domain.EcoSubmitted {
 		if err := eco.Review(r.Context(), a.approver); err != nil {
 			a.fail(w, r, "review eco", err, &a.ecosFailed)
 			return
 		}
 	}
-	plan, err := eco.Release(record.Versions, nil, a.today())
+	plan, err := eco.Release(record.Versions, a.today())
 	if err != nil {
 		if eco.State == domain.EcoRejected && previous != domain.EcoRejected {
 			if persistErr := a.store.ReleaseEco(r.Context(), eco, previous, domain.ReleasePlan{}); persistErr != nil {
@@ -662,7 +654,12 @@ func (a *API) fail(w http.ResponseWriter, r *http.Request, operation string, err
 	var problem *httpx.Problem
 	switch {
 	case errors.As(err, &de):
-		slog.WarnContext(r.Context(), operation+" rejected", "code", de.Code, "detail", de.Detail, "correlationId", middleware.GetReqID(r.Context()))
+		if de.Code == domain.CodeEcoApproverUnavailable {
+			failures.Add(1)
+			slog.ErrorContext(r.Context(), operation+" failed", "code", de.Code, "err", de.Cause, "correlationId", middleware.GetReqID(r.Context()))
+		} else {
+			slog.WarnContext(r.Context(), operation+" rejected", "code", de.Code, "detail", de.Detail, "correlationId", middleware.GetReqID(r.Context()))
+		}
 		err = problemFrom(de)
 	case errors.As(err, &problem) && problem.Status < http.StatusInternalServerError:
 	default:
@@ -674,8 +671,11 @@ func (a *API) fail(w http.ResponseWriter, r *http.Request, operation string, err
 
 func problemFrom(de *domain.Error) *httpx.Problem {
 	status := http.StatusUnprocessableEntity
-	if de.Code == domain.CodeEcoState {
+	switch de.Code {
+	case domain.CodeEcoState:
 		status = http.StatusConflict
+	case domain.CodeEcoApproverUnavailable:
+		status = http.StatusServiceUnavailable
 	}
 	return httpx.NewProblem(status, de.Code, de.Detail)
 }

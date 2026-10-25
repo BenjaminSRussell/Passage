@@ -42,6 +42,7 @@ describe("engineering module", () => {
     const table = await screen.findByRole("table", { name: "Where-used results" });
     expect(table).toHaveTextContent("WHEEL");
     expect(table).toHaveTextContent("BIKE");
+    expect(screen.getByRole("status")).toHaveTextContent("2 parents found");
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/engineering/boms:where-used?component=SPOKE&asOf=2026-03-01");
   });
 
@@ -59,6 +60,7 @@ describe("engineering module", () => {
     render(<WhereUsedPage />);
     fireEvent.change(screen.getByLabelText("Component"), { target: { value: "SPOKE" } });
     fireEvent.click(screen.getByRole("button", { name: "Find parents" }));
-    expect(await screen.findByText("No active BOM uses this component on that date.")).toBeTruthy();
+    expect(await screen.findByRole("status")).toHaveTextContent("No active BOM uses this component on that date.");
+    expect(screen.queryByRole("table")).toBeNull();
   });
 });

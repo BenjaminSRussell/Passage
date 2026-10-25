@@ -76,7 +76,9 @@ func (e *Eco) Review(ctx context.Context, ap Approver) error {
 	}
 	d, err := ap.Decide(ctx, e.ID)
 	if err != nil {
-		return errf(CodeEcoState, "approver unavailable for ECO %s, release blocked: %v", e.ID, err)
+		unavailable := errf(CodeEcoApproverUnavailable, "approval service unavailable, release blocked")
+		unavailable.Cause = err
+		return unavailable
 	}
 	e.DecidedBy = d.Actor
 	if !d.Approved {
@@ -85,7 +87,7 @@ func (e *Eco) Review(ctx context.Context, ap Approver) error {
 	return e.Transition(EcoApproved)
 }
 
-func (e *Eco) Release(versions []BomVersion, obsolete func(product string) bool, today time.Time) (ReleasePlan, error) {
+func (e *Eco) Release(versions []BomVersion, today time.Time) (ReleasePlan, error) {
 	if e.State != EcoApproved && e.State != EcoScheduled {
 		return ReleasePlan{}, errf(CodeEcoNotApproved, "ECO %s must be approved before release.", e.Number)
 	}
@@ -103,14 +105,14 @@ func (e *Eco) Release(versions []BomVersion, obsolete func(product string) bool,
 		}
 		return ReleasePlan{}, nil
 	}
-	plan, err := e.dryRun(versions, obsolete, date)
+	plan, err := e.dryRun(versions, date)
 	if err != nil {
 		return ReleasePlan{}, err
 	}
 	return plan, e.Transition(EcoReleased)
 }
 
-func (e *Eco) dryRun(versions []BomVersion, obsolete func(string) bool, date time.Time) (ReleasePlan, error) {
+func (e *Eco) dryRun(versions []BomVersion, date time.Time) (ReleasePlan, error) {
 	work := slices.Clone(versions)
 	index := make(map[string]int, len(work))
 	for i, v := range work {
@@ -133,11 +135,6 @@ func (e *Eco) dryRun(versions []BomVersion, obsolete func(string) bool, date tim
 		}
 		if !nw.EffectiveTo.IsZero() && nw.EffectiveTo.Before(date) {
 			return ReleasePlan{}, errf(CodeEcoDryRun, "version %s ends on %s, before the release date %s", nw.ID, nw.EffectiveTo.Format(dateLayout), date.Format(dateLayout))
-		}
-		for _, l := range nw.Lines {
-			if obsolete != nil && obsolete(l.ComponentProductID) {
-				return ReleasePlan{}, errf(CodeEcoDryRun, "%s", errf(CodeBomCompObsolete, "Component %s is obsolete.", l.ComponentProductID).Error())
-			}
 		}
 		old.Status = StatusExpired
 		if expiry := date.AddDate(0, 0, -1); old.EffectiveTo.IsZero() || old.EffectiveTo.After(expiry) {
@@ -180,15 +177,7 @@ func (p ReleasePlan) CheckCycles(cat Catalog) error {
 func (p ReleasePlan) ActivatedEvents() []events.BomVersionActivatedData {
 	out := make([]events.BomVersionActivatedData, len(p.Activate))
 	for i, v := range p.Activate {
-		out[i] = events.BomVersionActivatedData{
-			BomVersionID: v.ID, ProductID: v.ProductID, SiteID: v.SiteID,
-			EffectiveFrom: v.EffectiveFrom.Format(dateLayout), LineCount: len(v.Lines),
-			SupersedesVersionID: p.Expire[i].ID,
-		}
-		if !v.EffectiveTo.IsZero() {
-			to := v.EffectiveTo.Format(dateLayout)
-			out[i].EffectiveTo = &to
-		}
+		out[i] = v.ActivatedEvent(p.Expire[i].ID)
 	}
 	return out
 }

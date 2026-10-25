@@ -9,7 +9,7 @@ Wave 9 (PSG-9): engineering data for the `product` context: BOMs, routings, engi
 - `internal/domain/routing.go`: operation DAG validation and lead time (sequential sum, parallel branches take the max, efficiency).
 - `internal/domain/eco.go`: ECO state machine, `Approver` seam to the Temporal approval workflow, release plan (expire old at `release_date - 1`, activate new).
 - `internal/store`: pgx repositories under `dbx.WithTenantTx`; `Catalog` loads only the BOM versions reachable from the requested products (recursive query, down for explosion, up for where-used) into a `Snapshot` that satisfies `domain.Catalog`. `ReleaseEco` applies a `ReleasePlan` and enqueues its events in one transaction.
-- `internal/api`: handlers, validation, duties, metrics, readiness.
+- `internal/api`: handlers, validation, duties, readiness; `metrics.go` serves business counters plus `engineering_http_requests_total` and `engineering_http_request_duration_seconds` by route pattern. Alert on the 5xx share of requests and on explode p95 from the duration histogram.
 - `internal/events/events.go`: event types and payloads.
 - `migrations/0001_init.sql`: tables with `tenant_id` first, tenant RLS (enabled and forced), idempotency and outbox tables.
 - `api/openapi.yaml`, `events/asyncapi.yaml`, `charts/engineering`, `Dockerfile`.
@@ -24,15 +24,15 @@ Wave 9 (PSG-9): engineering data for the `product` context: BOMs, routings, engi
 | `POST /v1/engineering/ecos` | `engineering.bom.write` |
 | `POST /v1/engineering/ecos/{id}:release` | `engineering.eco.approve` |
 
-`engineering.route.write` (PRD 1.9.17) has no route until routing persistence exists. Creating a BOM version defaults to `draft`; `active` is accepted so a first version can exist without an ECO, and is checked for overlap. An ECO is created `submitted`; `:release` asks the approver, then releases or schedules it.
+`engineering.route.write` (PRD 1.9.17) has no route until routing persistence exists. Creating a BOM version defaults to `draft`; `active` is accepted only as the first version of a product and site (checked for overlap, `ENG-BOM-ECO-REQUIRED` otherwise) and enqueues `bomversion.activated`; every later activation goes through an ECO. Creates and releases serialise per tenant and product with a transaction advisory lock, and a release re-checks overlap inside its transaction. Explosion and where-used stop at 100,000 nodes with `ENG-BOM-TOOLARGE`. An ECO is created `submitted`; `:release` asks the approver, then releases or schedules it.
 
 ## Error codes
 
-`ENG-BOM-CYCLE`, `ENG-BOM-OVERLAP`, `ENG-BOM-NOVERSION`, `ENG-BOM-LEVELS`, `ENG-BOM-QTY`, `ENG-BOM-LINE`, `ENG-BOM-COMP-OBSOLETE`, `ENG-BOM-PHANTOM-NOBOM`, `ENG-ROUTE-QTY`, `ENG-ROUTE-NEXT-MISSING`, `ENG-ROUTE-SECONDARY-NOPRIMARY`, `ENG-ROUTE-CYCLE`, `ENG-ECO-STATE` (409), `ENG-ECO-NOT-APPROVED`, `ENG-ECO-DRYRUN`, `ENG-ECO-DATE` (all other domain codes map to 422), plus store codes `ENG-ECO-NOTFOUND` (404), `ENG-BOM-VERSION-NOTFOUND` (404), `ENG-DUPLICATE` (409) and `idempotency_key_reuse` (422). The PRD 1.9.18 catalog names the first seven present codes where they exist; `NOVERSION`, `LEVELS`, `QTY`, `LINE`, `ROUTE-QTY`, `ROUTE-CYCLE`, `ECO-STATE`, `ECO-DRYRUN`, `ECO-DATE` and the store codes are not in the catalog yet and must be reconciled with it.
+`ENG-BOM-CYCLE`, `ENG-BOM-OVERLAP`, `ENG-BOM-NOVERSION`, `ENG-BOM-LEVELS`, `ENG-BOM-QTY`, `ENG-BOM-LINE`, `ENG-BOM-TOOLARGE`, `ENG-BOM-ECO-REQUIRED`, `ENG-BOM-PHANTOM-NOBOM`, `ENG-ROUTE-QTY`, `ENG-ROUTE-NEXT-MISSING`, `ENG-ROUTE-SECONDARY-NOPRIMARY`, `ENG-ROUTE-CYCLE`, `ENG-ECO-STATE` (409), `ENG-ECO-APPROVER-UNAVAILABLE` (503, counted in `engineering_ecos_failed_total`), `ENG-ECO-NOT-APPROVED`, `ENG-ECO-DRYRUN`, `ENG-ECO-DATE` (all other domain codes map to 422), plus store codes `ENG-ECO-NOTFOUND` (404), `ENG-BOM-VERSION-NOTFOUND` (404), `ENG-DUPLICATE` (409) and `idempotency_key_reuse` (422). The PRD 1.9.18 catalog names the first seven present codes where they exist; `NOVERSION`, `LEVELS`, `QTY`, `LINE`, `ROUTE-QTY`, `ROUTE-CYCLE`, `ECO-STATE`, `ECO-DRYRUN`, `ECO-DATE` and the store codes are not in the catalog yet and must be reconciled with it.
 
 ## Event types
 
-The PRD names `dev.passage.engineering.bom.version.activated.v1`, which has four segments after the context and fails `platform/go/events.ValidType`. The entity is folded into one segment instead: `bomversion`, `routeversion` (as `releasedproduct` is in the product service). Emitted: `bomversion.activated`, `bomversion.expired`, `eco.submitted`, `eco.approved`, `eco.released`.
+The PRD names `dev.passage.engineering.bom.version.activated.v1`, which has four segments after the context and fails `platform/go/events.ValidType`. The entity is folded into one segment instead: `bomversion`, `routeversion` is reserved the same way (as `releasedproduct` is in the product service). Emitted: `bomversion.activated`, `bomversion.expired`, `eco.submitted`, `eco.approved`, `eco.released`.
 
 ## Dependencies
 

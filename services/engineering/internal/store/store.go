@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -254,6 +255,25 @@ func conflictOnDuplicate(err error) error {
 	return err
 }
 
+func lockProducts(ctx context.Context, tx pgx.Tx, tenantID string, products ...string) error {
+	sorted := slices.Clone(products)
+	slices.Sort(sorted)
+	for _, product := range slices.Compact(sorted) {
+		if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended($1, 0))`, tenantID+":"+product); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func ensureNoActiveOverlap(ctx context.Context, tx pgx.Tx, tenantID string, activated domain.BomVersion) error {
+	active, err := queryVersions(ctx, tx, `select `+versionColumns+` from bom_version v where tenant_id = $1 and product_id = $2 and status = 'active'`, tenantID, activated.ProductID)
+	if err != nil {
+		return err
+	}
+	return domain.CheckNoOverlap(active, activated)
+}
+
 func versionRoots(v domain.BomVersion) []string {
 	seen := map[string]bool{v.ProductID: true}
 	roots := []string{v.ProductID}
@@ -304,6 +324,9 @@ func (s *Postgres) CreateBomVersion(ctx context.Context, v domain.BomVersion, id
 			created = original[0]
 			return nil
 		}
+		if err := lockProducts(ctx, tx, p.TenantID, v.ProductID); err != nil {
+			return err
+		}
 		snapshot, err := loadSnapshot(ctx, tx, p.TenantID, versionRoots(v), false)
 		if err != nil {
 			return err
@@ -313,6 +336,11 @@ func (s *Postgres) CreateBomVersion(ctx context.Context, v domain.BomVersion, id
 		}
 		if err := insertVersion(ctx, tx, p.TenantID, v); err != nil {
 			return err
+		}
+		if v.Status == domain.StatusActive {
+			if err := emit(ctx, tx, p, v.ID, engevents.BomVersionActivated, aggregateBomVersion, v.ID, v.ActivatedEvent("")); err != nil {
+				return err
+			}
 		}
 		return remember(ctx, tx, p.TenantID, idem, v.ID)
 	})
@@ -446,7 +474,14 @@ func transition(ctx context.Context, tx pgx.Tx, query string, args ...any) error
 
 func (s *Postgres) ReleaseEco(ctx context.Context, e domain.Eco, prev domain.EcoState, plan domain.ReleasePlan) error {
 	p, _ := tenant.FromContext(ctx)
+	activatedProducts := make([]string, len(plan.Activate))
+	for i, v := range plan.Activate {
+		activatedProducts[i] = v.ProductID
+	}
 	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		if err := lockProducts(ctx, tx, p.TenantID, activatedProducts...); err != nil {
+			return err
+		}
 		if err := transition(ctx, tx, `update eco set state = $3, decided_by = $4, version = version + 1 where tenant_id = $1 and id = $2::uuid and state = $5`,
 			p.TenantID, e.ID, string(e.State), e.DecidedBy, string(prev)); err != nil {
 			return err
@@ -460,6 +495,11 @@ func (s *Postgres) ReleaseEco(ctx context.Context, e domain.Eco, prev domain.Eco
 		for _, v := range plan.Activate {
 			if err := transition(ctx, tx, `update bom_version set status = 'active', effective_from = $3, version = version + 1 where tenant_id = $1 and id = $2::uuid and status = 'draft'`,
 				p.TenantID, v.ID, v.EffectiveFrom); err != nil {
+				return err
+			}
+		}
+		for _, v := range plan.Activate {
+			if err := ensureNoActiveOverlap(ctx, tx, p.TenantID, v); err != nil {
 				return err
 			}
 		}

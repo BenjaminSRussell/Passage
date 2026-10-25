@@ -19,16 +19,27 @@ export function WhereUsedPage() {
   const [asOf, setAsOf] = useState("");
   const [rows, setRows] = useState<UsedBy[] | null>(null);
   const [error, setError] = useState("");
+  const [searching, setSearching] = useState(false);
 
   async function search(event: FormEvent) {
     event.preventDefault();
     setError("");
+    setSearching(true);
     try {
       setRows(flatten(await whereUsed(component.trim(), asOf)));
     } catch {
       setRows(null);
       setError("Where-used lookup failed. Check the component and date.");
+    } finally {
+      setSearching(false);
     }
+  }
+
+  function statusText(): string {
+    if (searching) return "Searching...";
+    if (rows === null) return "";
+    if (rows.length === 0) return "No active BOM uses this component on that date.";
+    return `${rows.length} ${rows.length === 1 ? "parent" : "parents"} found`;
   }
 
   return (
@@ -43,10 +54,11 @@ export function WhereUsedPage() {
           As of date
           <input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} />
         </label>
-        <button type="submit">Find parents</button>
+        <button type="submit" disabled={searching}>Find parents</button>
       </form>
       <p role="alert">{error}</p>
-      {rows && (
+      <p role="status">{statusText()}</p>
+      {!searching && rows && rows.length > 0 && (
         <table aria-label="Where-used results">
           <thead>
             <tr>
@@ -57,8 +69,8 @@ export function WhereUsedPage() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
-              <tr key={`${row.level}-${row.versionId}-${row.productId}`}>
+            {rows.map((row, index) => (
+              <tr key={`${index}-${row.level}-${row.versionId}-${row.productId}`}>
                 <td>{row.productId}</td>
                 <td>{row.level}</td>
                 <td>{row.versionId}</td>
@@ -68,7 +80,6 @@ export function WhereUsedPage() {
           </tbody>
         </table>
       )}
-      {rows?.length === 0 && <p>No active BOM uses this component on that date.</p>}
     </section>
   );
 }

@@ -8,9 +8,12 @@ import (
 type Error struct {
 	Code   string
 	Detail string
+	Cause  error
 }
 
 func (e *Error) Error() string { return e.Code + ": " + e.Detail }
+
+func (e *Error) Unwrap() error { return e.Cause }
 
 func errf(code, format string, args ...any) *Error {
 	return &Error{Code: code, Detail: fmt.Sprintf(format, args...)}
@@ -28,7 +31,6 @@ const (
 	CodeBomLevels       = "ENG-BOM-LEVELS"
 	CodeBomQty          = "ENG-BOM-QTY"
 	CodeBomLine         = "ENG-BOM-LINE"
-	CodeBomCompObsolete = "ENG-BOM-COMP-OBSOLETE"
 	CodeBomPhantomNoBom = "ENG-BOM-PHANTOM-NOBOM"
 	CodeRouteQty        = "ENG-ROUTE-QTY"
 	CodeRouteNextMiss   = "ENG-ROUTE-NEXT-MISSING"
@@ -38,4 +40,8 @@ const (
 	CodeEcoNotApproved  = "ENG-ECO-NOT-APPROVED"
 	CodeEcoDryRun       = "ENG-ECO-DRYRUN"
 	CodeEcoDate         = "ENG-ECO-DATE"
+
+	CodeBomTooLarge            = "ENG-BOM-TOOLARGE"
+	CodeBomEcoRequired         = "ENG-BOM-ECO-REQUIRED"
+	CodeEcoApproverUnavailable = "ENG-ECO-APPROVER-UNAVAILABLE"
 )

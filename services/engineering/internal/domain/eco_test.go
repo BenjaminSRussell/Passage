@@ -3,6 +3,7 @@ package domain_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	platformevents "github.com/BenjaminSRussell/passage/platform/events"
@@ -39,8 +40,7 @@ func releaseFixture() []domain.BomVersion {
 
 func TestEventTypesFollowTheKernelNamingRule(t *testing.T) {
 	for _, typ := range []string{
-		events.BomVersionActivated, events.BomVersionExpired, events.RouteVersionActivated, events.EcoSubmitted,
-		events.EcoApproved, events.EcoReleased, events.ResourceChanged, events.CalendarGenerated,
+		events.BomVersionActivated, events.BomVersionExpired, events.EcoSubmitted, events.EcoApproved, events.EcoReleased,
 	} {
 		if !platformevents.ValidType(typ) {
 			t.Errorf("%s is not a valid event type", typ)
@@ -83,7 +83,6 @@ func TestEcoReview(t *testing.T) {
 	}{
 		{"approved", domain.EcoSubmitted, fakeApprover{decision: domain.Decision{Approved: true, Actor: "ann"}}, domain.EcoApproved, false},
 		{"rejected", domain.EcoSubmitted, fakeApprover{decision: domain.Decision{Actor: "bob"}}, domain.EcoRejected, false},
-		{"approver unavailable fails closed", domain.EcoSubmitted, fakeApprover{err: errors.New("temporal down")}, domain.EcoSubmitted, true},
 		{"draft cannot be reviewed", domain.EcoDraft, fakeApprover{decision: domain.Decision{Approved: true}}, domain.EcoDraft, true},
 	}
 	for _, tt := range tests {
@@ -97,6 +96,16 @@ func TestEcoReview(t *testing.T) {
 	}
 }
 
+func TestEcoReviewApproverUnavailableFailsClosed(t *testing.T) {
+	cause := errors.New("temporal down: host-7.internal")
+	e := ecoIn(domain.EcoSubmitted, "")
+	err := e.Review(context.Background(), fakeApprover{err: cause})
+	var de *domain.Error
+	if !errors.As(err, &de) || de.Code != domain.CodeEcoApproverUnavailable || !errors.Is(err, cause) || strings.Contains(de.Detail, "host-7") || e.State != domain.EcoSubmitted {
+		t.Fatalf("err = %v, state = %s; want %s wrapping the cause without leaking it, state unchanged", err, e.State, domain.CodeEcoApproverUnavailable)
+	}
+}
+
 func TestEcoReleaseExpiresOldActivatesNew(t *testing.T) {
 	e := ecoIn(domain.EcoSubmitted, "2026-07-01")
 	if err := e.Review(context.Background(), fakeApprover{decision: domain.Decision{Approved: true, Actor: "ann"}}); err != nil {
@@ -104,11 +113,11 @@ func TestEcoReleaseExpiresOldActivatesNew(t *testing.T) {
 	}
 	versions := releaseFixture()
 
-	held, err := e.Release(versions, nil, date("2026-06-15"))
+	held, err := e.Release(versions, date("2026-06-15"))
 	if err != nil || e.State != domain.EcoScheduled || len(held.Activate) != 0 {
 		t.Fatalf("future release: err %v state %s plan %+v, want scheduled and empty", err, e.State, held)
 	}
-	plan, err := e.Release(versions, nil, date("2026-07-01"))
+	plan, err := e.Release(versions, date("2026-07-01"))
 	if err != nil || e.State != domain.EcoReleased {
 		t.Fatalf("release on the day: err %v state %s", err, e.State)
 	}
@@ -142,23 +151,20 @@ func TestEcoReleaseExpiresOldActivatesNew(t *testing.T) {
 }
 
 func TestEcoReleaseRefusals(t *testing.T) {
-	obsolete := func(p string) bool { return p == "C2" }
 	overlapping := releaseFixture()
 	overlapping = append(overlapping, version("V9", "P", "2026-06-01", ""))
 	tests := []struct {
 		name     string
 		eco      *domain.Eco
 		versions []domain.BomVersion
-		obsolete func(string) bool
 		today    string
 		want     string
 		state    domain.EcoState
 	}{
-		{"not approved", ecoIn(domain.EcoSubmitted, ""), releaseFixture(), nil, "2026-07-01", domain.CodeEcoNotApproved, domain.EcoSubmitted},
-		{"past release date", ecoIn(domain.EcoApproved, "2026-06-01"), releaseFixture(), nil, "2026-07-01", domain.CodeEcoDate, domain.EcoApproved},
-		{"obsolete component fails the dry run", ecoIn(domain.EcoApproved, "2026-07-01"), releaseFixture(), obsolete, "2026-07-01", domain.CodeEcoDryRun, domain.EcoApproved},
-		{"unknown version", &domain.Eco{ID: "e", State: domain.EcoApproved, Replaces: []domain.Replacement{{OldVersionID: "nope", NewVersionID: "V2"}}}, releaseFixture(), nil, "2026-07-01", domain.CodeEcoDryRun, domain.EcoApproved},
-		{"overlap with another active version", ecoIn(domain.EcoApproved, "2026-07-01"), overlapping, nil, "2026-07-01", domain.CodeEcoDryRun, domain.EcoApproved},
+		{"not approved", ecoIn(domain.EcoSubmitted, ""), releaseFixture(), "2026-07-01", domain.CodeEcoNotApproved, domain.EcoSubmitted},
+		{"past release date", ecoIn(domain.EcoApproved, "2026-06-01"), releaseFixture(), "2026-07-01", domain.CodeEcoDate, domain.EcoApproved},
+		{"unknown version", &domain.Eco{ID: "e", State: domain.EcoApproved, Replaces: []domain.Replacement{{OldVersionID: "nope", NewVersionID: "V2"}}}, releaseFixture(), "2026-07-01", domain.CodeEcoDryRun, domain.EcoApproved},
+		{"overlap with another active version", ecoIn(domain.EcoApproved, "2026-07-01"), overlapping, "2026-07-01", domain.CodeEcoDryRun, domain.EcoApproved},
 	}
 	endedDraft := releaseFixture()
 	endedDraft[1].EffectiveTo = date("2026-03-01")
@@ -171,15 +177,14 @@ func TestEcoReleaseRefusals(t *testing.T) {
 			name     string
 			eco      *domain.Eco
 			versions []domain.BomVersion
-			obsolete func(string) bool
 			today    string
 			want     string
 			state    domain.EcoState
-		}{tt.name, tt.eco, tt.versions, nil, "2026-07-01", domain.CodeEcoDryRun, domain.EcoApproved})
+		}{tt.name, tt.eco, tt.versions, "2026-07-01", domain.CodeEcoDryRun, domain.EcoApproved})
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			plan, err := tt.eco.Release(tt.versions, tt.obsolete, date(tt.today))
+			plan, err := tt.eco.Release(tt.versions, date(tt.today))
 			if !domain.HasCode(err, tt.want) || tt.eco.State != tt.state || len(plan.Activate)+len(plan.Expire) != 0 {
 				t.Fatalf("err = %v, state = %s, plan = %+v", err, tt.eco.State, plan)
 			}
@@ -191,7 +196,7 @@ func TestEcoReleaseNeverLengthensAnEndedVersion(t *testing.T) {
 	versions := releaseFixture()
 	versions[0].EffectiveTo = date("2026-03-31")
 	e := ecoIn(domain.EcoApproved, "2026-07-01")
-	plan, err := e.Release(versions, nil, date("2026-07-01"))
+	plan, err := e.Release(versions, date("2026-07-01"))
 	if err != nil || plan.Expire[0].EffectiveTo != date("2026-03-31") {
 		t.Fatalf("err %v expired %+v, want effective_to kept at 2026-03-31", err, plan.Expire)
 	}
@@ -199,7 +204,7 @@ func TestEcoReleaseNeverLengthensAnEndedVersion(t *testing.T) {
 
 func TestEcoScheduledReleasesOnALaterDay(t *testing.T) {
 	e := ecoIn(domain.EcoScheduled, "2026-06-20")
-	plan, err := e.Release(releaseFixture(), nil, date("2026-07-01"))
+	plan, err := e.Release(releaseFixture(), date("2026-07-01"))
 	if err != nil || e.State != domain.EcoReleased || plan.Activate[0].EffectiveFrom != date("2026-07-01") {
 		t.Fatalf("err %v state %s plan %+v, want released with the late day as effective date", err, e.State, plan)
 	}

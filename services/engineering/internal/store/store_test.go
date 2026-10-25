@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -86,7 +87,7 @@ func TestPostgres_ReleaseEco_ExpiresOldActivatesNew(t *testing.T) {
 	if err := loaded.Review(ctx, approver); err != nil {
 		t.Fatal(err)
 	}
-	plan, err := loaded.Release(record.Versions, nil, releaseDay)
+	plan, err := loaded.Release(record.Versions, releaseDay)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +126,7 @@ func TestPostgres_ReleaseEco_ExpiresOldActivatesNew(t *testing.T) {
 		events = append(events, typ)
 	}
 	want := []string{
-		"dev.passage.engineering.bomversion.activated.v1", "dev.passage.engineering.bomversion.expired.v1",
+		"dev.passage.engineering.bomversion.activated.v1", "dev.passage.engineering.bomversion.activated.v1", "dev.passage.engineering.bomversion.expired.v1",
 		"dev.passage.engineering.eco.approved.v1", "dev.passage.engineering.eco.released.v1", "dev.passage.engineering.eco.submitted.v1",
 	}
 	if len(events) != len(want) {
@@ -237,4 +238,180 @@ type approverOf bool
 
 func (a approverOf) Decide(context.Context, string) (domain.Decision, error) {
 	return domain.Decision{Approved: bool(a), Actor: "alice"}, nil
+}
+
+func outboxTypes(t *testing.T, pool *pgxpool.Pool, ctx context.Context, aggregateID string) []string {
+	t.Helper()
+	rows, err := pool.Query(ctx, `select type from outbox where aggregate_id = $1 order by type`, aggregateID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var types []string
+	for rows.Next() {
+		var typ string
+		if err := rows.Scan(&typ); err != nil {
+			t.Fatal(err)
+		}
+		types = append(types, typ)
+	}
+	return types
+}
+
+func TestPostgres_CreateActiveVersion_EnqueuesActivatedEvent(t *testing.T) {
+	s, pool, ctx := newStore(t, 1)
+	v := version("BIKE", domain.StatusActive, releaseDay, "WHEEL")
+	draft := version("BIKE", domain.StatusDraft, releaseDay.AddDate(1, 0, 0), "WHEEL")
+	for _, created := range []domain.BomVersion{v, draft} {
+		if _, err := s.CreateBomVersion(ctx, created, store.Idem{}, noCheck); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := outboxTypes(t, pool, ctx, v.ID); len(got) != 1 || got[0] != "dev.passage.engineering.bomversion.activated.v1" {
+		t.Fatalf("active insert outbox = %v; want one activated event", got)
+	}
+	if got := outboxTypes(t, pool, ctx, draft.ID); len(got) != 0 {
+		t.Fatalf("draft insert outbox = %v; want none", got)
+	}
+}
+
+func TestPostgres_ConcurrentActiveCreates_OnlyOneWins(t *testing.T) {
+	s, _, ctx := newStore(t, 1)
+	const racers = 2
+	var inCheck atomic.Int32
+	errs := make(chan error, racers)
+	for i := 0; i < racers; i++ {
+		go func() {
+			candidate := version("BIKE", domain.StatusActive, releaseDay, "WHEEL")
+			_, err := s.CreateBomVersion(ctx, candidate, store.Idem{}, func(existing store.Snapshot) error {
+				inCheck.Add(1)
+				for deadline := time.Now().Add(time.Second); inCheck.Load() < racers && time.Now().Before(deadline); {
+					time.Sleep(5 * time.Millisecond)
+				}
+				return domain.CheckNoOverlap(existing.VersionsFor("BIKE"), candidate)
+			})
+			errs <- err
+		}()
+	}
+	won := 0
+	for i := 0; i < racers; i++ {
+		if err := <-errs; err == nil {
+			won++
+		} else if !domain.HasCode(err, domain.CodeBomOverlap) {
+			t.Fatalf("loser error = %v; want %s", err, domain.CodeBomOverlap)
+		}
+	}
+	if won != 1 {
+		t.Fatalf("%d concurrent active creates committed; want exactly 1", won)
+	}
+}
+
+func TestPostgres_ReleaseEco_RefusesOverlapCreatedAfterDryRun(t *testing.T) {
+	s, _, ctx := newStore(t, 1)
+	old := version("BIKE", domain.StatusActive, time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC), "WHEEL")
+	next := version("BIKE", domain.StatusDraft, releaseDay, "WHEEL", "FRAME")
+	intruder := version("BIKE", domain.StatusActive, releaseDay.AddDate(0, 1, 0), "WHEEL")
+	for _, v := range []domain.BomVersion{old, next} {
+		if _, err := s.CreateBomVersion(ctx, v, store.Idem{}, noCheck); err != nil {
+			t.Fatal(err)
+		}
+	}
+	eco := domain.Eco{ID: ids.New(), Number: "ECO-1", State: domain.EcoApproved, ReleaseDate: releaseDay, Replaces: []domain.Replacement{{OldVersionID: old.ID, NewVersionID: next.ID}}}
+	if _, err := s.CreateEco(ctx, domain.Eco{ID: eco.ID, Number: "ECO-1", State: domain.EcoSubmitted, ReleaseDate: releaseDay, Replaces: eco.Replaces}, store.Idem{}); err != nil {
+		t.Fatal(err)
+	}
+	record, err := s.GetEco(ctx, eco.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded := record.Eco
+	loaded.State = domain.EcoApproved
+	plan, err := loaded.Release(record.Versions, releaseDay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateBomVersion(ctx, intruder, store.Idem{}, noCheck); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ReleaseEco(ctx, loaded, domain.EcoSubmitted, plan); !domain.HasCode(err, domain.CodeBomOverlap) {
+		t.Fatalf("release over a version activated after the dry run = %v; want %s", err, domain.CodeBomOverlap)
+	}
+	if got, err := s.GetEco(ctx, eco.ID); err != nil || got.Eco.State != domain.EcoSubmitted {
+		t.Fatalf("a refused release must leave the ECO untouched, got %+v, %v", got.Eco, err)
+	}
+}
+
+func TestPostgres_ListBomVersions_WalksEveryPage(t *testing.T) {
+	s, _, ctx := newStore(t, 1)
+	created := map[string]bool{}
+	for i := 0; i < 3; i++ {
+		v := version("P"+string(rune('A'+i)), domain.StatusDraft, releaseDay, "WHEEL")
+		created[v.ID] = true
+		if _, err := s.CreateBomVersion(ctx, v, store.Idem{}, noCheck); err != nil {
+			t.Fatal(err)
+		}
+	}
+	after, pages := "", 0
+	for {
+		page, err := s.ListBomVersions(ctx, after, 1)
+		if err != nil || len(page.Items) != 1 || !created[page.Items[0].ID] {
+			t.Fatalf("page %d = %+v, %v", pages, page, err)
+		}
+		delete(created, page.Items[0].ID)
+		pages++
+		if page.NextID == "" {
+			break
+		}
+		after = page.NextID
+	}
+	if pages != 3 || len(created) != 0 {
+		t.Fatalf("walked %d pages, %d versions unseen; want 3 and 0", pages, len(created))
+	}
+}
+
+func TestPostgres_DuplicateEcoNumber_IsConflict(t *testing.T) {
+	s, _, ctx := newStore(t, 1)
+	old := version("BIKE", domain.StatusActive, releaseDay.AddDate(-1, 0, 0), "WHEEL")
+	next := version("BIKE", domain.StatusDraft, releaseDay, "WHEEL")
+	for _, v := range []domain.BomVersion{old, next} {
+		if _, err := s.CreateBomVersion(ctx, v, store.Idem{}, noCheck); err != nil {
+			t.Fatal(err)
+		}
+	}
+	replaces := []domain.Replacement{{OldVersionID: old.ID, NewVersionID: next.ID}}
+	if _, err := s.CreateEco(ctx, domain.Eco{ID: ids.New(), Number: "ECO-1", State: domain.EcoSubmitted, Replaces: replaces}, store.Idem{}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := s.CreateEco(ctx, domain.Eco{ID: ids.New(), Number: "ECO-1", State: domain.EcoSubmitted, Replaces: replaces}, store.Idem{})
+	if problemCode(err) != store.CodeDuplicate {
+		t.Fatalf("duplicate ECO number = %v; want %s", err, store.CodeDuplicate)
+	}
+}
+
+func TestPostgres_ReleaseEco_PersistsRejectedAndScheduledStates(t *testing.T) {
+	s, _, ctx := newStore(t, 1)
+	old := version("BIKE", domain.StatusActive, releaseDay.AddDate(-1, 0, 0), "WHEEL")
+	next := version("BIKE", domain.StatusDraft, releaseDay.AddDate(0, 2, 0), "WHEEL")
+	for _, v := range []domain.BomVersion{old, next} {
+		if _, err := s.CreateBomVersion(ctx, v, store.Idem{}, noCheck); err != nil {
+			t.Fatal(err)
+		}
+	}
+	replaces := []domain.Replacement{{OldVersionID: old.ID, NewVersionID: next.ID}}
+	for _, tc := range []struct {
+		number string
+		to     domain.EcoState
+	}{{"ECO-REJ", domain.EcoRejected}, {"ECO-SCH", domain.EcoScheduled}} {
+		eco := domain.Eco{ID: ids.New(), Number: tc.number, State: domain.EcoSubmitted, ReleaseDate: next.EffectiveFrom, Replaces: replaces}
+		if _, err := s.CreateEco(ctx, eco, store.Idem{}); err != nil {
+			t.Fatal(err)
+		}
+		eco.State = tc.to
+		if err := s.ReleaseEco(ctx, eco, domain.EcoSubmitted, domain.ReleasePlan{}); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := s.GetEco(ctx, eco.ID); err != nil || got.Eco.State != tc.to {
+			t.Fatalf("%s state = %+v, %v; want %s", tc.number, got.Eco, err, tc.to)
+		}
+	}
 }

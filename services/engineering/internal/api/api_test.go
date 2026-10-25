@@ -162,6 +162,7 @@ func activeVersion(id, product, from, to string, lines ...domain.BomLine) domain
 
 func TestCreateBomVersion(t *testing.T) {
 	cycle := store.Snapshot{"WHEEL": {activeVersion("w1", "WHEEL", "2025-01-01", "", oneLine(1, "BIKE", 1))}}
+	ended := store.Snapshot{"BIKE": {activeVersion("b0", "BIKE", "2024-01-01", "2025-12-31", oneLine(1, "WHEEL", 1))}}
 	overlapping := store.Snapshot{"BIKE": {activeVersion("b1", "BIKE", "2025-01-01", "", oneLine(1, "WHEEL", 1))}}
 	tests := []struct {
 		name       string
@@ -187,6 +188,8 @@ func TestCreateBomVersion(t *testing.T) {
 		{"inverted range", &fakeStore{}, `{"productId":"BIKE","effectiveFrom":"2026-06-01","effectiveTo":"2026-01-01","lines":[{"componentProductId":"WHEEL","quantity":"1"}]}`, allDuties, true, http.StatusBadRequest, `"effectiveTo"`},
 		{"empty lines", &fakeStore{}, `{"productId":"BIKE","effectiveFrom":"2026-01-01","lines":[]}`, allDuties, true, http.StatusBadRequest, `"lines"`},
 		{"duplicate line number", &fakeStore{}, `{"productId":"BIKE","effectiveFrom":"2026-01-01","lines":[{"lineNo":1,"componentProductId":"A","quantity":"1"},{"lineNo":1,"componentProductId":"B","quantity":"1"}]}`, allDuties, true, http.StatusBadRequest, "duplicated"},
+		{"first active version is allowed", &fakeStore{}, strings.Replace(validBom, `"lines"`, `"status":"active","lines"`, 1), allDuties, true, http.StatusCreated, `"status":"active"`},
+		{"later active version needs an ECO", &fakeStore{catalog: ended}, strings.Replace(validBom, `"lines"`, `"status":"active","lines"`, 1), allDuties, true, http.StatusUnprocessableEntity, domain.CodeBomEcoRequired},
 		{"component cycle", &fakeStore{catalog: cycle}, validBom, allDuties, true, http.StatusUnprocessableEntity, domain.CodeBomCycle},
 		{"overlapping active range", &fakeStore{catalog: overlapping}, strings.Replace(validBom, `"lines"`, `"status":"active","lines"`, 1), allDuties, true, http.StatusUnprocessableEntity, domain.CodeBomOverlap},
 		{"store unavailable hides detail", &fakeStore{err: errors.New("pg secret detail")}, validBom, allDuties, true, http.StatusInternalServerError, "COM-0500"},
@@ -542,8 +545,7 @@ func TestReleaseEco_Rejections(t *testing.T) {
 		wantStatus int
 		wantBody   string
 	}{
-		{"approver unavailable fails closed", &fakeStore{record: releasableRecord(domain.EcoSubmitted, time.Time{})}, unavailable, allDuties, http.StatusConflict, domain.CodeEcoState},
-		{"already released", &fakeStore{record: releasableRecord(domain.EcoReleased, time.Time{})}, approves, allDuties, http.StatusUnprocessableEntity, domain.CodeEcoNotApproved},
+		{"approver unavailable fails closed", &fakeStore{record: releasableRecord(domain.EcoSubmitted, time.Time{})}, unavailable, allDuties, http.StatusServiceUnavailable, domain.CodeEcoApproverUnavailable},
 		{"cancelled eco", &fakeStore{record: releasableRecord(domain.EcoCancelled, time.Time{})}, approves, allDuties, http.StatusUnprocessableEntity, domain.CodeEcoNotApproved},
 		{"release date in the past", &fakeStore{record: releasableRecord(domain.EcoSubmitted, day("2026-01-01"))}, approves, allDuties, http.StatusUnprocessableEntity, domain.CodeEcoDate},
 		{"missing approve duty", &fakeStore{record: releasableRecord(domain.EcoSubmitted, time.Time{})}, approves, "engineering.read,engineering.bom.write", http.StatusForbidden, "AUTH-0003"},
@@ -566,11 +568,29 @@ func TestReleaseEco_Rejections(t *testing.T) {
 
 func TestReleaseEco_ApproverUnavailable_FailsClosed(t *testing.T) {
 	f := &fakeStore{record: releasableRecord(domain.EcoSubmitted, time.Time{})}
-	r, _ := newRouter(f, approverFunc(func(context.Context, string) (domain.Decision, error) {
-		return domain.Decision{}, errors.New("no workflow")
+	r, a := newRouter(f, approverFunc(func(context.Context, string) (domain.Decision, error) {
+		return domain.Decision{}, errors.New("no workflow at host-7.internal")
 	}))
-	if rec := release(r, allDuties); rec.Code != http.StatusConflict || len(f.released) != 0 {
-		t.Fatalf("an unavailable approver must block release without a state change: %d %s %+v", rec.Code, rec.Body, f.released)
+	rec := release(r, allDuties)
+	if rec.Code != http.StatusServiceUnavailable || len(f.released) != 0 || strings.Contains(rec.Body.String(), "host-7") {
+		t.Fatalf("an unavailable approver must block release with a 503 and no detail leak: %d %s %+v", rec.Code, rec.Body, f.released)
+	}
+	metrics := httptest.NewRecorder()
+	a.Metrics().ServeHTTP(metrics, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if !strings.Contains(metrics.Body.String(), "engineering_ecos_failed_total 1") {
+		t.Fatalf("an unavailable approver must count as a failure: %s", metrics.Body)
+	}
+}
+
+func TestReleaseEco_RepeatReturnsReleasedEcoWithoutSideEffects(t *testing.T) {
+	f := &fakeStore{record: releasableRecord(domain.EcoReleased, time.Time{})}
+	r, _ := newRouter(f, approverFunc(func(context.Context, string) (domain.Decision, error) {
+		t.Fatal("a released ECO must not be reviewed again")
+		return domain.Decision{}, nil
+	}))
+	rec := release(r, allDuties, "Idempotency-Key", "k1")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"state":"released"`) || len(f.released) != 0 {
+		t.Fatalf("repeat release = %d %s %+v; want 200 released and no store write", rec.Code, rec.Body, f.released)
 	}
 }
 
@@ -658,6 +678,20 @@ func TestMetricsCountBusinessOperations(t *testing.T) {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Fatalf("metrics missing %q in %s", want, rec.Body.String())
 		}
+	}
+}
+
+func TestExplode_DiamondBlowUpIsRefused(t *testing.T) {
+	catalog := store.Snapshot{}
+	for i := 0; i < domain.MaxLevels; i++ {
+		next := fmt.Sprintf("P%d", i+1)
+		product := fmt.Sprintf("P%d", i)
+		catalog[product] = []domain.BomVersion{activeVersion("v"+product, product, "2025-01-01", "", oneLine(1, next, 1), oneLine(2, next, 1))}
+	}
+	r, _ := newRouter(&fakeStore{catalog: catalog}, approves)
+	rec := do(r, http.MethodPost, "/v1/engineering/boms:explode", `{"productId":"P0"}`, allDuties, true)
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), domain.CodeBomTooLarge) {
+		t.Fatalf("diamond explosion = %d %.200s; want 422 %s", rec.Code, rec.Body, domain.CodeBomTooLarge)
 	}
 }
 

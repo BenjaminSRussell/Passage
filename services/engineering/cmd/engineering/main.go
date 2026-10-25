@@ -65,6 +65,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
+	slog.WarnContext(ctx, "fail-closed ECO approver bound, :release returns 503 until a workflow approver is wired", "err", errApproverNotConfigured)
 	a := api.New(store.New(pool), failClosedApprover{}, time.Now)
 	router := httpx.NewRouter()
 	a.Register(router)

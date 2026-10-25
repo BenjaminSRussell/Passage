@@ -369,3 +369,65 @@ func TestRollupCost(t *testing.T) {
 		t.Fatalf("total %s missing %v err %v, want 8.5 and [C]", total, missing, err)
 	}
 }
+
+func diamondCatalog() memCatalog {
+	c := memCatalog{}
+	for i := 0; i < domain.MaxLevels; i++ {
+		next := fmt.Sprintf("P%d", i+1)
+		c[fmt.Sprintf("P%d", i)] = []domain.BomVersion{version(fmt.Sprintf("V%d", i), fmt.Sprintf("P%d", i), "2025-01-01", "", line(1, next, 1), line(2, next, 1))}
+	}
+	return c
+}
+
+func TestExplodeRefusesDiamondBlowUp(t *testing.T) {
+	start := time.Now()
+	_, err := domain.Explode(diamondCatalog(), request("P0", 1, domain.MaxLevels))
+	if !domain.HasCode(err, domain.CodeBomTooLarge) || time.Since(start) > 5*time.Second {
+		t.Fatalf("err = %v after %v, want %s quickly", err, time.Since(start), domain.CodeBomTooLarge)
+	}
+}
+
+func TestWhereUsedRefusesDiamondBlowUp(t *testing.T) {
+	c := memCatalog{}
+	for i := 1; i <= domain.MaxLevels; i++ {
+		below := []string{fmt.Sprintf("A%d", i-1), fmt.Sprintf("B%d", i-1)}
+		if i == 1 {
+			below = []string{"LEAF", "LEAF"}
+		}
+		for _, p := range []string{"A", "B"} {
+			id := fmt.Sprintf("%s%d", p, i)
+			c[id] = []domain.BomVersion{version("V"+id, id, "2025-01-01", "", line(1, below[0], 1), line(2, below[1], 1))}
+		}
+	}
+	_, err := domain.WhereUsed(c, "LEAF", date("2026-03-01"), domain.MaxLevels)
+	if !domain.HasCode(err, domain.CodeBomTooLarge) {
+		t.Fatalf("err = %v, want %s", err, domain.CodeBomTooLarge)
+	}
+}
+
+func TestCheckDirectActivation(t *testing.T) {
+	existing := []domain.BomVersion{version("V1", "BIKE", "2025-01-01", "", line(1, "WHEEL", 1))}
+	site := version("V2", "BIKE", "2026-01-01", "")
+	site.SiteID = "S1"
+	draft := version("V3", "BIKE", "2026-01-01", "")
+	draft.Status = domain.StatusDraft
+	tests := []struct {
+		name      string
+		existing  []domain.BomVersion
+		candidate domain.BomVersion
+		want      string
+	}{
+		{"first active version", nil, version("V9", "BIKE", "2025-01-01", ""), ""},
+		{"second active version needs an ECO", existing, version("V9", "BIKE", "2026-01-01", ""), domain.CodeBomEcoRequired},
+		{"other site is a first version", existing, site, ""},
+		{"drafts are always allowed", existing, draft, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := domain.CheckDirectActivation(tt.existing, tt.candidate)
+			if (tt.want == "") != (err == nil) || (tt.want != "" && !domain.HasCode(err, tt.want)) {
+				t.Fatalf("err = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
