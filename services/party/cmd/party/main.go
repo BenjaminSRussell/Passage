@@ -48,13 +48,18 @@ func run(ctx context.Context, getenv func(string) string) error {
 	}
 	pool, err := dbx.Connect(ctx, databaseURL)
 	if err != nil {
+		slog.Error("database connect failed", "err", err)
 		return fmt.Errorf("connect database: %w", err)
 	}
 	defer pool.Close()
+	slog.Info("database connected")
 	if getenv("MIGRATE_ON_START") == "true" {
+		slog.Info("migrations starting")
 		if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
+			slog.Error("migrations failed", "err", err)
 			return fmt.Errorf("migrate: %w", err)
 		}
+		slog.Info("migrations applied")
 	}
 	a := api.New(vies.Unavailable{}, store.New(pool))
 	router := httpx.NewRouter()

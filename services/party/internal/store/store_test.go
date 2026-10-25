@@ -73,6 +73,21 @@ func insertCustomerRole(ctx context.Context, app *pgxpool.Pool, tenantID, partyI
 	})
 }
 
+func insertPaymentTerm(ctx context.Context, app *pgxpool.Pool, tenantID, code string) error {
+	return dbx.WithTenantTx(ctx, app, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `insert into payment_term (tenant_id, id, code, name, net_days) values ($1, $2, $3, 'Net 30', 30)`, tenantID, ids.New(), code)
+		return err
+	})
+}
+
+func insertBareCustomerRole(ctx context.Context, app *pgxpool.Pool, tenantID, partyID, legalEntityID, account string) error {
+	return dbx.WithTenantTx(ctx, app, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `insert into customer_role (tenant_id, id, party_id, legal_entity_id, account_number, customer_group_id, payment_term_id, posting_profile_id, currency_code)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, 'USD')`, tenantID, ids.New(), partyID, legalEntityID, account, ids.New(), ids.New(), ids.New())
+		return err
+	})
+}
+
 func count(ctx context.Context, t *testing.T, app *pgxpool.Pool, table string) int {
 	t.Helper()
 	var n int
@@ -158,6 +173,12 @@ func TestRLS_TenantIsolation(t *testing.T) {
 	if err := insertCustomerRole(ctxB, app, testkit.TenantID(1), partyA, legalEntityA, "CUST-B"); sqlState(err) != rlsViolation {
 		t.Fatalf("tenant B writing a tenant A role: got %v, want SQLSTATE %s", err, rlsViolation)
 	}
+	if err := insertBareCustomerRole(ctxB, app, testkit.TenantID(1), partyA, legalEntityA, "CUST-B2"); sqlState(err) != rlsViolation {
+		t.Fatalf("tenant B writing a tenant A customer_role row directly: got %v, want SQLSTATE %s", err, rlsViolation)
+	}
+	if err := insertPaymentTerm(ctxB, app, testkit.TenantID(1), "T-B"); sqlState(err) != rlsViolation {
+		t.Fatalf("tenant B writing a tenant A payment_term: got %v, want SQLSTATE %s", err, rlsViolation)
+	}
 }
 
 func TestRLS_LegalEntityScope(t *testing.T) {
@@ -184,6 +205,9 @@ func TestRLS_LegalEntityScope(t *testing.T) {
 	}
 	if err := insertCustomerRole(scoped, app, testkit.TenantID(1), partyID, legalEntityB, "CUST-C"); sqlState(err) != rlsViolation {
 		t.Fatalf("scoped session writing another legal entity's role: got %v, want SQLSTATE %s", err, rlsViolation)
+	}
+	if err := insertBareCustomerRole(scoped, app, testkit.TenantID(1), partyID, legalEntityB, "CUST-D"); sqlState(err) != rlsViolation {
+		t.Fatalf("scoped session writing another legal entity's customer_role row directly: got %v, want SQLSTATE %s", err, rlsViolation)
 	}
 }
 
