@@ -37,9 +37,17 @@ type Rate struct {
 	SupersededBy string
 }
 
+type Hop struct {
+	From      string
+	To        string
+	Rate      decimal.Decimal
+	ValidFrom time.Time
+}
+
 type Resolution struct {
 	Path    Path
 	Factors []decimal.Decimal
+	Hops    []Hop
 }
 
 type Book struct {
@@ -106,7 +114,7 @@ func (b *Book) Add(r Rate) error {
 	return nil
 }
 
-func (b *Book) lookup(typ, from, to string, date time.Time) (decimal.Decimal, bool) {
+func (b *Book) lookup(typ, from, to string, date time.Time) (*Rate, bool) {
 	var best *Rate
 	for i := range b.rates {
 		r := &b.rates[i]
@@ -117,22 +125,27 @@ func (b *Book) lookup(typ, from, to string, date time.Time) (decimal.Decimal, bo
 			best = r
 		}
 	}
-	if best == nil {
-		return decimal.Decimal{}, false
-	}
-	return best.Value, true
+	return best, best != nil
 }
 
-func (b *Book) leg(typ, from, to string, date time.Time) (decimal.Decimal, Path, bool) {
-	if v, ok := b.lookup(typ, from, to, date); ok {
-		return v, PathDirect, true
+func (b *Book) leg(typ, from, to string, date time.Time) (Hop, Path, bool) {
+	if r, ok := b.lookup(typ, from, to, date); ok {
+		return Hop{From: from, To: to, Rate: r.Value, ValidFrom: r.ValidFrom}, PathDirect, true
 	}
 	if b.types[typ].AllowInverse {
-		if v, ok := b.lookup(typ, to, from, date); ok {
-			return decimal.NewFromInt(1).Div(v), PathInverse, true
+		if r, ok := b.lookup(typ, to, from, date); ok {
+			return Hop{From: from, To: to, Rate: decimal.NewFromInt(1).Div(r.Value), ValidFrom: r.ValidFrom}, PathInverse, true
 		}
 	}
-	return decimal.Decimal{}, "", false
+	return Hop{}, "", false
+}
+
+func resolution(p Path, hops ...Hop) Resolution {
+	factors := make([]decimal.Decimal, len(hops))
+	for i, h := range hops {
+		factors[i] = h.Rate
+	}
+	return Resolution{Path: p, Factors: factors, Hops: hops}
 }
 
 func (b *Book) Resolve(typ, from, to string, date time.Time, refCurrency string) (Resolution, error) {
@@ -145,16 +158,16 @@ func (b *Book) Resolve(typ, from, to string, date time.Time, refCurrency string)
 		return Resolution{}, missing
 	}
 	if from == to {
-		return Resolution{Path: PathDirect, Factors: []decimal.Decimal{decimal.NewFromInt(1)}}, nil
+		return resolution(PathDirect, Hop{From: from, To: to, Rate: decimal.NewFromInt(1), ValidFrom: date}), nil
 	}
-	if v, p, ok := b.leg(typ, from, to, date); ok {
-		return Resolution{Path: p, Factors: []decimal.Decimal{v}}, nil
+	if h, p, ok := b.leg(typ, from, to, date); ok {
+		return resolution(p, h), nil
 	}
 	if refCurrency != "" && refCurrency != from && refCurrency != to {
 		first, _, ok1 := b.leg(typ, from, refCurrency, date)
 		second, _, ok2 := b.leg(typ, refCurrency, to, date)
 		if ok1 && ok2 {
-			return Resolution{Path: PathTriangulated, Factors: []decimal.Decimal{first, second}}, nil
+			return resolution(PathTriangulated, first, second), nil
 		}
 	}
 	return Resolution{}, missing
