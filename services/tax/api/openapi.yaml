@@ -1,0 +1,197 @@
+openapi: 3.1.0
+info:
+  title: tax
+  version: 0.1.0
+  description: Tax determination and calculation (wave 13). This slice ships the stateless calculate endpoint.
+servers:
+  - url: https://api.passage.dev
+paths:
+  /v1/tax/calculate:
+    post:
+      operationId: calculateTax
+      x-passage-duty: Calculate tax
+      description: Determines and calculates tax for one document. Configuration travels in the request until the tax store exists. Writes nothing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CalculateRequest' }
+      responses:
+        '200':
+          description: Per-line base and taxes, document totals by code, warnings and the determination trace.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CalculateResult' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /healthz:
+    get:
+      operationId: liveness
+      x-passage-duty: public
+      responses:
+        '200': { description: Process is alive. }
+  /readyz:
+    get:
+      operationId: readiness
+      x-passage-duty: public
+      responses:
+        '200': { description: Database reachable. }
+        '503': { description: Database unreachable. }
+  /metrics:
+    get:
+      operationId: metrics
+      x-passage-duty: public
+      description: Served on the admin port (9090), never through the ingress.
+      responses:
+        '200':
+          description: Prometheus text exposition.
+          content:
+            text/plain:
+              schema: { type: string }
+components:
+  schemas:
+    DecimalString:
+      type: string
+      pattern: '^-?[0-9]+(\.[0-9]{1,6})?$'
+    CalculateRequest:
+      type: object
+      additionalProperties: false
+      required: [currency, direction, document_date, lines, config]
+      properties:
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        direction: { type: string, enum: [output, input] }
+        document_date: { type: string, format: date }
+        tax_date: { type: string, format: date }
+        ship_from_country: { type: string }
+        provider: { type: string }
+        party:
+          type: object
+          additionalProperties: false
+          properties:
+            tax_group: { type: string }
+            tax_id: { type: string }
+            country: { type: string }
+            certificate: { type: string }
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            type: object
+            additionalProperties: false
+            required: [line_ref, amount, item_tax_group]
+            properties:
+              line_ref: { type: string, minLength: 1, maxLength: 64 }
+              amount: { $ref: '#/components/schemas/DecimalString' }
+              item_tax_group: { type: string }
+              price_includes_tax: { type: boolean }
+        config:
+          type: object
+          additionalProperties: false
+          properties:
+            default_rounding: { type: string, enum: [per_line, per_document] }
+            groups: { type: object, additionalProperties: { type: array, items: { type: string } } }
+            item_groups: { type: object, additionalProperties: { type: array, items: { type: string } } }
+            codes:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                required: [code, rates]
+                properties:
+                  code: { type: string }
+                  jurisdiction: { type: string }
+                  mechanism: { type: string, enum: [standard, reverse_charge, use_tax] }
+                  calc_basis: { type: string, enum: [line, document] }
+                  rounding: { type: string, enum: [per_line, per_document] }
+                  compound_sequence: { type: integer, minimum: 0 }
+                  recoverable_pct: { $ref: '#/components/schemas/DecimalString' }
+                  rates:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [rate_pct]
+                      properties:
+                        valid_from: { type: string, format: date }
+                        valid_to: { type: string, format: date }
+                        from_amount: { $ref: '#/components/schemas/DecimalString' }
+                        to_amount: { $ref: '#/components/schemas/DecimalString' }
+                        rate_pct: { $ref: '#/components/schemas/DecimalString' }
+                        min_tax: { $ref: '#/components/schemas/DecimalString' }
+                        max_tax: { $ref: '#/components/schemas/DecimalString' }
+            exemptions:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                properties:
+                  number: { type: string }
+                  codes: { type: array, items: { type: string } }
+                  valid_from: { type: string, format: date }
+                  valid_to: { type: string, format: date }
+    CalculateResult:
+      type: object
+      required: [engine, fallback, lines, document_taxes_by_code, warnings, determination_trace]
+      properties:
+        engine: { type: string }
+        fallback: { type: boolean }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [line_ref, base, taxes]
+            properties:
+              line_ref: { type: string }
+              base: { type: string }
+              taxes:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    code: { type: string }
+                    jurisdiction: { type: string }
+                    rate_pct: { type: string }
+                    tax_amount: { type: string }
+                    recoverable: { type: string }
+                    nonrecoverable: { type: string }
+                    direction: { type: string, enum: [output, input, use] }
+        document_taxes_by_code:
+          type: array
+          items:
+            type: object
+            properties:
+              code: { type: string }
+              direction: { type: string }
+              base: { type: string }
+              tax_amount: { type: string }
+        warnings:
+          type: array
+          items:
+            type: object
+            properties:
+              code: { type: string }
+              detail: { type: string }
+        determination_trace: { type: array, items: { type: string } }
+    Problem:
+      type: object
+      required: [type, title, status, code, serviceCode]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string }
+        serviceCode: { type: string }
+        traceId: { type: string }
+        errors: { type: object, additionalProperties: { type: string } }
+  responses:
+    Problem:
+      description: RFC 9457 problem details.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
