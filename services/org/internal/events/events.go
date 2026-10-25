@@ -17,10 +17,11 @@ var (
 	LocationUpdated         = events.Type(Context, "location", "updated", 1)
 	CurrencyRoundingChanged = events.Type(Context, "currencyrounding", "changed", 1)
 	AddressChanged          = events.Type(Context, "address", "changed", 1)
+	FiscalCalendarGenerated = events.Type(Context, "fiscalcalendar", "generated", 1)
 )
 
 func All() []string {
-	return []string{LegalEntityCreated, LegalEntityUpdated, OperatingUnitCreated, OperatingUnitUpdated, SiteCreated, SiteUpdated, WarehouseCreated, WarehouseUpdated, LocationCreated, LocationUpdated, CurrencyRoundingChanged, AddressChanged}
+	return []string{LegalEntityCreated, LegalEntityUpdated, OperatingUnitCreated, OperatingUnitUpdated, SiteCreated, SiteUpdated, WarehouseCreated, WarehouseUpdated, LocationCreated, LocationUpdated, CurrencyRoundingChanged, AddressChanged, FiscalCalendarGenerated}
 }
 
 type LegalEntityCreatedData struct {
@@ -100,4 +101,19 @@ type AddressChangedData struct {
 	OwnerID   string   `json:"owner_id"`
 	Purposes  []string `json:"purposes"`
 	ValidFrom string   `json:"valid_from"`
+}
+
+type FiscalPeriodData struct {
+	PeriodNo  int    `json:"period_no"`
+	Name      string `json:"name"`
+	StartDate string `json:"start_date"`
+	EndDate   string `json:"end_date"`
+	Type      string `json:"type"`
+	Week53    bool   `json:"week53"`
+}
+
+type FiscalCalendarGeneratedData struct {
+	CalendarID string             `json:"calendar_id"`
+	FiscalYear int                `json:"fiscal_year"`
+	Periods    []FiscalPeriodData `json:"periods"`
 }

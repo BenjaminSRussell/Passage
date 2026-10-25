@@ -18,7 +18,9 @@ Countries, currencies, regions and languages are platform-owned rows under the `
 
 ## Fiscal calendars
 
-`domain.GenerateYear` builds the periods of one fiscal year for the patterns `calendar`, `4-4-5`, `4-5-4`, `5-4-4`, `13-period` and `custom`, with optional opening, closing and special (adjustment) periods, and `domain.ProveContiguous` proves they tile the year (`ORG-CAL-GAP`, `ORG-CAL-OVERLAP`, `ORG-CAL-PATTERN`). A year is labelled by the calendar year of its nominal start. Week-based years end on the last day of the week nearest to the nominal year end (the NRF retail-calendar rule), so they have 364 or 371 days and the 371-day year puts its extra week in the last period (`week53`). The golden CSVs are in `testdata/fiscal-patterns/`. No route serves calendars yet.
+`domain.GenerateYear` builds the periods of one fiscal year for the patterns `calendar`, `4-4-5`, `4-5-4`, `5-4-4`, `13-period` and `custom`, with optional opening, closing and special (adjustment) periods, and `domain.ProveContiguous` proves they tile the year (`ORG-CAL-GAP`, `ORG-CAL-OVERLAP`, `ORG-CAL-PATTERN`). A year is labelled by the calendar year of its nominal start. Week-based years end on the last day of the week nearest to the nominal year end (the NRF retail-calendar rule), so they have 364 or 371 days and the 371-day year puts its extra week in the last period (`week53`). The golden CSVs are in `testdata/fiscal-patterns/`. 
+
+Calendars are tenant-level and persisted in `fiscal_calendar` and `fiscal_period`. `POST /v1/org/fiscal-calendars` (duty `org.fiscal-calendar.write`, `Idempotency-Key`) creates one with the defaults `startMonth` 1, `weekStart` `monday`, `openingClosing` true and `specialPeriods` 0; `GET /v1/org/fiscal-calendars/{id}` reads it. `POST /v1/org/fiscal-calendars/{id}:generate` with `{fiscalYear, force?, periods?}` writes the year's periods and emits `fiscalcalendar.generated` (201, `generated` true). Calling it again for the same calendar and year is a replay: 200, `generated` false, the stored periods, no write and no event. `force` replaces the rows and emits a second event, but first asks the `PostingChecker`: postings answer 409 `ORG-CAL-LOCKED`, a checker failure answers 503 `COM-0503`. Until the ledger exists the checker reports no postings. `periods` is required for a `custom` calendar and rejected for any other pattern (`ORG-CAL-PATTERN`). `GET /v1/org/fiscal-calendars/{id}/periods?fiscalYear=` returns the periods in order 0, operating, adjustment, 99.
 
 ## API
 
@@ -55,6 +57,11 @@ Contract: `api/openapi.yaml`. Paths follow the architecture spine (`/v1/<context
 |---|---|---|
 | COM-0001 | 400 | malformed body, unknown field, failed field validation (`errors` names the fields), bad `from`, `to` or `qty`, unknown `timeZone` |
 | AUTH-0001, AUTH-0003, COM-0500 | 401, 403, 500 | missing tenant, duty missing, internal error with hidden detail |
+| ORG-CAL-NOT-FOUND | 404 | fiscal calendar unknown, malformed id or another tenant's |
+| ORG-CAL-CODE-DUPLICATE | 409 | fiscal-calendar code already used in the tenant |
+| ORG-CAL-LOCKED | 409 | `force` regeneration of a fiscal year the ledger reports postings for |
+| ORG-CAL-PATTERN, ORG-CAL-GAP, ORG-CAL-OVERLAP | 422 | unusable calendar spec or custom ranges that do not tile the year |
+| COM-0503 | 503 | the ledger posting check failed, so `force` is refused |
 | ORG-LE-CODE-DUPLICATE | 409 | legal-entity code already used in the tenant |
 | ORG-LE-CODE-RESERVED | 400 | legal-entity code is DAT, SYS or ALL |
 | ORG-ADDR-NOT-OWNED | 422 | an address pointer (`primaryAddressId`, `addressId`) that is not a current address owned by the record: unknown, closed version id, another owner's or out of scope |
