@@ -33,6 +33,8 @@ const (
 	dutyLegalEntity  = "org.legal-entity.write"
 	dutyReference    = "org.reference.write"
 	maxNameLength    = 120
+	maxRegistration  = 40
+	defaultLanguage  = "en-US"
 	maxQuantityExp   = 18
 	minQuantityExp   = -24
 	validationDetail = "request failed validation"
@@ -40,6 +42,7 @@ const (
 
 var (
 	legalEntityCode = regexp.MustCompile(`^[A-Z0-9]{2,8}$`)
+	languageTag     = regexp.MustCompile(`^[a-z]{2}(-[A-Z]{2})?$`)
 	countryCode     = regexp.MustCompile(`^[A-Z]{2}$`)
 	currencyCode    = regexp.MustCompile(`^[A-Z]{3}$`)
 	reservedCodes   = map[string]bool{"DAT": true, "SYS": true, "ALL": true}
@@ -51,16 +54,32 @@ type API struct {
 	conversions []domain.Conversion
 	created     atomic.Int64
 	failed      atomic.Int64
+	updated     atomic.Int64
 
 	referenceChanged atomic.Int64
 }
 
 type createLegalEntityRequest struct {
-	Code     string `json:"code"`
-	Name     string `json:"name"`
-	Country  string `json:"country"`
-	Currency string `json:"currency"`
-	TimeZone string `json:"timeZone"`
+	Code               string  `json:"code"`
+	Name               string  `json:"name"`
+	Country            string  `json:"country"`
+	Currency           string  `json:"currency"`
+	TimeZone           string  `json:"timeZone"`
+	DefaultLanguage    string  `json:"defaultLanguage"`
+	RegistrationNumber *string `json:"registrationNumber"`
+}
+
+type updateLegalEntityRequest struct {
+	Version            *int    `json:"version"`
+	Name               *string `json:"name"`
+	TimeZone           *string `json:"timeZone"`
+	DefaultLanguage    *string `json:"defaultLanguage"`
+	RegistrationNumber *string `json:"registrationNumber"`
+	Status             *string `json:"status"`
+}
+
+type nameList struct {
+	Items []store.LegalEntityName `json:"items"`
 }
 
 type referenceStatusRequest struct {
@@ -98,6 +117,9 @@ func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
 	r.With(authz.RequireDuty(dutyLegalEntity)).Post("/v1/org/legal-entities", a.createLegalEntity)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/org/legal-entities", a.listLegalEntities)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/org/legal-entities/{id}", a.getLegalEntity)
+	r.With(authz.RequireDuty(dutyLegalEntity)).Patch("/v1/org/legal-entities/{id}", a.updateLegalEntity)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/org/legal-entities/{id}/names", a.listLegalEntityNames)
 	r.Get("/v1/org/uom/convert", a.convert)
 	for _, c := range referenceCollections {
 		base := "/v1/org/" + c.collection
@@ -112,6 +134,7 @@ func (a *API) Metrics() http.Handler {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 		fmt.Fprintf(w, "# HELP org_legal_entities_created_total Legal entities created.\n# TYPE org_legal_entities_created_total counter\norg_legal_entities_created_total %d\n", a.created.Load())
 		fmt.Fprintf(w, "# HELP org_legal_entities_failed_total Legal entity creations that failed in the store.\n# TYPE org_legal_entities_failed_total counter\norg_legal_entities_failed_total %d\n", a.failed.Load())
+		fmt.Fprintf(w, "# HELP org_legal_entities_updated_total Legal entity updates that bumped the version.\n# TYPE org_legal_entities_updated_total counter\norg_legal_entities_updated_total %d\n", a.updated.Load())
 		fmt.Fprintf(w, "# HELP org_reference_status_changed_total Reference rows whose tenant status was set.\n# TYPE org_reference_status_changed_total counter\norg_reference_status_changed_total %d\n", a.referenceChanged.Load())
 	})
 }
@@ -140,7 +163,17 @@ func (a *API) createLegalEntity(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
-	in := store.LegalEntity{Code: req.Code, Name: strings.TrimSpace(req.Name), Country: req.Country, Currency: req.Currency, TimeZone: req.TimeZone}
+	in := store.LegalEntity{Code: strings.ToUpper(req.Code), Name: strings.TrimSpace(req.Name), Country: req.Country, Currency: req.Currency, TimeZone: req.TimeZone,
+		DefaultLanguage: req.DefaultLanguage, RegistrationNumber: req.RegistrationNumber}
+	if in.DefaultLanguage == "" {
+		in.DefaultLanguage = defaultLanguage
+	}
+	if reservedCodes[in.Code] {
+		p := httpx.NewProblem(http.StatusBadRequest, "ORG-LE-CODE-RESERVED", "legal entity code is reserved")
+		p.Errors = map[string]string{"code": "must not be DAT, SYS or ALL"}
+		httpx.Fail(w, r, p)
+		return
+	}
 	if fields := validateLegalEntity(in); len(fields) > 0 {
 		p := httpx.NewProblem(http.StatusBadRequest, "COM-0001", validationDetail)
 		p.Errors = fields
@@ -167,7 +200,20 @@ func (a *API) listLegalEntities(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
-	page, err := a.store.ListLegalEntities(r.Context(), after, limit)
+	q := r.URL.Query()
+	f := store.LegalEntityFilter{Status: q.Get("status"), Country: q.Get("country"), Currency: q.Get("currency")}
+	switch {
+	case f.Status != "" && !validStatus(f.Status):
+		badQuery(w, r, "status", "must be active or inactive")
+		return
+	case f.Country != "" && !countryCode.MatchString(f.Country):
+		badQuery(w, r, "country", "must be two upper-case letters")
+		return
+	case f.Currency != "" && !currencyCode.MatchString(f.Currency):
+		badQuery(w, r, "currency", "must be three upper-case letters")
+		return
+	}
+	page, err := a.store.ListLegalEntities(r.Context(), f, after, limit)
 	if err != nil {
 		slog.Error("list legal entities failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)
@@ -178,6 +224,104 @@ func (a *API) listLegalEntities(w http.ResponseWriter, r *http.Request) {
 		body.NextCursor = base64.RawURLEncoding.EncodeToString([]byte(page.NextCode))
 	}
 	httpx.JSON(w, http.StatusOK, body)
+}
+
+func legalEntityID(w http.ResponseWriter, r *http.Request) (string, bool) {
+	id := chi.URLParam(r, "id")
+	if !ids.Valid(id) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeLegalEntityNotFound, "legal entity not found"))
+		return "", false
+	}
+	return id, true
+}
+
+func (a *API) getLegalEntity(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	id, ok := legalEntityID(w, r)
+	if !ok {
+		return
+	}
+	entity, err := a.store.GetLegalEntity(r.Context(), id)
+	if err != nil {
+		slog.Error("get legal entity failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, entity)
+}
+
+func (a *API) listLegalEntityNames(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	id, ok := legalEntityID(w, r)
+	if !ok {
+		return
+	}
+	names, err := a.store.ListLegalEntityNames(r.Context(), id)
+	if err != nil {
+		slog.Error("list legal entity names failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, nameList{Items: names})
+}
+
+func (a *API) updateLegalEntity(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	id, ok := legalEntityID(w, r)
+	if !ok {
+		return
+	}
+	var req updateLegalEntityRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	patch := store.LegalEntityPatch{TimeZone: req.TimeZone, DefaultLanguage: req.DefaultLanguage, RegistrationNumber: req.RegistrationNumber, Status: req.Status}
+	fields := map[string]string{}
+	if req.Version == nil || *req.Version < 1 {
+		fields["version"] = "is required and must be at least 1"
+	}
+	if req.Name != nil {
+		name := strings.TrimSpace(*req.Name)
+		patch.Name = &name
+		if !validName(name) {
+			fields["name"] = nameRule
+		}
+	}
+	if req.TimeZone != nil && !validTimeZone(*req.TimeZone) {
+		fields["timeZone"] = timeZoneRule
+	}
+	if req.DefaultLanguage != nil && !languageTag.MatchString(*req.DefaultLanguage) {
+		fields["defaultLanguage"] = languageRule
+	}
+	if req.RegistrationNumber != nil && utf8.RuneCountInString(*req.RegistrationNumber) > maxRegistration {
+		fields["registrationNumber"] = registrationRule
+	}
+	if req.Status != nil && !validStatus(*req.Status) {
+		fields["status"] = "must be active or inactive"
+	}
+	if len(fields) > 0 {
+		p := httpx.NewProblem(http.StatusBadRequest, "COM-0001", validationDetail)
+		p.Errors = fields
+		httpx.Fail(w, r, p)
+		return
+	}
+	entity, err := a.store.UpdateLegalEntity(r.Context(), id, *req.Version, patch)
+	if err != nil {
+		slog.Error("update legal entity failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.Fail(w, r, err)
+		return
+	}
+	if entity.Version != *req.Version {
+		a.updated.Add(1)
+	}
+	httpx.JSON(w, http.StatusOK, entity)
 }
 
 func validStatus(status string) bool { return status == "active" || status == "inactive" }
@@ -305,13 +449,30 @@ func problemFrom(err error) error {
 	return err
 }
 
+var (
+	nameRule         = fmt.Sprintf("must be 1 to %d characters", maxNameLength)
+	timeZoneRule     = "must be an IANA time zone name"
+	languageRule     = "must be a language tag such as en or en-US"
+	registrationRule = fmt.Sprintf("must be at most %d characters", maxRegistration)
+)
+
+func validName(name string) bool {
+	n := utf8.RuneCountInString(name)
+	return n > 0 && n <= maxNameLength
+}
+
+func validTimeZone(zone string) bool {
+	_, err := time.LoadLocation(zone)
+	return err == nil && zone != "" && zone != "Local"
+}
+
 func validateLegalEntity(in store.LegalEntity) map[string]string {
 	fields := map[string]string{}
-	if !legalEntityCode.MatchString(in.Code) || reservedCodes[in.Code] {
-		fields["code"] = "must be 2 to 8 characters of A-Z or 0-9 and not DAT, SYS or ALL"
+	if !legalEntityCode.MatchString(in.Code) {
+		fields["code"] = "must be 2 to 8 characters of A-Z or 0-9"
 	}
-	if n := utf8.RuneCountInString(in.Name); n == 0 || n > maxNameLength {
-		fields["name"] = fmt.Sprintf("must be 1 to %d characters", maxNameLength)
+	if !validName(in.Name) {
+		fields["name"] = nameRule
 	}
 	if !countryCode.MatchString(in.Country) {
 		fields["country"] = "must be an ISO 3166-1 alpha-2 code"
@@ -319,8 +480,14 @@ func validateLegalEntity(in store.LegalEntity) map[string]string {
 	if !currencyCode.MatchString(in.Currency) {
 		fields["currency"] = "must be an ISO 4217 alpha-3 code"
 	}
-	if _, err := time.LoadLocation(in.TimeZone); err != nil || in.TimeZone == "" || in.TimeZone == "Local" {
-		fields["timeZone"] = "must be an IANA time zone name"
+	if !validTimeZone(in.TimeZone) {
+		fields["timeZone"] = timeZoneRule
+	}
+	if !languageTag.MatchString(in.DefaultLanguage) {
+		fields["defaultLanguage"] = languageRule
+	}
+	if in.RegistrationNumber != nil && utf8.RuneCountInString(*in.RegistrationNumber) > maxRegistration {
+		fields["registrationNumber"] = registrationRule
 	}
 	return fields
 }
