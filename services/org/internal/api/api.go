@@ -60,6 +60,8 @@ type API struct {
 	ouUpdated        atomic.Int64
 	siteCreated      atomic.Int64
 	siteUpdated      atomic.Int64
+	warehouseCreated atomic.Int64
+	warehouseUpdated atomic.Int64
 }
 
 type createLegalEntityRequest struct {
@@ -120,6 +122,7 @@ func (a *API) Register(r chi.Router) {
 	}))
 	a.registerOperatingUnits(r)
 	a.registerSites(r)
+	a.registerWarehouses(r)
 	r.Get("/v1/org/uom/convert", a.convert)
 	for _, c := range referenceCollections {
 		base := "/v1/org/" + c.collection
@@ -140,6 +143,8 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP org_operating_units_updated_total Operating unit updates that bumped the version.\n# TYPE org_operating_units_updated_total counter\norg_operating_units_updated_total %d\n", a.ouUpdated.Load())
 		fmt.Fprintf(w, "# HELP org_sites_created_total Sites created.\n# TYPE org_sites_created_total counter\norg_sites_created_total %d\n", a.siteCreated.Load())
 		fmt.Fprintf(w, "# HELP org_sites_updated_total Site updates that bumped the version.\n# TYPE org_sites_updated_total counter\norg_sites_updated_total %d\n", a.siteUpdated.Load())
+		fmt.Fprintf(w, "# HELP org_warehouses_created_total Warehouses created.\n# TYPE org_warehouses_created_total counter\norg_warehouses_created_total %d\n", a.warehouseCreated.Load())
+		fmt.Fprintf(w, "# HELP org_warehouses_updated_total Warehouse updates that bumped the version.\n# TYPE org_warehouses_updated_total counter\norg_warehouses_updated_total %d\n", a.warehouseUpdated.Load())
 	})
 }
 

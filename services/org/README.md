@@ -1,6 +1,6 @@
 # org
 
-Organization service for Passage (wave 6). Slice 1 ships legal entities, the pure hierarchy as-of logic and unit-of-measure conversion. Create also writes `dev.passage.org.legalentity.created.v1` to the `outbox` table in the same transaction (an Idempotency-Key replay writes none), and PATCH writes `dev.passage.org.legalentity.updated.v1` with `{id, changed_fields, version}` in the same transaction when a value changed; operating units write `dev.passage.org.operatingunit.created.v1` on create and `dev.passage.org.operatingunit.updated.v1` on a version bump the same way; sites, which are legal-entity-scoped, write `dev.passage.org.site.created.v1` and `dev.passage.org.site.updated.v1` the same way; events are declared in `events/asyncapi.yaml`. Everything else is listed in `NOT-IMPLEMENTED.md`.
+Organization service for Passage (wave 6). Slice 1 ships legal entities, the pure hierarchy as-of logic and unit-of-measure conversion. Create also writes `dev.passage.org.legalentity.created.v1` to the `outbox` table in the same transaction (an Idempotency-Key replay writes none), and PATCH writes `dev.passage.org.legalentity.updated.v1` with `{id, changed_fields, version}` in the same transaction when a value changed; operating units write `dev.passage.org.operatingunit.created.v1` on create and `dev.passage.org.operatingunit.updated.v1` on a version bump the same way; sites, which are legal-entity-scoped, write `dev.passage.org.site.created.v1` and `dev.passage.org.site.updated.v1` the same way; warehouses, which take their legal entity from their site, write `dev.passage.org.warehouse.created.v1` and `dev.passage.org.warehouse.updated.v1` the same way; events are declared in `events/asyncapi.yaml`. Everything else is listed in `NOT-IMPLEMENTED.md`.
 
 Run: `DATABASE_URL=postgres://... MIGRATE_ON_START=true go run ./cmd/org`. Test: `go vet ./... && go test ./...`; store tests need `PASSAGE_TEST_DATABASE_URL` (role without BYPASSRLS).
 
@@ -27,6 +27,8 @@ Countries, currencies, regions and languages are platform-owned rows under the `
 | `POST /v1/org/operating-units` (body `type` department, cost_center, business_unit or value_stream, `code` upper-cased and unique per type, `name`; optional `defaultLegalEntityId`, `managerPartyId` for cost centers, `Idempotency-Key`) and `PATCH /v1/org/operating-units/{id}` (body `version` required, optional `name`, `status`, `defaultLegalEntityId`, `managerPartyId`; `""` clears an id; type and code immutable) | `org.operating-unit.write` |
 | `POST /v1/org/sites` (body `legalEntityId`, `code` upper-cased and unique per legal entity, `name`; optional `timeZone` defaulting to the legal entity's, `Idempotency-Key`) and `PATCH /v1/org/sites/{id}` (body `version` required, optional `name`, `timeZone`, `status`; legal entity and code immutable) | `org.site.write` |
 | `GET /v1/org/sites` (`limit`, `cursor`; filters `legalEntityId`, `status`; returns `{items, nextCursor}`) and `GET /v1/org/sites/{id}` | `org.read` |
+| `POST /v1/org/warehouses` (body `siteId`, `code` upper-cased and unique per legal entity, `name`; optional `type` standard, transit, quarantine or subcontractor, `timeZone` defaulting to the site's, `Idempotency-Key`; the legal entity is the site's) and `PATCH /v1/org/warehouses/{id}` (body `version` required, optional `siteId` within the same legal entity, `name`, `type`, `timeZone`, `status`; legal entity and code immutable) | `org.site.write` |
+| `GET /v1/org/warehouses` (`limit`, `cursor`; filters `legalEntityId`, `siteId`, `type`, `status`; returns `{items, nextCursor}`) and `GET /v1/org/warehouses/{id}` | `org.read` |
 | `GET /v1/org/operating-units` (`limit`, `cursor`; filters `type`, `defaultLegalEntityId`, `status`; returns `{items, nextCursor}`) and `GET /v1/org/operating-units/{id}` | `org.read` |
 | `GET /v1/org/{countries,currencies,regions,languages}` (`status` active or inactive; `country` for regions; returns `{items}`) and `GET /v1/org/{countries,currencies,regions,languages}/{code}` | `org.read` |
 | `PATCH /v1/org/{countries,currencies,regions,languages}/{code}` (body `{"status":"active"\|"inactive"}`; not for legal-entity-scoped callers) | `org.reference.write` |
@@ -51,8 +53,12 @@ Contract: `api/openapi.yaml`. Paths follow the architecture spine (`/v1/<context
 | ORG-SITE-NOT-FOUND | 404 | unknown, malformed or out-of-scope site id |
 | ORG-SITE-CODE-DUPLICATE | 409 | site code already used in the legal entity |
 | ORG-SITE-LEGAL-ENTITY-INVALID | 422 | legal entity unknown, inactive or outside the caller's scope |
+| ORG-WH-NOT-FOUND | 404 | unknown, malformed or out-of-scope warehouse id |
+| ORG-WH-CODE-DUPLICATE | 409 | warehouse code already used in the legal entity |
+| ORG-WH-SITE-INVALID | 422 | site unknown, inactive or outside the caller's scope |
+| ORG-WH-LE-MISMATCH | 422 | the new site belongs to a different legal entity than the warehouse |
 | idempotency_key_reuse | 422 | Idempotency-Key reused with a different body |
 | ORG-REF-NOT-FOUND | 404 | unknown reference code |
 | ORG-UOM-NO-PATH | 422 | no conversion within two hops inside one unit class |
 
-Metrics: `org_legal_entities_created_total`, `org_legal_entities_failed_total`, `org_legal_entities_updated_total`, `org_reference_status_changed_total`, `org_operating_units_created_total`, `org_operating_units_updated_total`, `org_sites_created_total`, `org_sites_updated_total` (stdlib atomics rendered as text).
+Metrics: `org_legal_entities_created_total`, `org_legal_entities_failed_total`, `org_legal_entities_updated_total`, `org_reference_status_changed_total`, `org_operating_units_created_total`, `org_operating_units_updated_total`, `org_sites_created_total`, `org_sites_updated_total`, `org_warehouses_created_total`, `org_warehouses_updated_total` (stdlib atomics rendered as text).

@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: org
-  version: 0.5.0
-  description: Organization service. Covers legal entities, operating units, sites, unit-of-measure conversion, and the platform-owned reference sets (countries, currencies, regions, languages) with tenant-level deactivation.
+  version: 0.6.0
+  description: Organization service. Covers legal entities, operating units, sites, warehouses, unit-of-measure conversion, and the platform-owned reference sets (countries, currencies, regions, languages) with tenant-level deactivation.
 servers:
   - url: https://app.local.passage.dev
 paths:
@@ -175,6 +175,59 @@ paths:
         '200':
           description: The site. A stale version is 409 ORG-VERSION-CONFLICT. A request that changes no value returns the stored site with the same version and emits no event. 400 COM-0001 for a field error, or for legalEntityId or code, which are immutable. 404 ORG-SITE-NOT-FOUND.
           content: { application/json: { schema: { $ref: '#/components/schemas/Site' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/warehouses:
+    post:
+      operationId: createWarehouse
+      x-passage-duty: org.site.write
+      parameters:
+        - { name: Idempotency-Key, in: header, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateWarehouse' } } }
+      responses:
+        '201':
+          description: Warehouse created, or the original warehouse on an Idempotency-Key replay. The legal entity is the site's; the time zone defaults to the site's and the type to standard. 400 COM-0001 for a field error. 409 ORG-WH-CODE-DUPLICATE when the code exists in the legal entity. 422 ORG-WH-SITE-INVALID when the site is unknown, inactive or outside the caller's scope. 422 idempotency_key_reuse when the key was used with a different body.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Warehouse' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listWarehouses
+      x-passage-duty: org.read
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
+        - { name: siteId, in: query, schema: { type: string, format: uuid } }
+        - { name: type, in: query, schema: { type: string, enum: [standard, transit, quarantine, subcontractor] } }
+        - { name: status, in: query, schema: { type: string, enum: [active, inactive] } }
+      responses:
+        '200':
+          description: One page of warehouses ordered by code then id; a legal-entity-scoped caller sees only that legal entity's warehouses. Pass nextCursor as cursor for the next page. A bad filter or cursor is 400 COM-0001.
+          content: { application/json: { schema: { $ref: '#/components/schemas/WarehouseList' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/warehouses/{id}:
+    get:
+      operationId: getWarehouse
+      x-passage-duty: org.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: One warehouse. A malformed id, an unknown id and a warehouse outside the caller's legal-entity scope are all 404 ORG-WH-NOT-FOUND.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Warehouse' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    patch:
+      operationId: updateWarehouse
+      x-passage-duty: org.site.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/UpdateWarehouse' } } }
+      responses:
+        '200':
+          description: The warehouse. A stale version is 409 ORG-VERSION-CONFLICT. A request that changes no value returns the stored warehouse with the same version and emits no event. 400 COM-0001 for a field error, or for legalEntityId or code, which are immutable. 404 ORG-WH-NOT-FOUND. 422 ORG-WH-SITE-INVALID when the new site is unknown, inactive or outside the caller's scope; 422 ORG-WH-LE-MISMATCH when the new site belongs to another legal entity.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Warehouse' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/org/countries:
     get:
@@ -407,6 +460,24 @@ components:
       type: object
       required: [items]
       properties: { items: { type: array, items: { $ref: '#/components/schemas/Site' } }, nextCursor: { type: string } }
+    CreateWarehouse:
+      type: object
+      additionalProperties: false
+      required: [siteId, code, name]
+      properties: { siteId: { type: string, format: uuid }, code: { type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{0,9}$', description: Upper-cased on save; unique within the legal entity }, name: { type: string, minLength: 1, maxLength: 120 }, type: { type: string, enum: [standard, transit, quarantine, subcontractor], default: standard }, timeZone: { type: string, description: IANA time zone name; defaults to the site's } }
+    Warehouse:
+      type: object
+      required: [id, legalEntityId, siteId, code, name, type, timeZone, status, version, createdAt, updatedAt]
+      properties: { id: { type: string, format: uuid }, legalEntityId: { type: string, format: uuid }, siteId: { type: string, format: uuid }, code: { type: string }, name: { type: string }, type: { type: string, enum: [standard, transit, quarantine, subcontractor] }, timeZone: { type: string }, status: { type: string, enum: [active, inactive] }, version: { type: integer }, createdAt: { type: string, format: date-time }, updatedAt: { type: string, format: date-time } }
+    UpdateWarehouse:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties: { version: { type: integer, minimum: 1 }, siteId: { type: string, format: uuid, description: A site in the same legal entity }, name: { type: string, minLength: 1, maxLength: 120 }, type: { type: string, enum: [standard, transit, quarantine, subcontractor] }, timeZone: { type: string, description: IANA time zone name }, status: { type: string, enum: [active, inactive] } }
+    WarehouseList:
+      type: object
+      required: [items]
+      properties: { items: { type: array, items: { $ref: '#/components/schemas/Warehouse' } }, nextCursor: { type: string } }
     ReferenceStatusChange:
       type: object
       additionalProperties: false
