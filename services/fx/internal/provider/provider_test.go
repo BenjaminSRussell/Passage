@@ -172,6 +172,8 @@ func TestOXRRejectsBadPayloads(t *testing.T) {
 		"empty rates":             {`{"timestamp":1792756800,"base":"USD","rates":{}}`, "no rates"},
 		"zero rate":               {`{"timestamp":1792756800,"base":"USD","rates":{"CHF":0}}`, "CHF"},
 		"null rate":               {`{"timestamp":1792756800,"base":"USD","rates":{"CHF":null}}`, "CHF"},
+		"huge exponent":           {`{"timestamp":1792756800,"base":"USD","rates":{"CHF":1e999999999}}`, "CHF"},
+		"tiny exponent":           {`{"timestamp":1792756800,"base":"USD","rates":{"CHF":1e-999999999}}`, "CHF"},
 		"not json":                {`{`, "json"},
 	}
 	for name, c := range cases {
@@ -229,6 +231,8 @@ func TestCSVRejectsBadRowsNamingTheLine(t *testing.T) {
 		"zero rate":               {header + "CLOSING,EUR,USD,2026-10-22,1.1\nCLOSING,EUR,GBP,2026-10-22,0\n", "line 3: rate must be greater than zero"},
 		"negative rate":           {header + "CLOSING,EUR,USD,2026-10-22,-1\n", "line 2: rate must be greater than zero"},
 		"huge rate":               {header + "CLOSING,EUR,USD,2026-10-22,1e400\n", "line 2: rate is out of range"},
+		"huge exponent":           {header + "CLOSING,EUR,USD,2026-10-22,1e999999999\n", "line 2: rate is out of range"},
+		"tiny exponent":           {header + "CLOSING,EUR,USD,2026-10-22,1e-999999999\n", "line 2: rate is out of range"},
 		"text rate":               {header + "CLOSING,EUR,USD,2026-10-22,abc\n", "line 2:"},
 		"bad date":                {header + "CLOSING,EUR,USD,22/10/2026,1.1\n", "line 2: valid_from"},
 		"lower case currency":     {header + "CLOSING,eur,USD,2026-10-22,1.1\n", "line 2: currencies"},

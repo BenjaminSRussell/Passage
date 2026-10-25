@@ -14,8 +14,9 @@ import (
 )
 
 const (
-	maxDecimals = 10
-	maxBody     = 4 << 20
+	maxDecimals     = 10
+	maxExponentSpan = 1000
+	maxBody         = 4 << 20
 )
 
 var (
@@ -61,14 +62,20 @@ func parseRate(raw string, strict bool) (decimal.Decimal, error) {
 	if err != nil {
 		return decimal.Decimal{}, fmt.Errorf("rate %q is not a number", raw)
 	}
+	if rate.Sign() <= 0 {
+		return decimal.Decimal{}, errors.New("rate must be greater than zero")
+	}
+	if rate.Exponent() > maxDecimals || rate.Exponent() < -maxExponentSpan {
+		return decimal.Decimal{}, errors.New("rate is out of range")
+	}
 	if rate.Exponent() < -maxDecimals {
 		if strict {
 			return decimal.Decimal{}, fmt.Errorf("rate has more than %d decimals", maxDecimals)
 		}
 		rate = rate.Round(maxDecimals)
-	}
-	if rate.Sign() <= 0 {
-		return decimal.Decimal{}, errors.New("rate must be greater than zero")
+		if rate.Sign() <= 0 {
+			return decimal.Decimal{}, errors.New("rate must be greater than zero")
+		}
 	}
 	if rate.GreaterThanOrEqual(maxRate) {
 		return decimal.Decimal{}, errors.New("rate is out of range")
