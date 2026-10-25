@@ -14,7 +14,7 @@ Run: `DATABASE_URL=postgres://... MIGRATE_ON_START=true go run ./cmd/org`. Test:
 
 ## Reference data
 
-Countries, currencies, regions and languages are platform-owned rows under the `sys` tenant (`00000000-0000-0000-0000-000000000000`): every tenant can read them, no tenant can insert, update or delete them. The data lives in `migrations/reference/countries.csv`, `currencies.csv`, `regions.csv` and `languages.csv`, embedded as `migrations.Reference`, and `store.SeedReference` loads it after the migrations when `MIGRATE_ON_START=true`. Regions cover US, CA, IN and MX as full ISO 3166-2 codes (`US-CA`). A malformed row fails the whole file with `<file> line <n>: <reason>`; re-running the seed changes nothing.
+Countries, currencies, regions and languages are platform-owned rows under the `sys` tenant (`00000000-0000-0000-0000-000000000000`): every tenant can read them, no tenant can insert, update or delete them. The data lives in `migrations/reference/countries.csv`, `currencies.csv`, `regions.csv` and `languages.csv`, embedded as `migrations.Reference`, and `store.SeedReference` loads it after the migrations when `MIGRATE_ON_START=true`. Regions cover US, CA, IN and MX as full ISO 3166-2 codes (`US-CA`). A malformed row fails the whole file with `<file> line <n>: <reason>`; re-running the seed changes nothing. Tenants never edit the `sys` rows: `PATCH /v1/org/{collection}/{code}` deactivates or reactivates a row for the calling tenant only, by writing `reference_status`, and every read returns the tenant's effective status.
 
 ## API
 
@@ -22,6 +22,8 @@ Countries, currencies, regions and languages are platform-owned rows under the `
 |---|---|
 | `POST /v1/org/legal-entities` (required `timeZone`, IANA name; optional `Idempotency-Key`) | `org.legal-entity.write` |
 | `GET /v1/org/legal-entities` (`limit` max 100, `cursor`; returns `{items, nextCursor}`) | `org.read` |
+| `GET /v1/org/{countries,currencies,regions,languages}` (`status` active or inactive; `country` for regions; returns `{items}`) and `GET /v1/org/{countries,currencies,regions,languages}/{code}` | `org.read` |
+| `PATCH /v1/org/{countries,currencies,regions,languages}/{code}` (body `{"status":"active"\|"inactive"}`; not for legal-entity-scoped callers) | `org.reference.write` |
 | `GET /v1/org/uom/convert?from=&to=&qty=` | any authenticated principal |
 | `GET /healthz`, `GET /readyz` (database ping, 503 when down), `GET /metrics` on the admin port | public |
 
@@ -35,6 +37,7 @@ Contract: `api/openapi.yaml`. Paths follow the architecture spine (`/v1/<context
 | AUTH-0001, AUTH-0003, COM-0500 | 401, 403, 500 | missing tenant, duty missing, internal error with hidden detail |
 | ORG-LE-CODE-DUPLICATE | 409 | legal-entity code already used in the tenant |
 | idempotency_key_reuse | 422 | Idempotency-Key reused with a different body |
+| ORG-REF-NOT-FOUND | 404 | unknown reference code |
 | ORG-UOM-NO-PATH | 422 | no conversion within two hops inside one unit class |
 
-Metrics: `org_legal_entities_created_total`, `org_legal_entities_failed_total` (stdlib atomics rendered as text).
+Metrics: `org_legal_entities_created_total`, `org_legal_entities_failed_total`, `org_reference_status_changed_total` (stdlib atomics rendered as text).
