@@ -65,7 +65,7 @@ func TestReferenceData_CommittedCountries(t *testing.T) {
 	if len(regionRequired) != 4 || !regionRequired["US"] || !regionRequired["CA"] || !regionRequired["IN"] || !regionRequired["MX"] {
 		t.Fatalf("region_required = %v, want exactly US CA IN MX", regionRequired)
 	}
-	if len(postal) != 7 {
+	if len(postal) != 7 || postal["US"] == "" || postal["CA"] == "" || postal["GB"] == "" || postal["DE"] == "" || postal["FR"] == "" || postal["IN"] == "" || postal["MX"] == "" {
 		t.Fatalf("postal_regex set for %v, want exactly US CA GB DE FR IN MX", postal)
 	}
 	for _, c := range []struct {
@@ -76,6 +76,9 @@ func TestReferenceData_CommittedCountries(t *testing.T) {
 		{"CA", "K1A 0B1", true}, {"GB", "SW1A 1AA", true}, {"DE", "10115", true},
 		{"FR", "75001", true}, {"IN", "110001", true}, {"MX", "01000", true},
 	} {
+		if postal[c.country] == "" {
+			t.Fatalf("no postal regex for %s", c.country)
+		}
 		if got := regexp.MustCompile(postal[c.country]).MatchString(c.sample); got != c.want {
 			t.Errorf("%s %q matches = %v, want %v", c.country, c.sample, got, c.want)
 		}
