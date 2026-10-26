@@ -1,0 +1,56 @@
+package events_test
+
+import (
+	"encoding/json"
+	"os"
+	"strings"
+	"testing"
+
+	platformevents "github.com/BenjaminSRussell/passage/platform/events"
+	"github.com/BenjaminSRussell/passage/services/engineering/internal/events"
+)
+
+func TestEventTypes_Valid(t *testing.T) {
+	for _, typ := range []string{events.ResourceChanged, events.CalendarGenerated} {
+		if !platformevents.ValidType(typ) {
+			t.Errorf("%s is not a valid event type", typ)
+		}
+	}
+}
+
+func TestPayloads_MatchAsyncAPI(t *testing.T) {
+	raw, err := os.ReadFile("../../events/asyncapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := string(raw)
+	cases := []struct {
+		message string
+		typ     string
+		payload any
+	}{
+		{"resourceChanged", events.ResourceChanged, events.ResourceChangedData{ChangedFields: []string{"x"}, SiteID: "s", CalendarID: "c"}},
+		{"calendarGenerated", events.CalendarGenerated, events.CalendarGeneratedData{}},
+	}
+	for _, tc := range cases {
+		start := strings.Index(spec, "    "+tc.message+":\n")
+		end := strings.Index(spec[start:], "x-passage-type: "+tc.typ)
+		if start < 0 || end < 0 {
+			t.Fatalf("%s with type %s missing from asyncapi.yaml", tc.message, tc.typ)
+		}
+		section := spec[start : start+end]
+		encoded, err := json.Marshal(tc.payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]any
+		if err := json.Unmarshal(encoded, &fields); err != nil {
+			t.Fatal(err)
+		}
+		for name := range fields {
+			if !strings.Contains(section, "          "+name+": ") {
+				t.Errorf("%s: property %s missing from asyncapi payload", tc.message, name)
+			}
+		}
+	}
+}

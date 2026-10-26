@@ -14,6 +14,14 @@ channels:
       submitted: { $ref: '#/components/messages/ecoSubmitted' }
       approved: { $ref: '#/components/messages/ecoApproved' }
       released: { $ref: '#/components/messages/ecoReleased' }
+  passage.engineering.resource:
+    address: passage.engineering.resource
+    messages:
+      changed: { $ref: '#/components/messages/resourceChanged' }
+  passage.engineering.calendar:
+    address: passage.engineering.calendar
+    messages:
+      generated: { $ref: '#/components/messages/calendarGenerated' }
 operations:
   onBomVersionActivated:
     action: send
@@ -35,6 +43,14 @@ operations:
     action: send
     channel: { $ref: '#/channels/passage.engineering.eco' }
     messages: [{ $ref: '#/channels/passage.engineering.eco/messages/released' }]
+  onResourceChanged:
+    action: send
+    channel: { $ref: '#/channels/passage.engineering.resource' }
+    messages: [{ $ref: '#/channels/passage.engineering.resource/messages/changed' }]
+  onCalendarGenerated:
+    action: send
+    channel: { $ref: '#/channels/passage.engineering.calendar' }
+    messages: [{ $ref: '#/channels/passage.engineering.calendar/messages/generated' }]
 components:
   messages:
     bomVersionActivated:
@@ -86,3 +102,28 @@ components:
       name: ecoReleased
       title: ECO released to production
       x-passage-type: dev.passage.engineering.eco.released.v1
+    resourceChanged:
+      name: resourceChanged
+      title: Resource created or changed
+      payload:
+        type: object
+        required: [resourceId, efficiencyPct, changedFields]
+        properties:
+          resourceId: { type: string }
+          siteId: { type: string }
+          calendarId: { type: string }
+          efficiencyPct: { type: string }
+          changedFields: { type: array, items: { type: string } }
+      x-passage-type: dev.passage.engineering.resource.changed.v1
+    calendarGenerated:
+      name: calendarGenerated
+      title: Calendar days generated for a range
+      payload:
+        type: object
+        required: [calendarId, from, to, openDays]
+        properties:
+          calendarId: { type: string }
+          from: { type: string, format: date }
+          to: { type: string, format: date }
+          openDays: { type: integer }
+      x-passage-type: dev.passage.engineering.calendar.generated.v1
