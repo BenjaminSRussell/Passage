@@ -28,6 +28,25 @@ var (
 	ten             = big.NewInt(10)
 )
 
+type Purpose string
+
+const (
+	PurposeGeneral  Purpose = "general"
+	PurposePrice    Purpose = "price"
+	PurposePurchase Purpose = "purchase"
+	PurposeSales    Purpose = "sales"
+	PurposeTax      Purpose = "tax"
+	PurposeCash     Purpose = "cash"
+)
+
+func ParsePurpose(s string) (Purpose, error) {
+	switch p := Purpose(s); p {
+	case PurposeGeneral, PurposePrice, PurposePurchase, PurposeSales, PurposeTax, PurposeCash:
+		return p, nil
+	}
+	return "", fmt.Errorf("unknown rounding purpose %q", s)
+}
+
 func ParseMethod(s string) (Method, error) {
 	switch m := Method(s); m {
 	case HalfEven, HalfUp, Down, Up:

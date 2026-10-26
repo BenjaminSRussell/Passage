@@ -296,6 +296,7 @@ components:
     currencyRoundingChanged:
       name: changed
       title: Currency rounding rule changed
+      description: Emitted by a PUT of a currency rounding rule that creates a row or changes its unit or method; an identical repeat emits nothing. legal_entity_id is null for a tenant row.
       payload:
         type: object
         required: [currency_code, purpose, unit, method]

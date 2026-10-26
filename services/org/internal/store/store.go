@@ -95,6 +95,9 @@ type Store interface {
 	ListReference(ctx context.Context, kind ReferenceKind, f ReferenceFilter) ([]ReferenceItem, error)
 	GetReference(ctx context.Context, kind ReferenceKind, code string) (ReferenceItem, error)
 	SetReferenceStatus(ctx context.Context, kind ReferenceKind, code, status string) (ReferenceItem, error)
+	PutCurrencyRounding(ctx context.Context, in CurrencyRounding) (CurrencyRounding, bool, error)
+	ListCurrencyRoundings(ctx context.Context, currency string) ([]CurrencyRounding, error)
+	ResolveCurrencyRounding(ctx context.Context, currency, purpose, legalEntityID string) (RoundingRule, error)
 	Ping(ctx context.Context) error
 }
 

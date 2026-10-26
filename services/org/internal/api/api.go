@@ -81,6 +81,8 @@ type API struct {
 	hierarchyAsOfQueries         atomic.Int64
 	hierarchyMakerCheckerRefused atomic.Int64
 	now                          func() time.Time
+
+	roundingChanged atomic.Int64
 }
 
 type createLegalEntityRequest struct {
@@ -148,6 +150,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerAddresses(r)
 	a.registerFiscalCalendars(r)
 	a.registerHierarchies(r)
+	a.registerCurrencyRounding(r)
 	r.Get("/v1/org/uom/convert", a.convert)
 	for _, c := range referenceCollections {
 		base := "/v1/org/" + c.collection
@@ -183,6 +186,7 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP org_hierarchy_versions_published_total Hierarchy versions published; idempotent replays are counted.\n# TYPE org_hierarchy_versions_published_total counter\norg_hierarchy_versions_published_total %d\n", a.hierarchyVersionsPublished.Load())
 		fmt.Fprintf(w, "# HELP org_hierarchy_as_of_queries_total Hierarchy as-of queries answered.\n# TYPE org_hierarchy_as_of_queries_total counter\norg_hierarchy_as_of_queries_total %d\n", a.hierarchyAsOfQueries.Load())
 		fmt.Fprintf(w, "# HELP org_hierarchy_publish_maker_checker_refused_total Security-purpose hierarchy publishes refused because the publisher was the last editor.\n# TYPE org_hierarchy_publish_maker_checker_refused_total counter\norg_hierarchy_publish_maker_checker_refused_total %d\n", a.hierarchyMakerCheckerRefused.Load())
+		fmt.Fprintf(w, "# HELP org_currency_rounding_rules_changed_total Currency rounding rule puts that created or changed a row; identical repeats are not counted.\n# TYPE org_currency_rounding_rules_changed_total counter\norg_currency_rounding_rules_changed_total %d\n", a.roundingChanged.Load())
 	})
 }
 
@@ -442,7 +446,7 @@ func (a *API) convert(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	from, to := q.Get("from"), q.Get("to")
 	qty, err := decimal.NewFromString(q.Get("qty"))
-	if from == "" || to == "" || err != nil || qty.Exponent() > maxQuantityExp || qty.Exponent() < minQuantityExp || qty.Abs().GreaterThan(maxQuantity) {
+	if from == "" || to == "" || err != nil || !decimalInBounds(qty) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", "from, to and a finite decimal qty are required"))
 		return
 	}
