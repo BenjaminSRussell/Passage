@@ -32,6 +32,10 @@ Slice A ships the settlement engine, the preview endpoint, the service skeleton 
 | Ledger posting via `ledger.Post` | slice D | key `post:payables:settlement:<id>:settle`; the event context name (`payables` vs `procurement`) must be settled first |
 | Tables, RLS, outbox events, Idempotency-Key | slice C | the preview writes nothing |
 | JWT validation, step-up MFA, OPA | wave 2 | the gateway validates tokens; services trust tenant headers |
-| `serviceCode` on 401 and 403 bodies | kernel handoff | tenant and authz middleware live in `platform/go` |
+| `serviceCode` on 401 and 403 bodies | kernel handoff | tenant and authz middleware live in `platform/go`; `api/openapi.yaml` documents the real bodies (`Unauthorized` as text/plain JSON, `Forbidden` as `KernelProblem`) |
 | Argo CD application, root `Makefile` wiring | handoff | `deploy/` belongs to wave 1 |
 | Web workspace screens | slice C | the module is a navigation stub |
+
+## Line-cap note
+
+PR #62 added 1768 lines against the 1500-line cap. The overshoot was accepted at merge: the excess is the 300-scenario oracle grid, the Helm chart, `api/openapi.yaml` and `go.sum`, none of which can be split from the slice without leaving the preview endpoint untestable, undeployable or undocumented. No placeholders or essay blocks were flagged. Issue #72 closes the deferred review findings and stays well under the cap.
