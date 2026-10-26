@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
@@ -109,6 +110,28 @@ func (f *fakeStore) ListFiscalPeriods(_ context.Context, id string, _ int) ([]st
 	return []store.FiscalPeriod{}, nil
 }
 
+func (f *fakeStore) ResolveFiscalPeriod(_ context.Context, id string, _ time.Time) (store.FiscalPeriodResolution, error) {
+	e, err := f.lookup(id)
+	if err != nil {
+		return store.FiscalPeriodResolution{}, err
+	}
+	if e.FiscalCalendarID == nil {
+		return store.FiscalPeriodResolution{}, httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeLegalEntityNoCalendar, "no calendar")
+	}
+	return store.FiscalPeriodResolution{LegalEntityID: id, CalendarID: *e.FiscalCalendarID, Source: "legalEntity", Period: store.FiscalPeriod{FiscalYear: 2026, PeriodNo: 6}}, nil
+}
+
+func (f *fakeStore) ResolveSiteFiscalPeriod(_ context.Context, id string, _ time.Time) (store.FiscalPeriodResolution, error) {
+	s, err := f.lookupSite(id)
+	if err != nil {
+		return store.FiscalPeriodResolution{}, err
+	}
+	if s.FiscalCalendarID == nil {
+		return store.FiscalPeriodResolution{}, httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeLegalEntityNoCalendar, "no calendar")
+	}
+	return store.FiscalPeriodResolution{SiteID: id, LegalEntityID: s.LegalEntityID, CalendarID: *s.FiscalCalendarID, Source: "site", Period: store.FiscalPeriod{FiscalYear: 2026, PeriodNo: 6}}, nil
+}
+
 func seededCalendars() *fakeStore {
 	return &fakeStore{calendars: []store.FiscalCalendar{{ID: calendarID, Code: "FY", Name: "Retail", Pattern: "4-4-5", StartMonth: 1, WeekStart: "monday", Status: "active", Version: 1}}}
 }
@@ -192,6 +215,59 @@ func TestFiscalCalendarReads(t *testing.T) {
 				t.Fatalf("got %d %s; want %d containing %s", rec.Code, rec.Body.String(), tc.wantStatus, tc.wantBody)
 			}
 		})
+	}
+}
+
+func TestFiscalPeriodResolution(t *testing.T) {
+	calendar := calendarID
+	const entityID = "00000000-0000-0000-0000-0000000000a1"
+	const entityPath = "/v1/org/legal-entities/" + entityID + "/fiscal-period"
+	const sitePath = "/v1/org/sites/" + siteID1 + "/fiscal-period"
+	seeded := func() *fakeStore {
+		return &fakeStore{
+			entities: []store.LegalEntity{{ID: entityID, FiscalCalendarID: &calendar}, {ID: siteLE2}},
+			sites:    []store.Site{{ID: siteID1, LegalEntityID: entityID, FiscalCalendarID: &calendar}},
+		}
+	}
+	tests := []struct {
+		name       string
+		path       string
+		duties     string
+		wantStatus int
+		wantBody   string
+	}{
+		{"legal entity resolves", entityPath + "?date=2026-06-15", "org.read", http.StatusOK, `"source":"legalEntity"`},
+		{"legal entity period number", entityPath + "?date=2026-06-15", "org.read", http.StatusOK, `"periodNo":6`},
+		{"legal entity without calendar", "/v1/org/legal-entities/" + siteLE2 + "/fiscal-period?date=2026-06-15", "org.read", http.StatusUnprocessableEntity, "ORG-LE-NO-CALENDAR"},
+		{"legal entity unknown", "/v1/org/legal-entities/00000000-0000-0000-0000-0000000000ff/fiscal-period?date=2026-06-15", "org.read", http.StatusNotFound, "ORG-LE-NOT-FOUND"},
+		{"legal entity malformed id", "/v1/org/legal-entities/nope/fiscal-period?date=2026-06-15", "org.read", http.StatusNotFound, "ORG-LE-NOT-FOUND"},
+		{"legal entity date missing", entityPath, "org.read", http.StatusBadRequest, `"date"`},
+		{"legal entity date impossible", entityPath + "?date=2026-02-30", "org.read", http.StatusBadRequest, `"date"`},
+		{"legal entity date unpadded", entityPath + "?date=2026-6-1", "org.read", http.StatusBadRequest, `"date"`},
+		{"legal entity without duty", entityPath + "?date=2026-06-15", "", http.StatusForbidden, "AUTH-0003"},
+		{"site resolves", sitePath + "?date=2026-06-15", "org.read", http.StatusOK, `"siteId":"` + siteID1 + `"`},
+		{"site source", sitePath + "?date=2026-06-15", "org.read", http.StatusOK, `"source":"site"`},
+		{"site date malformed", sitePath + "?date=abc", "org.read", http.StatusBadRequest, `"date"`},
+		{"site unknown", "/v1/org/sites/00000000-0000-0000-0000-0000000000ff/fiscal-period?date=2026-06-15", "org.read", http.StatusNotFound, "ORG-SITE-NOT-FOUND"},
+		{"site malformed id", "/v1/org/sites/nope/fiscal-period?date=2026-06-15", "org.read", http.StatusNotFound, "ORG-SITE-NOT-FOUND"},
+		{"site without duty", sitePath + "?date=2026-06-15", "", http.StatusForbidden, "AUTH-0003"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r, _ := newRouter(seeded())
+			rec := do(r, http.MethodGet, tc.path, "", tc.duties, true)
+			if rec.Code != tc.wantStatus || !strings.Contains(rec.Body.String(), tc.wantBody) {
+				t.Fatalf("got %d %s; want %d containing %s", rec.Code, rec.Body.String(), tc.wantStatus, tc.wantBody)
+			}
+		})
+	}
+}
+
+func TestFiscalPeriodResolution_RequiresTenant(t *testing.T) {
+	r, _ := newRouter(&fakeStore{})
+	rec := do(r, http.MethodGet, "/v1/org/sites/"+siteID1+"/fiscal-period?date=2026-06-15", "", "", false)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("got %d %s", rec.Code, rec.Body.String())
 	}
 }
 

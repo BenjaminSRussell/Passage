@@ -415,3 +415,199 @@ func TestPostgres_GenerateFiscalYearOnInactiveCalendarRefusesNewYearsOnly(t *tes
 		t.Fatalf("replay = %+v, %v; want 14 stored periods and generated false", replay, err)
 	}
 }
+
+func calendarOf(t *testing.T, s *store.Postgres, ctx context.Context, code, pattern string, years ...int) store.FiscalCalendar {
+	t.Helper()
+	c, err := s.CreateFiscalCalendar(ctx, fiscalCalendar(code, pattern), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	generate(t, s, ctx, c.ID, years...)
+	return c
+}
+
+func assignSiteCalendar(t *testing.T, s *store.Postgres, ctx context.Context, site store.Site, calendarID string) store.Site {
+	t.Helper()
+	assigned, err := s.UpdateSite(ctx, site.ID, site.Version, store.SitePatch{FiscalCalendarID: &calendarID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return assigned
+}
+
+func TestPostgres_ResolveFiscalPeriodSkipsOpeningAndClosingPeriods(t *testing.T) {
+	s, ctx, _ := lifecycleStore(t)
+	c := calendarOf(t, s, ctx, "FY", "calendar", 2026)
+	entity := assignCalendar(t, s, ctx, mustCreate(t, s, ctx, newEntity("US01")), c.ID)
+	for _, tc := range []struct {
+		date   time.Time
+		period int
+	}{{day(2026, 1, 1), 1}, {day(2026, 6, 15), 6}, {day(2026, 12, 31), 12}} {
+		got, err := s.ResolveFiscalPeriod(ctx, entity.ID, tc.date)
+		if err != nil || got.Period.PeriodNo != tc.period || got.Period.Type != "operating" || got.Source != "legalEntity" || got.CalendarID != c.ID || got.LegalEntityID != entity.ID {
+			t.Fatalf("resolve %s = %+v, %v; want operating period %d", tc.date.Format(time.DateOnly), got, err, tc.period)
+		}
+	}
+}
+
+func TestPostgres_ResolveFiscalPeriodReturnsLastOperatingPeriodOfA53WeekYear(t *testing.T) {
+	s, ctx, _ := lifecycleStore(t)
+	c := retail445(t, s, ctx)
+	generate(t, s, ctx, c.ID, 2028)
+	entity := assignCalendar(t, s, ctx, mustCreate(t, s, ctx, newEntity("US01")), c.ID)
+	for _, d := range []time.Time{day(2029, 1, 30), day(2029, 2, 3)} {
+		got, err := s.ResolveFiscalPeriod(ctx, entity.ID, d)
+		if err != nil || got.Period.PeriodNo != 12 || !got.Period.Week53 || got.Period.FiscalYear != 2028 {
+			t.Fatalf("resolve %s = %+v, %v; want period 12 of 2028 with week53", d.Format(time.DateOnly), got, err)
+		}
+	}
+}
+
+func TestPostgres_ResolveFiscalPeriodNeverReturnsAnAdjustmentPeriod(t *testing.T) {
+	s, ctx, _ := lifecycleStore(t)
+	in := fiscalCalendar("ADJ", "calendar")
+	in.SpecialPeriods = 2
+	c, err := s.CreateFiscalCalendar(ctx, in, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	generate(t, s, ctx, c.ID, 2026)
+	entity := assignCalendar(t, s, ctx, mustCreate(t, s, ctx, newEntity("US01")), c.ID)
+	periods, err := s.ListFiscalPeriods(ctx, c.ID, 2026)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range periods {
+		if p.Type != "adjustment" {
+			continue
+		}
+		start, _ := time.Parse(time.DateOnly, p.StartDate)
+		if got, err := s.ResolveFiscalPeriod(ctx, entity.ID, start); err == nil && got.Period.Type != "operating" {
+			t.Fatalf("resolve %s = %+v; want an operating period", p.StartDate, got)
+		}
+	}
+}
+
+func TestPostgres_ResolveFiscalPeriodRefusals(t *testing.T) {
+	s, ctx, _ := lifecycleStore(t)
+	c := calendarOf(t, s, ctx, "FY", "calendar", 2026)
+	bare := mustCreate(t, s, ctx, newEntity("US02"))
+	if _, err := s.ResolveFiscalPeriod(ctx, bare.ID, day(2026, 6, 15)); problemCode(t, err) != store.CodeLegalEntityNoCalendar {
+		t.Fatalf("entity without calendar error = %v", err)
+	}
+	entity := assignCalendar(t, s, ctx, mustCreate(t, s, ctx, newEntity("US01")), c.ID)
+	_, err := s.ResolveFiscalPeriod(ctx, entity.ID, day(2027, 3, 1))
+	var problem *httpx.Problem
+	if !errors.As(err, &problem) || problem.Code != store.CodeFiscalPeriodNotFound || problem.Detail != "No generated fiscal period of calendar FY contains 2027-03-01." {
+		t.Fatalf("ungenerated year error = %v", err)
+	}
+	if _, err := s.ResolveFiscalPeriod(ctx, "00000000-0000-0000-0000-0000000000ff", day(2026, 6, 15)); problemCode(t, err) != store.CodeLegalEntityNotFound {
+		t.Fatalf("unknown entity error = %v", err)
+	}
+}
+
+func TestPostgres_ResolveFiscalPeriodStillResolvesAfterTheCalendarIsDeactivated(t *testing.T) {
+	s, ctx, _ := lifecycleStore(t)
+	c := calendarOf(t, s, ctx, "FY", "calendar", 2026)
+	entity := assignCalendar(t, s, ctx, mustCreate(t, s, ctx, newEntity("US01")), c.ID)
+	cleared := ""
+	if _, err := s.UpdateLegalEntity(ctx, entity.ID, entity.Version, store.LegalEntityPatch{FiscalCalendarID: &cleared}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpdateFiscalCalendar(ctx, c.ID, 1, store.FiscalCalendarPatch{Status: ptr("inactive")}); err != nil {
+		t.Fatal(err)
+	}
+	site := mustCreateSite(t, s, ctx, newSite(entity.ID, "S1"))
+	other := calendarOf(t, s, ctx, "FY2", "calendar", 2026)
+	site = assignSiteCalendar(t, s, ctx, site, other.ID)
+	if _, err := s.UpdateFiscalCalendar(ctx, other.ID, 1, store.FiscalCalendarPatch{Status: ptr("inactive")}); problemCode(t, err) != store.CodeFiscalCalendarInUse {
+		t.Fatalf("deactivating a calendar an active site holds error = %v", err)
+	}
+	if _, err := s.UpdateSite(ctx, site.ID, site.Version, store.SitePatch{Status: ptr("inactive")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpdateFiscalCalendar(ctx, other.ID, 1, store.FiscalCalendarPatch{Status: ptr("inactive")}); err != nil {
+		t.Fatalf("deactivating after the site went inactive: %v", err)
+	}
+	got, err := s.ResolveSiteFiscalPeriod(ctx, site.ID, day(2026, 6, 15))
+	if err != nil || got.Period.PeriodNo != 6 || got.CalendarID != other.ID {
+		t.Fatalf("resolve on inactive calendar = %+v, %v; want period 6", got, err)
+	}
+}
+
+func TestPostgres_ResolveSiteFiscalPeriodPrefersTheSiteCalendar(t *testing.T) {
+	s, ctx, _ := lifecycleStore(t)
+	entityCalendar := calendarOf(t, s, ctx, "LE", "calendar", 2026)
+	siteCalendar := calendarOf(t, s, ctx, "ST", "4-4-5", 2026)
+	entity := mustCreate(t, s, ctx, newEntity("US01"))
+	site := mustCreateSite(t, s, ctx, newSite(entity.ID, "S1"))
+	if _, err := s.ResolveSiteFiscalPeriod(ctx, site.ID, day(2026, 6, 15)); problemCode(t, err) != store.CodeLegalEntityNoCalendar {
+		t.Fatalf("neither calendar error = %v", err)
+	}
+	assignCalendar(t, s, ctx, entity, entityCalendar.ID)
+	inherited, err := s.ResolveSiteFiscalPeriod(ctx, site.ID, day(2026, 6, 15))
+	if err != nil || inherited.Source != "legalEntity" || inherited.CalendarID != entityCalendar.ID || inherited.SiteID != site.ID || inherited.LegalEntityID != entity.ID {
+		t.Fatalf("inherited = %+v, %v; want the legal entity calendar", inherited, err)
+	}
+	assignSiteCalendar(t, s, ctx, site, siteCalendar.ID)
+	own, err := s.ResolveSiteFiscalPeriod(ctx, site.ID, day(2026, 6, 15))
+	if err != nil || own.Source != "site" || own.CalendarID != siteCalendar.ID {
+		t.Fatalf("own = %+v, %v; want the site calendar", own, err)
+	}
+	if _, err := s.ResolveSiteFiscalPeriod(ctx, site.ID, day(2027, 3, 1)); problemCode(t, err) != store.CodeFiscalPeriodNotFound {
+		t.Fatalf("ungenerated year error = %v", err)
+	}
+	if _, err := s.ResolveSiteFiscalPeriod(ctx, "00000000-0000-0000-0000-0000000000ff", day(2026, 6, 15)); problemCode(t, err) != store.CodeSiteNotFound {
+		t.Fatalf("unknown site error = %v", err)
+	}
+}
+
+func TestPostgres_ResolveFiscalPeriodIsScopedByTenantAndLegalEntity(t *testing.T) {
+	s, ctx, _ := lifecycleStore(t)
+	c := calendarOf(t, s, ctx, "FY", "calendar", 2026)
+	entity := assignCalendar(t, s, ctx, mustCreate(t, s, ctx, newEntity("US01")), c.ID)
+	site := mustCreateSite(t, s, ctx, newSite(entity.ID, "S1"))
+	date := day(2026, 6, 15)
+	other := principalContext(2)
+	if _, err := s.ResolveFiscalPeriod(other, entity.ID, date); problemCode(t, err) != store.CodeLegalEntityNotFound {
+		t.Fatalf("tenant 2 entity error = %v", err)
+	}
+	if _, err := s.ResolveSiteFiscalPeriod(other, site.ID, date); problemCode(t, err) != store.CodeSiteNotFound {
+		t.Fatalf("tenant 2 site error = %v", err)
+	}
+	demf := mustCreate(t, s, ctx, newEntity("DEMF"))
+	scoped := scopedTo(demf.ID)
+	if _, err := s.ResolveFiscalPeriod(scoped, entity.ID, date); problemCode(t, err) != store.CodeLegalEntityNotFound {
+		t.Fatalf("scoped entity error = %v", err)
+	}
+	if _, err := s.ResolveSiteFiscalPeriod(scoped, site.ID, date); problemCode(t, err) != store.CodeSiteNotFound {
+		t.Fatalf("scoped site error = %v", err)
+	}
+}
+
+func TestPostgres_FiscalCalendarInUseCountsSitesAndKeepsTheEntityOnlyText(t *testing.T) {
+	s, ctx, _ := lifecycleStore(t)
+	c := calendarOf(t, s, ctx, "FY", "calendar", 2026)
+	entity := mustCreate(t, s, ctx, newEntity("US01"))
+	site := assignSiteCalendar(t, s, ctx, mustCreateSite(t, s, ctx, newSite(entity.ID, "S1")), c.ID)
+	inactive := store.FiscalCalendarPatch{Status: ptr("inactive")}
+	var problem *httpx.Problem
+	_, err := s.UpdateFiscalCalendar(ctx, c.ID, 1, inactive)
+	if !errors.As(err, &problem) || problem.Code != store.CodeFiscalCalendarInUse || problem.Detail != "Fiscal calendar FY is assigned to 0 active legal entities and 1 active sites." {
+		t.Fatalf("site-only error = %v", err)
+	}
+	if got, _ := s.GetFiscalCalendar(ctx, c.ID); got.Status != "active" {
+		t.Fatalf("refused patch wrote: %+v", got)
+	}
+	assignCalendar(t, s, ctx, entity, c.ID)
+	if _, err := s.UpdateFiscalCalendar(ctx, c.ID, 1, inactive); !errors.As(err, &problem) || problem.Detail != "Fiscal calendar FY is assigned to 1 active legal entities and 1 active sites." {
+		t.Fatalf("both error = %v", err)
+	}
+	cleared := ""
+	if _, err := s.UpdateSite(ctx, site.ID, site.Version, store.SitePatch{FiscalCalendarID: &cleared}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpdateFiscalCalendar(ctx, c.ID, 1, inactive); !errors.As(err, &problem) || problem.Detail != "Fiscal calendar FY is assigned to 1 active legal entities." {
+		t.Fatalf("entity-only error = %v; want the pre-slice text", err)
+	}
+}

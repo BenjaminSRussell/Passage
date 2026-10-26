@@ -2,9 +2,11 @@ package store_test
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"testing"
 
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/org/internal/store"
@@ -201,5 +203,91 @@ func TestPostgres_UpdateSiteVersionsAndEmitsOneEvent(t *testing.T) {
 	}
 	if got := len(unitEvents(t, ctx, pool, siteCreatedType)); got != 1 {
 		t.Fatalf("created events = %d; want 1", got)
+	}
+}
+
+func TestPostgres_SiteCalendarAssignmentWritesOneEventAndRefusalsWriteNothing(t *testing.T) {
+	s, ctx, pool := lifecycleStore(t)
+	entity := mustCreate(t, s, ctx, newEntity("US01"))
+	calendar := calendarOf(t, s, ctx, "FY", "calendar", 2026)
+	neverGenerated := calendarOf(t, s, ctx, "EMPTY", "calendar")
+	inactive := calendarOf(t, s, ctx, "OLD", "calendar", 2026)
+	if _, err := s.UpdateFiscalCalendar(ctx, inactive.ID, 1, store.FiscalCalendarPatch{Status: ptr("inactive")}); err != nil {
+		t.Fatal(err)
+	}
+	site := mustCreateSite(t, s, ctx, newSite(entity.ID, "S1"))
+	if site.FiscalCalendarID != nil {
+		t.Fatalf("new site calendar = %v; want none", *site.FiscalCalendarID)
+	}
+	for _, id := range []string{neverGenerated.ID, inactive.ID, "00000000-0000-0000-0000-0000000000ff"} {
+		_, err := s.UpdateSite(ctx, site.ID, 1, store.SitePatch{FiscalCalendarID: ptr(id)})
+		var problem *httpx.Problem
+		if !errors.As(err, &problem) || problem.Code != store.CodeSiteCalendarInvalid || problem.Errors["fiscalCalendarId"] == "" {
+			t.Fatalf("assign %s error = %v; want ORG-SITE-CALENDAR-INVALID on fiscalCalendarId", id, err)
+		}
+		if _, err := s.CreateSite(ctx, store.Site{LegalEntityID: entity.ID, Code: "S2", Name: "Two", FiscalCalendarID: ptr(id)}, ""); problemCode(t, err) != store.CodeSiteCalendarInvalid {
+			t.Fatalf("create with %s error = %v", id, err)
+		}
+	}
+	if got := len(unitEvents(t, ctx, pool, siteUpdatedType)); got != 0 {
+		t.Fatalf("refused assignments wrote %d events", got)
+	}
+	if page, _ := s.ListSites(ctx, store.SiteFilter{}, store.SiteKey{}, store.MaxPageSize); len(page.Items) != 1 {
+		t.Fatalf("refused creates left %d sites; want 1", len(page.Items))
+	}
+	assigned := assignSiteCalendar(t, s, ctx, site, calendar.ID)
+	if assigned.Version != 2 || assigned.FiscalCalendarID == nil || *assigned.FiscalCalendarID != calendar.ID {
+		t.Fatalf("assigned = %+v", assigned)
+	}
+	events := unitEvents(t, ctx, pool, siteUpdatedType)
+	if len(events) != 1 || !reflect.DeepEqual(events[0]["changed_fields"], []any{"fiscal_calendar_id"}) {
+		t.Fatalf("events = %v", events)
+	}
+	if page, _ := s.ListSites(ctx, store.SiteFilter{}, store.SiteKey{}, store.MaxPageSize); len(page.Items) != 1 || page.Items[0].FiscalCalendarID == nil {
+		t.Fatalf("list = %+v; want the calendar", page.Items)
+	}
+	same := assignSiteCalendar(t, s, ctx, assigned, calendar.ID)
+	if same.Version != 2 || len(unitEvents(t, ctx, pool, siteUpdatedType)) != 1 {
+		t.Fatalf("re-assigning the same calendar bumped version or wrote an event: %+v", same)
+	}
+	cleared, err := s.UpdateSite(ctx, same.ID, 2, store.SitePatch{FiscalCalendarID: ptr("")})
+	if err != nil || cleared.Version != 3 || cleared.FiscalCalendarID != nil {
+		t.Fatalf("cleared = %+v, %v", cleared, err)
+	}
+	if got := len(unitEvents(t, ctx, pool, siteUpdatedType)); got != 2 {
+		t.Fatalf("events after clear = %d; want 2", got)
+	}
+}
+
+func TestPostgres_SiteCreateWithCalendarStoresItAndReplayWithAnotherCalendarIsReuse(t *testing.T) {
+	s, ctx, _ := lifecycleStore(t)
+	entity := mustCreate(t, s, ctx, newEntity("US01"))
+	first := calendarOf(t, s, ctx, "FY", "calendar", 2026)
+	second := calendarOf(t, s, ctx, "FY2", "calendar", 2026)
+	in := store.Site{LegalEntityID: entity.ID, Code: "S1", Name: "One", FiscalCalendarID: ptr(first.ID)}
+	created, err := s.CreateSite(ctx, in, "key-1")
+	if err != nil || created.FiscalCalendarID == nil || *created.FiscalCalendarID != first.ID {
+		t.Fatalf("created = %+v, %v", created, err)
+	}
+	if replay, err := s.CreateSite(ctx, in, "key-1"); err != nil || replay.ID != created.ID {
+		t.Fatalf("replay = %+v, %v", replay, err)
+	}
+	in.FiscalCalendarID = ptr(second.ID)
+	if _, err := s.CreateSite(ctx, in, "key-1"); problemCode(t, err) != store.CodeIdempotencyReuse {
+		t.Fatalf("replay with another calendar error = %v", err)
+	}
+	in.FiscalCalendarID = nil
+	if _, err := s.CreateSite(ctx, in, "key-1"); problemCode(t, err) != store.CodeIdempotencyReuse {
+		t.Fatalf("replay without a calendar error = %v", err)
+	}
+}
+
+func TestPostgres_SiteCannotUseAnotherTenantsCalendar(t *testing.T) {
+	s, ctx, _ := lifecycleStore(t)
+	foreign := calendarOf(t, s, ctx, "FY", "calendar", 2026)
+	other := principalContext(2)
+	entity := mustCreate(t, s, other, newEntity("US01"))
+	if _, err := s.CreateSite(other, store.Site{LegalEntityID: entity.ID, Code: "S1", Name: "One", FiscalCalendarID: ptr(foreign.ID)}, ""); problemCode(t, err) != store.CodeSiteCalendarInvalid {
+		t.Fatalf("tenant 2 create with tenant 1 calendar error = %v", err)
 	}
 }
