@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"sync"
@@ -356,6 +357,36 @@ func TestPostgres_FiscalCalendarInactiveRefusedWhileAssigned(t *testing.T) {
 	}
 	if got, err := s.UpdateFiscalCalendar(ctx, c.ID, 1, inactive); err != nil || got.Status != "inactive" || got.Version != 2 {
 		t.Fatalf("after clearing and deactivating = %+v, %v; want inactive version 2", got, err)
+	}
+}
+
+func TestPostgres_ConcurrentAssignAndDeactivateNeverLeaveAnActiveEntityOnAnInactiveCalendar(t *testing.T) {
+	s, ctx, pool := lifecycleStore(t)
+	for i := range 8 {
+		c, err := s.CreateFiscalCalendar(ctx, fiscalCalendar(fmt.Sprintf("FY%d", i), "calendar"), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		generate(t, s, ctx, c.ID, 2026)
+		entity := mustCreate(t, s, ctx, newEntity(fmt.Sprintf("US%02d", i)))
+		var assignErr, deactivateErr error
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			_, assignErr = s.UpdateLegalEntity(ctx, entity.ID, entity.Version, store.LegalEntityPatch{FiscalCalendarID: &c.ID})
+		}()
+		go func() {
+			defer wg.Done()
+			_, deactivateErr = s.UpdateFiscalCalendar(ctx, c.ID, 1, store.FiscalCalendarPatch{Status: ptr("inactive")})
+		}()
+		wg.Wait()
+		var violations int
+		if err := dbx.WithTenantTx(ctx, pool, func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `select count(*) from legal_entity e join fiscal_calendar c on c.tenant_id = e.tenant_id and c.id = e.fiscal_calendar_id where e.status = 'active' and c.status = 'inactive'`).Scan(&violations)
+		}); err != nil || violations != 0 {
+			t.Fatalf("round %d: violations = %d, %v; assign = %v, deactivate = %v", i, violations, err, assignErr, deactivateErr)
+		}
 	}
 }
 

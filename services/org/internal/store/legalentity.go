@@ -98,7 +98,7 @@ func checkActiveReferences(ctx context.Context, tx pgx.Tx, tenantID, country, cu
 func checkAssignableCalendar(ctx context.Context, tx pgx.Tx, tenantID, calendarID string) error {
 	var status string
 	var generated bool
-	err := tx.QueryRow(ctx, `select status, exists(select 1 from fiscal_period where tenant_id = $1 and calendar_id = $2) from fiscal_calendar where tenant_id = $1 and id = $2`,
+	err := tx.QueryRow(ctx, `select status, exists(select 1 from fiscal_period where tenant_id = $1 and calendar_id = $2) from fiscal_calendar where tenant_id = $1 and id = $2 for share of fiscal_calendar`,
 		tenantID, calendarID).Scan(&status, &generated)
 	if err == nil && status == "active" && generated {
 		return nil
