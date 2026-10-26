@@ -21,6 +21,12 @@ make lint-charts
 
 Database tests (`internal/store`, the serve test in `cmd/party`) are skipped unless `PASSAGE_TEST_DATABASE_URL` is set. The RLS tests also need `PASSAGE_TEST_APP_DATABASE_URL`, a connection as the non-bypass `passage_app` role, and fail without it. The database needs the `pg_trgm` extension.
 
+## Merge
+
+`store.Merge(ctx, MergeRequest{WinnerID, LoserID, Rules})` runs in one tenant transaction: survivorship per field (`keepWinner` default, `keepLoser`, `newest`, `nonEmpty`; an empty preferred value falls back to the other side), the loser's customer roles moved to the winner, `invoice_account_party_id` references rewritten, the loser marked `merged` with `merged_into_id`, a `party_merge` record, and one `dev.passage.party.party.merged.v1` outbox row. Both parties must share a type and be unmerged; a role in the same legal entity on both sides returns `ErrRoleConflict` and changes nothing. The principal must not be legal-entity scoped.
+
+`store.Audit(ctx)` returns an `IntegrityReport`: roles owned by merged parties, references to merged parties, merged parties without a merge record. `Clean()` is true after any successful merge.
+
 ## Duties
 
 | Duty | Grants |
