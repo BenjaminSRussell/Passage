@@ -14,9 +14,11 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/BenjaminSRussell/passage/services/org/internal/domain"
 )
 
 const SysTenantID = "00000000-0000-0000-0000-000000000000"
@@ -28,20 +30,31 @@ var (
 	minorUnits  = regexp.MustCompile(`^[0-4]$`)
 	regionCode  = regexp.MustCompile(`^[A-Z]{2}-[A-Z0-9]{1,3}$`)
 	languageISO = regexp.MustCompile(`^[a-z]{2}$`)
+	unitCode    = regexp.MustCompile(`^[A-Za-z0-9/%]{1,10}$`)
+	unitClasses = []string{"quantity", "each", "mass", "length", "volume", "area", "time", "temperature", "energy", "pressure", "power", "speed"}
+)
+
+const (
+	codeConflict       = "(tenant_id, code)"
+	numericScale       = 12
+	numericIntegerSize = 16
 )
 
 type dataset struct {
-	file    string
-	table   string
-	columns []string
-	parse   func(rec []string) ([]any, error)
+	file     string
+	table    string
+	columns  []string
+	parse    func(rec []string) ([]any, error)
+	conflict string
 }
 
 var datasets = []dataset{
-	{"countries.csv", "country", []string{"code", "name", "region_required", "postal_regex"}, parseCountry},
-	{"currencies.csv", "currency", []string{"code", "numeric_code", "name", "minor_units"}, parseCurrency},
-	{"regions.csv", "region", []string{"code", "country_code", "name"}, parseRegion},
-	{"languages.csv", "language", []string{"code", "name"}, parseLanguage},
+	{"countries.csv", "country", []string{"code", "name", "region_required", "postal_regex"}, parseCountry, codeConflict},
+	{"currencies.csv", "currency", []string{"code", "numeric_code", "name", "minor_units"}, parseCurrency, codeConflict},
+	{"regions.csv", "region", []string{"code", "country_code", "name"}, parseRegion, codeConflict},
+	{"languages.csv", "language", []string{"code", "name"}, parseLanguage, codeConflict},
+	{"units.csv", "unit_of_measure", []string{"code", "name", "class", "decimal_precision"}, parseUnit, codeConflict},
+	{"uom-conversions.csv", "uom_conversion", []string{"from_code", "to_code", "factor", "offset_value"}, parseConversion, ""},
 }
 
 func parseCountry(rec []string) ([]any, error) {
@@ -107,6 +120,101 @@ func parseLanguage(rec []string) ([]any, error) {
 	return []any{rec[0], rec[1]}, nil
 }
 
+func parseUnit(rec []string) ([]any, error) {
+	if !unitCode.MatchString(rec[0]) {
+		return nil, fmt.Errorf("code %q does not match %s", rec[0], unitCode)
+	}
+	if rec[1] == "" {
+		return nil, errors.New("name is empty")
+	}
+	if !slices.Contains(unitClasses, rec[2]) {
+		return nil, fmt.Errorf("class %q is not one of %s", rec[2], strings.Join(unitClasses, ", "))
+	}
+	precision, err := strconv.Atoi(rec[3])
+	if err != nil || precision < 0 || precision > 6 {
+		return nil, fmt.Errorf("decimal_precision %q must be an integer from 0 to 6", rec[3])
+	}
+	return []any{rec[0], rec[1], rec[2], precision}, nil
+}
+
+func parseNumeric(field, value string) (decimal.Decimal, error) {
+	d, err := decimal.NewFromString(value)
+	if err != nil {
+		return d, fmt.Errorf("%s %q is not a decimal", field, value)
+	}
+	if d.Exponent() < -numericScale {
+		return d, fmt.Errorf("%s %q has more than %d decimal places", field, value, numericScale)
+	}
+	if len(d.Abs().Truncate(0).String()) > numericIntegerSize {
+		return d, fmt.Errorf("%s %q has more than %d integer digits", field, value, numericIntegerSize)
+	}
+	return d, nil
+}
+
+func parseConversion(rec []string) ([]any, error) {
+	for i, field := range []string{"from_code", "to_code"} {
+		if !unitCode.MatchString(rec[i]) {
+			return nil, fmt.Errorf("%s %q does not match %s", field, rec[i], unitCode)
+		}
+	}
+	if rec[0] == rec[1] {
+		return nil, fmt.Errorf("from_code and to_code are both %q", rec[0])
+	}
+	factor, err := parseNumeric("factor", rec[2])
+	if err != nil {
+		return nil, err
+	}
+	if !factor.IsPositive() {
+		return nil, fmt.Errorf("factor %q must be greater than 0", rec[2])
+	}
+	offset, err := parseNumeric("offset_value", rec[3])
+	if err != nil {
+		return nil, err
+	}
+	return []any{rec[0], rec[1], factor.String(), offset.String()}, nil
+}
+
+func SeedConversions(files fs.FS) ([]domain.Conversion, error) {
+	units, err := ParseReference(files, "units.csv")
+	if err != nil {
+		return nil, err
+	}
+	rows, err := ParseReference(files, "uom-conversions.csv")
+	if err != nil {
+		return nil, err
+	}
+	classes := make(map[string]string, len(units))
+	for _, u := range units {
+		classes[u[0].(string)] = u[2].(string)
+	}
+	seen := make(map[[2]string]bool, len(rows))
+	out := make([]domain.Conversion, 0, len(rows))
+	for i, row := range rows {
+		from, to := row[0].(string), row[1].(string)
+		fail := func(reason string) error { return fmt.Errorf("uom-conversions.csv line %d: %s", i+2, reason) }
+		fromClass, fromKnown := classes[from]
+		toClass, toKnown := classes[to]
+		switch {
+		case !fromKnown:
+			return nil, fail(fmt.Sprintf("from_code %q is not in units.csv", from))
+		case !toKnown:
+			return nil, fail(fmt.Sprintf("to_code %q is not in units.csv", to))
+		case fromClass != toClass:
+			return nil, fail(fmt.Sprintf("%q is %s and %q is %s", from, fromClass, to, toClass))
+		}
+		pair := [2]string{min(from, to), max(from, to)}
+		if seen[pair] {
+			return nil, fail(fmt.Sprintf("pair %q and %q is already converted; the inverse is never stored", from, to))
+		}
+		seen[pair] = true
+		out = append(out, domain.Conversion{
+			From: from, To: to, Class: fromClass,
+			Factor: decimal.RequireFromString(row[2].(string)), Offset: decimal.RequireFromString(row[3].(string)),
+		})
+	}
+	return out, nil
+}
+
 func ParseReference(files fs.FS, file string) ([][]any, error) {
 	i := slices.IndexFunc(datasets, func(d dataset) bool { return d.file == file })
 	if i < 0 {
@@ -163,6 +271,9 @@ func SeedReference(ctx context.Context, pool *pgxpool.Pool, files fs.FS) error {
 		}
 		loaded[i] = rows
 	}
+	if _, err := SeedConversions(files); err != nil {
+		return err
+	}
 	ctx = tenant.With(ctx, tenant.Principal{TenantID: SysTenantID})
 	return dbx.WithTenantTx(ctx, pool, func(tx pgx.Tx) error {
 		for i, d := range datasets {
@@ -179,8 +290,12 @@ func (d dataset) insert(ctx context.Context, tx pgx.Tx, rows [][]any) error {
 	for i := range placeholders {
 		placeholders[i] = "$" + strconv.Itoa(i+2)
 	}
+	onConflict := "on conflict"
+	if d.conflict != "" {
+		onConflict += " " + d.conflict
+	}
 	statement := "insert into " + d.table + " (tenant_id, " + strings.Join(d.columns, ", ") +
-		") values ($1, " + strings.Join(placeholders, ", ") + ") on conflict (tenant_id, code) do nothing"
+		") values ($1, " + strings.Join(placeholders, ", ") + ") " + onConflict + " do nothing"
 	batch := &pgx.Batch{}
 	for _, row := range rows {
 		batch.Queue(statement, append([]any{SysTenantID}, row...)...)
