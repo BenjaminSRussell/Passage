@@ -30,10 +30,12 @@ type Pinger interface {
 }
 
 type API struct {
-	db       Pinger
-	now      func() time.Time
-	previews atomic.Int64
-	failed   atomic.Int64
+	db           Pinger
+	now          func() time.Time
+	previews     atomic.Int64
+	clientErrors atomic.Int64
+	serverFaults atomic.Int64
+	http         requestMetrics
 }
 
 type problemBody struct {
@@ -56,7 +58,7 @@ var problemSlugs = map[string]string{
 }
 
 func New(db Pinger, now func() time.Time) *API {
-	return &API{db: db, now: now}
+	return &API{db: db, now: now, http: newRequestMetrics()}
 }
 
 func (a *API) Register(r chi.Router) {
@@ -76,7 +78,7 @@ func (a *API) ready(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) preview(w http.ResponseWriter, r *http.Request) {
-	if !validTenant(w, r) {
+	if !a.validTenant(w, r) {
 		return
 	}
 	var dto domain.RequestDTO
@@ -91,7 +93,7 @@ func (a *API) preview(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := domain.Settle(req)
 	if err != nil {
-		a.failed.Add(1)
+		a.serverFaults.Add(1)
 		slog.Error("settlement preview failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		fail(w, r, err)
 		return
@@ -101,7 +103,7 @@ func (a *API) preview(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) reject(w http.ResponseWriter, r *http.Request, err error) {
-	a.failed.Add(1)
+	a.clientErrors.Add(1)
 	slog.Warn("settlement preview rejected", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 	var de *domain.Error
 	if errors.As(err, &de) {
@@ -132,13 +134,15 @@ func fail(w http.ResponseWriter, r *http.Request, err error) {
 	})
 }
 
-func validTenant(w http.ResponseWriter, r *http.Request) bool {
+func (a *API) validTenant(w http.ResponseWriter, r *http.Request) bool {
 	p, ok := tenant.FromContext(r.Context())
 	if !ok || !ids.Valid(p.TenantID) {
+		a.clientErrors.Add(1)
 		fail(w, r, httpx.NewProblem(http.StatusUnauthorized, "AUTH-0001", "missing or malformed tenant"))
 		return false
 	}
 	if p.LegalEntityID != "" && !ids.Valid(p.LegalEntityID) {
+		a.clientErrors.Add(1)
 		fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", "legal entity must be a single UUID"))
 		return false
 	}
@@ -148,7 +152,9 @@ func validTenant(w http.ResponseWriter, r *http.Request) bool {
 func (a *API) Metrics() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-		fmt.Fprintf(w, "# TYPE payables_settlement_previews_total counter\npayables_settlement_previews_total %d\n", a.previews.Load())
-		fmt.Fprintf(w, "# TYPE payables_settlement_preview_failures_total counter\npayables_settlement_preview_failures_total %d\n", a.failed.Load())
+		fmt.Fprintf(w, "# HELP payables_settlement_previews_total Successful settlement previews.\n# TYPE payables_settlement_previews_total counter\npayables_settlement_previews_total %d\n", a.previews.Load())
+		fmt.Fprintf(w, "# HELP payables_settlement_preview_client_errors_total Previews rejected as invalid input (4xx).\n# TYPE payables_settlement_preview_client_errors_total counter\npayables_settlement_preview_client_errors_total %d\n", a.clientErrors.Load())
+		fmt.Fprintf(w, "# HELP payables_settlement_preview_server_faults_total Previews that failed on a server fault (5xx).\n# TYPE payables_settlement_preview_server_faults_total counter\npayables_settlement_preview_server_faults_total %d\n", a.serverFaults.Load())
+		a.http.write(w)
 	})
 }

@@ -23,8 +23,8 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/SettlementResult' }
         '400': { $ref: '#/components/responses/Problem' }
-        '401': { $ref: '#/components/responses/Problem' }
-        '403': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '422': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
   /healthz:
@@ -145,7 +145,43 @@ components:
         serviceCode: { type: string }
         traceId: { type: string }
         errors: { type: object, additionalProperties: { type: string } }
+    KernelProblem:
+      type: object
+      description: Problem body written by the platform kernel (httpx.Problem); carries no serviceCode.
+      required: [type, title, status]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string, description: Raw service code such as AUTH-0003. }
+        traceId: { type: string }
+        errors: { type: object, additionalProperties: { type: string } }
+    TenantRejection:
+      type: object
+      description: JSON text written by tenant.Middleware through http.Error, with no instance or traceId.
+      required: [type, title, status, code, detail]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        code: { type: string }
+        detail: { type: string }
   responses:
+    Unauthorized:
+      description: Tenant header missing (tenant.Middleware, text/plain carrying the JSON of TenantRejection) or malformed (the handler's own check, application/problem+json).
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+        text/plain:
+          schema: { $ref: '#/components/schemas/TenantRejection' }
+          example: '{"type":"https://passage.dev/problems/AUTH-0001","title":"Unauthorized","status":401,"code":"AUTH-0001","detail":"missing tenant"}'
+    Forbidden:
+      description: Principal lacks the settlement.read duty. Written by authz.RequireDuty through httpx.Fail.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/KernelProblem' }
     Problem:
       description: RFC 9457 problem details.
       content:

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -112,6 +113,52 @@ func TestPreviewProblemEnvelopeCarriesEveryKey(t *testing.T) {
 	}
 }
 
+func TestAuthRejectionBodiesMatchKernel(t *testing.T) {
+	r, _ := newRouter(fakeDB{})
+	unauth := do(r, http.MethodPost, previewPath, workedBody, false, "")
+	forbidden := do(r, http.MethodPost, previewPath, workedBody, true, "")
+	malformedReq := httptest.NewRequest(http.MethodPost, previewPath, strings.NewReader(workedBody))
+	malformedReq.Header.Set("X-Passage-Tenant", "not-a-uuid")
+	malformedReq.Header.Set("X-Passage-Duties", "settlement.read")
+	malformed := httptest.NewRecorder()
+	r.ServeHTTP(malformed, malformedReq)
+
+	if unauth.Code != http.StatusUnauthorized || forbidden.Code != http.StatusForbidden || malformed.Code != http.StatusUnauthorized {
+		t.Fatalf("statuses %d %d %d", unauth.Code, forbidden.Code, malformed.Code)
+	}
+	if ct := unauth.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/plain") {
+		t.Errorf("401 content type %q", ct)
+	}
+	for name, rec := range map[string]*httptest.ResponseRecorder{"403": forbidden, "malformed 401": malformed} {
+		if ct := rec.Header().Get("Content-Type"); ct != "application/problem+json" {
+			t.Errorf("%s content type %q", name, ct)
+		}
+	}
+	decode := func(name string, rec *httptest.ResponseRecorder) map[string]any {
+		var body map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("%s body is not JSON: %v", name, err)
+		}
+		return body
+	}
+	for _, key := range []string{"type", "title", "status", "detail"} {
+		if _, ok := decode("403", forbidden)[key]; !ok {
+			t.Errorf("403 body missing %q: %s", key, forbidden.Body.String())
+		}
+	}
+	for name, rec := range map[string]*httptest.ResponseRecorder{"401": unauth, "403": forbidden} {
+		if _, ok := decode(name, rec)["serviceCode"]; ok {
+			t.Errorf("%s body carries serviceCode: %s", name, rec.Body.String())
+		}
+	}
+	if body := decode("malformed 401", malformed); body["serviceCode"] != "AUTH-0001" || body["code"] != "forbidden_tenant" || body["traceId"] == "" {
+		t.Errorf("malformed tenant problem %v", body)
+	}
+	if !strings.Contains(unauth.Body.String(), `"code":"AUTH-0001"`) || !strings.Contains(forbidden.Body.String(), `"code":"AUTH-0003"`) {
+		t.Errorf("unexpected codes: %s / %s", unauth.Body.String(), forbidden.Body.String())
+	}
+}
+
 func TestProbes(t *testing.T) {
 	down := fakeDB{err: errors.New("db down")}
 	tests := []struct {
@@ -150,16 +197,67 @@ func TestReadinessFailureIsLoggedWithCause(t *testing.T) {
 	}
 }
 
-func TestMetricsCountPreviews(t *testing.T) {
-	r, a := newRouter(fakeDB{})
-	do(r, http.MethodPost, previewPath, workedBody, true, "settlement.read")
-	do(r, http.MethodPost, previewPath, `{}`, true, "settlement.read")
+func scrape(a *api.API) string {
 	rec := httptest.NewRecorder()
 	a.Metrics().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
-	for _, want := range []string{"payables_settlement_previews_total 1", "payables_settlement_preview_failures_total 1"} {
-		if !strings.Contains(rec.Body.String(), want) {
-			t.Fatalf("metrics missing %q in %s", want, rec.Body.String())
+	return rec.Body.String()
+}
+
+func TestMetricsSeparateClientErrorsFromServerFaults(t *testing.T) {
+	a := api.New(fakeDB{}, fixedNow)
+	r := httpx.NewRouter()
+	a.Register(r)
+	h := a.Instrument(r)
+	do(h, http.MethodPost, previewPath, workedBody, true, "settlement.read")
+	do(h, http.MethodPost, previewPath, `{}`, true, "settlement.read")
+	do(h, http.MethodPost, previewPath, workedBody, false, "")
+	do(h, http.MethodPost, previewPath, workedBody, true, "")
+	malformed := httptest.NewRequest(http.MethodPost, previewPath, strings.NewReader(workedBody))
+	malformed.Header.Set("X-Passage-Tenant", "not-a-uuid")
+	malformed.Header.Set("X-Passage-Duties", "settlement.read")
+	h.ServeHTTP(httptest.NewRecorder(), malformed)
+	got := scrape(a)
+	for _, want := range []string{
+		"payables_settlement_previews_total 1",
+		"payables_settlement_preview_client_errors_total 2",
+		"payables_settlement_preview_server_faults_total 0",
+		`payables_http_requests_total{route="/v1/payables/settlements:preview",status="200"} 1`,
+		`payables_http_requests_total{route="/v1/payables/settlements:preview",status="400"} 1`,
+		`payables_http_requests_total{route="unmatched",status="401"} 1`,
+		`payables_http_requests_total{route="/v1/payables/settlements:preview",status="401"} 1`,
+		`payables_http_requests_total{route="/v1/payables/settlements:preview",status="403"} 1`,
+		`payables_http_request_duration_seconds_bucket{route="/v1/payables/settlements:preview",le="+Inf"} 4`,
+		`payables_http_request_duration_seconds_count{route="/v1/payables/settlements:preview"} 4`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("metrics missing %q in\n%s", want, got)
 		}
+	}
+	assertBucketsMonotonic(t, got, `payables_http_request_duration_seconds_bucket{route="/v1/payables/settlements:preview"`)
+	if !strings.Contains(got, `payables_http_request_duration_seconds_sum{route="/v1/payables/settlements:preview"}`) {
+		t.Errorf("metrics missing histogram _sum in\n%s", got)
+	}
+}
+
+func assertBucketsMonotonic(t *testing.T, scrape, prefix string) {
+	t.Helper()
+	previous, seen := int64(-1), 0
+	for _, line := range strings.Split(scrape, "\n") {
+		if !strings.HasPrefix(line, prefix) {
+			continue
+		}
+		var n int64
+		if _, err := fmt.Sscan(line[strings.LastIndex(line, " ")+1:], &n); err != nil {
+			t.Fatalf("bad bucket line %q", line)
+		}
+		if n < previous {
+			t.Errorf("bucket count decreased at %q", line)
+		}
+		previous = n
+		seen++
+	}
+	if seen < 2 {
+		t.Errorf("found %d buckets for %s", seen, prefix)
 	}
 }
 
