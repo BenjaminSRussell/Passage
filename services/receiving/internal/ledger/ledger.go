@@ -126,7 +126,7 @@ func (c *Client) Post(ctx context.Context, entry domain.JournalEntry) (string, e
 		slog.ErrorContext(ctx, "ledger post transport failed", "err", err, "idempotencyKey", entry.IdempotencyKey, "correlationId", middleware.GetReqID(ctx))
 		return "", fmt.Errorf("ledger post %s: %w", entry.IdempotencyKey, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
 	if err != nil {
 		slog.ErrorContext(ctx, "ledger post read failed", "err", err, "idempotencyKey", entry.IdempotencyKey, "correlationId", middleware.GetReqID(ctx))

@@ -1,0 +1,51 @@
+{{- if and .Values.alerts.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1") }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    app.kubernetes.io/name: receiving
+    {{- with .Values.alerts.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: receiving.slo
+      rules:
+        - alert: ReceivingHigh5xxRate
+          expr: |
+            sum(rate(receiving_http_requests_total{status=~"5..",route!~"/healthz|/readyz",namespace="{{ .Release.Namespace }}"}[5m]))
+              / sum(rate(receiving_http_requests_total{route!~"/healthz|/readyz",namespace="{{ .Release.Namespace }}"}[5m])) > {{ .Values.alerts.errorRatio }}
+            and sum(rate(receiving_http_requests_total{route!~"/healthz|/readyz",namespace="{{ .Release.Namespace }}"}[5m])) > 0.1
+          for: 5m
+          labels:
+            severity: {{ .Values.alerts.severity | quote }}
+            service: receiving
+          annotations:
+            summary: Receiving 5xx rate above {{ printf "%g" (mulf .Values.alerts.errorRatio 100) }}% for 5 minutes
+            description: More than {{ printf "%g" (mulf .Values.alerts.errorRatio 100) }}% of receiving HTTP responses were 5xx over the last 5 minutes.
+        - alert: ReceivingHighP99Latency
+          expr: |
+            histogram_quantile(0.99, sum(rate(receiving_http_request_duration_seconds_bucket{namespace="{{ .Release.Namespace }}"}[5m])) by (le)) > {{ .Values.alerts.p99LatencySeconds }}
+          for: 10m
+          labels:
+            severity: {{ .Values.alerts.severity | quote }}
+            service: receiving
+          annotations:
+            summary: Receiving p99 latency above {{ .Values.alerts.p99LatencySeconds }}s for 10 minutes
+            description: The wave 18 p99 budget is {{ .Values.alerts.p99LatencySeconds }} s (docs/prd/phase-3-procure-to-pay.md performance budgets, invoice post).
+        - alert: ReceivingPodNotReady
+          expr: |
+            sum(
+              kube_pod_status_ready{condition="false",namespace="{{ .Release.Namespace }}"}
+                * on(namespace, pod) group_left() kube_pod_labels{label_app_kubernetes_io_name="receiving"}
+                * on(namespace, pod) group_left() (kube_pod_status_phase{phase="Running"} == 1)
+            ) > 0
+          for: 5m
+          labels:
+            severity: {{ .Values.alerts.severity | quote }}
+            service: receiving
+          annotations:
+            summary: A receiving pod has been not ready for 5 minutes
+            description: At least one running receiving pod failed its readiness probe (/readyz) for 5 minutes.
+{{- end }}
