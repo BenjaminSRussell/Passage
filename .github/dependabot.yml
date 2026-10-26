@@ -1,0 +1,62 @@
+# Closes #71. Minor+patch bumps are grouped per ecosystem so a weekly run opens
+# a handful of PRs instead of one per dependency; majors stay ungrouped and
+# get their own PR for individual review.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directories:
+      - /platform/go
+      - /services/audit
+      - /services/batch
+      - /services/close
+      - /services/engineering
+      - /services/fx
+      - /services/identity
+      - /services/metadata
+      - /services/migration
+      - /services/numbering
+      - /services/org
+      - /services/party
+      - /services/payables
+      - /services/platform-health
+      - /services/product
+      - /services/receiving
+      - /services/tax
+      - /tools/connectors
+      - /tools/importexport
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      go-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directories:
+      - /apps/web
+      - /services/workflow-ts
+      - /tools/docs
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: pip
+    directory: /services/configurator-py
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      pip-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns: ['*']
