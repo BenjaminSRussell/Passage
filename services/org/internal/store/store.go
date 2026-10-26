@@ -39,6 +39,7 @@ type LegalEntity struct {
 	DefaultLanguage    string    `json:"defaultLanguage"`
 	RegistrationNumber *string   `json:"registrationNumber,omitempty"`
 	PrimaryAddressID   *string   `json:"primaryAddressId,omitempty"`
+	FiscalCalendarID   *string   `json:"fiscalCalendarId,omitempty"`
 	Status             string    `json:"status"`
 	Version            int       `json:"version"`
 	CreatedAt          time.Time `json:"createdAt"`
@@ -79,6 +80,8 @@ type Store interface {
 	ListAddresses(ctx context.Context, f AddressFilter, afterID string, limit int) (AddressPage, error)
 	CreateFiscalCalendar(ctx context.Context, in FiscalCalendar, idempotencyKey string) (FiscalCalendar, error)
 	GetFiscalCalendar(ctx context.Context, id string) (FiscalCalendar, error)
+	ListFiscalCalendars(ctx context.Context, f FiscalCalendarFilter, afterCode string, limit int) (FiscalCalendarPage, error)
+	UpdateFiscalCalendar(ctx context.Context, id string, version int, in FiscalCalendarPatch) (FiscalCalendar, error)
 	GenerateFiscalYear(ctx context.Context, id string, year int, custom []domain.DateRange, force bool) (FiscalYear, error)
 	ListFiscalPeriods(ctx context.Context, id string, year int) ([]FiscalPeriod, error)
 	CreateHierarchyType(ctx context.Context, in HierarchyType, idempotencyKey string) (HierarchyType, error)
@@ -137,11 +140,11 @@ func (s *Postgres) WithTreeLimits(l domain.TreeLimits) *Postgres {
 
 func (s *Postgres) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 
-const legalEntityColumns = "id, code, name, country, currency, time_zone, default_language, registration_number, primary_address_id, status, version, created_at, updated_at"
+const legalEntityColumns = "id, code, name, country, currency, time_zone, default_language, registration_number, primary_address_id, fiscal_calendar_id, status, version, created_at, updated_at"
 
 func scanLegalEntity(row pgx.Row, extra ...any) (LegalEntity, error) {
 	var e LegalEntity
-	err := row.Scan(append([]any{&e.ID, &e.Code, &e.Name, &e.Country, &e.Currency, &e.TimeZone, &e.DefaultLanguage, &e.RegistrationNumber, &e.PrimaryAddressID, &e.Status, &e.Version, &e.CreatedAt, &e.UpdatedAt}, extra...)...)
+	err := row.Scan(append([]any{&e.ID, &e.Code, &e.Name, &e.Country, &e.Currency, &e.TimeZone, &e.DefaultLanguage, &e.RegistrationNumber, &e.PrimaryAddressID, &e.FiscalCalendarID, &e.Status, &e.Version, &e.CreatedAt, &e.UpdatedAt}, extra...)...)
 	return e, err
 }
 

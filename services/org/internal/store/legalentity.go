@@ -18,11 +18,12 @@ import (
 )
 
 const (
-	MaxLegalEntitiesPerTenant = 500
-	CodeLegalEntityNotFound   = "ORG-LE-NOT-FOUND"
-	CodeVersionConflict       = "ORG-VERSION-CONFLICT"
-	CodeReferenceInactive     = "ORG-LE-REFERENCE-INACTIVE"
-	CodeLegalEntityLimit      = "ORG-LE-LIMIT"
+	MaxLegalEntitiesPerTenant      = 500
+	CodeLegalEntityNotFound        = "ORG-LE-NOT-FOUND"
+	CodeVersionConflict            = "ORG-VERSION-CONFLICT"
+	CodeReferenceInactive          = "ORG-LE-REFERENCE-INACTIVE"
+	CodeLegalEntityLimit           = "ORG-LE-LIMIT"
+	CodeLegalEntityCalendarInvalid = "ORG-LE-CALENDAR-INVALID"
 )
 
 type LegalEntityPatch struct {
@@ -31,6 +32,7 @@ type LegalEntityPatch struct {
 	DefaultLanguage    *string `json:"defaultLanguage"`
 	RegistrationNumber *string `json:"registrationNumber"`
 	PrimaryAddressID   *string `json:"primaryAddressId"`
+	FiscalCalendarID   *string `json:"fiscalCalendarId"`
 	Status             *string `json:"status"`
 }
 
@@ -93,6 +95,22 @@ func checkActiveReferences(ctx context.Context, tx pgx.Tx, tenantID, country, cu
 	return nil
 }
 
+func checkAssignableCalendar(ctx context.Context, tx pgx.Tx, tenantID, calendarID string) error {
+	var status string
+	var generated bool
+	err := tx.QueryRow(ctx, `select status, exists(select 1 from fiscal_period where tenant_id = $1 and calendar_id = $2) from fiscal_calendar where tenant_id = $1 and id = $2 for share of fiscal_calendar`,
+		tenantID, calendarID).Scan(&status, &generated)
+	if err == nil && status == "active" && generated {
+		return nil
+	}
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	p := httpx.NewProblem(http.StatusUnprocessableEntity, CodeLegalEntityCalendarInvalid, "fiscal calendar is unknown, inactive or has no generated year")
+	p.Errors = map[string]string{"fiscalCalendarId": "must be an active fiscal calendar with at least one generated year"}
+	return p
+}
+
 func (s *Postgres) GetLegalEntity(ctx context.Context, id string) (LegalEntity, error) {
 	p, _ := tenant.FromContext(ctx)
 	var e LegalEntity
@@ -127,6 +145,10 @@ func (in LegalEntityPatch) apply(e LegalEntity) (LegalEntity, []string) {
 	if e.PrimaryAddressID, addressChanged = applyID(e.PrimaryAddressID, in.PrimaryAddressID); addressChanged {
 		changed = append(changed, "primary_address_id")
 	}
+	var calendarChanged bool
+	if e.FiscalCalendarID, calendarChanged = applyID(e.FiscalCalendarID, in.FiscalCalendarID); calendarChanged {
+		changed = append(changed, "fiscal_calendar_id")
+	}
 	slices.Sort(changed)
 	return e, changed
 }
@@ -160,6 +182,11 @@ func (s *Postgres) UpdateLegalEntity(ctx context.Context, id string, version int
 				return err
 			}
 		}
+		if slices.Contains(changed, "fiscal_calendar_id") && next.FiscalCalendarID != nil {
+			if err := checkAssignableCalendar(ctx, tx, p.TenantID, *next.FiscalCalendarID); err != nil {
+				return err
+			}
+		}
 		if slices.Contains(changed, "name") {
 			if _, err := tx.Exec(ctx, `update legal_entity_name set valid_to = now() where tenant_id = $1 and legal_entity_id = $2 and valid_to is null`, p.TenantID, id); err != nil {
 				return err
@@ -168,8 +195,8 @@ func (s *Postgres) UpdateLegalEntity(ctx context.Context, id string, version int
 				return err
 			}
 		}
-		e, err = scanLegalEntity(tx.QueryRow(ctx, `update legal_entity set name = $3, time_zone = $4, default_language = $5, registration_number = $6, status = $7, primary_address_id = $8, version = version + 1, updated_at = now()
-			where tenant_id = $1 and id = $2 returning `+legalEntityColumns, p.TenantID, id, next.Name, next.TimeZone, next.DefaultLanguage, next.RegistrationNumber, next.Status, next.PrimaryAddressID))
+		e, err = scanLegalEntity(tx.QueryRow(ctx, `update legal_entity set name = $3, time_zone = $4, default_language = $5, registration_number = $6, status = $7, primary_address_id = $8, fiscal_calendar_id = $9, version = version + 1, updated_at = now()
+			where tenant_id = $1 and id = $2 returning `+legalEntityColumns, p.TenantID, id, next.Name, next.TimeZone, next.DefaultLanguage, next.RegistrationNumber, next.Status, next.PrimaryAddressID, next.FiscalCalendarID))
 		if err != nil {
 			return err
 		}

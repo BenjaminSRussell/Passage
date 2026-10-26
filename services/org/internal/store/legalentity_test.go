@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -197,4 +198,123 @@ func TestPostgres_TenantCapsAtFiveHundredLegalEntities(t *testing.T) {
 		t.Fatalf("an idempotent replay at the cap must return the original: %+v, %v", replay, err)
 	}
 	mustCreate(t, s, principalContext(2), newEntity("US01"))
+}
+
+func TestPostgres_LegalEntityCalendarAssignmentRequiresActiveGeneratedCalendar(t *testing.T) {
+	s, ctx, pool := lifecycleStore(t)
+	ready, empty, retired := retail445(t, s, ctx), fiscalCalendarNamed(t, s, ctx, "EMPTY"), fiscalCalendarNamed(t, s, ctx, "OLD")
+	generate(t, s, ctx, ready.ID, 2026)
+	generate(t, s, ctx, retired.ID, 2026)
+	if _, err := s.UpdateFiscalCalendar(ctx, retired.ID, 1, store.FiscalCalendarPatch{Status: ptr("inactive")}); err != nil {
+		t.Fatal(err)
+	}
+	entity := mustCreate(t, s, ctx, newEntity("US01"))
+	if entity.FiscalCalendarID != nil {
+		t.Fatalf("new entity has calendar %v; want none", *entity.FiscalCalendarID)
+	}
+	for name, id := range map[string]string{"no generated year": empty.ID, "inactive": retired.ID, "unknown": "0190b6c0-0000-7000-8000-0000000000ff", "another tenant": ready.ID} {
+		caller := ctx
+		if name == "another tenant" {
+			caller = principalContext(2)
+			entity2 := mustCreate(t, s, caller, newEntity("US01"))
+			_, err := s.UpdateLegalEntity(caller, entity2.ID, 1, store.LegalEntityPatch{FiscalCalendarID: &id})
+			assertCalendarInvalid(t, err, name)
+			continue
+		}
+		_, err := s.UpdateLegalEntity(caller, entity.ID, 1, store.LegalEntityPatch{FiscalCalendarID: &id})
+		assertCalendarInvalid(t, err, name)
+	}
+	if got, _ := s.GetLegalEntity(ctx, entity.ID); got.Version != 1 || got.FiscalCalendarID != nil || len(updatedChangedFields(t, ctx, pool)) != 0 {
+		t.Fatalf("refused assignments wrote: %+v", got)
+	}
+	assigned := assignCalendar(t, s, ctx, entity, ready.ID)
+	if assigned.Version != 2 || assigned.FiscalCalendarID == nil || *assigned.FiscalCalendarID != ready.ID {
+		t.Fatalf("assigned = %+v; want version 2 and the calendar", assigned)
+	}
+	if got := updatedChangedFields(t, ctx, pool); !reflect.DeepEqual(got, [][]string{{"fiscal_calendar_id"}}) {
+		t.Fatalf("changed_fields = %v; want one event naming fiscal_calendar_id", got)
+	}
+	page, err := s.ListLegalEntities(ctx, store.LegalEntityFilter{}, "", store.MaxPageSize)
+	if err != nil || len(page.Items) != 1 || page.Items[0].FiscalCalendarID == nil {
+		t.Fatalf("list = %+v, %v; want fiscalCalendarId on the list", page, err)
+	}
+	if body, _ := json.Marshal(assigned); !containsJSON(body, `"fiscalCalendarId":"`+ready.ID+`"`) {
+		t.Fatalf("json = %s", body)
+	}
+	same := ready.ID
+	if again, err := s.UpdateLegalEntity(ctx, entity.ID, 2, store.LegalEntityPatch{FiscalCalendarID: &same}); err != nil || again.Version != 2 {
+		t.Fatalf("same calendar = %+v, %v; want no change", again, err)
+	}
+	cleared := ""
+	back, err := s.UpdateLegalEntity(ctx, entity.ID, 2, store.LegalEntityPatch{FiscalCalendarID: &cleared})
+	if err != nil || back.Version != 3 || back.FiscalCalendarID != nil {
+		t.Fatalf("cleared = %+v, %v; want version 3 and no calendar", back, err)
+	}
+	if body, _ := json.Marshal(back); containsJSON(body, "fiscalCalendarId") {
+		t.Fatalf("json = %s; want fiscalCalendarId omitted", body)
+	}
+}
+
+func fiscalCalendarNamed(t *testing.T, s *store.Postgres, ctx context.Context, code string) store.FiscalCalendar {
+	t.Helper()
+	c, err := s.CreateFiscalCalendar(ctx, fiscalCalendar(code, "calendar"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+func containsJSON(body []byte, want string) bool { return strings.Contains(string(body), want) }
+
+func assertCalendarInvalid(t *testing.T, err error, name string) {
+	t.Helper()
+	var problem *httpx.Problem
+	if !errors.As(err, &problem) || problem.Code != store.CodeLegalEntityCalendarInvalid || problem.Errors["fiscalCalendarId"] != "must be an active fiscal calendar with at least one generated year" {
+		t.Fatalf("%s: error = %v; want ORG-LE-CALENDAR-INVALID on fiscalCalendarId", name, err)
+	}
+}
+
+func TestPostgres_CalendarForeignKeyRefusesAnotherTenantsCalendar(t *testing.T) {
+	s, ctx, pool := lifecycleStore(t)
+	calendar := fiscalCalendarNamed(t, s, ctx, "FY")
+	other := principalContext(2)
+	entity := mustCreate(t, s, other, newEntity("US01"))
+	err := dbx.WithTenantTx(other, pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(other, `update legal_entity set fiscal_calendar_id = $2 where tenant_id = $1 and id = $3`, testkit.TenantID(2), calendar.ID, entity.ID)
+		return err
+	})
+	if err == nil {
+		t.Fatal("the composite foreign key accepted another tenant's calendar")
+	}
+}
+
+func TestPostgres_ScopedCallerCannotAssignCalendarOfAnotherEntity(t *testing.T) {
+	s, ctx, _ := lifecycleStore(t)
+	calendar := retail445(t, s, ctx)
+	generate(t, s, ctx, calendar.ID, 2026)
+	a, b := mustCreate(t, s, ctx, newEntity("US01")), mustCreate(t, s, ctx, newEntity("US02"))
+	scoped := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: a.ID})
+	if _, err := s.UpdateLegalEntity(scoped, b.ID, 1, store.LegalEntityPatch{FiscalCalendarID: &calendar.ID}); problemCode(t, err) != store.CodeLegalEntityNotFound {
+		t.Fatalf("scoped assignment error = %v; want %s", err, store.CodeLegalEntityNotFound)
+	}
+	if got, _ := s.GetLegalEntity(ctx, b.ID); got.FiscalCalendarID != nil {
+		t.Fatalf("entity B changed: %+v", got)
+	}
+}
+
+func TestPostgres_Migration0023AppliesTwiceAndKeepsExistingEntitiesUnassigned(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	ctx := principalContext(1)
+	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	seed(t, ctx, admin)
+	s := store.New(app)
+	entity := mustCreate(t, s, ctx, newEntity("US01"))
+	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
+		t.Fatalf("second migrate: %v", err)
+	}
+	if got, err := s.GetLegalEntity(ctx, entity.ID); err != nil || got.FiscalCalendarID != nil {
+		t.Fatalf("entity after re-migrate = %+v, %v; want no calendar", got, err)
+	}
 }

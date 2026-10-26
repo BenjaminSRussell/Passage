@@ -77,6 +77,7 @@ type API struct {
 
 	fiscalCalendarCreated atomic.Int64
 	fiscalYearGenerated   atomic.Int64
+	fiscalCalendarUpdated atomic.Int64
 	postings              PostingChecker
 
 	hierarchyTypeCreated   atomic.Int64
@@ -196,6 +197,7 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP org_addresses_created_total Postal addresses created.\n# TYPE org_addresses_created_total counter\norg_addresses_created_total %d\n", a.addressCreated.Load())
 		fmt.Fprintf(w, "# HELP org_addresses_revised_total Postal address versions created by edits.\n# TYPE org_addresses_revised_total counter\norg_addresses_revised_total %d\n", a.addressRevised.Load())
 		fmt.Fprintf(w, "# HELP org_fiscal_calendars_created_total Fiscal calendars created.\n# TYPE org_fiscal_calendars_created_total counter\norg_fiscal_calendars_created_total %d\n", a.fiscalCalendarCreated.Load())
+		fmt.Fprintf(w, "# HELP org_fiscal_calendars_updated_total Fiscal calendar updates that bumped the version.\n# TYPE org_fiscal_calendars_updated_total counter\norg_fiscal_calendars_updated_total %d\n", a.fiscalCalendarUpdated.Load())
 		fmt.Fprintf(w, "# HELP org_fiscal_years_generated_total Fiscal years generated or regenerated; idempotent replays are not counted.\n# TYPE org_fiscal_years_generated_total counter\norg_fiscal_years_generated_total %d\n", a.fiscalYearGenerated.Load())
 		fmt.Fprintf(w, "# HELP org_hierarchy_types_created_total Hierarchy types created.\n# TYPE org_hierarchy_types_created_total counter\norg_hierarchy_types_created_total %d\n", a.hierarchyTypeCreated.Load())
 		fmt.Fprintf(w, "# HELP org_hierarchy_drafts_created_total Draft hierarchy versions created.\n# TYPE org_hierarchy_drafts_created_total counter\norg_hierarchy_drafts_created_total %d\n", a.hierarchyDraftCreated.Load())
@@ -341,6 +343,7 @@ func (a *API) updateLegalEntity(w http.ResponseWriter, r *http.Request, id strin
 		fields["status"] = "must be active or inactive"
 	}
 	optionalID(fields, "primaryAddressId", req.PrimaryAddressID, true)
+	optionalID(fields, "fiscalCalendarId", req.FiscalCalendarID, true)
 	if len(fields) > 0 {
 		p := httpx.NewProblem(http.StatusBadRequest, "COM-0001", validationDetail)
 		p.Errors = fields
