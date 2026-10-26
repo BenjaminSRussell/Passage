@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: org
-  version: 0.13.0
-  description: Organization service. Covers legal entities, operating units, sites, warehouses, locations, postal addresses with purposes, fiscal calendars with idempotent year generation and the period read, hierarchy types and draft hierarchy versions with validated node sets (error codes ORG-HIER-CYCLE, ORG-HIER-MULTI-ROOT, ORG-HIER-DUPLICATE-NODE, ORG-HIER-PARENT-UNKNOWN, ORG-HIER-DEPTH, ORG-HIER-SIZE, ORG-HIER-NODE-UNKNOWN, ORG-HIER-TYPE-NOT-FOUND, ORG-HIER-TYPE-CODE-DUPLICATE, ORG-HIER-VERSION-NOT-FOUND, ORG-HIER-DRAFT-EXISTS, ORG-HIER-VERSION-IMMUTABLE, ORG-HIER-OVERLAP, ORG-HIER-BACKDATE-DUTY, ORG-HIER-NO-VERSION, ORG-HIER-NODE-ABSENT, ORG-HIER-MAKER-CHECKER) with the version list, publish, supersede, the closure table, the as-of query and the version comparison, unit-of-measure conversion, the platform-owned reference sets (countries, currencies, regions, languages) with tenant-level deactivation, currency rounding rules with the round route and the rule delete (error codes ORG-CUR-ROUNDING-UNIT, ORG-CUR-ROUNDING-NOT-FOUND), and the unit conversions report with tenant-owned conversions (error codes ORG-UOM-CLASS-MISMATCH, ORG-UOM-CONVERSION-DUPLICATE, ORG-UOM-UNIT-INACTIVE).
+  version: 0.14.0
+  description: Organization service. Covers legal entities, operating units, sites, warehouses, locations, postal addresses with purposes, fiscal calendars with idempotent year generation and the period read, hierarchy types and draft hierarchy versions with validated node sets (error codes ORG-HIER-CYCLE, ORG-HIER-MULTI-ROOT, ORG-HIER-DUPLICATE-NODE, ORG-HIER-PARENT-UNKNOWN, ORG-HIER-DEPTH, ORG-HIER-SIZE, ORG-HIER-NODE-UNKNOWN, ORG-HIER-TYPE-NOT-FOUND, ORG-HIER-TYPE-CODE-DUPLICATE, ORG-HIER-VERSION-NOT-FOUND, ORG-HIER-DRAFT-EXISTS, ORG-HIER-VERSION-IMMUTABLE, ORG-HIER-OVERLAP, ORG-HIER-BACKDATE-DUTY, ORG-HIER-NO-VERSION, ORG-HIER-NODE-ABSENT, ORG-HIER-MAKER-CHECKER) with the version list, publish, supersede, the closure table, the as-of query and the version comparison, unit-of-measure conversion, the platform-owned reference sets (countries, currencies, regions, languages) with tenant-level deactivation, currency rounding rules with the round route and the rule delete (error codes ORG-CUR-ROUNDING-UNIT, ORG-CUR-ROUNDING-NOT-FOUND), name translations per owner with the base-name fallback route (error codes ORG-TRANSLATION-LANGUAGE-INVALID, ORG-TRANSLATION-NOT-FOUND), and the unit conversions report with tenant-owned conversions (error codes ORG-UOM-CLASS-MISMATCH, ORG-UOM-CONVERSION-DUPLICATE, ORG-UOM-UNIT-INACTIVE).
 servers:
   - url: https://app.local.passage.dev
 paths:
@@ -814,6 +814,254 @@ paths:
           description: The currency with its new status for the caller's tenant; repeating the current status changes nothing. Rejected for legal-entity-scoped callers.
           content: { application/json: { schema: { $ref: '#/components/schemas/Currency' } } }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/org/legal-entities/{id}/translations:
+    get:
+      operationId: listLegalEntityNameTranslations
+      x-passage-duty: org.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The legal entity's translated names ordered by language; an owner with none returns an empty list.
+          content: { application/json: { schema: { $ref: '#/components/schemas/NameTranslationList' } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: ORG-LE-NOT-FOUND for an owner that is unknown, another tenant's or outside the caller's legal-entity scope., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/legal-entities/{id}/translations/{language}:
+    put:
+      operationId: putLegalEntityNameTranslation
+      x-passage-duty: org.legal-entity.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/Language' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PutNameTranslation' } } }
+      responses:
+        '201':
+          description: The translation was created.
+          content: { application/json: { schema: { $ref: '#/components/schemas/NameTranslation' } } }
+        '200':
+          description: The translation was replaced; repeating an identical PUT returns the same row and is not counted.
+          content: { application/json: { schema: { $ref: '#/components/schemas/NameTranslation' } } }
+        '400': { description: COM-0001 naming language or name., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: ORG-LE-NOT-FOUND for an owner that is unknown, another tenant's or outside the caller's legal-entity scope., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: ORG-TRANSLATION-LANGUAGE-INVALID when the primary subtag is not an active language for the tenant., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+    delete:
+      operationId: deleteLegalEntityNameTranslation
+      x-passage-duty: org.legal-entity.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/Language' }
+      responses:
+        '204': { description: The translation is removed. }
+        '400': { description: COM-0001 naming language., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: ORG-TRANSLATION-NOT-FOUND when no such translation exists; ORG-LE-NOT-FOUND for an owner that is unknown, another tenant's or outside the caller's legal-entity scope., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/legal-entities/{id}/name:
+    get:
+      operationId: resolveLegalEntityName
+      x-passage-duty: org.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: language, in: query, schema: { type: string, pattern: '^[a-z]{2}(-[A-Z]{2})?$' }, description: Exact tag, then its primary subtag, then the base name. Absent returns the base name. }
+      responses:
+        '200':
+          description: The name to display in the requested language and where it came from.
+          content: { application/json: { schema: { $ref: '#/components/schemas/NameResolution' } } }
+        '400': { description: COM-0001 naming language., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: ORG-LE-NOT-FOUND for an owner that is unknown, another tenant's or outside the caller's legal-entity scope., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/operating-units/{id}/translations:
+    get:
+      operationId: listOperatingUnitNameTranslations
+      x-passage-duty: org.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The operating unit's translated names ordered by language; an owner with none returns an empty list.
+          content: { application/json: { schema: { $ref: '#/components/schemas/NameTranslationList' } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: ORG-OU-NOT-FOUND for an owner that is unknown, another tenant's or outside the caller's legal-entity scope., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/operating-units/{id}/translations/{language}:
+    put:
+      operationId: putOperatingUnitNameTranslation
+      x-passage-duty: org.operating-unit.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/Language' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PutNameTranslation' } } }
+      responses:
+        '201':
+          description: The translation was created.
+          content: { application/json: { schema: { $ref: '#/components/schemas/NameTranslation' } } }
+        '200':
+          description: The translation was replaced; repeating an identical PUT returns the same row and is not counted.
+          content: { application/json: { schema: { $ref: '#/components/schemas/NameTranslation' } } }
+        '400': { description: COM-0001 naming language or name., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: ORG-OU-NOT-FOUND for an owner that is unknown, another tenant's or outside the caller's legal-entity scope., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: ORG-TRANSLATION-LANGUAGE-INVALID when the primary subtag is not an active language for the tenant., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+    delete:
+      operationId: deleteOperatingUnitNameTranslation
+      x-passage-duty: org.operating-unit.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/Language' }
+      responses:
+        '204': { description: The translation is removed. }
+        '400': { description: COM-0001 naming language., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: ORG-TRANSLATION-NOT-FOUND when no such translation exists; ORG-OU-NOT-FOUND for an owner that is unknown, another tenant's or outside the caller's legal-entity scope., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/operating-units/{id}/name:
+    get:
+      operationId: resolveOperatingUnitName
+      x-passage-duty: org.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: language, in: query, schema: { type: string, pattern: '^[a-z]{2}(-[A-Z]{2})?$' }, description: Exact tag, then its primary subtag, then the base name. Absent returns the base name. }
+      responses:
+        '200':
+          description: The name to display in the requested language and where it came from.
+          content: { application/json: { schema: { $ref: '#/components/schemas/NameResolution' } } }
+        '400': { description: COM-0001 naming language., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: ORG-OU-NOT-FOUND for an owner that is unknown, another tenant's or outside the caller's legal-entity scope., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/sites/{id}/translations:
+    get:
+      operationId: listSiteNameTranslations
+      x-passage-duty: org.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The site's translated names ordered by language; an owner with none returns an empty list.
+          content: { application/json: { schema: { $ref: '#/components/schemas/NameTranslationList' } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: ORG-SITE-NOT-FOUND for an owner that is unknown, another tenant's or outside the caller's legal-entity scope., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/sites/{id}/translations/{language}:
+    put:
+      operationId: putSiteNameTranslation
+      x-passage-duty: org.site.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/Language' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PutNameTranslation' } } }
+      responses:
+        '201':
+          description: The translation was created.
+          content: { application/json: { schema: { $ref: '#/components/schemas/NameTranslation' } } }
+        '200':
+          description: The translation was replaced; repeating an identical PUT returns the same row and is not counted.
+          content: { application/json: { schema: { $ref: '#/components/schemas/NameTranslation' } } }
+        '400': { description: COM-0001 naming language or name., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: ORG-SITE-NOT-FOUND for an owner that is unknown, another tenant's or outside the caller's legal-entity scope., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: ORG-TRANSLATION-LANGUAGE-INVALID when the primary subtag is not an active language for the tenant., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+    delete:
+      operationId: deleteSiteNameTranslation
+      x-passage-duty: org.site.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/Language' }
+      responses:
+        '204': { description: The translation is removed. }
+        '400': { description: COM-0001 naming language., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: ORG-TRANSLATION-NOT-FOUND when no such translation exists; ORG-SITE-NOT-FOUND for an owner that is unknown, another tenant's or outside the caller's legal-entity scope., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/sites/{id}/name:
+    get:
+      operationId: resolveSiteName
+      x-passage-duty: org.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: language, in: query, schema: { type: string, pattern: '^[a-z]{2}(-[A-Z]{2})?$' }, description: Exact tag, then its primary subtag, then the base name. Absent returns the base name. }
+      responses:
+        '200':
+          description: The name to display in the requested language and where it came from.
+          content: { application/json: { schema: { $ref: '#/components/schemas/NameResolution' } } }
+        '400': { description: COM-0001 naming language., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: ORG-SITE-NOT-FOUND for an owner that is unknown, another tenant's or outside the caller's legal-entity scope., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/warehouses/{id}/translations:
+    get:
+      operationId: listWarehouseNameTranslations
+      x-passage-duty: org.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The warehouse's translated names ordered by language; an owner with none returns an empty list.
+          content: { application/json: { schema: { $ref: '#/components/schemas/NameTranslationList' } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: ORG-WH-NOT-FOUND for an owner that is unknown, another tenant's or outside the caller's legal-entity scope., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/warehouses/{id}/translations/{language}:
+    put:
+      operationId: putWarehouseNameTranslation
+      x-passage-duty: org.site.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/Language' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PutNameTranslation' } } }
+      responses:
+        '201':
+          description: The translation was created.
+          content: { application/json: { schema: { $ref: '#/components/schemas/NameTranslation' } } }
+        '200':
+          description: The translation was replaced; repeating an identical PUT returns the same row and is not counted.
+          content: { application/json: { schema: { $ref: '#/components/schemas/NameTranslation' } } }
+        '400': { description: COM-0001 naming language or name., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: ORG-WH-NOT-FOUND for an owner that is unknown, another tenant's or outside the caller's legal-entity scope., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: ORG-TRANSLATION-LANGUAGE-INVALID when the primary subtag is not an active language for the tenant., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+    delete:
+      operationId: deleteWarehouseNameTranslation
+      x-passage-duty: org.site.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/Language' }
+      responses:
+        '204': { description: The translation is removed. }
+        '400': { description: COM-0001 naming language., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: ORG-TRANSLATION-NOT-FOUND when no such translation exists; ORG-WH-NOT-FOUND for an owner that is unknown, another tenant's or outside the caller's legal-entity scope., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/warehouses/{id}/name:
+    get:
+      operationId: resolveWarehouseName
+      x-passage-duty: org.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: language, in: query, schema: { type: string, pattern: '^[a-z]{2}(-[A-Z]{2})?$' }, description: Exact tag, then its primary subtag, then the base name. Absent returns the base name. }
+      responses:
+        '200':
+          description: The name to display in the requested language and where it came from.
+          content: { application/json: { schema: { $ref: '#/components/schemas/NameResolution' } } }
+        '400': { description: COM-0001 naming language., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: ORG-WH-NOT-FOUND for an owner that is unknown, another tenant's or outside the caller's legal-entity scope., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/org/currencies/{code}/rounding-rules:
     get:
       operationId: listCurrencyRoundingRules
@@ -1070,6 +1318,13 @@ paths:
         '200': { description: Database reachable. }
         '503': { description: Database unreachable. }
 components:
+  parameters:
+    Language:
+      name: language
+      in: path
+      required: true
+      schema: { type: string, pattern: '^[a-z]{2}(-[A-Z]{2})?$' }
+      description: BCP 47 tag of the form fr or fr-CA.
   schemas:
     CreateLegalEntity:
       type: object
@@ -1426,6 +1681,34 @@ components:
       additionalProperties: false
       required: [status]
       properties: { status: { type: string, enum: [active, inactive] } }
+    PutNameTranslation:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties: { name: { type: string, minLength: 1, maxLength: 120, description: Trimmed; counted in characters. } }
+    NameTranslation:
+      type: object
+      required: [ownerType, ownerId, language, name, createdAt, updatedAt]
+      properties:
+        ownerType: { type: string, enum: [legal_entity, operating_unit, site, warehouse] }
+        ownerId: { type: string, format: uuid }
+        language: { type: string, pattern: '^[a-z]{2}(-[A-Z]{2})?$' }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    NameTranslationList:
+      type: object
+      required: [items]
+      properties: { items: { type: array, items: { $ref: '#/components/schemas/NameTranslation' } } }
+    NameResolution:
+      type: object
+      required: [ownerType, ownerId, name, source]
+      properties:
+        ownerType: { type: string, enum: [legal_entity, operating_unit, site, warehouse] }
+        ownerId: { type: string, format: uuid }
+        language: { type: string, description: The tag that matched; omitted when the base name is returned. }
+        name: { type: string }
+        source: { type: string, enum: [translation, base] }
     Problem:
       type: object
       required: [type, title, status]

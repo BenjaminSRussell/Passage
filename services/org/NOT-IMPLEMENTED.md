@@ -1,4 +1,4 @@
-# Not implemented in PSG-6 slice 31
+# Not implemented in PSG-6 slice 32
 
 | Deliverable or AC | Status | Reason |
 |---|---|---|
@@ -17,11 +17,14 @@
 | BR-6.12 stewardship reassignment when a team member leaves | handoff | services/party owns stewardship items (wave 7) |
 | ORG-TEAM-TYPE-CODE-DUPLICATE, ORG-TEAM-TYPE-NOT-FOUND, ORG-TEAM-TYPE-INVALID, ORG-TEAM-CODE-DUPLICATE, ORG-TEAM-NOT-FOUND, ORG-TEAM-OPERATING-UNIT-INVALID, ORG-TEAM-LIMIT, ORG-TEAM-MEMBER-KIND-INVALID, ORG-TEAM-MEMBER-LIMIT, ORG-TEAM-MEMBER-DUPLICATE, ORG-TEAM-INACTIVE, ORG-TEAM-MEMBER-NOT-FOUND, ORG-TEAM-MEMBER-RULE-SOURCED | not in catalog | new codes returned by the team-type, team and team-member routes; the §1.6.18 catalog lists only ORG-TEAM-MEMBER-RANGE and ORG-TEAM-EXPIRED |
 | Event type `dev.passage.org.teammembership.changed.v1` | deviation | the catalog's `org.team.membership.changed` has four segments after the namespace and the kernel `events.Type` regex allows three, so it collapses to `org.teammembership.changed` (the same collapse as `hierarchyversion.activated`) |
-| Deliverable 6: legal-entity copy from template, organization name translations | slice 2 of PSG-6 | copy needs Temporal (wave 4) and will sit behind an interface with an in-package fake; the rest is line budget; currency rounding rules are built (PSG-622) |
+| Deliverable 6: legal-entity copy from template | later slice of PSG-6 | copy needs Temporal (wave 4) and will sit behind an interface with an in-package fake; currency rounding rules (PSG-622) and organization name translations (PSG-632) are built |
 | Event `hierarchyversion.activated` | built, timer deferred | emitted at publish, also for a future effective_from; ORG-J2 activation timer needs Temporal (wave 4); the kernel type regex allows three segments, so `org.hierarchy.version.activated` collapses to `org.hierarchyversion.activated` |
 | Regions for countries other than US, CA, IN, MX | not built | delivered through localization packs (§1.6.20 'others via pack') |
 | In-memory conversion graph invalidated by event (§1.6.19 UoM conversion budget) | not built | `ConversionGraph` is read per request; the cache and its invalidation event wait for the Kafka relay (wave 4) |
 | ORG-UOM-UNIT-NOT-FOUND, ORG-UOM-CODE-DUPLICATE, ORG-UOM-CLASS-MISMATCH, ORG-UOM-CONVERSION-DUPLICATE, ORG-UOM-UNIT-INACTIVE | not in catalog | new codes returned by the unit and conversion routes; the §1.6.18 catalog lists only ORG-UOM-NO-PATH |
+| ORG-TRANSLATION-LANGUAGE-INVALID, ORG-TRANSLATION-NOT-FOUND | not in catalog | new codes returned by the name translation routes; the §1.6.18 catalog lists neither |
+| Translation name cap of 120 characters | deviation | PRD §1.6.4 gives `org_unit_translation.name` as text(100); the service caps every base name at 120, so translations use 120 to translate any base name at full length |
+| Translated names on list pages and in printed documents | later slice of PSG-6 / wave 46 | this slice serves the name route (`GET …/{id}/name?language=`); list responses keep the base name |
 | ORG-CUR-ROUNDING-NOT-FOUND | not in catalog | new code returned by the rounding rule delete; the §1.6.18 catalog lists only ORG-CUR-ROUNDING-UNIT |
 | `GET /v1/org/uom/conversions/{id}`, a `productSpecific` filter, edit or delete of a tenant conversion | not built | the report lists every conversion and rows are deactivated through their units (FR-6.8); product-specific conversions belong to wave 8 |
 | Product-specific conversions (`uom_conversion.product_id`) | handoff | the column exists and is always null; product-specific conversions belong to wave 8 (services/product) |

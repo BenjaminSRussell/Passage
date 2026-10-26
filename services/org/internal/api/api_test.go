@@ -67,6 +67,7 @@ type fakeStore struct {
 	roundingPut         store.CurrencyRounding
 	roundingPutCalls    int
 	roundingChanged     bool
+	translations        map[string]store.NameTranslation
 	roundings           []store.CurrencyRounding
 	resolveArgs         [3]string
 	resolved            store.RoundingRule
@@ -1599,4 +1600,62 @@ func (f *fakeStore) ListTeamMembers(_ context.Context, teamID string, filter sto
 		page.NextID = page.Items[limit-1].ID
 	}
 	return page, nil
+}
+
+func (f *fakeStore) translationKey(ownerType, ownerID, language string) string {
+	return ownerType + "/" + ownerID + "/" + language
+}
+
+func (f *fakeStore) PutNameTranslation(_ context.Context, ownerType, ownerID, language, name string) (store.NameTranslation, bool, error) {
+	if f.err != nil {
+		return store.NameTranslation{}, false, f.err
+	}
+	if f.translations == nil {
+		f.translations = map[string]store.NameTranslation{}
+	}
+	key := f.translationKey(ownerType, ownerID, language)
+	existing, found := f.translations[key]
+	row := store.NameTranslation{OwnerType: ownerType, OwnerID: ownerID, Language: language, Name: name, Changed: !found || existing.Name != name}
+	f.translations[key] = row
+	return row, !found, nil
+}
+
+func (f *fakeStore) ListNameTranslations(_ context.Context, ownerType, ownerID string) ([]store.NameTranslation, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	items := []store.NameTranslation{}
+	for _, row := range f.translations {
+		if row.OwnerType == ownerType && row.OwnerID == ownerID {
+			items = append(items, row)
+		}
+	}
+	slices.SortFunc(items, func(a, b store.NameTranslation) int { return strings.Compare(a.Language, b.Language) })
+	return items, nil
+}
+
+func (f *fakeStore) DeleteNameTranslation(_ context.Context, ownerType, ownerID, language string) error {
+	if f.err != nil {
+		return f.err
+	}
+	key := f.translationKey(ownerType, ownerID, language)
+	if _, found := f.translations[key]; !found {
+		return httpx.NewProblem(http.StatusNotFound, store.CodeTranslationNotFound, "translation not found")
+	}
+	delete(f.translations, key)
+	return nil
+}
+
+func (f *fakeStore) ResolveOrgUnitName(_ context.Context, ownerType, ownerID, tag string) (store.NameResolution, error) {
+	if f.err != nil {
+		return store.NameResolution{}, f.err
+	}
+	byLanguage := map[string]string{}
+	for _, row := range f.translations {
+		if row.OwnerType == ownerType && row.OwnerID == ownerID {
+			byLanguage[row.Language] = row.Name
+		}
+	}
+	name, language, source := domain.ResolveName("Base name", byLanguage, tag)
+	return store.NameResolution{OwnerType: ownerType, OwnerID: ownerID, Language: language, Name: name, Source: source}, nil
 }

@@ -91,6 +91,9 @@ type API struct {
 	now                          func() time.Time
 
 	roundingChanged atomic.Int64
+
+	translationsPut     atomic.Int64
+	translationsDeleted atomic.Int64
 }
 
 type createLegalEntityRequest struct {
@@ -161,6 +164,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerFiscalCalendars(r)
 	a.registerHierarchies(r)
 	a.registerCurrencyRounding(r)
+	a.registerTranslations(r)
 	r.Get("/v1/org/uom/convert", a.convert)
 	a.registerUnits(r)
 	for _, c := range referenceCollections {
@@ -207,6 +211,8 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP org_hierarchy_as_of_queries_total Hierarchy as-of queries answered.\n# TYPE org_hierarchy_as_of_queries_total counter\norg_hierarchy_as_of_queries_total %d\n", a.hierarchyAsOfQueries.Load())
 		fmt.Fprintf(w, "# HELP org_hierarchy_publish_maker_checker_refused_total Security-purpose hierarchy publishes refused because the publisher was the last editor.\n# TYPE org_hierarchy_publish_maker_checker_refused_total counter\norg_hierarchy_publish_maker_checker_refused_total %d\n", a.hierarchyMakerCheckerRefused.Load())
 		fmt.Fprintf(w, "# HELP org_currency_rounding_rules_changed_total Currency rounding rule puts that created or changed a row; identical repeats are not counted.\n# TYPE org_currency_rounding_rules_changed_total counter\norg_currency_rounding_rules_changed_total %d\n", a.roundingChanged.Load())
+		fmt.Fprintf(w, "# HELP org_name_translations_put_total Name translation puts that created or changed a row; identical repeats are not counted.\n# TYPE org_name_translations_put_total counter\norg_name_translations_put_total %d\n", a.translationsPut.Load())
+		fmt.Fprintf(w, "# HELP org_name_translations_deleted_total Name translations deleted.\n# TYPE org_name_translations_deleted_total counter\norg_name_translations_deleted_total %d\n", a.translationsDeleted.Load())
 	})
 }
 
