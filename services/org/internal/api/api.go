@@ -73,6 +73,7 @@ type API struct {
 	locationUpdated   atomic.Int64
 	addressCreated    atomic.Int64
 	addressRevised    atomic.Int64
+	addressSearches   atomic.Int64
 	geocoder          domain.Geocoder
 
 	fiscalCalendarCreated atomic.Int64
@@ -200,6 +201,7 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP org_locations_updated_total Location updates that bumped the version.\n# TYPE org_locations_updated_total counter\norg_locations_updated_total %d\n", a.locationUpdated.Load())
 		fmt.Fprintf(w, "# HELP org_addresses_created_total Postal addresses created.\n# TYPE org_addresses_created_total counter\norg_addresses_created_total %d\n", a.addressCreated.Load())
 		fmt.Fprintf(w, "# HELP org_addresses_revised_total Postal address versions created by edits.\n# TYPE org_addresses_revised_total counter\norg_addresses_revised_total %d\n", a.addressRevised.Load())
+		fmt.Fprintf(w, "# HELP org_address_searches_total Address list requests that carried a search text.\n# TYPE org_address_searches_total counter\norg_address_searches_total %d\n", a.addressSearches.Load())
 		fmt.Fprintf(w, "# HELP org_fiscal_calendars_created_total Fiscal calendars created.\n# TYPE org_fiscal_calendars_created_total counter\norg_fiscal_calendars_created_total %d\n", a.fiscalCalendarCreated.Load())
 		fmt.Fprintf(w, "# HELP org_fiscal_calendars_updated_total Fiscal calendar updates that bumped the version.\n# TYPE org_fiscal_calendars_updated_total counter\norg_fiscal_calendars_updated_total %d\n", a.fiscalCalendarUpdated.Load())
 		fmt.Fprintf(w, "# HELP org_fiscal_years_generated_total Fiscal years generated or regenerated; idempotent replays are not counted.\n# TYPE org_fiscal_years_generated_total counter\norg_fiscal_years_generated_total %d\n", a.fiscalYearGenerated.Load())

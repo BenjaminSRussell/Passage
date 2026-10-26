@@ -3,7 +3,9 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -136,8 +138,8 @@ func loadPurposes(ctx context.Context, tx pgx.Tx, tenantID string, addressIDs []
 	return purposes, rows.Err()
 }
 
-func loadAddress(ctx context.Context, tx pgx.Tx, condition string, tenantID, arg string) (Address, error) {
-	a, err := scanAddress(tx.QueryRow(ctx, `select `+addressColumns+` from postal_address where tenant_id = $1 and `+condition, tenantID, arg))
+func loadAddress(ctx context.Context, tx pgx.Tx, condition string, tenantID, arg string, more ...any) (Address, error) {
+	a, err := scanAddress(tx.QueryRow(ctx, `select `+addressColumns+` from postal_address where tenant_id = $1 and `+condition, append([]any{tenantID, arg}, more...)...))
 	if err != nil {
 		return Address{}, err
 	}
@@ -435,11 +437,60 @@ func (s *Postgres) GetAddressVersion(ctx context.Context, versionID string) (Add
 	return address, err
 }
 
-type AddressFilter struct{ OwnerType, OwnerID, Purpose string }
+type AddressFilter struct{ OwnerType, OwnerID, Purpose, Query, CountryCode string }
 
 type AddressPage struct {
 	Items  []Address
 	NextID string
+}
+
+type AddressVersion struct {
+	VersionID string    `json:"versionId"`
+	ValidFrom string    `json:"validFrom"`
+	ValidTo   *string   `json:"validTo"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
+func EscapeLike(s string) string { return likeEscaper.Replace(s) }
+
+func (s *Postgres) GetAddressAsOf(ctx context.Context, id, asOf string) (Address, error) {
+	p, _ := tenant.FromContext(ctx)
+	var address Address
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) (err error) {
+		address, err = loadAddress(ctx, tx, `address_id = $2 and valid_from <= $3::date and (valid_to is null or valid_to > $3::date)`, p.TenantID, id, asOf)
+		return err
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Address{}, addressNotFound()
+	}
+	return address, err
+}
+
+func (s *Postgres) ListAddressVersions(ctx context.Context, id string) ([]AddressVersion, error) {
+	p, _ := tenant.FromContext(ctx)
+	versions := []AddressVersion{}
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select id, to_char(valid_from, 'YYYY-MM-DD'), to_char(valid_to, 'YYYY-MM-DD'), created_at from postal_address
+			where tenant_id = $1 and address_id = $2 order by valid_from desc`, p.TenantID, id)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var v AddressVersion
+			if err := rows.Scan(&v.VersionID, &v.ValidFrom, &v.ValidTo, &v.CreatedAt); err != nil {
+				return err
+			}
+			versions = append(versions, v)
+		}
+		return rows.Err()
+	})
+	if err == nil && len(versions) == 0 {
+		return nil, addressNotFound()
+	}
+	return versions, err
 }
 
 func (s *Postgres) ListAddresses(ctx context.Context, f AddressFilter, afterID string, limit int) (AddressPage, error) {
@@ -447,11 +498,31 @@ func (s *Postgres) ListAddresses(ctx context.Context, f AddressFilter, afterID s
 	if afterID == "" {
 		afterID = "00000000-0000-0000-0000-000000000000"
 	}
+	args := []any{p.TenantID}
+	where := []string{"tenant_id = $1", "valid_to is null"}
+	add := func(condition string, arg any) {
+		args = append(args, arg)
+		where = append(where, fmt.Sprintf(condition, len(args)))
+	}
+	if f.OwnerType != "" {
+		add("owner_type = $%d", f.OwnerType)
+		add("owner_id = $%d", f.OwnerID)
+	}
+	if f.Query != "" {
+		add(`formatted ilike '%%' || $%d || '%%'`, EscapeLike(f.Query))
+	}
+	if f.CountryCode != "" {
+		add("country_code = $%d", f.CountryCode)
+	}
+	if f.Purpose != "" {
+		add(`exists (select 1 from address_purpose ap where ap.tenant_id = postal_address.tenant_id and ap.address_id = postal_address.address_id and ap.purpose = $%d)`, f.Purpose)
+	}
+	add("address_id > $%d::uuid", afterID)
+	args = append(args, limit+1)
+	query := `select ` + addressColumns + ` from postal_address where ` + strings.Join(where, " and ") + fmt.Sprintf(` order by address_id limit $%d`, len(args))
 	page := AddressPage{Items: []Address{}}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `select `+addressColumns+` from postal_address where tenant_id = $1 and owner_type = $2 and owner_id = $3 and valid_to is null and address_id > $4::uuid
-			and ($5::text = '' or exists (select 1 from address_purpose ap where ap.tenant_id = postal_address.tenant_id and ap.address_id = postal_address.address_id and ap.purpose = $5))
-			order by address_id limit $6`, p.TenantID, f.OwnerType, f.OwnerID, afterID, f.Purpose, limit+1)
+		rows, err := tx.Query(ctx, query, args...)
 		if err != nil {
 			return err
 		}

@@ -54,10 +54,11 @@ Every node set is checked structurally before it is stored: at most 50,000 nodes
 | `GET /v1/org/locations` (`limit`, `cursor`; filters `legalEntityId`, `warehouseId`, `type`, `status`; returns `{items, nextCursor}`) and `GET /v1/org/locations/{id}` | `org.read` |
 | `PATCH /v1/org/locations/{id}` (body `version` required, optional `name`, `type`, `status`, `addressId` (`""` clears); warehouse and code immutable) | `org.site.write` |
 | `POST /v1/org/addresses` (body `ownerType` legal_entity, operating_unit, site, warehouse, location or party, `ownerId`, `countryCode`, `city`, `street1`, `purposes` of 1 to 7 distinct values of business, delivery, invoice, remit_to, service, home, other each with optional `primary`; optional `regionCode`, `postalCode`, `street2`, `street3`, `building`, `poBox`, `validFrom`, `Idempotency-Key`) | `org.address.write` |
-| `GET /v1/org/addresses/{id}` (the current version with its purposes) | `org.read` |
+| `GET /v1/org/addresses/{id}` (the current version with its purposes; optional `asOf` YYYY-MM-DD returns the version in force on that date) | `org.read` |
+| `GET /v1/org/addresses/{id}/versions` (every version newest first as `{items}` of `versionId`, `validFrom`, `validTo`, `createdAt`; not paginated) | `org.read` |
 | `PATCH /v1/org/addresses/{id}` (body `versionId` plus any postal field, `validFrom` and `purposes`; `""` clears an optional field) | `org.address.write` |
 | `GET /v1/org/address-versions/{id}` (any version of an address by its `versionId`, current or closed) | `org.read` |
-| `GET /v1/org/addresses` (`ownerType`, `ownerId` required; `purpose`, `limit`, `cursor`; the owner's current addresses as `{items, nextCursor}`) | `org.read` |
+| `GET /v1/org/addresses` (`ownerType` and `ownerId` required unless `q` is given; `q` 3 to 100 characters of address text, `countryCode`, `purpose`, `limit`, `cursor`; current addresses as `{items, nextCursor}`) | `org.read` |
 | `GET /v1/org/operating-units` (`limit`, `cursor`; filters `type`, `defaultLegalEntityId`, `status`; returns `{items, nextCursor}`) and `GET /v1/org/operating-units/{id}` | `org.read` |
 | `POST /v1/org/team-types` (body `code` upper-cased and unique per tenant, `name` 1 to 60 characters, `memberKinds` of 1 to 2 distinct values of user, party; optional `Idempotency-Key`; not for legal-entity-scoped callers) | `org.operating-unit.write` |
 | `POST /v1/org/teams` (body `code` upper-cased and unique per tenant, `name` 1 to 60 characters, optional `description` up to 500, `teamTypeId`, optional `operatingUnitId`, `effectiveFrom`, optional `effectiveTo` as YYYY-MM-DD; optional `Idempotency-Key`; not for legal-entity-scoped callers) | `org.operating-unit.write` |
@@ -85,6 +86,10 @@ Every node set is checked structurally before it is stored: at most 50,000 nodes
 | `GET /healthz`, `GET /readyz` (database ping, 503 when down), `GET /metrics` on the admin port | public |
 
 Contract: `api/openapi.yaml`. Paths follow the architecture spine (`/v1/<context>/<collection>`), not the PRD's `/org/v1`. The chart is `charts/org` per CONVENTIONS, not the PRD's `passage-org`. The legal-entity header is `X-Passage-Legal-Entity`.
+
+## Address search and history
+
+`GET /v1/org/addresses?q=` matches the text as a literal, case-insensitive substring of the formatted address (`%`, `_` and `\` match themselves), served by the `postal_address_formatted_trgm` GIN trigram index from migration 0026, which creates the `pg_trgm` extension. `q` is trimmed and must be 3 to 100 characters; with `q` the owner filter is optional, but `ownerType` and `ownerId` come as a pair. Only current versions are searched. `GET /v1/org/addresses/{id}?asOf=` returns the version in force on that date (`validFrom` on or before it, `validTo` after it), a date before the first version is 404, and purposes are always the address's current purposes. `GET /v1/org/addresses/{id}/versions` lists every version newest first.
 
 ## Name translations
 
@@ -172,4 +177,4 @@ Legal entities, operating units, sites and warehouses can carry a translated nam
 | ORG-UOM-UNIT-NOT-FOUND | 404 | unit code not visible to the tenant (codes are case-sensitive) |
 | ORG-UOM-CODE-DUPLICATE | 409 | unit code already used by a platform unit or one of the tenant's units |
 
-Metrics: `org_fiscal_calendars_updated_total`, `org_legal_entities_created_total`, `org_legal_entities_failed_total`, `org_legal_entities_updated_total`, `org_reference_status_changed_total`, `org_uom_units_created_total`, `org_uom_conversions_created_total`, `org_currency_rounding_rules_changed_total`, `org_name_translations_put_total`, `org_name_translations_deleted_total`, `org_operating_units_created_total`, `org_operating_units_updated_total`, `org_team_types_created_total`, `org_teams_created_total`, `org_team_members_added_total`, `org_teams_updated_total`, `org_team_members_ended_total`, `org_team_members_removed_total`, `org_sites_created_total`, `org_sites_updated_total`, `org_warehouses_created_total`, `org_warehouses_updated_total`, `org_locations_created_total`, `org_locations_updated_total`, `org_addresses_created_total`, `org_addresses_revised_total` (stdlib atomics rendered as text).
+Metrics: `org_fiscal_calendars_updated_total`, `org_legal_entities_created_total`, `org_legal_entities_failed_total`, `org_legal_entities_updated_total`, `org_reference_status_changed_total`, `org_uom_units_created_total`, `org_uom_conversions_created_total`, `org_currency_rounding_rules_changed_total`, `org_name_translations_put_total`, `org_name_translations_deleted_total`, `org_operating_units_created_total`, `org_operating_units_updated_total`, `org_team_types_created_total`, `org_teams_created_total`, `org_team_members_added_total`, `org_teams_updated_total`, `org_team_members_ended_total`, `org_team_members_removed_total`, `org_sites_created_total`, `org_sites_updated_total`, `org_warehouses_created_total`, `org_warehouses_updated_total`, `org_locations_created_total`, `org_locations_updated_total`, `org_address_searches_total`, `org_addresses_created_total`, `org_addresses_revised_total` (stdlib atomics rendered as text).
