@@ -3,4 +3,4 @@ name: product
 description: Passage product master, variants and catalogs
 type: application
 version: 0.1.0
-appVersion: "0.1.0"
+appVersion: "0.2.0"

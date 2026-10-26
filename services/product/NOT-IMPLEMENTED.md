@@ -10,6 +10,7 @@ Delivered: product/master/variant domain and persistence, Cartesian explosion wi
 | Object-storage originals, malware scan, 200 MB uploads | deferred | DIR metadata, version copy and tsvector column exist; bucket `passage-product-media` is a wave-1 deploy handoff |
 | 1M-product typeahead p95 and 2M-DIR full-text p95 | not measured | search endpoints exist; the volume fixtures are a later capacity run |
 | GDSN publication, ZPL print routing | later waves | wave 35 / 31 |
-| Org site/warehouse membership check | interface | wave 6 org is not imported; site IDs are accepted as UUIDs |
-| Number sequence `PROD` / `SVC-{cat}` | in-package | wave 5 numbering is not imported; service numbers use `SVC-{cat}-{#####}` |
+| Number sequence `PROD` / `SVC-{cat}` | in-package | `services/numbering` now exists; `numberingclient`, `NUMBERING_BASE_URL`, allocation from `PROD` / `SVC-{cat}` and the 502 `PRD-NUMBERING-INVALID` response are the remaining PSG-802 slice (AC4-AC6); service numbers still use `SVC-{cat}-{#####}` |
 | Argo CD app, `passage_product` database, CNPG | handoff | `deploy/` is outside wave 8 ownership |
+| services/org/NOT-IMPLEMENTED.md rows "Product-specific conversions (`uom_conversion.product_id`)" and the matching `productSpecific` filter row | handoff delivered | done in this wave: `product_uom_conversion` and its product -> class -> error resolution are built in `services/product`; wiring the org report's `productSpecific` filter is wave 6's own work (the originating wave's next planner treats this as DONE) |
+| Org membership check when `ORG_BASE_URL` is empty | disabled | local and test runs log one startup warning and skip the check; the chart default is `http://org:8080`; fallback policy for production is a deploy handoff |

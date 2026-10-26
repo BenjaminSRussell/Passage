@@ -3,8 +3,10 @@ package api_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -14,16 +16,17 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/product/internal/api"
 	"github.com/BenjaminSRussell/passage/services/product/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/product/internal/orgclient"
 	"github.com/BenjaminSRussell/passage/services/product/internal/store"
 )
 
 type fakeStore struct {
-	products  map[string]domain.Product
-	released  map[string]domain.ReleasedProduct
-	idents    map[string]domain.Identifier
-	groups    map[string]domain.DimensionGroup
-	created   []domain.Product
-	pingErr   error
+	products    map[string]domain.Product
+	released    map[string]domain.ReleasedProduct
+	idents      map[string]domain.Identifier
+	groups      map[string]domain.DimensionGroup
+	created     []domain.Product
+	pingErr     error
 	lastExplode domain.ExplosionResult
 }
 
@@ -69,7 +72,9 @@ func (f *fakeStore) GetProduct(_ context.Context, id string) (domain.Product, er
 	}
 	return p, nil
 }
-func (f *fakeStore) ListProducts(context.Context, int) ([]domain.Product, error) { return f.created, nil }
+func (f *fakeStore) ListProducts(context.Context, int) ([]domain.Product, error) {
+	return f.created, nil
+}
 func (f *fakeStore) ExplodeVariants(_ context.Context, masterID string, selected map[string][]string) (domain.ExplosionResult, error) {
 	g := f.groups["dg-1"]
 	res, err := domain.Explode(nil, domain.ExplosionRequest{MasterNumber: "SHIRT", Dimensions: g.Fields, Selected: selected})
@@ -142,10 +147,12 @@ func (f *fakeStore) EvaluatePolicy(_ context.Context, releasedID, process string
 func (f *fakeStore) ConvertUOM(context.Context, string, string, string, string) (string, error) {
 	return "1", nil
 }
-func (f *fakeStore) Search(context.Context, string, int) ([]domain.Product, error) { return f.created, nil }
-func (f *fakeStore) SeedLifecycle(context.Context) error                           { return nil }
-func (f *fakeStore) UpsertAttribute(context.Context, domain.AttributeType) error   { return nil }
-func (f *fakeStore) SetGS1Prefix(context.Context, string, int64) error             { return nil }
+func (f *fakeStore) Search(context.Context, string, int) ([]domain.Product, error) {
+	return f.created, nil
+}
+func (f *fakeStore) SeedLifecycle(context.Context) error                         { return nil }
+func (f *fakeStore) UpsertAttribute(context.Context, domain.AttributeType) error { return nil }
+func (f *fakeStore) SetGS1Prefix(context.Context, string, int64) error           { return nil }
 func (f *fakeStore) AddProductConversion(context.Context, string, domain.Conversion) error {
 	return nil
 }
@@ -232,4 +239,181 @@ func TestReadyz(t *testing.T) {
 	if rec.Code != 503 {
 		t.Fatalf("not ready %d", rec.Code)
 	}
+}
+
+type fakeChecker struct {
+	sites      map[string]orgclient.Site
+	warehouses map[string]orgclient.Warehouse
+	err        error
+}
+
+func (c fakeChecker) Site(_ context.Context, id string) (orgclient.Site, error) {
+	if c.err != nil {
+		return orgclient.Site{}, c.err
+	}
+	s, ok := c.sites[id]
+	if !ok {
+		return s, orgclient.ErrNotFound
+	}
+	return s, nil
+}
+
+func (c fakeChecker) Warehouse(_ context.Context, id string) (orgclient.Warehouse, error) {
+	if c.err != nil {
+		return orgclient.Warehouse{}, c.err
+	}
+	w, ok := c.warehouses[id]
+	if !ok {
+		return w, orgclient.ErrNotFound
+	}
+	return w, nil
+}
+
+func orgFixture() fakeChecker {
+	return fakeChecker{
+		sites: map[string]orgclient.Site{
+			"S1": {ID: "S1", LegalEntityID: "LE1"},
+			"S2": {ID: "S2", LegalEntityID: "LE1"},
+			"SX": {ID: "SX", LegalEntityID: "LE2"},
+		},
+		warehouses: map[string]orgclient.Warehouse{
+			"W1": {ID: "W1", LegalEntityID: "LE1", SiteID: "S1"},
+			"W2": {ID: "W2", LegalEntityID: "LE1", SiteID: "S2"},
+			"WX": {ID: "WX", LegalEntityID: "LE2", SiteID: "S1"},
+		},
+	}
+}
+
+func orgRouter(f *fakeStore, c fakeChecker) *chi.Mux {
+	f.products["p-1"] = domain.Product{ID: "p-1", ProductNumber: "P1", LifecycleState: domain.StateActive}
+	r := httpx.NewRouter()
+	api.New(f).WithOrg(c).Register(r)
+	return r
+}
+
+func releaseBody(site, warehouse, siteDefaults string) string {
+	return `{"productId":"p-1","legalEntityId":"LE1","itemGroupId":"FG","itemModelGroupId":"STD","defaultSiteId":"` + site + `","defaultWarehouseId":"` + warehouse + `","siteDefaults":` + siteDefaults + `}`
+}
+
+func problemCode(t *testing.T, body string) (string, string) {
+	t.Helper()
+	var p struct{ Code, Detail string }
+	if err := json.Unmarshal([]byte(body), &p); err != nil {
+		t.Fatal(err)
+	}
+	return p.Code, p.Detail
+}
+
+func TestReleaseChecksOrgMembership(t *testing.T) {
+	tests := []struct {
+		name       string
+		body       string
+		checker    fakeChecker
+		wantStatus int
+		wantCode   string
+		wantField  string
+	}{
+		{"valid defaults", releaseBody("S1", "W1", `{}`), orgFixture(), http.StatusCreated, "", ""},
+		{"valid site default entry", releaseBody("S1", "W1", `{"S2":{"warehouseId":"W2"}}`), orgFixture(), http.StatusCreated, "", ""},
+		{"unknown site", releaseBody("SZ", "W1", `{}`), orgFixture(), 422, domain.CodeReleaseSiteInvalid, "defaultSiteId"},
+		{"site of another legal entity", releaseBody("SX", "W1", `{}`), orgFixture(), 422, domain.CodeReleaseSiteInvalid, "defaultSiteId"},
+		{"unknown warehouse", releaseBody("S1", "WZ", `{}`), orgFixture(), 422, domain.CodeReleaseWarehouseInvalid, "defaultWarehouseId"},
+		{"warehouse of another legal entity", releaseBody("S1", "WX", `{}`), orgFixture(), 422, domain.CodeReleaseWarehouseInvalid, "defaultWarehouseId"},
+		{"warehouse outside the site", releaseBody("S1", "W2", `{}`), orgFixture(), 422, domain.CodeReleaseWarehouseInvalid, "defaultWarehouseId"},
+		{"invalid site default entry", releaseBody("S1", "W1", `{"S2":{"warehouseId":"WX"}}`), orgFixture(), 422, domain.CodeReleaseWarehouseInvalid, "siteDefaults[S2].warehouseId"},
+		{"org unavailable", releaseBody("S1", "W1", `{}`), fakeChecker{err: orgclient.ErrUnavailable}, 503, "PRD-ORG-UNAVAILABLE", ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFake()
+			rec := do(orgRouter(f, tc.checker), http.MethodPost, "/v1/product/releases", tc.body, "product.release")
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("status %d %s", rec.Code, rec.Body.String())
+			}
+			if tc.wantStatus == http.StatusCreated {
+				if len(f.released) != 1 {
+					t.Fatalf("released = %d, want 1", len(f.released))
+				}
+				return
+			}
+			code, detail := problemCode(t, rec.Body.String())
+			if code != tc.wantCode || !strings.Contains(detail, tc.wantField) {
+				t.Fatalf("code %s detail %q", code, detail)
+			}
+			if len(f.released) != 0 {
+				t.Fatalf("nothing may be written, got %d released", len(f.released))
+			}
+		})
+	}
+}
+
+func TestReleaseWithoutCheckerSkipsOrg(t *testing.T) {
+	f := newFake()
+	f.products["p-1"] = domain.Product{ID: "p-1", LifecycleState: domain.StateActive}
+	rec := do(newRouter(f), http.MethodPost, "/v1/product/releases", releaseBody("ANY", "ANY", `{}`), "product.release")
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPutSiteDefaultChecksOrgMembership(t *testing.T) {
+	tests := []struct {
+		name       string
+		path       string
+		body       string
+		checker    fakeChecker
+		wantStatus int
+		wantCode   string
+	}{
+		{"valid", "/v1/product/released-products/rp-1/site-defaults/S2", `{"warehouseId":"W2"}`, orgFixture(), http.StatusOK, ""},
+		{"unknown site", "/v1/product/released-products/rp-1/site-defaults/SZ", `{"warehouseId":"W2"}`, orgFixture(), 422, domain.CodeReleaseSiteInvalid},
+		{"warehouse outside site", "/v1/product/released-products/rp-1/site-defaults/S1", `{"warehouseId":"W2"}`, orgFixture(), 422, domain.CodeReleaseWarehouseInvalid},
+		{"org unavailable", "/v1/product/released-products/rp-1/site-defaults/S2", `{"warehouseId":"W2"}`, fakeChecker{err: errors.Join(orgclient.ErrUnavailable)}, 503, "PRD-ORG-UNAVAILABLE"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFake()
+			f.released["rp-1"] = domain.ReleasedProduct{ID: "rp-1", LegalEntityID: "LE1"}
+			rec := do(orgRouter(f, tc.checker), http.MethodPut, tc.path, tc.body, "product.released.write")
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("status %d %s", rec.Code, rec.Body.String())
+			}
+			if tc.wantStatus == http.StatusOK {
+				return
+			}
+			if code, _ := problemCode(t, rec.Body.String()); code != tc.wantCode {
+				t.Fatalf("code %s", code)
+			}
+			if len(f.released["rp-1"].SiteDefaults) != 0 {
+				t.Fatal("nothing may be written")
+			}
+		})
+	}
+}
+
+func TestOrgFailuresAreCounted(t *testing.T) {
+	f := newFake()
+	a := api.New(f).WithOrg(fakeChecker{err: orgclient.ErrUnavailable})
+	r := httpx.NewRouter()
+	a.Register(r)
+	f.products["p-1"] = domain.Product{ID: "p-1", LifecycleState: domain.StateActive}
+	do(r, http.MethodPost, "/v1/product/releases", releaseBody("S1", "W1", `{}`), "product.release")
+	rec := httptest.NewRecorder()
+	a.Metrics().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if !strings.Contains(rec.Body.String(), "product_org_check_failed_total 1") {
+		t.Fatalf("metrics: %s", rec.Body.String())
+	}
+}
+
+func TestOpenAPIDocumentsEveryRoute(t *testing.T) {
+	spec, err := os.ReadFile("../../api/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = chi.Walk(newRouter(newFake()), func(_, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		if !strings.Contains(string(spec), "\n  "+route+":") {
+			t.Errorf("openapi.yaml does not document %s", route)
+		}
+		return nil
+	})
 }
