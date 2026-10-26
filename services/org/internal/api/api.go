@@ -54,19 +54,20 @@ type API struct {
 	failed  atomic.Int64
 	updated atomic.Int64
 
-	referenceChanged atomic.Int64
-	unitCreated      atomic.Int64
-	ouCreated        atomic.Int64
-	ouUpdated        atomic.Int64
-	siteCreated      atomic.Int64
-	siteUpdated      atomic.Int64
-	warehouseCreated atomic.Int64
-	warehouseUpdated atomic.Int64
-	locationCreated  atomic.Int64
-	locationUpdated  atomic.Int64
-	addressCreated   atomic.Int64
-	addressRevised   atomic.Int64
-	geocoder         domain.Geocoder
+	referenceChanged  atomic.Int64
+	unitCreated       atomic.Int64
+	conversionCreated atomic.Int64
+	ouCreated         atomic.Int64
+	ouUpdated         atomic.Int64
+	siteCreated       atomic.Int64
+	siteUpdated       atomic.Int64
+	warehouseCreated  atomic.Int64
+	warehouseUpdated  atomic.Int64
+	locationCreated   atomic.Int64
+	locationUpdated   atomic.Int64
+	addressCreated    atomic.Int64
+	addressRevised    atomic.Int64
+	geocoder          domain.Geocoder
 
 	fiscalCalendarCreated atomic.Int64
 	fiscalYearGenerated   atomic.Int64
@@ -170,6 +171,7 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP org_legal_entities_updated_total Legal entity updates that bumped the version.\n# TYPE org_legal_entities_updated_total counter\norg_legal_entities_updated_total %d\n", a.updated.Load())
 		fmt.Fprintf(w, "# HELP org_reference_status_changed_total Reference rows whose tenant status was set.\n# TYPE org_reference_status_changed_total counter\norg_reference_status_changed_total %d\n", a.referenceChanged.Load())
 		fmt.Fprintf(w, "# HELP org_uom_units_created_total Custom units of measure created.\n# TYPE org_uom_units_created_total counter\norg_uom_units_created_total %d\n", a.unitCreated.Load())
+		fmt.Fprintf(w, "# HELP org_uom_conversions_created_total Custom unit conversions created; idempotent replays are not counted.\n# TYPE org_uom_conversions_created_total counter\norg_uom_conversions_created_total %d\n", a.conversionCreated.Load())
 		fmt.Fprintf(w, "# HELP org_operating_units_created_total Operating units created.\n# TYPE org_operating_units_created_total counter\norg_operating_units_created_total %d\n", a.ouCreated.Load())
 		fmt.Fprintf(w, "# HELP org_operating_units_updated_total Operating unit updates that bumped the version.\n# TYPE org_operating_units_updated_total counter\norg_operating_units_updated_total %d\n", a.ouUpdated.Load())
 		fmt.Fprintf(w, "# HELP org_sites_created_total Sites created.\n# TYPE org_sites_created_total counter\norg_sites_created_total %d\n", a.siteCreated.Load())

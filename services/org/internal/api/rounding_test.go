@@ -238,3 +238,56 @@ func TestRoundCurrency_StoreBacked(t *testing.T) {
 		t.Errorf("list: %d %s", list.Code, list.Body)
 	}
 }
+
+func TestDeleteCurrencyRounding_PassesTheScopeToTheStore(t *testing.T) {
+	f := &fakeStore{}
+	r, _ := newRouter(f)
+	if rec := do(r, http.MethodDelete, chfCash, "", referenceDuties, true); rec.Code != http.StatusNoContent || rec.Body.Len() != 0 || f.roundingDeleteArgs != [3]string{"CHF", "cash", ""} {
+		t.Fatalf("tenant delete = %d %q, store got %v", rec.Code, rec.Body, f.roundingDeleteArgs)
+	}
+	if rec := do(r, http.MethodDelete, chfCash+"?legalEntityId="+entityA, "", referenceDuties, true); rec.Code != http.StatusNoContent || f.roundingDeleteArgs != [3]string{"CHF", "cash", entityA} {
+		t.Fatalf("legal-entity delete = %d, store got %v", rec.Code, f.roundingDeleteArgs)
+	}
+}
+
+func TestDeleteCurrencyRounding_RefusesInvalidInput(t *testing.T) {
+	tests := []struct{ name, path, field string }{
+		{"unknown purpose", "/v1/org/currencies/CHF/rounding-rules/retail", "purpose"},
+		{"purpose is case sensitive", "/v1/org/currencies/CHF/rounding-rules/Cash", "purpose"},
+		{"legal entity not a uuid", chfCash + "?legalEntityId=bogus", "legalEntityId"},
+		{"legal entity empty", chfCash + "?legalEntityId=", "legalEntityId"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := &fakeStore{}
+			r, _ := newRouter(f)
+			rec := do(r, http.MethodDelete, tt.path, "", referenceDuties, true)
+			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"`+tt.field+`"`) || f.roundingDeleteCalls != 0 {
+				t.Fatalf("got %d %s with %d store calls; want 400 naming %s and none", rec.Code, rec.Body, f.roundingDeleteCalls, tt.field)
+			}
+		})
+	}
+}
+
+func TestDeleteCurrencyRounding_AuthorizationAndStoreFailures(t *testing.T) {
+	f := &fakeStore{}
+	r, _ := newRouter(f)
+	if rec := do(r, http.MethodDelete, chfCash, "", "org.read", true); rec.Code != http.StatusForbidden {
+		t.Fatalf("without org.reference.write: %d", rec.Code)
+	}
+	if rec := do(r, http.MethodDelete, chfCash, "", referenceDuties, false); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("without a tenant: %d", rec.Code)
+	}
+	rec := do(r, http.MethodDelete, chfCash, "", referenceDuties, true, scopeHeader, entityA)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "AUTH-0003") || f.roundingDeleteCalls != 0 {
+		t.Fatalf("scoped caller: %d %s", rec.Code, rec.Body)
+	}
+	f.err = httpx.NewProblem(http.StatusNotFound, store.CodeRoundingNotFound, "no rule")
+	if rec := do(r, http.MethodDelete, chfCash, "", referenceDuties, true); rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "ORG-CUR-ROUNDING-NOT-FOUND") {
+		t.Fatalf("missing rule: %d %s", rec.Code, rec.Body)
+	}
+	f.err = errors.New("boom")
+	if rec := do(r, http.MethodDelete, chfCash, "", referenceDuties, true); rec.Code != http.StatusInternalServerError || !strings.Contains(rec.Body.String(), "COM-0500") {
+		t.Fatalf("store failure: %d %s", rec.Code, rec.Body)
+	}
+}

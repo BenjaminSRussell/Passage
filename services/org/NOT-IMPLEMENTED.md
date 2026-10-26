@@ -1,4 +1,4 @@
-# Not implemented in PSG-6 slice 24
+# Not implemented in PSG-6 slice 25
 
 | Deliverable or AC | Status | Reason |
 |---|---|---|
@@ -16,12 +16,12 @@
 | Deliverable 6: legal-entity copy from template, organization name translations | slice 2 of PSG-6 | copy needs Temporal (wave 4) and will sit behind an interface with an in-package fake; the rest is line budget; currency rounding rules are built (PSG-622) |
 | Event `hierarchyversion.activated` | built, timer deferred | emitted at publish, also for a future effective_from; ORG-J2 activation timer needs Temporal (wave 4); the kernel type regex allows three segments, so `org.hierarchy.version.activated` collapses to `org.hierarchyversion.activated` |
 | Regions for countries other than US, CA, IN, MX | not built | delivered through localization packs (§1.6.20 'others via pack') |
-| Conversion read API (inverse, round-trip check) and tenant-owned custom conversions | later slice of PSG-6 | convert over the persisted set, the unit read API, custom units and unit deactivation are built (PSG-624) |
 | In-memory conversion graph invalidated by event (§1.6.19 UoM conversion budget) | not built | `ConversionGraph` is read per request; the cache and its invalidation event wait for the Kafka relay (wave 4) |
-| ORG-UOM-UNIT-NOT-FOUND, ORG-UOM-CODE-DUPLICATE | not in catalog | new codes returned by the unit routes; the §1.6.18 catalog lists only ORG-UOM-NO-PATH |
+| ORG-UOM-UNIT-NOT-FOUND, ORG-UOM-CODE-DUPLICATE, ORG-UOM-CLASS-MISMATCH, ORG-UOM-CONVERSION-DUPLICATE, ORG-UOM-UNIT-INACTIVE | not in catalog | new codes returned by the unit and conversion routes; the §1.6.18 catalog lists only ORG-UOM-NO-PATH |
+| ORG-CUR-ROUNDING-NOT-FOUND | not in catalog | new code returned by the rounding rule delete; the §1.6.18 catalog lists only ORG-CUR-ROUNDING-UNIT |
+| `GET /v1/org/uom/conversions/{id}`, a `productSpecific` filter, edit or delete of a tenant conversion | not built | the report lists every conversion and rows are deactivated through their units (FR-6.8); product-specific conversions belong to wave 8 |
 | Product-specific conversions (`uom_conversion.product_id`) | handoff | the column exists and is always null; product-specific conversions belong to wave 8 (services/product) |
 | UoM classes energy, pressure, power, speed | built, beyond PRD | FR-6.8 lists eight classes; the AC-6.3 fixture needs these four |
-| Currency rounding rule delete (revert to fallback) | later slice of PSG-6 | rules can be created and changed (PSG-622); removing a row so the platform default applies again is not built |
 | Outbox relay (Debezium connector for `outbox`) | not built | Kafka and Debezium are wave 4; `outbox` and `idempotency_keys` tables exist with RLS, only `outbox` is written |
 | Jobs ORG-J1 to ORG-J6, Debezium connector; demo seed `ORG_SEED_PACKAGE=demo-manufacturer` | not built | Temporal and Kafka are wave 4; the seed needs sites and warehouses |
 | Argo CD Application, ingress, image registry entry, Kubernetes Secret `org-db`, database `passage_org` and `passage_app` role | handoff | `deploy/` and CI are outside wave 6 ownership |

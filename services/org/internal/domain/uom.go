@@ -69,6 +69,24 @@ func Convert(convs []Conversion, from, to string, qty decimal.Decimal) (decimal.
 
 func Display(qty decimal.Decimal, precision int32) decimal.Decimal { return qty.Round(precision) }
 
+func Inverse(c Conversion) (factor, offset decimal.Decimal) {
+	if c.Factor.IsZero() {
+		return decimal.Zero, decimal.Zero
+	}
+	factor = decimal.NewFromInt(1).DivRound(c.Factor, divisionPrecision)
+	offset = c.Offset.Neg().DivRound(c.Factor, divisionPrecision)
+	return Display(factor, DisplayPrecision), Display(offset, DisplayPrecision)
+}
+
+func RoundTrip(c Conversion) bool {
+	if c.Factor.IsZero() {
+		return false
+	}
+	one := decimal.NewFromInt(1)
+	back := step{c, true}.apply(step{c, false}.apply(one))
+	return Display(back, DisplayPrecision).Equal(one)
+}
+
 func StandardConversions() []Conversion {
 	rows := []struct{ from, to, class, factor, offset string }{
 		{"kg", "g", "mass", "1000", "0"},
