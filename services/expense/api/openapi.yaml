@@ -1,0 +1,195 @@
+openapi: 3.1.0
+info:
+  title: expense
+  version: 0.1.0
+  description: >-
+    Expense management, slice 1 of PSG-43. Stateless previews: policy evaluation of report
+    lines against the default rule set (receipts at 25.00 and up, alcohol blocked, submission
+    later than 60 days blocked, duplicates of merchant, amount and date blocked, meals over
+    75.00 a day without attendees needing justification), oldest-first cash-advance settlement
+    (BR-43.9) and travel requisition variance (BR-43.13). Nothing is persisted, so no call
+    takes an Idempotency-Key. Money is a decimal string, never a float.
+    Error codes: COM-0001, AUTH-0001, AUTH-0003, COM-0500. Result codes (in bodies, not
+    errors): EXP-POL-001, EXP-POL-002, EXP-REC-001, EXP-TR-001, EXP-ADV-003.
+servers:
+  - url: https://app.local.passage.dev
+paths:
+  /v1/expense/report-evaluations:
+    post:
+      operationId: evaluateReport
+      x-passage-duty: expense.report.write
+      description: >-
+        Evaluates every line at the submit date, PER_DAY rules and duplicate detection across
+        the report's lines. submittable is false while any BLOCK applies or any REQUIRE_* is
+        unsatisfied. Line ids must be unique (400 COM-0001).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EvaluationRequest' }
+      responses:
+        '200':
+          description: Results per rule that applied, submittable flag and totals (total = reimbursable + companyPaid).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EvaluationResponse' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/expense/cash-advance-settlements:
+    post:
+      operationId: previewAdvanceSettlement
+      x-passage-duty: expense.report.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SettleRequest' }
+      responses:
+        '200':
+          description: Per-advance application, open balance and status, total applied and the AP invoice amount.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Settlement' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/expense/travel-variances:
+    post:
+      operationId: checkRequisitionVariance
+      x-passage-duty: expense.report.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VarianceRequest' }
+      responses:
+        '200':
+          description: requiresJustification is true when the actual total exceeds estimate × (1 + tolerance). code EXP-TR-001 accompanies a true result.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VarianceResponse' }
+        default: { $ref: '#/components/responses/Problem' }
+  /readyz:
+    get:
+      operationId: readyz
+      x-passage-duty: public
+      responses:
+        '200': { description: Database reachable. }
+        '503': { description: Database unreachable. }
+  /healthz:
+    get:
+      operationId: healthz
+      x-passage-duty: public
+      responses:
+        '200': { description: Process is alive. }
+components:
+  responses:
+    Problem:
+      description: RFC 9457 problem details.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties:
+        type: { type: string, example: 'https://passage.dev/problems/COM-0001' }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string }
+        traceId: { type: string }
+        errors: { type: object, additionalProperties: { type: string } }
+    ExpenseLine:
+      type: object
+      required: [id, category, txnDate, amount]
+      additionalProperties: false
+      properties:
+        id: { type: string, maxLength: 64 }
+        category: { type: string, maxLength: 32, example: MEALS }
+        txnDate: { type: string, format: date }
+        amount: { type: string, description: Non-negative decimal in the accounting currency. }
+        merchant: { type: string, maxLength: 200 }
+        attendees: { type: integer, minimum: 0, maximum: 500 }
+        hasReceipt: { type: boolean }
+        justification: { type: string, maxLength: 500 }
+        paidBy: { type: string, enum: [EMPLOYEE, COMPANY_CARD] }
+    EvaluationRequest:
+      type: object
+      required: [submitDate, lines]
+      additionalProperties: false
+      properties:
+        submitDate: { type: string, format: date }
+        lines: { type: array, minItems: 1, maxItems: 500, items: { $ref: '#/components/schemas/ExpenseLine' } }
+    PolicyResult:
+      type: object
+      required: [lineId, ruleId, ruleVersion, outcome, code, message, satisfied]
+      properties:
+        lineId: { type: string }
+        ruleId: { type: string, example: EXP-RCPT-025 }
+        ruleVersion: { type: integer }
+        outcome: { type: string, enum: [WARN, BLOCK, REQUIRE_JUSTIFICATION, REQUIRE_RECEIPT] }
+        code: { type: string, enum: [EXP-POL-001, EXP-POL-002, EXP-REC-001], description: 'BLOCK and REQUIRE_JUSTIFICATION EXP-POL-001, WARN EXP-POL-002, REQUIRE_RECEIPT EXP-REC-001.' }
+        message: { type: string }
+        satisfied: { type: boolean }
+    EvaluationResponse:
+      type: object
+      required: [submittable, results, totals]
+      properties:
+        submittable: { type: boolean }
+        results: { type: array, items: { $ref: '#/components/schemas/PolicyResult' } }
+        totals:
+          type: object
+          required: [total, reimbursable, companyPaid]
+          properties:
+            total: { type: string }
+            reimbursable: { type: string }
+            companyPaid: { type: string }
+    Advance:
+      type: object
+      required: [id, paidOn, paid]
+      additionalProperties: false
+      description: A PAID cash advance of the worker in the report currency.
+      properties:
+        id: { type: string, maxLength: 64 }
+        paidOn: { type: string, format: date }
+        paid: { type: string }
+        cleared: { type: string, description: 'Already settled, returned, recovered or written off; at most paid. Default 0.' }
+    SettleRequest:
+      type: object
+      required: [reimbursableTotal]
+      additionalProperties: false
+      properties:
+        advances: { type: array, maxItems: 50, items: { $ref: '#/components/schemas/Advance' } }
+        reimbursableTotal: { type: string }
+    Settlement:
+      type: object
+      required: [applications, applied, apInvoiceAmount]
+      description: Advances applied oldest first; the AP invoice carries the rest of the reimbursable total.
+      properties:
+        applications:
+          type: array
+          items:
+            type: object
+            required: [advanceId, applied, openAfter, status]
+            properties:
+              advanceId: { type: string }
+              applied: { type: string }
+              openAfter: { type: string }
+              status: { type: string, enum: [PAID, PARTIALLY_SETTLED, SETTLED] }
+        applied: { type: string }
+        apInvoiceAmount: { type: string }
+        code: { type: string, example: EXP-ADV-003, description: Present when anything was applied. }
+    VarianceRequest:
+      type: object
+      required: [estimatedTotal, actualTotal]
+      additionalProperties: false
+      properties:
+        estimatedTotal: { type: string }
+        actualTotal: { type: string }
+        tolerancePct: { type: string, description: Percent from 0 to 100; default 10. }
+    VarianceResponse:
+      type: object
+      required: [requiresJustification]
+      properties:
+        requiresJustification: { type: boolean }
+        code: { type: string, example: EXP-TR-001 }

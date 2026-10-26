@@ -1,0 +1,11 @@
+asyncapi: 3.0.0
+info:
+  title: expense
+  version: 0.1.0
+  description: >-
+    No events are published by slice 1 of PSG-43. Previews are stateless. Planned events
+    (PRD 8.43.5, not implemented): dev.passage.expense.report.approved.v1,
+    dev.passage.expense.policy.violated.v1 and dev.passage.expense.cash-advance.paid.v1.
+channels: {}
+components:
+  messages: {}

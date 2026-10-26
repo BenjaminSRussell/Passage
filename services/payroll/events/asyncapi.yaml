@@ -1,0 +1,14 @@
+asyncapi: 3.0.0
+info:
+  title: payroll
+  version: 0.1.0
+  description: >-
+    No events are published by slice 1 of PSG-43. The calculation is a stateless preview and
+    the run lifecycle is not persisted yet. Planned events (PRD 8.43.5, not implemented):
+    dev.passage.payroll.run.posted.v1, dev.passage.payroll.statement.finalized.v1,
+    dev.passage.payroll.claim.created.v1, dev.passage.payroll.statutory-aggregate.closed.v1.
+    The kernel type rule allows three segments after the namespace, so run.posted maps to
+    payroll.run.posted and statement.finalized to payroll.statement.finalized when they land.
+channels: {}
+components:
+  messages: {}

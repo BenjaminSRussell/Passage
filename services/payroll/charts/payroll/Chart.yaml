@@ -1,0 +1,6 @@
+apiVersion: v2
+name: payroll
+description: Passage payroll engine (gross-to-net, rule sets, pay statements)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

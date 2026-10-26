@@ -1,0 +1,177 @@
+openapi: 3.1.0
+info:
+  title: payroll
+  version: 0.1.0
+  description: >-
+    Payroll engine, slice 1 of PSG-43. Serves a stateless gross-to-net preview under a
+    versioned rule set (US-FED-2025.1: Pub 15-T Worksheet 1A annual percentage method for
+    every filing status, standard and Step 2 checkbox schedules, 2020+ and pre-2020 W-4;
+    Social Security with the wage base cap, Medicare with the employee-only additional tax,
+    FUTA, Colorado flat state tax), supplemental withholding for off-cycle bonuses, deduction
+    arrears (BR-43.10) and employer costs. Nothing is persisted or posted, so the call takes
+    no Idempotency-Key. Money is a decimal string with two places, never a float.
+    Error codes: COM-0001, AUTH-0001, AUTH-0003, PAY-RULE-001, PAY-RUN-006, COM-0500.
+servers:
+  - url: https://app.local.passage.dev
+paths:
+  /v1/payroll/calculations:
+    post:
+      operationId: calculatePayStatement
+      x-passage-duty: payroll.run.maintain
+      description: >-
+        Gross-to-net for one worker and one period. 401 AUTH-0001 without a valid tenant,
+        403 AUTH-0003 without the duty, 400 COM-0001 on validation (including pre-tax above
+        gross), 422 PAY-RULE-001 when no published rule set, schedule or state rate covers
+        the inputs.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CalculationRequest' }
+      responses:
+        '200':
+          description: The statement, with a hash over its lines and a ruleVersion on every line.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Statement' }
+        default: { $ref: '#/components/responses/Problem' }
+  /readyz:
+    get:
+      operationId: readyz
+      x-passage-duty: public
+      responses:
+        '200': { description: Database reachable. }
+        '503': { description: Database unreachable. }
+  /healthz:
+    get:
+      operationId: healthz
+      x-passage-duty: public
+      responses:
+        '200': { description: Process is alive. }
+components:
+  responses:
+    Problem:
+      description: RFC 9457 problem details.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties:
+        type: { type: string, example: 'https://passage.dev/problems/PAY-RULE-001' }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string }
+        traceId: { type: string }
+        errors: { type: object, additionalProperties: { type: string } }
+    Amount:
+      type: object
+      required: [code, amount]
+      properties:
+        code: { type: string, maxLength: 32 }
+        amount: { type: string, description: Non-negative decimal string. Never a float. }
+    Deduction:
+      type: object
+      required: [code, amount, arrearsPolicy]
+      additionalProperties: false
+      properties:
+        code: { type: string, maxLength: 32 }
+        amount: { type: string }
+        priority: { type: integer, description: Lower is taken first. }
+        arrearsPolicy: { type: string, enum: [ARREARS, NO_ARREARS, PARTIAL] }
+        arrearsBalance: { type: string }
+        recoveryLimitPct: { type: string, description: Fraction of the normal deduction, default 1 (100%). }
+    PreTax:
+      type: object
+      required: [code, amount]
+      additionalProperties: false
+      properties:
+        code: { type: string, maxLength: 32 }
+        amount: { type: string }
+        reducesFica: { type: boolean, default: false, description: 'True for Section 125 medical or cafeteria-plan HSA (reduces FICA and FUTA wages); false for a 401(k).' }
+    W4:
+      type: object
+      required: [filingStatus]
+      additionalProperties: false
+      description: Form W-4. Step 3 and Step 4(a)/(b) amounts are annual; extraWithholding is per period.
+      properties:
+        filingStatus: { type: string, enum: [SINGLE, MARRIED_FILING_JOINTLY, MARRIED_FILING_SEPARATELY, HEAD_OF_HOUSEHOLD], description: 'A legacy (pre-2020) W-4 accepts SINGLE or MARRIED_FILING_JOINTLY only.' }
+        legacy: { type: boolean, default: false, description: Form W-4 from 2019 or earlier. }
+        allowances: { type: integer, minimum: 0, maximum: 99, description: Legacy W-4 only. }
+        multipleJobs: { type: boolean, default: false, description: Step 2 checkbox. }
+        dependentsCredit: { type: string, description: Step 3, annual. }
+        otherIncome: { type: string, description: Step 4(a), annual. }
+        deductions: { type: string, description: Step 4(b), annual. }
+        extraWithholding: { type: string, description: Step 4(c), per pay period. }
+    CalculationRequest:
+      type: object
+      required: [runType, country, taxYear, periodsPerYear, w4, earnings]
+      additionalProperties: false
+      properties:
+        workerId: { type: string, format: uuid }
+        runType: { type: string, enum: [REGULAR, OFF_CYCLE_BONUS] }
+        country: { type: string, example: US }
+        taxYear: { type: integer, example: 2025 }
+        periodsPerYear: { type: integer, enum: [12, 24, 26, 52] }
+        w4: { $ref: '#/components/schemas/W4' }
+        state: { type: string, description: Two-letter state code with a flat rate in the pack, e.g. CO. }
+        earnings: { type: array, minItems: 1, items: { $ref: '#/components/schemas/Amount' } }
+        preTax: { type: array, items: { $ref: '#/components/schemas/PreTax' } }
+        postTax: { type: array, items: { $ref: '#/components/schemas/Deduction' } }
+        employerMatch:
+          type: object
+          required: [code, percent, capRate]
+          properties:
+            code: { type: string, description: Pre-tax code the match applies to. }
+            percent: { type: string, description: Fraction of the employee contribution, e.g. 0.5. }
+            capRate: { type: string, description: Fraction of gross the contribution is capped at, e.g. 0.06. }
+        ytd:
+          type: object
+          properties:
+            ficaWages: { type: string }
+            futaWages: { type: string }
+            supplementalWages: { type: string }
+    Line:
+      type: object
+      required: [code, kind, amount, basisAmount, ruleVersion]
+      properties:
+        code: { type: string }
+        kind: { type: string, enum: [EARNING, PRETAX, TAX, POSTTAX, EMPLOYER] }
+        amount: { type: string }
+        basisAmount: { type: string }
+        ruleVersion: { type: string, example: US-FED-2025.1 }
+        bracket:
+          type: object
+          description: The Pub 15-T schedule row behind FED_WH (absent on other lines and on supplemental withholding).
+          properties:
+            schedule: { type: string, enum: [STANDARD, CHECKBOX] }
+            filingStatus: { type: string }
+            over: { type: string }
+            rate: { type: string }
+            baseTax: { type: string }
+            adjustedAnnualWage: { type: string }
+    ArrearsEntry:
+      type: object
+      properties:
+        code: { type: string }
+        created: { type: string }
+        recovered: { type: string }
+        balance: { type: string }
+    Statement:
+      type: object
+      required: [ruleSet, hash, gross, taxableWagesFed, ficaWages, net, employerCost, lines, arrears]
+      properties:
+        workerId: { type: string, format: uuid }
+        ruleSet: { type: string, example: US-FED-2025.1 }
+        hash: { type: string, description: SHA-256 hex of the lines. }
+        gross: { type: string }
+        taxableWagesFed: { type: string }
+        ficaWages: { type: string }
+        net: { type: string }
+        employerCost: { type: string }
+        lines: { type: array, items: { $ref: '#/components/schemas/Line' } }
+        arrears: { type: array, items: { $ref: '#/components/schemas/ArrearsEntry' } }
