@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: org
   version: 0.13.0
-  description: Organization service. Covers legal entities, operating units, sites, warehouses, locations, postal addresses with purposes, fiscal calendars with idempotent year generation and the period read, hierarchy types and draft hierarchy versions with validated node sets (error codes ORG-HIER-CYCLE, ORG-HIER-MULTI-ROOT, ORG-HIER-DUPLICATE-NODE, ORG-HIER-PARENT-UNKNOWN, ORG-HIER-DEPTH, ORG-HIER-SIZE, ORG-HIER-NODE-UNKNOWN, ORG-HIER-TYPE-NOT-FOUND, ORG-HIER-TYPE-CODE-DUPLICATE, ORG-HIER-VERSION-NOT-FOUND, ORG-HIER-DRAFT-EXISTS, ORG-HIER-VERSION-IMMUTABLE, ORG-HIER-OVERLAP, ORG-HIER-BACKDATE-DUTY, ORG-HIER-NO-VERSION, ORG-HIER-NODE-ABSENT, ORG-HIER-MAKER-CHECKER) with the version list, publish, supersede, the closure table, the as-of query and the version comparison, unit-of-measure conversion, the platform-owned reference sets (countries, currencies, regions, languages) with tenant-level deactivation, and currency rounding rules with the round route (error code ORG-CUR-ROUNDING-UNIT).
+  description: Organization service. Covers legal entities, operating units, sites, warehouses, locations, postal addresses with purposes, fiscal calendars with idempotent year generation and the period read, hierarchy types and draft hierarchy versions with validated node sets (error codes ORG-HIER-CYCLE, ORG-HIER-MULTI-ROOT, ORG-HIER-DUPLICATE-NODE, ORG-HIER-PARENT-UNKNOWN, ORG-HIER-DEPTH, ORG-HIER-SIZE, ORG-HIER-NODE-UNKNOWN, ORG-HIER-TYPE-NOT-FOUND, ORG-HIER-TYPE-CODE-DUPLICATE, ORG-HIER-VERSION-NOT-FOUND, ORG-HIER-DRAFT-EXISTS, ORG-HIER-VERSION-IMMUTABLE, ORG-HIER-OVERLAP, ORG-HIER-BACKDATE-DUTY, ORG-HIER-NO-VERSION, ORG-HIER-NODE-ABSENT, ORG-HIER-MAKER-CHECKER) with the version list, publish, supersede, the closure table, the as-of query and the version comparison, unit-of-measure conversion, the platform-owned reference sets (countries, currencies, regions, languages) with tenant-level deactivation, currency rounding rules with the round route and the rule delete (error codes ORG-CUR-ROUNDING-UNIT, ORG-CUR-ROUNDING-NOT-FOUND), and the unit conversions report with tenant-owned conversions (error codes ORG-UOM-CLASS-MISMATCH, ORG-UOM-CONVERSION-DUPLICATE, ORG-UOM-UNIT-INACTIVE).
 servers:
   - url: https://app.local.passage.dev
 paths:
@@ -652,6 +652,19 @@ paths:
         '404': { description: ORG-REF-NOT-FOUND for an unknown currency; ORG-LE-NOT-FOUND for a legal entity the tenant does not have., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: ORG-CUR-ROUNDING-UNIT when the unit is not a power of ten no finer than the currency minor unit or 5 or 25 times one; ORG-LE-REFERENCE-INACTIVE when the currency is inactive for the tenant., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         default: { $ref: '#/components/responses/Problem' }
+    delete:
+      operationId: deleteCurrencyRoundingRule
+      x-passage-duty: org.reference.write
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string, pattern: '^[A-Z]{3}$' } }
+        - { name: purpose, in: path, required: true, schema: { type: string, enum: [general, price, purchase, sales, tax, cash] } }
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid }, description: Deletes the legal-entity row instead of the tenant row. }
+      responses:
+        '204': { description: The row is removed, so the next fallback applies - legal entity, then tenant, then the currency's minor unit with half_even. One currencyrounding.changed event carries the rule now in force. Rejected with 403 AUTH-0003 for legal-entity-scoped callers. }
+        '400': { description: COM-0001 naming purpose or legalEntityId., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: ORG-CUR-ROUNDING-NOT-FOUND when no such rule exists; ORG-REF-NOT-FOUND for an unknown currency; ORG-LE-NOT-FOUND for an unknown legal entity., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/org/currencies/{code}/round:
     get:
       operationId: roundCurrencyAmount
@@ -810,6 +823,41 @@ paths:
           description: The unit with its new status for the caller's tenant; platform units change for the tenant only. Rejected for legal-entity-scoped callers. Units are never deleted.
           content: { application/json: { schema: { $ref: '#/components/schemas/Unit' } } }
         '404': { description: ORG-UOM-UNIT-NOT-FOUND., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/uom/conversions:
+    get:
+      operationId: listUomConversions
+      x-passage-duty: org.read
+      parameters:
+        - { name: class, in: query, schema: { type: string, enum: [quantity, each, mass, length, volume, area, time, temperature, energy, pressure, power, speed] } }
+        - { name: unit, in: query, schema: { type: string }, description: Matches either side; case-sensitive. }
+        - { name: status, in: query, schema: { type: string, enum: [active, inactive] } }
+      responses:
+        '200':
+          description: The unit conversions report - every platform and tenant conversion visible to the caller, ordered by from code then to code. status is inactive when either unit is inactive for the caller; such rows are not used by convert. Inverse values are display values rounded to 12 decimals; the stored row is never rewritten.
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/UomConversion' } } } }
+        '400': { description: COM-0001 naming class or status., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: createUomConversion
+      x-passage-duty: org.reference.write
+      parameters:
+        - { name: Idempotency-Key, in: header, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateUomConversion' } } }
+      responses:
+        '201':
+          description: Tenant-owned conversion created, or the original conversion on an Idempotency-Key replay. Rejected with 403 AUTH-0003 for legal-entity-scoped callers.
+          content: { application/json: { schema: { $ref: '#/components/schemas/UomConversion' } } }
+        '400': { description: COM-0001 naming fromCode, toCode, factor or offset., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: ORG-UOM-UNIT-NOT-FOUND., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: ORG-UOM-CONVERSION-DUPLICATE when the unordered pair is already converted by a platform or tenant row., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: ORG-UOM-UNIT-INACTIVE with a field error on the unit; ORG-UOM-CLASS-MISMATCH when the units are in different classes; idempotency_key_reuse when the key was used with a different body., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         default: { $ref: '#/components/responses/Problem' }
   /healthz:
     get:
@@ -1080,6 +1128,31 @@ components:
       type: object
       required: [from, to, quantity, displayQuantity]
       properties: { from: { type: string }, to: { type: string }, quantity: { type: string, description: Decimal string rounded to 12 decimals }, displayQuantity: { type: string, description: Decimal string rounded to the target unit's decimal precision } }
+    UomConversion:
+      type: object
+      required: [id, fromCode, toCode, class, factor, offset, inverseFactor, inverseOffset, roundTrip, system, productId, status]
+      properties:
+        id: { type: string, format: uuid }
+        fromCode: { type: string }
+        toCode: { type: string }
+        class: { type: string }
+        factor: { type: string, description: Decimal string, numeric(28,12) }
+        offset: { type: string, description: Decimal string, numeric(28,12) }
+        inverseFactor: { type: string, description: 1/factor rounded to 12 decimals, for display only }
+        inverseOffset: { type: string, description: -offset/factor rounded to 12 decimals, for display only }
+        roundTrip: { type: boolean, description: True when converting 1 from the first to the second unit and back equals 1 at 12 decimals }
+        system: { type: boolean }
+        productId: { type: [string, 'null'], description: Always null; product-specific conversions belong to the product wave }
+        status: { type: string, enum: [active, inactive] }
+    CreateUomConversion:
+      type: object
+      additionalProperties: false
+      required: [fromCode, toCode, factor]
+      properties:
+        fromCode: { type: string, pattern: '^[A-Za-z0-9/%]{1,10}$' }
+        toCode: { type: string, pattern: '^[A-Za-z0-9/%]{1,10}$', description: Must differ from fromCode. }
+        factor: { type: string, pattern: '^[0-9]{1,16}(\.[0-9]{1,12})?$', description: Greater than 0. }
+        offset: { type: [string, 'null'], pattern: '^-?[0-9]{1,16}(\.[0-9]{1,12})?$', description: Defaults to "0". }
     Unit:
       type: object
       required: [code, name, class, decimalPrecision, system, status]

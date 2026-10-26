@@ -73,6 +73,11 @@ type fakeStore struct {
 	unitCreated         store.Unit
 	unitCreateKey       string
 	unitStatusCalls     []string
+	conversions         []store.Conversion
+	conversionKeys      map[string]store.Conversion
+	conversionCreates   int
+	roundingDeleteArgs  [3]string
+	roundingDeleteCalls int
 }
 
 func (f *fakeStore) seedUnits() {
@@ -159,7 +164,7 @@ func (f *fakeStore) ConversionGraph(context.Context) ([]domain.Conversion, map[s
 		}
 	}
 	var convs []domain.Conversion
-	for _, c := range domain.StandardConversions() {
+	for _, c := range f.allConversions() {
 		_, from := precision[c.From]
 		_, to := precision[c.To]
 		if from && to {
@@ -167,6 +172,92 @@ func (f *fakeStore) ConversionGraph(context.Context) ([]domain.Conversion, map[s
 		}
 	}
 	return convs, precision, nil
+}
+
+func (f *fakeStore) allConversions() []domain.Conversion {
+	convs := domain.StandardConversions()
+	for _, c := range f.conversions {
+		convs = append(convs, domain.Conversion{From: c.FromCode, To: c.ToCode, Class: c.Class, Factor: c.Factor, Offset: c.Offset})
+	}
+	return convs
+}
+
+func (f *fakeStore) ListConversions(_ context.Context, filter store.ConversionFilter) ([]store.Conversion, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	f.seedUnits()
+	items := []store.Conversion{}
+	for _, c := range domain.StandardConversions() {
+		items = append(items, store.Conversion{ID: "sys-" + c.From + "-" + c.To, FromCode: c.From, ToCode: c.To, Class: c.Class, Factor: c.Factor, Offset: c.Offset, System: true})
+	}
+	items = append(items, f.conversions...)
+	out := []store.Conversion{}
+	for _, c := range items {
+		from, errFrom := f.unit(c.FromCode)
+		to, errTo := f.unit(c.ToCode)
+		if errFrom != nil || errTo != nil {
+			continue
+		}
+		c.Status = "inactive"
+		if from.Status == "active" && to.Status == "active" {
+			c.Status = "active"
+		}
+		if (filter.Class == "" || c.Class == filter.Class) && (filter.Unit == "" || c.FromCode == filter.Unit || c.ToCode == filter.Unit) && (filter.Status == "" || c.Status == filter.Status) {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeStore) CreateConversion(_ context.Context, in store.Conversion, key string) (store.Conversion, bool, error) {
+	if f.err != nil {
+		return store.Conversion{}, false, f.err
+	}
+	if replay, ok := f.conversionKeys[key]; ok && key != "" {
+		if replay.FromCode != in.FromCode || replay.ToCode != in.ToCode || !replay.Factor.Equal(in.Factor) || !replay.Offset.Equal(in.Offset) {
+			return store.Conversion{}, false, httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeIdempotencyReuse, "reuse")
+		}
+		return replay, false, nil
+	}
+	from, err := f.unit(in.FromCode)
+	if err != nil {
+		return store.Conversion{}, false, err
+	}
+	to, err := f.unit(in.ToCode)
+	if err != nil {
+		return store.Conversion{}, false, err
+	}
+	switch {
+	case from.Status != "active" || to.Status != "active":
+		return store.Conversion{}, false, httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeUnitInactive, "inactive")
+	case from.Class != to.Class:
+		return store.Conversion{}, false, httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeClassMismatch, "class")
+	}
+	for _, c := range f.allConversions() {
+		if (c.From == in.FromCode && c.To == in.ToCode) || (c.From == in.ToCode && c.To == in.FromCode) {
+			return store.Conversion{}, false, httpx.NewProblem(http.StatusConflict, store.CodeConversionDuplicate, "duplicate")
+		}
+	}
+	in.ID, in.Class, in.Status = fmt.Sprintf("conv-%d", len(f.conversions)+1), from.Class, "active"
+	f.conversions = append(f.conversions, in)
+	f.conversionCreates++
+	if key != "" {
+		if f.conversionKeys == nil {
+			f.conversionKeys = map[string]store.Conversion{}
+		}
+		f.conversionKeys[key] = in
+	}
+	return in, true, nil
+}
+
+func (f *fakeStore) DeleteCurrencyRounding(_ context.Context, currency, purpose string, legalEntityID *string) error {
+	f.roundingDeleteCalls++
+	f.roundingDeleteArgs = [3]string{currency, purpose}
+	if legalEntityID != nil {
+		f.roundingDeleteArgs[2] = *legalEntityID
+	}
+	return f.err
 }
 
 func (f *fakeStore) reference(kind store.ReferenceKind, code string) (store.ReferenceItem, bool) {

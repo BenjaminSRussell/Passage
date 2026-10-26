@@ -260,3 +260,86 @@ func TestCurrencyRounding_ScopedCallerSeesTenantRowsAndItsOwnEntityOnly(t *testi
 	}
 	assertRule(t, mustResolve(t, s, scoped, "CHF", "cash", a.ID), "1", domain.Up, store.RoundingSourceLegalEntity)
 }
+
+func TestCurrencyRounding_DeleteTenantRowRevertsToDefaultAndEmitsTheRuleInForce(t *testing.T) {
+	s, ctx, pool := lifecycleStore(t)
+	mustPut(t, s, ctx, rule(t, "CHF", "cash", "0.05", "half_up", nil))
+	assertRule(t, mustResolve(t, s, ctx, "CHF", "cash", ""), "0.05", domain.HalfUp, store.RoundingSourceTenant)
+	if err := s.DeleteCurrencyRounding(ctx, "CHF", "cash", nil); err != nil {
+		t.Fatal(err)
+	}
+	assertRule(t, mustResolve(t, s, ctx, "CHF", "cash", ""), "0.01", domain.HalfEven, store.RoundingSourceDefault)
+	events := roundingEvents(t, ctx, pool)
+	want := map[string]any{"currency_code": "CHF", "purpose": "cash", "legal_entity_id": nil, "unit": "0.01", "method": "half_even"}
+	if len(events) != 2 || !equalPayload(events[1], want) {
+		t.Fatalf("events = %v; want a second payload %v", events, want)
+	}
+	if err := s.DeleteCurrencyRounding(ctx, "CHF", "cash", nil); problemCode(t, err) != store.CodeRoundingNotFound {
+		t.Fatalf("second delete = %v; want %s", err, store.CodeRoundingNotFound)
+	}
+	if got := roundingEvents(t, ctx, pool); len(got) != 2 {
+		t.Fatalf("outbox rows after the refused delete = %d; want 2", len(got))
+	}
+}
+
+func TestCurrencyRounding_DeleteLegalEntityRowFallsBackToTheTenantRow(t *testing.T) {
+	s, ctx, pool := lifecycleStore(t)
+	a := mustCreate(t, s, ctx, newEntity("EA"))
+	b := mustCreate(t, s, ctx, newEntity("EB"))
+	mustPut(t, s, ctx, rule(t, "CHF", "cash", "0.05", "half_up", nil))
+	mustPut(t, s, ctx, rule(t, "CHF", "cash", "1", "up", &a.ID))
+	mustPut(t, s, ctx, rule(t, "CHF", "cash", "0.5", "down", &b.ID))
+	if err := s.DeleteCurrencyRounding(ctx, "CHF", "cash", &a.ID); err != nil {
+		t.Fatal(err)
+	}
+	assertRule(t, mustResolve(t, s, ctx, "CHF", "cash", a.ID), "0.05", domain.HalfUp, store.RoundingSourceTenant)
+	assertRule(t, mustResolve(t, s, ctx, "CHF", "cash", b.ID), "0.5", domain.Down, store.RoundingSourceLegalEntity)
+	assertRule(t, mustResolve(t, s, ctx, "CHF", "cash", ""), "0.05", domain.HalfUp, store.RoundingSourceTenant)
+	events := roundingEvents(t, ctx, pool)
+	want := map[string]any{"currency_code": "CHF", "purpose": "cash", "legal_entity_id": a.ID, "unit": "0.05", "method": "half_up"}
+	if len(events) != 4 || !equalPayload(events[3], want) {
+		t.Fatalf("events = %v; want a fourth payload %v", events, want)
+	}
+	if err := s.DeleteCurrencyRounding(ctx, "CHF", "cash", &a.ID); problemCode(t, err) != store.CodeRoundingNotFound {
+		t.Fatalf("second delete = %v; want %s", err, store.CodeRoundingNotFound)
+	}
+	if err := s.DeleteCurrencyRounding(ctx, "CHF", "cash", &b.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteCurrencyRounding(ctx, "CHF", "cash", nil); err != nil {
+		t.Fatal(err)
+	}
+	if events = roundingEvents(t, ctx, pool); len(events) != 6 || events[5]["unit"] != "0.01" || events[5]["legal_entity_id"] != nil {
+		t.Fatalf("tenant delete after the entity rows: events = %v", events)
+	}
+}
+
+func TestCurrencyRounding_DeleteRefusalsAndTenantIsolation(t *testing.T) {
+	s, ctx, pool := lifecycleStore(t)
+	other := mustCreate(t, s, principalContext(2), newEntity("OT"))
+	mustPut(t, s, ctx, rule(t, "CHF", "cash", "0.05", "half_up", nil))
+	tests := []struct {
+		name     string
+		ctx      context.Context
+		currency string
+		entity   *string
+		code     string
+	}{
+		{"unknown currency", ctx, "XXQ", nil, store.CodeReferenceNotFound},
+		{"another tenant's legal entity", ctx, "CHF", &other.ID, store.CodeLegalEntityNotFound},
+		{"malformed legal entity id", ctx, "CHF", ptr("bogus"), store.CodeLegalEntityNotFound},
+		{"no entity row", ctx, "CHF", ptr(mustCreate(t, s, ctx, newEntity("EA")).ID), store.CodeRoundingNotFound},
+		{"another tenant's rule", principalContext(2), "CHF", nil, store.CodeRoundingNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := s.DeleteCurrencyRounding(tt.ctx, tt.currency, "cash", tt.entity); problemCode(t, err) != tt.code {
+				t.Fatalf("delete = %v; want %s", err, tt.code)
+			}
+		})
+	}
+	assertRule(t, mustResolve(t, s, ctx, "CHF", "cash", ""), "0.05", domain.HalfUp, store.RoundingSourceTenant)
+	if events := roundingEvents(t, ctx, pool); len(events) != 1 {
+		t.Fatalf("outbox rows after refusals = %d; want 1", len(events))
+	}
+}

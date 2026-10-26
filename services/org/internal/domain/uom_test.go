@@ -99,3 +99,58 @@ func TestConvert_ZeroFactorAndThreeHopsAreUnreachable(t *testing.T) {
 		t.Fatalf("two hops must work: %v", err)
 	}
 }
+
+func csvRows(t *testing.T, path string) [][]string {
+	t.Helper()
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	rows, err := csv.NewReader(f).ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rows[1:]
+}
+
+func TestInverse(t *testing.T) {
+	tests := []struct {
+		name, factor, offset, wantFactor, wantOffset string
+	}{
+		{"kg to g", "1000", "0", "0.001", "0"},
+		{"celsius to fahrenheit", "1.8", "32", "0.555555555556", "-17.777777777778"},
+		{"celsius to kelvin", "1", "273.15", "1", "-273.15"},
+		{"non terminating", "3", "0", "0.333333333333", "0"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			factor, offset := domain.Inverse(domain.Conversion{Factor: dec(t, tc.factor), Offset: dec(t, tc.offset)})
+			if factor.String() != tc.wantFactor || offset.String() != tc.wantOffset {
+				t.Fatalf("got %s, %s; want %s, %s", factor, offset, tc.wantFactor, tc.wantOffset)
+			}
+		})
+	}
+}
+
+func TestRoundTrip(t *testing.T) {
+	var convs []domain.Conversion
+	for _, r := range csvRows(t, "../../testdata/uom-pairs.csv") {
+		convs = append(convs, domain.Conversion{From: r[0], To: r[1], Factor: dec(t, r[2]), Offset: dec(t, r[3])})
+	}
+	seeded := csvRows(t, "../../migrations/reference/uom-conversions.csv")
+	if len(convs) != 50 || len(seeded) != 49 {
+		t.Fatalf("fixtures hold %d pairs and %d seeded rows; want 50 and 49", len(convs), len(seeded))
+	}
+	for _, r := range seeded {
+		convs = append(convs, domain.Conversion{From: r[0], To: r[1], Factor: dec(t, r[2]), Offset: dec(t, r[3])})
+	}
+	for _, c := range convs {
+		if !domain.RoundTrip(c) {
+			t.Errorf("%s to %s (factor %s, offset %s) does not round-trip", c.From, c.To, c.Factor, c.Offset)
+		}
+	}
+	if domain.RoundTrip(domain.Conversion{Factor: decimal.Zero}) {
+		t.Error("a zero factor must not round-trip")
+	}
+}

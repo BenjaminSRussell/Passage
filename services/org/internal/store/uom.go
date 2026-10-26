@@ -3,11 +3,13 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
@@ -19,6 +21,10 @@ const (
 	CodeUnitNotFound      = "ORG-UOM-UNIT-NOT-FOUND"
 	CodeUnitCodeDuplicate = "ORG-UOM-CODE-DUPLICATE"
 	KindUnit              = "uom"
+
+	CodeUnitInactive        = "ORG-UOM-UNIT-INACTIVE"
+	CodeClassMismatch       = "ORG-UOM-CLASS-MISMATCH"
+	CodeConversionDuplicate = "ORG-UOM-CONVERSION-DUPLICATE"
 
 	visibleUnits = `select u.code, u.name, u.class, u.decimal_precision, u.system_flag, coalesce(s.status, u.status) as status
 		from unit_of_measure u
@@ -184,4 +190,139 @@ func (s *Postgres) ConversionGraph(ctx context.Context) ([]domain.Conversion, ma
 		return nil
 	})
 	return convs, precision, err
+}
+
+type Conversion struct {
+	ID       string
+	FromCode string
+	ToCode   string
+	Class    string
+	Factor   decimal.Decimal
+	Offset   decimal.Decimal
+	System   bool
+	Status   string
+}
+
+type ConversionFilter struct{ Class, Unit, Status, ID string }
+
+func queryConversions(ctx context.Context, q querier, tenantID string, f ConversionFilter) ([]Conversion, error) {
+	rows, err := q.Query(ctx, `with vu as (`+visibleUnits+`)
+		select x.* from (
+			select c.id::text, c.from_code, c.to_code, f.class, c.factor, c.offset_value, c.tenant_id = $2 as system,
+				case when f.status = 'active' and t.status = 'active' then 'active' else 'inactive' end as status
+			from uom_conversion c
+			join vu f on f.code = c.from_code
+			join vu t on t.code = c.to_code
+			where c.tenant_id in ($1, $2) and c.product_id is null
+				and ($3::text = '' or f.class = $3) and ($4::text = '' or c.from_code = $4 or c.to_code = $4) and ($6::text = '' or c.id::text = $6)
+		) x where $5::text = '' or x.status = $5 order by x.from_code, x.to_code`,
+		tenantID, SysTenantID, f.Class, f.Unit, f.Status, f.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	convs := []Conversion{}
+	for rows.Next() {
+		var c Conversion
+		if err := rows.Scan(&c.ID, &c.FromCode, &c.ToCode, &c.Class, &c.Factor, &c.Offset, &c.System, &c.Status); err != nil {
+			return nil, err
+		}
+		convs = append(convs, c)
+	}
+	return convs, rows.Err()
+}
+
+func (s *Postgres) ListConversions(ctx context.Context, f ConversionFilter) ([]Conversion, error) {
+	p, _ := tenant.FromContext(ctx)
+	var convs []Conversion
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) (err error) {
+		convs, err = queryConversions(ctx, tx, p.TenantID, f)
+		return err
+	})
+	return convs, err
+}
+
+func inactiveUnit(u Unit, field string) error {
+	problem := httpx.NewProblem(http.StatusUnprocessableEntity, CodeUnitInactive, fmt.Sprintf("unit %s is inactive", u.Code))
+	problem.Errors = map[string]string{field: "must be an active unit"}
+	return problem
+}
+
+func sameConversion(a, b Conversion) bool {
+	return a.FromCode == b.FromCode && a.ToCode == b.ToCode && a.Factor.Equal(b.Factor) && a.Offset.Equal(b.Offset)
+}
+
+func (s *Postgres) CreateConversion(ctx context.Context, in Conversion, idempotencyKey string) (Conversion, bool, error) {
+	p, _ := tenant.FromContext(ctx)
+	var key *string
+	if idempotencyKey != "" {
+		key = &idempotencyKey
+	}
+	duplicate := httpx.NewProblem(http.StatusConflict, CodeConversionDuplicate, "a conversion between "+in.FromCode+" and "+in.ToCode+" already exists")
+	reuse := httpx.NewProblem(http.StatusUnprocessableEntity, CodeIdempotencyReuse, "Idempotency-Key was already used with a different request body")
+	var out Conversion
+	created := false
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		replay := func(id string) error {
+			convs, err := queryConversions(ctx, tx, p.TenantID, ConversionFilter{ID: id})
+			if err != nil {
+				return err
+			}
+			if len(convs) != 1 || !sameConversion(convs[0], in) {
+				return reuse
+			}
+			out = convs[0]
+			return nil
+		}
+		if key != nil {
+			var id string
+			err := tx.QueryRow(ctx, `select id::text from uom_conversion where tenant_id = $1 and idempotency_key = $2`, p.TenantID, *key).Scan(&id)
+			if err == nil {
+				return replay(id)
+			}
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+		}
+		from, err := oneUnit(ctx, tx, p.TenantID, in.FromCode)
+		if err != nil {
+			return err
+		}
+		to, err := oneUnit(ctx, tx, p.TenantID, in.ToCode)
+		if err != nil {
+			return err
+		}
+		switch {
+		case from.Status != "active":
+			return inactiveUnit(from, "fromCode")
+		case to.Status != "active":
+			return inactiveUnit(to, "toCode")
+		case from.Class != to.Class:
+			return httpx.NewProblem(http.StatusUnprocessableEntity, CodeClassMismatch, fmt.Sprintf("%s is %s and %s is %s", from.Code, from.Class, to.Code, to.Class))
+		}
+		var taken bool
+		if err := tx.QueryRow(ctx, `select exists (select 1 from uom_conversion where tenant_id in ($1, $2) and product_id is null
+			and least(from_code, to_code) = least($3::text, $4::text) and greatest(from_code, to_code) = greatest($3::text, $4::text))`,
+			p.TenantID, SysTenantID, in.FromCode, in.ToCode).Scan(&taken); err != nil {
+			return err
+		}
+		if taken {
+			return duplicate
+		}
+		var id string
+		var inserted bool
+		if err := tx.QueryRow(ctx, `insert into uom_conversion (tenant_id, from_code, to_code, factor, offset_value, idempotency_key)
+			values ($1, $2, $3, $4, $5, $6)
+			on conflict (tenant_id, idempotency_key) where idempotency_key is not null do update set id = uom_conversion.id
+			returning id::text, xmax = 0`, p.TenantID, in.FromCode, in.ToCode, in.Factor.String(), in.Offset.String(), key).Scan(&id, &inserted); err != nil {
+			return err
+		}
+		created = inserted
+		return replay(id)
+	})
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
+		return Conversion{}, false, duplicate
+	}
+	return out, created, err
 }

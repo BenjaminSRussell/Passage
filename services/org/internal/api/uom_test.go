@@ -180,3 +180,163 @@ func TestUnits_HaveNoDeleteRoute(t *testing.T) {
 		t.Fatalf("DELETE = %d; want 404 or 405", rec.Code)
 	}
 }
+
+const (
+	conversionsPath = "/v1/org/uom/conversions"
+	gToLb           = `{"fromCode":"g","toCode":"lb","factor":"0.5"}`
+)
+
+func TestConversions_List(t *testing.T) {
+	tests := []struct {
+		name       string
+		query      string
+		duties     string
+		withTenant bool
+		wantStatus int
+		wantBody   string
+		notBody    string
+	}{
+		{"item shape", "", "org.read", true, http.StatusOK, `"fromCode":"kg","toCode":"g","class":"mass","factor":"1000","offset":"0","inverseFactor":"0.001","inverseOffset":"0","roundTrip":true,"system":true,"productId":null,"status":"active"`, ""},
+		{"offset inverse", "", "org.read", true, http.StatusOK, `"inverseFactor":"0.555555555556","inverseOffset":"-17.777777777778"`, ""},
+		{"by class", "?class=mass", "org.read", true, http.StatusOK, `"fromCode":"lb"`, `"fromCode":"C"`},
+		{"by unit on either side", "?unit=kg", "org.read", true, http.StatusOK, `"toCode":"kg"`, `"fromCode":"C"`},
+		{"unit is case sensitive", "?unit=KG", "org.read", true, http.StatusOK, `{"items":[]}`, ""},
+		{"unknown class", "?class=bogus", "org.read", true, http.StatusBadRequest, `"class"`, ""},
+		{"unknown status", "?status=gone", "org.read", true, http.StatusBadRequest, `"status"`, ""},
+		{"no tenant", "", "", false, http.StatusUnauthorized, "AUTH-0001", ""},
+		{"without duty", "", "org.reference.write", true, http.StatusForbidden, "AUTH-0003", ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r, _ := newRouter(&fakeStore{})
+			rec := do(r, http.MethodGet, conversionsPath+tc.query, "", tc.duties, tc.withTenant)
+			if rec.Code != tc.wantStatus || !strings.Contains(rec.Body.String(), tc.wantBody) || (tc.notBody != "" && strings.Contains(rec.Body.String(), tc.notBody)) {
+				t.Fatalf("got %d %s; want %d containing %q without %q", rec.Code, rec.Body.String(), tc.wantStatus, tc.wantBody, tc.notBody)
+			}
+		})
+	}
+}
+
+func TestConversions_ListReportsInactiveUnitsAndFiltersByStatus(t *testing.T) {
+	r, _ := newRouter(&fakeStore{})
+	do(r, http.MethodPatch, unitsPath+"/lb", `{"status":"inactive"}`, referenceDuties, true)
+	active := do(r, http.MethodGet, conversionsPath+"?status=active", "", "org.read", true)
+	inactive := do(r, http.MethodGet, conversionsPath+"?status=inactive", "", "org.read", true)
+	if strings.Contains(active.Body.String(), `"fromCode":"lb"`) || !strings.Contains(active.Body.String(), `"fromCode":"kg"`) {
+		t.Fatalf("active list = %s; want kg rows without lb", active.Body)
+	}
+	if !strings.Contains(inactive.Body.String(), `"fromCode":"lb"`) || !strings.Contains(inactive.Body.String(), `"status":"inactive"`) || strings.Contains(inactive.Body.String(), `"fromCode":"kg"`) {
+		t.Fatalf("inactive list = %s; want only lb rows", inactive.Body)
+	}
+}
+
+func TestConversions_ListStoreErrorIs500(t *testing.T) {
+	r, _ := newRouter(&fakeStore{err: http.ErrAbortHandler})
+	rec := do(r, http.MethodGet, conversionsPath, "", "org.read", true)
+	if rec.Code != http.StatusInternalServerError || strings.Contains(rec.Body.String(), "abort") {
+		t.Fatalf("got %d %s; want 500 without detail", rec.Code, rec.Body)
+	}
+}
+
+func TestConversions_Create(t *testing.T) {
+	tests := []struct {
+		name       string
+		body       string
+		duties     string
+		wantStatus int
+		wantBody   string
+	}{
+		{"valid", gToLb, referenceDuties, http.StatusCreated, `"fromCode":"g","toCode":"lb","class":"mass","factor":"0.5","offset":"0","inverseFactor":"2","inverseOffset":"0","roundTrip":true,"system":false,"productId":null,"status":"active"`},
+		{"valid offset", `{"fromCode":"g","toCode":"lb","factor":"2","offset":"-17.5"}`, referenceDuties, http.StatusCreated, `"offset":"-17.5"`},
+		{"null offset defaults", `{"fromCode":"g","toCode":"lb","factor":"2","offset":null}`, referenceDuties, http.StatusCreated, `"offset":"0"`},
+		{"factor zero", `{"fromCode":"g","toCode":"lb","factor":"0"}`, referenceDuties, http.StatusBadRequest, `"factor"`},
+		{"factor negative", `{"fromCode":"g","toCode":"lb","factor":"-1"}`, referenceDuties, http.StatusBadRequest, `"factor"`},
+		{"factor text", `{"fromCode":"g","toCode":"lb","factor":"abc"}`, referenceDuties, http.StatusBadRequest, `"factor"`},
+		{"factor exponent", `{"fromCode":"g","toCode":"lb","factor":"1e999999999"}`, referenceDuties, http.StatusBadRequest, `"factor"`},
+		{"factor thirteen decimals", `{"fromCode":"g","toCode":"lb","factor":"1.0000000000001"}`, referenceDuties, http.StatusBadRequest, `"factor"`},
+		{"factor seventeen integer digits", `{"fromCode":"g","toCode":"lb","factor":"12345678901234567"}`, referenceDuties, http.StatusBadRequest, `"factor"`},
+		{"factor sixteen integer digits and twelve decimals", `{"fromCode":"g","toCode":"lb","factor":"1234567890123456.123456789012"}`, referenceDuties, http.StatusCreated, `"id"`},
+		{"factor missing", `{"fromCode":"g","toCode":"lb"}`, referenceDuties, http.StatusBadRequest, `"factor"`},
+		{"factor as number", `{"fromCode":"g","toCode":"lb","factor":2}`, referenceDuties, http.StatusBadRequest, "COM-0001"},
+		{"offset text", `{"fromCode":"g","toCode":"lb","factor":"2","offset":"abc"}`, referenceDuties, http.StatusBadRequest, `"offset"`},
+		{"offset empty", `{"fromCode":"g","toCode":"lb","factor":"2","offset":""}`, referenceDuties, http.StatusBadRequest, `"offset"`},
+		{"same unit", `{"fromCode":"g","toCode":"g","factor":"2"}`, referenceDuties, http.StatusBadRequest, `"toCode"`},
+		{"missing from", `{"toCode":"g","factor":"2"}`, referenceDuties, http.StatusBadRequest, `"fromCode"`},
+		{"unknown field", `{"fromCode":"g","toCode":"lb","factor":"2","system":true}`, referenceDuties, http.StatusBadRequest, "COM-0001"},
+		{"unknown unit", `{"fromCode":"g","toCode":"furlong","factor":"2"}`, referenceDuties, http.StatusNotFound, "ORG-UOM-UNIT-NOT-FOUND"},
+		{"class mismatch", `{"fromCode":"kg","toCode":"C","factor":"2"}`, referenceDuties, http.StatusUnprocessableEntity, "ORG-UOM-CLASS-MISMATCH"},
+		{"reverse of a system pair", `{"fromCode":"g","toCode":"kg","factor":"0.001"}`, referenceDuties, http.StatusConflict, "ORG-UOM-CONVERSION-DUPLICATE"},
+		{"without the write duty", gToLb, "org.read", http.StatusForbidden, "AUTH-0003"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeStore{}
+			r, a := newRouter(f)
+			rec := do(r, http.MethodPost, conversionsPath, tc.body, tc.duties, true)
+			if rec.Code != tc.wantStatus || !strings.Contains(rec.Body.String(), tc.wantBody) {
+				t.Fatalf("got %d %s; want %d containing %q", rec.Code, rec.Body.String(), tc.wantStatus, tc.wantBody)
+			}
+			if got, want := metric(a, "org_uom_conversions_created_total"), map[bool]string{true: "1", false: "0"}[rec.Code == http.StatusCreated]; got != want {
+				t.Fatalf("counter = %s; want %s", got, want)
+			}
+		})
+	}
+}
+
+func TestConversions_CreateRefusesWithoutTenantAndLegalEntityScopedCaller(t *testing.T) {
+	f := &fakeStore{}
+	r, _ := newRouter(f)
+	if rec := do(r, http.MethodPost, conversionsPath, gToLb, "", false); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("without a tenant = %d; want 401", rec.Code)
+	}
+	rec := do(r, http.MethodPost, conversionsPath, gToLb, referenceDuties, true, "X-Passage-Legal-Entity", testkit.TenantID(2))
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "AUTH-0003") || f.conversionCreates != 0 {
+		t.Fatalf("scoped caller = %d %s; want 403 AUTH-0003 and no write", rec.Code, rec.Body)
+	}
+}
+
+func TestConversions_CreateStoreErrorIs500(t *testing.T) {
+	r, _ := newRouter(&fakeStore{err: http.ErrAbortHandler})
+	if rec := do(r, http.MethodPost, conversionsPath, gToLb, referenceDuties, true); rec.Code != http.StatusInternalServerError {
+		t.Fatalf("got %d; want 500", rec.Code)
+	}
+}
+
+func TestConversions_CreateRefusesInactiveUnit(t *testing.T) {
+	r, _ := newRouter(&fakeStore{})
+	do(r, http.MethodPatch, unitsPath+"/lb", `{"status":"inactive"}`, referenceDuties, true)
+	rec := do(r, http.MethodPost, conversionsPath, gToLb, referenceDuties, true)
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "ORG-UOM-UNIT-INACTIVE") {
+		t.Fatalf("got %d %s; want 422 ORG-UOM-UNIT-INACTIVE", rec.Code, rec.Body)
+	}
+}
+
+func TestConversions_CreateReplayWritesAndCountsOnce(t *testing.T) {
+	f := &fakeStore{}
+	r, a := newRouter(f)
+	first := do(r, http.MethodPost, conversionsPath, gToLb, referenceDuties, true, "Idempotency-Key", "k1")
+	replay := do(r, http.MethodPost, conversionsPath, gToLb, referenceDuties, true, "Idempotency-Key", "k1")
+	if first.Code != http.StatusCreated || replay.Code != http.StatusCreated || first.Body.String() != replay.Body.String() || f.conversionCreates != 1 {
+		t.Fatalf("first %d %s, replay %d %s, writes %d; want identical 201s and one write", first.Code, first.Body, replay.Code, replay.Body, f.conversionCreates)
+	}
+	reuse := do(r, http.MethodPost, conversionsPath, `{"fromCode":"g","toCode":"lb","factor":"0.6"}`, referenceDuties, true, "Idempotency-Key", "k1")
+	if reuse.Code != http.StatusUnprocessableEntity || !strings.Contains(reuse.Body.String(), "idempotency_key_reuse") {
+		t.Fatalf("reuse = %d %s; want 422 idempotency_key_reuse", reuse.Code, reuse.Body)
+	}
+	if got := metric(a, "org_uom_conversions_created_total"); got != "1" {
+		t.Fatalf("counter = %s; want 1", got)
+	}
+}
+
+func TestConversions_CreatedConversionIsUsedByConvert(t *testing.T) {
+	r, _ := newRouter(&fakeStore{})
+	do(r, http.MethodPost, conversionsPath, gToLb, referenceDuties, true)
+	for path, want := range map[string]string{
+		"/v1/org/uom/convert?from=g&to=lb&qty=2": `"quantity":"1"`,
+		"/v1/org/uom/convert?from=lb&to=g&qty=3": `"quantity":"6"`,
+	} {
+		if rec := do(r, http.MethodGet, path, "", "", true); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("GET %s = %d %s; want %s", path, rec.Code, rec.Body, want)
+		}
+	}
+}

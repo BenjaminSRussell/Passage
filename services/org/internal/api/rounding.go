@@ -19,6 +19,7 @@ import (
 const (
 	currencyBase     = "/v1/org/currencies/{code}"
 	maxRoundingScale = 6
+	purposeRule      = "must be general, price, purchase, sales, tax or cash"
 )
 
 type putCurrencyRoundingRequest struct {
@@ -40,6 +41,7 @@ type roundResult struct {
 
 func (a *API) registerCurrencyRounding(r chi.Router) {
 	r.With(authz.RequireDuty(dutyReference)).Put(currencyBase+"/rounding-rules/{purpose}", a.putCurrencyRounding)
+	r.With(authz.RequireDuty(dutyReference)).Delete(currencyBase+"/rounding-rules/{purpose}", a.deleteCurrencyRounding)
 	r.With(authz.RequireDuty(dutyRead)).Get(currencyBase+"/rounding-rules", a.listCurrencyRoundings)
 	r.With(authz.RequireDuty(dutyRead)).Get(currencyBase+"/round", a.roundCurrency)
 }
@@ -68,7 +70,7 @@ func parseRule(purpose string, req putCurrencyRoundingRequest) (store.CurrencyRo
 	fields := map[string]string{}
 	in := store.CurrencyRounding{Purpose: purpose, Method: req.Method, LegalEntityID: req.LegalEntityID}
 	if _, err := domain.ParsePurpose(purpose); err != nil {
-		fields["purpose"] = "must be general, price, purchase, sales, tax or cash"
+		fields["purpose"] = purposeRule
 	}
 	if _, err := domain.ParseMethod(req.Method); err != nil {
 		fields["method"] = "must be half_even, half_up, down or up"
@@ -111,6 +113,36 @@ func (a *API) putCurrencyRounding(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, rule)
 }
 
+func (a *API) deleteCurrencyRounding(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) || rejectScopedCaller(w, r, "change currency rounding rules") {
+		return
+	}
+	fields := map[string]string{}
+	purpose := chi.URLParam(r, "purpose")
+	if _, err := domain.ParsePurpose(purpose); err != nil {
+		fields["purpose"] = purposeRule
+	}
+	var legalEntityID *string
+	if q := r.URL.Query(); q.Has("legalEntityId") {
+		if asked := q.Get("legalEntityId"); canonicalUUID(asked) {
+			legalEntityID = &asked
+		} else {
+			fields["legalEntityId"] = "must be a UUID"
+		}
+	}
+	if len(fields) > 0 {
+		validationFailed(w, r, fields)
+		return
+	}
+	code := chi.URLParam(r, "code")
+	if err := a.store.DeleteCurrencyRounding(r.Context(), code, purpose, legalEntityID); err != nil {
+		slog.Error("delete currency rounding failed", "err", err, "currency", code, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.Fail(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (a *API) listCurrencyRoundings(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
@@ -140,7 +172,7 @@ func (a *API) roundCurrency(w http.ResponseWriter, r *http.Request) {
 		purpose = string(domain.PurposeGeneral)
 	}
 	if _, err := domain.ParsePurpose(purpose); err != nil {
-		badQuery(w, r, "purpose", "must be general, price, purchase, sales, tax or cash")
+		badQuery(w, r, "purpose", purposeRule)
 		return
 	}
 	p, _ := tenant.FromContext(r.Context())

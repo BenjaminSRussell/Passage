@@ -19,6 +19,8 @@ import (
 )
 
 const (
+	CodeRoundingNotFound = "ORG-CUR-ROUNDING-NOT-FOUND"
+
 	RoundingSourceLegalEntity = "legal_entity"
 	RoundingSourceTenant      = "tenant"
 	RoundingSourceDefault     = "default"
@@ -189,4 +191,42 @@ func (s *Postgres) ResolveCurrencyRounding(ctx context.Context, currency, purpos
 		return nil
 	})
 	return rule, err
+}
+
+func (s *Postgres) DeleteCurrencyRounding(ctx context.Context, currency, purpose string, legalEntityID *string) error {
+	p, _ := tenant.FromContext(ctx)
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		item, err := requireCurrency(ctx, tx, p.TenantID, currency)
+		if err != nil {
+			return err
+		}
+		if legalEntityID != nil {
+			if err := requireLegalEntity(ctx, tx, p.TenantID, *legalEntityID); err != nil {
+				return err
+			}
+		}
+		var deletedID string
+		err = tx.QueryRow(ctx, `delete from currency_rounding where tenant_id = $1 and currency_code = $2 and purpose = $3
+			and legal_entity_id is not distinct from $4::uuid returning id::text`, p.TenantID, currency, purpose, legalEntityID).Scan(&deletedID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return httpx.NewProblem(http.StatusNotFound, CodeRoundingNotFound, fmt.Sprintf("no %s rounding rule for %s", purpose, currency))
+		}
+		if err != nil {
+			return err
+		}
+		inForce := RoundingRule{Unit: decimal.New(1, -int32(*item.MinorUnits)), Method: domain.HalfEven}
+		if legalEntityID != nil {
+			var method string
+			var unit decimal.Decimal
+			err := tx.QueryRow(ctx, `select unit, method from currency_rounding where tenant_id = $1 and currency_code = $2 and purpose = $3 and legal_entity_id is null`,
+				p.TenantID, currency, purpose).Scan(&unit, &method)
+			if err == nil {
+				inForce = RoundingRule{Unit: unit, Method: domain.Method(method)}
+			} else if !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+		}
+		return enqueue(ctx, tx, "currencyrounding", deletedID, orgevents.CurrencyRoundingChanged, p.TenantID, orgevents.CurrencyRoundingChangedData{
+			CurrencyCode: currency, Purpose: purpose, LegalEntityID: legalEntityID, Unit: inForce.Unit.String(), Method: string(inForce.Method)})
+	})
 }
