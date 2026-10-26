@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Alert,
+  Badge,
   Button,
   Card,
   CardGrid,
@@ -216,16 +217,18 @@ export function ImportExportPage() {
               />
             )}
           </FormField>
-          <div>
+          <div className={styles.actions}>
             <Button type="submit" variant="primary">
               Validate
             </Button>
+            <Button disabled>Import</Button>
+            <Badge tone="neutral">Coming soon</Badge>
           </div>
         </form>
       </Card>
       <div className={styles.notice}>
         <Alert tone="success" live="status">
-          {result?.ok ? `${result.rows} ${result.rows === 1 ? "row" : "rows"} ready to import` : null}
+          {result?.ok ? `${result.rows} ${result.rows === 1 ? "row looks" : "rows look"} valid` : null}
         </Alert>
         <Alert tone="danger" live="alert">
           {result && !result.ok ? result.message : null}

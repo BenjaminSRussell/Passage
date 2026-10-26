@@ -71,7 +71,8 @@ describe("MetadataForm messages", () => {
   it("says when no form is defined for the entity", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 404 }));
     render(<MetadataForm entity="Gadget" />);
-    expect(await screen.findByRole("alert")).toHaveTextContent("No form is defined for Gadget yet");
+    expect(await screen.findByRole("heading", { name: "No form is defined for Gadget yet" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
   });
 
   it("clears the saved confirmation as soon as a field is edited", async () => {

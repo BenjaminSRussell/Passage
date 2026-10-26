@@ -68,7 +68,7 @@ describe("engineering module", () => {
     render(<WhereUsedPage />);
     fireEvent.change(screen.getByLabelText("Component"), { target: { value: "SPOKE" } });
     fireEvent.click(screen.getByRole("button", { name: "Find parents" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("0 parents found");
+    expect(await screen.findByRole("status")).toHaveTextContent("No active BOM uses this component on that date.");
     expect(screen.queryByRole("table")).toBeNull();
     expect(await screen.findByText("No parents found")).toBeInTheDocument();
   });

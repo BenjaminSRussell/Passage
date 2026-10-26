@@ -294,12 +294,23 @@ describe("generated form keyboard and validation", () => {
   it("adds a saved record to the list and resets the form", async () => {
     const user = userEvent.setup();
     const saved: Record<string, string>[] = [];
-    render(<FormRenderer entity={demoNote} onSubmit={(values) => saved.push(values)} />);
+    render(<FormRenderer entity={demoNote} onSubmit={(values) => {
+      saved.push(values);
+    }} />);
     await user.type(screen.getByLabelText("Title"), "Kickoff");
     await user.click(screen.getByRole("button", { name: "Save Note" }));
     expect(saved).toEqual([{ title: "Kickoff" }]);
     expect(screen.getByLabelText("Title")).toHaveValue("");
     expect(within(screen.getByRole("table", { name: "Note list" })).getByRole("button", { name: "Kickoff" })).toBeInTheDocument();
+  });
+
+  it("keeps the typed values when onSubmit rejects the save", async () => {
+    const user = userEvent.setup();
+    render(<FormRenderer entity={demoNote} onSubmit={() => false} />);
+    await user.type(screen.getByLabelText("Title"), "Kickoff");
+    await user.click(screen.getByRole("button", { name: "Save Note" }));
+    expect(screen.getByLabelText("Title")).toHaveValue("Kickoff");
+    expect(screen.getByText("No rows")).toBeInTheDocument();
   });
 
   it("labels each line cell with its line number", async () => {
@@ -337,6 +348,13 @@ describe("shell feedback", () => {
       vi.advanceTimersByTime(4000);
     });
     expect(screen.getAllByText("Saved view applied")).toHaveLength(1);
+  });
+
+  it("keeps search announcements in the live region only", async () => {
+    const user = userEvent.setup();
+    renderShell();
+    await user.keyboard("{Control>}k{/Control}");
+    expect(screen.getAllByText("Search opened")).toHaveLength(1);
   });
 
   it("re-announces an identical message after clearing the live region", async () => {

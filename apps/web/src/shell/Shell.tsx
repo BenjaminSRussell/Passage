@@ -71,7 +71,7 @@ export function Shell({ modules }: ShellProps) {
     [modules],
   );
 
-  const announce = useCallback((message: string, visual = true) => {
+  const announce = useCallback((message: string, visual = false) => {
     if (announceFrame.current !== undefined) {
       window.cancelAnimationFrame(announceFrame.current);
       announceFrame.current = undefined;
@@ -94,7 +94,7 @@ export function Shell({ modules }: ShellProps) {
     }
   }, []);
 
-  const announceQuietly = useCallback((message: string) => announce(message, false), [announce]);
+  const announceQuietly = useCallback((message: string) => announce(message), [announce]);
 
   useEffect(
     () => () => {
@@ -170,7 +170,7 @@ export function Shell({ modules }: ShellProps) {
       return;
     }
     wasOnline.current = online;
-    announce(online ? copy.announce.online : copy.announce.offline);
+    announce(online ? copy.announce.online : copy.announce.offline, true);
   }, [online, announce]);
 
   useEffect(() => {
@@ -220,7 +220,7 @@ export function Shell({ modules }: ShellProps) {
       density,
     };
     setPersonalization(applyView(saveView(personalization, view), view.id));
-    announce(copy.announce.savedViewApplied);
+    announce(copy.announce.savedViewApplied, true);
   }
 
   return (

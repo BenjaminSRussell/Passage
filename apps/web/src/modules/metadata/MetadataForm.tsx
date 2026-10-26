@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Alert, Button, Card, FormField, Input, PageHeader, Select, Skeleton } from "../../shell/ui";
+import { Alert, Button, Card, EmptyState, FormField, Input, PageHeader, Select, Skeleton } from "../../shell/ui";
 import styles from "./MetadataForm.module.css";
 
 interface FieldSchema {
@@ -27,6 +27,7 @@ const LOADING_FIELDS = [0, 1, 2, 3];
 export function MetadataForm({ entity }: MetadataFormProps) {
   const [schema, setSchema] = useState<EntitySchema>();
   const [error, setError] = useState("");
+  const [missing, setMissing] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const [reload, setReload] = useState(0);
@@ -35,17 +36,21 @@ export function MetadataForm({ entity }: MetadataFormProps) {
     const controller = new AbortController();
     setSchema(undefined);
     setError("");
+    setMissing(false);
     setSaved(false);
     fetch(`/api/v1/metadata/entities/${encodeURIComponent(entity)}/schema`, {
       signal: controller.signal,
       headers: apiHeaders(),
     })
       .then(async (response) => {
-        if (response.status === 404) throw new Error(`No form is defined for ${entity} yet.`);
+        if (response.status === 404) {
+          setMissing(true);
+          return undefined;
+        }
         if (!response.ok) throw new Error(`Schema request failed (${response.status})`);
         return (await response.json()) as EntitySchema;
       })
-      .then(setSchema)
+      .then((loaded) => loaded && setSchema(loaded))
       .catch((reason: unknown) => {
         if (reason instanceof DOMException && reason.name === "AbortError") return;
         setError(reason instanceof Error ? reason.message : "Schema request failed");
@@ -88,6 +93,14 @@ export function MetadataForm({ entity }: MetadataFormProps) {
     } finally {
       setSaving(false);
     }
+  }
+
+  if (missing) {
+    return (
+      <Card>
+        <EmptyState icon="database" title={`No form is defined for ${entity} yet`} description="Ask a workspace administrator to define its fields." />
+      </Card>
+    );
   }
 
   if (error && !schema) {

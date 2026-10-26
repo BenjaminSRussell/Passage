@@ -16,7 +16,10 @@ export function NotesPage({ catalog = fakeCatalog() }: NotesPageProps) {
     <>
       <PageHeader title={copy.notes.title} description={copy.notes.description} />
       <Card>
-        <FormRenderer entity={entity} onSubmit={() => setSavedTitle(entity.title)} />
+        <FormRenderer entity={entity} onSubmit={() => {
+            setSavedTitle(entity.title);
+            return true;
+          }} />
       </Card>
       <div className={styles.notice}>
         <Alert tone="success" live="status">

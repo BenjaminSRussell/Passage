@@ -55,3 +55,10 @@
 .notice > :not(:empty) {
   margin-block-start: var(--space-4);
 }
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}

@@ -57,11 +57,11 @@ describe("admin module", () => {
   it("validates pasted CSV on the client and reports the row count", () => {
     render(<ImportExportPage />);
     fireEvent.click(screen.getByRole("button", { name: "Validate" }));
-    expect(screen.getByRole("status")).toHaveTextContent("1 row ready to import");
+    expect(screen.getByRole("status")).toHaveTextContent("1 row looks valid");
     fireEvent.change(screen.getByLabelText("CSV data"), { target: { value: "a,b\n1,2\n3,4" } });
     expect(screen.getByRole("status")).toBeEmptyDOMElement();
     fireEvent.click(screen.getByRole("button", { name: "Validate" }));
-    expect(screen.getByRole("status")).toHaveTextContent("2 rows ready to import");
+    expect(screen.getByRole("status")).toHaveTextContent("2 rows look valid");
   });
 
   it("flags a ragged CSV row and an empty paste", () => {

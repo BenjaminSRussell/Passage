@@ -96,6 +96,9 @@ export function recordError(error: Error, componentStack?: string | null): Recor
     componentStack: componentStack ?? undefined,
   };
   recorded.push(entry);
+  if (typeof console !== "undefined") {
+    console.error("Route render failed", error, componentStack);
+  }
   if (recorded.length > MAX_RECORDED_ERRORS) {
     recorded.shift();
   }

@@ -82,6 +82,7 @@ export function WhereUsedPage() {
   function statusText(): string {
     if (searching) return "Searching…";
     if (rows === null) return "";
+    if (rows.length === 0) return "No active BOM uses this component on that date.";
     return `${rows.length} ${rows.length === 1 ? "parent" : "parents"} found`;
   }
 

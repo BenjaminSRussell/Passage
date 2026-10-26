@@ -8,7 +8,7 @@ export interface FormRendererProps {
   entity: EntityDef;
   values?: Record<string, string>;
   lines?: Record<string, string>[];
-  onSubmit?: (values: Record<string, string>, lines: Record<string, string>[]) => void;
+  onSubmit?: (values: Record<string, string>, lines: Record<string, string>[]) => boolean | void;
 }
 
 export function FormRenderer({ entity, values: initial, lines: initialLines, onSubmit }: FormRendererProps) {
@@ -41,10 +41,12 @@ export function FormRenderer({ entity, values: initial, lines: initialLines, onS
       document.getElementById(`${entity.id}-${firstInvalid.name}`)?.focus();
       return;
     }
+    if (onSubmit?.(values, lines) === false) {
+      return;
+    }
     setRecords((current) => [...current, values]);
     setValues({});
     setLines([]);
-    onSubmit?.(values, lines);
   }
 
   function finishEditing(key: string) {
