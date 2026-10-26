@@ -1,0 +1,76 @@
+asyncapi: 3.0.0
+info:
+  title: party
+  version: 0.2.0
+  description: CloudEvents 1.0 envelope from platform/go/events; payloads below are the data member. No payload carries dob, gender or a government id.
+channels:
+  passage.party.party:
+    address: passage.party.party
+    messages:
+      created:
+        $ref: '#/components/messages/partyCreated'
+      updated:
+        $ref: '#/components/messages/partyUpdated'
+      merged:
+        $ref: '#/components/messages/partyMerged'
+operations:
+  onPartyCreated:
+    action: send
+    channel: { $ref: '#/channels/passage.party.party' }
+    messages: [{ $ref: '#/channels/passage.party.party/messages/created' }]
+  onPartyUpdated:
+    action: send
+    channel: { $ref: '#/channels/passage.party.party' }
+    messages: [{ $ref: '#/channels/passage.party.party/messages/updated' }]
+  onPartyMerged:
+    action: send
+    channel: { $ref: '#/channels/passage.party.party' }
+    messages: [{ $ref: '#/channels/passage.party.party/messages/merged' }]
+components:
+  messages:
+    partyCreated:
+      name: created
+      title: Party created
+      description: primary_address_id is omitted until wave-6 addresses are linked.
+      payload:
+        type: object
+        required: [party_id, party_number, party_type, name]
+        properties:
+          party_id: { type: string, format: uuid }
+          party_number: { type: string }
+          party_type: { type: string, enum: [organization, person] }
+          name: { type: string }
+      x-passage-type: dev.passage.party.party.created.v1
+    partyUpdated:
+      name: updated
+      title: Party updated
+      description: changed_fields names the camelCase fields that changed, sorted. dob and gender are never named (BR-7.9); a change to only those bumps version with an empty list.
+      payload:
+        type: object
+        required: [party_id, changed_fields, version]
+        properties:
+          party_id: { type: string, format: uuid }
+          changed_fields: { type: array, items: { type: string } }
+          version: { type: integer }
+      x-passage-type: dev.passage.party.party.updated.v1
+    partyMerged:
+      name: merged
+      title: Party merged
+      payload:
+        type: object
+        required: [mergeId, survivorPartyId, mergedPartyIds, roleIdMap, mergedAt]
+        properties:
+          mergeId: { type: string, format: uuid }
+          survivorPartyId: { type: string, format: uuid }
+          mergedPartyIds: { type: array, items: { type: string, format: uuid } }
+          roleIdMap:
+            type: array
+            items:
+              type: object
+              required: [role, fromId, toId]
+              properties:
+                role: { type: string }
+                fromId: { type: string, format: uuid }
+                toId: { type: string, format: uuid }
+          mergedAt: { type: string, format: date-time }
+      x-passage-type: dev.passage.party.party.merged.v1
