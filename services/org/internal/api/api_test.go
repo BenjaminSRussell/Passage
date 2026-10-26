@@ -78,6 +78,10 @@ type fakeStore struct {
 	conversionCreates   int
 	roundingDeleteArgs  [3]string
 	roundingDeleteCalls int
+	teamTypes           []store.TeamType
+	teamTypeKeys        map[string]store.TeamType
+	teamTypeFilter      store.TeamTypeFilter
+	teamTypeAfter       string
 }
 
 func (f *fakeStore) seedUnits() {
@@ -1004,6 +1008,8 @@ func TestMetricsCountBusinessOperations(t *testing.T) {
 		"# TYPE org_legal_entities_created_total counter",
 		"org_legal_entities_created_total 1",
 		"org_legal_entities_failed_total 1",
+		"# TYPE org_team_types_created_total counter",
+		"org_team_types_created_total 0",
 	} {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Fatalf("metrics missing %q in %s", want, rec.Body.String())
@@ -1346,4 +1352,60 @@ func (f *fakeStore) ResolveCurrencyRounding(_ context.Context, currency, purpose
 		return store.RoundingRule{Unit: decimal.New(1, -2), Method: domain.HalfEven, Source: store.RoundingSourceDefault}, nil
 	}
 	return f.resolved, nil
+}
+
+func (f *fakeStore) CreateTeamType(_ context.Context, in store.TeamType, key string) (store.TeamType, bool, error) {
+	if f.err != nil {
+		return store.TeamType{}, false, f.err
+	}
+	if replay, ok := f.teamTypeKeys[key]; ok && key != "" {
+		if replay.Code != in.Code || replay.Name != in.Name || !slices.Equal(replay.MemberKinds, in.MemberKinds) {
+			return store.TeamType{}, false, httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeIdempotencyReuse, "reuse")
+		}
+		return replay, false, nil
+	}
+	for _, t := range f.teamTypes {
+		if t.Code == in.Code {
+			return store.TeamType{}, false, httpx.NewProblem(http.StatusConflict, store.CodeTeamTypeCodeDuplicate, "duplicate")
+		}
+	}
+	in.ID = fmt.Sprintf("00000000-0000-0000-0000-%012d", len(f.teamTypes)+1)
+	f.teamTypes = append(f.teamTypes, in)
+	if key != "" {
+		if f.teamTypeKeys == nil {
+			f.teamTypeKeys = map[string]store.TeamType{}
+		}
+		f.teamTypeKeys[key] = in
+	}
+	return in, true, nil
+}
+
+func (f *fakeStore) GetTeamType(_ context.Context, id string) (store.TeamType, error) {
+	if f.err != nil {
+		return store.TeamType{}, f.err
+	}
+	for _, t := range f.teamTypes {
+		if t.ID == id {
+			return t, nil
+		}
+	}
+	return store.TeamType{}, httpx.NewProblem(http.StatusNotFound, store.CodeTeamTypeNotFound, "team type not found")
+}
+
+func (f *fakeStore) ListTeamTypes(_ context.Context, filter store.TeamTypeFilter, afterCode string, limit int) (store.TeamTypePage, error) {
+	f.teamTypeFilter, f.teamTypeAfter = filter, afterCode
+	if f.err != nil {
+		return store.TeamTypePage{}, f.err
+	}
+	page := store.TeamTypePage{Items: []store.TeamType{}}
+	for _, t := range f.teamTypes {
+		if t.Code > afterCode && (filter.MemberKind == "" || slices.Contains(t.MemberKinds, filter.MemberKind)) {
+			page.Items = append(page.Items, t)
+		}
+	}
+	if len(page.Items) > limit {
+		page.Items = page.Items[:limit]
+		page.NextCode = page.Items[limit-1].Code
+	}
+	return page, nil
 }
