@@ -173,6 +173,28 @@ func TestPostRatesBatchAtomicityAndOutboxReconciliation(t *testing.T) {
 	}
 }
 
+func TestCurrentBookSkipsStoredRateTheBookRejects(t *testing.T) {
+	s, pool, ctx := migrated(t)
+	if _, err := s.PostRates(ctx, []store.RateInput{in("manual", "1.1")}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := pool.Exec(ctx, `insert into exchange_rate (tenant_id, id, rate_type_id, from_currency, to_currency, valid_from, rate, source)
+		select tenant_id, $1::uuid, id, 'GBP', 'USD', current_date - 3, 5000000000, 'manual' from exchange_rate_type where code = 'CLOSING'`, ids.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	book, err := s.CurrentBook(ctx, time.Now())
+	if err != nil {
+		t.Fatalf("one oversized stored rate must not fail the book: %v", err)
+	}
+	if _, err := book.Resolve("CLOSING", "EUR", "USD", time.Now(), ""); err != nil {
+		t.Fatalf("valid rate lost: %v", err)
+	}
+	if _, err := book.Resolve("CLOSING", "GBP", "USD", time.Now(), ""); !errors.Is(err, domain.ErrRateMissing) {
+		t.Fatalf("oversized rate must be skipped: %v", err)
+	}
+}
+
 func TestPutRateTypeIsIdempotent(t *testing.T) {
 	s, _, ctx := migrated(t)
 	again, err := s.PutRateType(ctx, store.RateType{Code: "CLOSING", Name: "Closing rate", AllowInverse: false})

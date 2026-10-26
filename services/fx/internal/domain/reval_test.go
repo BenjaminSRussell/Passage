@@ -4,6 +4,7 @@ import (
 	"encoding/csv"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -70,6 +71,10 @@ func TestRevalueMatchesWorkbook(t *testing.T) {
 		if !l.ReversalDate.Equal(date("2026-04-01")) || !l.PostingDate.Equal(periodEnd) {
 			t.Errorf("dates %v %v", l.PostingDate, l.ReversalDate)
 		}
+		if l.Gain.Value.Sign() < 0 || l.Loss.Value.Sign() < 0 || (l.Gain.Value.Sign() > 0 && l.Loss.Value.Sign() > 0) ||
+			!l.Gain.Value.Sub(l.Loss.Value).Equal(l.Adjustment.Value) {
+			t.Errorf("%s %s: gain %s loss %s do not split adjustment %s", l.Account, l.Currency, l.Gain.Value, l.Loss.Value, l.Adjustment.Value)
+		}
 		adjustments = adjustments.Add(l.Adjustment.Value)
 		gains, losses = gains.Add(l.Gain.Value), losses.Add(l.Loss.Value)
 	}
@@ -86,6 +91,30 @@ func TestRevalueMissingClosingRateReturnsNoPartialResult(t *testing.T) {
 	lines, err := Revalue(bals, map[string]decimal.Decimal{"EUR": dec("1.1")}, "USD", date("2026-03-31"))
 	if !errors.Is(err, ErrRateMissing) || lines != nil {
 		t.Fatalf("lines %v err %v", lines, err)
+	}
+}
+
+func TestRevalueRejectsNonPositiveClosingRate(t *testing.T) {
+	bals := []Balance{{Account: "1100", Currency: "EUR", BalanceTxn: dec("100"), BalanceAcct: dec("100")}}
+	for _, rate := range []string{"0", "-1.1"} {
+		lines, err := Revalue(bals, map[string]decimal.Decimal{"EUR": dec(rate)}, "USD", date("2026-03-31"))
+		if !errors.Is(err, ErrRateMissing) || lines != nil {
+			t.Fatalf("rate %s: lines %v err %v", rate, lines, err)
+		}
+	}
+}
+
+func TestRevalueNamesAllMissingCurrenciesSorted(t *testing.T) {
+	bals := []Balance{
+		{Account: "1", Currency: "JPY", BalanceTxn: dec("1")},
+		{Account: "2", Currency: "GBP", BalanceTxn: dec("1")},
+		{Account: "3", Currency: "CHF", BalanceTxn: dec("1")},
+	}
+	for i := 0; i < 50; i++ {
+		_, err := Revalue(bals, nil, "USD", date("2026-03-31"))
+		if err == nil || !strings.Contains(err.Error(), "for CHF, GBP, JPY") {
+			t.Fatalf("run %d: err = %v", i, err)
+		}
 	}
 }
 

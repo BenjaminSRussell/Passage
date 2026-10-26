@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -387,7 +388,9 @@ func (s *Postgres) CurrentBook(ctx context.Context, asOf time.Time) (*domain.Boo
 				return err
 			}
 			r.Type = types[typeID]
-			if err := book.Add(r); err != nil {
+			if err := book.Add(r); errors.Is(err, domain.ErrInvalidRate) {
+				slog.Warn("skipping stored rate the book rejects", "rateId", r.ID, "err", err)
+			} else if err != nil {
 				return fmt.Errorf("load rate %s: %w", r.ID, err)
 			}
 		}

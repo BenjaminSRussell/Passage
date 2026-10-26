@@ -3,6 +3,7 @@ package domain
 import (
 	"errors"
 	"math/rand/v2"
+	"strings"
 	"testing"
 
 	"github.com/BenjaminSRussell/passage/platform/money"
@@ -41,12 +42,12 @@ func TestConvertMissingResolution(t *testing.T) {
 
 func TestTriangulationRoundsOnce(t *testing.T) {
 	b := testBook(t)
+	r, err := b.Resolve("SPOT", "GBP", "CHF", date("2026-03-15"), "EUR")
+	if err != nil || r.Path != PathTriangulated {
+		t.Fatalf("resolve: %v %v", r.Path, err)
+	}
 	for _, amt := range []string{"1000.00", "0.07", "1234567.89", "-999.99"} {
 		a := money.Must(amt, "GBP")
-		r, err := b.Resolve("SPOT", "GBP", "CHF", date("2026-03-15"), "EUR")
-		if err != nil || r.Path != PathTriangulated {
-			t.Fatalf("resolve: %v %v", r.Path, err)
-		}
 		got, err := Convert(a, "CHF", r)
 		if err != nil {
 			t.Fatal(err)
@@ -124,7 +125,9 @@ func TestConvertEntryFailures(t *testing.T) {
 		{"empty", nil, eurToUSD("1.1"), ErrUnbalanced},
 		{"transaction column off", []Line{{1, money.Must("10", "EUR")}, {2, money.Must("-9", "EUR")}}, eurToUSD("1.1"), ErrUnbalanced},
 		{"balanced per currency only", []Line{{1, money.Must("10", "EUR")}, {2, money.Must("-10", "USD")}}, eurToUSD("1.1"), ErrUnbalanced},
-		{"missing currency", []Line{{1, money.Amount{Value: dec("1")}}, {2, money.Amount{Value: dec("-1")}}}, eurToUSD("1.1"), money.ErrCurrencyMismatch},
+		{"missing currency", []Line{{1, money.Amount{Value: dec("1")}}, {2, money.Amount{Value: dec("-1")}}}, eurToUSD("1.1"), ErrInvalidCurrency},
+		{"lowercase currency", []Line{{1, money.Amount{Value: dec("1"), Currency: "eur"}}, {2, money.Amount{Value: dec("-1"), Currency: "eur"}}}, eurToUSD("1.1"), ErrInvalidCurrency},
+		{"bad accounting currency", []Line{{1, money.Must("1", "EUR")}, {2, money.Must("-1", "EUR")}}, RateSet{Acct: Target{Currency: "us$"}, Rpt: Target{Currency: "EUR"}}, ErrInvalidCurrency},
 		{"no resolution", []Line{{1, money.Must("10", "GBP")}, {2, money.Must("-10", "GBP")}}, eurToUSD("1.1"), ErrRateMissing},
 	}
 	for _, c := range cases {
@@ -133,6 +136,99 @@ func TestConvertEntryFailures(t *testing.T) {
 				t.Fatalf("err = %v, want %v", err, c.err)
 			}
 		})
+	}
+}
+
+func TestConvertRejectsInvalidCurrencyCodes(t *testing.T) {
+	for _, code := range []string{"", "eur", "EU", "EURO", "1$3", "E R", "ÉUR"} {
+		if _, err := Convert(money.Amount{Value: dec("1"), Currency: code}, "USD", res("1.1")); !errors.Is(err, ErrInvalidCurrency) {
+			t.Errorf("source %q: err = %v", code, err)
+		}
+		if _, err := Convert(money.Must("1", "EUR"), code, res("1.1")); !errors.Is(err, ErrInvalidCurrency) {
+			t.Errorf("target %q: err = %v", code, err)
+		}
+	}
+}
+
+func TestInvalidCurrencyIsAnInvalidRate(t *testing.T) {
+	_, err := Convert(money.Amount{Value: dec("1"), Currency: "eur"}, "USD", res("1.1"))
+	addErr := NewBook(date("2026-03-31"), RateType{Code: "SPOT"}).Add(Rate{ID: "x", Type: "SPOT", From: "eur", To: "USD", Value: dec("1")})
+	if !errors.Is(err, ErrInvalidRate) || err.Error() != addErr.Error() {
+		t.Fatalf("convert %v, add %v", err, addErr)
+	}
+}
+
+func TestConvertEntryUnbalancedErrorNamesCurrenciesInSortedOrder(t *testing.T) {
+	lines := []Line{
+		{1, money.Must("1", "USD")}, {2, money.Must("2", "GBP")}, {3, money.Must("3", "EUR")},
+		{4, money.Must("4", "JPY")}, {5, money.Must("5", "CHF")},
+	}
+	want := "LEDGER_UNBALANCED: CHF off by 5, EUR off by 3, GBP off by 2, JPY off by 4, USD off by 1"
+	for i := 0; i < 50; i++ {
+		_, err := ConvertEntry(lines, eurToUSD("1.1"), HalfAwayFromZero)
+		if err == nil || err.Error() != want {
+			t.Fatalf("run %d: err = %v, want %s", i, err, want)
+		}
+	}
+}
+
+func TestConvertEntryNamesFailingLine(t *testing.T) {
+	lines := []Line{{7, money.Must("10", "GBP")}, {8, money.Must("-10", "GBP")}}
+	_, err := ConvertEntry(lines, eurToUSD("1.1"), HalfAwayFromZero)
+	if !errors.Is(err, ErrRateMissing) || !strings.Contains(err.Error(), "line 7") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestConvertEntryHalfEven(t *testing.T) {
+	lines := []Line{{1, money.Must("2.5", "EUR")}, {2, money.Must("-2.5", "EUR")}}
+	rs := RateSet{
+		Acct: Target{Currency: "JPY", Resolutions: map[string]Resolution{"EUR": res("1")}},
+		Rpt:  Target{Currency: "EUR", Resolutions: map[string]Resolution{}},
+	}
+	away, err := ConvertEntry(lines, rs, HalfAwayFromZero)
+	if err != nil || !away[0].Acct.Value.Equal(dec("3")) {
+		t.Fatalf("away %v err %v", away, err)
+	}
+	even, err := ConvertEntry(lines, rs, HalfEven)
+	if err != nil || !even[0].Acct.Value.Equal(dec("2")) || !even[1].Acct.Value.Equal(dec("-2")) {
+		t.Fatalf("even %v err %v", even, err)
+	}
+}
+
+func TestAllocateResidualNoLineCanAbsorb(t *testing.T) {
+	lines := []Line{{1, money.Must("1", "EUR")}, {2, money.Must("1", "EUR")}}
+	rounded := []decimal.Decimal{dec("-0.01"), dec("0")}
+	if _, _, err := allocateResidual(lines, rounded, "USD"); !errors.Is(err, ErrUnbalanced) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestResidualLandsOnOneLineWithinOneMinorUnit(t *testing.T) {
+	lines := []Line{
+		{1, money.Must("33.33", "EUR")},
+		{2, money.Must("33.33", "EUR")},
+		{3, money.Must("-66.66", "EUR")},
+	}
+	out, err := ConvertEntry(lines, eurToUSD("1.0850000000"), HalfAwayFromZero)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adjusted := 0
+	for _, l := range out {
+		plain, _ := Convert(l.Txn, "USD", res("1.0850000000"))
+		if l.AcctAdjusted {
+			adjusted++
+		}
+		if l.Acct.Value.Sub(plain.Value).Abs().GreaterThan(dec("0.01")) {
+			t.Fatalf("line %d moved more than one minor unit: %v vs %v", l.No, l.Acct, plain)
+		}
+		if !l.AcctAdjusted && !l.Acct.Value.Equal(plain.Value) {
+			t.Fatalf("unadjusted line %d differs from plain rounding", l.No)
+		}
+	}
+	if adjusted != 1 {
+		t.Fatalf("adjusted lines = %d", adjusted)
 	}
 }
 

@@ -20,4 +20,5 @@
 | OpenAPI, AsyncAPI, route/event contract test, Helm chart `passage-fx`, CronJobs, PrometheusRule, Dockerfile, `cmd/fx` | PSG-1202 slice 2e | no HTTP surface yet |
 | Web workspace `apps/web/src/modules/fx/` | slice 4 of PSG-12 | depends on the API |
 | Revaluation batch scheduled in dev | handoff | `deploy/` is outside the owned paths of this ticket |
+| Duty check ("Override exchange rates"), RLS and tenant scoping of `domain.Book` | required before any exposure | the domain library has no auth; the store is tenant-scoped, the in-memory book is not |
 | ISO 4217 reference data | handoff | wave 6 owns it; `money.MinorUnits` is used meanwhile |

@@ -11,10 +11,12 @@ import (
 	"time"
 
 	"github.com/shopspring/decimal"
+
+	"github.com/BenjaminSRussell/passage/services/fx/internal/domain"
 )
 
 const (
-	maxDecimals     = 10
+	maxDecimals     = domain.MaxRateScale
 	maxExponentSpan = 1000
 	maxBody         = 4 << 20
 )
@@ -22,7 +24,7 @@ const (
 var (
 	ErrDisabled  = errors.New("provider disabled")
 	ErrMalformed = errors.New("malformed provider payload")
-	maxRate      = decimal.New(1, 10)
+	maxRate      = decimal.NewFromInt(domain.MaxRate)
 )
 
 type RatePoint struct {
@@ -77,7 +79,7 @@ func parseRate(raw string, strict bool) (decimal.Decimal, error) {
 			return decimal.Decimal{}, errors.New("rate must be greater than zero")
 		}
 	}
-	if rate.GreaterThanOrEqual(maxRate) {
+	if rate.GreaterThan(maxRate) {
 		return decimal.Decimal{}, errors.New("rate is out of range")
 	}
 	return rate, nil
