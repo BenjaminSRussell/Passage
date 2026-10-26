@@ -214,7 +214,7 @@ describe("command palette", () => {
   it("returns focus to the menu button when the search trigger is not visible", async () => {
     const user = userEvent.setup();
     const offsetParent = vi.spyOn(HTMLElement.prototype, "offsetParent", "get").mockImplementation(function (this: HTMLElement) {
-      return this.getAttribute("aria-label") === "Search" ? null : document.body;
+      return this.hasAttribute("aria-keyshortcuts") ? null : document.body;
     });
     renderShell();
     await user.keyboard("{Control>}k{/Control}");

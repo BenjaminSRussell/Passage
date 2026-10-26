@@ -1,4 +1,5 @@
 /// <reference types="vitest" />
+import { configDefaults } from "vitest/config";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { federationRemotes } from "./src/shell/federation";
@@ -12,5 +13,5 @@ export default defineConfig({
   plugins: [react()],
   define: { __PASSAGE_REMOTES__: JSON.stringify(federationRemotes) },
   server: { port: 5173, proxy: { "/api": "http://localhost:8080" } },
-  test: { environment: "jsdom", globals: true, setupFiles: ["./src/test-setup.ts"] },
+  test: { environment: "jsdom", globals: true, setupFiles: ["./src/test-setup.ts"], exclude: [...configDefaults.exclude, "e2e/**"] },
 });

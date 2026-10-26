@@ -54,6 +54,8 @@ jobs:
       - run: npm ci
       - run: npx vitest --run
       - run: npx tsc --noEmit
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test
 
   py:
     name: py (ortools=${{ matrix.ortools }})

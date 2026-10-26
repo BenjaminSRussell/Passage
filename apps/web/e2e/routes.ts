@@ -1,0 +1,32 @@
+/**
+ * Every routable page of the shell: shell pages, each `nav.to` in
+ * `src/modules/*\/module.ts`, one product detail and a 404 path.
+ * Keep in sync with the module nav lists.
+ */
+export const ROUTES: readonly string[] = [
+  "/",
+  "/notes",
+  "/metadata/Vendor",
+  "/close",
+  "/workflow",
+  "/workflow/inbox",
+  "/workflow/designer",
+  "/workflow/jobs",
+  "/workflow/templates",
+  "/product",
+  "/product/items",
+  "/product/released",
+  "/product/BOLT",
+  "/engineering",
+  "/engineering/where-used",
+  "/admin",
+  "/admin/audit",
+  "/admin/sequences",
+  "/admin/alerts",
+  "/admin/import",
+  "/admin/documents",
+  "/admin/texts",
+  "/tax",
+  "/payables",
+  "/no-such-page",
+];
