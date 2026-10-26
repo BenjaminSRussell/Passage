@@ -11,7 +11,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-ortools = ["ortools>=9.10"]
+# <10 cap: see #107 (OnlyEnforceIf literal handling changed across OR-Tools releases)
+ortools = ["ortools>=9.11,<10"]
 test = ["pytest>=8.3.0", "httpx>=0.27.0"]
 
 [build-system]

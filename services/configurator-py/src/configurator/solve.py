@@ -108,7 +108,11 @@ def _solve_cpsat(model: dict, selections: dict[str, str], tables: dict[str, dict
             pass
 
     def lit(name: str, value: str):
-        return vars_[name] == domains[name].index(value)
+        idx = domains[name].index(value)
+        b = m.NewBoolVar(f"{name}={value}")
+        m.Add(vars_[name] == idx).OnlyEnforceIf(b)
+        m.Add(vars_[name] != idx).OnlyEnforceIf(b.Not())
+        return b
 
     for c in model["constraints"]:
         kind = c["kind"]

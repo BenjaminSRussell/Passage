@@ -19,7 +19,8 @@ jobs:
     outputs:
       go: ${{ steps.filter.outputs.go }}
       web: ${{ steps.filter.outputs.web }}
-      run: ${{ steps.filter.outputs.go == 'true' || steps.filter.outputs.web == 'true' || steps.filter.outputs.charts == 'true' }}
+      py: ${{ steps.filter.outputs.py }}
+      run: ${{ steps.filter.outputs.go == 'true' || steps.filter.outputs.web == 'true' || steps.filter.outputs.py == 'true' || steps.filter.outputs.charts == 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - id: filter
@@ -33,6 +34,9 @@ jobs:
             web:
               - 'apps/web/**'
               - '.github/workflows/**'
+            py:
+              - 'services/configurator-py/**'
+              - '.github/workflows/**'
             charts:
               - 'services/**/charts/**'
               - 'deploy/**'
@@ -44,6 +48,7 @@ jobs:
     with:
       go: ${{ needs.changes.outputs.go == 'true' || startsWith(github.ref, 'refs/tags/') }}
       web: ${{ needs.changes.outputs.web == 'true' }}
+      py: ${{ needs.changes.outputs.py == 'true' }}
     permissions:
       contents: read
       packages: write
