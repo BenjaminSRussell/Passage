@@ -3,6 +3,7 @@ package domain
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -19,11 +20,12 @@ const (
 )
 
 const (
-	TypeString  = "string"
-	TypeInt     = "int"
-	TypeDecimal = "decimal"
-	TypeDate    = "date"
-	TypeBool    = "bool"
+	TypeString    = "string"
+	TypeInt       = "int"
+	TypeDecimal   = "decimal"
+	TypeDate      = "date"
+	TypeBool      = "bool"
+	TypeTimestamp = "timestamp"
 )
 
 const (
@@ -40,18 +42,30 @@ type Error struct{ Code, Detail string }
 func (e *Error) Error() string { return e.Code + ": " + e.Detail }
 
 type FieldRule struct {
-	Source   string            `json:"source"`
-	Target   string            `json:"target"`
-	Type     string            `json:"type"`
-	Enum     map[string]string `json:"enum,omitempty"`
-	Default  *string           `json:"default,omitempty"`
-	Required bool              `json:"required,omitempty"`
+	Source      string            `json:"source"`
+	Target      string            `json:"target"`
+	Type        string            `json:"type"`
+	Rule        string            `json:"rule,omitempty"`
+	Value       *string           `json:"value,omitempty"`
+	Sources     []string          `json:"sources,omitempty"`
+	Separator   string            `json:"separator,omitempty"`
+	Fn          string            `json:"fn,omitempty"`
+	TimeSource  string            `json:"timeSource,omitempty"`
+	Width       int               `json:"width,omitempty"`
+	Enum        map[string]string `json:"enum,omitempty"`
+	EnumDefault *string           `json:"enumDefault,omitempty"`
+	Scale       *int              `json:"scale,omitempty"`
+	Default     *string           `json:"default,omitempty"`
+	Required    bool              `json:"required,omitempty"`
 }
 
 type Mapping struct {
-	Entity  string      `json:"entity"`
-	Version int         `json:"version"`
-	Fields  []FieldRule `json:"fields"`
+	Entity         string        `json:"entity"`
+	Version        int           `json:"version"`
+	SourceTimezone string        `json:"sourceTimezone,omitempty"`
+	Fields         []FieldRule   `json:"fields"`
+	Tests          []MappingTest `json:"tests,omitempty"`
+	loc            *time.Location
 }
 
 type Reject struct {
@@ -70,66 +84,164 @@ func ParseMapping(data []byte) (Mapping, error) {
 	if m.Entity == "" || m.Version < 1 || len(m.Fields) == 0 {
 		return Mapping{}, &Error{CodeMapInvalid, "entity, version >= 1 and at least one field are required"}
 	}
+	loc, err := time.LoadLocation(m.SourceTimezone)
+	if err != nil {
+		return Mapping{}, &Error{CodeMapInvalid, "sourceTimezone is not an IANA zone"}
+	}
+	m.loc = loc
 	targets := map[string]bool{}
 	for _, f := range m.Fields {
-		if f.Source == "" || f.Target == "" {
-			return Mapping{}, &Error{CodeMapInvalid, "every field needs source and target"}
+		if e := f.check(); e != nil {
+			return Mapping{}, e
 		}
 		if targets[f.Target] {
 			return Mapping{}, &Error{CodeMapInvalid, "duplicate target " + f.Target}
 		}
 		targets[f.Target] = true
-		switch f.Type {
-		case TypeString, TypeInt, TypeDecimal, TypeDate, TypeBool:
-		default:
-			return Mapping{}, &Error{CodeMapInvalid, "unknown type for target " + f.Target}
-		}
-		if f.Default != nil {
-			if _, rej := coerce(f, *f.Default); rej != nil {
-				return Mapping{}, &Error{CodeMapInvalid, "default for target " + f.Target + " does not satisfy its type"}
+		for _, v := range []*string{f.Default, f.Value, f.EnumDefault} {
+			if v == nil {
+				continue
+			}
+			if _, _, rej := m.coerce(f, *v, nil); rej != nil {
+				return Mapping{}, &Error{CodeMapInvalid, "value for target " + f.Target + " does not satisfy its type"}
 			}
 		}
+	}
+	if e := m.checkTests(); e != nil {
+		return Mapping{}, e
 	}
 	return m, nil
 }
 
 func (m Mapping) Apply(row map[string]any) (map[string]any, []Reject) {
+	out, _, rejects := m.ApplyWithWarnings(row)
+	return out, rejects
+}
+
+func (m Mapping) ApplyWithWarnings(row map[string]any) (map[string]any, []Warning, []Reject) {
 	out := make(map[string]any, len(m.Fields))
+	var warnings []Warning
 	var rejects []Reject
 	for _, f := range m.Fields {
-		text, present, scalar := sourceText(row[f.Source])
-		if !scalar {
-			rejects = append(rejects, Reject{f.Target, CodeMapCoerce, f.Source + " is not a scalar"})
+		text, present, rej := f.text(row)
+		if rej != nil {
+			rejects = append(rejects, *rej)
 			continue
+		}
+		if present && isNullMarker(f.Fn, text) {
+			present = false
 		}
 		if !present {
 			if f.Default != nil {
 				text, present = *f.Default, true
 			} else if f.Required {
-				rejects = append(rejects, Reject{f.Target, CodeMapRequired, f.Source + " is required"})
+				rejects = append(rejects, Reject{f.Target, CodeMapRequired, f.origin() + " is required"})
 				continue
 			} else {
 				continue
 			}
 		} else if len(f.Enum) > 0 {
 			mapped, ok := f.Enum[text]
+			if !ok && f.EnumDefault != nil {
+				warnings = append(warnings, Warning{f.Target, CodeMapEnumDefault, fmt.Sprintf("%s has no enum mapping; default %s used", f.origin(), *f.EnumDefault)})
+				mapped, ok = *f.EnumDefault, true
+			}
 			if !ok {
-				rejects = append(rejects, Reject{f.Target, CodeMapEnum, f.Source + " has no enum mapping"})
+				rejects = append(rejects, Reject{f.Target, CodeMapEnum, f.origin() + " has no enum mapping"})
 				continue
 			}
 			text = mapped
 		}
-		v, rej := coerce(f, text)
+		v, w, rej := m.coerce(f, text, row)
 		if rej != nil {
 			rejects = append(rejects, *rej)
 			continue
 		}
+		if w != nil {
+			warnings = append(warnings, *w)
+		}
 		out[f.Target] = v
 	}
 	if len(rejects) > 0 {
-		return nil, rejects
+		return nil, nil, rejects
 	}
-	return out, nil
+	return out, warnings, nil
+}
+
+func (m Mapping) location() *time.Location {
+	if m.loc == nil {
+		return time.UTC
+	}
+	return m.loc
+}
+
+func (m Mapping) coerce(f FieldRule, text string, row map[string]any) (any, *Warning, *Reject) {
+	if f.Fn != "" {
+		return m.coerceFn(f, text, row)
+	}
+	switch f.Type {
+	case TypeString:
+		return text, nil, nil
+	case TypeInt:
+		n, err := strconv.ParseInt(text, 10, 64)
+		if err != nil {
+			return nil, nil, badValue(f, CodeMapCoerce, "is not an integer")
+		}
+		return n, nil, nil
+	case TypeDecimal:
+		return coerceDecimal(f, text)
+	case TypeDate:
+		t, err := time.Parse(dateLayout, text)
+		if err != nil {
+			t, err = time.Parse(time.RFC3339, text)
+		}
+		if err != nil {
+			return nil, nil, badValue(f, CodeMapCoerce, "is not an ISO date")
+		}
+		return t.Format(dateLayout), nil, nil
+	case TypeTimestamp:
+		t, err := time.Parse(time.RFC3339, text)
+		if err != nil {
+			return nil, nil, badValue(f, CodeMapCoerce, "is not an RFC 3339 timestamp")
+		}
+		return t.UTC().Format(time.RFC3339), nil, nil
+	case TypeBool:
+		switch strings.ToLower(text) {
+		case "true", "1", "y", "yes":
+			return true, nil, nil
+		case "false", "0", "n", "no":
+			return false, nil, nil
+		}
+		return nil, nil, badValue(f, CodeMapCoerce, "is not a boolean")
+	}
+	return nil, nil, badValue(f, CodeMapInvalid, "has an unknown type")
+}
+
+func coerceDecimal(f FieldRule, text string) (any, *Warning, *Reject) {
+	d, err := decimal.NewFromString(text)
+	if err != nil {
+		return nil, nil, badValue(f, CodeMapCoerce, "is not a decimal")
+	}
+	rangeWhy := "exceeds scale 6 or magnitude 1e14"
+	if exp := d.Exponent(); exp > maxDecimalExponent || exp < -maxDecimalScaleGuard {
+		return nil, nil, badValue(f, CodeMapRange, rangeWhy)
+	}
+	places := int32(maxDecimalScale)
+	if f.Scale != nil {
+		places = int32(*f.Scale)
+	}
+	r := d.RoundBank(places)
+	if (f.Scale == nil && !r.Equal(d)) || r.Abs().GreaterThanOrEqual(maxDecimalMagnitude) {
+		return nil, nil, badValue(f, CodeMapRange, rangeWhy)
+	}
+	if f.Scale == nil {
+		return d.String(), nil, nil
+	}
+	var w *Warning
+	if !r.Equal(d) {
+		w = &Warning{f.Target, CodePrecisionLoss, fmt.Sprintf("%s rounded to scale %d, delta %s", f.origin(), places, d.Sub(r).Abs())}
+	}
+	return r.StringFixed(places), w, nil
 }
 
 func sourceText(v any) (text string, present, scalar bool) {
@@ -156,50 +268,4 @@ func sourceText(v any) (text string, present, scalar bool) {
 	}
 	s = strings.TrimSpace(s)
 	return s, s != "", true
-}
-
-func coerce(f FieldRule, text string) (any, *Reject) {
-	bad := func(code, why string) (any, *Reject) {
-		return nil, &Reject{f.Target, code, f.Source + " " + why}
-	}
-	switch f.Type {
-	case TypeString:
-		return text, nil
-	case TypeInt:
-		n, err := strconv.ParseInt(text, 10, 64)
-		if err != nil {
-			return bad(CodeMapCoerce, "is not an integer")
-		}
-		return n, nil
-	case TypeDecimal:
-		d, err := decimal.NewFromString(text)
-		if err != nil {
-			return bad(CodeMapCoerce, "is not a decimal")
-		}
-		if exp := d.Exponent(); exp > maxDecimalExponent || exp < -maxDecimalScaleGuard {
-			return bad(CodeMapRange, "exceeds scale 6 or magnitude 1e14")
-		}
-		if !d.Round(maxDecimalScale).Equal(d) || d.Abs().GreaterThanOrEqual(maxDecimalMagnitude) {
-			return bad(CodeMapRange, "exceeds scale 6 or magnitude 1e14")
-		}
-		return d.String(), nil
-	case TypeDate:
-		t, err := time.Parse(dateLayout, text)
-		if err != nil {
-			t, err = time.Parse(time.RFC3339, text)
-		}
-		if err != nil {
-			return bad(CodeMapCoerce, "is not an ISO date")
-		}
-		return t.Format(dateLayout), nil
-	case TypeBool:
-		switch strings.ToLower(text) {
-		case "true", "1", "y", "yes":
-			return true, nil
-		case "false", "0", "n", "no":
-			return false, nil
-		}
-		return bad(CodeMapCoerce, "is not a boolean")
-	}
-	return bad(CodeMapInvalid, "has an unknown type")
 }

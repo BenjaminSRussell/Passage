@@ -84,6 +84,7 @@ type runView struct {
 	ParentRunID    string                  `json:"parentRunId,omitempty"`
 	Counts         counts                  `json:"counts"`
 	Rejects        []domain.RowReject      `json:"rejects"`
+	Warnings       []domain.RowWarning     `json:"warnings"`
 	Absent         []string                `json:"absent"`
 	Reconciliation *domain.ReconcileReport `json:"reconciliation,omitempty"`
 	CreatedAt      time.Time               `json:"createdAt"`
@@ -96,6 +97,7 @@ type counts struct {
 	Updated   int `json:"updated"`
 	Unchanged int `json:"unchanged"`
 	Rejected  int `json:"rejected"`
+	Warned    int `json:"warned"`
 }
 
 func New(s store.Store, backends BackendFactory) *API { return &API{store: s, backends: backends} }
@@ -154,6 +156,16 @@ func (a *API) createRun(w http.ResponseWriter, r *http.Request) {
 	mapping, err := domain.ParseMapping(req.Mapping)
 	if err != nil {
 		httpx.Fail(w, r, problemFrom(err))
+		return
+	}
+	if failures := mapping.RunTests(); len(failures) > 0 {
+		p := httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeMapTestFail, fmt.Sprintf("%d mapping tests failed for %s.", len(failures), mapping.Entity))
+		p.Errors = make(map[string]string, len(failures))
+		for _, f := range failures {
+			p.Errors[f.Name] = f.Reason
+		}
+		a.logFailure(r, "mapping tests failed", p)
+		httpx.Fail(w, r, p)
 		return
 	}
 	a.execute(w, r, store.Run{SourceSystem: req.SourceSystem, Mode: req.Mode, Entity: mapping.Entity, DryRun: req.DryRun, MappingVersion: mapping.Version, Mapping: req.Mapping}, mapping, nil)
@@ -272,12 +284,15 @@ func view(run store.Run) runView {
 	rep := run.Report
 	v := runView{
 		ID: run.ID, SourceSystem: run.SourceSystem, Mode: run.Mode, Entity: run.Entity, Status: rep.Status, DryRun: run.DryRun,
-		MappingVersion: run.MappingVersion, ParentRunID: run.ParentRunID, Rejects: rep.Rejects, Absent: rep.Absent,
+		MappingVersion: run.MappingVersion, ParentRunID: run.ParentRunID, Rejects: rep.Rejects, Warnings: rep.Warnings, Absent: rep.Absent,
 		Reconciliation: rep.Reconciliation, CreatedAt: run.CreatedAt,
-		Counts: counts{rep.Extracted, rep.Mapped, rep.Created, rep.Updated, rep.Unchanged, len(rep.Rejects)},
+		Counts: counts{Extracted: rep.Extracted, Mapped: rep.Mapped, Created: rep.Created, Updated: rep.Updated, Unchanged: rep.Unchanged, Rejected: len(rep.Rejects), Warned: len(rep.Warnings)},
 	}
 	if v.Rejects == nil {
 		v.Rejects = []domain.RowReject{}
+	}
+	if v.Warnings == nil {
+		v.Warnings = []domain.RowWarning{}
 	}
 	if v.Absent == nil {
 		v.Absent = []string{}

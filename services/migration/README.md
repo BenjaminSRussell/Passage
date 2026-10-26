@@ -27,7 +27,31 @@ Mappings are JSON (a subset of the YAML the architecture names; no YAML library 
   {"source":"CreditMax","target":"creditLimit","type":"decimal","default":"0"}]}
 ```
 
-Types: `string`, `int`, `decimal`, `date`, `bool`. Absent, null and blank values are treated alike: default fill, else `required` rejects, else the field is omitted. Decimals never pass through float; scale above 6 or magnitude at or above 1e14 is rejected, not rounded. Reject details carry the field name and code, never the value.
+Types: `string`, `int`, `decimal`, `date`, `bool`, `timestamp` (RFC 3339, emitted in UTC). Absent, null and blank values are treated alike: default fill, else `required` rejects, else the field is omitted. Decimals never pass through float. Without `scale`, a decimal above scale 6 or at or above 1e14 is rejected, not rounded. Reject details carry the field name and code, never the value.
+
+Rule kinds (`rule`, default `copy`):
+
+- `const`: `value` is the target value and there is no `source`; the value must satisfy the type at parse time.
+- `concat`: `sources` (at least two, type `string`) joined by `separator`. Each part is trimmed and blank parts are skipped; when every part is blank the field is absent.
+
+Functions (`fn`), each with a fixed declared type:
+
+- `ax_datetime` (`timestamp`): AX `utcdatetime` text (`2006-01-02 15:04:05` or `2006-01-02T15:04:05`) read in the mapping's `sourceTimezone` (IANA name, default `UTC`). `1900-01-01`, with or without `00:00:00`, is the AX null marker and is absent.
+- `ax_noyes` (`bool`): `0`, `1`, `No` or `Yes`, case-insensitive.
+- `sap_dats` (`date`, or `timestamp` when `timeSource` names a `HHMMSS` column read in `sourceTimezone`; a blank time is `000000`): `YYYYMMDD`. `00000000` and `99991231` are absent.
+- `sap_lead_zero` (`string`, `width` 1 to 40 required): an all-digit value is left-padded with zeros to `width`; a digit value longer than `width` rejects; any other value passes through unchanged.
+
+Further field options:
+
+- `enumDefault`: target value for a present value with no `enum` entry; the row is loaded with a `MIG-MAP-ENUM-DEFAULT` warning. Without it the row rejects with `MIG-MAP-ENUM`.
+- `scale` (0 to 6, decimals only): the value is rounded half-even (`RoundBank`) to `scale`. When rounding changes it, the row is loaded with a `MAP-PRECISION-LOSS` warning carrying the absolute delta. The magnitude check still applies after rounding.
+
+Mapping options:
+
+- `sourceTimezone`: IANA zone for the `ax_datetime` and `sap_dats` time sources; an unknown name rejects with `MIG-MAP-INVALID`.
+- `tests`: `[{name, input, expect | expectRejects}]`. `expect` is the exact mapped output as strings per target; `expectRejects` lists the reject codes. Each case has exactly one of the two; names are unique. `POST /v1/integration/migration-runs` runs the tests after parsing and before any backend call: a failing case answers 422 `MIG-MAP-TEST-FAIL` with each failed name in `errors`. A mapping without tests is accepted. `POST .../{id}:rerun` uses the stored mapping and does not re-run tests.
+
+Warnings are reported per row in `warnings` and counted in `counts.warned` on the run view; warned rows are still loaded. Rejects remain the exception queue.
 
 ## Error codes
 
@@ -37,7 +61,11 @@ Types: `string`, `int`, `decimal`, `date`, `bool`. Absent, null and blank values
 | MIG-MAP-REQUIRED | required source value absent |
 | MIG-MAP-COERCE | value not convertible to the declared type |
 | MIG-MAP-ENUM | value has no enum mapping |
-| MIG-MAP-RANGE | decimal scale above 6 or magnitude at or above 1e14 |
+| MIG-MAP-RANGE | decimal scale above 6 (or above `scale`) or magnitude at or above 1e14 |
+| MIG-MAP-UNKNOWN-FN | unknown `rule` or `fn` in the mapping document (422) |
+| MIG-MAP-TEST-FAIL | one or more mapping tests failed; the failed names are in `errors` (422) |
+| MIG-MAP-ENUM-DEFAULT | warning: unmatched enum value mapped to `enumDefault`; the row is loaded |
+| MAP-PRECISION-LOSS | warning: decimal rounded to `scale`; the detail carries the absolute delta; the row is loaded |
 | MIG-ROW-DUPLICATE-KEY | source key repeated within one extract |
 | MIG-LOAD-FAILED | target loader error for the batch |
 | MIG-BACKEND-NOT-CONFIGURED | no extract and load backend wired (501) |
