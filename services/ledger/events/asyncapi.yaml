@@ -1,0 +1,119 @@
+asyncapi: 3.0.0
+info:
+  title: Passage Ledger events
+  version: 0.1.0
+  description: |
+    Events published by the ledger service through the transactional outbox (Debezium relays
+    outbox rows to Kafka). Every event is a CloudEvents 1.0 envelope with source
+    /passage/ledger/ledger and the tenant in `tenantid`. Schema evolution is additive only.
+defaultContentType: application/cloudevents+json
+channels:
+  journalPosted:
+    address: passage.ledger.journal
+    description: Journal entries committed (posting and reversal entries are both posted entries).
+    messages:
+      journalPosted:
+        $ref: "#/components/messages/JournalPosted"
+  journalReversed:
+    address: passage.ledger.journal
+    description: Reversal committed; the reversing entry is also announced as journal.posted.
+    messages:
+      journalReversed:
+        $ref: "#/components/messages/JournalReversed"
+  balanceRebuilt:
+    address: passage.ledger.balance
+    description: Balance projection rebuild finished.
+    messages:
+      balanceRebuilt:
+        $ref: "#/components/messages/BalanceRebuilt"
+operations:
+  publishJournalPosted:
+    action: send
+    channel: { $ref: "#/channels/journalPosted" }
+    summary: A journal entry was committed.
+  publishJournalReversed:
+    action: send
+    channel: { $ref: "#/channels/journalReversed" }
+    summary: A journal entry was reversed.
+  publishBalanceRebuilt:
+    action: send
+    channel: { $ref: "#/channels/balanceRebuilt" }
+    summary: A balance rebuild finished.
+components:
+  messages:
+    JournalPosted:
+      name: dev.passage.ledger.journal.posted.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [type, source, tenantid, subject, data]
+        properties:
+          type: { const: dev.passage.ledger.journal.posted.v1 }
+          source: { const: /passage/ledger/ledger }
+          tenantid: { type: string, format: uuid }
+          subject: { type: string, description: Entry id }
+          data:
+            type: object
+            required: [entryId, ledgerId, documentId, voucher, postingSequence, postingDate, periodKey, lineCount, totals, source, traceId]
+            properties:
+              entryId: { type: string, format: uuid }
+              ledgerId: { type: string, format: uuid }
+              documentId: { type: string, format: uuid }
+              voucher: { type: string }
+              postingSequence: { type: integer, format: int64, description: Gap-free per ledger }
+              postingDate: { type: string, format: date }
+              periodKey: { type: string, example: "2026-03" }
+              lineCount: { type: integer }
+              totals:
+                type: object
+                properties:
+                  currency: { type: string }
+                  debit: { type: string }
+                  credit: { type: string }
+              source:
+                type: object
+                properties:
+                  system: { type: string }
+                  type: { type: string }
+                  id: { type: string }
+                  uri: { type: string }
+              traceId: { type: string, minLength: 32, maxLength: 32 }
+    JournalReversed:
+      name: dev.passage.ledger.journal.reversed.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [type, source, tenantid, subject, data]
+        properties:
+          type: { const: dev.passage.ledger.journal.reversed.v1 }
+          source: { const: /passage/ledger/ledger }
+          tenantid: { type: string, format: uuid }
+          subject: { type: string, description: Original entry id }
+          data:
+            type: object
+            required: [originalEntryId, reversingEntryId, ledgerId, postingDate]
+            properties:
+              originalEntryId: { type: string, format: uuid }
+              reversingEntryId: { type: string, format: uuid }
+              ledgerId: { type: string, format: uuid }
+              postingDate: { type: string, format: date }
+    BalanceRebuilt:
+      name: dev.passage.ledger.balance.rebuilt.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [type, source, tenantid, subject, data]
+        properties:
+          type: { const: dev.passage.ledger.balance.rebuilt.v1 }
+          source: { const: /passage/ledger/ledger }
+          tenantid: { type: string, format: uuid }
+          subject: { type: string, description: Ledger id }
+          data:
+            type: object
+            required: [ledgerId, highWaterSequence, rowsWritten, rowsDiffering, durationMs]
+            properties:
+              ledgerId: { type: string, format: uuid }
+              highWaterSequence: { type: integer, format: int64 }
+              rowsWritten: { type: integer, format: int64 }
+              rowsDiffering: { type: integer, format: int64, description: Greater than zero raises a P1 alert }
+              durationMs: { type: integer, format: int64 }

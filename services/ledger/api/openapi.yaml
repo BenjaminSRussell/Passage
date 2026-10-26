@@ -1,0 +1,628 @@
+openapi: 3.1.0
+info:
+  title: Passage Ledger API
+  version: 0.1.0
+  description: |
+    Universal journal, chart of accounts and balance projection (wave 11, PSG-11).
+    Every route is mounted under /api/v1/ledger except /readyz. Errors are RFC 9457
+    problem details (application/problem+json) with a stable `code`; rule rejections
+    are 422 with a `violations[]` array of {code, lineIndex, field, message}.
+    Each operation names the duty it requires in `x-passage-duty` (enforced with
+    the platform's authz.RequireDuty; 403 AUTH-0003 without it). Money amounts are
+    decimal strings at the currency's ISO 4217 minor-unit scale, never numbers.
+servers:
+  - url: https://api.{env}.passage.dev
+    variables:
+      env: { default: dev }
+tags:
+  - name: charts
+  - name: ledgers
+  - name: journal
+  - name: balances
+  - name: ops
+components:
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: 1 to 128 characters after trimming surrounding whitespace, scoped to tenant and legal entity. Same key and payload replays the stored response; a different payload returns 409 LEDGER_IDEMPOTENCY_CONFLICT; a request racing another one with the same key returns 409 LEDGER_IDEMPOTENCY_IN_PROGRESS with Retry-After 1.
+      schema: { type: string, minLength: 1, maxLength: 128 }
+    Traceparent:
+      name: traceparent
+      in: header
+      required: false
+      description: W3C traceparent; its trace id is copied to the entry. A 32-character id is minted when absent.
+      schema: { type: string }
+    ChartCode:
+      name: chart
+      in: path
+      required: true
+      schema: { type: string, pattern: '^[A-Z0-9]{1,10}$' }
+    AccountNumber:
+      name: number
+      in: path
+      required: true
+      schema: { type: string, pattern: '^[A-Za-z0-9._-]{1,20}$' }
+    EntryId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    LedgerId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties:
+        type: { type: string, format: uri, example: "https://passage.dev/problems/LEDGER_UNBALANCED" }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string }
+        traceId: { type: string }
+        errors:
+          type: object
+          additionalProperties: { type: string }
+    Violation:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string, example: LEDGER_UNBALANCED }
+        lineIndex: { type: integer, description: "Absent for entry-level violations" }
+        field: { type: string }
+        message: { type: string }
+    ViolationProblem:
+      allOf:
+        - $ref: "#/components/schemas/Problem"
+        - type: object
+          required: [violations]
+          properties:
+            violations:
+              type: array
+              items: { $ref: "#/components/schemas/Violation" }
+    Amount:
+      type: object
+      required: [currency, value]
+      properties:
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        value: { type: string, description: Decimal string with at most the currency's minor-unit scale }
+    Source:
+      type: object
+      required: [system, type, id]
+      properties:
+        system: { type: string, maxLength: 128 }
+        type: { type: string, maxLength: 128 }
+        id: { type: string, maxLength: 128 }
+        uri: { type: string }
+    PostLine:
+      type: object
+      required: [account, debitCredit, amount]
+      properties:
+        account: { type: string, maxLength: 20 }
+        dimensions:
+          type: object
+          additionalProperties: { type: string }
+        debitCredit: { type: string, enum: [D, C] }
+        amount: { $ref: "#/components/schemas/Amount" }
+        text: { type: string, maxLength: 255 }
+        sourceLineRef: { type: string, maxLength: 200 }
+    PostEntryRequest:
+      type: object
+      required: [ledgerId, documentId, postingDate, source, lines]
+      properties:
+        ledgerId: { type: string, format: uuid }
+        documentId: { type: string, format: uuid, description: Groups entries across ledgers and split documents }
+        postingDate: { type: string, format: date }
+        documentDate: { type: string, format: date }
+        description: { type: string, maxLength: 255 }
+        source: { $ref: "#/components/schemas/Source" }
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 10000
+          items: { $ref: "#/components/schemas/PostLine" }
+    Totals:
+      type: object
+      properties:
+        currency: { type: string }
+        debit: { type: string }
+        credit: { type: string }
+    EntryLine:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        lineNumber: { type: integer }
+        account: { type: string }
+        dimensionCombinationId: { type: string, description: Lowercase hex of the SHA-256 combination id }
+        displayName: { type: string, example: "1010-D100-C200" }
+        dimensions:
+          type: object
+          additionalProperties: { type: string }
+        debitCredit: { type: string, enum: [D, C] }
+        amount: { type: string }
+        text: { type: string }
+        sourceLineRef: { type: string }
+        reversalOfLineId: { type: string, format: uuid }
+    Entry:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        ledgerId: { type: string, format: uuid }
+        documentId: { type: string, format: uuid }
+        voucher: { type: string }
+        postingSequence: { type: integer, format: int64 }
+        postingDate: { type: string, format: date }
+        periodKey: { type: string, example: "2026-03" }
+        documentDate: { type: string, format: date }
+        description: { type: string }
+        source: { $ref: "#/components/schemas/Source" }
+        reversalOfEntryId: { type: string, format: uuid }
+        postedAt: { type: string, format: date-time }
+        postedBy: { type: string }
+        traceId: { type: string }
+        totals: { $ref: "#/components/schemas/Totals" }
+        lines:
+          type: array
+          items: { $ref: "#/components/schemas/EntryLine" }
+    EntryResult:
+      type: object
+      properties:
+        entries:
+          type: array
+          items: { $ref: "#/components/schemas/Entry" }
+        idempotency:
+          type: object
+          properties:
+            key: { type: string }
+            replayed: { type: boolean }
+        traceId: { type: string }
+    Ledger:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        code: { type: string, pattern: '^[A-Z0-9]{1,10}$' }
+        name: { type: string }
+        chartCode: { type: string }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        dimensionAttributes:
+          type: array
+          maxItems: 20
+          items: { type: string }
+        firstOpenDate: { type: string, format: date }
+        futurePostingDays: { type: integer, minimum: 0, maximum: 730 }
+        createdAt: { type: string, format: date-time }
+    Account:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        chartCode: { type: string }
+        accountNumber: { type: string }
+        name: { type: string }
+        accountType:
+          type: string
+          enum: [asset, liability, equity, revenue, expense, profit_and_loss_total, balance_sheet_total, reporting]
+        isPostable: { type: boolean }
+        suspendedFrom: { type: string, format: date }
+        reconciliationAccountType:
+          type: string
+          enum: [none, customer, vendor, bank, inventory, fixed_asset]
+    ValidateResponse:
+      type: object
+      properties:
+        valid: { type: boolean }
+        violations:
+          type: array
+          items: { $ref: "#/components/schemas/Violation" }
+        lines:
+          type: array
+          items:
+            type: object
+            properties:
+              lineIndex: { type: integer }
+              account: { type: string }
+              displayName: { type: string }
+              dimensionCombinationId: { type: string }
+        currency: { type: string }
+        debit: { type: string }
+        credit: { type: string }
+    TrialBalance:
+      type: object
+      properties:
+        ledgerId: { type: string, format: uuid }
+        currency: { type: string }
+        rows:
+          type: array
+          items:
+            type: object
+            properties:
+              account: { type: string }
+              name: { type: string }
+              debit: { type: string }
+              credit: { type: string }
+              net: { type: string }
+              lineCount: { type: integer, format: int64 }
+        debit: { type: string }
+        credit: { type: string }
+        net: { type: string }
+        balanced: { type: boolean }
+    RebuildResult:
+      type: object
+      properties:
+        ledgerId: { type: string, format: uuid }
+        highWaterSequence: { type: integer, format: int64 }
+        rowsWritten: { type: integer, format: int64 }
+        rowsDiffering: { type: integer, format: int64 }
+        durationMs: { type: integer, format: int64 }
+  responses:
+    Problem400:
+      description: Validation failed (COM-0001 with errors map)
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Problem401:
+      description: Missing or malformed tenant (AUTH-0001)
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Problem403:
+      description: Forbidden (duty missing, or caller scoped to another legal entity)
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Problem404:
+      description: Not found
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Problem409:
+      description: Idempotency conflict (LEDGER_IDEMPOTENCY_CONFLICT) or in-progress duplicate (LEDGER_IDEMPOTENCY_IN_PROGRESS, with Retry-After)
+      headers:
+        Retry-After:
+          description: Seconds to wait; set to 1 on LEDGER_IDEMPOTENCY_IN_PROGRESS only
+          schema: { type: integer }
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Problem422:
+      description: Posting rule rejection; nothing was written. violations[] lists every failed rule.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/ViolationProblem" }
+paths:
+  /api/v1/ledger/ledgers:
+    post:
+      tags: [ledgers]
+      operationId: createLedger
+      x-passage-duty: ledger.ledger.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [legalEntityId, code, name, chartCode, currency]
+              properties:
+                legalEntityId: { type: string, format: uuid }
+                code: { type: string, pattern: '^[A-Z0-9]{1,10}$' }
+                name: { type: string, minLength: 1, maxLength: 120 }
+                chartCode: { type: string, pattern: '^[A-Z0-9]{1,10}$' }
+                currency: { type: string, pattern: '^[A-Z]{3}$' }
+                dimensionAttributes: { type: array, maxItems: 20, items: { type: string } }
+                firstOpenDate: { type: string, format: date }
+                futurePostingDays: { type: integer, minimum: 0, maximum: 730, default: 366 }
+      responses:
+        "201":
+          description: Ledger created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Ledger" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "409":
+          description: A ledger with this code already exists (LEDGER_CODE_DUPLICATE)
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+  /api/v1/ledger/ledgers/{id}:
+    get:
+      tags: [ledgers]
+      operationId: getLedger
+      x-passage-duty: ledger.journal.read
+      parameters:
+        - $ref: "#/components/parameters/LedgerId"
+      responses:
+        "200":
+          description: Ledger
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Ledger" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+  /api/v1/ledger/charts/{chart}/accounts:
+    get:
+      tags: [charts]
+      operationId: listAccounts
+      x-passage-duty: ledger.journal.read
+      parameters:
+        - $ref: "#/components/parameters/ChartCode"
+        - name: after
+          in: query
+          required: false
+          description: "Keyset cursor: the last account number of the previous page"
+          schema: { type: string }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 100 }
+      responses:
+        "200":
+          description: Page of accounts ordered by account number
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextAfter]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Account" }
+                  nextAfter:
+                    type: string
+                    description: Cursor for the next page (pass as `after`); empty when this page is the last
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+  /api/v1/ledger/charts/{chart}/accounts/{number}:
+    put:
+      tags: [charts]
+      operationId: putAccount
+      x-passage-duty: ledger.account.write
+      description: Creates (201) or replaces (200) a main account. Naturally idempotent.
+      parameters:
+        - $ref: "#/components/parameters/ChartCode"
+        - $ref: "#/components/parameters/AccountNumber"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, accountType]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 120 }
+                accountType:
+                  type: string
+                  enum: [asset, liability, equity, revenue, expense, profit_and_loss_total, balance_sheet_total, reporting]
+                isPostable: { type: boolean, default: true }
+                suspendedFrom: { type: string, format: date }
+                reconciliationAccountType:
+                  type: string
+                  enum: [none, customer, vendor, bank, inventory, fixed_asset]
+      responses:
+        "200":
+          description: Account replaced
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Account" }
+        "201":
+          description: Account created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Account" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+  /api/v1/ledger/journal-entries:
+    post:
+      tags: [journal]
+      operationId: postEntry
+      x-passage-duty: ledger.journal.post
+      description: |
+        Posts one balanced entry atomically or rejects it entirely. Pipeline (slice 1): schema,
+        ledger resolution, posting-date window, account existence, postability and suspension,
+        reconciliation-account protection for manual journals (source ledger/manual_journal),
+        currency and scale, dimension attributes, combination interning, balance check, sequence
+        assignment, insert, balance upsert, outbox. Account structures, fiscal periods and FX
+        are not yet applied (NOT-IMPLEMENTED.md). The database re-checks the balance at commit.
+        Retries with the same Idempotency-Key and payload replay the stored response (200 with
+        idempotency.replayed = true). Idempotency records are kept 400 days; replays after expiry
+        are new requests.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Traceparent"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PostEntryRequest" }
+      responses:
+        "201":
+          description: Entry posted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EntryResult" }
+        "200":
+          description: Replay of an identical request (idempotency.replayed = true)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EntryResult" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "409": { $ref: "#/components/responses/Problem409" }
+        "422": { $ref: "#/components/responses/Problem422" }
+  /api/v1/ledger/journal-entries/{id}:
+    get:
+      tags: [journal]
+      operationId: getEntry
+      x-passage-duty: ledger.journal.read
+      parameters:
+        - $ref: "#/components/parameters/EntryId"
+      responses:
+        "200":
+          description: Entry with lines
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Entry" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+  /api/v1/ledger/journal-entries/{id}/reverse:
+    post:
+      tags: [journal]
+      operationId: reverseEntry
+      x-passage-duty: ledger.journal.reverse
+      description: |
+        Creates an exact negating entry linked to the original (reversalOfEntryId; lines carry
+        reversalOfLineId). An entry can be reversed once (LEDGER_REVERSAL_ALREADY_REVERSED); a
+        reversal can itself be reversed to re-instate the original. The reversal date defaults to
+        the original posting date and may not precede it (LEDGER_DATE_INVALID).
+        Reason codes (FR-11.15) are not yet accepted; see NOT-IMPLEMENTED.md.
+      parameters:
+        - $ref: "#/components/parameters/EntryId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                postingDate: { type: string, format: date, description: Defaults to the original posting date }
+                description: { type: string, maxLength: 255 }
+      responses:
+        "201":
+          description: Reversal posted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EntryResult" }
+        "200":
+          description: Replay of an identical request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EntryResult" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "409": { $ref: "#/components/responses/Problem409" }
+        "422": { $ref: "#/components/responses/Problem422" }
+  /api/v1/ledger/validate:
+    post:
+      tags: [journal]
+      operationId: validateEntry
+      x-passage-duty: ledger.journal.post
+      description: Dry run of the posting rules. Returns every violation in one response; writes nothing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PostEntryRequest" }
+      responses:
+        "200":
+          description: Validation result
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ValidateResponse" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+  /api/v1/ledger/balances:
+    get:
+      tags: [balances]
+      operationId: trialBalance
+      x-passage-duty: ledger.balance.read
+      description: Trial balance per account from the balance projection, for a period range and account range.
+      parameters:
+        - name: ledger
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+        - name: period_from
+          in: query
+          required: false
+          schema: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' }
+        - name: period_to
+          in: query
+          required: false
+          schema: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' }
+        - name: account_from
+          in: query
+          required: false
+          schema: { type: string }
+        - name: account_to
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        "200":
+          description: Trial balance
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TrialBalance" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+  /api/v1/ledger/balances:rebuild:
+    post:
+      tags: [ops]
+      operationId: rebuildBalances
+      x-passage-duty: ledger.balance.rebuild
+      description: Rebuilds the balance projection of one ledger from the journal and reports differing rows.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ledgerId]
+              properties:
+                ledgerId: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Rebuild result
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RebuildResult" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+  /readyz:
+    get:
+      tags: [ops]
+      operationId: readyz
+      description: |
+        Served on the admin port (9090), not under the API base URL: readiness is a database
+        ping. The main port's /healthz and /readyz are the platform router's static probes;
+        /metrics is also on the admin port.
+      security: []
+      responses:
+        "200":
+          description: Ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [ready] }
+        "503":
+          description: Database not reachable
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [unavailable] }

@@ -1,0 +1,25 @@
+replicaCount: 3
+
+image:
+  repository: ghcr.io/benjaminsrussell/passage-ledger
+  tag: ""
+  # Set to a sha256 digest in Argo CD overlays (digest-pinned sync).
+  digest: ""
+  pullPolicy: IfNotPresent
+
+# Name of the Secret holding DATABASE_URL (passage_app role, no BYPASSRLS).
+databaseSecret: ledger-db-app
+
+# Dev only: apply migrations on start. Stage and prod run them as an Argo PreSync Job.
+migrateOnStart: false
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+
+serviceMonitor:
+  enabled: false

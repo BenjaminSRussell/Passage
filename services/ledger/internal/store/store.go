@@ -1,0 +1,352 @@
+// Package store is the ledger's Postgres layer. Every method runs inside
+// dbx.WithTenantTx so row-level security applies; posting serializes per ledger
+// by locking the ledger row, which also assigns the gap-free posting sequence.
+package store
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/BenjaminSRussell/passage/platform/events"
+	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/outbox"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/BenjaminSRussell/passage/services/ledger/internal/domain"
+	ledgerevents "github.com/BenjaminSRussell/passage/services/ledger/internal/events"
+)
+
+// MaxPageSize bounds keyset pages (FR-11.14).
+const MaxPageSize = 1000
+
+const uniqueViolation = "23505"
+
+// Store is the persistence contract the HTTP layer depends on.
+type Store interface {
+	PutAccount(ctx context.Context, chartCode, number string, in Account) (Account, bool, error)
+	ListAccounts(ctx context.Context, chartCode, afterNumber string, limit int) ([]Account, error)
+	CreateLedger(ctx context.Context, in Ledger) (Ledger, error)
+	GetLedger(ctx context.Context, id string) (Ledger, error)
+	PostEntry(ctx context.Context, in PostInput) (EntryResult, error)
+	ReverseEntry(ctx context.Context, in ReverseInput) (EntryResult, error)
+	GetEntry(ctx context.Context, id string) (Entry, error)
+	ValidateEntry(ctx context.Context, in PostInput) (domain.Result, error)
+	TrialBalance(ctx context.Context, f BalanceFilter) (TrialBalance, error)
+	RebuildBalances(ctx context.Context, ledgerID string) (RebuildResult, error)
+	Ping(ctx context.Context) error
+}
+
+// Postgres implements Store.
+type Postgres struct{ pool *pgxpool.Pool }
+
+// New returns a Postgres-backed store.
+func New(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
+
+// Ping checks the database connection for the readiness probe.
+func (s *Postgres) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
+
+// Account is a main account in a chart.
+type Account struct {
+	ID            string  `json:"id"`
+	ChartCode     string  `json:"chartCode"`
+	Number        string  `json:"accountNumber"`
+	Name          string  `json:"name"`
+	Type          string  `json:"accountType"`
+	Postable      bool    `json:"isPostable"`
+	SuspendedFrom *string `json:"suspendedFrom,omitempty"`
+	ReconType     string  `json:"reconciliationAccountType"`
+}
+
+// Ledger is one accounting ledger of a legal entity.
+type Ledger struct {
+	ID                  string    `json:"id"`
+	LegalEntityID       string    `json:"legalEntityId"`
+	Code                string    `json:"code"`
+	Name                string    `json:"name"`
+	ChartCode           string    `json:"chartCode"`
+	Currency            string    `json:"currency"`
+	DimensionAttributes []string  `json:"dimensionAttributes"`
+	FirstOpenDate       *string   `json:"firstOpenDate,omitempty"`
+	FuturePostingDays   int       `json:"futurePostingDays"`
+	NextSequence        int64     `json:"-"`
+	CreatedAt           time.Time `json:"createdAt"`
+}
+
+// Rules returns the posting rules this ledger imposes.
+func (l Ledger) Rules() domain.Rules {
+	r := domain.Rules{ChartCode: l.ChartCode, Currency: l.Currency, DimensionAttributes: l.DimensionAttributes, FutureDays: l.FuturePostingDays}
+	if l.FirstOpenDate != nil {
+		if d, err := time.Parse(time.DateOnly, *l.FirstOpenDate); err == nil {
+			r.FirstOpenDate = &d
+		}
+	}
+	return r
+}
+
+// PostInput is one entry to post or validate.
+type PostInput struct {
+	LedgerID     string
+	DocumentID   string
+	PostingDate  time.Time
+	DocumentDate *time.Time
+	Description  string
+	Source       ledgerevents.Source
+	Lines        []domain.LineInput
+	Key          string
+	Hash         []byte
+	Actor        string
+	TraceID      string
+	Today        time.Time
+}
+
+// rules returns the ledger's posting rules for this input: a manual journal
+// source additionally protects reconciliation accounts (BR-11.8).
+func (in PostInput) rules(l Ledger) domain.Rules {
+	r := l.Rules()
+	r.Manual = domain.IsManualSource(in.Source.System, in.Source.Type)
+	return r
+}
+
+// ReverseInput is a reversal request for one posted entry.
+type ReverseInput struct {
+	EntryID     string
+	PostingDate *time.Time
+	Description string
+	Key         string
+	Hash        []byte
+	Actor       string
+	TraceID     string
+	Today       time.Time
+}
+
+// Idempotency reports the replay state of a keyed request.
+type Idempotency struct {
+	Key      string `json:"key"`
+	Replayed bool   `json:"replayed"`
+}
+
+// EntryResult is the response of a posting or reversal.
+type EntryResult struct {
+	Entries     []Entry     `json:"entries"`
+	Idempotency Idempotency `json:"idempotency"`
+	TraceID     string      `json:"traceId"`
+}
+
+// Entry is a posted journal entry with its lines.
+type Entry struct {
+	ID                string               `json:"id"`
+	LedgerID          string               `json:"ledgerId"`
+	DocumentID        string               `json:"documentId"`
+	Voucher           string               `json:"voucher"`
+	PostingSequence   int64                `json:"postingSequence"`
+	PostingDate       string               `json:"postingDate"`
+	PeriodKey         string               `json:"periodKey"`
+	DocumentDate      *string              `json:"documentDate,omitempty"`
+	Description       string               `json:"description"`
+	Source            ledgerevents.Source  `json:"source"`
+	ReversalOfEntryID *string              `json:"reversalOfEntryId,omitempty"`
+	PostedAt          time.Time            `json:"postedAt"`
+	PostedBy          string               `json:"postedBy"`
+	TraceID           string               `json:"traceId"`
+	Totals            ledgerevents.Amounts `json:"totals"`
+	Lines             []Line               `json:"lines"`
+}
+
+// Line is one journal line.
+type Line struct {
+	ID                     string            `json:"id"`
+	LineNumber             int               `json:"lineNumber"`
+	Account                string            `json:"account"`
+	DimensionCombinationID string            `json:"dimensionCombinationId"`
+	DisplayName            string            `json:"displayName"`
+	Dimensions             map[string]string `json:"dimensions,omitempty"`
+	DebitCredit            string            `json:"debitCredit"`
+	Amount                 string            `json:"amount"`
+	Text                   string            `json:"text,omitempty"`
+	SourceLineRef          string            `json:"sourceLineRef,omitempty"`
+	ReversalOfLineID       *string           `json:"reversalOfLineId,omitempty"`
+}
+
+// BalanceFilter selects balances for a trial balance.
+type BalanceFilter struct {
+	LedgerID, PeriodFrom, PeriodTo, AccountFrom, AccountTo string
+}
+
+// BalanceRow is one account's period-to-date turnover in the filter.
+type BalanceRow struct {
+	Account   string `json:"account"`
+	Name      string `json:"name"`
+	Debit     string `json:"debit"`
+	Credit    string `json:"credit"`
+	Net       string `json:"net"`
+	LineCount int64  `json:"lineCount"`
+}
+
+// TrialBalance is the account-level summary with totals.
+type TrialBalance struct {
+	LedgerID string       `json:"ledgerId"`
+	Currency string       `json:"currency"`
+	Rows     []BalanceRow `json:"rows"`
+	Debit    string       `json:"debit"`
+	Credit   string       `json:"credit"`
+	Net      string       `json:"net"`
+	Balanced bool         `json:"balanced"`
+}
+
+// RebuildResult reports a balance rebuild (BR-11.7, simplified: no shadow table).
+type RebuildResult struct {
+	LedgerID          string `json:"ledgerId"`
+	HighWaterSequence int64  `json:"highWaterSequence"`
+	RowsWritten       int64  `json:"rowsWritten"`
+	RowsDiffering     int64  `json:"rowsDiffering"`
+	DurationMs        int64  `json:"durationMs"`
+}
+
+func principalOf(ctx context.Context) (tenant.Principal, error) {
+	p, ok := tenant.FromContext(ctx)
+	if !ok {
+		return tenant.Principal{}, httpx.NewProblem(http.StatusUnauthorized, "AUTH-0001", "missing tenant")
+	}
+	return p, nil
+}
+
+func enqueue(ctx context.Context, tx pgx.Tx, aggregateID, eventType, tenantID string, data any) error {
+	evt, err := events.New(eventType, ledgerevents.EventSource, aggregateID, tenantID, data)
+	if err != nil {
+		return err
+	}
+	return outbox.Enqueue(ctx, tx, "journal", aggregateID, evt)
+}
+
+func isUnique(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == uniqueViolation
+}
+
+// CodeIdempotencyInProgress is the 409 returned while another request holding
+// the same Idempotency-Key is still being committed (FR-11.5). The API adds
+// Retry-After: 1.
+const CodeIdempotencyInProgress = "LEDGER_IDEMPOTENCY_IN_PROGRESS"
+
+// idempotencyRace maps a unique violation on an idempotency key to 409
+// LEDGER_IDEMPOTENCY_IN_PROGRESS. Requests on the same ledger serialize on the
+// ledger row lock and replay instead; this covers the same key racing on two
+// ledgers of one legal entity, where the loser hits the key's primary key.
+func idempotencyRace(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation && strings.Contains(pgErr.ConstraintName, "idempotency") {
+		return httpx.NewProblem(http.StatusConflict, CodeIdempotencyInProgress, "a request with this Idempotency-Key is still in progress; retry shortly")
+	}
+	return err
+}
+
+// replayIdempotent returns true with the stored response when the key was used
+// with the same payload; a different payload is a 409 (BR-11.6). Expired keys
+// are removed first so the request is treated as new (FR-11.5).
+func replayIdempotent(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, key string, hash []byte, out *EntryResult) (bool, error) {
+	if _, err := tx.Exec(ctx, `delete from idempotency_keys where tenant_id = $1 and legal_entity_id = $2 and key = $3 and expires_at <= now()`,
+		tenantID, legalEntityID, key); err != nil {
+		return false, err
+	}
+	var stored []byte
+	var body []byte
+	err := tx.QueryRow(ctx, `select payload_hash, response_body from idempotency_keys where tenant_id = $1 and legal_entity_id = $2 and key = $3`,
+		tenantID, legalEntityID, key).Scan(&stored, &body)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !bytes.Equal(stored, hash) {
+		return false, httpx.NewProblem(http.StatusConflict, "LEDGER_IDEMPOTENCY_CONFLICT", "Idempotency-Key was already used with a different request body")
+	}
+	if err := json.Unmarshal(body, out); err != nil {
+		return false, err
+	}
+	out.Idempotency = Idempotency{Key: key, Replayed: true}
+	return true, nil
+}
+
+// storeIdempotent records a successful response under the key (2xx only).
+func storeIdempotent(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, key string, hash []byte, result EntryResult) error {
+	body, err := json.Marshal(result)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `insert into idempotency_keys (tenant_id, legal_entity_id, key, payload_hash, response_status, response_body)
+		values ($1, $2, $3, $4, 201, $5)`, tenantID, legalEntityID, key, hash, string(body))
+	return err
+}
+
+func loadLedger(ctx context.Context, tx pgx.Tx, tenantID, id string, lock bool) (Ledger, error) {
+	q := ledgerColumns + ` from ledger where tenant_id = $1 and id = $2`
+	if lock {
+		q += ` for update`
+	}
+	l, err := scanLedger(tx.QueryRow(ctx, q, tenantID, id))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Ledger{}, httpx.NewProblem(http.StatusNotFound, "LEDGER_NOT_FOUND", "ledger not found")
+	}
+	return l, err
+}
+
+// loadAccounts returns the accounts of chart that appear in numbers, keyed by number.
+func loadAccounts(ctx context.Context, tx pgx.Tx, tenantID, chart string, numbers []string) (map[string]domain.Account, error) {
+	out := make(map[string]domain.Account, len(numbers))
+	if len(numbers) == 0 {
+		return out, nil
+	}
+	rows, err := tx.Query(ctx, `select id, account_number, is_postable, suspended_from::text, reconciliation_account_type
+		from main_account where tenant_id = $1 and chart_code = $2 and account_number = any($3)`, tenantID, chart, numbers)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var a domain.Account
+		var susp *string
+		if err := rows.Scan(&a.ID, &a.Number, &a.Postable, &susp, &a.ReconType); err != nil {
+			return nil, err
+		}
+		if susp != nil {
+			if d, err := time.Parse(time.DateOnly, *susp); err == nil {
+				a.SuspendedFrom = &d
+			}
+		}
+		out[a.Number] = a
+	}
+	return out, rows.Err()
+}
+
+func accountNumbers(lines []domain.LineInput) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, l := range lines {
+		if !seen[l.Account] {
+			seen[l.Account] = true
+			out = append(out, l.Account)
+		}
+	}
+	return out
+}
+
+const ledgerColumns = `select id, legal_entity_id, code, name, chart_code, currency, dimension_attributes, first_open_date::text, future_posting_days, next_sequence, created_at`
+
+func scanLedger(row pgx.Row) (Ledger, error) {
+	var l Ledger
+	err := row.Scan(&l.ID, &l.LegalEntityID, &l.Code, &l.Name, &l.ChartCode, &l.Currency, &l.DimensionAttributes,
+		&l.FirstOpenDate, &l.FuturePostingDays, &l.NextSequence, &l.CreatedAt)
+	if l.DimensionAttributes == nil {
+		l.DimensionAttributes = []string{}
+	}
+	return l, err
+}
