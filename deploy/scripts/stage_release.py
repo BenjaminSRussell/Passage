@@ -11,6 +11,10 @@ from pathlib import Path
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 STAGE_MANIFEST = Path("deploy/envs/stage/apps/hello-ledger.yaml")
 PLACEHOLDER_DIGEST = "sha256:" + "0" * 64
+IMAGE_REPOSITORY = "ghcr.io/benjaminsrussell/hello-ledger"
+WORKFLOW_REPOSITORY = "BenjaminSRussell/Passage"
+OIDC_ISSUER = "https://token.actions.githubusercontent.com"
+IDENTITY_REGEXP = r"^https://github\.com/BenjaminSRussell/Passage/\.github/workflows/ci\.yml@refs/(heads/main|tags/v.+)$"
 DIGEST_LINE = re.compile(r"(?m)^(\s*digest:\s*)(sha256:[0-9a-f]{64})(\s*)$")
 
 
@@ -85,7 +89,35 @@ def _write_digest(path, text, digest):
         raise ReleaseError(f"cannot update stage manifest {path}: {error}") from error
 
 
-def promote(root, digest):
+def cosign_identity_args():
+    return [
+        "--certificate-identity-regexp",
+        IDENTITY_REGEXP,
+        "--certificate-oidc-issuer",
+        OIDC_ISSUER,
+        "--certificate-github-workflow-repository",
+        WORKFLOW_REPOSITORY,
+    ]
+
+
+def verify_image(digest):
+    reference = f"{IMAGE_REPOSITORY}@{digest}"
+    identity = cosign_identity_args()
+    for command in (
+        ["cosign", "verify", *identity, reference],
+        ["cosign", "verify-attestation", "--type", "spdxjson", *identity, reference],
+    ):
+        try:
+            subprocess.run(command, check=True, capture_output=True, text=True)
+        except OSError as error:
+            raise ReleaseError(f"cannot run cosign to verify {reference}: {error}") from error
+        except subprocess.CalledProcessError as error:
+            raise ReleaseError(
+                f"`{' '.join(command[:2])}` rejected {reference}: {error.stderr.strip()}"
+            ) from error
+
+
+def promote(root, digest, skip_verify=False):
     if re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is None:
         raise ReleaseError("digest must be an immutable lowercase sha256:<64 hex characters> reference")
     if digest == PLACEHOLDER_DIGEST:
@@ -98,6 +130,13 @@ def promote(root, digest):
     current = read_digest(text)
     if digest == current:
         raise ReleaseError(f"stage already pins {digest}")
+    if skip_verify:
+        print(
+            f"WARNING: SKIP_VERIFY set; {digest} promoted WITHOUT signature or SBOM verification",
+            file=sys.stderr,
+        )
+    else:
+        verify_image(digest)
     _write_digest(path, text, digest)
     return current, digest
 
@@ -148,6 +187,7 @@ def main(argv=None, repo_root=None):
     promote_parser = commands.add_parser("promote", help="pin a digest in the stage Application")
     promote_parser.add_argument("--to", choices=["stage"], required=True)
     promote_parser.add_argument("--digest", required=True)
+    promote_parser.add_argument("--skip-verify", action="store_true")
     rollback_parser = commands.add_parser("rollback", help="restore the prior stage digest from Git history")
     rollback_parser.add_argument("--env", choices=["stage"], required=True)
     args = parser.parse_args(argv)
@@ -155,7 +195,7 @@ def main(argv=None, repo_root=None):
 
     try:
         if args.command == "promote":
-            previous, current = promote(root, args.digest)
+            previous, current = promote(root, args.digest, args.skip_verify)
             print(f"stage digest: {previous} -> {current}")
         else:
             previous, current = rollback(root)

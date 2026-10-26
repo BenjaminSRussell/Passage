@@ -1,0 +1,106 @@
+# Migration to the CEL ImageValidatingPolicy is deferred until the chart is on a Kyverno release where it is GA.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-signed-images
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+    policies.kyverno.io/title: Require signed images with an SBOM attestation
+    pod-policies.kyverno.io/autogen-controllers: none
+spec:
+  failurePolicy: Fail
+  background: false
+  webhookTimeoutSeconds: 30
+  rules:
+    - name: require-digest-pinned-images
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [hello-ledger, passage-*]
+      validate:
+        failureAction: Enforce
+        message: Images under ghcr.io/benjaminsrussell/ must be referenced by @sha256 digest, not a mutable tag.
+        foreach:
+          - list: request.object.spec.containers
+            preconditions:
+              any:
+                - key: "{{ element.image }}"
+                  operator: Equals
+                  value: ghcr.io/benjaminsrussell/*
+                - key: "{{ element.image }}"
+                  operator: Equals
+                  value: ghcr.io:443/benjaminsrussell/*
+            deny:
+              conditions:
+                all:
+                  - key: "{{ regex_match('@sha256:[0-9a-f]{64}$', element.image) }}"
+                    operator: Equals
+                    value: false
+          - list: request.object.spec.initContainers || `[]`
+            preconditions:
+              any:
+                - key: "{{ element.image }}"
+                  operator: Equals
+                  value: ghcr.io/benjaminsrussell/*
+                - key: "{{ element.image }}"
+                  operator: Equals
+                  value: ghcr.io:443/benjaminsrussell/*
+            deny:
+              conditions:
+                all:
+                  - key: "{{ regex_match('@sha256:[0-9a-f]{64}$', element.image) }}"
+                    operator: Equals
+                    value: false
+          - list: request.object.spec.ephemeralContainers || `[]`
+            preconditions:
+              any:
+                - key: "{{ element.image }}"
+                  operator: Equals
+                  value: ghcr.io/benjaminsrussell/*
+                - key: "{{ element.image }}"
+                  operator: Equals
+                  value: ghcr.io:443/benjaminsrussell/*
+            deny:
+              conditions:
+                all:
+                  - key: "{{ regex_match('@sha256:[0-9a-f]{64}$', element.image) }}"
+                    operator: Equals
+                    value: false
+    - name: verify-cosign-signature-and-sbom
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [hello-ledger, passage-*]
+      verifyImages:
+        - type: Cosign
+          failureAction: Enforce
+          imageReferences:
+            - ghcr.io/benjaminsrussell/*
+            - ghcr.io:443/benjaminsrussell/*
+          required: true
+          mutateDigest: false
+          verifyDigest: true
+          attestors:
+            - count: 1
+              entries:
+                - keyless:
+                    issuer: https://token.actions.githubusercontent.com
+                    subjectRegExp: ^https://github\.com/BenjaminSRussell/Passage/\.github/workflows/ci\.yml@refs/(heads/main|tags/v.+)$
+                    additionalExtensions:
+                      githubWorkflowRepository: BenjaminSRussell/Passage
+                    rekor:
+                      url: https://rekor.sigstore.dev
+          attestations:
+            - type: https://spdx.dev/Document
+              attestors:
+                - count: 1
+                  entries:
+                    - keyless:
+                        issuer: https://token.actions.githubusercontent.com
+                        subjectRegExp: ^https://github\.com/BenjaminSRussell/Passage/\.github/workflows/ci\.yml@refs/(heads/main|tags/v.+)$
+                        additionalExtensions:
+                          githubWorkflowRepository: BenjaminSRussell/Passage
+                        rekor:
+                          url: https://rekor.sigstore.dev

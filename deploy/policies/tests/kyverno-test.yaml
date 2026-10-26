@@ -1,0 +1,31 @@
+# Offline test of the digest-pinning rule only. The verify-cosign-signature-and-sbom rule needs
+# registry and Rekor access, so it is proven only by deploy/scripts/negative-unsigned-image.sh on a live cluster.
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: verify-signed-images
+policies:
+  - ../admission/verify-signed-images.yaml
+resources:
+  - resources.yaml
+results:
+  - policy: verify-signed-images
+    rule: require-digest-pinned-images
+    resources: [unsigned-hello-ledger]
+    kind: Pod
+    result: fail
+  - policy: verify-signed-images
+    rule: require-digest-pinned-images
+    resources: [third-party-postgres]
+    kind: Pod
+    result: skip
+  - policy: verify-signed-images
+    rule: require-digest-pinned-images
+    resources: [tagged-init-container]
+    kind: Pod
+    result: fail
+  - policy: verify-signed-images
+    rule: require-digest-pinned-images
+    resources: [tagged-ephemeral-container]
+    kind: Pod
+    result: fail
