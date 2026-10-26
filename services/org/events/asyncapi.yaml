@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: org
-  version: 0.10.0
+  version: 0.11.0
   description: CloudEvents 1.0 envelope from platform/go/events; payloads below are the data member.
 channels:
   passage.org.legalentity:
@@ -144,6 +144,7 @@ components:
     legalEntityUpdated:
       name: updated
       title: Legal entity updated
+      description: changed_fields names the snake_case columns that changed, including fiscal_calendar_id when a fiscal calendar is assigned or cleared.
       payload:
         type: object
         required: [id, changed_fields, version]

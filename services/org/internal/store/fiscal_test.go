@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/services/org/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/org/internal/store"
 )
@@ -228,5 +230,157 @@ func TestPostgres_ConcurrentGenerateFiscalYearProducesOneYearAndOneEvent(t *test
 	}
 	if n := len(unitEvents(t, ctx, pool, fiscalGeneratedType)); n != 1 || fiscalRows(t, ctx, pool, "fiscal_period") != 14 {
 		t.Fatalf("events = %d, rows = %d; want 1 and 14", n, fiscalRows(t, ctx, pool, "fiscal_period"))
+	}
+}
+
+func generate(t *testing.T, s *store.Postgres, ctx context.Context, id string, years ...int) {
+	t.Helper()
+	for _, y := range years {
+		if _, err := s.GenerateFiscalYear(ctx, id, y, nil, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func assignCalendar(t *testing.T, s *store.Postgres, ctx context.Context, entity store.LegalEntity, calendarID string) store.LegalEntity {
+	t.Helper()
+	assigned, err := s.UpdateLegalEntity(ctx, entity.ID, entity.Version, store.LegalEntityPatch{FiscalCalendarID: &calendarID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return assigned
+}
+
+func TestPostgres_ListFiscalCalendarsPagesFiltersAndReportsGeneratedYears(t *testing.T) {
+	s, ctx, _ := lifecycleStore(t)
+	a, b, c := fiscalCalendar("A", "calendar"), fiscalCalendar("B", "4-4-5"), fiscalCalendar("C", "calendar")
+	created := map[string]store.FiscalCalendar{}
+	for _, in := range []store.FiscalCalendar{c, a, b} {
+		got, err := s.CreateFiscalCalendar(ctx, in, "")
+		if err != nil || got.GeneratedYears == nil || len(got.GeneratedYears) != 0 {
+			t.Fatalf("created = %+v, %v; want generatedYears as an empty non-nil slice", got, err)
+		}
+		created[in.Code] = got
+	}
+	generate(t, s, ctx, created["A"].ID, 2027, 2026)
+	first, err := s.ListFiscalCalendars(ctx, store.FiscalCalendarFilter{}, "", 2)
+	if err != nil || len(first.Items) != 2 || first.NextCode != "B" || first.Items[0].Code != "A" {
+		t.Fatalf("first page = %+v, %v; want A, B and cursor B", first, err)
+	}
+	if !reflect.DeepEqual(first.Items[0].GeneratedYears, []int{2026, 2027}) || first.Items[1].GeneratedYears == nil || len(first.Items[1].GeneratedYears) != 0 {
+		t.Fatalf("generatedYears = %v and %v; want [2026 2027] and []", first.Items[0].GeneratedYears, first.Items[1].GeneratedYears)
+	}
+	second, err := s.ListFiscalCalendars(ctx, store.FiscalCalendarFilter{}, first.NextCode, 2)
+	if err != nil || len(second.Items) != 1 || second.Items[0].Code != "C" || second.NextCode != "" {
+		t.Fatalf("second page = %+v, %v; want C and no cursor", second, err)
+	}
+	byPattern, err := s.ListFiscalCalendars(ctx, store.FiscalCalendarFilter{Pattern: "4-4-5"}, "", store.MaxPageSize)
+	if err != nil || len(byPattern.Items) != 1 || byPattern.Items[0].Code != "B" {
+		t.Fatalf("pattern filter = %+v, %v", byPattern, err)
+	}
+	if _, err := s.UpdateFiscalCalendar(ctx, created["C"].ID, 1, store.FiscalCalendarPatch{Status: ptr("inactive")}); err != nil {
+		t.Fatal(err)
+	}
+	byStatus, err := s.ListFiscalCalendars(ctx, store.FiscalCalendarFilter{Status: "inactive"}, "", store.MaxPageSize)
+	if err != nil || len(byStatus.Items) != 1 || byStatus.Items[0].Code != "C" {
+		t.Fatalf("status filter = %+v, %v", byStatus, err)
+	}
+	got, err := s.GetFiscalCalendar(ctx, created["A"].ID)
+	if err != nil || !reflect.DeepEqual(got.GeneratedYears, []int{2026, 2027}) {
+		t.Fatalf("get = %+v, %v; want the list's generatedYears", got, err)
+	}
+	other, err := s.ListFiscalCalendars(principalContext(2), store.FiscalCalendarFilter{}, "", store.MaxPageSize)
+	if err != nil || len(other.Items) != 0 {
+		t.Fatalf("other tenant list = %+v, %v; want none", other, err)
+	}
+}
+
+func TestPostgres_UpdateFiscalCalendarVersionsNoOpAndTenantIsolation(t *testing.T) {
+	s, ctx, _ := lifecycleStore(t)
+	c, err := s.CreateFiscalCalendar(ctx, fiscalCalendar("FY", "calendar"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	renamed, err := s.UpdateFiscalCalendar(ctx, c.ID, 1, store.FiscalCalendarPatch{Name: ptr("Renamed")})
+	if err != nil || renamed.Name != "Renamed" || renamed.Version != 2 || renamed.Code != "FY" {
+		t.Fatalf("rename = %+v, %v; want version 2", renamed, err)
+	}
+	same, err := s.UpdateFiscalCalendar(ctx, c.ID, 2, store.FiscalCalendarPatch{Name: ptr("Renamed")})
+	if err != nil || same.Version != 2 || !same.UpdatedAt.Equal(renamed.UpdatedAt) {
+		t.Fatalf("unchanged patch = %+v, %v; want the same version and updatedAt", same, err)
+	}
+	if _, err := s.UpdateFiscalCalendar(ctx, c.ID, 1, store.FiscalCalendarPatch{Name: ptr("Stale")}); problemCode(t, err) != store.CodeVersionConflict {
+		t.Fatalf("stale version error = %v", err)
+	}
+	if got, _ := s.GetFiscalCalendar(ctx, c.ID); got.Name != "Renamed" || got.Version != 2 {
+		t.Fatalf("stale patch wrote: %+v", got)
+	}
+	if _, err := s.UpdateFiscalCalendar(principalContext(2), c.ID, 2, store.FiscalCalendarPatch{Name: ptr("Hijacked")}); problemCode(t, err) != store.CodeFiscalCalendarNotFound {
+		t.Fatalf("other tenant update error = %v", err)
+	}
+}
+
+func TestPostgres_FiscalCalendarInactiveRefusedWhileAssigned(t *testing.T) {
+	s, ctx, pool := lifecycleStore(t)
+	c, err := s.CreateFiscalCalendar(ctx, fiscalCalendar("FY", "calendar"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	generate(t, s, ctx, c.ID, 2026)
+	one, two := mustCreate(t, s, ctx, newEntity("US01")), mustCreate(t, s, ctx, newEntity("US02"))
+	one, two = assignCalendar(t, s, ctx, one, c.ID), assignCalendar(t, s, ctx, two, c.ID)
+	var scopes string
+	if err := dbx.WithTenantTx(ctx, pool, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `select current_setting('passage.legal_entity_scopes')`).Scan(&scopes)
+	}); err != nil || scopes != "*" {
+		t.Fatalf("unscoped caller scopes = %q, %v; want *", scopes, err)
+	}
+	inactive := store.FiscalCalendarPatch{Status: ptr("inactive")}
+	_, err = s.UpdateFiscalCalendar(ctx, c.ID, 1, inactive)
+	var problem *httpx.Problem
+	if !errors.As(err, &problem) || problem.Code != store.CodeFiscalCalendarInUse || problem.Detail != "Fiscal calendar FY is assigned to 2 active legal entities." {
+		t.Fatalf("in-use error = %v; want ORG-CAL-IN-USE counting both entities", err)
+	}
+	if got, _ := s.GetFiscalCalendar(ctx, c.ID); got.Status != "active" || got.Version != 1 {
+		t.Fatalf("refused patch wrote: %+v", got)
+	}
+	cleared := ""
+	if _, err := s.UpdateLegalEntity(ctx, one.ID, one.Version, store.LegalEntityPatch{FiscalCalendarID: &cleared}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpdateFiscalCalendar(ctx, c.ID, 1, inactive); problemCode(t, err) != store.CodeFiscalCalendarInUse {
+		t.Fatalf("one entity still assigned, error = %v", err)
+	}
+	if _, err := s.UpdateLegalEntity(ctx, two.ID, two.Version, store.LegalEntityPatch{Status: ptr("inactive")}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.UpdateFiscalCalendar(ctx, c.ID, 1, inactive); err != nil || got.Status != "inactive" || got.Version != 2 {
+		t.Fatalf("after clearing and deactivating = %+v, %v; want inactive version 2", got, err)
+	}
+}
+
+func TestPostgres_GenerateFiscalYearOnInactiveCalendarRefusesNewYearsOnly(t *testing.T) {
+	s, ctx, pool := lifecycleStore(t)
+	c, err := s.CreateFiscalCalendar(ctx, fiscalCalendar("FY", "calendar"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	generate(t, s, ctx, c.ID, 2026)
+	if _, err := s.UpdateFiscalCalendar(ctx, c.ID, 1, store.FiscalCalendarPatch{Status: ptr("inactive")}); err != nil {
+		t.Fatal(err)
+	}
+	periods, outbox := fiscalRows(t, ctx, pool, "fiscal_period"), len(outboxRows(t, ctx, pool))
+	if _, err := s.GenerateFiscalYear(ctx, c.ID, 2027, nil, false); problemCode(t, err) != store.CodeFiscalCalendarInactive {
+		t.Fatalf("new year error = %v; want ORG-CAL-INACTIVE", err)
+	}
+	if _, err := s.GenerateFiscalYear(ctx, c.ID, 2026, nil, true); problemCode(t, err) != store.CodeFiscalCalendarInactive {
+		t.Fatalf("force error = %v; want ORG-CAL-INACTIVE", err)
+	}
+	if fiscalRows(t, ctx, pool, "fiscal_period") != periods || len(outboxRows(t, ctx, pool)) != outbox {
+		t.Fatal("a refused generate wrote periods or an outbox row")
+	}
+	replay, err := s.GenerateFiscalYear(ctx, c.ID, 2026, nil, false)
+	if err != nil || replay.Generated || len(replay.Periods) != 14 {
+		t.Fatalf("replay = %+v, %v; want 14 stored periods and generated false", replay, err)
 	}
 }

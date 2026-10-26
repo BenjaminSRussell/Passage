@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -58,12 +59,25 @@ type generateFiscalYearRequest struct {
 	} `json:"periods"`
 }
 
+type updateFiscalCalendarRequest struct {
+	Version *int    `json:"version"`
+	Name    *string `json:"name"`
+	Status  *string `json:"status"`
+}
+
+type fiscalCalendarList struct {
+	Items      []store.FiscalCalendar `json:"items"`
+	NextCursor string                 `json:"nextCursor,omitempty"`
+}
+
 type fiscalPeriodList struct {
 	Items []store.FiscalPeriod `json:"items"`
 }
 
 func (a *API) registerFiscalCalendars(r chi.Router) {
 	r.With(authz.RequireDuty(dutyFiscalCalendar)).Post(fiscalCalendars, a.createFiscalCalendar)
+	r.With(authz.RequireDuty(dutyRead)).Get(fiscalCalendars, a.listFiscalCalendars)
+	r.With(authz.RequireDuty(dutyFiscalCalendar)).Patch(fiscalCalendars+"/{id}", fiscalCalendarRoute(a.updateFiscalCalendar))
 	r.With(authz.RequireDuty(dutyRead)).Get(fiscalCalendars+"/{id}", fiscalCalendarRoute(a.getFiscalCalendar))
 	r.With(authz.RequireDuty(dutyFiscalCalendar)).Post(fiscalCalendars+"/{id}:generate", fiscalCalendarRoute(a.generateFiscalYear))
 	r.With(authz.RequireDuty(dutyRead)).Get(fiscalCalendars+"/{id}/periods", fiscalCalendarRoute(a.listFiscalPeriods))
@@ -151,6 +165,75 @@ func (a *API) getFiscalCalendar(w http.ResponseWriter, r *http.Request, id strin
 		slog.Error("get fiscal calendar failed", "err", err, "calendarId", id, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)
 		return
+	}
+	httpx.JSON(w, http.StatusOK, calendar)
+}
+
+func (a *API) listFiscalCalendars(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	limit, after, err := pageParams(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	q := r.URL.Query()
+	f := store.FiscalCalendarFilter{Status: q.Get("status"), Pattern: q.Get("pattern")}
+	if f.Status != "" && !validStatus(f.Status) {
+		badQuery(w, r, "status", "must be active or inactive")
+		return
+	}
+	if _, err := domain.ParsePattern(f.Pattern); f.Pattern != "" && err != nil {
+		badQuery(w, r, "pattern", "must be calendar, 4-4-5, 4-5-4, 5-4-4, 13-period or custom")
+		return
+	}
+	page, err := a.store.ListFiscalCalendars(r.Context(), f, after, limit)
+	if err != nil {
+		slog.Error("list fiscal calendars failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.Fail(w, r, err)
+		return
+	}
+	body := fiscalCalendarList{Items: page.Items}
+	if page.NextCode != "" {
+		body.NextCursor = base64.RawURLEncoding.EncodeToString([]byte(page.NextCode))
+	}
+	httpx.JSON(w, http.StatusOK, body)
+}
+
+func (a *API) updateFiscalCalendar(w http.ResponseWriter, r *http.Request, id string) {
+	if rejectScopedCaller(w, r, "update fiscal calendars") {
+		return
+	}
+	var req updateFiscalCalendarRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	fields := map[string]string{}
+	if req.Name != nil {
+		trimmed := strings.TrimSpace(*req.Name)
+		req.Name = &trimmed
+		fields = validateShared(req.Name, nil, nil, nil)
+	}
+	if req.Version == nil || *req.Version < 1 {
+		fields["version"] = "is required and must be at least 1"
+	}
+	if req.Status != nil && !validStatus(*req.Status) {
+		fields["status"] = "must be active or inactive"
+	}
+	if len(fields) > 0 {
+		validationFailed(w, r, fields)
+		return
+	}
+	calendar, err := a.store.UpdateFiscalCalendar(r.Context(), id, *req.Version, store.FiscalCalendarPatch{Name: req.Name, Status: req.Status})
+	if err != nil {
+		slog.Error("update fiscal calendar failed", "err", err, "calendarId", id, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.Fail(w, r, err)
+		return
+	}
+	if calendar.Version != *req.Version {
+		a.fiscalCalendarUpdated.Add(1)
 	}
 	httpx.JSON(w, http.StatusOK, calendar)
 }

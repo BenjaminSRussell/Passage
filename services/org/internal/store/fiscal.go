@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 	"time"
@@ -22,8 +23,10 @@ const (
 	CodeFiscalCalendarNotFound = "ORG-CAL-NOT-FOUND"
 	CodeFiscalCalendarCode     = "ORG-CAL-CODE-DUPLICATE"
 	CodeFiscalYearLocked       = "ORG-CAL-LOCKED"
+	CodeFiscalCalendarInUse    = "ORG-CAL-IN-USE"
+	CodeFiscalCalendarInactive = "ORG-CAL-INACTIVE"
 	fiscalDateLayout           = "2006-01-02"
-	fiscalCalendarColumns      = "id, code, name, pattern, start_month, week_start, opening_closing, special_periods, status, version, created_at, updated_at"
+	fiscalCalendarColumns      = "id, code, name, pattern, start_month, week_start, opening_closing, special_periods, status, version, created_at, updated_at, array(select distinct fiscal_year::int from fiscal_period p where p.tenant_id = fiscal_calendar.tenant_id and p.calendar_id = fiscal_calendar.id order by 1)"
 	fiscalPeriodColumns        = "fiscal_year, period_no, name, start_date, end_date, type, week53"
 )
 
@@ -47,6 +50,22 @@ type FiscalCalendar struct {
 	Version        int       `json:"version"`
 	CreatedAt      time.Time `json:"createdAt"`
 	UpdatedAt      time.Time `json:"updatedAt"`
+	GeneratedYears []int     `json:"generatedYears"`
+}
+
+type FiscalCalendarFilter struct {
+	Status  string
+	Pattern string
+}
+
+type FiscalCalendarPage struct {
+	Items    []FiscalCalendar `json:"items"`
+	NextCode string           `json:"-"`
+}
+
+type FiscalCalendarPatch struct {
+	Name   *string
+	Status *string
 }
 
 type FiscalPeriod struct {
@@ -73,9 +92,14 @@ func fiscalCalendarNotFound() error {
 func scanFiscalCalendar(row pgx.Row, extra ...any) (FiscalCalendar, error) {
 	var c FiscalCalendar
 	var weekStart int
-	err := row.Scan(append([]any{&c.ID, &c.Code, &c.Name, &c.Pattern, &c.StartMonth, &weekStart, &c.OpeningClosing, &c.SpecialPeriods, &c.Status, &c.Version, &c.CreatedAt, &c.UpdatedAt}, extra...)...)
+	var years []int32
+	err := row.Scan(append([]any{&c.ID, &c.Code, &c.Name, &c.Pattern, &c.StartMonth, &weekStart, &c.OpeningClosing, &c.SpecialPeriods, &c.Status, &c.Version, &c.CreatedAt, &c.UpdatedAt, &years}, extra...)...)
 	if err == nil {
 		c.WeekStart = weekdayNames[weekStart]
+		c.GeneratedYears = make([]int, len(years))
+		for i, y := range years {
+			c.GeneratedYears[i] = int(y)
+		}
 	}
 	return c, err
 }
@@ -195,6 +219,9 @@ func (s *Postgres) GenerateFiscalYear(ctx context.Context, id string, year int, 
 			out.Periods, err = readFiscalPeriods(ctx, tx, p.TenantID, id, year)
 			return err
 		}
+		if c.Status == "inactive" {
+			return httpx.NewProblem(http.StatusUnprocessableEntity, CodeFiscalCalendarInactive, fmt.Sprintf("Fiscal calendar %s is inactive.", c.Code))
+		}
 		if _, err := tx.Exec(ctx, `delete from fiscal_period where tenant_id = $1 and calendar_id = $2 and fiscal_year = $3`, p.TenantID, id, year); err != nil {
 			return err
 		}
@@ -227,4 +254,71 @@ func (s *Postgres) ListFiscalPeriods(ctx context.Context, id string, year int) (
 		return err
 	})
 	return periods, err
+}
+
+func (s *Postgres) ListFiscalCalendars(ctx context.Context, f FiscalCalendarFilter, afterCode string, limit int) (FiscalCalendarPage, error) {
+	p, _ := tenant.FromContext(ctx)
+	page := FiscalCalendarPage{Items: []FiscalCalendar{}}
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select `+fiscalCalendarColumns+` from fiscal_calendar where tenant_id = $1 and code > $2
+			and ($3::text = '' or status = $3) and ($4::text = '' or pattern = $4) order by code limit $5`, p.TenantID, afterCode, f.Status, f.Pattern, limit+1)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			c, err := scanFiscalCalendar(rows)
+			if err != nil {
+				return err
+			}
+			page.Items = append(page.Items, c)
+		}
+		return rows.Err()
+	})
+	if len(page.Items) > limit {
+		page.Items = page.Items[:limit]
+		page.NextCode = page.Items[limit-1].Code
+	}
+	return page, err
+}
+
+func (s *Postgres) UpdateFiscalCalendar(ctx context.Context, id string, version int, in FiscalCalendarPatch) (FiscalCalendar, error) {
+	p, _ := tenant.FromContext(ctx)
+	var c FiscalCalendar
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		current, err := loadFiscalCalendar(ctx, tx, p.TenantID, id, " for update")
+		if err != nil {
+			return err
+		}
+		c = current
+		if current.Version != version {
+			return httpx.NewProblem(http.StatusConflict, CodeVersionConflict, fmt.Sprintf("current version is %d", current.Version))
+		}
+		next := current
+		if in.Name != nil {
+			next.Name = *in.Name
+		}
+		if in.Status != nil {
+			next.Status = *in.Status
+		}
+		if next.Name == current.Name && next.Status == current.Status {
+			return nil
+		}
+		if next.Status == "inactive" && current.Status != "inactive" {
+			var assigned int
+			if err := tx.QueryRow(ctx, `select count(*) from legal_entity where tenant_id = $1 and fiscal_calendar_id = $2 and status = 'active'`, p.TenantID, id).Scan(&assigned); err != nil {
+				return err
+			}
+			if assigned > 0 {
+				return httpx.NewProblem(http.StatusConflict, CodeFiscalCalendarInUse, fmt.Sprintf("Fiscal calendar %s is assigned to %d active legal entities.", current.Code, assigned))
+			}
+		}
+		c, err = scanFiscalCalendar(tx.QueryRow(ctx, `update fiscal_calendar set name = $3, status = $4, version = version + 1, updated_at = now()
+			where tenant_id = $1 and id = $2 returning `+fiscalCalendarColumns, p.TenantID, id, next.Name, next.Status))
+		return err
+	})
+	if err != nil {
+		return FiscalCalendar{}, err
+	}
+	return c, nil
 }

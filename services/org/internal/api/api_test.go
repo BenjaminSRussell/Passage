@@ -48,6 +48,7 @@ type fakeStore struct {
 	calendars           []store.FiscalCalendar
 	generatedYears      map[string]bool
 	generateCalls       int
+	updateCalls         int
 	generateErr         error
 	generatedID         string
 	hierarchyNodes      []store.HierarchyNode
@@ -367,6 +368,10 @@ func (f *fakeStore) UpdateLegalEntity(_ context.Context, id string, version int,
 	}
 	if in.Name != nil && *in.Name != e.Name {
 		e.Name = *in.Name
+		e.Version++
+	}
+	if in.FiscalCalendarID != nil && *in.FiscalCalendarID != "" {
+		e.FiscalCalendarID = in.FiscalCalendarID
 		e.Version++
 	}
 	return *e, nil
@@ -869,6 +874,10 @@ func TestLegalEntityLifecycleRoutes(t *testing.T) {
 		{"patch no change keeps version", seededStore(), http.MethodPatch, byID, `{"version":1,"name":"Passage US"}`, allDuties, true, http.StatusOK, `"version":1`},
 		{"patch unknown field code", seededStore(), http.MethodPatch, byID, `{"version":1,"code":"X1"}`, allDuties, true, http.StatusBadRequest, "COM-0001"},
 		{"patch bad primary address id", seededStore(), http.MethodPatch, byID, `{"version":1,"primaryAddressId":"abc"}`, allDuties, true, http.StatusBadRequest, `"primaryAddressId"`},
+		{"patch bad fiscal calendar id", seededStore(), http.MethodPatch, byID, `{"version":1,"fiscalCalendarId":"abc"}`, allDuties, true, http.StatusBadRequest, `"fiscalCalendarId"`},
+		{"patch numeric fiscal calendar id", seededStore(), http.MethodPatch, byID, `{"version":1,"fiscalCalendarId":7}`, allDuties, true, http.StatusBadRequest, "COM-0001"},
+		{"patch fiscal calendar id assigned", seededStore(), http.MethodPatch, byID, `{"version":1,"fiscalCalendarId":"0190b6c0-0000-7000-8000-0000000000c1"}`, allDuties, true, http.StatusOK, `"fiscalCalendarId":"0190b6c0-0000-7000-8000-0000000000c1"`},
+		{"patch clearing fiscal calendar id accepted", seededStore(), http.MethodPatch, byID, `{"version":1,"fiscalCalendarId":""}`, allDuties, true, http.StatusOK, `"version":1`},
 		{"patch clearing primary address id accepted", seededStore(), http.MethodPatch, byID, `{"version":1,"primaryAddressId":""}`, allDuties, true, http.StatusOK, `"version":1`},
 		{"patch missing version", seededStore(), http.MethodPatch, byID, `{"name":"x"}`, allDuties, true, http.StatusBadRequest, `"version"`},
 		{"patch bad status", seededStore(), http.MethodPatch, byID, `{"version":1,"status":"deleted"}`, allDuties, true, http.StatusBadRequest, `"status"`},
