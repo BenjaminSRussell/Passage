@@ -144,18 +144,18 @@ func (a *API) createRun(w http.ResponseWriter, r *http.Request) {
 	}
 	var req createRunRequest
 	if err := httpx.Decode(r, &req); err != nil {
-		httpx.Fail(w, r, err)
+		fail(w, r, err)
 		return
 	}
 	if fields := validateRun(req); len(fields) > 0 {
 		p := httpx.NewProblem(http.StatusBadRequest, "COM-0001", validationDetail)
 		p.Errors = fields
-		httpx.Fail(w, r, p)
+		fail(w, r, p)
 		return
 	}
 	mapping, err := domain.ParseMapping(req.Mapping)
 	if err != nil {
-		httpx.Fail(w, r, problemFrom(err))
+		fail(w, r, problemFrom(err))
 		return
 	}
 	if failures := mapping.RunTests(); len(failures) > 0 {
@@ -165,7 +165,7 @@ func (a *API) createRun(w http.ResponseWriter, r *http.Request) {
 			p.Errors[f.Name] = f.Reason
 		}
 		a.logFailure(r, "mapping tests failed", p)
-		httpx.Fail(w, r, p)
+		fail(w, r, p)
 		return
 	}
 	a.execute(w, r, store.Run{SourceSystem: req.SourceSystem, Mode: req.Mode, Entity: mapping.Entity, DryRun: req.DryRun, MappingVersion: mapping.Version, Mapping: req.Mapping}, mapping, nil)
@@ -178,13 +178,13 @@ func (a *API) rerun(w http.ResponseWriter, r *http.Request) {
 	prev, err := a.store.GetRun(r.Context(), chi.URLParam(r, "id"))
 	if err != nil {
 		a.logFailure(r, "load run for rerun failed", err)
-		httpx.Fail(w, r, err)
+		fail(w, r, err)
 		return
 	}
 	mapping, err := domain.ParseMapping(prev.Mapping)
 	if err != nil {
 		a.logFailure(r, "stored mapping no longer parses", err)
-		httpx.Fail(w, r, problemFrom(err))
+		fail(w, r, problemFrom(err))
 		return
 	}
 	next := store.Run{SourceSystem: prev.SourceSystem, Mode: prev.Mode, Entity: prev.Entity, DryRun: prev.DryRun, MappingVersion: prev.MappingVersion, Mapping: prev.Mapping, ParentRunID: prev.ID}
@@ -199,12 +199,12 @@ func (a *API) execute(w http.ResponseWriter, r *http.Request, run store.Run, map
 		existing, found, err := a.store.RunByKey(ctx, key)
 		if err != nil {
 			a.logFailure(r, "idempotency lookup failed", err)
-			httpx.Fail(w, r, err)
+			fail(w, r, err)
 			return
 		}
 		if found {
 			if !sameRequest(existing, run) {
-				httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, codeKeyReuse, "Idempotency-Key was already used with a different request"))
+				fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, codeKeyReuse, "Idempotency-Key was already used with a different request"))
 				return
 			}
 			respond(w, existing)
@@ -216,10 +216,10 @@ func (a *API) execute(w http.ResponseWriter, r *http.Request, run store.Run, map
 		a.failed.Add(1)
 		a.logFailure(r, "migration backend unavailable", err)
 		if errors.Is(err, ErrNotConfigured) {
-			httpx.Fail(w, r, httpx.NewProblem(http.StatusNotImplemented, CodeNotConfigured, "extract and load backends are not configured for this deployment"))
+			fail(w, r, httpx.NewProblem(http.StatusNotImplemented, CodeNotConfigured, "extract and load backends are not configured for this deployment"))
 			return
 		}
-		httpx.Fail(w, r, err)
+		fail(w, r, err)
 		return
 	}
 	started := time.Now()
@@ -234,14 +234,14 @@ func (a *API) execute(w http.ResponseWriter, r *http.Request, run store.Run, map
 	if err != nil {
 		a.failed.Add(1)
 		a.logFailure(r, "migration run aborted", err)
-		httpx.Fail(w, r, err)
+		fail(w, r, err)
 		return
 	}
 	saved, err := a.store.SaveRun(ctx, run, key)
 	if err != nil {
 		a.failed.Add(1)
 		a.logFailure(r, "saving migration run failed", err)
-		httpx.Fail(w, r, err)
+		fail(w, r, err)
 		return
 	}
 	slog.InfoContext(ctx, "migration run finished", "correlationId", middleware.GetReqID(ctx), "runId", saved.ID, "entity", run.Entity, "sourceSystem", run.SourceSystem, "mode", run.Mode,
@@ -260,14 +260,14 @@ func (a *API) getRun(w http.ResponseWriter, r *http.Request) {
 	run, err := a.store.GetRun(r.Context(), chi.URLParam(r, "id"))
 	if err != nil {
 		a.logFailure(r, "get migration run failed", err)
-		httpx.Fail(w, r, err)
+		fail(w, r, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, view(run))
 }
 
 func (a *API) parallelRunDiffs(w http.ResponseWriter, r *http.Request) {
-	httpx.Fail(w, r, httpx.NewProblem(http.StatusNotImplemented, CodeDeferred, "parallel-run diffs belong to wave 49"))
+	fail(w, r, httpx.NewProblem(http.StatusNotImplemented, CodeDeferred, "parallel-run diffs belong to wave 49"))
 }
 
 func (a *API) logFailure(r *http.Request, msg string, err error) {
@@ -329,12 +329,38 @@ func problemFrom(err error) error {
 func tenantWide(w http.ResponseWriter, r *http.Request) bool {
 	p, ok := tenant.FromContext(r.Context())
 	if !ok || !ids.Valid(p.TenantID) {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnauthorized, "AUTH-0001", "missing or malformed tenant"))
+		fail(w, r, httpx.NewProblem(http.StatusUnauthorized, "AUTH-0001", "missing or malformed tenant"))
 		return false
 	}
 	if p.LegalEntityID != "" {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "a legal-entity-scoped caller cannot run migrations"))
+		fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "a legal-entity-scoped caller cannot run migrations"))
 		return false
 	}
 	return true
+}
+
+type problemBody struct {
+	Type        string            `json:"type"`
+	Title       string            `json:"title"`
+	Status      int               `json:"status"`
+	Detail      string            `json:"detail,omitempty"`
+	Instance    string            `json:"instance,omitempty"`
+	Code        string            `json:"code"`
+	ServiceCode string            `json:"serviceCode"`
+	TraceID     string            `json:"traceId,omitempty"`
+	Errors      map[string]string `json:"errors,omitempty"`
+}
+
+func fail(w http.ResponseWriter, r *http.Request, err error) {
+	var p *httpx.Problem
+	if !errors.As(err, &p) {
+		slog.Error("unhandled error", "err", err, "path", r.URL.Path, "correlationId", middleware.GetReqID(r.Context()))
+		p = httpx.NewProblem(http.StatusInternalServerError, "COM-0500", "internal error")
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(p.Status)
+	_ = json.NewEncoder(w).Encode(problemBody{
+		Type: p.Type, Title: p.Title, Status: p.Status, Detail: p.Detail, Instance: r.URL.Path,
+		Code: p.Code, ServiceCode: p.Code, TraceID: middleware.GetReqID(r.Context()), Errors: p.Errors,
+	})
 }
