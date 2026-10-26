@@ -1,0 +1,309 @@
+openapi: 3.1.0
+info:
+  title: Passage Costing API
+  version: 0.1.0
+  description: >-
+    Inventory costing (PSG-20, wave 20), slice 1. Settlement preview under the item
+    model group's costing method, costing versions with item-cost import, and the
+    internal purchase price variance hook. Slice 1 is stateless for settlement and
+    PPV; versions and item costs are persisted with RLS.
+servers:
+  - url: https://api.{env}.passage.dev
+    variables:
+      env: { default: dev }
+paths:
+  /readyz:
+    get:
+      operationId: readyz
+      summary: Readiness (own Postgres reachable within 500 ms)
+      x-passage-duty: none
+      responses:
+        "200": { description: ready, content: { application/json: { schema: { $ref: "#/components/schemas/Status" } } } }
+        "503": { description: not ready, content: { application/json: { schema: { $ref: "#/components/schemas/Status" } } } }
+  /v1/costing/settlements:preview:
+    post:
+      operationId: previewSettlements
+      summary: Settle issues against receipts under a costing method (no persistence)
+      x-passage-duty: costing.read
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/Duties"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SettlePreviewRequest" }
+      responses:
+        "200":
+          description: settlement result
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SettlePreviewResponse" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/costing/versions:
+    post:
+      operationId: createCostingVersion
+      summary: Create a DRAFT costing version
+      x-passage-duty: costing.version.write
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/Duties"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateVersionRequest" }
+      responses:
+        "201":
+          description: created (or the stored response for a replayed Idempotency-Key)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CostingVersion" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409":
+          description: CST-VER-CODE-DUPLICATE, the code is taken in this legal entity
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "422":
+          description: idempotency_key_reuse, the key was used with a different body
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+  /v1/costing/versions/{id}/item-costs:import:
+    post:
+      operationId: importItemCosts
+      summary: Import pending item costs into a DRAFT version (idempotent per product and site; bumps the version's optimistic version)
+      x-passage-duty: costing.version.write
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/Duties"
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ImportItemCostsRequest" }
+      responses:
+        "200":
+          description: imported
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [versionId, imported]
+                properties:
+                  versionId: { type: string, format: uuid }
+                  imported: { type: integer }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+  /internal/v1/costing/ppv:
+    post:
+      operationId: calculatePpv
+      summary: Purchase price variance for a STANDARD item at receipt or invoice (internal hook, no persistence in slice 1)
+      x-passage-duty: costing.ppv.post
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/Duties"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PpvRequest" }
+      responses:
+        "200":
+          description: PPV amount (positive is a debit)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PpvResponse" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+components:
+  parameters:
+    TenantHeader:
+      name: X-Passage-Tenant
+      in: header
+      required: true
+      description: Tenant id set by the gateway until JWT validation lands (kernel tenant middleware).
+      schema: { type: string, format: uuid }
+    Duties:
+      name: X-Passage-Duties
+      in: header
+      required: false
+      description: Comma-separated duties of the caller; checked per operation.
+      schema: { type: string }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, maxLength: 255 }
+  responses:
+    Problem:
+      description: RFC 9457 problem details
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+  schemas:
+    Status:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string }
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: { type: string, format: uri, example: "https://passage.dev/problems/CST-TXN-001" }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string }
+        serviceCode: { type: string, example: "CST-0001" }
+        traceId: { type: string }
+        errors:
+          type: object
+          additionalProperties: { type: string }
+    Decimal:
+      type: string
+      pattern: "^-?[0-9]+(\\.[0-9]+)?$"
+      description: Decimal string; money and quantities never travel as numbers.
+    Transaction:
+      type: object
+      required: [id, kind, qty, financialDate]
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [RECEIPT, ISSUE] }
+        qty: { $ref: "#/components/schemas/Decimal" }
+        value: { $ref: "#/components/schemas/Decimal", description: "Required for RECEIPT; the receipt value in the currency." }
+        financialDate: { type: string, format: date }
+        physicalDate: { type: string, format: date, description: "Defaults to financialDate." }
+    SettlePreviewRequest:
+      type: object
+      required: [method, currency, transactions]
+      properties:
+        method: { type: string, enum: [FIFO, LIFO, LIFO_DATE, WEIGHTED_AVG_RUNNING, WEIGHTED_AVG_PERIODIC, MOVING_AVG, STANDARD] }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        fallback:
+          type: string
+          enum: [RUNNING_AVG, STANDARD, LAST_RECEIPT]
+          default: RUNNING_AVG
+          description: >-
+            Valuation of issue quantity no receipt in the run covers (BR-20.3). RUNNING_AVG uses the
+            average of the stock before the issue, then standardUnitCost, then the last receipt cost.
+        standardUnitCost: { $ref: "#/components/schemas/Decimal", description: "Required for STANDARD and for the STANDARD fallback." }
+        transactions:
+          type: array
+          minItems: 1
+          maxItems: 20000
+          items: { $ref: "#/components/schemas/Transaction" }
+    SettlePreviewResponse:
+      type: object
+      required: [method, currency, issueCosts, settlements, exceptions, remainingQty, remainingValue]
+      properties:
+        method: { type: string }
+        currency: { type: string }
+        issueCosts:
+          type: object
+          additionalProperties: { $ref: "#/components/schemas/Decimal" }
+        settlements:
+          type: array
+          items:
+            type: object
+            required: [seq, issueId, qty, value]
+            properties:
+              seq: { type: integer }
+              issueId: { type: string }
+              receiptId: { type: string }
+              pool: { type: string }
+              qty: { $ref: "#/components/schemas/Decimal" }
+              value: { $ref: "#/components/schemas/Decimal" }
+        exceptions:
+          type: array
+          items:
+            type: object
+            required: [issueId, qty, value, fallback]
+            properties:
+              issueId: { type: string }
+              qty: { $ref: "#/components/schemas/Decimal" }
+              value: { $ref: "#/components/schemas/Decimal" }
+              fallback: { type: string }
+        remainingQty: { $ref: "#/components/schemas/Decimal" }
+        remainingValue: { $ref: "#/components/schemas/Decimal" }
+    CreateVersionRequest:
+      type: object
+      required: [legalEntityId, code, type, currency, effectiveFrom]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        code: { type: string, pattern: "^[A-Z0-9][A-Z0-9_-]{1,31}$" }
+        type: { type: string, enum: [STANDARD, PLANNED] }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        effectiveFrom: { type: string, format: date }
+        blockActivation: { type: boolean, default: false }
+    CostingVersion:
+      type: object
+      required: [id, legalEntityId, code, type, status, currency, effectiveFrom, blockActivation, version, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        code: { type: string }
+        type: { type: string, enum: [STANDARD, PLANNED] }
+        status: { type: string, enum: [DRAFT, ACTIVE, ARCHIVED] }
+        currency: { type: string }
+        effectiveFrom: { type: string, format: date }
+        blockActivation: { type: boolean }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+    ItemCost:
+      type: object
+      required: [productId, siteId, unitCost]
+      properties:
+        productId: { type: string, format: uuid }
+        siteId: { type: string, format: uuid }
+        unitCost:
+          type: string
+          pattern: "^[0-9]{1,14}(\\.[0-9]{1,6})?$"
+          description: Non-negative unit cost in the version currency; at most 14 integer digits and 6 decimals (numeric(20,6)).
+    ImportItemCostsRequest:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 50000
+          items: { $ref: "#/components/schemas/ItemCost" }
+    PpvRequest:
+      type: object
+      required: [kind, currency, qty, poUnitPrice, sourceDocumentId]
+      properties:
+        kind: { type: string, enum: [RECEIPT, INVOICE] }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        qty: { $ref: "#/components/schemas/Decimal", description: "Must be positive." }
+        standardUnitCost: { $ref: "#/components/schemas/Decimal", description: "Required for RECEIPT: (PO price - standard) x qty." }
+        poUnitPrice: { $ref: "#/components/schemas/Decimal", description: "PO unit price, required for both kinds." }
+        invoiceUnitPrice: { $ref: "#/components/schemas/Decimal", description: "Required for INVOICE: (invoice price - PO price) x qty." }
+        sourceDocumentId: { type: string }
+    PpvResponse:
+      type: object
+      required: [kind, currency, amount, direction, sourceDocumentId]
+      properties:
+        kind: { type: string }
+        currency: { type: string }
+        amount: { $ref: "#/components/schemas/Decimal" }
+        direction: { type: string, enum: [DR, CR, NONE], description: "DR is an unfavourable debit; CR a credit." }
+        sourceDocumentId: { type: string }

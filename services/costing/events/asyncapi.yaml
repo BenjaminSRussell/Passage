@@ -1,0 +1,21 @@
+asyncapi: 3.0.0
+info:
+  title: Passage Costing Events
+  version: 0.1.0
+  description: >-
+    Slice 1 of PSG-20 (wave 20) publishes and consumes no events. Settlement
+    preview and PPV are request/response only, and costing versions persist
+    without an outbox row. The events below are the wave 20 catalog for later
+    slices; they are listed here so consumers can plan, not because code emits them yet.
+defaultContentType: application/json
+channels: {}
+operations: {}
+components:
+  messages: {}
+x-planned-events:
+  - dev.passage.costing.close.completed.v1
+  - dev.passage.costing.close.cancelled.v1
+  - dev.passage.costing.close.failed.v1
+  - dev.passage.costing.cost.changed.v1
+  - dev.passage.costing.reconciliation.diff.v1
+  - dev.passage.costing.agingsnapshot.created.v1

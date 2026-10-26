@@ -1,0 +1,6 @@
+apiVersion: v2
+name: costing
+description: Passage inventory costing service (costing methods, settlement preview, costing versions, PPV hook)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
