@@ -2,13 +2,16 @@ package store_test
 
 import (
 	"context"
+	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/org/internal/domain"
 	orgevents "github.com/BenjaminSRussell/passage/services/org/internal/events"
@@ -617,5 +620,355 @@ func TestPostgres_TeamMembersAreTenantIsolated(t *testing.T) {
 	var n int
 	if err := admin.QueryRow(ctx, `select count(*) from team_member`).Scan(&n); err != nil || n != 1 {
 		t.Fatalf("members = %d, %v; want 1", n, err)
+	}
+}
+
+func openTeamWithMember(t *testing.T) (*store.Postgres, context.Context, *pgxpool.Pool, store.Team, store.TeamMember) {
+	t.Helper()
+	s, ctx, admin, tt := teamFixture(t)
+	team, _, err := s.CreateTeam(ctx, newTeam(tt.ID, "MDSTEW"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	member, _, err := s.AddTeamMember(ctx, team.ID, newMember("user", memberA, "2026-02-01", nil), dateOn(t, "2026-03-01"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s, ctx, admin, team, member
+}
+
+func patchStatus(status string) store.TeamPatch { return store.TeamPatch{Status: &status} }
+
+func TestPostgres_UpdateTeamChangesFieldsAndBumpsVersionOnce(t *testing.T) {
+	s, ctx, _, tt := teamFixture(t)
+	ou := mustCreateUnit(t, s, ctx, unit("department", "D1"))
+	in := newTeam(tt.ID, "MDSTEW")
+	in.Description, in.EffectiveTo = strPtr("Master data"), strPtr("2026-12-31")
+	team, _, err := s.CreateTeam(ctx, in, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := s.UpdateTeam(ctx, team.ID, 1, store.TeamPatch{Name: strPtr("Renamed"), Description: strPtr("Changed"), OperatingUnitID: &ou.ID})
+	if err != nil || updated.Version != 2 || updated.Name != "Renamed" || deref(updated.Description) != "Changed" || deref(updated.OperatingUnitID) != ou.ID || updated.Code != "MDSTEW" || updated.EffectiveFrom != "2026-01-01" {
+		t.Fatalf("update = %+v, %v", updated, err)
+	}
+	if _, err := s.UpdateTeam(ctx, team.ID, 1, store.TeamPatch{Name: strPtr("Stale")}); problemCode(t, err) != store.CodeVersionConflict {
+		t.Fatalf("stale version error = %v; want %s", err, store.CodeVersionConflict)
+	}
+	same, err := s.UpdateTeam(ctx, team.ID, 2, store.TeamPatch{Name: strPtr("Renamed"), Description: strPtr("Changed"), OperatingUnitID: &ou.ID})
+	if err != nil || same.Version != 2 || !same.UpdatedAt.Equal(updated.UpdatedAt) {
+		t.Fatalf("unchanged patch = %+v, %v; want version 2 and no write", same, err)
+	}
+	cleared, err := s.UpdateTeam(ctx, team.ID, 2, store.TeamPatch{Description: strPtr(""), OperatingUnitID: strPtr(""), EffectiveTo: strPtr("")})
+	if err != nil || cleared.Version != 3 || cleared.Description != nil || cleared.OperatingUnitID != nil || cleared.EffectiveTo != nil {
+		t.Fatalf("clear = %+v, %v", cleared, err)
+	}
+	got, err := s.GetTeam(ctx, team.ID)
+	if err != nil || got.Version != 3 || got.Name != "Renamed" || got.EffectiveTo != nil {
+		t.Fatalf("stored = %+v, %v", got, err)
+	}
+	if _, err := s.UpdateTeam(ctx, "00000000-0000-0000-0000-0000000000ff", 1, store.TeamPatch{}); problemCode(t, err) != store.CodeTeamNotFound {
+		t.Fatalf("unknown team error = %v; want %s", err, store.CodeTeamNotFound)
+	}
+}
+
+func TestPostgres_UpdateTeamRefusesUnknownAndInactiveOperatingUnit(t *testing.T) {
+	s, ctx, admin, tt := teamFixture(t)
+	team, _, err := s.CreateTeam(ctx, newTeam(tt.ID, "T1"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	unknown := "00000000-0000-0000-0000-0000000000dd"
+	if _, err := s.UpdateTeam(ctx, team.ID, 1, store.TeamPatch{OperatingUnitID: &unknown}); problemCode(t, err) != store.CodeTeamOperatingUnitInvalid {
+		t.Fatalf("unknown unit error = %v; want %s", err, store.CodeTeamOperatingUnitInvalid)
+	}
+	ou := mustCreateUnit(t, s, ctx, unit("department", "D1"))
+	if _, err := admin.Exec(ctx, `update operating_unit set status = 'inactive' where id = $1`, ou.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpdateTeam(ctx, team.ID, 1, store.TeamPatch{OperatingUnitID: &ou.ID}); problemCode(t, err) != store.CodeTeamOperatingUnitInvalid {
+		t.Fatalf("inactive unit error = %v; want %s", err, store.CodeTeamOperatingUnitInvalid)
+	}
+	if got, err := s.GetTeam(ctx, team.ID); err != nil || got.Version != 1 || got.OperatingUnitID != nil {
+		t.Fatalf("stored after refusals = %+v, %v; want untouched", got, err)
+	}
+}
+
+func TestPostgres_UpdateTeamRefusesNarrowingUnderMembers(t *testing.T) {
+	s, ctx, _, team, member := openTeamWithMember(t)
+	_, err := s.UpdateTeam(ctx, team.ID, 1, store.TeamPatch{EffectiveTo: strPtr("2026-12-31")})
+	var problem *httpx.Problem
+	if !errors.As(err, &problem) || problem.Code != store.CodeTeamMemberRange || problem.Errors["effectiveTo"] == "" || !strings.Contains(problem.Detail, "1 members are valid after 2026-12-31; end them first.") {
+		t.Fatalf("narrowing error = %v", err)
+	}
+	later := newMember("user", memberB, "2027-02-01", strPtr("2027-03-01"))
+	if _, _, err := s.AddTeamMember(ctx, team.ID, later, dateOn(t, "2026-03-01"), ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpdateTeam(ctx, team.ID, 1, store.TeamPatch{EffectiveTo: strPtr("2026-12-31")}); err == nil || !strings.Contains(err.Error(), "2 members are valid after") {
+		t.Fatalf("two-member narrowing error = %v", err)
+	}
+	if _, err := s.UpdateTeam(ctx, team.ID, 1, store.TeamPatch{EffectiveTo: strPtr("2025-12-31")}); problemCode(t, err) != "COM-0001" {
+		t.Fatalf("effectiveTo before effectiveFrom error = %v; want COM-0001", err)
+	}
+	if _, _, err := s.EndTeamMember(ctx, team.ID, member.ID, dateOn(t, "2026-06-30")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RemoveTeamMember(ctx, team.ID, memberRowByMemberID(t, ctx, s, team.ID, memberB)); err != nil {
+		t.Fatal(err)
+	}
+	narrowed, err := s.UpdateTeam(ctx, team.ID, 1, store.TeamPatch{EffectiveTo: strPtr("2026-12-31")})
+	if err != nil || deref(narrowed.EffectiveTo) != "2026-12-31" || narrowed.Version != 2 {
+		t.Fatalf("narrowed = %+v, %v", narrowed, err)
+	}
+	if reopened, err := s.UpdateTeam(ctx, team.ID, 2, store.TeamPatch{EffectiveTo: strPtr("")}); err != nil || reopened.EffectiveTo != nil {
+		t.Fatalf("reopen = %+v, %v; clearing effectiveTo never conflicts", reopened, err)
+	}
+}
+
+func memberRowByMemberID(t *testing.T, ctx context.Context, s *store.Postgres, teamID, memberID string) string {
+	t.Helper()
+	page, err := s.ListTeamMembers(ctx, teamID, store.TeamMemberFilter{}, "", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range page.Items {
+		if m.MemberID == memberID {
+			return m.ID
+		}
+	}
+	t.Fatalf("no member row for %s", memberID)
+	return ""
+}
+
+func TestPostgres_DeactivatedTeamRefusesNewMembersUntilReactivated(t *testing.T) {
+	s, ctx, admin, tt := teamFixture(t)
+	team, _, err := s.CreateTeam(ctx, newTeam(tt.ID, "T1"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	today := dateOn(t, "2026-03-01")
+	first, _, err := s.AddTeamMember(ctx, team.ID, newMember("user", memberA, "2026-02-01", nil), today, "key-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	off, err := s.UpdateTeam(ctx, team.ID, 1, patchStatus("inactive"))
+	if err != nil || off.Version != 2 || off.Status != "inactive" {
+		t.Fatalf("deactivate = %+v, %v", off, err)
+	}
+	if page, err := s.ListTeams(ctx, store.TeamFilter{Status: "inactive"}, "", 10); err != nil || len(page.Items) != 1 || page.Items[0].ID != team.ID {
+		t.Fatalf("inactive list = %+v, %v", page, err)
+	}
+	if _, _, err := s.AddTeamMember(ctx, team.ID, newMember("user", memberB, "2026-02-01", nil), today, ""); problemCode(t, err) != store.CodeTeamInactive {
+		t.Fatalf("add on inactive team error = %v; want %s", err, store.CodeTeamInactive)
+	}
+	replay, inserted, err := s.AddTeamMember(ctx, team.ID, newMember("user", memberA, "2026-02-01", nil), today, "key-1")
+	if err != nil || inserted || replay.ID != first.ID {
+		t.Fatalf("replay on inactive team = %+v, %v, %v; want the stored row", replay, inserted, err)
+	}
+	var n int
+	if err := admin.QueryRow(ctx, `select count(*) from team_member`).Scan(&n); err != nil || n != 1 || len(membershipEvents(t, ctx, admin)) != 1 {
+		t.Fatalf("members = %d, %v; events = %d; want 1 of each", n, err, len(membershipEvents(t, ctx, admin)))
+	}
+	if _, _, err := s.EndTeamMember(ctx, team.ID, first.ID, dateOn(t, "2026-06-30")); err != nil {
+		t.Fatalf("ending a member on an inactive team = %v; want allowed", err)
+	}
+	if _, err := s.UpdateTeam(ctx, team.ID, 2, patchStatus("active")); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.AddTeamMember(ctx, team.ID, newMember("user", memberB, "2026-02-01", nil), today, ""); err != nil {
+		t.Fatalf("add after reactivation = %v", err)
+	}
+}
+
+func TestPostgres_EndTeamMemberEmitsRemoved(t *testing.T) {
+	s, ctx, admin, team, member := openTeamWithMember(t)
+	ended, changed, err := s.EndTeamMember(ctx, team.ID, member.ID, dateOn(t, "2026-06-30"))
+	if err != nil || !changed || deref(ended.ValidTo) != "2026-06-30" || ended.ID != member.ID {
+		t.Fatalf("end = %+v, %v, %v", ended, changed, err)
+	}
+	events := membershipEvents(t, ctx, admin)
+	if len(events) != 2 {
+		t.Fatalf("events = %+v; want the add and the end", events)
+	}
+	end := events[1]
+	added, addedOK := end["added"].([]any)
+	removed, removedOK := end["removed"].([]any)
+	if !addedOK || len(added) != 0 || !removedOK || len(removed) != 1 || end["as_of"] != "2026-07-01" || end["team_id"] != team.ID {
+		t.Fatalf("end event = %+v", end)
+	}
+	if ref := removed[0].(map[string]any); ref["member_kind"] != "user" || ref["member_id"] != memberA || ref["member_role"] != "member" {
+		t.Fatalf("removed ref = %v", ref)
+	}
+	again, changed, err := s.EndTeamMember(ctx, team.ID, member.ID, dateOn(t, "2026-06-30"))
+	if err != nil || changed || deref(again.ValidTo) != "2026-06-30" || len(membershipEvents(t, ctx, admin)) != 2 {
+		t.Fatalf("re-sent end = %+v, %v, %v; events = %d", again, changed, err, len(membershipEvents(t, ctx, admin)))
+	}
+	for name, validTo := range map[string]string{"later than the current end": "2026-08-01", "before validFrom": "2026-01-15"} {
+		_, _, err := s.EndTeamMember(ctx, team.ID, member.ID, dateOn(t, validTo))
+		var problem *httpx.Problem
+		if !errors.As(err, &problem) || problem.Code != store.CodeTeamMemberRange || problem.Errors["validTo"] == "" {
+			t.Fatalf("%s error = %v; want %s on validTo", name, err, store.CodeTeamMemberRange)
+		}
+	}
+	if len(membershipEvents(t, ctx, admin)) != 2 {
+		t.Fatal("a refused end wrote an event")
+	}
+}
+
+func TestPostgres_EndTeamMemberClosesAnOpenEndAndFreesTheCap(t *testing.T) {
+	s, ctx, _, team, member := openTeamWithMember(t)
+	previous := store.MaxMembersPerTeam
+	store.MaxMembersPerTeam = 1
+	t.Cleanup(func() { store.MaxMembersPerTeam = previous })
+	if _, _, err := s.AddTeamMember(ctx, team.ID, newMember("user", memberB, "2026-02-01", nil), dateOn(t, "2026-03-01"), ""); problemCode(t, err) != store.CodeTeamMemberLimit {
+		t.Fatalf("add at the cap error = %v; want %s", err, store.CodeTeamMemberLimit)
+	}
+	if _, changed, err := s.EndTeamMember(ctx, team.ID, member.ID, dateOn(t, "2026-03-31")); err != nil || !changed {
+		t.Fatalf("close open end = %v, %v", changed, err)
+	}
+	if _, _, err := s.AddTeamMember(ctx, team.ID, newMember("user", memberB, "2026-04-01", nil), dateOn(t, "2026-04-01"), ""); err != nil {
+		t.Fatalf("add after the end date = %v; the ended member must free its slot", err)
+	}
+}
+
+func TestPostgres_EndAndRemoveRefuseAnotherTeamsMember(t *testing.T) {
+	s, ctx, admin, team, member := openTeamWithMember(t)
+	other, _, err := s.CreateTeam(ctx, newTeam(team.TeamTypeID, "OTHER"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	unknown := "00000000-0000-0000-0000-0000000000ff"
+	if _, _, err := s.EndTeamMember(ctx, other.ID, member.ID, dateOn(t, "2026-06-30")); problemCode(t, err) != store.CodeTeamMemberNotFound {
+		t.Fatalf("end through another team error = %v; want %s", err, store.CodeTeamMemberNotFound)
+	}
+	if err := s.RemoveTeamMember(ctx, other.ID, member.ID); problemCode(t, err) != store.CodeTeamMemberNotFound {
+		t.Fatalf("remove through another team error = %v; want %s", err, store.CodeTeamMemberNotFound)
+	}
+	if _, _, err := s.EndTeamMember(ctx, team.ID, unknown, dateOn(t, "2026-06-30")); problemCode(t, err) != store.CodeTeamMemberNotFound {
+		t.Fatalf("end unknown member error = %v; want %s", err, store.CodeTeamMemberNotFound)
+	}
+	if _, _, err := s.EndTeamMember(ctx, unknown, member.ID, dateOn(t, "2026-06-30")); problemCode(t, err) != store.CodeTeamNotFound {
+		t.Fatalf("end on unknown team error = %v; want %s", err, store.CodeTeamNotFound)
+	}
+	if err := s.RemoveTeamMember(ctx, unknown, member.ID); problemCode(t, err) != store.CodeTeamNotFound {
+		t.Fatalf("remove on unknown team error = %v; want %s", err, store.CodeTeamNotFound)
+	}
+	if len(membershipEvents(t, ctx, admin)) != 1 {
+		t.Fatal("a refused end or removal wrote an event")
+	}
+}
+
+func TestPostgres_RemoveTeamMemberDeletesManualRowAndKeepsRuleRows(t *testing.T) {
+	s, ctx, admin, team, member := openTeamWithMember(t)
+	ruleRow := "00000000-0000-0000-0000-0000000000c9"
+	if _, err := admin.Exec(ctx, `insert into team_member (tenant_id, id, team_id, member_kind, member_id, valid_from, source)
+		values ($1, $2, $3, 'user', $4, '2026-02-01', 'rule')`, testkit.TenantID(1), ruleRow, team.ID, memberB); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RemoveTeamMember(ctx, team.ID, ruleRow); problemCode(t, err) != store.CodeTeamMemberRuleSourced {
+		t.Fatalf("rule row removal error = %v; want %s", err, store.CodeTeamMemberRuleSourced)
+	}
+	if err := s.RemoveTeamMember(ctx, team.ID, member.ID); err != nil {
+		t.Fatal(err)
+	}
+	page, err := s.ListTeamMembers(ctx, team.ID, store.TeamMemberFilter{}, "", 10)
+	if err != nil || len(page.Items) != 1 || page.Items[0].ID != ruleRow {
+		t.Fatalf("members after removal = %+v, %v; want only the rule row", page, err)
+	}
+	events := membershipEvents(t, ctx, admin)
+	if len(events) != 2 {
+		t.Fatalf("events = %+v; want the add and the removal", events)
+	}
+	removal := events[1]
+	added, _ := removal["added"].([]any)
+	removed, _ := removal["removed"].([]any)
+	if len(added) != 0 || len(removed) != 1 || removal["as_of"] != member.ValidFrom {
+		t.Fatalf("removal event = %+v; want empty added, one removed, as_of %s", removal, member.ValidFrom)
+	}
+	if err := s.RemoveTeamMember(ctx, team.ID, member.ID); problemCode(t, err) != store.CodeTeamMemberNotFound {
+		t.Fatalf("second removal error = %v; want %s", err, store.CodeTeamMemberNotFound)
+	}
+}
+
+func TestPostgres_ListTeamsFiltersByMemberOnceEach(t *testing.T) {
+	s, ctx, _, tt := teamFixture(t)
+	today := dateOn(t, "2026-03-01")
+	ids := map[string]string{}
+	for _, code := range []string{"T1", "T2", "T3"} {
+		team, _, err := s.CreateTeam(ctx, newTeam(tt.ID, code), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids[code] = team.ID
+	}
+	for _, in := range []struct {
+		team string
+		row  store.TeamMember
+	}{
+		{"T1", newMember("user", memberA, "2026-02-01", strPtr("2026-06-30"))},
+		{"T1", newMember("user", memberA, "2026-08-01", nil)},
+		{"T2", newMember("user", memberA, "2026-02-01", strPtr("2026-06-30"))},
+		{"T3", newMember("user", memberB, "2026-02-01", nil)},
+	} {
+		if _, _, err := s.AddTeamMember(ctx, ids[in.team], in.row, today, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	codes := func(f store.TeamFilter) []string {
+		t.Helper()
+		page, err := s.ListTeams(ctx, f, "", 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, item := range page.Items {
+			out = append(out, item.Code)
+		}
+		return out
+	}
+	asOf := func(v string) *time.Time { d := dateOn(t, v); return &d }
+	for name, tc := range map[string]struct {
+		filter store.TeamFilter
+		want   []string
+	}{
+		"member on two rows of one team lists it once": {store.TeamFilter{MemberID: memberA}, []string{"T1", "T2"}},
+		"as of inside the first row":                   {store.TeamFilter{MemberID: memberA, AsOf: asOf("2026-03-01")}, []string{"T1", "T2"}},
+		"as of the last day of the first row":          {store.TeamFilter{MemberID: memberA, AsOf: asOf("2026-06-30")}, []string{"T1", "T2"}},
+		"as of the gap":                                {store.TeamFilter{MemberID: memberA, AsOf: asOf("2026-07-01")}, nil},
+		"as of the second row":                         {store.TeamFilter{MemberID: memberA, AsOf: asOf("2026-09-01")}, []string{"T1"}},
+		"other member":                                 {store.TeamFilter{MemberID: memberB}, []string{"T3"}},
+		"unknown member":                               {store.TeamFilter{MemberID: memberC}, nil},
+		"combined with status":                         {store.TeamFilter{MemberID: memberA, Status: "inactive"}, nil},
+		"no member filter":                             {store.TeamFilter{}, []string{"T1", "T2", "T3"}},
+	} {
+		if got := codes(tc.filter); !slices.Equal(got, tc.want) {
+			t.Fatalf("%s = %v; want %v", name, got, tc.want)
+		}
+	}
+	if page, err := s.ListTeams(principalContext(2), store.TeamFilter{MemberID: memberA}, "", 10); err != nil || len(page.Items) != 0 {
+		t.Fatalf("tenant B member filter = %+v, %v; want empty", page, err)
+	}
+}
+
+func TestPostgres_TeamMaintenanceIsTenantIsolated(t *testing.T) {
+	s, ctx, admin, team, member := openTeamWithMember(t)
+	other := principalContext(2)
+	if _, err := s.UpdateTeam(other, team.ID, 1, store.TeamPatch{Name: strPtr("Hijacked")}); problemCode(t, err) != store.CodeTeamNotFound {
+		t.Fatalf("tenant B update error = %v; want %s", err, store.CodeTeamNotFound)
+	}
+	if _, _, err := s.EndTeamMember(other, team.ID, member.ID, dateOn(t, "2026-06-30")); problemCode(t, err) != store.CodeTeamNotFound {
+		t.Fatalf("tenant B end error = %v; want %s", err, store.CodeTeamNotFound)
+	}
+	if err := s.RemoveTeamMember(other, team.ID, member.ID); problemCode(t, err) != store.CodeTeamNotFound {
+		t.Fatalf("tenant B remove error = %v; want %s", err, store.CodeTeamNotFound)
+	}
+	got, err := s.GetTeam(ctx, team.ID)
+	if err != nil || got.Name != team.Name || got.Version != 1 {
+		t.Fatalf("tenant A team = %+v, %v; want untouched", got, err)
+	}
+	var open int
+	if err := admin.QueryRow(ctx, `select count(*) from team_member where valid_to is null`).Scan(&open); err != nil || open != 1 || len(membershipEvents(t, ctx, admin)) != 1 {
+		t.Fatalf("open members = %d, %v; want the member untouched with only the add event", open, err)
 	}
 }

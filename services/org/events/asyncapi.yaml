@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: org
-  version: 0.9.0
+  version: 0.10.0
   description: CloudEvents 1.0 envelope from platform/go/events; payloads below are the data member.
 channels:
   passage.org.legalentity:
@@ -305,7 +305,7 @@ components:
     teamMembershipChanged:
       name: changed
       title: Team membership changed
-      description: Emitted when a member is added to a team (POST /v1/org/teams/{id}/members); a replay emits nothing. added carries the new member and as_of is its validFrom. removed is always empty until member end and removal ship in a later slice.
+      description: Emitted when a member is added to a team (POST /v1/org/teams/{id}/members), ended (POST /v1/org/teams/{id}/members/{memberId}:end) or removed as entered in error (DELETE /v1/org/teams/{id}/members/{memberId}); a replay or a re-sent end date emits nothing. An add carries the new member in added with empty removed and as_of is its validFrom, the first day in force. An end carries empty added and the member in removed, and as_of is the day after validTo, the first day the member is no longer in force. A removal carries empty added and the member in removed, and as_of is the row's validFrom because the member is treated as never having been in force.
       payload:
         type: object
         required: [team_id, added, removed, as_of]

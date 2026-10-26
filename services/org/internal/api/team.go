@@ -39,6 +39,15 @@ type addTeamMemberRequest struct {
 	ValidTo    *string `json:"validTo"`
 }
 
+type updateTeamRequest struct {
+	Version *int `json:"version"`
+	store.TeamPatch
+}
+
+type endTeamMemberRequest struct {
+	ValidTo *string `json:"validTo"`
+}
+
 type createTeamTypeRequest struct {
 	Code        string   `json:"code"`
 	Name        string   `json:"name"`
@@ -59,7 +68,10 @@ func (a *API) registerTeams(r chi.Router) {
 	r.With(authz.RequireDuty(dutyOperatingUnit)).Post(teams, a.createTeam)
 	r.With(authz.RequireDuty(dutyRead)).Get(teams, a.listTeams)
 	r.With(authz.RequireDuty(dutyRead)).Get(teams+"/{id}", teamRoute(a.getTeam))
+	r.With(authz.RequireDuty(dutyOperatingUnit)).Patch(teams+"/{id}", teamRoute(a.updateTeam))
 	r.With(authz.RequireDuty(dutyOperatingUnit)).Post(teams+"/{id}/members", teamRoute(a.addTeamMember))
+	r.With(authz.RequireDuty(dutyOperatingUnit)).Post(teams+"/{id}/members/{memberId}:end", teamRoute(a.endTeamMember))
+	r.With(authz.RequireDuty(dutyOperatingUnit)).Delete(teams+"/{id}/members/{memberId}", teamRoute(a.removeTeamMember))
 	r.With(authz.RequireDuty(dutyRead)).Get(teams+"/{id}/members", teamRoute(a.listTeamMembers))
 	r.With(authz.RequireDuty(dutyOperatingUnit)).Post(teamTypes, a.createTeamType)
 	r.With(authz.RequireDuty(dutyRead)).Get(teamTypes, a.listTeamTypes)
@@ -242,13 +254,17 @@ func (a *API) listTeams(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	f := store.TeamFilter{TeamTypeID: strings.ToLower(q.Get("teamTypeId")), OperatingUnitID: strings.ToLower(q.Get("operatingUnitId")), Status: q.Get("status")}
+	f := store.TeamFilter{TeamTypeID: strings.ToLower(q.Get("teamTypeId")), OperatingUnitID: strings.ToLower(q.Get("operatingUnitId")), Status: q.Get("status"), MemberID: strings.ToLower(q.Get("memberId"))}
 	if f.TeamTypeID != "" && !canonicalUUID(f.TeamTypeID) {
 		badQuery(w, r, "teamTypeId", "must be a UUID")
 		return
 	}
 	if f.OperatingUnitID != "" && !canonicalUUID(f.OperatingUnitID) {
 		badQuery(w, r, "operatingUnitId", "must be a UUID")
+		return
+	}
+	if f.MemberID != "" && !canonicalUUID(f.MemberID) {
+		badQuery(w, r, "memberId", "must be a UUID")
 		return
 	}
 	if f.Status != "" && !validStatus(f.Status) {
@@ -301,6 +317,120 @@ func (a *API) getTeam(w http.ResponseWriter, r *http.Request, id string) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, t)
+}
+
+func (a *API) updateTeam(w http.ResponseWriter, r *http.Request, id string) {
+	if refuseScopedCaller(w, r, "update teams") {
+		return
+	}
+	var req updateTeamRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	fields := map[string]string{}
+	if req.Version == nil || *req.Version < 1 {
+		fields["version"] = "is required and must be at least 1"
+	}
+	if req.Name != nil {
+		trimmed := strings.TrimSpace(*req.Name)
+		req.Name = &trimmed
+		if trimmed == "" || utf8.RuneCountInString(trimmed) > teamNameLength {
+			fields["name"] = fmt.Sprintf("must be 1 to %d characters", teamNameLength)
+		}
+	}
+	if req.Description != nil && utf8.RuneCountInString(*req.Description) > teamDescriptionLength {
+		fields["description"] = fmt.Sprintf("must be at most %d characters", teamDescriptionLength)
+	}
+	if req.OperatingUnitID != nil {
+		lower := strings.ToLower(*req.OperatingUnitID)
+		req.OperatingUnitID = &lower
+		if lower != "" && !canonicalUUID(lower) {
+			fields["operatingUnitId"] = "must be a UUID"
+		}
+	}
+	if req.EffectiveTo != nil && *req.EffectiveTo != "" {
+		if _, ok := parseDate(*req.EffectiveTo); !ok {
+			fields["effectiveTo"] = "must be a date as YYYY-MM-DD"
+		}
+	}
+	if req.Status != nil && !validStatus(*req.Status) {
+		fields["status"] = "must be active or inactive"
+	}
+	if len(fields) > 0 {
+		validationFailed(w, r, fields)
+		return
+	}
+	team, err := a.store.UpdateTeam(r.Context(), id, *req.Version, req.TeamPatch)
+	if err != nil {
+		slog.Error("update team failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.Fail(w, r, err)
+		return
+	}
+	if team.Version != *req.Version {
+		a.teamUpdated.Add(1)
+	}
+	httpx.JSON(w, http.StatusOK, team)
+}
+
+func teamMemberRowID(w http.ResponseWriter, r *http.Request) (string, bool) {
+	id := chi.URLParam(r, "memberId")
+	if !canonicalUUID(id) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeTeamMemberNotFound, "team member not found"))
+		return "", false
+	}
+	return id, true
+}
+
+func (a *API) endTeamMember(w http.ResponseWriter, r *http.Request, teamID string) {
+	if refuseScopedCaller(w, r, "end team members") {
+		return
+	}
+	memberRowID, ok := teamMemberRowID(w, r)
+	if !ok {
+		return
+	}
+	var req endTeamMemberRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	var validTo time.Time
+	valid := false
+	if req.ValidTo != nil {
+		validTo, valid = parseDate(*req.ValidTo)
+	}
+	if !valid {
+		validationFailed(w, r, map[string]string{"validTo": "is required and must be a date as YYYY-MM-DD"})
+		return
+	}
+	member, changed, err := a.store.EndTeamMember(r.Context(), teamID, memberRowID, validTo)
+	if err != nil {
+		slog.Error("end team member failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.Fail(w, r, err)
+		return
+	}
+	if changed {
+		a.teamMemberEnded.Add(1)
+	}
+	httpx.JSON(w, http.StatusOK, member)
+}
+
+func (a *API) removeTeamMember(w http.ResponseWriter, r *http.Request, teamID string) {
+	if refuseScopedCaller(w, r, "remove team members") {
+		return
+	}
+	memberRowID, ok := teamMemberRowID(w, r)
+	if !ok {
+		return
+	}
+	if err := a.store.RemoveTeamMember(r.Context(), teamID, memberRowID); err != nil {
+		slog.Error("remove team member failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.Fail(w, r, err)
+		return
+	}
+	a.teamMemberRemoved.Add(1)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a *API) addTeamMember(w http.ResponseWriter, r *http.Request, teamID string) {

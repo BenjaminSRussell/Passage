@@ -112,7 +112,10 @@ type Store interface {
 	CreateTeam(ctx context.Context, in Team, idempotencyKey string) (Team, bool, error)
 	GetTeam(ctx context.Context, id string) (Team, error)
 	ListTeams(ctx context.Context, f TeamFilter, afterCode string, limit int) (TeamPage, error)
+	UpdateTeam(ctx context.Context, id string, version int, in TeamPatch) (Team, error)
 	AddTeamMember(ctx context.Context, teamID string, in TeamMember, today time.Time, idempotencyKey string) (TeamMember, bool, error)
+	EndTeamMember(ctx context.Context, teamID, memberRowID string, validTo time.Time) (TeamMember, bool, error)
+	RemoveTeamMember(ctx context.Context, teamID, memberRowID string) error
 	ListTeamMembers(ctx context.Context, teamID string, f TeamMemberFilter, afterID string, limit int) (TeamMemberPage, error)
 	Ping(ctx context.Context) error
 }

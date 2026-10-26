@@ -61,6 +61,9 @@ type API struct {
 	teamTypeCreated   atomic.Int64
 	teamCreated       atomic.Int64
 	teamMemberAdded   atomic.Int64
+	teamUpdated       atomic.Int64
+	teamMemberEnded   atomic.Int64
+	teamMemberRemoved atomic.Int64
 	ouUpdated         atomic.Int64
 	siteCreated       atomic.Int64
 	siteUpdated       atomic.Int64
@@ -180,6 +183,9 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP org_team_types_created_total Team types created; idempotent replays are not counted.\n# TYPE org_team_types_created_total counter\norg_team_types_created_total %d\n", a.teamTypeCreated.Load())
 		fmt.Fprintf(w, "# HELP org_teams_created_total Teams created; idempotent replays are not counted.\n# TYPE org_teams_created_total counter\norg_teams_created_total %d\n", a.teamCreated.Load())
 		fmt.Fprintf(w, "# HELP org_team_members_added_total Team members added; idempotent replays are not counted.\n# TYPE org_team_members_added_total counter\norg_team_members_added_total %d\n", a.teamMemberAdded.Load())
+		fmt.Fprintf(w, "# HELP org_teams_updated_total Team updates that changed the team; unchanged patches are not counted.\n# TYPE org_teams_updated_total counter\norg_teams_updated_total %d\n", a.teamUpdated.Load())
+		fmt.Fprintf(w, "# HELP org_team_members_ended_total Team members ended; re-sent end dates are not counted.\n# TYPE org_team_members_ended_total counter\norg_team_members_ended_total %d\n", a.teamMemberEnded.Load())
+		fmt.Fprintf(w, "# HELP org_team_members_removed_total Team members removed as entered in error.\n# TYPE org_team_members_removed_total counter\norg_team_members_removed_total %d\n", a.teamMemberRemoved.Load())
 		fmt.Fprintf(w, "# HELP org_operating_units_updated_total Operating unit updates that bumped the version.\n# TYPE org_operating_units_updated_total counter\norg_operating_units_updated_total %d\n", a.ouUpdated.Load())
 		fmt.Fprintf(w, "# HELP org_sites_created_total Sites created.\n# TYPE org_sites_created_total counter\norg_sites_created_total %d\n", a.siteCreated.Load())
 		fmt.Fprintf(w, "# HELP org_sites_updated_total Site updates that bumped the version.\n# TYPE org_sites_updated_total counter\norg_sites_updated_total %d\n", a.siteUpdated.Load())
