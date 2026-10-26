@@ -75,6 +75,8 @@ Every node set is checked structurally before it is stored: at most 50,000 nodes
 | `PUT /v1/org/currencies/{code}/rounding-rules/{purpose}` (purpose general, price, purchase, sales, tax or cash; body `unit`, `method`, optional `legalEntityId`; not for legal-entity-scoped callers; an identical repeat changes nothing and emits no event) | `org.reference.write` |
 | `DELETE /v1/org/currencies/{code}/rounding-rules/{purpose}` (optional `?legalEntityId=` deletes that entity's row instead of the tenant row; 204; emits `currencyrounding.changed` with the rule now in force; not for legal-entity-scoped callers) | `org.reference.write` |
 | `GET /v1/org/currencies/{code}/rounding-rules` (the tenant's stored rules as `{items}`) and `GET /v1/org/currencies/{code}/round?amount=&purpose=&legalEntityId=` (rounds with the legal-entity rule, else the tenant rule, else the currency's minor unit with half_even; `source` names which) | `org.read` |
+| `PUT /v1/org/{legal-entities,operating-units,sites,warehouses}/{id}/translations/{language}` (body `{name}`; 201 when created, 200 when replaced; see Name translations) and `DELETE` of the same path (204) | the owner's write duty |
+| `GET /v1/org/{legal-entities,operating-units,sites,warehouses}/{id}/translations` (`{items}` ordered by language) and `GET …/{id}/name?language=` (the resolved name with `source`) | `org.read` |
 | `GET /v1/org/uom/convert?from=&to=&qty=` (returns `quantity` and `displayQuantity`) | any authenticated principal |
 | `GET /v1/org/uom/conversions` (`class`, `unit`, `status`; returns `{items}` with inverse and round-trip check) | `org.read` |
 | `GET /v1/org/uom/units` (`class`, `status`; returns `{items}`) and `GET /v1/org/uom/units/{code}` | `org.read` |
@@ -83,6 +85,18 @@ Every node set is checked structurally before it is stored: at most 50,000 nodes
 | `GET /healthz`, `GET /readyz` (database ping, 503 when down), `GET /metrics` on the admin port | public |
 
 Contract: `api/openapi.yaml`. Paths follow the architecture spine (`/v1/<context>/<collection>`), not the PRD's `/org/v1`. The chart is `charts/org` per CONVENTIONS, not the PRD's `passage-org`. The legal-entity header is `X-Passage-Legal-Entity`.
+
+## Name translations
+
+Legal entities, operating units, sites and warehouses can carry a translated name per language tag (`fr`, `fr-CA`), stored in `org_unit_translation` (primary key tenant, owner type, owner id, language). Routes exist for each owner collection (`legal-entities`, `operating-units`, `sites`, `warehouses`) and take the owner's write duty (legal entities `org.legal-entity.write`, operating units `org.operating-unit.write`, sites and warehouses `org.site.write`).
+
+- The primary subtag of the language must be an active row of `language` for the tenant, else 422 `ORG-TRANSLATION-LANGUAGE-INVALID`. The check runs on write only, so a language deactivated later still resolves.
+- `GET …/{id}/name?language=fr-CA` resolves the name: the exact tag, then its primary subtag (`fr`), then the base name. `source` is `translation` or `base`; `language` names the tag that matched and is absent for the base name. A region-only translation (`fr-CA`) is never used for a plain `fr` request.
+- An inactive owner still accepts and serves translations, because documents for history keep printing its name.
+- Names are trimmed and capped at 120 characters (counted in runes), the same as base names; the PRD's text(100) is a recorded deviation.
+- A PUT that creates returns 201, one that replaces returns 200, and an identical repeat returns 200 and changes nothing.
+- No outbox event is emitted: PRD §1.6.5 lists none for translations, so consumers read the name route.
+- Owners outside the caller's tenant or legal-entity scope answer with the owner's own 404. Operating units carry no legal entity, so scoped callers can maintain their translations.
 
 ## Error codes
 
@@ -149,6 +163,8 @@ Contract: `api/openapi.yaml`. Paths follow the architecture spine (`/v1/<context
 | ORG-REF-NOT-FOUND | 404 | unknown reference code |
 | ORG-CUR-ROUNDING-UNIT | 422 | rounding unit outside 0.000001 to 1000, finer than the currency minor unit, or not a power of ten or 5 or 25 times one |
 | ORG-CUR-ROUNDING-NOT-FOUND | 404 | no rounding rule to delete for that currency, purpose and scope |
+| ORG-TRANSLATION-LANGUAGE-INVALID | 422 | the primary subtag of the translation language is unknown or deactivated for the tenant |
+| ORG-TRANSLATION-NOT-FOUND | 404 | no translation to delete for that owner and language |
 | ORG-UOM-CLASS-MISMATCH | 422 | the two units of a conversion are in different classes |
 | ORG-UOM-CONVERSION-DUPLICATE | 409 | the unordered pair is already converted by a platform or tenant row |
 | ORG-UOM-UNIT-INACTIVE | 422 | a unit of a new conversion is inactive for the tenant |
@@ -156,4 +172,4 @@ Contract: `api/openapi.yaml`. Paths follow the architecture spine (`/v1/<context
 | ORG-UOM-UNIT-NOT-FOUND | 404 | unit code not visible to the tenant (codes are case-sensitive) |
 | ORG-UOM-CODE-DUPLICATE | 409 | unit code already used by a platform unit or one of the tenant's units |
 
-Metrics: `org_fiscal_calendars_updated_total`, `org_legal_entities_created_total`, `org_legal_entities_failed_total`, `org_legal_entities_updated_total`, `org_reference_status_changed_total`, `org_uom_units_created_total`, `org_uom_conversions_created_total`, `org_currency_rounding_rules_changed_total`, `org_operating_units_created_total`, `org_operating_units_updated_total`, `org_team_types_created_total`, `org_teams_created_total`, `org_team_members_added_total`, `org_teams_updated_total`, `org_team_members_ended_total`, `org_team_members_removed_total`, `org_sites_created_total`, `org_sites_updated_total`, `org_warehouses_created_total`, `org_warehouses_updated_total`, `org_locations_created_total`, `org_locations_updated_total`, `org_addresses_created_total`, `org_addresses_revised_total` (stdlib atomics rendered as text).
+Metrics: `org_fiscal_calendars_updated_total`, `org_legal_entities_created_total`, `org_legal_entities_failed_total`, `org_legal_entities_updated_total`, `org_reference_status_changed_total`, `org_uom_units_created_total`, `org_uom_conversions_created_total`, `org_currency_rounding_rules_changed_total`, `org_name_translations_put_total`, `org_name_translations_deleted_total`, `org_operating_units_created_total`, `org_operating_units_updated_total`, `org_team_types_created_total`, `org_teams_created_total`, `org_team_members_added_total`, `org_teams_updated_total`, `org_team_members_ended_total`, `org_team_members_removed_total`, `org_sites_created_total`, `org_sites_updated_total`, `org_warehouses_created_total`, `org_warehouses_updated_total`, `org_locations_created_total`, `org_locations_updated_total`, `org_addresses_created_total`, `org_addresses_revised_total` (stdlib atomics rendered as text).

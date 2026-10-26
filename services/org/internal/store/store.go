@@ -104,6 +104,10 @@ type Store interface {
 	ListCurrencyRoundings(ctx context.Context, currency string) ([]CurrencyRounding, error)
 	ResolveCurrencyRounding(ctx context.Context, currency, purpose, legalEntityID string) (RoundingRule, error)
 	DeleteCurrencyRounding(ctx context.Context, currency, purpose string, legalEntityID *string) error
+	PutNameTranslation(ctx context.Context, ownerType, ownerID, language, name string) (NameTranslation, bool, error)
+	ListNameTranslations(ctx context.Context, ownerType, ownerID string) ([]NameTranslation, error)
+	DeleteNameTranslation(ctx context.Context, ownerType, ownerID, language string) error
+	ResolveOrgUnitName(ctx context.Context, ownerType, ownerID, tag string) (NameResolution, error)
 	ListUnits(ctx context.Context, f UnitFilter) ([]Unit, error)
 	GetUnit(ctx context.Context, code string) (Unit, error)
 	CreateUnit(ctx context.Context, in Unit, idempotencyKey string) (Unit, error)
