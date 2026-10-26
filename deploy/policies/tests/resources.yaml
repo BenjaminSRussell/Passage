@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: unsigned-hello-ledger
+  namespace: hello-ledger
+spec:
+  containers:
+    - name: hello-ledger
+      image: ghcr.io/benjaminsrussell/hello-ledger:unsigned
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: third-party-postgres
+  namespace: hello-ledger
+spec:
+  containers:
+    - name: postgres
+      image: docker.io/library/postgres@sha256:0000000000000000000000000000000000000000000000000000000000000001
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: tagged-init-container
+  namespace: hello-ledger
+spec:
+  initContainers:
+    - name: migrate
+      image: ghcr.io/benjaminsrussell/hello-ledger:unsigned
+  containers:
+    - name: hello-ledger
+      image: ghcr.io/benjaminsrussell/hello-ledger@sha256:0000000000000000000000000000000000000000000000000000000000000002
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: tagged-ephemeral-container
+  namespace: hello-ledger
+spec:
+  containers:
+    - name: hello-ledger
+      image: ghcr.io/benjaminsrussell/hello-ledger@sha256:0000000000000000000000000000000000000000000000000000000000000002
+  ephemeralContainers:
+    - name: debug
+      image: ghcr.io/benjaminsrussell/hello-ledger:unsigned

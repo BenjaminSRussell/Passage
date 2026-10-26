@@ -7,8 +7,9 @@ IMAGE := passage-local/hello-ledger:local
 REVISION ?= main
 PYTHON ?= python3
 IMAGE_DIGEST ?=
+SKIP_VERIFY ?=
 
-.PHONY: deploy-local destroy-local promote-stage rollback-stage test-stage-release
+.PHONY: deploy-local destroy-local promote-stage rollback-stage test-stage-release test-policies
 
 deploy-local:
 	tofu -chdir=tofu/cluster init -input=false
@@ -36,10 +37,15 @@ destroy-local:
 
 promote-stage:
 	@test -n "$(IMAGE_DIGEST)" || { echo "Usage: make -C deploy promote-stage IMAGE_DIGEST=sha256:<64 lowercase hex characters>" >&2; exit 2; }
-	$(PYTHON) scripts/stage_release.py promote --to stage --digest "$(IMAGE_DIGEST)"
+	$(if $(filter 1,$(SKIP_VERIFY)),@echo "WARNING: SKIP_VERIFY=1 - signature and SBOM verification disabled" >&2)
+	$(PYTHON) scripts/stage_release.py promote --to stage --digest "$(IMAGE_DIGEST)" $(if $(filter 1,$(SKIP_VERIFY)),--skip-verify)
 
 rollback-stage:
 	$(PYTHON) scripts/stage_release.py rollback --env stage
 
 test-stage-release:
 	$(PYTHON) -m unittest discover -s scripts -p 'test_*.py' -v
+
+test-policies:
+	@which kyverno >/dev/null || { echo "kyverno CLI not installed; install it from https://kyverno.io/docs/kyverno-cli/ to run the policy tests" >&2; exit 2; }
+	kyverno test policies/tests

@@ -114,6 +114,15 @@ jobs:
         with:
           python-version: '3.12'
       - run: make -C deploy test-stage-release
+      - name: Install Kyverno CLI
+        env:
+          KYVERNO_VERSION: 1.19.2
+          KYVERNO_SHA256: 357eaf1df8bc24ddd5a73979fadeaae6a032e8710f11af264229756e4956bf4a
+        run: |
+          curl -fsSLo kyverno-cli.tar.gz "https://github.com/kyverno/kyverno/releases/download/v${KYVERNO_VERSION}/kyverno-cli_v${KYVERNO_VERSION}_linux_x86_64.tar.gz"
+          echo "${KYVERNO_SHA256}  kyverno-cli.tar.gz" | sha256sum --check --strict
+          sudo tar -xzf kyverno-cli.tar.gz -C /usr/local/bin kyverno
+      - run: make -C deploy test-policies
 
   image:
     if: inputs.go && github.event_name != 'pull_request'

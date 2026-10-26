@@ -1,6 +1,10 @@
+import os
+import shutil
+import stat
 import subprocess
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 import stage_release
@@ -51,6 +55,31 @@ class StageReleaseTests(unittest.TestCase):
         self.run_git("config", "user.email", "passage-test@example.invalid")
         self.commit("Initial stage digest")
         self.run_git("checkout", "-qb", "promotion-test")
+        self.stub_dir = self.root / "stub-bin"
+        self.stub_dir.mkdir()
+        self.cosign_log = self.root / "cosign.log"
+        self.install_cosign_stub(fail_on="")
+        path_patch = unittest.mock.patch.dict(
+            os.environ, {"PATH": f"{self.stub_dir}{os.pathsep}{os.environ['PATH']}"}
+        )
+        path_patch.start()
+        self.addCleanup(path_patch.stop)
+
+    def install_cosign_stub(self, fail_on):
+        stub = self.stub_dir / "cosign"
+        stub.write_text(
+            "#!/bin/sh\n"
+            f'echo "$@" >> "{self.cosign_log}"\n'
+            f'[ "$1" = "{fail_on}" ] && {{ echo "no matching signatures" >&2; exit 1; }}\n'
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        stub.chmod(stub.stat().st_mode | stat.S_IXUSR)
+
+    def cosign_calls(self):
+        if not self.cosign_log.exists():
+            return []
+        return self.cosign_log.read_text(encoding="utf-8").splitlines()
 
     def tearDown(self):
         self.temporary_directory.cleanup()
@@ -95,6 +124,69 @@ class StageReleaseTests(unittest.TestCase):
             for revision in reversed(revisions)
         ]
         self.assertEqual(history_digests, [INITIAL_DIGEST, PROMOTED_DIGEST, INITIAL_DIGEST])
+
+    def test_promote_verifies_signature_and_sbom_attestation_before_writing(self):
+        result = stage_release.main(
+            ["promote", "--to", "stage", "--digest", PROMOTED_DIGEST],
+            repo_root=self.root,
+        )
+
+        self.assertEqual(result, 0)
+        reference = f"{stage_release.IMAGE_REPOSITORY}@{PROMOTED_DIGEST}"
+        identity = " ".join(stage_release.cosign_identity_args())
+        self.assertEqual(
+            self.cosign_calls(),
+            [
+                f"verify {identity} {reference}",
+                f"verify-attestation --type spdxjson {identity} {reference}",
+            ],
+        )
+
+    def test_promote_refuses_unsigned_image(self):
+        self.install_cosign_stub(fail_on="verify")
+
+        result = stage_release.main(
+            ["promote", "--to", "stage", "--digest", PROMOTED_DIGEST],
+            repo_root=self.root,
+        )
+
+        self.assertEqual(result, 2)
+        self.assertEqual(self.digest(), INITIAL_DIGEST)
+
+    def test_promote_refuses_image_without_sbom_attestation(self):
+        self.install_cosign_stub(fail_on="verify-attestation")
+
+        result = stage_release.main(
+            ["promote", "--to", "stage", "--digest", PROMOTED_DIGEST],
+            repo_root=self.root,
+        )
+
+        self.assertEqual(result, 2)
+        self.assertEqual(self.digest(), INITIAL_DIGEST)
+
+    def test_promote_refuses_when_cosign_is_missing(self):
+        (self.stub_dir / "cosign").unlink()
+        git_dir = os.path.dirname(shutil.which("git"))
+        with unittest.mock.patch.dict(os.environ, {"PATH": f"{self.stub_dir}{os.pathsep}{git_dir}"}):
+            result = stage_release.main(
+                ["promote", "--to", "stage", "--digest", PROMOTED_DIGEST],
+                repo_root=self.root,
+            )
+
+        self.assertEqual(result, 2)
+        self.assertEqual(self.digest(), INITIAL_DIGEST)
+
+    def test_skip_verify_bypasses_cosign_with_warning(self):
+        self.install_cosign_stub(fail_on="verify")
+
+        result = stage_release.main(
+            ["promote", "--to", "stage", "--digest", PROMOTED_DIGEST, "--skip-verify"],
+            repo_root=self.root,
+        )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(self.digest(), PROMOTED_DIGEST)
+        self.assertEqual(self.cosign_calls(), [])
 
     def test_promote_rejects_non_sha256_digest(self):
         result = stage_release.main(
