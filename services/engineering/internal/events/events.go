@@ -31,3 +31,23 @@ type EcoData struct {
 	ReleaseDate      string   `json:"releaseDate,omitempty"`
 	ApproverID       string   `json:"approverId,omitempty"`
 }
+
+const (
+	ResourceChanged   = "dev.passage.engineering.resource.changed.v1"
+	CalendarGenerated = "dev.passage.engineering.calendar.generated.v1"
+)
+
+type ResourceChangedData struct {
+	ResourceID    string   `json:"resourceId"`
+	SiteID        string   `json:"siteId,omitempty"`
+	CalendarID    string   `json:"calendarId,omitempty"`
+	EfficiencyPct string   `json:"efficiencyPct"`
+	ChangedFields []string `json:"changedFields"`
+}
+
+type CalendarGeneratedData struct {
+	CalendarID string `json:"calendarId"`
+	From       string `json:"from"`
+	To         string `json:"to"`
+	OpenDays   int    `json:"openDays"`
+}

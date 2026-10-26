@@ -45,3 +45,10 @@ const (
 	CodeBomEcoRequired         = "ENG-BOM-ECO-REQUIRED"
 	CodeEcoApproverUnavailable = "ENG-ECO-APPROVER-UNAVAILABLE"
 )
+
+const (
+	CodeCalShift  = "ENG-CAL-SHIFT"
+	CodeCalRange  = "ENG-CAL-RANGE"
+	CodeResVendor = "ENG-RES-VENDOR"
+	CodeResSite   = "ENG-RES-SITE"
+)
