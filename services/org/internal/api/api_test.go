@@ -14,11 +14,13 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/shopspring/decimal"
 
 	pevents "github.com/BenjaminSRussell/passage/platform/events"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/org/internal/api"
+	"github.com/BenjaminSRussell/passage/services/org/internal/domain"
 	orgevents "github.com/BenjaminSRussell/passage/services/org/internal/events"
 	"github.com/BenjaminSRussell/passage/services/org/internal/store"
 )
@@ -61,6 +63,12 @@ type fakeStore struct {
 	hierarchyVersions   []store.HierarchyVersionSummary
 	versionFilter       store.HierarchyVersionFilter
 	versionAfter        int
+	roundingPut         store.CurrencyRounding
+	roundingPutCalls    int
+	roundingChanged     bool
+	roundings           []store.CurrencyRounding
+	resolveArgs         [3]string
+	resolved            store.RoundingRule
 }
 
 func (f *fakeStore) reference(kind store.ReferenceKind, code string) (store.ReferenceItem, bool) {
@@ -817,6 +825,80 @@ func TestOpenAPIDocumentsEveryRoute(t *testing.T) {
 	})
 }
 
+var specOperation = regexp.MustCompile(`^    (get|put|post|patch|delete|head|options):$`)
+
+func declaredOperations(spec string) map[string]bool {
+	declared := map[string]bool{}
+	inPaths, path, operation := false, "", ""
+	for _, line := range strings.Split(spec, "\n") {
+		switch {
+		case line == "paths:":
+			inPaths = true
+		case inPaths && line != "" && !strings.HasPrefix(line, " "):
+			inPaths = false
+		case !inPaths:
+		case strings.HasPrefix(line, "  /") && strings.HasSuffix(line, ":") && !strings.HasPrefix(line, "   "):
+			path, operation = strings.TrimSuffix(strings.TrimSpace(line), ":"), ""
+		case specOperation.MatchString(line):
+			operation = path + " " + specOperation.FindStringSubmatch(line)[1]
+			declared[operation] = false
+		case operation != "" && strings.HasPrefix(line, "      x-passage-duty: "):
+			declared[operation] = true
+		}
+	}
+	return declared
+}
+
+func parityProblems(served map[string]bool, spec string) []string {
+	declared := declaredOperations(spec)
+	var problems []string
+	for operation := range served {
+		if hasDuty, ok := declared[operation]; !ok {
+			problems = append(problems, "not documented: "+operation)
+		} else if !hasDuty {
+			problems = append(problems, "no x-passage-duty: "+operation)
+		}
+	}
+	for operation := range declared {
+		if !served[operation] {
+			problems = append(problems, "not served: "+operation)
+		}
+	}
+	slices.Sort(problems)
+	return problems
+}
+
+func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
+	spec, err := os.ReadFile("../../api/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, _ := newRouter(&fakeStore{})
+	served := map[string]bool{}
+	_ = chi.Walk(r, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		served[route+" "+strings.ToLower(method)] = true
+		return nil
+	})
+	if len(served) < 40 {
+		t.Fatalf("router walk yielded %d operations; the walk is not seeing the routes", len(served))
+	}
+	for _, problem := range parityProblems(served, string(spec)) {
+		t.Error(problem)
+	}
+
+	t.Run("detects drift in both directions", func(t *testing.T) {
+		const small = "openapi: 3.1.0\npaths:\n  /a:\n    get:\n      x-passage-duty: org.read\n    put:\n      operationId: noDuty\n  /b:\n    post:\n      x-passage-duty: org.read\ncomponents:\n  schemas: {}\n"
+		got := parityProblems(map[string]bool{"/a get": true, "/a put": true, "/c get": true}, small)
+		want := []string{"no x-passage-duty: /a put", "not documented: /c get", "not served: /b post"}
+		if !slices.Equal(got, want) {
+			t.Fatalf("problems = %v; want %v", got, want)
+		}
+		if extra := parityProblems(map[string]bool{"/a get": true, "/a put": true, "/b post": true}, strings.Replace(small, "noDuty", "noDuty\n      x-passage-duty: org.read", 1)); len(extra) != 0 {
+			t.Fatalf("a matching spec must have no problems: %v", extra)
+		}
+	})
+}
+
 func TestAsyncAPIDeclaresEveryEvent(t *testing.T) {
 	spec, err := os.ReadFile("../../events/asyncapi.yaml")
 	if err != nil {
@@ -1033,4 +1115,35 @@ func (f *fakeStore) GetHierarchyVersion(_ context.Context, id string) (store.Hie
 func (f *fakeStore) DeleteHierarchyDraft(context.Context, string, int) error {
 	f.deleteCalls++
 	return f.err
+}
+
+func (f *fakeStore) PutCurrencyRounding(_ context.Context, in store.CurrencyRounding) (store.CurrencyRounding, bool, error) {
+	if f.err != nil {
+		return store.CurrencyRounding{}, false, f.err
+	}
+	f.roundingPutCalls++
+	f.roundingPut = in
+	in.ID = "id-1"
+	return in, f.roundingChanged, nil
+}
+
+func (f *fakeStore) ListCurrencyRoundings(context.Context, string) ([]store.CurrencyRounding, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	if f.roundings == nil {
+		return []store.CurrencyRounding{}, nil
+	}
+	return f.roundings, nil
+}
+
+func (f *fakeStore) ResolveCurrencyRounding(_ context.Context, currency, purpose, legalEntityID string) (store.RoundingRule, error) {
+	if f.err != nil {
+		return store.RoundingRule{}, f.err
+	}
+	f.resolveArgs = [3]string{currency, purpose, legalEntityID}
+	if f.resolved.Unit.IsZero() {
+		return store.RoundingRule{Unit: decimal.New(1, -2), Method: domain.HalfEven, Source: store.RoundingSourceDefault}, nil
+	}
+	return f.resolved, nil
 }

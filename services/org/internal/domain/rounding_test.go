@@ -119,3 +119,16 @@ func TestRound_Properties(t *testing.T) {
 		}
 	})
 }
+
+func TestParsePurpose(t *testing.T) {
+	for _, name := range []string{"general", "price", "purchase", "sales", "tax", "cash"} {
+		if got, err := domain.ParsePurpose(name); err != nil || string(got) != name {
+			t.Errorf("%q: got %q, %v", name, got, err)
+		}
+	}
+	for _, name := range []string{"", "General", "retail"} {
+		if _, err := domain.ParsePurpose(name); err == nil {
+			t.Errorf("%q: expected error", name)
+		}
+	}
+}

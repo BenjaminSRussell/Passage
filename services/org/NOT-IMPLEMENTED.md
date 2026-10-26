@@ -1,4 +1,4 @@
-# Not implemented in PSG-6 slice 21
+# Not implemented in PSG-6 slice 22
 
 | Deliverable or AC | Status | Reason |
 |---|---|---|
@@ -13,14 +13,12 @@
 | ORG-CAL-PATTERN, ORG-CAL-OVERLAP, ORG-CAL-NOT-FOUND, ORG-CAL-CODE-DUPLICATE | not in catalog | new codes returned by /v1/org/fiscal-calendars; the §1.6.18 catalog lists only ORG-CAL-LOCKED and ORG-CAL-GAP |
 | Deliverable 5: reference data | partial | UoM conversion is built (AC3) over a built-in conversion set in `domain.StandardConversions`; countries, currencies, regions (US, CA, IN, MX) and languages are seeded (tables `country`, `currency`, `region`, `language`, `reference_status`; loader `store.SeedReference`); the read API (`GET /v1/org/{countries,currencies,regions,languages}[/{code}]`) and tenant deactivation (`PATCH …/{code}`, table `reference_status`) are built; the `uom_conversion` table is a later slice of PSG-6 |
 | Deliverable 6: teams, team types, memberships | slice 2 of PSG-6 | line budget; membership criteria need OPA/Rego, which is not present |
-| Deliverable 6: legal-entity copy from template, currency rounding rules, organization name translations | slice 2 of PSG-6 | copy needs Temporal (wave 4) and will sit behind an interface with an in-package fake; the rest is line budget |
+| Deliverable 6: legal-entity copy from template, organization name translations | slice 2 of PSG-6 | copy needs Temporal (wave 4) and will sit behind an interface with an in-package fake; the rest is line budget; currency rounding rules are built (PSG-622) |
 | Event `hierarchyversion.activated` | built, timer deferred | emitted at publish, also for a future effective_from; ORG-J2 activation timer needs Temporal (wave 4); the kernel type regex allows three segments, so `org.hierarchy.version.activated` collapses to `org.hierarchyversion.activated` |
-| Event `currencyrounding.changed` | declared in `events/asyncapi.yaml`, not yet emitted | the aggregates and routes that emit them are later slices of PSG-602 |
 | Regions for countries other than US, CA, IN, MX | not built | delivered through localization packs (§1.6.20 'others via pack') |
 | PSG-602 item 3: persisted units of measure and conversions | later slice of PSG-602 | split from the outbox slice for the line budget |
-| PSG-602 item 4: currency rounding rules | later slice of PSG-602 | split from the outbox slice for the line budget |
-| PSG-602 item 8: OpenAPI route-parity and AsyncAPI parse contract tests, per-aggregate metrics, chart appVersion bump | later slice of PSG-602 | this slice checks asyncapi declarations by substring because go.mod has no YAML parser |
-| Persisted units of measure and conversions, convert over the persisted set, currency-rounding persistence and `GET /v1/org/currencies/{code}/round`, OpenAPI route-parity contract test | later slice of PSG-6 | `domain.Round`, `ValidateUnit` and `ParseMethod` (PSG-603) are not yet reachable from a route |
+| Persisted units of measure and conversions, convert over the persisted set | later slice of PSG-6 | needs a seed data file and gets a slice of its own; `domain.StandardConversions` serves convert until then |
+| Currency rounding rule delete (revert to fallback) | later slice of PSG-6 | rules can be created and changed (PSG-622); removing a row so the platform default applies again is not built |
 | Outbox relay (Debezium connector for `outbox`) | not built | Kafka and Debezium are wave 4; `outbox` and `idempotency_keys` tables exist with RLS, only `outbox` is written |
 | Jobs ORG-J1 to ORG-J6, Debezium connector; demo seed `ORG_SEED_PACKAGE=demo-manufacturer` | not built | Temporal and Kafka are wave 4; the seed needs sites and warehouses |
 | Argo CD Application, ingress, image registry entry, Kubernetes Secret `org-db`, database `passage_org` and `passage_app` role | handoff | `deploy/` and CI are outside wave 6 ownership |

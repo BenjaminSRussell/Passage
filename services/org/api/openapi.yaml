@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: org
   version: 0.13.0
-  description: Organization service. Covers legal entities, operating units, sites, warehouses, locations, postal addresses with purposes, fiscal calendars with idempotent year generation and the period read, hierarchy types and draft hierarchy versions with validated node sets (error codes ORG-HIER-CYCLE, ORG-HIER-MULTI-ROOT, ORG-HIER-DUPLICATE-NODE, ORG-HIER-PARENT-UNKNOWN, ORG-HIER-DEPTH, ORG-HIER-SIZE, ORG-HIER-NODE-UNKNOWN, ORG-HIER-TYPE-NOT-FOUND, ORG-HIER-TYPE-CODE-DUPLICATE, ORG-HIER-VERSION-NOT-FOUND, ORG-HIER-DRAFT-EXISTS, ORG-HIER-VERSION-IMMUTABLE, ORG-HIER-OVERLAP, ORG-HIER-BACKDATE-DUTY, ORG-HIER-NO-VERSION, ORG-HIER-NODE-ABSENT, ORG-HIER-MAKER-CHECKER) with the version list, publish, supersede, the closure table, the as-of query and the version comparison, unit-of-measure conversion, and the platform-owned reference sets (countries, currencies, regions, languages) with tenant-level deactivation.
+  description: Organization service. Covers legal entities, operating units, sites, warehouses, locations, postal addresses with purposes, fiscal calendars with idempotent year generation and the period read, hierarchy types and draft hierarchy versions with validated node sets (error codes ORG-HIER-CYCLE, ORG-HIER-MULTI-ROOT, ORG-HIER-DUPLICATE-NODE, ORG-HIER-PARENT-UNKNOWN, ORG-HIER-DEPTH, ORG-HIER-SIZE, ORG-HIER-NODE-UNKNOWN, ORG-HIER-TYPE-NOT-FOUND, ORG-HIER-TYPE-CODE-DUPLICATE, ORG-HIER-VERSION-NOT-FOUND, ORG-HIER-DRAFT-EXISTS, ORG-HIER-VERSION-IMMUTABLE, ORG-HIER-OVERLAP, ORG-HIER-BACKDATE-DUTY, ORG-HIER-NO-VERSION, ORG-HIER-NODE-ABSENT, ORG-HIER-MAKER-CHECKER) with the version list, publish, supersede, the closure table, the as-of query and the version comparison, unit-of-measure conversion, the platform-owned reference sets (countries, currencies, regions, languages) with tenant-level deactivation, and currency rounding rules with the round route (error code ORG-CUR-ROUNDING-UNIT).
 servers:
   - url: https://app.local.passage.dev
 paths:
@@ -617,6 +617,58 @@ paths:
           description: The currency with its new status for the caller's tenant; repeating the current status changes nothing. Rejected for legal-entity-scoped callers.
           content: { application/json: { schema: { $ref: '#/components/schemas/Currency' } } }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/org/currencies/{code}/rounding-rules:
+    get:
+      operationId: listCurrencyRoundingRules
+      x-passage-duty: org.read
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string, pattern: '^[A-Z]{3}$' } }
+      responses:
+        '200':
+          description: The tenant's stored rounding rules for the currency, ordered by purpose, tenant rows before legal-entity rows, then by legal entity id. A currency with no rows returns an empty list; the platform default (the currency's minor unit, half_even) has no row.
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/CurrencyRounding' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: ORG-REF-NOT-FOUND for an unknown currency., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/currencies/{code}/rounding-rules/{purpose}:
+    put:
+      operationId: putCurrencyRoundingRule
+      x-passage-duty: org.reference.write
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string, pattern: '^[A-Z]{3}$' } }
+        - { name: purpose, in: path, required: true, schema: { type: string, enum: [general, price, purchase, sales, tax, cash] } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PutCurrencyRounding' } } }
+      responses:
+        '200':
+          description: The stored rule. Repeating an identical PUT returns the same body, leaves updatedAt unchanged and emits no event. Rejected with 403 AUTH-0003 for legal-entity-scoped callers.
+          content: { application/json: { schema: { $ref: '#/components/schemas/CurrencyRounding' } } }
+        '400': { description: COM-0001 naming purpose, method, unit or legalEntityId., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: ORG-REF-NOT-FOUND for an unknown currency; ORG-LE-NOT-FOUND for a legal entity the tenant does not have., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: ORG-CUR-ROUNDING-UNIT when the unit is not a power of ten no finer than the currency minor unit or 5 or 25 times one; ORG-LE-REFERENCE-INACTIVE when the currency is inactive for the tenant., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/currencies/{code}/round:
+    get:
+      operationId: roundCurrencyAmount
+      x-passage-duty: org.read
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string, pattern: '^[A-Z]{3}$' } }
+        - { name: amount, in: query, required: true, schema: { type: string }, description: A finite decimal of at most 1e18 in magnitude. }
+        - { name: purpose, in: query, schema: { type: string, enum: [general, price, purchase, sales, tax, cash], default: general } }
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid }, description: Defaults to the caller's legal-entity scope. A scoped caller asking for another entity is refused with 403 AUTH-0003. }
+      responses:
+        '200':
+          description: The amount rounded by the first matching rule - legal entity, then tenant, then the currency's minor unit with half_even.
+          content: { application/json: { schema: { $ref: '#/components/schemas/RoundResult' } } }
+        '400': { description: COM-0001 naming amount, purpose or legalEntityId., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: ORG-REF-NOT-FOUND for an unknown currency; ORG-LE-NOT-FOUND for an unknown legal entity., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/org/regions:
     get:
       operationId: listRegions
@@ -932,6 +984,36 @@ components:
       type: object
       required: [code, name, status, numericCode, minorUnits]
       properties: { code: { type: string }, name: { type: string }, status: { type: string, enum: [active, inactive] }, numericCode: { type: string }, minorUnits: { type: integer, minimum: 0, maximum: 4 } }
+    PutCurrencyRounding:
+      type: object
+      required: [unit, method]
+      properties:
+        unit: { type: string, description: 'A positive decimal with at most 6 decimal places, such as "0.05".' }
+        method: { type: string, enum: [half_even, half_up, down, up] }
+        legalEntityId: { type: [string, 'null'], format: uuid, description: Absent or null stores a tenant row. }
+    CurrencyRounding:
+      type: object
+      required: [id, currencyCode, purpose, legalEntityId, unit, method, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        currencyCode: { type: string, pattern: '^[A-Z]{3}$' }
+        purpose: { type: string, enum: [general, price, purchase, sales, tax, cash] }
+        legalEntityId: { type: [string, 'null'], format: uuid }
+        unit: { type: string }
+        method: { type: string, enum: [half_even, half_up, down, up] }
+        updatedAt: { type: string, format: date-time }
+    RoundResult:
+      type: object
+      required: [currency, purpose, legalEntityId, amount, rounded, unit, method, source]
+      properties:
+        currency: { type: string }
+        purpose: { type: string, enum: [general, price, purchase, sales, tax, cash] }
+        legalEntityId: { type: [string, 'null'], format: uuid }
+        amount: { type: string, description: The input echoed. }
+        rounded: { type: string, description: The rounded amount with exactly the unit's decimal places. }
+        unit: { type: string, description: The unit with trailing zeros stripped. }
+        method: { type: string, enum: [half_even, half_up, down, up] }
+        source: { type: string, enum: [legal_entity, tenant, default] }
     Region:
       type: object
       required: [code, name, status, countryCode]

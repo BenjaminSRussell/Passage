@@ -96,6 +96,14 @@ type WarehouseUpdatedData struct {
 	Version       int      `json:"version"`
 }
 
+type CurrencyRoundingChangedData struct {
+	CurrencyCode  string  `json:"currency_code"`
+	Purpose       string  `json:"purpose"`
+	LegalEntityID *string `json:"legal_entity_id"`
+	Unit          string  `json:"unit"`
+	Method        string  `json:"method"`
+}
+
 type AddressChangedData struct {
 	AddressID string   `json:"address_id"`
 	VersionID string   `json:"version_id"`

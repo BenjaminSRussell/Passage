@@ -55,6 +55,8 @@ Every node set is checked structurally before it is stored: at most 50,000 nodes
 | `GET /v1/org/hierarchy-types/{id}/as-of?date=&node=` | `org.read` |
 | `GET /v1/org/{countries,currencies,regions,languages}` (`status` active or inactive; `country` for regions; returns `{items}`) and `GET /v1/org/{countries,currencies,regions,languages}/{code}` | `org.read` |
 | `PATCH /v1/org/{countries,currencies,regions,languages}/{code}` (body `{"status":"active"\|"inactive"}`; not for legal-entity-scoped callers) | `org.reference.write` |
+| `PUT /v1/org/currencies/{code}/rounding-rules/{purpose}` (purpose general, price, purchase, sales, tax or cash; body `unit`, `method`, optional `legalEntityId`; not for legal-entity-scoped callers; an identical repeat changes nothing and emits no event) | `org.reference.write` |
+| `GET /v1/org/currencies/{code}/rounding-rules` (the tenant's stored rules as `{items}`) and `GET /v1/org/currencies/{code}/round?amount=&purpose=&legalEntityId=` (rounds with the legal-entity rule, else the tenant rule, else the currency's minor unit with half_even; `source` names which) | `org.read` |
 | `GET /v1/org/uom/convert?from=&to=&qty=` | any authenticated principal |
 | `GET /healthz`, `GET /readyz` (database ping, 503 when down), `GET /metrics` on the admin port | public |
 
@@ -103,6 +105,7 @@ Contract: `api/openapi.yaml`. Paths follow the architecture spine (`/v1/<context
 | ORG-ADDR-PRIMARY-DUPLICATE | 409 | the owner already has a primary address for a purpose |
 | ORG-ADDR-VALID-FROM-INVALID | 422 | `validFrom` precedes the current version or is after today |
 | ORG-REF-NOT-FOUND | 404 | unknown reference code |
+| ORG-CUR-ROUNDING-UNIT | 422 | rounding unit outside 0.000001 to 1000, finer than the currency minor unit, or not a power of ten or 5 or 25 times one |
 | ORG-UOM-NO-PATH | 422 | no conversion within two hops inside one unit class |
 
-Metrics: `org_legal_entities_created_total`, `org_legal_entities_failed_total`, `org_legal_entities_updated_total`, `org_reference_status_changed_total`, `org_operating_units_created_total`, `org_operating_units_updated_total`, `org_sites_created_total`, `org_sites_updated_total`, `org_warehouses_created_total`, `org_warehouses_updated_total`, `org_locations_created_total`, `org_locations_updated_total`, `org_addresses_created_total`, `org_addresses_revised_total` (stdlib atomics rendered as text).
+Metrics: `org_legal_entities_created_total`, `org_legal_entities_failed_total`, `org_legal_entities_updated_total`, `org_reference_status_changed_total`, `org_currency_rounding_rules_changed_total`, `org_operating_units_created_total`, `org_operating_units_updated_total`, `org_sites_created_total`, `org_sites_updated_total`, `org_warehouses_created_total`, `org_warehouses_updated_total`, `org_locations_created_total`, `org_locations_updated_total`, `org_addresses_created_total`, `org_addresses_revised_total` (stdlib atomics rendered as text).
