@@ -38,6 +38,10 @@ Hierarchies are tenant-level configuration, scoped by tenant only. `POST /v1/org
 
 Every node set is checked structurally before it is stored: at most 50,000 nodes, each org unit once, known parents, no cycle, exactly one root and at most 15 levels. `POST /v1/org/hierarchy-versions/{id}:publish` (body `version`, `effectiveFrom`, optional `reason`; `Idempotency-Key`) publishes a draft. The version must come after the type's latest published version (`ORG-HIER-OVERLAP`), which is superseded with its range closed at `effectiveFrom`; the stored node set is re-validated, and the closure table (one row per ancestor-descendant pair, no self pairs) is written in the same transaction as the `dev.passage.org.hierarchyversion.activated.v1` event. A publish with `effectiveFrom` before today (UTC) is backdated: it needs the `org.hierarchy.backdate` duty, a type with `backdateAllowed` and a `reason` of 10 to 500 characters, or it is refused with `ORG-HIER-BACKDATE-DUTY` before any state changes. `GET /v1/org/hierarchy-types/{id}/as-of?date=&node=` returns the node's parent, ancestors and descendants in the non-draft version in force on that date; superseded versions answer for dates inside their closed range.
 
+## Web module
+
+`apps/web/src/modules/org/` (id `org`, title Organization) serves `/org`, `/org/legal-entities`, `/org/operating-units`, `/org/sites` and `/org/warehouses`. `LegalEntityProvider` loads the active legal entities once, restores the choice stored under `localStorage` key `passage.org.legalEntity` while it still names an active entity, and offers the read-only `ALL` scope only with the duty `org.switcher.all_scope`. `LegalEntitySwitcher` (label "Legal entity") sits in the module header. Every request goes through `orgFetch`, which sends `X-Passage-LegalEntity: <id>` for one entity, or `X-Passage-LegalEntity-Scope: ALL` on GET for `ALL` and never on a write; the list pages also pass `legalEntityId` as a filter and drop responses from a superseded scope.
+
 ## API
 
 | Operation | Duty |
