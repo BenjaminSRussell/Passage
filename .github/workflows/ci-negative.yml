@@ -10,6 +10,12 @@ on:
 permissions:
   contents: read
 
+# Cut Actions volume: a new push to a PR cancels that PR's superseded run;
+# runs on main are never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   injected-failures-are-caught:
     runs-on: ubuntu-24.04
