@@ -32,8 +32,15 @@ const (
 	minExponent        = -18
 )
 
+// Ports are required; New panics when either is nil.
+type Ports struct {
+	Periods domain.PeriodControl
+	Ledger  domain.LedgerPoster
+}
+
 type API struct {
 	store      store.Store
+	ports      Ports
 	evaluated  atomic.Int64
 	rejected   atomic.Int64
 	arrived    atomic.Int64
@@ -41,7 +48,16 @@ type API struct {
 	http       requestMetrics
 }
 
-func New(s store.Store) *API { return &API{store: s, http: newRequestMetrics()} }
+func New(s store.Store, ports Ports) *API {
+	if ports.Periods == nil || ports.Ledger == nil {
+		panic("api.New: Ports.Periods and Ports.Ledger are required")
+	}
+	return &API{store: s, ports: ports, http: newRequestMetrics()}
+}
+
+func (a *API) PostInvoice(ctx context.Context, in domain.VendorInvoice, profile domain.PostingProfile) (domain.JournalEntry, error) {
+	return domain.PostInvoice(ctx, in, a.ports.Periods, a.ports.Ledger, profile)
+}
 
 func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)

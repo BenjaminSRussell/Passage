@@ -14,6 +14,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/api"
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/store"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/store/memstore"
 )
@@ -28,7 +29,7 @@ type pingStore struct {
 func (f pingStore) Ping(context.Context) error { return f.pingErr }
 
 func newRouter(s store.Store) (*chi.Mux, *api.API) {
-	a := api.New(s)
+	a := api.New(s, api.Ports{Periods: domain.FakePeriods{Status: domain.PeriodOpen}, Ledger: &domain.FakeLedger{}})
 	r := httpx.NewRouter()
 	a.Register(r)
 	return r, a

@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -21,12 +22,14 @@ type PostLine struct {
 }
 
 type VendorInvoice struct {
-	ID            string
-	LegalEntityID string
-	PostingDate   time.Time
-	InvoiceDate   time.Time
-	Currency      string
-	Lines         []PostLine
+	ID             string
+	LegalEntityID  string
+	LedgerID       string
+	FiscalPeriodID string
+	PostingDate    time.Time
+	InvoiceDate    time.Time
+	Currency       string
+	Lines          []PostLine
 }
 
 func clearingFor(item GrirItem, qty decimal.Decimal, exhausts bool, clearedInInvoice decimal.Decimal) money.Amount {
@@ -40,7 +43,10 @@ func PostInvoice(ctx context.Context, in VendorInvoice, periods PeriodControl, l
 	if in.PostingDate.IsZero() || len(in.Lines) == 0 {
 		return JournalEntry{}, fail(CodeInvalidReceipt, "invoice %s needs a posting date and at least one line", in.ID)
 	}
-	status, err := periods.AP(ctx, in.PostingDate)
+	if in.LedgerID == "" || in.FiscalPeriodID == "" {
+		return JournalEntry{}, fail(CodeInvalidReceipt, "invoice %s needs a ledger and a fiscal period", in.ID)
+	}
+	status, err := periods.AP(ctx, PeriodQuery{LedgerID: in.LedgerID, FiscalPeriodID: in.FiscalPeriodID, PostingDate: in.PostingDate})
 	if err != nil {
 		slog.ErrorContext(ctx, "period control unavailable", "err", err, "invoiceId", in.ID)
 		return JournalEntry{}, fmt.Errorf("check AP period for invoice %s: %w", in.ID, err)
@@ -87,6 +93,9 @@ func PostInvoice(ctx context.Context, in VendorInvoice, periods PeriodControl, l
 	}
 	entry.Lines = append(entry.Lines, JournalLine{Account: profile.VendorControl, Amount: payable.Neg()})
 	if _, err := ledger.Post(ctx, entry); err != nil {
+		if errors.Is(err, ErrPeriodClosed) {
+			return JournalEntry{}, fail(CodePeriodClosed, "ledger rejected invoice %s: period closed", in.ID)
+		}
 		slog.ErrorContext(ctx, "invoice ledger post failed", "err", err, "invoiceId", in.ID)
 		return JournalEntry{}, fmt.Errorf("post invoice %s: %w", in.ID, err)
 	}

@@ -45,6 +45,10 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if databaseURL == "" {
 		return errors.New("DATABASE_URL is required")
 	}
+	ports, err := buildPorts(getenv)
+	if err != nil {
+		return err
+	}
 	pool, err := dbx.Connect(ctx, databaseURL)
 	if err != nil {
 		return fmt.Errorf("connect database: %w", err)
@@ -55,7 +59,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
-	a := api.New(store.New(pool))
+	a := api.New(store.New(pool), ports)
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()
