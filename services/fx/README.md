@@ -33,6 +33,14 @@ The API layer that maps these to problems arrives in a later slice. `FX_RATE_STA
 
 ## Dependencies
 
-No module beyond what `platform/go` already requires: `shopspring/decimal` for amounts and rates, `pgregory.net/rapid` for property tests. `platform` is consumed through the `replace` directive.
+No module beyond what `platform/go` already requires: `shopspring/decimal` (MIT) for amounts and rates, `pgregory.net/rapid` for property tests. `platform` is consumed through the `replace` directive.
+
+`pgregory.net/rapid` is MPL-2.0, a file-level weak copyleft licence. It is imported only from `_test.go` files, so it is not linked into any shipped binary and no source-disclosure obligation reaches the service; it is used unmodified. It earns its place because the reconciliation invariant (every converted column sums to zero within minor units) needs generated inputs and shrinking that the seeded 10k fixture alone does not give.
+
+## Validation rules
+
+- Currency codes are exactly three uppercase A-Z letters, checked by one validator for `Book.Add`, `Convert` and `ConvertEntry`; anything else returns `ErrInvalidCurrency` (which is also an `ErrInvalidRate`).
+- `Book.Add` accepts rates in (0, 1e9] with at most 10 decimals (`domain.MaxRate`, `domain.MaxRateScale`, shared with the provider adapters, which reject anything above). Lookups go through a map keyed by (type, from, to) to a date-ordered series, then a binary search for the latest row on or before the date; duplicate-ID checks are map lookups. `CurrentBook` skips and logs a stored row the book rejects instead of failing the whole tenant book.
+- `ConvertEntry` and `Revalue` name every offending currency in sorted order, so errors are stable across runs.
 
 See `NOT-IMPLEMENTED.md` for the deliverables outside this slice.

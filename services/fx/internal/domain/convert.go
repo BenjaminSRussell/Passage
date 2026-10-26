@@ -3,38 +3,51 @@ package domain
 import (
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
+	"strings"
 
 	"github.com/BenjaminSRussell/passage/platform/money"
 	"github.com/shopspring/decimal"
 )
 
 var (
+	// ErrRoundingExceeded means the residual after rounding is larger than half a minor unit per line.
 	ErrRoundingExceeded = errors.New("LEDGER_ROUNDING_EXCEEDED")
-	ErrUnbalanced       = errors.New("LEDGER_UNBALANCED")
+	// ErrUnbalanced means an entry does not net to zero in every currency or has no line to absorb a residual.
+	ErrUnbalanced = errors.New("LEDGER_UNBALANCED")
 )
 
+// Mode selects the rounding rule applied to converted amounts.
 type Mode int
 
 const (
+	// HalfAwayFromZero rounds ties away from zero.
 	HalfAwayFromZero Mode = iota
+	// HalfEven rounds ties to the even neighbour (banker's rounding).
 	HalfEven
 )
 
+// Line is one journal line in its transaction currency; No identifies it in errors and breaks ties.
 type Line struct {
 	No     int
 	Amount money.Amount
 }
 
+// Target is a destination currency and, keyed by source currency, the Resolution used to reach it.
 type Target struct {
 	Currency    string
 	Resolutions map[string]Resolution
 }
 
+// RateSet holds the accounting and reporting targets of an entry.
 type RateSet struct {
 	Acct Target
 	Rpt  Target
 }
 
+// ConvertedLine is a Line with its accounting and reporting amounts; AcctAdjusted and
+// RptAdjusted mark the line that absorbed the rounding residual in that column.
 type ConvertedLine struct {
 	No           int
 	Txn          money.Amount
@@ -44,13 +57,17 @@ type ConvertedLine struct {
 	RptAdjusted  bool
 }
 
+// Convert converts a to the currency to using res, rounding once to the target's minor units.
 func Convert(a money.Amount, to string, res Resolution) (money.Amount, error) {
 	return convert(a, to, res, HalfAwayFromZero)
 }
 
 func convert(a money.Amount, to string, res Resolution, mode Mode) (money.Amount, error) {
-	if len(a.Currency) != 3 {
-		return money.Amount{}, fmt.Errorf("%w: %q", money.ErrCurrencyMismatch, a.Currency)
+	if err := checkCurrency(a.Currency); err != nil {
+		return money.Amount{}, err
+	}
+	if err := checkCurrency(to); err != nil {
+		return money.Amount{}, err
 	}
 	if a.Currency == to {
 		return a, nil
@@ -62,28 +79,41 @@ func convert(a money.Amount, to string, res Resolution, mode Mode) (money.Amount
 	for _, f := range res.Factors {
 		v = v.Mul(f)
 	}
-	out := money.Amount{Value: v, Currency: to}
 	if mode == HalfEven {
 		return money.Amount{Value: v.RoundBank(money.MinorUnits(to)), Currency: to}, nil
 	}
-	return out.Round(), nil
+	return money.Amount{Value: v, Currency: to}.Round(), nil
 }
 
+// ConvertEntry converts a balanced entry into the accounting and reporting currencies. Every
+// currency must net to zero in the transaction column, and each derived column is reconciled
+// to zero by moving the rounding residual onto the largest line. Currency codes are validated
+// like Convert, and unbalanced currencies are reported in sorted order.
 func ConvertEntry(lines []Line, rates RateSet, mode Mode) ([]ConvertedLine, error) {
 	if len(lines) == 0 {
 		return nil, fmt.Errorf("%w: no lines", ErrUnbalanced)
 	}
+	if err := checkCurrency(rates.Acct.Currency); err != nil {
+		return nil, err
+	}
+	if err := checkCurrency(rates.Rpt.Currency); err != nil {
+		return nil, err
+	}
 	sums := map[string]decimal.Decimal{}
 	for _, l := range lines {
-		if len(l.Amount.Currency) != 3 {
-			return nil, fmt.Errorf("%w: line %d currency %q", money.ErrCurrencyMismatch, l.No, l.Amount.Currency)
+		if err := checkCurrency(l.Amount.Currency); err != nil {
+			return nil, fmt.Errorf("line %d: %w", l.No, err)
 		}
 		sums[l.Amount.Currency] = sums[l.Amount.Currency].Add(l.Amount.Value)
 	}
-	for cur, s := range sums {
-		if !s.IsZero() {
-			return nil, fmt.Errorf("%w: %s off by %s", ErrUnbalanced, cur, s)
+	var off []string
+	for _, cur := range slices.Sorted(maps.Keys(sums)) {
+		if !sums[cur].IsZero() {
+			off = append(off, fmt.Sprintf("%s off by %s", cur, sums[cur]))
 		}
+	}
+	if len(off) > 0 {
+		return nil, fmt.Errorf("%w: %s", ErrUnbalanced, strings.Join(off, ", "))
 	}
 	acct, acctAdj, err := deriveColumn(lines, rates.Acct, mode)
 	if err != nil {
@@ -110,7 +140,7 @@ func deriveColumn(lines []Line, t Target, mode Mode) ([]decimal.Decimal, []bool,
 	for i, l := range lines {
 		c, err := convert(l.Amount, t.Currency, t.Resolutions[l.Amount.Currency], mode)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, fmt.Errorf("line %d: %w", l.No, err)
 		}
 		rounded[i] = c.Value
 	}
