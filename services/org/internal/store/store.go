@@ -98,6 +98,11 @@ type Store interface {
 	PutCurrencyRounding(ctx context.Context, in CurrencyRounding) (CurrencyRounding, bool, error)
 	ListCurrencyRoundings(ctx context.Context, currency string) ([]CurrencyRounding, error)
 	ResolveCurrencyRounding(ctx context.Context, currency, purpose, legalEntityID string) (RoundingRule, error)
+	ListUnits(ctx context.Context, f UnitFilter) ([]Unit, error)
+	GetUnit(ctx context.Context, code string) (Unit, error)
+	CreateUnit(ctx context.Context, in Unit, idempotencyKey string) (Unit, error)
+	SetUnitStatus(ctx context.Context, code, status string) (Unit, error)
+	ConversionGraph(ctx context.Context) ([]domain.Conversion, map[string]int32, error)
 	Ping(ctx context.Context) error
 }
 
