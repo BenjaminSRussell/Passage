@@ -53,8 +53,14 @@ type PostingProfile struct {
 	VendorControl string
 }
 
+type PeriodQuery struct {
+	LedgerID       string
+	FiscalPeriodID string
+	PostingDate    time.Time
+}
+
 type PeriodControl interface {
-	AP(ctx context.Context, postingDate time.Time) (PeriodStatus, error)
+	AP(ctx context.Context, q PeriodQuery) (PeriodStatus, error)
 }
 
 type LedgerPoster interface {
@@ -66,7 +72,7 @@ type FakePeriods struct {
 	Err    error
 }
 
-func (f FakePeriods) AP(context.Context, time.Time) (PeriodStatus, error) { return f.Status, f.Err }
+func (f FakePeriods) AP(context.Context, PeriodQuery) (PeriodStatus, error) { return f.Status, f.Err }
 
 type FakeLedger struct {
 	Entries []JournalEntry

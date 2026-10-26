@@ -21,7 +21,7 @@ func grirItem(qty, unitPrice string) *domain.GrirItem {
 
 func invoiceFor(item *domain.GrirItem, qty, price string, date time.Time) domain.VendorInvoice {
 	return domain.VendorInvoice{
-		ID: "vi-1", LegalEntityID: "le-1", PostingDate: date, InvoiceDate: date, Currency: "USD",
+		ID: "vi-1", LegalEntityID: "le-1", LedgerID: "l-1", FiscalPeriodID: "fp-1", PostingDate: date, InvoiceDate: date, Currency: "USD",
 		Lines: []domain.PostLine{{Item: item, Qty: dec(qty), UnitPrice: dec(price)}},
 	}
 }

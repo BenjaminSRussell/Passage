@@ -118,8 +118,10 @@ func (c *Client) Post(ctx context.Context, entry domain.JournalEntry) (string, e
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Idempotency-Key", entry.IdempotencyKey)
-	req.Header.Set("X-Passage-Tenant", principal.TenantID)
-	req.Header.Set("X-Correlation-Id", middleware.GetReqID(ctx))
+	req.Header.Set(tenant.HeaderTenant, principal.TenantID)
+	if id := middleware.GetReqID(ctx); id != "" {
+		req.Header.Set(middleware.RequestIDHeader, id)
+	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {

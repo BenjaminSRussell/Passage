@@ -18,6 +18,9 @@ Store tests run only when `PASSAGE_TEST_DATABASE_URL` is set, against a role wit
 |---|---|
 | `DATABASE_URL` | required; Postgres URL, from a Secret in the cluster |
 | `MIGRATE_ON_START` | `true` applies embedded migrations at start (dev only) |
+| `LEDGER_URL` | base URL of the ledger service (`POST /v1/ledger/journal-entries:post`, 3 s timeout); required |
+| `CLOSE_URL` | base URL of `services/close` (`POST /v1/close/period-statuses:check`, 2 s timeout, source system `ap`); required |
+| `PASSAGE_ALLOW_FAKES` | `1` lets an empty `LEDGER_URL` or `CLOSE_URL` fall back to the in-memory fakes with a warning log; local development only, any other value fails start-up |
 | `HTTP_ADDR` | default `:8080` |
 | `ADMIN_ADDR` | default `:9090`, serves `/metrics` only |
 

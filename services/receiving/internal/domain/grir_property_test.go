@@ -41,13 +41,13 @@ func TestGrir_NetsToZero(t *testing.T) {
 			if partial && item.ReceivedQty.Cmp(decimal.NewFromInt(1)) > 0 {
 				first := item.ReceivedQty.Div(decimal.NewFromInt(3)).Floor()
 				if first.Sign() > 0 {
-					if _, err := domain.PostInvoice(ctx, domain.VendorInvoice{ID: "p", PostingDate: august15, Currency: "USD", Lines: []domain.PostLine{{Item: item, Qty: first, UnitPrice: price}}}, periods, ledger, testProfile); err != nil {
+					if _, err := domain.PostInvoice(ctx, domain.VendorInvoice{ID: "p", LedgerID: "l-1", FiscalPeriodID: "fp-1", PostingDate: august15, Currency: "USD", Lines: []domain.PostLine{{Item: item, Qty: first, UnitPrice: price}}}, periods, ledger, testProfile); err != nil {
 						t.Fatal(err)
 					}
 				}
 			}
 			rest := item.ReceivedQty.Sub(item.InvoicedQty)
-			if _, err := domain.PostInvoice(ctx, domain.VendorInvoice{ID: "f", PostingDate: august15, Currency: "USD", Lines: []domain.PostLine{{Item: item, Qty: rest, UnitPrice: price}}}, periods, ledger, testProfile); err != nil {
+			if _, err := domain.PostInvoice(ctx, domain.VendorInvoice{ID: "f", LedgerID: "l-1", FiscalPeriodID: "fp-1", PostingDate: august15, Currency: "USD", Lines: []domain.PostLine{{Item: item, Qty: rest, UnitPrice: price}}}, periods, ledger, testProfile); err != nil {
 				t.Fatal(err)
 			}
 			if !item.OpenAmount().IsZero() {
