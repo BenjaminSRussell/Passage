@@ -16,7 +16,7 @@ spec:
       match:
         any:
           - resources:
-              kinds: [Pod]
+              kinds: [Pod, Pod/ephemeralcontainers]
               namespaces: [hello-ledger, passage-*]
       validate:
         failureAction: Enforce
@@ -71,7 +71,7 @@ spec:
       match:
         any:
           - resources:
-              kinds: [Pod]
+              kinds: [Pod, Pod/ephemeralcontainers]
               namespaces: [hello-ledger, passage-*]
       verifyImages:
         - type: Cosign
