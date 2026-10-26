@@ -1,0 +1,60 @@
+code,name,class,decimal_precision
+kg,Kilogram,mass,3
+g,Gram,mass,3
+mg,Milligram,mass,3
+t,Metric ton,mass,3
+lb,Pound,mass,3
+oz,Ounce,mass,3
+st,Stone,mass,3
+ct,Carat,mass,3
+m,Metre,length,3
+cm,Centimetre,length,3
+mm,Millimetre,length,3
+km,Kilometre,length,3
+in,Inch,length,3
+ft,Foot,length,3
+yd,Yard,length,3
+mi,Mile,length,3
+nmi,Nautical mile,length,3
+L,Litre,volume,3
+mL,Millilitre,volume,3
+gal,US gallon,volume,3
+qt,US quart,volume,3
+pt,US pint,volume,3
+floz,US fluid ounce,volume,3
+m3,Cubic metre,volume,3
+cup,US cup,volume,3
+tbsp,US tablespoon,volume,3
+tsp,US teaspoon,volume,3
+bbl,Barrel,volume,3
+m2,Square metre,area,3
+cm2,Square centimetre,area,3
+ha,Hectare,area,3
+acre,Acre,area,3
+ft2,Square foot,area,3
+km2,Square kilometre,area,3
+C,Degree Celsius,temperature,2
+K,Kelvin,temperature,2
+F,Degree Fahrenheit,temperature,2
+h,Hour,time,3
+min,Minute,time,3
+s,Second,time,3
+d,Day,time,3
+wk,Week,time,3
+kWh,Kilowatt hour,energy,3
+MJ,Megajoule,energy,3
+kJ,Kilojoule,energy,3
+J,Joule,energy,3
+bar,Bar,pressure,3
+kPa,Kilopascal,pressure,3
+psi,Pound per square inch,pressure,3
+atm,Standard atmosphere,pressure,3
+W,Watt,power,3
+kW,Kilowatt,power,3
+kn,Knot,speed,3
+kmh,Kilometre per hour,speed,3
+mph,Mile per hour,speed,3
+ea,Each,each,0
+dz,Dozen,each,0
+pr,Pair,each,0
+%,Percent,quantity,2
