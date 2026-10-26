@@ -37,6 +37,25 @@ func TestPipeline_LoadsAndReconcilesAXDataset(t *testing.T) {
 	}
 }
 
+func TestPipeline_WarnedRowsAreLoadedAndListed(t *testing.T) {
+	m := parseMapping(t, fieldDoc("", `{"source":"st","target":"status","type":"string","enum":{"A":"active"},"enumDefault":"unknown"}`))
+	rows := []domain.Record{
+		{Key: "C1", Fields: map[string]any{"st": "A"}},
+		{Key: "C2", Fields: map[string]any{"st": "Blocked"}},
+	}
+	p, _, loader := newPipeline(rows)
+	rep, err := p.Run(context.Background(), domain.RunSpec{SourceSystem: system, Entity: "customer", Mapping: m})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Warnings) != 1 || rep.Warnings[0].SourceKey != "C2" || rep.Warnings[0].Warnings[0].Code != domain.CodeMapEnumDefault {
+		t.Fatalf("warnings %+v", rep.Warnings)
+	}
+	if rep.Created != 2 || len(loader.Rows) != 2 || len(rep.Rejects) != 0 {
+		t.Fatalf("created=%d loaded=%d rejects=%+v", rep.Created, len(loader.Rows), rep.Rejects)
+	}
+}
+
 func TestPipeline_BatchesAtMostThousand(t *testing.T) {
 	p, _, loader := newPipeline(axDataset(2500, 0, 0, 0).Customers)
 	if _, err := p.Run(context.Background(), spec(t)); err != nil {

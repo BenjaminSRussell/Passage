@@ -24,6 +24,9 @@ paths:
         '501':
           description: MIG-BACKEND-NOT-CONFIGURED, no extract and load backend is wired in this deployment.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: MIG-MAP-TEST-FAIL, one or more mapping tests failed; errors maps each failed test name to its reason. No backend is called.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/integration/migration-runs/{id}:
     get:
@@ -97,7 +100,7 @@ components:
         run: { $ref: '#/components/schemas/MigrationRun' }
     MigrationRun:
       type: object
-      required: [id, sourceSystem, mode, entity, status, dryRun, mappingVersion, counts, rejects, absent, createdAt]
+      required: [id, sourceSystem, mode, entity, status, dryRun, mappingVersion, counts, rejects, warnings, absent, createdAt]
       properties:
         id: { type: string, format: uuid }
         sourceSystem: { type: string }
@@ -109,8 +112,8 @@ components:
         parentRunId: { type: string, format: uuid }
         counts:
           type: object
-          required: [extracted, mapped, created, updated, unchanged, rejected]
-          properties: { extracted: { type: integer }, mapped: { type: integer }, created: { type: integer }, updated: { type: integer }, unchanged: { type: integer }, rejected: { type: integer } }
+          required: [extracted, mapped, created, updated, unchanged, rejected, warned]
+          properties: { extracted: { type: integer }, mapped: { type: integer }, created: { type: integer }, updated: { type: integer }, unchanged: { type: integer }, rejected: { type: integer }, warned: { type: integer, description: Loaded rows that carry at least one warning. } }
         rejects:
           type: array
           items:
@@ -119,6 +122,15 @@ components:
             properties:
               sourceKey: { type: string }
               rejects: { type: array, items: { type: object, required: [field, code, detail], properties: { field: { type: string }, code: { type: string }, detail: { type: string } } } }
+        warnings:
+          type: array
+          description: Rows still mapped and loaded, with MIG-MAP-ENUM-DEFAULT or MAP-PRECISION-LOSS warnings.
+          items:
+            type: object
+            required: [sourceKey, warnings]
+            properties:
+              sourceKey: { type: string }
+              warnings: { type: array, items: { type: object, required: [field, code, detail], properties: { field: { type: string }, code: { type: string }, detail: { type: string } } } }
         absent: { type: array, items: { type: string }, description: Source keys loaded earlier and missing from this extract; never deleted. }
         reconciliation:
           type: object

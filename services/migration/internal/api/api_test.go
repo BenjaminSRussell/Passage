@@ -328,6 +328,42 @@ func TestCreateRun_DryRunRecordsLedgerWithoutLoading(t *testing.T) {
 	}
 }
 
+func TestCreateRun_FailingMappingTestsStopBeforeBackend(t *testing.T) {
+	invoked := false
+	factory := func(context.Context, string) (api.Backend, error) {
+		invoked = true
+		return api.Backend{}, api.ErrNotConfigured
+	}
+	r := httpx.NewRouter()
+	api.New(store.NewMem(), factory).Register(r)
+	mapping := func(expect string) string {
+		return `{"entity":"customer","version":1,"fields":[{"source":"Group","target":"segment","type":"string","enum":{"10":"retail"}}],` +
+			`"tests":[{"name":"retail maps","input":{"Group":"10"},"expect":{"segment":"` + expect + `"}}]}`
+	}
+	rec := do(r, http.MethodPost, runsPath, `{"sourceSystem":"ax2012","mode":"rehearsal","mapping":`+mapping("wholesale")+`}`, duties, true)
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), domain.CodeMapTestFail) || !strings.Contains(rec.Body.String(), "retail maps") || invoked {
+		t.Fatalf("got %d %s, backend invoked %v", rec.Code, rec.Body, invoked)
+	}
+	rec = do(r, http.MethodPost, runsPath, `{"sourceSystem":"ax2012","mode":"rehearsal","mapping":`+mapping("retail")+`}`, duties, true)
+	if rec.Code != http.StatusNotImplemented || !strings.Contains(rec.Body.String(), api.CodeNotConfigured) || !invoked {
+		t.Fatalf("passing tests must proceed: got %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestCreateRun_ReportsWarnedRows(t *testing.T) {
+	loader := domain.NewMemLoader()
+	r := router(store.NewMem(), rowsExtractor{[]domain.Record{{Key: "C1", Fields: map[string]any{"Name": "Acme", "Group": "77"}}}}, loader)
+	mapping := `{"entity":"customer","version":1,"fields":[{"source":"Group","target":"segment","type":"string","enum":{"10":"retail"},"enumDefault":"other"}]}`
+	rec := do(r, http.MethodPost, runsPath, `{"sourceSystem":"ax2012","mode":"rehearsal","mapping":`+mapping+`}`, duties, true)
+	if rec.Code != http.StatusAccepted || len(loader.Rows) != 1 {
+		t.Fatalf("got %d %s, loaded %d", rec.Code, rec.Body, len(loader.Rows))
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `"warned":1`) || !strings.Contains(body, domain.CodeMapEnumDefault) || !strings.Contains(body, `"sourceKey":"C1"`) {
+		t.Fatalf("warnings missing from run view: %s", body)
+	}
+}
+
 type syncBuffer struct {
 	mu  sync.Mutex
 	buf bytes.Buffer

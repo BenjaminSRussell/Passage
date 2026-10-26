@@ -98,6 +98,7 @@ type Report struct {
 	Updated        int              `json:"updated"`
 	Unchanged      int              `json:"unchanged"`
 	Rejects        []RowReject      `json:"rejects"`
+	Warnings       []RowWarning     `json:"warnings"`
 	Ledger         []LedgerEntry    `json:"-"`
 	Absent         []string         `json:"absent"`
 	Reconciliation *ReconcileReport `json:"reconciliation,omitempty"`
@@ -154,10 +155,13 @@ func (p *Pipeline) Run(ctx context.Context, spec RunSpec) (Report, error) {
 			continue
 		}
 		seen[r.Key] = true
-		out, rejects := spec.Mapping.Apply(r.Fields)
+		out, warnings, rejects := spec.Mapping.ApplyWithWarnings(r.Fields)
 		if len(rejects) > 0 {
 			rep.Rejects = append(rep.Rejects, RowReject{r.Key, rejects})
 			continue
+		}
+		if len(warnings) > 0 {
+			rep.Warnings = append(rep.Warnings, RowWarning{r.Key, warnings})
 		}
 		rep.Mapped++
 		mapped = append(mapped, Record{r.Key, out})
