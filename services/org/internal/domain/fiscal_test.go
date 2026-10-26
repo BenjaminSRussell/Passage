@@ -61,6 +61,7 @@ func TestGenerateYear_MatchesGoldenFixtures(t *testing.T) {
 		{"4-4-5-2026", withPattern(febSunday, domain.Pattern445), 2026},
 		{"4-4-5-2028", withPattern(febSunday, domain.Pattern445), 2028},
 		{"13-period-2026", withPattern(febSunday, domain.Pattern13), 2026},
+		{"13-period-2028", withPattern(febSunday, domain.Pattern13), 2028},
 		{"4-5-4-2026", withPattern(febSunday, domain.Pattern454), 2026},
 		{"5-4-4-2026", withPattern(febSunday, domain.Pattern544), 2026},
 	}
