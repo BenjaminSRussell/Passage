@@ -20,10 +20,11 @@ var (
 	FiscalCalendarGenerated = events.Type(Context, "fiscalcalendar", "generated", 1)
 
 	HierarchyVersionActivated = events.Type(Context, "hierarchyversion", "activated", 1)
+	TeamMembershipChanged     = events.Type(Context, "teammembership", "changed", 1)
 )
 
 func All() []string {
-	return []string{LegalEntityCreated, LegalEntityUpdated, OperatingUnitCreated, OperatingUnitUpdated, SiteCreated, SiteUpdated, WarehouseCreated, WarehouseUpdated, LocationCreated, LocationUpdated, CurrencyRoundingChanged, AddressChanged, FiscalCalendarGenerated, HierarchyVersionActivated}
+	return []string{LegalEntityCreated, LegalEntityUpdated, OperatingUnitCreated, OperatingUnitUpdated, SiteCreated, SiteUpdated, WarehouseCreated, WarehouseUpdated, LocationCreated, LocationUpdated, CurrencyRoundingChanged, AddressChanged, FiscalCalendarGenerated, HierarchyVersionActivated, TeamMembershipChanged}
 }
 
 type LegalEntityCreatedData struct {
@@ -137,4 +138,17 @@ type HierarchyVersionActivatedData struct {
 	NodeCount           int      `json:"node_count"`
 	SupersededVersionID *string  `json:"superseded_version_id"`
 	BackdateReason      *string  `json:"backdate_reason"`
+}
+
+type TeamMemberRef struct {
+	MemberKind string `json:"member_kind"`
+	MemberID   string `json:"member_id"`
+	MemberRole string `json:"member_role"`
+}
+
+type TeamMembershipChangedData struct {
+	TeamID  string          `json:"team_id"`
+	Added   []TeamMemberRef `json:"added"`
+	Removed []TeamMemberRef `json:"removed"`
+	AsOf    string          `json:"as_of"`
 }

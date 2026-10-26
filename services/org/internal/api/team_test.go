@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/org/internal/store"
@@ -268,5 +269,136 @@ func TestTeamReplayIsNotCountedAndKeyReuseIsRefused(t *testing.T) {
 	a.Metrics().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	if !strings.Contains(rec.Body.String(), "org_teams_created_total 1\n") {
 		t.Fatalf("metrics = %s", rec.Body)
+	}
+}
+
+const (
+	memberID1  = "00000000-0000-0000-0000-0000000000a1"
+	memberBody = `{"memberKind":"user","memberId":"` + memberID1 + `","validFrom":"2026-02-01","validTo":"2026-06-30"}`
+)
+
+func TestTeamMembers(t *testing.T) {
+	scoped := []string{"X-Passage-Legal-Entity", testkit.TenantID(2)}
+	membersPath := teamsPath + "/" + teamTypeID1 + "/members"
+	withBody := func(old, replacement string) string { return strings.Replace(memberBody, old, replacement, 1) }
+	seeded := func() *fakeStore {
+		return &fakeStore{teams: []store.Team{{ID: teamTypeID1, Code: "AUD"}}, teamMembers: []store.TeamMember{{ID: "00000000-0000-0000-0000-000000000001", MemberKind: "user", MemberRole: "lead"}}}
+	}
+	tests := []struct {
+		name       string
+		method     string
+		path       string
+		body       string
+		duties     string
+		withTenant bool
+		headers    []string
+		wantStatus int
+		wantBody   string
+	}{
+		{"add", http.MethodPost, membersPath, memberBody, teamDuties, true, nil, http.StatusCreated, `"teamId":"` + teamTypeID1 + `","memberKind":"user","memberId":"` + memberID1 + `","memberRole":"member","validFrom":"2026-02-01","validTo":"2026-06-30","source":"manual"`},
+		{"add lower-cases member id and keeps lead", http.MethodPost, membersPath, `{"memberKind":"party","memberId":"` + strings.ToUpper(memberID1) + `","memberRole":"lead","validFrom":"2026-02-01"}`, teamDuties, true, nil, http.StatusCreated, `"memberId":"` + memberID1 + `","memberRole":"lead"`},
+		{"add bad kind", http.MethodPost, membersPath, withBody(`"user"`, `"admin"`), teamDuties, true, nil, http.StatusBadRequest, `"memberKind"`},
+		{"add absent kind", http.MethodPost, membersPath, `{"memberId":"` + memberID1 + `","validFrom":"2026-02-01"}`, teamDuties, true, nil, http.StatusBadRequest, `"memberKind"`},
+		{"add non-UUID member", http.MethodPost, membersPath, withBody(memberID1, "nope"), teamDuties, true, nil, http.StatusBadRequest, `"memberId"`},
+		{"add number for member id", http.MethodPost, membersPath, withBody(`"`+memberID1+`"`, `123`), teamDuties, true, nil, http.StatusBadRequest, "COM-0001"},
+		{"add bad role", http.MethodPost, membersPath, withBody(`"validFrom"`, `"memberRole":"boss","validFrom"`), teamDuties, true, nil, http.StatusBadRequest, `"memberRole"`},
+		{"add impossible validFrom", http.MethodPost, membersPath, withBody("2026-02-01", "2026-13-01"), teamDuties, true, nil, http.StatusBadRequest, `"validFrom"`},
+		{"add absent validFrom", http.MethodPost, membersPath, `{"memberKind":"user","memberId":"` + memberID1 + `"}`, teamDuties, true, nil, http.StatusBadRequest, `"validFrom"`},
+		{"add unparsable validTo", http.MethodPost, membersPath, withBody("2026-06-30", "soon"), teamDuties, true, nil, http.StatusBadRequest, `"validTo"`},
+		{"add validTo before validFrom", http.MethodPost, membersPath, withBody("2026-06-30", "2026-01-31"), teamDuties, true, nil, http.StatusBadRequest, `"validTo"`},
+		{"add source refused", http.MethodPost, membersPath, withBody(`"validFrom"`, `"source":"rule","validFrom"`), teamDuties, true, nil, http.StatusBadRequest, "COM-0001"},
+		{"add unknown team", http.MethodPost, teamsPath + "/00000000-0000-0000-0000-0000000000ff/members", memberBody, teamDuties, true, nil, http.StatusNotFound, "ORG-TEAM-NOT-FOUND"},
+		{"add malformed team", http.MethodPost, teamsPath + "/nope/members", memberBody, teamDuties, true, nil, http.StatusNotFound, "ORG-TEAM-NOT-FOUND"},
+		{"add without duty", http.MethodPost, membersPath, memberBody, "org.read", true, nil, http.StatusForbidden, "AUTH-0003"},
+		{"add without tenant", http.MethodPost, membersPath, memberBody, "", false, nil, http.StatusUnauthorized, "AUTH-0001"},
+		{"add legal-entity scoped caller", http.MethodPost, membersPath, memberBody, teamDuties, true, scoped, http.StatusForbidden, "AUTH-0003"},
+		{"add store error hides internals", http.MethodPost, membersPath, memberBody, teamDuties, true, nil, http.StatusInternalServerError, "COM-"},
+		{"list", http.MethodGet, membersPath + "?asOf=2026-03-01&memberKind=user&memberRole=lead", "", teamDuties, true, nil, http.StatusOK, `"memberRole":"lead"`},
+		{"list scoped caller may read", http.MethodGet, membersPath, "", teamDuties, true, scoped, http.StatusOK, `"memberRole":"lead"`},
+		{"list without duty", http.MethodGet, membersPath, "", "", true, nil, http.StatusForbidden, "AUTH-0003"},
+		{"list bad asOf", http.MethodGet, membersPath + "?asOf=2026-13-01", "", teamDuties, true, nil, http.StatusBadRequest, `"asOf"`},
+		{"list bad memberKind", http.MethodGet, membersPath + "?memberKind=x", "", teamDuties, true, nil, http.StatusBadRequest, `"memberKind"`},
+		{"list bad memberRole", http.MethodGet, membersPath + "?memberRole=Lead", "", teamDuties, true, nil, http.StatusBadRequest, `"memberRole"`},
+		{"list undecodable cursor", http.MethodGet, membersPath + "?cursor=%25", "", teamDuties, true, nil, http.StatusBadRequest, "cursor"},
+		{"list non-UUID cursor", http.MethodGet, membersPath + "?cursor=" + base64.RawURLEncoding.EncodeToString([]byte("nope")), "", teamDuties, true, nil, http.StatusBadRequest, "cursor"},
+		{"list unknown team", http.MethodGet, teamsPath + "/00000000-0000-0000-0000-0000000000ff/members", "", teamDuties, true, nil, http.StatusNotFound, "ORG-TEAM-NOT-FOUND"},
+		{"list malformed team", http.MethodGet, teamsPath + "/nope/members", "", teamDuties, true, nil, http.StatusNotFound, "ORG-TEAM-NOT-FOUND"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := seeded()
+			if tc.name == "add store error hides internals" {
+				f.err = errors.New("pq: secret")
+			}
+			r, _ := newRouter(f)
+			rec := do(r, tc.method, tc.path, tc.body, tc.duties, tc.withTenant, tc.headers...)
+			if rec.Code != tc.wantStatus || !strings.Contains(rec.Body.String(), tc.wantBody) {
+				t.Fatalf("%s = %d %s, want %d containing %q", tc.name, rec.Code, rec.Body, tc.wantStatus, tc.wantBody)
+			}
+			if strings.Contains(rec.Body.String(), "secret") {
+				t.Fatalf("response leaks store error: %s", rec.Body)
+			}
+		})
+	}
+}
+
+func TestTeamMemberAddPassesTheClockAndReplayIsNotCounted(t *testing.T) {
+	f := &fakeStore{teams: []store.Team{{ID: teamTypeID1}}}
+	r, a := newRouter(f)
+	a.SetClock(func() time.Time { return time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC) })
+	path := teamsPath + "/" + teamTypeID1 + "/members"
+	first := do(r, http.MethodPost, path, memberBody, teamDuties, true, "Idempotency-Key", "k1")
+	replay := do(r, http.MethodPost, path, memberBody, teamDuties, true, "Idempotency-Key", "k1")
+	reuse := do(r, http.MethodPost, path, strings.Replace(memberBody, memberID1, "00000000-0000-0000-0000-0000000000a2", 1), teamDuties, true, "Idempotency-Key", "k1")
+	if first.Code != http.StatusCreated || replay.Code != http.StatusCreated || first.Body.String() != replay.Body.String() {
+		t.Fatalf("first = %d %s, replay = %d %s", first.Code, first.Body, replay.Code, replay.Body)
+	}
+	if reuse.Code != http.StatusUnprocessableEntity || !strings.Contains(reuse.Body.String(), "idempotency_key_reuse") {
+		t.Fatalf("reuse = %d %s", reuse.Code, reuse.Body)
+	}
+	if f.teamMemberToday.Format("2006-01-02") != "2026-03-01" {
+		t.Fatalf("store saw today = %s", f.teamMemberToday)
+	}
+	rec := httptest.NewRecorder()
+	a.Metrics().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if !strings.Contains(rec.Body.String(), "org_team_members_added_total 1\n") {
+		t.Fatalf("metrics = %s", rec.Body)
+	}
+}
+
+func TestTeamMembersFiltersReachStoreAndPageByCursor(t *testing.T) {
+	f := &fakeStore{teams: []store.Team{{ID: teamTypeID1}}, teamMembers: []store.TeamMember{
+		{ID: "00000000-0000-0000-0000-000000000001"}, {ID: "00000000-0000-0000-0000-000000000002"}, {ID: "00000000-0000-0000-0000-000000000003"},
+	}}
+	r, _ := newRouter(f)
+	base := teamsPath + "/" + teamTypeID1 + "/members"
+	do(r, http.MethodGet, base+"?asOf=2026-03-01&memberKind=party&memberRole=lead", "", teamDuties, true)
+	if f.teamMemberFilter.AsOf == nil || f.teamMemberFilter.AsOf.Format("2006-01-02") != "2026-03-01" || f.teamMemberFilter.MemberKind != "party" || f.teamMemberFilter.MemberRole != "lead" {
+		t.Fatalf("store saw %+v", f.teamMemberFilter)
+	}
+	var ids []string
+	path := base + "?limit=2"
+	for pages := 0; path != ""; pages++ {
+		if pages > 3 {
+			t.Fatal("paging did not terminate")
+		}
+		rec := do(r, http.MethodGet, path, "", teamDuties, true)
+		var page struct {
+			Items      []store.TeamMember `json:"items"`
+			NextCursor string             `json:"nextCursor"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &page); rec.Code != http.StatusOK || err != nil {
+			t.Fatalf("page = %d %s %v", rec.Code, rec.Body, err)
+		}
+		for _, item := range page.Items {
+			ids = append(ids, item.ID[len(item.ID)-1:])
+		}
+		path = ""
+		if page.NextCursor != "" {
+			path = base + "?limit=2&cursor=" + page.NextCursor
+		}
+	}
+	if got := strings.Join(ids, ","); got != "1,2,3" {
+		t.Fatalf("ids = %s, want 1,2,3", got)
 	}
 }

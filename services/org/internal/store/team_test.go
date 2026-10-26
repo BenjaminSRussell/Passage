@@ -11,6 +11,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/org/internal/domain"
+	orgevents "github.com/BenjaminSRussell/passage/services/org/internal/events"
 	"github.com/BenjaminSRussell/passage/services/org/internal/store"
 	"github.com/BenjaminSRussell/passage/services/org/migrations"
 )
@@ -367,5 +368,254 @@ func TestPostgres_TeamCrossTenantIsolation(t *testing.T) {
 	}
 	if _, _, err := s.CreateTeam(other, newTeam(tt.ID, "T1"), ""); problemCode(t, err) != store.CodeTeamTypeInvalid {
 		t.Fatalf("tenant B reuse of the code error = %v; want %s", err, store.CodeTeamTypeInvalid)
+	}
+}
+
+func dateOn(t *testing.T, v string) time.Time {
+	t.Helper()
+	d, err := time.Parse("2006-01-02", v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
+func newMember(kind, memberID, from string, to *string) store.TeamMember {
+	return store.TeamMember{MemberKind: kind, MemberID: memberID, ValidFrom: from, ValidTo: to}
+}
+
+const (
+	memberA = "00000000-0000-0000-0000-0000000000a1"
+	memberB = "00000000-0000-0000-0000-0000000000a2"
+	memberC = "00000000-0000-0000-0000-0000000000a3"
+)
+
+func memberFixture(t *testing.T) (*store.Postgres, context.Context, *pgxpool.Pool, store.Team) {
+	t.Helper()
+	s, ctx, admin, tt := teamFixture(t)
+	in := newTeam(tt.ID, "MDSTEW")
+	in.EffectiveTo = strPtr("2026-12-31")
+	team, _, err := s.CreateTeam(ctx, in, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s, ctx, admin, team
+}
+
+func membershipEvents(t *testing.T, ctx context.Context, pool *pgxpool.Pool) []map[string]any {
+	t.Helper()
+	return unitEvents(t, ctx, pool, orgevents.TeamMembershipChanged)
+}
+
+func TestPostgres_TeamMemberTableEnforcesNaturalKeyRangeAndRLS(t *testing.T) {
+	_, ctx, admin, team := memberFixture(t)
+	insert := `insert into team_member (tenant_id, id, team_id, member_kind, member_id, valid_from, valid_to)
+		values ($1, $2, $3, 'user', $4, $5::date, $6::date)`
+	if _, err := admin.Exec(ctx, insert, testkit.TenantID(1), memberC, team.ID, memberA, "2026-02-01", "2026-01-31"); err == nil {
+		t.Fatal("valid_to before valid_from accepted")
+	}
+	if _, err := admin.Exec(ctx, insert, testkit.TenantID(1), memberC, team.ID, memberA, "2026-02-01", "2026-03-01"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := admin.Exec(ctx, insert, testkit.TenantID(1), memberB, team.ID, memberA, "2026-02-01", "2026-04-01"); err == nil {
+		t.Fatal("natural key duplicate accepted")
+	}
+	var enabled, forced bool
+	if err := admin.QueryRow(ctx, `select relrowsecurity, relforcerowsecurity from pg_class where oid = 'team_member'::regclass`).Scan(&enabled, &forced); err != nil || !enabled || !forced {
+		t.Fatalf("rls enabled=%v forced=%v err=%v", enabled, forced, err)
+	}
+}
+
+func TestPostgres_AddTeamMemberStoresDefaultsAndEmitsOneEvent(t *testing.T) {
+	s, ctx, admin, team := memberFixture(t)
+	to := "2026-06-30"
+	got, inserted, err := s.AddTeamMember(ctx, team.ID, newMember("user", memberA, "2026-02-01", &to), dateOn(t, "2026-03-01"), "")
+	if err != nil || !inserted || got.Source != "manual" || got.MemberRole != "member" || got.TeamID != team.ID || got.ValidFrom != "2026-02-01" || deref(got.ValidTo) != to {
+		t.Fatalf("add = %+v, %v, %v", got, inserted, err)
+	}
+	events := membershipEvents(t, ctx, admin)
+	if len(events) != 1 || events[0]["team_id"] != team.ID || events[0]["as_of"] != "2026-02-01" {
+		t.Fatalf("events = %+v", events)
+	}
+	added, _ := events[0]["added"].([]any)
+	removed, ok := events[0]["removed"].([]any)
+	if len(added) != 1 || !ok || len(removed) != 0 {
+		t.Fatalf("added = %v, removed = %v (%v)", added, events[0]["removed"], ok)
+	}
+	if ref := added[0].(map[string]any); ref["member_kind"] != "user" || ref["member_id"] != memberA || ref["member_role"] != "member" {
+		t.Fatalf("added ref = %v", ref)
+	}
+}
+
+func TestPostgres_AddTeamMemberRefusals(t *testing.T) {
+	s, ctx, admin, team := memberFixture(t)
+	to, late := "2026-06-30", "2027-02-01"
+	today := dateOn(t, "2026-03-01")
+	tests := []struct {
+		name   string
+		teamID string
+		in     store.TeamMember
+		today  time.Time
+		want   string
+	}{
+		{"unknown team", "00000000-0000-0000-0000-0000000000ff", newMember("user", memberA, "2026-02-01", &to), today, store.CodeTeamNotFound},
+		{"kind not allowed by team type", team.ID, newMember("party", memberA, "2026-02-01", &to), today, store.CodeTeamMemberKindInvalid},
+		{"starts after the team ends", team.ID, newMember("user", memberA, "2027-01-15", &late), today, store.CodeTeamMemberRange},
+		{"starts before the team", team.ID, newMember("user", memberA, "2025-12-31", &to), today, store.CodeTeamMemberRange},
+		{"open-ended in a bounded team", team.ID, newMember("user", memberA, "2026-02-01", nil), today, store.CodeTeamMemberRange},
+		{"team ended", team.ID, newMember("user", memberA, "2026-02-01", &to), dateOn(t, "2027-01-01"), store.CodeTeamExpired},
+	}
+	for _, tc := range tests {
+		if _, _, err := s.AddTeamMember(ctx, tc.teamID, tc.in, tc.today, ""); problemCode(t, err) != tc.want {
+			t.Fatalf("%s error = %v; want %s", tc.name, err, tc.want)
+		}
+	}
+	if _, _, err := s.AddTeamMember(ctx, team.ID, newMember("user", memberA, "2026-02-01", &to), dateOn(t, "2026-12-31"), ""); err != nil {
+		t.Fatalf("add on the last day of the team = %v", err)
+	}
+	var n int
+	if err := admin.QueryRow(ctx, `select count(*) from team_member`).Scan(&n); err != nil || n != 1 || len(membershipEvents(t, ctx, admin)) != 1 {
+		t.Fatalf("members = %d, %v; events = %d; want one of each", n, err, len(membershipEvents(t, ctx, admin)))
+	}
+}
+
+func TestPostgres_AddTeamMemberDuplicateAndLimit(t *testing.T) {
+	s, ctx, admin, team := memberFixture(t)
+	previous := store.MaxMembersPerTeam
+	store.MaxMembersPerTeam = 2
+	t.Cleanup(func() { store.MaxMembersPerTeam = previous })
+	to := "2026-06-30"
+	today := dateOn(t, "2026-03-01")
+	for _, id := range []string{memberA, memberB} {
+		if _, _, err := s.AddTeamMember(ctx, team.ID, newMember("user", id, "2026-02-01", &to), today, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, err := s.AddTeamMember(ctx, team.ID, newMember("user", memberA, "2026-02-01", &to), today, ""); problemCode(t, err) != store.CodeTeamMemberLimit {
+		t.Fatalf("over-limit duplicate error = %v; want %s", err, store.CodeTeamMemberLimit)
+	}
+	store.MaxMembersPerTeam = 3
+	if _, _, err := s.AddTeamMember(ctx, team.ID, newMember("user", memberA, "2026-02-01", &to), today, ""); problemCode(t, err) != store.CodeTeamMemberDuplicate {
+		t.Fatalf("duplicate error = %v; want %s", err, store.CodeTeamMemberDuplicate)
+	}
+	if _, _, err := s.AddTeamMember(ctx, team.ID, newMember("user", memberC, "2026-02-01", &to), today, ""); err != nil {
+		t.Fatal(err)
+	}
+	store.MaxMembersPerTeam = 2
+	if _, _, err := s.AddTeamMember(ctx, team.ID, newMember("user", "00000000-0000-0000-0000-0000000000a4", "2026-02-01", &to), today, ""); problemCode(t, err) != store.CodeTeamMemberLimit {
+		t.Fatalf("limit error = %v; want %s", err, store.CodeTeamMemberLimit)
+	}
+	var n int
+	if err := admin.QueryRow(ctx, `select count(*) from team_member`).Scan(&n); err != nil || n != 3 || len(membershipEvents(t, ctx, admin)) != 3 {
+		t.Fatalf("members = %d, %v; want 3 with 3 events", n, err)
+	}
+	if _, _, err := s.AddTeamMember(ctx, team.ID, newMember("user", "00000000-0000-0000-0000-0000000000a4", "2026-02-01", &to), dateOn(t, "2026-07-01"), ""); err != nil {
+		t.Fatalf("members ended before today must not count toward the cap: %v", err)
+	}
+}
+
+func TestPostgres_AddTeamMemberReplay(t *testing.T) {
+	s, ctx, admin, team := memberFixture(t)
+	to := "2026-06-30"
+	today := dateOn(t, "2026-03-01")
+	first, inserted, err := s.AddTeamMember(ctx, team.ID, newMember("user", memberA, "2026-02-01", &to), today, "key-1")
+	if err != nil || !inserted {
+		t.Fatalf("first = %+v, %v, %v", first, inserted, err)
+	}
+	replay, inserted, err := s.AddTeamMember(ctx, team.ID, newMember("user", memberA, "2026-02-01", &to), today, "key-1")
+	if err != nil || inserted || replay.ID != first.ID {
+		t.Fatalf("replay = %+v, %v, %v; want the original row and inserted false", replay, inserted, err)
+	}
+	if _, _, err := s.AddTeamMember(ctx, team.ID, newMember("user", memberB, "2026-02-01", &to), today, "key-1"); problemCode(t, err) != store.CodeIdempotencyReuse {
+		t.Fatalf("changed member error = %v; want %s", err, store.CodeIdempotencyReuse)
+	}
+	var n int
+	if err := admin.QueryRow(ctx, `select count(*) from team_member`).Scan(&n); err != nil || n != 1 || len(membershipEvents(t, ctx, admin)) != 1 {
+		t.Fatalf("members = %d, %v; want 1 with 1 event", n, err)
+	}
+}
+
+func TestPostgres_ListTeamMembersFiltersAndPages(t *testing.T) {
+	s, ctx, _, team := memberFixture(t)
+	if _, err := s.ListTeamMembers(ctx, "00000000-0000-0000-0000-0000000000ff", store.TeamMemberFilter{}, "", 10); problemCode(t, err) != store.CodeTeamNotFound {
+		t.Fatalf("unknown team error = %v; want %s", err, store.CodeTeamNotFound)
+	}
+	to := "2026-06-30"
+	today := dateOn(t, "2026-03-01")
+	lead := newMember("user", memberB, "2026-08-01", strPtr("2026-12-31"))
+	lead.MemberRole = "lead"
+	for _, in := range []store.TeamMember{newMember("user", memberA, "2026-02-01", &to), lead, newMember("user", memberC, "2026-02-01", &to)} {
+		if _, _, err := s.AddTeamMember(ctx, team.ID, in, today, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	list := func(f store.TeamMemberFilter) []string {
+		t.Helper()
+		page, err := s.ListTeamMembers(ctx, team.ID, f, "", 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, item := range page.Items {
+			out = append(out, item.MemberID[len(item.MemberID)-2:])
+		}
+		return out
+	}
+	asOf := func(v string) *time.Time { d := dateOn(t, v); return &d }
+	for name, tc := range map[string]struct {
+		filter store.TeamMemberFilter
+		want   []string
+	}{
+		"all":            {store.TeamMemberFilter{}, []string{"a1", "a2", "a3"}},
+		"as of in range": {store.TeamMemberFilter{AsOf: asOf("2026-03-01")}, []string{"a1", "a3"}},
+		"as of last day": {store.TeamMemberFilter{AsOf: asOf("2026-06-30")}, []string{"a1", "a3"}},
+		"as of gap":      {store.TeamMemberFilter{AsOf: asOf("2026-07-01")}, nil},
+		"as of later":    {store.TeamMemberFilter{AsOf: asOf("2026-09-01")}, []string{"a2"}},
+		"role":           {store.TeamMemberFilter{MemberRole: "lead"}, []string{"a2"}},
+		"kind":           {store.TeamMemberFilter{MemberKind: "party"}, nil},
+	} {
+		if got := list(tc.filter); !slices.Equal(got, tc.want) {
+			t.Fatalf("%s = %v; want %v", name, got, tc.want)
+		}
+	}
+	var paged []string
+	after := ""
+	for pages := 0; ; pages++ {
+		if pages > 3 {
+			t.Fatal("paging did not terminate")
+		}
+		page, err := s.ListTeamMembers(ctx, team.ID, store.TeamMemberFilter{}, after, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, item := range page.Items {
+			paged = append(paged, item.MemberID[len(item.MemberID)-2:])
+		}
+		if page.NextID == "" {
+			break
+		}
+		after = page.NextID
+	}
+	if want := []string{"a1", "a2", "a3"}; !slices.Equal(paged, want) {
+		t.Fatalf("paged = %v; want %v", paged, want)
+	}
+}
+
+func TestPostgres_TeamMembersAreTenantIsolated(t *testing.T) {
+	s, ctx, admin, team := memberFixture(t)
+	to := "2026-06-30"
+	if _, _, err := s.AddTeamMember(ctx, team.ID, newMember("user", memberA, "2026-02-01", &to), dateOn(t, "2026-03-01"), ""); err != nil {
+		t.Fatal(err)
+	}
+	other := principalContext(2)
+	if _, _, err := s.AddTeamMember(other, team.ID, newMember("user", memberB, "2026-02-01", &to), dateOn(t, "2026-03-01"), ""); problemCode(t, err) != store.CodeTeamNotFound {
+		t.Fatalf("tenant B add error = %v; want %s", err, store.CodeTeamNotFound)
+	}
+	if _, err := s.ListTeamMembers(other, team.ID, store.TeamMemberFilter{}, "", 10); problemCode(t, err) != store.CodeTeamNotFound {
+		t.Fatalf("tenant B list error = %v; want %s", err, store.CodeTeamNotFound)
+	}
+	var n int
+	if err := admin.QueryRow(ctx, `select count(*) from team_member`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("members = %d, %v; want 1", n, err)
 	}
 }

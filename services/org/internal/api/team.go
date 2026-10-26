@@ -26,7 +26,18 @@ const (
 	teamDescriptionLength = 500
 )
 
-var teamMemberKinds = []string{"user", "party"}
+var (
+	teamMemberKinds = []string{"user", "party"}
+	teamMemberRoles = []string{"member", "lead"}
+)
+
+type addTeamMemberRequest struct {
+	MemberKind string  `json:"memberKind"`
+	MemberID   string  `json:"memberId"`
+	MemberRole string  `json:"memberRole"`
+	ValidFrom  string  `json:"validFrom"`
+	ValidTo    *string `json:"validTo"`
+}
 
 type createTeamTypeRequest struct {
 	Code        string   `json:"code"`
@@ -48,6 +59,8 @@ func (a *API) registerTeams(r chi.Router) {
 	r.With(authz.RequireDuty(dutyOperatingUnit)).Post(teams, a.createTeam)
 	r.With(authz.RequireDuty(dutyRead)).Get(teams, a.listTeams)
 	r.With(authz.RequireDuty(dutyRead)).Get(teams+"/{id}", teamRoute(a.getTeam))
+	r.With(authz.RequireDuty(dutyOperatingUnit)).Post(teams+"/{id}/members", teamRoute(a.addTeamMember))
+	r.With(authz.RequireDuty(dutyRead)).Get(teams+"/{id}/members", teamRoute(a.listTeamMembers))
 	r.With(authz.RequireDuty(dutyOperatingUnit)).Post(teamTypes, a.createTeamType)
 	r.With(authz.RequireDuty(dutyRead)).Get(teamTypes, a.listTeamTypes)
 	r.With(authz.RequireDuty(dutyRead)).Get(teamTypes+"/{id}", teamTypeRoute(a.getTeamType))
@@ -288,4 +301,99 @@ func (a *API) getTeam(w http.ResponseWriter, r *http.Request, id string) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, t)
+}
+
+func (a *API) addTeamMember(w http.ResponseWriter, r *http.Request, teamID string) {
+	if refuseScopedCaller(w, r, "add team members") {
+		return
+	}
+	var req addTeamMemberRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	in := store.TeamMember{MemberKind: req.MemberKind, MemberID: strings.ToLower(req.MemberID), MemberRole: req.MemberRole, ValidFrom: req.ValidFrom, ValidTo: req.ValidTo}
+	if in.MemberRole == "" {
+		in.MemberRole = teamMemberRoles[0]
+	}
+	fields := map[string]string{}
+	if !slices.Contains(teamMemberKinds, in.MemberKind) {
+		fields["memberKind"] = "must be user or party"
+	}
+	if !canonicalUUID(in.MemberID) {
+		fields["memberId"] = "must be a UUID"
+	}
+	if !slices.Contains(teamMemberRoles, in.MemberRole) {
+		fields["memberRole"] = "must be member or lead"
+	}
+	from, fromOK := parseDate(in.ValidFrom)
+	if !fromOK {
+		fields["validFrom"] = "must be a date as YYYY-MM-DD"
+	}
+	if in.ValidTo != nil {
+		to, toOK := parseDate(*in.ValidTo)
+		if !toOK {
+			fields["validTo"] = "must be a date as YYYY-MM-DD"
+		} else if fromOK && to.Before(from) {
+			fields["validTo"] = "must not be before validFrom"
+		}
+	}
+	if len(fields) > 0 {
+		validationFailed(w, r, fields)
+		return
+	}
+	created, inserted, err := a.store.AddTeamMember(r.Context(), teamID, in, a.now(), r.Header.Get(idempotencyKey))
+	if err != nil {
+		slog.Error("add team member failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.Fail(w, r, err)
+		return
+	}
+	if inserted {
+		a.teamMemberAdded.Add(1)
+	}
+	httpx.JSON(w, http.StatusCreated, created)
+}
+
+func (a *API) listTeamMembers(w http.ResponseWriter, r *http.Request, teamID string) {
+	limit, after, err := pageParams(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if after != "" && !canonicalUUID(after) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", "cursor is invalid"))
+		return
+	}
+	q := r.URL.Query()
+	f := store.TeamMemberFilter{MemberKind: q.Get("memberKind"), MemberRole: q.Get("memberRole")}
+	if f.MemberKind != "" && !slices.Contains(teamMemberKinds, f.MemberKind) {
+		badQuery(w, r, "memberKind", "must be user or party")
+		return
+	}
+	if f.MemberRole != "" && !slices.Contains(teamMemberRoles, f.MemberRole) {
+		badQuery(w, r, "memberRole", "must be member or lead")
+		return
+	}
+	if raw := q.Get("asOf"); raw != "" {
+		asOf, ok := parseDate(raw)
+		if !ok {
+			badQuery(w, r, "asOf", "must be a date as YYYY-MM-DD")
+			return
+		}
+		f.AsOf = &asOf
+	}
+	page, err := a.store.ListTeamMembers(r.Context(), teamID, f, after, limit)
+	if err != nil {
+		slog.Error("list team members failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.Fail(w, r, err)
+		return
+	}
+	body := struct {
+		Items      []store.TeamMember `json:"items"`
+		NextCursor string             `json:"nextCursor,omitempty"`
+	}{Items: page.Items}
+	if page.NextID != "" {
+		body.NextCursor = base64.RawURLEncoding.EncodeToString([]byte(page.NextID))
+	}
+	httpx.JSON(w, http.StatusOK, body)
 }
