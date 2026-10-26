@@ -1,4 +1,4 @@
-# Not implemented in PSG-6 slice 33
+# Not implemented in PSG-6 slice 34
 
 | Deliverable or AC | Status | Reason |
 |---|---|---|
@@ -37,9 +37,9 @@
 | Ledger posting check for ORG-CAL-LOCKED (BR-6.7) | handoff | the ledger (wave 11) must expose whether a fiscal year has postings; api.noPostings reports none until then, so force regeneration is always allowed |
 | Reference data screen (deactivate, add custom UoM, test conversion) in apps/web/src/modules/org/ | later slice of PSG-6 | needs this slice's API; the web module is not created |
 | BR-6.11 ORG-LE-DEFAULT-IN-USE (refuse deactivation while users default to the entity) | handoff | users' default legal entity is held by the identity/shell waves (2, 5), outside wave 6 ownership; org needs a read API or event for it |
-| Operating-unit numbers from the wave-5 sequence (org.ou.number_sequence OU-{#####}) | later slice of PSG-6 | codes are caller-supplied; needs a services/numbering client |
+| Operating-unit numbers from the wave-5 sequence (org.ou.number_sequence OU-{#####}) | later slice of PSG-6 | sequences are scoped per legal entity, `services/numbering` has no tenant-level sequence and org has no numbering client, so it needs a wave-5 contract first |
 | Operating-unit CSV bulk import | later slice of PSG-6 | import belongs to the web module slice |
-| Default warehouse on site create and its maintenance | later slice of PSG-6 | site calendar assignment is built (PSG-631); a default warehouse needs its own create contract on POST /v1/org/sites |
+| ORG-SITE-DEFAULT-WAREHOUSE-INVALID, ORG-WH-IS-DEFAULT | not in catalog | new codes returned by the default-warehouse routes (site PATCH `defaultWarehouseId` and warehouse PATCH of a site's default); the §1.6.18 catalog lists neither |
 | Fiscal period UUID for services/close `fiscalPeriodId` | not built | org periods are keyed by (calendar_id, fiscal_year, period_no); resolution returns that key; whether close keys periods by it or org adds a surrogate id is decided with wave 14 |
 | address_id in site.created, warehouse.created and location.created events | not built | an address needs its owner's id, so the pointer is set by PATCH after create and announced in the *.updated event's changed_fields; inline address on create is not built |
 | Shared addresses (a warehouse pointing at its site's address) | not built | PSG-614 accepts only a current address owned by the record itself (ORG-ADDR-NOT-OWNED) |

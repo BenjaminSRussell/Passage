@@ -6,10 +6,16 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/org/internal/store"
+	"github.com/BenjaminSRussell/passage/services/org/migrations"
 )
 
 const (
@@ -289,5 +295,222 @@ func TestPostgres_SiteCannotUseAnotherTenantsCalendar(t *testing.T) {
 	entity := mustCreate(t, s, other, newEntity("US01"))
 	if _, err := s.CreateSite(other, store.Site{LegalEntityID: entity.ID, Code: "S1", Name: "One", FiscalCalendarID: ptr(foreign.ID)}, ""); problemCode(t, err) != store.CodeSiteCalendarInvalid {
 		t.Fatalf("tenant 2 create with tenant 1 calendar error = %v", err)
+	}
+}
+
+func siteWithDefault(legalEntityID, code, warehouseCode string) store.Site {
+	in := newSite(legalEntityID, code)
+	in.DefaultWarehouse = &store.Warehouse{Code: warehouseCode, Name: "Warehouse " + warehouseCode}
+	return in
+}
+
+func outboxTypesInOrder(t *testing.T, ctx context.Context, pool *pgxpool.Pool) []string {
+	t.Helper()
+	var types []string
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `select set_config('passage.tenant_id', $1, true), set_config('passage.legal_entity_scopes', '*', true)`, testkit.TenantID(1)); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := tx.Query(ctx, `select type from outbox order by id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var typ string
+		if err := rows.Scan(&typ); err != nil {
+			t.Fatal(err)
+		}
+		types = append(types, typ)
+	}
+	return types
+}
+
+func TestPostgres_SiteCreateWithDefaultWarehouseWritesBothRowsAndEventsInOrder(t *testing.T) {
+	s, ctx, pool := lifecycleStore(t)
+	in := newEntity("US01")
+	in.TimeZone = "America/New_York"
+	a := mustCreate(t, s, ctx, in)
+	site := mustCreateSite(t, s, ctx, siteWithDefault(a.ID, "S1", "MAIN"))
+	if site.DefaultWarehouseID == nil || site.Replayed {
+		t.Fatalf("site = %+v; want a default warehouse id on a fresh create", site)
+	}
+	warehouse, err := s.GetWarehouse(ctx, *site.DefaultWarehouseID)
+	if err != nil || warehouse.SiteID != site.ID || warehouse.LegalEntityID != a.ID || warehouse.Type != "standard" || warehouse.TimeZone != "America/New_York" {
+		t.Fatalf("default warehouse = %+v, %v", warehouse, err)
+	}
+	stored, err := s.GetSite(ctx, site.ID)
+	if err != nil || stored.DefaultWarehouseID == nil || *stored.DefaultWarehouseID != warehouse.ID || stored.Version != 1 {
+		t.Fatalf("stored site = %+v, %v", stored, err)
+	}
+	if got := outboxTypesInOrder(t, ctx, pool); !reflect.DeepEqual(got, []string{"dev.passage.org.legalentity.created.v1", siteCreatedType, warehouseCreatedType}) {
+		t.Fatalf("event order = %v", got)
+	}
+	if events := unitEvents(t, ctx, pool, siteCreatedType); len(events) != 1 || events[0]["default_warehouse_id"] != warehouse.ID {
+		t.Fatalf("site.created = %v; want default_warehouse_id %s", events, warehouse.ID)
+	}
+}
+
+func TestPostgres_SiteCreateWithoutDefaultWarehouseLeavesNone(t *testing.T) {
+	s, ctx, pool := lifecycleStore(t)
+	a := mustCreate(t, s, ctx, newEntity("US01"))
+	site := mustCreateSite(t, s, ctx, newSite(a.ID, "S1"))
+	page, err := s.ListWarehouses(ctx, store.WarehouseFilter{}, store.SiteKey{}, store.MaxPageSize)
+	if site.DefaultWarehouseID != nil || err != nil || len(page.Items) != 0 {
+		t.Fatalf("site = %+v, warehouses = %+v, %v; want neither", site, page, err)
+	}
+	if events := unitEvents(t, ctx, pool, siteCreatedType); len(events) != 1 {
+		t.Fatalf("created events = %v", events)
+	} else if _, present := events[0]["default_warehouse_id"]; present {
+		t.Fatalf("payload = %v; default_warehouse_id must be omitted", events[0])
+	}
+}
+
+func TestPostgres_SiteCreateWithDuplicateWarehouseCodeLeavesNothingBehind(t *testing.T) {
+	s, ctx, pool := lifecycleStore(t)
+	a := mustCreate(t, s, ctx, newEntity("US01"))
+	mustCreateSite(t, s, ctx, siteWithDefault(a.ID, "S1", "MAIN"))
+	if _, err := s.CreateSite(ctx, siteWithDefault(a.ID, "S2", "MAIN"), ""); problemCode(t, err) != store.CodeWarehouseCodeDuplicate {
+		t.Fatalf("duplicate warehouse code error = %v", err)
+	}
+	sites, _ := s.ListSites(ctx, store.SiteFilter{}, store.SiteKey{}, store.MaxPageSize)
+	warehouses, _ := s.ListWarehouses(ctx, store.WarehouseFilter{}, store.SiteKey{}, store.MaxPageSize)
+	if len(sites.Items) != 1 || len(warehouses.Items) != 1 {
+		t.Fatalf("sites = %d, warehouses = %d; want 1 and 1", len(sites.Items), len(warehouses.Items))
+	}
+	if got := len(unitEvents(t, ctx, pool, siteCreatedType)) + len(unitEvents(t, ctx, pool, warehouseCreatedType)); got != 2 {
+		t.Fatalf("rolled-back create left %d site/warehouse events in total; want 2", got)
+	}
+	if _, err := s.CreateSite(ctx, newSite(a.ID, "S1"), ""); problemCode(t, err) != store.CodeSiteCodeDuplicate {
+		t.Fatalf("duplicate site code error = %v", err)
+	}
+}
+
+func TestPostgres_SiteCreateWithDefaultWarehouseReplayCreatesNothingAndOtherBodyIsReuse(t *testing.T) {
+	s, ctx, pool := lifecycleStore(t)
+	a := mustCreate(t, s, ctx, newEntity("US01"))
+	first, err := s.CreateSite(ctx, siteWithDefault(a.ID, "S1", "MAIN"), "key-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	replay, err := s.CreateSite(ctx, siteWithDefault(a.ID, "S1", "MAIN"), "key-1")
+	if err != nil || replay.ID != first.ID || !replay.Replayed || deref(replay.DefaultWarehouseID) != deref(first.DefaultWarehouseID) {
+		t.Fatalf("replay = %+v, %v; want the original site", replay, err)
+	}
+	for name, in := range map[string]store.Site{"other code": siteWithDefault(a.ID, "S1", "OTHER"), "no default": newSite(a.ID, "S1")} {
+		if _, err := s.CreateSite(ctx, in, "key-1"); problemCode(t, err) != store.CodeIdempotencyReuse {
+			t.Fatalf("%s: error = %v; want idempotency reuse", name, err)
+		}
+	}
+	sites, _ := s.ListSites(ctx, store.SiteFilter{}, store.SiteKey{}, store.MaxPageSize)
+	warehouses, _ := s.ListWarehouses(ctx, store.WarehouseFilter{}, store.SiteKey{}, store.MaxPageSize)
+	events := len(unitEvents(t, ctx, pool, siteCreatedType)) + len(unitEvents(t, ctx, pool, warehouseCreatedType))
+	if len(sites.Items) != 1 || len(warehouses.Items) != 1 || events != 2 {
+		t.Fatalf("sites = %d, warehouses = %d, events = %d; want 1, 1, 2", len(sites.Items), len(warehouses.Items), events)
+	}
+}
+
+func TestPostgres_SiteDefaultWarehouseCanBeRepointedAndClearedAndRefusalsChangeNothing(t *testing.T) {
+	s, ctx, pool := lifecycleStore(t)
+	a := mustCreate(t, s, ctx, newEntity("US01"))
+	site := mustCreateSite(t, s, ctx, siteWithDefault(a.ID, "S1", "MAIN"))
+	other := mustCreateSite(t, s, ctx, siteWithDefault(a.ID, "S2", "OTHER"))
+	spare := mustCreateWarehouse(t, s, ctx, newWarehouse(site.ID, "SPARE"))
+	inactive := mustCreateWarehouse(t, s, ctx, newWarehouse(site.ID, "OFF"))
+	status := "inactive"
+	if _, err := s.UpdateWarehouse(ctx, inactive.ID, 1, store.WarehousePatch{Status: &status}); err != nil {
+		t.Fatal(err)
+	}
+	for name, id := range map[string]string{"another site": *other.DefaultWarehouseID, "inactive": inactive.ID, "unknown": "00000000-0000-0000-0000-00000000dead"} {
+		id := id
+		if _, err := s.UpdateSite(ctx, site.ID, 1, store.SitePatch{DefaultWarehouseID: &id}); problemCode(t, err) != store.CodeSiteDefaultWarehouseInvalid {
+			t.Fatalf("%s: error = %v; want ORG-SITE-DEFAULT-WAREHOUSE-INVALID", name, err)
+		}
+	}
+	if untouched, _ := s.GetSite(ctx, site.ID); untouched.Version != 1 || deref(untouched.DefaultWarehouseID) != deref(site.DefaultWarehouseID) {
+		t.Fatalf("refusals changed the site: %+v", untouched)
+	}
+	moved, err := s.UpdateSite(ctx, site.ID, 1, store.SitePatch{DefaultWarehouseID: &spare.ID})
+	if err != nil || moved.Version != 2 || deref(moved.DefaultWarehouseID) != spare.ID {
+		t.Fatalf("re-point = %+v, %v", moved, err)
+	}
+	empty := ""
+	cleared, err := s.UpdateSite(ctx, site.ID, 2, store.SitePatch{DefaultWarehouseID: &empty})
+	if err != nil || cleared.Version != 3 || cleared.DefaultWarehouseID != nil {
+		t.Fatalf("clear = %+v, %v", cleared, err)
+	}
+	fields := updatedChangedFieldsFor(t, ctx, pool, siteUpdatedType)
+	if !reflect.DeepEqual(fields, [][]string{{"default_warehouse_id"}, {"default_warehouse_id"}}) {
+		t.Fatalf("changed_fields = %v", fields)
+	}
+}
+
+func updatedChangedFieldsFor(t *testing.T, ctx context.Context, pool *pgxpool.Pool, eventType string) [][]string {
+	t.Helper()
+	var fields [][]string
+	for _, event := range unitEvents(t, ctx, pool, eventType) {
+		var names []string
+		for _, name := range event["changed_fields"].([]any) {
+			names = append(names, name.(string))
+		}
+		fields = append(fields, names)
+	}
+	return fields
+}
+
+func TestPostgres_MigrationAddsDefaultWarehouseColumnTwiceAndDeferredForeignKeyRejectsOtherEntities(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	ctx := principalContext(1)
+	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	seed(t, ctx, admin)
+	script, err := migrations.FS.ReadFile("0027_site_default_warehouse.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := admin.Exec(ctx, string(script)); err != nil {
+		t.Fatalf("re-applying 0027: %v", err)
+	}
+	var columns int
+	if err := admin.QueryRow(ctx, `select count(*) from information_schema.columns where table_schema = current_schema() and table_name = 'site' and column_name = 'default_warehouse_id'`).Scan(&columns); err != nil || columns != 1 {
+		t.Fatalf("default_warehouse_id columns = %d, %v", columns, err)
+	}
+	s := store.New(app)
+	a, b := mustCreate(t, s, ctx, newEntity("US01")), mustCreate(t, s, ctx, newEntity("US02"))
+	siteA := mustCreateSite(t, s, ctx, newSite(a.ID, "S1"))
+	foreign := mustCreateSite(t, s, ctx, siteWithDefault(b.ID, "S2", "WHB"))
+	err = dbx.WithTenantTx(ctx, app, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `update site set default_warehouse_id = $2 where tenant_id = $3 and id = $1`, siteA.ID, *foreign.DefaultWarehouseID, testkit.TenantID(1))
+		return err
+	})
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23503" {
+		t.Fatalf("pointing at another legal entity's warehouse error = %v; want a foreign key violation at commit", err)
+	}
+}
+
+func TestPostgres_SiteDefaultWarehouseIsInvisibleAcrossTenantsAndScopes(t *testing.T) {
+	s, ctx, _ := lifecycleStore(t)
+	a, b := mustCreate(t, s, ctx, newEntity("US01")), mustCreate(t, s, ctx, newEntity("US02"))
+	siteB := mustCreateSite(t, s, ctx, siteWithDefault(b.ID, "S2", "WHB"))
+	siteA := mustCreateSite(t, s, ctx, siteWithDefault(a.ID, "S1", "WHA"))
+	id := *siteB.DefaultWarehouseID
+	scoped := scopedTo(a.ID)
+	if _, err := s.UpdateSite(scoped, siteA.ID, 1, store.SitePatch{DefaultWarehouseID: &id}); problemCode(t, err) != store.CodeSiteDefaultWarehouseInvalid {
+		t.Fatalf("scoped caller setting another entity's warehouse error = %v", err)
+	}
+	if _, err := s.UpdateSite(scoped, siteB.ID, 1, store.SitePatch{DefaultWarehouseID: &id}); problemCode(t, err) != store.CodeSiteNotFound {
+		t.Fatalf("scoped caller updating another entity's site error = %v", err)
+	}
+	if _, err := s.UpdateSite(principalContext(2), siteB.ID, 1, store.SitePatch{DefaultWarehouseID: &id}); problemCode(t, err) != store.CodeSiteNotFound {
+		t.Fatalf("tenant 2 updating tenant 1's site error = %v", err)
+	}
+	if got, _ := s.GetSite(scoped, siteA.ID); deref(got.DefaultWarehouseID) != *siteA.DefaultWarehouseID {
+		t.Fatalf("scoped read = %+v", got)
 	}
 }

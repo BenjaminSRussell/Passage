@@ -76,6 +76,8 @@ type API struct {
 	addressSearches   atomic.Int64
 	geocoder          domain.Geocoder
 
+	siteDefaultWarehouses atomic.Int64
+
 	fiscalCalendarCreated atomic.Int64
 	fiscalYearGenerated   atomic.Int64
 	fiscalCalendarUpdated atomic.Int64
@@ -194,6 +196,7 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP org_team_members_removed_total Team members removed as entered in error.\n# TYPE org_team_members_removed_total counter\norg_team_members_removed_total %d\n", a.teamMemberRemoved.Load())
 		fmt.Fprintf(w, "# HELP org_operating_units_updated_total Operating unit updates that bumped the version.\n# TYPE org_operating_units_updated_total counter\norg_operating_units_updated_total %d\n", a.ouUpdated.Load())
 		fmt.Fprintf(w, "# HELP org_sites_created_total Sites created.\n# TYPE org_sites_created_total counter\norg_sites_created_total %d\n", a.siteCreated.Load())
+		fmt.Fprintf(w, "# HELP org_site_default_warehouses_total Sites created with a default warehouse; idempotent replays are not counted.\n# TYPE org_site_default_warehouses_total counter\norg_site_default_warehouses_total %d\n", a.siteDefaultWarehouses.Load())
 		fmt.Fprintf(w, "# HELP org_sites_updated_total Site updates that bumped the version.\n# TYPE org_sites_updated_total counter\norg_sites_updated_total %d\n", a.siteUpdated.Load())
 		fmt.Fprintf(w, "# HELP org_warehouses_created_total Warehouses created.\n# TYPE org_warehouses_created_total counter\norg_warehouses_created_total %d\n", a.warehouseCreated.Load())
 		fmt.Fprintf(w, "# HELP org_warehouses_updated_total Warehouse updates that bumped the version.\n# TYPE org_warehouses_updated_total counter\norg_warehouses_updated_total %d\n", a.warehouseUpdated.Load())

@@ -23,6 +23,7 @@ const (
 	CodeWarehouseCodeDuplicate       = "ORG-WH-CODE-DUPLICATE"
 	CodeWarehouseSiteInvalid         = "ORG-WH-SITE-INVALID"
 	CodeWarehouseLegalEntityMismatch = "ORG-WH-LE-MISMATCH"
+	CodeWarehouseIsDefault           = "ORG-WH-IS-DEFAULT"
 	foreignKeyViolation              = "23503"
 	defaultWarehouseType             = "standard"
 	warehouseColumns                 = "id, legal_entity_id, site_id, code, name, type, time_zone, status, address_id, version, created_at, updated_at"
@@ -103,6 +104,27 @@ func mapWarehouseConstraint(err error) error {
 	return err
 }
 
+func insertWarehouse(ctx context.Context, tx pgx.Tx, tenantID string, site Site, in Warehouse, key *string) (Warehouse, bool, error) {
+	zone, kind := in.TimeZone, in.Type
+	if zone == "" {
+		zone = site.TimeZone
+	}
+	if kind == "" {
+		kind = defaultWarehouseType
+	}
+	var inserted bool
+	warehouse, err := scanWarehouse(tx.QueryRow(ctx, `insert into warehouse (tenant_id, id, legal_entity_id, site_id, code, name, type, time_zone, idempotency_key)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		on conflict (tenant_id, idempotency_key) do update set version = warehouse.version
+		returning `+warehouseColumns+`, (xmax = 0)`, tenantID, ids.New(), site.LegalEntityID, site.ID, in.Code, in.Name, kind, zone, key), &inserted)
+	return warehouse, inserted, err
+}
+
+func enqueueWarehouseCreated(ctx context.Context, tx pgx.Tx, tenantID string, warehouse Warehouse) error {
+	return enqueue(ctx, tx, "warehouse", warehouse.ID, orgevents.WarehouseCreated, tenantID,
+		orgevents.WarehouseCreatedData{ID: warehouse.ID, LegalEntityID: warehouse.LegalEntityID, ParentID: &warehouse.SiteID, Type: &warehouse.Type})
+}
+
 func (s *Postgres) CreateWarehouse(ctx context.Context, in Warehouse, idempotencyKey string) (Warehouse, error) {
 	p, _ := tenant.FromContext(ctx)
 	var key *string
@@ -128,23 +150,12 @@ func (s *Postgres) CreateWarehouse(ctx context.Context, in Warehouse, idempotenc
 		if !ok {
 			return warehouseSiteInvalid()
 		}
-		zone, kind := in.TimeZone, in.Type
-		if zone == "" {
-			zone = site.TimeZone
-		}
-		if kind == "" {
-			kind = defaultWarehouseType
-		}
 		var inserted bool
-		warehouse, err = scanWarehouse(tx.QueryRow(ctx, `insert into warehouse (tenant_id, id, legal_entity_id, site_id, code, name, type, time_zone, idempotency_key)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-			on conflict (tenant_id, idempotency_key) do update set version = warehouse.version
-			returning `+warehouseColumns+`, (xmax = 0)`, p.TenantID, ids.New(), site.LegalEntityID, site.ID, in.Code, in.Name, kind, zone, key), &inserted)
+		warehouse, inserted, err = insertWarehouse(ctx, tx, p.TenantID, site, in, key)
 		if err != nil || !inserted {
 			return err
 		}
-		return enqueue(ctx, tx, "warehouse", warehouse.ID, orgevents.WarehouseCreated, p.TenantID,
-			orgevents.WarehouseCreatedData{ID: warehouse.ID, LegalEntityID: warehouse.LegalEntityID, ParentID: &warehouse.SiteID, Type: &warehouse.Type})
+		return enqueueWarehouseCreated(ctx, tx, p.TenantID, warehouse)
 	})
 	if err != nil {
 		return Warehouse{}, mapWarehouseConstraint(err)
@@ -260,6 +271,17 @@ func (s *Postgres) UpdateWarehouse(ctx context.Context, id string, version int, 
 		next, changed := in.apply(current)
 		if len(changed) == 0 {
 			return nil
+		}
+		if slices.Contains(changed, "site_id") || (slices.Contains(changed, "status") && next.Status == "inactive") {
+			var isDefault bool
+			if err := tx.QueryRow(ctx, `select exists (select 1 from site where tenant_id = $1 and default_warehouse_id = $2)`, p.TenantID, id).Scan(&isDefault); err != nil {
+				return err
+			}
+			if isDefault {
+				bad := httpx.NewProblem(http.StatusUnprocessableEntity, CodeWarehouseIsDefault, "warehouse is its site's default; re-point or clear the site's default first")
+				bad.Errors = map[string]string{"status": "cannot deactivate or move the site's default warehouse"}
+				return bad
+			}
 		}
 		if slices.Contains(changed, "address_id") && next.AddressID != nil {
 			if err := checkOwnedAddress(ctx, tx, p.TenantID, "warehouse", id, *next.AddressID, "addressId"); err != nil {

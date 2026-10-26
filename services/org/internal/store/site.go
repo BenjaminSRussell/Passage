@@ -24,7 +24,9 @@ const (
 	CodeSiteLegalEntityInvalid = "ORG-SITE-LEGAL-ENTITY-INVALID"
 	CodeSiteInUse              = "ORG-SITE-IN-USE"
 	CodeSiteCalendarInvalid    = "ORG-SITE-CALENDAR-INVALID"
-	siteColumns                = "id, legal_entity_id, code, name, time_zone, status, address_id, fiscal_calendar_id, version, created_at, updated_at"
+
+	CodeSiteDefaultWarehouseInvalid = "ORG-SITE-DEFAULT-WAREHOUSE-INVALID"
+	siteColumns                     = "id, legal_entity_id, code, name, time_zone, status, address_id, fiscal_calendar_id, default_warehouse_id, version, created_at, updated_at"
 )
 
 type Site struct {
@@ -39,6 +41,10 @@ type Site struct {
 	Version          int       `json:"version"`
 	CreatedAt        time.Time `json:"createdAt"`
 	UpdatedAt        time.Time `json:"updatedAt"`
+
+	DefaultWarehouseID *string    `json:"defaultWarehouseId,omitempty"`
+	DefaultWarehouse   *Warehouse `json:"-"`
+	Replayed           bool       `json:"-"`
 }
 
 type SitePatch struct {
@@ -47,6 +53,8 @@ type SitePatch struct {
 	Status           *string `json:"status"`
 	AddressID        *string `json:"addressId"`
 	FiscalCalendarID *string `json:"fiscalCalendarId"`
+
+	DefaultWarehouseID *string `json:"defaultWarehouseId"`
 }
 
 type SiteFilter struct{ LegalEntityID, Status string }
@@ -60,7 +68,7 @@ type SitePage struct {
 
 func scanSite(row pgx.Row, extra ...any) (Site, error) {
 	var s Site
-	err := row.Scan(append([]any{&s.ID, &s.LegalEntityID, &s.Code, &s.Name, &s.TimeZone, &s.Status, &s.AddressID, &s.FiscalCalendarID, &s.Version, &s.CreatedAt, &s.UpdatedAt}, extra...)...)
+	err := row.Scan(append([]any{&s.ID, &s.LegalEntityID, &s.Code, &s.Name, &s.TimeZone, &s.Status, &s.AddressID, &s.FiscalCalendarID, &s.DefaultWarehouseID, &s.Version, &s.CreatedAt, &s.UpdatedAt}, extra...)...)
 	return s, err
 }
 
@@ -84,12 +92,18 @@ func (s *Postgres) CreateSite(ctx context.Context, in Site, idempotencyKey strin
 		key = &idempotencyKey
 	}
 	var site Site
+	var stored *Warehouse
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		if key != nil {
 			replay, err := scanSite(tx.QueryRow(ctx, `select `+siteColumns+` from site where tenant_id = $1 and idempotency_key = $2`, p.TenantID, *key))
 			if err == nil {
-				site = replay
-				return nil
+				site, site.Replayed = replay, true
+				if replay.DefaultWarehouseID == nil {
+					return nil
+				}
+				found, err := scanWarehouse(tx.QueryRow(ctx, `select `+warehouseColumns+` from warehouse where tenant_id = $1 and id = $2`, p.TenantID, *replay.DefaultWarehouseID))
+				stored = &found
+				return err
 			}
 			if !errors.Is(err, pgx.ErrNoRows) {
 				return err
@@ -118,19 +132,51 @@ func (s *Postgres) CreateSite(ctx context.Context, in Site, idempotencyKey strin
 			values ($1, $2, $3, $4, $5, $6, $7, $8)
 			on conflict (tenant_id, idempotency_key) do update set version = site.version
 			returning `+siteColumns+`, (xmax = 0)`, p.TenantID, ids.New(), in.LegalEntityID, in.Code, in.Name, zone, in.FiscalCalendarID, key), &inserted)
-		if err != nil || !inserted {
+		if err != nil {
 			return err
 		}
-		return enqueue(ctx, tx, "site", site.ID, orgevents.SiteCreated, p.TenantID, orgevents.SiteCreatedData{ID: site.ID, LegalEntityID: site.LegalEntityID})
+		if !inserted {
+			site.Replayed = true
+			return nil
+		}
+		var created Warehouse
+		if in.DefaultWarehouse != nil {
+			if created, _, err = insertWarehouse(ctx, tx, p.TenantID, site, *in.DefaultWarehouse, nil); err != nil {
+				return err
+			}
+			if _, err = tx.Exec(ctx, `update site set default_warehouse_id = $3 where tenant_id = $1 and id = $2`, p.TenantID, site.ID, created.ID); err != nil {
+				return err
+			}
+			site.DefaultWarehouseID = &created.ID
+			stored = &created
+		}
+		if err := enqueue(ctx, tx, "site", site.ID, orgevents.SiteCreated, p.TenantID, orgevents.SiteCreatedData{ID: site.ID, LegalEntityID: site.LegalEntityID, DefaultWarehouseID: site.DefaultWarehouseID}); err != nil {
+			return err
+		}
+		if in.DefaultWarehouse == nil {
+			return nil
+		}
+		return enqueueWarehouseCreated(ctx, tx, p.TenantID, created)
 	})
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
+		if pgErr.TableName == "warehouse" {
+			return Site{}, mapWarehouseConstraint(err)
+		}
 		return Site{}, httpx.NewProblem(http.StatusConflict, CodeSiteCodeDuplicate, "a site with this code already exists in the legal entity")
 	}
-	if err == nil && key != nil && (site.LegalEntityID != in.LegalEntityID || site.Code != in.Code || site.Name != in.Name || (in.TimeZone != "" && site.TimeZone != in.TimeZone) || deref(site.FiscalCalendarID) != deref(in.FiscalCalendarID)) {
+	if err == nil && key != nil && (site.LegalEntityID != in.LegalEntityID || site.Code != in.Code || site.Name != in.Name || (in.TimeZone != "" && site.TimeZone != in.TimeZone) || deref(site.FiscalCalendarID) != deref(in.FiscalCalendarID) || defaultWarehouseDiffers(stored, in.DefaultWarehouse)) {
 		return Site{}, httpx.NewProblem(http.StatusUnprocessableEntity, CodeIdempotencyReuse, "Idempotency-Key was already used with a different request body")
 	}
 	return site, err
+}
+
+func defaultWarehouseDiffers(existing, requested *Warehouse) bool {
+	if existing == nil || requested == nil {
+		return existing != requested
+	}
+	return existing.Code != requested.Code || existing.Name != requested.Name ||
+		(requested.Type != "" && existing.Type != requested.Type) || (requested.TimeZone != "" && existing.TimeZone != requested.TimeZone)
 }
 
 func (s *Postgres) GetSite(ctx context.Context, id string) (Site, error) {
@@ -199,6 +245,10 @@ func (in SitePatch) apply(site Site) (Site, []string) {
 	if site.FiscalCalendarID, calendarChanged = applyID(site.FiscalCalendarID, in.FiscalCalendarID); calendarChanged {
 		changed = append(changed, "fiscal_calendar_id")
 	}
+	var defaultChanged bool
+	if site.DefaultWarehouseID, defaultChanged = applyID(site.DefaultWarehouseID, in.DefaultWarehouseID); defaultChanged {
+		changed = append(changed, "default_warehouse_id")
+	}
 	return site, changed
 }
 
@@ -242,8 +292,20 @@ func (s *Postgres) UpdateSite(ctx context.Context, id string, version int, in Si
 				return err
 			}
 		}
-		site, err = scanSite(tx.QueryRow(ctx, `update site set name = $3, status = $4, time_zone = $5, address_id = $6, fiscal_calendar_id = $7, version = version + 1, updated_at = now()
-			where tenant_id = $1 and id = $2 returning `+siteColumns, p.TenantID, id, next.Name, next.Status, next.TimeZone, next.AddressID, next.FiscalCalendarID))
+		if slices.Contains(changed, "default_warehouse_id") && next.DefaultWarehouseID != nil {
+			var owned bool
+			if err := tx.QueryRow(ctx, `select exists (select 1 from warehouse where tenant_id = $1 and id = $2 and site_id = $3 and status = 'active' for share)`,
+				p.TenantID, *next.DefaultWarehouseID, id).Scan(&owned); err != nil {
+				return err
+			}
+			if !owned {
+				bad := httpx.NewProblem(http.StatusUnprocessableEntity, CodeSiteDefaultWarehouseInvalid, "default warehouse must be an active warehouse of this site")
+				bad.Errors = map[string]string{"defaultWarehouseId": "must be an active warehouse of this site"}
+				return bad
+			}
+		}
+		site, err = scanSite(tx.QueryRow(ctx, `update site set name = $3, status = $4, time_zone = $5, address_id = $6, fiscal_calendar_id = $7, default_warehouse_id = $8, version = version + 1, updated_at = now()
+			where tenant_id = $1 and id = $2 returning `+siteColumns, p.TenantID, id, next.Name, next.Status, next.TimeZone, next.AddressID, next.FiscalCalendarID, next.DefaultWarehouseID))
 		if err != nil {
 			return err
 		}

@@ -261,3 +261,35 @@ func TestPostgres_UpdateWarehouseVersionsAndEmitsOneEvent(t *testing.T) {
 		t.Fatalf("updated events = %v", events)
 	}
 }
+
+func TestPostgres_DefaultWarehouseCannotBeDeactivatedOrMovedUntilTheSiteReleasesIt(t *testing.T) {
+	s, ctx, _ := lifecycleStore(t)
+	a := mustCreate(t, s, ctx, newEntity("US01"))
+	site := mustCreateSite(t, s, ctx, siteWithDefault(a.ID, "S1", "MAIN"))
+	elsewhere := mustCreateSite(t, s, ctx, newSite(a.ID, "S2"))
+	plain := mustCreateWarehouse(t, s, ctx, newWarehouse(site.ID, "PLAIN"))
+	def := *site.DefaultWarehouseID
+	inactive, moved := "inactive", elsewhere.ID
+	for name, patch := range map[string]store.WarehousePatch{"deactivate": {Status: &inactive}, "move": {SiteID: &moved}} {
+		if _, err := s.UpdateWarehouse(ctx, def, 1, patch); problemCode(t, err) != store.CodeWarehouseIsDefault {
+			t.Fatalf("%s: error = %v; want ORG-WH-IS-DEFAULT", name, err)
+		}
+	}
+	if got, _ := s.GetWarehouse(ctx, def); got.Status != "active" || got.SiteID != site.ID || got.Version != 1 {
+		t.Fatalf("refusals changed the warehouse: %+v", got)
+	}
+	if got, err := s.UpdateWarehouse(ctx, plain.ID, 1, store.WarehousePatch{Status: &inactive}); err != nil || got.Status != "inactive" {
+		t.Fatalf("non-default deactivate = %+v, %v", got, err)
+	}
+	same := "active"
+	if got, err := s.UpdateWarehouse(ctx, def, 1, store.WarehousePatch{Status: &same, SiteID: &site.ID}); err != nil || got.Version != 1 {
+		t.Fatalf("unchanged values on the default = %+v, %v; want a no-op", got, err)
+	}
+	empty := ""
+	if _, err := s.UpdateSite(ctx, site.ID, 1, store.SitePatch{DefaultWarehouseID: &empty}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.UpdateWarehouse(ctx, def, 1, store.WarehousePatch{Status: &inactive}); err != nil || got.Status != "inactive" {
+		t.Fatalf("deactivate after the default was cleared = %+v, %v", got, err)
+	}
+}

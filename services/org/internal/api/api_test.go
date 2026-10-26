@@ -37,6 +37,7 @@ type fakeStore struct {
 	ouCalls             int
 	sites               []store.Site
 	siteCalls           int
+	replayCreates       bool
 	warehouses          []store.Warehouse
 	warehouseCalls      int
 	locations           []store.Location
@@ -478,10 +479,25 @@ func (f *fakeStore) CreateSite(_ context.Context, in store.Site, _ string) (stor
 	}
 	for _, s := range f.sites {
 		if s.LegalEntityID == in.LegalEntityID && s.Code == in.Code {
+			if f.replayCreates {
+				s.Replayed = true
+				return s, nil
+			}
 			return store.Site{}, httpx.NewProblem(http.StatusConflict, store.CodeSiteCodeDuplicate, "duplicate")
 		}
 	}
 	in.ID, in.Status, in.Version = fmt.Sprintf("00000000-0000-0000-0000-%012d", len(f.sites)+1), "active", 1
+	if in.DefaultWarehouse != nil {
+		for _, w := range f.warehouses {
+			if w.LegalEntityID == in.LegalEntityID && w.Code == in.DefaultWarehouse.Code {
+				return store.Site{}, httpx.NewProblem(http.StatusConflict, store.CodeWarehouseCodeDuplicate, "duplicate")
+			}
+		}
+		created := *in.DefaultWarehouse
+		created.ID, created.LegalEntityID, created.SiteID, created.Status, created.Version = fmt.Sprintf("00000000-0000-0000-0001-%012d", len(f.warehouses)+1), in.LegalEntityID, in.ID, "active", 1
+		f.warehouses = append(f.warehouses, created)
+		in.DefaultWarehouseID = &created.ID
+	}
 	f.sites = append(f.sites, in)
 	return in, nil
 }
@@ -541,11 +557,30 @@ func (f *fakeStore) UpdateSite(_ context.Context, id string, version int, in sto
 			}
 		}
 	}
+	if in.DefaultWarehouseID != nil {
+		if *in.DefaultWarehouseID == "" {
+			s.DefaultWarehouseID = nil
+		} else if !f.activeWarehouseOf(id, *in.DefaultWarehouseID) {
+			return store.Site{}, httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeSiteDefaultWarehouseInvalid, "invalid")
+		} else {
+			s.DefaultWarehouseID = in.DefaultWarehouseID
+		}
+		s.Version++
+	}
 	if in.Name != nil && *in.Name != s.Name {
 		s.Name = *in.Name
 		s.Version++
 	}
 	return *s, nil
+}
+
+func (f *fakeStore) activeWarehouseOf(siteID, warehouseID string) bool {
+	for _, w := range f.warehouses {
+		if w.ID == warehouseID && w.SiteID == siteID && w.Status == "active" {
+			return true
+		}
+	}
+	return false
 }
 
 func (f *fakeStore) CreateWarehouse(_ context.Context, in store.Warehouse, _ string) (store.Warehouse, error) {
@@ -628,6 +663,11 @@ func (f *fakeStore) UpdateWarehouse(_ context.Context, id string, version int, i
 			if s.ID == *in.SiteID && s.LegalEntityID != w.LegalEntityID {
 				return store.Warehouse{}, httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeWarehouseLegalEntityMismatch, "mismatch")
 			}
+		}
+	}
+	for _, s := range f.sites {
+		if s.DefaultWarehouseID != nil && *s.DefaultWarehouseID == id && ((in.Status != nil && *in.Status == "inactive") || (in.SiteID != nil && *in.SiteID != w.SiteID)) {
+			return store.Warehouse{}, httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeWarehouseIsDefault, "is default")
 		}
 	}
 	if in.Name != nil && *in.Name != w.Name {

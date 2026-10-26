@@ -69,6 +69,9 @@ func TestWarehouses(t *testing.T) {
 		{"create uppercase site id", seededSites(), http.MethodPost, warehousesPath, warehouseBody(strings.ToUpper(siteID1), "w1"), siteDuties, true, http.StatusCreated, `"siteId":"` + siteID1 + `"`},
 		{"patch uppercase site in another legal entity", seededWarehouses(), http.MethodPatch, warehousesPath + "/" + warehouseID1, `{"version":1,"siteId":"` + strings.ToUpper(siteOtherLE) + `"}`, siteDuties, true, http.StatusUnprocessableEntity, "ORG-WH-LE-MISMATCH"},
 		{"patch without duty", seededWarehouses(), http.MethodPatch, warehousesPath + "/" + warehouseID1, `{"version":1}`, "org.read", true, http.StatusForbidden, "AUTH-0003"},
+		{"patch deactivate default", defaultSeeded(), http.MethodPatch, warehousesPath + "/" + warehouseID1, `{"version":1,"status":"inactive"}`, siteDuties, true, http.StatusUnprocessableEntity, "ORG-WH-IS-DEFAULT"},
+		{"patch move default", defaultSeeded(), http.MethodPatch, warehousesPath + "/" + warehouseID1, `{"version":1,"siteId":"` + siteID1[:35] + `9"}`, siteDuties, true, http.StatusUnprocessableEntity, "ORG-WH-IS-DEFAULT"},
+		{"patch deactivate non-default", seededWarehouses(), http.MethodPatch, warehousesPath + "/" + warehouseID1, `{"version":1,"status":"inactive"}`, siteDuties, true, http.StatusOK, `"code":"W1"`},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

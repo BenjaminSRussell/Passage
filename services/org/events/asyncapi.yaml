@@ -188,11 +188,12 @@ components:
           parent_id: { type: [string, 'null'], format: uuid }
           type: { type: [string, 'null'] }
           address_id: { type: [string, 'null'], format: uuid, description: Null until the address slice. }
+          default_warehouse_id: { type: string, format: uuid, description: Present only when the site was created with a default warehouse; that warehouse's own warehouse.created event follows this one. }
       x-passage-type: dev.passage.org.site.created.v1
     siteUpdated:
       name: updated
       title: Site updated
-      description: changed_fields names the fields whose value changed, including fiscal_calendar_id when the site's fiscal calendar is set, changed or cleared.
+      description: changed_fields names the fields whose value changed, including fiscal_calendar_id when the site's fiscal calendar is set, changed or cleared and default_warehouse_id when the site's default warehouse is set, re-pointed or cleared.
       payload:
         type: object
         required: [id, changed_fields, version]

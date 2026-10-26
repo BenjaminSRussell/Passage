@@ -29,6 +29,15 @@ type createSiteRequest struct {
 	Name             string  `json:"name"`
 	TimeZone         *string `json:"timeZone"`
 	FiscalCalendarID *string `json:"fiscalCalendarId"`
+
+	DefaultWarehouse *createDefaultWarehouse `json:"defaultWarehouse"`
+}
+
+type createDefaultWarehouse struct {
+	Code     string  `json:"code"`
+	Name     string  `json:"name"`
+	Type     *string `json:"type"`
+	TimeZone *string `json:"timeZone"`
 }
 
 type updateSiteRequest struct {
@@ -73,6 +82,9 @@ func (a *API) createSite(w http.ResponseWriter, r *http.Request) {
 		lowered := strings.ToLower(*req.FiscalCalendarID)
 		in.FiscalCalendarID = &lowered
 	}
+	if req.DefaultWarehouse != nil {
+		in.DefaultWarehouse = validateDefaultWarehouse(fields, *req.DefaultWarehouse)
+	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
 		return
@@ -84,7 +96,31 @@ func (a *API) createSite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.siteCreated.Add(1)
+	if in.DefaultWarehouse != nil && !site.Replayed {
+		a.siteDefaultWarehouses.Add(1)
+	}
 	httpx.JSON(w, http.StatusCreated, site)
+}
+
+func validateDefaultWarehouse(fields map[string]string, req createDefaultWarehouse) *store.Warehouse {
+	in := store.Warehouse{Code: strings.ToUpper(req.Code), Name: strings.TrimSpace(req.Name)}
+	nested := validateShared(&in.Name, req.TimeZone, nil, nil)
+	if req.TimeZone != nil {
+		in.TimeZone = *req.TimeZone
+	}
+	if req.Type != nil {
+		in.Type = *req.Type
+		if !warehouseType(in.Type) {
+			nested["type"] = invalidWarehouseTy
+		}
+	}
+	if !siteCode.MatchString(in.Code) {
+		nested["code"] = "must be 1 to 10 characters of A-Z, 0-9, _ or -, starting with A-Z or 0-9"
+	}
+	for field, rule := range nested {
+		fields["defaultWarehouse."+field] = rule
+	}
+	return &in
 }
 
 func (a *API) listSites(w http.ResponseWriter, r *http.Request) {
@@ -183,9 +219,14 @@ func (a *API) updateSite(w http.ResponseWriter, r *http.Request, id string) {
 	}
 	optionalID(fields, "addressId", req.AddressID, true)
 	optionalID(fields, "fiscalCalendarId", req.FiscalCalendarID, true)
+	optionalID(fields, "defaultWarehouseId", req.DefaultWarehouseID, true)
 	if req.FiscalCalendarID != nil {
 		lowered := strings.ToLower(*req.FiscalCalendarID)
 		req.FiscalCalendarID = &lowered
+	}
+	if req.DefaultWarehouseID != nil {
+		lowered := strings.ToLower(*req.DefaultWarehouseID)
+		req.DefaultWarehouseID = &lowered
 	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)

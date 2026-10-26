@@ -78,6 +78,20 @@ func TestSites(t *testing.T) {
 		{"patch stale version", seededSites(), http.MethodPatch, sitesPath + "/" + siteID1, `{"version":7,"name":"x"}`, siteDuties, true, http.StatusConflict, "ORG-VERSION-CONFLICT"},
 		{"patch malformed id", seededSites(), http.MethodPatch, sitesPath + "/nope", `{"version":1}`, siteDuties, true, http.StatusNotFound, "ORG-SITE-NOT-FOUND"},
 		{"patch without duty", seededSites(), http.MethodPatch, sitesPath + "/" + siteID1, `{"version":1}`, "org.read", true, http.StatusForbidden, "AUTH-0003"},
+		{"create with default warehouse", &fakeStore{}, http.MethodPost, sitesPath, withDefault(`{"code":"main","name":"Main"}`), siteDuties, true, http.StatusCreated, `"defaultWarehouseId":"00000000-0000-0000-0001-000000000001"`},
+		{"create with default warehouse duplicate code", seededWarehouses(), http.MethodPost, sitesPath, strings.Replace(withDefault(`{"code":"w1","name":"Main"}`), `"S1"`, `"S9"`, 1), siteDuties, true, http.StatusConflict, "ORG-WH-CODE-DUPLICATE"},
+		{"create default warehouse bad code", &fakeStore{}, http.MethodPost, sitesPath, withDefault(`{"code":"bad code","name":"Main"}`), siteDuties, true, http.StatusBadRequest, `"defaultWarehouse.code"`},
+		{"create default warehouse empty object", &fakeStore{}, http.MethodPost, sitesPath, withDefault(`{}`), siteDuties, true, http.StatusBadRequest, `"defaultWarehouse.name"`},
+		{"create default warehouse long name", &fakeStore{}, http.MethodPost, sitesPath, withDefault(`{"code":"M","name":"` + strings.Repeat("x", 121) + `"}`), siteDuties, true, http.StatusBadRequest, `"defaultWarehouse.name"`},
+		{"create default warehouse bad type", &fakeStore{}, http.MethodPost, sitesPath, withDefault(`{"code":"M","name":"Main","type":"bulk"}`), siteDuties, true, http.StatusBadRequest, `"defaultWarehouse.type"`},
+		{"create default warehouse bad time zone", &fakeStore{}, http.MethodPost, sitesPath, withDefault(`{"code":"M","name":"Main","timeZone":"Mars/Base"}`), siteDuties, true, http.StatusBadRequest, `"defaultWarehouse.timeZone"`},
+		{"create default warehouse not an object", &fakeStore{}, http.MethodPost, sitesPath, withDefault(`"MAIN"`), siteDuties, true, http.StatusBadRequest, "COM-0001"},
+		{"create default warehouse unknown field", &fakeStore{}, http.MethodPost, sitesPath, withDefault(`{"code":"M","name":"Main","x":1}`), siteDuties, true, http.StatusBadRequest, "COM-0001"},
+		{"create null default warehouse", &fakeStore{}, http.MethodPost, sitesPath, withDefault(`null`), siteDuties, true, http.StatusCreated, `"code":"S1"`},
+		{"patch default warehouse bad id", seededSites(), http.MethodPatch, sitesPath + "/" + siteID1, `{"version":1,"defaultWarehouseId":"abc"}`, siteDuties, true, http.StatusBadRequest, `"defaultWarehouseId"`},
+		{"patch default warehouse unknown", seededSites(), http.MethodPatch, sitesPath + "/" + siteID1, `{"version":1,"defaultWarehouseId":"` + warehouseID1 + `"}`, siteDuties, true, http.StatusUnprocessableEntity, "ORG-SITE-DEFAULT-WAREHOUSE-INVALID"},
+		{"patch default warehouse set", seededWarehouses(), http.MethodPatch, sitesPath + "/" + siteID1, `{"version":1,"defaultWarehouseId":"` + strings.ToUpper(warehouseID1) + `"}`, siteDuties, true, http.StatusOK, `"defaultWarehouseId":"` + warehouseID1 + `"`},
+		{"patch default warehouse clear", defaultSeeded(), http.MethodPatch, sitesPath + "/" + siteID1, `{"version":1,"defaultWarehouseId":""}`, siteDuties, true, http.StatusOK, `"version":2`},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -144,6 +158,33 @@ func TestSites_MetricsCountCreatesAndVersionBumps(t *testing.T) {
 	rec := httptest.NewRecorder()
 	a.Metrics().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	for _, want := range []string{"org_sites_created_total 1", "org_sites_updated_total 1"} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("metrics missing %q in %s", want, rec.Body.String())
+		}
+	}
+}
+
+func withDefault(object string) string {
+	return `{"legalEntityId":"` + siteLE1 + `","code":"S1","name":"Plant","defaultWarehouse":` + object + `}`
+}
+
+func defaultSeeded() *fakeStore {
+	f := seededWarehouses()
+	f.sites[0].DefaultWarehouseID = &f.warehouses[0].ID
+	return f
+}
+
+func TestSites_MetricCountsOnlyFreshCreatesWithADefaultWarehouse(t *testing.T) {
+	f := &fakeStore{}
+	r, a := newRouter(f)
+	do(r, http.MethodPost, sitesPath, siteBody(siteLE1, "S1"), siteDuties, true)
+	do(r, http.MethodPost, sitesPath, `{"legalEntityId":"`+siteLE1+`","code":"S2","name":"Plant","defaultWarehouse":{"code":"M2","name":"Main"}}`, siteDuties, true)
+	do(r, http.MethodPost, sitesPath, `{"legalEntityId":"`+siteLE1+`","code":"S3","name":"Plant","defaultWarehouse":{"code":"bad code","name":"Main"}}`, siteDuties, true)
+	f.replayCreates = true
+	do(r, http.MethodPost, sitesPath, `{"legalEntityId":"`+siteLE1+`","code":"S2","name":"Plant","defaultWarehouse":{"code":"M2","name":"Main"}}`, siteDuties, true)
+	rec := httptest.NewRecorder()
+	a.Metrics().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	for _, want := range []string{"# TYPE org_site_default_warehouses_total counter", "org_site_default_warehouses_total 1\n", "org_sites_created_total 3"} {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Fatalf("metrics missing %q in %s", want, rec.Body.String())
 		}

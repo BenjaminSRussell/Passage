@@ -61,6 +61,8 @@ type SiteCreatedData struct {
 	ParentID      *string `json:"parent_id"`
 	Type          *string `json:"type"`
 	AddressID     *string `json:"address_id"`
+
+	DefaultWarehouseID *string `json:"default_warehouse_id,omitempty"`
 }
 
 type SiteUpdatedData struct {
