@@ -25,6 +25,7 @@ const (
 	CodeFiscalYearLocked       = "ORG-CAL-LOCKED"
 	CodeFiscalCalendarInUse    = "ORG-CAL-IN-USE"
 	CodeFiscalCalendarInactive = "ORG-CAL-INACTIVE"
+	CodeFiscalPeriodNotFound   = "ORG-CAL-PERIOD-NOT-FOUND"
 	fiscalDateLayout           = "2006-01-02"
 	fiscalCalendarColumns      = "id, code, name, pattern, start_month, week_start, opening_closing, special_periods, status, version, created_at, updated_at, array(select distinct fiscal_year::int from fiscal_period p where p.tenant_id = fiscal_calendar.tenant_id and p.calendar_id = fiscal_calendar.id order by 1)"
 	fiscalPeriodColumns        = "fiscal_year, period_no, name, start_date, end_date, type, week53"
@@ -78,6 +79,14 @@ type FiscalPeriod struct {
 	Week53     bool   `json:"week53"`
 }
 
+type FiscalPeriodResolution struct {
+	SiteID        string       `json:"siteId,omitempty"`
+	LegalEntityID string       `json:"legalEntityId"`
+	CalendarID    string       `json:"calendarId"`
+	Source        string       `json:"source"`
+	Period        FiscalPeriod `json:"period"`
+}
+
 type FiscalYear struct {
 	CalendarID string         `json:"calendarId"`
 	FiscalYear int            `json:"fiscalYear"`
@@ -126,6 +135,74 @@ func loadFiscalCalendar(ctx context.Context, tx pgx.Tx, tenantID, id string, loc
 		return c, fiscalCalendarNotFound()
 	}
 	return c, err
+}
+
+func resolveOperatingPeriod(ctx context.Context, tx pgx.Tx, tenantID, calendarID string, date time.Time) (FiscalPeriod, error) {
+	period, err := scanFiscalPeriod(tx.QueryRow(ctx, `select `+fiscalPeriodColumns+` from fiscal_period
+		where tenant_id = $1 and calendar_id = $2 and type = 'operating' and start_date <= $3 and end_date >= $3`, tenantID, calendarID, date))
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return period, err
+	}
+	calendar, err := loadFiscalCalendar(ctx, tx, tenantID, calendarID, "")
+	if err != nil {
+		return FiscalPeriod{}, err
+	}
+	return FiscalPeriod{}, httpx.NewProblem(http.StatusNotFound, CodeFiscalPeriodNotFound, fmt.Sprintf("No generated fiscal period of calendar %s contains %s.", calendar.Code, date.Format(fiscalDateLayout)))
+}
+
+func (s *Postgres) ResolveFiscalPeriod(ctx context.Context, legalEntityID string, date time.Time) (FiscalPeriodResolution, error) {
+	p, _ := tenant.FromContext(ctx)
+	out := FiscalPeriodResolution{LegalEntityID: legalEntityID, Source: "legalEntity"}
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var calendarID *string
+		err := tx.QueryRow(ctx, `select fiscal_calendar_id from legal_entity where tenant_id = $1 and id = $2`, p.TenantID, legalEntityID).Scan(&calendarID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return legalEntityNotFound()
+		}
+		if err != nil {
+			return err
+		}
+		if calendarID == nil {
+			return noCalendar()
+		}
+		out.CalendarID = *calendarID
+		out.Period, err = resolveOperatingPeriod(ctx, tx, p.TenantID, out.CalendarID, date)
+		return err
+	})
+	return out, err
+}
+
+func noCalendar() error {
+	return httpx.NewProblem(http.StatusUnprocessableEntity, CodeLegalEntityNoCalendar, "neither the site nor its legal entity has a fiscal calendar")
+}
+
+func (s *Postgres) ResolveSiteFiscalPeriod(ctx context.Context, siteID string, date time.Time) (FiscalPeriodResolution, error) {
+	p, _ := tenant.FromContext(ctx)
+	out := FiscalPeriodResolution{SiteID: siteID}
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var siteCalendar, entityCalendar *string
+		err := tx.QueryRow(ctx, `select s.legal_entity_id, s.fiscal_calendar_id, e.fiscal_calendar_id from site s
+			join legal_entity e on e.tenant_id = s.tenant_id and e.id = s.legal_entity_id
+			where s.tenant_id = $1 and s.id = $2`, p.TenantID, siteID).Scan(&out.LegalEntityID, &siteCalendar, &entityCalendar)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return siteNotFound()
+		}
+		if err != nil {
+			return err
+		}
+		out.Source = "site"
+		calendarID := siteCalendar
+		if calendarID == nil {
+			out.Source, calendarID = "legalEntity", entityCalendar
+		}
+		if calendarID == nil {
+			return noCalendar()
+		}
+		out.CalendarID = *calendarID
+		out.Period, err = resolveOperatingPeriod(ctx, tx, p.TenantID, out.CalendarID, date)
+		return err
+	})
+	return out, err
 }
 
 func readFiscalPeriods(ctx context.Context, tx pgx.Tx, tenantID, id string, year int) ([]FiscalPeriod, error) {
@@ -305,12 +382,17 @@ func (s *Postgres) UpdateFiscalCalendar(ctx context.Context, id string, version 
 			return nil
 		}
 		if next.Status == "inactive" && current.Status != "inactive" {
-			var assigned int
-			if err := tx.QueryRow(ctx, `select count(*) from legal_entity where tenant_id = $1 and fiscal_calendar_id = $2 and status = 'active'`, p.TenantID, id).Scan(&assigned); err != nil {
+			var assigned, assignedSites int
+			if err := tx.QueryRow(ctx, `select (select count(*) from legal_entity where tenant_id = $1 and fiscal_calendar_id = $2 and status = 'active'),
+				(select count(*) from site where tenant_id = $1 and fiscal_calendar_id = $2 and status = 'active')`, p.TenantID, id).Scan(&assigned, &assignedSites); err != nil {
 				return err
 			}
-			if assigned > 0 {
-				return httpx.NewProblem(http.StatusConflict, CodeFiscalCalendarInUse, fmt.Sprintf("Fiscal calendar %s is assigned to %d active legal entities.", current.Code, assigned))
+			if assigned > 0 || assignedSites > 0 {
+				detail := fmt.Sprintf("Fiscal calendar %s is assigned to %d active legal entities", current.Code, assigned)
+				if assignedSites > 0 {
+					detail += fmt.Sprintf(" and %d active sites", assignedSites)
+				}
+				return httpx.NewProblem(http.StatusConflict, CodeFiscalCalendarInUse, detail+".")
 			}
 		}
 		c, err = scanFiscalCalendar(tx.QueryRow(ctx, `update fiscal_calendar set name = $3, status = $4, version = version + 1, updated_at = now()

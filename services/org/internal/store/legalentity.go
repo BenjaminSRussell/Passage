@@ -24,6 +24,7 @@ const (
 	CodeReferenceInactive          = "ORG-LE-REFERENCE-INACTIVE"
 	CodeLegalEntityLimit           = "ORG-LE-LIMIT"
 	CodeLegalEntityCalendarInvalid = "ORG-LE-CALENDAR-INVALID"
+	CodeLegalEntityNoCalendar      = "ORG-LE-NO-CALENDAR"
 )
 
 type LegalEntityPatch struct {
@@ -95,7 +96,7 @@ func checkActiveReferences(ctx context.Context, tx pgx.Tx, tenantID, country, cu
 	return nil
 }
 
-func checkAssignableCalendar(ctx context.Context, tx pgx.Tx, tenantID, calendarID string) error {
+func checkAssignableCalendar(ctx context.Context, tx pgx.Tx, tenantID, calendarID, code string) error {
 	var status string
 	var generated bool
 	err := tx.QueryRow(ctx, `select status, exists(select 1 from fiscal_period where tenant_id = $1 and calendar_id = $2) from fiscal_calendar where tenant_id = $1 and id = $2 for share of fiscal_calendar`,
@@ -106,7 +107,7 @@ func checkAssignableCalendar(ctx context.Context, tx pgx.Tx, tenantID, calendarI
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return err
 	}
-	p := httpx.NewProblem(http.StatusUnprocessableEntity, CodeLegalEntityCalendarInvalid, "fiscal calendar is unknown, inactive or has no generated year")
+	p := httpx.NewProblem(http.StatusUnprocessableEntity, code, "fiscal calendar is unknown, inactive or has no generated year")
 	p.Errors = map[string]string{"fiscalCalendarId": "must be an active fiscal calendar with at least one generated year"}
 	return p
 }
@@ -183,7 +184,7 @@ func (s *Postgres) UpdateLegalEntity(ctx context.Context, id string, version int
 			}
 		}
 		if slices.Contains(changed, "fiscal_calendar_id") && next.FiscalCalendarID != nil {
-			if err := checkAssignableCalendar(ctx, tx, p.TenantID, *next.FiscalCalendarID); err != nil {
+			if err := checkAssignableCalendar(ctx, tx, p.TenantID, *next.FiscalCalendarID, CodeLegalEntityCalendarInvalid); err != nil {
 				return err
 			}
 		}

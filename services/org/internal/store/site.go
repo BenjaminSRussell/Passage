@@ -23,27 +23,30 @@ const (
 	CodeSiteCodeDuplicate      = "ORG-SITE-CODE-DUPLICATE"
 	CodeSiteLegalEntityInvalid = "ORG-SITE-LEGAL-ENTITY-INVALID"
 	CodeSiteInUse              = "ORG-SITE-IN-USE"
-	siteColumns                = "id, legal_entity_id, code, name, time_zone, status, address_id, version, created_at, updated_at"
+	CodeSiteCalendarInvalid    = "ORG-SITE-CALENDAR-INVALID"
+	siteColumns                = "id, legal_entity_id, code, name, time_zone, status, address_id, fiscal_calendar_id, version, created_at, updated_at"
 )
 
 type Site struct {
-	ID            string    `json:"id"`
-	LegalEntityID string    `json:"legalEntityId"`
-	Code          string    `json:"code"`
-	Name          string    `json:"name"`
-	TimeZone      string    `json:"timeZone"`
-	Status        string    `json:"status"`
-	AddressID     *string   `json:"addressId,omitempty"`
-	Version       int       `json:"version"`
-	CreatedAt     time.Time `json:"createdAt"`
-	UpdatedAt     time.Time `json:"updatedAt"`
+	ID               string    `json:"id"`
+	LegalEntityID    string    `json:"legalEntityId"`
+	Code             string    `json:"code"`
+	Name             string    `json:"name"`
+	TimeZone         string    `json:"timeZone"`
+	Status           string    `json:"status"`
+	AddressID        *string   `json:"addressId,omitempty"`
+	FiscalCalendarID *string   `json:"fiscalCalendarId,omitempty"`
+	Version          int       `json:"version"`
+	CreatedAt        time.Time `json:"createdAt"`
+	UpdatedAt        time.Time `json:"updatedAt"`
 }
 
 type SitePatch struct {
-	Name      *string `json:"name"`
-	TimeZone  *string `json:"timeZone"`
-	Status    *string `json:"status"`
-	AddressID *string `json:"addressId"`
+	Name             *string `json:"name"`
+	TimeZone         *string `json:"timeZone"`
+	Status           *string `json:"status"`
+	AddressID        *string `json:"addressId"`
+	FiscalCalendarID *string `json:"fiscalCalendarId"`
 }
 
 type SiteFilter struct{ LegalEntityID, Status string }
@@ -57,7 +60,7 @@ type SitePage struct {
 
 func scanSite(row pgx.Row, extra ...any) (Site, error) {
 	var s Site
-	err := row.Scan(append([]any{&s.ID, &s.LegalEntityID, &s.Code, &s.Name, &s.TimeZone, &s.Status, &s.AddressID, &s.Version, &s.CreatedAt, &s.UpdatedAt}, extra...)...)
+	err := row.Scan(append([]any{&s.ID, &s.LegalEntityID, &s.Code, &s.Name, &s.TimeZone, &s.Status, &s.AddressID, &s.FiscalCalendarID, &s.Version, &s.CreatedAt, &s.UpdatedAt}, extra...)...)
 	return s, err
 }
 
@@ -105,11 +108,16 @@ func (s *Postgres) CreateSite(ctx context.Context, in Site, idempotencyKey strin
 		if zone == "" {
 			zone = legalEntityZone
 		}
+		if in.FiscalCalendarID != nil {
+			if err := checkAssignableCalendar(ctx, tx, p.TenantID, *in.FiscalCalendarID, CodeSiteCalendarInvalid); err != nil {
+				return err
+			}
+		}
 		var inserted bool
-		site, err = scanSite(tx.QueryRow(ctx, `insert into site (tenant_id, id, legal_entity_id, code, name, time_zone, idempotency_key)
-			values ($1, $2, $3, $4, $5, $6, $7)
+		site, err = scanSite(tx.QueryRow(ctx, `insert into site (tenant_id, id, legal_entity_id, code, name, time_zone, fiscal_calendar_id, idempotency_key)
+			values ($1, $2, $3, $4, $5, $6, $7, $8)
 			on conflict (tenant_id, idempotency_key) do update set version = site.version
-			returning `+siteColumns+`, (xmax = 0)`, p.TenantID, ids.New(), in.LegalEntityID, in.Code, in.Name, zone, key), &inserted)
+			returning `+siteColumns+`, (xmax = 0)`, p.TenantID, ids.New(), in.LegalEntityID, in.Code, in.Name, zone, in.FiscalCalendarID, key), &inserted)
 		if err != nil || !inserted {
 			return err
 		}
@@ -119,7 +127,7 @@ func (s *Postgres) CreateSite(ctx context.Context, in Site, idempotencyKey strin
 	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
 		return Site{}, httpx.NewProblem(http.StatusConflict, CodeSiteCodeDuplicate, "a site with this code already exists in the legal entity")
 	}
-	if err == nil && key != nil && (site.LegalEntityID != in.LegalEntityID || site.Code != in.Code || site.Name != in.Name || (in.TimeZone != "" && site.TimeZone != in.TimeZone)) {
+	if err == nil && key != nil && (site.LegalEntityID != in.LegalEntityID || site.Code != in.Code || site.Name != in.Name || (in.TimeZone != "" && site.TimeZone != in.TimeZone) || deref(site.FiscalCalendarID) != deref(in.FiscalCalendarID)) {
 		return Site{}, httpx.NewProblem(http.StatusUnprocessableEntity, CodeIdempotencyReuse, "Idempotency-Key was already used with a different request body")
 	}
 	return site, err
@@ -187,6 +195,10 @@ func (in SitePatch) apply(site Site) (Site, []string) {
 	if site.AddressID, addressChanged = applyID(site.AddressID, in.AddressID); addressChanged {
 		changed = append(changed, "address_id")
 	}
+	var calendarChanged bool
+	if site.FiscalCalendarID, calendarChanged = applyID(site.FiscalCalendarID, in.FiscalCalendarID); calendarChanged {
+		changed = append(changed, "fiscal_calendar_id")
+	}
 	return site, changed
 }
 
@@ -225,8 +237,13 @@ func (s *Postgres) UpdateSite(ctx context.Context, id string, version int, in Si
 				return err
 			}
 		}
-		site, err = scanSite(tx.QueryRow(ctx, `update site set name = $3, status = $4, time_zone = $5, address_id = $6, version = version + 1, updated_at = now()
-			where tenant_id = $1 and id = $2 returning `+siteColumns, p.TenantID, id, next.Name, next.Status, next.TimeZone, next.AddressID))
+		if slices.Contains(changed, "fiscal_calendar_id") && next.FiscalCalendarID != nil {
+			if err := checkAssignableCalendar(ctx, tx, p.TenantID, *next.FiscalCalendarID, CodeSiteCalendarInvalid); err != nil {
+				return err
+			}
+		}
+		site, err = scanSite(tx.QueryRow(ctx, `update site set name = $3, status = $4, time_zone = $5, address_id = $6, fiscal_calendar_id = $7, version = version + 1, updated_at = now()
+			where tenant_id = $1 and id = $2 returning `+siteColumns, p.TenantID, id, next.Name, next.Status, next.TimeZone, next.AddressID, next.FiscalCalendarID))
 		if err != nil {
 			return err
 		}

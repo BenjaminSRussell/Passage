@@ -24,10 +24,11 @@ const (
 var siteCode = regexp.MustCompile(`^[A-Z0-9][A-Z0-9_-]{0,9}$`)
 
 type createSiteRequest struct {
-	LegalEntityID string  `json:"legalEntityId"`
-	Code          string  `json:"code"`
-	Name          string  `json:"name"`
-	TimeZone      *string `json:"timeZone"`
+	LegalEntityID    string  `json:"legalEntityId"`
+	Code             string  `json:"code"`
+	Name             string  `json:"name"`
+	TimeZone         *string `json:"timeZone"`
+	FiscalCalendarID *string `json:"fiscalCalendarId"`
 }
 
 type updateSiteRequest struct {
@@ -66,6 +67,11 @@ func (a *API) createSite(w http.ResponseWriter, r *http.Request) {
 	}
 	if !siteCode.MatchString(in.Code) {
 		fields["code"] = "must be 1 to 10 characters of A-Z, 0-9, _ or -, starting with A-Z or 0-9"
+	}
+	if req.FiscalCalendarID != nil {
+		optionalID(fields, "fiscalCalendarId", req.FiscalCalendarID, false)
+		lowered := strings.ToLower(*req.FiscalCalendarID)
+		in.FiscalCalendarID = &lowered
 	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
@@ -176,6 +182,11 @@ func (a *API) updateSite(w http.ResponseWriter, r *http.Request, id string) {
 		fields["status"] = "must be active or inactive"
 	}
 	optionalID(fields, "addressId", req.AddressID, true)
+	optionalID(fields, "fiscalCalendarId", req.FiscalCalendarID, true)
+	if req.FiscalCalendarID != nil {
+		lowered := strings.ToLower(*req.FiscalCalendarID)
+		req.FiscalCalendarID = &lowered
+	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
 		return

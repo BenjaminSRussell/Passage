@@ -60,6 +60,18 @@ paths:
           description: The legal entity. A stale version is 409 ORG-VERSION-CONFLICT. A request that changes no value returns the stored entity with the same version and emits no event. 422 ORG-LE-CALENDAR-INVALID, field fiscalCalendarId, when the calendar is unknown, inactive or has no generated year. Changing the default language to an unknown or inactive language is 422 ORG-LE-REFERENCE-INACTIVE. 400 COM-0001 for a field error. 404 ORG-LE-NOT-FOUND. 422 ORG-ADDR-NOT-OWNED, naming the field in errors, when the address pointer is not a current address owned by this record; an old version id, another owner's address and an address outside the caller's scope all fail. 403 AUTH-0003 without the duty.
           content: { application/json: { schema: { $ref: '#/components/schemas/LegalEntity' } } }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/org/legal-entities/{id}/fiscal-period:
+    get:
+      operationId: resolveLegalEntityFiscalPeriod
+      x-passage-duty: org.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: date, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: The operating period of the legal entity's fiscal calendar that contains the date, with source legalEntity. Opening, closing and adjustment periods are never returned. An inactive calendar still resolves. 400 COM-0001 naming date when it is missing or not YYYY-MM-DD. 404 ORG-LE-NOT-FOUND for a malformed, unknown or out-of-scope id. 404 ORG-CAL-PERIOD-NOT-FOUND when no generated period of the calendar contains the date. 422 ORG-LE-NO-CALENDAR when the legal entity has no calendar. 403 AUTH-0003 without the duty.
+          content: { application/json: { schema: { $ref: '#/components/schemas/FiscalPeriodResolution' } } }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/org/legal-entities/{id}/names:
     get:
       operationId: listLegalEntityNames
@@ -288,7 +300,7 @@ paths:
         content: { application/json: { schema: { $ref: '#/components/schemas/CreateSite' } } }
       responses:
         '201':
-          description: Site created, or the original site on an Idempotency-Key replay. The time zone defaults to the legal entity's. 400 COM-0001 for a field error. 409 ORG-SITE-CODE-DUPLICATE when the code exists in the legal entity. 422 ORG-SITE-LEGAL-ENTITY-INVALID when the legal entity is unknown, inactive or outside the caller's scope. 422 idempotency_key_reuse when the key was used with a different body.
+          description: Site created, or the original site on an Idempotency-Key replay. The time zone defaults to the legal entity's. 400 COM-0001 for a field error. 409 ORG-SITE-CODE-DUPLICATE when the code exists in the legal entity. 422 ORG-SITE-LEGAL-ENTITY-INVALID when the legal entity is unknown, inactive or outside the caller's scope. 422 ORG-SITE-CALENDAR-INVALID, field fiscalCalendarId, when the calendar is unknown, inactive or has no generated year. 422 idempotency_key_reuse when the key was used with a different body.
           content: { application/json: { schema: { $ref: '#/components/schemas/Site' } } }
         default: { $ref: '#/components/responses/Problem' }
     get:
@@ -325,8 +337,20 @@ paths:
         content: { application/json: { schema: { $ref: '#/components/schemas/UpdateSite' } } }
       responses:
         '200':
-          description: The site. A stale version is 409 ORG-VERSION-CONFLICT. A request that changes no value returns the stored site with the same version and emits no event. 400 COM-0001 for a field error, or for legalEntityId or code, which are immutable. 404 ORG-SITE-NOT-FOUND. 409 ORG-SITE-IN-USE when the patch sets status inactive while an active warehouse references the site. 422 ORG-ADDR-NOT-OWNED, naming the field in errors, when the address pointer is not a current address owned by this record; an old version id, another owner's address and an address outside the caller's scope all fail. 403 AUTH-0003 without the duty.
+          description: The site. A stale version is 409 ORG-VERSION-CONFLICT. A request that changes no value returns the stored site with the same version and emits no event. 400 COM-0001 for a field error, or for legalEntityId or code, which are immutable. 404 ORG-SITE-NOT-FOUND. 409 ORG-SITE-IN-USE when the patch sets status inactive while an active warehouse references the site. 422 ORG-SITE-CALENDAR-INVALID, field fiscalCalendarId, when the calendar is unknown, inactive or has no generated year. 422 ORG-ADDR-NOT-OWNED, naming the field in errors, when the address pointer is not a current address owned by this record; an old version id, another owner's address and an address outside the caller's scope all fail. 403 AUTH-0003 without the duty.
           content: { application/json: { schema: { $ref: '#/components/schemas/Site' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/sites/{id}/fiscal-period:
+    get:
+      operationId: resolveSiteFiscalPeriod
+      x-passage-duty: org.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: date, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: The operating period containing the date, from the site's own calendar (source site) or, when the site has none, its legal entity's (source legalEntity). Opening, closing and adjustment periods are never returned. An inactive calendar still resolves. 400 COM-0001 naming date when it is missing or not YYYY-MM-DD. 404 ORG-SITE-NOT-FOUND for a malformed, unknown or out-of-scope id. 404 ORG-CAL-PERIOD-NOT-FOUND when no generated period of the calendar contains the date. 422 ORG-LE-NO-CALENDAR when neither the site nor its legal entity has a calendar. 403 AUTH-0003 without the duty.
+          content: { application/json: { schema: { $ref: '#/components/schemas/FiscalPeriodResolution' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/org/warehouses:
     post:
@@ -419,7 +443,7 @@ paths:
         content: { application/json: { schema: { $ref: '#/components/schemas/UpdateFiscalCalendar' } } }
       responses:
         '200':
-          description: The calendar. A stale version is 409 ORG-VERSION-CONFLICT. A request that changes no value returns the stored calendar with the same version. 400 COM-0001 for a field error or for code, pattern, startMonth, weekStart, openingClosing or specialPeriods, which are immutable. 404 ORG-CAL-NOT-FOUND. 409 ORG-CAL-IN-USE when status inactive is requested while active legal entities are assigned to the calendar. 403 AUTH-0003 without the duty or for a legal-entity-scoped caller.
+          description: The calendar. A stale version is 409 ORG-VERSION-CONFLICT. A request that changes no value returns the stored calendar with the same version. 400 COM-0001 for a field error or for code, pattern, startMonth, weekStart, openingClosing or specialPeriods, which are immutable. 404 ORG-CAL-NOT-FOUND. 409 ORG-CAL-IN-USE when status inactive is requested while active legal entities or active sites are assigned to the calendar; the detail reads "Fiscal calendar {code} is assigned to N active legal entities." or, when sites hold it, "... N active legal entities and M active sites.". 403 AUTH-0003 without the duty or for a legal-entity-scoped caller.
           content: { application/json: { schema: { $ref: '#/components/schemas/FiscalCalendar' } } }
         default: { $ref: '#/components/responses/Problem' }
     get:
@@ -1087,16 +1111,16 @@ components:
       type: object
       additionalProperties: false
       required: [legalEntityId, code, name]
-      properties: { legalEntityId: { type: string, format: uuid }, code: { type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{0,9}$', description: Upper-cased on save; unique within the legal entity }, name: { type: string, minLength: 1, maxLength: 120 }, timeZone: { type: string, description: IANA time zone name; defaults to the legal entity's } }
+      properties: { legalEntityId: { type: string, format: uuid }, code: { type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{0,9}$', description: Upper-cased on save; unique within the legal entity }, name: { type: string, minLength: 1, maxLength: 120 }, timeZone: { type: string, description: IANA time zone name; defaults to the legal entity's }, fiscalCalendarId: { type: string, format: uuid, description: An active fiscal calendar with at least one generated year (422 ORG-SITE-CALENDAR-INVALID otherwise); omit to follow the legal entity's calendar } }
     Site:
       type: object
       required: [id, legalEntityId, code, name, timeZone, status, version, createdAt, updatedAt]
-      properties: { id: { type: string, format: uuid }, legalEntityId: { type: string, format: uuid }, code: { type: string }, name: { type: string }, timeZone: { type: string }, status: { type: string, enum: [active, inactive] }, addressId: { type: [string, 'null'], format: uuid, description: The stable address_id of a current address owned by the site; follows address revisions. }, version: { type: integer }, createdAt: { type: string, format: date-time }, updatedAt: { type: string, format: date-time } }
+      properties: { id: { type: string, format: uuid }, legalEntityId: { type: string, format: uuid }, code: { type: string }, name: { type: string }, timeZone: { type: string }, status: { type: string, enum: [active, inactive] }, addressId: { type: [string, 'null'], format: uuid, description: The stable address_id of a current address owned by the site; follows address revisions. }, fiscalCalendarId: { type: [string, 'null'], format: uuid, description: The site's own fiscal calendar; absent while the site follows its legal entity's }, version: { type: integer }, createdAt: { type: string, format: date-time }, updatedAt: { type: string, format: date-time } }
     UpdateSite:
       type: object
       additionalProperties: false
       required: [version]
-      properties: { version: { type: integer, minimum: 1 }, name: { type: string, minLength: 1, maxLength: 120 }, timeZone: { type: string, description: IANA time zone name }, status: { type: string, enum: [active, inactive] }, addressId: { type: string, description: A UUID of a current address owned by the site, or an empty string to clear } }
+      properties: { version: { type: integer, minimum: 1 }, name: { type: string, minLength: 1, maxLength: 120 }, timeZone: { type: string, description: IANA time zone name }, status: { type: string, enum: [active, inactive] }, addressId: { type: string, description: A UUID of a current address owned by the site, or an empty string to clear }, fiscalCalendarId: { type: string, description: A UUID of an active fiscal calendar with at least one generated year (422 ORG-SITE-CALENDAR-INVALID otherwise), or an empty string to clear } }
     SiteList:
       type: object
       required: [items]
@@ -1146,6 +1170,10 @@ components:
       type: object
       required: [fiscalYear, periodNo, name, startDate, endDate, type, week53]
       properties: { fiscalYear: { type: integer }, periodNo: { type: integer }, name: { type: string }, startDate: { type: string, format: date }, endDate: { type: string, format: date }, type: { type: string, enum: [opening, operating, closing, adjustment] }, week53: { type: boolean } }
+    FiscalPeriodResolution:
+      type: object
+      required: [legalEntityId, calendarId, source, period]
+      properties: { siteId: { type: string, format: uuid }, legalEntityId: { type: string, format: uuid }, calendarId: { type: string, format: uuid }, source: { type: string, enum: [site, legalEntity] }, period: { $ref: '#/components/schemas/FiscalPeriod' } }
     FiscalYear:
       type: object
       required: [calendarId, fiscalYear, generated, periods]

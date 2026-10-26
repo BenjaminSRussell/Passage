@@ -84,6 +84,8 @@ type Store interface {
 	UpdateFiscalCalendar(ctx context.Context, id string, version int, in FiscalCalendarPatch) (FiscalCalendar, error)
 	GenerateFiscalYear(ctx context.Context, id string, year int, custom []domain.DateRange, force bool) (FiscalYear, error)
 	ListFiscalPeriods(ctx context.Context, id string, year int) ([]FiscalPeriod, error)
+	ResolveFiscalPeriod(ctx context.Context, legalEntityID string, date time.Time) (FiscalPeriodResolution, error)
+	ResolveSiteFiscalPeriod(ctx context.Context, siteID string, date time.Time) (FiscalPeriodResolution, error)
 	CreateHierarchyType(ctx context.Context, in HierarchyType, idempotencyKey string) (HierarchyType, error)
 	GetHierarchyType(ctx context.Context, id string) (HierarchyType, error)
 	ListHierarchyTypes(ctx context.Context, f HierarchyTypeFilter, afterCode string, limit int) (HierarchyTypePage, error)

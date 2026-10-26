@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: org
-  version: 0.11.0
+  version: 0.12.0
   description: CloudEvents 1.0 envelope from platform/go/events; payloads below are the data member.
 channels:
   passage.org.legalentity:
@@ -192,6 +192,7 @@ components:
     siteUpdated:
       name: updated
       title: Site updated
+      description: changed_fields names the fields whose value changed, including fiscal_calendar_id when the site's fiscal calendar is set, changed or cleared.
       payload:
         type: object
         required: [id, changed_fields, version]

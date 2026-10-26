@@ -81,6 +81,44 @@ func (a *API) registerFiscalCalendars(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRead)).Get(fiscalCalendars+"/{id}", fiscalCalendarRoute(a.getFiscalCalendar))
 	r.With(authz.RequireDuty(dutyFiscalCalendar)).Post(fiscalCalendars+"/{id}:generate", fiscalCalendarRoute(a.generateFiscalYear))
 	r.With(authz.RequireDuty(dutyRead)).Get(fiscalCalendars+"/{id}/periods", fiscalCalendarRoute(a.listFiscalPeriods))
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/org/legal-entities/{id}/fiscal-period", legalEntityRoute(a.resolveLegalEntityPeriod))
+	r.With(authz.RequireDuty(dutyRead)).Get(sites+"/{id}/fiscal-period", siteRoute(a.resolveSitePeriod))
+}
+
+func resolveDate(w http.ResponseWriter, r *http.Request) (time.Time, bool) {
+	date, err := time.Parse(dateLayout, r.URL.Query().Get("date"))
+	if err != nil {
+		badQuery(w, r, "date", "must be a date in YYYY-MM-DD form")
+	}
+	return date, err == nil
+}
+
+func (a *API) resolveLegalEntityPeriod(w http.ResponseWriter, r *http.Request, id string) {
+	date, ok := resolveDate(w, r)
+	if !ok {
+		return
+	}
+	resolution, err := a.store.ResolveFiscalPeriod(r.Context(), id, date)
+	if err != nil {
+		slog.Error("resolve fiscal period failed", "err", err, "legalEntityId", id, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, resolution)
+}
+
+func (a *API) resolveSitePeriod(w http.ResponseWriter, r *http.Request, id string) {
+	date, ok := resolveDate(w, r)
+	if !ok {
+		return
+	}
+	resolution, err := a.store.ResolveSiteFiscalPeriod(r.Context(), id, date)
+	if err != nil {
+		slog.Error("resolve site fiscal period failed", "err", err, "siteId", id, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, resolution)
 }
 
 func fiscalCalendarRoute(next func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {

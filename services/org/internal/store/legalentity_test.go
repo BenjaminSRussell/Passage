@@ -318,3 +318,20 @@ func TestPostgres_Migration0023AppliesTwiceAndKeepsExistingEntitiesUnassigned(t 
 		t.Fatalf("entity after re-migrate = %+v, %v; want no calendar", got, err)
 	}
 }
+
+func TestPostgres_Migration0024AppliesTwiceAndKeepsExistingSitesUnassigned(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	ctx := principalContext(1)
+	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	seed(t, ctx, admin)
+	s := store.New(app)
+	site := mustCreateSite(t, s, ctx, newSite(mustCreate(t, s, ctx, newEntity("US01")).ID, "S1"))
+	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
+		t.Fatalf("second migrate: %v", err)
+	}
+	if got, err := s.GetSite(ctx, site.ID); err != nil || got.FiscalCalendarID != nil {
+		t.Fatalf("site after re-migrate = %+v, %v; want no calendar", got, err)
+	}
+}
