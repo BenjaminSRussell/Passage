@@ -37,6 +37,8 @@ spec:
               value: {{ .Values.migrateOnStart | quote }}
             - name: CONFIGURATOR_URL
               value: {{ .Values.configuratorURL | quote }}
+            - name: ORG_BASE_URL
+              value: {{ .Values.orgBaseURL | quote }}
           ports:
             - { name: http, containerPort: 8080 }
             - { name: admin, containerPort: 9090 }

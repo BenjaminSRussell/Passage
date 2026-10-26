@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: product
-  version: 0.1.0
+  version: 0.2.0
   description: Product master, variants, released products, GS1 identifiers and configurator.
 servers:
   - url: https://app.local.passage.dev
@@ -56,6 +56,8 @@ paths:
       x-passage-duty: product.release
       responses:
         '201': { description: Released product. }
+        '422': { description: 'PRD-RELEASE-SITE-INVALID (unknown site or another legal entity) or PRD-RELEASE-WAREHOUSE-INVALID (unknown warehouse, another legal entity or not in the site); nothing is written.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '503': { description: 'PRD-ORG-UNAVAILABLE: the org service could not confirm sites and warehouses; nothing is written.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/product/released-products/{id}/site-defaults/{siteId}:
     get:
       operationId: resolveSiteDefault
@@ -73,6 +75,8 @@ paths:
         - { name: siteId, in: path, required: true, schema: { type: string } }
       responses:
         '200': { description: Site default replaced. }
+        '422': { description: 'PRD-RELEASE-SITE-INVALID (unknown site or another legal entity) or PRD-RELEASE-WAREHOUSE-INVALID (unknown warehouse, another legal entity or not in the site); nothing is written.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '503': { description: 'PRD-ORG-UNAVAILABLE: the org service could not confirm sites and warehouses; nothing is written.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/product/released-products/{id}/process-policy:
     get:
       operationId: processPolicy
@@ -126,6 +130,84 @@ paths:
       responses:
         '200': { description: Database reachable. }
         '503': { description: Database unreachable. }
+  /v1/product/setup/dimension-groups:
+    post:
+      operationId: createDimensionGroup
+      x-passage-duty: product.setup.write
+      responses:
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/product/setup/item-groups:
+    post:
+      operationId: createItemGroup
+      x-passage-duty: product.setup.write
+      responses:
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/product/setup/item-model-groups:
+    post:
+      operationId: createItemModelGroup
+      x-passage-duty: product.setup.write
+      responses:
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/product/products:search:
+    get:
+      operationId: searchProducts
+      x-passage-duty: product.read
+      responses:
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/product/products/{id}/attributes:
+    post:
+      operationId: setProductAttributes
+      x-passage-duty: product.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/product/products/{id}/identifiers:
+    post:
+      operationId: addProductIdentifier
+      x-passage-duty: product.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/product/products/{id}/relations:
+    post:
+      operationId: addProductRelation
+      x-passage-duty: product.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/product/released-products/{id}:
+    patch:
+      operationId: patchReleasedProduct
+      x-passage-duty: product.released.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/product/gtins/{gtin}:
+    get:
+      operationId: getGTIN
+      x-passage-duty: product.read
+      parameters:
+        - { name: gtin, in: path, required: true, schema: { type: string } }
+      responses:
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/product/barcodes/{gtin}:
+    get:
+      operationId: getBarcode
+      x-passage-duty: product.read
+      parameters:
+        - { name: gtin, in: path, required: true, schema: { type: string } }
+      responses:
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/product/jobs/group-change:
+    post:
+      operationId: runGroupChange
+      x-passage-duty: product.jobs.write
+      responses:
+        default: { $ref: '#/components/responses/Problem' }
 components:
   schemas:
     CreateProduct:

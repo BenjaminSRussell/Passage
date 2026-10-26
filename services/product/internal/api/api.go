@@ -2,9 +2,11 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -17,7 +19,9 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/product/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/product/internal/orgclient"
 	"github.com/BenjaminSRussell/passage/services/product/internal/store"
+	"github.com/BenjaminSRussell/passage/services/product/internal/upstream"
 )
 
 const (
@@ -30,6 +34,8 @@ const (
 	dutyConfigure     = "product.configure"
 	dutyGTIN          = "product.gtin.allocate"
 	dutyJobs          = "product.jobs.write"
+
+	codeOrgUnavailable = "PRD-ORG-UNAVAILABLE"
 )
 
 type Solver interface {
@@ -43,15 +49,22 @@ func (localSolver) Solve(model domain.CfgModel, selections map[string]string) (d
 }
 
 type API struct {
-	store    store.Store
-	solver   Solver
-	created  atomic.Int64
-	exploded atomic.Int64
-	released atomic.Int64
-	failed   atomic.Int64
+	store     store.Store
+	solver    Solver
+	created   atomic.Int64
+	exploded  atomic.Int64
+	released  atomic.Int64
+	failed    atomic.Int64
+	org       orgclient.Checker
+	orgFailed atomic.Int64
 }
 
 func New(s store.Store) *API { return &API{store: s, solver: localSolver{}} }
+
+func (a *API) WithOrg(c orgclient.Checker) *API {
+	a.org = c
+	return a
+}
 
 func NewWithSolver(s store.Store, solver Solver) *API {
 	a := New(s)
@@ -96,6 +109,7 @@ func (a *API) Metrics() http.Handler {
 		_, _ = fmt.Fprintf(w, "# HELP product_exploded_total Variant explosion jobs.\n# TYPE product_exploded_total counter\nproduct_exploded_total %d\n", a.exploded.Load())
 		_, _ = fmt.Fprintf(w, "# HELP product_released_total Products released.\n# TYPE product_released_total counter\nproduct_released_total %d\n", a.released.Load())
 		_, _ = fmt.Fprintf(w, "# HELP product_failed_total Failed mutating requests.\n# TYPE product_failed_total counter\nproduct_failed_total %d\n", a.failed.Load())
+		_, _ = fmt.Fprintf(w, "# HELP product_org_check_failed_total Release or site-default writes rejected by the org membership check.\n# TYPE product_org_check_failed_total counter\nproduct_org_check_failed_total %d\n", a.orgFailed.Load())
 	})
 }
 
@@ -197,15 +211,15 @@ func (a *API) createItemModelGroup(w http.ResponseWriter, r *http.Request) {
 }
 
 type createProductRequest struct {
-	ProductNumber    string                   `json:"productNumber"`
-	Subtype          string                   `json:"subtype"`
-	ProductType      string                   `json:"productType"`
-	Name             string                   `json:"name"`
-	Description      string                   `json:"description"`
-	SearchName       string                   `json:"searchName"`
-	BaseUOM          string                   `json:"baseUom"`
-	DimensionGroupID string                   `json:"dimensionGroupId"`
-	LifecycleState   string                   `json:"lifecycleState"`
+	ProductNumber    string                    `json:"productNumber"`
+	Subtype          string                    `json:"subtype"`
+	ProductType      string                    `json:"productType"`
+	Name             string                    `json:"name"`
+	Description      string                    `json:"description"`
+	SearchName       string                    `json:"searchName"`
+	BaseUOM          string                    `json:"baseUom"`
+	DimensionGroupID string                    `json:"dimensionGroupId"`
+	LifecycleState   string                    `json:"lifecycleState"`
 	Service          *domain.ServiceAttributes `json:"service"`
 }
 
@@ -368,13 +382,13 @@ func (a *API) addRelation(w http.ResponseWriter, r *http.Request) {
 }
 
 type releaseRequest struct {
-	ProductID          string                       `json:"productId"`
-	LegalEntityID      string                       `json:"legalEntityId"`
-	ItemNumber         string                       `json:"itemNumber"`
-	ItemGroupID        string                       `json:"itemGroupId"`
-	ItemModelGroupID   string                       `json:"itemModelGroupId"`
-	DefaultSiteID      string                       `json:"defaultSiteId"`
-	DefaultWarehouseID string                       `json:"defaultWarehouseId"`
+	ProductID          string                        `json:"productId"`
+	LegalEntityID      string                        `json:"legalEntityId"`
+	ItemNumber         string                        `json:"itemNumber"`
+	ItemGroupID        string                        `json:"itemGroupId"`
+	ItemModelGroupID   string                        `json:"itemModelGroupId"`
+	DefaultSiteID      string                        `json:"defaultSiteId"`
+	DefaultWarehouseID string                        `json:"defaultWarehouseId"`
 	SiteDefaults       map[string]domain.SiteDefault `json:"siteDefaults"`
 }
 
@@ -385,6 +399,24 @@ func (a *API) release(w http.ResponseWriter, r *http.Request) {
 	var req releaseRequest
 	if err := httpx.Decode(r, &req); err != nil {
 		httpx.Fail(w, r, err)
+		return
+	}
+	placements := []placement{{"defaultSiteId", req.DefaultSiteID, "defaultWarehouseId", req.DefaultWarehouseID}}
+	sites := make([]string, 0, len(req.SiteDefaults))
+	for key := range req.SiteDefaults {
+		sites = append(sites, key)
+	}
+	sort.Strings(sites)
+	for _, key := range sites {
+		entry := req.SiteDefaults[key]
+		siteID := entry.SiteID
+		if siteID == "" {
+			siteID = key
+		}
+		prefix := "siteDefaults[" + key + "]."
+		placements = append(placements, placement{prefix + "siteId", siteID, prefix + "warehouseId", entry.WarehouseID})
+	}
+	if !a.checkOrg(w, r, req.LegalEntityID, placements...) {
 		return
 	}
 	rp, err := a.store.Release(r.Context(), req.ProductID, domain.ReleaseDefaults{
@@ -427,6 +459,16 @@ func (a *API) putSiteDefault(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.SiteID = chi.URLParam(r, "siteId")
+	if a.org != nil {
+		rp, err := a.store.GetReleased(r.Context(), chi.URLParam(r, "id"))
+		if err != nil {
+			httpx.Fail(w, r, err)
+			return
+		}
+		if !a.checkOrg(w, r, rp.LegalEntityID, placement{"siteId", req.SiteID, "warehouseId", req.WarehouseID}) {
+			return
+		}
+	}
 	got, err := a.store.PutSiteDefault(r.Context(), chi.URLParam(r, "id"), req)
 	if err != nil {
 		httpx.Fail(w, r, err)
@@ -579,4 +621,70 @@ func (a *API) groupChange(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"items": domain.RunGroupChange(req.Items, nil)})
+}
+
+type placement struct {
+	siteField, siteID, warehouseField, warehouseID string
+}
+
+func (a *API) checkOrg(w http.ResponseWriter, r *http.Request, legalEntityID string, placements ...placement) bool {
+	if a.org == nil {
+		return true
+	}
+	ctx := upstream.WithAuthorization(r.Context(), r.Header.Get("Authorization"))
+	for _, p := range placements {
+		if err := a.checkPlacement(ctx, legalEntityID, p); err != nil {
+			a.failed.Add(1)
+			a.orgFailed.Add(1)
+			httpx.Fail(w, r, orgProblem(r, err))
+			return false
+		}
+	}
+	return true
+}
+
+func (a *API) checkPlacement(ctx context.Context, legalEntityID string, p placement) error {
+	if p.siteID != "" {
+		ref, err := lookup(func() (*domain.OrgRef, error) {
+			s, err := a.org.Site(ctx, p.siteID)
+			return &domain.OrgRef{ID: s.ID, LegalEntityID: s.LegalEntityID}, err
+		})
+		if err != nil {
+			return err
+		}
+		if err := domain.CheckSite(p.siteField, legalEntityID, ref); err != nil {
+			return err
+		}
+	}
+	if p.warehouseID != "" {
+		ref, err := lookup(func() (*domain.OrgRef, error) {
+			wh, err := a.org.Warehouse(ctx, p.warehouseID)
+			return &domain.OrgRef{ID: wh.ID, LegalEntityID: wh.LegalEntityID, SiteID: wh.SiteID}, err
+		})
+		if err != nil {
+			return err
+		}
+		return domain.CheckWarehouse(p.warehouseField, legalEntityID, p.siteID, ref)
+	}
+	return nil
+}
+
+func lookup(fetch func() (*domain.OrgRef, error)) (*domain.OrgRef, error) {
+	ref, err := fetch()
+	switch {
+	case err == nil:
+		return ref, nil
+	case errors.Is(err, orgclient.ErrNotFound):
+		return nil, nil
+	}
+	return nil, err
+}
+
+func orgProblem(r *http.Request, err error) *httpx.Problem {
+	var de *domain.Error
+	if errors.As(err, &de) {
+		return httpx.NewProblem(http.StatusUnprocessableEntity, de.Code, de.Detail)
+	}
+	slog.Warn("org membership check unavailable", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+	return httpx.NewProblem(http.StatusServiceUnavailable, codeOrgUnavailable, "org service is unavailable")
 }

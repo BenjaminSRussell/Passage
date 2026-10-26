@@ -12,6 +12,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/services/product/internal/api"
+	"github.com/BenjaminSRussell/passage/services/product/internal/orgclient"
 	"github.com/BenjaminSRussell/passage/services/product/internal/store"
 	"github.com/BenjaminSRussell/passage/services/product/migrations"
 )
@@ -55,7 +56,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
-	a := api.New(store.New(pool))
+	a := api.New(store.New(pool)).WithOrg(orgChecker(getenv))
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()
@@ -74,4 +75,13 @@ func addr(getenv func(string) string, key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func orgChecker(getenv func(string) string) orgclient.Checker {
+	baseURL := getenv("ORG_BASE_URL")
+	if baseURL == "" {
+		slog.Warn("org membership check disabled: ORG_BASE_URL is empty")
+		return nil
+	}
+	return orgclient.New(baseURL)
 }
