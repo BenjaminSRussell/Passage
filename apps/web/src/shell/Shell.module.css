@@ -98,6 +98,11 @@
   color: var(--color-text);
 }
 
+.search:focus-visible {
+  outline: 2px solid transparent;
+  box-shadow: var(--focus-ring);
+}
+
 .searchLabel {
   flex: 1;
   text-align: start;
@@ -138,7 +143,7 @@
   align-items: center;
   gap: var(--space-2);
   inline-size: 100%;
-  min-block-size: 32px;
+  min-block-size: var(--nav-item-height);
   padding-inline: var(--space-3);
   border: 0;
   border-radius: var(--radius-sm);
@@ -320,6 +325,35 @@
 
 .scrim {
   display: none;
+}
+
+.toast {
+  position: fixed;
+  inset-block-end: var(--space-6);
+  inset-inline-start: 50%;
+  z-index: 60;
+  max-inline-size: calc(100vw - var(--space-8));
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-text);
+  color: var(--color-bg-surface);
+  box-shadow: var(--shadow-lg);
+  font-size: var(--text-sm-size);
+  line-height: var(--text-sm-leading);
+  font-weight: var(--weight-medium);
+  transform: translateX(-50%);
+  pointer-events: none;
+  animation: toast-in var(--duration-base) var(--ease-out);
+}
+
+.toast:dir(rtl) {
+  transform: translateX(50%);
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+  }
 }
 
 @media (max-width: 959px) {

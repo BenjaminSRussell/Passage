@@ -1,3 +1,7 @@
+const isMac = typeof navigator !== "undefined" && /Mac|iP/.test(navigator.platform);
+
+export const shortcutHint = isMac ? "⌘K" : "Ctrl K";
+
 export const copy = {
   nav: { home: "Home", notes: "Notes", general: "General" },
   buttons: {
@@ -33,13 +37,14 @@ export const copy = {
   },
   home: {
     pageTitle: "Workspaces",
-    description: "Open a workspace, or press ⌘K to jump to any page.",
+    description: `Open a workspace, or press ${shortcutHint} to jump to any page.`,
     emptyTitle: "No workspaces yet",
     emptyDescription: "Workspaces appear here once they're installed.",
   },
   notes: {
-    title: "Note form",
+    title: "Notes",
     description: "A preview of a form generated from entity metadata.",
+    saved: (title: string) => `${title} saved`,
   },
   notFound: {
     title: "We couldn't find that page",

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Alert,
+  Button,
   Card,
   CardGrid,
   DataTable,
@@ -31,8 +32,8 @@ export function AdminHome() {
   return (
     <>
       <PageHeader
-        title="Admin workspace"
-        description="Number sequences, audit, alerts, import/export, documents and standard texts."
+        title="Admin"
+        description="Numbering, audit, alerts, imports and documents in one place."
       />
       <CardGrid as="ul" label="Admin pages">
         {adminCards.map((card) => (
@@ -78,7 +79,7 @@ const auditColumns: DataTableColumn<AuditEntry>[] = [
 export function AuditViewer({ items = [] }: { items?: AuditEntry[] }) {
   return (
     <>
-      <PageHeader title="Audit viewer" description="See who changed what, and when." />
+      <PageHeader title="Audit" description="See who changed what, and when." />
       <DataTable
         label="Audit entries"
         columns={auditColumns}
@@ -119,8 +120,8 @@ function EmptyPage({
 export function SequencePage() {
   return (
     <EmptyPage
-      title="Number sequences"
-      description="Allocate gap-free numbers per legal entity from the numbering service."
+      title="Sequences"
+      description="Set up gap-free numbering per legal entity."
       icon="receipt"
       emptyTitle="No sequences set up yet"
       emptyDescription="Sequences number your documents without gaps, per legal entity."
@@ -131,7 +132,7 @@ export function SequencePage() {
 export function AlertInbox({ items = [] }: { items?: { message: string }[] }) {
   return (
     <>
-      <PageHeader title="Alert inbox" description="Review failures and overdue approvals." />
+      <PageHeader title="Alerts" description="Review failures and overdue approvals." />
       {items.length === 0 ? (
         <Card>
           <EmptyState
@@ -153,20 +154,83 @@ export function AlertInbox({ items = [] }: { items?: { message: string }[] }) {
   );
 }
 
+function countColumns(line: string): number {
+  let columns = 1;
+  let quoted = false;
+  for (const char of line) {
+    if (char === '"') {
+      quoted = !quoted;
+    } else if (char === "," && !quoted) {
+      columns += 1;
+    }
+  }
+  return columns;
+}
+
+export type CsvCheck = { ok: true; rows: number } | { ok: false; message: string };
+
+export function checkCsv(text: string): CsvCheck {
+  const lines = text.split(/\r?\n/).filter((line) => line.trim() !== "");
+  if (lines.length < 2) {
+    return { ok: false, message: "Add a header row and at least one data row." };
+  }
+  const expected = countColumns(lines[0]);
+  for (let index = 1; index < lines.length; index += 1) {
+    const found = countColumns(lines[index]);
+    if (found !== expected) {
+      return { ok: false, message: `Row ${index + 1} has ${found} ${found === 1 ? "column" : "columns"}, expected ${expected}.` };
+    }
+  }
+  return { ok: true, rows: lines.length - 1 };
+}
+
 export function ImportExportPage() {
   const [text, setText] = useState("title,body\nHello,World");
+  const [result, setResult] = useState<CsvCheck | null>(null);
   return (
     <>
-      <PageHeader title="Import and export" description="Move records in and out as CSV." />
+      <PageHeader title="Import / export" description="Move records in and out as CSV." />
       <Card>
-        <FormField
-          id="csv"
-          label="CSV data"
-          hint="Paste comma-separated rows. The first row names the columns."
+        <form
+          className={styles.csvForm}
+          onSubmit={(event) => {
+            event.preventDefault();
+            setResult(checkCsv(text));
+          }}
         >
-          {(control) => <Textarea {...control} mono rows={8} value={text} onChange={(e) => setText(e.target.value)} />}
-        </FormField>
+          <FormField
+            id="csv"
+            label="CSV data"
+            hint="Paste comma-separated rows. The first row names the columns."
+          >
+            {(control) => (
+              <Textarea
+                {...control}
+                mono
+                rows={8}
+                value={text}
+                onChange={(e) => {
+                  setText(e.target.value);
+                  setResult(null);
+                }}
+              />
+            )}
+          </FormField>
+          <div>
+            <Button type="submit" variant="primary">
+              Validate
+            </Button>
+          </div>
+        </form>
       </Card>
+      <div className={styles.notice}>
+        <Alert tone="success" live="status">
+          {result?.ok ? `${result.rows} ${result.rows === 1 ? "row" : "rows"} ready to import` : null}
+        </Alert>
+        <Alert tone="danger" live="alert">
+          {result && !result.ok ? result.message : null}
+        </Alert>
+      </div>
     </>
   );
 }
@@ -175,7 +239,7 @@ export function DocumentsPage() {
   return (
     <EmptyPage
       title="Documents"
-      description="Check-out, check-in, versions and legal hold. Object storage is the S3-compatible port."
+      description="Check documents in and out, track versions and apply legal holds."
       icon="note"
       emptyTitle="No documents yet"
       emptyDescription="Documents you attach to records appear here."

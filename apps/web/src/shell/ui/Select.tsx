@@ -8,11 +8,14 @@ export interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
 
 export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select({ invalid, className, ...rest }, ref) {
   return (
-    <select
-      {...rest}
-      ref={ref}
-      aria-invalid={invalid || rest["aria-invalid"]}
-      className={cx(styles.control, styles.select, invalid && styles.invalid, className)}
-    />
+    <span className={styles.selectWrap}>
+      <select
+        {...rest}
+        ref={ref}
+        aria-invalid={invalid || rest["aria-invalid"]}
+        className={cx(styles.control, styles.select, invalid && styles.invalid, className)}
+      />
+      <span className={styles.chevron} aria-hidden="true" />
+    </span>
   );
 });

@@ -18,7 +18,7 @@ export function buttonClassName(variant: ButtonVariant = "secondary", size: Butt
 }
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
-  { variant = "secondary", size = "md", loading = false, icon, type = "button", disabled, className, children, ...rest },
+  { variant = "secondary", size = "md", loading = false, icon, type = "button", disabled, className, children, onClick, ...rest },
   ref,
 ) {
   return (
@@ -26,8 +26,16 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       {...rest}
       ref={ref}
       type={type}
-      disabled={disabled || loading}
+      disabled={disabled}
+      aria-disabled={loading || undefined}
       aria-busy={loading || undefined}
+      onClick={(event) => {
+        if (loading) {
+          event.preventDefault();
+          return;
+        }
+        onClick?.(event);
+      }}
       className={buttonClassName(variant, size, className)}
     >
       {loading ? <span className={styles.spinner} aria-hidden="true" /> : icon ? <Icon name={icon} /> : null}

@@ -66,3 +66,24 @@ describe("MetadataForm", () => {
     expect(await screen.findByText("Vendor saved.")).toBeInTheDocument();
   });
 });
+
+describe("MetadataForm messages", () => {
+  it("says when no form is defined for the entity", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 404 }));
+    render(<MetadataForm entity="Gadget" />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("No form is defined for Gadget yet");
+  });
+
+  it("clears the saved confirmation as soon as a field is edited", async () => {
+    const schema = { title: "Vendor", properties: { code: { type: "string", title: "Code" } } };
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify(schema), { status: 200 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 201 }));
+    render(<MetadataForm entity="Vendor" />);
+    fireEvent.change(await screen.findByLabelText("Code"), { target: { value: "V-1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Vendor" }));
+    expect(await screen.findByText("Vendor saved.")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Code"), { target: { value: "V-2" } });
+    expect(screen.queryByText("Vendor saved.")).not.toBeInTheDocument();
+  });
+});

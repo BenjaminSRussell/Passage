@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { cx } from "./cx";
 import styles from "./DataTable.module.css";
 import { EmptyState } from "./EmptyState";
@@ -33,10 +33,35 @@ function cellValue<T>(column: DataTableColumn<T>, row: T): ReactNode {
 }
 
 export function DataTable<T>({ label, columns, rows, getRowKey, loading = false, empty, onRowOpen }: DataTableProps<T>) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [overflows, setOverflows] = useState(false);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) {
+      return;
+    }
+    const measure = () => setOverflows(el.scrollWidth > el.clientWidth);
+    measure();
+    if (typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    if (el.firstElementChild) {
+      observer.observe(el.firstElementChild);
+    }
+    return () => observer.disconnect();
+  }, []);
+
   const cellClass = (column: DataTableColumn<T>) =>
     cx(styles.cell, column.align === "end" && styles.end, column.mono && styles.mono);
   return (
-    <div className={styles.scroll} role="region" aria-label={label} tabIndex={0}>
+    <div
+      ref={scrollRef}
+      className={styles.scroll}
+      {...(overflows ? { role: "region", "aria-label": `${label} table`, tabIndex: 0 } : {})}
+    >
       <table className={styles.table} aria-label={label} aria-busy={loading || undefined}>
         <thead>
           <tr>

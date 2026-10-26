@@ -41,6 +41,7 @@ export function MetadataForm({ entity }: MetadataFormProps) {
       headers: apiHeaders(),
     })
       .then(async (response) => {
+        if (response.status === 404) throw new Error(`No form is defined for ${entity} yet.`);
         if (!response.ok) throw new Error(`Schema request failed (${response.status})`);
         return (await response.json()) as EntitySchema;
       })
@@ -129,9 +130,9 @@ export function MetadataForm({ entity }: MetadataFormProps) {
   const required = new Set(schema.required ?? []);
   return (
     <>
-      <PageHeader title={schema.title} description="Fields come from the current tenant’s effective metadata definition." />
+      <PageHeader title={schema.title} description="Fields come from the current tenant's effective metadata definition." />
       <Card>
-        <form onSubmit={(event) => void submit(event)}>
+        <form onChange={() => setSaved(false)} onSubmit={(event) => void submit(event)}>
           <div className={styles.fields}>
             {Object.entries(schema.properties)
               .filter(([, field]) => field["x-passage-visibility"] !== "hidden")

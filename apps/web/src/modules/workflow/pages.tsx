@@ -1,6 +1,8 @@
 import { Badge, Card, DataTable, PageHeader, StatGroup, StatTile, StatusPill, type DataTableColumn } from "../../shell/ui";
 import styles from "./pages.module.css";
 
+const sampleDataBadge = <Badge tone="neutral">Sample data</Badge>;
+
 export function WorkflowHome({
   counts = { pending: 4, running: 1, failed: 0 },
 }: {
@@ -8,7 +10,7 @@ export function WorkflowHome({
 }) {
   return (
     <>
-      <PageHeader title="Workflow and batch" description="Approvals, batch jobs and message templates." />
+      <PageHeader title="Workflow and batch" description="Approvals, batch jobs and message templates." meta={sampleDataBadge} />
       <StatGroup label="Workflow tiles">
         <StatTile label="Pending work items" value={counts.pending} />
         <StatTile label="Running jobs" value={counts.running} />
@@ -48,7 +50,7 @@ export function InboxPage({
 }) {
   return (
     <>
-      <PageHeader title="Work items" />
+      <PageHeader title="Inbox" description="Approvals assigned to you." meta={sampleDataBadge} />
       <DataTable
         label="Work items"
         columns={workItemColumns}
@@ -61,16 +63,16 @@ export function InboxPage({
 }
 
 const approvalSteps = [
-  { name: "Manager role", detail: "PT4H · escalate to finance" },
-  { name: "Director user", detail: "PT4H · delegate allowed" },
-  { name: "Controller expression", detail: "PT4H · escalate to admin" },
+  { name: "Manager role", detail: "4-hour SLA · escalate to finance" },
+  { name: "Director user", detail: "4-hour SLA · delegate allowed" },
+  { name: "Controller expression", detail: "4-hour SLA · escalate to admin" },
 ];
 
 export function DesignerPage() {
   return (
     <>
       <PageHeader
-        title="Workflow designer"
+        title="Designer"
         description="Amount-band approval chain for purchase requisitions: role, then user, then expression, with a 4-hour SLA."
       />
       <ol className={styles.steps} aria-label="Approval steps">
@@ -111,7 +113,7 @@ export function JobMonitorPage({
 }) {
   return (
     <>
-      <PageHeader title="Job monitor" />
+      <PageHeader title="Job monitor" description="Scheduled and on-demand batch runs." meta={sampleDataBadge} />
       <DataTable
         label="Batch runs"
         columns={batchColumns}
@@ -128,7 +130,7 @@ const shippedTemplates = ["workflow.workitem.assigned", "workflow.workitem.escal
 export function TemplatesPage() {
   return (
     <>
-      <PageHeader title="Message templates" />
+      <PageHeader title="Templates" description="Message templates that workflows and batch jobs send." />
       <Card padded={false}>
         <ul className={styles.templates} aria-label="Shipped templates">
           {shippedTemplates.map((code) => (

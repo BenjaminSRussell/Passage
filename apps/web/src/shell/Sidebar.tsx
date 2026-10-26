@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { Link, NavLink, matchPath, useLocation } from "react-router-dom";
 import type { NavItem, PassageModule } from "../modules/registry";
-import { copy } from "./copy";
+import { copy, shortcutHint } from "./copy";
 import { useFocusTrap } from "./hooks/useFocusTrap";
 import styles from "./Shell.module.css";
 import type { ShellNavItem } from "./shellNav";
@@ -16,8 +16,6 @@ export interface SidebarProps {
   onOpenSearch(): void;
   onCloseDrawer(): void;
 }
-
-const isMac = typeof navigator !== "undefined" && /Mac|iP/.test(navigator.platform);
 
 function containsPath(items: NavItem[], pathname: string): boolean {
   return items.some((n) => matchPath({ path: n.to, end: true }, pathname) !== null);
@@ -80,7 +78,7 @@ export function Sidebar({ modules, shellNav, drawerOpen, searchRef, onOpenSearch
         >
           <Icon name="search" />
           <span className={styles.searchLabel}>{copy.buttons.search}</span>
-          <kbd aria-hidden="true">{isMac ? "⌘K" : "Ctrl K"}</kbd>
+          <kbd aria-hidden="true">{shortcutHint}</kbd>
         </button>
       </div>
       <nav aria-label="Workspaces" className={styles.nav}>

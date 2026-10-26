@@ -13,14 +13,22 @@ import {
 import { whereUsed, type UsedBy } from "./api/client";
 import styles from "./pages.module.css";
 
-export function EngineeringHome() {
+export function EngineeringHome({ onOpenWhereUsed }: { onOpenWhereUsed?: () => void }) {
   return (
     <>
       <PageHeader title="Engineering data" description="Bills of material, routings and change orders." />
-      <Card title="Where-used">
+      <Card
+        title="Where-used"
+        actions={
+          onOpenWhereUsed ? (
+            <Button size="sm" onClick={onOpenWhereUsed}>
+              Open Where-used
+            </Button>
+          ) : undefined
+        }
+      >
         <p className={styles.lead}>
-          Find every product that uses a component, across all BOM levels, as of a date. Open Where-used from the
-          navigation to run the report.
+          Find every product that uses a component, across all BOM levels, as of a date.
         </p>
       </Card>
     </>
@@ -72,9 +80,8 @@ export function WhereUsedPage() {
   }
 
   function statusText(): string {
-    if (searching) return "Searching...";
+    if (searching) return "Searching…";
     if (rows === null) return "";
-    if (rows.length === 0) return "No active BOM uses this component on that date.";
     return `${rows.length} ${rows.length === 1 ? "parent" : "parents"} found`;
   }
 

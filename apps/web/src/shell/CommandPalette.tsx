@@ -137,44 +137,44 @@ export function CommandPalette({ entries, onSelect, onClose, announce }: Command
         <p id="palette-help" className="visually-hidden">
           {copy.palette.help}
         </p>
-        {hasResults ? (
-          <div
-            id="palette-listbox"
-            role="listbox"
-            aria-label={copy.palette.listLabel}
-            className={styles.list}
-            onMouseDown={(e) => e.preventDefault()}
-          >
-            {groups.map((g, gi) => (
-              <div key={g.group} role="group" aria-labelledby={`palette-group-${gi}`}>
-                <div id={`palette-group-${gi}`} role="presentation" className={styles.groupLabel}>
-                  {g.group}
-                </div>
-                {g.items.map(({ entry, index }) => (
-                  <div
-                    key={entry.id}
-                    role="option"
-                    id={`palette-option-${index}`}
-                    aria-selected={index === active}
-                    className={styles.option}
-                    onMouseMove={() => setActive(index)}
-                    onClick={() => onSelect(entry)}
-                  >
-                    <span className={styles.optionIcon}>
-                      <Icon name={entry.icon ?? "grid"} />
-                    </span>
-                    <span className={styles.optionLabel}>{entry.label}</span>
-                    {index === active ? (
-                      <span className={styles.enterHint} aria-hidden="true">
-                        ↵
-                      </span>
-                    ) : null}
-                  </div>
-                ))}
+        <div
+          id="palette-listbox"
+          role="listbox"
+          aria-label={copy.palette.listLabel}
+          className={styles.list}
+          onMouseDown={(e) => e.preventDefault()}
+        >
+          {groups.map((g, gi) => (
+            <div key={g.group} role="group" aria-labelledby={`palette-group-${gi}`}>
+              <div id={`palette-group-${gi}`} role="presentation" className={styles.groupLabel}>
+                {g.group}
               </div>
-            ))}
-          </div>
-        ) : (
+              {g.items.map(({ entry, index }) => (
+                <div
+                  key={entry.id}
+                  role="option"
+                  id={`palette-option-${index}`}
+                  aria-label={`${entry.label}, ${entry.group}`}
+                  aria-selected={index === active}
+                  className={styles.option}
+                  onMouseMove={() => setActive(index)}
+                  onClick={() => onSelect(entry)}
+                >
+                  <span className={styles.optionIcon}>
+                    <Icon name={entry.icon ?? "grid"} />
+                  </span>
+                  <span className={styles.optionLabel}>{entry.label}</span>
+                  {index === active ? (
+                    <span className={styles.enterHint} aria-hidden="true">
+                      ↵
+                    </span>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+        {hasResults ? null : (
           <div className={styles.empty}>
             <Icon name="search" size={20} />
             <p className={styles.emptyTitle}>{copy.palette.noResults(query)}</p>

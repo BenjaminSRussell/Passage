@@ -1,11 +1,20 @@
 import { createElement } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import type { PassageModule } from "../registry";
-import { CatalogPage, ProductDetail, ProductHome, ReleasedPage } from "./pages";
+import { CatalogPage, ProductDetail, ProductHome, ProductNotFound, ReleasedPage, sampleProducts } from "./pages";
 
 function CatalogRoute() {
   const navigate = useNavigate();
   return createElement(CatalogPage, { onOpen: (number: string) => navigate(`/product/${encodeURIComponent(number)}`) });
+}
+
+function ProductDetailRoute() {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const found = sampleProducts.find((p) => p.number === id);
+  return found
+    ? createElement(ProductDetail, { product: found })
+    : createElement(ProductNotFound, { onBack: () => navigate("/product/items") });
 }
 
 const product: PassageModule = {
@@ -16,7 +25,7 @@ const product: PassageModule = {
     { path: "/product", element: createElement(ProductHome) },
     { path: "/product/items", element: createElement(CatalogRoute) },
     { path: "/product/released", element: createElement(ReleasedPage) },
-    { path: "/product/:id", element: createElement(ProductDetail), handle: { title: "Product details" } },
+    { path: "/product/:id", element: createElement(ProductDetailRoute), handle: { title: "Product details" } },
   ],
   nav: [
     { label: "Overview", to: "/product", duty: "product.read" },

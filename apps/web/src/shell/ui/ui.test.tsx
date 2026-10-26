@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { DataTable, FormField, Input, StatusPill, WorkspacePlaceholder } from "./index";
+import userEvent from "@testing-library/user-event";
+import { Button, DataTable, FormField, Input, StatusPill, WorkspacePlaceholder } from "./index";
 
 describe("design-system primitives", () => {
   it("WorkspacePlaceholder explains the workspace and links back home", () => {
@@ -12,6 +13,40 @@ describe("design-system primitives", () => {
     expect(screen.getByRole("heading", { level: 2, name: "Tax" })).toBeInTheDocument();
     expect(screen.getByText("This workspace isn't available yet")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Browse workspaces" })).toHaveAttribute("href", "/");
+  });
+
+  it("a loading Button stays focusable and ignores clicks and submits", async () => {
+    const user = userEvent.setup();
+    const clicks: string[] = [];
+    const submits: string[] = [];
+    const { rerender } = render(
+      <form onSubmit={(e) => { e.preventDefault(); submits.push("submit"); }}>
+        <Button type="submit" variant="primary" onClick={() => clicks.push("click")}>
+          Find parents
+        </Button>
+      </form>,
+    );
+    const button = screen.getByRole("button", { name: "Find parents" });
+    button.focus();
+    rerender(
+      <form onSubmit={(e) => { e.preventDefault(); submits.push("submit"); }}>
+        <Button type="submit" variant="primary" loading onClick={() => clicks.push("click")}>
+          Find parents
+        </Button>
+      </form>,
+    );
+    expect(button).not.toBeDisabled();
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    expect(button).toHaveAttribute("aria-busy", "true");
+    expect(button).toHaveFocus();
+    await user.click(button);
+    expect(clicks).toEqual([]);
+    expect(submits).toEqual([]);
+  });
+
+  it("an explicitly disabled Button is natively disabled", () => {
+    render(<Button disabled>Save</Button>);
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
   it("StatusPill maps a status to its label without adding a live role", () => {

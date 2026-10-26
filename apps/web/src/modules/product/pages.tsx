@@ -1,14 +1,20 @@
-import { Badge, Card, EmptyState, PageHeader, StatGroup, StatTile, StatusPill, DataTable, type DataTableColumn } from "../../shell/ui";
+import { Badge, Button, Card, EmptyState, PageHeader, StatGroup, StatTile, StatusPill, DataTable, type DataTableColumn } from "../../shell/ui";
 import styles from "./pages.module.css";
 
+const sampleDataBadge = <Badge tone="neutral">Sample data</Badge>;
+
 export function ProductHome({
-  counts = { products: 500, masters: 50, released: 500, incomplete: 0 },
+  counts = { products: 500, masters: 50, released: 0, incomplete: 0 },
 }: {
   counts?: { products: number; masters: number; released: number; incomplete: number };
 }) {
   return (
     <>
-      <PageHeader title="Product information management" description="Products, masters and what's released to each legal entity." />
+      <PageHeader
+        title="Product information"
+        description="Product information management: products, masters and what's released to each legal entity."
+        meta={sampleDataBadge}
+      />
       <StatGroup label="PIM tiles">
         <StatTile label="Products" value={counts.products} />
         <StatTile label="Masters" value={counts.masters} />
@@ -19,14 +25,20 @@ export function ProductHome({
   );
 }
 
-interface CatalogItem {
+export interface Product {
   number: string;
   name: string;
   subtype: string;
   state: string;
+  gtin: string;
 }
 
-const catalogColumns: DataTableColumn<CatalogItem>[] = [
+export const sampleProducts: Product[] = [
+  { number: "SHIRT", name: "Knit shirt", subtype: "master", state: "active", gtin: "06141411234579" },
+  { number: "BOLT", name: "Hex bolt", subtype: "product", state: "active", gtin: "04006381333931" },
+];
+
+const catalogColumns: DataTableColumn<Product>[] = [
   { key: "number", header: "Number", mono: true },
   { key: "name", header: "Name" },
   {
@@ -38,18 +50,15 @@ const catalogColumns: DataTableColumn<CatalogItem>[] = [
 ];
 
 export function CatalogPage({
-  items = [
-    { number: "SHIRT", name: "Knit shirt", subtype: "master", state: "active" },
-    { number: "BOLT", name: "Hex bolt", subtype: "product", state: "active" },
-  ],
+  items = sampleProducts,
   onOpen,
 }: {
-  items?: CatalogItem[];
+  items?: Product[];
   onOpen?: (number: string) => void;
 }) {
   return (
     <>
-      <PageHeader title="All products and masters" />
+      <PageHeader title="Products" description="Every product and master in your catalog." meta={sampleDataBadge} />
       <DataTable
         label="Products"
         columns={catalogColumns}
@@ -70,18 +79,27 @@ export function ReleasedPage() {
         <EmptyState
           icon="box"
           title="No released products yet"
-          description="Item group, model group, default site and warehouse per legal entity."
+          description="Products released to a legal entity appear here, with their item group, model group, default site and warehouse."
         />
       </Card>
     </>
   );
 }
 
-export function ProductDetail({
-  product = { number: "SHIRT", name: "Knit shirt", gtin: "06141411234579" },
-}: {
-  product?: { number: string; name: string; gtin: string };
-}) {
+export function ProductNotFound({ onBack }: { onBack(): void }) {
+  return (
+    <Card>
+      <EmptyState
+        icon="box"
+        title="Product not found"
+        description="There is no product with that number. Check the address, or pick one from the catalog."
+        action={<Button onClick={onBack}>Back to products</Button>}
+      />
+    </Card>
+  );
+}
+
+export function ProductDetail({ product = sampleProducts[0] }: { product?: Product }) {
   return (
     <>
       <PageHeader title={product.name} meta={<StatusPill status="active" />} />

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import styles from "./forms.module.css";
 import type { EntityDef } from "./metadata";
 import { validateEntity } from "./metadata";
@@ -13,28 +13,47 @@ export interface FormRendererProps {
 
 export function FormRenderer({ entity, values: initial, lines: initialLines, onSubmit }: FormRendererProps) {
   const [values, setValues] = useState<Record<string, string>>(initial ?? {});
-  const [lines, setLines] = useState<Record<string, string>[]>(initialLines ?? []);
+  const [lines, setLines] = useState<Record<string, string>[]>([]);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [records, setRecords] = useState<Record<string, string>[]>(initialLines ?? []);
   const [editing, setEditing] = useState<{ row: number; field: string } | null>(null);
   const editRef = useRef<HTMLInputElement>(null);
+  const cellButtons = useRef(new Map<string, HTMLButtonElement>());
+  const restoreFocusKey = useRef<string | null>(null);
 
   const fields = entity.fields;
   const lineDef = entity.lines;
 
-  const listRows = useMemo(() => (initialLines && initialLines.length ? initialLines : lines), [initialLines, lines]);
-
   useEffect(() => {
     if (editing) {
       editRef.current?.focus();
+    } else if (restoreFocusKey.current) {
+      cellButtons.current.get(restoreFocusKey.current)?.focus();
+      restoreFocusKey.current = null;
     }
   }, [editing]);
 
   function submit() {
     const next = validateEntity(entity, values);
     setErrors(next);
-    if (Object.keys(next).length === 0) {
-      onSubmit?.(values, lines);
+    const firstInvalid = fields.find((field) => next[field.name]);
+    if (firstInvalid) {
+      document.getElementById(`${entity.id}-${firstInvalid.name}`)?.focus();
+      return;
     }
+    setRecords((current) => [...current, values]);
+    setValues({});
+    setLines([]);
+    onSubmit?.(values, lines);
+  }
+
+  function finishEditing(key: string) {
+    restoreFocusKey.current = key;
+    setEditing(null);
+  }
+
+  function updateRecord(index: number, field: string, value: string) {
+    setRecords((current) => current.map((row, i) => (i === index ? { ...row, [field]: value } : row)));
   }
 
   function updateLine(index: number, field: string, value: string) {
@@ -43,9 +62,9 @@ export function FormRenderer({ entity, values: initial, lines: initialLines, onS
 
   return (
     <section aria-labelledby={`${entity.id}-heading`} className={styles.form}>
-      <h2 id={`${entity.id}-heading`} className={styles.heading}>
+      <h3 id={`${entity.id}-heading`} className={styles.heading}>
         {entity.title}
-      </h2>
+      </h3>
       <form
         className={styles.fields}
         onSubmit={(e) => {
@@ -59,6 +78,7 @@ export function FormRenderer({ entity, values: initial, lines: initialLines, onS
             name: field.name,
             value: values[field.name] ?? "",
             invalid: Boolean(errors[field.name]),
+            "aria-required": field.required ? (true as const) : undefined,
             onChange: (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
               setValues((v) => ({ ...v, [field.name]: e.target.value })),
           };
@@ -69,7 +89,7 @@ export function FormRenderer({ entity, values: initial, lines: initialLines, onS
                   <Textarea {...control} {...shared} />
                 ) : field.type === "lookup" ? (
                   <Select {...control} {...shared}>
-                    <option value="">Select</option>
+                    <option value="">Select…</option>
                     {(field.lookup ?? []).map((opt) => (
                       <option key={opt} value={opt}>
                         {opt}
@@ -101,37 +121,52 @@ export function FormRenderer({ entity, values: initial, lines: initialLines, onS
           </tr>
         </thead>
         <tbody>
-          {listRows.length === 0 ? (
+          {records.length === 0 ? (
             <tr>
               <td colSpan={fields.length} className={styles.empty}>
                 No rows
               </td>
             </tr>
           ) : (
-            listRows.map((row, index) => (
+            records.map((row, index) => (
               <tr key={index}>
-                {fields.map((field) => (
-                  <td key={field.name}>
-                    {editing?.row === index && editing.field === field.name ? (
-                      <Input
-                        ref={editRef}
-                        aria-label={`Edit ${field.label}`}
-                        value={row[field.name] ?? ""}
-                        onChange={(e) => updateLine(index, field.name, e.target.value)}
-                        onBlur={() => setEditing(null)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === "Escape") {
-                            setEditing(null);
-                          }
-                        }}
-                      />
-                    ) : (
-                      <button type="button" className={styles.cellButton} onClick={() => setEditing({ row: index, field: field.name })}>
-                        {row[field.name] || `Edit ${field.label}`}
-                      </button>
-                    )}
-                  </td>
-                ))}
+                {fields.map((field) => {
+                  const key = `${index}-${field.name}`;
+                  return (
+                    <td key={field.name}>
+                      {editing?.row === index && editing.field === field.name ? (
+                        <Input
+                          ref={editRef}
+                          aria-label={`Edit ${field.label}`}
+                          value={row[field.name] ?? ""}
+                          onChange={(e) => updateRecord(index, field.name, e.target.value)}
+                          onBlur={() => setEditing(null)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === "Escape") {
+                              e.preventDefault();
+                              finishEditing(key);
+                            }
+                          }}
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          ref={(node) => {
+                            if (node) {
+                              cellButtons.current.set(key, node);
+                            } else {
+                              cellButtons.current.delete(key);
+                            }
+                          }}
+                          className={styles.cellButton}
+                          onClick={() => setEditing({ row: index, field: field.name })}
+                        >
+                          {row[field.name] || `Edit ${field.label}`}
+                        </button>
+                      )}
+                    </td>
+                  );
+                })}
               </tr>
             ))
           )}
@@ -141,9 +176,9 @@ export function FormRenderer({ entity, values: initial, lines: initialLines, onS
       {lineDef ? (
         <section aria-labelledby={`${lineDef.id}-heading`} className={styles.lines}>
           <div className={styles.linesHead}>
-            <h3 id={`${lineDef.id}-heading`} className={styles.subheading}>
+            <h4 id={`${lineDef.id}-heading`} className={styles.subheading}>
               {lineDef.title}s
-            </h3>
+            </h4>
             <Button size="sm" onClick={() => setLines((current) => [...current, {}])}>
               Add {lineDef.title}
             </Button>
@@ -164,7 +199,7 @@ export function FormRenderer({ entity, values: initial, lines: initialLines, onS
                   {lineDef.fields.map((field) => (
                     <td key={field.name}>
                       <label htmlFor={`${lineDef.id}-${index}-${field.name}`} className="visually-hidden">
-                        {field.label}
+                        {`${field.label}, line ${index + 1}`}
                       </label>
                       <Input
                         id={`${lineDef.id}-${index}-${field.name}`}

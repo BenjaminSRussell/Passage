@@ -1,6 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { copy } from "./copy";
+import { recordError } from "./telemetry";
 import { Alert, Button, buttonClassName } from "./ui";
 
 interface State {
@@ -15,7 +16,7 @@ export class RouteErrorBoundary extends Component<{ children: ReactNode }, State
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error("Route render failed", error, info.componentStack);
+    recordError(error, info.componentStack);
   }
 
   render() {

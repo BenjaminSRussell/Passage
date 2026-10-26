@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { loadModules } from "../registry";
 import admin from "./module";
@@ -52,6 +52,26 @@ describe("admin module", () => {
   it("describes what each CSV field expects", () => {
     render(<ImportExportPage />);
     expect(screen.getByLabelText("CSV data")).toHaveAccessibleDescription(/first row names the columns/);
+  });
+
+  it("validates pasted CSV on the client and reports the row count", () => {
+    render(<ImportExportPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Validate" }));
+    expect(screen.getByRole("status")).toHaveTextContent("1 row ready to import");
+    fireEvent.change(screen.getByLabelText("CSV data"), { target: { value: "a,b\n1,2\n3,4" } });
+    expect(screen.getByRole("status")).toBeEmptyDOMElement();
+    fireEvent.click(screen.getByRole("button", { name: "Validate" }));
+    expect(screen.getByRole("status")).toHaveTextContent("2 rows ready to import");
+  });
+
+  it("flags a ragged CSV row and an empty paste", () => {
+    render(<ImportExportPage />);
+    fireEvent.change(screen.getByLabelText("CSV data"), { target: { value: "a,b,c\n1,2,3\n4,5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Validate" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Row 3 has 2 columns, expected 3");
+    fireEvent.change(screen.getByLabelText("CSV data"), { target: { value: "a,b" } });
+    fireEvent.click(screen.getByRole("button", { name: "Validate" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Add a header row and at least one data row");
   });
 
   it("links each admin card to its page", () => {

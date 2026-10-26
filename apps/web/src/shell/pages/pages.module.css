@@ -85,3 +85,7 @@
     transform: none;
   }
 }
+
+.notice > :not(:empty) {
+  margin-block-start: var(--space-4);
+}

@@ -6,7 +6,7 @@ import { copy } from "./copy";
 import { useOnlineStatus } from "./hooks/useOnlineStatus";
 import { demoNote } from "./metadata";
 import { resolvePage } from "./pageMeta";
-import { activeView, applyView, saveView, type Density, type Personalization, type SavedView } from "./personalization";
+import { applyView, saveView, type Density, type Personalization, type SavedView } from "./personalization";
 import { RouteErrorBoundary } from "./RouteErrorBoundary";
 import styles from "./Shell.module.css";
 import { shellNav } from "./shellNav";
@@ -15,6 +15,13 @@ import { clickTrace } from "./telemetry";
 import { TopBar } from "./TopBar";
 import { Alert, Skeleton } from "./ui";
 import { workspaceIcon } from "./workspaceIcons";
+
+const TOAST_MS = 4000;
+const DRAWER_BREAKPOINT = "(min-width: 960px)";
+
+function isShown(el: HTMLElement): boolean {
+  return el.offsetParent !== null && window.getComputedStyle(el).visibility !== "hidden";
+}
 
 export interface ShellProps {
   modules: PassageModule[];
@@ -37,7 +44,8 @@ export function Shell({ modules }: ShellProps) {
   const online = useOnlineStatus();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [announce, setAnnounce] = useState("");
+  const [announcement, setAnnouncement] = useState("");
+  const [toast, setToast] = useState("");
   const [density, setDensity] = useState<Density>("comfortable");
   const [personalization, setPersonalization] = useState<Personalization>({ views: [] });
   const searchRef = useRef<HTMLButtonElement>(null);
@@ -47,6 +55,9 @@ export function Shell({ modules }: ShellProps) {
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const lastPath = useRef(pathname);
   const wasOnline = useRef(online);
+  const announced = useRef("");
+  const announceFrame = useRef<number>();
+  const toastTimer = useRef<number>();
 
   const page = useMemo(() => resolvePage(pathname, modules, shellNav), [pathname, modules]);
 
@@ -60,6 +71,41 @@ export function Shell({ modules }: ShellProps) {
     [modules],
   );
 
+  const announce = useCallback((message: string, visual = true) => {
+    if (announceFrame.current !== undefined) {
+      window.cancelAnimationFrame(announceFrame.current);
+      announceFrame.current = undefined;
+    }
+    const write = () => {
+      announced.current = message;
+      setAnnouncement(message);
+    };
+    if (message === announced.current && typeof window.requestAnimationFrame === "function") {
+      announced.current = "";
+      setAnnouncement("");
+      announceFrame.current = window.requestAnimationFrame(write);
+    } else {
+      write();
+    }
+    if (visual) {
+      setToast(message);
+      window.clearTimeout(toastTimer.current);
+      toastTimer.current = window.setTimeout(() => setToast(""), TOAST_MS);
+    }
+  }, []);
+
+  const announceQuietly = useCallback((message: string) => announce(message, false), [announce]);
+
+  useEffect(
+    () => () => {
+      if (announceFrame.current !== undefined) {
+        window.cancelAnimationFrame(announceFrame.current);
+      }
+      window.clearTimeout(toastTimer.current);
+    },
+    [],
+  );
+
   const openPalette = useCallback(() => {
     const focused = document.activeElement;
     returnFocusRef.current = focused instanceof HTMLElement && focused !== document.body ? focused : null;
@@ -71,7 +117,10 @@ export function Shell({ modules }: ShellProps) {
     paletteOpenRef.current = false;
     setPaletteOpen(false);
     if (restoreFocus) {
-      const target = returnFocusRef.current?.isConnected ? returnFocusRef.current : searchRef.current;
+      const stored = returnFocusRef.current;
+      const target = stored?.isConnected
+        ? stored
+        : [searchRef.current, menuRef.current].find((el): el is HTMLButtonElement => el !== null && isShown(el)) ?? titleRef.current;
       target?.focus();
     }
   }, []);
@@ -84,15 +133,15 @@ export function Shell({ modules }: ShellProps) {
           (document.getElementById("global-search") as HTMLInputElement | null)?.select();
         } else {
           openPalette();
+          announce(copy.announce.searchOpened);
         }
-        setAnnounce(copy.announce.searchOpened);
       } else if (e.key === "Escape" && paletteOpenRef.current) {
         closePalette();
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [openPalette, closePalette]);
+  }, [openPalette, closePalette, announce]);
 
   useEffect(() => {
     document.title = `${page.title} · Passage`;
@@ -121,18 +170,32 @@ export function Shell({ modules }: ShellProps) {
       return;
     }
     wasOnline.current = online;
-    setAnnounce(online ? copy.announce.online : copy.announce.offline);
-  }, [online]);
+    announce(online ? copy.announce.online : copy.announce.offline);
+  }, [online, announce]);
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") {
+      return;
+    }
+    const wide = window.matchMedia(DRAWER_BREAKPOINT);
+    const closeWhenWide = (event: MediaQueryListEvent) => {
+      if (event.matches) {
+        setDrawerOpen(false);
+      }
+    };
+    wide.addEventListener("change", closeWhenWide);
+    return () => wide.removeEventListener("change", closeWhenWide);
+  }, []);
 
   function openSearch() {
     clickTrace("search");
     openPalette();
-    setAnnounce(copy.announce.searchOpened);
+    announce(copy.announce.searchOpened);
   }
 
   function selectEntry(entry: PaletteEntry) {
     closePalette(false);
-    setAnnounce(copy.announce.opened(entry.label));
+    announce(copy.announce.opened(entry.label));
     if (entry.to === pathname) {
       titleRef.current?.focus({ preventScroll: true });
     } else {
@@ -154,12 +217,10 @@ export function Shell({ modules }: ShellProps) {
       name: "Default",
       entity: demoNote.id,
       columns: demoNote.fields.map((f) => f.name),
-      density: "comfortable",
+      density,
     };
-    const next = applyView(saveView(personalization, view), view.id);
-    setPersonalization(next);
-    setDensity(activeView(next)?.density ?? "comfortable");
-    setAnnounce(copy.announce.savedViewApplied);
+    setPersonalization(applyView(saveView(personalization, view), view.id));
+    announce(copy.announce.savedViewApplied);
   }
 
   return (
@@ -203,9 +264,14 @@ export function Shell({ modules }: ShellProps) {
         </main>
       </div>
       <div role="status" aria-live="polite" className="visually-hidden">
-        {announce}
+        {announcement}
       </div>
-      {paletteOpen ? <CommandPalette entries={entries} onSelect={selectEntry} onClose={() => closePalette()} announce={setAnnounce} /> : null}
+      {toast ? (
+        <div className={styles.toast} aria-hidden="true">
+          {toast}
+        </div>
+      ) : null}
+      {paletteOpen ? <CommandPalette entries={entries} onSelect={selectEntry} onClose={() => closePalette()} announce={announceQuietly} /> : null}
     </div>
   );
 }
