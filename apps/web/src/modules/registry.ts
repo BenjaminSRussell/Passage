@@ -12,6 +12,7 @@ export interface PassageModule {
   /** Stable id, equal to the folder name. */
   id: string;
   title: string;
+  description?: string;
   routes: RouteObject[];
   nav: NavItem[];
 }

@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
+import { Alert, Button, Card, EmptyState, FormField, Input, PageHeader, Select, Skeleton } from "../../shell/ui";
+import styles from "./MetadataForm.module.css";
 
 interface FieldSchema {
   type?: string;
@@ -20,36 +22,49 @@ export interface MetadataFormProps {
   entity: string;
 }
 
+const LOADING_FIELDS = [0, 1, 2, 3];
+
 export function MetadataForm({ entity }: MetadataFormProps) {
   const [schema, setSchema] = useState<EntitySchema>();
   const [error, setError] = useState("");
+  const [missing, setMissing] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
     setSchema(undefined);
     setError("");
+    setMissing(false);
+    setSaved(false);
     fetch(`/api/v1/metadata/entities/${encodeURIComponent(entity)}/schema`, {
       signal: controller.signal,
       headers: apiHeaders(),
     })
       .then(async (response) => {
+        if (response.status === 404) {
+          setMissing(true);
+          return undefined;
+        }
         if (!response.ok) throw new Error(`Schema request failed (${response.status})`);
         return (await response.json()) as EntitySchema;
       })
-      .then(setSchema)
+      .then((loaded) => loaded && setSchema(loaded))
       .catch((reason: unknown) => {
         if (reason instanceof DOMException && reason.name === "AbortError") return;
         setError(reason instanceof Error ? reason.message : "Schema request failed");
       });
     return () => controller.abort();
-  }, [entity]);
+  }, [entity, reload]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const formElement = event.currentTarget;
     setError("");
     setSaved(false);
-    const form = new FormData(event.currentTarget);
+    setSaving(true);
+    const form = new FormData(formElement);
     const input: Record<string, unknown> = {};
     for (const [name, field] of Object.entries(schema?.properties ?? {})) {
       if (field.readOnly || field["x-passage-visibility"] === "hidden") continue;
@@ -60,62 +75,129 @@ export function MetadataForm({ entity }: MetadataFormProps) {
       const value = form.get(name);
       if (typeof value === "string" && value !== "") input[name] = value;
     }
-    const response = await fetch(`/api/v1/data/${encodeURIComponent(entity)}`, {
-      method: "POST",
-      headers: { ...apiHeaders(), "Content-Type": "application/json" },
-      body: JSON.stringify(input),
-    });
-    if (!response.ok) {
-      const problem = (await response.json()) as { detail?: string };
-      setError(problem.detail ?? `Save failed (${response.status})`);
-      return;
+    try {
+      const response = await fetch(`/api/v1/data/${encodeURIComponent(entity)}`, {
+        method: "POST",
+        headers: { ...apiHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      });
+      if (!response.ok) {
+        const problem = (await response.json().catch(() => ({}))) as { detail?: string };
+        setError(problem.detail ?? `Save failed (${response.status})`);
+        return;
+      }
+      setSaved(true);
+      formElement.reset();
+    } catch {
+      setError("Save failed. Check your connection and try again.");
+    } finally {
+      setSaving(false);
     }
-    setSaved(true);
-    event.currentTarget.reset();
   }
 
-  if (error && !schema) return <p role="alert">{error}</p>;
-  if (!schema) return <p aria-live="polite">Loading {entity} metadata…</p>;
+  if (missing) {
+    return (
+      <Card>
+        <EmptyState icon="database" title={`No form is defined for ${entity} yet`} description="Ask a workspace administrator to define its fields." />
+      </Card>
+    );
+  }
+
+  if (error && !schema) {
+    return (
+      <Alert
+        tone="danger"
+        live="alert"
+        title="We couldn't load this form"
+        action={
+          <Button size="sm" onClick={() => setReload((count) => count + 1)}>
+            Try again
+          </Button>
+        }
+      >
+        {error}
+      </Alert>
+    );
+  }
+
+  if (!schema) {
+    return (
+      <div aria-busy="true">
+        <p aria-live="polite" className="visually-hidden">
+          Loading {entity} metadata…
+        </p>
+        <Card>
+          <div className={styles.fields}>
+            {LOADING_FIELDS.map((key) => (
+              <div key={key} className={styles.skeletonField}>
+                <Skeleton width="1/4" />
+                <Skeleton height="control" />
+              </div>
+            ))}
+          </div>
+        </Card>
+      </div>
+    );
+  }
 
   const required = new Set(schema.required ?? []);
   return (
-    <section aria-labelledby="metadata-form-title">
-      <h1 id="metadata-form-title">{schema.title}</h1>
-      <p>Fields come from the current tenant’s effective metadata definition.</p>
-      <form onSubmit={(event) => void submit(event)}>
-        {Object.entries(schema.properties)
-          .filter(([, field]) => field["x-passage-visibility"] !== "hidden")
-          .map(([name, field]) => (
-            <div key={name}>
-              <label htmlFor={`metadata-${name}`}>{field.title ?? humanize(name)}</label>
-              {field.enum ? (
-                <select id={`metadata-${name}`} name={name} required={required.has(name)} defaultValue="">
-                  <option value="" disabled>
-                    Select…
-                  </option>
-                  {field.enum.map((value) => (
-                    <option key={value} value={value}>
-                      {value}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <input
+    <>
+      <PageHeader title={schema.title} description="Fields come from the current tenant's effective metadata definition." />
+      <Card>
+        <form onChange={() => setSaved(false)} onSubmit={(event) => void submit(event)}>
+          <div className={styles.fields}>
+            {Object.entries(schema.properties)
+              .filter(([, field]) => field["x-passage-visibility"] !== "hidden")
+              .map(([name, field]) => (
+                <FormField
+                  key={name}
                   id={`metadata-${name}`}
-                  name={name}
-                  type={inputType(field)}
-                  required={required.has(name)}
-                  readOnly={field.readOnly}
-                  defaultValue={typeof field.default === "string" ? field.default : undefined}
-                />
-              )}
-            </div>
-          ))}
-        <button type="submit">Save</button>
-      </form>
-      {saved ? <p role="status">Saved.</p> : null}
-      {error ? <p role="alert">{error}</p> : null}
-    </section>
+                  label={field.title ?? humanize(name)}
+                  optional={!required.has(name)}
+                >
+                  {(control) =>
+                    field.enum ? (
+                      <Select {...control} name={name} required={required.has(name)} defaultValue="">
+                        <option value="" disabled>
+                          Select…
+                        </option>
+                        {field.enum.map((value) => (
+                          <option key={value} value={value}>
+                            {value}
+                          </option>
+                        ))}
+                      </Select>
+                    ) : (
+                      <Input
+                        {...control}
+                        name={name}
+                        type={inputType(field)}
+                        required={required.has(name)}
+                        readOnly={field.readOnly}
+                        defaultValue={typeof field.default === "string" ? field.default : undefined}
+                      />
+                    )
+                  }
+                </FormField>
+              ))}
+          </div>
+          <div className={styles.actions}>
+            <Button type="submit" variant="primary" loading={saving}>
+              Save {schema.title}
+            </Button>
+          </div>
+        </form>
+      </Card>
+      <div className={styles.alerts}>
+        <Alert tone="success" live="status">
+          {saved ? `${schema.title} saved.` : null}
+        </Alert>
+        <Alert tone="danger" live="alert">
+          {error || null}
+        </Alert>
+      </div>
+    </>
   );
 }
 

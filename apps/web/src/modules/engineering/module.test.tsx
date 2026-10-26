@@ -28,6 +28,13 @@ describe("engineering module", () => {
     expect(screen.getByRole("heading", { name: "Engineering data" })).toBeTruthy();
   });
 
+  it("offers to open where-used from the overview", () => {
+    const opened: string[] = [];
+    render(<EngineeringHome onOpenWhereUsed={() => opened.push("where-used")} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open Where-used" }));
+    expect(opened).toEqual(["where-used"]);
+  });
+
   it("lists every parent level returned by the where-used report", async () => {
     const fetchMock = stubFetch({
       ok: true,
@@ -53,6 +60,7 @@ describe("engineering module", () => {
     fireEvent.click(screen.getByRole("button", { name: "Find parents" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Where-used lookup failed");
     expect(screen.queryByRole("table")).toBeNull();
+    expect(screen.getByLabelText("Component")).toHaveValue("SPOKE");
   });
 
   it("says so when nothing uses the component", async () => {
@@ -62,5 +70,6 @@ describe("engineering module", () => {
     fireEvent.click(screen.getByRole("button", { name: "Find parents" }));
     expect(await screen.findByRole("status")).toHaveTextContent("No active BOM uses this component on that date.");
     expect(screen.queryByRole("table")).toBeNull();
+    expect(await screen.findByText("No parents found")).toBeInTheDocument();
   });
 });

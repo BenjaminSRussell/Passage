@@ -5,6 +5,7 @@ import { AdminHome, AlertInbox, AuditViewer, DocumentsPage, ImportExportPage, Se
 const admin: PassageModule = {
   id: "admin",
   title: "Admin",
+  description: "Numbering, audit, alerts, imports and documents.",
   routes: [
     { path: "/admin", element: createElement(AdminHome) },
     { path: "/admin/audit", element: createElement(AuditViewer) },

@@ -5,6 +5,7 @@ import { DesignerPage, InboxPage, JobMonitorPage, TemplatesPage, WorkflowHome } 
 const workflow: PassageModule = {
   id: "workflow",
   title: "Workflow and batch",
+  description: "Approvals, batch jobs and message templates.",
   routes: [
     { path: "/workflow", element: createElement(WorkflowHome) },
     { path: "/workflow/inbox", element: createElement(InboxPage) },

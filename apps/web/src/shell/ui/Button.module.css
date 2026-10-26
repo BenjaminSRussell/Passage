@@ -1,0 +1,132 @@
+.button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-block-size: var(--control-height);
+  padding-inline: var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text);
+  font-size: var(--text-md-size);
+  line-height: var(--text-md-leading);
+  font-weight: var(--weight-semibold);
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out);
+}
+
+.button:hover {
+  text-decoration: none;
+}
+
+.button:disabled,
+.button[aria-disabled="true"] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.button:active:not(:disabled):not([aria-disabled="true"]) {
+  transform: translateY(0.5px);
+}
+
+.sm {
+  min-block-size: 32px;
+  padding-inline: var(--space-3);
+  font-size: var(--text-sm-size);
+  line-height: var(--text-sm-leading);
+}
+
+.sm::after {
+  content: "";
+  position: absolute;
+  inset-block: -6px;
+  inset-inline: 0;
+}
+
+.primary {
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  box-shadow: var(--shadow-sm);
+}
+
+.primary:hover:not(:disabled):not([aria-disabled="true"]) {
+  background: var(--color-accent-hover);
+  color: var(--color-on-accent);
+}
+
+.secondary {
+  background: var(--color-bg-surface);
+  border-color: var(--color-border-input);
+  color: var(--color-text);
+  box-shadow: var(--shadow-sm);
+}
+
+.secondary:hover:not(:disabled):not([aria-disabled="true"]) {
+  background: var(--color-bg-muted);
+  color: var(--color-text);
+}
+
+.ghost {
+  color: var(--color-text);
+}
+
+.ghost:hover:not(:disabled):not([aria-disabled="true"]) {
+  background: var(--color-bg-muted);
+  color: var(--color-text);
+}
+
+.ghost[aria-pressed="true"] {
+  background: var(--color-accent-subtle);
+  color: var(--color-accent-strong);
+}
+
+.danger {
+  background: var(--color-danger);
+  color: var(--color-on-danger);
+  box-shadow: var(--shadow-sm);
+}
+
+.danger:hover:not(:disabled):not([aria-disabled="true"]) {
+  filter: brightness(0.92);
+  color: var(--color-on-danger);
+}
+
+.button:focus-visible {
+  box-shadow: var(--focus-ring);
+}
+
+.spinner {
+  inline-size: 14px;
+  block-size: 14px;
+  flex: none;
+  border: 2px solid currentColor;
+  border-inline-end-color: transparent;
+  border-radius: 50%;
+  animation: spin 700ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+    border-inline-end-color: currentColor;
+    opacity: 0.6;
+  }
+
+  .button:active:not(:disabled):not([aria-disabled="true"]) {
+    transform: none;
+  }
+}

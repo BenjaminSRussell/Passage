@@ -77,3 +77,34 @@ export function headersFor(trace: Trace): Record<string, string> {
   const root = trace.spans[0];
   return { traceparent: traceparent(trace.traceId, root.spanId) };
 }
+
+export interface RecordedError {
+  traceId: string;
+  message: string;
+  stack?: string;
+  componentStack?: string;
+}
+
+const MAX_RECORDED_ERRORS = 50;
+const recorded: RecordedError[] = [];
+
+export function recordError(error: Error, componentStack?: string | null): RecordedError {
+  const entry: RecordedError = {
+    traceId: newTraceId(),
+    message: error.message,
+    stack: error.stack,
+    componentStack: componentStack ?? undefined,
+  };
+  recorded.push(entry);
+  if (typeof console !== "undefined") {
+    console.error("Route render failed", error, componentStack);
+  }
+  if (recorded.length > MAX_RECORDED_ERRORS) {
+    recorded.shift();
+  }
+  return entry;
+}
+
+export function recordedErrors(): readonly RecordedError[] {
+  return recorded;
+}

@@ -1,0 +1,91 @@
+.cell {
+  display: flex;
+}
+
+.cell > * {
+  flex: 1;
+}
+
+.cardHead {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-block-end: var(--space-3);
+}
+
+.tile {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  inline-size: 36px;
+  block-size: 36px;
+  border-radius: var(--radius-md);
+  background: var(--color-accent-subtle);
+  color: var(--color-accent-strong);
+}
+
+.cardTitle {
+  font-size: var(--text-lg-size);
+  line-height: var(--text-lg-leading);
+}
+
+.cardDescription {
+  margin-block-end: var(--space-3);
+  color: var(--color-text-muted);
+}
+
+.links {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-block-start: 1px solid var(--color-border);
+  padding-block-start: var(--space-2);
+  gap: 2px;
+}
+
+.link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-block-size: var(--nav-item-height);
+  padding-inline: var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  font-size: var(--text-sm-size);
+  text-decoration: none;
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.link svg {
+  color: var(--color-text-muted);
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.link:hover {
+  background: var(--color-bg-muted);
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.link:hover svg {
+  color: var(--color-accent);
+  transform: translateX(2px);
+}
+
+.link:dir(rtl) svg {
+  transform: scaleX(-1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .link:hover svg {
+    transform: none;
+  }
+}
+
+.notice > :not(:empty) {
+  margin-block-start: var(--space-4);
+}

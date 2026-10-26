@@ -4,13 +4,22 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { loadModules } from "./modules/registry";
 import { Shell } from "./shell/Shell";
+import { HomePage } from "./shell/pages/HomePage";
+import { NotesPage } from "./shell/pages/NotesPage";
+import { NotFoundPage } from "./shell/pages/NotFoundPage";
+import "./shell/theme.css";
 
 const modules = loadModules();
 const router = createBrowserRouter([
   {
     path: "/",
     element: <Shell modules={modules} />,
-    children: modules.flatMap((m) => m.routes),
+    children: [
+      { index: true, element: <HomePage modules={modules} /> },
+      { path: "notes", element: <NotesPage /> },
+      ...modules.flatMap((m) => m.routes),
+      { path: "*", element: <NotFoundPage /> },
+    ],
   },
 ]);
 

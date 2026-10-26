@@ -26,4 +26,18 @@ describe("workflow module", () => {
     render(<JobMonitorPage />);
     expect(screen.getByRole("table", { name: "Batch runs" })).toHaveTextContent("rows-1m");
   });
+
+  it("flags overdue work items and shows readable statuses", () => {
+    render(<InboxPage />);
+    const table = screen.getByRole("table", { name: "Work items" });
+    expect(table).toHaveTextContent("Overdue");
+    expect(table).toHaveTextContent("Escalated");
+  });
+
+  it("explains empty inbox and job monitor", () => {
+    render(<InboxPage items={[]} />);
+    expect(screen.getByText("You're all caught up")).toBeInTheDocument();
+    render(<JobMonitorPage runs={[]} />);
+    expect(screen.getByText("No batch runs yet")).toBeInTheDocument();
+  });
 });

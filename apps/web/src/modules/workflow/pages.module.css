@@ -1,0 +1,77 @@
+.steps {
+  max-inline-size: var(--reading-max);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+}
+
+.step {
+  position: relative;
+  padding-inline-start: var(--space-10);
+  padding-block-end: var(--space-4);
+  counter-increment: step;
+}
+
+.step:last-child {
+  padding-block-end: 0;
+}
+
+.step::before {
+  content: counter(step);
+  position: absolute;
+  inset-block-start: var(--space-4);
+  inset-inline-start: 0;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  inline-size: 24px;
+  block-size: 24px;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent-subtle);
+  color: var(--color-accent-strong);
+  font-size: var(--text-xs-size);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+.step:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  inset-block: calc(var(--space-4) + 24px) 0;
+  inset-inline-start: 11.5px;
+  inline-size: 1px;
+  background: var(--color-border);
+}
+
+.stepName {
+  margin: 0;
+  font-weight: var(--weight-semibold);
+}
+
+.stepDetail {
+  margin: var(--space-1) 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm-size);
+  line-height: var(--text-sm-leading);
+}
+
+.templates {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.template {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-block-size: var(--row-height);
+  padding-inline: var(--space-5);
+  border-block-end: 1px solid var(--color-border);
+}
+
+.template:last-child {
+  border-block-end: 0;
+}
