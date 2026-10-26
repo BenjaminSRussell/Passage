@@ -754,8 +754,62 @@ paths:
         - { name: qty, in: query, required: true, schema: { type: string, description: Finite decimal } }
       responses:
         '200':
-          description: Quantity converted, rounded to 12 decimals.
+          description: Quantity converted over the caller's visible, active units and conversions. quantity is rounded to 12 decimals; displayQuantity is rounded to the target unit's decimal precision. An unknown or inactive unit, or a pair with no path, returns 422 ORG-UOM-NO-PATH.
           content: { application/json: { schema: { $ref: '#/components/schemas/Conversion' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/uom/units:
+    get:
+      operationId: listUnits
+      x-passage-duty: org.read
+      parameters:
+        - { name: class, in: query, schema: { type: string, enum: [quantity, each, mass, length, volume, area, time, temperature, energy, pressure, power, speed] } }
+        - { name: status, in: query, schema: { type: string, enum: [active, inactive] } }
+      responses:
+        '200':
+          description: The platform units plus the tenant's own units with their status for the caller's tenant, ordered by code.
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/Unit' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: createUnit
+      x-passage-duty: org.reference.write
+      parameters:
+        - { name: Idempotency-Key, in: header, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateUnit' } } }
+      responses:
+        '201':
+          description: Custom unit created, or the original unit on an Idempotency-Key replay. Rejected with 403 AUTH-0003 for legal-entity-scoped callers.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Unit' } } }
+        '409': { description: ORG-UOM-CODE-DUPLICATE when the code is a platform unit or one of the tenant's units., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/uom/units/{code}:
+    get:
+      operationId: getUnit
+      x-passage-duty: org.read
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string }, description: Case-sensitive. }
+      responses:
+        '200':
+          description: One unit with its status for the caller's tenant.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Unit' } } }
+        '404': { description: ORG-UOM-UNIT-NOT-FOUND., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+    patch:
+      operationId: setUnitStatus
+      x-passage-duty: org.reference.write
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/UnitStatus' } } }
+      responses:
+        '200':
+          description: The unit with its new status for the caller's tenant; platform units change for the tenant only. Rejected for legal-entity-scoped callers. Units are never deleted.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Unit' } } }
+        '404': { description: ORG-UOM-UNIT-NOT-FOUND., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         default: { $ref: '#/components/responses/Problem' }
   /healthz:
     get:
@@ -1024,8 +1078,22 @@ components:
       properties: { code: { type: string }, name: { type: string }, status: { type: string, enum: [active, inactive] } }
     Conversion:
       type: object
-      required: [from, to, quantity]
-      properties: { from: { type: string }, to: { type: string }, quantity: { type: string, description: Decimal string } }
+      required: [from, to, quantity, displayQuantity]
+      properties: { from: { type: string }, to: { type: string }, quantity: { type: string, description: Decimal string rounded to 12 decimals }, displayQuantity: { type: string, description: Decimal string rounded to the target unit's decimal precision } }
+    Unit:
+      type: object
+      required: [code, name, class, decimalPrecision, system, status]
+      properties: { code: { type: string }, name: { type: string }, class: { type: string }, decimalPrecision: { type: integer, minimum: 0, maximum: 6 }, system: { type: boolean }, status: { type: string, enum: [active, inactive] } }
+    CreateUnit:
+      type: object
+      additionalProperties: false
+      required: [code, name, class, decimalPrecision]
+      properties: { code: { type: string, pattern: '^[A-Za-z0-9/%]{1,10}$' }, name: { type: string, minLength: 1, maxLength: 120 }, class: { type: string, enum: [quantity, each, mass, length, volume, area, time, temperature, energy, pressure, power, speed] }, decimalPrecision: { type: integer, minimum: 0, maximum: 6 } }
+    UnitStatus:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties: { status: { type: string, enum: [active, inactive] } }
     Problem:
       type: object
       required: [type, title, status]

@@ -1,4 +1,4 @@
-# Not implemented in PSG-6 slice 23
+# Not implemented in PSG-6 slice 24
 
 | Deliverable or AC | Status | Reason |
 |---|---|---|
@@ -11,12 +11,14 @@
 | Deliverable 4: fiscal calendars | partial | generator (PSG-615) plus tables fiscal_calendar and fiscal_period, POST /v1/org/fiscal-calendars, GET /v1/org/fiscal-calendars/{id}, POST …/{id}:generate (idempotent per calendar and year; force refused with ORG-CAL-LOCKED when the PostingChecker reports postings), GET …/{id}/periods and the fiscalcalendar.generated event are built; calendar list and PATCH, legal-entity calendar assignment (org.le.fiscal_calendar), job ORG-J3 roll-forward and the fiscal period schedule document are a later slice of PSG-6; period statuses per ledger belong to wave 14 |
 | Fiscal-pattern fixtures for 2025, 2027 and 2028 beyond 4-4-5-2028 (§1.6.9 lists five patterns for 2025–2028) | later slice of PSG-6 | data files get their own slice; PSG-615 commits the six fixtures that AC4 and the pattern tests need |
 | ORG-CAL-PATTERN, ORG-CAL-OVERLAP, ORG-CAL-NOT-FOUND, ORG-CAL-CODE-DUPLICATE | not in catalog | new codes returned by /v1/org/fiscal-calendars; the §1.6.18 catalog lists only ORG-CAL-LOCKED and ORG-CAL-GAP |
-| Deliverable 5: reference data | partial | UoM conversion is built (AC3) over a built-in conversion set in `domain.StandardConversions`; countries, currencies, regions (US, CA, IN, MX) and languages are seeded (tables `country`, `currency`, `region`, `language`, `reference_status`; loader `store.SeedReference`); the read API (`GET /v1/org/{countries,currencies,regions,languages}[/{code}]`) and tenant deactivation (`PATCH …/{code}`, table `reference_status`) are built; units and conversions are seeded (tables `unit_of_measure`, `uom_conversion`, PSG-623) |
+| Deliverable 5: reference data | partial | UoM conversion is built (AC3); convert reads the persisted set; units can be listed, added and deactivated (PSG-624); countries, currencies, regions (US, CA, IN, MX) and languages are seeded (tables `country`, `currency`, `region`, `language`, `reference_status`; loader `store.SeedReference`); the read API (`GET /v1/org/{countries,currencies,regions,languages}[/{code}]`) and tenant deactivation (`PATCH …/{code}`, table `reference_status`) are built; units and conversions are seeded (tables `unit_of_measure`, `uom_conversion`, PSG-623) |
 | Deliverable 6: teams, team types, memberships | slice 2 of PSG-6 | line budget; membership criteria need OPA/Rego, which is not present |
 | Deliverable 6: legal-entity copy from template, organization name translations | slice 2 of PSG-6 | copy needs Temporal (wave 4) and will sit behind an interface with an in-package fake; the rest is line budget; currency rounding rules are built (PSG-622) |
 | Event `hierarchyversion.activated` | built, timer deferred | emitted at publish, also for a future effective_from; ORG-J2 activation timer needs Temporal (wave 4); the kernel type regex allows three segments, so `org.hierarchy.version.activated` collapses to `org.hierarchyversion.activated` |
 | Regions for countries other than US, CA, IN, MX | not built | delivered through localization packs (§1.6.20 'others via pack') |
-| Convert over the persisted conversions, unit and conversion read API, custom units and conversions, unit deactivation | later slice of PSG-6 | tables `unit_of_measure` and `uom_conversion` and their seed are built (PSG-623); `/v1/org/uom/convert` serves `domain.StandardConversions` until then |
+| Conversion read API (inverse, round-trip check) and tenant-owned custom conversions | later slice of PSG-6 | convert over the persisted set, the unit read API, custom units and unit deactivation are built (PSG-624) |
+| In-memory conversion graph invalidated by event (§1.6.19 UoM conversion budget) | not built | `ConversionGraph` is read per request; the cache and its invalidation event wait for the Kafka relay (wave 4) |
+| ORG-UOM-UNIT-NOT-FOUND, ORG-UOM-CODE-DUPLICATE | not in catalog | new codes returned by the unit routes; the §1.6.18 catalog lists only ORG-UOM-NO-PATH |
 | Product-specific conversions (`uom_conversion.product_id`) | handoff | the column exists and is always null; product-specific conversions belong to wave 8 (services/product) |
 | UoM classes energy, pressure, power, speed | built, beyond PRD | FR-6.8 lists eight classes; the AC-6.3 fixture needs these four |
 | Currency rounding rule delete (revert to fallback) | later slice of PSG-6 | rules can be created and changed (PSG-622); removing a row so the platform default applies again is not built |

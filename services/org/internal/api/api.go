@@ -49,13 +49,13 @@ var (
 )
 
 type API struct {
-	store       store.Store
-	conversions []domain.Conversion
-	created     atomic.Int64
-	failed      atomic.Int64
-	updated     atomic.Int64
+	store   store.Store
+	created atomic.Int64
+	failed  atomic.Int64
+	updated atomic.Int64
 
 	referenceChanged atomic.Int64
+	unitCreated      atomic.Int64
 	ouCreated        atomic.Int64
 	ouUpdated        atomic.Int64
 	siteCreated      atomic.Int64
@@ -124,13 +124,14 @@ type listResponse struct {
 }
 
 type convertResponse struct {
-	From     string          `json:"from"`
-	To       string          `json:"to"`
-	Quantity decimal.Decimal `json:"quantity"`
+	From            string          `json:"from"`
+	To              string          `json:"to"`
+	Quantity        decimal.Decimal `json:"quantity"`
+	DisplayQuantity decimal.Decimal `json:"displayQuantity"`
 }
 
 func New(s store.Store) *API {
-	return &API{store: s, conversions: domain.StandardConversions(), geocoder: domain.NullGeocoder{}, postings: noPostings{}, now: time.Now}
+	return &API{store: s, geocoder: domain.NullGeocoder{}, postings: noPostings{}, now: time.Now}
 }
 
 func (a *API) Register(r chi.Router) {
@@ -152,6 +153,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerHierarchies(r)
 	a.registerCurrencyRounding(r)
 	r.Get("/v1/org/uom/convert", a.convert)
+	a.registerUnits(r)
 	for _, c := range referenceCollections {
 		base := "/v1/org/" + c.collection
 		r.With(authz.RequireDuty(dutyRead)).Get(base, a.listReference(c.kind))
@@ -167,6 +169,7 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP org_legal_entities_failed_total Legal entity creations that failed in the store.\n# TYPE org_legal_entities_failed_total counter\norg_legal_entities_failed_total %d\n", a.failed.Load())
 		fmt.Fprintf(w, "# HELP org_legal_entities_updated_total Legal entity updates that bumped the version.\n# TYPE org_legal_entities_updated_total counter\norg_legal_entities_updated_total %d\n", a.updated.Load())
 		fmt.Fprintf(w, "# HELP org_reference_status_changed_total Reference rows whose tenant status was set.\n# TYPE org_reference_status_changed_total counter\norg_reference_status_changed_total %d\n", a.referenceChanged.Load())
+		fmt.Fprintf(w, "# HELP org_uom_units_created_total Custom units of measure created.\n# TYPE org_uom_units_created_total counter\norg_uom_units_created_total %d\n", a.unitCreated.Load())
 		fmt.Fprintf(w, "# HELP org_operating_units_created_total Operating units created.\n# TYPE org_operating_units_created_total counter\norg_operating_units_created_total %d\n", a.ouCreated.Load())
 		fmt.Fprintf(w, "# HELP org_operating_units_updated_total Operating unit updates that bumped the version.\n# TYPE org_operating_units_updated_total counter\norg_operating_units_updated_total %d\n", a.ouUpdated.Load())
 		fmt.Fprintf(w, "# HELP org_sites_created_total Sites created.\n# TYPE org_sites_created_total counter\norg_sites_created_total %d\n", a.siteCreated.Load())
@@ -450,12 +453,24 @@ func (a *API) convert(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", "from, to and a finite decimal qty are required"))
 		return
 	}
-	result, err := domain.Convert(a.conversions, from, to, qty)
+	convs, precision, err := a.store.ConversionGraph(r.Context())
+	if err != nil {
+		slog.Error("load conversion graph failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.Fail(w, r, err)
+		return
+	}
+	for _, code := range []string{from, to} {
+		if _, ok := precision[code]; !ok {
+			httpx.Fail(w, r, problemFrom(&domain.Error{Code: domain.CodeNoPath, Detail: "unit " + code + " is unknown or inactive"}))
+			return
+		}
+	}
+	result, err := domain.Convert(convs, from, to, qty)
 	if err != nil {
 		httpx.Fail(w, r, problemFrom(err))
 		return
 	}
-	httpx.JSON(w, http.StatusOK, convertResponse{From: from, To: to, Quantity: domain.Display(result, domain.DisplayPrecision)})
+	httpx.JSON(w, http.StatusOK, convertResponse{From: from, To: to, Quantity: domain.Display(result, domain.DisplayPrecision), DisplayQuantity: domain.Display(result, precision[to])})
 }
 
 func problemFrom(err error) error {

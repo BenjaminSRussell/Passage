@@ -69,6 +69,104 @@ type fakeStore struct {
 	roundings           []store.CurrencyRounding
 	resolveArgs         [3]string
 	resolved            store.RoundingRule
+	units               []store.Unit
+	unitCreated         store.Unit
+	unitCreateKey       string
+	unitStatusCalls     []string
+}
+
+func (f *fakeStore) seedUnits() {
+	if f.units != nil {
+		return
+	}
+	f.units = []store.Unit{
+		{Code: "C", Name: "Celsius", Class: "temperature", DecimalPrecision: 2, System: true, Status: "active"},
+		{Code: "F", Name: "Fahrenheit", Class: "temperature", DecimalPrecision: 2, System: true, Status: "active"},
+		{Code: "K", Name: "Kelvin", Class: "temperature", DecimalPrecision: 2, System: true, Status: "active"},
+		{Code: "g", Name: "Gram", Class: "mass", DecimalPrecision: 0, System: true, Status: "active"},
+		{Code: "kg", Name: "Kilogram", Class: "mass", DecimalPrecision: 3, System: true, Status: "active"},
+		{Code: "lb", Name: "Pound", Class: "mass", DecimalPrecision: 3, System: true, Status: "active"},
+	}
+}
+
+func (f *fakeStore) unit(code string) (*store.Unit, error) {
+	f.seedUnits()
+	for i := range f.units {
+		if f.units[i].Code == code {
+			return &f.units[i], nil
+		}
+	}
+	return nil, httpx.NewProblem(http.StatusNotFound, store.CodeUnitNotFound, "no unit with code "+code)
+}
+
+func (f *fakeStore) ListUnits(_ context.Context, filter store.UnitFilter) ([]store.Unit, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	f.seedUnits()
+	items := []store.Unit{}
+	for _, u := range f.units {
+		if (filter.Class == "" || u.Class == filter.Class) && (filter.Status == "" || u.Status == filter.Status) {
+			items = append(items, u)
+		}
+	}
+	return items, nil
+}
+
+func (f *fakeStore) GetUnit(_ context.Context, code string) (store.Unit, error) {
+	if f.err != nil {
+		return store.Unit{}, f.err
+	}
+	u, err := f.unit(code)
+	if err != nil {
+		return store.Unit{}, err
+	}
+	return *u, nil
+}
+
+func (f *fakeStore) CreateUnit(_ context.Context, in store.Unit, key string) (store.Unit, error) {
+	if f.err != nil {
+		return store.Unit{}, f.err
+	}
+	if _, err := f.unit(in.Code); err == nil {
+		return store.Unit{}, httpx.NewProblem(http.StatusConflict, store.CodeUnitCodeDuplicate, "duplicate")
+	}
+	in.System, in.Status = false, "active"
+	f.unitCreated, f.unitCreateKey = in, key
+	f.units = append(f.units, in)
+	return in, nil
+}
+
+func (f *fakeStore) SetUnitStatus(_ context.Context, code, status string) (store.Unit, error) {
+	u, err := f.unit(code)
+	if err != nil {
+		return store.Unit{}, err
+	}
+	u.Status = status
+	f.unitStatusCalls = append(f.unitStatusCalls, code+"="+status)
+	return *u, nil
+}
+
+func (f *fakeStore) ConversionGraph(context.Context) ([]domain.Conversion, map[string]int32, error) {
+	if f.err != nil {
+		return nil, nil, f.err
+	}
+	f.seedUnits()
+	precision := map[string]int32{}
+	for _, u := range f.units {
+		if u.Status == "active" {
+			precision[u.Code] = int32(u.DecimalPrecision)
+		}
+	}
+	var convs []domain.Conversion
+	for _, c := range domain.StandardConversions() {
+		_, from := precision[c.From]
+		_, to := precision[c.To]
+		if from && to {
+			convs = append(convs, c)
+		}
+	}
+	return convs, precision, nil
 }
 
 func (f *fakeStore) reference(kind store.ReferenceKind, code string) (store.ReferenceItem, bool) {
@@ -745,6 +843,8 @@ func TestConvert(t *testing.T) {
 		wantBody   string
 	}{
 		{"kilograms to grams", "from=kg&to=g&qty=2.5", true, http.StatusOK, `"quantity":"2500"`},
+		{"display rounds to the target precision", "from=lb&to=kg&qty=10", true, http.StatusOK, `"quantity":"4.5359237","displayQuantity":"4.536"`},
+		{"display rounds to whole grams", "from=kg&to=g&qty=2.5004", true, http.StatusOK, `"displayQuantity":"2500"`},
 		{"offset conversion", "from=C&to=F&qty=100", true, http.StatusOK, `"quantity":"212"`},
 		{"without tenant", "from=kg&to=g&qty=1", false, http.StatusUnauthorized, "AUTH-0001"},
 		{"missing qty", "from=kg&to=g", true, http.StatusBadRequest, "COM-0001"},
@@ -753,6 +853,8 @@ func TestConvert(t *testing.T) {
 		{"missing from", "to=g&qty=1", true, http.StatusBadRequest, "COM-0001"},
 		{"unknown unit", "from=kg&to=furlong&qty=1", true, http.StatusUnprocessableEntity, "ORG-UOM-NO-PATH"},
 		{"cross class", "from=kg&to=m&qty=1", true, http.StatusUnprocessableEntity, "ORG-UOM-NO-PATH"},
+		{"cross class between known units", "from=kg&to=C&qty=1", true, http.StatusUnprocessableEntity, "ORG-UOM-NO-PATH"},
+		{"case mismatch", "from=KG&to=g&qty=1", true, http.StatusUnprocessableEntity, "ORG-UOM-NO-PATH"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -762,6 +864,13 @@ func TestConvert(t *testing.T) {
 				t.Fatalf("got %d %s; want %d containing %s", rec.Code, rec.Body.String(), tc.wantStatus, tc.wantBody)
 			}
 		})
+	}
+}
+
+func TestConvert_StoreErrorIs500(t *testing.T) {
+	r, _ := newRouter(&fakeStore{err: errors.New("db down")})
+	if rec := do(r, http.MethodGet, "/v1/org/uom/convert?from=kg&to=g&qty=1", "", "", true); rec.Code != http.StatusInternalServerError {
+		t.Fatalf("got %d %s; want 500", rec.Code, rec.Body.String())
 	}
 }
 
