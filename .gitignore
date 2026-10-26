@@ -17,3 +17,5 @@ node_modules/
 apps/*/dist/
 tools/docs/node_modules/
 docs/PRD-full.pdf
+apps/web/test-results/
+apps/web/playwright-report/

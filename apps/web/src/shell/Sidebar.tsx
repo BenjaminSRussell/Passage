@@ -71,7 +71,6 @@ export function Sidebar({ modules, shellNav, drawerOpen, searchRef, onOpenSearch
           ref={searchRef}
           type="button"
           className={styles.search}
-          aria-label={copy.buttons.search}
           aria-keyshortcuts="Control+K Meta+K"
           aria-haspopup="dialog"
           onClick={onOpenSearch}
