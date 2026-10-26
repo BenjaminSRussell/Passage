@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: party
-  version: 0.1.0
-  description: Global party and business partner service. This slice exposes tax registration validation.
+  version: 0.2.0
+  description: Global party and business partner service. Parties are created, read and updated here; search, roles and duplicate handling follow in later slices.
 servers:
   - url: https://app.local.passage.dev
 paths:
@@ -32,6 +32,86 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /v1/party/parties:
+    post:
+      operationId: createParty
+      x-passage-duty: party.write
+      description: Creates an organization or person. The party number comes from numbering sequence PARTY. A replay with the same Idempotency-Key and body returns the original party; the same key with another body is 409 idempotency_key_reuse. Emits dev.passage.party.party.created.v1.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateParty' }
+      responses:
+        '201':
+          description: Created, or the original party on an idempotent replay.
+          headers:
+            ETag: { description: 'The version, quoted.', schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Party' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { description: 'idempotency_key_reuse: the key was used with a different body.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: 'PTY-PARTY-INVALID; errors names each failing field.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '500': { $ref: '#/components/responses/Problem' }
+        '503': { description: 'PTY-NUMBERING-UNAVAILABLE: the numbering service failed, timed out or NUMBERING_URL is empty. No party is written.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/party/parties/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getParty
+      x-passage-duty: party.read
+      description: A merged party answers with its survivor (at most 5 hops), requestedId and redirected true. dob is returned only to callers holding pii.read; others see "••••" when it is set.
+      responses:
+        '200':
+          description: The party.
+          headers:
+            ETag: { description: 'The version, quoted.', schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Party' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: 'PTY-PARTY-NOT-FOUND: unknown id, another tenant, or a malformed id.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '500': { $ref: '#/components/responses/Problem' }
+    patch:
+      operationId: updateParty
+      x-passage-duty: party.write
+      description: Optimistic update. A PATCH that changes nothing returns 200 with the same version and emits no event. Emits dev.passage.party.party.updated.v1 otherwise; dob and gender are never named in its changed_fields.
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: 'The quoted version. Required unless the body carries version.'
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PatchParty' }
+      responses:
+        '200':
+          description: The updated party.
+          headers:
+            ETag: { description: 'The version, quoted.', schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Party' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: 'PTY-PARTY-NOT-FOUND.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: 'PTY-VERSION-CONFLICT (error class conflict_version): the version is stale.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: 'PTY-PARTY-INVALID (bad field, partyType change) or PTY-STATUS-TRANSITION (status merged, unknown status, or the party is merged).', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '428': { description: 'PTY-VERSION-REQUIRED: no usable If-Match or body version.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '500': { $ref: '#/components/responses/Problem' }
   /healthz:
     get:
@@ -75,6 +155,60 @@ components:
         country: { type: string }
         number: { type: string, description: Normalized number. }
         validationStatus: { type: string, enum: [valid, invalid, unverified, format_only] }
+    PartyFields:
+      type: object
+      properties:
+        legalName: { type: string, maxLength: 200, description: Organization only. }
+        tradeName: { type: string, maxLength: 200, description: Organization only. }
+        registrationNumber: { type: string, maxLength: 200, description: Organization only. }
+        industryCode: { type: string, maxLength: 200, description: Organization only. }
+        givenName: { type: string, maxLength: 200, description: Person only. }
+        middleName: { type: string, maxLength: 200, description: Person only. }
+        familyName: { type: string, maxLength: 200, description: Person only. }
+        prefix: { type: string, maxLength: 200, description: Person only. }
+        suffix: { type: string, maxLength: 200, description: Person only. }
+        dob: { type: string, format: date, description: 'Person only. Masked to "••••" for callers without pii.read.' }
+        gender: { type: string, maxLength: 200, description: Person only. }
+        languageCode: { type: string }
+        timeZone: { type: string }
+        ownerUserId: { type: string, format: uuid }
+        ownerTeamId: { type: string, format: uuid }
+    CreateParty:
+      allOf:
+        - $ref: '#/components/schemas/PartyFields'
+        - type: object
+          required: [partyType]
+          properties:
+            partyType: { type: string, enum: [organization, person] }
+      unevaluatedProperties: false
+      description: An organization requires legalName; a person requires givenName and familyName.
+    PatchParty:
+      allOf:
+        - $ref: '#/components/schemas/PartyFields'
+        - type: object
+          properties:
+            partyType: { type: string, enum: [organization, person], description: 'Must equal the current type.' }
+            status: { type: string, enum: [active, inactive] }
+            version: { type: integer, minimum: 1, description: 'Used when If-Match is absent.' }
+      unevaluatedProperties: false
+    Party:
+      allOf:
+        - $ref: '#/components/schemas/PartyFields'
+        - type: object
+          required: [id, partyNumber, partyType, name, searchName, status, version, createdAt, updatedAt]
+          properties:
+            id: { type: string, format: uuid }
+            partyNumber: { type: string }
+            partyType: { type: string, enum: [organization, person] }
+            name: { type: string }
+            searchName: { type: string }
+            status: { type: string, enum: [active, inactive, merged] }
+            mergedIntoId: { type: string, format: uuid }
+            version: { type: integer }
+            createdAt: { type: string, format: date-time }
+            updatedAt: { type: string, format: date-time }
+            requestedId: { type: string, description: Present with redirected when a merged party was requested. }
+            redirected: { type: boolean }
     Problem:
       type: object
       required: [type, title, status]

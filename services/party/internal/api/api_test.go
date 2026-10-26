@@ -38,7 +38,7 @@ func newRouter(c domain.Checker) (*chi.Mux, *api.API) {
 }
 
 func newRouterWithPinger(c domain.Checker, p api.Pinger) (*chi.Mux, *api.API) {
-	a := api.New(c, p)
+	a := api.New(c, p, nil, nil)
 	r := httpx.NewRouter()
 	a.Register(r)
 	return r, a
@@ -213,4 +213,21 @@ func TestProbesAreServedByKernel(t *testing.T) {
 			t.Errorf("%s got %d", path, rec.Code)
 		}
 	}
+}
+
+func newRequest(method, path, body, duties string) *http.Request {
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
+	req.Header.Set("X-Passage-Duties", duties)
+	return req
+}
+
+func serve(r http.Handler, req *http.Request) *httptest.ResponseRecorder {
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	return rec
+}
+
+func httpRecorderFor(h http.Handler) string {
+	return serve(h, httptest.NewRequest(http.MethodGet, "/metrics", nil)).Body.String()
 }

@@ -17,12 +17,15 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/party/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/party/internal/store"
 )
 
 const (
 	checkTimeout = 5 * time.Second
 	readyTimeout = 500 * time.Millisecond
 	dutyWrite    = "party.write"
+	dutyRead     = "party.read"
+	dutyPII      = "pii.read"
 	codeInvalid  = "PTY-0001"
 )
 
@@ -30,8 +33,15 @@ var reportedStatuses = []domain.Status{domain.StatusValid, domain.StatusInvalid,
 
 type Pinger interface{ Ping(context.Context) error }
 
+type Sequencer interface {
+	Next(ctx context.Context, code, idempotencyKey string) (string, error)
+}
+
 type API struct {
 	pinger   Pinger
+	parties  store.Store
+	sequence Sequencer
+	created  atomic.Int64
 	checker  loggedChecker
 	statuses map[domain.Status]*atomic.Int64
 	rejected atomic.Int64
@@ -65,8 +75,8 @@ func (c loggedChecker) Check(ctx context.Context, country, number string) (domai
 	return status, err
 }
 
-func New(checker domain.Checker, pinger Pinger) *API {
-	a := &API{pinger: pinger, statuses: map[domain.Status]*atomic.Int64{}}
+func New(checker domain.Checker, pinger Pinger, parties store.Store, sequence Sequencer) *API {
+	a := &API{pinger: pinger, parties: parties, sequence: sequence, statuses: map[domain.Status]*atomic.Int64{}}
 	for _, s := range reportedStatuses {
 		a.statuses[s] = new(atomic.Int64)
 	}
@@ -77,6 +87,9 @@ func New(checker domain.Checker, pinger Pinger) *API {
 func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
 	r.With(authz.RequireDuty(dutyWrite)).Post("/v1/party/tax-registrations:validate", a.validate)
+	r.With(authz.RequireDuty(dutyWrite)).Post("/v1/party/parties", a.createParty)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/party/parties/{id}", a.getParty)
+	r.With(authz.RequireDuty(dutyWrite)).Patch("/v1/party/parties/{id}", a.patchParty)
 }
 
 func (a *API) Metrics() http.Handler {
@@ -88,6 +101,7 @@ func (a *API) Metrics() http.Handler {
 		}
 		fmt.Fprintf(w, "# HELP party_tax_validations_rejected_total Tax validation requests rejected for malformed requests, tenant context, or tax format.\n# TYPE party_tax_validations_rejected_total counter\nparty_tax_validations_rejected_total %d\n", a.rejected.Load())
 		fmt.Fprintf(w, "# HELP party_tax_checker_failures_total Checker calls that failed and left the registration unverified.\n# TYPE party_tax_checker_failures_total counter\nparty_tax_checker_failures_total %d\n", a.failures.Load())
+		fmt.Fprintf(w, "# HELP party_parties_created_total Parties created; an idempotent replay is not counted.\n# TYPE party_parties_created_total counter\nparty_parties_created_total %d\n", a.created.Load())
 	})
 }
 

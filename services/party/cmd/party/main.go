@@ -12,6 +12,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/services/party/internal/api"
+	"github.com/BenjaminSRussell/passage/services/party/internal/numbering"
 	"github.com/BenjaminSRussell/passage/services/party/internal/store"
 	"github.com/BenjaminSRussell/passage/services/party/internal/vies"
 	"github.com/BenjaminSRussell/passage/services/party/migrations"
@@ -61,7 +62,14 @@ func run(ctx context.Context, getenv func(string) string) error {
 		}
 		slog.Info("migrations applied")
 	}
-	a := api.New(vies.Unavailable{}, store.New(pool))
+	var sequencer api.Sequencer = numbering.Unavailable{}
+	if url := getenv("NUMBERING_URL"); url != "" {
+		sequencer = numbering.New(url)
+	} else {
+		slog.Warn("NUMBERING_URL is empty, party creation returns 503 until it is set")
+	}
+	parties := store.New(pool)
+	a := api.New(vies.Unavailable{}, parties, parties, sequencer)
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()
