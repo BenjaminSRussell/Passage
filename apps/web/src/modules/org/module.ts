@@ -1,5 +1,6 @@
 import { createElement } from "react";
 import type { PassageModule } from "../registry";
+import { HierarchyDesignerPage } from "./HierarchyDesignerPage";
 import { ReferenceDataPage } from "./ReferenceDataPage";
 import { LegalEntitiesPage, OperatingUnitsPage, OrgHome, OrgLayout, SitesPage, WarehousesPage } from "./pages";
 
@@ -17,6 +18,7 @@ const org: PassageModule = {
         { path: "/org/sites", element: createElement(SitesPage) },
         { path: "/org/warehouses", element: createElement(WarehousesPage) },
         { path: "/org/reference-data", element: createElement(ReferenceDataPage) },
+        { path: "/org/hierarchy", element: createElement(HierarchyDesignerPage) },
       ],
     },
   ],
@@ -27,6 +29,7 @@ const org: PassageModule = {
     { label: "Sites", to: "/org/sites", duty: "org.read" },
     { label: "Warehouses", to: "/org/warehouses", duty: "org.read" },
     { label: "Reference data", to: "/org/reference-data", duty: "org.read" },
+    { label: "Hierarchies", to: "/org/hierarchy", duty: "org.read" },
   ],
 };
 

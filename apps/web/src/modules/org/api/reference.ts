@@ -103,7 +103,7 @@ export async function referenceFetch<T>(path: string, init: RequestInit = {}): P
   return (await res.json()) as T;
 }
 
-function withQuery(path: string, filters: Record<string, string | undefined>): string {
+export function withQuery(path: string, filters: Record<string, string | undefined>): string {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(filters)) {
     if (value) {
