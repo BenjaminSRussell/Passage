@@ -77,6 +77,8 @@ type Store interface {
 	GetAddress(ctx context.Context, id string) (Address, error)
 	ReviseAddress(ctx context.Context, id, versionID string, next Address) (Address, error)
 	GetAddressVersion(ctx context.Context, versionID string) (Address, error)
+	GetAddressAsOf(ctx context.Context, id, asOf string) (Address, error)
+	ListAddressVersions(ctx context.Context, id string) ([]AddressVersion, error)
 	ListAddresses(ctx context.Context, f AddressFilter, afterID string, limit int) (AddressPage, error)
 	CreateFiscalCalendar(ctx context.Context, in FiscalCalendar, idempotencyKey string) (FiscalCalendar, error)
 	GetFiscalCalendar(ctx context.Context, id string) (FiscalCalendar, error)

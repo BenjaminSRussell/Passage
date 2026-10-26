@@ -44,6 +44,8 @@ type fakeStore struct {
 	locationUpdateCalls int
 	addresses           []store.Address
 	addressCalls        int
+	addressFilter       store.AddressFilter
+	asOfArg             string
 	reviseCalls         int
 	calendars           []store.FiscalCalendar
 	generatedYears      map[string]bool
@@ -763,10 +765,41 @@ func (f *fakeStore) GetAddressVersion(_ context.Context, versionID string) (stor
 	return store.Address{}, httpx.NewProblem(http.StatusNotFound, store.CodeAddressNotFound, "address not found")
 }
 
+func (f *fakeStore) GetAddressAsOf(_ context.Context, id, asOf string) (store.Address, error) {
+	f.addressCalls++
+	f.asOfArg = asOf
+	for _, a := range f.addresses {
+		if a.ID == id && asOf >= a.ValidFrom {
+			return a, nil
+		}
+	}
+	return store.Address{}, httpx.NewProblem(http.StatusNotFound, store.CodeAddressNotFound, "address not found")
+}
+
+func (f *fakeStore) ListAddressVersions(_ context.Context, id string) ([]store.AddressVersion, error) {
+	f.addressCalls++
+	if f.err != nil {
+		return nil, f.err
+	}
+	for _, a := range f.addresses {
+		if a.ID == id {
+			return []store.AddressVersion{{VersionID: a.VersionID, ValidFrom: a.ValidFrom}}, nil
+		}
+	}
+	return nil, httpx.NewProblem(http.StatusNotFound, store.CodeAddressNotFound, "address not found")
+}
+
 func (f *fakeStore) ListAddresses(_ context.Context, filter store.AddressFilter, afterID string, limit int) (store.AddressPage, error) {
+	f.addressFilter = filter
 	page := store.AddressPage{Items: []store.Address{}}
 	for _, a := range f.addresses {
-		if a.OwnerType != filter.OwnerType || a.OwnerID != filter.OwnerID || a.ID <= afterID {
+		if filter.OwnerType != "" && (a.OwnerType != filter.OwnerType || a.OwnerID != filter.OwnerID) || a.ID <= afterID {
+			continue
+		}
+		if filter.Query != "" && !strings.Contains(strings.ToLower(a.City+" "+a.Street1), strings.ToLower(filter.Query)) {
+			continue
+		}
+		if filter.CountryCode != "" && a.CountryCode != filter.CountryCode {
 			continue
 		}
 		if len(page.Items) == limit {

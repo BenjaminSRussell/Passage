@@ -67,6 +67,10 @@ type addressList struct {
 	NextCursor string          `json:"nextCursor,omitempty"`
 }
 
+type addressVersionList struct {
+	Items []store.AddressVersion `json:"items"`
+}
+
 func (a *API) SetGeocoder(g domain.Geocoder) { a.geocoder = g }
 
 func (a *API) SetClock(now func() time.Time) { a.now = now }
@@ -76,6 +80,7 @@ func (a *API) registerAddresses(r chi.Router) {
 	r.With(authz.RequireDuty(dutyAddress)).Patch(addresses+"/{id}", addressRoute(a.updateAddress))
 	r.With(authz.RequireDuty(dutyRead)).Get(addresses, a.listAddresses)
 	r.With(authz.RequireDuty(dutyRead)).Get(addresses+"/{id}", addressRoute(a.getAddress))
+	r.With(authz.RequireDuty(dutyRead)).Get(addresses+"/{id}/versions", addressRoute(a.listAddressVersions))
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/org/address-versions/{id}", addressRoute(a.getAddressVersion))
 }
 
@@ -195,13 +200,33 @@ func addressRoute(next func(http.ResponseWriter, *http.Request, string)) http.Ha
 }
 
 func (a *API) getAddress(w http.ResponseWriter, r *http.Request, id string) {
-	address, err := a.store.GetAddress(r.Context(), id)
+	var address store.Address
+	var err error
+	if asOf, given := r.URL.Query()["asOf"]; given {
+		if day, parseErr := time.Parse(dateLayout, asOf[0]); parseErr != nil || day.Format(dateLayout) != asOf[0] {
+			badQuery(w, r, "asOf", "must be a calendar date as YYYY-MM-DD")
+			return
+		}
+		address, err = a.store.GetAddressAsOf(r.Context(), id, asOf[0])
+	} else {
+		address, err = a.store.GetAddress(r.Context(), id)
+	}
 	if err != nil {
 		slog.Error("get address failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, address)
+}
+
+func (a *API) listAddressVersions(w http.ResponseWriter, r *http.Request, id string) {
+	versions, err := a.store.ListAddressVersions(r.Context(), id)
+	if err != nil {
+		slog.Error("list address versions failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, addressVersionList{Items: versions})
 }
 
 func (req *updateAddressRequest) normalize() {
@@ -298,13 +323,22 @@ func (a *API) listAddresses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	f := store.AddressFilter{OwnerType: q.Get("ownerType"), OwnerID: canonicalID(q.Get("ownerId")), Purpose: q.Get("purpose")}
+	f := store.AddressFilter{OwnerType: q.Get("ownerType"), OwnerID: canonicalID(q.Get("ownerId")), Purpose: q.Get("purpose"),
+		Query: strings.TrimSpace(q.Get("q")), CountryCode: q.Get("countryCode")}
+	searching := q.Has("q")
+	if searching {
+		a.addressSearches.Add(1)
+	}
+	ownerGiven := q.Get("ownerType") != "" || q.Get("ownerId") != ""
+	qLength := utf8.RuneCountInString(f.Query)
 	for _, c := range []struct {
 		field, rule string
 		invalid     bool
 	}{
-		{"ownerType", "must be legal_entity, operating_unit, site, warehouse, location or party", !slices.Contains(addressOwnerTypes, f.OwnerType)},
-		{"ownerId", "is required and must be a UUID", !canonicalUUID(f.OwnerID)},
+		{"q", "must be 3 to 100 characters", searching && (qLength < 3 || qLength > 100)},
+		{"ownerType", "must be legal_entity, operating_unit, site, warehouse, location or party", (!searching || ownerGiven) && !slices.Contains(addressOwnerTypes, f.OwnerType)},
+		{"ownerId", "is required and must be a UUID", (!searching || ownerGiven) && !canonicalUUID(f.OwnerID)},
+		{"countryCode", "must be an ISO 3166-1 alpha-2 code", f.CountryCode != "" && !countryCode.MatchString(f.CountryCode)},
 		{"purpose", "must be one of " + strings.Join(domain.AddressPurposes, ", "), f.Purpose != "" && !domain.ValidPurpose(f.Purpose)},
 		{"cursor", "is invalid", cursor != "" && !canonicalUUID(cursor)},
 	} {

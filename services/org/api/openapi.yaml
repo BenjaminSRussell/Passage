@@ -695,14 +695,16 @@ paths:
       operationId: listAddresses
       x-passage-duty: org.read
       parameters:
-        - { name: ownerType, in: query, required: true, schema: { type: string, enum: [legal_entity, operating_unit, site, warehouse, location, party] } }
-        - { name: ownerId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: ownerType, in: query, description: Required unless q is given; if either owner field is given both are required, schema: { type: string, enum: [legal_entity, operating_unit, site, warehouse, location, party] } }
+        - { name: ownerId, in: query, description: Required unless q is given; if either owner field is given both are required, schema: { type: string, format: uuid } }
+        - { name: q, in: query, description: Case-insensitive literal substring of the formatted address, trimmed, 3 to 100 characters; % and _ match themselves, schema: { type: string, minLength: 3, maxLength: 100 } }
+        - { name: countryCode, in: query, schema: { type: string, pattern: '^[A-Z]{2}$' } }
         - { name: purpose, in: query, schema: { type: string, enum: [business, delivery, invoice, remit_to, service, home, other] } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
         - { name: cursor, in: query, schema: { type: string } }
       responses:
         '200':
-          description: The owner's current address versions ordered by address id, filtered by purpose when given. An owner outside the caller's legal-entity scope yields an empty page. Pass nextCursor as cursor for the next page. 400 COM-0001 for a bad owner, purpose, limit or cursor.
+          description: Current address versions ordered by address id, for one owner or, with q, across the tenant's owners and legal entities, filtered by countryCode and purpose when given. Superseded versions are never returned. An owner or legal entity outside the caller's scope yields no rows. Pass nextCursor as cursor for the next page. 400 COM-0001 for a bad q (outside 3 to 100 characters), owner, countryCode, purpose, limit or cursor.
           content: { application/json: { schema: { $ref: '#/components/schemas/AddressList' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/org/address-versions/{id}:
@@ -722,9 +724,10 @@ paths:
       x-passage-duty: org.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: asOf, in: query, description: Date YYYY-MM-DD; returns the version in force on that date, schema: { type: string, format: date } }
       responses:
         '200':
-          description: The current version of the address with its purposes. A malformed id, an unknown id and an address outside the caller's legal-entity scope are all 404 ORG-ADDR-NOT-FOUND.
+          description: The current version of the address with its purposes, or with asOf the version in force on that date (validFrom on or before the date, validTo after it); purposes are always the current purposes. The body carries versionId so a document can pin it. A malformed id, an unknown id, a date before the first version and an address outside the caller's legal-entity scope are all 404 ORG-ADDR-NOT-FOUND. A malformed or non-calendar asOf is 400 COM-0001.
           content: { application/json: { schema: { $ref: '#/components/schemas/Address' } } }
         default: { $ref: '#/components/responses/Problem' }
     patch:
@@ -739,6 +742,17 @@ paths:
         '200':
           description: The new current version. The edit closes the current version, inserts the next one, replaces the purposes and emits address.changed for the new version. A request that changes nothing and has no validFrom returns the current version and writes nothing. 400 COM-0001 for a field error, or for ownerType or ownerId, which are immutable. 404 ORG-ADDR-NOT-FOUND. 409 ORG-VERSION-CONFLICT when versionId is stale, or ORG-ADDR-PRIMARY-DUPLICATE. 422 ORG-ADDR-VALID-FROM-INVALID when validFrom precedes the current version or is in the future, or one of ORG-ADDR-COUNTRY-INVALID, ORG-ADDR-REGION-UNKNOWN, ORG-ADDR-REGION-REQUIRED or ORG-ADDR-POSTAL-FORMAT.
           content: { application/json: { schema: { $ref: '#/components/schemas/Address' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/addresses/{id}/versions:
+    get:
+      operationId: listAddressVersions
+      x-passage-duty: org.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Every version of the address ordered by validFrom descending; the open version has validTo null and each closed version's validTo equals the next version's validFrom. Not paginated, because an address has a handful of versions. A malformed id, an unknown id, another tenant's address and an address outside the caller's legal-entity scope are all 404 ORG-ADDR-NOT-FOUND.
+          content: { application/json: { schema: { $ref: '#/components/schemas/AddressVersionList' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/org/countries:
     get:
@@ -1579,6 +1593,19 @@ components:
       additionalProperties: false
       required: [versionId]
       properties: { versionId: { type: string, format: uuid, description: The current versionId; a stale value is 409 }, countryCode: { type: string, pattern: '^[A-Z]{2}$' }, regionCode: { type: string, pattern: '^[A-Z0-9]{0,3}$', description: Empty string clears }, city: { type: string, minLength: 1, maxLength: 60 }, postalCode: { type: string, maxLength: 12, description: Empty string clears }, street1: { type: string, minLength: 1, maxLength: 100 }, street2: { type: string, maxLength: 100, description: Empty string clears }, street3: { type: string, maxLength: 100, description: Empty string clears }, building: { type: string, maxLength: 20, description: Empty string clears }, poBox: { type: string, maxLength: 20, description: Empty string clears }, validFrom: { type: string, format: date, description: Between the current version's validFrom and today; defaults to today }, purposes: { type: array, minItems: 1, maxItems: 7, items: { $ref: '#/components/schemas/AddressPurpose' }, description: Replaces the purpose set when present } }
+    AddressVersion:
+      type: object
+      required: [versionId, validFrom, validTo, createdAt]
+      properties:
+        versionId: { type: string, format: uuid }
+        validFrom: { type: string, format: date }
+        validTo: { type: string, format: date, nullable: true }
+        createdAt: { type: string, format: date-time }
+    AddressVersionList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/AddressVersion' } }
     AddressList:
       type: object
       required: [items]

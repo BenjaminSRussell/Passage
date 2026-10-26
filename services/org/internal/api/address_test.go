@@ -302,3 +302,101 @@ func TestAddresses_MetricsCountCreates(t *testing.T) {
 		t.Fatalf("metrics missing the address counter in %s", rec.Body.String())
 	}
 }
+
+func TestAddresses_Search(t *testing.T) {
+	f, r, _ := seededAddress(t, stubGeocoder{})
+	long := strings.Repeat("a", 101)
+	for _, tc := range []struct {
+		name, query string
+		status      int
+		want        string
+	}{
+		{"match across owners", "?q=francisco", http.StatusOK, `"items":[{`},
+		{"no match", "?q=nowhere", http.StatusOK, `"items":[]`},
+		{"country filter match", "?q=Main&countryCode=US", http.StatusOK, `"items":[{`},
+		{"country filter excludes", "?q=Main&countryCode=CA", http.StatusOK, `"items":[]`},
+		{"two characters", "?q=ab", http.StatusBadRequest, `"q"`},
+		{"101 characters", "?q=" + long, http.StatusBadRequest, `"q"`},
+		{"whitespace only", "?q=%20%20%20", http.StatusBadRequest, `"q"`},
+		{"hundred multi-byte runes", "?q=" + strings.Repeat("%C3%A9", 100), http.StatusOK, `"items":[]`},
+		{"ownerType without ownerId", "?q=Main&ownerType=warehouse", http.StatusBadRequest, `"ownerId"`},
+		{"ownerId without ownerType", "?q=Main&ownerId=" + ownerUUID, http.StatusBadRequest, `"ownerType"`},
+		{"owner pair with q", "?q=Main&ownerType=warehouse&ownerId=" + ownerUUID, http.StatusOK, `"items":[{`},
+		{"no q and no owner", "", http.StatusBadRequest, `"ownerType"`},
+		{"countryCode lowercase", "?q=Main&countryCode=us", http.StatusBadRequest, `"countryCode"`},
+		{"countryCode without owner or q", "?countryCode=US", http.StatusBadRequest, `"ownerType"`},
+		{"countryCode three letters", "?q=Main&countryCode=USA", http.StatusBadRequest, `"countryCode"`},
+	} {
+		if rec := do(r, http.MethodGet, addressesPath+tc.query, "", addressDuties, true); rec.Code != tc.status || !strings.Contains(rec.Body.String(), tc.want) {
+			t.Fatalf("search %s = %d %s", tc.name, rec.Code, rec.Body)
+		}
+	}
+	do(r, http.MethodGet, addressesPath+"?q=%20Main%20", "", addressDuties, true)
+	if f.addressFilter.Query != "Main" {
+		t.Fatalf("filter query = %q, want the trimmed text", f.addressFilter.Query)
+	}
+}
+
+func TestAddresses_SearchMetricCountsOnlyQueryRequests(t *testing.T) {
+	r, a := newRouter(&fakeStore{})
+	do(r, http.MethodGet, addressesPath+"?q=Main", "", addressDuties, true)
+	do(r, http.MethodGet, addressesPath+"?q=x", "", addressDuties, true)
+	do(r, http.MethodGet, addressesPath+"?ownerType=warehouse&ownerId="+ownerUUID, "", addressDuties, true)
+	rec := httptest.NewRecorder()
+	a.Metrics().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if !strings.Contains(rec.Body.String(), "org_address_searches_total 2") {
+		t.Fatalf("metrics = %s", rec.Body.String())
+	}
+}
+
+func TestAddresses_AsOf(t *testing.T) {
+	f, r, _ := seededAddress(t, stubGeocoder{})
+	for _, tc := range []struct {
+		name, query string
+		status      int
+		want        string
+	}{
+		{"on or after first version", "?asOf=2026-03-15", http.StatusOK, `"versionId":"` + stubVersionID + `"`},
+		{"before first version", "?asOf=2025-12-31", http.StatusNotFound, "ORG-ADDR-NOT-FOUND"},
+		{"non-calendar date", "?asOf=2026-02-30", http.StatusBadRequest, `"asOf"`},
+		{"wrong layout", "?asOf=06/01/2026", http.StatusBadRequest, `"asOf"`},
+		{"unpadded", "?asOf=2026-6-1", http.StatusBadRequest, `"asOf"`},
+		{"empty", "?asOf=", http.StatusBadRequest, `"asOf"`},
+		{"omitted", "", http.StatusOK, `"versionId"`},
+	} {
+		if rec := do(r, http.MethodGet, firstAddress+tc.query, "", addressDuties, true); rec.Code != tc.status || !strings.Contains(rec.Body.String(), tc.want) {
+			t.Fatalf("asOf %s = %d %s", tc.name, rec.Code, rec.Body)
+		}
+	}
+	do(r, http.MethodGet, firstAddress+"?asOf=2026-05-31", "", addressDuties, true)
+	if f.asOfArg != "2026-05-31" {
+		t.Fatalf("store asOf = %q", f.asOfArg)
+	}
+}
+
+func TestAddresses_Versions(t *testing.T) {
+	f, r, _ := seededAddress(t, stubGeocoder{})
+	versions := firstAddress + "/versions"
+	if rec := do(r, http.MethodGet, versions, "", addressDuties, true); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"items":[{"versionId":"`+stubVersionID+`"`) || !strings.Contains(rec.Body.String(), `"validTo":null`) {
+		t.Fatalf("versions = %d %s", rec.Code, rec.Body)
+	}
+	for _, path := range []string{addressesPath + "/00000000-0000-0000-0003-0000000000ff/versions", addressesPath + "/nope/versions"} {
+		if rec := do(r, http.MethodGet, path, "", addressDuties, true); rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "ORG-ADDR-NOT-FOUND") {
+			t.Fatalf("%s = %d %s", path, rec.Code, rec.Body)
+		}
+	}
+	if rec := do(r, http.MethodGet, versions, "", "org.site.write", true); rec.Code != http.StatusForbidden {
+		t.Fatalf("versions without org.read = %d", rec.Code)
+	}
+	if rec := do(r, http.MethodGet, versions, "", addressDuties, false); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("versions without tenant = %d", rec.Code)
+	}
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	defer slog.SetDefault(previous)
+	f.err = errors.New("db down")
+	if rec := do(r, http.MethodGet, versions, "", addressDuties, true); rec.Code != http.StatusInternalServerError || !strings.Contains(logs.String(), "list address versions failed") || !strings.Contains(logs.String(), "correlationId") {
+		t.Fatalf("store failure = %d, logs %s", rec.Code, logs.String())
+	}
+}
