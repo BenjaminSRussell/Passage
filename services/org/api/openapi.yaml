@@ -167,6 +167,46 @@ paths:
           description: The team type. A legal-entity-scoped caller may read it. 403 AUTH-0003 without org.read. 404 ORG-TEAM-TYPE-NOT-FOUND for a malformed, unknown or other tenant's id.
           content: { application/json: { schema: { $ref: '#/components/schemas/TeamType' } } }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/org/teams:
+    get:
+      operationId: listTeams
+      x-passage-duty: org.read
+      parameters:
+        - { name: teamTypeId, in: query, schema: { type: string, format: uuid } }
+        - { name: operatingUnitId, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [active, inactive] } }
+        - { name: asOf, in: query, description: Keeps teams in force on this date; both the first and last day count, schema: { type: string, format: date } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: One page of teams ordered by code. Teams are tenant-wide, so a legal-entity-scoped caller reads them too. Pass nextCursor as cursor for the next page. 400 COM-0001 naming teamTypeId, operatingUnitId, status, asOf, limit or cursor. 403 AUTH-0003 without org.read.
+          content: { application/json: { schema: { $ref: '#/components/schemas/TeamPage' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: createTeam
+      x-passage-duty: org.operating-unit.write
+      parameters:
+        - { name: Idempotency-Key, in: header, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateTeam' } } }
+      responses:
+        '201':
+          description: Team created, or the original team on an Idempotency-Key replay (no second row, counter not incremented). 400 COM-0001 naming code, name, description, teamTypeId, operatingUnitId, effectiveFrom or effectiveTo (effectiveTo before effectiveFrom is a field error on effectiveTo). 409 ORG-TEAM-CODE-DUPLICATE. 422 ORG-TEAM-TYPE-INVALID for an unknown team type, ORG-TEAM-OPERATING-UNIT-INVALID for an unknown or inactive operating unit, ORG-TEAM-LIMIT at 5,000 teams in the tenant, idempotency_key_reuse when the key was used with a different body. 403 AUTH-0003 without the duty or for a legal-entity-scoped caller.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Team' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/teams/{id}:
+    get:
+      operationId: getTeam
+      x-passage-duty: org.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The team. A legal-entity-scoped caller may read it. 403 AUTH-0003 without org.read. 404 ORG-TEAM-NOT-FOUND for a malformed, unknown or other tenant's id.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Team' } } }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/org/sites:
     post:
       operationId: createSite
@@ -1035,6 +1075,19 @@ components:
       type: object
       required: [items]
       properties: { items: { type: array, items: { $ref: '#/components/schemas/TeamType' } }, nextCursor: { type: string } }
+    CreateTeam:
+      type: object
+      additionalProperties: false
+      required: [code, name, teamTypeId, effectiveFrom]
+      properties: { code: { type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{1,19}$', description: Upper-cased on save; unique within the tenant }, name: { type: string, minLength: 1, maxLength: 60 }, description: { type: [string, 'null'], maxLength: 500 }, teamTypeId: { type: string, format: uuid }, operatingUnitId: { type: [string, 'null'], format: uuid, description: Must be an active operating unit of the tenant }, effectiveFrom: { type: string, format: date }, effectiveTo: { type: [string, 'null'], format: date, description: Last day in force; not before effectiveFrom } }
+    Team:
+      type: object
+      required: [id, code, name, teamTypeId, effectiveFrom, status, version, createdAt, updatedAt]
+      properties: { id: { type: string, format: uuid }, code: { type: string }, name: { type: string }, description: { type: string }, teamTypeId: { type: string, format: uuid }, operatingUnitId: { type: string, format: uuid }, effectiveFrom: { type: string, format: date }, effectiveTo: { type: string, format: date }, status: { type: string, enum: [active, inactive] }, version: { type: integer }, createdAt: { type: string, format: date-time }, updatedAt: { type: string, format: date-time } }
+    TeamPage:
+      type: object
+      required: [items]
+      properties: { items: { type: array, items: { $ref: '#/components/schemas/Team' } }, nextCursor: { type: string } }
     HierarchyNode:
       type: object
       required: [orgUnitId, kind, parentOrgUnitId, sortOrder]

@@ -109,6 +109,9 @@ type Store interface {
 	CreateTeamType(ctx context.Context, in TeamType, idempotencyKey string) (TeamType, bool, error)
 	GetTeamType(ctx context.Context, id string) (TeamType, error)
 	ListTeamTypes(ctx context.Context, f TeamTypeFilter, afterCode string, limit int) (TeamTypePage, error)
+	CreateTeam(ctx context.Context, in Team, idempotencyKey string) (Team, bool, error)
+	GetTeam(ctx context.Context, id string) (Team, error)
+	ListTeams(ctx context.Context, f TeamFilter, afterCode string, limit int) (TeamPage, error)
 	Ping(ctx context.Context) error
 }
 

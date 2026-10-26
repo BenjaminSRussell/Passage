@@ -82,6 +82,9 @@ type fakeStore struct {
 	teamTypeKeys        map[string]store.TeamType
 	teamTypeFilter      store.TeamTypeFilter
 	teamTypeAfter       string
+	teams               []store.Team
+	teamKeys            map[string]store.Team
+	teamFilter          store.TeamFilter
 }
 
 func (f *fakeStore) seedUnits() {
@@ -1010,6 +1013,8 @@ func TestMetricsCountBusinessOperations(t *testing.T) {
 		"org_legal_entities_failed_total 1",
 		"# TYPE org_team_types_created_total counter",
 		"org_team_types_created_total 0",
+		"# TYPE org_teams_created_total counter",
+		"org_teams_created_total 0",
 	} {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Fatalf("metrics missing %q in %s", want, rec.Body.String())
@@ -1400,6 +1405,63 @@ func (f *fakeStore) ListTeamTypes(_ context.Context, filter store.TeamTypeFilter
 	page := store.TeamTypePage{Items: []store.TeamType{}}
 	for _, t := range f.teamTypes {
 		if t.Code > afterCode && (filter.MemberKind == "" || slices.Contains(t.MemberKinds, filter.MemberKind)) {
+			page.Items = append(page.Items, t)
+		}
+	}
+	if len(page.Items) > limit {
+		page.Items = page.Items[:limit]
+		page.NextCode = page.Items[limit-1].Code
+	}
+	return page, nil
+}
+
+func (f *fakeStore) CreateTeam(_ context.Context, in store.Team, key string) (store.Team, bool, error) {
+	if f.err != nil {
+		return store.Team{}, false, f.err
+	}
+	if replay, ok := f.teamKeys[key]; ok && key != "" {
+		if replay.Code != in.Code || replay.Name != in.Name {
+			return store.Team{}, false, httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeIdempotencyReuse, "reuse")
+		}
+		return replay, false, nil
+	}
+	for _, t := range f.teams {
+		if t.Code == in.Code {
+			return store.Team{}, false, httpx.NewProblem(http.StatusConflict, store.CodeTeamCodeDuplicate, "duplicate")
+		}
+	}
+	in.ID = fmt.Sprintf("00000000-0000-0000-0000-%012d", len(f.teams)+1)
+	in.Status, in.Version = "active", 1
+	f.teams = append(f.teams, in)
+	if key != "" {
+		if f.teamKeys == nil {
+			f.teamKeys = map[string]store.Team{}
+		}
+		f.teamKeys[key] = in
+	}
+	return in, true, nil
+}
+
+func (f *fakeStore) GetTeam(_ context.Context, id string) (store.Team, error) {
+	if f.err != nil {
+		return store.Team{}, f.err
+	}
+	for _, t := range f.teams {
+		if t.ID == id {
+			return t, nil
+		}
+	}
+	return store.Team{}, httpx.NewProblem(http.StatusNotFound, store.CodeTeamNotFound, "team not found")
+}
+
+func (f *fakeStore) ListTeams(_ context.Context, filter store.TeamFilter, afterCode string, limit int) (store.TeamPage, error) {
+	f.teamFilter = filter
+	if f.err != nil {
+		return store.TeamPage{}, f.err
+	}
+	page := store.TeamPage{Items: []store.Team{}}
+	for _, t := range f.teams {
+		if t.Code > afterCode {
 			page.Items = append(page.Items, t)
 		}
 	}

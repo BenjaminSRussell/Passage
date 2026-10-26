@@ -4,11 +4,13 @@ import (
 	"context"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
+	"github.com/BenjaminSRussell/passage/services/org/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/org/internal/store"
 	"github.com/BenjaminSRussell/passage/services/org/migrations"
 )
@@ -137,5 +139,233 @@ func TestPostgres_TeamTypesAreTenantIsolated(t *testing.T) {
 	}
 	if _, _, err := s.CreateTeamType(other, teamType("STEW", "party"), ""); err != nil {
 		t.Fatalf("tenant B reuse of the code: %v", err)
+	}
+}
+
+func newTeam(typeID, code string) store.Team {
+	return store.Team{Code: code, Name: "Team " + code, TeamTypeID: typeID, EffectiveFrom: "2026-01-01"}
+}
+
+func teamFixture(t *testing.T) (*store.Postgres, context.Context, *pgxpool.Pool, store.TeamType) {
+	t.Helper()
+	s, ctx, admin := teamStore(t)
+	tt, _, err := s.CreateTeamType(ctx, teamType("STEW", "user"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s, ctx, admin, tt
+}
+
+func strPtr(s string) *string { return &s }
+
+func TestPostgres_CreateTeamStoresDatesAndDefaults(t *testing.T) {
+	s, ctx, _, tt := teamFixture(t)
+	in := newTeam(tt.ID, "MDSTEW")
+	in.Description, in.EffectiveTo = strPtr("Master data"), strPtr("2026-12-31")
+	created, inserted, err := s.CreateTeam(ctx, in, "")
+	if err != nil || !inserted {
+		t.Fatalf("create = %+v, %v, %v", created, inserted, err)
+	}
+	if created.EffectiveFrom != "2026-01-01" || deref(created.EffectiveTo) != "2026-12-31" || created.Status != "active" || created.Version != 1 || deref(created.Description) != "Master data" || created.OperatingUnitID != nil {
+		t.Fatalf("created = %+v", created)
+	}
+	got, err := s.GetTeam(ctx, created.ID)
+	if err != nil || got.ID != created.ID || got.EffectiveFrom != "2026-01-01" {
+		t.Fatalf("get = %+v, %v", got, err)
+	}
+	if _, err := s.GetTeam(ctx, "00000000-0000-0000-0000-0000000000ff"); problemCode(t, err) != store.CodeTeamNotFound {
+		t.Fatalf("unknown get error = %v; want %s", err, store.CodeTeamNotFound)
+	}
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+func TestPostgres_CreateTeamRefusesInvalidReferents(t *testing.T) {
+	s, ctx, admin, tt := teamFixture(t)
+	if _, _, err := s.CreateTeam(ctx, newTeam("00000000-0000-0000-0000-0000000000ee", "T1"), ""); problemCode(t, err) != store.CodeTeamTypeInvalid {
+		t.Fatalf("unknown type error = %v; want %s", err, store.CodeTeamTypeInvalid)
+	}
+	missingUnit := newTeam(tt.ID, "T2")
+	missingUnit.OperatingUnitID = strPtr("00000000-0000-0000-0000-0000000000dd")
+	if _, _, err := s.CreateTeam(ctx, missingUnit, ""); problemCode(t, err) != store.CodeTeamOperatingUnitInvalid {
+		t.Fatalf("unknown unit error = %v; want %s", err, store.CodeTeamOperatingUnitInvalid)
+	}
+	ou, err := s.CreateOperatingUnit(ctx, unit("department", "D1"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := newTeam(tt.ID, "T3")
+	active.OperatingUnitID = &ou.ID
+	if created, _, err := s.CreateTeam(ctx, active, ""); err != nil || deref(created.OperatingUnitID) != ou.ID {
+		t.Fatalf("active unit create = %+v, %v", created, err)
+	}
+	if _, err := admin.Exec(ctx, `update operating_unit set status = 'inactive' where id = $1`, ou.ID); err != nil {
+		t.Fatal(err)
+	}
+	inactive := newTeam(tt.ID, "T4")
+	inactive.OperatingUnitID = &ou.ID
+	if _, _, err := s.CreateTeam(ctx, inactive, ""); problemCode(t, err) != store.CodeTeamOperatingUnitInvalid {
+		t.Fatalf("inactive unit error = %v; want %s", err, store.CodeTeamOperatingUnitInvalid)
+	}
+}
+
+func TestPostgres_CreateTeamDuplicateCode(t *testing.T) {
+	s, ctx, _, tt := teamFixture(t)
+	if _, _, err := s.CreateTeam(ctx, newTeam(tt.ID, "T1"), ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.CreateTeam(ctx, newTeam(tt.ID, "T1"), ""); problemCode(t, err) != store.CodeTeamCodeDuplicate {
+		t.Fatalf("duplicate error = %v; want %s", err, store.CodeTeamCodeDuplicate)
+	}
+}
+
+func TestPostgres_CreateTeamLimit(t *testing.T) {
+	s, ctx, admin, tt := teamFixture(t)
+	previous := store.MaxTeamsPerTenant
+	store.MaxTeamsPerTenant = 2
+	t.Cleanup(func() { store.MaxTeamsPerTenant = previous })
+	for _, code := range []string{"T1", "T2"} {
+		if _, _, err := s.CreateTeam(ctx, newTeam(tt.ID, code), ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, err := s.CreateTeam(ctx, newTeam(tt.ID, "T3"), ""); problemCode(t, err) != store.CodeTeamLimit {
+		t.Fatalf("over-limit error = %v; want %s", err, store.CodeTeamLimit)
+	}
+	var n int
+	if err := admin.QueryRow(ctx, `select count(*) from team`).Scan(&n); err != nil || n != 2 {
+		t.Fatalf("team count = %d, %v; want 2", n, err)
+	}
+}
+
+func TestPostgres_CreateTeamReplay(t *testing.T) {
+	s, ctx, admin, tt := teamFixture(t)
+	first, inserted, err := s.CreateTeam(ctx, newTeam(tt.ID, "T1"), "key-1")
+	if err != nil || !inserted {
+		t.Fatalf("first = %+v, %v, %v", first, inserted, err)
+	}
+	replay, inserted, err := s.CreateTeam(ctx, newTeam(tt.ID, "T1"), "key-1")
+	if err != nil || inserted || replay.ID != first.ID {
+		t.Fatalf("replay = %+v, %v, %v; want the original row and inserted false", replay, inserted, err)
+	}
+	changed := newTeam(tt.ID, "T1")
+	changed.Name = "Other"
+	if _, _, err := s.CreateTeam(ctx, changed, "key-1"); problemCode(t, err) != store.CodeIdempotencyReuse {
+		t.Fatalf("changed name error = %v; want %s", err, store.CodeIdempotencyReuse)
+	}
+	var n int
+	if err := admin.QueryRow(ctx, `select count(*) from team`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("team count = %d, %v; want 1", n, err)
+	}
+}
+
+func TestPostgres_ListTeamsFiltersAndPages(t *testing.T) {
+	s, ctx, admin, tt := teamFixture(t)
+	other, _, err := s.CreateTeamType(ctx, teamType("AUD", "user"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ou, err := s.CreateOperatingUnit(ctx, unit("department", "D1"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ranged := newTeam(tt.ID, "MDSTEW")
+	ranged.EffectiveTo = strPtr("2026-12-31")
+	inUnit := newTeam(other.ID, "B2")
+	inUnit.OperatingUnitID = &ou.ID
+	for _, in := range []store.Team{ranged, inUnit, newTeam(other.ID, "C3")} {
+		if _, _, err := s.CreateTeam(ctx, in, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := admin.Exec(ctx, `update team set status = 'inactive' where code = 'C3'`); err != nil {
+		t.Fatal(err)
+	}
+	codes := func(f store.TeamFilter) []string {
+		t.Helper()
+		page, err := s.ListTeams(ctx, f, "", 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, item := range page.Items {
+			out = append(out, item.Code)
+		}
+		return out
+	}
+	day := func(v string) *time.Time {
+		d, err := time.Parse("2006-01-02", v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &d
+	}
+	for asOf, want := range map[string]bool{"2026-06-01": true, "2026-12-31": true, "2027-01-15": false, "2025-12-31": false} {
+		got := slices.Contains(codes(store.TeamFilter{AsOf: day(asOf)}), "MDSTEW")
+		if got != want || got != domain.TeamInForce(*day("2026-01-01"), day("2026-12-31"), *day(asOf)) {
+			t.Fatalf("asOf %s includes MDSTEW = %v; want %v", asOf, got, want)
+		}
+	}
+	for name, tc := range map[string]struct {
+		filter store.TeamFilter
+		want   []string
+	}{
+		"all":         {store.TeamFilter{}, []string{"B2", "C3", "MDSTEW"}},
+		"team type":   {store.TeamFilter{TeamTypeID: other.ID}, []string{"B2", "C3"}},
+		"unit":        {store.TeamFilter{OperatingUnitID: ou.ID}, []string{"B2"}},
+		"status":      {store.TeamFilter{Status: "inactive"}, []string{"C3"}},
+		"after range": {store.TeamFilter{AsOf: day("2027-01-15")}, []string{"B2", "C3"}},
+	} {
+		if got := codes(tc.filter); !slices.Equal(got, tc.want) {
+			t.Fatalf("%s = %v; want %v", name, got, tc.want)
+		}
+	}
+	var paged []string
+	after := ""
+	for pages := 0; ; pages++ {
+		if pages > 3 {
+			t.Fatal("paging did not terminate")
+		}
+		page, err := s.ListTeams(ctx, store.TeamFilter{}, after, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, item := range page.Items {
+			paged = append(paged, item.Code)
+		}
+		if page.NextCode == "" {
+			break
+		}
+		after = page.NextCode
+	}
+	if want := []string{"B2", "C3", "MDSTEW"}; !slices.Equal(paged, want) {
+		t.Fatalf("paged = %v; want %v", paged, want)
+	}
+}
+
+func TestPostgres_TeamCrossTenantIsolation(t *testing.T) {
+	s, ctx, _, tt := teamFixture(t)
+	created, _, err := s.CreateTeam(ctx, newTeam(tt.ID, "T1"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := principalContext(2)
+	page, err := s.ListTeams(other, store.TeamFilter{}, "", 10)
+	if err != nil || len(page.Items) != 0 {
+		t.Fatalf("tenant B list = %+v, %v; want empty", page, err)
+	}
+	if _, err := s.GetTeam(other, created.ID); problemCode(t, err) != store.CodeTeamNotFound {
+		t.Fatalf("tenant B get error = %v; want %s", err, store.CodeTeamNotFound)
+	}
+	if _, _, err := s.CreateTeam(other, newTeam(tt.ID, "T2"), ""); problemCode(t, err) != store.CodeTeamTypeInvalid {
+		t.Fatalf("tenant B create against tenant A's type error = %v; want %s", err, store.CodeTeamTypeInvalid)
+	}
+	if _, _, err := s.CreateTeam(other, newTeam(tt.ID, "T1"), ""); problemCode(t, err) != store.CodeTeamTypeInvalid {
+		t.Fatalf("tenant B reuse of the code error = %v; want %s", err, store.CodeTeamTypeInvalid)
 	}
 }
