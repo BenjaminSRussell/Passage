@@ -194,6 +194,7 @@ func TestTeams(t *testing.T) {
 		{"list bad status", seeded(), http.MethodGet, teamsPath + "?status=bogus", "", teamDuties, true, nil, http.StatusBadRequest, `"status"`},
 		{"list bad teamTypeId", seeded(), http.MethodGet, teamsPath + "?teamTypeId=nope", "", teamDuties, true, nil, http.StatusBadRequest, `"teamTypeId"`},
 		{"list bad operatingUnitId", seeded(), http.MethodGet, teamsPath + "?operatingUnitId=nope", "", teamDuties, true, nil, http.StatusBadRequest, `"operatingUnitId"`},
+		{"list bad memberId", seeded(), http.MethodGet, teamsPath + "?memberId=nope", "", teamDuties, true, nil, http.StatusBadRequest, `"memberId"`},
 		{"list bad cursor", seeded(), http.MethodGet, teamsPath + "?cursor=%25", "", teamDuties, true, nil, http.StatusBadRequest, "cursor"},
 		{"list limit over max", seeded(), http.MethodGet, teamsPath + "?limit=101", "", teamDuties, true, nil, http.StatusBadRequest, "limit"},
 		{"get ok", seeded(), http.MethodGet, teamsPath + "/" + teamTypeID1, "", teamDuties, true, nil, http.StatusOK, `"code":"AUD"`},
@@ -218,7 +219,10 @@ func TestTeams(t *testing.T) {
 func TestTeamsListFiltersReachStore(t *testing.T) {
 	f := &fakeStore{}
 	r, _ := newRouter(f)
-	do(r, http.MethodGet, teamsPath+"?asOf=2026-12-31&status=inactive&teamTypeId="+strings.ToUpper(teamTypeID1)+"&operatingUnitId="+teamTypeID1, "", teamDuties, true)
+	do(r, http.MethodGet, teamsPath+"?asOf=2026-12-31&status=inactive&teamTypeId="+strings.ToUpper(teamTypeID1)+"&operatingUnitId="+teamTypeID1+"&memberId="+strings.ToUpper(memberID1), "", teamDuties, true)
+	if f.teamFilter.MemberID != memberID1 {
+		t.Fatalf("store saw member id %q", f.teamFilter.MemberID)
+	}
 	if f.teamFilter.AsOf == nil || f.teamFilter.AsOf.Format("2006-01-02") != "2026-12-31" || f.teamFilter.Status != "inactive" || f.teamFilter.TeamTypeID != teamTypeID1 || f.teamFilter.OperatingUnitID != teamTypeID1 {
 		t.Fatalf("store saw %+v", f.teamFilter)
 	}
@@ -400,5 +404,135 @@ func TestTeamMembersFiltersReachStoreAndPageByCursor(t *testing.T) {
 	}
 	if got := strings.Join(ids, ","); got != "1,2,3" {
 		t.Fatalf("ids = %s, want 1,2,3", got)
+	}
+}
+
+const memberRowID1 = "00000000-0000-0000-0000-0000000000c1"
+
+func teamWithMember() *fakeStore {
+	to := "2026-06-30"
+	return &fakeStore{
+		teams:       []store.Team{{ID: teamTypeID1, Code: "AUD", Name: "Auditors", Version: 1}},
+		teamMembers: []store.TeamMember{{ID: memberRowID1, TeamID: teamTypeID1, MemberKind: "user", MemberID: memberID1, ValidFrom: "2026-02-01", ValidTo: &to}},
+	}
+}
+
+func TestTeamMaintenanceRoutes(t *testing.T) {
+	scoped := []string{"X-Passage-Legal-Entity", testkit.TenantID(2)}
+	teamPath := teamsPath + "/" + teamTypeID1
+	memberPath := teamPath + "/members/" + memberRowID1
+	tests := []struct {
+		name       string
+		method     string
+		path       string
+		body       string
+		duties     string
+		withTenant bool
+		headers    []string
+		wantStatus int
+		wantBody   string
+	}{
+		{"patch", http.MethodPatch, teamPath, `{"version":1,"name":" Renamed "}`, teamDuties, true, nil, http.StatusOK, `"name":"Renamed","teamTypeId":"","effectiveFrom":"","status":"","version":2`},
+		{"patch accepts every clearable field", http.MethodPatch, teamPath, `{"version":1,"description":"","operatingUnitId":"","effectiveTo":"","status":"inactive"}`, teamDuties, true, nil, http.StatusOK, `"version":1`},
+		{"patch lower-cases the operating unit", http.MethodPatch, teamPath, `{"version":1,"operatingUnitId":"` + strings.ToUpper(memberID1) + `"}`, teamDuties, true, nil, http.StatusOK, `"version":1`},
+		{"patch stale version", http.MethodPatch, teamPath, `{"version":5}`, teamDuties, true, nil, http.StatusConflict, "ORG-VERSION-CONFLICT"},
+		{"patch missing version", http.MethodPatch, teamPath, `{"name":"x"}`, teamDuties, true, nil, http.StatusBadRequest, `"version"`},
+		{"patch zero version", http.MethodPatch, teamPath, `{"version":0}`, teamDuties, true, nil, http.StatusBadRequest, `"version"`},
+		{"patch string version", http.MethodPatch, teamPath, `{"version":"1"}`, teamDuties, true, nil, http.StatusBadRequest, "COM-0001"},
+		{"patch blank name", http.MethodPatch, teamPath, `{"version":1,"name":"  "}`, teamDuties, true, nil, http.StatusBadRequest, `"name"`},
+		{"patch 61-char name", http.MethodPatch, teamPath, `{"version":1,"name":"` + strings.Repeat("n", 61) + `"}`, teamDuties, true, nil, http.StatusBadRequest, `"name"`},
+		{"patch 60-char name", http.MethodPatch, teamPath, `{"version":1,"name":"` + strings.Repeat("n", 60) + `"}`, teamDuties, true, nil, http.StatusOK, `"version":2`},
+		{"patch 501-char description", http.MethodPatch, teamPath, `{"version":1,"description":"` + strings.Repeat("d", 501) + `"}`, teamDuties, true, nil, http.StatusBadRequest, `"description"`},
+		{"patch non-UUID operating unit", http.MethodPatch, teamPath, `{"version":1,"operatingUnitId":"nope"}`, teamDuties, true, nil, http.StatusBadRequest, `"operatingUnitId"`},
+		{"patch unparsable effectiveTo", http.MethodPatch, teamPath, `{"version":1,"effectiveTo":"2026-13-40"}`, teamDuties, true, nil, http.StatusBadRequest, `"effectiveTo"`},
+		{"patch number for effectiveTo", http.MethodPatch, teamPath, `{"version":1,"effectiveTo":20261231}`, teamDuties, true, nil, http.StatusBadRequest, "COM-0001"},
+		{"patch status closed", http.MethodPatch, teamPath, `{"version":1,"status":"closed"}`, teamDuties, true, nil, http.StatusBadRequest, `"status"`},
+		{"patch code refused", http.MethodPatch, teamPath, `{"version":1,"code":"X"}`, teamDuties, true, nil, http.StatusBadRequest, "COM-0001"},
+		{"patch teamTypeId refused", http.MethodPatch, teamPath, `{"version":1,"teamTypeId":"` + teamTypeID1 + `"}`, teamDuties, true, nil, http.StatusBadRequest, "COM-0001"},
+		{"patch effectiveFrom refused", http.MethodPatch, teamPath, `{"version":1,"effectiveFrom":"2026-01-01"}`, teamDuties, true, nil, http.StatusBadRequest, "COM-0001"},
+		{"patch unknown team", http.MethodPatch, teamsPath + "/00000000-0000-0000-0000-0000000000ff", `{"version":1}`, teamDuties, true, nil, http.StatusNotFound, "ORG-TEAM-NOT-FOUND"},
+		{"patch malformed team", http.MethodPatch, teamsPath + "/nope", `{"version":1}`, teamDuties, true, nil, http.StatusNotFound, "ORG-TEAM-NOT-FOUND"},
+		{"patch without duty", http.MethodPatch, teamPath, `{"version":1}`, "org.read", true, nil, http.StatusForbidden, "AUTH-0003"},
+		{"patch without tenant", http.MethodPatch, teamPath, `{"version":1}`, "", false, nil, http.StatusUnauthorized, "AUTH-0001"},
+		{"patch legal-entity scoped caller", http.MethodPatch, teamPath, `{"version":1}`, teamDuties, true, scoped, http.StatusForbidden, "AUTH-0003"},
+		{"end", http.MethodPost, memberPath + ":end", `{"validTo":"2026-05-31"}`, teamDuties, true, nil, http.StatusOK, `"validTo":"2026-05-31"`},
+		{"end missing validTo", http.MethodPost, memberPath + ":end", `{}`, teamDuties, true, nil, http.StatusBadRequest, `"validTo"`},
+		{"end null validTo", http.MethodPost, memberPath + ":end", `{"validTo":null}`, teamDuties, true, nil, http.StatusBadRequest, `"validTo"`},
+		{"end empty validTo", http.MethodPost, memberPath + ":end", `{"validTo":""}`, teamDuties, true, nil, http.StatusBadRequest, `"validTo"`},
+		{"end impossible validTo", http.MethodPost, memberPath + ":end", `{"validTo":"2026-02-30"}`, teamDuties, true, nil, http.StatusBadRequest, `"validTo"`},
+		{"end number for validTo", http.MethodPost, memberPath + ":end", `{"validTo":20260630}`, teamDuties, true, nil, http.StatusBadRequest, "COM-0001"},
+		{"end unknown field", http.MethodPost, memberPath + ":end", `{"validTo":"2026-05-31","validFrom":"2026-01-01"}`, teamDuties, true, nil, http.StatusBadRequest, "COM-0001"},
+		{"end malformed member", http.MethodPost, teamPath + "/members/nope:end", `{"validTo":"2026-05-31"}`, teamDuties, true, nil, http.StatusNotFound, "ORG-TEAM-MEMBER-NOT-FOUND"},
+		{"end unknown member", http.MethodPost, teamPath + "/members/00000000-0000-0000-0000-0000000000ff:end", `{"validTo":"2026-05-31"}`, teamDuties, true, nil, http.StatusNotFound, "ORG-TEAM-MEMBER-NOT-FOUND"},
+		{"end malformed team", http.MethodPost, teamsPath + "/nope/members/" + memberRowID1 + ":end", `{"validTo":"2026-05-31"}`, teamDuties, true, nil, http.StatusNotFound, "ORG-TEAM-NOT-FOUND"},
+		{"end without duty", http.MethodPost, memberPath + ":end", `{"validTo":"2026-05-31"}`, "org.read", true, nil, http.StatusForbidden, "AUTH-0003"},
+		{"end legal-entity scoped caller", http.MethodPost, memberPath + ":end", `{"validTo":"2026-05-31"}`, teamDuties, true, scoped, http.StatusForbidden, "AUTH-0003"},
+		{"remove", http.MethodDelete, memberPath, "", teamDuties, true, nil, http.StatusNoContent, ""},
+		{"remove malformed member", http.MethodDelete, teamPath + "/members/nope", "", teamDuties, true, nil, http.StatusNotFound, "ORG-TEAM-MEMBER-NOT-FOUND"},
+		{"remove unknown member", http.MethodDelete, teamPath + "/members/00000000-0000-0000-0000-0000000000ff", "", teamDuties, true, nil, http.StatusNotFound, "ORG-TEAM-MEMBER-NOT-FOUND"},
+		{"remove malformed team", http.MethodDelete, teamsPath + "/nope/members/" + memberRowID1, "", teamDuties, true, nil, http.StatusNotFound, "ORG-TEAM-NOT-FOUND"},
+		{"remove without duty", http.MethodDelete, memberPath, "", "org.read", true, nil, http.StatusForbidden, "AUTH-0003"},
+		{"remove without tenant", http.MethodDelete, memberPath, "", "", false, nil, http.StatusUnauthorized, "AUTH-0001"},
+		{"remove legal-entity scoped caller", http.MethodDelete, memberPath, "", teamDuties, true, scoped, http.StatusForbidden, "AUTH-0003"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r, _ := newRouter(teamWithMember())
+			rec := do(r, tc.method, tc.path, tc.body, tc.duties, tc.withTenant, tc.headers...)
+			if rec.Code != tc.wantStatus || !strings.Contains(rec.Body.String(), tc.wantBody) {
+				t.Fatalf("%s = %d %s, want %d containing %q", tc.name, rec.Code, rec.Body, tc.wantStatus, tc.wantBody)
+			}
+		})
+	}
+}
+
+func TestTeamMaintenanceStoreErrorsHideInternalsAndAreNotCounted(t *testing.T) {
+	f := teamWithMember()
+	f.err = errors.New("pq: secret")
+	r, a := newRouter(f)
+	memberPath := teamsPath + "/" + teamTypeID1 + "/members/" + memberRowID1
+	for name, rec := range map[string]*httptest.ResponseRecorder{
+		"patch":  do(r, http.MethodPatch, teamsPath+"/"+teamTypeID1, `{"version":1,"name":"x"}`, teamDuties, true),
+		"end":    do(r, http.MethodPost, memberPath+":end", `{"validTo":"2026-05-31"}`, teamDuties, true),
+		"remove": do(r, http.MethodDelete, memberPath, "", teamDuties, true),
+	} {
+		if rec.Code != http.StatusInternalServerError || strings.Contains(rec.Body.String(), "secret") {
+			t.Fatalf("%s = %d %s", name, rec.Code, rec.Body)
+		}
+	}
+	metrics := httptest.NewRecorder()
+	a.Metrics().ServeHTTP(metrics, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	for _, want := range []string{"org_teams_updated_total 0\n", "org_team_members_ended_total 0\n", "org_team_members_removed_total 0\n"} {
+		if !strings.Contains(metrics.Body.String(), want) {
+			t.Fatalf("metrics missing %q in %s", want, metrics.Body)
+		}
+	}
+}
+
+func TestTeamMaintenanceCountersCountOnlyRealChanges(t *testing.T) {
+	r, a := newRouter(teamWithMember())
+	teamPath := teamsPath + "/" + teamTypeID1
+	memberPath := teamPath + "/members/" + memberRowID1
+	for _, step := range []struct {
+		method, path, body string
+		want               int
+	}{
+		{http.MethodPatch, teamPath, `{"version":1,"name":"Renamed"}`, http.StatusOK},
+		{http.MethodPatch, teamPath, `{"version":2,"name":"Renamed"}`, http.StatusOK},
+		{http.MethodPost, memberPath + ":end", `{"validTo":"2026-06-30"}`, http.StatusOK},
+		{http.MethodPost, memberPath + ":end", `{"validTo":"2026-05-31"}`, http.StatusOK},
+		{http.MethodDelete, memberPath, "", http.StatusNoContent},
+		{http.MethodDelete, memberPath, "", http.StatusNotFound},
+	} {
+		if rec := do(r, step.method, step.path, step.body, teamDuties, true); rec.Code != step.want {
+			t.Fatalf("%s %s = %d %s, want %d", step.method, step.path, rec.Code, rec.Body, step.want)
+		}
+	}
+	metrics := httptest.NewRecorder()
+	a.Metrics().ServeHTTP(metrics, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	for _, want := range []string{"org_teams_updated_total 1\n", "org_team_members_ended_total 1\n", "org_team_members_removed_total 1\n"} {
+		if !strings.Contains(metrics.Body.String(), want) {
+			t.Fatalf("metrics missing %q in %s", want, metrics.Body)
+		}
 	}
 }

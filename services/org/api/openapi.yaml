@@ -175,12 +175,13 @@ paths:
         - { name: teamTypeId, in: query, schema: { type: string, format: uuid } }
         - { name: operatingUnitId, in: query, schema: { type: string, format: uuid } }
         - { name: status, in: query, schema: { type: string, enum: [active, inactive] } }
-        - { name: asOf, in: query, description: Keeps teams in force on this date; both the first and last day count, schema: { type: string, format: date } }
+        - { name: asOf, in: query, description: Keeps teams in force on this date; both the first and last day count. With memberId the member row must also be in force on this date, schema: { type: string, format: date } }
+        - { name: memberId, in: query, description: Keeps teams that have a member row for this member id (a team appears once however many validity rows the member has), schema: { type: string, format: uuid } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
         - { name: cursor, in: query, schema: { type: string } }
       responses:
         '200':
-          description: One page of teams ordered by code. Teams are tenant-wide, so a legal-entity-scoped caller reads them too. Pass nextCursor as cursor for the next page. 400 COM-0001 naming teamTypeId, operatingUnitId, status, asOf, limit or cursor. 403 AUTH-0003 without org.read.
+          description: One page of teams ordered by code. Teams are tenant-wide, so a legal-entity-scoped caller reads them too. Pass nextCursor as cursor for the next page. 400 COM-0001 naming teamTypeId, operatingUnitId, status, memberId, asOf, limit or cursor. 403 AUTH-0003 without org.read.
           content: { application/json: { schema: { $ref: '#/components/schemas/TeamPage' } } }
         default: { $ref: '#/components/responses/Problem' }
     post:
@@ -205,6 +206,19 @@ paths:
       responses:
         '200':
           description: The team. A legal-entity-scoped caller may read it. 403 AUTH-0003 without org.read. 404 ORG-TEAM-NOT-FOUND for a malformed, unknown or other tenant's id.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Team' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    patch:
+      operationId: updateTeam
+      x-passage-duty: org.operating-unit.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/UpdateTeam' } } }
+      responses:
+        '200':
+          description: The team. A stale version is 409 ORG-VERSION-CONFLICT. A request that changes no value returns the stored team with the same version. status inactive deactivates the team (adding a member is then 422 ORG-TEAM-INACTIVE) and active reactivates it. An empty description, operatingUnitId or effectiveTo clears it. 400 COM-0001 naming version, name, description, operatingUnitId, effectiveTo or status, a body carrying code, teamTypeId or effectiveFrom, or an effectiveTo before effectiveFrom. 404 ORG-TEAM-NOT-FOUND. 422 ORG-TEAM-OPERATING-UNIT-INVALID for an unknown or inactive operating unit, ORG-TEAM-MEMBER-RANGE on effectiveTo when members are valid after it. 403 AUTH-0003 without the duty or for a legal-entity-scoped caller.
           content: { application/json: { schema: { $ref: '#/components/schemas/Team' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/org/teams/{id}/members:
@@ -236,6 +250,32 @@ paths:
         '201':
           description: Member added (source manual), or the original member on an Idempotency-Key replay (no second row, no second event, counter not incremented). Emits dev.passage.org.teammembership.changed.v1. 400 COM-0001 naming memberKind, memberId, memberRole, validFrom or validTo. 404 ORG-TEAM-NOT-FOUND for a malformed, unknown or other tenant's team. 409 ORG-TEAM-MEMBER-DUPLICATE for the same member and validFrom. 422 ORG-TEAM-MEMBER-KIND-INVALID when the team type does not allow the kind, ORG-TEAM-EXPIRED when the team has ended, ORG-TEAM-MEMBER-RANGE when the validity is not inside the team's effective range (a bounded team needs a bounded validTo), ORG-TEAM-MEMBER-LIMIT at 2,000 members in force, idempotency_key_reuse when the key was used with a different body. 403 AUTH-0003 without the duty or for a legal-entity-scoped caller.
           content: { application/json: { schema: { $ref: '#/components/schemas/TeamMember' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/teams/{id}/members/{memberId}:end:
+    post:
+      operationId: endTeamMember
+      x-passage-duty: org.operating-unit.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: memberId, in: path, required: true, description: The member row id from the member list, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/EndTeamMember' } } }
+      responses:
+        '200':
+          description: The member with its new validTo. Re-sending the current validTo returns the member unchanged with no event and no count. Emits dev.passage.org.teammembership.changed.v1 with empty added, one removed entry and as_of the day after validTo. Allowed on an inactive team. 400 COM-0001 naming validTo. 404 ORG-TEAM-NOT-FOUND or ORG-TEAM-MEMBER-NOT-FOUND. 422 ORG-TEAM-MEMBER-RANGE on validTo before validFrom or after the current validTo. 403 AUTH-0003 without the duty or for a legal-entity-scoped caller.
+          content: { application/json: { schema: { $ref: '#/components/schemas/TeamMember' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/org/teams/{id}/members/{memberId}:
+    delete:
+      operationId: removeTeamMember
+      x-passage-duty: org.operating-unit.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: memberId, in: path, required: true, description: The member row id from the member list, schema: { type: string, format: uuid } }
+      responses:
+        '204':
+          description: A member entered in error is deleted. Emits dev.passage.org.teammembership.changed.v1 with empty added, one removed entry and as_of the row's validFrom. Allowed on an inactive team. 404 ORG-TEAM-NOT-FOUND or ORG-TEAM-MEMBER-NOT-FOUND. 422 ORG-TEAM-MEMBER-RULE-SOURCED for a rule-sourced row. 403 AUTH-0003 without the duty or for a legal-entity-scoped caller.
         default: { $ref: '#/components/responses/Problem' }
   /v1/org/sites:
     post:
@@ -1114,6 +1154,16 @@ components:
       type: object
       required: [id, code, name, teamTypeId, effectiveFrom, status, version, createdAt, updatedAt]
       properties: { id: { type: string, format: uuid }, code: { type: string }, name: { type: string }, description: { type: string }, teamTypeId: { type: string, format: uuid }, operatingUnitId: { type: string, format: uuid }, effectiveFrom: { type: string, format: date }, effectiveTo: { type: string, format: date }, status: { type: string, enum: [active, inactive] }, version: { type: integer }, createdAt: { type: string, format: date-time }, updatedAt: { type: string, format: date-time } }
+    UpdateTeam:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties: { version: { type: integer, minimum: 1 }, name: { type: string, minLength: 1, maxLength: 60 }, description: { type: string, maxLength: 500, description: An empty string clears it }, operatingUnitId: { type: string, description: An active operating unit UUID, or an empty string to clear }, effectiveTo: { type: string, description: A date as YYYY-MM-DD not before effectiveFrom, or an empty string for open-ended }, status: { type: string, enum: [active, inactive] } }
+    EndTeamMember:
+      type: object
+      additionalProperties: false
+      required: [validTo]
+      properties: { validTo: { type: string, format: date, description: The last day the member is in force; it can only be moved earlier than the current validTo } }
     TeamPage:
       type: object
       required: [items]

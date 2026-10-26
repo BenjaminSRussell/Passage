@@ -1021,6 +1021,12 @@ func TestMetricsCountBusinessOperations(t *testing.T) {
 		"org_teams_created_total 0",
 		"# TYPE org_team_members_added_total counter",
 		"org_team_members_added_total 0",
+		"# TYPE org_teams_updated_total counter",
+		"org_teams_updated_total 0",
+		"# TYPE org_team_members_ended_total counter",
+		"org_team_members_ended_total 0",
+		"# TYPE org_team_members_removed_total counter",
+		"org_team_members_removed_total 0",
 	} {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Fatalf("metrics missing %q in %s", want, rec.Body.String())
@@ -1506,6 +1512,63 @@ func (f *fakeStore) AddTeamMember(_ context.Context, teamID string, in store.Tea
 		f.teamMemberKeys[key] = in
 	}
 	return in, true, nil
+}
+
+func (f *fakeStore) UpdateTeam(_ context.Context, id string, version int, in store.TeamPatch) (store.Team, error) {
+	if f.err != nil {
+		return store.Team{}, f.err
+	}
+	for i, t := range f.teams {
+		if t.ID != id {
+			continue
+		}
+		if t.Version != version {
+			return store.Team{}, httpx.NewProblem(http.StatusConflict, store.CodeVersionConflict, "current version is 2")
+		}
+		if in.Name != nil && *in.Name != t.Name {
+			t.Name, t.Version = *in.Name, t.Version+1
+		}
+		f.teams[i] = t
+		return t, nil
+	}
+	return store.Team{}, httpx.NewProblem(http.StatusNotFound, store.CodeTeamNotFound, "team not found")
+}
+
+func (f *fakeStore) memberIndex(teamID, memberRowID string) (int, error) {
+	if !f.teamKnown(teamID) {
+		return -1, httpx.NewProblem(http.StatusNotFound, store.CodeTeamNotFound, "team not found")
+	}
+	i := slices.IndexFunc(f.teamMembers, func(m store.TeamMember) bool { return m.TeamID == teamID && m.ID == memberRowID })
+	if i < 0 {
+		return -1, httpx.NewProblem(http.StatusNotFound, store.CodeTeamMemberNotFound, "team member not found")
+	}
+	return i, nil
+}
+
+func (f *fakeStore) EndTeamMember(_ context.Context, teamID, memberRowID string, validTo time.Time) (store.TeamMember, bool, error) {
+	if f.err != nil {
+		return store.TeamMember{}, false, f.err
+	}
+	i, err := f.memberIndex(teamID, memberRowID)
+	if err != nil {
+		return store.TeamMember{}, false, err
+	}
+	end := validTo.Format("2006-01-02")
+	changed := f.teamMembers[i].ValidTo == nil || *f.teamMembers[i].ValidTo != end
+	f.teamMembers[i].ValidTo = &end
+	return f.teamMembers[i], changed, nil
+}
+
+func (f *fakeStore) RemoveTeamMember(_ context.Context, teamID, memberRowID string) error {
+	if f.err != nil {
+		return f.err
+	}
+	i, err := f.memberIndex(teamID, memberRowID)
+	if err != nil {
+		return err
+	}
+	f.teamMembers = slices.Delete(f.teamMembers, i, i+1)
+	return nil
 }
 
 func (f *fakeStore) ListTeamMembers(_ context.Context, teamID string, filter store.TeamMemberFilter, afterID string, limit int) (store.TeamMemberPage, error) {
