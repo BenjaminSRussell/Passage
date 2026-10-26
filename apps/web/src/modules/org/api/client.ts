@@ -1,4 +1,4 @@
-const base = "/api/v1/org";
+export const base = "/api/v1/org";
 
 export const ALL = "ALL";
 
@@ -88,7 +88,7 @@ export function describeProblem(error: unknown): Problem {
   return { code: "COM-0001", message: error instanceof Error ? error.message : "Request failed" };
 }
 
-async function toError(res: Response): Promise<OrgApiError> {
+export async function toError(res: Response): Promise<OrgApiError> {
   const body = (await res.json().catch(() => null)) as { code?: unknown; detail?: unknown; title?: unknown } | null;
   const code = typeof body?.code === "string" && body.code !== "" ? body.code : "COM-0001";
   const message =

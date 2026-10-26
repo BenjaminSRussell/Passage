@@ -1,4 +1,4 @@
-# Not implemented in PSG-6 slice 35
+# Not implemented in PSG-6 slice 36
 
 | Deliverable or AC | Status | Reason |
 |---|---|---|
@@ -35,7 +35,6 @@
 | handoff delivered: services/fx/NOT-IMPLEMENTED.md row "ISO 4217 reference data" | done in PSG-606 | GET /v1/org/currencies and /v1/org/currencies/{code} serve ISO 4217 code, numeric code, name and minor units; switching services/fx off money.MinorUnits is wave 12's own work |
 | OPA duty entries for /v1/org/** (org.read, org.legal-entity.write, org.reference.write, org.operating-unit.write, org.site.write, org.address.write, org.fiscal-calendar.write, org.hierarchy.write, org.hierarchy.publish, org.hierarchy.backdate) in policies/authz/data.json | handoff | policies/ is outside wave 6 ownership; the service enforces duties from forwarded headers today |
 | Ledger posting check for ORG-CAL-LOCKED (BR-6.7) | handoff | the ledger (wave 11) must expose whether a fiscal year has postings; api.noPostings reports none until then, so force regeneration is always allowed |
-| Reference data screen (deactivate, add custom UoM, test conversion) in apps/web/src/modules/org/ | later slice of PSG-6 | the web module exists since PSG-635; the screen is not built |
 | BR-6.11 ORG-LE-DEFAULT-IN-USE (refuse deactivation while users default to the entity) | handoff | users' default legal entity is held by the identity/shell waves (2, 5), outside wave 6 ownership; org needs a read API or event for it |
 | Operating-unit numbers from the wave-5 sequence (org.ou.number_sequence OU-{#####}) | later slice of PSG-6 | sequences are scoped per legal entity, `services/numbering` has no tenant-level sequence and org has no numbering client, so it needs a wave-5 contract first |
 | Operating-unit CSV bulk import | later slice of PSG-6 | import belongs to the web module slice |

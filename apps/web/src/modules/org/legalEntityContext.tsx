@@ -3,12 +3,14 @@ import { ALL, describeProblem, listLegalEntities, type LegalEntity, type Problem
 
 const STORAGE_KEY = "passage.org.legalEntity";
 const ALL_SCOPE_DUTY = "org.switcher.all_scope";
+const REFERENCE_WRITE_DUTY = "org.reference.write";
 
 export interface LegalEntityContextValue {
   entities: LegalEntity[];
   scope: Scope;
   setScope(scope: Scope): void;
   canAll: boolean;
+  canWriteReference: boolean;
   loading: boolean;
   error: Problem | null;
 }
@@ -37,6 +39,7 @@ function writeStored(value: string | null): void {
 
 export function LegalEntityProvider({ duties, children }: { duties?: readonly string[]; children: ReactNode }) {
   const canAll = Array.isArray(duties) && duties.includes(ALL_SCOPE_DUTY);
+  const canWriteReference = Array.isArray(duties) && duties.includes(REFERENCE_WRITE_DUTY);
   const [entities, setEntities] = useState<LegalEntity[]>([]);
   const [scope, setScopeState] = useState<Scope>("");
   const [loading, setLoading] = useState(true);
@@ -81,8 +84,8 @@ export function LegalEntityProvider({ duties, children }: { duties?: readonly st
   );
 
   const value = useMemo(
-    () => ({ entities, scope, setScope, canAll, loading, error }),
-    [entities, scope, setScope, canAll, loading, error],
+    () => ({ entities, scope, setScope, canAll, canWriteReference, loading, error }),
+    [entities, scope, setScope, canAll, canWriteReference, loading, error],
   );
   return <LegalEntityContext.Provider value={value}>{children}</LegalEntityContext.Provider>;
 }

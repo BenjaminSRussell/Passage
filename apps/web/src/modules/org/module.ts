@@ -1,5 +1,6 @@
 import { createElement } from "react";
 import type { PassageModule } from "../registry";
+import { ReferenceDataPage } from "./ReferenceDataPage";
 import { LegalEntitiesPage, OperatingUnitsPage, OrgHome, OrgLayout, SitesPage, WarehousesPage } from "./pages";
 
 const org: PassageModule = {
@@ -15,6 +16,7 @@ const org: PassageModule = {
         { path: "/org/operating-units", element: createElement(OperatingUnitsPage) },
         { path: "/org/sites", element: createElement(SitesPage) },
         { path: "/org/warehouses", element: createElement(WarehousesPage) },
+        { path: "/org/reference-data", element: createElement(ReferenceDataPage) },
       ],
     },
   ],
@@ -24,6 +26,7 @@ const org: PassageModule = {
     { label: "Operating units", to: "/org/operating-units", duty: "org.read" },
     { label: "Sites", to: "/org/sites", duty: "org.read" },
     { label: "Warehouses", to: "/org/warehouses", duty: "org.read" },
+    { label: "Reference data", to: "/org/reference-data", duty: "org.read" },
   ],
 };
 
