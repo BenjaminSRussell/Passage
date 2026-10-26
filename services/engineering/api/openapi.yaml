@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: engineering
   version: 0.1.0
-  description: Engineering data service. Slice 2 covers BOM versions, explosion, where-used, routing lead time and engineering change orders.
+  description: Engineering data service. Covers BOM versions, explosion, where-used, routing lead time, engineering change orders, and (slice 4) work calendars, resource groups, capabilities and resources.
 servers:
   - url: https://app.local.passage.dev
 paths:
@@ -97,6 +97,116 @@ paths:
         '200':
           description: ECO approved and released. Old versions expire the day before the release date and new versions become active in one transaction. A future release date schedules the ECO. Releasing an already released ECO returns it unchanged with no side effects, so a retry under the same Idempotency-Key is safe. An unavailable approval service is 503 ENG-ECO-APPROVER-UNAVAILABLE and leaves the ECO unchanged.
           content: { application/json: { schema: { $ref: '#/components/schemas/Eco' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/calendars:
+    post:
+      operationId: createCalendar
+      x-passage-duty: engineering.resource.write
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CalendarRequest' } } }
+      responses:
+        '201':
+          description: Calendar created, or the original calendar on an Idempotency-Key replay. warnings lists soft limits such as weekly shift hours above 48. Overlapping or malformed shifts are 422 ENG-CAL-SHIFT.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Calendar' } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/calendars/{id}:generate:
+    post:
+      operationId: generateCalendar
+      x-passage-duty: engineering.resource.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/DateRange' } } }
+      responses:
+        '200':
+          description: Days generated for the range. A repeat upserts the same days and returns the same counts, so a retry under the same Idempotency-Key is safe. A range over 60 months or with to before from is 422 ENG-CAL-RANGE.
+          content: { application/json: { schema: { $ref: '#/components/schemas/CalendarGeneration' } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/calendars/{id}/days:
+    get:
+      operationId: listCalendarDays
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: Generated days inside the requested range only, ordered by date.
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/CalendarDay' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/resource-groups:
+    post:
+      operationId: createResourceGroup
+      x-passage-duty: engineering.resource.write
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ResourceGroup' } } }
+      responses:
+        '201':
+          description: Resource group created, or the original group on an Idempotency-Key replay. A duplicate code is 409 ENG-DUPLICATE.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ResourceGroup' } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/capabilities:
+    post:
+      operationId: createCapability
+      x-passage-duty: engineering.resource.write
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/Capability' } } }
+      responses:
+        '201':
+          description: Capability created, or the original capability on an Idempotency-Key replay. A duplicate code is 409 ENG-DUPLICATE.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Capability' } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/resources:
+    post:
+      operationId: createResource
+      x-passage-duty: engineering.resource.write
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/Resource' } } }
+      responses:
+        '201':
+          description: Resource created with its capabilities, or the original resource on an Idempotency-Key replay. A vendor without vendorPartyId is 422 ENG-RES-VENDOR and a group on another site is 422 ENG-RES-SITE.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Resource' } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/resources/{id}:
+    get:
+      operationId: getResource
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The resource with its capabilities and effectiveCalendarId, which is the resource's own calendar or else its group's.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Resource' } } }
+        '404': { $ref: '#/components/responses/NotFound' }
         default: { $ref: '#/components/responses/Problem' }
   /healthz:
     get:
@@ -208,6 +318,94 @@ components:
         releaseDate: { type: string, format: date }
         decidedBy: { type: string }
         replaces: { type: array, minItems: 1, items: { type: object, required: [oldVersionId, newVersionId], properties: { oldVersionId: { type: string, format: uuid }, newVersionId: { type: string, format: uuid } } } }
+    Shift:
+      type: object
+      additionalProperties: false
+      required: [start, end]
+      properties:
+        start: { type: string, pattern: '^[0-2][0-9]:[0-5][0-9]$' }
+        end: { type: string, pattern: '^[0-2][0-9]:[0-5][0-9]$', description: An end before start runs past midnight }
+        efficiencyPct: { type: string, description: 1 to 100 with at most two decimals }
+    CalendarRequest:
+      type: object
+      additionalProperties: false
+      required: [code, name, template]
+      properties:
+        code: { type: string, maxLength: 64 }
+        name: { type: string, maxLength: 200 }
+        template: { type: array, minItems: 7, maxItems: 7, description: 'Seven day patterns, Monday first', items: { type: array, maxItems: 5, items: { $ref: '#/components/schemas/Shift' } } }
+        closedDates: { type: array, maxItems: 2000, items: { type: string, format: date } }
+    Calendar:
+      type: object
+      required: [id, code, name, template, closedDates, version, warnings]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        template: { type: array, items: { type: array, items: { $ref: '#/components/schemas/Shift' } } }
+        closedDates: { type: array, items: { type: string, format: date } }
+        version: { type: integer }
+        generatedFrom: { type: string, format: date }
+        generatedTo: { type: string, format: date }
+        warnings: { type: array, items: { type: string } }
+    DateRange:
+      type: object
+      additionalProperties: false
+      required: [from, to]
+      properties: { from: { type: string, format: date }, to: { type: string, format: date } }
+    CalendarGeneration:
+      type: object
+      required: [openDays, totalHours]
+      properties: { openDays: { type: integer }, totalHours: { type: string } }
+    CalendarDay:
+      type: object
+      required: [date, open, shifts, totalH]
+      properties: { date: { type: string, format: date }, open: { type: boolean }, shifts: { type: array, items: { $ref: '#/components/schemas/Shift' } }, totalH: { type: string } }
+    ResourceGroup:
+      type: object
+      additionalProperties: false
+      required: [code, name, siteId]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string, maxLength: 64 }
+        name: { type: string, maxLength: 200 }
+        siteId: { type: string, maxLength: 64 }
+        calendarId: { type: string, format: uuid }
+    Capability:
+      type: object
+      additionalProperties: false
+      required: [code, name]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string, maxLength: 64 }
+        name: { type: string, maxLength: 200 }
+    ResourceCapability:
+      type: object
+      additionalProperties: false
+      required: [capabilityId, level, effectiveFrom]
+      properties:
+        capabilityId: { type: string, format: uuid }
+        level: { type: integer, minimum: 1 }
+        effectiveFrom: { type: string, format: date }
+        effectiveTo: { type: string, format: date }
+    Resource:
+      type: object
+      additionalProperties: false
+      required: [code, name, type, siteId]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string, maxLength: 64 }
+        name: { type: string, maxLength: 200 }
+        type: { type: string, enum: [machine, tool, labor, vendor, location] }
+        siteId: { type: string, maxLength: 64 }
+        groupId: { type: string, format: uuid }
+        calendarId: { type: string, format: uuid }
+        efficiencyPct: { type: string, description: Above 0 to 100 with at most two decimals, default: '100' }
+        capacityPerDayH: { type: string, description: Below 1000000 with at most four decimals, default: '0' }
+        exclusive: { type: boolean, default: false }
+        vendorPartyId: { type: string, maxLength: 64, description: Required for type vendor and refused for other types }
+        capabilities: { type: array, maxItems: 100, items: { $ref: '#/components/schemas/ResourceCapability' } }
+        effectiveCalendarId: { type: string, format: uuid, readOnly: true }
     Problem:
       type: object
       required: [type, title, status]
@@ -216,4 +414,13 @@ components:
   responses:
     Problem:
       description: RFC 9457 problem details.
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    NotFound:
+      description: ENG-CAL-NOTFOUND or ENG-RES-NOTFOUND as RFC 9457 problem details.
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    Conflict:
+      description: ENG-DUPLICATE, a record with this code already exists.
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    Unprocessable:
+      description: ENG-CAL-SHIFT, ENG-CAL-RANGE, ENG-RES-VENDOR, ENG-RES-SITE or idempotency_key_reuse.
       content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }

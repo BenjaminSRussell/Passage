@@ -28,19 +28,20 @@ import (
 )
 
 const (
-	readyTimeout     = 500 * time.Millisecond
-	idempotencyKey   = "Idempotency-Key"
-	dutyRead         = "engineering.read"
-	dutyBomWrite     = "engineering.bom.write"
-	dutyEcoApprove   = "engineering.eco.approve"
-	dateLayout       = "2006-01-02"
-	validationDetail = "request failed validation"
-	maxIDLength      = 64
-	maxLines         = 5000
-	maxOperations    = 500
-	maxNumberLength  = 40
-	maxDecimalExp    = 15
-	minDecimalExp    = -12
+	readyTimeout      = 500 * time.Millisecond
+	idempotencyKey    = "Idempotency-Key"
+	dutyRead          = "engineering.read"
+	dutyBomWrite      = "engineering.bom.write"
+	dutyEcoApprove    = "engineering.eco.approve"
+	dutyResourceWrite = "engineering.resource.write"
+	dateLayout        = "2006-01-02"
+	validationDetail  = "request failed validation"
+	maxIDLength       = 64
+	maxLines          = 5000
+	maxOperations     = 500
+	maxNumberLength   = 40
+	maxDecimalExp     = 15
+	minDecimalExp     = -12
 )
 
 var (
@@ -58,6 +59,10 @@ type API struct {
 	ecosFailed   atomic.Int64
 	explosions   atomic.Int64
 	stats        routeStats
+
+	calendarsCreated atomic.Int64
+	resourcesCreated atomic.Int64
+	resourceFailed   atomic.Int64
 }
 
 func New(s store.Store, approver domain.Approver, now func() time.Time) *API {
@@ -75,6 +80,13 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(dutyRead)).Post("/v1/engineering/routes:lead-time", a.leadTime)
 		r.With(authz.RequireDuty(dutyBomWrite)).Post("/v1/engineering/ecos", a.createEco)
 		r.With(authz.RequireDuty(dutyEcoApprove)).Post("/v1/engineering/ecos/{id}:release", a.releaseEco)
+		r.With(authz.RequireDuty(dutyResourceWrite)).Post("/v1/engineering/calendars", a.createCalendar)
+		r.With(authz.RequireDuty(dutyResourceWrite)).Post("/v1/engineering/calendars/{id}:generate", a.generateCalendar)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/calendars/{id}/days", a.calendarDays)
+		r.With(authz.RequireDuty(dutyResourceWrite)).Post("/v1/engineering/resource-groups", a.createResourceGroup)
+		r.With(authz.RequireDuty(dutyResourceWrite)).Post("/v1/engineering/capabilities", a.createCapability)
+		r.With(authz.RequireDuty(dutyResourceWrite)).Post("/v1/engineering/resources", a.createResource)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/resources/{id}", a.getResource)
 	})
 }
 

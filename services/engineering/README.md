@@ -1,6 +1,6 @@
 # engineering
 
-Wave 9 (PSG-9): engineering data for the `product` context: BOMs, routings, engineering change orders. Slice 1 is the pure domain kernel, the store, HTTP API, specs, chart and web module followed, slice 2 added pure calendar and resource domain code, and slice 3 adds resource and calendar persistence. What is not built is in `NOT-IMPLEMENTED.md`.
+Wave 9 (PSG-9): engineering data for the `product` context: BOMs, routings, engineering change orders. Slice 1 is the pure domain kernel, the store, HTTP API, specs, chart and web module followed, slice 2 added pure calendar and resource domain code, slice 3 added resource and calendar persistence, and slice 4 exposes it over HTTP. What is not built is in `NOT-IMPLEMENTED.md`.
 
 ## Layout
 
@@ -10,7 +10,7 @@ Wave 9 (PSG-9): engineering data for the `product` context: BOMs, routings, engi
 - `internal/domain/eco.go`: ECO state machine, `Approver` seam to the Temporal approval workflow, release plan (expire old at `release_date - 1`, activate new).
 - `internal/domain/calendar.go`, `resource.go`: shift validation, calendar day generation, resource validation, effective calendar, requirement matching.
 - `internal/store`: pgx repositories under `dbx.WithTenantTx`; `Catalog` loads only the BOM versions reachable from the requested products (recursive query, down for explosion, up for where-used) into a `Snapshot` that satisfies `domain.Catalog`. `ReleaseEco` applies a `ReleasePlan` and enqueues its events in one transaction. `resource.go` holds calendar, group, capability and resource persistence: `GenerateCalendar` upserts `calendar_day` rows and enqueues one `calendar.generated` per call; `CreateResource` checks group site, calendar and capabilities and enqueues one `resource.changed`.
-- `internal/api`: handlers, validation, duties, readiness; `metrics.go` serves business counters plus `engineering_http_requests_total` and `engineering_http_request_duration_seconds` by route pattern. Alert on the 5xx share of requests and on explode p95 from the duration histogram.
+- `internal/api`: handlers, validation, duties, readiness (`resource.go` holds the calendar, group, capability and resource handlers); `metrics.go` serves business counters plus `engineering_http_requests_total` and `engineering_http_request_duration_seconds` by route pattern. Alert on the 5xx share of requests and on explode p95 from the duration histogram.
 - `internal/events/events.go`: event types and payloads.
 - `migrations/0001_init.sql`: tables with `tenant_id` first, tenant RLS (enabled and forced), idempotency and outbox tables.
 - `migrations/0002_resources.sql`: `work_calendar`, `calendar_day`, `resource_group`, `capability`, `resource`, `resource_capability` with the same RLS and grants.
@@ -25,12 +25,16 @@ Wave 9 (PSG-9): engineering data for the `product` context: BOMs, routings, engi
 | `POST /v1/engineering/boms:explode`, `GET /v1/engineering/boms:where-used`, `POST /v1/engineering/routes:lead-time` | `engineering.read` |
 | `POST /v1/engineering/ecos` | `engineering.bom.write` |
 | `POST /v1/engineering/ecos/{id}:release` | `engineering.eco.approve` |
+| `POST /v1/engineering/calendars`, `POST /v1/engineering/calendars/{id}:generate`, `POST /v1/engineering/resource-groups`, `POST /v1/engineering/capabilities`, `POST /v1/engineering/resources` | `engineering.resource.write` |
+| `GET /v1/engineering/calendars/{id}/days`, `GET /v1/engineering/resources/{id}` | `engineering.read` |
+
+Calendar, group, capability and resource creates honour `Idempotency-Key` (a different body under the same key is 422 `idempotency_key_reuse`); `:generate` is state-based, so a repeat upserts the same days. A calendar template is exactly seven day patterns, Monday first. `GET /resources/{id}` returns capabilities and `effectiveCalendarId`. Malformed bodies are 400 `COM-0001` with an `errors` map. Counters: `engineering_calendars_created_total`, `engineering_resources_created_total`, `engineering_resource_requests_failed_total`.
 
 `engineering.route.write` (PRD 1.9.17) has no route until routing persistence exists. Creating a BOM version defaults to `draft`; `active` is accepted only as the first version of a product and site (checked for overlap, `ENG-BOM-ECO-REQUIRED` otherwise) and enqueues `bomversion.activated`; every later activation goes through an ECO. Creates and releases serialise per tenant and product with a transaction advisory lock, and a release re-checks overlap inside its transaction. Explosion and where-used stop at 100,000 nodes with `ENG-BOM-TOOLARGE`. An ECO is created `submitted`; `:release` asks the approver, then releases or schedules it.
 
 ## Error codes
 
-`ENG-BOM-CYCLE`, `ENG-BOM-OVERLAP`, `ENG-BOM-NOVERSION`, `ENG-BOM-LEVELS`, `ENG-BOM-QTY`, `ENG-BOM-LINE`, `ENG-BOM-TOOLARGE`, `ENG-BOM-ECO-REQUIRED`, `ENG-BOM-PHANTOM-NOBOM`, `ENG-ROUTE-QTY`, `ENG-ROUTE-NEXT-MISSING`, `ENG-ROUTE-SECONDARY-NOPRIMARY`, `ENG-ROUTE-CYCLE`, `ENG-ECO-STATE` (409), `ENG-ECO-APPROVER-UNAVAILABLE` (503, counted in `engineering_ecos_failed_total`), `ENG-ECO-NOT-APPROVED`, `ENG-ECO-DRYRUN`, `ENG-ECO-DATE`, `ENG-CAL-SHIFT`, `ENG-CAL-RANGE`, `ENG-RES-VENDOR`, `ENG-RES-SITE` (all other domain codes map to 422), plus store codes `ENG-ECO-NOTFOUND` (404), `ENG-BOM-VERSION-NOTFOUND` (404), `ENG-CAL-NOTFOUND` (404), `ENG-RES-NOTFOUND` (404), `ENG-DUPLICATE` (409) and `idempotency_key_reuse` (422). The PRD 1.9.18 catalog names the first seven present codes where they exist; `NOVERSION`, `LEVELS`, `QTY`, `LINE`, `ROUTE-QTY`, `ROUTE-CYCLE`, `ECO-STATE`, `ECO-DRYRUN`, `ECO-DATE` and the store codes are not in the catalog yet and must be reconciled with it.
+`ENG-BOM-CYCLE`, `ENG-BOM-OVERLAP`, `ENG-BOM-NOVERSION`, `ENG-BOM-LEVELS`, `ENG-BOM-QTY`, `ENG-BOM-LINE`, `ENG-BOM-TOOLARGE`, `ENG-BOM-ECO-REQUIRED`, `ENG-BOM-PHANTOM-NOBOM`, `ENG-ROUTE-QTY`, `ENG-ROUTE-NEXT-MISSING`, `ENG-ROUTE-SECONDARY-NOPRIMARY`, `ENG-ROUTE-CYCLE`, `ENG-ECO-STATE` (409), `ENG-ECO-APPROVER-UNAVAILABLE` (503, counted in `engineering_ecos_failed_total`), `ENG-ECO-NOT-APPROVED`, `ENG-ECO-DRYRUN`, `ENG-ECO-DATE`, `ENG-CAL-SHIFT`, `ENG-CAL-RANGE`, `ENG-RES-VENDOR`, `ENG-RES-SITE` (422, as are all other domain codes), plus store codes `ENG-ECO-NOTFOUND` (404), `ENG-BOM-VERSION-NOTFOUND` (404), `ENG-CAL-NOTFOUND` (404), `ENG-RES-NOTFOUND` (404), `ENG-DUPLICATE` (409) and `idempotency_key_reuse` (422). The PRD 1.9.18 catalog names the first seven present codes where they exist; `NOVERSION`, `LEVELS`, `QTY`, `LINE`, `ROUTE-QTY`, `ROUTE-CYCLE`, `ECO-STATE`, `ECO-DRYRUN`, `ECO-DATE` and the store codes are not in the catalog yet and must be reconciled with it.
 
 ## Event types
 

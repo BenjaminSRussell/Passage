@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -25,7 +26,7 @@ import (
 )
 
 const (
-	allDuties  = "engineering.read,engineering.bom.write,engineering.eco.approve"
+	allDuties  = "engineering.read,engineering.bom.write,engineering.eco.approve,engineering.resource.write"
 	versions   = "/v1/engineering/bom-versions"
 	ecos       = "/v1/engineering/ecos"
 	oldVersion = "00000000-0000-0000-0000-0000000000a1"
@@ -54,6 +55,7 @@ type fakeStore struct {
 	hashes   map[string]string
 	created  []domain.BomVersion
 	released []releaseCall
+	res      *resourceState
 }
 
 func (f *fakeStore) CreateBomVersion(_ context.Context, v domain.BomVersion, idem store.Idem, check func(store.Snapshot) error) (domain.BomVersion, error) {
@@ -706,12 +708,19 @@ func TestSpecs_MatchRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	r, _ := newRouter(&fakeStore{}, approves)
+	registered := map[string]bool{}
 	_ = chi.Walk(r, func(_, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		registered[route] = true
 		if !strings.Contains(string(openapi), "\n  "+route+":") {
 			t.Errorf("openapi.yaml does not document %s", route)
 		}
 		return nil
 	})
+	for _, match := range regexp.MustCompile(`(?m)^  (/\S+):$`).FindAllStringSubmatch(string(openapi), -1) {
+		if !registered[match[1]] {
+			t.Errorf("openapi.yaml documents %s but no route is registered", match[1])
+		}
+	}
 	for _, typ := range []string{engevents.BomVersionActivated, engevents.BomVersionExpired, engevents.EcoSubmitted, engevents.EcoApproved, engevents.EcoReleased} {
 		if !events.ValidType(typ) || !strings.Contains(string(asyncapi), typ) || !strings.Contains(string(asyncapi), events.Topic(typ)) {
 			t.Errorf("asyncapi.yaml does not document %s on %s", typ, events.Topic(typ))

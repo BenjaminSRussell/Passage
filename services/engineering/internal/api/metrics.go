@@ -63,6 +63,9 @@ func (a *API) Metrics() http.Handler {
 		{"engineering_ecos_released_total", "ECOs released to production.", &a.ecosReleased},
 		{"engineering_ecos_failed_total", "ECO requests that failed in the store or domain with an unexpected error, including an unavailable approver.", &a.ecosFailed},
 		{"engineering_explosions_total", "BOM explosions served.", &a.explosions},
+		{"engineering_calendars_created_total", "Work calendars created.", &a.calendarsCreated},
+		{"engineering_resources_created_total", "Resources created.", &a.resourcesCreated},
+		{"engineering_resource_requests_failed_total", "Resource and calendar requests that failed in the store or domain with an unexpected error.", &a.resourceFailed},
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
