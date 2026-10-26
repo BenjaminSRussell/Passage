@@ -9,6 +9,10 @@ describe("tax module", () => {
     expect(tax.nav.every((n) => n.to.startsWith("/tax"))).toBe(true);
   });
 
+  it("renders a page for its route", () => {
+    expect(tax.routes[0].element).not.toBeNull();
+  });
+
   it("is auto-discovered by the registry", () => {
     expect(loadModules().map((m) => m.id)).toContain("tax");
   });

@@ -1,0 +1,85 @@
+.scroll {
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.table {
+  inline-size: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--text-sm-size);
+  line-height: var(--text-sm-leading);
+}
+
+.head {
+  position: sticky;
+  inset-block-start: 0;
+  padding-block: var(--space-2);
+  padding-inline: var(--cell-padding-inline);
+  border-block-end: 1px solid var(--color-border);
+  background: var(--color-bg-muted);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs-size);
+  line-height: var(--text-xs-leading);
+  font-weight: var(--weight-semibold);
+  text-align: start;
+  white-space: nowrap;
+}
+
+.cell {
+  block-size: var(--row-height);
+  padding-inline: var(--cell-padding-inline);
+  border-block-end: 1px solid var(--color-border);
+  vertical-align: middle;
+}
+
+.row:last-child > .cell {
+  border-block-end: 0;
+}
+
+.row:nth-child(even) {
+  background: color-mix(in srgb, var(--color-bg-muted) 50%, transparent);
+}
+
+.row:hover {
+  background: var(--color-bg-muted);
+}
+
+.clickable {
+  cursor: pointer;
+}
+
+.end {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs-size);
+}
+
+.emptyCell {
+  padding: 0;
+}
+
+.rowLink {
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-accent);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.rowLink:hover,
+.rowLink:focus-visible {
+  color: var(--color-accent-hover);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}

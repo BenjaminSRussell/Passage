@@ -53,6 +53,7 @@ describe("engineering module", () => {
     fireEvent.click(screen.getByRole("button", { name: "Find parents" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Where-used lookup failed");
     expect(screen.queryByRole("table")).toBeNull();
+    expect(screen.getByLabelText("Component")).toHaveValue("SPOKE");
   });
 
   it("says so when nothing uses the component", async () => {
@@ -62,5 +63,6 @@ describe("engineering module", () => {
     fireEvent.click(screen.getByRole("button", { name: "Find parents" }));
     expect(await screen.findByRole("status")).toHaveTextContent("No active BOM uses this component on that date.");
     expect(screen.queryByRole("table")).toBeNull();
+    expect(await screen.findByText("No parents found")).toBeInTheDocument();
   });
 });

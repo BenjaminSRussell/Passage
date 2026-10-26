@@ -1,7 +1,7 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { loadModules } from "../registry";
 import product from "./module";
-import { CatalogPage, ProductHome } from "./pages";
+import { CatalogPage, ProductDetail, ProductHome } from "./pages";
 
 describe("product module", () => {
   it("uses its folder name as id and declares product routes", () => {
@@ -24,5 +24,30 @@ describe("product module", () => {
   it("lists products and masters", () => {
     render(<CatalogPage />);
     expect(screen.getByRole("table", { name: "Products" })).toHaveTextContent("SHIRT");
+  });
+
+  it("labels subtype and state in plain words", () => {
+    render(<CatalogPage />);
+    const table = screen.getByRole("table", { name: "Products" });
+    expect(table).toHaveTextContent("Master");
+    expect(table).toHaveTextContent("Active");
+  });
+
+  it("opens a product from its number", () => {
+    const opened: string[] = [];
+    render(<CatalogPage onOpen={(number) => opened.push(number)} />);
+    fireEvent.click(screen.getByRole("button", { name: "BOLT" }));
+    expect(opened).toEqual(["BOLT"]);
+  });
+
+  it("explains an empty catalog", () => {
+    render(<CatalogPage items={[]} />);
+    expect(screen.getByText("No products yet")).toBeInTheDocument();
+  });
+
+  it("shows product identifiers in a definition list", () => {
+    const { container } = render(<ProductDetail />);
+    expect(screen.getByRole("heading", { name: "Knit shirt" })).toBeInTheDocument();
+    expect(container.querySelector("dl")).toHaveTextContent("06141411234579");
   });
 });

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MetadataForm } from "./MetadataForm";
 
@@ -36,5 +36,33 @@ describe("MetadataForm", () => {
     );
     expect(screen.getByRole("option", { name: "preferred" })).toBeInTheDocument();
     expect(screen.getByLabelText("Code")).toBeRequired();
+  });
+
+  it("shows a loading message, then offers a retry when the schema fails to load", async () => {
+    const schema = { title: "Vendor", properties: { code: { type: "string", title: "Code" } } };
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("{}", { status: 500 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(schema), { status: 200 }));
+
+    render(<MetadataForm entity="Vendor" />);
+
+    expect(screen.getByText("Loading Vendor metadata…")).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("We couldn't load this form");
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByLabelText("Code")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save Vendor" })).toBeInTheDocument();
+  });
+
+  it("confirms a save and keeps the form usable", async () => {
+    const schema = { title: "Vendor", properties: { code: { type: "string", title: "Code" } } };
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify(schema), { status: 200 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 201 }));
+
+    render(<MetadataForm entity="Vendor" />);
+
+    fireEvent.change(await screen.findByLabelText("Code"), { target: { value: "V-1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Vendor" }));
+    expect(await screen.findByText("Vendor saved.")).toBeInTheDocument();
   });
 });

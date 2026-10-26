@@ -1,0 +1,51 @@
+.skeleton {
+  display: block;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, var(--color-bg-muted) 25%, var(--color-border) 50%, var(--color-bg-muted) 75%);
+  background-size: 300% 100%;
+  animation: shimmer 1.2s ease-in-out infinite;
+}
+
+.wFull {
+  inline-size: 100%;
+}
+
+.w34 {
+  inline-size: 75%;
+}
+
+.w12 {
+  inline-size: 50%;
+}
+
+.w14 {
+  inline-size: 25%;
+}
+
+.text {
+  block-size: 14px;
+}
+
+.control {
+  block-size: var(--control-height);
+}
+
+.tile {
+  block-size: 96px;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+    background: var(--color-bg-muted);
+  }
+}

@@ -13,4 +13,10 @@ describe("module registry", () => {
       expect(m.nav.length).toBeGreaterThan(0);
     }
   });
+
+  it("gives every module a description for the home page", () => {
+    for (const m of loadModules()) {
+      expect(m.description, m.id).toBeTruthy();
+    }
+  });
 });

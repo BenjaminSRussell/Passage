@@ -1,6 +1,8 @@
-import { useMemo, useState, type ChangeEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import styles from "./forms.module.css";
 import type { EntityDef } from "./metadata";
 import { validateEntity } from "./metadata";
+import { Button, FormField, Input, Select, Textarea } from "./ui";
 
 export interface FormRendererProps {
   entity: EntityDef;
@@ -14,11 +16,18 @@ export function FormRenderer({ entity, values: initial, lines: initialLines, onS
   const [lines, setLines] = useState<Record<string, string>[]>(initialLines ?? []);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [editing, setEditing] = useState<{ row: number; field: string } | null>(null);
+  const editRef = useRef<HTMLInputElement>(null);
 
   const fields = entity.fields;
   const lineDef = entity.lines;
 
   const listRows = useMemo(() => (initialLines && initialLines.length ? initialLines : lines), [initialLines, lines]);
+
+  useEffect(() => {
+    if (editing) {
+      editRef.current?.focus();
+    }
+  }, [editing]);
 
   function submit() {
     const next = validateEntity(entity, values);
@@ -33,9 +42,12 @@ export function FormRenderer({ entity, values: initial, lines: initialLines, onS
   }
 
   return (
-    <section aria-labelledby={`${entity.id}-heading`}>
-      <h2 id={`${entity.id}-heading`}>{entity.title}</h2>
+    <section aria-labelledby={`${entity.id}-heading`} className={styles.form}>
+      <h2 id={`${entity.id}-heading`} className={styles.heading}>
+        {entity.title}
+      </h2>
       <form
+        className={styles.fields}
         onSubmit={(e) => {
           e.preventDefault();
           submit();
@@ -43,45 +55,42 @@ export function FormRenderer({ entity, values: initial, lines: initialLines, onS
       >
         {fields.map((field) => {
           const id = `${entity.id}-${field.name}`;
-          const invalid = Boolean(errors[field.name]);
           const shared = {
-            id,
             name: field.name,
             value: values[field.name] ?? "",
-            "aria-invalid": invalid || undefined,
-            "aria-describedby": invalid ? `${id}-error` : undefined,
+            invalid: Boolean(errors[field.name]),
             onChange: (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
               setValues((v) => ({ ...v, [field.name]: e.target.value })),
           };
           return (
-            <div key={field.name}>
-              <label htmlFor={id}>{field.label}</label>
-              {field.type === "text" ? (
-                <textarea {...shared} />
-              ) : field.type === "lookup" ? (
-                <select {...shared}>
-                  <option value="">Select</option>
-                  {(field.lookup ?? []).map((opt) => (
-                    <option key={opt} value={opt}>
-                      {opt}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <input {...shared} type={field.type === "number" ? "number" : "text"} />
-              )}
-              {invalid ? (
-                <p id={`${id}-error`} role="alert">
-                  {errors[field.name]}
-                </p>
-              ) : null}
-            </div>
+            <FormField key={field.name} id={id} label={field.label} optional={!field.required} error={errors[field.name]}>
+              {(control) =>
+                field.type === "text" ? (
+                  <Textarea {...control} {...shared} />
+                ) : field.type === "lookup" ? (
+                  <Select {...control} {...shared}>
+                    <option value="">Select</option>
+                    {(field.lookup ?? []).map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
+                  </Select>
+                ) : (
+                  <Input {...control} {...shared} type={field.type === "number" ? "number" : "text"} />
+                )
+              }
+            </FormField>
           );
         })}
-        <button type="submit">Save {entity.title}</button>
+        <div className={styles.actions}>
+          <Button type="submit" variant="primary">
+            Save {entity.title}
+          </Button>
+        </div>
       </form>
 
-      <table aria-label={`${entity.title} list`}>
+      <table aria-label={`${entity.title} list`} className={styles.table}>
         <thead>
           <tr>
             {fields.map((field) => (
@@ -94,7 +103,9 @@ export function FormRenderer({ entity, values: initial, lines: initialLines, onS
         <tbody>
           {listRows.length === 0 ? (
             <tr>
-              <td colSpan={fields.length}>No rows</td>
+              <td colSpan={fields.length} className={styles.empty}>
+                No rows
+              </td>
             </tr>
           ) : (
             listRows.map((row, index) => (
@@ -102,7 +113,8 @@ export function FormRenderer({ entity, values: initial, lines: initialLines, onS
                 {fields.map((field) => (
                   <td key={field.name}>
                     {editing?.row === index && editing.field === field.name ? (
-                      <input
+                      <Input
+                        ref={editRef}
                         aria-label={`Edit ${field.label}`}
                         value={row[field.name] ?? ""}
                         onChange={(e) => updateLine(index, field.name, e.target.value)}
@@ -114,7 +126,7 @@ export function FormRenderer({ entity, values: initial, lines: initialLines, onS
                         }}
                       />
                     ) : (
-                      <button type="button" onClick={() => setEditing({ row: index, field: field.name })}>
+                      <button type="button" className={styles.cellButton} onClick={() => setEditing({ row: index, field: field.name })}>
                         {row[field.name] || `Edit ${field.label}`}
                       </button>
                     )}
@@ -127,12 +139,16 @@ export function FormRenderer({ entity, values: initial, lines: initialLines, onS
       </table>
 
       {lineDef ? (
-        <section aria-labelledby={`${lineDef.id}-heading`}>
-          <h3 id={`${lineDef.id}-heading`}>{lineDef.title}s</h3>
-          <button type="button" onClick={() => setLines((current) => [...current, {}])}>
-            Add {lineDef.title}
-          </button>
-          <table aria-label={`${lineDef.title} grid`}>
+        <section aria-labelledby={`${lineDef.id}-heading`} className={styles.lines}>
+          <div className={styles.linesHead}>
+            <h3 id={`${lineDef.id}-heading`} className={styles.subheading}>
+              {lineDef.title}s
+            </h3>
+            <Button size="sm" onClick={() => setLines((current) => [...current, {}])}>
+              Add {lineDef.title}
+            </Button>
+          </div>
+          <table aria-label={`${lineDef.title} grid`} className={styles.table}>
             <thead>
               <tr>
                 {lineDef.fields.map((field) => (
@@ -147,8 +163,10 @@ export function FormRenderer({ entity, values: initial, lines: initialLines, onS
                 <tr key={index}>
                   {lineDef.fields.map((field) => (
                     <td key={field.name}>
-                      <label htmlFor={`${lineDef.id}-${index}-${field.name}`}>{field.label}</label>
-                      <input
+                      <label htmlFor={`${lineDef.id}-${index}-${field.name}`} className="visually-hidden">
+                        {field.label}
+                      </label>
+                      <Input
                         id={`${lineDef.id}-${index}-${field.name}`}
                         value={row[field.name] ?? ""}
                         onChange={(e) => updateLine(index, field.name, e.target.value)}
