@@ -22,6 +22,8 @@ Units of measure and their conversions are seeded the same way from `migrations/
 
 `domain.GenerateYear` builds the periods of one fiscal year for the patterns `calendar`, `4-4-5`, `4-5-4`, `5-4-4`, `13-period` and `custom`, with optional opening, closing and special (adjustment) periods, and `domain.ProveContiguous` proves they tile the year (`ORG-CAL-GAP`, `ORG-CAL-OVERLAP`, `ORG-CAL-PATTERN`). A year is labelled by the calendar year of its nominal start. Week-based years end on the last day of the week nearest to the nominal year end (the NRF retail-calendar rule), so they have 364 or 371 days and the 371-day year puts its extra week in the last period (`week53`). The golden CSVs are in `testdata/fiscal-patterns/`. 
 
+Teams are tenant-level and persisted in `team_type` and `team` (migration 0021). `POST /v1/org/team-types` (duty `org.operating-unit.write`, `Idempotency-Key`) creates a team type that states which member kinds, user or party, its teams may hold; a replay returns the stored row with 201 and is not counted, and a key reused with another body is 422 `idempotency_key_reuse`. Team creation, team reads and members arrive in later slices; the `team` table has no writer yet.
+
 Calendars are tenant-level and persisted in `fiscal_calendar` and `fiscal_period`. `POST /v1/org/fiscal-calendars` (duty `org.fiscal-calendar.write`, `Idempotency-Key`) creates one with the defaults `startMonth` 1, `weekStart` `monday`, `openingClosing` true and `specialPeriods` 0; `GET /v1/org/fiscal-calendars/{id}` reads it. `POST /v1/org/fiscal-calendars/{id}:generate` with `{fiscalYear, force?, periods?}` writes the year's periods and emits `fiscalcalendar.generated` (201, `generated` true). Calling it again for the same calendar and year is a replay: 200, `generated` false, the stored periods, no write and no event. `force` replaces the rows and emits a second event, but first asks the `PostingChecker`: postings answer 409 `ORG-CAL-LOCKED`, a checker failure answers 503 `COM-0503`. Until the ledger exists the checker reports no postings. `periods` is required for a `custom` calendar and rejected for any other pattern (`ORG-CAL-PATTERN`). `GET /v1/org/fiscal-calendars/{id}/periods?fiscalYear=` returns the periods in order 0, operating, adjustment, 99.
 
 ## Hierarchies
@@ -52,6 +54,8 @@ Every node set is checked structurally before it is stored: at most 50,000 nodes
 | `GET /v1/org/address-versions/{id}` (any version of an address by its `versionId`, current or closed) | `org.read` |
 | `GET /v1/org/addresses` (`ownerType`, `ownerId` required; `purpose`, `limit`, `cursor`; the owner's current addresses as `{items, nextCursor}`) | `org.read` |
 | `GET /v1/org/operating-units` (`limit`, `cursor`; filters `type`, `defaultLegalEntityId`, `status`; returns `{items, nextCursor}`) and `GET /v1/org/operating-units/{id}` | `org.read` |
+| `POST /v1/org/team-types` (body `code` upper-cased and unique per tenant, `name` 1 to 60 characters, `memberKinds` of 1 to 2 distinct values of user, party; optional `Idempotency-Key`; not for legal-entity-scoped callers) | `org.operating-unit.write` |
+| `GET /v1/org/team-types` (`limit`, `cursor`; filter `memberKind` user or party; returns `{items, nextCursor}` in code order) and `GET /v1/org/team-types/{id}` | `org.read` |
 | `POST /v1/org/hierarchy-types` (body `code`, `name`, `purposes`; optional `backdateAllowed`, `Idempotency-Key`), `POST /v1/org/hierarchy-types/{id}/versions` (`Idempotency-Key`, no body) and `PUT /v1/org/hierarchy-versions/{id}/nodes` (body `version`, `nodes`) | `org.hierarchy.write` |
 | `POST /v1/org/hierarchy-versions/{id}:publish` (body `version`, `effectiveFrom`; optional `reason`, `Idempotency-Key`; not for legal-entity-scoped callers; a backdated `effectiveFrom` also needs `org.hierarchy.backdate`) | `org.hierarchy.publish` |
 | `GET /v1/org/hierarchy-types/{id}/as-of?date=&node=` | `org.read` |
@@ -90,6 +94,8 @@ Contract: `api/openapi.yaml`. Paths follow the architecture spine (`/v1/<context
 | ORG-ADDR-NOT-OWNED | 422 | an address pointer (`primaryAddressId`, `addressId`) that is not a current address owned by the record: unknown, closed version id, another owner's or out of scope |
 | ORG-LE-NOT-FOUND, ORG-VERSION-CONFLICT | 404, 409 | unknown, malformed or out-of-scope legal-entity id; stale version (also a stale address `versionId`) |
 | ORG-LE-REFERENCE-INACTIVE, ORG-LE-LIMIT | 422 | country, currency or default language unknown or inactive for the tenant; 500 legal entities already |
+| ORG-TEAM-TYPE-NOT-FOUND | 404 | unknown, malformed or another tenant's team-type id |
+| ORG-TEAM-TYPE-CODE-DUPLICATE | 409 | team-type code already used in the tenant |
 | ORG-OU-NOT-FOUND | 404 | unknown or malformed operating-unit id |
 | ORG-OU-CODE-DUPLICATE | 409 | operating-unit code already used for the type in the tenant |
 | ORG-OU-LEGAL-ENTITY-INVALID | 422 | default legal entity unknown, inactive or outside the caller's scope |
@@ -121,4 +127,4 @@ Contract: `api/openapi.yaml`. Paths follow the architecture spine (`/v1/<context
 | ORG-UOM-UNIT-NOT-FOUND | 404 | unit code not visible to the tenant (codes are case-sensitive) |
 | ORG-UOM-CODE-DUPLICATE | 409 | unit code already used by a platform unit or one of the tenant's units |
 
-Metrics: `org_legal_entities_created_total`, `org_legal_entities_failed_total`, `org_legal_entities_updated_total`, `org_reference_status_changed_total`, `org_uom_units_created_total`, `org_uom_conversions_created_total`, `org_currency_rounding_rules_changed_total`, `org_operating_units_created_total`, `org_operating_units_updated_total`, `org_sites_created_total`, `org_sites_updated_total`, `org_warehouses_created_total`, `org_warehouses_updated_total`, `org_locations_created_total`, `org_locations_updated_total`, `org_addresses_created_total`, `org_addresses_revised_total` (stdlib atomics rendered as text).
+Metrics: `org_legal_entities_created_total`, `org_legal_entities_failed_total`, `org_legal_entities_updated_total`, `org_reference_status_changed_total`, `org_uom_units_created_total`, `org_uom_conversions_created_total`, `org_currency_rounding_rules_changed_total`, `org_operating_units_created_total`, `org_operating_units_updated_total`, `org_team_types_created_total`, `org_sites_created_total`, `org_sites_updated_total`, `org_warehouses_created_total`, `org_warehouses_updated_total`, `org_locations_created_total`, `org_locations_updated_total`, `org_addresses_created_total`, `org_addresses_revised_total` (stdlib atomics rendered as text).

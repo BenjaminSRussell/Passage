@@ -58,6 +58,7 @@ type API struct {
 	unitCreated       atomic.Int64
 	conversionCreated atomic.Int64
 	ouCreated         atomic.Int64
+	teamTypeCreated   atomic.Int64
 	ouUpdated         atomic.Int64
 	siteCreated       atomic.Int64
 	siteUpdated       atomic.Int64
@@ -146,6 +147,7 @@ func (a *API) Register(r chi.Router) {
 		return map[string]any{"items": names}, err
 	}))
 	a.registerOperatingUnits(r)
+	a.registerTeams(r)
 	a.registerSites(r)
 	a.registerWarehouses(r)
 	a.registerLocations(r)
@@ -173,6 +175,7 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP org_uom_units_created_total Custom units of measure created.\n# TYPE org_uom_units_created_total counter\norg_uom_units_created_total %d\n", a.unitCreated.Load())
 		fmt.Fprintf(w, "# HELP org_uom_conversions_created_total Custom unit conversions created; idempotent replays are not counted.\n# TYPE org_uom_conversions_created_total counter\norg_uom_conversions_created_total %d\n", a.conversionCreated.Load())
 		fmt.Fprintf(w, "# HELP org_operating_units_created_total Operating units created.\n# TYPE org_operating_units_created_total counter\norg_operating_units_created_total %d\n", a.ouCreated.Load())
+		fmt.Fprintf(w, "# HELP org_team_types_created_total Team types created; idempotent replays are not counted.\n# TYPE org_team_types_created_total counter\norg_team_types_created_total %d\n", a.teamTypeCreated.Load())
 		fmt.Fprintf(w, "# HELP org_operating_units_updated_total Operating unit updates that bumped the version.\n# TYPE org_operating_units_updated_total counter\norg_operating_units_updated_total %d\n", a.ouUpdated.Load())
 		fmt.Fprintf(w, "# HELP org_sites_created_total Sites created.\n# TYPE org_sites_created_total counter\norg_sites_created_total %d\n", a.siteCreated.Load())
 		fmt.Fprintf(w, "# HELP org_sites_updated_total Site updates that bumped the version.\n# TYPE org_sites_updated_total counter\norg_sites_updated_total %d\n", a.siteUpdated.Load())

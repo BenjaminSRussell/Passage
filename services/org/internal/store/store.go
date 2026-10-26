@@ -106,6 +106,9 @@ type Store interface {
 	ConversionGraph(ctx context.Context) ([]domain.Conversion, map[string]int32, error)
 	ListConversions(ctx context.Context, f ConversionFilter) ([]Conversion, error)
 	CreateConversion(ctx context.Context, in Conversion, idempotencyKey string) (Conversion, bool, error)
+	CreateTeamType(ctx context.Context, in TeamType, idempotencyKey string) (TeamType, bool, error)
+	GetTeamType(ctx context.Context, id string) (TeamType, error)
+	ListTeamTypes(ctx context.Context, f TeamTypeFilter, afterCode string, limit int) (TeamTypePage, error)
 	Ping(ctx context.Context) error
 }
 
