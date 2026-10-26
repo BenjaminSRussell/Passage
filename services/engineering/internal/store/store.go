@@ -29,10 +29,14 @@ const (
 	CodeDuplicate        = "ENG-DUPLICATE"
 	CodeEcoNotFound      = "ENG-ECO-NOTFOUND"
 	CodeVersionNotFound  = "ENG-BOM-VERSION-NOTFOUND"
+	CodeCalNotFound      = "ENG-CAL-NOTFOUND"
+	CodeResNotFound      = "ENG-RES-NOTFOUND"
 	eventSource          = "/passage/engineering/engineering"
 	uniqueViolation      = "23505"
 	aggregateBomVersion  = "bomversion"
 	aggregateEco         = "eco"
+	aggregateResource    = "resource"
+	aggregateCalendar    = "calendar"
 )
 
 type Idem struct{ Key, Hash string }
@@ -73,6 +77,13 @@ type Store interface {
 	CreateEco(ctx context.Context, e domain.Eco, idem Idem) (domain.Eco, error)
 	GetEco(ctx context.Context, id string) (EcoRecord, error)
 	ReleaseEco(ctx context.Context, e domain.Eco, prev domain.EcoState, plan domain.ReleasePlan) error
+	CreateCalendar(ctx context.Context, c Calendar, idem Idem) (Calendar, []string, error)
+	GenerateCalendar(ctx context.Context, id string, from, to time.Time) (CalendarGeneration, error)
+	ListCalendarDays(ctx context.Context, id string, from, to time.Time) ([]domain.CalendarDay, error)
+	CreateResourceGroup(ctx context.Context, g domain.ResourceGroup, idem Idem) (domain.ResourceGroup, error)
+	CreateCapability(ctx context.Context, c domain.Capability, idem Idem) (domain.Capability, error)
+	CreateResource(ctx context.Context, r domain.Resource, idem Idem) (ResourceRecord, error)
+	GetResource(ctx context.Context, id string) (ResourceRecord, error)
 	Ping(ctx context.Context) error
 }
 

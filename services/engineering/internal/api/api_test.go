@@ -43,6 +43,7 @@ type releaseCall struct {
 }
 
 type fakeStore struct {
+	store.Store
 	err      error
 	pingErr  error
 	relErr   error

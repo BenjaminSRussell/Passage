@@ -1,6 +1,6 @@
 # engineering
 
-Wave 9 (PSG-9): engineering data for the `product` context: BOMs, routings, engineering change orders. Slice 1 is the pure domain kernel, slice 2 adds the store, HTTP API, specs, chart and web module. What is not built is in `NOT-IMPLEMENTED.md`.
+Wave 9 (PSG-9): engineering data for the `product` context: BOMs, routings, engineering change orders. Slice 1 is the pure domain kernel, the store, HTTP API, specs, chart and web module followed, slice 2 added pure calendar and resource domain code, and slice 3 adds resource and calendar persistence. What is not built is in `NOT-IMPLEMENTED.md`.
 
 ## Layout
 
@@ -8,10 +8,12 @@ Wave 9 (PSG-9): engineering data for the `product` context: BOMs, routings, engi
 - `internal/domain/bom.go`: as-of version resolution, multi-level explosion, implosion (where-used), cycle and overlap checks, cost roll-up skeleton.
 - `internal/domain/routing.go`: operation DAG validation and lead time (sequential sum, parallel branches take the max, efficiency).
 - `internal/domain/eco.go`: ECO state machine, `Approver` seam to the Temporal approval workflow, release plan (expire old at `release_date - 1`, activate new).
-- `internal/store`: pgx repositories under `dbx.WithTenantTx`; `Catalog` loads only the BOM versions reachable from the requested products (recursive query, down for explosion, up for where-used) into a `Snapshot` that satisfies `domain.Catalog`. `ReleaseEco` applies a `ReleasePlan` and enqueues its events in one transaction.
+- `internal/domain/calendar.go`, `resource.go`: shift validation, calendar day generation, resource validation, effective calendar, requirement matching.
+- `internal/store`: pgx repositories under `dbx.WithTenantTx`; `Catalog` loads only the BOM versions reachable from the requested products (recursive query, down for explosion, up for where-used) into a `Snapshot` that satisfies `domain.Catalog`. `ReleaseEco` applies a `ReleasePlan` and enqueues its events in one transaction. `resource.go` holds calendar, group, capability and resource persistence: `GenerateCalendar` upserts `calendar_day` rows and enqueues one `calendar.generated` per call; `CreateResource` checks group site, calendar and capabilities and enqueues one `resource.changed`.
 - `internal/api`: handlers, validation, duties, readiness; `metrics.go` serves business counters plus `engineering_http_requests_total` and `engineering_http_request_duration_seconds` by route pattern. Alert on the 5xx share of requests and on explode p95 from the duration histogram.
 - `internal/events/events.go`: event types and payloads.
 - `migrations/0001_init.sql`: tables with `tenant_id` first, tenant RLS (enabled and forced), idempotency and outbox tables.
+- `migrations/0002_resources.sql`: `work_calendar`, `calendar_day`, `resource_group`, `capability`, `resource`, `resource_capability` with the same RLS and grants.
 - `api/openapi.yaml`, `events/asyncapi.yaml`, `charts/engineering`, `Dockerfile`.
 - `testdata/`: `bom-golden-7x2000.json` (7 levels, 2,000 BOM lines), `routing-leadtime.json` (12 fixtures).
 
@@ -28,11 +30,11 @@ Wave 9 (PSG-9): engineering data for the `product` context: BOMs, routings, engi
 
 ## Error codes
 
-`ENG-BOM-CYCLE`, `ENG-BOM-OVERLAP`, `ENG-BOM-NOVERSION`, `ENG-BOM-LEVELS`, `ENG-BOM-QTY`, `ENG-BOM-LINE`, `ENG-BOM-TOOLARGE`, `ENG-BOM-ECO-REQUIRED`, `ENG-BOM-PHANTOM-NOBOM`, `ENG-ROUTE-QTY`, `ENG-ROUTE-NEXT-MISSING`, `ENG-ROUTE-SECONDARY-NOPRIMARY`, `ENG-ROUTE-CYCLE`, `ENG-ECO-STATE` (409), `ENG-ECO-APPROVER-UNAVAILABLE` (503, counted in `engineering_ecos_failed_total`), `ENG-ECO-NOT-APPROVED`, `ENG-ECO-DRYRUN`, `ENG-ECO-DATE` (all other domain codes map to 422), plus store codes `ENG-ECO-NOTFOUND` (404), `ENG-BOM-VERSION-NOTFOUND` (404), `ENG-DUPLICATE` (409) and `idempotency_key_reuse` (422). The PRD 1.9.18 catalog names the first seven present codes where they exist; `NOVERSION`, `LEVELS`, `QTY`, `LINE`, `ROUTE-QTY`, `ROUTE-CYCLE`, `ECO-STATE`, `ECO-DRYRUN`, `ECO-DATE` and the store codes are not in the catalog yet and must be reconciled with it.
+`ENG-BOM-CYCLE`, `ENG-BOM-OVERLAP`, `ENG-BOM-NOVERSION`, `ENG-BOM-LEVELS`, `ENG-BOM-QTY`, `ENG-BOM-LINE`, `ENG-BOM-TOOLARGE`, `ENG-BOM-ECO-REQUIRED`, `ENG-BOM-PHANTOM-NOBOM`, `ENG-ROUTE-QTY`, `ENG-ROUTE-NEXT-MISSING`, `ENG-ROUTE-SECONDARY-NOPRIMARY`, `ENG-ROUTE-CYCLE`, `ENG-ECO-STATE` (409), `ENG-ECO-APPROVER-UNAVAILABLE` (503, counted in `engineering_ecos_failed_total`), `ENG-ECO-NOT-APPROVED`, `ENG-ECO-DRYRUN`, `ENG-ECO-DATE`, `ENG-CAL-SHIFT`, `ENG-CAL-RANGE`, `ENG-RES-VENDOR`, `ENG-RES-SITE` (all other domain codes map to 422), plus store codes `ENG-ECO-NOTFOUND` (404), `ENG-BOM-VERSION-NOTFOUND` (404), `ENG-CAL-NOTFOUND` (404), `ENG-RES-NOTFOUND` (404), `ENG-DUPLICATE` (409) and `idempotency_key_reuse` (422). The PRD 1.9.18 catalog names the first seven present codes where they exist; `NOVERSION`, `LEVELS`, `QTY`, `LINE`, `ROUTE-QTY`, `ROUTE-CYCLE`, `ECO-STATE`, `ECO-DRYRUN`, `ECO-DATE` and the store codes are not in the catalog yet and must be reconciled with it.
 
 ## Event types
 
-The PRD names `dev.passage.engineering.bom.version.activated.v1`, which has four segments after the context and fails `platform/go/events.ValidType`. The entity is folded into one segment instead: `bomversion`, `routeversion` is reserved the same way (as `releasedproduct` is in the product service). Emitted: `bomversion.activated`, `bomversion.expired`, `eco.submitted`, `eco.approved`, `eco.released`.
+The PRD names `dev.passage.engineering.bom.version.activated.v1`, which has four segments after the context and fails `platform/go/events.ValidType`. The entity is folded into one segment instead: `bomversion`, `routeversion` is reserved the same way (as `releasedproduct` is in the product service). Emitted: `bomversion.activated`, `bomversion.expired`, `eco.submitted`, `eco.approved`, `eco.released`, `resource.changed`, `calendar.generated`.
 
 ## Dependencies
 
