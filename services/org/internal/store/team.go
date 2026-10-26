@@ -15,6 +15,8 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/BenjaminSRussell/passage/services/org/internal/domain"
+	orgevents "github.com/BenjaminSRussell/passage/services/org/internal/events"
 )
 
 const (
@@ -31,7 +33,21 @@ const (
 		to_char(effective_to, 'YYYY-MM-DD'), status, version, created_at, updated_at`
 )
 
-var MaxTeamsPerTenant = 5000
+const (
+	CodeTeamMemberKindInvalid = "ORG-TEAM-MEMBER-KIND-INVALID"
+	CodeTeamMemberRange       = "ORG-TEAM-MEMBER-RANGE"
+	CodeTeamExpired           = "ORG-TEAM-EXPIRED"
+	CodeTeamMemberLimit       = "ORG-TEAM-MEMBER-LIMIT"
+	CodeTeamMemberDuplicate   = "ORG-TEAM-MEMBER-DUPLICATE"
+	teamDateLayout            = "2006-01-02"
+	teamMemberColumns         = `id, team_id, member_kind, member_id, member_role, to_char(valid_from, 'YYYY-MM-DD'),
+		to_char(valid_to, 'YYYY-MM-DD'), source, created_at, updated_at`
+)
+
+var (
+	MaxTeamsPerTenant = 5000
+	MaxMembersPerTeam = 2000
+)
 
 type TeamType struct {
 	ID          string    `json:"id"`
@@ -278,6 +294,184 @@ func (s *Postgres) ListTeams(ctx context.Context, f TeamFilter, afterCode string
 	if len(page.Items) > limit {
 		page.Items = page.Items[:limit]
 		page.NextCode = page.Items[limit-1].Code
+	}
+	return page, err
+}
+
+type TeamMember struct {
+	ID         string    `json:"id"`
+	TeamID     string    `json:"teamId"`
+	MemberKind string    `json:"memberKind"`
+	MemberID   string    `json:"memberId"`
+	MemberRole string    `json:"memberRole"`
+	ValidFrom  string    `json:"validFrom"`
+	ValidTo    *string   `json:"validTo,omitempty"`
+	Source     string    `json:"source"`
+	CreatedAt  time.Time `json:"createdAt"`
+	UpdatedAt  time.Time `json:"updatedAt"`
+}
+
+type TeamMemberFilter struct {
+	AsOf                   *time.Time
+	MemberKind, MemberRole string
+}
+
+type TeamMemberPage struct {
+	Items  []TeamMember
+	NextID string `json:"-"`
+}
+
+func scanTeamMember(row pgx.Row, extra ...any) (TeamMember, error) {
+	var m TeamMember
+	err := row.Scan(append([]any{&m.ID, &m.TeamID, &m.MemberKind, &m.MemberID, &m.MemberRole, &m.ValidFrom, &m.ValidTo, &m.Source, &m.CreatedAt, &m.UpdatedAt}, extra...)...)
+	return m, err
+}
+
+func teamNotFound() error {
+	return httpx.NewProblem(http.StatusNotFound, CodeTeamNotFound, "team not found")
+}
+
+func checkTeamMemberRange(in TeamMember, code string, from time.Time, to *time.Time, today time.Time) error {
+	validFrom, err := time.Parse(teamDateLayout, in.ValidFrom)
+	if err != nil {
+		return err
+	}
+	var validTo *time.Time
+	if in.ValidTo != nil {
+		v, err := time.Parse(teamDateLayout, *in.ValidTo)
+		if err != nil {
+			return err
+		}
+		validTo = &v
+	}
+	switch domain.MemberRangeViolation(from, to, validFrom, validTo, today) {
+	case "expired":
+		return httpx.NewProblem(http.StatusUnprocessableEntity, CodeTeamExpired, fmt.Sprintf("Team %s has ended.", code))
+	case "range":
+		field := "validTo"
+		if !domain.TeamInForce(from, to, validFrom) {
+			field = "validFrom"
+		}
+		return invalidTeamReferent(CodeTeamMemberRange, field, "Member validity must be inside the team's effective range.")
+	}
+	return nil
+}
+
+func checkTeamMemberLimit(ctx context.Context, tx pgx.Tx, tenantID, teamID string, today time.Time) error {
+	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended('org-team-member-limit:' || $1::text, 0))`, teamID); err != nil {
+		return err
+	}
+	var n int
+	if err := tx.QueryRow(ctx, `select count(*) from team_member where tenant_id = $1 and team_id = $2 and (valid_to is null or valid_to >= $3::date)`,
+		tenantID, teamID, today.Format(teamDateLayout)).Scan(&n); err != nil {
+		return err
+	}
+	if n >= MaxMembersPerTeam {
+		return httpx.NewProblem(http.StatusUnprocessableEntity, CodeTeamMemberLimit, fmt.Sprintf("a team can have at most %d members", MaxMembersPerTeam))
+	}
+	return nil
+}
+
+func (s *Postgres) AddTeamMember(ctx context.Context, teamID string, in TeamMember, today time.Time, idempotencyKey string) (TeamMember, bool, error) {
+	p, _ := tenant.FromContext(ctx)
+	if in.MemberRole == "" {
+		in.MemberRole = "member"
+	}
+	var key *string
+	if idempotencyKey != "" {
+		key = &idempotencyKey
+	}
+	var m TeamMember
+	var inserted bool
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) (err error) {
+		if key != nil {
+			replay, err := scanTeamMember(tx.QueryRow(ctx, `select `+teamMemberColumns+` from team_member where tenant_id = $1 and idempotency_key = $2`, p.TenantID, *key))
+			if err == nil {
+				m = replay
+				return nil
+			}
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+		}
+		var code string
+		var from time.Time
+		var to *time.Time
+		var kinds []string
+		err = tx.QueryRow(ctx, `select t.code, t.effective_from, t.effective_to, tt.member_kinds from team t
+			join team_type tt on tt.tenant_id = t.tenant_id and tt.id = t.team_type_id
+			where t.tenant_id = $1 and t.id = $2 for update of t`, p.TenantID, teamID).Scan(&code, &from, &to, &kinds)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return teamNotFound()
+		}
+		if err != nil {
+			return err
+		}
+		if !slices.Contains(kinds, in.MemberKind) {
+			return invalidTeamReferent(CodeTeamMemberKindInvalid, "memberKind", fmt.Sprintf("team %s does not accept %s members", code, in.MemberKind))
+		}
+		if err := checkTeamMemberRange(in, code, from, to, today); err != nil {
+			return err
+		}
+		if err := checkTeamMemberLimit(ctx, tx, p.TenantID, teamID, today); err != nil {
+			return err
+		}
+		m, err = scanTeamMember(tx.QueryRow(ctx, `insert into team_member (tenant_id, id, team_id, member_kind, member_id, member_role, valid_from, valid_to, source, idempotency_key)
+			values ($1, $2, $3, $4, $5, $6, $7::date, $8::date, 'manual', $9)
+			on conflict (tenant_id, idempotency_key) do update set updated_at = team_member.updated_at
+			returning `+teamMemberColumns+`, (xmax = 0)`, p.TenantID, ids.New(), teamID, in.MemberKind, in.MemberID, in.MemberRole, in.ValidFrom, in.ValidTo, key), &inserted)
+		if err != nil || !inserted {
+			return err
+		}
+		return enqueue(ctx, tx, "team", teamID, orgevents.TeamMembershipChanged, p.TenantID, orgevents.TeamMembershipChangedData{
+			TeamID:  teamID,
+			Added:   []orgevents.TeamMemberRef{{MemberKind: m.MemberKind, MemberID: m.MemberID, MemberRole: m.MemberRole}},
+			Removed: []orgevents.TeamMemberRef{},
+			AsOf:    m.ValidFrom,
+		})
+	})
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
+		return TeamMember{}, false, httpx.NewProblem(http.StatusConflict, CodeTeamMemberDuplicate, "this member is already on the team from this date")
+	}
+	if err == nil && key != nil && (m.TeamID != teamID || m.MemberKind != in.MemberKind || m.MemberID != in.MemberID || m.MemberRole != in.MemberRole ||
+		m.ValidFrom != in.ValidFrom || deref(m.ValidTo) != deref(in.ValidTo)) {
+		return TeamMember{}, false, idempotencyReuse()
+	}
+	return m, inserted, err
+}
+
+func (s *Postgres) ListTeamMembers(ctx context.Context, teamID string, f TeamMemberFilter, afterID string, limit int) (TeamMemberPage, error) {
+	p, _ := tenant.FromContext(ctx)
+	page := TeamMemberPage{Items: []TeamMember{}}
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var exists bool
+		if err := tx.QueryRow(ctx, `select exists (select 1 from team where tenant_id = $1 and id = $2)`, p.TenantID, teamID).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			return teamNotFound()
+		}
+		rows, err := tx.Query(ctx, `select `+teamMemberColumns+` from team_member where tenant_id = $1 and team_id = $2
+			and ($3::text = '' or id > $3::uuid) and ($4::text = '' or member_kind = $4) and ($5::text = '' or member_role = $5)
+			and ($6::date is null or (valid_from <= $6::date and (valid_to is null or valid_to >= $6::date)))
+			order by id limit $7`, p.TenantID, teamID, afterID, f.MemberKind, f.MemberRole, f.AsOf, limit+1)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			m, err := scanTeamMember(rows)
+			if err != nil {
+				return err
+			}
+			page.Items = append(page.Items, m)
+		}
+		return rows.Err()
+	})
+	if len(page.Items) > limit {
+		page.Items = page.Items[:limit]
+		page.NextID = page.Items[limit-1].ID
 	}
 	return page, err
 }

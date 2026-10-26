@@ -207,6 +207,36 @@ paths:
           description: The team. A legal-entity-scoped caller may read it. 403 AUTH-0003 without org.read. 404 ORG-TEAM-NOT-FOUND for a malformed, unknown or other tenant's id.
           content: { application/json: { schema: { $ref: '#/components/schemas/Team' } } }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/org/teams/{id}/members:
+    get:
+      operationId: listTeamMembers
+      x-passage-duty: org.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: asOf, in: query, description: Keeps members valid on this date; both the first and last day count, schema: { type: string, format: date } }
+        - { name: memberKind, in: query, schema: { type: string, enum: [user, party] } }
+        - { name: memberRole, in: query, schema: { type: string, enum: [member, lead] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: One page of the team's members in insertion order. A legal-entity-scoped caller may read them. Pass nextCursor as cursor for the next page. 400 COM-0001 naming asOf, memberKind, memberRole, limit or cursor. 403 AUTH-0003 without org.read. 404 ORG-TEAM-NOT-FOUND for a malformed, unknown or other tenant's team.
+          content: { application/json: { schema: { $ref: '#/components/schemas/TeamMemberPage' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: addTeamMember
+      x-passage-duty: org.operating-unit.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/AddTeamMember' } } }
+      responses:
+        '201':
+          description: Member added (source manual), or the original member on an Idempotency-Key replay (no second row, no second event, counter not incremented). Emits dev.passage.org.teammembership.changed.v1. 400 COM-0001 naming memberKind, memberId, memberRole, validFrom or validTo. 404 ORG-TEAM-NOT-FOUND for a malformed, unknown or other tenant's team. 409 ORG-TEAM-MEMBER-DUPLICATE for the same member and validFrom. 422 ORG-TEAM-MEMBER-KIND-INVALID when the team type does not allow the kind, ORG-TEAM-EXPIRED when the team has ended, ORG-TEAM-MEMBER-RANGE when the validity is not inside the team's effective range (a bounded team needs a bounded validTo), ORG-TEAM-MEMBER-LIMIT at 2,000 members in force, idempotency_key_reuse when the key was used with a different body. 403 AUTH-0003 without the duty or for a legal-entity-scoped caller.
+          content: { application/json: { schema: { $ref: '#/components/schemas/TeamMember' } } }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/org/sites:
     post:
       operationId: createSite
@@ -1088,6 +1118,19 @@ components:
       type: object
       required: [items]
       properties: { items: { type: array, items: { $ref: '#/components/schemas/Team' } }, nextCursor: { type: string } }
+    TeamMember:
+      type: object
+      required: [id, teamId, memberKind, memberId, memberRole, validFrom, source, createdAt, updatedAt]
+      properties: { id: { type: string, format: uuid }, teamId: { type: string, format: uuid }, memberKind: { type: string, enum: [user, party] }, memberId: { type: string, format: uuid }, memberRole: { type: string, enum: [member, lead] }, validFrom: { type: string, format: date }, validTo: { type: string, format: date }, source: { type: string, enum: [manual, rule] }, createdAt: { type: string, format: date-time }, updatedAt: { type: string, format: date-time } }
+    TeamMemberPage:
+      type: object
+      required: [items]
+      properties: { items: { type: array, items: { $ref: '#/components/schemas/TeamMember' } }, nextCursor: { type: string } }
+    AddTeamMember:
+      type: object
+      additionalProperties: false
+      required: [memberKind, memberId, validFrom]
+      properties: { memberKind: { type: string, enum: [user, party] }, memberId: { type: string, format: uuid, description: A user id or party id; not checked against those services }, memberRole: { type: string, enum: [member, lead], default: member }, validFrom: { type: string, format: date }, validTo: { type: string, format: date, description: Required when the team has an effectiveTo, and inside the team's range } }
     HierarchyNode:
       type: object
       required: [orgUnitId, kind, parentOrgUnitId, sortOrder]

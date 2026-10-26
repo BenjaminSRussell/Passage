@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: org
-  version: 0.8.0
+  version: 0.9.0
   description: CloudEvents 1.0 envelope from platform/go/events; payloads below are the data member.
 channels:
   passage.org.legalentity:
@@ -42,6 +42,11 @@ channels:
     messages:
       activated:
         $ref: '#/components/messages/hierarchyVersionActivated'
+  passage.org.teammembership:
+    address: passage.org.teammembership
+    messages:
+      changed:
+        $ref: '#/components/messages/teamMembershipChanged'
   passage.org.location:
     address: passage.org.location
     messages:
@@ -100,6 +105,10 @@ operations:
     action: send
     channel: { $ref: '#/channels/passage.org.hierarchyversion' }
     messages: [{ $ref: '#/channels/passage.org.hierarchyversion/messages/activated' }]
+  onTeamMembershipChanged:
+    action: send
+    channel: { $ref: '#/channels/passage.org.teammembership' }
+    messages: [{ $ref: '#/channels/passage.org.teammembership/messages/changed' }]
   onLocationCreated:
     action: send
     channel: { $ref: '#/channels/passage.org.location' }
@@ -293,6 +302,19 @@ components:
           superseded_version_id: { type: [string, 'null'], format: uuid }
           backdate_reason: { type: [string, 'null'], description: The audit reason of a backdated publish. }
       x-passage-type: dev.passage.org.hierarchyversion.activated.v1
+    teamMembershipChanged:
+      name: changed
+      title: Team membership changed
+      description: Emitted when a member is added to a team (POST /v1/org/teams/{id}/members); a replay emits nothing. added carries the new member and as_of is its validFrom. removed is always empty until member end and removal ship in a later slice.
+      payload:
+        type: object
+        required: [team_id, added, removed, as_of]
+        properties:
+          team_id: { type: string, format: uuid }
+          added: { type: array, items: { type: object, required: [member_kind, member_id, member_role], properties: { member_kind: { type: string, enum: [user, party] }, member_id: { type: string, format: uuid }, member_role: { type: string, enum: [member, lead] } } } }
+          removed: { type: array, items: { type: object, required: [member_kind, member_id, member_role], properties: { member_kind: { type: string, enum: [user, party] }, member_id: { type: string, format: uuid }, member_role: { type: string, enum: [member, lead] } } } }
+          as_of: { type: string, format: date }
+      x-passage-type: dev.passage.org.teammembership.changed.v1
     currencyRoundingChanged:
       name: changed
       title: Currency rounding rule changed
