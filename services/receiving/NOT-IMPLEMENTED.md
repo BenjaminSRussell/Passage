@@ -18,6 +18,7 @@ Delivered: domain model (receipt state machine, registration with over-delivery 
 | Real `PeriodControl` and `LedgerPoster` adapters | blocked on ledger waves | the contract to satisfy is `POST /v1/ledger/journal-entries:post` with `Idempotency-Key`, 3 s timeout, `422 period_closed`; in-package fakes stand in |
 | PO lines, received quantities from procurement and inventory | blocked on PSG-17 and wave 16 | evaluate takes them from the request body |
 | `serviceCode` in error bodies; `passage.legal_entity_ids` and `passage.actor` GUCs | handoff to platform kernel | `platform/go/httpx` and `dbx` are not editable here; the RLS policy uses the `passage.legal_entity_scopes` GUC the kernel sets |
-| CI golangci-lint working-directory, Argo CD application, Makefile image target | handoff | `.github/`, `deploy/` and the root Makefile are outside wave 18 ownership |
-| Database `passage_receiving`, `receiving-db` Secret | handoff to deploy | provisioned by cluster infrastructure and External Secrets |
+| Makefile image target | handoff | the root Makefile is outside wave 18 ownership |
+| Argo CD Application `deploy/envs/<env>/apps/receiving.yaml` (chart `services/receiving/charts/receiving`, image digest from CI) | handoff to deploy | only hello-ledger is registered under `deploy/envs/*/apps/`; no other merged service (payables, party, org, ...) has an Application, so a platform-wide registration pattern is undecided and is not invented here |
+| Database `passage_receiving`, role and `receiving-db` Secret (key consumed by the chart's `databaseSecret`) | handoff to deploy | `deploy/envs/dev/apps/postgres.yaml` provisions only the hello-ledger database today; per-service databases and secrets are not yet a platform pattern |
 | JWT validation | wave 2 | the service trusts gateway headers by platform design |

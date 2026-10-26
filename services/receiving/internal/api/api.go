@@ -52,10 +52,10 @@ func (a *API) Register(r chi.Router) {
 func (a *API) Metrics() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-		fmt.Fprintf(w, "# HELP receiving_matches_evaluated_total Invoices evaluated by the matching engine.\n# TYPE receiving_matches_evaluated_total counter\nreceiving_matches_evaluated_total %d\n", a.evaluated.Load())
-		fmt.Fprintf(w, "# HELP receiving_evaluate_rejected_total Evaluate requests rejected by validation.\n# TYPE receiving_evaluate_rejected_total counter\nreceiving_evaluate_rejected_total %d\n", a.rejected.Load())
-		fmt.Fprintf(w, "# HELP receiving_receipts_arrived_total Receipts recorded at arrival.\n# TYPE receiving_receipts_arrived_total counter\nreceiving_receipts_arrived_total %d\n", a.arrived.Load())
-		fmt.Fprintf(w, "# HELP receiving_receipts_registered_total Receipts registered, including direct receipts.\n# TYPE receiving_receipts_registered_total counter\nreceiving_receipts_registered_total %d\n", a.registered.Load())
+		_, _ = fmt.Fprintf(w, "# HELP receiving_matches_evaluated_total Invoices evaluated by the matching engine.\n# TYPE receiving_matches_evaluated_total counter\nreceiving_matches_evaluated_total %d\n", a.evaluated.Load())
+		_, _ = fmt.Fprintf(w, "# HELP receiving_evaluate_rejected_total Evaluate requests rejected by validation.\n# TYPE receiving_evaluate_rejected_total counter\nreceiving_evaluate_rejected_total %d\n", a.rejected.Load())
+		_, _ = fmt.Fprintf(w, "# HELP receiving_receipts_arrived_total Receipts recorded at arrival.\n# TYPE receiving_receipts_arrived_total counter\nreceiving_receipts_arrived_total %d\n", a.arrived.Load())
+		_, _ = fmt.Fprintf(w, "# HELP receiving_receipts_registered_total Receipts registered, including direct receipts.\n# TYPE receiving_receipts_registered_total counter\nreceiving_receipts_registered_total %d\n", a.registered.Load())
 		a.http.write(w)
 	})
 }

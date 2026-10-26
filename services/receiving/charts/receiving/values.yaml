@@ -10,4 +10,11 @@ resources:
   requests: { cpu: 50m, memory: 64Mi }
   limits: { cpu: 250m, memory: 128Mi }
 serviceMonitor:
-  enabled: false
+  enabled: true
+  interval: 30s
+alerts:
+  enabled: true
+  labels: {}
+  severity: page
+  errorRatio: 0.01
+  p99LatencySeconds: 4

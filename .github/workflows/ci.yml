@@ -34,9 +34,26 @@ jobs:
           cache-dependency-path: '**/go.sum'
       - run: make vet
       - run: make test-go
+
+  lint:
+    if: inputs.go
+    name: lint (${{ matrix.module }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # excluded until clean: services/close engineering fx migration org party payables tax, tools/connectors
+        module: [platform/go, services/audit, services/batch, services/identity, services/metadata, services/numbering, services/platform-health, services/product, services/receiving, tools/importexport]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: '1.23'
+          cache-dependency-path: '**/go.sum'
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a
         with:
-          working-directory: services/platform-health
+          version: v2.15.0
+          working-directory: ${{ matrix.module }}
 
   web:
     if: inputs.web
@@ -87,7 +104,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310
-      - run: helm lint services/platform-health/charts/hello-ledger
+      - run: helm lint services/platform-health/charts/hello-ledger services/receiving/charts/receiving
 
   deploy-release:
     runs-on: ubuntu-24.04
@@ -100,7 +117,7 @@ jobs:
 
   image:
     if: inputs.go && github.event_name != 'pull_request'
-    needs: [go, charts]
+    needs: [go, lint, charts]
     runs-on: ubuntu-24.04
     permissions:
       contents: read

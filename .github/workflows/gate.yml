@@ -30,6 +30,7 @@ jobs:
             go:
               - 'platform/go/**'
               - 'services/**'
+              - 'tools/**'
               - '.github/workflows/**'
             web:
               - 'apps/web/**'
