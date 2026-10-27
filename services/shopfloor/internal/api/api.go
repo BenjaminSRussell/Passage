@@ -87,6 +87,8 @@ type Store interface {
 	GetProcessMessage(ctx context.Context, id string) (store.ProcessMessage, error)
 	ReportDelivery(ctx context.Context, messageID, destination, outcome string, errText *string, now time.Time, idem store.Idem) (store.ProcessMessage, error)
 	ReprocessDelivery(ctx context.Context, messageID, destination, reason string, now time.Time, idem store.Idem) (store.ProcessMessage, error)
+	DeleteProcessMessage(ctx context.Context, messageID, reason string, now time.Time, idem store.Idem) (store.ProcessMessage, error)
+	ClaimRetries(ctx context.Context, now time.Time, limit int) ([]store.RetryClaim, error)
 }
 
 // API holds the handlers and the counters served on the admin port.
@@ -108,6 +110,10 @@ type API struct {
 	processReplays atomic.Int64
 	// processReprocessed counts manual reprocesses of destinations in error.
 	processReprocessed atomic.Int64
+	// processRetried counts destinations the retry sweep published again.
+	processRetried atomic.Int64
+	// processDeleted counts process messages deleted with a reason.
+	processDeleted atomic.Int64
 }
 
 // New returns the API over s.
@@ -222,6 +228,8 @@ func (a *API) Metrics() http.Handler {
 		counter("shopfloor_process_messages_stored_total", "Process messages stored (FR-25.17).", a.processStored.Load())
 		counter("shopfloor_process_message_replays_total", "Process messages replayed by (source, sourceMessageId) and not stored again.", a.processReplays.Load())
 		counter("shopfloor_process_deliveries_reprocessed_total", "Process message destinations in error sent again by a supervisor.", a.processReprocessed.Load())
+		counter("shopfloor_process_deliveries_retried_total", "Process message destinations published again by the retry sweep.", a.processRetried.Load())
+		counter("shopfloor_process_messages_deleted_total", "Process messages deleted with a reason by a supervisor.", a.processDeleted.Load())
 		counter("shopfloor_failed_total", "Requests that failed in the store.", a.failed.Load())
 	})
 }

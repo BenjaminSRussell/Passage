@@ -2,6 +2,7 @@ import { useRef, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Alert, Badge, Button, Card, DataTable, FormField, PageHeader, Skeleton, Textarea, type DataTableColumn } from "../../shell/ui";
 import {
+  deleteProcessMessage,
   describeProblem,
   getProcessMessage,
   newKey,
@@ -24,14 +25,20 @@ const valueColumns: DataTableColumn<Characteristic>[] = [
   { key: "outOfLimit", header: "Check", render: (row) => (row.outOfLimit ? <Badge tone="warning">Out of limit</Badge> : dash) },
 ];
 
-/** One process message with its values and per-destination deliveries; destinations in error can be reprocessed. */
+/**
+ * One process message with its values and per-destination deliveries. A destination in
+ * error can be reprocessed, or the message deleted with a reason (FR-25.17).
+ */
 export function ProcessMessageDetailPage() {
   const { id = "" } = useParams();
   const state = useLoad((signal) => getProcessMessage(id, signal), id);
   const [fresh, setFresh] = useState<ProcessMessage | null>(null);
   const [reprocessing, setReprocessing] = useState<ProcessDelivery["destination"] | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [notice, setNotice] = useState<{ title: string; text: string } | null>(null);
   const message = fresh && fresh.id === id ? fresh : state.data;
+  const deleted = Boolean(message?.deletedAt);
+  const deletable = Boolean(message && !deleted && message.deliveries.some((d) => d.status === "error"));
 
   const deliveryColumns: DataTableColumn<ProcessDelivery>[] = [
     { key: "destination", header: "Destination", render: (row) => DESTINATION_LABELS[row.destination] ?? row.destination },
@@ -47,7 +54,7 @@ export function ProcessMessageDetailPage() {
       key: "action",
       header: "Action",
       render: (row) =>
-        row.status === "error" ? (
+        row.status === "error" && !deleted ? (
           <Button size="sm" aria-label={`Reprocess ${DESTINATION_LABELS[row.destination] ?? row.destination}`} onClick={() => setReprocessing(row.destination)}>
             Reprocess
           </Button>
@@ -59,10 +66,26 @@ export function ProcessMessageDetailPage() {
 
   return (
     <div className={styles.stack}>
-      <PageHeader title="Process message" description={<Link to="/shopfloor/process-messages">All process messages</Link>} />
+      <PageHeader
+        title="Process message"
+        description={<Link to="/shopfloor/process-messages">All process messages</Link>}
+        actions={
+          deletable && !deleting ? (
+            <Button
+              variant="danger"
+              onClick={() => {
+                setReprocessing(null);
+                setDeleting(true);
+              }}
+            >
+              Delete message
+            </Button>
+          ) : undefined
+        }
+      />
       {notice ? (
-        <Alert tone="success" title="Sent again" live="status">
-          {notice}
+        <Alert tone="success" title={notice.title} live="status">
+          {notice.text}
         </Alert>
       ) : null}
       {state.error && !message ? (
@@ -75,6 +98,23 @@ export function ProcessMessageDetailPage() {
         </Card>
       ) : (
         <>
+          {message.deletedAt ? (
+            <Alert tone="warning" title="Deleted">
+              {`Deleted ${formatDateTime(message.deletedAt)}${message.deletedBy ? ` by ${message.deletedBy}` : ""}: ${message.deleteReason ?? ""}. `}
+              It no longer appears in the monitor, takes no delivery reports and is not retried.
+            </Alert>
+          ) : null}
+          {deleting && deletable ? (
+            <DeleteForm
+              messageId={message.id}
+              onDone={(saved) => {
+                setFresh(saved);
+                setDeleting(false);
+                setNotice({ title: "Message deleted", text: "The reason is kept with the message, and its remaining retries have stopped." });
+              }}
+              onCancel={() => setDeleting(false)}
+            />
+          ) : null}
           <Card>
             <dl className={styles.details}>
               <div className={styles.entry}>
@@ -127,7 +167,7 @@ export function ProcessMessageDetailPage() {
               onDone={(saved) => {
                 setFresh(saved);
                 setReprocessing(null);
-                setNotice(`${DESTINATION_LABELS[reprocessing]} is pending again and the message was published to it once more.`);
+                setNotice({ title: "Sent again", text: `${DESTINATION_LABELS[reprocessing]} is pending again and the message was published to it once more.` });
               }}
               onCancel={() => setReprocessing(null)}
             />
@@ -142,7 +182,8 @@ export function ProcessMessageDetailPage() {
             />
           </Card>
           <p className={styles.note}>
-            A destination is retried after 1, 5, 15 and 60 minutes. After the fifth failed attempt it stays in error until it is reprocessed.
+            A destination is retried after 1, 5, 15 and 60 minutes. After the fifth failed attempt it stays in error until it is reprocessed, or the
+            message is deleted with a reason.
           </p>
         </>
       )}
@@ -215,6 +256,84 @@ function ReprocessForm({ messageId, destination, onDone, onCancel }: ReprocessFo
         <div className={styles.formActions}>
           <Button type="submit" variant="primary" loading={busy}>
             Send again
+          </Button>
+          <Button variant="ghost" onClick={onCancel}>
+            Cancel
+          </Button>
+        </div>
+      </form>
+    </Card>
+  );
+}
+
+interface DeleteFormProps {
+  messageId: string;
+  onDone(saved: ProcessMessage): void;
+  onCancel(): void;
+}
+
+function DeleteForm({ messageId, onDone, onCancel }: DeleteFormProps) {
+  const [reason, setReason] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [failure, setFailure] = useState<Problem | null>(null);
+  const [busy, setBusy] = useState(false);
+  const key = useRef(newKey());
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    const text = reason.trim();
+    if (text.length < 1 || text.length > 500) {
+      setError("Say why the message is deleted, up to 500 characters.");
+      return;
+    }
+    setError(null);
+    setFailure(null);
+    setBusy(true);
+    try {
+      onDone(await deleteProcessMessage(messageId, { reason: text }, key.current));
+    } catch (failed) {
+      const problem = describeProblem(failed);
+      if (problem.fields.reason) setError(problem.fields.reason);
+      else setFailure(problem);
+      // Keep the key so a retry after a lost response replays the stored outcome.
+      if (problem.code === "idempotency_key_reuse") key.current = newKey();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card title="Delete message" headingLevel={3}>
+      <form className={styles.form} onSubmit={submit} noValidate>
+        <p className={`${styles.note} ${styles.formActions}`}>
+          The message leaves the monitor and its remaining retries stop. Destinations already delivered are not undone, and the message and your reason
+          are kept for audit.
+        </p>
+        <FormField id="delete-reason" label="Reason for deleting" hint="For example, a duplicate of another message or a sample that was lost." error={error ?? undefined}>
+          {(control) => (
+            <Textarea
+              {...control}
+              value={reason}
+              maxLength={500}
+              rows={3}
+              invalid={Boolean(error)}
+              onChange={(event) => {
+                setReason(event.target.value);
+                key.current = newKey();
+              }}
+            />
+          )}
+        </FormField>
+        {failure ? (
+          <div className={styles.formActions}>
+            <Alert tone="danger" title="Could not delete" live="alert">
+              {failure.message} ({failure.code})
+            </Alert>
+          </div>
+        ) : null}
+        <div className={styles.formActions}>
+          <Button type="submit" variant="danger" loading={busy}>
+            Delete message
           </Button>
           <Button variant="ghost" onClick={onCancel}>
             Cancel

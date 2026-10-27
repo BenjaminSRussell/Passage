@@ -696,6 +696,11 @@ paths:
     get:
       operationId: listProcessMessages
       summary: Process message monitor, newest first (CO54 equivalent)
+      description: |
+        Keyset paging: pass the `nextCursor` of a page as `cursor` to get the next one;
+        `nextCursor` is null on the last page. Deleted messages are not listed (read one
+        by id to see its deletion). A cursor this list did not return is COM-0001 naming
+        `cursor`.
       x-passage-duty: shopfloor.view
       parameters:
         - name: status
@@ -723,19 +728,27 @@ paths:
             minimum: 1
             maximum: 500
             default: 100
+        - name: cursor
+          in: query
+          description: Opaque position from the previous page's `nextCursor`.
+          schema:
+            type: string
       responses:
         "200":
-          description: Messages with their per-destination deliveries.
+          description: One page of messages with their per-destination deliveries.
           content:
             application/json:
               schema:
                 type: object
-                required: [items]
+                required: [items, nextCursor]
                 properties:
                   items:
                     type: array
                     items:
                       $ref: "#/components/schemas/ProcessMessage"
+                  nextCursor:
+                    type: [string, "null"]
+                    description: Cursor of the next page; null on the last page.
         "400":
           $ref: "#/components/responses/Problem"
         "401":
@@ -746,6 +759,7 @@ paths:
     get:
       operationId: getProcessMessage
       summary: One process message with its deliveries
+      description: A deleted message is still returned, with `deletedAt`, `deletedBy` and `deleteReason` set.
       x-passage-duty: shopfloor.view
       parameters:
         - name: id
@@ -775,7 +789,8 @@ paths:
         Called by the context that owns the destination after it handled
         `processmessage.received`. A failure waits 1, 5, 15 and then 60 minutes; after the
         fifth failed attempt the destination is `error` until reprocessed. A delivered
-        destination is final; reporting again changes nothing. The message becomes
+        destination is final; reporting again changes nothing. A deleted message takes no
+        reports (SF-0120). The message becomes
         `delivered` (and `processmessage.delivered` is published once) when every
         destination is delivered.
       x-passage-duty: shopfloor.process.deliver
@@ -821,7 +836,7 @@ paths:
     post:
       operationId: reprocessProcessMessage
       summary: Send a destination in error again, with a reason
-      description: Only a destination in `error` can be reprocessed (SF-0116). It returns to pending with its attempts reset, and `processmessage.received` is published naming that destination alone.
+      description: Only a destination in `error` can be reprocessed (SF-0116), and not on a deleted message (SF-0120). It returns to pending with its attempts reset, and `processmessage.received` is published naming that destination alone.
       x-passage-duty: shopfloor.process.create
       parameters:
         - name: id
@@ -855,6 +870,97 @@ paths:
         "409":
           $ref: "#/components/responses/Problem"
         "422":
+          $ref: "#/components/responses/Problem"
+  /api/v1/shopfloor/process-messages/{id}:delete:
+    post:
+      operationId: deleteProcessMessage
+      summary: Delete a message with a destination in error, with a reason
+      description: |
+        FR-25.17: a destination whose retries are used up stays in error "for manual
+        reprocess or deletion (with reason)". Only a message with at least one destination
+        in `error` can be deleted (SF-0119); a deleted message cannot be deleted again
+        (SF-0120). The message is kept for audit with `deletedAt`, `deletedBy` and
+        `deleteReason`, leaves the monitor, takes no further reports or reprocesses, and the
+        retry sweep skips it. Destinations already delivered are not undone.
+        `processmessage.deleted` is published naming the destinations that never received
+        the message. Needs an authenticated user.
+      x-passage-duty: shopfloor.process.create
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeleteProcessMessage"
+      responses:
+        "200":
+          description: The deleted message.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProcessMessage"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /api/v1/shopfloor/process-messages:retry-due:
+    post:
+      operationId: retryDueProcessMessages
+      summary: Retry sweep - publish again the destinations whose wait elapsed
+      description: |
+        FR-25.17 retry job. The platform scheduler calls it every minute for each tenant,
+        with a service identity holding the deliver duty, so the sweep runs under that
+        tenant's row-level security. It takes up to `limit` destinations that failed at
+        least once, are still pending and whose `nextAttemptAt` has passed (oldest first),
+        and publishes `processmessage.received` once per message naming only those
+        destinations. Each is leased until its next scheduled attempt (the same 1, 5, 15
+        or 60 minute wait), so a consumer that does not answer is not flooded; its next
+        report replaces the lease. Concurrent sweeps skip messages another one holds.
+        Destinations that never reported (waiting for their consumer), in error (waiting
+        for a supervisor) and deleted messages are not retried. Calling it again is safe,
+        so it takes no Idempotency-Key.
+      x-passage-duty: shopfloor.process.deliver
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+      responses:
+        "200":
+          description: The destinations published again by this sweep.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/RetryClaim"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
           $ref: "#/components/responses/Problem"
   /healthz:
     get:
@@ -1606,7 +1712,7 @@ components:
           format: date-time
     ProcessMessage:
       type: object
-      required: [id, source, sourceMessageId, categoryCode, orderId, phasePath, occurredAt, receivedAt, status, outOfLimit, values, deliveries]
+      required: [id, source, sourceMessageId, categoryCode, orderId, phasePath, occurredAt, receivedAt, status, outOfLimit, values, deliveries, deletedAt, deletedBy, deleteReason]
       properties:
         id:
           type: string
@@ -1642,6 +1748,39 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ProcessDelivery"
+        deletedAt:
+          type: [string, "null"]
+          format: date-time
+          description: When a supervisor deleted the message; null while it is not deleted.
+        deletedBy:
+          type: [string, "null"]
+        deleteReason:
+          type: [string, "null"]
+    DeleteProcessMessage:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Why the message is deleted; kept for audit (leading and trailing spaces are trimmed).
+    RetryClaim:
+      type: object
+      required: [messageId, destination, attempts, nextAttemptAt]
+      properties:
+        messageId:
+          type: string
+          format: uuid
+        destination:
+          $ref: "#/components/schemas/ProcessDestination"
+        attempts:
+          type: integer
+          description: Failed attempts reported so far.
+        nextAttemptAt:
+          type: string
+          format: date-time
+          description: End of the lease; the sweep does not publish the destination again before it unless its consumer reports.
     ProcessIngest:
       type: object
       required: [message, duplicate]

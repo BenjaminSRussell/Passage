@@ -238,3 +238,77 @@ func TestHTTP_ProcessMessageMonitor(t *testing.T) {
 		t.Fatalf("reprocess of a pending destination: %d %s", rec.Code, rec.Body.String())
 	}
 }
+
+// Slice 5 over HTTP and Postgres: the retry sweep publishes a failed destination
+// again once its wait has passed; a supervisor deletes the message once the
+// destination is in error; the monitor pages with a cursor and no longer lists it,
+// while reading it by id shows who deleted it and why.
+func TestHTTP_ProcessMessageSweepDeleteAndPaging(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 10, 20, 10, 0, 0, 0, time.UTC)
+	h := newRouterAt(store.New(app), func() time.Time { return now })
+	duties := "shopfloor.process.create,shopfloor.process.deliver,shopfloor.view"
+	var ids []string
+	for i := 0; i < 3; i++ {
+		body := fmt.Sprintf(`{"source":"edge","sourceMessageId":"pcs-%d","categoryCode":"quality-result","orderId":%q,"occurredAt":"2026-10-20T09:00:00Z","values":[]}`, i, jobID)
+		rec := call(t, h, http.MethodPost, "/api/v1/shopfloor/process-messages", body, duties)
+		var res store.ProcessIngest
+		if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil || rec.Code != http.StatusCreated {
+			t.Fatalf("create %d: %d %s", i, rec.Code, rec.Body.String())
+		}
+		ids = append(ids, res.Message.ID)
+		now = now.Add(time.Second)
+	}
+	target := ids[0]
+	report := "/api/v1/shopfloor/process-messages/" + target + "/deliveries/quality:report"
+	if rec := callWith(t, h, http.MethodPost, report, `{"outcome":"failed","error":"QMS down"}`, duties, map[string]string{"Idempotency-Key": "f-0"}); rec.Code != http.StatusOK {
+		t.Fatalf("report: %d %s", rec.Code, rec.Body.String())
+	}
+	sweep := "/api/v1/shopfloor/process-messages:retry-due"
+	if rec := call(t, h, http.MethodPost, sweep, "", duties); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"items":[]`) {
+		t.Fatalf("sweep before the wait: %d %s", rec.Code, rec.Body.String())
+	}
+	now = now.Add(time.Minute)
+	if rec := call(t, h, http.MethodPost, sweep, "", duties); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"destination":"quality"`) {
+		t.Fatalf("sweep after the wait: %d %s", rec.Code, rec.Body.String())
+	}
+
+	del := "/api/v1/shopfloor/process-messages/" + target + ":delete"
+	if rec := callWith(t, h, http.MethodPost, del, `{"reason":"duplicate"}`, duties, map[string]string{"Idempotency-Key": "del-0"}); rec.Code != http.StatusUnprocessableEntity || problemCode(t, rec) != "SF-0119" {
+		t.Fatalf("delete while retrying: %d %s", rec.Code, rec.Body.String())
+	}
+	for i := 1; i < 5; i++ {
+		if rec := callWith(t, h, http.MethodPost, report, `{"outcome":"failed"}`, duties, map[string]string{"Idempotency-Key": fmt.Sprintf("f-%d", i)}); rec.Code != http.StatusOK {
+			t.Fatalf("report %d: %d", i, rec.Code)
+		}
+	}
+	first := callWith(t, h, http.MethodPost, del, `{"reason":"sample lost"}`, duties, map[string]string{"Idempotency-Key": "del-1"})
+	again := callWith(t, h, http.MethodPost, del, `{"reason":"sample lost"}`, duties, map[string]string{"Idempotency-Key": "del-1"})
+	if first.Code != http.StatusOK || again.Code != http.StatusOK || again.Header().Get("Idempotent-Replayed") != "true" {
+		t.Fatalf("delete %d / replay %d: %s", first.Code, again.Code, again.Body.String())
+	}
+
+	got := call(t, h, http.MethodGet, "/api/v1/shopfloor/process-messages/"+target, "", duties)
+	var m store.ProcessMessage
+	_ = json.Unmarshal(got.Body.Bytes(), &m)
+	if m.DeletedAt == nil || m.DeletedBy == nil || *m.DeletedBy != "supervisor-1" || *m.DeleteReason != "sample lost" {
+		t.Fatalf("deleted message read back: %s", got.Body.String())
+	}
+	var page struct {
+		Items      []store.ProcessMessage `json:"items"`
+		NextCursor *string                `json:"nextCursor"`
+	}
+	rec := call(t, h, http.MethodGet, "/api/v1/shopfloor/process-messages?limit=1", "", duties)
+	_ = json.Unmarshal(rec.Body.Bytes(), &page)
+	if len(page.Items) != 1 || page.Items[0].ID != ids[2] || page.NextCursor == nil {
+		t.Fatalf("first page: %s", rec.Body.String())
+	}
+	rec = call(t, h, http.MethodGet, "/api/v1/shopfloor/process-messages?limit=1&cursor="+*page.NextCursor, "", duties)
+	_ = json.Unmarshal(rec.Body.Bytes(), &page)
+	if len(page.Items) != 1 || page.Items[0].ID != ids[1] || page.NextCursor != nil {
+		t.Fatalf("second page (the deleted message is not listed): %s", rec.Body.String())
+	}
+}

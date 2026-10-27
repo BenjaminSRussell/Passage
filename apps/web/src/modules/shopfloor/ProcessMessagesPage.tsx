@@ -1,6 +1,16 @@
+import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Alert, Badge, Button, buttonClassName, DataTable, FormField, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
-import { listProcessMessages, type ProcessCategory, type ProcessDestination, type ProcessMessage, type ProcessStatus } from "./api/client";
+import {
+  describeProblem,
+  listProcessMessages,
+  type ProcessCategory,
+  type ProcessDestination,
+  type ProcessMessage,
+  type ProcessMessagePage,
+  type ProcessStatus,
+  type Problem,
+} from "./api/client";
 import { dash, formatDateTime } from "./format";
 import styles from "./pages.module.css";
 import {
@@ -52,7 +62,18 @@ const columns: DataTableColumn<ProcessMessage>[] = [
   },
 ];
 
-/** Process message monitor (FR-25.17, CO54 equivalent): messages with their per-destination delivery state. */
+/** Pages loaded after the first one, tied to the first page they continue. */
+interface MorePages {
+  base: ProcessMessagePage;
+  items: ProcessMessage[];
+  cursor: string | null;
+  error: Problem | null;
+}
+
+/**
+ * Process message monitor (FR-25.17, CO54 equivalent): messages with their per-destination
+ * delivery state, newest first, one page at a time (keyset cursor).
+ */
 export function ProcessMessagesPage() {
   const [params, setParams] = useSearchParams();
   const status = (params.get("status") ?? "") as ProcessStatus | "";
@@ -62,6 +83,32 @@ export function ProcessMessagesPage() {
     (signal) => listProcessMessages({ status, category, destination }, signal),
     `process|${status}|${category}|${destination}`,
   );
+  const [more, setMore] = useState<MorePages | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  // Further pages belong to the first page they continue; a new filter or a reload starts over.
+  const extra = more && state.data && more.base === state.data ? more : null;
+  const rows = state.data ? [...state.data.items, ...(extra?.items ?? [])] : [];
+  const cursor = extra ? extra.cursor : (state.data?.nextCursor ?? null);
+
+  async function loadMore() {
+    const base = state.data;
+    if (!base || !cursor) return;
+    setLoadingMore(true);
+    try {
+      const page = await listProcessMessages({ status, category, destination, cursor });
+      setMore((prev) => ({
+        base,
+        items: [...(prev && prev.base === base ? prev.items : []), ...page.items],
+        cursor: page.nextCursor,
+        error: null,
+      }));
+    } catch (failed) {
+      const error = describeProblem(failed);
+      setMore((prev) => (prev && prev.base === base ? { ...prev, error } : { base, items: [], cursor, error }));
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   function setFilter(name: string, value: string) {
     const next = new URLSearchParams(params);
@@ -126,18 +173,33 @@ export function ProcessMessagesPage() {
           {state.error.message} ({state.error.code})
         </Alert>
       ) : (
-        <DataTable
-          label="Process messages"
-          columns={columns}
-          rows={state.data ?? []}
-          getRowKey={(row) => row.id}
-          loading={state.loading}
-          empty={
-            filtered
-              ? { title: "No messages match these filters", description: "Clear a filter to see more messages." }
-              : { title: "No process messages yet", description: "Kiosk PI sheets and the edge connector send them as orders run; you can also record one by hand." }
-          }
-        />
+        <>
+          <DataTable
+            label="Process messages"
+            columns={columns}
+            rows={rows}
+            getRowKey={(row) => row.id}
+            loading={state.loading}
+            empty={
+              filtered
+                ? { title: "No messages match these filters", description: "Clear a filter to see more messages." }
+                : { title: "No process messages yet", description: "Kiosk PI sheets and the edge connector send them as orders run; you can also record one by hand." }
+            }
+          />
+          {extra?.error ? (
+            <Alert tone="danger" title="Could not load more messages" live="alert">
+              {extra.error.message} ({extra.error.code})
+            </Alert>
+          ) : null}
+          {!state.loading && cursor ? (
+            <div className={styles.actions}>
+              <Button loading={loadingMore} onClick={() => void loadMore()}>
+                Load more messages
+              </Button>
+              <span className={styles.note}>{`Showing the newest ${rows.length} ${rows.length === 1 ? "message" : "messages"}.`}</span>
+            </div>
+          ) : null}
+        </>
       )}
     </div>
   );

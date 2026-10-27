@@ -22,6 +22,7 @@ import (
 const (
 	CodeProcessNotFound  = "SF-0117"
 	CodeDeliveryNotFound = "SF-0118"
+	CodeMessageDeleted   = "SF-0120"
 
 	processAggregate = "processmessage"
 )
@@ -40,6 +41,11 @@ type ProcessMessage struct {
 	OutOfLimit      bool                    `json:"outOfLimit"`
 	Values          []domain.Characteristic `json:"values"`
 	Deliveries      []domain.Delivery       `json:"deliveries"`
+	// DeletedAt, DeletedBy and DeleteReason are set once a supervisor deleted the
+	// message; it is kept for audit but leaves the monitor.
+	DeletedAt    *time.Time `json:"deletedAt"`
+	DeletedBy    *string    `json:"deletedBy"`
+	DeleteReason *string    `json:"deleteReason"`
 }
 
 // ProcessIngest reports the stored message and whether the call was a replay of
@@ -50,16 +56,38 @@ type ProcessIngest struct {
 }
 
 // ProcessFilter narrows the monitor list. Empty strings match everything.
+// After, when set, starts the page after that message (keyset paging, newest first).
+// Deleted messages never appear.
 type ProcessFilter struct {
 	Status      string
 	Category    string
 	Destination string
 	OrderID     string
 	Limit       int
+	After       *ProcessCursor
+}
+
+// ProcessCursor is the position of a message in the monitor order (received_at desc, id desc).
+type ProcessCursor struct {
+	ReceivedAt time.Time
+	ID         string
+}
+
+// RetryClaim is one destination the retry sweep published again (FR-25.17). The
+// sweep will not publish it again before NextAttemptAt unless its consumer reports.
+type RetryClaim struct {
+	MessageID     string    `json:"messageId"`
+	Destination   string    `json:"destination"`
+	Attempts      int       `json:"attempts"`
+	NextAttemptAt time.Time `json:"nextAttemptAt"`
 }
 
 func processNotFound() error {
 	return httpx.NewProblem(http.StatusNotFound, CodeProcessNotFound, "process message not found")
+}
+
+func messageDeleted() error {
+	return httpx.NewProblem(http.StatusUnprocessableEntity, CodeMessageDeleted, "the process message was deleted")
 }
 
 func deliveryNotFound() error {
@@ -143,18 +171,25 @@ func (s *Postgres) IngestProcessMessage(ctx context.Context, in domain.NewMessag
 }
 
 // ListProcessMessages is the process message monitor (CO54 equivalent): newest
-// first, filtered by status, category, destination and order.
+// first, filtered by status, category, destination and order, without deleted
+// messages, one keyset page at a time.
 func (s *Postgres) ListProcessMessages(ctx context.Context, f ProcessFilter) ([]ProcessMessage, error) {
 	p, _ := tenant.FromContext(ctx)
+	var afterAt *time.Time
+	var afterID *string
+	if f.After != nil {
+		afterAt, afterID = &f.After.ReceivedAt, &f.After.ID
+	}
 	var out []ProcessMessage
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
 		out, err = loadProcessMessages(ctx, tx, p.TenantID,
-			`($2::text = '' or status = $2) and ($3::text = '' or category_code = $3)
+			`deleted_at is null and ($2::text = '' or status = $2) and ($3::text = '' or category_code = $3)
 			and ($4::text = '' or order_id = nullif($4, '')::uuid)
 			and ($5::text = '' or exists (select 1 from process_message_delivery d
-				where d.tenant_id = process_message.tenant_id and d.message_id = process_message.id and d.destination = $5))`,
-			[]any{f.Status, f.Category, f.OrderID, f.Destination}, f.Limit)
+				where d.tenant_id = process_message.tenant_id and d.message_id = process_message.id and d.destination = $5))
+			and ($6::timestamptz is null or (received_at, id) < ($6::timestamptz, $7::uuid))`,
+			[]any{f.Status, f.Category, f.OrderID, f.Destination, afterAt, afterID}, f.Limit)
 		return err
 	})
 	if out == nil {
@@ -163,7 +198,7 @@ func (s *Postgres) ListProcessMessages(ctx context.Context, f ProcessFilter) ([]
 	return out, err
 }
 
-// GetProcessMessage returns one message with its deliveries.
+// GetProcessMessage returns one message with its deliveries, deleted or not.
 func (s *Postgres) GetProcessMessage(ctx context.Context, id string) (ProcessMessage, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out ProcessMessage
@@ -207,20 +242,13 @@ func (s *Postgres) mutateDelivery(ctx context.Context, messageID, destination st
 	p, _ := tenant.FromContext(ctx)
 	var out ProcessMessage
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		var locked string
-		err := tx.QueryRow(ctx, `select id::text from process_message where tenant_id = $1 and id = $2::uuid for update`,
-			p.TenantID, messageID).Scan(&locked)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return processNotFound()
-		}
+		msg, err := lockProcessMessage(ctx, tx, p.TenantID, messageID)
 		if err != nil {
 			return err
 		}
-		msgs, err := loadProcessMessages(ctx, tx, p.TenantID, "id = $2::uuid", []any{messageID}, 1)
-		if err != nil {
-			return err
+		if msg.DeletedAt != nil {
+			return messageDeleted()
 		}
-		msg := msgs[0]
 		idx := -1
 		for i, d := range msg.Deliveries {
 			if d.Destination == destination {
@@ -273,11 +301,151 @@ func (s *Postgres) mutateDelivery(ctx context.Context, messageID, destination st
 	return out, err
 }
 
+// DeleteProcessMessage deletes a message with a reason (FR-25.17). Only a message
+// with a destination in error can be deleted (SF-0119); a deleted one cannot be
+// deleted again (SF-0120). The row is kept for audit with who deleted it and why,
+// leaves the monitor, cannot be reported or reprocessed, and the retry sweep skips
+// it. dev.passage.shopfloor.processmessage.deleted.v1 names the destinations that
+// never received the message, so the EBR consumer can record the exception.
+func (s *Postgres) DeleteProcessMessage(ctx context.Context, messageID, reason string, now time.Time, idem Idem) (ProcessMessage, error) {
+	p, _ := tenant.FromContext(ctx)
+	var out ProcessMessage
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		msg, err := lockProcessMessage(ctx, tx, p.TenantID, messageID)
+		if err != nil {
+			return err
+		}
+		if msg.DeletedAt != nil {
+			return messageDeleted()
+		}
+		if err := domain.CheckDeletable(msg.Deliveries); err != nil {
+			var de *domain.Error
+			if errors.As(err, &de) {
+				return httpx.NewProblem(http.StatusUnprocessableEntity, de.Code, de.Detail)
+			}
+			return err
+		}
+		if _, err := tx.Exec(ctx, `update process_message set deleted_at = $3, deleted_by = $4, delete_reason = $5
+			where tenant_id = $1 and id = $2::uuid`, p.TenantID, messageID, now, p.UserID, reason); err != nil {
+			return err
+		}
+		if err := enqueue(ctx, tx, processAggregate, messageID, sfevents.ProcessMessageDeleted, p.TenantID, sfevents.ProcessMessageDeletedData{
+			MessageID: messageID, CategoryCode: msg.CategoryCode, OrderID: msg.OrderID, Reason: reason,
+			Undelivered: domain.Undelivered(msg.Deliveries), DeletedBy: p.UserID, DeletedAt: now,
+		}); err != nil {
+			return err
+		}
+		at, by, why := now, p.UserID, reason
+		msg.DeletedAt, msg.DeletedBy, msg.DeleteReason = &at, &by, &why
+		out = msg
+		return remember(ctx, tx, idem, http.StatusOK, out)
+	})
+	return out, err
+}
+
+// ClaimRetries is the retry sweep (FR-25.17, every minute per tenant). It takes up
+// to limit destinations that failed, are still pending and whose wait has elapsed,
+// leases each (domain.Delivery.Claim) and publishes processmessage.received again,
+// once per message, naming only its due destinations. Messages locked by another
+// sweep, a report, a reprocess or a delete are skipped, so concurrent sweeps never
+// publish the same retry twice. Deleted messages are never retried.
+func (s *Postgres) ClaimRetries(ctx context.Context, now time.Time, limit int) ([]RetryClaim, error) {
+	p, _ := tenant.FromContext(ctx)
+	out := []RetryClaim{}
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select d.message_id::text, d.destination, d.status, d.attempts, d.next_attempt_at
+			from process_message_delivery d
+			join process_message m on m.tenant_id = d.tenant_id and m.id = d.message_id
+			where d.tenant_id = $1 and d.status = $2 and d.attempts > 0 and d.next_attempt_at <= $3 and m.deleted_at is null
+			order by d.next_attempt_at, d.message_id, d.destination
+			limit $4
+			for update of m skip locked`, p.TenantID, domain.DeliveryPending, now, limit)
+		if err != nil {
+			return err
+		}
+		due := map[string][]domain.Delivery{}
+		var order []string
+		for rows.Next() {
+			var msgID string
+			var d domain.Delivery
+			if err := rows.Scan(&msgID, &d.Destination, &d.Status, &d.Attempts, &d.NextAttemptAt); err != nil {
+				rows.Close()
+				return err
+			}
+			if !d.DueForRetry(now) {
+				continue
+			}
+			if _, seen := due[msgID]; !seen {
+				order = append(order, msgID)
+			}
+			due[msgID] = append(due[msgID], d)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if len(order) == 0 {
+			return nil
+		}
+		msgs, err := loadProcessMessages(ctx, tx, p.TenantID, "id = any($2::uuid[])", []any{order}, 0)
+		if err != nil {
+			return err
+		}
+		byID := make(map[string]ProcessMessage, len(msgs))
+		for _, m := range msgs {
+			byID[m.ID] = m
+		}
+		for _, msgID := range order {
+			msg := byID[msgID]
+			dests := make([]string, 0, len(due[msgID]))
+			for _, d := range due[msgID] {
+				claimed := d.Claim(now)
+				if _, err := tx.Exec(ctx, `update process_message_delivery set next_attempt_at = $4
+					where tenant_id = $1 and message_id = $2::uuid and destination = $3`,
+					p.TenantID, msgID, d.Destination, claimed.NextAttemptAt); err != nil {
+					return err
+				}
+				dests = append(dests, d.Destination)
+				out = append(out, RetryClaim{MessageID: msgID, Destination: d.Destination, Attempts: d.Attempts, NextAttemptAt: *claimed.NextAttemptAt})
+			}
+			if err := enqueue(ctx, tx, processAggregate, msgID, sfevents.ProcessMessageReceived, p.TenantID,
+				sfevents.ProcessMessageReceivedData{MessageID: msgID, Source: msg.Source, SourceMessageID: msg.SourceMessageID,
+					CategoryCode: msg.CategoryCode, OrderID: msg.OrderID, PhasePath: msg.PhasePath, Destinations: dests,
+					Values: msg.Values, OutOfLimit: msg.OutOfLimit, OccurredAt: msg.OccurredAt}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return out, err
+}
+
+// lockProcessMessage locks one message for a change and loads it with its deliveries.
+func lockProcessMessage(ctx context.Context, tx pgx.Tx, tenantID, messageID string) (ProcessMessage, error) {
+	var locked string
+	err := tx.QueryRow(ctx, `select id::text from process_message where tenant_id = $1 and id = $2::uuid for update`,
+		tenantID, messageID).Scan(&locked)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ProcessMessage{}, processNotFound()
+	}
+	if err != nil {
+		return ProcessMessage{}, err
+	}
+	msgs, err := loadProcessMessages(ctx, tx, tenantID, "id = $2::uuid", []any{messageID}, 1)
+	if err != nil {
+		return ProcessMessage{}, err
+	}
+	if len(msgs) == 0 {
+		return ProcessMessage{}, processNotFound()
+	}
+	return msgs[0], nil
+}
+
 // loadProcessMessages reads messages matching where (which uses placeholders from $2)
 // and attaches their deliveries. limit 0 means no limit.
 func loadProcessMessages(ctx context.Context, tx pgx.Tx, tenantID, where string, args []any, limit int) ([]ProcessMessage, error) {
 	q := `select id::text, source, source_message_id, category_code, order_id::text, phase_path, characteristics,
-		occurred_at, received_at, status from process_message where tenant_id = $1 and (` + where + `)
+		occurred_at, received_at, status, deleted_at, deleted_by, delete_reason from process_message where tenant_id = $1 and (` + where + `)
 		order by received_at desc, id desc`
 	if limit > 0 {
 		q += fmt.Sprintf(" limit %d", limit)
@@ -293,7 +461,7 @@ func loadProcessMessages(ctx context.Context, tx pgx.Tx, tenantID, where string,
 		var m ProcessMessage
 		var chars []byte
 		if err := rows.Scan(&m.ID, &m.Source, &m.SourceMessageID, &m.CategoryCode, &m.OrderID, &m.PhasePath, &chars,
-			&m.OccurredAt, &m.ReceivedAt, &m.Status); err != nil {
+			&m.OccurredAt, &m.ReceivedAt, &m.Status, &m.DeletedAt, &m.DeletedBy, &m.DeleteReason); err != nil {
 			rows.Close()
 			return nil, err
 		}

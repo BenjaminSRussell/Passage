@@ -15,6 +15,7 @@ import {
   listDowntimes,
   describeProblem,
   listWorkerDays,
+  deleteProcessMessage,
   listProcessMessages,
   createProcessMessage,
   reprocessProcessMessage,
@@ -195,8 +196,25 @@ describe("shopfloor process message client", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it("lists with the monitor filters and drops empty ones", async () => {
-    await listProcessMessages({ status: "error", category: "quality-result", destination: "", limit: 20 });
+    const page = await listProcessMessages({ status: "error", category: "quality-result", destination: "", limit: 20 });
     expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/shopfloor/process-messages?status=error&category=quality-result&limit=20");
+    expect(page).toEqual({ items: [], nextCursor: null });
+  });
+
+  it("passes the cursor for the next page and returns nextCursor", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ items: [], nextCursor: "c-2" }), { status: 200 }));
+    const page = await listProcessMessages({ cursor: "c-1" });
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/shopfloor/process-messages?cursor=c-1");
+    expect(page.nextCursor).toBe("c-2");
+  });
+
+  it("deletes with a reason and an Idempotency-Key", async () => {
+    await deleteProcessMessage("m/1", { reason: "duplicate" }, "d-key");
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/v1/shopfloor/process-messages/m%2F1:delete");
+    expect(init.method).toBe("POST");
+    expect(new Headers(init.headers).get("Idempotency-Key")).toBe("d-key");
+    expect(JSON.parse(init.body as string)).toEqual({ reason: "duplicate" });
   });
 
   it("records without an Idempotency-Key (the source message id is the key) and reprocesses with one", async () => {

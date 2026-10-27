@@ -3,6 +3,36 @@
 Shop floor execution service. Wave reference: **PSG-25 / Wave 25**
 (Shop Floor Execution, Time Registration & IoT), PRD section 4.25.
 
+## Slice 5: retry sweep, delete with reason, monitor paging
+
+- Retry sweep (`POST process-messages:retry-due?limit=`, duty `shopfloor.process.deliver`,
+  limit 1 to 500, default 100; FR-25.17 job "every 1 min"): takes the destinations that
+  failed at least once, are still pending and whose `nextAttemptAt` has passed, oldest
+  first, and publishes `processmessage.received` again once per message naming only those
+  destinations. Each is leased until its next scheduled attempt (the same 1, 5, 15 or 60
+  minute wait), so a consumer that does not answer is published to on the schedule, not
+  every minute; its next report replaces the lease. Messages another transaction holds (a
+  sweep, report, reprocess or delete) are skipped (`for update skip locked`), so two
+  sweeps never publish the same retry. Destinations that never reported wait for their
+  consumer, destinations in error wait for a supervisor, and deleted messages are never
+  retried. The sweep runs under one tenant's row-level security: the platform scheduler
+  calls it every minute per tenant with a service identity (handoff, see NOT-IMPLEMENTED).
+  Counted in `shopfloor_process_deliveries_retried_total`.
+- Delete (`POST process-messages/{id}:delete`, duty `shopfloor.process.create`,
+  `Idempotency-Key`, reason 1 to 500 characters, authenticated user): FR-25.17 lets a
+  destination in error be reprocessed or the message deleted with a reason. Only a message
+  with a destination in `error` can be deleted (SF-0119); a deleted one cannot be deleted
+  again, reported or reprocessed (SF-0120). The row is kept for audit with `deletedAt`,
+  `deletedBy` and `deleteReason` (migration 0005), leaves the monitor and is still read by
+  id. `dev.passage.shopfloor.processmessage.deleted.v1` names the destinations that never
+  received it, so the EBR consumer can record the missed message (BR-24.15).
+- Monitor paging (`GET process-messages?cursor=`): keyset on (received time, id), newest
+  first. The response carries `nextCursor`, null on the last page; a cursor the list did
+  not return is COM-0001 naming `cursor`.
+- Web: the monitor loads further pages with *Load more*; the message detail shows a
+  deleted message's audit fields and offers *Delete message* (with a reason) when a
+  destination is in error.
+
 ## Slice 4: process messages
 
 - Record (`POST process-messages`, duty `shopfloor.process.create`, FR-25.17): messages from
@@ -136,6 +166,7 @@ migrations/            0001_init.sql (worker, time_registration, worker_day, pay
                        pay_export_batch, pay_export_line)
                        0003_bundles_offline.sql (clock offset, bundle index)
                        0004_process_messages.sql (process_message, process_message_delivery)
+                       0005_process_message_delete.sql (deletion audit columns, monitor keyset index)
 api/openapi.yaml       OpenAPI 3.1 for every endpoint
 events/asyncapi.yaml   AsyncAPI 3 for every event
 charts/shopfloor       Helm chart (3 replicas, /healthz and /readyz probes, ServiceMonitor toggle)
@@ -180,9 +211,9 @@ OpenAPI and AsyncAPI files in step with the router and the published event types
 | POST `/api/v1/shopfloor/machine-events` | `shopfloor.machine.ingest` (edge gateway service identity) |
 | POST `/api/v1/shopfloor/downtimes/{id}:code` | `shopfloor.time.register` |
 | POST `/api/v1/shopfloor/pay:export`, GET `/pay-exports`, `/pay-exports/{id}` | `shopfloor.pay.export` (Export time to payroll) |
-| POST `/api/v1/shopfloor/process-messages`, `/process-messages/{id}:reprocess` | `shopfloor.process.create` (Create process messages) |
+| POST `/api/v1/shopfloor/process-messages`, `/process-messages/{id}:reprocess`, `/process-messages/{id}:delete` | `shopfloor.process.create` (Create process messages: manual, reprocess/delete with reason) |
 | GET `/api/v1/shopfloor/process-messages`, `/process-messages/{id}` | `shopfloor.view` |
-| POST `/api/v1/shopfloor/process-messages/{id}/deliveries/{destination}:report` | `shopfloor.process.deliver` (consuming context service identities) |
+| POST `/api/v1/shopfloor/process-messages/{id}/deliveries/{destination}:report`, `/process-messages:retry-due` | `shopfloor.process.deliver` (consuming context and scheduler service identities) |
 
 Duties are checked by the platform `authz` middleware. The OPA decision point replaces the
 local check in a later wave, behind the same interface.
@@ -193,7 +224,7 @@ Problem details use `application/problem+json` with `type` `https://passage.dev/
 
 | Code | HTTP | Meaning |
 |---|---|---|
-| `AUTH-0001` | 401 | Missing or malformed tenant, or no authenticated user for approval |
+| `AUTH-0001` | 401 | Missing or malformed tenant, or no authenticated user for approval, export or deletion |
 | `COM-0001` | 400 | Request failed validation (or no `Idempotency-Key`); `errors` lists the fields |
 | `AUTH-0003` | 403 | Missing duty |
 | `SF-0006` | 422 | Day cannot be approved: flags are open |
@@ -216,6 +247,8 @@ Problem details use `application/problem+json` with `type` `https://passage.dev/
 | `SF-0116` | 422 | Only a destination in `error` can be reprocessed |
 | `SF-0117` | 404 | Process message not found |
 | `SF-0118` | 404 | The message has no delivery to that destination |
+| `SF-0119` | 422 | Only a message with a destination in `error` can be deleted |
+| `SF-0120` | 422 | The process message was deleted; it takes no report, reprocess or second delete |
 | `idempotency_key_reuse` | 422 | `Idempotency-Key` already used with a different request |
 
 Catalog entries SF-0001..SF-0020 (PRD 4.25.18) are reserved; only the codes above are raised.

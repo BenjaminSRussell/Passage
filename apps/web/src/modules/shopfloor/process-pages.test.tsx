@@ -72,6 +72,9 @@ const message = (extra: Partial<ProcessMessage> = {}): ProcessMessage => ({
     { destination: "kafka", status: "delivered", attempts: 1, lastError: null, nextAttemptAt: null, deliveredAt: "2026-10-21T08:00:02Z" },
     { destination: "quality", status: "error", attempts: 5, lastError: "QMS unavailable", nextAttemptAt: null, deliveredAt: null },
   ],
+  deletedAt: null,
+  deletedBy: null,
+  deleteReason: null,
   ...extra,
 });
 
@@ -100,6 +103,39 @@ describe("Process message monitor", () => {
     fill("Destination", "");
     expect(await screen.findByText("No process messages yet")).toBeInTheDocument();
     expect(calls.at(-1)?.url.search).toBe("");
+  });
+
+  it("loads further pages with the cursor and the same filters, until the last page", async () => {
+    const second = message({ id: "0195f0a0-0000-7000-8000-000000000042", sourceMessageId: "pi-6", receivedAt: "2026-10-21T07:00:00Z" });
+    handler = (url) => {
+      if (!url.pathname.endsWith("/process-messages")) return undefined;
+      return url.searchParams.get("cursor") === "c-1" ? json(200, { items: [second], nextCursor: null }) : json(200, { items: [message()], nextCursor: "c-1" });
+    };
+    renderAt("/shopfloor/process-messages?status=partially-delivered");
+    const table = await screen.findByRole("table", { name: "Process messages" });
+    await waitFor(() => expect(within(table).getAllByRole("link")).toHaveLength(1));
+    expect(screen.getByText("Showing the newest 1 message.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Load more messages" }));
+    await waitFor(() => expect(within(table).getAllByRole("link")).toHaveLength(2));
+    expect(within(table).getByRole("link", { name: "Open message from pi-6" })).toBeInTheDocument();
+    expect(calls.at(-1)?.url.search).toBe("?status=partially-delivered&cursor=c-1");
+    expect(screen.queryByRole("button", { name: "Load more messages" })).toBeNull();
+  });
+
+  it("keeps the loaded rows when a further page fails, and starts over when a filter changes", async () => {
+    handler = (url) => {
+      if (!url.pathname.endsWith("/process-messages")) return undefined;
+      if (url.searchParams.get("cursor")) return json(503, { code: "COM-0503", detail: "Service unavailable" });
+      return json(200, { items: [message()], nextCursor: "c-1" });
+    };
+    renderAt("/shopfloor/process-messages");
+    fireEvent.click(await screen.findByRole("button", { name: "Load more messages" }));
+    expect(await screen.findByText(/Service unavailable \(COM-0503\)/)).toBeInTheDocument();
+    expect(within(screen.getByRole("table", { name: "Process messages" })).getAllByRole("link")).toHaveLength(1);
+    fill("Status", "error");
+    await waitFor(() => expect(calls.at(-1)?.url.search).toBe("?status=error"));
+    await waitFor(() => expect(screen.queryByText(/Service unavailable/)).toBeNull());
+    expect(await screen.findByRole("button", { name: "Load more messages" })).toBeInTheDocument();
   });
 
   it("shows the load error with a retry", async () => {
@@ -157,6 +193,62 @@ describe("Process message detail", () => {
     fill("Reason", "retry");
     fireEvent.click(screen.getByRole("button", { name: "Send again" }));
     expect(await screen.findByText(/only a destination in error can be reprocessed \(SF-0116\)/)).toBeInTheDocument();
+  });
+
+  it("deletes a message with a destination in error, with a reason and an Idempotency-Key", async () => {
+    handler = (url, init) => {
+      if (init.method === "POST" && url.pathname.endsWith(`/process-messages/${MSG}:delete`)) {
+        return json(200, message({ deletedAt: "2026-10-21T09:00:00Z", deletedBy: "supervisor-1", deleteReason: "sample lost" }));
+      }
+      if (url.pathname.endsWith(`/process-messages/${MSG}`)) return json(200, message());
+      return undefined;
+    };
+    const { container } = renderAt(`/shopfloor/process-messages/${MSG}`);
+    fireEvent.click(await screen.findByRole("button", { name: "Delete message" }));
+    expect(screen.getByRole("heading", { name: "Delete message" })).toBeInTheDocument();
+    expect(pageViolations(container)).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Delete message" }));
+    expect(await screen.findByText("Say why the message is deleted, up to 500 characters.")).toBeInTheDocument();
+    expect(posts(":delete")).toHaveLength(0);
+
+    fill("Reason for deleting", "  sample lost ");
+    fireEvent.click(screen.getByRole("button", { name: "Delete message" }));
+    expect(await screen.findByText(/its remaining retries have stopped/)).toBeInTheDocument();
+    const [sent] = posts(":delete");
+    expect(sent.body).toEqual({ reason: "sample lost" });
+    expect(header(sent, "Idempotency-Key")).toMatch(/^[0-9a-f-]{36}$/);
+    expect(screen.getByText(/by supervisor-1: sample lost/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete message" })).toBeNull();
+    expect(within(screen.getByRole("table", { name: "Deliveries" })).queryAllByRole("button")).toHaveLength(0);
+  });
+
+  it("shows a refused delete next to the form and keeps the message", async () => {
+    handler = (_url, init) =>
+      init.method === "POST" ? json(422, { code: "SF-0119", detail: "only a message with a destination in error can be deleted" }) : json(200, message());
+    renderAt(`/shopfloor/process-messages/${MSG}`);
+    fireEvent.click(await screen.findByRole("button", { name: "Delete message" }));
+    fill("Reason for deleting", "duplicate");
+    fireEvent.click(screen.getByRole("button", { name: "Delete message" }));
+    expect(await screen.findByText(/only a message with a destination in error can be deleted \(SF-0119\)/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("button", { name: "Delete message" })).toBeInTheDocument();
+  });
+
+  it("offers no delete while every destination can still be retried", async () => {
+    const m = message();
+    handler = () => json(200, { ...m, deliveries: m.deliveries.map((d) => (d.status === "error" ? { ...d, status: "pending", attempts: 2 } : d)) });
+    renderAt(`/shopfloor/process-messages/${MSG}`);
+    await screen.findByRole("table", { name: "Deliveries" });
+    expect(screen.queryByRole("button", { name: "Delete message" })).toBeNull();
+  });
+
+  it("shows who deleted a message and why, and offers no reprocess or delete", async () => {
+    handler = () => json(200, message({ deletedAt: "2026-10-21T09:00:00Z", deletedBy: "supervisor-1", deleteReason: "duplicate of pi-6" }));
+    const { container } = renderAt(`/shopfloor/process-messages/${MSG}`);
+    expect(await screen.findByText(/by supervisor-1: duplicate of pi-6/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete message" })).toBeNull();
+    expect(within(screen.getByRole("table", { name: "Deliveries" })).queryAllByRole("button")).toHaveLength(0);
+    expect(pageViolations(container)).toEqual([]);
   });
 
   it("shows a missing message as an error", async () => {

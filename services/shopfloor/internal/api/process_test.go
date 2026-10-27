@@ -2,14 +2,18 @@ package api
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/shopfloor/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/shopfloor/internal/store"
 )
@@ -27,6 +31,11 @@ type processFake struct {
 	received time.Time
 	filter   store.ProcessFilter
 	reasons  []string
+	// order, when set, is the monitor order (newest first) the list walks.
+	order   []string
+	claims  []store.RetryClaim
+	sweptAt time.Time
+	swept   int
 }
 
 func (f *processFake) store(in domain.NewMessage, cat domain.Category) store.ProcessMessage {
@@ -53,15 +62,55 @@ func (f *processFake) IngestProcessMessage(_ context.Context, in domain.NewMessa
 	return store.ProcessIngest{Message: f.store(in, cat)}, nil
 }
 
+// ListProcessMessages walks order newest first and honours the keyset cursor and the
+// limit the way the Postgres store does.
 func (f *processFake) ListProcessMessages(_ context.Context, flt store.ProcessFilter) ([]store.ProcessMessage, error) {
 	f.filter = flt
 	out := []store.ProcessMessage{}
-	for _, m := range f.msgs {
-		if flt.Status == "" || m.Status == flt.Status {
-			out = append(out, m)
+	ids := f.order
+	if ids == nil {
+		for id := range f.msgs {
+			ids = append(ids, id)
 		}
 	}
+	for _, id := range ids {
+		m := f.msgs[id]
+		if m.DeletedAt != nil || (flt.Status != "" && m.Status != flt.Status) {
+			continue
+		}
+		if a := flt.After; a != nil && !(m.ReceivedAt.Before(a.ReceivedAt) || (m.ReceivedAt.Equal(a.ReceivedAt) && m.ID < a.ID)) {
+			continue
+		}
+		if flt.Limit > 0 && len(out) == flt.Limit {
+			break
+		}
+		out = append(out, m)
+	}
 	return out, nil
+}
+
+func (f *processFake) DeleteProcessMessage(_ context.Context, id, reason string, now time.Time, _ store.Idem) (store.ProcessMessage, error) {
+	f.reasons = append(f.reasons, reason)
+	m, ok := f.msgs[id]
+	if !ok {
+		return store.ProcessMessage{}, httpx.NewProblem(http.StatusNotFound, store.CodeProcessNotFound, "process message not found")
+	}
+	if m.DeletedAt != nil {
+		return m, httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeMessageDeleted, "the process message was deleted")
+	}
+	if err := domain.CheckDeletable(m.Deliveries); err != nil {
+		var de *domain.Error
+		errors.As(err, &de)
+		return m, httpx.NewProblem(http.StatusUnprocessableEntity, de.Code, de.Detail)
+	}
+	m.DeletedAt, m.DeleteReason = &now, &reason
+	f.msgs[id] = m
+	return m, nil
+}
+
+func (f *processFake) ClaimRetries(_ context.Context, now time.Time, limit int) ([]store.RetryClaim, error) {
+	f.sweptAt, f.swept = now, limit
+	return f.claims, nil
 }
 
 func (f *processFake) GetProcessMessage(_ context.Context, id string) (store.ProcessMessage, error) {
@@ -130,6 +179,14 @@ func (f *fakeStore) ReportDelivery(context.Context, string, string, string, *str
 
 func (f *fakeStore) ReprocessDelivery(context.Context, string, string, string, time.Time, store.Idem) (store.ProcessMessage, error) {
 	return store.ProcessMessage{}, errProcessNotStubbed
+}
+
+func (f *fakeStore) DeleteProcessMessage(context.Context, string, string, time.Time, store.Idem) (store.ProcessMessage, error) {
+	return store.ProcessMessage{}, errProcessNotStubbed
+}
+
+func (f *fakeStore) ClaimRetries(context.Context, time.Time, int) ([]store.RetryClaim, error) {
+	return nil, errProcessNotStubbed
 }
 
 // Process message handlers are reached through the same Store interface as the rest of the service.
@@ -294,11 +351,12 @@ func TestProcessMessage_ListPassesEveryFilter(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
-	want := store.ProcessFilter{Status: "error", Category: "quality-result", Destination: "quality", OrderID: orderID, Limit: 20}
+	// The store is asked for one row more than the page to tell whether another page follows.
+	want := store.ProcessFilter{Status: "error", Category: "quality-result", Destination: "quality", OrderID: orderID, Limit: 21}
 	if fs.filter != want {
 		t.Fatalf("filter %+v, want %+v", fs.filter, want)
 	}
-	if rec := call(t, h, http.MethodGet, "/api/v1/shopfloor/process-messages", "", processDuty); rec.Code != http.StatusOK || fs.filter.Limit != defaultProcessList {
+	if rec := call(t, h, http.MethodGet, "/api/v1/shopfloor/process-messages", "", processDuty); rec.Code != http.StatusOK || fs.filter.Limit != defaultProcessList+1 {
 		t.Fatalf("default limit %d (status %d)", fs.filter.Limit, rec.Code)
 	}
 	for _, q := range []string{"destination=fax", "orderId=PO-7"} {
@@ -354,5 +412,174 @@ func TestProcessMessage_ReprocessTrimsReasonAndUnknownIDIsNotFound(t *testing.T)
 	}
 	if rec := call(t, h, http.MethodGet, "/api/v1/shopfloor/process-messages/not-a-uuid", "", processDuty); rec.Code != http.StatusNotFound || problemCode(t, rec) != store.CodeProcessNotFound {
 		t.Fatalf("bad id get: %d", rec.Code)
+	}
+}
+
+// pagedFake holds five messages received a minute apart, two of them in the same
+// instant so the id breaks the tie, newest first.
+func pagedFake() *processFake {
+	base := time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC)
+	fs := &processFake{msgs: map[string]store.ProcessMessage{}}
+	for i, at := range []time.Time{base, base.Add(-time.Minute), base.Add(-time.Minute), base.Add(-2 * time.Minute), base.Add(-3 * time.Minute)} {
+		id := fmt.Sprintf("0195f0a0-0000-7000-8000-%012d", 90-i)
+		fs.msgs[id] = store.ProcessMessage{ID: id, ReceivedAt: at, Status: domain.MessageReceived}
+		fs.order = append(fs.order, id)
+	}
+	return fs
+}
+
+type monitorPage struct {
+	Items      []store.ProcessMessage `json:"items"`
+	NextCursor *string                `json:"nextCursor"`
+}
+
+func TestProcessMessage_MonitorPagesWithCursor(t *testing.T) {
+	fs := pagedFake()
+	h := newRouter(fs)
+	var seen []string
+	url := "/api/v1/shopfloor/process-messages?limit=2"
+	for page := 0; ; page++ {
+		if page > 3 {
+			t.Fatal("paging did not end")
+		}
+		rec := call(t, h, http.MethodGet, url, "", processDuty)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("page %d: %d %s", page, rec.Code, rec.Body.String())
+		}
+		var out monitorPage
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		if len(out.Items) > 2 {
+			t.Fatalf("page %d holds %d messages, limit 2", page, len(out.Items))
+		}
+		for _, m := range out.Items {
+			seen = append(seen, m.ID)
+		}
+		if out.NextCursor == nil {
+			if !strings.Contains(rec.Body.String(), `"nextCursor":null`) {
+				t.Fatalf("last page must carry nextCursor null: %s", rec.Body.String())
+			}
+			break
+		}
+		url = "/api/v1/shopfloor/process-messages?limit=2&cursor=" + *out.NextCursor
+	}
+	if strings.Join(seen, ",") != strings.Join(fs.order, ",") {
+		t.Fatalf("pages walked %v, want %v", seen, fs.order)
+	}
+}
+
+// A page that is exactly full at the end of the list says so: no cursor to an empty page.
+func TestProcessMessage_ExactLastPageHasNoCursor(t *testing.T) {
+	rec := call(t, newRouter(pagedFake()), http.MethodGet, "/api/v1/shopfloor/process-messages?limit=5", "", processDuty)
+	var out monitorPage
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	if rec.Code != http.StatusOK || len(out.Items) != 5 || out.NextCursor != nil {
+		t.Fatalf("status %d, %d items, cursor %v", rec.Code, len(out.Items), out.NextCursor)
+	}
+}
+
+func TestProcessMessage_MalformedCursorNamesField(t *testing.T) {
+	h := newRouter(pagedFake())
+	notUUID := base64.RawURLEncoding.EncodeToString([]byte("2026-10-20T09:00:00Z|PO-7"))
+	notTime := base64.RawURLEncoding.EncodeToString([]byte("yesterday|" + messageID))
+	for _, c := range []string{"garbage!", notUUID, notTime} {
+		rec := call(t, h, http.MethodGet, "/api/v1/shopfloor/process-messages?cursor="+c, "", processDuty)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("cursor %q: status %d", c, rec.Code)
+		}
+		var p httpx.Problem
+		_ = json.Unmarshal(rec.Body.Bytes(), &p)
+		if _, ok := p.Errors["cursor"]; !ok {
+			t.Fatalf("cursor %q not named in %v", c, p.Errors)
+		}
+	}
+}
+
+func TestProcessMessage_CursorRoundTrips(t *testing.T) {
+	c := store.ProcessCursor{ReceivedAt: time.Date(2026, 10, 20, 9, 0, 0, 123456000, time.UTC), ID: messageID}
+	got, ok := decodeCursor(encodeCursor(c))
+	if !ok || !got.ReceivedAt.Equal(c.ReceivedAt) || got.ID != c.ID {
+		t.Fatalf("round trip = %+v %v", got, ok)
+	}
+}
+
+func TestProcessMessage_DeleteNeedsReasonKeyAndDestinationInError(t *testing.T) {
+	fs := &processFake{}
+	h := newRouter(fs)
+	call(t, h, http.MethodPost, "/api/v1/shopfloor/process-messages", qualityBody("k-20"), processDuty)
+	url := "/api/v1/shopfloor/process-messages/" + messageID + ":delete"
+	if rec := call(t, h, http.MethodPost, url, `{"reason":"   "}`, processDuty); rec.Code != http.StatusBadRequest {
+		t.Fatalf("blank reason: %d", rec.Code)
+	}
+	if rec := callWith(t, h, http.MethodPost, url, `{"reason":"duplicate"}`, processDuty, nil); rec.Code != http.StatusBadRequest {
+		t.Fatalf("no Idempotency-Key: %d", rec.Code)
+	}
+	if rec := call(t, h, http.MethodPost, url, `{"reason":"duplicate"}`, "shopfloor.view,shopfloor.process.deliver"); rec.Code != http.StatusForbidden {
+		t.Fatalf("without the create duty: %d", rec.Code)
+	}
+	if rec := call(t, h, http.MethodPost, url, `{"reason":"duplicate"}`, processDuty); rec.Code != http.StatusUnprocessableEntity || problemCode(t, rec) != domain.CodeNotDeletable {
+		t.Fatalf("still retrying: %d %s", rec.Code, rec.Body.String())
+	}
+	m := fs.msgs[messageID]
+	m.Deliveries[0].Status = domain.DeliveryError
+	fs.msgs[messageID] = m
+	rec := call(t, h, http.MethodPost, url, `{"reason":"  QMS lost the sample  "}`, processDuty)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete: %d %s", rec.Code, rec.Body.String())
+	}
+	var out store.ProcessMessage
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	if out.DeletedAt == nil || out.DeleteReason == nil || *out.DeleteReason != "QMS lost the sample" {
+		t.Fatalf("deleted message = %+v", out)
+	}
+	if rec := call(t, h, http.MethodPost, url, `{"reason":"again"}`, processDuty); rec.Code != http.StatusUnprocessableEntity || problemCode(t, rec) != store.CodeMessageDeleted {
+		t.Fatalf("second delete: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := call(t, h, http.MethodPost, "/api/v1/shopfloor/process-messages/not-a-uuid:delete", `{"reason":"x"}`, processDuty); rec.Code != http.StatusNotFound {
+		t.Fatalf("bad id: %d", rec.Code)
+	}
+}
+
+// Deletion is audited, so it needs an authenticated user and not only a tenant.
+func TestProcessMessage_DeleteNeedsUser(t *testing.T) {
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/shopfloor/process-messages/"+messageID+":delete", strings.NewReader(`{"reason":"x"}`))
+	r.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
+	r.Header.Set("X-Passage-Duties", processDuty)
+	r.Header.Set("Idempotency-Key", "k")
+	rec := httptest.NewRecorder()
+	newRouter(&processFake{}).ServeHTTP(rec, r)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestProcessMessage_RetrySweepUsesServerTimeAndLimit(t *testing.T) {
+	server := time.Date(2026, 10, 20, 9, 5, 0, 0, time.UTC)
+	fs := &processFake{claims: []store.RetryClaim{{MessageID: messageID, Destination: domain.DestQuality, Attempts: 2, NextAttemptAt: server.Add(5 * time.Minute)}}}
+	h := newRouterAt(fs, func() time.Time { return server })
+	url := "/api/v1/shopfloor/process-messages:retry-due"
+	if rec := call(t, h, http.MethodPost, url, "", "shopfloor.view,shopfloor.process.create"); rec.Code != http.StatusForbidden {
+		t.Fatalf("without the deliver duty: %d", rec.Code)
+	}
+	for _, q := range []string{"?limit=0", "?limit=501", "?limit=x"} {
+		if rec := call(t, h, http.MethodPost, url+q, "", processDuty); rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s: %d", q, rec.Code)
+		}
+	}
+	rec := call(t, h, http.MethodPost, url, "", processDuty)
+	if rec.Code != http.StatusOK || !fs.sweptAt.Equal(server) || fs.swept != defaultRetryBatch {
+		t.Fatalf("status %d, swept at %v limit %d", rec.Code, fs.sweptAt, fs.swept)
+	}
+	var out struct {
+		Items []store.RetryClaim `json:"items"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	if len(out.Items) != 1 || out.Items[0].Destination != domain.DestQuality || out.Items[0].Attempts != 2 {
+		t.Fatalf("claims = %s", rec.Body.String())
+	}
+	fs.claims = nil
+	if rec := call(t, h, http.MethodPost, url+"?limit=500", "", processDuty); rec.Code != http.StatusOK || fs.swept != 500 || !strings.Contains(rec.Body.String(), `"items":[]`) {
+		t.Fatalf("empty sweep: %d limit %d %s", rec.Code, fs.swept, rec.Body.String())
 	}
 }

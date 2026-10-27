@@ -20,16 +20,18 @@ var (
 	// The entity is one word: the naming rule allows only [a-z0-9] per segment.
 	ProcessMessageReceived  = events.Type(Context, "processmessage", "received", 1)
 	ProcessMessageDelivered = events.Type(Context, "processmessage", "delivered", 1)
+	ProcessMessageDeleted   = events.Type(Context, "processmessage", "deleted", 1)
 )
 
 // All lists every event type the service publishes (used by the startup registry check).
 func All() []string {
-	return []string{RegistrationPosted, PaydayApproved, PaydayExported, AndonRaised, ProcessMessageReceived, ProcessMessageDelivered}
+	return []string{RegistrationPosted, PaydayApproved, PaydayExported, AndonRaised, ProcessMessageReceived, ProcessMessageDelivered, ProcessMessageDeleted}
 }
 
 // ProcessMessageReceivedData is the payload of dev.passage.shopfloor.processmessage.received.v1,
-// published when a process message is stored and again for one destination when it is
-// reprocessed (FR-25.17). Each consuming context (w21 journal, w33 quality, w24 EBR,
+// published when a process message is stored, again for one destination when it is
+// reprocessed, and again by the retry sweep for the destinations whose wait elapsed
+// (FR-25.17). Destinations then names only those destinations. Each consuming context (w21 journal, w33 quality, w24 EBR,
 // w35 webhook) acts on the destinations it owns and reports the outcome back.
 // OutOfLimit tells the EBR consumer to record an exception (BR-25.13).
 type ProcessMessageReceivedData struct {
@@ -51,6 +53,20 @@ type ProcessMessageDeliveredData struct {
 	MessageID    string `json:"messageId"`
 	CategoryCode string `json:"categoryCode"`
 	OrderID      string `json:"orderId"`
+}
+
+// ProcessMessageDeletedData is the payload of dev.passage.shopfloor.processmessage.deleted.v1,
+// published when a supervisor deletes a message with a destination in error (FR-25.17).
+// Undelivered names the destinations that never received it, so the EBR consumer can
+// record the missed message as an exception (BR-24.15).
+type ProcessMessageDeletedData struct {
+	MessageID    string    `json:"messageId"`
+	CategoryCode string    `json:"categoryCode"`
+	OrderID      string    `json:"orderId"`
+	Reason       string    `json:"reason"`
+	Undelivered  []string  `json:"undelivered"`
+	DeletedBy    string    `json:"deletedBy"`
+	DeletedAt    time.Time `json:"deletedAt"`
 }
 
 // PaydayExportedData is the payload of dev.passage.shopfloor.payday.exported.v1:

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -14,6 +15,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/shopfloor/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/shopfloor/internal/store"
 )
@@ -30,6 +32,8 @@ const (
 	maxProcessList     = 500
 	maxReprocessReason = 500
 	maxDeliveryError   = 1000
+	defaultRetryBatch  = 100
+	maxRetryBatch      = 500
 )
 
 var processStatuses = map[string]bool{
@@ -58,6 +62,38 @@ type reprocessRequest struct {
 	Reason      string `json:"reason"`
 }
 
+type deleteRequest struct {
+	Reason string `json:"reason"`
+}
+
+// processPage is one page of the monitor. NextCursor is null on the last page.
+type processPage struct {
+	Items      []store.ProcessMessage `json:"items"`
+	NextCursor *string                `json:"nextCursor"`
+}
+
+// encodeCursor returns the opaque monitor cursor for the last message of a page.
+func encodeCursor(c store.ProcessCursor) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(c.ReceivedAt.UTC().Format(time.RFC3339Nano) + "|" + c.ID))
+}
+
+// decodeCursor reverses encodeCursor and refuses anything else.
+func decodeCursor(s string) (store.ProcessCursor, bool) {
+	raw, err := base64.RawURLEncoding.DecodeString(s)
+	if err != nil {
+		return store.ProcessCursor{}, false
+	}
+	at, id, ok := strings.Cut(string(raw), "|")
+	if !ok || !ids.Valid(id) {
+		return store.ProcessCursor{}, false
+	}
+	t, err := time.Parse(time.RFC3339Nano, at)
+	if err != nil {
+		return store.ProcessCursor{}, false
+	}
+	return store.ProcessCursor{ReceivedAt: t, ID: id}, true
+}
+
 // registerProcess mounts the process message routes (FR-25.17).
 func (a *API) registerProcess(r chi.Router) {
 	r.With(authz.RequireDuty(DutyProcessCreate)).Post("/api/v1/shopfloor/process-messages", a.createProcessMessage)
@@ -65,6 +101,8 @@ func (a *API) registerProcess(r chi.Router) {
 	r.With(authz.RequireDuty(DutyView)).Get("/api/v1/shopfloor/process-messages/{id}", a.getProcessMessage)
 	r.With(authz.RequireDuty(DutyProcessDeliver)).Post("/api/v1/shopfloor/process-messages/{id}/deliveries/{destination}:report", a.reportDelivery)
 	r.With(authz.RequireDuty(DutyProcessCreate)).Post("/api/v1/shopfloor/process-messages/{id}:reprocess", a.reprocessDelivery)
+	r.With(authz.RequireDuty(DutyProcessCreate)).Post("/api/v1/shopfloor/process-messages/{id}:delete", a.deleteProcessMessage)
+	r.With(authz.RequireDuty(DutyProcessDeliver)).Post("/api/v1/shopfloor/process-messages:retry-due", a.retryDueProcessMessages)
 }
 
 // createProcessMessage stores a message from a kiosk PI sheet, the edge or manual
@@ -131,6 +169,14 @@ func (a *API) listProcessMessages(w http.ResponseWriter, r *http.Request) {
 	if o := q.Get("orderId"); o != "" && !ids.Valid(o) {
 		fields["orderId"] = "must be a UUID"
 	}
+	var after *store.ProcessCursor
+	if c := q.Get("cursor"); c != "" {
+		if cur, ok := decodeCursor(c); ok {
+			after = &cur
+		} else {
+			fields["cursor"] = "is not a cursor returned by this list"
+		}
+	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
 		return
@@ -139,14 +185,23 @@ func (a *API) listProcessMessages(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// One row more than the page tells whether another page follows; it is not returned.
 	items, err := a.store.ListProcessMessages(r.Context(), store.ProcessFilter{
-		Status: q.Get("status"), Category: q.Get("category"), Destination: q.Get("destination"), OrderID: q.Get("orderId"), Limit: limit,
+		Status: q.Get("status"), Category: q.Get("category"), Destination: q.Get("destination"), OrderID: q.Get("orderId"),
+		Limit: limit + 1, After: after,
 	})
 	if err != nil {
 		a.fail(w, r, "list process messages", err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, itemsResponse[store.ProcessMessage]{Items: items})
+	page := processPage{Items: items}
+	if len(items) > limit {
+		page.Items = items[:limit]
+		last := page.Items[limit-1]
+		next := encodeCursor(store.ProcessCursor{ReceivedAt: last.ReceivedAt, ID: last.ID})
+		page.NextCursor = &next
+	}
+	httpx.JSON(w, http.StatusOK, page)
 }
 
 func (a *API) getProcessMessage(w http.ResponseWriter, r *http.Request) {
@@ -267,4 +322,70 @@ func (a *API) reprocessDelivery(w http.ResponseWriter, r *http.Request) {
 	}
 	a.processReprocessed.Add(1)
 	httpx.JSON(w, http.StatusOK, m)
+}
+
+// deleteProcessMessage deletes a message with a destination in error, with a reason
+// (FR-25.17). It is a supervisor command: it needs an authenticated user, whom the
+// audit columns and the deleted event name, and an Idempotency-Key.
+func (a *API) deleteProcessMessage(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	if p, _ := tenant.FromContext(r.Context()); p.UserID == "" {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnauthorized, "AUTH-0001", "deleting a process message needs an authenticated user"))
+		return
+	}
+	idem, ok := readIdem(w, r)
+	if !ok {
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if !ids.Valid(id) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeProcessNotFound, "process message not found"))
+		return
+	}
+	var req deleteRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	reason := strings.TrimSpace(req.Reason)
+	if n := len([]rune(reason)); n < 1 || n > maxReprocessReason {
+		validationFailed(w, r, map[string]string{"reason": fmt.Sprintf("must be 1 to %d characters", maxReprocessReason)})
+		return
+	}
+	if a.replayed(w, r, idem) {
+		return
+	}
+	m, err := a.store.DeleteProcessMessage(r.Context(), id, reason, a.now().UTC(), idem)
+	if err != nil {
+		a.fail(w, r, "delete process message", err)
+		return
+	}
+	a.processDeleted.Add(1)
+	httpx.JSON(w, http.StatusOK, m)
+}
+
+// retryDueProcessMessages is the retry sweep (FR-25.17). The platform scheduler calls
+// it every minute for each tenant with a service identity holding the deliver duty,
+// so the sweep runs under that tenant's row-level security. A repeated call is safe:
+// a claimed destination is leased until its next scheduled attempt.
+func (a *API) retryDueProcessMessages(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	limit, ok := limitParam(w, r, defaultRetryBatch, maxRetryBatch)
+	if !ok {
+		return
+	}
+	claims, err := a.store.ClaimRetries(r.Context(), a.now().UTC(), limit)
+	if err != nil {
+		a.fail(w, r, "process message retry sweep", err)
+		return
+	}
+	if claims == nil {
+		claims = []store.RetryClaim{}
+	}
+	a.processRetried.Add(int64(len(claims)))
+	httpx.JSON(w, http.StatusOK, itemsResponse[store.RetryClaim]{Items: claims})
 }

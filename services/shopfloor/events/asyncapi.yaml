@@ -43,6 +43,8 @@ channels:
         $ref: "#/components/messages/ProcessMessageReceived"
       processMessageDelivered:
         $ref: "#/components/messages/ProcessMessageDelivered"
+      processMessageDeleted:
+        $ref: "#/components/messages/ProcessMessageDeleted"
 operations:
   publishProcessMessageReceived:
     action: send
@@ -56,6 +58,12 @@ operations:
       $ref: "#/channels/processMessages"
     messages:
       - $ref: "#/channels/processMessages/messages/processMessageDelivered"
+  publishProcessMessageDeleted:
+    action: send
+    channel:
+      $ref: "#/channels/processMessages"
+    messages:
+      - $ref: "#/channels/processMessages/messages/processMessageDeleted"
   publishPaydayExported:
     action: send
     channel:
@@ -105,7 +113,7 @@ components:
     ProcessMessageReceived:
       name: dev.passage.shopfloor.processmessage.received.v1
       contentType: application/cloudevents+json
-      description: Published when a process message is stored, and again when a destination in error is reprocessed (then `destinations` holds only that destination).
+      description: Published when a process message is stored, again when a destination in error is reprocessed, and again by the retry sweep for the destinations whose wait elapsed (then `destinations` holds only those destinations).
       payload:
         $ref: "#/components/schemas/ProcessMessageReceivedData"
     ProcessMessageDelivered:
@@ -114,6 +122,12 @@ components:
       description: Published once, when every destination of the message is delivered.
       payload:
         $ref: "#/components/schemas/ProcessMessageDeliveredData"
+    ProcessMessageDeleted:
+      name: dev.passage.shopfloor.processmessage.deleted.v1
+      contentType: application/cloudevents+json
+      description: Published once, when a supervisor deletes a message with a destination in error, with the reason. `undelivered` names the destinations that never received it; the EBR consumer records the missed message as an exception (BR-24.15).
+      payload:
+        $ref: "#/components/schemas/ProcessMessageDeletedData"
   schemas:
     ProcessMessageReceivedData:
       type: object
@@ -164,6 +178,31 @@ components:
         orderId:
           type: string
           format: uuid
+    ProcessMessageDeletedData:
+      type: object
+      required: [messageId, categoryCode, orderId, reason, undelivered, deletedBy, deletedAt]
+      properties:
+        messageId:
+          type: string
+          format: uuid
+        categoryCode:
+          type: string
+        orderId:
+          type: string
+          format: uuid
+        reason:
+          type: string
+          maxLength: 500
+        undelivered:
+          type: array
+          items:
+            type: string
+            enum: [ebr, journal, quality, kafka, webhook]
+        deletedBy:
+          type: string
+        deletedAt:
+          type: string
+          format: date-time
     Characteristic:
       type: object
       required: [name, type, value, outOfLimit]

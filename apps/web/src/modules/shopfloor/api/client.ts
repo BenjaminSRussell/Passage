@@ -474,6 +474,10 @@ export interface ProcessMessage {
   outOfLimit: boolean;
   values: Characteristic[];
   deliveries: ProcessDelivery[];
+  /** Set once a supervisor deleted the message (slice 5); it then leaves the monitor. */
+  deletedAt: string | null;
+  deletedBy: string | null;
+  deleteReason: string | null;
 }
 
 export interface ProcessIngest {
@@ -487,19 +491,33 @@ export interface ProcessFilter {
   destination?: ProcessDestination | "";
   orderId?: string;
   limit?: number;
+  /** Opaque position from the previous page's nextCursor. */
+  cursor?: string;
 }
 
-export function listProcessMessages(filter: ProcessFilter = {}, signal?: AbortSignal): Promise<ProcessMessage[]> {
-  return items<ProcessMessage>(
+/** One page of the monitor, newest first. nextCursor is null on the last page. */
+export interface ProcessMessagePage {
+  items: ProcessMessage[];
+  nextCursor: string | null;
+}
+
+export async function listProcessMessages(filter: ProcessFilter = {}, signal?: AbortSignal): Promise<ProcessMessagePage> {
+  const body = await send<{ items?: ProcessMessage[]; nextCursor?: string | null }>(
     `/process-messages${query({
       status: filter.status,
       category: filter.category,
       destination: filter.destination,
       orderId: filter.orderId,
       limit: filter.limit,
+      cursor: filter.cursor,
     })}`,
+    {},
     signal,
   );
+  if (!Array.isArray(body.items)) {
+    throw new ShopfloorApiError(0, "COM-0001", "The response has no items");
+  }
+  return { items: body.items, nextCursor: typeof body.nextCursor === "string" ? body.nextCursor : null };
 }
 
 export function getProcessMessage(id: string, signal?: AbortSignal): Promise<ProcessMessage> {
@@ -518,4 +536,12 @@ export function reprocessProcessMessage(
   key: string = newKey(),
 ): Promise<ProcessMessage> {
   return post<ProcessMessage>(`/process-messages/${encodeURIComponent(id)}:reprocess`, input, key);
+}
+
+/**
+ * Deletes a message with a destination in error, with a reason kept for audit
+ * (SF-0119 otherwise, SF-0120 when already deleted). Keep one key per form.
+ */
+export function deleteProcessMessage(id: string, input: { reason: string }, key: string = newKey()): Promise<ProcessMessage> {
+  return post<ProcessMessage>(`/process-messages/${encodeURIComponent(id)}:delete`, input, key);
 }
