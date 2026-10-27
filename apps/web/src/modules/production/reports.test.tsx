@@ -217,7 +217,7 @@ describe("WIP balance report (4.21.14)", () => {
     stubFetch(() => new Promise<Response>(() => undefined));
     const first = renderAt("/production/wip-balances");
     expect(
-      await findTable({ name: "WIP balance" }),
+      await screen.findByRole("table", { name: "WIP balance" }),
     ).toHaveAttribute("aria-busy", "true");
     first.unmount();
 

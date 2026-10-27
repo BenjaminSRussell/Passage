@@ -1,5 +1,5 @@
 import { findTable } from "../../test-utils";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { COVERAGE_DEFAULTS, type CoverageGroup } from "./api/client";
@@ -141,6 +141,8 @@ describe("Coverage group page", () => {
     ]);
     renderAt("/planning/coverage-groups/REQ");
     const freeze = await screen.findByLabelText("Freeze fence (days)");
+    // Flush the page's passive effect that clears `saved` on load; under load it can otherwise run after the save.
+    await act(async () => {});
     expect(screen.queryByLabelText("Code")).not.toBeInTheDocument();
     fireEvent.change(freeze, { target: { value: "3" } });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));

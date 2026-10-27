@@ -214,7 +214,7 @@ describe("Planning calculators page", () => {
     const fetchMock = stubCalc("/supply-schedule:project", () => new Promise<Response>((resolve) => (release = resolve)));
     render(<CalculatorsPage />);
     fireEvent.click(within(formNamed("Supply schedule")).getByRole("button", { name: "Project" }));
-    const loading = await findTable({ name: "Supply schedule" });
+    const loading = await screen.findByRole("table", { name: "Supply schedule" });
     expect(loading.getAttribute("aria-busy")).toBe("true");
     release(
       json({
