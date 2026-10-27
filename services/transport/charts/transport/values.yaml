@@ -1,0 +1,40 @@
+image:
+  repository: ghcr.io/benjaminsrussell/passage/transport
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+# DATABASE_URL is read from this secret (key: url); never set inline.
+database:
+  secretName: transport-db
+  secretKey: url
+
+env:
+  PASSAGE_ENV: dev
+  SERVICE_NAME: transport
+  HTTP_ADDR: ":8080"
+  ADMIN_ADDR: ":9090"
+  MIGRATE_ON_START: "false"
+
+service:
+  type: ClusterIP
+  port: 8080
+  adminPort: 9090
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+serviceMonitor:
+  enabled: false
+  interval: 30s
+
+features:
+  tmsEnabled: true
+  landedCost: false
+  vrp: false

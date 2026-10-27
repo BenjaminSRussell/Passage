@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "passage-tms-optimizer"
+version = "0.1.0"
+description = "Passage transportation route optimizer (OR-Tools VRP) for wave 34"
+requires-python = ">=3.11"
+dependencies = [
+  "ortools>=9.10",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "hypothesis>=6",
+]
+
+[tool.setuptools.packages.find]
+include = ["tms_optimizer*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

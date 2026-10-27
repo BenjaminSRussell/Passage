@@ -1,0 +1,58 @@
+asyncapi: 3.0.0
+info:
+  title: Passage Transport events
+  version: 0.1.0
+  description: CloudEvents 1.0 envelope; amounts are decimal strings. Slice 1 publishes one event.
+defaultContentType: application/cloudevents+json
+channels:
+  freightBillMatched:
+    address: passage.tms.freightbill
+    description: Topic for freight bill events (Debezium outbox router).
+    messages:
+      freightBillMatched:
+        $ref: '#/components/messages/FreightBillMatched'
+operations:
+  publishFreightBillMatched:
+    action: send
+    channel:
+      $ref: '#/channels/freightBillMatched'
+    summary: A carrier invoice was matched to a freight bill.
+    messages:
+      - $ref: '#/channels/freightBillMatched/messages/freightBillMatched'
+components:
+  messages:
+    FreightBillMatched:
+      name: dev.passage.tms.freightbill.matched.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [type, source, id, specversion, tenantid, data]
+        properties:
+          specversion: { type: string, const: '1.0' }
+          type: { type: string, const: dev.passage.tms.freightbill.matched.v1 }
+          source: { type: string, const: /passage/tms/transport }
+          id: { type: string }
+          tenantid: { type: string, format: uuid }
+          subject: { type: string, description: freight bill id }
+          time: { type: string, format: date-time }
+          datacontenttype: { type: string, const: application/json }
+          dataschema: { type: string }
+          data:
+            type: object
+            required: [freightBillId, carrierInvoiceId, matchStatus, variance, lines]
+            properties:
+              freightBillId: { type: string, format: uuid }
+              carrierInvoiceId: { type: string, format: uuid }
+              matchStatus: { type: string, enum: [MATCHED, VARIANCE], description: 'MATCHED when every charge is within tolerance (BR-34.4), otherwise VARIANCE' }
+              variance: { type: string }
+              lines:
+                type: array
+                items:
+                  type: object
+                  required: [chargeCode, expected, invoiced, variance, withinTolerance]
+                  properties:
+                    chargeCode: { type: string }
+                    expected: { type: string }
+                    invoiced: { type: string }
+                    variance: { type: string, description: invoiced minus expected }
+                    withinTolerance: { type: boolean }

@@ -1,0 +1,448 @@
+openapi: 3.1.0
+info:
+  title: Passage Transport (TMS) API
+  version: 0.1.0
+  description: |
+    Wave 34 slice 1: rate cards, rate shopping, freight bills and carrier
+    invoices. Errors are RFC 9457 problem details (application/problem+json)
+    with a stable `code`; see README.md for the error code list. Browsers call
+    /api/v1/transport/..., which the web BFF rewrites to these /v1/transport/...
+    paths. Amounts are decimal strings, never floats. Identifiers are lower-case
+    UUIDs.
+servers:
+  - url: https://api.{env}.passage.dev
+    variables:
+      env:
+        default: dev
+paths:
+  /v1/transport/rate-cards:
+    post:
+      operationId: createRateCard
+      summary: Create an effective-dated rate card
+      description: Rejected with TMS-0102 when it shares a day with a card of the same carrier, service and basis (BR-34.10).
+      x-passage-duty: TMS_RATE_APPROVE
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RateCardRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RateCard' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listRateCards
+      summary: List rate cards, optionally filtered by carrier and service
+      x-passage-duty: TMS_RATE
+      parameters:
+        - name: carrierId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: serviceId
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Rate cards
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/RateCard' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/transport/shipments/{id}:rate:
+    post:
+      operationId: rateShipment
+      summary: Rate a shipment across carrier services and rank the options
+      description: |
+        For each carrier service, the cards valid on the ship date are rated
+        (BR-34.2); a service with no valid card yields one NO_VALID_RATE_CARD
+        option (TMS-0101, BR-34.10). Deterministic for identical inputs; each
+        option carries an explain trace. Results are not cached yet.
+      x-passage-duty: TMS_RATE
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RateRequest' }
+      responses:
+        '200':
+          description: Ranked quotes; `chosen` is the first OK option
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RateResponse' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/transport/freight-bills:
+    post:
+      operationId: createFreightBill
+      summary: Create a freight bill with expected charges for a load
+      x-passage-duty: TMS_RECONCILE
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FreightBillRequest' }
+      responses:
+        '201':
+          description: Created (or the replayed bill for a repeated Idempotency-Key)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FreightBill' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listFreightBills
+      summary: List freight bills, newest first (at most 500)
+      x-passage-duty: TMS_VIEW
+      parameters:
+        - name: matchStatus
+          in: query
+          schema: { type: string, enum: [UNMATCHED, MATCHED, VARIANCE, DISPUTED, APPROVED, SETTLED] }
+        - name: carrierId
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Freight bills
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/FreightBill' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/transport/freight-bills/{id}:
+    get:
+      operationId: getFreightBill
+      summary: Get a freight bill with its carrier invoice and line comparison
+      x-passage-duty: TMS_VIEW
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Freight bill; `carrierInvoice` and `match` are present once an invoice is matched
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FreightBillDetail' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/transport/carrier-invoices:
+    post:
+      operationId: registerCarrierInvoice
+      summary: Register a carrier invoice and match it to its freight bill
+      description: |
+        The idempotency key is the carrier and invoice number: a repeated number
+        for the carrier is rejected (TMS-0108). An invoice naming a bill is
+        matched line by line with the default tolerance (BR-34.4); the bill must
+        be the carrier's, in the same currency (TMS-0112), and not already
+        invoiced (TMS-0111). An invoice with no freight bill is stored as
+        UNEXPECTED_INVOICE (TMS-0109) and never auto-approved.
+      x-passage-duty: TMS_RECONCILE
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CarrierInvoiceRequest' }
+      responses:
+        '201':
+          description: Registered, and matched when it names a freight bill
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvoiceResponse' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listCarrierInvoices
+      summary: List carrier invoices, newest first (at most 500)
+      x-passage-duty: TMS_RECONCILE
+      parameters:
+        - name: matchStatus
+          in: query
+          description: UNEXPECTED_INVOICE lists the exception queue
+          schema: { type: string, enum: [MATCHED, VARIANCE, UNEXPECTED_INVOICE] }
+        - name: carrierId
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Carrier invoices
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/CarrierInvoice' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/transport/carrier-invoices/{id}:
+    get:
+      operationId: getCarrierInvoice
+      summary: Get a carrier invoice
+      x-passage-duty: TMS_RECONCILE
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Carrier invoice
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CarrierInvoice' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+components:
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: |
+        Stored with the record the command creates, with a fingerprint of the
+        method, path and body. A repeat with the same body returns that record;
+        a repeat with a different body is 422 idempotency_key_reuse.
+      schema: { type: string, minLength: 1, maxLength: 200 }
+  responses:
+    Problem:
+      description: RFC 9457 problem detail
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string, description: Stable error code }
+        traceId: { type: string }
+        errors:
+          type: object
+          additionalProperties: { type: string }
+    Line:
+      description: One charge; the amount is in the document currency.
+      type: object
+      required: [chargeCode, amount]
+      additionalProperties: false
+      properties:
+        chargeCode: { type: string, maxLength: 20 }
+        amount: { type: string, description: Decimal string, pattern: '^[0-9]+(\.[0-9]+)?$' }
+    RateRow:
+      type: object
+      required: [origin, destination, breakFrom, rate, unit]
+      properties:
+        origin: { type: string, description: Zone or lane origin; * matches any }
+        destination: { type: string, description: Zone or lane destination; * matches any }
+        breakFrom: { type: string, description: Decimal lower bound of the break band }
+        breakTo: { type: [string, 'null'], description: Decimal upper bound, exclusive }
+        rate: { type: string, description: Decimal rate per unit }
+        unit: { type: string, enum: [KG, PALLET, CONTAINER, SHIPMENT, KM, MILE], description: 'Quantity priced: chargeable kg, pallets, one container or shipment, or the shipment distance in km or miles' }
+    Accessorial:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string }
+        flat: { type: string, description: Decimal flat amount }
+        pct: { type: string, description: Percent of base charge; a non-zero pct wins over flat }
+    RateCardRequest:
+      type: object
+      required: [carrierId, serviceId, basis, currency, validFrom, rows]
+      properties:
+        carrierId: { type: string, format: uuid }
+        serviceId: { type: string, format: uuid }
+        basis:
+          type: string
+          enum: [LANE, ZONE, DISTANCE, WEIGHT_BREAK, PER_PALLET, PER_CONTAINER, FLAT]
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        validFrom: { type: string, format: date }
+        validTo: { type: [string, 'null'], format: date }
+        minimumCharge: { type: string }
+        dimDivisor: { type: integer, minimum: 1, description: 'Dimensional divisor in cm³ per kg; 0 or absent means 5000' }
+        fuelPct: { type: string, description: Fuel surcharge percent of base }
+        rows: { type: array, minItems: 1, items: { $ref: '#/components/schemas/RateRow' } }
+        accessorials: { type: array, items: { $ref: '#/components/schemas/Accessorial' } }
+    RateCard:
+      allOf:
+        - $ref: '#/components/schemas/RateCardRequest'
+        - type: object
+          required: [id, minimumCharge, dimDivisor, fuelPct, accessorials]
+          properties:
+            id: { type: string, format: uuid }
+    RateRequest:
+      type: object
+      required: [originZone, destinationZone, shipDate]
+      properties:
+        originZone: { type: string, maxLength: 20 }
+        destinationZone: { type: string, maxLength: 20 }
+        weightKg: { type: string }
+        volumeM3: { type: string }
+        pallets: { type: integer, minimum: 0 }
+        distanceKm: { type: string, description: Decimal distance; prices KM and MILE rows }
+        shipDate: { type: string, format: date }
+        accessorialCodes: { type: array, items: { type: string, maxLength: 20 } }
+    Quote:
+      type: object
+      required: [carrierId, serviceId, currency, status, total, charges, trace]
+      properties:
+        carrierId: { type: string, format: uuid }
+        serviceId: { type: string, format: uuid }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        status: { type: string, enum: [OK, NO_VALID_RATE_CARD, NO_LANE_RATE] }
+        total: { type: string, description: Decimal sum of rounded charges }
+        charges:
+          type: array
+          items:
+            type: object
+            required: [code, amount]
+            properties:
+              code: { type: string, description: 'BASE, ACC:<code> or FUEL' }
+              amount: { type: string, description: Decimal rounded half-up to cents }
+        trace:
+          type: array
+          description: Explain trace, one entry per rating step with its inputs
+          items:
+            type: object
+            required: [step, input, amount]
+            properties:
+              step: { type: string }
+              input: { type: string }
+              amount: { type: string }
+    RateResponse:
+      type: object
+      required: [shipmentId, options]
+      properties:
+        shipmentId: { type: string, format: uuid }
+        options: { type: array, items: { $ref: '#/components/schemas/Quote' } }
+        chosen: { $ref: '#/components/schemas/Quote' }
+    FreightBillRequest:
+      type: object
+      required: [loadId, carrierId, currency, expectedLines]
+      properties:
+        loadId: { type: string, format: uuid }
+        carrierId: { type: string, format: uuid }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        expectedLines:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/Line' }
+    FreightBill:
+      type: object
+      required: [id, loadId, carrierId, currency, expectedLines, expectedTotal, matchStatus, version, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        loadId: { type: string, format: uuid }
+        carrierId: { type: string, format: uuid }
+        currency: { type: string }
+        expectedLines: { type: array, items: { $ref: '#/components/schemas/Line' } }
+        expectedTotal: { type: string }
+        matchStatus:
+          type: string
+          enum: [UNMATCHED, MATCHED, VARIANCE, DISPUTED, APPROVED, SETTLED]
+        carrierInvoiceId: { type: string, format: uuid }
+        varianceTotal: { type: string, description: Invoiced minus expected, once matched }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+    FreightBillDetail:
+      allOf:
+        - $ref: '#/components/schemas/FreightBill'
+        - type: object
+          properties:
+            carrierInvoice: { $ref: '#/components/schemas/CarrierInvoice' }
+            match: { $ref: '#/components/schemas/MatchResult' }
+    MatchResult:
+      type: object
+      required: [status, lines, varianceTotal]
+      properties:
+        status: { type: string, enum: [MATCHED, VARIANCE] }
+        varianceTotal: { type: string }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [chargeCode, expected, invoiced, variance, allowed, within]
+            properties:
+              chargeCode: { type: string }
+              expected: { type: string }
+              invoiced: { type: string }
+              variance: { type: string, description: Invoiced minus expected }
+              allowed: { type: string, description: 'The smaller of $5.00 and 2 % of the expected charge' }
+              within: { type: boolean }
+    CarrierInvoiceRequest:
+      type: object
+      required: [carrierId, invoiceNo, invoiceDate, source, currency, lines]
+      properties:
+        carrierId: { type: string, format: uuid }
+        invoiceNo: { type: string, minLength: 1, maxLength: 40 }
+        invoiceDate: { type: string, format: date }
+        source: { type: string, enum: [EDI210, MANUAL, API] }
+        freightBillId: { type: string, format: uuid, description: The bill to match; absent makes the invoice UNEXPECTED_INVOICE }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        lines:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/Line' }
+    CarrierInvoice:
+      allOf:
+        - $ref: '#/components/schemas/CarrierInvoiceRequest'
+        - type: object
+          required: [id, total, matchStatus, createdAt]
+          properties:
+            id: { type: string, format: uuid }
+            total: { type: string, description: Decimal sum of invoice lines }
+            matchStatus: { type: string, enum: [MATCHED, VARIANCE, UNEXPECTED_INVOICE] }
+            varianceTotal: { type: string }
+            createdAt: { type: string, format: date-time }
+    InvoiceResponse:
+      type: object
+      required: [invoice]
+      properties:
+        invoice: { $ref: '#/components/schemas/CarrierInvoice' }
+        freightBill: { $ref: '#/components/schemas/FreightBill' }

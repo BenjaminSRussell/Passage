@@ -1,0 +1,17 @@
+{
+  "description": "Hand-checkable fixture: 6 stops (2,100 kg) on 2 vehicles of 1,100 kg, depot at origin. Speed 60 km/h so 1 km = 1 minute.",
+  "depot": {"x": 0, "y": 0},
+  "speed_kmh": 60,
+  "stops": [
+    {"id": "S1", "x": 10, "y": 0, "earliest": 0, "latest": 120, "service_min": 10, "weight_kg": 400, "volume_l": 1000, "pallets": 2},
+    {"id": "S2", "x": 10, "y": 10, "earliest": 0, "latest": 130, "service_min": 10, "weight_kg": 400, "volume_l": 1000, "pallets": 2},
+    {"id": "S3", "x": 0, "y": 10, "earliest": 30, "latest": 150, "service_min": 10, "weight_kg": 400, "volume_l": 1000, "pallets": 2},
+    {"id": "S4", "x": -10, "y": 0, "earliest": 0, "latest": 200, "service_min": 10, "weight_kg": 300, "volume_l": 800, "pallets": 1},
+    {"id": "S5", "x": -10, "y": -10, "earliest": 60, "latest": 220, "service_min": 10, "weight_kg": 300, "volume_l": 800, "pallets": 1},
+    {"id": "S6", "x": 0, "y": -10, "earliest": 0, "latest": 240, "service_min": 10, "weight_kg": 300, "volume_l": 800, "pallets": 1}
+  ],
+  "vehicles": [
+    {"id": "V1", "capacity_kg": 1100, "capacity_l": 3000, "pallets": 6, "fixed_cost": 0, "max_route_min": 660},
+    {"id": "V2", "capacity_kg": 1100, "capacity_l": 3000, "pallets": 6, "fixed_cost": 0, "max_route_min": 660}
+  ]
+}
