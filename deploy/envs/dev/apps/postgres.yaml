@@ -18,6 +18,13 @@ data:
     CREATE ROLE passage_app LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD '$APP_PASSWORD';
     GRANT ALL ON SCHEMA public TO passage_app;
     SQL
+  20-receiving-db.sh: |
+    psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" <<SQL
+    SELECT 'CREATE DATABASE passage_receiving' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'passage_receiving')\gexec
+    GRANT CONNECT, CREATE ON DATABASE passage_receiving TO passage_app;
+    \c passage_receiving
+    GRANT ALL ON SCHEMA public TO passage_app;
+    SQL
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -35,6 +42,9 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: postgres
+      annotations:
+        # initdb scripts run only on an empty PGDATA; bump this whenever postgres-init changes so the pod restarts
+        passage.dev/init-rev: "2"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -104,5 +114,8 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: hello-ledger
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: receiving
       ports:
         - { protocol: TCP, port: 5432 }
