@@ -463,6 +463,8 @@ func TestInvoice_LedgerIDMustMatchTheConfiguredLedgerAndMayBeOmitted(t *testing.
 		t.Fatalf("an invoice for a foreign ledger reached the ledger: %d entries, want %d", len(rg.ledger.Entries), entries)
 	}
 
+	problemCode(t, rg.call(http.MethodPost, invoicesPath, foreign, duty("VendorInvoicePost", "k", "X-Passage-Legal-Entity", ledgerID)), http.StatusForbidden, "AUTH-0003")
+
 	omitted := strings.Replace(invoiceBody("INV-2", r.ID, 1, ""), `"ledgerId":"`+ledgerID+`",`, "", 1)
 	got := decode[invoiceJSON](t, rg.call(http.MethodPost, invoicesPath, omitted, rg.apPoster()), http.StatusCreated)
 	if got.LedgerID != ledgerID || len(rg.ledger.Entries) != entries+1 || rg.ledger.Entries[entries].LedgerID != ledgerID {

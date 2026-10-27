@@ -151,12 +151,12 @@ func (a *API) postVendorInvoice(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, validationProblem(fields))
 		return
 	}
-	if req.LedgerID != "" && req.LedgerID != a.ports.Profile.LedgerID {
-		writeError(w, r, &domain.Error{Code: domain.CodeInvalidReceipt, Detail: "ledgerId differs from the ledger this service posts to"})
-		return
-	}
 	if err := inScope(p, req.LegalEntityID); err != nil {
 		writeError(w, r, err)
+		return
+	}
+	if req.LedgerID != "" && req.LedgerID != a.ports.Profile.LedgerID {
+		writeError(w, r, &domain.Error{Code: domain.CodeInvalidReceipt, Detail: "ledgerId differs from the ledger this service posts to"})
 		return
 	}
 	ctx := r.Context()

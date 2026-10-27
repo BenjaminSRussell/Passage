@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -15,6 +16,8 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/money"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/api"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/store"
@@ -453,7 +456,6 @@ func TestResolve_AResolveThatReversesWhileTheCommandIsInFlightFailsTheCommand(t 
 
 func TestResolve_LedgerRejectionsOnReverseAreNon422AndReleaseTheClaim(t *testing.T) {
 	var dates []time.Time
-	failure := errors.New("unreachable")
 	rg, broken := brokenRig(t)
 	r := rg.posted(t, "PS-1", 10, 4)
 	broken.failing = true
@@ -468,7 +470,6 @@ func TestResolve_LedgerRejectionsOnReverseAreNon422AndReleaseTheClaim(t *testing
 	}{
 		{fmt.Errorf("ledger reverse: %w", domain.ErrPeriodClosed), http.StatusUnprocessableEntity, "PER-AP-001"},
 		{fmt.Errorf("ledger reverse: %w", domain.ErrLedgerRejected), http.StatusUnprocessableEntity, "RCV-LDG-001"},
-		{failure, http.StatusServiceUnavailable, "COM-0503"},
 	} {
 		failureLedger := reverseFails{FakeLedger: rg.ledger, err: tc.err, dates: &dates}
 		a := api.New(broken, api.Ports{
@@ -480,13 +481,87 @@ func TestResolve_LedgerRejectionsOnReverseAreNon422AndReleaseTheClaim(t *testing
 		a.Register(router)
 		problemCode(t, doWith(router, http.MethodPost, resolvePath(key), "", admin("k"+strconv.Itoa(i))), tc.status, tc.code)
 	}
-	if len(dates) != 3 || dates[0].IsZero() {
-		t.Fatalf("reverse posting dates %v, want three non-zero dates", dates)
+	if len(dates) != 2 || dates[0].IsZero() {
+		t.Fatalf("reverse posting dates %v, want two non-zero dates", dates)
 	}
 	got := decode[struct{ Outcome string }](t, rg.call(http.MethodPost, resolvePath(key), "", admin("final")), http.StatusOK)
 	if got.Outcome != "REVERSED" {
 		t.Fatalf("outcome %s: a failed resolve must release its claim so a later one can finish", got.Outcome)
 	}
+}
+
+type finishFails struct {
+	*commitFails
+	fail *bool
+}
+
+func (f finishFails) FinishPending(ctx context.Context, key, outcome string) error {
+	if *f.fail {
+		return errors.New("database unavailable")
+	}
+	return f.commitFails.FinishPending(ctx, key, outcome)
+}
+
+func resolveRouter(st store.Store, ledger domain.LedgerPoster, lease time.Duration) http.Handler {
+	a := api.New(st, api.Ports{
+		Periods: domain.FakePeriods{Status: domain.PeriodOpen}, Ledger: ledger,
+		Profile:       domain.PostingProfile{LedgerID: ledgerID, Inventory: "1400", GRIR: "2100", PPV: "5200", VendorControl: "2000"},
+		ResolveMinAge: time.Nanosecond, ResolveLease: lease,
+	})
+	router := httpx.NewRouter()
+	a.Register(router)
+	return router
+}
+
+func assertClaimHeldThenLeaseTakeover(t *testing.T, rg *rig, broken *commitFails, r receiptJSON, key string, takeover http.Handler) {
+	t.Helper()
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1)})
+	if _, err := rg.st.ClaimPending(ctx, key, 0, time.Hour); !errors.Is(err, store.ErrPendingClaimed) {
+		t.Fatalf("claim after the unknown outcome: err=%v, want it still held", err)
+	}
+	problemCode(t, rg.call(http.MethodPost, receiptsPath+"/"+r.ID+":correct", correction("-1"), rg.poster(r.Version)), http.StatusConflict, "RCV-IDM-001")
+	if got := decode[receiptJSON](t, rg.call(http.MethodGet, receiptsPath+"/"+r.ID, "", duty("ReceivingMaintain", "")), http.StatusOK); got.Lines[0].Qty != "4" || got.Version != r.Version {
+		t.Fatalf("the repeated command committed: qty %s version %d", got.Lines[0].Qty, got.Version)
+	}
+	time.Sleep(10 * time.Millisecond)
+	got := decode[struct{ Outcome, LedgerEntryID string }](t, doWith(takeover, http.MethodPost, resolvePath(key), "", admin("takeover")), http.StatusOK)
+	if got.Outcome != "REVERSED" || !slices.Contains(rg.ledger.Reversed, got.LedgerEntryID) {
+		t.Fatalf("takeover %+v reversed %v", got, rg.ledger.Reversed)
+	}
+}
+
+func TestResolve_UnknownReverseOutcomeKeepsTheClaim(t *testing.T) {
+	var dates []time.Time
+	rg, broken := brokenRig(t)
+	r := rg.posted(t, "PS-1", 10, 4)
+	broken.failing = true
+	rg.call(http.MethodPost, receiptsPath+"/"+r.ID+":correct", correction("-1"), rg.poster(r.Version))
+	broken.failing = false
+	key := "post:receiving:productreceipt:" + r.ID + ":correction:1"
+
+	flaky := reverseFails{FakeLedger: rg.ledger, err: errors.New("timeout"), dates: &dates}
+	problemCode(t, doWith(resolveRouter(broken, flaky, time.Hour), http.MethodPost, resolvePath(key), "", admin("first")), http.StatusServiceUnavailable, "COM-0503")
+
+	assertClaimHeldThenLeaseTakeover(t, rg, broken, r, key, resolveRouter(broken, rg.ledger, time.Millisecond))
+}
+
+func TestResolve_FinishFailingAfterTheReversalKeepsTheClaim(t *testing.T) {
+	rg, broken := brokenRig(t)
+	r := rg.posted(t, "PS-1", 10, 4)
+	broken.failing = true
+	rg.call(http.MethodPost, receiptsPath+"/"+r.ID+":correct", correction("-1"), rg.poster(r.Version))
+	broken.failing = false
+	key := "post:receiving:productreceipt:" + r.ID + ":correction:1"
+
+	failing := true
+	st := finishFails{commitFails: broken, fail: &failing}
+	problemCode(t, doWith(resolveRouter(st, rg.ledger, time.Hour), http.MethodPost, resolvePath(key), "", admin("first")), http.StatusInternalServerError, "COM-0500")
+	if len(rg.ledger.Reversed) != 1 {
+		t.Fatalf("the ledger reversal did not happen before the failure: %v", rg.ledger.Reversed)
+	}
+	failing = false
+
+	assertClaimHeldThenLeaseTakeover(t, rg, broken, r, key, resolveRouter(st, rg.ledger, time.Millisecond))
 }
 
 func TestPending_InvoiceTrackerStaysOpenUntilTheCommitSucceeds(t *testing.T) {

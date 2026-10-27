@@ -215,7 +215,7 @@ func (a *API) resolvePending(w http.ResponseWriter, r *http.Request) {
 		abandon(httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeLedgerRejected, "the ledger refused the reversal; see the ledger for the reason"))
 		return
 	case err != nil:
-		abandon(unavailable("the ledger entry exists but could not be reversed yet; try again"))
+		writeError(w, r, unavailable("the ledger entry exists but the reversal may or may not have been applied; the posting stays claimed, try again after the lease"))
 		return
 	}
 	a.finishPending(w, r, row.Key, store.OutcomeReversed, id)
@@ -229,7 +229,9 @@ func (a *API) releaseClaim(ctx context.Context, key string) {
 
 func (a *API) finishPending(w http.ResponseWriter, r *http.Request, key, outcome, entryID string) {
 	if err := a.store.FinishPending(context.WithoutCancel(r.Context()), key, outcome); err != nil {
-		a.releaseClaim(r.Context(), key)
+		if outcome == store.OutcomeRejected {
+			a.releaseClaim(r.Context(), key)
+		}
 		writeError(w, r, err)
 		return
 	}
