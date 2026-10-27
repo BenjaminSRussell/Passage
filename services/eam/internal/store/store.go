@@ -32,6 +32,9 @@ const (
 	CodeValidation   = "EAM-VAL-001"
 	CodeKeyReuse     = "idempotency_key_reuse"
 	CodeDuplicate    = "EAM-DUP-001"
+	CodeFaultMissing = "EAM-FLT-001"
+	CodeFaultInvalid = "EAM-FLT-002"
+	CodeDowntime     = "EAM-DT-001"
 )
 
 // Page is one page of a list, newest first. NextCursor is the id to pass as

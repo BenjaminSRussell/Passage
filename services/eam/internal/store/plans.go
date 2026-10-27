@@ -346,7 +346,7 @@ func scheduleLines(ctx context.Context, tx pgx.Tx, t, extra string, args []any, 
 		lineID := l.id
 		woID, err := insertWorkOrder(ctx, tx, t, WorkOrder{AssetID: l.assetID, Type: "PREVENTIVE", Status: "CREATED",
 			Priority: domain.DefaultPriority(l.criticality, false), Currency: l.currency, PlanLineID: &lineID,
-			JobType: l.jobType, DueAt: sched.NextDueAt}, "")
+			JobType: l.jobType, DueAt: sched.NextDueAt}, "", now)
 		if err != nil {
 			return res, err
 		}

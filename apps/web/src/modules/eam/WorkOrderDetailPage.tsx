@@ -15,6 +15,7 @@ import {
 } from "./api/client";
 import { addMoney, dash, dayOf, HOURS, minuteOf, money, nextStatuses, RATE, statusLabel, typeLabel } from "./format";
 import { Entry, Failure, State } from "./parts";
+import { DowntimeCard, FaultCard } from "./WorkOrderCare";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -115,12 +116,15 @@ export function WorkOrderDetailPage() {
           <Entry term="Total cost" mono>
             {addMoney(wo.partsCost, wo.laborCost)} {wo.currency}
           </Entry>
+          <Entry term="Warranty">{wo.warrantyCovered ? "Covered by a vendor warranty; completion raises a claim" : "Not covered"}</Entry>
           <Entry term="Origin">
             {wo.planLineId ? "Maintenance plan" : wo.requestId ? "Maintenance request" : "Raised by hand"}
           </Entry>
         </dl>
       </Card>
       <StatusCard wo={wo} onSaved={saved} />
+      <FaultCard wo={wo} onSaved={saved} />
+      <DowntimeCard wo={wo} onSaved={saved} />
       <Card title="Labor">
         <div className={styles.stack}>
           <DataTable label="Labor" columns={laborColumns} rows={wo.labor} getRowKey={(row) => row.id} empty={{ title: "No labor booked yet" }} />
@@ -142,7 +146,7 @@ export function WorkOrderDetailPage() {
 
 function StatusCard({ wo, onSaved }: { wo: WorkOrderDetail; onSaved(text: string): void }) {
   const [completing, setCompleting] = useState(false);
-  const [downtime, setDowntime] = useState("0");
+  const [downtime, setDowntime] = useState(String(wo.downtimeMinutes));
   const [error, setError] = useState<string | null>(null);
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState<WorkOrderStatus | null>(null);
@@ -194,7 +198,13 @@ function StatusCard({ wo, onSaved }: { wo: WorkOrderDetail; onSaved(text: string
                 </Button>
               ))}
             {next.includes("COMPLETED") ? (
-              <Button variant="primary" onClick={() => setCompleting(true)}>
+              <Button
+                variant="primary"
+                onClick={() => {
+                  setDowntime(String(wo.downtimeMinutes));
+                  setCompleting(true);
+                }}
+              >
                 Complete
               </Button>
             ) : null}
@@ -202,7 +212,7 @@ function StatusCard({ wo, onSaved }: { wo: WorkOrderDetail; onSaved(text: string
         )}
         {completing ? (
           <form className={styles.form} onSubmit={complete} noValidate aria-label="Complete work order">
-            <FormField id="wo-downtime" label="Downtime in minutes" hint="How long the asset was out of service. It feeds availability and MTBF." error={error ?? undefined}>
+            <FormField id="wo-downtime" label="Downtime in minutes" hint="How long the asset was out of service, at least the recorded downtime windows. It feeds availability and MTBF." error={error ?? undefined}>
               {(control) => <Input {...control} inputMode="numeric" value={downtime} invalid={Boolean(error)} onChange={(e) => setDowntime(e.target.value)} />}
             </FormField>
             <div className={styles.formActions}>
@@ -217,7 +227,13 @@ function StatusCard({ wo, onSaved }: { wo: WorkOrderDetail; onSaved(text: string
         ) : null}
         {failure ? (
           <Failure
-            title={failure.code === "conflict_version" ? "Someone else changed this work order. Reload it and try again." : "Could not change the status"}
+            title={
+              failure.code === "conflict_version"
+                ? "Someone else changed this work order. Reload it and try again."
+                : failure.code === "EAM-FLT-001"
+                  ? "Register the fault first"
+                  : "Could not change the status"
+            }
             problem={failure}
           />
         ) : null}

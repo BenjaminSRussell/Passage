@@ -23,16 +23,17 @@ type Request struct {
 	WorkOrderID     *string   `json:"workOrderId,omitempty"`
 	DedupeKey       *string   `json:"dedupeKey,omitempty"`
 	ConditionRuleID *string   `json:"conditionRuleId,omitempty"`
+	TriageNote      *string   `json:"triageNote,omitempty"`
 	CreatedAt       time.Time `json:"createdAt"`
 }
 
 const requestColumns = `id::text, asset_id::text, source, severity, description, reading_value::float8, status,
-  work_order_id::text, dedupe_key, condition_rule_id::text, created_at`
+  work_order_id::text, dedupe_key, condition_rule_id::text, triage_note, created_at`
 
 func scanRequest(row pgx.Row) (Request, error) {
 	var r Request
 	err := row.Scan(&r.ID, &r.AssetID, &r.Source, &r.Severity, &r.Description, &r.ReadingValue, &r.Status,
-		&r.WorkOrderID, &r.DedupeKey, &r.ConditionRuleID, &r.CreatedAt)
+		&r.WorkOrderID, &r.DedupeKey, &r.ConditionRuleID, &r.TriageNote, &r.CreatedAt)
 	return r, err
 }
 
@@ -117,7 +118,7 @@ func (s *Postgres) ConvertRequest(ctx context.Context, id, currency, key string)
 		if req.Severity == 1 {
 			wo.Type, wo.Priority = "EMERGENCY", 1
 		}
-		woID, err := insertWorkOrder(ctx, tx, t, wo, key)
+		woID, err := insertWorkOrder(ctx, tx, t, wo, key, s.now())
 		if err != nil {
 			return err
 		}

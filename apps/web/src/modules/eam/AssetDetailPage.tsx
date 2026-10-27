@@ -4,6 +4,7 @@ import { Alert, Button, buttonClassName, Card, DataTable, EmptyState, FormField,
 import {
   activateAsset,
   assetKpis,
+  changeLifecycle,
   createCounter,
   createRule,
   describeProblem,
@@ -18,6 +19,7 @@ import {
   type WorkOrder,
 } from "./api/client";
 import { addMoney, dash, dayOf, hours, minuteOf, percent, typeLabel } from "./format";
+import { CriticalityCard, WarrantyCard } from "./AssetCare";
 import { Entry, Failure, State } from "./parts";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
@@ -55,20 +57,29 @@ export function AssetDetailPage() {
   const navigate = useNavigate();
   const [notice, setNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<Problem | null>(null);
-  const [activating, setActivating] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [confirmDispose, setConfirmDispose] = useState(false);
   const state = useLoad((signal) => getAsset(id, signal), id);
 
-  async function activate(asset: AssetDetail) {
-    setActivating(true);
+  async function lifecycle(asset: AssetDetail, to: "ACTIVE" | "INACTIVE" | "DISPOSED") {
+    setBusy(to);
     setActionError(null);
     try {
-      await activateAsset(asset.id, asset.version);
-      setNotice("Asset activated. It can now receive work orders.");
+      if (to === "ACTIVE") await activateAsset(asset.id, asset.version);
+      else await changeLifecycle(asset.id, to, asset.version);
+      setConfirmDispose(false);
+      setNotice(
+        to === "ACTIVE"
+          ? "Asset activated. It can now receive work orders."
+          : to === "INACTIVE"
+            ? "Asset retired. It takes no new work orders until you activate it again."
+            : "Asset disposed. This is final.",
+      );
       state.reload();
     } catch (error) {
       setActionError(describeProblem(error));
     } finally {
-      setActivating(false);
+      setBusy(null);
     }
   }
 
@@ -106,6 +117,11 @@ export function AssetDetailPage() {
   }
   const asset = state.data!;
   const canActivate = asset.lifecycleState === "CREATED" || asset.lifecycleState === "INACTIVE";
+  const canDispose = asset.lifecycleState === "CREATED" || asset.lifecycleState === "INACTIVE";
+  const saved = (text: string) => {
+    setNotice(text);
+    state.reload();
+  };
 
   return (
     <div className={styles.stack}>
@@ -116,8 +132,18 @@ export function AssetDetailPage() {
         actions={
           <div className={styles.actions}>
             {canActivate ? (
-              <Button variant="primary" loading={activating} onClick={() => activate(asset)}>
+              <Button variant="primary" loading={busy === "ACTIVE"} onClick={() => lifecycle(asset, "ACTIVE")}>
                 Activate asset
+              </Button>
+            ) : null}
+            {asset.lifecycleState === "ACTIVE" ? (
+              <Button loading={busy === "INACTIVE"} onClick={() => lifecycle(asset, "INACTIVE")}>
+                Retire asset
+              </Button>
+            ) : null}
+            {canDispose ? (
+              <Button variant="danger" onClick={() => setConfirmDispose(true)}>
+                Dispose of asset
               </Button>
             ) : null}
             {asset.lifecycleState === "ACTIVE" ? (
@@ -131,7 +157,27 @@ export function AssetDetailPage() {
       <Alert tone="success" live="status">
         {notice}
       </Alert>
-      {actionError ? <Failure title="Could not activate the asset" problem={actionError} /> : null}
+      {confirmDispose ? (
+        <Alert tone="warning" title="Dispose of this asset?">
+          <div className={styles.confirm}>
+            <span>Disposal is final: the asset can never be activated again. Assets with open work orders cannot be disposed.</span>
+            <div className={styles.actions}>
+              <Button variant="danger" loading={busy === "DISPOSED"} onClick={() => lifecycle(asset, "DISPOSED")}>
+                Dispose permanently
+              </Button>
+              <Button variant="ghost" onClick={() => setConfirmDispose(false)}>
+                Keep the asset
+              </Button>
+            </div>
+          </div>
+        </Alert>
+      ) : null}
+      {actionError ? (
+        <Failure
+          title={actionError.code === "conflict_version" ? "Someone else changed this asset. Reload it and try again." : "Could not change the asset's state"}
+          problem={actionError}
+        />
+      ) : null}
       <Card title="Details">
         <dl className={styles.details}>
           <Entry term="Asset number" mono>
@@ -170,6 +216,8 @@ export function AssetDetailPage() {
           {asset.counters.length > 0 ? <RuleForm counters={asset.counters} onSaved={(text) => { setNotice(text); state.reload(); }} /> : null}
         </div>
       </Card>
+      <CriticalityCard assetId={asset.id} onSaved={saved} />
+      <WarrantyCard assetId={asset.id} onSaved={saved} />
       <KpiCard assetId={asset.id} />
       <RecentOrders assetId={asset.id} onOpen={(row) => navigate(`/eam/work-orders/${row.id}`)} />
     </div>

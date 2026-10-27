@@ -90,6 +90,18 @@ func (h *Handler) router() chi.Router {
 		r.With(anyDuty(DutyPlanner, DutyTechnician)).Post("/work-orders/{id}/status", h.transitionWorkOrder)
 		r.With(authz.RequireDuty(DutyTechnician)).Post("/work-orders/{id}/labor", h.recordLabor)
 		r.With(authz.RequireDuty(DutyInquire)).Get("/kpis", h.kpis)
+		// Slice 2: lifecycle, criticality, warranties, fault catalogs and faults, downtime, triage.
+		r.With(authz.RequireDuty(DutyAssetMaintain)).Post("/assets/{id}/lifecycle", h.changeLifecycle)
+		r.With(authz.RequireDuty(DutyInquire)).Get("/assets/{id}/criticality", h.listAssessments)
+		r.With(authz.RequireDuty(DutyAssetMaintain)).Post("/assets/{id}/criticality", h.assessCriticality)
+		r.With(authz.RequireDuty(DutyInquire)).Get("/assets/{id}/warranties", h.listWarranties)
+		r.With(authz.RequireDuty(DutyAssetMaintain)).Post("/assets/{id}/warranties", h.createWarranty)
+		r.With(authz.RequireDuty(DutyInquire)).Get("/fault-catalogs", h.listFaultCatalogs)
+		r.With(authz.RequireDuty(DutyInquire)).Get("/fault-catalogs/{assetType}", h.getFaultCatalog)
+		r.With(authz.RequireDuty(DutyPlanAdmin)).Put("/fault-catalogs/{assetType}", h.putFaultCatalog)
+		r.With(authz.RequireDuty(DutyTechnician)).Post("/work-orders/{id}/faults", h.registerFault)
+		r.With(anyDuty(DutyPlanner, DutyTechnician)).Post("/work-orders/{id}/downtime", h.recordDowntime)
+		r.With(authz.RequireDuty(DutyPlanner)).Post("/requests/{id}/triage", h.triageRequest)
 	})
 	return r
 }

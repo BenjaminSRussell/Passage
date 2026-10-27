@@ -1,10 +1,12 @@
-# EAM (enterprise asset management) — wave 44, slice 1
+# EAM (enterprise asset management) — wave 44, slices 1 and 2
 
 Ticket PSG-44. Passage's maintenance context: plant assets, counters and condition
 rules, maintenance plans that generate preventive work orders, maintenance requests,
 work orders with labor and status transitions, and asset reliability KPIs.
-The authoritative requirements are PRD section 8.44; NOT-IMPLEMENTED.md lists what
-this slice leaves out and why.
+Slice 2 adds asset retirement, criticality assessment, vendor warranties with the
+work order warranty check, fault catalogs with fault registration, downtime windows
+and request triage. The authoritative requirements are PRD section 8.44;
+NOT-IMPLEMENTED.md lists what the slices leave out and why.
 
 ## What slice 1 does
 
@@ -50,15 +52,55 @@ this slice leaves out and why.
 - **KPIs** (FR-44.13, BR-44.8): MTBF, MTTR and availability for one asset over a
   window.
 
+## What slice 2 adds
+
+- **Asset lifecycle** (FR-44.2): `POST /assets/{id}/lifecycle` retires an ACTIVE asset to
+  INACTIVE or disposes of a CREATED or INACTIVE one, with an If-Match version. DISPOSED
+  is final, and an asset with open work orders cannot be disposed (EAM-AST-001).
+  INACTIVE assets take no new work orders and the scheduler skips their lines;
+  `/activate` brings them back.
+- **Criticality assessment** (FR-44.22, BR-44.15): consequences (SAFETY, ENVIRONMENT,
+  PRODUCTION, QUALITY, COST) and likelihood, each 1-5. risk = worst consequence ×
+  likelihood; criticality is 5 when risk ≥ 20 or SAFETY = 5, then 4/3/2 at 15/10/5.
+  Each assessment is a new version; the asset takes the derived criticality (and a new
+  asset version), so new CORRECTIVE orders default to priority 6 − criticality (AC-44.16).
+- **Warranties** (FR-44.17, BR-44.14): vendor warranties per asset (type, vendor party,
+  start basis, start date, months, parts and/or labor coverage, excluded job types).
+  Every work order creation path (by hand, request conversion, plan generation) checks
+  them on the order's date (its due date, or now): the newest ACTIVE warranty in force
+  whose exclusions do not name the job type is stored on the order (`warrantyId`,
+  `warrantyCovered`). Completing a covered order emits
+  `dev.passage.eam.warranty.claimable.v1` with the covered parts and labor amounts
+  (decimal, minor unit) when they are above zero.
+- **Fault catalogs and faults** (FR-44.16, AC-44.15): one catalog per asset type
+  (symptoms, areas, types, causes, remedies and the allowed symptom/area/type
+  combinations), read with GET (ETag = version) and replaced with PUT and If-Match
+  (`"0"` for a new catalog). Technicians register the fault on an open order; the codes
+  must fit the asset type's catalog (EAM-FLT-002). Registrations are append-only and the
+  newest is current, so a replayed key never brings back a superseded one. CORRECTIVE
+  and EMERGENCY orders cannot complete without a fault (EAM-FLT-001).
+- **Downtime windows** (BR-44.5): `POST /work-orders/{id}/downtime` books [from, to) on
+  the production resource (the asset's by default) of an open order. Whole minutes add
+  to the order's downtime and `dev.passage.eam.downtime.recorded.v1` goes to the outbox
+  for wave-23 capacity. Windows on one order may not overlap, and a completion may not
+  report less downtime than the windows (EAM-DT-001).
+- **Request triage** (FR-44.6): TRIAGE, DEFER and REJECT with an optional note, kept in an
+  append-only history whose key replays a retried action; each change emits
+  `dev.passage.eam.request.triaged.v1`. CONVERTED and REJECTED requests are final.
+
 Domain logic is pure (`internal/domain`) and table-tested, with property tests
-(`rapid`). Store integration tests are in `internal/store/store_test.go`; HTTP tests,
+(`rapid`). Store integration tests are in `internal/store/store_test.go` and
+`internal/store/slice2_test.go`; HTTP tests,
 including a check that `api/openapi.yaml` lists exactly the served routes, are in
 `internal/api`.
 
 The web module is `apps/web/src/modules/eam`: workspace tiles, asset list, create form
 and detail (counters, readings, condition rules, KPIs), plan list and editor, request
 triage with one-action conversion, and the work order list, create form and detail
-(status actions, completion with downtime, labor, history).
+(status actions, completion with downtime, labor, history). Slice 2 adds asset
+retirement and disposal, the criticality matrix and its versions, warranties, the fault
+and downtime cards on the work order, triage actions on the request list, and the fault
+catalog designer (`/eam/fault-catalogs`).
 
 ## Layout
 
@@ -68,7 +110,7 @@ internal/domain/         pure rules: scheduler, counters, condition rules, work 
 internal/store/          Postgres repositories (tenant-scoped transactions, outbox in the same tx)
 internal/api/            HTTP handlers, duty checks, validation
 internal/events/         event types and payloads
-migrations/              0001 domain tables + RLS, 0002 outbox and idempotency
+migrations/              0001 domain tables + RLS, 0002 outbox and idempotency, 0003 slice 2 tables + RLS
 api/openapi.yaml         contract for every endpoint
 events/asyncapi.yaml     contract for every event
 charts/eam/              Helm chart (passage-eam)
@@ -98,13 +140,13 @@ row-level security test runs the store as that role.
 
 | Duty | Routes |
 |---|---|
-| EamAssetMaintain | assets, activate, counters, rules |
+| EamAssetMaintain | assets, activate, lifecycle, criticality, warranties, counters, rules |
 | EamCounterRegister | readings |
-| EamPlanAdmin | plans, plans/schedule |
+| EamPlanAdmin | plans, plans/schedule, fault catalogs (PUT) |
 | EamRequestCreate | requests |
-| EamPlanner | request convert, work order create, status (or EamTechnician) |
-| EamTechnician | status (or EamPlanner), labor |
-| EamInquire | every GET: workspace, assets, readings, plans, requests, work orders, kpis |
+| EamPlanner | request convert and triage, work order create, status and downtime (or EamTechnician) |
+| EamTechnician | status and downtime (or EamPlanner), labor, faults |
+| EamInquire | every GET: workspace, assets, assessments, warranties, readings, plans, fault catalogs, requests, work orders, kpis |
 
 ## Error codes
 
@@ -113,27 +155,32 @@ Problem details are `application/problem+json`. The `code` field carries the cod
 | Code | HTTP | Meaning |
 |---|---|---|
 | EAM-CTR-001 | 422 | Cumulative counter reading below the last reading without reset |
-| EAM-AST-001 | 422 | Asset not in a state that allows the action (activation, work order, request conversion) |
+| EAM-AST-001 | 422 | Asset not in a state that allows the action (activation, retirement, disposal, work order, request conversion) |
 | EAM-WO-001 | 422 | Work order transition or labor not allowed in the current state |
 | EAM-WO-005 | 422 | CAPITAL work order without a fixed asset or CIP project |
 | EAM-WO-006 | 422 | Completion without ordered actual start and end times |
 | EAM-PLN-003 | 422 | Plan line invalid (kind, interval, counter, or tolerance) |
-| EAM-REQ-001 | 422 | Request not NEW or TRIAGED, so it cannot convert |
-| EAM-NF-001 | 404 | Asset, counter, work order, request or plan not found |
+| EAM-REQ-001 | 422 | Request state does not allow the action (convert needs NEW or TRIAGED; triage is refused on CONVERTED or REJECTED) |
+| EAM-FLT-001 | 422 | CORRECTIVE or EMERGENCY work order completed without a registered fault |
+| EAM-FLT-002 | 422 | Fault not allowed by the asset type's catalog, or the type has no catalog |
+| EAM-DT-001 | 422 | Downtime window overlaps one on the order, no production resource to book, or completion downtime below the windows |
+| EAM-NF-001 | 404 | Asset, counter, work order, request, plan or fault catalog not found |
 | EAM-VAL-001 | 400 | Request failed validation |
 | EAM-DUP-001 | 409 | Plan code or counter name (per asset) already used |
-| idempotency_key_reuse | 422 | Idempotency-Key already used for another counter, work order or rule |
+| idempotency_key_reuse | 422 | Idempotency-Key already used for another counter, work order, rule, request, asset assessment or warranty |
 | conflict_version | 412 | If-Match version does not match the current version |
 | precondition_required | 428 | If-Match missing on a versioned action |
 | idempotency_key_required | 400 | Idempotency-Key missing on a creating or custom POST |
 | AUTH-0001 | 401 | No tenant or principal |
 | AUTH-0003 | 403 | Missing duty |
 
-Codes from PRD 8.44.18 that this slice does not raise (EAM-WO-002..004, EAM-FLT-*,
-EAM-PMT-*, EAM-WAR-001, EAM-BUD-001) belong to later slices.
+Codes from PRD 8.44.18 that these slices do not raise (EAM-WO-002..004, EAM-PMT-*,
+EAM-BUD-001, EAM-REF-001) belong to later slices. EAM-WAR-001 is informational: the work
+order carries `warrantyCovered` and `warrantyId` instead of a message.
 
 ## Wave reference
 
 PRD section 8.44 (`docs/prd/phase-8-projects-people-service.md`). Depends on PSG-43.
-Downstream consumers: wave 23 scheduler (downtime, later), wave 16 inventory (parts,
-later), ledger posting (WO costs, later), wave 45 warranty claims (later).
+Downstream consumers: wave 23 scheduler (`downtime.recorded`), wave 45 supplier
+warranty claims (`warranty.claimable`), wave 16 inventory (parts, later), ledger posting
+(WO costs, later).

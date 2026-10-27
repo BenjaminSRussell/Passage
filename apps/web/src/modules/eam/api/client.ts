@@ -173,6 +173,7 @@ export interface MaintenanceRequest {
   readingValue?: number;
   status: RequestStatus;
   workOrderId?: string;
+  triageNote?: string;
   createdAt: string;
 }
 
@@ -200,6 +201,8 @@ export interface WorkOrder {
   downtimeMinutes: number;
   partsCost: string;
   laborCost: string;
+  warrantyId?: string;
+  warrantyCovered: boolean;
   version: number;
   createdAt: string;
 }
@@ -220,9 +223,117 @@ export interface StatusChange {
   actor?: string;
 }
 
+export interface Fault {
+  symptom: string;
+  area: string;
+  type: string;
+  cause: string;
+  remedy: string;
+}
+
+export interface WorkOrderFault extends Fault {
+  id: string;
+  notes?: string;
+  registeredBy?: string;
+  registeredAt: string;
+}
+
+export interface DowntimeWindow {
+  id: string;
+  resourceId: string;
+  from: string;
+  to: string;
+  minutes: number;
+  recordedBy?: string;
+}
+
 export interface WorkOrderDetail extends WorkOrder {
+  assetType: string;
   labor: LaborLine[];
   history: StatusChange[];
+  fault?: WorkOrderFault;
+  downtime: DowntimeWindow[];
+}
+
+export interface NewDowntime {
+  from: string;
+  to: string;
+  resourceId?: string;
+}
+
+export type TriageAction = "TRIAGE" | "REJECT" | "DEFER";
+
+export interface Consequences {
+  safety: number;
+  environment: number;
+  production: number;
+  quality: number;
+  cost: number;
+}
+
+export interface CriticalityAssessment {
+  id: string;
+  assetId: string;
+  version: number;
+  consequence: Consequences;
+  likelihood: number;
+  riskScore: number;
+  criticality: number;
+  assessedBy?: string;
+  assessedAt: string;
+}
+
+export interface NewWarranty {
+  warrantyType: string;
+  vendorPartyId: string;
+  startBasis: "PURCHASE" | "INSTALL";
+  startsOn: string;
+  months: number;
+  partsCovered: boolean;
+  laborCovered: boolean;
+  exclusions?: string[];
+}
+
+export interface Warranty extends NewWarranty {
+  id: string;
+  assetId: string;
+  endsOn: string;
+  exclusions: string[];
+  status: "ACTIVE" | "VOIDED";
+  createdAt: string;
+}
+
+export interface FaultCode {
+  code: string;
+  text: string;
+}
+
+export interface FaultCombination {
+  symptom: string;
+  area: string;
+  type: string;
+}
+
+export interface FaultCatalogInput {
+  symptoms: FaultCode[];
+  areas: FaultCode[];
+  types: FaultCode[];
+  causes: FaultCode[];
+  remedies: FaultCode[];
+  allowedCombinations: FaultCombination[];
+}
+
+export interface FaultCatalogSummary {
+  assetType: string;
+  version: number;
+  codes: number;
+  combinations: number;
+  updatedAt: string;
+}
+
+export interface FaultCatalog extends FaultCatalogInput {
+  assetType: string;
+  version: number;
 }
 
 export interface NewWorkOrder {
@@ -398,4 +509,59 @@ export function recordLabor(workOrderId: string, hours: string, rate: string, ke
 
 export function assetKpis(assetId: string, from: string, to: string, signal?: AbortSignal): Promise<Kpi> {
   return send<Kpi>(`/kpis${query({ asset: assetId, from, to })}`, {}, signal);
+}
+
+export function changeLifecycle(assetId: string, to: "INACTIVE" | "DISPOSED", version: number, key = newKey()): Promise<Asset> {
+  return post<Asset>(`/assets/${id(assetId)}/lifecycle`, { to }, key, { "If-Match": `"${version}"` });
+}
+
+export async function listAssessments(assetId: string, signal?: AbortSignal): Promise<CriticalityAssessment[]> {
+  return (await page<CriticalityAssessment>(`/assets/${id(assetId)}/criticality`, signal)).items;
+}
+
+export function assessCriticality(assetId: string, consequence: Consequences, likelihood: number, key: string): Promise<CriticalityAssessment> {
+  return post<CriticalityAssessment>(`/assets/${id(assetId)}/criticality`, { consequence, likelihood }, key);
+}
+
+export async function listWarranties(assetId: string, signal?: AbortSignal): Promise<Warranty[]> {
+  return (await page<Warranty>(`/assets/${id(assetId)}/warranties`, signal)).items;
+}
+
+export function createWarranty(assetId: string, input: NewWarranty, key: string): Promise<Warranty> {
+  return post<Warranty>(`/assets/${id(assetId)}/warranties`, input, key);
+}
+
+export async function listFaultCatalogs(signal?: AbortSignal): Promise<FaultCatalogSummary[]> {
+  return (await page<FaultCatalogSummary>("/fault-catalogs", signal)).items;
+}
+
+/** The catalog of an asset type, or null when the type has none yet (404). */
+export async function getFaultCatalog(assetType: string, signal?: AbortSignal): Promise<FaultCatalog | null> {
+  try {
+    return await send<FaultCatalog>(`/fault-catalogs/${id(assetType)}`, {}, signal);
+  } catch (error) {
+    if (error instanceof EamApiError && error.status === 404) return null;
+    throw error;
+  }
+}
+
+/** Replaces a catalog; version is the one read (0 for a new catalog). */
+export function putFaultCatalog(assetType: string, input: FaultCatalogInput, version: number): Promise<FaultCatalog> {
+  return send<FaultCatalog>(`/fault-catalogs/${id(assetType)}`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+    headers: { "If-Match": `"${version}"` },
+  });
+}
+
+export function registerFault(workOrderId: string, input: Fault & { notes?: string }, key: string): Promise<WorkOrderDetail> {
+  return post<WorkOrderDetail>(`/work-orders/${id(workOrderId)}/faults`, input, key);
+}
+
+export function recordDowntime(workOrderId: string, input: NewDowntime, key: string): Promise<WorkOrderDetail> {
+  return post<WorkOrderDetail>(`/work-orders/${id(workOrderId)}/downtime`, input, key);
+}
+
+export function triageRequest(requestId: string, action: TriageAction, note: string, key = newKey()): Promise<MaintenanceRequest> {
+  return post<MaintenanceRequest>(`/requests/${id(requestId)}/triage`, note ? { action, note } : { action }, key);
 }

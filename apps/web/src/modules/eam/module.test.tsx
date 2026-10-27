@@ -20,6 +20,7 @@ describe("eam module", () => {
       "/eam/work-orders",
       "/eam/work-orders/new",
       "/eam/work-orders/:id",
+      "/eam/fault-catalogs",
     ]) {
       expect(paths).toContain(path);
     }

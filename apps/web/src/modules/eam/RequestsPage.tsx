@@ -8,10 +8,12 @@ import {
   listAssets,
   listRequests,
   newKey,
+  triageRequest,
   type MaintenanceRequest,
   type NewRequest,
   type Problem,
   type RequestSource,
+  type TriageAction,
 } from "./api/client";
 import { dash, minuteOf, sentence } from "./format";
 import { Failure, PagedTable, State, StatusFilter } from "./parts";
@@ -20,7 +22,9 @@ import { useLoad, usePaged } from "./useLoad";
 
 const STATUSES = ["NEW", "TRIAGED", "CONVERTED", "REJECTED", "DEFERRED"];
 
-/** Request triage (8.44.6): requests from people, quality and condition rules, converted to a work order in one action. */
+const triageDone: Record<TriageAction, string> = { TRIAGE: "triaged", DEFER: "deferred", REJECT: "rejected" };
+
+/** Request triage (8.44.6, FR-44.6): convert to a work order in one action, triage, defer or reject. */
 export function RequestsPage() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
@@ -28,7 +32,27 @@ export function RequestsPage() {
   const state = usePaged((cursor, signal) => listRequests({ status: status === "ALL" ? "" : status, cursor }, signal), `requests|${status}`);
   const [converting, setConverting] = useState<string | null>(null);
   const [failure, setFailure] = useState<Problem | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const keys = useRef(new Map<string, string>());
+
+  async function triage(row: MaintenanceRequest, action: TriageAction) {
+    setConverting(`${row.id}|${action}`);
+    setFailure(null);
+    setNotice(null);
+    // One key per request and action, so a retry applies the action once.
+    const slot = `${row.id}|${action}|${row.status}`;
+    const key = keys.current.get(slot) ?? newKey();
+    keys.current.set(slot, key);
+    try {
+      const out = await triageRequest(row.id, action, "", key);
+      setNotice(`Request ${triageDone[action]}: it is now ${sentence(out.status).toLowerCase()}.`);
+      state.reload();
+    } catch (e) {
+      setFailure(describeProblem(e));
+    } finally {
+      setConverting(null);
+    }
+  }
 
   async function convert(row: MaintenanceRequest) {
     setConverting(row.id);
@@ -53,18 +77,36 @@ export function RequestsPage() {
     { key: "severity", header: "Severity", align: "end" },
     { key: "readingValue", header: "Reading", align: "end", render: (row) => (row.readingValue === undefined ? dash : row.readingValue) },
     { key: "status", header: "Status", render: (row) => <State value={row.status} /> },
+    { key: "triageNote", header: "Triage note", render: (row) => row.triageNote ?? dash },
     {
       key: "action",
       header: "Action",
       render: (row) =>
         row.workOrderId ? (
           <Link to={`/eam/work-orders/${row.workOrderId}`}>Open work order</Link>
-        ) : row.status === "NEW" || row.status === "TRIAGED" ? (
-          <Button size="sm" loading={converting === row.id} onClick={() => convert(row)}>
-            Convert to work order
-          </Button>
-        ) : (
+        ) : row.status === "CONVERTED" || row.status === "REJECTED" ? (
           dash
+        ) : (
+          <div className={styles.actions}>
+            {row.status !== "DEFERRED" ? (
+              <Button size="sm" loading={converting === row.id} onClick={() => convert(row)}>
+                Convert to work order
+              </Button>
+            ) : null}
+            {row.status !== "TRIAGED" ? (
+              <Button size="sm" variant="ghost" loading={converting === `${row.id}|TRIAGE`} onClick={() => triage(row, "TRIAGE")}>
+                Triage
+              </Button>
+            ) : null}
+            {row.status !== "DEFERRED" ? (
+              <Button size="sm" variant="ghost" loading={converting === `${row.id}|DEFER`} onClick={() => triage(row, "DEFER")}>
+                Defer
+              </Button>
+            ) : null}
+            <Button size="sm" variant="ghost" loading={converting === `${row.id}|REJECT`} onClick={() => triage(row, "REJECT")}>
+              Reject
+            </Button>
+          </div>
         ),
     },
   ];
@@ -88,7 +130,10 @@ export function RequestsPage() {
           onChange={(next) => setParams({ status: next || "ALL" })}
         />
       </div>
-      {failure ? <Failure title="Could not convert the request" problem={failure} /> : null}
+      <Alert tone="success" live="status">
+        {notice}
+      </Alert>
+      {failure ? <Failure title="Could not update the request" problem={failure} /> : null}
       <PagedTable
         label="Maintenance requests"
         noun="requests"

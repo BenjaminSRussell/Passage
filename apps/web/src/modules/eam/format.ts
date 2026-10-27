@@ -13,6 +13,19 @@ export const PLAN_CODE = /^[A-Z0-9][A-Z0-9_-]{1,29}$/;
 
 export const CURRENCY = /^[A-Z]{3}$/;
 
+/** Fault catalog code: ^[A-Z0-9_]{1,20}$. */
+export const FAULT_CODE = /^[A-Z0-9_]{1,20}$/;
+
+/** A calendar date, YYYY-MM-DD. */
+export const DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** A datetime-local value ("2026-10-21T08:00") read as UTC, as an ISO timestamp; null when it is not one. */
+export function utcFromLocalInput(value: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) return null;
+  const at = new Date(`${value}:00Z`);
+  return Number.isNaN(at.getTime()) ? null : at.toISOString();
+}
+
 /** A positive decimal with up to 2 places for hours, and up to 6 for rates. */
 export const HOURS = /^\d{1,7}(\.\d{1,2})?$/;
 export const RATE = /^\d{1,14}(\.\d{1,6})?$/;
@@ -55,6 +68,7 @@ export const statusTone: Record<string, BadgeTone> = {
   CONVERTED: "success",
   REJECTED: "neutral",
   DEFERRED: "neutral",
+  VOIDED: "neutral",
 };
 
 export const typeLabel: Record<string, string> = {

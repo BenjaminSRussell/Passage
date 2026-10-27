@@ -5,10 +5,11 @@ import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
 const areas = [
-  { to: "/eam/assets", title: "Assets", text: "Register equipment, activate it, and add counters and condition rules." },
+  { to: "/eam/assets", title: "Assets", text: "Register equipment, add counters and condition rules, assess criticality and record warranties." },
   { to: "/eam/plans", title: "Maintenance plans", text: "Time and counter plans that create preventive work orders." },
-  { to: "/eam/requests", title: "Requests", text: "Triage requests from people and condition rules, and convert them to work orders." },
-  { to: "/eam/work-orders", title: "Work orders", text: "Move orders through their lifecycle and book labor." },
+  { to: "/eam/requests", title: "Requests", text: "Triage, defer or reject requests from people and condition rules, or convert them to work orders." },
+  { to: "/eam/work-orders", title: "Work orders", text: "Move orders through their lifecycle, book labor and downtime, and register faults." },
+  { to: "/eam/fault-catalogs", title: "Fault catalogs", text: "Design the symptoms, causes and remedies technicians choose from per asset type." },
 ];
 
 /** Asset management workspace (8.44.6): tiles counted by the service, then the areas of the workspace. */

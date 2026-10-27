@@ -52,7 +52,33 @@ func setup(t *testing.T) fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.PutFaultCatalog(ctx, "PUMP", pumpCatalog(), 0); err != nil {
+		t.Fatal(err)
+	}
 	return fixture{ctx: ctx, pool: pool, s: s, t: testkit.TenantID(1), asset: a.ID, counter: c.ID}
+}
+
+// pumpCatalog is the PUMP fault catalog every fixture starts with (FR-44.16).
+func pumpCatalog() domain.FaultCatalog {
+	return domain.FaultCatalog{
+		Symptoms:     []domain.FaultCode{{Code: "NOISE", Text: "Abnormal noise"}, {Code: "LEAK", Text: "Leak"}},
+		Areas:        []domain.FaultCode{{Code: "BEARING", Text: "Bearing"}, {Code: "SEAL", Text: "Seal"}},
+		Types:        []domain.FaultCode{{Code: "WEAR", Text: "Wear"}},
+		Causes:       []domain.FaultCode{{Code: "FATIGUE", Text: "Fatigue"}},
+		Remedies:     []domain.FaultCode{{Code: "REPLACE", Text: "Replace"}},
+		Combinations: []domain.FaultCombination{{Symptom: "NOISE", Area: "BEARING", Type: "WEAR"}, {Symptom: "LEAK", Area: "SEAL", Type: "WEAR"}},
+	}
+}
+
+var bearingWear = domain.Fault{Symptom: "NOISE", Area: "BEARING", Type: "WEAR", Cause: "FATIGUE", Remedy: "REPLACE"}
+
+// fault registers the bearing-wear fault on a work order, so a CORRECTIVE or
+// EMERGENCY order can complete (EAM-FLT-001).
+func (f fixture) fault(t *testing.T, woID string) {
+	t.Helper()
+	if _, err := f.s.RegisterFault(f.ctx, woID, bearingWear, "", "tech-1", ""); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // inTenant runs a read-only check inside a tenant-scoped transaction (RLS).
@@ -460,6 +486,7 @@ func TestTransitionWorkOrder(t *testing.T) {
 	if _, err := f.s.TransitionWorkOrder(f.ctx, wo.ID, Transition{To: domain.StatusCompleted, Version: v, ActualStart: &start, ActualEnd: &end}, "t-bad"); problemCode(err) != CodeWOTimes {
 		t.Fatalf("end before start: %v, want %s", err, CodeWOTimes)
 	}
+	f.fault(t, wo.ID)
 	done, err := f.s.TransitionWorkOrder(f.ctx, wo.ID, Transition{To: domain.StatusCompleted, Version: v, DowntimeMinutes: ptr(90)}, "t-done")
 	if err != nil || done.DowntimeMinutes != 90 || done.ActualEnd == nil {
 		t.Fatalf("completion = %+v %v", done, err)
@@ -501,6 +528,7 @@ func TestLabor_ReplayAndClosedOrder(t *testing.T) {
 	if err != nil || len(detail.Labor) != 1 || !decimal.RequireFromString(detail.LaborCost).Equal(decimal.RequireFromString("100.25")) {
 		t.Fatalf("labor = %+v cost %s %v, want one line of 100.25", detail.Labor, detail.LaborCost, err)
 	}
+	f.fault(t, wo.ID)
 	v := f.advance(t, wo.ID, detail.Version, domain.StatusScheduled, domain.StatusReleased, domain.StatusInProgress, domain.StatusCompleted)
 	_ = v
 	if _, err := f.s.RecordLabor(f.ctx, wo.ID, decimal.NewFromInt(1), decimal.NewFromInt(1), nil, "lab-2"); problemCode(err) != CodeWOTransition {
@@ -521,6 +549,7 @@ func TestAssetKPI_AC448(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		f.fault(t, wo.ID)
 		v := f.advance(t, wo.ID, wo.Version, domain.StatusScheduled, domain.StatusReleased)
 		start := from.Add(time.Duration(100*(i+1)) * time.Hour)
 		end := start.Add(time.Duration(hours) * time.Hour)
@@ -613,7 +642,9 @@ func TestRLS_TenantIsolation(t *testing.T) {
 		}
 	}
 	for _, table := range []string{"asset", "counter", "counter_reading", "maintenance_plan", "plan_line", "work_order",
-		"work_order_transition", "work_order_labor", "work_order_part", "maintenance_request", "condition_rule", "outbox", "idempotency_keys"} {
+		"work_order_transition", "work_order_labor", "work_order_part", "maintenance_request", "condition_rule", "outbox", "idempotency_keys",
+		"criticality_assessment", "fault_catalog", "fault_code", "fault_combination", "work_order_fault", "downtime_window",
+		"maintenance_request_triage", "asset_warranty"} {
 		var enabled, forced bool
 		if err := admin.QueryRow(ctx, `select relrowsecurity, relforcerowsecurity from pg_class
 		  where relname = $1 and relnamespace = $2::regnamespace`, table, schema).Scan(&enabled, &forced); err != nil {
@@ -641,5 +672,22 @@ func TestRLS_TenantIsolation(t *testing.T) {
 	b, err := s.CreateAsset(two, Asset{Name: "Pump", AssetType: "PUMP", SiteID: testkit.TenantID(9), Criticality: 3}, "k")
 	if err != nil || b.ID == a.ID {
 		t.Fatalf("tenant 2 asset = %+v %v", b, err)
+	}
+	// Fault catalogs and warranties are tenant data too.
+	if _, err := s.PutFaultCatalog(one, "PUMP", pumpCatalog(), 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetFaultCatalog(two, "PUMP"); problemCode(err) != CodeNotFound {
+		t.Fatalf("tenant 2 reading tenant 1's catalog: %v, want %s", err, CodeNotFound)
+	}
+	if c, err := s.PutFaultCatalog(two, "PUMP", pumpCatalog(), 0); err != nil || c.Version != 1 {
+		t.Fatalf("tenant 2 own catalog = %+v %v, want version 1", c, err)
+	}
+	if _, err := s.CreateWarranty(one, a.ID, Warranty{WarrantyType: "OEM", VendorPartyID: testkit.TenantID(8), StartBasis: "PURCHASE",
+		StartsOn: "2026-01-01", Months: 12, PartsCovered: true}, "w"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ListWarranties(two, a.ID); problemCode(err) != CodeNotFound {
+		t.Fatalf("tenant 2 listing tenant 1's warranties: %v, want %s", err, CodeNotFound)
 	}
 }

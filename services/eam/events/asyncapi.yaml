@@ -2,7 +2,7 @@ asyncapi: 3.0.0
 info:
   title: Passage EAM events
   version: 0.1.0
-  description: CloudEvents published through the transactional outbox (Debezium relay). Downtime and budget events arrive in later slices.
+  description: CloudEvents published through the transactional outbox (Debezium relay). Permit and budget events arrive in later slices.
 defaultContentType: application/cloudevents+json
 channels:
   requestCreated:
@@ -30,6 +30,21 @@ channels:
     messages:
       counterReadingRegistered:
         $ref: "#/components/messages/CounterReadingRegistered"
+  downtimeRecorded:
+    address: passage.eam.downtime
+    messages:
+      downtimeRecorded:
+        $ref: "#/components/messages/DowntimeRecorded"
+  requestTriaged:
+    address: passage.eam.request
+    messages:
+      requestTriaged:
+        $ref: "#/components/messages/RequestTriaged"
+  warrantyClaimable:
+    address: passage.eam.warranty
+    messages:
+      warrantyClaimable:
+        $ref: "#/components/messages/WarrantyClaimable"
 operations:
   publishRequestCreated:
     action: send
@@ -46,8 +61,29 @@ operations:
   publishCounterReadingRegistered:
     action: send
     channel: { $ref: "#/channels/counterReadingRegistered" }
+  publishDowntimeRecorded:
+    action: send
+    channel: { $ref: "#/channels/downtimeRecorded" }
+  publishRequestTriaged:
+    action: send
+    channel: { $ref: "#/channels/requestTriaged" }
+  publishWarrantyClaimable:
+    action: send
+    channel: { $ref: "#/channels/warrantyClaimable" }
 components:
   messages:
+    DowntimeRecorded:
+      name: dev.passage.eam.downtime.recorded.v1
+      payload:
+        $ref: "#/components/schemas/DowntimeRecorded"
+    RequestTriaged:
+      name: dev.passage.eam.request.triaged.v1
+      payload:
+        $ref: "#/components/schemas/RequestTriaged"
+    WarrantyClaimable:
+      name: dev.passage.eam.warranty.claimable.v1
+      payload:
+        $ref: "#/components/schemas/WarrantyClaimable"
     RequestCreated:
       name: dev.passage.eam.request.created.v1
       payload:
@@ -115,3 +151,39 @@ components:
         value: { type: number }
         at: { type: string, format: date-time }
         source: { type: string, enum: [MANUAL, IOT] }
+    DowntimeRecorded:
+      type: object
+      description: A production resource stop booked on a work order (BR-44.5); wave 23 makes it a capacity exception for [from, to).
+      required: [downtimeId, resourceId, workOrderId, assetId, from, to, minutes]
+      properties:
+        downtimeId: { type: string, format: uuid }
+        resourceId: { type: string, format: uuid }
+        workOrderId: { type: string, format: uuid }
+        assetId: { type: string, format: uuid }
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        minutes: { type: integer, minimum: 1 }
+    RequestTriaged:
+      type: object
+      description: A triage action on a maintenance request (FR-44.6).
+      required: [requestId, assetId, action, from, to, at]
+      properties:
+        requestId: { type: string, format: uuid }
+        assetId: { type: string, format: uuid }
+        action: { type: string, enum: [TRIAGE, REJECT, DEFER] }
+        from: { type: string, enum: [NEW, TRIAGED, DEFERRED] }
+        to: { type: string, enum: [TRIAGED, REJECTED, DEFERRED] }
+        at: { type: string, format: date-time }
+        actor: { type: string }
+    WarrantyClaimable:
+      type: object
+      description: A warranty-covered work order completed with a covered amount above zero (BR-44.14); consumed by wave 45 supplier claims (FR-45.15).
+      required: [workOrderId, assetId, warrantyId, vendorPartyId, currency, coveredParts, coveredLabor]
+      properties:
+        workOrderId: { type: string, format: uuid }
+        assetId: { type: string, format: uuid }
+        warrantyId: { type: string, format: uuid }
+        vendorPartyId: { type: string, format: uuid }
+        currency: { type: string }
+        coveredParts: { type: string, description: decimal string }
+        coveredLabor: { type: string, description: decimal string }

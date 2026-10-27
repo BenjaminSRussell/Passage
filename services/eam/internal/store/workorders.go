@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -32,19 +33,21 @@ type WorkOrder struct {
 	DowntimeMinutes int        `json:"downtimeMinutes"`
 	PartsCost       string     `json:"partsCost"`
 	LaborCost       string     `json:"laborCost"`
+	WarrantyID      *string    `json:"warrantyId,omitempty"`
+	WarrantyCovered bool       `json:"warrantyCovered"`
 	Version         int        `json:"version"`
 	CreatedAt       time.Time  `json:"createdAt"`
 }
 
 const workOrderColumns = `id::text, number, asset_id::text, work_order_type, status, priority, currency,
   plan_line_id::text, request_id::text, coalesce(job_type, ''), due_at, actual_start, actual_end,
-  downtime_minutes, parts_cost::text, labor_cost::text, version, created_at`
+  downtime_minutes, parts_cost::text, labor_cost::text, warranty_id::text, warranty_covered, version, created_at`
 
 func scanWorkOrder(row pgx.Row) (WorkOrder, error) {
 	var w WorkOrder
 	err := row.Scan(&w.ID, &w.Number, &w.AssetID, &w.Type, &w.Status, &w.Priority, &w.Currency,
 		&w.PlanLineID, &w.RequestID, &w.JobType, &w.DueAt, &w.ActualStart, &w.ActualEnd,
-		&w.DowntimeMinutes, &w.PartsCost, &w.LaborCost, &w.Version, &w.CreatedAt)
+		&w.DowntimeMinutes, &w.PartsCost, &w.LaborCost, &w.WarrantyID, &w.WarrantyCovered, &w.Version, &w.CreatedAt)
 	return w, err
 }
 
@@ -57,15 +60,29 @@ func getWorkOrder(ctx context.Context, tx pgx.Tx, t, id string, lock bool) (Work
 	return w, notFound(err, "work order")
 }
 
-// insertWorkOrder creates a work order in CREATED and returns its id. The number
-// comes from the work-order sequence, allocated last in the transaction.
-func insertWorkOrder(ctx context.Context, tx pgx.Tx, t string, in WorkOrder, key string) (string, error) {
+// insertWorkOrder creates a work order in CREATED and returns its id. Every
+// creation path (by hand, request conversion, plan generation) runs the
+// warranty check here (BR-44.14) on the order's date: its due date, or now. The
+// number comes from the work-order sequence, allocated last in the transaction.
+func insertWorkOrder(ctx context.Context, tx pgx.Tx, t string, in WorkOrder, key string, now time.Time) (string, error) {
+	at := now
+	if in.DueAt != nil {
+		at = *in.DueAt
+	}
+	w, err := coveringWarranty(ctx, tx, t, in.AssetID, at, in.JobType)
+	if err != nil {
+		return "", err
+	}
+	var warrantyID *string
+	if w != nil {
+		warrantyID = &w.ID
+	}
 	id := ids.New()
-	_, err := tx.Exec(ctx, `insert into work_order (tenant_id, id, number, asset_id, work_order_type, status, priority,
-	    plan_line_id, request_id, job_type, currency, due_at, idempotency_key)
-	  values ($1, $2, 'WO-' || nextval('work_order_number_seq'), $3, $4, 'CREATED', $5, $6, $7, $8, $9, $10, $11)`,
+	_, err = tx.Exec(ctx, `insert into work_order (tenant_id, id, number, asset_id, work_order_type, status, priority,
+	    plan_line_id, request_id, job_type, currency, due_at, warranty_id, warranty_covered, idempotency_key)
+	  values ($1, $2, 'WO-' || nextval('work_order_number_seq'), $3, $4, 'CREATED', $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
 		t, id, in.AssetID, in.Type, in.Priority, in.PlanLineID, in.RequestID, optStr(in.JobType), in.Currency,
-		in.DueAt, optStr(key))
+		in.DueAt, warrantyID, warrantyID != nil, optStr(key))
 	return id, err
 }
 
@@ -98,7 +115,7 @@ func (s *Postgres) CreateWorkOrder(ctx context.Context, in WorkOrder, key string
 		} else if in.Priority == 0 {
 			in.Priority = domain.DefaultTypePriority(in.Type, asset.Criticality)
 		}
-		id, err := insertWorkOrder(ctx, tx, t, in, key)
+		id, err := insertWorkOrder(ctx, tx, t, in, key, s.now())
 		if err != nil {
 			return err
 		}
@@ -175,7 +192,24 @@ func (s *Postgres) TransitionWorkOrder(ctx context.Context, id string, in Transi
 			if err := domain.ValidCompletion(newStart, newEnd); err != nil {
 				return problem(422, CodeWOTimes, err.Error())
 			}
+			if domain.FaultRequired(cur.Type) {
+				f, err := currentFault(ctx, tx, t, id)
+				if err != nil {
+					return err
+				}
+				if f == nil {
+					return problem(422, CodeFaultMissing, "register a fault before completing "+cur.Type+" work orders")
+				}
+			}
 			if in.DowntimeMinutes != nil {
+				windows, err := recordedDowntime(ctx, tx, t, id)
+				if err != nil {
+					return err
+				}
+				if *in.DowntimeMinutes < windows {
+					return problem(422, CodeDowntime, fmt.Sprintf(
+						"downtime of %d minutes is less than the %d minutes of downtime windows already recorded", *in.DowntimeMinutes, windows))
+				}
 				downtime = *in.DowntimeMinutes
 			}
 		}
@@ -201,6 +235,11 @@ func (s *Postgres) TransitionWorkOrder(ctx context.Context, id string, in Transi
 				LaborCost: cur.LaborCost, DowntimeMins: downtime,
 				CompletedAt: newEnd.UTC().Format(time.RFC3339Nano)}); err != nil {
 				return err
+			}
+			if cur.WarrantyCovered && cur.WarrantyID != nil {
+				if err := claimWarranty(ctx, tx, t, cur); err != nil {
+					return err
+				}
 			}
 			if cur.PlanLineID != nil {
 				if err := resetPlanLine(ctx, tx, t, *cur.PlanLineID, *newEnd, now); err != nil {
@@ -356,14 +395,18 @@ type StatusChange struct {
 	Actor *string   `json:"actor,omitempty"`
 }
 
-// WorkOrderDetail is a work order with its labor and status history.
+// WorkOrderDetail is a work order with its asset type, labor, status history,
+// current fault registration and downtime windows.
 type WorkOrderDetail struct {
 	WorkOrder
-	Labor   []LaborLine    `json:"labor"`
-	History []StatusChange `json:"history"`
+	AssetType string           `json:"assetType"`
+	Labor     []LaborLine      `json:"labor"`
+	History   []StatusChange   `json:"history"`
+	Fault     *WorkOrderFault  `json:"fault,omitempty"`
+	Downtime  []DowntimeWindow `json:"downtime"`
 }
 
-// GetWorkOrder returns one work order with its labor lines and status history.
+// GetWorkOrder returns one work order with its detail.
 func (s *Postgres) GetWorkOrder(ctx context.Context, id string) (WorkOrderDetail, error) {
 	var out WorkOrderDetail
 	err := s.withTx(ctx, func(tx pgx.Tx, t string) error {
@@ -371,38 +414,70 @@ func (s *Postgres) GetWorkOrder(ctx context.Context, id string) (WorkOrderDetail
 		if err != nil {
 			return err
 		}
-		out = WorkOrderDetail{WorkOrder: w, Labor: []LaborLine{}, History: []StatusChange{}}
-		rows, err := tx.Query(ctx, `select id::text, hours::text, rate::text, cost::text, worker_id::text, created_at
-		  from work_order_labor where tenant_id = $1 and work_order_id = $2 order by id`, t, id)
-		if err != nil {
-			return err
-		}
-		for rows.Next() {
-			var l LaborLine
-			if err := rows.Scan(&l.ID, &l.Hours, &l.Rate, &l.Cost, &l.WorkerID, &l.CreatedAt); err != nil {
-				rows.Close()
-				return err
-			}
-			out.Labor = append(out.Labor, l)
-		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
-			return err
-		}
-		rows, err = tx.Query(ctx, `select from_status, to_status, at, actor from work_order_transition
-		  where tenant_id = $1 and work_order_id = $2 order by at, id`, t, id)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var c StatusChange
-			if err := rows.Scan(&c.From, &c.To, &c.At, &c.Actor); err != nil {
-				return err
-			}
-			out.History = append(out.History, c)
-		}
-		return rows.Err()
+		out, err = workOrderDetail(ctx, tx, t, w)
+		return err
 	})
+	return out, err
+}
+
+// workOrderDetail reads the parts of the detail view that live in other tables.
+func workOrderDetail(ctx context.Context, tx pgx.Tx, t string, w WorkOrder) (WorkOrderDetail, error) {
+	out := WorkOrderDetail{WorkOrder: w, Labor: []LaborLine{}, History: []StatusChange{}, Downtime: []DowntimeWindow{}}
+	if err := tx.QueryRow(ctx, `select asset_type from asset where tenant_id = $1 and id = $2`, t, w.AssetID).
+		Scan(&out.AssetType); err != nil {
+		return out, err
+	}
+	rows, err := tx.Query(ctx, `select id::text, hours::text, rate::text, cost::text, worker_id::text, created_at
+	  from work_order_labor where tenant_id = $1 and work_order_id = $2 order by id`, t, w.ID)
+	if err != nil {
+		return out, err
+	}
+	for rows.Next() {
+		var l LaborLine
+		if err := rows.Scan(&l.ID, &l.Hours, &l.Rate, &l.Cost, &l.WorkerID, &l.CreatedAt); err != nil {
+			rows.Close()
+			return out, err
+		}
+		out.Labor = append(out.Labor, l)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+	rows, err = tx.Query(ctx, `select from_status, to_status, at, actor from work_order_transition
+	  where tenant_id = $1 and work_order_id = $2 order by at, id`, t, w.ID)
+	if err != nil {
+		return out, err
+	}
+	for rows.Next() {
+		var c StatusChange
+		if err := rows.Scan(&c.From, &c.To, &c.At, &c.Actor); err != nil {
+			rows.Close()
+			return out, err
+		}
+		out.History = append(out.History, c)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+	rows, err = tx.Query(ctx, `select id::text, resource_id::text, starts_at, ends_at, minutes, recorded_by
+	  from downtime_window where tenant_id = $1 and work_order_id = $2 order by starts_at, id`, t, w.ID)
+	if err != nil {
+		return out, err
+	}
+	for rows.Next() {
+		var d DowntimeWindow
+		if err := rows.Scan(&d.ID, &d.ResourceID, &d.From, &d.To, &d.Minutes, &d.RecordedBy); err != nil {
+			rows.Close()
+			return out, err
+		}
+		out.Downtime = append(out.Downtime, d)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+	out.Fault, err = currentFault(ctx, tx, t, w.ID)
 	return out, err
 }

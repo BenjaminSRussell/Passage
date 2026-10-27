@@ -97,12 +97,15 @@ const order: WorkOrder = {
   downtimeMinutes: 0,
   partsCost: "0",
   laborCost: "360.000000",
+  warrantyCovered: false,
   version: 3,
   createdAt: "2026-10-21T08:00:00Z",
 };
 
 const orderDetail: WorkOrderDetail = {
   ...order,
+  assetType: "PUMP",
+  downtime: [],
   labor: [{ id: "l1", hours: "8.00", rate: "45.000000", cost: "360.000000", createdAt: "2026-10-21T09:00:00Z" }],
   history: [{ from: "CREATED", to: "SCHEDULED", at: "2026-10-21T08:10:00Z", actor: "planner-1" }],
 };
@@ -198,6 +201,8 @@ describe("asset detail", () => {
       if (get(`/assets/${PUMP}`)(url, init)) return json(200, detail);
       if (get("/kpis")(url, init)) return json(200, { failures: 3, mtbfHours: 900, mttrHours: 3.3333, availability: 0.996 });
       if (get("/work-orders")(url, init)) return json(200, { items: [order] });
+      if (get(`/assets/${PUMP}/criticality`)(url, init)) return json(200, { items: [] });
+      if (get(`/assets/${PUMP}/warranties`)(url, init)) return json(200, { items: [] });
       return undefined;
     };
   }

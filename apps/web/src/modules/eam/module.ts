@@ -2,6 +2,7 @@ import { createElement } from "react";
 import type { PassageModule } from "../registry";
 import { AssetDetailPage } from "./AssetDetailPage";
 import { AssetsPage, NewAssetPage } from "./AssetsPage";
+import { FaultCatalogPage } from "./FaultCatalogPage";
 import { NewPlanPage, PlansPage } from "./PlansPage";
 import { NewRequestPage, RequestsPage } from "./RequestsPage";
 import { WorkOrderDetailPage } from "./WorkOrderDetailPage";
@@ -11,7 +12,7 @@ import { WorkspacePage } from "./WorkspacePage";
 const eam: PassageModule = {
   id: "eam",
   title: "Asset management",
-  description: "Maintain plant assets with preventive plans, condition triggers, work orders and asset costs.",
+  description: "Maintain plant assets with preventive plans, condition triggers, work orders, faults, warranties and asset costs.",
   routes: [
     { path: "/eam", element: createElement(WorkspacePage), handle: { title: "Asset management" } },
     { path: "/eam/assets", element: createElement(AssetsPage), handle: { title: "Assets" } },
@@ -24,6 +25,7 @@ const eam: PassageModule = {
     { path: "/eam/work-orders", element: createElement(WorkOrdersPage), handle: { title: "Work orders" } },
     { path: "/eam/work-orders/new", element: createElement(NewWorkOrderPage), handle: { title: "New work order" } },
     { path: "/eam/work-orders/:id", element: createElement(WorkOrderDetailPage), handle: { title: "Work order" } },
+    { path: "/eam/fault-catalogs", element: createElement(FaultCatalogPage), handle: { title: "Fault catalog designer" } },
   ],
   nav: [
     { label: "Overview", to: "/eam", duty: "EamInquire" },
@@ -31,6 +33,7 @@ const eam: PassageModule = {
     { label: "Maintenance plans", to: "/eam/plans", duty: "EamInquire" },
     { label: "Requests", to: "/eam/requests", duty: "EamInquire" },
     { label: "Work orders", to: "/eam/work-orders", duty: "EamInquire" },
+    { label: "Fault catalogs", to: "/eam/fault-catalogs", duty: "EamInquire" },
   ],
 };
 
