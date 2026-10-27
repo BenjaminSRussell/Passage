@@ -1,7 +1,7 @@
 import { z } from "zod";
-import { defaultFetch, request, type FetchLike } from "./http";
+import { defaultFetch, request, type FetchLike } from "../../../shell/api/http";
 
-export { ApiError, newKey } from "./http";
+export { ApiError, newKey } from "../../../shell/api/http";
 
 export const RECEIPT_STATES = ["ARRIVED", "REGISTERED", "POSTED", "CANCELLED"] as const;
 export type ReceiptState = (typeof RECEIPT_STATES)[number];
@@ -126,10 +126,10 @@ export function postReceipt(id: string, version: number, idempotencyKey: string,
   return command(id, "post", version, idempotencyKey, fetchImpl);
 }
 
-export function correctReceipt(id: string, version: number, lines: CorrectLineInput[], idempotencyKey: string, fetchImpl: FetchLike = defaultFetch): Promise<Receipt> {
-  return command(id, "correct", version, idempotencyKey, fetchImpl, { lines });
+export function correctReceipt(id: string, version: number, lines: CorrectLineInput[], idempotencyKey: string, postingDate?: string, fetchImpl: FetchLike = defaultFetch): Promise<Receipt> {
+  return command(id, "correct", version, idempotencyKey, fetchImpl, { lines, ...(postingDate ? { postingDate } : {}) });
 }
 
-export function cancelReceipt(id: string, version: number, idempotencyKey: string, fetchImpl: FetchLike = defaultFetch): Promise<Receipt> {
-  return command(id, "cancel", version, idempotencyKey, fetchImpl);
+export function cancelReceipt(id: string, version: number, idempotencyKey: string, postingDate?: string, fetchImpl: FetchLike = defaultFetch): Promise<Receipt> {
+  return command(id, "cancel", version, idempotencyKey, fetchImpl, postingDate ? { postingDate } : undefined);
 }

@@ -13,8 +13,9 @@ import (
 )
 
 var (
-	ErrNotFound     = errors.New("receipt not found")
-	ErrGrirNotFound = errors.New("no open GR/IR item for the receipt line")
+	ErrPendingNotFound = errors.New("pending posting not found")
+	ErrNotFound        = errors.New("receipt not found")
+	ErrGrirNotFound    = errors.New("no open GR/IR item for the receipt line")
 )
 
 type DuplicatePackingSlipError struct{ ReceiptNumber string }
@@ -81,11 +82,29 @@ type PostOutcome struct {
 }
 
 type PendingPosting struct {
-	Key     string
-	Subject string
-	Hash    string
-	Journal []byte
+	Key      string
+	BaseKey  string
+	Subjects []string
+	Hash     string
+	Journal  []byte
 }
+
+type PendingRow struct {
+	Key       string
+	BaseKey   string
+	Subjects  []string
+	Hash      string
+	Journal   []byte
+	Outcome   string
+	CreatedAt time.Time
+	DoneAt    *time.Time
+}
+
+const (
+	OutcomePosted   = "POSTED"
+	OutcomeRejected = "REJECTED"
+	OutcomeReversed = "REVERSED"
+)
 
 type LineChange struct {
 	LineNo     int
@@ -165,6 +184,10 @@ type Store interface {
 	ReservePosting(ctx context.Context, p PendingPosting) error
 	ReleasePosting(ctx context.Context, key string) error
 	EnsureNoPending(ctx context.Context, subject string) error
+	PostingGeneration(ctx context.Context, baseKey string) (int, error)
+	GetPending(ctx context.Context, key string) (PendingRow, error)
+	ListPending(ctx context.Context) ([]PendingRow, error)
+	FinishPending(ctx context.Context, key, outcome string) error
 	ClaimKey(ctx context.Context, key, hash string, lockFor time.Duration) (ClaimResult, error)
 	CompleteKey(ctx context.Context, key string, status int, body []byte) error
 	ReleaseKey(ctx context.Context, key string) error
@@ -172,7 +195,10 @@ type Store interface {
 
 var _ Store = (*Postgres)(nil)
 
-type Postgres struct{ pool *pgxpool.Pool }
+type Postgres struct {
+	pool    *pgxpool.Pool
+	pending *pgxpool.Pool
+}
 
 func New(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
 

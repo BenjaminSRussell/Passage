@@ -3,9 +3,9 @@ import { useRef, useState, type FormEvent } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader } from "../../shell/ui";
 import { newKey, postVendorInvoice, type Invoice, type InvoiceInput } from "./api/client";
-import { describeFailure, fieldErrors } from "../receiving/api/http";
+import { describeFailure, fieldErrors } from "../../shell/api/http";
 import { DECIMAL, UUID, type InvoiceNavState } from "./parts";
-import styles from "../receiving/pages.module.css";
+import styles from "../../shell/pageLayout.module.css";
 
 const MAX_LINES = 500;
 

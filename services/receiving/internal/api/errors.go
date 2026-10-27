@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5/middleware"
 
@@ -28,6 +29,7 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 	var problem *httpx.Problem
 	var domainErr *domain.Error
 	var duplicate *store.DuplicatePackingSlipError
+	var pending *store.PendingError
 	switch {
 	case errors.As(err, &problem):
 		httpx.Fail(w, r, problem)
@@ -35,6 +37,10 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 		httpx.Fail(w, r, httpx.NewProblem(domainStatus[domainErr.Code], domainErr.Code, domainErr.Detail))
 	case errors.As(err, &duplicate):
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, "RCV-DUP-001", "Packing slip already used on receipt "+duplicate.ReceiptNumber))
+	case errors.As(err, &pending):
+		problem := httpx.NewProblem(http.StatusConflict, domain.CodePostingPending, pending.Error()+"; repeat the original request first")
+		problem.Errors = map[string]string{"pendingKey": pending.Key, "createdAt": pending.CreatedAt.UTC().Format(time.RFC3339)}
+		httpx.Fail(w, r, problem)
 	case errors.Is(err, store.ErrNotFound):
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, "RCV-NF-001", "receipt not found"))
 	case errors.Is(err, store.ErrGrirNotFound):

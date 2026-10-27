@@ -6,20 +6,78 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/url"
+	"slices"
+	"sync"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
+	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/store"
 )
 
-type durableLedger struct {
-	inner   domain.LedgerPoster
-	store   store.Store
-	subject string
+const dutyReceivingAdmin = "ReceivingAdmin"
+
+type pendingTracker struct {
+	mu       sync.Mutex
+	started  map[string]time.Time
+	subjects map[string][]string
 }
 
-func (a *API) ledgerFor(subject string) domain.LedgerPoster {
-	return durableLedger{inner: a.ports.Ledger, store: a.store, subject: subject}
+func (t *pendingTracker) add(key string, subjects []string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.started == nil {
+		t.started, t.subjects = map[string]time.Time{}, map[string][]string{}
+	}
+	if _, ok := t.started[key]; !ok {
+		t.started[key] = time.Now()
+	}
+	t.subjects[key] = subjects
+}
+
+func (t *pendingTracker) drop(key string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.started, key)
+	delete(t.subjects, key)
+}
+
+func (t *pendingTracker) finish(subjects ...string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for key, held := range t.subjects {
+		if slices.ContainsFunc(subjects, func(s string) bool { return slices.Contains(held, s) }) {
+			delete(t.started, key)
+			delete(t.subjects, key)
+		}
+	}
+}
+
+func (t *pendingTracker) stats() (open int, oldest time.Duration) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for _, started := range t.started {
+		oldest = max(oldest, time.Since(started))
+	}
+	return len(t.started), oldest
+}
+
+type durableLedger struct {
+	inner    domain.LedgerPoster
+	store    store.Store
+	tracker  *pendingTracker
+	subjects []string
+}
+
+func (a *API) ledgerFor(subjects ...string) domain.LedgerPoster {
+	unique := slices.Compact(slices.Sorted(slices.Values(subjects)))
+	return durableLedger{inner: a.ports.Ledger, store: a.store, tracker: &a.pendingPostings, subjects: unique}
 }
 
 func (d durableLedger) Post(ctx context.Context, entry domain.JournalEntry) (string, error) {
@@ -27,12 +85,22 @@ func (d durableLedger) Post(ctx context.Context, entry domain.JournalEntry) (str
 	if err != nil {
 		return "", err
 	}
-	sum := sha256.Sum256(append([]byte(entry.IdempotencyKey+"\x00"), journal...))
-	if err := d.store.ReservePosting(ctx, store.PendingPosting{Key: entry.IdempotencyKey, Subject: d.subject, Hash: hex.EncodeToString(sum[:]), Journal: journal}); err != nil {
+	base := entry.IdempotencyKey
+	sum := sha256.Sum256(append([]byte(base+"\x00"), journal...))
+	generation, err := d.store.PostingGeneration(ctx, base)
+	if err != nil {
 		return "", err
 	}
+	if generation > 0 {
+		entry.IdempotencyKey = fmt.Sprintf("%s:r%d", base, generation)
+	}
+	if err := d.store.ReservePosting(ctx, store.PendingPosting{Key: entry.IdempotencyKey, BaseKey: base, Subjects: d.subjects, Hash: hex.EncodeToString(sum[:]), Journal: journal}); err != nil {
+		return "", err
+	}
+	d.tracker.add(entry.IdempotencyKey, d.subjects)
 	id, err := d.inner.Post(ctx, entry)
-	if errors.Is(err, domain.ErrPeriodClosed) {
+	if errors.Is(err, domain.ErrPeriodClosed) || errors.Is(err, domain.ErrLedgerRejected) {
+		d.tracker.drop(entry.IdempotencyKey)
 		if releaseErr := d.store.ReleasePosting(ctx, entry.IdempotencyKey); releaseErr != nil {
 			return "", errors.Join(err, releaseErr)
 		}
@@ -49,4 +117,103 @@ func optionalDate(fields map[string]string, name, value string) time.Time {
 		fields[name] = "must be a YYYY-MM-DD date"
 	}
 	return t
+}
+
+type pendingBody struct {
+	Key       string   `json:"key"`
+	Subjects  []string `json:"subjects"`
+	CreatedAt string   `json:"createdAt"`
+	AgeSecond int64    `json:"ageSeconds"`
+}
+
+func toPendingBody(r store.PendingRow) pendingBody {
+	return pendingBody{Key: r.Key, Subjects: r.Subjects, CreatedAt: r.CreatedAt.UTC().Format(time.RFC3339), AgeSecond: int64(time.Since(r.CreatedAt).Seconds())}
+}
+
+func (a *API) listPending(w http.ResponseWriter, r *http.Request) {
+	rows, err := a.store.ListPending(r.Context())
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	out := struct {
+		Items []pendingBody `json:"items"`
+	}{Items: make([]pendingBody, 0, len(rows))}
+	for _, row := range rows {
+		out.Items = append(out.Items, toPendingBody(row))
+	}
+	httpx.JSON(w, http.StatusOK, out)
+}
+
+type resolveBody struct {
+	Key           string `json:"key"`
+	Outcome       string `json:"outcome"`
+	LedgerEntryID string `json:"ledgerEntryId,omitempty"`
+}
+
+func unavailable(detail string) *httpx.Problem {
+	return httpx.NewProblem(http.StatusServiceUnavailable, "COM-0503", detail)
+}
+
+func (a *API) resolvePending(w http.ResponseWriter, r *http.Request) {
+	if _, ok := tenant.FromContext(r.Context()); !ok {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnauthorized, "AUTH-0001", "missing or malformed tenant"))
+		return
+	}
+	key, err := url.PathUnescape(chi.URLParam(r, "key"))
+	if err != nil || key == "" {
+		httpx.Fail(w, r, validationProblem(map[string]string{"key": "must be a pending posting key"}))
+		return
+	}
+	ctx := r.Context()
+	row, err := a.store.GetPending(ctx, key)
+	if errors.Is(err, store.ErrPendingNotFound) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, "RCV-NF-003", "pending posting not found"))
+		return
+	}
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if row.DoneAt != nil {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, domain.CodeInvalidTransition, "the posting is already finished as "+row.Outcome))
+		return
+	}
+	reverser, ok := a.ports.Ledger.(domain.LedgerReverser)
+	if !ok {
+		httpx.Fail(w, r, unavailable("the ledger adapter cannot reverse entries"))
+		return
+	}
+	var entry domain.JournalEntry
+	if err := json.Unmarshal(row.Journal, &entry); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	entry.IdempotencyKey = row.Key
+	id, err := a.ports.Ledger.Post(ctx, entry)
+	switch {
+	case errors.Is(err, domain.ErrPeriodClosed) || errors.Is(err, domain.ErrLedgerRejected):
+		a.finishPending(w, r, row.Key, store.OutcomeRejected, "")
+		return
+	case errors.Is(err, domain.ErrLedgerConflict):
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, domain.CodePostingPending, "the ledger holds a different entry under this key; resolve it in the ledger"))
+		return
+	case err != nil:
+		httpx.Fail(w, r, unavailable("the ledger could not be reached; try again"))
+		return
+	}
+	if err := reverser.Reverse(ctx, id, row.Key+":reverse"); err != nil {
+		httpx.Fail(w, r, unavailable("the ledger entry exists but could not be reversed yet; try again"))
+		return
+	}
+	a.finishPending(w, r, row.Key, store.OutcomeReversed, id)
+}
+
+func (a *API) finishPending(w http.ResponseWriter, r *http.Request, key, outcome, entryID string) {
+	if err := a.store.FinishPending(r.Context(), key, outcome); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	a.pendingPostings.drop(key)
+	httpx.JSON(w, http.StatusOK, resolveBody{Key: key, Outcome: outcome, LedgerEntryID: entryID})
 }

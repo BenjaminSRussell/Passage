@@ -239,4 +239,34 @@ func TestMigration0005_InvoiceTablesIsolationAndUniqueNumber(t *testing.T) {
 			t.Errorf("%s: other legal entity sees %d rows, want 0", table, got)
 		}
 	}
+	pending := func(p tenant.Principal, table string) (n int) {
+		err := dbx.WithTenantTx(tenant.With(ctx, p), pool, func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `select count(*) from `+table).Scan(&n)
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	st := store.New(pool)
+	if err := st.ReservePosting(tenant.With(ctx, one), store.PendingPosting{Key: "k", BaseKey: "k", Subjects: []string{receiptID, invoiceID}, Hash: "h", Journal: []byte(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"receiving_pending_posting", "receiving_pending_posting_subject"} {
+		if got := pending(one, table); got == 0 {
+			t.Errorf("%s: owner sees no rows", table)
+		}
+		if got := pending(principal(2), table); got != 0 {
+			t.Errorf("%s: other tenant sees %d rows, want 0", table, got)
+		}
+	}
+	if err := st.EnsureNoPending(tenant.With(ctx, principal(2)), receiptID); err != nil {
+		t.Errorf("another tenant must not see the pending posting: %v", err)
+	}
+	if err := run(one, `delete from receiving_vendor_invoice where tenant_id = $1`, one.TenantID); err == nil {
+		t.Error("passage_app must not be able to delete invoices")
+	}
+	if err := run(one, `update receiving_vendor_invoice set total = 0 where tenant_id = $1`, one.TenantID); err == nil {
+		t.Error("passage_app must not be able to update invoices")
+	}
 }

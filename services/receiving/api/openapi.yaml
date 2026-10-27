@@ -170,7 +170,7 @@ paths:
         '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
         '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
         '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-001' }
-        '409': { $ref: '#/components/responses/Problem', description: 'RCV-STA-001 receipt is not REGISTERED; RCV-IDM-001 an earlier ledger posting for the receipt is unfinished or differs; COM-0410.' }
+        '409': { $ref: '#/components/responses/Problem', description: 'RCV-STA-001 receipt is not REGISTERED; RCV-IDM-001 an earlier ledger posting touching the receipt is unfinished or differs (errors.pendingKey and errors.createdAt name it); COM-0410.' }
         '412': { $ref: '#/components/responses/Problem', description: 'COM-0412' }
         '422': { $ref: '#/components/responses/Problem', description: 'PER-AP-001 ledger period closed; COM-0409.' }
         '428': { $ref: '#/components/responses/Problem', description: 'COM-0428' }
@@ -195,7 +195,7 @@ paths:
         '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
         '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
         '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-001' }
-        '409': { $ref: '#/components/responses/Problem', description: 'RCV-STA-001 receipt not POSTED; RCV-COR-001 correction below the invoiced quantity; RCV-IDM-001 an earlier ledger posting for the receipt is unfinished or differs; COM-0410.' }
+        '409': { $ref: '#/components/responses/Problem', description: 'RCV-STA-001 receipt not POSTED; RCV-COR-001 correction below the invoiced quantity; RCV-IDM-001 an earlier ledger posting touching the receipt is unfinished or differs (errors.pendingKey and errors.createdAt name it); COM-0410.' }
         '412': { $ref: '#/components/responses/Problem', description: 'COM-0412' }
         '422': { $ref: '#/components/responses/Problem', description: 'RCV-VAL-001, RCV-OVR-001, PER-AP-001, COM-0409.' }
         '428': { $ref: '#/components/responses/Problem', description: 'COM-0428' }
@@ -224,7 +224,7 @@ paths:
         '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
         '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
         '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-001' }
-        '409': { $ref: '#/components/responses/Problem', description: 'RCV-STA-001 already cancelled or has invoiced quantity; RCV-IDM-001 an earlier ledger posting for the receipt is unfinished or differs; COM-0410.' }
+        '409': { $ref: '#/components/responses/Problem', description: 'RCV-STA-001 already cancelled or has invoiced quantity; RCV-IDM-001 an earlier ledger posting touching the receipt is unfinished or differs (errors.pendingKey and errors.createdAt name it); COM-0410.' }
         '412': { $ref: '#/components/responses/Problem', description: 'COM-0412' }
         '422': { $ref: '#/components/responses/Problem', description: 'PER-AP-001, RCV-VAL-001 posting date before the receipt date, COM-0409.' }
         '428': { $ref: '#/components/responses/Problem', description: 'COM-0428' }
@@ -277,6 +277,59 @@ paths:
         '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-002 receipt line has no open GR/IR item.' }
         '409': { $ref: '#/components/responses/Problem', description: 'AP-DUP-001 invoice number already posted for the vendor; RCV-IDM-001 an earlier posting for this invoice is unfinished or differs; COM-0410.' }
         '422': { $ref: '#/components/responses/Problem', description: 'PER-AP-001 closed AP period; AP-QTY-001 more than received and uninvoiced; RCV-VAL-001 other vendor or entity; COM-0409.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/pending-postings:
+    get:
+      operationId: listPendingPostings
+      x-passage-duty: ReceivingAdmin
+      description: Ledger postings this service recorded before calling the ledger and has not seen complete (oldest first, at most 200). A row stays open when the ledger call ended in an unknown outcome (timeout, transport error, 5xx) or the local commit failed after the ledger accepted the entry.
+      responses:
+        '200':
+          description: Open pending postings.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [key, subjects, createdAt, ageSeconds]
+                      properties:
+                        key: { type: string }
+                        subjects: { type: array, items: { type: string }, description: Receipt ids and, for an invoice posting, the invoice id. }
+                        createdAt: { type: string, format: date-time }
+                        ageSeconds: { type: integer }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/pending-postings/{key}/resolve:
+    post:
+      operationId: resolvePendingPosting
+      x-passage-duty: ReceivingAdmin
+      description: Re-sends the stored journal to the ledger under its key. When the ledger returns an entry id (it had it, or accepts it now) that entry is reversed and the row is marked REVERSED, which frees the receipt and invoice it blocked; the user then repeats the command, which posts under a new ledger key generation. A definite ledger rejection marks the row REJECTED. Colons in the key may be sent as they are or percent-encoded.
+      parameters:
+        - { name: key, in: path, required: true, schema: { type: string } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Outcome REVERSED (with the reversed ledger entry id) or REJECTED.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [key, outcome]
+                properties:
+                  key: { type: string }
+                  outcome: { type: string, enum: [REVERSED, REJECTED] }
+                  ledgerEntryId: { type: string }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-003' }
+        '409': { $ref: '#/components/responses/Problem', description: 'RCV-STA-001 already finished; RCV-IDM-001 the ledger holds a different entry under the key.' }
+        '503': { $ref: '#/components/responses/Problem', description: 'COM-0503 the ledger could not be reached or the reversal failed; try again.' }
         '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
   /healthz:
     get:

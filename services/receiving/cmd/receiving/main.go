@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
@@ -19,6 +20,7 @@ import (
 const (
 	defaultHTTPAddr  = ":8080"
 	defaultAdminAddr = ":9090"
+	pendingPoolConns = 2
 )
 
 func main() {
@@ -59,7 +61,12 @@ func run(ctx context.Context, getenv func(string) string) error {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
-	a := api.New(store.New(pool), ports)
+	pendingPool, err := dbx.Connect(ctx, smallPoolURL(databaseURL))
+	if err != nil {
+		return fmt.Errorf("connect pending-posting pool: %w", err)
+	}
+	defer pendingPool.Close()
+	a := api.New(store.New(pool).WithPendingPool(pendingPool), ports)
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()
@@ -71,6 +78,17 @@ func run(ctx context.Context, getenv func(string) string) error {
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), a.Instrument(router)) }()
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "ADMIN_ADDR", defaultAdminAddr), admin) }()
 	return <-errs
+}
+
+func smallPoolURL(databaseURL string) string {
+	u, err := url.Parse(databaseURL)
+	if err != nil {
+		return databaseURL
+	}
+	q := u.Query()
+	q.Set("pool_max_conns", fmt.Sprint(pendingPoolConns))
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 func addr(getenv func(string) string, key, fallback string) string {

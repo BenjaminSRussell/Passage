@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -63,6 +64,19 @@ type requestBody struct {
 
 type responseBody struct {
 	JournalEntryID string `json:"journalEntryId"`
+	Entries        []struct {
+		ID string `json:"id"`
+	} `json:"entries"`
+}
+
+func (r responseBody) entryID() string {
+	if r.JournalEntryID != "" {
+		return r.JournalEntryID
+	}
+	if len(r.Entries) > 0 {
+		return r.Entries[0].ID
+	}
+	return ""
 }
 
 type problemBody struct {
@@ -138,11 +152,11 @@ func (c *Client) Post(ctx context.Context, entry domain.JournalEntry) (string, e
 
 	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated {
 		var out responseBody
-		if err := json.Unmarshal(raw, &out); err != nil || out.JournalEntryID == "" {
+		if err := json.Unmarshal(raw, &out); err != nil || out.entryID() == "" {
 			slog.ErrorContext(ctx, "ledger post response unusable", "err", err, "status", resp.StatusCode, "idempotencyKey", entry.IdempotencyKey, "correlationId", middleware.GetReqID(ctx))
 			return "", fmt.Errorf("ledger post %s: response has no journalEntryId", entry.IdempotencyKey)
 		}
-		return out.JournalEntryID, nil
+		return out.entryID(), nil
 	}
 
 	if resp.StatusCode == http.StatusUnprocessableEntity {
@@ -157,7 +171,46 @@ func (c *Client) Post(ctx context.Context, entry domain.JournalEntry) (string, e
 			return "", fmt.Errorf("ledger post %s: %w", entry.IdempotencyKey, domain.ErrLedgerConflict)
 		}
 	}
+	if resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.StatusCode != http.StatusConflict && resp.StatusCode != http.StatusRequestTimeout {
+		err = fmt.Errorf("ledger post %s: status %d: %w", entry.IdempotencyKey, resp.StatusCode, domain.ErrLedgerRejected)
+		slog.ErrorContext(ctx, "ledger post rejected", "err", err, "status", resp.StatusCode, "idempotencyKey", entry.IdempotencyKey, "correlationId", middleware.GetReqID(ctx))
+		return "", err
+	}
 	err = fmt.Errorf("ledger post %s: unexpected status %d", entry.IdempotencyKey, resp.StatusCode)
 	slog.ErrorContext(ctx, "ledger post rejected", "err", err, "status", resp.StatusCode, "idempotencyKey", entry.IdempotencyKey, "correlationId", middleware.GetReqID(ctx))
 	return "", err
+}
+
+func (c *Client) Reverse(ctx context.Context, entryID, idempotencyKey string) error {
+	principal, ok := tenant.FromContext(ctx)
+	if !ok {
+		return errors.New("ledger reverse: no principal in context")
+	}
+	payload, err := json.Marshal(map[string]string{"description": "reversal of a receiving posting that was never confirmed locally"})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+fmt.Sprintf(domain.LedgerReversePathTmpl, url.PathEscape(entryID)), bytes.NewReader(payload))
+	if err != nil {
+		return fmt.Errorf("ledger reverse %s: %w", entryID, err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", idempotencyKey)
+	req.Header.Set(tenant.HeaderTenant, principal.TenantID)
+	if id := middleware.GetReqID(ctx); id != "" {
+		req.Header.Set(middleware.RequestIDHeader, id)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		slog.ErrorContext(ctx, "ledger reverse transport failed", "err", err, "entryId", entryID, "correlationId", middleware.GetReqID(ctx))
+		return fmt.Errorf("ledger reverse %s: %w", entryID, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxResponseSize))
+	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated {
+		return nil
+	}
+	err = fmt.Errorf("ledger reverse %s: unexpected status %d", entryID, resp.StatusCode)
+	slog.ErrorContext(ctx, "ledger reverse rejected", "err", err, "status", resp.StatusCode, "entryId", entryID, "correlationId", middleware.GetReqID(ctx))
+	return err
 }

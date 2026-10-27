@@ -269,3 +269,20 @@ func TestAdjustments_PostingDateDefaultsToReceiptDateAndNeverPrecedesIt(t *testi
 		t.Fatalf("cancel with an early date must be refused without posting: %v", err)
 	}
 }
+
+func TestFakeLedger_ReplaysIdenticalBodiesAndRefusesChangedOnes(t *testing.T) {
+	ledger := &domain.FakeLedger{}
+	entry := domain.JournalEntry{IdempotencyKey: "k", Lines: []domain.JournalLine{{Account: "1400", Amount: money.Must("5.00", "USD")}, {Account: "2100", Amount: money.Must("-5.00", "USD")}}}
+	first, err := ledger.Post(context.Background(), entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := ledger.Post(context.Background(), entry)
+	if err != nil || again != first || len(ledger.Entries) != 1 || ledger.Balance("2100").String() != "-5" {
+		t.Fatalf("replay id=%q err=%v entries=%d GR/IR=%s, want the same id, one entry and -5", again, err, len(ledger.Entries), ledger.Balance("2100"))
+	}
+	entry.Lines[0].Amount = money.Must("6.00", "USD")
+	if _, err := ledger.Post(context.Background(), entry); !errors.Is(err, domain.ErrLedgerConflict) || len(ledger.Entries) != 1 {
+		t.Fatalf("a changed body under the same key must conflict without posting: %v", err)
+	}
+}

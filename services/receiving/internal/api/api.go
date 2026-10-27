@@ -54,7 +54,9 @@ type API struct {
 	posted     atomic.Int64
 	adjusted   atomic.Int64
 	invoiced   atomic.Int64
-	http       requestMetrics
+
+	pendingPostings pendingTracker
+	http            requestMetrics
 }
 
 func New(s store.Store, ports Ports) *API {
@@ -65,7 +67,15 @@ func New(s store.Store, ports Ports) *API {
 }
 
 func (a *API) PostInvoice(ctx context.Context, in domain.VendorInvoice, profile domain.PostingProfile) (domain.JournalEntry, error) {
-	return domain.PostInvoice(ctx, in, a.ports.Periods, a.ledgerFor(in.ID), profile)
+	subjects := []string{in.ID}
+	for _, l := range in.Lines {
+		subjects = append(subjects, l.Item.ReceiptID)
+	}
+	entry, err := domain.PostInvoice(ctx, in, a.ports.Periods, a.ledgerFor(subjects...), profile)
+	if err == nil {
+		a.pendingPostings.finish(subjects...)
+	}
+	return entry, err
 }
 
 func (a *API) Register(r chi.Router) {
@@ -80,6 +90,8 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyReceivingPost)).Post("/v1/receiving/receipts/{id}:correct", a.idempotent(a.correctReceipt))
 	r.With(authz.RequireDuty(dutyReceivingPost)).Post("/v1/receiving/receipts/{id}:cancel", a.idempotent(a.cancelReceipt))
 	r.With(authz.RequireDuty(dutyAPInquire)).Get("/v1/receiving/grir", a.listGrir)
+	r.With(authz.RequireDuty(dutyReceivingAdmin)).Get("/v1/receiving/pending-postings", a.listPending)
+	r.With(authz.RequireDuty(dutyReceivingAdmin)).Post("/v1/receiving/pending-postings/{key}/resolve", a.idempotent(a.resolvePending))
 	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/invoices:post", a.idempotent(a.postVendorInvoice))
 }
 
@@ -101,6 +113,9 @@ func (a *API) Metrics() http.Handler {
 		for _, c := range counters {
 			_, _ = fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s counter\n%s %d\n", c.name, c.help, c.name, c.name, c.value.Load())
 		}
+		open, oldest := a.pendingPostings.stats()
+		_, _ = fmt.Fprintf(w, "# HELP receiving_pending_postings_open Ledger postings this process recorded and has not seen complete.\n# TYPE receiving_pending_postings_open gauge\nreceiving_pending_postings_open %d\n", open)
+		_, _ = fmt.Fprintf(w, "# HELP receiving_pending_postings_oldest_age_seconds Age of the oldest unfinished ledger posting.\n# TYPE receiving_pending_postings_oldest_age_seconds gauge\nreceiving_pending_postings_oldest_age_seconds %d\n", int64(oldest.Seconds()))
 		a.http.write(w)
 	})
 }

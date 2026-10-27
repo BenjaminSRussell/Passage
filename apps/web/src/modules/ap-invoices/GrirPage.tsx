@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { Alert, Badge, Button, DataTable, FormField, Input, PageHeader, Select, StatGroup, StatTile, type BadgeTone, type DataTableColumn } from "../../shell/ui";
 import { fetchGrir, GRIR_STATUSES, type GrirItem, type GrirStatus } from "./api/client";
 import { subtractDecimal, UUID, type InvoiceNavState } from "./parts";
-import styles from "../receiving/pages.module.css";
+import styles from "../../shell/pageLayout.module.css";
 
 const statusTone: Record<GrirStatus, BadgeTone> = { OPEN: "warning", PARTIAL: "info", CLEARED: "success", WRITTEN_OFF: "neutral" };
 const statusLabel = (s: GrirStatus) => s.charAt(0) + s.slice(1).toLowerCase().replace("_", " ");

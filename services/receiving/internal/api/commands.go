@@ -302,7 +302,7 @@ func (a *API) postReceipt(w http.ResponseWriter, r *http.Request) {
 		if err := checkVersion(rec.Version, cmd.version); err != nil {
 			return store.PostOutcome{}, err
 		}
-		next, items, err := toDomain(rec).Post(ctx, a.ledgerFor(cmd.id), a.ports.Profile)
+		next, items, err := toDomain(rec).Post(ctx, a.ledgerFor(rec.ID), a.ports.Profile)
 		if err != nil {
 			return store.PostOutcome{}, err
 		}
@@ -318,6 +318,7 @@ func (a *API) postReceipt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.posted.Add(1)
+	a.pendingPostings.finish(cmd.id)
 	writeReceipt(w, http.StatusOK, posted)
 }
 
@@ -366,7 +367,7 @@ func (a *API) correctReceipt(w http.ResponseWriter, r *http.Request) {
 			return store.Adjustment{}, err
 		}
 		seq := rec.CorrectionSeq + 1
-		entryID, changes, err := toDomain(rec).Correct(ctx, a.ledgerFor(cmd.id), a.ports.Profile, seq, postingDate, deltas)
+		entryID, changes, err := toDomain(rec).Correct(ctx, a.ledgerFor(rec.ID), a.ports.Profile, seq, postingDate, deltas)
 		if err != nil {
 			return store.Adjustment{}, err
 		}
@@ -390,6 +391,7 @@ func (a *API) correctReceipt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.adjusted.Add(1)
+	a.pendingPostings.finish(cmd.id)
 	writeReceipt(w, http.StatusOK, corrected)
 }
 
@@ -427,7 +429,7 @@ func (a *API) cancelReceipt(w http.ResponseWriter, r *http.Request) {
 				return store.Adjustment{}, err
 			}
 		}
-		entryID, err := toDomain(rec).Cancel(ctx, a.ledgerFor(cmd.id), a.ports.Profile, postingDate)
+		entryID, err := toDomain(rec).Cancel(ctx, a.ledgerFor(rec.ID), a.ports.Profile, postingDate)
 		if err != nil || rec.State != domain.Posted {
 			return store.Adjustment{}, err
 		}
@@ -446,6 +448,7 @@ func (a *API) cancelReceipt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.adjusted.Add(1)
+	a.pendingPostings.finish(cmd.id)
 	writeReceipt(w, http.StatusOK, cancelled)
 }
 

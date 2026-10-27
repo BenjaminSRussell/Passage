@@ -55,26 +55,43 @@ $$;
 CREATE TABLE IF NOT EXISTS receiving_pending_posting (
   tenant_id uuid NOT NULL,
   ledger_key text NOT NULL,
+  base_key text NOT NULL,
   subject text NOT NULL,
   request_hash text NOT NULL,
   journal jsonb NOT NULL,
-  outcome text CHECK (outcome IN ('POSTED', 'REJECTED')),
+  outcome text CHECK (outcome IN ('POSTED', 'REJECTED', 'REVERSED')),
   created_at timestamptz NOT NULL DEFAULT now(),
   done_at timestamptz,
   PRIMARY KEY (tenant_id, ledger_key)
 );
 
-CREATE INDEX IF NOT EXISTS receiving_pending_posting_subject_ix ON receiving_pending_posting (tenant_id, subject) WHERE done_at IS NULL;
+CREATE INDEX IF NOT EXISTS receiving_pending_posting_base_ix ON receiving_pending_posting (tenant_id, base_key) WHERE outcome = 'REVERSED';
+CREATE INDEX IF NOT EXISTS receiving_pending_posting_open_ix ON receiving_pending_posting (tenant_id, created_at) WHERE done_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS receiving_pending_posting_subject (
+  tenant_id uuid NOT NULL,
+  ledger_key text NOT NULL,
+  subject text NOT NULL,
+  done_at timestamptz,
+  PRIMARY KEY (tenant_id, ledger_key, subject),
+  FOREIGN KEY (tenant_id, ledger_key) REFERENCES receiving_pending_posting (tenant_id, ledger_key)
+);
+
+CREATE INDEX IF NOT EXISTS receiving_pending_posting_subject_open_ix ON receiving_pending_posting_subject (tenant_id, subject) WHERE done_at IS NULL;
 
 DO $$
+DECLARE
+  t text;
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = current_schema() AND tablename = 'receiving_pending_posting' AND policyname = 'receiving_pending_posting_tenant_access') THEN
-    ALTER TABLE receiving_pending_posting ENABLE ROW LEVEL SECURITY;
-    ALTER TABLE receiving_pending_posting FORCE ROW LEVEL SECURITY;
-    CREATE POLICY receiving_pending_posting_tenant_access ON receiving_pending_posting AS PERMISSIVE USING (tenant_id = current_setting('passage.tenant_id', true)::uuid) WITH CHECK (tenant_id = current_setting('passage.tenant_id', true)::uuid);
-  END IF;
+  FOREACH t IN ARRAY ARRAY['receiving_pending_posting', 'receiving_pending_posting_subject'] LOOP
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = current_schema() AND tablename = t AND policyname = t || '_tenant_access') THEN
+      EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
+      EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', t);
+      EXECUTE format('CREATE POLICY %I ON %I AS PERMISSIVE USING (tenant_id = current_setting(''passage.tenant_id'', true)::uuid) WITH CHECK (tenant_id = current_setting(''passage.tenant_id'', true)::uuid)', t || '_tenant_access', t);
+    END IF;
+  END LOOP;
 END
 $$;
 
 GRANT SELECT, INSERT ON receiving_vendor_invoice, receiving_vendor_invoice_line TO passage_app;
-GRANT SELECT, INSERT, UPDATE ON receiving_pending_posting TO passage_app;
+GRANT SELECT, INSERT, UPDATE ON receiving_pending_posting, receiving_pending_posting_subject TO passage_app;

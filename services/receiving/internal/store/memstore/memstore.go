@@ -48,9 +48,7 @@ type tenantData struct {
 }
 
 type pendingRow struct {
-	subject string
-	hash    string
-	done    bool
+	store.PendingRow
 }
 
 type Store struct {
@@ -425,66 +423,140 @@ func (t *tenantData) grirFor(receiptID string, lineNo int) int {
 	return slices.IndexFunc(t.grir, func(g store.GrirItem) bool { return g.ReceiptID == receiptID && g.LineNo == lineNo })
 }
 
-func (s *Store) markDone(ctx context.Context, subject string) {
-	p, _ := tenant.FromContext(ctx)
-	s.pmu.Lock()
-	defer s.pmu.Unlock()
-	for _, row := range s.pending[p.TenantID] {
-		if row.subject == subject {
-			row.done = true
-		}
-	}
+func (r *pendingRow) open() bool { return r.DoneAt == nil }
+
+func (r *pendingRow) touches(subjects []string) bool {
+	return slices.ContainsFunc(subjects, func(sub string) bool { return slices.Contains(r.Subjects, sub) })
 }
 
-func (s *Store) ReservePosting(ctx context.Context, p store.PendingPosting) error {
+func (s *Store) pendingFor(ctx context.Context) (map[string]*pendingRow, error) {
 	principal, ok := tenant.FromContext(ctx)
 	if !ok {
-		return errors.New("memstore: no principal in context")
+		return nil, errors.New("memstore: no principal in context")
 	}
-	s.pmu.Lock()
-	defer s.pmu.Unlock()
 	rows := s.pending[principal.TenantID]
 	if rows == nil {
 		rows = map[string]*pendingRow{}
 		s.pending[principal.TenantID] = rows
 	}
-	for key, row := range rows {
-		if row.subject == p.Subject && (!row.done || key == p.Key) && (key != p.Key || row.hash != p.Hash) {
-			return store.PendingConflict(p.Subject)
+	return rows, nil
+}
+
+func (s *Store) markDone(ctx context.Context, subject string) {
+	s.pmu.Lock()
+	defer s.pmu.Unlock()
+	rows, _ := s.pendingFor(ctx)
+	now := time.Now().UTC()
+	for _, row := range rows {
+		if row.open() && slices.Contains(row.Subjects, subject) {
+			row.DoneAt, row.Outcome = &now, store.OutcomePosted
 		}
 	}
-	if rows[p.Key] == nil {
-		rows[p.Key] = &pendingRow{subject: p.Subject, hash: p.Hash}
+}
+
+func (s *Store) ReservePosting(ctx context.Context, p store.PendingPosting) error {
+	s.pmu.Lock()
+	defer s.pmu.Unlock()
+	rows, err := s.pendingFor(ctx)
+	if err != nil {
+		return err
 	}
+	for key, row := range rows {
+		if !row.touches(p.Subjects) || !(row.open() || (key == p.Key && row.Outcome == store.OutcomePosted)) {
+			continue
+		}
+		if key != p.Key || row.Hash != p.Hash {
+			return &store.PendingError{Subject: p.Subjects[0], Key: key, CreatedAt: row.CreatedAt}
+		}
+	}
+	existing := rows[p.Key]
+	if existing != nil && existing.Outcome != store.OutcomeRejected {
+		return nil
+	}
+	rows[p.Key] = &pendingRow{store.PendingRow{
+		Key: p.Key, BaseKey: p.BaseKey, Subjects: slices.Compact(slices.Sorted(slices.Values(p.Subjects))), Hash: p.Hash, Journal: slices.Clone(p.Journal), CreatedAt: time.Now().UTC(),
+	}}
 	return nil
 }
 
-func (s *Store) EnsureNoPending(ctx context.Context, subject string) error {
-	principal, ok := tenant.FromContext(ctx)
-	if !ok {
-		return errors.New("memstore: no principal in context")
-	}
+func (s *Store) FinishPending(ctx context.Context, key, outcome string) error {
 	s.pmu.Lock()
 	defer s.pmu.Unlock()
-	for _, row := range s.pending[principal.TenantID] {
-		if row.subject == subject && !row.done {
-			return store.PendingConflict(subject)
-		}
+	rows, err := s.pendingFor(ctx)
+	if err != nil {
+		return err
+	}
+	if row := rows[key]; row != nil && row.open() {
+		now := time.Now().UTC()
+		row.DoneAt, row.Outcome = &now, outcome
 	}
 	return nil
 }
 
 func (s *Store) ReleasePosting(ctx context.Context, key string) error {
-	principal, ok := tenant.FromContext(ctx)
-	if !ok {
-		return errors.New("memstore: no principal in context")
-	}
+	return s.FinishPending(ctx, key, store.OutcomeRejected)
+}
+
+func (s *Store) EnsureNoPending(ctx context.Context, subject string) error {
 	s.pmu.Lock()
 	defer s.pmu.Unlock()
-	if row := s.pending[principal.TenantID][key]; row != nil && !row.done {
-		delete(s.pending[principal.TenantID], key)
+	rows, err := s.pendingFor(ctx)
+	if err != nil {
+		return err
+	}
+	for key, row := range rows {
+		if row.open() && slices.Contains(row.Subjects, subject) {
+			return &store.PendingError{Subject: subject, Key: key, CreatedAt: row.CreatedAt}
+		}
 	}
 	return nil
+}
+
+func (s *Store) PostingGeneration(ctx context.Context, baseKey string) (int, error) {
+	s.pmu.Lock()
+	defer s.pmu.Unlock()
+	rows, err := s.pendingFor(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, row := range rows {
+		if row.BaseKey == baseKey && row.Outcome == store.OutcomeReversed {
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (s *Store) GetPending(ctx context.Context, key string) (store.PendingRow, error) {
+	s.pmu.Lock()
+	defer s.pmu.Unlock()
+	rows, err := s.pendingFor(ctx)
+	if err != nil {
+		return store.PendingRow{}, err
+	}
+	row := rows[key]
+	if row == nil {
+		return store.PendingRow{}, store.ErrPendingNotFound
+	}
+	return row.PendingRow, nil
+}
+
+func (s *Store) ListPending(ctx context.Context) ([]store.PendingRow, error) {
+	s.pmu.Lock()
+	defer s.pmu.Unlock()
+	rows, err := s.pendingFor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []store.PendingRow
+	for _, row := range rows {
+		if row.open() {
+			out = append(out, row.PendingRow)
+		}
+	}
+	slices.SortFunc(out, func(a, b store.PendingRow) int { return a.CreatedAt.Compare(b.CreatedAt) })
+	return out, nil
 }
 
 func (s *Store) emit(adj store.Adjustment) {

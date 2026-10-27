@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -156,5 +158,71 @@ func TestPost_RejectsBeforeSending(t *testing.T) {
 				t.Fatalf("err %v called %v", err, called)
 			}
 		})
+	}
+}
+
+func TestPathsMatchTheLedgerServiceRouteTable(t *testing.T) {
+	src, err := os.ReadFile("../../../ledger/internal/api/api.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`r.Route("/api/v1/ledger"`, `Post("/journal-entries", a.postEntry)`, `Post("/journal-entries/{id}/reverse", a.reverseEntry)`} {
+		if !strings.Contains(string(src), want) {
+			t.Fatalf("ledger route table no longer contains %s; update domain.LedgerPostPath and LedgerReversePathTmpl", want)
+		}
+	}
+	if domain.LedgerPostPath != "/api/v1/ledger/journal-entries" || fmt.Sprintf(domain.LedgerReversePathTmpl, "E1") != "/api/v1/ledger/journal-entries/E1/reverse" {
+		t.Fatalf("paths %s %s do not match the ledger routes", domain.LedgerPostPath, domain.LedgerReversePathTmpl)
+	}
+}
+
+func TestPostReadsTheLedgerEntriesResponseAndClassifiesRejections(t *testing.T) {
+	entry := domain.JournalEntry{IdempotencyKey: "k", LegalEntityID: "le", Lines: []domain.JournalLine{{Account: "1400", Amount: money.Must("5.00", "USD")}, {Account: "2100", Amount: money.Must("-5.00", "USD")}}}
+	tests := []struct {
+		name     string
+		status   int
+		body     string
+		wantID   string
+		rejected bool
+		conflict bool
+	}{
+		{"entries array", http.StatusCreated, `{"entries":[{"id":"E7"}]}`, "E7", false, false},
+		{"validation rejection is definite", http.StatusBadRequest, `{"code":"COM-0001"}`, "", true, false},
+		{"forbidden is definite", http.StatusForbidden, `{}`, "", true, false},
+		{"server error is unknown", http.StatusInternalServerError, `{}`, "", false, false},
+		{"gateway timeout is unknown", http.StatusGatewayTimeout, `{}`, "", false, false},
+		{"request timeout is unknown", http.StatusRequestTimeout, `{}`, "", false, false},
+		{"idempotency conflict", http.StatusConflict, `{"code":"LEDGER_IDEMPOTENCY_CONFLICT"}`, "", false, true},
+		{"in progress is unknown", http.StatusConflict, `{"code":"LEDGER_IDEMPOTENCY_IN_PROGRESS"}`, "", false, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			client, _, _ := serve(t, tc.status, tc.body)
+			id, err := client.Post(testCtx(), entry)
+			if errors.Is(err, domain.ErrLedgerRejected) != tc.rejected || errors.Is(err, domain.ErrLedgerConflict) != tc.conflict || id != tc.wantID {
+				t.Fatalf("id=%q err=%v, want id %q rejected=%v conflict=%v", id, err, tc.wantID, tc.rejected, tc.conflict)
+			}
+		})
+	}
+}
+
+func TestReverseCallsTheReverseRouteWithItsOwnKey(t *testing.T) {
+	var got *http.Request
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(srv.Close)
+	if err := New(srv.URL, nil).Reverse(testCtx(), "E1", "k:reverse"); err != nil {
+		t.Fatal(err)
+	}
+	if got.URL.Path != "/api/v1/ledger/journal-entries/E1/reverse" || got.Header.Get("Idempotency-Key") != "k:reverse" {
+		t.Fatalf("reverse sent %s with key %q", got.URL.Path, got.Header.Get("Idempotency-Key"))
+	}
+	failing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusBadGateway) }))
+	t.Cleanup(failing.Close)
+	if err := New(failing.URL, nil).Reverse(testCtx(), "E1", "k"); err == nil {
+		t.Fatal("a failed reversal must surface")
 	}
 }

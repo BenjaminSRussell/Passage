@@ -2,8 +2,12 @@ package api_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
@@ -122,9 +126,13 @@ func TestPending_CorrectionThatCommittedInTheLedgerBlocksEverythingButItsOwnRepe
 		t.Fatalf("a blocked command reached the ledger: %d entries, want %d", len(rg.ledger.Entries), posted)
 	}
 
+	balance := rg.ledger.Balance("2100").String()
 	got := decode[receiptJSON](t, rg.call(http.MethodPost, path+":correct", correction("-1"), rg.poster(r.Version)), http.StatusOK)
 	if got.Lines[0].Qty != "3" {
 		t.Fatalf("repeating the original correction left qty %s, want 3", got.Lines[0].Qty)
+	}
+	if len(rg.ledger.Entries) != posted || rg.ledger.Balance("2100").String() != balance {
+		t.Fatalf("the repeat posted again: %d entries (want %d), GR/IR %s (want %s)", len(rg.ledger.Entries), posted, rg.ledger.Balance("2100"), balance)
 	}
 	decode[receiptJSON](t, rg.call(http.MethodPost, path+":cancel", "", rg.poster(got.Version)), http.StatusOK)
 }
@@ -159,6 +167,9 @@ func TestPending_InvoiceWithTheSameNumberAndEditedLinesIsRefused(t *testing.T) {
 		t.Fatalf("an edited invoice reached the ledger")
 	}
 	got := decode[invoiceJSON](t, rg.call(http.MethodPost, invoicesPath, invoiceBody("INV-1", r.ID, 2, ""), rg.apPoster()), http.StatusCreated)
+	if len(rg.ledger.Entries) != posted {
+		t.Fatalf("the repeat posted the invoice to the ledger again: %d entries, want %d", len(rg.ledger.Entries), posted)
+	}
 	if got.Total != "5.00" {
 		t.Fatalf("invoice total %s, want 5.00", got.Total)
 	}
@@ -197,5 +208,148 @@ func TestAdjustments_PostingDateReachesTheLedger(t *testing.T) {
 	decode[receiptJSON](t, rg.call(http.MethodPost, path+":cancel", `{"postingDate":"2026-11-05"}`, rg.poster(got.Version)), http.StatusOK)
 	if d := rg.ledger.Entries[len(rg.ledger.Entries)-1].PostingDate.Format("2006-01-02"); d != "2026-11-05" {
 		t.Fatalf("cancellation posted on %s, want 2026-11-05", d)
+	}
+}
+
+func TestPending_ConflictBodyNamesTheKeyAndStartTime(t *testing.T) {
+	rg, broken := brokenRig(t)
+	r := rg.posted(t, "PS-1", 10, 4)
+	broken.failing = true
+	rg.call(http.MethodPost, receiptsPath+"/"+r.ID+":correct", correction("-1"), rg.poster(r.Version))
+	broken.failing = false
+	rec := rg.call(http.MethodPost, receiptsPath+"/"+r.ID+":cancel", "", rg.poster(r.Version))
+	problemCode(t, rec, http.StatusConflict, "RCV-IDM-001")
+	var body struct {
+		Errors map[string]string `json:"errors"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Errors["pendingKey"] != "post:receiving:productreceipt:"+r.ID+":correction:1" || body.Errors["createdAt"] == "" {
+		t.Fatalf("problem errors %+v", body.Errors)
+	}
+}
+
+func TestPending_AnInvoiceInLimboBlocksCorrectionAndCancellation(t *testing.T) {
+	rg, broken := brokenRig(t)
+	r := rg.posted(t, "PS-1", 10, 4)
+	broken.failing = true
+	problemCode(t, rg.call(http.MethodPost, invoicesPath, invoiceBody("INV-1", r.ID, 2, ""), rg.apPoster()), http.StatusInternalServerError, "COM-0500")
+	broken.failing = false
+	posted := len(rg.ledger.Entries)
+
+	problemCode(t, rg.call(http.MethodPost, receiptsPath+"/"+r.ID+":correct", correction("-1"), rg.poster(r.Version)), http.StatusConflict, "RCV-IDM-001")
+	problemCode(t, rg.call(http.MethodPost, receiptsPath+"/"+r.ID+":cancel", "", rg.poster(r.Version)), http.StatusConflict, "RCV-IDM-001")
+	if len(rg.ledger.Entries) != posted {
+		t.Fatalf("a blocked command reached the ledger")
+	}
+	decode[invoiceJSON](t, rg.call(http.MethodPost, invoicesPath, invoiceBody("INV-1", r.ID, 2, ""), rg.apPoster()), http.StatusCreated)
+	decode[receiptJSON](t, rg.call(http.MethodPost, receiptsPath+"/"+r.ID+":correct", correction("-1"), rg.poster(r.Version)), http.StatusOK)
+}
+
+func TestPending_ACorrectionInLimboBlocksInvoicesOnThatReceipt(t *testing.T) {
+	rg, broken := brokenRig(t)
+	r := rg.posted(t, "PS-1", 10, 4)
+	other := rg.posted(t, "PS-2", 10, 4)
+	broken.failing = true
+	rg.call(http.MethodPost, receiptsPath+"/"+r.ID+":correct", correction("-1"), rg.poster(r.Version))
+	broken.failing = false
+	posted := len(rg.ledger.Entries)
+
+	problemCode(t, rg.call(http.MethodPost, invoicesPath, invoiceBody("INV-1", r.ID, 1, ""), rg.apPoster()), http.StatusConflict, "RCV-IDM-001")
+	decode[invoiceJSON](t, rg.call(http.MethodPost, invoicesPath, invoiceBody("INV-2", other.ID, 1, ""), rg.apPoster()), http.StatusCreated)
+	if len(rg.ledger.Entries) != posted+1 {
+		t.Fatalf("only the unrelated receipt's invoice may reach the ledger: %d entries, want %d", len(rg.ledger.Entries), posted+1)
+	}
+}
+
+func admin(key string) headers { return duty("ReceivingAdmin", key) }
+
+func resolvePath(key string) string {
+	return "/v1/receiving/pending-postings/" + url.PathEscape(key) + "/resolve"
+}
+
+func TestResolve_ReversesAnUnconfirmedPostingAndFreesTheReceipt(t *testing.T) {
+	rg, broken := brokenRig(t)
+	r := rg.posted(t, "PS-1", 10, 4)
+	path := receiptsPath + "/" + r.ID
+	broken.failing = true
+	rg.call(http.MethodPost, path+":correct", correction("-1"), rg.poster(r.Version))
+	broken.failing = false
+	key := "post:receiving:productreceipt:" + r.ID + ":correction:1"
+
+	list := decode[struct{ Items []struct{ Key string } }](t, rg.call(http.MethodGet, "/v1/receiving/pending-postings", "", admin("")), http.StatusOK)
+	if len(list.Items) != 1 || list.Items[0].Key != key {
+		t.Fatalf("pending list %+v", list)
+	}
+	problemCode(t, rg.call(http.MethodPost, resolvePath(key), "", duty("ReceivingPost", "k1")), http.StatusForbidden, "AUTH-0003")
+	problemCode(t, rg.call(http.MethodPost, resolvePath("nope"), "", admin("k2")), http.StatusNotFound, "RCV-NF-003")
+
+	rg.ledger.Err = errors.New("ledger unreachable")
+	problemCode(t, rg.call(http.MethodPost, resolvePath(key), "", admin("k3")), http.StatusServiceUnavailable, "COM-0503")
+	rg.ledger.Err = nil
+	problemCode(t, rg.call(http.MethodPost, path+":cancel", "", rg.poster(r.Version)), http.StatusConflict, "RCV-IDM-001")
+
+	got := decode[struct{ Outcome, LedgerEntryID string }](t, rg.call(http.MethodPost, resolvePath(key), "", admin("k4")), http.StatusOK)
+	if got.Outcome != "REVERSED" || len(rg.ledger.Reversed) != 1 || rg.ledger.Reversed[0] != got.LedgerEntryID {
+		t.Fatalf("resolve %+v reversed %v", got, rg.ledger.Reversed)
+	}
+	problemCode(t, rg.call(http.MethodPost, resolvePath(key), "", admin("k5")), http.StatusConflict, "RCV-STA-001")
+
+	redone := decode[receiptJSON](t, rg.call(http.MethodPost, path+":correct", correction("-2"), rg.poster(r.Version)), http.StatusOK)
+	if redone.Lines[0].Qty != "2" {
+		t.Fatalf("redone correction left qty %s, want 2", redone.Lines[0].Qty)
+	}
+	if last := rg.ledger.Entries[len(rg.ledger.Entries)-1].IdempotencyKey; last != key+":r1" {
+		t.Fatalf("the redo used ledger key %q, want a new generation %q", last, key+":r1")
+	}
+	after := decode[struct{ Items []struct{ Key string } }](t, rg.call(http.MethodGet, "/v1/receiving/pending-postings", "", admin("")), http.StatusOK)
+	if len(after.Items) != 0 {
+		t.Fatalf("pending list after resolve and redo: %+v", after)
+	}
+}
+
+func TestResolve_ARejectedResendJustFreesTheSubjects(t *testing.T) {
+	rg, broken := brokenRig(t)
+	r := rg.posted(t, "PS-1", 10, 4)
+	broken.failing = true
+	rg.call(http.MethodPost, receiptsPath+"/"+r.ID+":correct", correction("-1"), rg.poster(r.Version))
+	broken.failing = false
+	key := "post:receiving:productreceipt:" + r.ID + ":correction:1"
+	rg.ledger.Err = domain.ErrLedgerRejected
+	got := decode[struct{ Outcome string }](t, rg.call(http.MethodPost, resolvePath(key), "", admin("k1")), http.StatusOK)
+	if got.Outcome != "REJECTED" || len(rg.ledger.Reversed) != 0 {
+		t.Fatalf("outcome %s reversed %v", got.Outcome, rg.ledger.Reversed)
+	}
+	rg.ledger.Err = nil
+	decode[receiptJSON](t, rg.call(http.MethodPost, receiptsPath+"/"+r.ID+":cancel", "", rg.poster(r.Version)), http.StatusOK)
+}
+
+func TestPending_DefiniteRejectionsReleaseAndAmbiguousFailuresKeep(t *testing.T) {
+	rg := newRig(domain.PeriodOpen)
+	r := rg.posted(t, "PS-1", 10, 4)
+	path := receiptsPath + "/" + r.ID + ":correct"
+	rg.ledger.Err = domain.ErrLedgerRejected
+	problemCode(t, rg.call(http.MethodPost, path, correction("-1"), rg.poster(r.Version)), http.StatusInternalServerError, "COM-0500")
+	rg.ledger.Err = nil
+	decode[receiptJSON](t, rg.call(http.MethodPost, path, correction("-2"), rg.poster(r.Version)), http.StatusOK)
+
+	rg.ledger.Err = errors.New("timeout")
+	problemCode(t, rg.call(http.MethodPost, path, correction("-1"), rg.poster(r.Version+1)), http.StatusInternalServerError, "COM-0500")
+	rg.ledger.Err = nil
+	problemCode(t, rg.call(http.MethodPost, path, correction("-1.5"), rg.poster(r.Version+1)), http.StatusConflict, "RCV-IDM-001")
+}
+
+func TestMetrics_ExposeTheOldestUnfinishedPosting(t *testing.T) {
+	rg, broken := brokenRig(t)
+	r := rg.posted(t, "PS-1", 10, 4)
+	broken.failing = true
+	rg.call(http.MethodPost, receiptsPath+"/"+r.ID+":correct", correction("-1"), rg.poster(r.Version))
+	rec := httptest.NewRecorder()
+	rg.api.Metrics().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	for _, want := range []string{"receiving_pending_postings_open 1", "receiving_pending_postings_oldest_age_seconds 0"} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("metrics missing %q in %s", want, rec.Body.String())
+		}
 	}
 }

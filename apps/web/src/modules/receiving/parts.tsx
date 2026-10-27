@@ -2,8 +2,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useRef, useState, type ReactNode } from "react";
 import { Badge, type BadgeTone } from "../../shell/ui";
 import { newKey, type Receipt, type ReceiptState } from "./api/client";
-import { ApiError, describeFailure, fieldErrors } from "./api/http";
-import styles from "./pages.module.css";
+import { ApiError, describeFailure, fieldErrors } from "../../shell/api/http";
+import styles from "../../shell/pageLayout.module.css";
 
 const stateTone: Record<ReceiptState, BadgeTone> = {
   ARRIVED: "info",

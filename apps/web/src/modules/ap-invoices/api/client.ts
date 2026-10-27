@@ -1,8 +1,8 @@
 import { z } from "zod";
 
-import { defaultFetch, request, type FetchLike } from "../../receiving/api/http";
+import { defaultFetch, request, type FetchLike } from "../../../shell/api/http";
 
-export { ApiError, newKey } from "../../receiving/api/http";
+export { ApiError, newKey } from "../../../shell/api/http";
 
 export const GRIR_STATUSES = ["OPEN", "PARTIAL", "CLEARED", "WRITTEN_OFF"] as const;
 export type GrirStatus = (typeof GRIR_STATUSES)[number];

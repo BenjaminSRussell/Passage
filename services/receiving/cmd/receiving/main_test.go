@@ -133,3 +133,10 @@ func TestBuildPortsUsesRealAdaptersWhenConfigured(t *testing.T) {
 		t.Fatalf("periods is %T despite CLOSE_URL", ports.Periods)
 	}
 }
+
+func TestSmallPoolURLCapsConnectionsAndKeepsTheRest(t *testing.T) {
+	got := smallPoolURL("postgres://passage_app:pw@db:5432/passage_receiving?sslmode=disable")
+	if !strings.Contains(got, "pool_max_conns=2") || !strings.Contains(got, "sslmode=disable") || !strings.HasPrefix(got, "postgres://passage_app:pw@db:5432/passage_receiving?") {
+		t.Fatalf("got %s", got)
+	}
+}

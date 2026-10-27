@@ -33,6 +33,7 @@ Store tests run only when `PASSAGE_TEST_DATABASE_URL` is set, against a role wit
 | `POST /v1/receiving/arrivals`, `POST /v1/receiving/receipts` (direct receipt), `POST /v1/receiving/receipts/{id}:register`, `GET /v1/receiving/receipts`, `GET /v1/receiving/receipts/{id}` | `ReceivingMaintain` |
 | `POST /v1/receiving/receipts/{id}:post`, `:correct`, `:cancel` | `ReceivingPost` |
 | `GET /v1/receiving/grir` | `APInquire` |
+| `GET /v1/receiving/pending-postings`, `POST /v1/receiving/pending-postings/{key}/resolve` | `ReceivingAdmin` |
 | `POST /v1/receiving/invoices:post` | `VendorInvoicePost` |
 
 Every POST except the tester requires `Idempotency-Key`; replays carry `Idempotent-Replayed: true`. Commands on an existing receipt (`:register`, `:post`, `:correct`, `:cancel`) also require `If-Match` with the receipt `version` (428 when absent, 412 when stale); every receipt response carries `version` and an `ETag`. Lists page with an opaque `nextCursor`. Also: `GET /healthz`, `GET /readyz` (database ping within 500 ms, 503 when down), `GET /metrics` on the admin port. Contract: `api/openapi.yaml`. The PRD lists the tester under `/payables/`; wave 19 owns that service, so it is hosted here and moving it is a path rename.
@@ -71,13 +72,28 @@ Every POST except the tester requires `Idempotency-Key`; replays carry `Idempote
 | AP-DUP-001 | 409 | invoice number already posted for the vendor (case-insensitive) |
 | RCV-COR-001 | 409 | correction would take a line below its invoiced quantity |
 | RCV-IDM-001 | 409 | an earlier ledger posting for the receipt or invoice is unfinished (the ledger accepted it, the local commit did not) or differs; repeat the original request first |
-| RCV-NF-001 / RCV-NF-002 | 404 | receipt not found / receipt line has no open GR/IR item |
+| RCV-NF-001 / RCV-NF-002 / RCV-NF-003 | 404 | receipt not found / receipt line has no open GR/IR item / pending posting not found |
+| COM-0503 | 503 | the ledger could not be reached while resolving a pending posting |
 | COM-0412 | 412 | `If-Match` differs from the receipt version |
 | COM-0428 | 428 | `If-Match` missing |
 
+## Pending ledger postings (runbook)
+
+Each ledger post is first recorded in `receiving_pending_posting` (one row per ledger key) with the subjects it touches in `receiving_pending_posting_subject`: the receipt for a receipt command; the invoice id and every referenced receipt for an invoice. The row is marked done in the same transaction that applies the effect. While a row is open, any other ledger-posting command on one of its subjects, or the same key with a different body, returns 409 `RCV-IDM-001`; the problem's `errors.pendingKey` and `errors.createdAt` name the row. Repeating the original request completes it.
+
+A row stays open when the ledger call ended in an unknown outcome (timeout, transport error, 5xx, 408, or a 409 that is not a conflict) or the local commit failed after the ledger accepted the entry. Any other 4xx from the ledger, and a closed period, release the row at once.
+
+When the original request cannot be repeated (the client is gone, the data changed):
+1. `GET /v1/receiving/pending-postings` (duty `ReceivingAdmin`) lists open rows, oldest first.
+2. `POST /v1/receiving/pending-postings/{key}/resolve` (duty `ReceivingAdmin`, `Idempotency-Key` required) re-sends the stored journal under its key. If the ledger returns an entry id it is reversed through `POST /api/v1/ledger/journal-entries/{id}/reverse` and the row becomes `REVERSED`, which frees the receipt and invoice; a definite rejection makes it `REJECTED`. It answers 503 `COM-0503` when the ledger cannot be reached or the reversal failed; call it again.
+3. The user repeats the command. Its ledger key carries a generation suffix (`:r1`, `:r2`) so it does not replay the reversed entry.
+
+`ReceivingAdmin` is not in `policies/authz/data.json` yet. Alerting: the gauge `receiving_pending_postings_oldest_age_seconds` (and `receiving_pending_postings_open`) is kept per process, so it is lost on restart; the `ReceivingPendingPostingStuck` PrometheusRule fires above 900 s. After a crash use the database as the source of truth:
+`SELECT tenant_id, ledger_key, subject, created_at FROM receiving_pending_posting WHERE done_at IS NULL AND created_at < now() - interval '15 minutes';` (run as the table owner, because the application role sees one tenant at a time).
+
 ## Metrics
 
-`receiving_matches_evaluated_total`, `receiving_evaluate_rejected_total`, `receiving_receipts_arrived_total`, `receiving_receipts_registered_total`, `receiving_receipts_posted_total`, `receiving_receipts_adjusted_total`, `receiving_invoices_posted_total`, `receiving_http_requests_total`, `receiving_http_request_duration_seconds`. No Prometheus client dependency.
+`receiving_matches_evaluated_total`, `receiving_evaluate_rejected_total`, `receiving_receipts_arrived_total`, `receiving_receipts_registered_total`, `receiving_receipts_posted_total`, `receiving_receipts_adjusted_total`, `receiving_invoices_posted_total`, `receiving_pending_postings_open`, `receiving_pending_postings_oldest_age_seconds`, `receiving_http_requests_total`, `receiving_http_request_duration_seconds`. No Prometheus client dependency.
 
 ## Needs
 

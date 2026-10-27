@@ -128,6 +128,14 @@ func registered(t *testing.T, st store.Store, p tenant.Principal, slip string, s
 	return r
 }
 
+func wantPending(t *testing.T, err error, key string) {
+	t.Helper()
+	var pe *store.PendingError
+	if !errors.As(err, &pe) || pe.Key != key || pe.CreatedAt.IsZero() {
+		t.Fatalf("err=%v, want a PendingError naming %s with its start time", err, key)
+	}
+}
+
 func wantCode(t *testing.T, err error, code string) {
 	t.Helper()
 	var de *domain.Error
@@ -589,7 +597,7 @@ var cases = []struct {
 		p := principal(1)
 		r := registered(t, b.st, p, "PS-1", "S1", "S2", "S3")
 		reserve := func(key, hash string) error {
-			return b.st.ReservePosting(ctxOf(p), store.PendingPosting{Key: key, Subject: r.ID, Hash: hash, Journal: []byte(`{"k":1}`)})
+			return b.st.ReservePosting(ctxOf(p), store.PendingPosting{Key: key, BaseKey: key, Subjects: []string{r.ID}, Hash: hash, Journal: []byte(`{"k":1}`)})
 		}
 		if err := reserve("k1", "h1"); err != nil {
 			t.Fatal(err)
@@ -597,9 +605,9 @@ var cases = []struct {
 		if err := reserve("k1", "h1"); err != nil {
 			t.Fatalf("the same key and body must be accepted again: %v", err)
 		}
-		wantCode(t, reserve("k1", "h2"), domain.CodePostingPending)
-		wantCode(t, reserve("k2", "h1"), domain.CodePostingPending)
-		wantCode(t, b.st.EnsureNoPending(ctxOf(p), r.ID), domain.CodePostingPending)
+		wantPending(t, reserve("k1", "h2"), "k1")
+		wantPending(t, reserve("k2", "h1"), "k1")
+		wantPending(t, b.st.EnsureNoPending(ctxOf(p), r.ID), "k1")
 		if err := b.st.EnsureNoPending(ctxOf(p), "someone-else"); err != nil {
 			t.Fatalf("another subject is unaffected: %v", err)
 		}
@@ -618,6 +626,63 @@ var cases = []struct {
 		page, _ := b.st.ListGrir(ctxOf(p), store.GrirFilter{})
 		if !page.Items[0].UnitPrice.Equal(decimal.RequireFromString("2.5")) {
 			t.Fatalf("grir unit price %s, want the receipt line price 2.5", page.Items[0].UnitPrice)
+		}
+	}},
+	{"a released key can be reserved again with a new body, and a posted key keeps its body", func(t *testing.T, b backend) {
+		p := principal(1)
+		reserve := func(key, hash string) error {
+			return b.st.ReservePosting(ctxOf(p), store.PendingPosting{Key: key, BaseKey: key, Subjects: []string{"subject-a"}, Hash: hash, Journal: []byte(`{}`)})
+		}
+		if err := reserve("k", "h1"); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.st.ReleasePosting(ctxOf(p), "k"); err != nil {
+			t.Fatal(err)
+		}
+		if err := reserve("k", "h2"); err != nil {
+			t.Fatalf("re-arming a rejected key with a new hash must succeed: %v", err)
+		}
+		wantPending(t, reserve("k", "h3"), "k")
+		row, err := b.st.GetPending(ctxOf(p), "k")
+		if err != nil || row.Hash != "h2" || row.DoneAt != nil || len(row.Subjects) != 1 {
+			t.Fatalf("row=%+v err=%v, want the re-armed open row with hash h2", row, err)
+		}
+		if err := b.st.FinishPending(ctxOf(p), "k", store.OutcomeReversed); err != nil {
+			t.Fatal(err)
+		}
+		if n, _ := b.st.PostingGeneration(ctxOf(p), "k"); n != 1 {
+			t.Fatalf("generation %d, want 1 after a reversal", n)
+		}
+		if err := b.st.EnsureNoPending(ctxOf(p), "subject-a"); err != nil {
+			t.Fatalf("a reversed posting frees its subject: %v", err)
+		}
+		if _, err := b.st.GetPending(ctxOf(p), "missing"); !errors.Is(err, store.ErrPendingNotFound) {
+			t.Fatalf("err=%v, want ErrPendingNotFound", err)
+		}
+	}},
+	{"a posting over several subjects blocks each of them and completes them all together", func(t *testing.T, b backend) {
+		p := principal(1)
+		invoice := store.PendingPosting{Key: "inv", BaseKey: "inv", Subjects: []string{"receipt-2", "invoice-1", "receipt-1"}, Hash: "h", Journal: []byte(`{}`)}
+		if err := b.st.ReservePosting(ctxOf(p), invoice); err != nil {
+			t.Fatal(err)
+		}
+		for _, subject := range []string{"receipt-1", "receipt-2", "invoice-1"} {
+			wantPending(t, b.st.EnsureNoPending(ctxOf(p), subject), "inv")
+		}
+		other := store.PendingPosting{Key: "corr", BaseKey: "corr", Subjects: []string{"receipt-2"}, Hash: "h", Journal: []byte(`{}`)}
+		wantPending(t, b.st.ReservePosting(ctxOf(p), other), "inv")
+		rows, err := b.st.ListPending(ctxOf(p))
+		if err != nil || len(rows) != 1 || len(rows[0].Subjects) != 3 || rows[0].Subjects[0] != "invoice-1" {
+			t.Fatalf("rows=%+v err=%v, want one open row with three sorted subjects", rows, err)
+		}
+		if err := b.st.FinishPending(ctxOf(p), "inv", store.OutcomeReversed); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.st.ReservePosting(ctxOf(p), other); err != nil {
+			t.Fatalf("finishing the invoice posting must free the receipts: %v", err)
+		}
+		if err := b.st.ReservePosting(ctxOf(principal(2)), invoice); err != nil {
+			t.Fatalf("another tenant is unaffected: %v", err)
 		}
 	}},
 	{"ping succeeds on a healthy store", func(t *testing.T, b backend) {

@@ -2,7 +2,7 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { Receipt, ReceiptLine } from "./api/client";
 import { emptyArrival, toArrivalInput, validateArrival } from "./NewArrivalPage";
-import { validateCorrection, validateRegister } from "./ReceiptPage";
+import { validateCorrection, validatePostingDate, validateRegister } from "./ReceiptPage";
 import { idempotencyKey, json, pageViolations, renderAt, server, useFakeServer } from "./testServer";
 
 useFakeServer();
@@ -309,5 +309,39 @@ describe("receipt page", () => {
     server.handler = () => json(404, { code: "RCV-NF-001", detail: "receipt not found" });
     renderAt(`/receiving/receipts/${ID}`);
     expect(await screen.findByRole("alert")).toHaveTextContent("receipt not found");
+  });
+
+  it("sends an optional posting date with a correction and with a cancellation", async () => {
+    const posted = receipt({ state: "POSTED", version: 3, lines: [line({ amount: "25.00" })] });
+    serve(posted, () => json(200, { ...posted, version: 4 }));
+    renderAt(`/receiving/receipts/${ID}`);
+    await screen.findByRole("form", { name: "Correct receipt" });
+
+    fireEvent.change(screen.getByLabelText("Line 1 quantity change"), { target: { value: "-1" } });
+    fireEvent.change(screen.getByLabelText("Posting date", { selector: "#cor-date" }), { target: { value: "2026-10-01" } });
+    fireEvent.click(screen.getByRole("button", { name: "Post correction" }));
+    expect(await screen.findByText("Use 2026-10-25 or later.")).toBeInTheDocument();
+    expect(commandCalls()).toHaveLength(0);
+
+    fireEvent.change(screen.getByLabelText("Posting date", { selector: "#cor-date" }), { target: { value: "2026-11-02" } });
+    fireEvent.click(screen.getByRole("button", { name: "Post correction" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm correction" }));
+    await waitFor(() => expect(commandCalls()).toHaveLength(1));
+    expect(commandCalls()[0].body).toEqual({ lines: [{ lineNo: 1, qtyDelta: "-1" }], postingDate: "2026-11-02" });
+
+    fireEvent.change(screen.getByLabelText("Posting date", { selector: "#cancel-date" }), { target: { value: "2026-11-05" } });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel receipt" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm cancel" }));
+    await waitFor(() => expect(commandCalls()).toHaveLength(2));
+    expect(commandCalls()[1].url.pathname).toBe(`/api/v1/receiving/receipts/${ID}:cancel`);
+    expect(commandCalls()[1].body).toEqual({ postingDate: "2026-11-05" });
+  });
+
+  it("checks a posting date against the receipt date", () => {
+    const r = receipt();
+    expect(validatePostingDate(r, "")).toBeUndefined();
+    expect(validatePostingDate(r, "2026-10-25")).toBeUndefined();
+    expect(validatePostingDate(r, "2026-10-24")).toBe("Use 2026-10-25 or later.");
+    expect(validatePostingDate(r, "25/10/2026")).toBe("Enter a date.");
   });
 });

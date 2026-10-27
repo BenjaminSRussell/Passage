@@ -4,7 +4,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, DataTable, FormField, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
 import { fetchReceipts, RECEIPT_STATES, type Receipt, type ReceiptState } from "./api/client";
 import { StateBadge } from "./parts";
-import styles from "./pages.module.css";
+import styles from "../../shell/pageLayout.module.css";
 
 const columns: DataTableColumn<Receipt>[] = [
   { key: "receiptNumber", header: "Receipt", mono: true },

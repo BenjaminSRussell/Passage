@@ -1,4 +1,4 @@
-import { DECIMAL, UUID } from "../receiving/api/http";
+import { DECIMAL, UUID } from "../../shell/api/http";
 
 export { DECIMAL, UUID };
 

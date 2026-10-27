@@ -13,9 +13,9 @@ import {
   type ReceiptLine,
   type RegisterLineInput,
 } from "./api/client";
-import { DECIMAL, SIGNED_DECIMAL, UUID } from "./api/http";
+import { DECIMAL, SIGNED_DECIMAL, UUID } from "../../shell/api/http";
 import { Detail, StateBadge, useAction } from "./parts";
-import styles from "./pages.module.css";
+import styles from "../../shell/pageLayout.module.css";
 
 type Errors = Record<string, string>;
 
@@ -189,8 +189,16 @@ function PostPanel({ receipt, reload }: { receipt: Receipt; reload: () => void }
   );
 }
 
-export function validateCorrection(receipt: Receipt, deltas: string[]): Errors {
+export function validatePostingDate(receipt: Receipt, postingDate: string): string | undefined {
+  if (postingDate === "") return undefined;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(postingDate)) return "Enter a date.";
+  return postingDate < receipt.receiptDate ? `Use ${receipt.receiptDate} or later.` : undefined;
+}
+
+export function validateCorrection(receipt: Receipt, deltas: string[], postingDate = ""): Errors {
   const errors: Errors = {};
+  const dateError = validatePostingDate(receipt, postingDate);
+  if (dateError) errors.postingDate = dateError;
   let changed = 0;
   receipt.lines.forEach((_, i) => {
     const d = deltas[i].trim();
@@ -205,20 +213,21 @@ export function validateCorrection(receipt: Receipt, deltas: string[]): Errors {
 function CorrectForm({ receipt, reload }: { receipt: Receipt; reload: () => void }) {
   const action = useAction(receipt.id);
   const [deltas, setDeltas] = useState<string[]>(() => receipt.lines.map(() => ""));
+  const [postingDate, setPostingDate] = useState("");
   const [errors, setErrors] = useState<Errors>({});
   const [confirming, setConfirming] = useState(false);
   const shown = { ...errors, ...(action.failure?.fields ?? {}) };
 
   function review(event: FormEvent) {
     event.preventDefault();
-    const found = validateCorrection(receipt, deltas);
+    const found = validateCorrection(receipt, deltas, postingDate);
     setErrors(found);
     setConfirming(Object.keys(found).length === 0);
   }
 
   async function submit() {
     const lines = receipt.lines.flatMap((l, i) => (deltas[i].trim() === "" ? [] : [{ lineNo: l.lineNo, qtyDelta: deltas[i].trim() }]));
-    await action.run((key) => correctReceipt(receipt.id, receipt.version, lines, key));
+    await action.run((key) => correctReceipt(receipt.id, receipt.version, lines, key, postingDate));
   }
 
   return (
@@ -230,6 +239,9 @@ function CorrectForm({ receipt, reload }: { receipt: Receipt; reload: () => void
             {(c) => <Input {...c} inputMode="decimal" value={deltas[i]} onChange={(e) => setDeltas((prev) => prev.map((d, j) => (j === i ? e.target.value : d)))} invalid={Boolean(shown[`lines[${i}].qtyDelta`])} />}
           </FormField>
         ))}
+        <FormField id="cor-date" label="Posting date" hint={`Defaults to the receipt date, ${receipt.receiptDate}.`} optional error={shown.postingDate}>
+          {(c) => <Input {...c} type="date" value={postingDate} onChange={(e) => setPostingDate(e.target.value)} invalid={Boolean(shown.postingDate)} />}
+        </FormField>
         {shown.lines ? (
           <div className={styles.formActions}>
             <Alert tone="danger" live="alert">
@@ -255,6 +267,8 @@ function CorrectForm({ receipt, reload }: { receipt: Receipt; reload: () => void
 function CancelPanel({ receipt, reload }: { receipt: Receipt; reload: () => void }) {
   const action = useAction(receipt.id);
   const [confirming, setConfirming] = useState(false);
+  const [postingDate, setPostingDate] = useState("");
+  const [dateError, setDateError] = useState<string | undefined>();
   const posted = receipt.state === "POSTED";
   return (
     <Card title="Cancel receipt">
@@ -264,6 +278,11 @@ function CancelPanel({ receipt, reload }: { receipt: Receipt; reload: () => void
             ? "Cancelling reverses the ledger entry and closes the GR/IR items. It is refused once any line has been invoiced."
             : "Cancelling releases any serials recorded on the receipt. The packing slip stays used."}
         </p>
+        {posted ? (
+          <FormField id="cancel-date" label="Posting date" hint={`Defaults to the receipt date, ${receipt.receiptDate}.`} optional error={dateError ?? action.failure?.fields.postingDate}>
+            {(c) => <Input {...c} type="date" value={postingDate} onChange={(e) => setPostingDate(e.target.value)} invalid={Boolean(dateError)} />}
+          </FormField>
+        ) : null}
         <FailureAlert title="Could not cancel the receipt" failure={action.failure} onReload={reload} />
         {confirming ? (
           <ConfirmStep
@@ -271,7 +290,11 @@ function CancelPanel({ receipt, reload }: { receipt: Receipt; reload: () => void
             keepLabel="Keep receipt"
             variant="danger"
             busy={action.busy}
-            onConfirm={() => void action.run((key) => cancelReceipt(receipt.id, receipt.version, key))}
+            onConfirm={() => {
+              const invalid = validatePostingDate(receipt, postingDate);
+              setDateError(invalid);
+              if (!invalid) void action.run((key) => cancelReceipt(receipt.id, receipt.version, key, postingDate));
+            }}
             onKeep={() => setConfirming(false)}
           />
         ) : (

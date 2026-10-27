@@ -73,6 +73,19 @@ func (l *recordingLedger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(`{"journalEntryId":"je-1"}`))
 }
 
+func completePostings(t *testing.T, st *memstore.Store) {
+	t.Helper()
+	rows, err := st.ListPending(tenantCtx())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range rows {
+		if err := st.FinishPending(tenantCtx(), row.Key, "POSTED"); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func closeService(t *testing.T, status int, body string) *periods.Client {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -92,7 +105,8 @@ func TestPostInvoice_GrirNetsToZeroThroughRealLedgerAdapter(t *testing.T) {
 	ledgerSrv := httptest.NewServer(recorder)
 	t.Cleanup(ledgerSrv.Close)
 	ledgerClient := ledger.New(ledgerSrv.URL, nil)
-	a := api.New(memstore.New(), api.Ports{
+	st := memstore.New()
+	a := api.New(st, api.Ports{
 		Periods: closeService(t, http.StatusOK, `{"allowed":true,"module":"ap","status":"open"}`),
 		Ledger:  ledgerClient,
 	})
@@ -129,12 +143,14 @@ func TestPostInvoice_GrirNetsToZeroThroughRealLedgerAdapter(t *testing.T) {
 			if _, err := a.PostInvoice(ctx, in, profile); err != nil {
 				t.Fatal(err)
 			}
+			completePostings(t, st)
 		}
 		rest := item.ReceivedQty.Sub(item.InvoicedQty)
 		in := domain.VendorInvoice{ID: fmt.Sprintf("final-%d", i), LedgerID: ledgerUUID, FiscalPeriodID: fiscalPeriodID, PostingDate: postingDay, Currency: "USD", Lines: []domain.PostLine{{Item: item, Qty: rest, UnitPrice: price}}}
 		if _, err := a.PostInvoice(ctx, in, profile); err != nil {
 			t.Fatal(err)
 		}
+		completePostings(t, st)
 		if !item.OpenAmount().IsZero() {
 			t.Fatalf("line %d open item %s, want 0", i+1, item.OpenAmount())
 		}

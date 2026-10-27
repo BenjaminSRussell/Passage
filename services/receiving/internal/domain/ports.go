@@ -2,6 +2,9 @@ package domain
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -11,11 +14,15 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/money"
 )
 
-const LedgerPostPath = "/v1/ledger/journal-entries:post"
+const (
+	LedgerPostPath        = "/api/v1/ledger/journal-entries"
+	LedgerReversePathTmpl = "/api/v1/ledger/journal-entries/%s/reverse"
+)
 
 var (
 	ErrPeriodClosed   = errors.New("ledger period closed")
 	ErrLedgerConflict = errors.New("ledger idempotency conflict")
+	ErrLedgerRejected = errors.New("ledger rejected the entry")
 )
 
 type PeriodStatus string
@@ -79,17 +86,53 @@ type FakePeriods struct {
 
 func (f FakePeriods) AP(context.Context, PeriodQuery) (PeriodStatus, error) { return f.Status, f.Err }
 
+type LedgerReverser interface {
+	Reverse(ctx context.Context, entryID, idempotencyKey string) error
+}
+
+type fakePosting struct {
+	hash string
+	id   string
+}
+
 type FakeLedger struct {
-	Entries []JournalEntry
-	Err     error
+	Entries  []JournalEntry
+	Reversed []string
+	Err      error
+	posted   map[string]fakePosting
 }
 
 func (f *FakeLedger) Post(_ context.Context, entry JournalEntry) (string, error) {
 	if f.Err != nil {
 		return "", f.Err
 	}
+	raw, err := json.Marshal(entry)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(raw)
+	hash := hex.EncodeToString(sum[:])
+	if prior, ok := f.posted[entry.IdempotencyKey]; ok {
+		if prior.hash != hash {
+			return "", ErrLedgerConflict
+		}
+		return prior.id, nil
+	}
+	if f.posted == nil {
+		f.posted = map[string]fakePosting{}
+	}
 	f.Entries = append(f.Entries, entry)
-	return fmt.Sprintf("fake-entry-%d", len(f.Entries)), nil
+	id := fmt.Sprintf("fake-entry-%d", len(f.Entries))
+	f.posted[entry.IdempotencyKey] = fakePosting{hash: hash, id: id}
+	return id, nil
+}
+
+func (f *FakeLedger) Reverse(_ context.Context, entryID, _ string) error {
+	if f.Err != nil {
+		return f.Err
+	}
+	f.Reversed = append(f.Reversed, entryID)
+	return nil
 }
 
 func (f *FakeLedger) Balance(account string) decimal.Decimal {
