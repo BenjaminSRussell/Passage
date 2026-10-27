@@ -1,0 +1,220 @@
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.formActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  grid-column: 1 / -1;
+}
+
+.groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+  margin: 0;
+  margin-block-start: var(--space-4);
+  padding: 0;
+  border: 0;
+}
+
+.groupsLegend {
+  inline-size: 100%;
+  margin-block-end: var(--space-2);
+  padding: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm-size);
+  line-height: var(--text-sm-leading);
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm-size);
+  line-height: var(--text-sm-leading);
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--space-4);
+}
+
+.details {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-5);
+  margin: 0;
+}
+
+.entry {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-inline-size: 0;
+}
+
+.term {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm-size);
+  line-height: var(--text-sm-leading);
+}
+
+.value {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+.muted {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm-size);
+  line-height: var(--text-sm-leading);
+}
+
+.more {
+  display: flex;
+  justify-content: center;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.note {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm-size);
+  line-height: var(--text-sm-leading);
+  max-inline-size: var(--reading-max);
+}
+
+.loading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.messages {
+  margin: 0;
+  padding-inline-start: var(--space-5);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm-size);
+  line-height: var(--text-sm-leading);
+}
+
+.rank {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs-size);
+  line-height: var(--text-xs-leading);
+}
+
+.fieldError {
+  inline-size: 100%;
+  margin: 0;
+  color: var(--color-danger);
+  font-size: var(--text-sm-size);
+  line-height: var(--text-sm-leading);
+}
+
+.lineRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: var(--space-3);
+  align-items: start;
+  margin: 0;
+  padding: var(--space-3) 0 0;
+  border: 0;
+  border-block-start: 1px solid var(--color-border);
+}
+
+.lineChecks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  padding-block-start: var(--space-6);
+}
+
+.board {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(15rem, 1fr);
+  gap: var(--space-4);
+  overflow-x: auto;
+  padding-block-end: var(--space-2);
+}
+
+.boardColumn {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-inline-size: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-muted);
+}
+
+.boardHeading {
+  margin: 0;
+  font-size: var(--text-sm-size);
+  line-height: var(--text-sm-leading);
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.boardList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.boardCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.boardCardHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-weight: 600;
+}
+
+.boardFacts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin: 0;
+}

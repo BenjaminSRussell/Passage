@@ -1,0 +1,495 @@
+openapi: 3.1.0
+info:
+  title: Passage Lean Manufacturing
+  version: 0.2.0
+  description: >
+    Lean manufacturing (wave 24, PSG-24 slice 1): production flows with their
+    activities, kanban rules, kanban cards and the kanban board. Routes match the
+    handlers in internal/api (checked by internal/api/openapi_test.go). Errors are
+    RFC 9457 problem details (application/problem+json) with a stable `code`; see
+    README.md. The gateway routes /api/v1/lean/* to this service.
+servers:
+  - url: https://api.{env}.passage.dev
+    variables:
+      env:
+        default: dev
+paths:
+  /v1/lean/flows:
+    post:
+      operationId: createFlow
+      summary: Create a draft production flow with its activities (FR-24.8)
+      x-passage-duty: lean.flow.write
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/FlowRequest' } } }
+      responses:
+        '201':
+          description: 'Created in status draft. A replay returns 200 with Idempotent-Replayed: true.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Flow' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: LEAN-0105 when the value stream already has a flow with this name, or activity names repeat.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listFlows
+      summary: Production flows, newest first (activities omitted; activityCount given)
+      x-passage-duty: lean.read
+      parameters:
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/FlowStatus' } }
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Flows
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Flow' } }
+        '400': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/lean/flows/{id}:
+    get:
+      operationId: getFlow
+      summary: One production flow with its activities in sequence order
+      x-passage-duty: lean.read
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: The flow
+          content: { application/json: { schema: { $ref: '#/components/schemas/Flow' } } }
+        '404':
+          description: LEAN-0101
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/lean/flows/{id}:activate:
+    post:
+      operationId: activateFlow
+      summary: Validate connectivity and activate a draft flow (FR-24.8)
+      x-passage-duty: lean.flow.write
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version: { type: integer, minimum: 1, description: The flow version the caller read (optimistic concurrency). }
+                activeFrom: { type: string, format: date, description: Defaults to today (UTC). }
+                activeTo: { type: string, format: date }
+      responses:
+        '200':
+          description: 'The active flow with version + 1. A replay returns the first answer with Idempotent-Replayed: true. Writes dev.passage.lean.flow.activated.v1.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Flow' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404':
+          description: LEAN-0101
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: LEAN-0104 when the version is stale; LEAN-0106 when the flow is not a draft.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: LEAN-0004 when a process activity has no output location; idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/lean/kanban-rules:
+    post:
+      operationId: createKanbanRule
+      summary: Create a kanban rule (FR-24.9)
+      x-passage-duty: lean.kanban-rule.write
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/RuleRequest' } } }
+      responses:
+        '201':
+          description: 'Created. A replay returns 200 with Idempotent-Replayed: true.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Rule' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404':
+          description: LEAN-0101 when flowId names no flow.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: LEAN-0105 when the code is taken.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listKanbanRules
+      summary: Kanban rules ordered by code, with their active card count
+      x-passage-duty: lean.read
+      parameters:
+        - { name: flowId, in: query, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Rules
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Rule' } }
+        '400': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/lean/kanban-rules/{id}:
+    get:
+      operationId: getKanbanRule
+      summary: One kanban rule
+      x-passage-duty: lean.read
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: The rule
+          content: { application/json: { schema: { $ref: '#/components/schemas/Rule' } } }
+        '404':
+          description: LEAN-0102
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/lean/kanban-rules:fixed-count:
+    post:
+      operationId: suggestFixedKanbanCount
+      summary: Suggest the number of kanbans for a fixed rule (BR-24.7). Writes nothing and is never applied automatically.
+      x-passage-duty: lean.kanban-rule.write
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/FixedCountRequest' } } }
+      responses:
+        '200':
+          description: The suggested number of kanbans.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  numberOfKanbans: { type: integer }
+        '400': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/lean/kanbans:generate:
+    post:
+      operationId: generateKanbans
+      summary: Generate kanbans for a fixed or event rule (FR-24.9, FR-24.11, BR-24.7, BR-24.8)
+      description: >
+        A fixed rule creates `count` cards in Not planned (0 or omitted fills the rule to its
+        number of kanbans). An event rule creates ⌈demandQty / fixedQty⌉ cards in Planned, due
+        at `due` or now + lead time, each referencing the triggering line; the last card is full
+        size unless the rule has exactQty. Cards are numbered <rule code>-0001, -0002, ... A
+        scheduled rule's kanbans come from master planning (wave 22) and are refused here.
+      x-passage-duty: lean.kanban.write
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/GenerateRequest' } } }
+      responses:
+        '201':
+          description: 'The created cards. A replay returns the first answer with 200 and Idempotent-Replayed: true. Writes dev.passage.lean.kanban.created.v1 per card.'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Kanban' } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404':
+          description: LEAN-0102
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: LEAN-0002 when a fixed rule would exceed its number of kanbans.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: LEAN-0107 when the rule is scheduled or not effective today; idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/lean/kanbans/{id}:
+    get:
+      operationId: getKanban
+      summary: One kanban card
+      x-passage-duty: lean.read
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: The card
+          content: { application/json: { schema: { $ref: '#/components/schemas/Kanban' } } }
+        '404':
+          description: LEAN-0103
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/lean/kanbans/{id}:move:
+    post:
+      operationId: moveKanban
+      summary: Move a card one step through the kanban state machine (BR-24.6)
+      description: >
+        Forward moves are one step at a time: Not planned → Planned → Prepared → In progress →
+        Completed → Emptied. The backward moves are Planned → Not planned and, for fixed rules
+        only, Emptied → Not planned (card reuse, which counts against the rule's number of
+        kanbans again). Moving to Planned sets the due date from the rule lead time when none
+        is set; moving back to Not planned clears it.
+      x-passage-duty: lean.kanban.work
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to, version]
+              properties:
+                to: { $ref: '#/components/schemas/KanbanState' }
+                version: { type: integer, minimum: 1, description: The card version the caller read. }
+      responses:
+        '200':
+          description: 'The moved card with version + 1. A replay returns the first answer with Idempotent-Replayed: true. Writes dev.passage.lean.kanban.statechanged.v1.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Kanban' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404':
+          description: LEAN-0103
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: LEAN-0001 when the move is not allowed (AC-24.7); LEAN-0002 when card reuse would exceed the rule; LEAN-0104 when the version is stale.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/lean/board:
+    get:
+      operationId: getKanbanBoard
+      summary: The kanban board, one column per card state (FR-24.10)
+      description: >
+        Every card that is not emptied, plus emptied fixed-rule cards waiting for reuse, oldest
+        due first, at most 500 cards (truncated is true when the limit was reached). Spent
+        event-rule cards are left out.
+      x-passage-duty: lean.kanban.work
+      parameters:
+        - { name: siteId, in: query, schema: { type: string, format: uuid } }
+        - { name: flowId, in: query, schema: { type: string, format: uuid } }
+        - { name: ruleId, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Board columns in state order.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [columns, truncated]
+                properties:
+                  columns:
+                    type: array
+                    items:
+                      type: object
+                      required: [state, kanbans]
+                      properties:
+                        state: { $ref: '#/components/schemas/KanbanState' }
+                        kanbans: { type: array, items: { $ref: '#/components/schemas/Kanban' } }
+                  truncated: { type: boolean }
+        '400': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /healthz:
+    get:
+      operationId: healthz
+      summary: Liveness
+      security: []
+      responses:
+        '200': { description: Process is up }
+  /readyz:
+    get:
+      operationId: readyz
+      summary: Readiness (Postgres reachable)
+      security: []
+      responses:
+        '200': { description: Ready }
+        '503': { description: Database unreachable }
+components:
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: 1 to 200 characters. A retry with the same key and body returns the first answer; a different body is idempotency_key_reuse (422).
+      schema: { type: string, minLength: 1, maxLength: 200 }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+  schemas:
+    Decimal:
+      type: string
+      description: Decimal as a JSON string (numbers are accepted on input).
+      pattern: '^-?[0-9]+(\.[0-9]+)?$'
+    Quantity:
+      type: string
+      description: Positive decimal below 10^12 with at most 6 decimals.
+      pattern: '^[0-9]{1,12}(\.[0-9]{1,6})?$'
+    FlowStatus:
+      type: string
+      enum: [draft, active, expired]
+    ActivityKind:
+      type: string
+      enum: [process, transfer, service]
+    KanbanState:
+      type: string
+      enum: [not-planned, planned, prepared, in-progress, completed, emptied]
+    ActivityRequest:
+      type: object
+      required: [sequence, name, kind]
+      properties:
+        sequence: { type: integer, minimum: 1 }
+        name: { type: string, minLength: 1, maxLength: 80 }
+        kind: { $ref: '#/components/schemas/ActivityKind' }
+        cycleTimeS: { type: integer, minimum: 0 }
+        workCellResourceId: { type: [string, 'null'], format: uuid }
+        inputLocationId: { type: [string, 'null'], format: uuid }
+        outputLocationId: { type: [string, 'null'], format: uuid, description: Required on process activities before activation (LEAN-0004). }
+        predecessors: { type: array, items: { type: integer }, description: Sequence numbers of other activities of this flow. }
+        pickingRequired: { type: boolean, default: false }
+    Activity:
+      allOf:
+        - $ref: '#/components/schemas/ActivityRequest'
+        - type: object
+          required: [id]
+          properties:
+            id: { type: string, format: uuid }
+    FlowRequest:
+      type: object
+      required: [valueStreamId, siteId, name, activities]
+      properties:
+        valueStreamId: { type: string, format: uuid, description: The wave-6 operating unit of type value stream. }
+        siteId: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        taktTimeS: { type: [integer, 'null'], minimum: 1 }
+        activities: { type: array, minItems: 1, maxItems: 100, items: { $ref: '#/components/schemas/ActivityRequest' } }
+    Flow:
+      type: object
+      required: [id, valueStreamId, siteId, name, status, version, activityCount, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        valueStreamId: { type: string, format: uuid }
+        siteId: { type: string, format: uuid }
+        name: { type: string }
+        taktTimeS: { type: [integer, 'null'] }
+        status: { $ref: '#/components/schemas/FlowStatus' }
+        activeFrom: { type: [string, 'null'], format: date }
+        activeTo: { type: [string, 'null'], format: date }
+        version: { type: integer }
+        activityCount: { type: integer }
+        activities: { type: array, items: { $ref: '#/components/schemas/Activity' }, description: Present on create, get and activate, omitted in lists. }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    RuleRequest:
+      type: object
+      required: [code, itemId, siteId, ruleType, replenishment, fixedQty]
+      properties:
+        code: { type: string, pattern: '^[A-Z0-9][A-Z0-9_.-]{0,31}$' }
+        itemId: { type: string, format: uuid }
+        siteId: { type: string, format: uuid }
+        flowId: { type: [string, 'null'], format: uuid }
+        ruleType: { type: string, enum: [manufacturing, withdrawal] }
+        replenishment: { type: string, enum: [fixed, scheduled, event] }
+        fixedQty: { $ref: '#/components/schemas/Quantity' }
+        numberOfKanbans: { type: [integer, 'null'], minimum: 1, maximum: 1000, description: Required on fixed rules, refused on others. }
+        leadTimeH: { type: integer, minimum: 0, maximum: 8760, default: 0 }
+        eventSource: { type: [string, 'null'], enum: [sales, bom, kanban, min-stock, null], description: Required on event rules, refused on others. }
+        exactQty: { type: boolean, default: false, description: 'Event rules: the last card holds the remainder instead of a full fixedQty (BR-24.8).' }
+        effectiveFrom: { type: string, format: date, description: Defaults to today (UTC). }
+        effectiveTo: { type: [string, 'null'], format: date }
+    Rule:
+      type: object
+      required: [id, code, itemId, siteId, ruleType, replenishment, fixedQty, leadTimeH, exactQty, effectiveFrom, version, activeKanbans, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        itemId: { type: string, format: uuid }
+        siteId: { type: string, format: uuid }
+        flowId: { type: [string, 'null'], format: uuid }
+        ruleType: { type: string, enum: [manufacturing, withdrawal] }
+        replenishment: { type: string, enum: [fixed, scheduled, event] }
+        fixedQty: { $ref: '#/components/schemas/Decimal' }
+        numberOfKanbans: { type: [integer, 'null'] }
+        leadTimeH: { type: integer }
+        eventSource: { type: [string, 'null'] }
+        exactQty: { type: boolean }
+        effectiveFrom: { type: string, format: date }
+        effectiveTo: { type: [string, 'null'], format: date }
+        version: { type: integer }
+        activeKanbans: { type: integer, description: Cards that are not emptied (BR-24.7). }
+        createdAt: { type: string, format: date-time }
+    FixedCountRequest:
+      type: object
+      required: [dailyDemand, leadTimeDays, safetyPct, fixedQty]
+      properties:
+        dailyDemand: { $ref: '#/components/schemas/Decimal' }
+        leadTimeDays: { $ref: '#/components/schemas/Decimal' }
+        safetyPct: { $ref: '#/components/schemas/Decimal' }
+        fixedQty: { $ref: '#/components/schemas/Decimal' }
+    GenerateRequest:
+      type: object
+      required: [ruleId]
+      properties:
+        ruleId: { type: string, format: uuid }
+        count: { type: integer, minimum: 0, maximum: 1000, description: 'Fixed rules: cards to add; 0 or omitted fills the rule.' }
+        demandQty: { $ref: '#/components/schemas/Quantity' }
+        eventRefType: { type: [string, 'null'], maxLength: 80, description: 'Event rules: the triggering line type, for example sales-line.' }
+        eventRefId: { type: [string, 'null'], maxLength: 80 }
+        due: { type: [string, 'null'], format: date-time }
+    Kanban:
+      type: object
+      required: [id, ruleId, ruleCode, itemId, ruleType, replenishment, cardNumber, qty, state, version, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        ruleId: { type: string, format: uuid }
+        ruleCode: { type: string }
+        itemId: { type: string, format: uuid }
+        ruleType: { type: string, enum: [manufacturing, withdrawal] }
+        replenishment: { type: string, enum: [fixed, scheduled, event] }
+        cardNumber: { type: string, example: MIX-A-0001 }
+        qty: { $ref: '#/components/schemas/Decimal' }
+        state: { $ref: '#/components/schemas/KanbanState' }
+        due: { type: [string, 'null'], format: date-time }
+        eventRefType: { type: [string, 'null'] }
+        eventRefId: { type: [string, 'null'] }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    Problem:
+      type: object
+      description: RFC 9457 problem details.
+      properties:
+        type: { type: string, example: 'https://passage.dev/problems/LEAN-0001' }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string }
+        traceId: { type: string }
+        errors: { type: object, additionalProperties: { type: string } }
+  responses:
+    Problem:
+      description: Problem details (application/problem+json).
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }

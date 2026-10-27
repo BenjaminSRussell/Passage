@@ -1,0 +1,6 @@
+apiVersion: v2
+name: processmfg
+description: Passage process manufacturing service (formulas, batch orders, potency, co-products, catch weight)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

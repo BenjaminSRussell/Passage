@@ -1,0 +1,99 @@
+asyncapi: 3.0.0
+info:
+  title: Passage Process Manufacturing events
+  version: 0.2.0
+  description: >
+    CloudEvents 1.0 published through the transactional outbox (Debezium
+    outbox router), each in the same transaction as the change it reports.
+    Event types follow dev.passage.<context>.<entity>.<verb>.v<n>; the context
+    is production, as in PRD 4.24.5, and the entity drops the PRD hyphen
+    (batch-order → batchorder) because the kernel rule allows none. Payloads
+    match internal/events/events.go. batch.attributes-recorded and
+    co-product.allocated arrive with the slices that persist them (see
+    NOT-IMPLEMENTED.md).
+defaultContentType: application/cloudevents+json
+channels:
+  formula:
+    address: passage.production.formula
+    messages:
+      formulaCreated:
+        $ref: '#/components/messages/FormulaCreated'
+  batchOrder:
+    address: passage.production.batchorder
+    messages:
+      batchOrderCreated:
+        $ref: '#/components/messages/BatchOrderCreated'
+      batchOrderRescaled:
+        $ref: '#/components/messages/BatchOrderRescaled'
+operations:
+  publishFormulaCreated:
+    action: send
+    channel: { $ref: '#/channels/formula' }
+    messages: [{ $ref: '#/channels/formula/messages/formulaCreated' }]
+    summary: A formula was created (engineering, planning consume it)
+  publishBatchOrderCreated:
+    action: send
+    channel: { $ref: '#/channels/batchOrder' }
+    messages: [{ $ref: '#/channels/batchOrder/messages/batchOrderCreated' }]
+    summary: A batch order was created from a formula snapshot (planning, analytics consume it)
+  publishBatchOrderRescaled:
+    action: send
+    channel: { $ref: '#/channels/batchOrder' }
+    messages: [{ $ref: '#/channels/batchOrder/messages/batchOrderRescaled' }]
+    summary: A batch order's size changed before it started (planning, scheduling consume it)
+components:
+  messages:
+    FormulaCreated:
+      name: dev.passage.production.formula.created.v1
+      contentType: application/cloudevents+json
+      payload: { $ref: '#/components/schemas/FormulaCreatedData' }
+    BatchOrderCreated:
+      name: dev.passage.production.batchorder.created.v1
+      contentType: application/cloudevents+json
+      payload: { $ref: '#/components/schemas/BatchOrderCreatedData' }
+    BatchOrderRescaled:
+      name: dev.passage.production.batchorder.rescaled.v1
+      contentType: application/cloudevents+json
+      payload: { $ref: '#/components/schemas/BatchOrderRescaledData' }
+  schemas:
+    FormulaCreatedData:
+      type: object
+      required: [formulaId, code, itemId, size, unit, lines]
+      properties:
+        formulaId: { type: string, format: uuid }
+        code: { type: string }
+        itemId: { type: string, format: uuid }
+        size: { type: string, description: Decimal as a string. }
+        unit: { type: string }
+        lines: { type: integer }
+    OutputLine:
+      type: object
+      required: [lineNumber, itemId, type, qty]
+      properties:
+        lineNumber: { type: integer }
+        itemId: { type: string, format: uuid }
+        type: { type: string, enum: [co-product, by-product] }
+        qty: { type: string, description: Quantity at the batch size. }
+    BatchOrderCreatedData:
+      type: object
+      required: [orderId, orderNumber, legalEntityId, formulaId, formulaVersion, itemId, batchSize, scaleFactor, coProducts]
+      properties:
+        orderId: { type: string, format: uuid }
+        orderNumber: { type: string }
+        legalEntityId: { type: string, format: uuid }
+        formulaId: { type: string, format: uuid }
+        formulaVersion: { type: integer }
+        itemId: { type: string, format: uuid }
+        batchSize: { type: string }
+        scaleFactor: { type: string }
+        coProducts: { type: array, items: { $ref: '#/components/schemas/OutputLine' } }
+    BatchOrderRescaledData:
+      type: object
+      required: [orderId, previousBatchSize, batchSize, scaleFactor, version, coProducts]
+      properties:
+        orderId: { type: string, format: uuid }
+        previousBatchSize: { type: string }
+        batchSize: { type: string }
+        scaleFactor: { type: string }
+        version: { type: integer }
+        coProducts: { type: array, items: { $ref: '#/components/schemas/OutputLine' } }

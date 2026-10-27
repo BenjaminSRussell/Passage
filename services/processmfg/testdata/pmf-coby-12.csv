@@ -1,0 +1,13 @@
+method,by_product_cost_type,by_qty,by_rate,expected_burden,expected_main,expected_co
+tca,per-quantity,50,1.50,75.0000,7940.0000,1985.0000
+tca,per-series,1,120,120.0000,7904.0000,1976.0000
+tca,percent,0,2.5,250.0000,7800.0000,1950.0000
+tca,recycled,20,3,60.0000,7952.0000,1988.0000
+quantity,per-quantity,50,1.50,75.0000,6616.6667,3308.3333
+quantity,per-series,1,120,120.0000,6586.6667,3293.3333
+quantity,percent,0,2.5,250.0000,6500.0000,3250.0000
+manual,per-quantity,50,1.50,75.0000,6947.5000,2977.5000
+manual,per-series,1,120,120.0000,6916.0000,2964.0000
+manual,recycled,20,3,60.0000,6958.0000,2982.0000
+none,percent,0,2.5,250.0000,9750.0000,0.0000
+none,recycled,20,3,60.0000,9940.0000,0.0000

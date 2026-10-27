@@ -1,0 +1,472 @@
+openapi: 3.1.0
+info:
+  title: Passage Process Manufacturing
+  version: 0.2.0
+  description: >
+    Process manufacturing (wave 24, PSG-24 slice 1): formulas, batch orders scaled
+    from a formula snapshot, and the potency, catch-weight and co-product
+    allocation calculators. Routes match the handlers in internal/api (checked by
+    internal/api/openapi_test.go). Errors are RFC 9457 problem details
+    (application/problem+json) with a stable `code`; see README.md. The gateway
+    routes /api/v1/production/formulas*, /batch-orders*, /potency*, /catch-weight*
+    and /co-products* to this service.
+servers:
+  - url: https://api.{env}.passage.dev
+    variables:
+      env:
+        default: dev
+paths:
+  /v1/production/formulas:
+    post:
+      operationId: createFormula
+      summary: Create a formula with its lines (FR-24.1)
+      x-passage-duty: production.formula.write
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/FormulaRequest' } } }
+      responses:
+        '201':
+          description: 'Created. An idempotent replay returns 200 with Idempotent-Replayed: true. Writes dev.passage.production.formula.created.v1.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Formula' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: PMF-0103 when the code is taken.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: PMF-0001 when percent-controlled scalable lines do not sum to 100 within ±0.01 (AC-24.9); idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listFormulas
+      summary: Formulas ordered by code (lines omitted; lineCount given)
+      x-passage-duty: production.batch-order.read
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Formulas
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Formula' } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/formulas/{id}:
+    get:
+      operationId: getFormula
+      summary: One formula with its lines
+      x-passage-duty: production.batch-order.read
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: The formula
+          content: { application/json: { schema: { $ref: '#/components/schemas/Formula' } } }
+        '404':
+          description: PMF-0101
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/formulas/{id}:scale:
+    post:
+      operationId: previewScale
+      summary: Preview a formula at a batch size without writing (BR-24.1)
+      x-passage-duty: production.batch-order.read
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [batchSize]
+              properties:
+                batchSize: { $ref: '#/components/schemas/Quantity' }
+      responses:
+        '200':
+          description: Scaled lines. The scalable input lines sum exactly to their unrounded total; the rounding residual sits on the largest of them.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ScaleResponse' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404':
+          description: PMF-0101
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/batch-orders:
+    post:
+      operationId: createBatchOrder
+      summary: Create a batch order from a formula at a batch size (FR-24.2, BR-24.1)
+      x-passage-duty: production.batch-order.write
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/BatchOrderRequest' } } }
+      responses:
+        '201':
+          description: 'Created in status planned with number BO-nnnnnn per legal entity. A replay returns 200 with Idempotent-Replayed: true. Writes dev.passage.production.batchorder.created.v1.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/BatchOrder' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403':
+          description: AUTH-0003 when the duty is missing or legalEntityId is outside the caller's scope.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '404':
+          description: PMF-0101 when the formula does not exist.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listBatchOrders
+      summary: Batch orders, newest first (lines omitted)
+      x-passage-duty: production.batch-order.read
+      parameters:
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/OrderStatus' } }
+        - { name: formulaId, in: query, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Batch orders
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/BatchOrder' } }
+        '400': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/batch-orders/{id}:
+    get:
+      operationId: getBatchOrder
+      summary: One batch order with its scaled lines
+      x-passage-duty: production.batch-order.read
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: The batch order
+          content: { application/json: { schema: { $ref: '#/components/schemas/BatchOrder' } } }
+        '404':
+          description: PMF-0102
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/batch-orders/{id}:rescale:
+    post:
+      operationId: rescaleBatchOrder
+      summary: Change the batch size before the order starts (PRD 4.24.5)
+      x-passage-duty: production.batch-order.write
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [batchSize, version]
+              properties:
+                batchSize: { $ref: '#/components/schemas/Quantity' }
+                version: { type: integer, minimum: 1, description: The order version the caller read (optimistic concurrency). }
+      responses:
+        '200':
+          description: 'The rescaled order with version + 1; the snapshot lines are re-scaled. A replay returns the first answer with Idempotent-Replayed: true. Writes dev.passage.production.batchorder.rescaled.v1.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/BatchOrder' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404':
+          description: PMF-0102
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: PMF-0104 when the version is stale; PMF-0105 when the order has started.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/potency:consume:
+    post:
+      operationId: consumePotency
+      summary: Potency-based consumption of an active-ingredient line (BR-24.2)
+      x-passage-duty: production.batch-order.read
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PotencyRequest' } } }
+      responses:
+        '200':
+          description: Active-ingredient quantity and the compensating line after adjustment.
+          content: { application/json: { schema: { $ref: '#/components/schemas/PotencyResponse' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '422':
+          description: PMF-0002 (POTENCY_COMPENSATION_NEGATIVE) when the compensating line would become negative.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/catch-weight:validate:
+    post:
+      operationId: validateCatchWeight
+      summary: Validate a catch-weight receipt or RAF weight (BR-24.5)
+      x-passage-duty: production.batch-order.read
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CatchWeightRequest' } } }
+      responses:
+        '200':
+          description: The weight is within min × units to max × units.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Valid' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '422':
+          description: PMF-0004 when the weight is outside min × units to max × units.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/co-products:allocate:
+    post:
+      operationId: allocateCoProducts
+      summary: Preview co-product and by-product cost allocation (FR-24.4, BR-24.3)
+      x-passage-duty: production.journal.post
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/AllocateRequest' } } }
+      responses:
+        '200':
+          description: Allocated amounts (4 decimals, BR-24.3). Main + co-products + by-product burdens equal the batch cost exactly.
+          content: { application/json: { schema: { $ref: '#/components/schemas/AllocateResponse' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '422':
+          description: PMF-0021 when weights sum to zero or burdens exceed the batch cost.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /healthz:
+    get:
+      operationId: healthz
+      summary: Liveness
+      security: []
+      responses:
+        '200': { description: Process is up }
+  /readyz:
+    get:
+      operationId: readyz
+      summary: Readiness (Postgres reachable)
+      security: []
+      responses:
+        '200': { description: Ready }
+        '503': { description: Database unreachable }
+components:
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: 1 to 200 characters. A retry with the same key and body returns the first answer; a different body is idempotency_key_reuse (422).
+      schema: { type: string, minLength: 1, maxLength: 200 }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+  schemas:
+    Decimal:
+      type: string
+      description: Decimal as a JSON string (numbers are accepted on input).
+      pattern: '^-?[0-9]+(\.[0-9]+)?$'
+    Quantity:
+      type: string
+      description: Positive decimal below 10^12 with at most 6 decimals.
+      pattern: '^[0-9]{1,12}(\.[0-9]{1,6})?$'
+    LineType:
+      type: string
+      enum: [ingredient, active-ingredient, phantom, co-product, by-product]
+    OrderStatus:
+      type: string
+      enum: [planned, released, started, reported, ended, closed]
+    FormulaLineRequest:
+      type: object
+      required: [lineNumber, itemId, type]
+      properties:
+        lineNumber: { type: integer, minimum: 1 }
+        itemId: { type: string, format: uuid }
+        type: { $ref: '#/components/schemas/LineType' }
+        qty: { $ref: '#/components/schemas/Decimal' }
+        percent: { $ref: '#/components/schemas/Decimal', description: '0 to 100, at most 4 decimals' }
+        scalable: { type: boolean, default: true }
+        percentControlled: { type: boolean, default: false, description: Not allowed on co- and by-product lines. }
+    FormulaRequest:
+      type: object
+      required: [code, name, itemId, size, unit, lines]
+      properties:
+        code: { type: string, pattern: '^[A-Z0-9][A-Z0-9_.-]{0,39}$' }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        itemId: { type: string, format: uuid }
+        bomVersionId: { type: [string, 'null'], format: uuid }
+        size: { $ref: '#/components/schemas/Quantity' }
+        unit: { type: string, minLength: 1, maxLength: 10 }
+        lines: { type: array, minItems: 1, maxItems: 200, items: { $ref: '#/components/schemas/FormulaLineRequest' } }
+    FormulaLine:
+      type: object
+      required: [lineNumber, itemId, type, qty, percent, scalable, percentControlled]
+      properties:
+        lineNumber: { type: integer }
+        itemId: { type: string, format: uuid }
+        type: { $ref: '#/components/schemas/LineType' }
+        qty: { $ref: '#/components/schemas/Decimal' }
+        percent: { $ref: '#/components/schemas/Decimal' }
+        scalable: { type: boolean }
+        percentControlled: { type: boolean }
+    Formula:
+      type: object
+      required: [id, code, name, itemId, size, unit, version, lineCount, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        itemId: { type: string, format: uuid }
+        bomVersionId: { type: [string, 'null'], format: uuid }
+        size: { $ref: '#/components/schemas/Decimal' }
+        unit: { type: string }
+        version: { type: integer }
+        lineCount: { type: integer }
+        lines: { type: array, items: { $ref: '#/components/schemas/FormulaLine' }, description: Present on create and get, omitted in lists. }
+        createdAt: { type: string, format: date-time }
+    BatchOrderRequest:
+      type: object
+      required: [formulaId, batchSize]
+      properties:
+        formulaId: { type: string, format: uuid }
+        batchSize: { $ref: '#/components/schemas/Quantity' }
+        legalEntityId: { type: string, format: uuid, description: Defaults to the caller's legal entity. }
+    OrderLine:
+      type: object
+      required: [lineNumber, itemId, type, formulaQty, percent, scalable, percentControlled, qty]
+      properties:
+        lineNumber: { type: integer }
+        itemId: { type: string, format: uuid }
+        type: { $ref: '#/components/schemas/LineType' }
+        formulaQty: { $ref: '#/components/schemas/Decimal' }
+        percent: { $ref: '#/components/schemas/Decimal' }
+        scalable: { type: boolean }
+        percentControlled: { type: boolean }
+        qty: { $ref: '#/components/schemas/Decimal', description: Quantity at the order's batch size. }
+    BatchOrder:
+      type: object
+      required: [id, legalEntityId, orderNumber, formulaId, formulaCode, formulaVersion, itemId, unit, formulaSize, batchSize, scaleFactor, status, version, createdBy, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        orderNumber: { type: string, example: BO-000001 }
+        formulaId: { type: string, format: uuid }
+        formulaCode: { type: string }
+        formulaVersion: { type: integer }
+        itemId: { type: string, format: uuid }
+        unit: { type: string }
+        formulaSize: { $ref: '#/components/schemas/Decimal' }
+        batchSize: { $ref: '#/components/schemas/Decimal' }
+        scaleFactor: { $ref: '#/components/schemas/Decimal' }
+        status: { $ref: '#/components/schemas/OrderStatus' }
+        version: { type: integer }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        lines: { type: array, items: { $ref: '#/components/schemas/OrderLine' }, description: Present on create, get and rescale, omitted in lists. }
+    ScaledLine:
+      type: object
+      properties:
+        lineNumber: { type: integer }
+        itemId: { type: string }
+        type: { $ref: '#/components/schemas/LineType' }
+        formulaQty: { $ref: '#/components/schemas/Decimal' }
+        qty: { $ref: '#/components/schemas/Decimal' }
+    ScaleResponse:
+      type: object
+      properties:
+        batchSize: { $ref: '#/components/schemas/Decimal' }
+        scaleFactor: { $ref: '#/components/schemas/Decimal' }
+        lines: { type: array, items: { $ref: '#/components/schemas/ScaledLine' } }
+    PotencyRequest:
+      type: object
+      required: [planned, standardPotency, batchPotency, compensatingPlanned]
+      properties:
+        planned: { $ref: '#/components/schemas/Decimal' }
+        standardPotency: { $ref: '#/components/schemas/Decimal' }
+        batchPotency: { $ref: '#/components/schemas/Decimal' }
+        compensatingPlanned: { $ref: '#/components/schemas/Decimal' }
+    PotencyResponse:
+      type: object
+      properties:
+        qty: { $ref: '#/components/schemas/Decimal' }
+        compensatingQty: { $ref: '#/components/schemas/Decimal' }
+    CatchWeightRequest:
+      type: object
+      required: [nominal, min, max, cwQty, weight]
+      properties:
+        nominal: { $ref: '#/components/schemas/Decimal' }
+        min: { $ref: '#/components/schemas/Decimal' }
+        max: { $ref: '#/components/schemas/Decimal' }
+        cwQty: { type: integer, minimum: 1 }
+        weight: { $ref: '#/components/schemas/Decimal' }
+    Valid:
+      type: object
+      properties:
+        valid: { type: boolean }
+    CostItem:
+      type: object
+      required: [itemId]
+      properties:
+        itemId: { type: string }
+        standardCost: { $ref: '#/components/schemas/Decimal' }
+        rafQty: { $ref: '#/components/schemas/Decimal' }
+        percent: { $ref: '#/components/schemas/Decimal' }
+    ByProductItem:
+      type: object
+      required: [itemId, costType]
+      properties:
+        itemId: { type: string }
+        costType: { type: string, enum: [per-series, per-quantity, percent, recycled] }
+        qty: { $ref: '#/components/schemas/Decimal' }
+        rate: { $ref: '#/components/schemas/Decimal' }
+    AllocateRequest:
+      type: object
+      required: [batchCost, currency, method, main]
+      properties:
+        batchCost: { $ref: '#/components/schemas/Decimal' }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        method: { type: string, enum: [none, manual, tca, quantity] }
+        main: { $ref: '#/components/schemas/CostItem' }
+        coProducts: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/CostItem' } }
+        byProducts: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/ByProductItem' } }
+    Allocated:
+      type: object
+      properties:
+        itemId: { type: string }
+        amount: { $ref: '#/components/schemas/Decimal' }
+        percent: { $ref: '#/components/schemas/Decimal' }
+    AllocateResponse:
+      type: object
+      properties:
+        currency: { type: string }
+        main: { $ref: '#/components/schemas/Allocated' }
+        coProducts: { type: array, items: { $ref: '#/components/schemas/Allocated' } }
+        byProductBurdens: { type: array, items: { $ref: '#/components/schemas/Allocated' } }
+        total: { $ref: '#/components/schemas/Decimal' }
+    Problem:
+      type: object
+      description: RFC 9457 problem details.
+      properties:
+        type: { type: string, example: 'https://passage.dev/problems/PMF-0001' }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string }
+        traceId: { type: string }
+        errors: { type: object, additionalProperties: { type: string } }
+  responses:
+    Problem:
+      description: Problem details (application/problem+json).
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
