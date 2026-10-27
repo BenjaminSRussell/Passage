@@ -42,6 +42,12 @@ describe("transport module", () => {
       "/transport/gate",
       "/transport/gate/check-in",
       "/transport/gate/:id",
+      "/transport/screening-holds",
+      "/transport/screening-holds/:id",
+      "/transport/routes",
+      "/transport/routes/new",
+      "/transport/routes/:id",
+      "/transport/load-plans",
     ]);
     expect(transport.routes.every((r) => r.element !== null && r.element !== undefined)).toBe(true);
     expect(transport.nav.every((n) => n.to.startsWith("/transport") && n.duty?.startsWith("TMS_"))).toBe(true);
@@ -51,6 +57,8 @@ describe("transport module", () => {
     expect(transport.nav.find((n) => n.to === "/transport/loads")?.duty).toBe("TMS_VIEW");
     expect(transport.nav.find((n) => n.to === "/transport/gate")?.duty).toBe("TMS_GATE");
     expect(transport.nav.find((n) => n.to === "/transport/goods-in-transit")?.duty).toBe("TMS_LANDED_COST");
+    expect(transport.nav.find((n) => n.to === "/transport/routes")?.duty).toBe("TMS_PLAN");
+    expect(transport.nav.find((n) => n.to === "/transport/screening-holds")?.duty).toBe("TMS_VIEW");
   });
 
   it("is auto-discovered by the registry", () => {

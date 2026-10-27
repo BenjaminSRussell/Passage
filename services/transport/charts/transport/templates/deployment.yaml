@@ -40,6 +40,10 @@ spec:
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
+            {{- with .Values.optimizer.url }}
+            - name: TMS_OPTIMIZER_URL
+              value: {{ . | quote }}
+            {{- end }}
             - name: TMS_FEATURE_ENABLED
               value: {{ .Values.features.tmsEnabled | quote }}
             - name: TMS_FEATURE_LANDED_COST

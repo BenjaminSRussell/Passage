@@ -35,6 +35,8 @@ type screenRequest struct {
 type screenResponse struct {
 	LoadID      string `json:"loadId"`
 	CrossBorder bool   `json:"crossBorder"`
+	// HoldID names the screening hold a HOLD decision opened or refreshed.
+	HoldID string `json:"holdId,omitempty"`
 	domain.ScreeningDecision
 }
 
@@ -176,8 +178,10 @@ func (a *API) checkLoadDG(w http.ResponseWriter, r *http.Request) {
 }
 
 // screenLoad screens the parties of a load through the ComplianceScreeningProvider
-// hook (FR-34.19, BR-34.17). The decision is returned, not stored: holds and their
-// release come with the screening hold record.
+// hook (FR-34.19, BR-34.17). A HOLD decision holds the load: the hold is stored
+// (or refreshed when one is open) and blocks tendering until a
+// TRADE_COMPLIANCE_RELEASE user releases it. CLEAR and WARN are returned, not
+// stored, and never clear an open hold.
 func (a *API) screenLoad(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
@@ -209,7 +213,17 @@ func (a *API) screenLoad(w http.ResponseWriter, r *http.Request) {
 	cross := req.CrossBorder || domain.CrossBorder(req.Parties)
 	decision := domain.ScreenParties(r.Context(), a.screening, req.Parties, cross)
 	a.screenings.Add(1)
-	httpx.JSON(w, http.StatusOK, screenResponse{LoadID: id, CrossBorder: cross, ScreeningDecision: decision})
+	resp := screenResponse{LoadID: id, CrossBorder: cross, ScreeningDecision: decision}
+	if decision.Decision == domain.DecisionHold {
+		hold, err := a.store.RecordScreeningHold(r.Context(), id, decision.Parties)
+		if err != nil {
+			a.fail(w, r, "record screening hold failed", err)
+			return
+		}
+		a.holdsOpened.Add(1)
+		resp.HoldID = hold.ID
+	}
+	httpx.JSON(w, http.StatusOK, resp)
 }
 
 func (a *API) approveFreightBill(w http.ResponseWriter, r *http.Request) {

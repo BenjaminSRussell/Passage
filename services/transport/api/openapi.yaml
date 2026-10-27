@@ -1,13 +1,14 @@
 openapi: 3.1.0
 info:
   title: Passage Transport (TMS) API
-  version: 0.4.0
+  version: 0.5.0
   description: |
-    Wave 34 slices 1 to 4: rate cards, rate shopping, freight bills with their
-    approval and dispute, carrier invoices, tenders, tracking events, landed-cost
-    voyages and goods-in-transit orders, rule-based load building, dangerous-goods
-    checks, trade-compliance screening, and driver check-in and check-out with
-    the gate log. Errors are RFC 9457 problem details (application/problem+json)
+    Wave 34 slices 1 to 5: rate cards, rate shopping with its cache, freight
+    bills with their approval and dispute, carrier invoices, tenders, tracking
+    events, landed-cost voyages and goods-in-transit orders, rule-based load
+    building, dangerous-goods checks, trade-compliance screening with its holds,
+    driver check-in and check-out with the gate log, route optimization and
+    load-plan stacking. Errors are RFC 9457 problem details (application/problem+json)
     with a stable `code`; see README.md for the error code list. Browsers call
     /api/v1/transport/..., which the web BFF rewrites to these /v1/transport/...
     paths. Amounts are decimal strings, never floats. Identifiers are lower-case
@@ -75,7 +76,11 @@ paths:
         For each carrier service, the cards valid on the ship date are rated
         (BR-34.2); a service with no valid card yields one NO_VALID_RATE_CARD
         option (TMS-0101, BR-34.10). Deterministic for identical inputs; each
-        option carries an explain trace. Results are not cached yet.
+        option carries an explain trace. Results are cached per tenant and
+        input (the shipment id is not part of the input) for
+        `TMS_RATING_CACHE_MIN` minutes (rating_cache_min, default 10, 0 turns
+        the cache off, FR-34.4); saving a rate card drops the tenant's cached
+        results on the replica that saved it.
       x-passage-duty: TMS_RATE
       parameters:
         - name: id
@@ -90,6 +95,10 @@ paths:
       responses:
         '200':
           description: Ranked quotes; `chosen` is the first OK option
+          headers:
+            X-Passage-Cache:
+              description: HIT when served from the rate-shop cache, else MISS
+              schema: { type: string, enum: [HIT, MISS] }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RateResponse' }
@@ -415,8 +424,11 @@ paths:
         POTENTIAL_MATCH, BLOCKED or SCREENING_PENDING party makes the decision
         HOLD (TMS-0133). Without a provider a cross-border load is NOT_SCREENED
         and the decision is WARN (TMS-0134). A load is cross-border when the
-        request says so or the parties name more than one country. The decision
-        is not stored yet.
+        request says so or the parties name more than one country. A HOLD
+        stores a screening hold on the load (one OPEN hold per load; screening
+        again while held refreshes its party results) and names it in
+        `holdId`; the hold blocks tendering until it is released. CLEAR and
+        WARN are not stored and never clear an open hold.
       x-passage-duty: TMS_PLAN
       parameters:
         - $ref: '#/components/parameters/LoadId'
@@ -470,7 +482,8 @@ paths:
         is refused with TMS-0114; a PENDING tender past its deadline is
         cascaded first and no longer blocks once it has failed. A load whose
         latest dangerous-goods check is FAIL is refused with 422 TMS-0130 and no
-        tender is sent (AC-34.13).
+        tender is sent (AC-34.13); so is a load with an OPEN screening hold, with
+        422 TMS-0133 (BR-34.17, AC-34.16).
       x-passage-duty: TMS_TENDER
       parameters:
         - name: id
@@ -1024,8 +1037,189 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
+  /v1/transport/screening-holds:
+    get:
+      operationId: listScreeningHolds
+      summary: Screening holds inquiry, newest first (§6.34.14)
+      x-passage-duty: TMS_VIEW
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [OPEN, RELEASED] }
+        - name: loadId
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: At most 500 holds
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/ScreeningHold' } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/transport/screening-holds/{id}:
+    get:
+      operationId: getScreeningHold
+      summary: One screening hold with its party results and release
+      x-passage-duty: TMS_VIEW
+      parameters:
+        - $ref: '#/components/parameters/HoldId'
+      responses:
+        '200':
+          description: The hold
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ScreeningHold' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/transport/screening-holds/{id}:release:
+    post:
+      operationId: releaseScreeningHold
+      summary: Release a POTENTIAL_MATCH or SCREENING_PENDING hold (BR-34.17, AC-34.16)
+      description: |
+        The reason (1 to 500 characters) and the calling user are kept on the
+        hold, which is the release log. A hold with a BLOCKED party stays until
+        the screening list changes: 422 TMS-0133. A hold already released by
+        another user or for another reason is 409 TMS-0122; the same release
+        again returns the hold unchanged. Tendering proceeds once no hold is
+        OPEN.
+      x-passage-duty: TRADE_COMPLIANCE_RELEASE
+      parameters:
+        - $ref: '#/components/parameters/HoldId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 500 }
+      responses:
+        '200':
+          description: The released hold
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ScreeningHold' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /v1/transport/routes:optimize:
+    post:
+      operationId: optimizeRoutes
+      summary: Plan multi-stop routes with the OR-Tools VRP (FR-34.2, BR-34.1)
+      description: |
+        Validates and normalizes the request, then calls the optimizer in
+        services/routing-py. The SHA-256 of the normalized request is the
+        idempotency key: the same request returns the stored plan with 200 and
+        `replayed: true` instead of solving again. Infeasible stops are dropped
+        and reported in `solution.dropped` with warning TMS-0104, never
+        silently. An optimizer that is not configured, fails, or answers with a
+        reply that loses a stop is 503 TMS-0123 and nothing is stored. The call
+        is synchronous, so `timeLimitS` is 5 to 25 (default 20).
+      x-passage-duty: TMS_PLAN
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RouteRequest' }
+      responses:
+        '201':
+          description: Solved and stored
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoutePlan' }
+        '200':
+          description: The plan stored for the same request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoutePlan' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /v1/transport/routes:
+    get:
+      operationId: listRoutePlans
+      summary: Route plans, newest first, without their request and routes
+      x-passage-duty: TMS_PLAN
+      responses:
+        '200':
+          description: At most 500 plans
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/RoutePlanSummary' } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/transport/routes/{id}:
+    get:
+      operationId: getRoutePlan
+      summary: One route plan with its request and routes
+      x-passage-duty: TMS_PLAN
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Route plan id
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The plan
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoutePlan' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/transport/load-plans:stack:
+    post:
+      operationId: stackLoadPlan
+      summary: Layer-based load plan for a trailer or container (FR-34.18)
+      description: |
+        First-fit decreasing by footprint with layers in services/routing-py.
+        No pallet is stacked on a non-stackable one (AC-34.18), a pallet for an
+        earlier stop never sits under one for a later stop, later stops load
+        first at the nose, and the plan reports the floor positions used and an
+        axle-weight estimate. Pallets that do not fit are listed in `unplaced`.
+        The plan is returned, not stored. A reply that loses a pallet or stacks
+        on a non-stackable one is 503 TMS-0123.
+      x-passage-duty: TMS_PLAN
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoadPlanRequest' }
+      responses:
+        '200':
+          description: The load plan
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoadPlan' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
 components:
   parameters:
+    HoldId:
+      name: id
+      in: path
+      required: true
+      description: Screening hold id
+      schema: { type: string, format: uuid }
     GoodsInTransitId:
       name: id
       in: path
@@ -1195,6 +1389,7 @@ components:
         loadId: { type: string, format: uuid }
         crossBorder: { type: boolean }
         decision: { type: string, enum: [CLEAR, WARN, HOLD] }
+        holdId: { type: string, format: uuid, description: The screening hold a HOLD decision opened or refreshed }
         parties:
           type: array
           items:
@@ -1723,3 +1918,186 @@ components:
         occurredAt: { type: string, format: date-time }
         recordedBy: { type: string }
         detail: { type: object, additionalProperties: { type: string }, description: No driver PII }
+    ScreeningHold:
+      type: object
+      required: [id, loadId, status, parties, createdBy, createdAt, version]
+      properties:
+        id: { type: string, format: uuid }
+        loadId: { type: string, format: uuid }
+        status: { type: string, enum: [OPEN, RELEASED] }
+        parties:
+          type: array
+          description: The latest screening result per party
+          items:
+            type: object
+            required: [role, name, status]
+            properties:
+              role: { type: string }
+              name: { type: string }
+              status: { type: string, enum: [CLEAR, POTENTIAL_MATCH, BLOCKED, SCREENING_PENDING, NOT_SCREENED] }
+              code: { type: string, enum: [TMS-0133, TMS-0134] }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        releasedBy: { type: string }
+        releaseReason: { type: string }
+        releasedAt: { type: string, format: date-time }
+        version: { type: integer }
+    RoutePoint:
+      type: object
+      required: [x, y]
+      description: Planar kilometres in a local projection
+      properties:
+        x: { type: number }
+        y: { type: number }
+    RouteRequest:
+      type: object
+      required: [depot, stops, vehicles]
+      properties:
+        depot: { $ref: '#/components/schemas/RoutePoint' }
+        stops:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            type: object
+            required: [id, point, earliest, latest]
+            properties:
+              id: { type: string, minLength: 1, maxLength: 64 }
+              point: { $ref: '#/components/schemas/RoutePoint' }
+              earliest: { type: integer, minimum: 0, description: Minutes from route start }
+              latest: { type: integer, minimum: 0, maximum: 10080 }
+              serviceMin: { type: integer, minimum: 0 }
+              weightKg: { type: integer, minimum: 0 }
+              volumeL: { type: integer, minimum: 0 }
+              pallets: { type: integer, minimum: 0 }
+        vehicles:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            type: object
+            required: [id]
+            properties:
+              id: { type: string, minLength: 1, maxLength: 64 }
+              capacityKg: { type: integer, minimum: 0 }
+              capacityL: { type: integer, minimum: 0 }
+              pallets: { type: integer, minimum: 0 }
+              fixedCost: { type: integer, minimum: 0, description: Solver cost weight in whole money units }
+              maxRouteMin: { type: integer, minimum: 1, description: 'Default 660 (11 h driving)' }
+        speedKmh: { type: number, exclusiveMinimum: 0, maximum: 200, description: Default 60 }
+        latenessPerMin: { type: integer, minimum: 0, maximum: 10000, description: 'Soft lateness penalty per minute; default 50, 0 turns it off' }
+        timeLimitS: { type: integer, minimum: 5, maximum: 25, description: Default 20 }
+    RouteSolution:
+      type: object
+      required: [routes, dropped]
+      properties:
+        routes:
+          type: array
+          items:
+            type: object
+            required: [vehicleId, stops, distanceKm, endMin]
+            properties:
+              vehicleId: { type: string }
+              stops:
+                type: array
+                items:
+                  type: object
+                  required: [stopId, arrivalMin, lateMin]
+                  properties:
+                    stopId: { type: string }
+                    arrivalMin: { type: integer }
+                    lateMin: { type: integer }
+              distanceKm: { type: number }
+              endMin: { type: integer }
+        dropped: { type: array, items: { type: string }, description: Stops dropped as infeasible (TMS-0104) }
+    RoutePlanSummary:
+      type: object
+      required: [id, requestHash, stopCount, vehicleCount, routeCount, droppedCount, totalDistanceKm, timeLimitS, createdBy, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        requestHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        stopCount: { type: integer }
+        vehicleCount: { type: integer }
+        routeCount: { type: integer, description: Vehicles used }
+        droppedCount: { type: integer }
+        totalDistanceKm: { type: number }
+        timeLimitS: { type: integer }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+    RoutePlan:
+      allOf:
+        - $ref: '#/components/schemas/RoutePlanSummary'
+        - type: object
+          required: [request, solution, replayed, warnings]
+          properties:
+            request: { $ref: '#/components/schemas/RouteRequest' }
+            solution: { $ref: '#/components/schemas/RouteSolution' }
+            replayed: { type: boolean, description: True when the plan stored for the same request was returned }
+            warnings:
+              type: array
+              items:
+                type: object
+                required: [code, severity, detail]
+                properties:
+                  code: { type: string, enum: [TMS-0104] }
+                  severity: { type: string }
+                  detail: { type: string }
+    LoadPlanRequest:
+      type: object
+      required: [trailer, pallets]
+      properties:
+        trailer:
+          type: object
+          required: [lengthMm, widthMm, maxHeightMm, maxWeightKg]
+          properties:
+            lengthMm: { type: integer, minimum: 1 }
+            widthMm: { type: integer, minimum: 1 }
+            maxHeightMm: { type: integer, minimum: 1 }
+            maxWeightKg: { type: integer, minimum: 1 }
+            kingpinMm: { type: integer, minimum: 0, description: Front support of the axle estimate from the nose; default 0 }
+            axleMm: { type: integer, minimum: 0, description: Rear axle group from the nose; default the trailer length }
+        pallets:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items:
+            type: object
+            required: [id, lengthMm, widthMm, heightMm, weightKg, stackable]
+            properties:
+              id: { type: string, minLength: 1, maxLength: 64 }
+              lengthMm: { type: integer, minimum: 1 }
+              widthMm: { type: integer, minimum: 1 }
+              heightMm: { type: integer, minimum: 1 }
+              weightKg: { type: integer, minimum: 0 }
+              stackable: { type: boolean }
+              stopSeq: { type: integer, minimum: 0, description: Stop position on the route; later stops load first }
+              maxStackKg: { type: integer, minimum: 0, description: Maximum weight of a stack on this pallet }
+    LoadPlan:
+      type: object
+      required: [placements, unplaced, floorPositionsUsed, lengthUsedMm, layers, totalWeightKg, loadSequence, axle]
+      properties:
+        placements:
+          type: array
+          items:
+            type: object
+            required: [palletIds, xMm, yMm, lengthMm, widthMm, heightMm, weightKg]
+            properties:
+              palletIds: { type: array, items: { type: string }, description: Bottom to top }
+              xMm: { type: integer, description: Across the width from the left wall }
+              yMm: { type: integer, description: Along the length from the nose }
+              lengthMm: { type: integer }
+              widthMm: { type: integer }
+              heightMm: { type: integer }
+              weightKg: { type: integer }
+        unplaced: { type: array, items: { type: string } }
+        floorPositionsUsed: { type: integer }
+        lengthUsedMm: { type: integer }
+        layers: { type: integer, description: Highest stack }
+        totalWeightKg: { type: integer }
+        loadSequence: { type: array, items: { type: string }, description: Order to load the pallets }
+        axle:
+          type: object
+          required: [kingpinKg, axleKg]
+          properties:
+            kingpinKg: { type: integer }
+            axleKg: { type: integer }

@@ -10,10 +10,14 @@ building, freight bill approval and dispute, the transport dangerous-goods check
 DG shipping-paper lines and a tender gate, the denied-party screening hook, and the pure
 Incoterm transfer, gate and detention rules; slice 4 adds driver check-in and check-out
 with seal verification, detention and an append-only gate log, and goods-in-transit
-orders that move voyage receipt lines into transit at the Incoterm transfer event. What is not built yet is listed
+orders that move voyage receipt lines into transit at the Incoterm transfer event; slice 5
+adds screening holds with their trade-compliance release and the tender gate, the
+rate-shop cache, route optimization through the routing-py VRP with stored plans keyed
+by request hash, and layer-based load plans. What is not built yet is listed
 in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
 
-Route optimization (VRP) lives in the sibling Python service `services/routing-py`.
+The solvers (OR-Tools VRP and the load-plan stacker) live in the sibling Python service
+`services/routing-py`; `internal/optimizer` calls it over HTTP at `TMS_OPTIMIZER_URL`.
 
 ## Layout
 
@@ -25,15 +29,19 @@ internal/domain/        pure rules, no I/O: rating, freight-bill matching, ISO 6
                         (BR-34.8), freight bill decisions (BR-34.4), DG check (BR-34.15),
                         screening hook (BR-34.17), Incoterm transfer (BR-34.11), gate
                         arrival, seal and detention (BR-34.13, BR-34.14), gate visits,
-                        goods-in-transit orders (BR-34.11)
+                        goods-in-transit orders (BR-34.11), screening holds and their
+                        release (BR-34.17), route requests and solution checks (BR-34.1),
+                        load plan requests and plan checks (FR-34.18)
 internal/store/         pgx repositories, every query inside dbx.WithTenantTx (RLS applies)
 internal/api/           HTTP handlers, request validation, duty checks
 internal/events/        event type constants and payload structs
+internal/optimizer/     HTTP client for routing-py: POST /v1/routes:solve, POST /v1/load-plans:stack
 migrations/             0001_init.sql (rate_card, freight_bill, carrier_invoice, outbox),
                         0002_tender_tracking_voyage.sql (tender, tracking_event, voyage),
                         0003_load_dg_decision.sql (load_build, load, load_shipment, dg_check,
                         freight_bill_decision), 0004_gate_goods_in_transit.sql (gate_visit,
-                        gate_event, goods_in_transit_order, goods_in_transit_line), applied in order
+                        gate_event, goods_in_transit_order, goods_in_transit_line),
+                        0005_screening_hold_route_plan.sql (screening_hold, route_plan), applied in order
 api/openapi.yaml        OpenAPI 3.1 for every endpoint in this slice
 events/asyncapi.yaml    AsyncAPI 3 for every event the service publishes
 charts/transport/       Helm chart (image, DATABASE_URL from a secret, probes, ServiceMonitor toggle)
@@ -97,6 +105,30 @@ charts/transport/       Helm chart (image, DATABASE_URL from a secret, probes, S
 | GET | /v1/transport/goods-in-transit/{id} | TMS_LANDED_COST | |
 | POST | /v1/transport/goods-in-transit/{id}:ship | TMS_LANDED_COST | `{shippedAt?}`; PENDING to IN_TRANSIT (TMS-0121) and publishes `goodsintransit.shipped`; an IN_TRANSIT order is returned unchanged |
 
+## Endpoints (slice 5)
+
+| Method | Path | Duty | Notes |
+|---|---|---|---|
+| POST | /v1/transport/loads/{id}:screen | TMS_PLAN | Now stores a HOLD as a screening hold (one OPEN per load; screening again refreshes its party results) and returns `holdId`; CLEAR and WARN never clear it |
+| GET | /v1/transport/screening-holds | TMS_VIEW | Screening holds inquiry, newest first, at most 500; filter by `status` (OPEN, RELEASED) and `loadId` |
+| GET | /v1/transport/screening-holds/{id} | TMS_VIEW | The hold with its party results and release |
+| POST | /v1/transport/screening-holds/{id}:release | TRADE_COMPLIANCE_RELEASE | `{reason}` (1 to 500); user and reason stay on the hold; a BLOCKED party is 422 TMS-0133; released by someone else or for another reason 409 TMS-0122; the same release again returns the hold |
+| POST | /v1/transport/routes:optimize | TMS_PLAN | Depot, stops (window in minutes, service time, weight, volume, pallets), vehicles; `timeLimitS` 5 to 25 (default 20), `latenessPerMin` default 50; 201 with the stored plan, 200 `replayed` for the same request; dropped stops warn TMS-0104; optimizer missing or failing 503 TMS-0123 |
+| GET | /v1/transport/routes | TMS_PLAN | Plan summaries, newest first, at most 500 |
+| GET | /v1/transport/routes/{id} | TMS_PLAN | The plan with its request, routes and dropped stops |
+| POST | /v1/transport/load-plans:stack | TMS_PLAN | Trailer and up to 200 pallets; placements bottom to top, unplaced pallets, floor positions, layers, load sequence and kingpin / rear-axle estimate; not stored; 503 TMS-0123 without an optimizer |
+
+`POST /loads/{id}:tender` refuses a load with an OPEN screening hold with 422 TMS-0133
+and stores no tender (BR-34.17, AC-34.16). `POST /shipments/{id}:rate` answers from a
+cache per tenant and rating input for `TMS_RATING_CACHE_MIN` minutes (default 10, 0
+off) and says `X-Passage-Cache: HIT` or `MISS`; saving a rate card drops that tenant's
+cache on the replica.
+
+Configuration: `TMS_OPTIMIZER_URL` (chart `optimizer.url`) is the routing-py base URL;
+without it optimize and load-plan calls are 503 TMS-0123. `TMS_RATING_CACHE_MIN` sets
+the rate-shop cache window (values outside 0 to 60 are clamped; a non-number stops the
+service at start).
+
 TMS_GATE also guards the gate log reads: the visits carry driver names and license ids
 (personal data, 90-day retention), so TMS_VIEW does not read them. The gate log rows and
 the `gate.checkedin` event carry no driver PII; the application role may only insert and
@@ -126,7 +158,10 @@ status form, voyage list, form and detail with allocation, load list, build-load
 and load detail with the DG check (findings and shipping papers) and party screening,
 approve and dispute on the freight bill detail with its decision history, the gate log
 with check-in, seal and check-out (blocked attempts shown in the visit's log), and
-goods-in-transit orders (list, form prefilled from a voyage, detail with ship).
+goods-in-transit orders (list, form prefilled from a voyage, detail with ship),
+screening holds (list, detail with the release form; the load detail links a new hold),
+route plans (list, optimize form, detail with each vehicle's route and dropped stops) and
+the load plan (form with the top view, floor positions, load sequence and axle estimate).
 
 ## Run
 
@@ -205,6 +240,19 @@ go test ./internal/store/
   FAIL blocks a tender of the load with TMS-0130 (AC-34.13, `dg_check_mode` BLOCK).
 - BR-34.17 screening: every party through the provider with a 5 s timeout; POTENTIAL_MATCH,
   BLOCKED, an error, a timeout or an unknown status hold the load; the hook never clears.
+  A HOLD is stored; the load cannot be tendered while it is OPEN (TMS-0133, AC-34.16). A
+  TRADE_COMPLIANCE_RELEASE user releases POTENTIAL_MATCH and SCREENING_PENDING holds
+  with a reason, kept with the user and time; a BLOCKED party stays held until the list
+  changes. One OPEN hold per load (partial unique index).
+- FR-34.2 / BR-34.1 route optimization: the request is normalized (defaults: speed 60
+  km/h, lateness 50 per minute, 660 min per route, solver 20 s) and hashed; the hash is
+  the idempotency key, so the same request returns the stored plan without solving. A
+  reply that loses a stop, names an unknown stop or vehicle, or serves a stop twice is
+  refused (503 TMS-0123), so a stop is never dropped silently; dropped stops warn TMS-0104.
+- FR-34.18 load plans: a reply that loses a pallet or stacks on a non-stackable one is
+  refused (AC-34.18 is checked on the Go side too).
+- FR-34.4 rate-shop cache: per tenant and input hash for `rating_cache_min`; a new rate
+  card is used at once on the replica that saved it.
 - BR-34.11, BR-34.13, BR-34.14: Incoterm transfer event, arrival ON_TIME / EARLY / LATE
   within `gate_tolerance_min` (TMS-0127), seal match (TMS-0129), walk-in check (TMS-0128),
   detention = ceil((dwell − free time) ÷ 60) × hourly rate (AC-34.11), raised at check-in
@@ -255,14 +303,17 @@ Envelope: RFC 9457 `application/problem+json`, `type` = `https://passage.dev/pro
 | TMS-0124 | 422 | A voyage container number fails the ISO 6346 check digit; the container is named in `errors` |
 | TMS-0130 | 422 / finding | DG segregation FAIL finding; a tender of a load whose latest DG check FAILed is refused with it |
 | TMS-0131 | finding | ADR 1.1.3.6 points above 1,000 |
-| TMS-0133 | screening | A party is POTENTIAL_MATCH, BLOCKED or SCREENING_PENDING; the load is held |
+| TMS-0133 | screening / 422 | A party is POTENTIAL_MATCH, BLOCKED or SCREENING_PENDING; the load is held. 422 on a tender of a held load and on releasing a hold with a BLOCKED party |
+| TMS-0104 | warning | Stops dropped as infeasible by the route optimizer; in the plan's `warnings` |
+| TMS-0122 | 409 | The screening hold is already released by another user or for another reason (slice-local; the catalog leaves 0122 unassigned) |
+| TMS-0123 | 503 | The optimizer is not configured, unreachable, failing, or answered with something that is not a plan (slice-local) |
 | TMS-0134 | screening | No provider and the load is cross-border: NOT_SCREENED |
 | COM-0428 | 428 | `If-Match` missing on approve or dispute |
 | conflict_version | 412 | `If-Match` is not the bill's current version |
 
-TMS-0100 is also the not-found code for tenders, voyages, loads, gate visits and
-goods-in-transit orders. Codes not yet raised (TMS-0103, 0104, 0107, 0125, 0132, 0135) are
-listed in NOT-IMPLEMENTED.md.
+TMS-0100 is also the not-found code for tenders, voyages, loads, gate visits,
+goods-in-transit orders, screening holds and route plans. Codes not yet raised (TMS-0103,
+0107, 0125, 0132, 0135) are listed in NOT-IMPLEMENTED.md.
 
 ## Events
 

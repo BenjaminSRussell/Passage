@@ -90,7 +90,7 @@ export function matchTone(status: string): BadgeTone {
   }
 }
 
-/** Badge tone for a tender, tender attempt, stop or voyage state. */
+/** Badge tone for a tender, tender attempt, stop, voyage or screening hold state. */
 export function stateTone(status: string): BadgeTone {
   switch (status) {
     case "ACCEPTED":
@@ -107,7 +107,10 @@ export function stateTone(status: string): BadgeTone {
     case "ESTIMATED":
       return "warning";
     case "TENDER_FAILED":
+    case "OPEN":
       return "danger";
+    case "RELEASED":
+      return "success";
     default:
       return "neutral";
   }

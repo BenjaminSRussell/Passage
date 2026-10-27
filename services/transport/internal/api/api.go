@@ -1,7 +1,8 @@
 // Package api exposes the transport HTTP routes: rate cards, rate shopping,
 // freight bills and their approval, carrier invoices, tenders, tracking events,
 // landed-cost voyages and goods in transit, load building, DG checks,
-// trade-compliance screening, and driver check-in and check-out at the gate.
+// trade-compliance screening and its holds, driver check-in and check-out at
+// the gate, route optimization and load-plan stacking.
 package api
 
 import (
@@ -34,16 +35,19 @@ import (
 
 // Duties (PRD §6.34.17).
 const (
-	DutyView         = "TMS_VIEW"
-	DutyRate         = "TMS_RATE"
-	DutyRateApprove  = "TMS_RATE_APPROVE"
-	DutyReconcile    = "TMS_RECONCILE"
-	DutyApprove      = "TMS_RECONCILE_APPROVE"
-	DutyPlan         = "TMS_PLAN"
-	DutyTender       = "TMS_TENDER"
-	DutyRespond      = "TMS_CARRIER_RESPOND"
-	DutyTrackIngest  = "TMS_TRACK_INGEST"
-	DutyLandedCost   = "TMS_LANDED_COST"
+	DutyView        = "TMS_VIEW"
+	DutyRate        = "TMS_RATE"
+	DutyRateApprove = "TMS_RATE_APPROVE"
+	DutyReconcile   = "TMS_RECONCILE"
+	DutyApprove     = "TMS_RECONCILE_APPROVE"
+	DutyPlan        = "TMS_PLAN"
+	DutyTender      = "TMS_TENDER"
+	DutyRespond     = "TMS_CARRIER_RESPOND"
+	DutyTrackIngest = "TMS_TRACK_INGEST"
+	DutyLandedCost  = "TMS_LANDED_COST"
+	// DutyTradeRelease releases screening holds (BR-34.17). It conflicts with
+	// SALES_ORDER_MAINTAIN (§6.34.17); role design keeps them apart.
+	DutyTradeRelease = "TRADE_COMPLIANCE_RELEASE"
 	idempotencyKey   = "Idempotency-Key"
 	validationDetail = "request failed validation"
 	maxCodeLength    = 20
@@ -66,6 +70,8 @@ type API struct {
 	store     store.Store
 	clock     func() time.Time
 	screening domain.ScreeningProvider
+	optimizer Optimizer
+	rates     *rateCache
 
 	rateShops        atomic.Int64
 	rateCardsCreated atomic.Int64
@@ -88,11 +94,27 @@ type API struct {
 	gateBlocked      atomic.Int64
 	gitCreated       atomic.Int64
 	gitShipped       atomic.Int64
+	rateCacheHits    atomic.Int64
+	holdsOpened      atomic.Int64
+	holdsReleased    atomic.Int64
+	routesOptimized  atomic.Int64
+	loadPlans        atomic.Int64
+	optimizerErrors  atomic.Int64
 	serverErrors     atomic.Int64
 }
 
-// New returns the API over st, reading time from the system clock.
-func New(st store.Store) *API { return &API{store: st, clock: time.Now} }
+// New returns the API over st, reading time from the system clock, with the
+// default 10-minute rate-shop cache.
+func New(st store.Store) *API {
+	return &API{store: st, clock: time.Now, rates: newRateCache(defaultRatingCacheMin * time.Minute)}
+}
+
+// WithRatingCacheMinutes sets the rate-shop cache window (rating_cache_min,
+// FR-34.4). Values outside 0 to 60 are clamped; 0 turns the cache off.
+func (a *API) WithRatingCacheMinutes(m int) *API {
+	a.rates = newRateCache(time.Duration(clampInt(m, 0, maxRatingCacheMin)) * time.Minute)
+	return a
+}
 
 // WithClock replaces the time source; tests use it to step through tender deadlines.
 func (a *API) WithClock(now func() time.Time) *API {
@@ -151,6 +173,13 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(DutyGate)).Get(prefix+"/gate/visits", a.listGateVisits)
 	r.With(authz.RequireDuty(DutyGate)).Get(prefix+"/gate/visits/{id}", a.getGateVisit)
 	r.With(authz.RequireDuty(DutyGate)).Post(prefix+"/gate/visits/{id}:seal", a.recordSeal)
+	r.With(authz.RequireDuty(DutyView)).Get(prefix+"/screening-holds", a.listScreeningHolds)
+	r.With(authz.RequireDuty(DutyView)).Get(prefix+"/screening-holds/{id}", a.getScreeningHold)
+	r.With(authz.RequireDuty(DutyTradeRelease)).Post(prefix+"/screening-holds/{id}:release", a.releaseScreeningHold)
+	r.With(authz.RequireDuty(DutyPlan)).Post(prefix+"/routes:optimize", a.optimizeRoutes)
+	r.With(authz.RequireDuty(DutyPlan)).Get(prefix+"/routes", a.listRoutePlans)
+	r.With(authz.RequireDuty(DutyPlan)).Get(prefix+"/routes/{id}", a.getRoutePlan)
+	r.With(authz.RequireDuty(DutyPlan)).Post(prefix+"/load-plans:stack", a.stackLoadPlan)
 }
 
 type rateCardRequest struct {
@@ -280,6 +309,8 @@ func (a *API) createRateCard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.rateCardsCreated.Add(1)
+	p, _ := tenant.FromContext(r.Context())
+	a.rates.invalidate(p.TenantID)
 	httpx.JSON(w, http.StatusCreated, created)
 }
 
@@ -350,6 +381,19 @@ func (a *API) rateShipment(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
+	p, _ := tenant.FromContext(r.Context())
+	key, err := rateCacheKey(req)
+	if err != nil {
+		a.fail(w, r, "hash rate request failed", err)
+		return
+	}
+	a.rateShops.Add(1)
+	if quotes, hit := a.rates.get(p.TenantID, key, a.clock()); hit {
+		a.rateCacheHits.Add(1)
+		w.Header().Set(headerRateCache, "HIT")
+		writeRate(w, shipmentID, quotes)
+		return
+	}
 	cards, err := a.store.ListRateCards(r.Context(), store.RateCardFilter{})
 	if err != nil {
 		a.fail(w, r, "load rate cards failed", err)
@@ -366,7 +410,13 @@ func (a *API) rateShipment(w http.ResponseWriter, r *http.Request) {
 		Accessorials:    req.AccessorialCodes,
 	}
 	quotes := domain.ShopRates(cards, s)
-	a.rateShops.Add(1)
+	a.rates.put(p.TenantID, key, quotes, a.clock())
+	w.Header().Set(headerRateCache, "MISS")
+	writeRate(w, shipmentID, quotes)
+}
+
+// writeRate answers a rate shop with the ranked options and the chosen one.
+func writeRate(w http.ResponseWriter, shipmentID string, quotes []domain.Quote) {
 	resp := rateResponse{ShipmentID: shipmentID, Options: quotes}
 	if len(quotes) > 0 && quotes[0].Status == domain.QuoteOK {
 		resp.Chosen = &quotes[0]
@@ -589,6 +639,12 @@ func (a *API) Metrics() http.Handler {
 			{"transport_gate_check_outs_blocked_total", "Gate check-outs blocked by a seal mismatch or an unconfirmed load (TMS-0129).", a.gateBlocked.Load()},
 			{"transport_goods_in_transit_created_total", "Goods-in-transit order create requests answered with an order, replays included.", a.gitCreated.Load()},
 			{"transport_goods_in_transit_shipped_total", "Goods-in-transit ship requests answered with a shipped order, replays included.", a.gitShipped.Load()},
+			{"transport_rate_shop_cache_hits_total", "Rate shops answered from the rate-shop cache.", a.rateCacheHits.Load()},
+			{"transport_screening_holds_opened_total", "Load screens that opened or refreshed a screening hold.", a.holdsOpened.Load()},
+			{"transport_screening_holds_released_total", "Screening hold releases applied or replayed.", a.holdsReleased.Load()},
+			{"transport_routes_optimized_total", "Route optimizations solved and stored, concurrent duplicates included.", a.routesOptimized.Load()},
+			{"transport_load_plans_total", "Load plans stacked.", a.loadPlans.Load()},
+			{"transport_optimizer_errors_total", "Optimizer calls that failed or returned something that is not a plan (TMS-0123).", a.optimizerErrors.Load()},
 			{"transport_server_errors_total", "Requests that failed with a server error.", a.serverErrors.Load()},
 		} {
 			fmt.Fprintf(w, "# HELP %[1]s %[2]s\n# TYPE %[1]s counter\n%[1]s %[3]d\n", m.name, m.help, m.value)

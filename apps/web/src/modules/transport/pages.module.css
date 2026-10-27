@@ -142,3 +142,46 @@
   align-items: end;
   gap: var(--space-3);
 }
+
+/* Load plan top view (FR-34.18). The SVG is drawn in millimetres, so the label
+   size is in those user units, about a fifth of a pallet width. */
+.topView {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.topView svg {
+  inline-size: 100%;
+  max-inline-size: 16rem;
+  block-size: auto;
+}
+
+.floor {
+  fill: var(--color-bg-muted);
+  stroke: var(--color-border-input);
+  stroke-width: 20;
+}
+
+.single {
+  fill: var(--color-accent-subtle);
+  stroke: var(--color-accent);
+  stroke-width: 16;
+}
+
+.stacked {
+  fill: var(--color-accent);
+  stroke: var(--color-accent-strong);
+  stroke-width: 16;
+}
+
+.floorLabel {
+  fill: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: 180px;
+}
+
+.stacked + .floorLabel {
+  fill: var(--color-on-accent);
+}

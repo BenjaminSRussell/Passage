@@ -239,8 +239,12 @@ function ScreeningCard({ loadId }: { loadId: string }) {
         {result ? (
           <div className={styles.stack}>
             {result.decision === "HOLD" ? (
-              <Alert tone="danger" title="Load held for trade compliance (TMS-0133)">
-                A party needs review. The hold is not cleared automatically; a trade compliance user releases it with a reason.
+              <Alert
+                tone="danger"
+                title="Load held for trade compliance (TMS-0133)"
+                action={result.holdId ? <Link to={`/transport/screening-holds/${result.holdId}`}>Open the hold</Link> : undefined}
+              >
+                A party needs review. The load cannot be tendered until a trade compliance officer releases the hold with a reason; it is not cleared automatically.
               </Alert>
             ) : result.decision === "WARN" ? (
               <Alert tone="warning" title="Not screened (TMS-0134)">

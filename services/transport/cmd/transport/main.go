@@ -1,5 +1,8 @@
 // Command transport serves the wave-34 transportation API: rate cards, rate
-// shopping, freight bills, carrier invoices, tenders, tracking and landed-cost voyages.
+// shopping, freight bills, carrier invoices, tenders, tracking, landed-cost voyages,
+// loads, the gate, screening holds, route optimization and load plans.
+// TMS_OPTIMIZER_URL points at services/routing-py; TMS_RATING_CACHE_MIN sets the
+// rate-shop cache window.
 package main
 
 import (
@@ -10,10 +13,12 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/services/transport/internal/api"
+	"github.com/BenjaminSRussell/passage/services/transport/internal/optimizer"
 	"github.com/BenjaminSRussell/passage/services/transport/internal/store"
 	"github.com/BenjaminSRussell/passage/services/transport/migrations"
 )
@@ -58,6 +63,16 @@ func run(ctx context.Context, getenv func(string) string) error {
 		}
 	}
 	a := api.New(store.New(pool))
+	if u := getenv("TMS_OPTIMIZER_URL"); u != "" {
+		a.WithOptimizer(optimizer.New(u, nil))
+	}
+	if v := getenv("TMS_RATING_CACHE_MIN"); v != "" {
+		m, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("TMS_RATING_CACHE_MIN: %w", err)
+		}
+		a.WithRatingCacheMinutes(m)
+	}
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()

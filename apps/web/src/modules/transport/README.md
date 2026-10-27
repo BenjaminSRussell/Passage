@@ -8,7 +8,7 @@ Screens for the transport service (`services/transport`), through the web BFF at
 | `/transport` | Workspace with links to each area | TMS_VIEW |
 | `/transport/loads` | Loads by status with weight and pallet fill against capacity | TMS_VIEW |
 | `/transport/loads/build` | Build loads from shipments by rule (TMS-0115, TMS-0116); shows the loads planned | TMS_PLAN |
-| `/transport/loads/:id` | Load detail: capacity, shipments, latest DG check with findings and shipping papers, DG check form, DG history, party screening; "Start tender" hidden while the latest DG check is FAIL | TMS_VIEW, TMS_PLAN to check and screen |
+| `/transport/loads/:id` | Load detail: capacity, shipments, latest DG check with findings and shipping papers, DG check form, DG history, party screening (a HOLD links to its screening hold); "Start tender" hidden while the latest DG check is FAIL | TMS_VIEW, TMS_PLAN to check and screen |
 | `/transport/rate-shop` | Rate a shipment, compare carrier services, read the explain trace | TMS_RATE |
 | `/transport/rate-cards` | Rate card list, filter by carrier | TMS_RATE |
 | `/transport/rate-cards/new` | Rate card form with rate rows and accessorials (TMS-0102 on overlap) | TMS_RATE_APPROVE |
@@ -32,6 +32,12 @@ Screens for the transport service (`services/transport`), through the web BFF at
 | `/transport/gate` | Gate log: trucks in the yard by default; filter by status, site, check-in day and carrier; arrival and detention per visit | TMS_GATE |
 | `/transport/gate/check-in` | Check-in form: direction, carrier, trailer, seal, load, driver, appointment and time (or walk-in), paper-fallback arrival time, on-time window and free time | TMS_GATE |
 | `/transport/gate/:id` | Visit detail: arrival (TMS-0127), seal at load confirmation, check-out with the declared seal and detention rate (TMS-0129 blocks and the attempt appears in the log, TMS-0126 detention), gate log | TMS_GATE |
+| `/transport/screening-holds` | Screening holds: open by default, status filter, held parties, who released | TMS_VIEW |
+| `/transport/screening-holds/:id` | Hold detail with the party results; release with a reason (a BLOCKED party cannot be released, TMS-0133) | TMS_VIEW, TRADE_COMPLIANCE_RELEASE to release |
+| `/transport/routes` | Route plans with stops, vehicles used, dropped stops and distance | TMS_PLAN |
+| `/transport/routes/new` | Optimize routes: depot, stops with windows and quantities, vehicles, solver time (5 to 25 s), speed, lateness penalty; TMS-0123 when the optimizer is unavailable | TMS_PLAN |
+| `/transport/routes/:id` | Plan detail: each used vehicle's stops in order with window, arrival and lateness; dropped stops with TMS-0104 | TMS_PLAN |
+| `/transport/load-plans` | Load plan: trailer and pallets; top view (SVG, nose at the top), floor positions, load sequence, kingpin and rear-axle estimate, pallets that do not fit | TMS_PLAN |
 
 Amounts stay decimal strings (`format.ts` rounds and sums on the digits). Create forms keep one
 `Idempotency-Key` per form until a field changes. Tests: `npx vitest --run src/modules/transport`.

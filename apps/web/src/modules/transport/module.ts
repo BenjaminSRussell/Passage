@@ -10,17 +10,23 @@ import { GateVisitDetailPage } from "./GateVisitDetailPage";
 import { GoodsInTransitDetailPage } from "./GoodsInTransitDetailPage";
 import { GoodsInTransitPage } from "./GoodsInTransitPage";
 import { LoadDetailPage } from "./LoadDetailPage";
+import { LoadPlanPage } from "./LoadPlanPage";
 import { LoadsPage } from "./LoadsPage";
 import { LoadTrackingPage } from "./LoadTrackingPage";
 import { NewCarrierInvoicePage } from "./NewCarrierInvoicePage";
 import { NewFreightBillPage } from "./NewFreightBillPage";
 import { NewGoodsInTransitPage } from "./NewGoodsInTransitPage";
 import { NewRateCardPage } from "./NewRateCardPage";
+import { NewRoutePlanPage } from "./NewRoutePlanPage";
 import { NewTenderPage } from "./NewTenderPage";
 import { NewTrackingEventPage } from "./NewTrackingEventPage";
 import { NewVoyagePage } from "./NewVoyagePage";
 import { RateCardsPage } from "./RateCardsPage";
 import { RateShopPage } from "./RateShopPage";
+import { RoutePlanDetailPage } from "./RoutePlanDetailPage";
+import { RoutePlansPage } from "./RoutePlansPage";
+import { ScreeningHoldDetailPage } from "./ScreeningHoldDetailPage";
+import { ScreeningHoldsPage } from "./ScreeningHoldsPage";
 import { TenderDetailPage } from "./TenderDetailPage";
 import { TendersPage } from "./TendersPage";
 import { TrackingPage } from "./TrackingPage";
@@ -32,7 +38,7 @@ const transport: PassageModule = {
   id: "transport",
   title: "Transportation",
   description:
-    "Build loads, check dangerous goods and screen parties, rate shop and tender loads to carriers, track shipments, check drivers in and out at the gate, reconcile carrier invoices, allocate landed cost and move goods in transit.",
+    "Build loads, plan routes and trailer loads, check dangerous goods and screen parties, release screening holds, rate shop and tender loads to carriers, track shipments, check drivers in and out at the gate, reconcile carrier invoices, allocate landed cost and move goods in transit.",
   routes: [
     { path: "/transport", element: createElement(TransportHome), handle: { title: "Transportation" } },
     { path: "/transport/loads", element: createElement(LoadsPage), handle: { title: "Loads" } },
@@ -61,6 +67,12 @@ const transport: PassageModule = {
     { path: "/transport/gate", element: createElement(GatePage), handle: { title: "Gate" } },
     { path: "/transport/gate/check-in", element: createElement(CheckInPage), handle: { title: "Check in" } },
     { path: "/transport/gate/:id", element: createElement(GateVisitDetailPage), handle: { title: "Gate visit" } },
+    { path: "/transport/screening-holds", element: createElement(ScreeningHoldsPage), handle: { title: "Screening holds" } },
+    { path: "/transport/screening-holds/:id", element: createElement(ScreeningHoldDetailPage), handle: { title: "Screening hold" } },
+    { path: "/transport/routes", element: createElement(RoutePlansPage), handle: { title: "Route plans" } },
+    { path: "/transport/routes/new", element: createElement(NewRoutePlanPage), handle: { title: "Optimize routes" } },
+    { path: "/transport/routes/:id", element: createElement(RoutePlanDetailPage), handle: { title: "Route plan" } },
+    { path: "/transport/load-plans", element: createElement(LoadPlanPage), handle: { title: "Load plan" } },
   ],
   nav: [
     { label: "Transportation", to: "/transport", duty: "TMS_VIEW" },
@@ -74,6 +86,9 @@ const transport: PassageModule = {
     { label: "Landed cost voyages", to: "/transport/voyages", duty: "TMS_LANDED_COST" },
     { label: "Goods in transit", to: "/transport/goods-in-transit", duty: "TMS_LANDED_COST" },
     { label: "Gate", to: "/transport/gate", duty: "TMS_GATE" },
+    { label: "Screening holds", to: "/transport/screening-holds", duty: "TMS_VIEW" },
+    { label: "Route plans", to: "/transport/routes", duty: "TMS_PLAN" },
+    { label: "Load plan", to: "/transport/load-plans", duty: "TMS_PLAN" },
   ],
 };
 

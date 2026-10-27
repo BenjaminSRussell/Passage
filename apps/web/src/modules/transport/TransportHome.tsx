@@ -9,6 +9,21 @@ const areas = [
     text: "Consolidate shipments into loads by rule within weight, volume and pallet capacity, check their dangerous goods and screen their parties.",
   },
   {
+    title: "Route plans",
+    to: "/transport/routes",
+    text: "Plan multi-stop routes within vehicle capacity, time windows and route duration; stops that cannot be served are reported.",
+  },
+  {
+    title: "Load plan",
+    to: "/transport/load-plans",
+    text: "Stack pallets on a trailer floor in layers, see the top view, the load sequence and an axle-weight estimate.",
+  },
+  {
+    title: "Screening holds",
+    to: "/transport/screening-holds",
+    text: "Loads held by denied-party and sanctions screening, and their release by trade compliance with a reason.",
+  },
+  {
     title: "Rate shop",
     to: "/transport/rate-shop",
     text: "Rate a shipment across carrier services and compare totals with the explain trace for every charge.",
@@ -61,7 +76,7 @@ export function TransportHome() {
     <div className={styles.stack}>
       <PageHeader
         title="Transportation"
-        description="Build, rate and tender loads to carriers, track them to delivery, run the gate, reconcile carrier invoices against the freight you expected to pay, and put landed cost onto inventory. Route optimization and yard moves come in a later release."
+        description="Build, rate and tender loads to carriers, track them to delivery, run the gate, reconcile carrier invoices against the freight you expected to pay, and put landed cost onto inventory. Yard moves come in a later release."
       />
       <CardGrid as="ul" label="Transportation areas">
         {areas.map((area) => (

@@ -642,7 +642,16 @@ export interface ScreeningDecision {
   loadId: string;
   crossBorder: boolean;
   decision: "CLEAR" | "WARN" | "HOLD";
-  parties: { role: PartyRole; name: string; status: ScreenStatus; code?: string }[];
+  parties: PartyScreening[];
+  /** The screening hold a HOLD decision opened or refreshed. */
+  holdId?: string;
+}
+
+export interface PartyScreening {
+  role: PartyRole;
+  name: string;
+  status: ScreenStatus;
+  code?: string;
 }
 
 /** Builds loads by rule; reuse one key per form so a retried submit cannot plan the shipments twice. */
@@ -841,4 +850,159 @@ export function getGoodsInTransit(id: string, signal?: AbortSignal): Promise<Goo
 /** Ships the order at the transfer event (TMS-0121); a shipped order comes back unchanged. */
 export function shipGoodsInTransit(id: string, shippedAt?: string): Promise<GoodsInTransit> {
   return post<GoodsInTransit>(`/goods-in-transit/${encodeURIComponent(id)}:ship`, shippedAt ? { shippedAt } : {});
+}
+
+// ---- Screening holds (FR-34.19, BR-34.17) -------------------------------------
+
+export type HoldStatus = "OPEN" | "RELEASED";
+export const HOLD_STATUSES: HoldStatus[] = ["OPEN", "RELEASED"];
+
+export interface ScreeningHold {
+  id: string;
+  loadId: string;
+  status: HoldStatus;
+  parties: PartyScreening[];
+  createdBy: string;
+  createdAt: string;
+  releasedBy?: string;
+  releaseReason?: string;
+  releasedAt?: string;
+  version: number;
+}
+
+export function listScreeningHolds(filter: { status?: HoldStatus | ""; loadId?: string } = {}, signal?: AbortSignal): Promise<ScreeningHold[]> {
+  return items<ScreeningHold>(`/screening-holds${query(filter)}`, signal);
+}
+
+export function getScreeningHold(id: string, signal?: AbortSignal): Promise<ScreeningHold> {
+  return send<ScreeningHold>(`/screening-holds/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** Releases a POTENTIAL_MATCH or SCREENING_PENDING hold with a reason (TRADE_COMPLIANCE_RELEASE); a BLOCKED party is refused (TMS-0133). */
+export function releaseScreeningHold(id: string, reason: string): Promise<ScreeningHold> {
+  return post<ScreeningHold>(`/screening-holds/${encodeURIComponent(id)}:release`, { reason });
+}
+
+// ---- Route optimization (FR-34.2, BR-34.1) -----------------------------------
+
+export interface RoutePoint {
+  x: number;
+  y: number;
+}
+
+export interface RouteStop {
+  id: string;
+  point: RoutePoint;
+  earliest: number;
+  latest: number;
+  serviceMin: number;
+  weightKg: number;
+  volumeL: number;
+  pallets: number;
+}
+
+export interface RouteVehicle {
+  id: string;
+  capacityKg: number;
+  capacityL: number;
+  pallets: number;
+  fixedCost?: number;
+  maxRouteMin?: number;
+}
+
+export interface RouteRequest {
+  depot: RoutePoint;
+  stops: RouteStop[];
+  vehicles: RouteVehicle[];
+  speedKmh?: number;
+  latenessPerMin?: number;
+  timeLimitS?: number;
+}
+
+export interface RouteSolutionRoute {
+  vehicleId: string;
+  stops: { stopId: string; arrivalMin: number; lateMin: number }[];
+  distanceKm: number;
+  endMin: number;
+}
+
+export interface RoutePlanSummary {
+  id: string;
+  requestHash: string;
+  stopCount: number;
+  vehicleCount: number;
+  routeCount: number;
+  droppedCount: number;
+  totalDistanceKm: number;
+  timeLimitS: number;
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface RoutePlan extends RoutePlanSummary {
+  request: RouteRequest;
+  solution: { routes: RouteSolutionRoute[]; dropped: string[] };
+  replayed: boolean;
+  warnings: { code: string; severity: string; detail: string }[];
+}
+
+/** Solves and stores a route plan; the same request returns the stored plan (the request hash is the key). */
+export function optimizeRoutes(input: RouteRequest): Promise<RoutePlan> {
+  return post<RoutePlan>("/routes:optimize", input);
+}
+
+export function listRoutePlans(signal?: AbortSignal): Promise<RoutePlanSummary[]> {
+  return items<RoutePlanSummary>("/routes", signal);
+}
+
+export function getRoutePlan(id: string, signal?: AbortSignal): Promise<RoutePlan> {
+  return send<RoutePlan>(`/routes/${encodeURIComponent(id)}`, {}, signal);
+}
+
+// ---- Load plan stacking (FR-34.18) -------------------------------------------
+
+export interface Trailer {
+  lengthMm: number;
+  widthMm: number;
+  maxHeightMm: number;
+  maxWeightKg: number;
+  kingpinMm?: number;
+  axleMm?: number;
+}
+
+export interface PlanPallet {
+  id: string;
+  lengthMm: number;
+  widthMm: number;
+  heightMm: number;
+  weightKg: number;
+  stackable: boolean;
+  stopSeq: number;
+  maxStackKg?: number;
+}
+
+export interface Placement {
+  palletIds: string[];
+  xMm: number;
+  yMm: number;
+  lengthMm: number;
+  widthMm: number;
+  heightMm: number;
+  weightKg: number;
+}
+
+export interface LoadPlan {
+  placements: Placement[];
+  unplaced: string[];
+  floorPositionsUsed: number;
+  lengthUsedMm: number;
+  layers: number;
+  totalWeightKg: number;
+  loadSequence: string[];
+  axle: { kingpinKg: number; axleKg: number };
+}
+
+/** Computes a layer-based load plan; nothing is stored. */
+export function stackLoadPlan(input: { trailer: Trailer; pallets: PlanPallet[] }): Promise<LoadPlan> {
+  return post<LoadPlan>("/load-plans:stack", input);
 }

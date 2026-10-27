@@ -82,6 +82,16 @@ type fakeStore struct {
 	gitCall      fakeGITCreate
 	gitFilter    store.GoodsInTransitFilter
 	shippedAt    time.Time
+
+	// Slice 5: screening holds and route plans (holds_test.go, routes_test.go).
+	held        []domain.PartyScreening
+	hold        domain.ScreeningHold
+	holdErr     error
+	holdFilter  store.HoldFilter
+	released    string
+	plans       map[string]domain.RoutePlan
+	savedPlans  int
+	findPlanErr error
 }
 
 func (f *fakeStore) CreateRateCard(_ context.Context, in domain.RateCard, idem store.Idem) (domain.RateCard, error) {

@@ -1,6 +1,6 @@
 // Package store persists rate cards, freight bills and their decisions, carrier
 // invoices, tenders, tracking events, landed-cost voyages, loads, DG checks, gate
-// visits with their gate log, and goods-in-transit orders. Every query runs inside
+// visits with their gate log, goods-in-transit orders, screening holds and route plans. Every query runs inside
 // dbx.WithTenantTx so row-level security applies.
 package store
 
@@ -106,6 +106,14 @@ type Store interface {
 	GetGoodsInTransit(ctx context.Context, id string) (domain.GoodsInTransit, error)
 	ListGoodsInTransit(ctx context.Context, f GoodsInTransitFilter) ([]domain.GoodsInTransit, error)
 	ShipGoodsInTransit(ctx context.Context, id string, at time.Time) (domain.GoodsInTransit, error)
+	RecordScreeningHold(ctx context.Context, loadID string, parties []domain.PartyScreening) (domain.ScreeningHold, error)
+	GetScreeningHold(ctx context.Context, id string) (domain.ScreeningHold, error)
+	ListScreeningHolds(ctx context.Context, f HoldFilter) ([]domain.ScreeningHold, error)
+	ReleaseScreeningHold(ctx context.Context, id, reason string, at time.Time) (domain.ScreeningHold, error)
+	FindRoutePlan(ctx context.Context, hash string) (domain.RoutePlan, bool, error)
+	SaveRoutePlan(ctx context.Context, plan domain.RoutePlan) (domain.RoutePlan, bool, error)
+	GetRoutePlan(ctx context.Context, id string) (domain.RoutePlan, error)
+	ListRoutePlans(ctx context.Context) ([]domain.RoutePlanSummary, error)
 	Ping(ctx context.Context) error
 }
 
