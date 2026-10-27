@@ -202,6 +202,58 @@ export interface ReturnableBalance {
   lastReturnedAt: string | null;
 }
 
+/** One short-picked shipment line of the short picks and backorders report (FR-28.2). */
+export interface BackorderRow {
+  shipmentLineId: string;
+  shipmentId: string;
+  shipmentNumber: string;
+  status: ShipmentStatus;
+  warehouseId: string;
+  orderId: string;
+  customerId: string;
+  orderLineId: string;
+  productId: string;
+  unit: string;
+  qtyPlanned: string;
+  qtyPicked: string;
+  qtyShipped: string;
+  /** Planned minus picked. */
+  qtyRemainder: string;
+  /** A remainder is left and the shipment is not cancelled. */
+  open: boolean;
+  /** The line's first short pick. */
+  shortPickedAt: string;
+}
+
+export interface BackorderPage {
+  items: BackorderRow[];
+  nextCursor?: string;
+}
+
+export interface BackorderFilter {
+  warehouseId?: string;
+  status?: "open" | "all";
+  from?: string;
+  to?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+/** A returnable balance aged first in, first out (FR-28.16). */
+export interface AgedReturnableBalance extends ReturnableBalance {
+  oldestOutstandingDate: string | null;
+  daysOutstanding: number;
+  chargeDue: boolean;
+}
+
+export interface ReturnableAging {
+  asOf: string;
+  chargeDays: number;
+  count: number;
+  chargeDueCount: number;
+  items: AgedReturnableBalance[];
+}
+
 export interface AutoPackResult {
   shipment: Shipment;
   containers: Container[];
@@ -563,6 +615,28 @@ export async function deliveredNotInvoiced(
 /** One page of the SSCC register, in SSCC order (BR-28.5, section 5.28.14). */
 export async function ssccRegister(filter: SsccFilter, signal?: AbortSignal): Promise<SsccPage> {
   const body = await send<SsccPage>(`/sscc-register${query({ ...filter })}`, {}, signal);
+  if (!Array.isArray(body.items)) {
+    throw new FulfillmentApiError(0, "COM-0001", "The response has no items", {});
+  }
+  return body;
+}
+
+/** One page of the short picks and backorders report, newest short pick first (FR-28.2, section 5.28.14). */
+export async function listBackorders(filter: BackorderFilter, signal?: AbortSignal): Promise<BackorderPage> {
+  const body = await send<BackorderPage>(`/backorders${query({ ...filter })}`, {}, signal);
+  if (!Array.isArray(body.items)) {
+    throw new FulfillmentApiError(0, "COM-0001", "The response has no items", {});
+  }
+  return body;
+}
+
+/** Outstanding returnable balances with days outstanding and the charge flag after chargeDays (FR-28.16). */
+export async function returnableAging(
+  filter: { customerId?: string; chargeDays?: number; chargeDue?: boolean; limit?: number },
+  signal?: AbortSignal,
+): Promise<ReturnableAging> {
+  const { chargeDue, ...rest } = filter;
+  const body = await send<ReturnableAging>(`/returnable-packaging/aging${query({ ...rest, chargeDue: chargeDue ? "true" : undefined })}`, {}, signal);
   if (!Array.isArray(body.items)) {
     throw new FulfillmentApiError(0, "COM-0001", "The response has no items", {});
   }

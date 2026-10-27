@@ -3,7 +3,6 @@ package api
 import (
 	"net/http"
 	"regexp"
-	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
@@ -43,21 +42,7 @@ func (a *API) listSSCCs(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, "customerId", "must be a UUID")
 		return
 	}
-	for _, bound := range []struct {
-		name string
-		into *time.Time
-	}{{"from", &f.From}, {"to", &f.To}} {
-		if v := q.Get(bound.name); v != "" {
-			t, err := time.Parse(dateLayout, v)
-			if err != nil {
-				fail(w, r, bound.name, "must be a YYYY-MM-DD date")
-				return
-			}
-			*bound.into = t
-		}
-	}
-	if !f.From.IsZero() && !f.To.IsZero() && f.To.Before(f.From) {
-		fail(w, r, "to", "must not be before from")
+	if !dateRange(w, r, &f.From, &f.To) {
 		return
 	}
 	if f.AfterSSCC != "" && !ssccCursorPattern.MatchString(f.AfterSSCC) {

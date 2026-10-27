@@ -1,6 +1,6 @@
 # fulfillment
 
-Passage fulfillment service, wave 28 (PSG-28), slices 1 to 4. It releases confirmed
+Passage fulfillment service, wave 28 (PSG-28), slices 1 to 6. It releases confirmed
 order lines to a warehouse shipment, records pick and pack quantities,
 closes containers with GS1 SSCC-18 numbers (by hand or by packing rule with
 auto-pack), and posts a packing slip that
@@ -17,7 +17,10 @@ The picking workbench groups released shipments into pick waves; carrier
 tracking events are stored and published; containers print a GS1-128 ZPL label.
 The delivered-not-invoiced report gives the open 1405 balance per legal entity
 as of a date, read from the slip journals. The SSCC register lists every SSCC
-issued, with its shipment and no-reuse date.
+issued, with its shipment and no-reuse date. The short picks and backorders
+report lists the lines a pick confirmed below plan with the remainder still
+owed, and the returnable packaging aging gives the days each customer has held
+its returnable containers (first in, first out) and whether a charge is due.
 
 Engineering rules: `docs/engineering/CONVENTIONS.md`. Requirements:
 `docs/prd/phase-5-order-to-cash.md` section 5.28. Gaps in this slice are listed in
@@ -39,6 +42,7 @@ migrations/             0001_init.sql (RLS, outbox, idempotency, number counters
                         0003_partial_waves_tracking.sql (PARTIALLY_SHIPPED, carrier and
                         zone, container slip link, waves, tracking events)
                         0004_dni.sql (partial index for the DNI report)
+                        0005_short_picks.sql (first short-pick time per shipment line)
 api/openapi.yaml        OpenAPI 3.1 for every endpoint in this slice
 events/asyncapi.yaml    AsyncAPI 3 for every event in this slice
 charts/fulfillment/     Helm chart (helm lint passes)
@@ -80,7 +84,14 @@ and legal-entity isolation, auto-pack (AC-28.11), the packaging fee and report
 (AC-28.12), returnable balances (AC-28.13), partial shipments over two slips
 with a per-slip cancel (AC-28.4, FR-28.8), shipment cancel, the workbench
 (AC-28.10), tracking, the ASN, the delivered-not-invoiced report (AC-28.8,
-as-of dates around a cancel) and the SSCC register (filters, cursor, scope) against Postgres through `platform/go/testkit`. They run as the application role
+as-of dates around a cancel), the SSCC register (filters, cursor, scope), the
+short picks and backorders report (FR-28.2: open, shipped part, re-pick, cancel,
+filters, cursor, scope), returnable aging (FIFO buckets from the slips, a
+cancelled slip left out) and the `warehouse-sim-1k` run (AC-28.7: 1,000 orders
+released, picked with short picks, packed and posted, with zero mismatch between
+released quantities, slip lines and `packingslip.posted` events; see
+`testdata/warehouse-sim-1k/README.md`; skipped with `-short`) against Postgres
+through `platform/go/testkit`. They run as the application role
 so row-level security applies, which needs both URLs:
 
 ```
@@ -103,8 +114,9 @@ page, and the container types, packing rules, packaging materials, packaging
 fees (rates and report) and returnable packaging pages, and from slice 3 the
 picking workbench, pick waves and wave detail, and on the shipment detail the
 remainder pick, cancel, tracking with manual entry, the ZPL label and the ASN
-option, from slice 4 the delivered-not-invoiced report, and from slice 5 the
-SSCC register. Run `npx vitest --run src/modules/fulfillment`
+option, from slice 4 the delivered-not-invoiced report, from slice 5 the
+SSCC register, and from slice 6 the short picks and backorders report and the
+returnable packaging aging. Run `npx vitest --run src/modules/fulfillment`
 and `npx tsc --noEmit` in `apps/web`.
 
 ## Endpoints (slice 1)
@@ -160,6 +172,17 @@ not be below what is packed (FUL-0031).
 |---|---|---|---|
 | GET | `/api/v1/fulfillment/delivered-not-invoiced` | WarehouseView | `legalEntityId` (required), `customerId`, `asOf` (default today), `limit`; open 1405 per currency (`totals`, `lineCount`) and the slips with days outstanding |
 | GET | `/api/v1/fulfillment/sscc-register` | WarehouseView | `companyPrefix`, `customerId`, `from`, `to` (issue dates, UTC), `limit`, `cursor`; issued SSCCs in SSCC order with container, shipment, slip, `issuedAt` and `noReuseUntil` (BR-28.5), `nextCursor` when more exist |
+
+## Endpoints (slice 6)
+
+| Method | Path | Duty | Notes |
+|---|---|---|---|
+| GET | `/api/v1/fulfillment/backorders` | WarehouseView | Short picks and backorders (FR-28.2): `warehouseId`, `status` (`open` default, `all`), `from`, `to` (first short-pick date, UTC), `limit`, `cursor`; each line with `qtyRemainder` (planned - picked) and `open`, newest short pick first |
+| GET | `/api/v1/fulfillment/returnable-packaging/aging` | WarehouseView | Returnable aging (FR-28.16): `customerId`, `chargeDays` (30 to 365, default 90), `chargeDue=true`, `limit`; every balance above zero with `oldestOutstandingDate`, `daysOutstanding` (FIFO from the slip posting dates, as of today UTC) and `chargeDue` (older than `chargeDays`); `count` and `chargeDueCount` cover all, `items` the oldest `limit` |
+
+A pick confirmation that leaves a line below plan stamps the line's first
+short-pick time (migration 0005); the remainder is the backorder until a re-pick
+reaches plan or the shipment is cancelled.
 
 Idempotency: a key is stored per tenant with a fingerprint of the method, path
 and body. A replay returns the stored response; the same key on another path or

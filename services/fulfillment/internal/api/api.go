@@ -63,6 +63,10 @@ func New(s store.Store, opts Options) *API {
 	return &API{store: s, opts: opts, now: func() time.Time { return time.Now().UTC() }}
 }
 
+// SetClock replaces the clock that dates "today" (release horizon, DNI as-of
+// default, returnable aging). Tests use it; production keeps UTC wall time.
+func (a *API) SetClock(now func() time.Time) { a.now = now }
+
 // Routes mounts every fulfillment endpoint on r. Each route carries the duty
 // named by its operation's x-passage-duty.
 func (a *API) Routes(r chi.Router) {

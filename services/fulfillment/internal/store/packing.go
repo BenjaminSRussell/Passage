@@ -38,6 +38,7 @@ type PackingStore interface {
 	AutoPack(ctx context.Context, id string, version int, unitWeights map[string]decimal.Decimal, idem Idem) (AutoPackResult, error)
 	ListReturnableBalances(ctx context.Context, customerID string, limit int) ([]ReturnableBalance, error)
 	ReturnPackaging(ctx context.Context, in ReturnInput, idem Idem) (ReturnableBalance, error)
+	ReturnableAging(ctx context.Context, customerID string) ([]ReturnableAgingRow, error)
 }
 
 // ContainerType is a carton, crate or pallet type: its tare weight, whether it
@@ -126,6 +127,13 @@ type ReturnableBalance struct {
 	Balance        decimal.Decimal `json:"balance"`
 	LastShippedAt  *time.Time      `json:"lastShippedAt"`
 	LastReturnedAt *time.Time      `json:"lastReturnedAt"`
+}
+
+// ReturnableAgingRow is an outstanding returnable balance with the shipments
+// that can still make it up, newest first, for first-in-first-out aging.
+type ReturnableAgingRow struct {
+	ReturnableBalance
+	Shipped []domain.RTPShipped
 }
 
 // ReturnInput is a standalone return receipt of returnable containers.
@@ -784,4 +792,69 @@ func returnableData(counts []returnableCount, sign int64) []fulevents.Returnable
 		out = append(out, fulevents.ReturnableMove{ContainerType: c.ContainerType, Qty: decimal.NewFromInt(sign * c.Qty).String()})
 	}
 	return out
+}
+
+// ReturnableAging returns every balance above zero, optionally of one
+// customer, with the posting dates and counts of the returnable containers
+// that shipped to that customer (FR-28.16 aging inquiry). The balances are
+// per tenant; the shipped containers are read through their packing slip and
+// shipment, so a caller scoped to some legal entities ages only from the
+// shipments it can see. Cancelled slips do not count: their containers are
+// back to CLOSED with no slip.
+func (s *Postgres) ReturnableAging(ctx context.Context, customerID string) ([]ReturnableAgingRow, error) {
+	out := []ReturnableAgingRow{}
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select customer_id::text, container_type, balance::text, last_shipped_at, last_returned_at
+			from returnable_packaging_balance
+			where balance > 0 and ($1::text = '' or customer_id = nullif($1::text, '')::uuid)
+			order by customer_id, container_type`, customerID)
+		if err != nil {
+			return err
+		}
+		index := map[string]int{} // customer/container type -> row
+		seen := map[string]bool{}
+		customers := []string{}
+		for rows.Next() {
+			var r ReturnableAgingRow
+			var bal string
+			if err := rows.Scan(&r.CustomerID, &r.ContainerType, &bal, &r.LastShippedAt, &r.LastReturnedAt); err != nil {
+				rows.Close()
+				return err
+			}
+			r.Balance = dec(bal)
+			if !seen[r.CustomerID] {
+				seen[r.CustomerID] = true
+				customers = append(customers, r.CustomerID)
+			}
+			index[r.CustomerID+"/"+r.ContainerType] = len(out)
+			out = append(out, r)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil || len(out) == 0 {
+			return err
+		}
+		shipped, err := tx.Query(ctx, `select sh.customer_id::text, c.container_type, ps.posting_date, count(*)
+			from container c
+			join packing_slip ps on ps.tenant_id = c.tenant_id and ps.id = c.packing_slip_id
+			join shipment sh on sh.tenant_id = c.tenant_id and sh.id = c.shipment_id
+			where c.returnable and c.packing_slip_id is not null and sh.customer_id = any($1::uuid[])
+			group by sh.customer_id, c.container_type, ps.posting_date`, customers)
+		if err != nil {
+			return err
+		}
+		defer shipped.Close()
+		for shipped.Next() {
+			var customer, containerType string
+			var day time.Time
+			var n int64
+			if err := shipped.Scan(&customer, &containerType, &day, &n); err != nil {
+				return err
+			}
+			if i, ok := index[customer+"/"+containerType]; ok {
+				out[i].Shipped = append(out[i].Shipped, domain.RTPShipped{Date: day, Qty: decimal.NewFromInt(n)})
+			}
+		}
+		return shipped.Err()
+	})
+	return out, err
 }

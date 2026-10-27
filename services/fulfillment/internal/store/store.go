@@ -259,6 +259,8 @@ type Store interface {
 	DeliveredNotInvoiced(ctx context.Context, f DNIFilter) ([]domain.DNIRow, error)
 	// ListSSCCs is the SSCC register (BR-28.5, sscc.go).
 	ListSSCCs(ctx context.Context, f SSCCFilter) ([]SSCCRow, error)
+	// ListBackorders is the short picks and backorders report (FR-28.2, backorders.go).
+	ListBackorders(ctx context.Context, f BackorderFilter) ([]BackorderRow, error)
 	PackingStore
 	WorkbenchStore
 	Ping(ctx context.Context) error
@@ -733,8 +735,12 @@ func (s *Postgres) ConfirmPick(ctx context.Context, id string, version int, pick
 					return sh, mapDomain(err)
 				}
 				l := sh.Lines[idx]
-				if _, err := tx.Exec(ctx, `update shipment_line set qty_picked = $3, pick_confirmed = true where tenant_id = $1 and id = $2`,
-					p.TenantID, l.ID, next.Picked); err != nil {
+				// A pick below the planned quantity opens a backorder; the first
+				// short pick dates it for the short-pick report (FR-28.2, backorders.go).
+				if _, err := tx.Exec(ctx, `update shipment_line set qty_picked = $3, pick_confirmed = true,
+						short_picked_at = case when $4::boolean then coalesce(short_picked_at, now()) else short_picked_at end
+					where tenant_id = $1 and id = $2`,
+					p.TenantID, l.ID, next.Picked, backorder.IsPositive()); err != nil {
 					return sh, err
 				}
 				l.Picked, l.PickConfirmed = next.Picked, true

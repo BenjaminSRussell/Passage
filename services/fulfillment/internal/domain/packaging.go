@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/shopspring/decimal"
 
@@ -88,4 +89,60 @@ func ApplyBalance(balance, delta decimal.Decimal) (decimal.Decimal, error) {
 		return balance, ErrRTPNegative
 	}
 	return next, nil
+}
+
+// Bounds and default of rtp_charge_days (section 5.28.13): a returnable
+// container held longer than this becomes chargeable (FR-28.16, wave 30 bills it).
+const (
+	DefaultRTPChargeDays = 90
+	MinRTPChargeDays     = 30
+	MaxRTPChargeDays     = 365
+)
+
+// RTPShipped is a number of returnable containers of one type that shipped to
+// a customer on one packing slip posting date.
+type RTPShipped struct {
+	Date time.Time
+	Qty  decimal.Decimal
+}
+
+// RTPAging is the age of an outstanding returnable balance (FR-28.16).
+type RTPAging struct {
+	// OldestOutstanding is the posting date of the oldest shipment the
+	// customer still holds containers of; nil when no shipment is known.
+	OldestOutstanding *time.Time
+	DaysOutstanding   int
+	ChargeDue         bool
+}
+
+// AgeReturnables ages a balance first in, first out: returns are taken against
+// the oldest shipments, so the containers a customer still holds are those of
+// its newest shipments that add up to the balance. The age is the days from
+// the oldest of those to asOf, and the balance is chargeable once that age
+// exceeds chargeDays (section 5.28.16: "balances outstanding > rtp_charge_days").
+// When the shipments add up to less than the balance, the oldest shipment
+// given is used. A balance of zero or less, or no shipment, has no age.
+func AgeReturnables(balance decimal.Decimal, shipped []RTPShipped, asOf time.Time, chargeDays int) RTPAging {
+	if !balance.IsPositive() || len(shipped) == 0 {
+		return RTPAging{}
+	}
+	newest := append([]RTPShipped(nil), shipped...)
+	sort.SliceStable(newest, func(i, j int) bool { return newest[i].Date.After(newest[j].Date) })
+	var oldest time.Time
+	left := balance
+	for _, s := range newest {
+		if !left.IsPositive() {
+			break
+		}
+		if !s.Qty.IsPositive() {
+			continue
+		}
+		oldest = dateOnly(s.Date)
+		left = left.Sub(s.Qty)
+	}
+	if oldest.IsZero() {
+		return RTPAging{}
+	}
+	days := DaysOutstanding(oldest, asOf)
+	return RTPAging{OldestOutstanding: &oldest, DaysOutstanding: days, ChargeDue: days > chargeDays}
 }

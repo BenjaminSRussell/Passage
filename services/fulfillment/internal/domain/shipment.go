@@ -159,3 +159,14 @@ func AllPacked(lines []LineQty) bool {
 	}
 	return len(lines) > 0
 }
+
+// Backorder is what a short pick left of a line: the planned quantity not
+// picked (FR-28.2), and whether it is still owed. A re-pick that reaches the
+// planned quantity closes it, and so does cancelling the shipment.
+func Backorder(status ShipmentStatus, planned, picked decimal.Decimal) (remainder decimal.Decimal, open bool) {
+	remainder = planned.Sub(picked)
+	if remainder.IsNegative() {
+		remainder = decimal.Zero
+	}
+	return remainder, remainder.IsPositive() && status != StatusCancelled
+}

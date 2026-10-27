@@ -3,13 +3,14 @@ info:
   title: Passage Fulfillment API
   version: 1.0.0
   description: >
-    Wave 28 slices 1 to 5. Release, pick, pack and packing-slip posting;
+    Wave 28 slices 1 to 6. Release, pick, pack and packing-slip posting;
     container types, packing rules and auto-pack; packaging materials, country
     fee rates, the statistical packaging fee and the packaging report;
     returnable transport packaging balances; partial shipments, shipment
     cancellation, the picking workbench and pick waves, carrier tracking
     events, the ASN on post, the GS1-128 container label (ZPL), the
-    delivered-not-invoiced report and the SSCC register. Carrier
+    delivered-not-invoiced report, the SSCC register, the short picks and
+    backorders report and returnable packaging aging. Carrier
     rate/label/manifest and drop-ship are later slices (see NOT-IMPLEMENTED.md).
     Errors are RFC 9457 problem details with a stable code.
 servers:
@@ -1017,6 +1018,58 @@ paths:
                   nextCursor: { type: string, pattern: "^[0-9]{18}$", description: "Present when another page exists." }
         "400": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
+  /api/v1/fulfillment/backorders:
+    get:
+      operationId: listBackorders
+      summary: Short picks and backorders (FR-28.2, AC-28.4, section 5.28.14)
+      description: >-
+        Shipment lines a pick confirmed below their planned quantity, newest short pick first. The
+        remainder (qtyPlanned - qtyPicked) is open until a re-pick reaches the planned quantity or the shipment
+        is cancelled. status=open (default) lists open backorders only; status=all also lists closed ones. from
+        and to bound the date of the line's first short pick. Page with limit and the nextCursor of the previous
+        page.
+      x-passage-duty: WarehouseView
+      parameters:
+        - { name: warehouseId, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [open, all], default: open } }
+        - { name: from, in: query, description: "First short-pick date (YYYY-MM-DD, UTC), inclusive.", schema: { type: string, format: date } }
+        - { name: to, in: query, description: "Last short-pick date (YYYY-MM-DD, UTC), inclusive; not before from.", schema: { type: string, format: date } }
+        - { name: cursor, in: query, description: "nextCursor of the previous page (a shipment line id).", schema: { type: string, format: uuid } }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: One page of the report
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [shipmentLineId, shipmentId, shipmentNumber, status, warehouseId, orderId, customerId, orderLineId, productId, unit, qtyPlanned, qtyPicked, qtyShipped, qtyRemainder, open, shortPickedAt]
+                      properties:
+                        shipmentLineId: { type: string, format: uuid }
+                        shipmentId: { type: string, format: uuid }
+                        shipmentNumber: { type: string }
+                        status: { $ref: "#/components/schemas/ShipmentStatus" }
+                        warehouseId: { type: string, format: uuid }
+                        orderId: { type: string, format: uuid }
+                        customerId: { type: string, format: uuid }
+                        orderLineId: { type: string, format: uuid }
+                        productId: { type: string, format: uuid }
+                        unit: { type: string }
+                        qtyPlanned: { $ref: "#/components/schemas/Decimal" }
+                        qtyPicked: { $ref: "#/components/schemas/Decimal" }
+                        qtyShipped: { $ref: "#/components/schemas/Decimal" }
+                        qtyRemainder: { $ref: "#/components/schemas/Decimal" }
+                        open: { type: boolean, description: "A remainder is left and the shipment is not cancelled." }
+                        shortPickedAt: { type: string, format: date-time, description: "The line's first short pick." }
+                  nextCursor: { type: string, format: uuid, description: "Present when another page exists." }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
   /api/v1/fulfillment/returnable-packaging:
     get:
       operationId: listReturnableBalances
@@ -1037,6 +1090,48 @@ paths:
                   items:
                     type: array
                     items: { $ref: "#/components/schemas/ReturnableBalance" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /api/v1/fulfillment/returnable-packaging/aging:
+    get:
+      operationId: returnablePackagingAging
+      summary: Returnable packaging aging, days outstanding and charge due (FR-28.16, section 5.28.14)
+      description: >-
+        Every balance above zero, aged first in, first out as of today (UTC): returns are taken against the
+        oldest shipments, so oldestOutstandingDate is the posting date of the oldest packing slip whose
+        containers the customer still holds. chargeDue is set once daysOutstanding exceeds chargeDays
+        (rtp_charge_days, default 90); wave 30 charges those. count and chargeDueCount cover every matching
+        balance; items holds at most limit of them, oldest first.
+      x-passage-duty: WarehouseView
+      parameters:
+        - { name: customerId, in: query, schema: { type: string, format: uuid } }
+        - { name: chargeDays, in: query, schema: { type: integer, minimum: 30, maximum: 365, default: 90 } }
+        - { name: chargeDue, in: query, description: "true lists only balances whose charge is due.", schema: { type: boolean, default: false } }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: The aged balances
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [asOf, chargeDays, count, chargeDueCount, items]
+                properties:
+                  asOf: { type: string, format: date }
+                  chargeDays: { type: integer }
+                  count: { type: integer }
+                  chargeDueCount: { type: integer }
+                  items:
+                    type: array
+                    items:
+                      allOf:
+                        - { $ref: "#/components/schemas/ReturnableBalance" }
+                        - type: object
+                          required: [oldestOutstandingDate, daysOutstanding, chargeDue]
+                          properties:
+                            oldestOutstandingDate: { type: [string, "null"], format: date, description: "Null when no shipped container of the balance is visible." }
+                            daysOutstanding: { type: integer }
+                            chargeDue: { type: boolean }
         "400": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
   /api/v1/fulfillment/returnable-packaging:return:

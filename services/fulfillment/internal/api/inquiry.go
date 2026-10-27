@@ -13,12 +13,14 @@ import (
 	"github.com/BenjaminSRussell/passage/services/fulfillment/internal/store"
 )
 
-// routesInquiry mounts the delivered-not-invoiced report and the SSCC register
-// of section 5.28.14.
+// routesInquiry mounts the reports of section 5.28.14: delivered not invoiced,
+// the SSCC register, short picks and backorders, and returnable packaging aging.
 // WarehouseView covers "GET shipments, tracking, DNI" (section 5.28.17).
 func (a *API) routesInquiry(r chi.Router) {
 	r.With(authz.RequireDuty("WarehouseView")).Get("/api/v1/fulfillment/delivered-not-invoiced", a.deliveredNotInvoiced)
 	r.With(authz.RequireDuty("WarehouseView")).Get("/api/v1/fulfillment/sscc-register", a.listSSCCs)
+	r.With(authz.RequireDuty("WarehouseView")).Get("/api/v1/fulfillment/backorders", a.listBackorders)
+	r.With(authz.RequireDuty("WarehouseView")).Get("/api/v1/fulfillment/returnable-packaging/aging", a.returnableAging)
 }
 
 type dniResponse struct {

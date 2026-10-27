@@ -44,6 +44,7 @@ type fakeStore struct {
 	ssccFilter     store.SSCCFilter
 	ssccRows       []store.SSCCRow
 	ssccCalls      int
+	reports        reportCalls
 }
 
 func (f *fakeStore) RunRelease(_ context.Context, warehouseID string, groups []domain.ReleaseGroup, idem store.Idem) (store.ReleaseResult, error) {
