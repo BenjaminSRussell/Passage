@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: production
-  version: 0.21.6
+  version: 0.21.7
   description: |
     CloudEvents 1.0 envelope from platform/go/events; payloads below are the data member.
     Every event is written to the outbox in the same transaction as the change it reports and
@@ -9,8 +9,9 @@ info:
     is the caller. Event types follow dev.passage.<context>.<entity>.<verb>.v<n>; the kernel
     rule allows no hyphen, so the PRD's passage.production.order.status-changed.v1 is
     order.statuschanged (see NOT-IMPLEMENTED.md). journal.posted and order.settled carry the
-    balanced ledger lines for the general ledger (wave 11) to book; subcontract.po-requested
-    arrives with the slice that creates subcontract purchase orders. asbuilt.assigned and
+    balanced ledger lines for the general ledger (wave 11) to book. subcontract.porequested (the
+    PRD's subcontract.po-requested) asks purchasing (wave 17) for the vendor PO of each subcontract
+    operation once its order is released (FR-21.10). asbuilt.assigned and
     asbuilt.detached carry the as-built genealogy (FR-21.19) for the trace inquiry (wave 16)
     and nonconformance (wave 33). order.bomedited reports an order-specific BOM or route edit
     (FR-21.18) with the requirement lines planning needs. triggerpoint.fired reports each trigger
@@ -50,6 +51,12 @@ channels:
     messages:
       fired:
         $ref: '#/components/messages/triggerPointFired'
+  passage.production.subcontract:
+    address: passage.production.subcontract
+    description: Keyed by order id (the outbox aggregate), so an order's requests stay ordered.
+    messages:
+      porequested:
+        $ref: '#/components/messages/subcontractPORequested'
 operations:
   onOrderCreated:
     action: send
@@ -87,6 +94,10 @@ operations:
     action: send
     channel: { $ref: '#/channels/passage.production.triggerpoint' }
     messages: [{ $ref: '#/channels/passage.production.triggerpoint/messages/fired' }]
+  onSubcontractPORequested:
+    action: send
+    channel: { $ref: '#/channels/passage.production.subcontract' }
+    messages: [{ $ref: '#/channels/passage.production.subcontract/messages/porequested' }]
 components:
   messages:
     orderCreated:
@@ -281,6 +292,32 @@ components:
           reworkOrderId: { type: [string, 'null'], format: uuid }
           actor: { type: string }
       x-passage-type: dev.passage.production.triggerpoint.fired.v1
+    subcontractPORequested:
+      name: porequested
+      title: Subcontract purchase order requested
+      description: |
+        Emitted in the transaction that releases an order (also by bulk status), once for each subcontract
+        operation, and for a subcontract operation that an edit of the released order adds or a split of a
+        released order creates. An operation is requested once: a reset and second release, a replay or a
+        retry emit nothing more (FR-21.10). Consumer: purchasing (wave 17), which creates the vendor PO line.
+      payload:
+        type: object
+        required: [orderId, orderNumber, legalEntityId, siteId, warehouseId, operNumber, resourceId, qty, unitPrice, amount, currency, dueDate, actor]
+        properties:
+          orderId: { type: string, format: uuid }
+          orderNumber: { type: string }
+          legalEntityId: { type: string, format: uuid }
+          siteId: { type: string, format: uuid }
+          warehouseId: { type: string, format: uuid }
+          operNumber: { type: integer }
+          resourceId: { type: string, format: uuid, description: 'The vendor resource of the operation (the PRD vendorId until the resource carries its vendor account).' }
+          qty: { type: string, description: The operation's process quantity (BR-21.8). }
+          unitPrice: { type: string, description: The vendor price per unit of process quantity. }
+          amount: { type: string, description: 'unitPrice × qty at 4 places: the subcontract row of the estimate.' }
+          currency: { type: string }
+          dueDate: { type: [string, 'null'], format: date, description: The order's delivery date until scheduling (wave 23) dates the operation. }
+          actor: { type: string }
+      x-passage-type: dev.passage.production.subcontract.porequested.v1
   schemas:
     reworkReference:
       type: object

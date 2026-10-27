@@ -6,6 +6,7 @@ import type {
   Flushing,
   JournalType,
   LoggedCommand,
+  OperStatus,
   ProductionCommand,
   ProductionStatus,
   Proposal,
@@ -67,6 +68,19 @@ export const statusTone: Record<ProductionStatus, BadgeTone> = {
   ReportedAsFinished: "success",
   Ended: "success",
   Cancelled: "danger",
+};
+
+/** The feedback status of an operation (FR-21.6). */
+export const operStatusLabel: Record<OperStatus, string> = {
+  open: "Open",
+  started: "Started",
+  finished: "Finished",
+};
+
+export const operStatusTone: Record<OperStatus, BadgeTone> = {
+  open: "neutral",
+  started: "warning",
+  finished: "success",
 };
 
 export const costGroupLabel: Record<CostGroup, string> = {

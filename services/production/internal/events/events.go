@@ -21,11 +21,38 @@ var (
 	// TriggerPointFired reports a trigger point evaluated as due on route-card feedback
 	// (FR-21.17): what its function did, or why it failed (PROD-0019).
 	TriggerPointFired = events.Type(Context, "triggerpoint", "fired", 1)
+	// SubcontractPORequested asks purchasing for the vendor PO of one subcontract
+	// operation of a released order (FR-21.10); the PRD's subcontract.po-requested.
+	SubcontractPORequested = events.Type(Context, "subcontract", "porequested", 1)
 )
 
 // All lists every event type this service publishes.
 func All() []string {
-	return []string{OrderCreated, OrderUpdated, OrderStatusChanged, OrderSettled, JournalPosted, AsBuiltAssigned, AsBuiltDetached, OrderBOMEdited, TriggerPointFired}
+	return []string{OrderCreated, OrderUpdated, OrderStatusChanged, OrderSettled, JournalPosted, AsBuiltAssigned, AsBuiltDetached, OrderBOMEdited, TriggerPointFired,
+		SubcontractPORequested}
+}
+
+// SubcontractPORequestedData is the payload of subcontract.porequested.v1: one
+// subcontract operation of a released order. ResourceID is the vendor resource
+// (the PRD's vendorId until the wave 9 resource carries its vendor account); Qty
+// is the operation's process quantity, UnitPrice the vendor price per unit and
+// Amount the planned subcontract cost (UnitPrice × Qty at 4 places, the estimate's
+// row). DueDate is the order's delivery date until scheduling (wave 23) dates
+// the operation.
+type SubcontractPORequestedData struct {
+	OrderID       string  `json:"orderId"`
+	OrderNumber   string  `json:"orderNumber"`
+	LegalEntityID string  `json:"legalEntityId"`
+	SiteID        string  `json:"siteId"`
+	WarehouseID   string  `json:"warehouseId"`
+	OperNumber    int     `json:"operNumber"`
+	ResourceID    string  `json:"resourceId"`
+	Qty           string  `json:"qty"`
+	UnitPrice     string  `json:"unitPrice"`
+	Amount        string  `json:"amount"`
+	Currency      string  `json:"currency"`
+	DueDate       *string `json:"dueDate"`
+	Actor         string  `json:"actor"`
 }
 
 // OrderCreatedData is the payload of order.created.v1.

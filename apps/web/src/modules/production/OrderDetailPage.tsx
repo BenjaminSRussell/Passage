@@ -56,6 +56,7 @@ import {
   isZero,
   loggedCommandLabel,
   negate,
+  operStatusLabel,
   statusLabel,
   statusTone,
   varianceLabel,
@@ -100,8 +101,12 @@ const operationColumns: DataTableColumn<Operation>[] = [
   { key: "processQty", header: "Process qty", align: "end" },
   { key: "scrapPct", header: "Scrap %", align: "end" },
   { key: "hoursReported", header: "Reported h", align: "end", render: (row) => row.hoursReported ?? "0" },
-  { key: "status", header: "Feedback", render: (row) => row.status ?? "open" },
-  { key: "subcontract", header: "Subcontract", render: (row) => (row.subcontract ? "Yes" : "No") },
+  { key: "status", header: "Feedback", render: (row) => operStatusLabel[row.status ?? "open"] ?? row.status },
+  {
+    key: "subcontract",
+    header: "Subcontract",
+    render: (row) => (!row.subcontract ? "No" : row.poRequestedAt ? `Yes, PO requested ${row.poRequestedAt.slice(0, 10)}` : "Yes"),
+  },
 ];
 
 const costColumns: DataTableColumn<CostRow>[] = [

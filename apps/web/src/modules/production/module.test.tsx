@@ -31,6 +31,7 @@ describe("production module", () => {
       "/production/as-built",
       "/production/wip-balances",
       "/production/variances",
+      "/production/subcontract-operations",
       "/production/:id",
     ]);
     expect(production.nav).toEqual([
@@ -39,6 +40,7 @@ describe("production module", () => {
       { label: "As-built and where-used", to: "/production/as-built", duty: "production.order.read" },
       { label: "WIP balance", to: "/production/wip-balances", duty: "production.cost.read" },
       { label: "Production variances", to: "/production/variances", duty: "production.cost.read" },
+      { label: "Subcontract operations", to: "/production/subcontract-operations", duty: "production.order.read" },
       { label: "Posting profiles", to: "/production/posting-profiles", duty: "production.setup.read" },
     ]);
     expect(loadModules().some((m) => m.id === "production")).toBe(true);

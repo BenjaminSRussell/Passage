@@ -7,6 +7,7 @@ import { CreateProductionOrderPage, type OrderValues } from "./CreateOrderPage";
 import { ProductionOrderDetail } from "./OrderDetailPage";
 import { ProductionOrdersPage } from "./OrdersPage";
 import { PostingProfilesPage } from "./PostingProfilesPage";
+import { SubcontractOperationsPage } from "./SubcontractOperationsPage";
 import { VarianceReportPage } from "./VarianceReportPage";
 import { WIPReportPage } from "./WIPReportPage";
 
@@ -73,11 +74,16 @@ function VariancesRoute() {
   return createElement(VarianceReportPage, { onOpenOrder: (orderId) => navigate(open(orderId)) });
 }
 
+function SubcontractRoute() {
+  const navigate = useNavigate();
+  return createElement(SubcontractOperationsPage, { onOpenOrder: (orderId) => navigate(open(orderId)) });
+}
+
 const production: PassageModule = {
   id: "production",
   title: "Production",
   description:
-    "Production orders: create, estimate, release, start, post picking lists, route cards and reports as finished, end with settlement; bulk status updates, split and merge, order-specific BOM and route edits; WIP balance and variance reports; rework orders, as-built genealogy and posting profiles.",
+    "Production orders: create, estimate, release, start, post picking lists, route cards and reports as finished, end with settlement; bulk status updates, split and merge, order-specific BOM and route edits; WIP balance and variance reports; subcontract operations with their vendor PO requests; rework orders, as-built genealogy and posting profiles.",
   routes: [
     { path: list, element: createElement(OrdersRoute) },
     { path: `${list}/new`, element: createElement(CreateRoute), handle: { title: "New production order" } },
@@ -85,6 +91,7 @@ const production: PassageModule = {
     { path: `${list}/as-built`, element: createElement(AsBuiltRoute), handle: { title: "As-built and where-used" } },
     { path: `${list}/wip-balances`, element: createElement(WIPRoute), handle: { title: "WIP balance by order" } },
     { path: `${list}/variances`, element: createElement(VariancesRoute), handle: { title: "Production variances" } },
+    { path: `${list}/subcontract-operations`, element: createElement(SubcontractRoute), handle: { title: "Subcontract operations" } },
     { path: `${list}/:id`, element: createElement(DetailRoute), handle: { title: "Production order" } },
   ],
   nav: [
@@ -93,6 +100,7 @@ const production: PassageModule = {
     { label: "As-built and where-used", to: `${list}/as-built`, duty: "production.order.read" },
     { label: "WIP balance", to: `${list}/wip-balances`, duty: "production.cost.read" },
     { label: "Production variances", to: `${list}/variances`, duty: "production.cost.read" },
+    { label: "Subcontract operations", to: `${list}/subcontract-operations`, duty: "production.order.read" },
     { label: "Posting profiles", to: `${list}/posting-profiles`, duty: "production.setup.read" },
   ],
 };

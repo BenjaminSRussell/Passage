@@ -59,6 +59,8 @@ type fakeStore struct {
 	triggerDel  []string
 	triggerErr  error
 	triggerOld  bool // CreateTriggerPoint answers as a replay
+	subFilters  []store.SubcontractFilter
+	subcontract store.SubcontractReport
 }
 
 func (f *fakeStore) Ping(context.Context) error { return f.pingErr }

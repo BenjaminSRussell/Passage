@@ -87,6 +87,11 @@ export interface OrderLine {
   qtyConsumed?: string;
 }
 
+/** The feedback status of an operation (FR-21.6). */
+export type OperStatus = "open" | "started" | "finished";
+
+export const OPER_STATUSES: OperStatus[] = ["open", "started", "finished"];
+
 export interface Operation {
   operNumber: number;
   resourceId: string;
@@ -101,7 +106,9 @@ export interface Operation {
   hoursReported?: string;
   qtyGood?: string;
   qtyError?: string;
-  status?: "open" | "started" | "finished";
+  status?: OperStatus;
+  /** When release asked purchasing for this subcontract operation's vendor PO (FR-21.10). */
+  poRequestedAt?: string;
 }
 
 export interface CostRow {
@@ -615,6 +622,46 @@ export interface VarianceQuery {
   limit?: number;
 }
 
+/** One subcontract operation of the subcontract operations inquiry (4.21.14, FR-21.10). */
+export interface SubcontractRow {
+  orderId: string;
+  orderNumber: string;
+  orderStatus: ProductionStatus;
+  legalEntityId: string;
+  siteId: string;
+  currency: string;
+  /** The order's delivery date until scheduling dates the operation. */
+  dueDate: string | null;
+  operNumber: number;
+  /** The vendor resource. */
+  resourceId: string;
+  qty: string;
+  qtyGood: string;
+  unitPrice: string;
+  /** Unit price × quantity in the currency's minor unit. */
+  amount: string;
+  operStatus: OperStatus;
+  /** Null until release requests the vendor PO. */
+  poRequestedAt: string | null;
+}
+
+export interface SubcontractReport {
+  items: SubcontractRow[];
+  totals: { currency: string; operations: number; amount: string }[];
+  nextCursor?: string;
+}
+
+export interface SubcontractQuery {
+  status?: OperStatus | "";
+  orderStatus?: ProductionStatus | "";
+  resourceId?: string;
+  siteId?: string;
+  dueFrom?: string;
+  dueTo?: string;
+  cursor?: string;
+  limit?: number;
+}
+
 export interface Problem {
   status: number;
   code: string;
@@ -962,6 +1009,19 @@ export async function getVarianceReport({ limit = 50, ...filter }: VarianceQuery
     items: Array.isArray(body.items) ? body.items : [],
     totals: Array.isArray(body.totals) ? body.totals : [],
     net: Array.isArray(body.net) ? body.net : [],
+    nextCursor: body.nextCursor,
+  };
+}
+
+/** The subcontract operations with their planned amount and PO request, totals per currency (4.21.14). */
+export async function getSubcontractOperations(
+  { limit = 50, ...filter }: SubcontractQuery = {},
+  signal?: AbortSignal,
+): Promise<SubcontractReport> {
+  const body = await requestAt<Partial<SubcontractReport>>(`${root}/subcontract-operations?${query({ ...filter, limit })}`, { signal });
+  return {
+    items: Array.isArray(body.items) ? body.items : [],
+    totals: Array.isArray(body.totals) ? body.totals : [],
     nextCursor: body.nextCursor,
   };
 }

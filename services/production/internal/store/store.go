@@ -202,6 +202,7 @@ type Store interface {
 	CreateTriggerPoint(ctx context.Context, in NewTriggerPoint) (TriggerPoint, bool, error)
 	ListTriggerPoints(ctx context.Context, orderID string) ([]TriggerPoint, error)
 	DeleteTriggerPoint(ctx context.Context, id string) error
+	SubcontractOperations(ctx context.Context, f SubcontractFilter) (SubcontractReport, error)
 }
 
 // Postgres is the production store.
@@ -695,6 +696,14 @@ func (s *Postgres) Transition(ctx context.Context, t Transition) (Order, bool, e
 			string(from), string(to), t.Actor, t.TraceID, t.IdempotencyKey, t.RequestHash); err != nil {
 			return err
 		}
+		// FR-21.10: releasing asks purchasing for the vendor PO of each subcontract
+		// operation not requested yet (a reset back to Released requests nothing new).
+		var requests []prodevents.SubcontractPORequestedData
+		if to == domain.Released && from != to {
+			if requests, err = claimSubcontractRequests(ctx, tx, p.TenantID, t.OrderID, t.Actor); err != nil {
+				return err
+			}
+		}
 		out, err = loadOrder(ctx, tx, p.TenantID, t.OrderID)
 		if err != nil {
 			return err
@@ -702,10 +711,13 @@ func (s *Postgres) Transition(ctx context.Context, t Transition) (Order, bool, e
 		if from == to && t.Command != domain.CmdReportFinished {
 			return nil // a re-estimate changes cost rows, not the status
 		}
-		return enqueue(ctx, tx, t.OrderID, prodevents.OrderStatusChanged, p.TenantID, t.Actor, prodevents.OrderStatusChangedData{
+		if err := enqueue(ctx, tx, t.OrderID, prodevents.OrderStatusChanged, p.TenantID, t.Actor, prodevents.OrderStatusChangedData{
 			OrderID: t.OrderID, From: string(from), To: string(to), Quantity: out.Quantity.String(), QtyRAF: out.QtyRAF.String(),
 			QtyError: out.QtyError.String(), Actor: t.Actor, OccurredAt: out.UpdatedAt.UTC().Format(time.RFC3339Nano),
-		})
+		}); err != nil {
+			return err
+		}
+		return enqueueSubcontractRequests(ctx, tx, p.TenantID, t.OrderID, t.Actor, requests)
 	})
 	return out, replayed, err
 }
@@ -820,7 +832,8 @@ func loadLines(ctx context.Context, q querier, tenantID, orderID string) ([]doma
 
 func loadOperations(ctx context.Context, q querier, tenantID, orderID string) ([]domain.Operation, error) {
 	rows, err := q.Query(ctx, `select oper_number, resource_id::text, setup_time_h::text, run_time_h_per::text, process_qty::text, scrap_pct::text,
-		labor_rate::text, overhead_rate::text, subcontract, subcontract_price::text, hours_reported::text, qty_good::text, qty_error::text, status
+		labor_rate::text, overhead_rate::text, subcontract, subcontract_price::text, hours_reported::text, qty_good::text, qty_error::text, status,
+		po_requested_at
 		from production_operation where tenant_id = $1 and order_id = $2 order by oper_number`, tenantID, orderID)
 	if err != nil {
 		return nil, err
@@ -831,7 +844,7 @@ func loadOperations(ctx context.Context, q querier, tenantID, orderID string) ([
 		var op domain.Operation
 		var setup, run, proc, scrap, labor, oh, sub, hours, good, bad, status string
 		if err := rows.Scan(&op.OperNumber, &op.ResourceID, &setup, &run, &proc, &scrap, &labor, &oh, &op.Subcontract, &sub,
-			&hours, &good, &bad, &status); err != nil {
+			&hours, &good, &bad, &status, &op.PORequestedAt); err != nil {
 			return nil, err
 		}
 		op.HoursReported, op.QtyGood, op.QtyError, op.Status = dec(hours), dec(good), dec(bad), domain.OperStatus(status)

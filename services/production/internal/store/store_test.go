@@ -558,6 +558,18 @@ func TestStore_RowLevelSecurity(t *testing.T) {
 			t.Fatalf("WIP report leaked outside its tenant or legal entity: %d rows (%v)", len(rep.Items), err)
 		}
 	}
+	// The subcontract operations inquiry (FR-21.10) is scoped through the order.
+	if _, _, err := s.CreateOrder(ctxA, subcontractOrder(t, "rls-sub", leA, ids.New())); err != nil {
+		t.Fatal(err)
+	}
+	if rep, err := s.SubcontractOperations(scoped, SubcontractFilter{}); err != nil || len(rep.Items) != 1 {
+		t.Fatalf("subcontract inquiry in scope: %d rows (%v)", len(rep.Items), err)
+	}
+	for _, ctx := range []context.Context{ctxOther, scopedCtx(tenantA, leB)} {
+		if rep, err := s.SubcontractOperations(ctx, SubcontractFilter{}); err != nil || len(rep.Items) != 0 || len(rep.Totals) != 0 {
+			t.Fatalf("subcontract inquiry leaked outside its tenant or legal entity: %d rows (%v)", len(rep.Items), err)
+		}
+	}
 	var leaked int
 	if err := dbx.WithTenantTx(ctxOther, app, func(tx pgx.Tx) error {
 		return tx.QueryRow(context.Background(), `select (select count(*) from production_wip_posting) + (select count(*) from production_journal_line)

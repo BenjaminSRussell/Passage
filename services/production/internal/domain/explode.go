@@ -3,6 +3,7 @@ package domain
 import (
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/shopspring/decimal"
 )
@@ -114,7 +115,9 @@ func Requantify(lines []OrderLine, orderQty decimal.Decimal) ([]OrderLine, error
 // Operation is a route operation of the order, planned on infinite capacity (wave 21).
 // SubcontractPrice is the vendor price per unit of the operation's process quantity.
 // The feedback fields (hours, good and error quantity, status) are booked by
-// route-card journals (FR-21.6) and read-only on create.
+// route-card journals (FR-21.6) and read-only on create. PORequestedAt is when
+// release asked purchasing for the vendor PO of a subcontract operation
+// (FR-21.10); it is read-only too.
 type Operation struct {
 	OperNumber       int             `json:"operNumber"`
 	ResourceID       string          `json:"resourceId"`
@@ -130,6 +133,7 @@ type Operation struct {
 	QtyGood          decimal.Decimal `json:"qtyGood"`
 	QtyError         decimal.Decimal `json:"qtyError"`
 	Status           OperStatus      `json:"status,omitempty"`
+	PORequestedAt    *time.Time      `json:"poRequestedAt,omitempty"`
 }
 
 // OperStatus is the feedback status of an operation: open until the first

@@ -147,6 +147,14 @@ func (s *Postgres) SplitOrder(ctx context.Context, in Split) (SplitResult, error
 				return err
 			}
 		}
+		// FR-21.10: the new order of a released split needs its own vendor PO; the
+		// original keeps its request (the PO quantity change is purchasing's).
+		var requests []prodevents.SubcontractPORequestedData
+		if h.status == domain.Released {
+			if requests, err = claimSubcontractRequests(ctx, tx, p.TenantID, newID, in.Actor); err != nil {
+				return err
+			}
+		}
 		if out.Original, err = loadOrder(ctx, tx, p.TenantID, in.OrderID); err != nil {
 			return err
 		}
@@ -161,6 +169,9 @@ func (s *Postgres) SplitOrder(ctx context.Context, in Split) (SplitResult, error
 			created.ReworkReference = &prodevents.ReworkReference{Type: string(ref.Type), ID: ref.ID}
 		}
 		if err := enqueue(ctx, tx, newID, prodevents.OrderCreated, p.TenantID, in.Actor, created); err != nil {
+			return err
+		}
+		if err := enqueueSubcontractRequests(ctx, tx, p.TenantID, newID, in.Actor, requests); err != nil {
 			return err
 		}
 		return enqueueUpdated(ctx, tx, p.TenantID, in.Actor, out.Original)

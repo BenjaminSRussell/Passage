@@ -169,6 +169,24 @@ Slice 6:
   cascades when an order edit removes the operation) and the firing log
   `production_trigger_firing`, with RLS and grants.
 
+Slice 7:
+
+- Subcontract purchase requests (FR-21.10): releasing an order (one at a time or by bulk status)
+  emits `subcontract.porequested` in the release transaction, after `order.statuschanged`, for
+  each subcontract operation: the vendor resource, the process quantity, the vendor unit price,
+  the planned amount (unit price × quantity at 4 places, equal to the estimate's subcontract row),
+  currency, site, warehouse and the order's delivery date as the due date. The operation's
+  `poRequestedAt` is stamped under the order row lock, so each operation is requested once: a
+  re-estimate, a reset and second release or a replay emit nothing more. A subcontract operation
+  that an edit adds to a Released order, and the operations of the new order of a Released split,
+  are requested in that transaction. Purchasing (wave 17) creates the PO line from the event.
+- Subcontract operations inquiry (4.21.14): `GET /v1/production/subcontract-operations` with
+  legal entity, site, vendor resource, operation status, order status and due-date range: each
+  subcontract operation with its quantity, good quantity, unit price, amount and request time,
+  keyset-paged by order and operation, with totals per currency (`production.order.read`).
+- Migration `0007_subcontract.sql` adds `production_operation.po_requested_at` and a partial index
+  on the subcontract operations.
+
 Inventory transactions (wave 16), GL booking (wave 11) and period control (wave 14) are
 handoffs. Everything not built is listed in `NOT-IMPLEMENTED.md`.
 
@@ -182,13 +200,15 @@ internal/domain/       pure rules: status.go (BR-21.1 state machine, reset, RAF 
                        rework.go (FR-21.20), asbuilt.go (FR-21.19, BR-21.14),
                        bulk.go (FR-21.12), split.go (FR-21.15 split and merge),
                        order_edit.go (FR-21.18 BOM and route edits), inquiry.go (variance % of planned),
-                       trigger.go (FR-21.17 conditions, due triggers, inserted numbering, rework route)
+                       trigger.go (FR-21.17 conditions, due triggers, inserted numbering, rework route),
+                       subcontract.go (FR-21.10 purchase requests)
 internal/domain/testdata/  prod-orders-50.json and the exact-fraction generator that computed it
 internal/store/        Postgres repositories (pgx), tenant-scoped transactions, row locks, outbox writes:
                        store.go (orders, commands), journal.go (journals, postings, settlement, reversals),
                        profile.go (posting profiles), asbuilt.go (as-built genealogy),
                        split.go (split, merge, bulk status), order_edit.go (BOM and route edits, audit),
-                       inquiry.go (WIP balance and variance reports), trigger.go (trigger points, firing on route cards)
+                       inquiry.go (WIP balance and variance reports), trigger.go (trigger points, firing on route cards),
+                       subcontract.go (purchase requests at release, subcontract operations inquiry)
 internal/api/          HTTP handlers, request validation, platform authz duties
 internal/events/       event types and payloads
 migrations/            0001_init.sql (orders), 0002_journals.sql (profiles, journals, WIP postings,
@@ -196,7 +216,7 @@ migrations/            0001_init.sql (orders), 0002_journals.sql (profiles, jour
                        as-built records), 0004_split_merge.sql (split and merge links),
                        0005_order_edits.sql (orderBomModified, edit audit, report indexes),
                        0006_trigger_points.sql (trigger points and firings), with RLS and app-role grants
-                       on every table; migrations.go (embed)
+                       on every table, 0007_subcontract.sql (purchase request stamp); migrations.go (embed)
 api/openapi.yaml       OpenAPI 3.1 for every route (a test checks it against the router)
 events/asyncapi.yaml   AsyncAPI 3 for every event (a test checks it against the payloads)
 charts/production/     Helm chart (deployment, service, HPA on CPU 70%, optional ServiceMonitor)

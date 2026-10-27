@@ -111,6 +111,14 @@ func (s *Postgres) EditOrder(ctx context.Context, in OrderEdit) (Order, error) {
 			where tenant_id = $1 and id = $2`, p.TenantID, in.OrderID, version); err != nil {
 			return err
 		}
+		// FR-21.10: a subcontract operation added to (or turned on in) a released
+		// order is requested like the ones release requested.
+		var requests []prodevents.SubcontractPORequestedData
+		if h.status == domain.Released {
+			if requests, err = claimSubcontractRequests(ctx, tx, p.TenantID, in.OrderID, in.Actor); err != nil {
+				return err
+			}
+		}
 		if out, err = loadOrder(ctx, tx, p.TenantID, in.OrderID); err != nil {
 			return err
 		}
@@ -126,7 +134,10 @@ func (s *Postgres) EditOrder(ctx context.Context, in OrderEdit) (Order, error) {
 			planned := byGroup(out.Costs)
 			data.PlannedCost = &planned
 		}
-		return enqueue(ctx, tx, in.OrderID, prodevents.OrderBOMEdited, p.TenantID, in.Actor, data)
+		if err := enqueue(ctx, tx, in.OrderID, prodevents.OrderBOMEdited, p.TenantID, in.Actor, data); err != nil {
+			return err
+		}
+		return enqueueSubcontractRequests(ctx, tx, p.TenantID, in.OrderID, in.Actor, requests)
 	})
 	return out, err
 }
