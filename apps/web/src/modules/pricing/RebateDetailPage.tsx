@@ -32,8 +32,9 @@ import {
 } from "./api/client";
 import { DAY, SIGNED_DECIMAL, sumDecimals } from "./format";
 import styles from "./pages.module.css";
-import { BASIS_LABELS, describeRebateCustomer, PERIOD_LABELS } from "./rebateFormat";
+import { basisLabel, describePosting, describeRebateCustomer, PARTY_LABELS, PERIOD_LABELS } from "./rebateFormat";
 import { useLoad } from "./useLoad";
+import { VendorClaimsCard } from "./VendorClaimsCard";
 
 const PERIOD = /^\d{4}(-(0[1-9]|1[0-2])|-Q[1-4])?$/;
 
@@ -82,7 +83,10 @@ export function parseRetroLines(text: string, currency: string): { lines: RetroL
   return { lines };
 }
 
-/** One rebate agreement: its tiers and the accruals posted invoices produced (Rebate accruals drill-down, §5.26.14). */
+/**
+ * One rebate agreement: its tiers and the accruals posted invoices produced (Rebate accruals
+ * drill-down, §5.26.14); for a vendor rebate also its period claims (FR-26.15).
+ */
 export function RebateDetailPage() {
   const { id = "" } = useParams();
   const state = useLoad((signal) => getRebateAgreement(id, signal), id);
@@ -158,11 +162,12 @@ export function RebateDetailPage() {
       : { key: "amountPerUnit", header: "Per unit", mono: true, align: "end", render: (t) => `${t.amountPerUnit ?? "0"} ${agreement.currency}` },
   ];
   const rows = accruals.data ?? [];
+  const vendor = agreement.partyRole === "VENDOR";
   return (
     <div className={styles.stack}>
       <PageHeader
         title={agreement.name}
-        description={`${describeRebateCustomer(agreement)} · ${PERIOD_LABELS[agreement.period].toLowerCase()} · ${agreement.currency}`}
+        description={`${PARTY_LABELS[agreement.partyRole ?? "CUSTOMER"]} · ${describeRebateCustomer(agreement)} · ${PERIOD_LABELS[agreement.period].toLowerCase()} · ${agreement.currency}`}
         meta={<StatusPill status={agreement.status.toLowerCase()} />}
         actions={
           <Link className={buttonClassName("ghost")} to="/pricing/rebates">
@@ -172,16 +177,16 @@ export function RebateDetailPage() {
       />
       <Card title="Agreement">
         <dl className={styles.details}>
-          <Detail term={agreement.customerId ? "Customer" : "Customer group"} mono>
-            {agreement.customerId ?? agreement.customerGroupId}
+          <Detail term={vendor ? "Vendor" : agreement.customerId ? "Customer" : "Customer group"} mono>
+            {vendor ? agreement.vendorId : (agreement.customerId ?? agreement.customerGroupId)}
           </Detail>
-          <Detail term="Basis">{BASIS_LABELS[agreement.basis]}</Detail>
+          <Detail term="Basis">{basisLabel(agreement)}</Detail>
           <Detail term="Accrual period">{PERIOD_LABELS[agreement.period]}</Detail>
           <Detail term="Valid" mono>
             {`${agreement.validFrom} – ${agreement.validTo}`}
           </Detail>
           <Detail term="Posting" mono>
-            {`Dr ${agreement.expenseAccount} / Cr ${agreement.accrualAccount}`}
+            {describePosting(agreement)}
           </Detail>
           <Detail term="Legal entity" mono>
             {agreement.legalEntityId}
@@ -218,13 +223,19 @@ export function RebateDetailPage() {
                 rows={rows}
                 getRowKey={(row) => row.id}
                 loading={accruals.loading}
-                empty={{ title: "No accruals yet", description: "Accruals appear when posted invoices of this customer fall in the agreement's validity." }}
+                empty={{
+                  title: "No accruals yet",
+                  description: vendor
+                    ? "Accruals appear when posted invoices of this vendor fall in the agreement's validity."
+                    : "Accruals appear when posted invoices of this customer fall in the agreement's validity.",
+                }}
               />
               {rows.length >= 100 ? <p className={styles.note}>Showing the first 100 accruals; the total covers those rows only. Choose a period to narrow the list.</p> : null}
             </>
           )}
         </div>
       </Card>
+      {vendor ? <VendorClaimsCard agreement={agreement} /> : null}
       <Card title="Retroactive recompute">
         <form className={styles.form} onSubmit={recompute} noValidate>
           <p className={`${styles.note} ${styles.wide}`}>

@@ -26,13 +26,15 @@ import { RebatesPage } from "./RebatesPage";
 import { SalesGroupDetailPage } from "./SalesGroupDetailPage";
 import { SalesGroupsPage } from "./SalesGroupsPage";
 import { SimulatePage } from "./SimulatePage";
+import { VendorClaimDetailPage } from "./VendorClaimDetailPage";
+import { VendorClaimsPage } from "./VendorClaimsPage";
 import { WorkspacePage } from "./WorkspacePage";
 
 const pricing: PassageModule = {
   id: "pricing",
   title: "Pricing",
   description:
-    "Trade agreements, campaigns, pricing procedures, price journals, rebates, commissions, trade funds, promotions and the explanation behind every price.",
+    "Trade agreements, campaigns, pricing procedures, price journals, customer and vendor rebates, commissions, trade funds, promotions and the explanation behind every price.",
   routes: [
     { path: "/pricing", element: createElement(WorkspacePage), handle: { title: "Pricing workspace" } },
     { path: "/pricing/agreements", element: createElement(AgreementsPage), handle: { title: "Trade agreements" } },
@@ -49,6 +51,8 @@ const pricing: PassageModule = {
     { path: "/pricing/journals/:id", element: createElement(JournalDetailPage), handle: { title: "Price journal" } },
     { path: "/pricing/rebates", element: createElement(RebatesPage), handle: { title: "Rebate agreements" } },
     { path: "/pricing/rebates/new", element: createElement(NewRebatePage), handle: { title: "New rebate agreement" } },
+    { path: "/pricing/rebates/claims", element: createElement(VendorClaimsPage), handle: { title: "Vendor rebate claims" } },
+    { path: "/pricing/rebates/claims/:id", element: createElement(VendorClaimDetailPage), handle: { title: "Vendor rebate claim" } },
     { path: "/pricing/rebates/:id", element: createElement(RebateDetailPage), handle: { title: "Rebate agreement" } },
     { path: "/pricing/commission/sales-groups", element: createElement(SalesGroupsPage), handle: { title: "Sales groups" } },
     { path: "/pricing/commission/sales-groups/new", element: createElement(NewSalesGroupPage), handle: { title: "New sales group" } },
@@ -69,6 +73,7 @@ const pricing: PassageModule = {
     { label: "Pricing procedures", to: "/pricing/procedures", duty: "pricing.view" },
     { label: "Price journals", to: "/pricing/journals", duty: "pricing.view" },
     { label: "Rebate agreements", to: "/pricing/rebates", duty: "pricing.rebate.view" },
+    { label: "Vendor rebate claims", to: "/pricing/rebates/claims", duty: "pricing.rebate.view" },
     { label: "Sales groups", to: "/pricing/commission/sales-groups", duty: "pricing.commission.view" },
     { label: "Commission transactions", to: "/pricing/commission/transactions", duty: "pricing.commission.view" },
     { label: "Trade funds", to: "/pricing/funds", duty: "pricing.view" },

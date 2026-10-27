@@ -19,7 +19,30 @@ const (
 	CampaignRestored = "dev.passage.pricing.campaign.restored.v1"
 	// Pricing procedures (FR-26.1): a version became ACTIVE.
 	ProcedureActivated = "dev.passage.pricing.procedure.activated.v1"
+	// Vendor rebate claims (FR-26.15): a period claim was created, and approved for w19 AP.
+	VendorRebateClaimCreated  = "dev.passage.pricing.vendorrebateclaim.created.v1"
+	VendorRebateClaimApproved = "dev.passage.pricing.vendorrebateclaim.approved.v1"
 )
+
+// VendorRebateClaimData is the payload of vendorrebateclaim.created and .approved. Amount
+// is the period's accruals less its earlier claims (BR-26.11): w19 AP settles an approved
+// positive claim by a credit note or a payment deduction (SettlementMode) and a negative
+// one by a vendor invoice (VENDOR_INVOICE). Ids only, never vendor names.
+type VendorRebateClaimData struct {
+	ClaimID        string `json:"claim_id"`
+	Number         string `json:"number"`
+	LegalEntityID  string `json:"legal_entity_id"`
+	AgreementID    string `json:"agreement_id"`
+	VendorID       string `json:"vendor_id"`
+	PeriodID       string `json:"period_id"`
+	AccruedTotal   string `json:"accrued_total"`
+	PriorClaimed   string `json:"prior_claimed"`
+	Amount         string `json:"amount"`
+	Currency       string `json:"currency"`
+	SettlementMode string `json:"settlement_mode"`
+	Status         string `json:"status"`
+	Version        int    `json:"version"`
+}
 
 // CampaignStatusData is the payload of campaign.killed and campaign.restored. A killed
 // campaign's records leave the next resolve (NEXT_RESOLVE, §5.26.13); the sales cache
@@ -75,13 +98,15 @@ type JournalPostedData struct {
 }
 
 // RebateAccrualPostedData is the payload of rebateaccrual.posted. The ledger (w11) posts
-// Dr DebitAccount / Cr CreditAccount for Amount when it consumes the event (FR-26.11;
-// 4150 / 2150 unless the agreement names other accounts). Amount is negative for a
-// credit note or a tier recompute that lowers the period.
+// Dr DebitAccount / Cr CreditAccount for Amount when it consumes the event: Dr 4150 /
+// Cr 2150 for a CUSTOMER agreement (FR-26.11) and Dr 2160 / Cr 5100 for a VENDOR agreement
+// (FR-26.15), unless the agreement names other accounts. Amount is negative for a credit
+// note or a tier recompute that lowers the period.
 type RebateAccrualPostedData struct {
 	AccrualID     string `json:"accrual_id"`
 	LegalEntityID string `json:"legal_entity_id"`
 	AgreementID   string `json:"agreement_id"`
+	PartyRole     string `json:"party_role"`
 	PeriodID      string `json:"period_id"`
 	InvoiceLineID string `json:"invoice_line_id"`
 	Amount        string `json:"amount"`

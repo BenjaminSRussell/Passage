@@ -1,10 +1,19 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select } from "../../shell/ui";
-import { createRebateAgreement, describeProblem, newKey, type Problem, type RebateAgreementInput, type RebateBasis, type RebatePeriod } from "./api/client";
+import {
+  createRebateAgreement,
+  describeProblem,
+  newKey,
+  type Problem,
+  type RebateAgreementInput,
+  type RebateBasis,
+  type RebatePartyRole,
+  type RebatePeriod,
+} from "./api/client";
 import { DAY, DECIMAL, UUID } from "./format";
 import styles from "./pages.module.css";
-import { BASIS_LABELS, PERIOD_LABELS } from "./rebateFormat";
+import { BASIS_LABELS, PARTY_LABELS, PERIOD_LABELS, VENDOR_BASIS_LABELS } from "./rebateFormat";
 
 export interface TierDraft {
   from: string;
@@ -14,7 +23,10 @@ export interface TierDraft {
 export interface RebateDraft {
   legalEntityId: string;
   name: string;
+  /** CUSTOMER rebates a customer or group; VENDOR earns a rebate from a vendor (FR-26.15). */
+  party: RebatePartyRole;
   scope: "customer" | "group";
+  /** The customer, customer group or (vendor rebate) vendor id. */
   customer: string;
   basis: RebateBasis;
   period: RebatePeriod;
@@ -28,9 +40,16 @@ export interface RebateDraft {
 
 type Errors = Record<string, string>;
 
+/** Default accounts per party role (§5.26.13): accrual 2150 / expense 4150, or receivable 2160 / income 5100. */
+export const DEFAULT_ACCOUNTS: Record<RebatePartyRole, { accrualAccount: string; expenseAccount: string }> = {
+  CUSTOMER: { accrualAccount: "2150", expenseAccount: "4150" },
+  VENDOR: { accrualAccount: "2160", expenseAccount: "5100" },
+};
+
 export const emptyRebate: RebateDraft = {
   legalEntityId: "",
   name: "",
+  party: "CUSTOMER",
   scope: "customer",
   customer: "",
   basis: "NET_AMOUNT",
@@ -50,7 +69,9 @@ export function validateRebate(v: RebateDraft): Errors {
   const errors: Errors = {};
   if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
   if (v.name.trim() === "" || v.name.trim().length > 120) errors.name = "Enter a name of up to 120 characters.";
-  if (!UUID.test(v.customer.trim())) errors.customer = v.scope === "customer" ? "Enter the customer id (a UUID)." : "Enter the customer group id (a UUID).";
+  if (!UUID.test(v.customer.trim())) {
+    errors.customer = v.party === "VENDOR" ? "Enter the vendor id (a UUID)." : v.scope === "customer" ? "Enter the customer id (a UUID)." : "Enter the customer group id (a UUID).";
+  }
   if (!/^[A-Z]{3}$/.test(v.currency)) errors.currency = "Use a three-letter ISO 4217 code, such as USD.";
   if (!DAY.test(v.validFrom)) errors.validFrom = "Enter the first valid day.";
   if (!DAY.test(v.validTo)) errors.validTo = "Enter the last valid day.";
@@ -73,7 +94,8 @@ export function toAgreementInput(v: RebateDraft): RebateAgreementInput {
   return {
     legalEntityId: v.legalEntityId.trim(),
     name: v.name.trim(),
-    ...(v.scope === "customer" ? { customerId: customer } : { customerGroupId: customer }),
+    partyRole: v.party,
+    ...(v.party === "VENDOR" ? { vendorId: customer } : v.scope === "customer" ? { customerId: customer } : { customerGroupId: customer }),
     basis: v.basis,
     period: v.period,
     tiers: v.tiers.map((t) => (v.basis === "NET_AMOUNT" ? { from: t.from, ratePct: t.value } : { from: t.from, amountPerUnit: t.value })),
@@ -85,7 +107,22 @@ export function toAgreementInput(v: RebateDraft): RebateAgreementInput {
   };
 }
 
-/** Create a customer rebate agreement with its tiers (FR-26.11). */
+/**
+ * The draft after switching the party role: accounts still on the old role's defaults move to
+ * the new role's defaults; accounts the user typed are kept.
+ */
+export function withParty(v: RebateDraft, party: RebatePartyRole): RebateDraft {
+  const from = DEFAULT_ACCOUNTS[v.party];
+  const to = DEFAULT_ACCOUNTS[party];
+  return {
+    ...v,
+    party,
+    accrualAccount: v.accrualAccount === from.accrualAccount ? to.accrualAccount : v.accrualAccount,
+    expenseAccount: v.expenseAccount === from.expenseAccount ? to.expenseAccount : v.expenseAccount,
+  };
+}
+
+/** Create a customer (FR-26.11) or vendor (FR-26.15) rebate agreement with its tiers. */
 export function NewRebatePage() {
   const navigate = useNavigate();
   const [values, setValues] = useState<RebateDraft>(emptyRebate);
@@ -114,7 +151,7 @@ export function NewRebatePage() {
       const problem = describeProblem(error);
       const fields: Errors = {};
       for (const [name, message] of Object.entries(problem.fields)) {
-        if (name === "customer" || name === "customerId" || name === "customerGroupId") fields.customer = message;
+        if (name === "customer" || name === "customerId" || name === "customerGroupId" || name === "vendorId") fields.customer = message;
         else if (name === "validity") fields.validTo = message;
         else if (name === "accounts") fields.accrualAccount = message;
         else if (name === "tiers") fields["tiers[0].value"] = message;
@@ -144,31 +181,53 @@ export function NewRebatePage() {
   );
 
   const valueLabel = values.basis === "NET_AMOUNT" ? "Rate %" : `Amount per unit (${values.currency || "currency"})`;
+  const vendor = values.party === "VENDOR";
+  const basisLabels = vendor ? VENDOR_BASIS_LABELS : BASIS_LABELS;
   return (
     <div className={styles.stack}>
       <PageHeader
         title="New rebate agreement"
-        description="The agreement is active from its first valid day: posted invoices of the customer accrue against it period by period."
+        description="The agreement is active from its first valid day: posted invoices of the customer, or vendor invoices of the vendor, accrue against it period by period."
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
           {text("rb-legal-entity", "legalEntityId", "Legal entity id", { mono: true })}
           {text("rb-name", "name", "Agreement name")}
-          <FormField id="rb-scope" label="Rebates">
+          <FormField id="rb-party" label="Type" hint={vendor ? "Earned from a vendor on its invoices and settled by period claims." : "Paid to a customer on its posted invoices."}>
             {(c) => (
-              <Select {...c} value={values.scope} onChange={(e) => update({ scope: e.target.value as RebateDraft["scope"] })}>
-                <option value="customer">One customer</option>
-                <option value="group">A customer group</option>
+              <Select
+                {...c}
+                value={values.party}
+                onChange={(e) => {
+                  setValues((prev) => withParty(prev, e.target.value as RebatePartyRole));
+                  key.current = newKey();
+                }}
+              >
+                {(Object.keys(PARTY_LABELS) as RebatePartyRole[]).map((p) => (
+                  <option key={p} value={p}>
+                    {PARTY_LABELS[p]}
+                  </option>
+                ))}
               </Select>
             )}
           </FormField>
-          {text("rb-customer", "customer", values.scope === "customer" ? "Customer id" : "Customer group id", { mono: true })}
+          {vendor ? null : (
+            <FormField id="rb-scope" label="Rebates">
+              {(c) => (
+                <Select {...c} value={values.scope} onChange={(e) => update({ scope: e.target.value as RebateDraft["scope"] })}>
+                  <option value="customer">One customer</option>
+                  <option value="group">A customer group</option>
+                </Select>
+              )}
+            </FormField>
+          )}
+          {text("rb-customer", "customer", vendor ? "Vendor id" : values.scope === "customer" ? "Customer id" : "Customer group id", { mono: true })}
           <FormField id="rb-basis" label="Basis">
             {(c) => (
               <Select {...c} value={values.basis} onChange={(e) => update({ basis: e.target.value as RebateBasis })}>
-                {(Object.keys(BASIS_LABELS) as RebateBasis[]).map((b) => (
+                {(Object.keys(basisLabels) as RebateBasis[]).map((b) => (
                   <option key={b} value={b}>
-                    {BASIS_LABELS[b]}
+                    {basisLabels[b]}
                   </option>
                 ))}
               </Select>
@@ -188,8 +247,17 @@ export function NewRebatePage() {
           {text("rb-currency", "currency", "Currency", { mono: true, hint: "Only invoices in this currency accrue." })}
           {text("rb-valid-from", "validFrom", "Valid from", { type: "date" })}
           {text("rb-valid-to", "validTo", "Valid to", { type: "date", hint: "Inclusive." })}
-          {text("rb-expense", "expenseAccount", "Expense account", { mono: true, hint: "Debited on accrual." })}
-          {text("rb-accrual", "accrualAccount", "Accrual account", { mono: true, hint: "Credited on accrual." })}
+          {vendor ? (
+            <>
+              {text("rb-accrual", "accrualAccount", "Receivable account", { mono: true, hint: "Debited on accrual (vendor rebate receivable)." })}
+              {text("rb-expense", "expenseAccount", "Income account", { mono: true, hint: "Credited on accrual (purchase rebate income)." })}
+            </>
+          ) : (
+            <>
+              {text("rb-expense", "expenseAccount", "Expense account", { mono: true, hint: "Debited on accrual." })}
+              {text("rb-accrual", "accrualAccount", "Accrual account", { mono: true, hint: "Credited on accrual." })}
+            </>
+          )}
           {values.tiers.map((t, i) => (
             <fieldset key={i} className={styles.lineSet}>
               <legend className={styles.groupsLegend}>{`Tier ${i + 1}`}</legend>

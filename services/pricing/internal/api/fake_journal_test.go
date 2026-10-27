@@ -165,6 +165,7 @@ func (f *fakeStore) CreateAgreement(_ context.Context, a domain.RebateAgreement,
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	a.ID = f.nextID("0005")
+	a.PartyRole = domain.PartyRoleOf(a)
 	f.agreements[a.ID] = a
 	return a, nil
 }
@@ -179,12 +180,12 @@ func (f *fakeStore) GetAgreement(_ context.Context, id string) (domain.RebateAgr
 	return a, nil
 }
 
-func (f *fakeStore) ListAgreements(_ context.Context, legalEntityID string, _ int) ([]domain.RebateAgreement, error) {
+func (f *fakeStore) ListAgreements(_ context.Context, flt store.AgreementFilter) ([]domain.RebateAgreement, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	out := []domain.RebateAgreement{}
 	for _, a := range f.agreements {
-		if legalEntityID == "" || a.LegalEntityID == legalEntityID {
+		if (flt.LegalEntityID == "" || a.LegalEntityID == flt.LegalEntityID) && (flt.PartyRole == "" || a.PartyRole == flt.PartyRole) {
 			out = append(out, a)
 		}
 	}
@@ -198,6 +199,9 @@ func (f *fakeStore) AccrueInvoiceLine(_ context.Context, in store.AccrualInput) 
 	a, ok := f.agreements[in.AgreementID]
 	if !ok {
 		return store.Accrual{}, false, httpx.NewProblem(http.StatusNotFound, store.CodeAgreementNotFound, "no rebate agreement "+in.AgreementID)
+	}
+	if in.Party != "" && in.Party != a.PartyRole {
+		return store.Accrual{}, false, httpx.NewProblem(http.StatusUnprocessableEntity, store.CodePartyMismatch, "agreement is a "+a.PartyRole+" agreement")
 	}
 	if in.Currency != a.Currency {
 		return store.Accrual{}, false, httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeValidation, "invoice currency does not match the agreement currency")

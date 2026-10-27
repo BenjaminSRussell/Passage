@@ -33,6 +33,8 @@ func TestEventsMatchAsyncAPI(t *testing.T) {
 		{events.CampaignKilled, events.CampaignStatusData{}},
 		{events.CampaignRestored, events.CampaignStatusData{}},
 		{events.ProcedureActivated, events.ProcedureActivatedData{SupersededID: "x"}},
+		{events.VendorRebateClaimCreated, events.VendorRebateClaimData{}},
+		{events.VendorRebateClaimApproved, events.VendorRebateClaimData{}},
 	}
 	for _, c := range cases {
 		if !pevents.ValidType(c.typ) {

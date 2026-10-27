@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -24,6 +25,11 @@ import (
 // CodeAgreementNotFound is raised when a rebate agreement id does not exist.
 const CodeAgreementNotFound = "PRC-0035"
 
+// CodePartyMismatch is raised when an invoice of one party role is presented to an
+// agreement of the other: sales invoices accrue CUSTOMER agreements, vendor invoices
+// accrue VENDOR agreements (FR-26.15).
+const CodePartyMismatch = "PRC-0045"
+
 // Accrual is one invoice line's accrual row (FR-26.11).
 type Accrual struct {
 	ID            string
@@ -40,8 +46,11 @@ type Accrual struct {
 	Retroactive bool
 }
 
-// AccrualInput is one posted invoice line presented for accrual.
+// AccrualInput is one posted invoice line presented for accrual. Party, when set, must
+// match the agreement's party role (PRC-0045): the sales invoice feed sends CUSTOMER and
+// the vendor invoice feed sends VENDOR.
 type AccrualInput struct {
+	Party         string
 	AgreementID   string
 	InvoiceLineID string
 	InvoiceDate   time.Time
@@ -84,16 +93,17 @@ func (s *Postgres) CreateAgreement(ctx context.Context, a domain.RebateAgreement
 	if idempotencyKey != "" {
 		key = &idempotencyKey
 	}
+	a.PartyRole = domain.PartyRoleOf(a)
 	var out domain.RebateAgreement
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		a.ID = ids.New()
 		var inserted string
-		err := tx.QueryRow(ctx, `insert into rebate_agreement (tenant_id, id, legal_entity_id, name, customer_id, customer_group_id, basis, period,
-			tiers, currency, valid_from, valid_to, accrual_account, expense_account, idempotency_key)
-			values ($1, $2, $3, $4, nullif($5, '')::uuid, nullif($6, '')::uuid, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+		err := tx.QueryRow(ctx, `insert into rebate_agreement (tenant_id, id, legal_entity_id, name, party_role, customer_id, customer_group_id,
+			vendor_id, basis, period, tiers, currency, valid_from, valid_to, accrual_account, expense_account, idempotency_key)
+			values ($1, $2, $3, $4, $5, nullif($6, '')::uuid, nullif($7, '')::uuid, nullif($8, '')::uuid, $9, $10, $11, $12, $13, $14, $15, $16, $17)
 			on conflict (tenant_id, idempotency_key) do nothing returning id::text`,
-			p.TenantID, a.ID, a.LegalEntityID, a.Name, a.CustomerID, a.CustomerGroupID, a.Basis, a.Period, tiers, a.Currency,
-			a.ValidFrom, a.ValidTo, a.AccrualAccount, a.ExpenseAccount, key).Scan(&inserted)
+			p.TenantID, a.ID, a.LegalEntityID, a.Name, a.PartyRole, a.CustomerID, a.CustomerGroupID, a.VendorID, a.Basis, a.Period, tiers,
+			a.Currency, a.ValidFrom, a.ValidTo, a.AccrualAccount, a.ExpenseAccount, key).Scan(&inserted)
 		if errors.Is(err, pgx.ErrNoRows) && key != nil {
 			replay, err := loadAgreement(ctx, tx, `where tenant_id = $1 and idempotency_key = $2`, p.TenantID, *key)
 			if err != nil {
@@ -131,26 +141,36 @@ func agreementNotFound(id string) error {
 	return httpx.NewProblem(http.StatusNotFound, CodeAgreementNotFound, "no rebate agreement "+id)
 }
 
-// loadAgreement reads one agreement matched by a trailing WHERE clause.
-func loadAgreement(ctx context.Context, tx pgx.Tx, where string, args ...any) (domain.RebateAgreement, error) {
+const agreementColumns = `select id::text, legal_entity_id::text, name, party_role, coalesce(customer_id::text, ''),
+	coalesce(customer_group_id::text, ''), coalesce(vendor_id::text, ''), basis, period, tiers, currency::text, valid_from, valid_to,
+	accrual_account, expense_account from rebate_agreement `
+
+func scanAgreement(row pgx.Row) (domain.RebateAgreement, error) {
 	var a domain.RebateAgreement
 	var tiers []byte
-	err := tx.QueryRow(ctx, `select id::text, legal_entity_id::text, name, coalesce(customer_id::text, ''), coalesce(customer_group_id::text, ''),
-		basis, period, tiers, currency::text, valid_from, valid_to, accrual_account, expense_account from rebate_agreement `+where, args...).
-		Scan(&a.ID, &a.LegalEntityID, &a.Name, &a.CustomerID, &a.CustomerGroupID, &a.Basis, &a.Period, &tiers, &a.Currency,
-			&a.ValidFrom, &a.ValidTo, &a.AccrualAccount, &a.ExpenseAccount)
-	if err != nil {
+	if err := row.Scan(&a.ID, &a.LegalEntityID, &a.Name, &a.PartyRole, &a.CustomerID, &a.CustomerGroupID, &a.VendorID, &a.Basis,
+		&a.Period, &tiers, &a.Currency, &a.ValidFrom, &a.ValidTo, &a.AccrualAccount, &a.ExpenseAccount); err != nil {
 		return a, err
 	}
-	return a, json.Unmarshal(tiers, &a.Tiers)
+	if err := json.Unmarshal(tiers, &a.Tiers); err != nil {
+		return a, fmt.Errorf("decode agreement tiers: %w", err)
+	}
+	return a, nil
+}
+
+// loadAgreement reads one agreement matched by a trailing WHERE clause.
+func loadAgreement(ctx context.Context, tx pgx.Tx, where string, args ...any) (domain.RebateAgreement, error) {
+	return scanAgreement(tx.QueryRow(ctx, agreementColumns+where, args...))
 }
 
 // sameAgreement reports whether a replayed create carries the same economic content.
 func sameAgreement(stored, in domain.RebateAgreement) bool {
 	a, _ := json.Marshal(stored.Tiers)
 	b, _ := json.Marshal(in.Tiers)
-	return stored.LegalEntityID == in.LegalEntityID && stored.Name == in.Name && stored.CustomerID == in.CustomerID &&
-		stored.CustomerGroupID == in.CustomerGroupID && stored.Basis == in.Basis && stored.Period == in.Period &&
+	return stored.LegalEntityID == in.LegalEntityID && stored.Name == in.Name && stored.PartyRole == domain.PartyRoleOf(in) &&
+		stored.CustomerID == in.CustomerID && stored.CustomerGroupID == in.CustomerGroupID && stored.VendorID == in.VendorID &&
+		stored.Basis == in.Basis && stored.Period == in.Period && stored.AccrualAccount == in.AccrualAccount &&
+		stored.ExpenseAccount == in.ExpenseAccount &&
 		stored.Currency == in.Currency && string(a) == string(b) &&
 		dayStr(stored.ValidFrom) == dayStr(in.ValidFrom) && dayStr(stored.ValidTo) == dayStr(in.ValidTo)
 }
@@ -170,6 +190,10 @@ func (s *Postgres) AccrueInvoiceLine(ctx context.Context, in AccrualInput) (Accr
 		}
 		if err != nil {
 			return err
+		}
+		if in.Party != "" && in.Party != a.PartyRole {
+			return httpx.NewProblem(http.StatusUnprocessableEntity, CodePartyMismatch,
+				"agreement "+a.ID+" is a "+a.PartyRole+" rebate agreement; it does not accrue "+strings.ToLower(in.Party)+" invoices")
 		}
 		if in.Currency != a.Currency {
 			return httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeValidation, "invoice currency does not match the agreement currency")
@@ -220,9 +244,10 @@ func (s *Postgres) AccrueInvoiceLine(ctx context.Context, in AccrualInput) (Accr
 		if inc.IsZero() {
 			return nil
 		}
+		debit, credit := domain.AccrualPosting(a)
 		evt, err := events.New(pevents.RebateAccrualPosted, eventSource, out.ID, p.TenantID, pevents.RebateAccrualPostedData{
-			AccrualID: out.ID, LegalEntityID: a.LegalEntityID, AgreementID: a.ID, PeriodID: key, InvoiceLineID: in.InvoiceLineID,
-			Amount: inc.String(), Currency: a.Currency, DebitAccount: a.ExpenseAccount, CreditAccount: a.AccrualAccount})
+			AccrualID: out.ID, LegalEntityID: a.LegalEntityID, AgreementID: a.ID, PartyRole: a.PartyRole, PeriodID: key,
+			InvoiceLineID: in.InvoiceLineID, Amount: inc.String(), Currency: a.Currency, DebitAccount: debit, CreditAccount: credit})
 		if err != nil {
 			return err
 		}
@@ -256,29 +281,31 @@ func (s *Postgres) ListAccruals(ctx context.Context, f AccrualFilter) ([]Accrual
 	return out, err
 }
 
-// ListAgreements returns rebate agreements, optionally filtered by legal entity (FR-26.11).
-func (s *Postgres) ListAgreements(ctx context.Context, legalEntityID string, limit int) ([]domain.RebateAgreement, error) {
-	if limit <= 0 || limit > MaxListLimit {
-		limit = MaxListLimit
+// AgreementFilter selects rebate agreements by legal entity and party role.
+type AgreementFilter struct {
+	LegalEntityID string
+	PartyRole     string
+	Limit         int
+}
+
+// ListAgreements returns rebate agreements, optionally filtered by legal entity and party
+// role (FR-26.11, FR-26.15).
+func (s *Postgres) ListAgreements(ctx context.Context, f AgreementFilter) ([]domain.RebateAgreement, error) {
+	if f.Limit <= 0 || f.Limit > MaxListLimit {
+		f.Limit = MaxListLimit
 	}
 	out := []domain.RebateAgreement{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `select id::text, legal_entity_id::text, name, coalesce(customer_id::text, ''), coalesce(customer_group_id::text, ''),
-			basis, period, tiers, currency::text, valid_from, valid_to, accrual_account, expense_account from rebate_agreement
-			where ($1::text = '' or legal_entity_id::text = $1) order by valid_from, id limit $2`, legalEntityID, limit)
+		rows, err := tx.Query(ctx, agreementColumns+`where ($1::text = '' or legal_entity_id::text = $1)
+			and ($2::text = '' or party_role = $2) order by valid_from, id limit $3`, f.LegalEntityID, f.PartyRole, f.Limit)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		for rows.Next() {
-			var a domain.RebateAgreement
-			var tiers []byte
-			if err := rows.Scan(&a.ID, &a.LegalEntityID, &a.Name, &a.CustomerID, &a.CustomerGroupID, &a.Basis, &a.Period, &tiers, &a.Currency,
-				&a.ValidFrom, &a.ValidTo, &a.AccrualAccount, &a.ExpenseAccount); err != nil {
+			a, err := scanAgreement(rows)
+			if err != nil {
 				return fmt.Errorf("scan agreement: %w", err)
-			}
-			if err := json.Unmarshal(tiers, &a.Tiers); err != nil {
-				return fmt.Errorf("decode agreement tiers: %w", err)
 			}
 			out = append(out, a)
 		}

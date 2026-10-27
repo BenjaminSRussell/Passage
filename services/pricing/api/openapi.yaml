@@ -343,10 +343,11 @@ paths:
   /v1/pricing/rebates/agreements:
     get:
       operationId: listRebateAgreements
-      summary: List customer rebate agreements.
+      summary: List customer and vendor rebate agreements.
       x-passage-duty: pricing.rebate.view
       parameters:
         - {name: legalEntityId, in: query, required: false, schema: {type: string, format: uuid}}
+        - {name: partyRole, in: query, required: false, schema: {type: string, enum: [CUSTOMER, VENDOR]}}
       responses:
         "200":
           description: Agreements, oldest validity first.
@@ -364,7 +365,7 @@ paths:
         "422": {$ref: "#/components/responses/Problem"}
     post:
       operationId: createRebateAgreement
-      summary: Create a customer rebate agreement with tiers (FR-26.11).
+      summary: Create a customer (FR-26.11) or vendor (FR-26.15) rebate agreement with tiers.
       x-passage-duty: pricing.rebate.maintain
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -485,6 +486,154 @@ paths:
         "401": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
         "404": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/rebates/agreements/{id}/claim-preview:
+    get:
+      operationId: previewVendorRebateClaim
+      summary: Preview the claim one period of a VENDOR agreement would produce (FR-26.15, AC-26.11).
+      description: >
+        amount = the period's accruals - the period's earlier claims (BR-26.11). Nothing is written.
+        422 PRC-0045 for a CUSTOMER agreement.
+      x-passage-duty: pricing.rebate.view
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: period, in: query, required: true, description: "Period key such as 2027-03, 2027-Q1 or 2027.", schema: {type: string, pattern: "^[0-9]{4}(-(0[1-9]|1[0-2])|-Q[1-4])?$"}}
+      responses:
+        "200":
+          description: The claim the period would produce now.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/VendorClaimPreview"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/rebates/vendor-accruals:
+    post:
+      operationId: accrueVendorRebateInvoiceLine
+      summary: Accrue one posted vendor invoice line against a VENDOR agreement (vendor-invoice.posted consumer, FR-26.15).
+      description: >
+        Stand-in for the w19 vendor-invoice.posted consumer. value is the vendor invoice net and
+        quantity the received quantity (BR-26.11). Same period lock, tier recompute and redelivery
+        rules as /rebates/accruals; the accrual posts Dr 2160 / Cr 5100 (AC-26.11) through
+        rebateaccrual.posted with party_role VENDOR. 422 PRC-0045 for a CUSTOMER agreement.
+      x-passage-duty: pricing.rebate.maintain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RebateAccrualInput"}
+      responses:
+        "200":
+          description: Already accrued (redelivery).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/RebateAccrual"}
+        "201":
+          description: Accrued; dev.passage.pricing.rebateaccrual.posted.v1 written to the outbox.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/RebateAccrual"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/rebates/vendor-claims:
+    get:
+      operationId: listVendorRebateClaims
+      summary: Vendor rebate claims inquiry (§5.26.14), newest first.
+      x-passage-duty: pricing.rebate.view
+      parameters:
+        - {name: agreementId, in: query, required: false, schema: {type: string, format: uuid}}
+        - {name: vendorId, in: query, required: false, schema: {type: string, format: uuid}}
+        - {name: period, in: query, required: false, schema: {type: string, pattern: "^[0-9]{4}(-(0[1-9]|1[0-2])|-Q[1-4])?$"}}
+        - {name: status, in: query, required: false, schema: {type: string, enum: [OPEN, APPROVED]}}
+      responses:
+        "200":
+          description: At most 100 claims.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/VendorClaim"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+    post:
+      operationId: createVendorRebateClaim
+      summary: Claim one period of a VENDOR agreement (FR-26.15, BR-26.11).
+      description: >
+        Creates claim RC-n (sequence per legal entity) OPEN for the period's accruals less its
+        earlier claims, under the period lock, and writes vendorrebateclaim.created. A negative
+        amount (over-accrual) settles by VENDOR_INVOICE whatever settlementMode says. 422 PRC-0043
+        when nothing was accrued in the period, 409 PRC-0015 when its accruals are fully claimed,
+        422 PRC-0045 for a CUSTOMER agreement.
+      x-passage-duty: pricing.rebate.maintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/VendorClaimInput"}
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/VendorClaim"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/rebates/vendor-claims/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getVendorRebateClaim
+      summary: Read one vendor rebate claim.
+      x-passage-duty: pricing.rebate.view
+      responses:
+        "200":
+          description: The claim.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/VendorClaim"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/rebates/vendor-claims/{id}:approve:
+    post:
+      operationId: approveVendorRebateClaim
+      summary: Approve an OPEN claim for settlement through w19 AP (duty VendorRebateClaimApprove).
+      description: >
+        Checks the body version (412 conflict_version), requires OPEN (409 PRC-0031) and refuses the
+        user who created the claim (403 PRC-0046). Writes vendorrebateclaim.approved.
+      x-passage-duty: pricing.rebate.claim.approve
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/VersionRequest"}
+      responses:
+        "200":
+          description: Approved.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/VendorClaim"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
         "422": {$ref: "#/components/responses/Problem"}
   /v1/pricing/commission/sales-groups:
     get:
@@ -1568,12 +1717,17 @@ components:
     RebateAgreementInput:
       type: object
       required: [legalEntityId, name, basis, period, tiers, currency, validFrom, validTo]
-      description: Exactly one of customerId or customerGroupId is required.
+      description: >
+        A CUSTOMER agreement (default) takes exactly one of customerId or customerGroupId; a VENDOR
+        agreement (FR-26.15) takes vendorId and neither customer field. Accounts default to 2150 / 4150
+        (customer) or 2160 / 5100 (vendor).
       properties:
         legalEntityId: {type: string, format: uuid}
         name: {type: string, minLength: 1, maxLength: 120}
+        partyRole: {type: string, enum: [CUSTOMER, VENDOR], default: CUSTOMER}
         customerId: {type: string, format: uuid}
         customerGroupId: {type: string, format: uuid}
+        vendorId: {type: string, format: uuid}
         basis: {type: string, enum: [NET_AMOUNT, QUANTITY]}
         period: {type: string, enum: [MONTH, QUARTER, YEAR]}
         tiers:
@@ -1583,13 +1737,13 @@ components:
         currency: {type: string, pattern: "^[A-Z]{3}$"}
         validFrom: {type: string, format: date}
         validTo: {type: string, format: date}
-        accrualAccount: {type: string, default: "2150"}
-        expenseAccount: {type: string, default: "4150"}
+        accrualAccount: {type: string, description: "Balance-sheet side: 2150 rebate accrual (customer) or 2160 vendor rebate receivable (vendor) by default."}
+        expenseAccount: {type: string, description: "P&L side: 4150 rebate expense (customer) or 5100 purchase rebate income (vendor) by default."}
     RebateAgreement:
       allOf:
         - $ref: "#/components/schemas/RebateAgreementInput"
         - type: object
-          required: [id, status]
+          required: [id, partyRole, accrualAccount, expenseAccount, status]
           properties:
             id: {type: string, format: uuid}
             status: {type: string, enum: [ACTIVE]}
@@ -1614,10 +1768,51 @@ components:
         invoiceDate: {type: string, format: date}
         basisValue: {type: string}
         basisQuantity: {type: string}
-        amount: {type: string, description: "Accrued amount; posts Dr 4150 / Cr 2150."}
+        amount: {type: string, description: "Accrued amount; posts Dr 4150 / Cr 2150 (customer) or Dr 2160 / Cr 5100 (vendor) by default."}
         currency: {type: string}
         status: {type: string, enum: [ACCRUED, ADJUSTED, SETTLED, REVERSED]}
         retroactive: {type: boolean, description: "True for an invoice line replayed by a retroactive recompute (amount 0) and for its per-period delta (invoiceLineId retro:<run key>:<period>)."}
+    VendorClaimInput:
+      type: object
+      required: [agreementId, period]
+      properties:
+        agreementId: {type: string, format: uuid}
+        period: {type: string, pattern: "^[0-9]{4}(-(0[1-9]|1[0-2])|-Q[1-4])?$"}
+        settlementMode: {type: string, enum: [CREDIT_NOTE, PAYMENT_DEDUCTION], default: CREDIT_NOTE, description: "vendor_rebate_claim_mode; a negative claim settles by VENDOR_INVOICE."}
+    VendorClaimPreview:
+      type: object
+      required: [agreementId, vendorId, periodId, accrued, priorClaimed, amount, currency, settlementMode, claims]
+      properties:
+        agreementId: {type: string, format: uuid}
+        vendorId: {type: string, format: uuid}
+        periodId: {type: string}
+        accrued: {type: string, description: "The period's accruals."}
+        priorClaimed: {type: string, description: "What the period's claims already claimed."}
+        amount: {type: string, description: "accrued - priorClaimed; 0 when fully claimed."}
+        currency: {type: string}
+        settlementMode: {type: string, enum: [CREDIT_NOTE, VENDOR_INVOICE]}
+        claims: {type: integer, description: "Claims already created for the period."}
+    VendorClaim:
+      type: object
+      required: [id, number, legalEntityId, agreementId, vendorId, periodId, accruedTotal, priorClaimed, amount, currency, settlementMode, status, version, createdAt]
+      properties:
+        id: {type: string, format: uuid}
+        number: {type: string, pattern: "^RC-[0-9]{6,}$"}
+        legalEntityId: {type: string, format: uuid}
+        agreementId: {type: string, format: uuid}
+        vendorId: {type: string, format: uuid}
+        periodId: {type: string}
+        accruedTotal: {type: string}
+        priorClaimed: {type: string}
+        amount: {type: string, description: "Negative for an over-accrued period."}
+        currency: {type: string}
+        settlementMode: {type: string, enum: [CREDIT_NOTE, PAYMENT_DEDUCTION, VENDOR_INVOICE]}
+        status: {type: string, enum: [OPEN, APPROVED]}
+        version: {type: integer, minimum: 1}
+        createdBy: {type: string}
+        approvedBy: {type: string}
+        createdAt: {type: string, format: date-time}
+        approvedAt: {type: string, format: date-time}
     RetroLine:
       type: object
       required: [invoiceLineId, invoiceDate, currency]

@@ -4,7 +4,34 @@ Deterministic pricing engine for Passage: resolves net prices and discounts for 
 customer / product / date / quantity / currency tuple from condition records, and returns
 the ordered trace of conditions that produced the price. Ticket PSG-26, PRD §5.26.
 
-## Status (slices 1-5)
+## Status (slices 1-6)
+
+Built in slice 6:
+
+- **Vendor rebate agreements** (FR-26.15, BR-26.11, AC-26.11): `partyRole` VENDOR on a rebate
+  agreement with `vendorId` (and no customer); accounts default to 2160 vendor rebate receivable /
+  5100 purchase rebate income. `POST /rebates/vendor-accruals` stands in for the w19
+  vendor-invoice.posted consumer (vendor-invoiced net or received quantity, same period lock and
+  tier recompute as customer accruals) and writes `rebateaccrual.posted` with `party_role` VENDOR
+  and Dr 2160 / Cr 5100. The two invoice feeds never cross (422 PRC-0045).
+- **Vendor rebate claims**: `GET /rebates/agreements/{id}/claim-preview?period=` shows what a period
+  would claim; `POST /rebates/vendor-claims` creates claim `RC-000001`, `RC-000002`, ... (per legal
+  entity) for the period's accruals less its earlier claims, under the period lock, OPEN, with
+  `vendorrebateclaim.created`. Nothing accrued is 422 PRC-0043; a fully claimed period is 409
+  PRC-0015; an over-claimed period produces a negative claim settled by VENDOR_INVOICE; otherwise
+  the claim settles by CREDIT_NOTE (default) or PAYMENT_DEDUCTION. `:approve` (duty
+  `pricing.rebate.claim.approve`, versioned, `Idempotency-Key`) refuses the claim's creator (403
+  PRC-0046) and writes `vendorrebateclaim.approved` for w19 AP. The Vendor rebate claims inquiry
+  filters by agreement, vendor, period and status.
+- **Record snapshot cache** (FR-26.14): `store.Cache` keeps the ACTIVE record set of a resolve per
+  tenant, caller scope, legal entity, currency, customer group and pricing day for
+  `PRICING_CACHE_TTL` (default 60s, 10s to 600s, 0 turns it off); activate, withdraw, journal post
+  and reverse, and campaign kill and restore empty it on this replica.
+- Migration `0006_vendor_rebates.sql` (party_role and vendor_id with a named party check,
+  vendor_rebate_claim with RLS and legal-entity scope).
+- **Web**: customer or vendor type on the rebate form (accounts follow the type), type filter on the
+  rebate list, the claims card on a vendor agreement (preview a period, claim it, list its claims),
+  the Vendor rebate claims inquiry and the claim detail with approval.
 
 Built in slice 5:
 
@@ -138,7 +165,7 @@ internal/domain/        pure engine: types, resolve, calc, journal validation an
 internal/store/         Postgres repository (pgx, tenant-scoped transactions, outbox)
 internal/api/           HTTP handlers and validation
 internal/events/        event type constants and payloads
-migrations/             0001_init.sql (condition_record, outbox, idempotency_keys), 0002 (journals, rebates), 0003 (commission, retro flag); all with RLS
+migrations/             0001_init.sql (condition_record, outbox, idempotency_keys), 0002 (journals, rebates), 0003 (commission, retro flag), 0004 (funds, promotions), 0005 (procedures, campaigns), 0006 (vendor rebates and claims); all with RLS
 api/openapi.yaml        OpenAPI 3.1 for every endpoint
 events/asyncapi.yaml    AsyncAPI 3 for every published event
 charts/pricing/         Helm chart
@@ -162,11 +189,17 @@ testdata/               fixtures
 | POST | `/v1/pricing/journals/{id}:validate` | pricing.journal.post | VALIDATED when clean, else OPEN with line errors |
 | POST | `/v1/pricing/journals/{id}:post` | pricing.journal.post | all lines or none (PRC-0005); `Idempotency-Key` honoured |
 | POST | `/v1/pricing/journals/{id}:reverse` | pricing.journal.post | 201 with the reversing journal; `Idempotency-Key` honoured |
-| GET | `/v1/pricing/rebates/agreements?legalEntityId=` | pricing.rebate.view | |
-| POST | `/v1/pricing/rebates/agreements` | pricing.rebate.maintain | `Idempotency-Key` honoured |
+| GET | `/v1/pricing/rebates/agreements?legalEntityId=&partyRole=` | pricing.rebate.view | |
+| POST | `/v1/pricing/rebates/agreements` | pricing.rebate.maintain | `Idempotency-Key` honoured; `partyRole` CUSTOMER (default) or VENDOR with `vendorId` |
 | GET | `/v1/pricing/rebates/agreements/{id}` | pricing.rebate.view | |
 | GET | `/v1/pricing/rebates/accruals?agreementId=&period=` | pricing.rebate.view | period such as 2027-03, 2027-Q1 or 2027 |
 | POST | `/v1/pricing/rebates/accruals` | pricing.rebate.maintain | one posted invoice line; 201 new, 200 already accrued (stand-in for the invoice.posted consumer) |
+| POST | `/v1/pricing/rebates/vendor-accruals` | pricing.rebate.maintain | one posted vendor invoice line on a VENDOR agreement (Dr 2160 / Cr 5100); 201 new, 200 already accrued; PRC-0045 for a CUSTOMER agreement |
+| GET | `/v1/pricing/rebates/agreements/{id}/claim-preview?period=` | pricing.rebate.view | accrued, claimed before, amount and settlement of the next claim; writes nothing |
+| GET | `/v1/pricing/rebates/vendor-claims?agreementId=&vendorId=&period=&status=` | pricing.rebate.view | Vendor rebate claims inquiry, newest first |
+| POST | `/v1/pricing/rebates/vendor-claims` | pricing.rebate.maintain | body `{agreementId, period, settlementMode}`; RC-n; PRC-0043 / PRC-0015; `Idempotency-Key` honoured |
+| GET | `/v1/pricing/rebates/vendor-claims/{id}` | pricing.rebate.view | |
+| POST | `/v1/pricing/rebates/vendor-claims/{id}:approve` | pricing.rebate.claim.approve | body `{version}`; not by the creator (PRC-0046); `Idempotency-Key` honoured |
 | POST | `/v1/pricing/rebates/agreements/{id}:retro-recompute` | pricing.rebate.maintain | `Idempotency-Key` required (names the run); body `{lines}` of posted invoices before the activation |
 | GET | `/v1/pricing/commission/sales-groups?legalEntityId=` | pricing.commission.view | |
 | POST | `/v1/pricing/commission/sales-groups` | pricing.commission.maintain | `Idempotency-Key` honoured; reps with shares summing to 100 |
@@ -213,6 +246,7 @@ testdata/               fixtures
 | PRC-0031 | 409 | Invalid state transition (store) |
 | PRC-0034 | 404 | Price journal not found |
 | PRC-0006 | 200 (notice) | Retroactive recompute re-accrued posted invoices (count in the message) |
+| PRC-0015 | 409 | Vendor rebate claim for the agreement and period already processed: its accruals are fully claimed |
 | PRC-0011 | 409 | Fund is closed: attribution, revision or a promotion on it is refused (reopen first) |
 | PRC-0012 | 422 | Fund budget exceeded by the named amount without overspend (attribution or a budget cut) |
 | PRC-0013 | 422 | No commission rule at any level for the sales group |
@@ -224,6 +258,10 @@ testdata/               fixtures
 | PRC-0040 | 404 | Promotion plan not found |
 | PRC-0041 | 404 | Campaign not found (also when a condition record names an unknown campaign) |
 | PRC-0042 | 404 | Pricing procedure not found |
+| PRC-0043 | 422 | Nothing accrued in the period to claim |
+| PRC-0044 | 404 | Vendor rebate claim not found |
+| PRC-0045 | 422 | Party role mismatch: a sales invoice on a VENDOR agreement, a vendor invoice or claim on a CUSTOMER agreement |
+| PRC-0046 | 403 | The user who created a vendor rebate claim cannot approve it |
 | conflict_version | 412 | Body version does not match the stored version |
 | idempotency_key_reuse | 422 | Same `Idempotency-Key` with a different body, or an invoice line accrued again with a different date, value or quantity |
 | COM-0001 | 422 | Validation failure; `errors` maps each field to its message (percentages outside 0–100, a product-keyed TOTAL_DISC, bad dates, ...) |
@@ -237,7 +275,8 @@ Written to `outbox` in the same transaction as the change (see `events/asyncapi.
 - `dev.passage.pricing.conditionrecord.activated.v1` (activation and journal post; `journal_id` set by journals, `campaign_id` for a campaign record)
 - `dev.passage.pricing.conditionrecord.withdrawn.v1`
 - `dev.passage.pricing.journal.posted.v1` (post and reverse)
-- `dev.passage.pricing.rebateaccrual.posted.v1` (`retroactive=true` on a retroactive recompute delta)
+- `dev.passage.pricing.rebateaccrual.posted.v1` (`retroactive=true` on a retroactive recompute delta; `party_role` CUSTOMER posts Dr 4150 / Cr 2150, VENDOR Dr 2160 / Cr 5100)
+- `dev.passage.pricing.vendorrebateclaim.created.v1` and `.approved.v1` (vendor rebate claims for w19 AP)
 - `dev.passage.pricing.commission.calculated.v1` (one per rep per invoice line; rep id only, never a name)
 - `dev.passage.pricing.fund.closed.v1`, `dev.passage.pricing.fund.reopened.v1`
 - `dev.passage.pricing.fundusage.recorded.v1` (one per attribution, with the period usage and budget after it)
@@ -251,14 +290,15 @@ writes `condition-record` and `rebate-accrual`. Naming is a handoff to the kerne
 
 12-factor env vars, validated at startup: `PASSAGE_ENV`, `SERVICE_NAME`, `HTTP_ADDR`,
 `ADMIN_ADDR`, `DATABASE_URL`, `PRICING_MAX_LINES` (500), `PRICING_EXPLAIN_MAX_BYTES` (65536).
-`PRICING_CACHE_TTL` is set by the chart but is not read yet (no cache in this slice).
+`PRICING_CACHE_TTL` (60s; a duration or whole seconds, 10s to 600s, 0 turns the record snapshot
+cache off).
 
 ## Run and test
 
 ```
 cd services/pricing
 go test ./...                      # runs without Postgres; store/API DB tests skip
-PASSAGE_TEST_DATABASE_URL=postgres://... go test ./...   # runs store and API DB tests
+PASSAGE_TEST_DATABASE_URL=postgres://... PASSAGE_TEST_APP_DATABASE_URL=postgres://passage_app:...@... go test ./...   # runs the store DB tests under RLS
 go vet ./...
 ```
 

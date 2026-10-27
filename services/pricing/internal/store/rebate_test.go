@@ -102,7 +102,7 @@ func TestPostgres_RebateTierCrossing(t *testing.T) {
 	if !sum.Equal(decimal.NewFromInt(45)) {
 		t.Fatalf("period accruals sum to %s; want 45.00 (4,500 x 1%%)", sum)
 	}
-	list, err := s.ListAgreements(ctx, legalEntity, 0)
+	list, err := s.ListAgreements(ctx, store.AgreementFilter{LegalEntityID: legalEntity})
 	if err != nil || len(list) != 1 || list[0].ID != a.ID {
 		t.Fatalf("agreements = %+v, %v", list, err)
 	}

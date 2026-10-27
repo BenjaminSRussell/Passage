@@ -9,7 +9,7 @@ describe("pricing module", () => {
     expect(pricing.nav.every((n) => n.to.startsWith("/pricing"))).toBe(true);
   });
 
-  it("has a list, a create form and a detail page for trade agreements, campaigns, procedures, price journals, rebates, sales groups, trade funds and promotions, plus the commission inquiry, the workspace and simulation", () => {
+  it("has a list, a create form and a detail page for trade agreements, campaigns, procedures, price journals, rebates and vendor rebate claims, sales groups, trade funds and promotions, plus the commission inquiry, the workspace and simulation", () => {
     expect(pricing.routes.map((r) => r.path)).toEqual([
       "/pricing",
       "/pricing/agreements",
@@ -26,6 +26,8 @@ describe("pricing module", () => {
       "/pricing/journals/:id",
       "/pricing/rebates",
       "/pricing/rebates/new",
+      "/pricing/rebates/claims",
+      "/pricing/rebates/claims/:id",
       "/pricing/rebates/:id",
       "/pricing/commission/sales-groups",
       "/pricing/commission/sales-groups/new",
@@ -49,6 +51,7 @@ describe("pricing module", () => {
       "/pricing/procedures": "pricing.view",
       "/pricing/journals": "pricing.view",
       "/pricing/rebates": "pricing.rebate.view",
+      "/pricing/rebates/claims": "pricing.rebate.view",
       "/pricing/commission/sales-groups": "pricing.commission.view",
       "/pricing/commission/transactions": "pricing.commission.view",
       "/pricing/funds": "pricing.view",

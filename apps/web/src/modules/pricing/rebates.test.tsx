@@ -17,6 +17,7 @@ const tiered: RebateAgreement = {
   id: A1,
   legalEntityId: LE,
   name: "Acme quarterly",
+  partyRole: "CUSTOMER",
   customerId: C1,
   basis: "NET_AMOUNT",
   period: "QUARTER",
@@ -115,6 +116,7 @@ describe("New rebate agreement", () => {
     expect(post?.body).toEqual({
       legalEntityId: LE,
       name: "Acme quarterly",
+      partyRole: "CUSTOMER",
       customerId: C1,
       basis: "NET_AMOUNT",
       period: "QUARTER",

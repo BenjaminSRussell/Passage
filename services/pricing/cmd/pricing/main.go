@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
@@ -60,8 +61,12 @@ func run(ctx context.Context, getenv func(string) string) error {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
+	ttl, err := cacheTTL(getenv)
+	if err != nil {
+		return err
+	}
 	router := httpx.NewRouter()
-	a := api.New(store.New(pool), cfg)
+	a := api.New(store.NewCache(store.New(pool), ttl), cfg)
 	a.Register(router)
 	admin := http.NewServeMux()
 	admin.Handle("/metrics", a.Metrics())
@@ -79,6 +84,34 @@ func addr(getenv func(string) string, key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// Bounds of the record snapshot lifetime (§5.26.13 cache_ttl_seconds: default 60, 10 to 600).
+const (
+	defaultCacheTTL = 60 * time.Second
+	minCacheTTL     = 10 * time.Second
+	maxCacheTTL     = 600 * time.Second
+)
+
+// cacheTTL reads PRICING_CACHE_TTL as a duration (60s) or whole seconds (60). 0 turns the
+// record snapshot cache off; any other value outside 10s to 600s is refused at startup.
+func cacheTTL(getenv func(string) string) (time.Duration, error) {
+	raw := getenv("PRICING_CACHE_TTL")
+	if raw == "" {
+		return defaultCacheTTL, nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		n, nerr := strconv.Atoi(raw)
+		if nerr != nil {
+			return 0, fmt.Errorf("PRICING_CACHE_TTL must be a duration such as 60s, got %q", raw)
+		}
+		d = time.Duration(n) * time.Second
+	}
+	if d != 0 && (d < minCacheTTL || d > maxCacheTTL) {
+		return 0, fmt.Errorf("PRICING_CACHE_TTL must be 0 or from %s to %s, got %q", minCacheTTL, maxCacheTTL, raw)
+	}
+	return d, nil
 }
 
 // config reads PRICING_MAX_LINES and PRICING_EXPLAIN_MAX_BYTES, refusing out-of-range values at startup.

@@ -17,9 +17,11 @@ Routes, all on the pricing service API (`services/pricing/api/openapi.yaml`):
 | `/pricing/journals` | Price journal log with a status filter | `GET /journals` |
 | `/pricing/journals/new` | Create an OPEN journal from pasted `UPDATE, id, version, percent` / `DELETE, id, version` rows | `POST /journals` |
 | `/pricing/journals/:id` | Lines with before and after values; validate, post (PRC-0005 shown) and reverse | `GET`, `:validate`, `:post`, `:reverse` |
-| `/pricing/rebates` | Rebate agreements with basis, period and tiers | `GET /rebates/agreements` |
-| `/pricing/rebates/new` | Create a tiered agreement for a customer or customer group | `POST /rebates/agreements` |
-| `/pricing/rebates/:id` | Tiers, posting accounts, accruals by period with an exact total (retroactive rows marked), and the retroactive recompute from pasted posted invoice lines | `GET /rebates/agreements/{id}`, `GET /rebates/accruals`, `POST /rebates/agreements/{id}:retro-recompute` |
+| `/pricing/rebates` | Customer and vendor rebate agreements with type, basis, period and tiers; type filter | `GET /rebates/agreements?partyRole=` |
+| `/pricing/rebates/new` | Create a tiered agreement for a customer, a customer group or (vendor rebate) a vendor; accounts follow the type (2150 / 4150 or 2160 / 5100) | `POST /rebates/agreements` |
+| `/pricing/rebates/:id` | Tiers, posting accounts, accruals by period with an exact total (retroactive rows marked), the retroactive recompute from pasted posted invoice lines, and for a vendor rebate the claims card: preview a period, claim it (credit note or payment deduction; PRC-0015 shown) and list its claims | `GET /rebates/agreements/{id}`, `GET /rebates/accruals`, `POST /rebates/agreements/{id}:retro-recompute`, `GET /rebates/agreements/{id}/claim-preview`, `GET`/`POST /rebates/vendor-claims` |
+| `/pricing/rebates/claims` | Vendor rebate claims inquiry by vendor, period and status, with exact totals per currency | `GET /rebates/vendor-claims` |
+| `/pricing/rebates/claims/:id` | One claim: accrued, claimed before, amount, settlement; approve at its version (PRC-0046 shown when the creator tries) | `GET /rebates/vendor-claims/{id}`, `:approve` |
 | `/pricing/commission/sales-groups` | Sales groups with their reps and shares | `GET /commission/sales-groups` |
 | `/pricing/commission/sales-groups/new` | Create a sales group; reps with shares that add up to 100 | `POST /commission/sales-groups` |
 | `/pricing/commission/sales-groups/:id` | Reps, commission rules in search order, add a rule (409 PRC-0038 shown) | `GET /commission/sales-groups/{id}`, `GET`/`POST /commission/rules` |
@@ -38,7 +40,7 @@ Routes, all on the pricing service API (`services/pricing/api/openapi.yaml`):
 - Pages use the shell primitives (`shell/ui`) and `pages.module.css` tokens; every list has
   loading, empty and error states.
 - Tests: `npx vitest --run src/modules/pricing` and `npx tsc --noEmit` from `apps/web`. `testServer.tsx`
-  holds the fetch stub and router used by `journals.test.tsx`, `rebates.test.tsx`, `commission.test.tsx`, `funds.test.tsx`,
+  holds the fetch stub and router used by `journals.test.tsx`, `rebates.test.tsx`, `vendorRebates.test.tsx`, `commission.test.tsx`, `funds.test.tsx`,
   `promotions.test.tsx`, `campaigns.test.tsx` and `procedures.test.tsx`.
 
 Needs: nothing from the shell beyond the existing `shell/ui` components. No npm

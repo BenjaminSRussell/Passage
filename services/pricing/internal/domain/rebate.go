@@ -16,15 +16,18 @@ const (
 	PeriodYear     = "YEAR"
 )
 
-// RebateAgreement is a customer rebate agreement. Exactly one of CustomerID and
-// CustomerGroupID is set. Tiers pay RatePct of net value (NET_AMOUNT) or
-// AmountPerUnit per unit (QUANTITY).
+// RebateAgreement is a rebate agreement. A CUSTOMER agreement names exactly one of
+// CustomerID and CustomerGroupID; a VENDOR agreement (FR-26.15) names VendorID only.
+// Tiers pay RatePct of net value (NET_AMOUNT: invoiced net, or vendor-invoiced net) or
+// AmountPerUnit per unit (QUANTITY: invoiced, or received, quantity).
 type RebateAgreement struct {
 	ID              string
 	LegalEntityID   string
 	Name            string
+	PartyRole       string
 	CustomerID      string
 	CustomerGroupID string
+	VendorID        string
 	Basis           string
 	Period          string
 	Tiers           []Tier
@@ -35,11 +38,26 @@ type RebateAgreement struct {
 	ExpenseAccount  string
 }
 
-// ValidateAgreement checks an agreement before it is stored (FR-26.11, BR-26.8).
+// ValidateAgreement checks an agreement before it is stored (FR-26.11, FR-26.15, BR-26.8).
 func ValidateAgreement(a RebateAgreement) *Error {
 	fields := map[string]string{}
-	if (a.CustomerID == "") == (a.CustomerGroupID == "") {
-		fields["customer"] = "exactly one of customerId or customerGroupId is required"
+	switch PartyRoleOf(a) {
+	case PartyCustomer:
+		if a.VendorID != "" {
+			fields["vendorId"] = "a customer rebate agreement takes no vendorId"
+		}
+		if (a.CustomerID == "") == (a.CustomerGroupID == "") {
+			fields["customer"] = "exactly one of customerId or customerGroupId is required"
+		}
+	case PartyVendor:
+		if a.VendorID == "" {
+			fields["vendorId"] = "a vendor rebate agreement requires vendorId"
+		}
+		if a.CustomerID != "" || a.CustomerGroupID != "" {
+			fields["customer"] = "a vendor rebate agreement takes no customerId or customerGroupId"
+		}
+	default:
+		fields["partyRole"] = "must be CUSTOMER or VENDOR"
 	}
 	if a.Basis != BasisNetAmount && a.Basis != BasisQuantity {
 		fields["basis"] = "must be NET_AMOUNT or QUANTITY"

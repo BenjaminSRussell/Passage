@@ -147,6 +147,7 @@ func (s *Postgres) RecomputeRetro(ctx context.Context, in RetroInput) (RetroResu
 			}
 		}
 		out.Deltas = domain.RetroDeltas(a, periodsInOrder)
+		debit, credit := domain.AccrualPosting(a)
 		for _, d := range out.Deltas {
 			lineID := retroLineID(in.RunKey, d.Period)
 			if _, err := tx.Exec(ctx, `update rebate_period set accrued_total = $3::numeric where agreement_id = $1 and period_key = $2`,
@@ -163,8 +164,8 @@ func (s *Postgres) RecomputeRetro(ctx context.Context, in RetroInput) (RetroResu
 				return fmt.Errorf("insert retro delta: %w", err)
 			}
 			evt, err := events.New(pevents.RebateAccrualPosted, eventSource, accrualID, p.TenantID, pevents.RebateAccrualPostedData{
-				AccrualID: accrualID, LegalEntityID: a.LegalEntityID, AgreementID: a.ID, PeriodID: d.Period, InvoiceLineID: lineID,
-				Amount: d.Delta.String(), Currency: a.Currency, DebitAccount: a.ExpenseAccount, CreditAccount: a.AccrualAccount, Retroactive: true})
+				AccrualID: accrualID, LegalEntityID: a.LegalEntityID, AgreementID: a.ID, PartyRole: a.PartyRole, PeriodID: d.Period, InvoiceLineID: lineID,
+				Amount: d.Delta.String(), Currency: a.Currency, DebitAccount: debit, CreditAccount: credit, Retroactive: true})
 			if err != nil {
 				return err
 			}

@@ -325,10 +325,12 @@ export function reversePriceJournal(id: string, key: string = newKey()): Promise
   return post<Journal>(`/journals/${encodeURIComponent(id)}:reverse`, {}, key);
 }
 
-// ---- Rebate agreements and accruals (FR-26.11, BR-26.8).
+// ---- Rebate agreements and accruals (FR-26.11, BR-26.8; vendor rebates FR-26.15).
 
 export type RebateBasis = "NET_AMOUNT" | "QUANTITY";
 export type RebatePeriod = "MONTH" | "QUARTER" | "YEAR";
+/** CUSTOMER rebates accrue on sales invoices; VENDOR rebates on vendor invoices and settle by claims. */
+export type RebatePartyRole = "CUSTOMER" | "VENDOR";
 
 export interface RebateTier {
   from: string;
@@ -339,8 +341,10 @@ export interface RebateTier {
 export interface RebateAgreementInput {
   legalEntityId: string;
   name: string;
+  partyRole?: RebatePartyRole;
   customerId?: string;
   customerGroupId?: string;
+  vendorId?: string;
   basis: RebateBasis;
   period: RebatePeriod;
   tiers: RebateTier[];
@@ -353,6 +357,7 @@ export interface RebateAgreementInput {
 
 export interface RebateAgreement extends RebateAgreementInput {
   id: string;
+  partyRole: RebatePartyRole;
   status: "ACTIVE";
   accrualAccount: string;
   expenseAccount: string;
@@ -373,8 +378,8 @@ export interface RebateAccrual {
   retroactive?: boolean;
 }
 
-export function listRebateAgreements(legalEntityId = "", signal?: AbortSignal): Promise<RebateAgreement[]> {
-  return items<RebateAgreement>(`/rebates/agreements${query({ legalEntityId })}`, signal);
+export function listRebateAgreements(legalEntityId = "", signal?: AbortSignal, partyRole: RebatePartyRole | "" = ""): Promise<RebateAgreement[]> {
+  return items<RebateAgreement>(`/rebates/agreements${query({ legalEntityId, partyRole })}`, signal);
 }
 
 export function getRebateAgreement(id: string, signal?: AbortSignal): Promise<RebateAgreement> {
@@ -388,6 +393,81 @@ export function createRebateAgreement(body: RebateAgreementInput, key: string = 
 /** GET /rebates/accruals - accrual rows of an agreement, optionally for one period (2027-03, 2027-Q1, 2027). */
 export function listRebateAccruals(filter: { agreementId?: string; period?: string } = {}, signal?: AbortSignal): Promise<RebateAccrual[]> {
   return items<RebateAccrual>(`/rebates/accruals${query(filter)}`, signal);
+}
+
+// ---- Vendor rebate claims (FR-26.15, BR-26.11, AC-26.11).
+
+/** CREDIT_NOTE and PAYMENT_DEDUCTION are chosen; a negative claim settles by VENDOR_INVOICE on its own. */
+export type ClaimSettlementMode = "CREDIT_NOTE" | "PAYMENT_DEDUCTION" | "VENDOR_INVOICE";
+export type ClaimStatus = "OPEN" | "APPROVED";
+
+export interface VendorClaimPreview {
+  agreementId: string;
+  vendorId: string;
+  periodId: string;
+  /** The period's accruals. */
+  accrued: string;
+  /** What the period's earlier claims already claimed. */
+  priorClaimed: string;
+  /** accrued - priorClaimed: what a new claim would settle; "0" when the period is fully claimed. */
+  amount: string;
+  currency: string;
+  settlementMode: ClaimSettlementMode;
+  claims: number;
+}
+
+export interface VendorClaim {
+  id: string;
+  number: string;
+  legalEntityId: string;
+  agreementId: string;
+  vendorId: string;
+  periodId: string;
+  accruedTotal: string;
+  priorClaimed: string;
+  amount: string;
+  currency: string;
+  settlementMode: ClaimSettlementMode;
+  status: ClaimStatus;
+  version: number;
+  createdBy?: string;
+  approvedBy?: string;
+  createdAt: string;
+  approvedAt?: string;
+}
+
+export interface VendorClaimFilter {
+  agreementId?: string;
+  vendorId?: string;
+  period?: string;
+  status?: ClaimStatus | "";
+}
+
+/** GET /rebates/agreements/{id}/claim-preview - the claim a period of a VENDOR agreement would produce; writes nothing. */
+export function previewVendorClaim(agreementId: string, period: string, signal?: AbortSignal): Promise<VendorClaimPreview> {
+  return send<VendorClaimPreview>(`/rebates/agreements/${encodeURIComponent(agreementId)}/claim-preview${query({ period })}`, {}, signal);
+}
+
+/** POST /rebates/vendor-claims - claim one period (RC-n); 409 PRC-0015 when it is fully claimed. */
+export function createVendorClaim(
+  body: { agreementId: string; period: string; settlementMode?: "CREDIT_NOTE" | "PAYMENT_DEDUCTION" },
+  key: string = newKey(),
+): Promise<VendorClaim> {
+  return post<VendorClaim>("/rebates/vendor-claims", body, key);
+}
+
+/** GET /rebates/vendor-claims - the Vendor rebate claims inquiry, newest first, at most 100. */
+export function listVendorClaims(filter: VendorClaimFilter = {}, signal?: AbortSignal): Promise<VendorClaim[]> {
+  return items<VendorClaim>(`/rebates/vendor-claims${query({ ...filter })}`, signal);
+}
+
+export function getVendorClaim(id: string, signal?: AbortSignal): Promise<VendorClaim> {
+  return send<VendorClaim>(`/rebates/vendor-claims/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** POST /rebates/vendor-claims/{id}:approve at the claim version; the claim's creator cannot approve it (PRC-0046). */
+export function approveVendorClaim(id: string, version: number, key: string = newKey()): Promise<VendorClaim> {
+  return post<VendorClaim>(`/rebates/vendor-claims/${encodeURIComponent(id)}:approve`, { version }, key);
 }
 
 // ---- Retroactive rebate recompute (FR-26.23, BR-26.14, AC-26.14).
