@@ -12,11 +12,12 @@ import { JournalBatchesPage } from "./JournalBatchesPage";
 import { JournalBatchPage, NewJournalBatchPage } from "./JournalBatchPage";
 import { EditJournalNamePage, NewJournalNamePage } from "./JournalNameFormPage";
 import { JournalNamesPage } from "./JournalNamesPage";
+import { LedgerLinesPage } from "./LedgerLinesPage";
 
 const ledger: PassageModule = {
   id: "ledger",
   title: "General ledger",
-  description: "Universal journal: manual journal batches with approval, trial balance, posted journal entries and their reversal, journal names, shared reason codes, account structures, dimension values and default description templates.",
+  description: "Universal journal: manual journal batches with approval, trial balance, ledger transactions inquiry, posted journal entries and their reversal, journal names, shared reason codes, account structures, dimension values and default description templates.",
   routes: [
     { path: "/ledger/journal-batches", element: createElement(JournalBatchesPage), handle: { title: "Journal batches" } },
     { path: "/ledger/journal-batches/new", element: createElement(NewJournalBatchPage), handle: { title: "New journal batch" } },
@@ -25,6 +26,7 @@ const ledger: PassageModule = {
     { path: "/ledger/journal-names/new", element: createElement(NewJournalNamePage), handle: { title: "New journal name" } },
     { path: "/ledger/journal-names/:code", element: createElement(EditJournalNamePage), handle: { title: "Journal name" } },
     { path: "/ledger/trial-balance", element: createElement(TrialBalanceScreen), handle: { title: "Trial balance" } },
+    { path: "/ledger/transactions", element: createElement(LedgerLinesPage), handle: { title: "Ledger transactions" } },
     { path: "/ledger/entries/:id", element: createElement(EntryScreen), handle: { title: "Journal entry" } },
     { path: "/ledger/reason-codes", element: createElement(ReasonCodesPage), handle: { title: "Reason codes" } },
     { path: "/ledger/reason-codes/new", element: createElement(NewReasonCodePage), handle: { title: "New reason code" } },
@@ -40,6 +42,7 @@ const ledger: PassageModule = {
   nav: [
     { label: "Journal batches", to: "/ledger/journal-batches", duty: "ledger.journal.read" },
     { label: "Trial balance", to: "/ledger/trial-balance", duty: "ledger.balance.read" },
+    { label: "Ledger transactions", to: "/ledger/transactions", duty: "ledger.journal.read" },
     { label: "Journal names", to: "/ledger/journal-names", duty: "ledger.journal.read" },
     { label: "Reason codes", to: "/ledger/reason-codes", duty: "ledger.journal.read" },
     { label: "Account structures", to: "/ledger/structures", duty: "ledger.journal.read" },

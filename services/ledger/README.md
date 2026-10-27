@@ -2,7 +2,7 @@
 
 The ledger is the universal journal: one append-only, double-entry journal per
 ledger, the chart of accounts, the posting API every subledger calls, and the
-balance projection that trial balances read. Wave 11 (PSG-11, slices 1 to 5).
+balance projection that trial balances read. Wave 11 (PSG-11, slices 1 to 6).
 
 Reference: `docs/prd/phase-2-financial-core.md` section 2.11. What is built and
 what is not is listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
@@ -29,6 +29,13 @@ what is not is listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
   the posting transaction; `GET /api/v1/ledger/balances` is the trial balance with
   a balanced flag; `POST /api/v1/ledger/balances:rebuild` recomputes the projection
   from the journal and reports differing rows.
+- Ledger transactions (FR-11.14): `GET /api/v1/ledger/journal-lines?ledger=` lists
+  posted lines in posting order (posting sequence, line number) with the entry's
+  voucher, date, description, source and trace id. Filters: `account_from`/`account_to`
+  (text range, inclusive), `date_from`/`date_to` (posting date, inclusive), `voucher`,
+  `source_system` and `dim.{ATTRIBUTE}=value` (all pairs must match). Keyset pages of
+  up to 1,000 lines (default 100): pass `nextCursor` back as `cursor`. Migration 0010
+  indexes the date and account access paths.
 - Events through the outbox (same transaction): `dev.passage.ledger.journal.posted.v1`,
   `dev.passage.ledger.journal.reversed.v1`, `dev.passage.ledger.balance.rebuilt.v1`.
 - Database guarantees (FR-11.6, BR-11.1): every table has `tenant_id` with ENABLE and
@@ -201,7 +208,7 @@ mounted route and its duty is in `api/openapi.yaml`. Store tests use
 |---|---|
 | `ledger.ledger.write` | `POST /ledgers` |
 | `ledger.account.write` | `PUT /charts/{chart}/accounts/{number}` |
-| `ledger.journal.read` | `GET /ledgers/{id}`, `GET /charts/{chart}/accounts`, `GET /journal-entries/{id}`, `GET /reason-codes[/{code}]`, `GET /ledgers/{ledger}/account-structures[/{id}]`, `GET /ledgers/{ledger}/dimension-values`, `GET /description-templates[/{id}]`, `GET /journal-names[/{code}]`, `GET /journal-batches[/{id}]` |
+| `ledger.journal.read` | `GET /ledgers/{id}`, `GET /charts/{chart}/accounts`, `GET /journal-entries/{id}`, `GET /reason-codes[/{code}]`, `GET /ledgers/{ledger}/account-structures[/{id}]`, `GET /ledgers/{ledger}/dimension-values`, `GET /description-templates[/{id}]`, `GET /journal-names[/{code}]`, `GET /journal-batches[/{id}]`, `GET /journal-lines` |
 | `ledger.journal.post` | `POST /journal-entries`, `POST /validate`, `POST /journal-batches/{id}/post` (PRD "Post ledger journals") |
 | `ledger.journal.postdirect` | Checked inside `POST /journal-batches/{id}/post` for a validated batch whose journal name has no workflow (PRD "Post ledger journals without approval") |
 | `ledger.journal.write` | `POST /journal-batches`, `PATCH /journal-batches/{id}`, `POST .../submit`, `POST .../cancel` (PRD "Maintain ledger journals") |

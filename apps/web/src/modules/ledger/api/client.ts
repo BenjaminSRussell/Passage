@@ -642,3 +642,65 @@ export async function putDescriptionTemplate(
   if (!res.ok) throw await readProblem(res);
   return descriptionTemplateSchema.parse(await res.json());
 }
+
+/** One posted journal line with its entry context (FR-11.14 ledger transactions). */
+export const journalLineSchema = z.object({
+  id: z.string(),
+  entryId: z.string(),
+  voucher: z.string(),
+  postingSequence: z.number(),
+  postingDate: z.string(),
+  lineNumber: z.number(),
+  account: z.string(),
+  displayName: z.string(),
+  dimensions: z.record(z.string()).optional(),
+  debitCredit: z.enum(["D", "C"]),
+  amount: z.string(),
+  currency: z.string(),
+  negativePosting: z.boolean(),
+  text: z.string().optional(),
+  description: z.string().optional(),
+  sourceSystem: z.string(),
+  sourceType: z.string(),
+  sourceId: z.string(),
+  sourceUri: z.string().optional(),
+  sourceLineRef: z.string().optional(),
+  reversalOfEntryId: z.string().optional(),
+  traceId: z.string(),
+});
+export type JournalLine = z.infer<typeof journalLineSchema>;
+
+/** Filters of GET /api/v1/ledger/journal-lines. Dimensions become dim.{ATTRIBUTE}=value. */
+export interface JournalLineQuery {
+  ledgerId: string;
+  accountFrom?: string;
+  accountTo?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  voucher?: string;
+  sourceSystem?: string;
+  dimensions?: Record<string, string>;
+  cursor?: string;
+  limit?: number;
+}
+
+const journalLinePageSchema = z.object({
+  items: z.array(journalLineSchema),
+  nextCursor: z.string().optional(),
+});
+export type JournalLinePage = z.infer<typeof journalLinePageSchema>;
+
+/** GET /api/v1/ledger/journal-lines: one keyset page in posting order. */
+export function fetchJournalLines(q: JournalLineQuery, fetchImpl: FetchLike = defaultFetch): Promise<JournalLinePage> {
+  const params = new URLSearchParams({ ledger: q.ledgerId });
+  if (q.accountFrom) params.set("account_from", q.accountFrom);
+  if (q.accountTo) params.set("account_to", q.accountTo);
+  if (q.dateFrom) params.set("date_from", q.dateFrom);
+  if (q.dateTo) params.set("date_to", q.dateTo);
+  if (q.voucher) params.set("voucher", q.voucher);
+  if (q.sourceSystem) params.set("source_system", q.sourceSystem);
+  for (const [attr, value] of Object.entries(q.dimensions ?? {})) params.set(`dim.${attr}`, value);
+  if (q.cursor) params.set("cursor", q.cursor);
+  if (q.limit) params.set("limit", String(q.limit));
+  return getJSON(`/api/v1/ledger/journal-lines?${params.toString()}`, journalLinePageSchema, fetchImpl);
+}

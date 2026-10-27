@@ -63,6 +63,7 @@ type Store interface {
 	DecideBatch(ctx context.Context, id string, version int, approve bool) (Batch, error)
 	CancelBatch(ctx context.Context, id string, version int) (Batch, error)
 	PostBatch(ctx context.Context, in PostBatchInput) (EntryResult, error)
+	ListLines(ctx context.Context, f LineFilter) (LinePage, error)
 	Ping(ctx context.Context) error
 }
 

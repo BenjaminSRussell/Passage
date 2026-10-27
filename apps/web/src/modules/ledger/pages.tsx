@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { Alert, Badge, Card, DataTable, FormField, Input, PageHeader, Button, type DataTableColumn } from "../../shell/ui";
 import { fetchEntry, fetchTrialBalance, type Entry, type TrialBalance, type TrialBalanceQuery } from "./api/client";
 import styles from "./pages.module.css";
@@ -10,6 +10,21 @@ export const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4
 const PERIOD = /^\d{4}-\d{2}$/;
 
 type Row = TrialBalance["rows"][number];
+
+/**
+ * The ledger transactions address for one trial balance row: the account and
+ * the posting dates its periods cover (period keys are calendar months until
+ * fiscal calendars arrive).
+ */
+export function transactionsLink(q: TrialBalanceQuery, account: string): string {
+  const params = new URLSearchParams({ ledger: q.ledgerId, account_from: account, account_to: account });
+  if (q.periodFrom) params.set("date_from", `${q.periodFrom}-01`);
+  if (q.periodTo) {
+    const [y, m] = q.periodTo.split("-").map(Number);
+    params.set("date_to", new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10));
+  }
+  return `/ledger/transactions?${params.toString()}`;
+}
 
 const balanceColumns: DataTableColumn<Row>[] = [
   { key: "account", header: "Account", mono: true },
@@ -22,6 +37,7 @@ const balanceColumns: DataTableColumn<Row>[] = [
 
 /** Trial balance: account rows from the balance projection, with the balanced check. */
 export function TrialBalanceScreen() {
+  const navigate = useNavigate();
   const [draft, setDraft] = useState<TrialBalanceQuery>({ ledgerId: "" });
   const [query, setQuery] = useState<TrialBalanceQuery | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -101,7 +117,9 @@ export function TrialBalanceScreen() {
             getRowKey={(row) => row.account}
             loading={result.isPending}
             empty={{ title: "No balances", description: "Nothing has been posted to this ledger in the selected periods." }}
+            onRowOpen={(row) => query && navigate(transactionsLink(query, row.account))}
           />
+          <p className={styles.note}>Open an account to see its posted lines.</p>
         </>
       )}
     </div>

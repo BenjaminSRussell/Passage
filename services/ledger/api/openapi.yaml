@@ -162,6 +162,35 @@ components:
         sourceLineRef: { type: string }
         reversalOfLineId: { type: string, format: uuid }
         negativePosting: { type: boolean, description: Storno line; the projection reduces the original side (BR-11.16) }
+    LedgerLine:
+      type: object
+      description: A posted journal line with its entry context (ledger transactions inquiry, FR-11.14).
+      required: [id, entryId, voucher, postingSequence, postingDate, lineNumber, account, displayName, debitCredit, amount, currency, negativePosting, sourceSystem, sourceType, sourceId, traceId]
+      properties:
+        id: { type: string, format: uuid }
+        entryId: { type: string, format: uuid }
+        voucher: { type: string }
+        postingSequence: { type: integer, format: int64 }
+        postingDate: { type: string, format: date }
+        lineNumber: { type: integer }
+        account: { type: string }
+        displayName: { type: string, example: "6010-D100-C1" }
+        dimensions:
+          type: object
+          additionalProperties: { type: string }
+        debitCredit: { type: string, enum: [D, C] }
+        amount: { type: string, description: Decimal at the currency's minor-unit scale }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        negativePosting: { type: boolean }
+        text: { type: string, description: Line text }
+        description: { type: string, description: Entry description }
+        sourceSystem: { type: string }
+        sourceType: { type: string }
+        sourceId: { type: string }
+        sourceUri: { type: string }
+        sourceLineRef: { type: string }
+        reversalOfEntryId: { type: string, format: uuid, description: Set on the lines of a reversing entry }
+        traceId: { type: string, description: W3C trace id of the posting request }
     Entry:
       type: object
       properties:
@@ -1286,6 +1315,47 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ValidateResponse" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+  /api/v1/ledger/journal-lines:
+    get:
+      tags: [journal]
+      operationId: listJournalLines
+      x-passage-duty: ledger.journal.read
+      description: |
+        Ledger transactions inquiry (FR-11.14): posted lines of one ledger in posting order
+        (posting sequence, line number). account_from/account_to compare account numbers as text
+        (inclusive); date_from/date_to bound the posting date (inclusive); voucher and source_system
+        match exactly; each dim.{ATTRIBUTE}=value (for example dim.DEPT=D100) must match the line's
+        combination, all of them together (each attribute once, values 1 to 20 characters; OpenAPI
+        cannot declare a dotted parameter family, so dim.* parameters are described here only).
+        Pages are keyset: pass nextCursor back as cursor with the
+        same filters. An unknown ledger, or one outside the caller's legal-entity scope, is 404.
+      parameters:
+        - { name: ledger, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: account_from, in: query, required: false, schema: { type: string, pattern: '^[A-Za-z0-9._-]{1,20}$' } }
+        - { name: account_to, in: query, required: false, schema: { type: string, pattern: '^[A-Za-z0-9._-]{1,20}$' } }
+        - { name: date_from, in: query, required: false, schema: { type: string, format: date } }
+        - { name: date_to, in: query, required: false, schema: { type: string, format: date } }
+        - { name: voucher, in: query, required: false, schema: { type: string, maxLength: 30 } }
+        - { name: source_system, in: query, required: false, schema: { type: string, maxLength: 64 } }
+        - { name: cursor, in: query, required: false, description: The nextCursor of the previous page, schema: { type: string, pattern: '^[0-9]{1,18}\.[0-9]{1,5}$' } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 1000, default: 100 } }
+      responses:
+        "200":
+          description: One page of lines
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/LedgerLine" }
+                  nextCursor: { type: string, description: Present only when more lines follow }
         "400": { $ref: "#/components/responses/Problem400" }
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }

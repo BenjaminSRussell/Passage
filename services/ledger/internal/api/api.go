@@ -97,6 +97,7 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(dutyRead)).Get("/journal-entries/{id}", a.getEntry)
 		r.With(authz.RequireDuty(dutyReverse)).Post("/journal-entries/{id}/reverse", a.reverseEntry)
 		r.With(authz.RequireDuty(dutyPost)).Post("/validate", a.validateEntry)
+		r.With(authz.RequireDuty(dutyRead)).Get("/journal-lines", a.listLines)
 		r.With(authz.RequireDuty(dutyBalanceRead)).Get("/balances", a.trialBalance)
 		r.With(authz.RequireDuty(dutyRebuild)).Post("/balances:rebuild", a.rebuildBalances)
 		r.With(authz.RequireDuty(dutyRead)).Get("/reason-codes", a.listReasonCodes)

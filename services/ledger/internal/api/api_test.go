@@ -52,6 +52,9 @@ type fakeStore struct {
 	// batch answers every batch call; batchCalls records them in order.
 	batch      store.Batch
 	batchCalls []batchCall
+	// linePage answers ListLines; lineFilters records each filter it received.
+	linePage    store.LinePage
+	lineFilters []store.LineFilter
 }
 
 // batchCall is one journal batch store call as the handler made it.

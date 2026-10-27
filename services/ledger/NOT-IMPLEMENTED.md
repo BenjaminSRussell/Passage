@@ -1,4 +1,4 @@
-# NOT-IMPLEMENTED — ledger (PSG-11, wave 11, after slice 5)
+# NOT-IMPLEMENTED — ledger (PSG-11, wave 11, after slice 6)
 
 Every PSG-11 deliverable and acceptance criterion not yet fully built. Slice 2
 added shared reason codes (D6, FR-11.15), reversal reason rules, negative
@@ -20,7 +20,12 @@ with legal-entity scope) with the BR-11.10 state machine, `version`/`ETag` and
 `If-Match`; submit (validation with the posting rules), approve/reject, cancel
 and post (entry and batch status in one transaction, `Idempotency-Key`);
 `dev.passage.ledger.batch.statuschanged.v1` through the outbox; and the journal
-name, batch list, new batch and batch screens. Status is either `later slice of PSG-11`
+name, batch list, new batch and batch screens. Slice 6 added the ledger
+transactions inquiry (FR-11.14): `GET /journal-lines` with keyset paging and
+account-range, posting-date, voucher, source-system and `dim.{ATTRIBUTE}`
+filters, the indexes for it (migration 0010), the Ledger transactions screen
+(filters in the address, load more, drill to the entry) and the drill from a
+trial balance account to its lines. Status is either `later slice of PSG-11`
 (owned by this service, next slices) or `handoff` (needs another owner or a
 path outside `services/ledger/` and `apps/web/src/modules/ledger/`).
 
@@ -59,7 +64,7 @@ path outside `services/ledger/` and `apps/web/src/modules/ledger/`).
 | FR-11.15 shared reason codes | partial | Built: catalogue, CRUD API, ledger-level `reversal_reason_required` and `negative_posting_enabled`, active / `applies_to` ledger / `requires_comment` / `alternative_posting_date_allowed` checks, storno lines, reason fields on the entry and on `journal.reversed`. The journal-name level `reversal_reason_required` is built for entries posted from batches (`TestPostgres_AC11_11_JournalNameRequiresReversalReason`). Not built: the parameters live on the ledger rather than the legal entity (PRD §2.11 parameter table) until legal-entity parameters exist; translatable `name` (single-language until the wave 5 translation service, handoff); the "Reason code usage" report; reason codes on clearing reset and realignment (D8, D10). Other modules (bank, customer, vendor, fixed asset, counting) read the shared table in their own waves. |
 | FR-11.12 source object and `source_line_ref` | built | — |
 | FR-11.13 opening balances via the migration framework | handoff | Needs wave 10 migration framework and the conversion-suspense account; the demo chart and opening balances (deploy) are also not loaded. |
-| FR-11.14 query API: line query (keyset), balance filters by dimension, `group_by` | partial | Trial balance over account and period range is built. Line query with keyset cursor, `dim.{attr}` filters, `group_by`, and the account × dimension inquiries are not built. |
+| FR-11.14 query API: line query (keyset), balance filters by dimension, `group_by` | partial | Built: trial balance over account and period range; `GET /journal-lines` (keyset cursor `<posting_sequence>.<line_number>`, max 1,000 per page, `account_from`/`account_to`, `date_from`/`date_to`, `voucher`, `source_system`, `dim.{attr}` exact match; 404 `LEDGER_NOT_FOUND` for a ledger outside the caller's tenant or legal-entity scope) and its screen. Not built: `period_from`/`period_to` on the line query (posting dates cover it until fiscal periods exist, wave 6); dimension filters on `GET /balances` and `group_by` (the balance projection is keyed by combination, so this needs a combination-to-dimension join on the balance read, later slice of PSG-11); the account × dimension inquiries; `amount_acct`/`amount_rpt` columns on the line (single currency, `amount` is `amount_txn`, wave 12); the trace id is shown as text, not linked to the tracing UI (wave 5 shell); line export (PRD §2.11 exports). |
 | FR-11.17 default descriptions | partial | Built (see D7). Not built: the description language comes from `journal_name.description_language` (PRD §2.11 parameter table) or the legal entity's language, neither of which exists yet, so posting always looks up `en` templates (journal names exist since slice 5 but carry no `description_language` yet; legal-entity languages wait on wave 6, handoff); `party_name` expands to empty text until source documents carry a party (subledger waves); reversals keep their fixed `Reversal of <voucher>` text rather than a `reversal` template; `POST /validate` does not return the expanded description; templates are not translatable through the wave 5 translation service (handoff). |
 | FR-11.10, FR-11.11 | later slice of PSG-11 | Recurring journals, batch templates, attachments and notes: see D5. |
 | FR-11.16, FR-11.18 – FR-11.24 | later slice of PSG-11 | See D7–D10. |
@@ -100,6 +105,7 @@ path outside `services/ledger/` and `apps/web/src/modules/ledger/`).
 | AC2 negative tests: unbalanced, closed period, invalid dimension | partial | Unbalanced, account rules, scale, empty lines, dimension attribute/format, structure not found, dimension required/invalid/inactive and closed period (before `firstOpenDate`) are covered in domain table tests and store tests (`TestPostgres_PostingValidatesAgainstStructures`, `TestPostgres_DimensionValueRegister`). Fiscal-period status is not built (see above). |
 | AC3 duplicate `Post` with the same key is a no-op | built | Store test covers replay returning the same entry. |
 | AC4 throughput 5,000 lines/s, p99 < 200 ms | later slice of PSG-11 | Performance test on the dev cluster; needs the deployed stack. |
+| PRD AC-11.10 first page for one account and month in < 300 ms p95 over 10M lines | partial | The keyset query and its indexes (`journal_entry (tenant_id, ledger_id, posting_date, posting_sequence)`, `journal_line (tenant_id, main_account_id, entry_id)`) are built and covered functionally by `TestPostgres_ListLines_*`; the 10M-line latency measurement is a performance gate on the dev cluster (later slice of PSG-11). |
 | AC5 reversal is an exact negating entry linked to the original | built | Store test asserts swapped D/C, reversal line links and single reversal. |
 | PRD AC-11.4 6010 requires DEPT under the active structure → 422 `LEDGER_DIMENSION_REQUIRED` with `line_index` | built | `TestStructure_AC11_4` (domain) and `TestPostgres_PostingValidatesAgainstStructures` (store). |
 | PRD AC-11.11 reason required on reversal; storno restores turnover | built | Ledger level: `TestPostgres_ReversalRequiresReasonWhenConfigured` (422 `LEDGER_REASON_REQUIRED`) and `TestPostgres_NegativeReversalRestoresTurnover` (trial balance debit and credit back to their pre-posting values, rebuild agrees, re-instatement restores them). Journal-name level: `TestPostgres_AC11_11_JournalNameRequiresReversalReason`. |
