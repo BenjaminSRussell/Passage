@@ -9,22 +9,26 @@ import { CreditProfilePage, NewCreditProfilePage } from "./CreditProfileFormPage
 import { CreditProfilesPage } from "./CreditProfilesPage";
 import { NewOrderPage } from "./NewOrderPage";
 import { OrderDetailPage } from "./OrderDetailPage";
-import { CreditHoldsPage, OrdersPage } from "./OrdersPage";
+import { HoldQueuePage } from "./HoldQueuePage";
+import { OrdersPage } from "./OrdersPage";
 import { NewProductListingPage, ProductListingsPage } from "./ProductListingsPage";
+import { QuotationDetailPage } from "./QuotationDetailPage";
+import { NewQuotationPage, QuotationsPage } from "./QuotationsPage";
 import { ScheduleReleasePage } from "./ScheduleReleasePage";
+import { NewSupplementaryRulePage, SupplementaryRulesPage } from "./SupplementaryRulesPage";
 
 const sales: PassageModule = {
   id: "sales",
   title: "Sales",
   description:
-    "Enter, confirm, change and cancel sales orders, apply and release holds, maintain credit profiles, product listings and sales agreements, check available-to-promise, reconcile scheduling releases and preview backorder runs.",
+    "Quote and convert to orders, enter, confirm, change and cancel sales orders, apply holds and work the release queue, maintain credit profiles, product listings, supplementary items and sales agreements, check available-to-promise, reconcile scheduling releases and preview backorder runs.",
   routes: [
     { path: "/sales", element: createElement(OrdersPage), handle: { title: "Sales orders" } },
     { path: "/sales/orders", element: createElement(OrdersPage) },
     { path: "/sales/orders/new", element: createElement(NewOrderPage), handle: { title: "New sales order" } },
     { path: "/sales/orders/:id", element: createElement(OrderDetailPage), handle: { title: "Sales order" } },
     { path: "/sales/orders/:id/change", element: createElement(ChangeOrderPage), handle: { title: "Change sales order" } },
-    { path: "/sales/credit-holds", element: createElement(CreditHoldsPage) },
+    { path: "/sales/credit-holds", element: createElement(HoldQueuePage) },
     { path: "/sales/credit-profiles", element: createElement(CreditProfilesPage) },
     { path: "/sales/credit-profiles/new", element: createElement(NewCreditProfilePage), handle: { title: "New credit profile" } },
     { path: "/sales/credit-profiles/:legalEntityId/:customerId", element: createElement(CreditProfilePage), handle: { title: "Credit profile" } },
@@ -36,10 +40,16 @@ const sales: PassageModule = {
     { path: "/sales/agreements", element: createElement(AgreementsPage) },
     { path: "/sales/agreements/new", element: createElement(NewAgreementPage), handle: { title: "New sales agreement" } },
     { path: "/sales/agreements/:id", element: createElement(AgreementDetailPage), handle: { title: "Sales agreement" } },
+    { path: "/sales/quotations", element: createElement(QuotationsPage) },
+    { path: "/sales/quotations/new", element: createElement(NewQuotationPage), handle: { title: "New sales quotation" } },
+    { path: "/sales/quotations/:id", element: createElement(QuotationDetailPage), handle: { title: "Sales quotation" } },
+    { path: "/sales/supplementary-items", element: createElement(SupplementaryRulesPage) },
+    { path: "/sales/supplementary-items/new", element: createElement(NewSupplementaryRulePage), handle: { title: "New supplementary item rule" } },
   ],
   nav: [
     { label: "Sales orders", to: "/sales/orders", duty: "sales.order.read" },
     { label: "New order", to: "/sales/orders/new", duty: "sales.order.write" },
+    { label: "Quotations", to: "/sales/quotations", duty: "sales.order.read" },
     { label: "Credit release queue", to: "/sales/credit-holds", duty: "sales.credit.release" },
     { label: "Credit profiles", to: "/sales/credit-profiles", duty: "sales.order.read" },
     { label: "ATP check", to: "/sales/atp", duty: "sales.order.read" },
@@ -47,6 +57,7 @@ const sales: PassageModule = {
     { label: "Backorder run preview", to: "/sales/backorder-runs", duty: "sales.backorder.run" },
     { label: "Product listings", to: "/sales/product-listings", duty: "sales.order.read" },
     { label: "Sales agreements", to: "/sales/agreements", duty: "sales.order.read" },
+    { label: "Supplementary items", to: "/sales/supplementary-items", duty: "sales.order.read" },
   ],
 };
 

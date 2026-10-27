@@ -35,16 +35,14 @@ interface OrderListProps {
   title: string;
   description: string;
   label: string;
-  /** Fixed hold filter (the credit release queue); otherwise the user picks filters. */
-  hold?: HoldType;
   empty: { title: string; description: string };
 }
 
 /** One list of orders, newest first, with "Load more" over the service cursor. */
-function OrderList({ title, description, label, hold, empty }: OrderListProps) {
+function OrderList({ title, description, label, empty }: OrderListProps) {
   const navigate = useNavigate();
   const [status, setStatus] = useState<OrderStatus | "">("");
-  const [holdFilter, setHoldFilter] = useState<HoldType | "">(hold ?? "");
+  const [holdFilter, setHoldFilter] = useState<HoldType | "">("");
   const filterKey = `${status}|${holdFilter}`;
   const state = useLoad((signal) => listOrders({ status, hold: holdFilter }, signal), filterKey);
   const [more, setMore] = useState<OrderSummary[]>([]);
@@ -98,20 +96,18 @@ function OrderList({ title, description, label, hold, empty }: OrderListProps) {
             </Select>
           )}
         </FormField>
-        {hold ? null : (
-          <FormField id={`${label}-hold`} label="Active hold">
-            {(control) => (
-              <Select {...control} value={holdFilter} onChange={(e) => setHoldFilter(e.target.value as HoldType | "")}>
-                <option value="">Any or none</option>
-                {HOLD_TYPES.map((h) => (
-                  <option key={h} value={h}>
-                    {sentence(h)}
-                  </option>
-                ))}
-              </Select>
-            )}
-          </FormField>
-        )}
+        <FormField id={`${label}-hold`} label="Active hold">
+          {(control) => (
+            <Select {...control} value={holdFilter} onChange={(e) => setHoldFilter(e.target.value as HoldType | "")}>
+              <option value="">Any or none</option>
+              {HOLD_TYPES.map((h) => (
+                <option key={h} value={h}>
+                  {sentence(h)}
+                </option>
+              ))}
+            </Select>
+          )}
+        </FormField>
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load orders" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
@@ -152,19 +148,6 @@ export function OrdersPage() {
       description="Every order in your legal entities, newest first. Open an order to confirm it or release its holds."
       label="Sales orders"
       empty={{ title: "No sales orders yet", description: "Orders you enter or receive through a channel appear here." }}
-    />
-  );
-}
-
-/** Credit release queue (PRD §5.27.6): orders with an ACTIVE CREDIT hold. */
-export function CreditHoldsPage() {
-  return (
-    <OrderList
-      title="Credit release queue"
-      description="Orders the credit check held. Open one to see the failing rule and release it; the release confirms the order."
-      label="Orders on credit hold"
-      hold="CREDIT"
-      empty={{ title: "No orders on credit hold", description: "Orders that fail the credit check at confirmation wait here for release." }}
     />
   );
 }

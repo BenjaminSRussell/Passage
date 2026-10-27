@@ -208,6 +208,16 @@ type Store interface {
 	ListAgreements(ctx context.Context, f AgreementFilter) ([]Agreement, error)
 	GetAgreement(ctx context.Context, id string) (Agreement, error)
 	ReleaseAgreement(ctx context.Context, id string, in AgreementRelease, now time.Time) (ReleaseResult, bool, error)
+	CreateQuotation(ctx context.Context, in NewQuotation) (Quotation, bool, error)
+	ListQuotations(ctx context.Context, f QuotationFilter) ([]Quotation, error)
+	GetQuotation(ctx context.Context, id string) (Quotation, error)
+	SendQuotation(ctx context.Context, id string, version int, now time.Time) (Quotation, error)
+	LoseQuotation(ctx context.Context, id string, version int, reason string) (Quotation, error)
+	ConvertQuotation(ctx context.Context, id string, in ConvertRequest, now time.Time) (QuotationConversion, error)
+	ListHolds(ctx context.Context, f HoldQueueFilter) ([]HoldQueueItem, error)
+	CreateSupplementaryRule(ctx context.Context, in domain.SupplementaryRule, actor string) (domain.SupplementaryRule, error)
+	ListSupplementaryRules(ctx context.Context, f SupplementaryRuleFilter) ([]domain.SupplementaryRule, error)
+	DeleteSupplementaryRule(ctx context.Context, id string) error
 	Ping(ctx context.Context) error
 }
 
@@ -333,7 +343,7 @@ func nextOrderSequence(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID s
 	return nextSequence(ctx, tx, tenantID, legalEntityID, "SO")
 }
 
-// nextSequence draws the next number of a per-legal-entity sequence (SO-, SA-).
+// nextSequence draws the next number of a per-legal-entity sequence (SO-, SA-, SQ-).
 func nextSequence(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, sequenceID string) (int64, error) {
 	var seq int64
 	err := tx.QueryRow(ctx, `insert into sales_number_sequence (tenant_id, legal_entity_id, sequence_id, next_value) values ($1, $2, $3, 2)

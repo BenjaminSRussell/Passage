@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
@@ -53,4 +54,38 @@ func (a *API) applyHold(w http.ResponseWriter, r *http.Request) {
 		setETag(w, order.Version)
 		httpx.JSON(w, http.StatusCreated, order)
 	})(w, r)
+}
+
+// listHolds is the release queue (PRD §5.27.6): ACTIVE holds in the caller's
+// scope, oldest first, with the failed credit rule and the customer's limit.
+// holdType filters by type (CREDIT is the credit release queue).
+func (a *API) listHolds(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	legalEntity, ok := creditLegalEntity(w, r, false)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	f := store.HoldQueueFilter{LegalEntityID: legalEntity, HoldType: q.Get("holdType")}
+	fields := map[string]string{}
+	if f.HoldType != "" && !holdTypes[f.HoldType] {
+		fields["holdType"] = "must be CREDIT, FRAUD, MANUAL or PRICE_REVIEW"
+	}
+	limit, ok := pageLimit(q.Get("limit"))
+	if !ok {
+		fields["limit"] = fmt.Sprintf("must be 1 to %d", maxPageSize)
+	}
+	if len(fields) > 0 {
+		validationFailed(w, r, fields)
+		return
+	}
+	f.Limit = limit
+	items, err := a.store.ListHolds(r.Context(), f)
+	if err != nil {
+		a.fail(w, r, "list holds", err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
 }

@@ -16,11 +16,27 @@ var (
 	OrderChanged         = events.Type(Context, "order", "changed", 1)
 	OrderCancelled       = events.Type(Context, "order", "cancelled", 1)
 	AgreementReleased    = events.Type(Context, "agreement", "released", 1)
+	QuotationConverted   = events.Type(Context, "quotation", "converted", 1)
 )
 
 // All lists every event type this service publishes.
 func All() []string {
-	return []string{OrderConfirmed, OrderHoldApplied, OrderHoldReleased, CreditCheckEvaluated, OrderChanged, OrderCancelled, AgreementReleased}
+	return []string{OrderConfirmed, OrderHoldApplied, OrderHoldReleased, CreditCheckEvaluated, OrderChanged, OrderCancelled, AgreementReleased,
+		QuotationConverted}
+}
+
+// QuotationConvertedData is the data member of quotation.converted.v1: the
+// lines of one quotation (by quotation line number) that became the lines of
+// a new DRAFT sales order (FR-27.1).
+type QuotationConvertedData struct {
+	QuotationID     string `json:"quotation_id"`
+	QuotationNumber string `json:"quotation_number"`
+	CustomerID      string `json:"customer_id"`
+	OrderID         string `json:"order_id"`
+	OrderNumber     string `json:"order_number"`
+	Lines           []int  `json:"lines"`
+	Actor           string `json:"actor"`
+	Version         int    `json:"version"`
 }
 
 // AgreementReleasedData is the data member of agreement.released.v1: one

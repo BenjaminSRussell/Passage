@@ -613,3 +613,207 @@ export function releaseAgreementOrder(id: string, input: ReleaseOrderInput, key:
     headers: { "Idempotency-Key": key },
   });
 }
+
+export const QUOTATION_STATUSES = ["DRAFT", "SENT", "CONVERTED", "LOST", "EXPIRED", "CANCELLED"] as const;
+export type QuotationStatus = (typeof QUOTATION_STATUSES)[number];
+
+export interface QuotationLine extends OrderLine {
+  lineStatus: "OPEN" | "CONVERTED";
+  /** The order a CONVERTED line became. */
+  convertedOrderId?: string;
+}
+
+export interface Quotation {
+  id: string;
+  legalEntityId: string;
+  quotationNumber: string;
+  customerId: string;
+  invoiceAccountId: string;
+  currency: string;
+  status: QuotationStatus;
+  /** The last day the quotation can be sent or converted. */
+  validUntil: string;
+  probabilityPct: number;
+  netTotal: Decimal;
+  lostReason?: string;
+  version: number;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  /** Filled on a single read, empty in the list. */
+  lines: QuotationLine[];
+  lineCount: number;
+  openLines: number;
+}
+
+export interface NewQuotation {
+  legalEntityId: string;
+  customerId: string;
+  invoiceAccountId?: string;
+  currency: string;
+  validUntil?: string;
+  probabilityPct?: number;
+  lines: NewOrderLine[];
+}
+
+export interface QuotationFilter {
+  legalEntityId?: string;
+  customerId?: string;
+  status?: QuotationStatus | "";
+}
+
+export interface ConvertQuotationInput {
+  /** Quotation line numbers; empty converts every open line. */
+  lineNos?: number[];
+  listingOverrideReason?: string;
+}
+
+export interface QuotationConversion {
+  quotation: Quotation;
+  order: Order;
+}
+
+/** Quotations in the caller's scope, newest first, without lines. */
+export async function listQuotations(filter: QuotationFilter = {}, signal?: AbortSignal): Promise<Quotation[]> {
+  const body = await json<{ items?: Quotation[] }>(
+    `/quotations${query({ legalEntityId: filter.legalEntityId, customerId: filter.customerId, status: filter.status, limit: 200 })}`,
+    {},
+    signal,
+  );
+  return body.items ?? [];
+}
+
+export function getQuotation(id: string, signal?: AbortSignal): Promise<Versioned<Quotation>> {
+  return versioned<Quotation>(`/quotations/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** Stores a DRAFT quotation numbered SQ- (FR-27.1). */
+export function createQuotation(input: NewQuotation, key: string = newKey()): Promise<Versioned<Quotation>> {
+  return versioned<Quotation>("/quotations", { method: "POST", body: JSON.stringify(input), headers: { "Idempotency-Key": key } });
+}
+
+/** Moves a DRAFT quotation that is still valid to SENT. */
+export function sendQuotation(id: string, etag: string): Promise<Versioned<Quotation>> {
+  return versioned<Quotation>(`/quotations/${encodeURIComponent(id)}:send`, { method: "POST", headers: { "If-Match": etag } });
+}
+
+/** Marks a DRAFT or SENT quotation LOST with a reason. */
+export function loseQuotation(id: string, etag: string, reason: string): Promise<Versioned<Quotation>> {
+  return versioned<Quotation>(`/quotations/${encodeURIComponent(id)}:lose`, { method: "POST", body: JSON.stringify({ reason }), headers: { "If-Match": etag } });
+}
+
+/** Converts the selected open lines (all when none are given) into one DRAFT order (AC-27.6). */
+export function convertQuotation(id: string, etag: string, input: ConvertQuotationInput): Promise<Versioned<QuotationConversion>> {
+  return versioned<QuotationConversion>(`/quotations/${encodeURIComponent(id)}:convert`, {
+    method: "POST",
+    body: JSON.stringify(input),
+    headers: { "If-Match": etag },
+  });
+}
+
+/** One ACTIVE hold in the release queue. */
+export interface HoldQueueItem {
+  holdId: string;
+  legalEntityId: string;
+  orderId: string;
+  orderNumber: string;
+  /** The order's version; its ETag is what the release call must echo. */
+  orderVersion: number;
+  customerId: string;
+  holdType: HoldType;
+  reasonCode: string;
+  amount: Decimal;
+  currency: string;
+  appliedBy: string;
+  appliedAt: string;
+  /** The failed rule of the last credit check (CREDIT holds). */
+  failedRule?: CreditRule;
+  creditLimit?: Decimal;
+  limitCurrency?: string;
+}
+
+export interface HoldQueueFilter {
+  legalEntityId?: string;
+  holdType?: HoldType | "";
+}
+
+/** ACTIVE holds, oldest first (PRD §5.27.6 credit release queue). */
+export async function listHolds(filter: HoldQueueFilter = {}, signal?: AbortSignal): Promise<HoldQueueItem[]> {
+  const body = await json<{ items?: HoldQueueItem[] }>(
+    `/holds${query({ legalEntityId: filter.legalEntityId, holdType: filter.holdType, limit: 200 })}`,
+    {},
+    signal,
+  );
+  return body.items ?? [];
+}
+
+export const SUPPLEMENTARY_REQUIREMENTS = ["MANDATORY", "OPTIONAL"] as const;
+export type SupplementaryRequirement = (typeof SUPPLEMENTARY_REQUIREMENTS)[number];
+
+export const SUPPLEMENTARY_PRICING = ["FREE", "PRICED"] as const;
+export type SupplementaryPricing = (typeof SUPPLEMENTARY_PRICING)[number];
+
+export interface SupplementaryRuleInput {
+  legalEntityId: string;
+  parentProductId: string;
+  /** Absent for every customer of the legal entity. */
+  customerId?: string;
+  supplementaryProductId: string;
+  unit: string;
+  requirement: SupplementaryRequirement;
+  baseQuantity: Decimal;
+  quantityPerBase: Decimal;
+  pricing: SupplementaryPricing;
+  unitPrice?: Decimal;
+}
+
+export interface SupplementaryRule extends SupplementaryRuleInput {
+  id: string;
+  customerId?: string;
+  unitPrice: Decimal;
+}
+
+export interface SupplementaryLine {
+  ruleId: string;
+  productId: string;
+  unit: string;
+  requirement: SupplementaryRequirement;
+  quantity: Decimal;
+  unitPrice: Decimal;
+  supplementaryOf: string;
+}
+
+export interface SupplementaryEvaluationInput {
+  legalEntityId: string;
+  productId: string;
+  customerId?: string;
+  quantity: Decimal;
+}
+
+export interface SupplementaryRuleFilter {
+  legalEntityId?: string;
+  parentProductId?: string;
+}
+
+export async function listSupplementaryRules(filter: SupplementaryRuleFilter = {}, signal?: AbortSignal): Promise<SupplementaryRule[]> {
+  const body = await json<{ items?: SupplementaryRule[] }>(
+    `/supplementary-item-rules${query({ legalEntityId: filter.legalEntityId, parentProductId: filter.parentProductId, limit: 200 })}`,
+    {},
+    signal,
+  );
+  return body.items ?? [];
+}
+
+export function createSupplementaryRule(input: SupplementaryRuleInput): Promise<SupplementaryRule> {
+  return json<SupplementaryRule>("/supplementary-item-rules", { method: "POST", body: JSON.stringify(input) });
+}
+
+export async function deleteSupplementaryRule(id: string): Promise<void> {
+  await send(`/supplementary-item-rules/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+/** The supplementary lines a parent line triggers (FR-27.14); nothing is stored. */
+export async function evaluateSupplementary(input: SupplementaryEvaluationInput): Promise<SupplementaryLine[]> {
+  const body = await json<{ items?: SupplementaryLine[] }>("/supplementary-items:evaluate", { method: "POST", body: JSON.stringify(input) });
+  return body.items ?? [];
+}

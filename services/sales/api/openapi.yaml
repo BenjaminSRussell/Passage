@@ -3,8 +3,9 @@ info:
   title: Passage Sales
   version: 1.0.0
   description: >-
-    Sales orders, ATP promise checks, credit profiles and order holds (wave 27,
-    slice 1). Every operation carries x-passage-duty. Errors are RFC 9457
+    Sales orders, ATP promise checks, credit profiles and order holds, change
+    management, listings, agreements, quotations, the hold release queue and
+    supplementary item rules (wave 27, slices 1 to 4). Every operation carries x-passage-duty. Errors are RFC 9457
     application/problem+json with a stable code listed in the service README.
 servers:
   - url: https://api.{env}.passage.dev
@@ -602,6 +603,284 @@ paths:
         "400": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
         "422": {$ref: "#/components/responses/Problem"}
+  /v1/sales/quotations:
+    get:
+      summary: Quotations in the caller's scope, newest first, without lines (Quotations pipeline)
+      operationId: listQuotations
+      x-passage-duty: sales.order.read
+      parameters:
+        - $ref: "#/components/parameters/LegalEntityQuery"
+        - {name: customerId, in: query, schema: {type: string, format: uuid}}
+        - {name: status, in: query, schema: {type: string, enum: [DRAFT, SENT, CONVERTED, LOST, EXPIRED, CANCELLED]}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      responses:
+        "200":
+          description: quotations
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/Quotation"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+    post:
+      summary: Create a DRAFT quotation numbered SQ- (FR-27.1); validity defaults to +30 days and probability to 50
+      operationId: createQuotation
+      x-passage-duty: sales.quotation.maintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CreateQuotationRequest"}
+      responses:
+        "201":
+          description: created; ETag carries the version
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Quotation"}
+        "200":
+          description: a repeat of the Idempotency-Key with the same body returns the stored quotation
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Quotation"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "422":
+          description: idempotency_key_reuse - the key was used with a different body
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+  /v1/sales/quotations/{id}:
+    get:
+      summary: One quotation with its lines; converted lines name their order
+      operationId: getQuotation
+      x-passage-duty: sales.order.read
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: the quotation
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Quotation"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/sales/quotations/{id}:send:
+    post:
+      summary: Move a DRAFT quotation that is still valid to SENT
+      operationId: sendQuotation
+      x-passage-duty: sales.quotation.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: sent
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Quotation"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422":
+          description: SLS-0030 not a DRAFT; SLS-0031 the validity has passed
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+  /v1/sales/quotations/{id}:lose:
+    post:
+      summary: Mark a DRAFT or SENT quotation LOST with a reason
+      operationId: loseQuotation
+      x-passage-duty: sales.quotation.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: {type: string, minLength: 1, maxLength: 200}
+      responses:
+        "200":
+          description: lost
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Quotation"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422":
+          description: SLS-0030 the quotation is converted, lost or expired
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+  /v1/sales/quotations/{id}:convert:
+    post:
+      summary: >-
+        Convert the selected open lines (every open line when lineNos is empty or the body absent)
+        into one DRAFT order at the quoted prices (FR-27.1, AC-27.6); emits quotation.converted
+      operationId: convertQuotation
+      x-passage-duty: sales.quotation.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ConvertQuotationRequest"}
+      responses:
+        "201":
+          description: the quotation (CONVERTED) and the DRAFT order; ETag carries the quotation version
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/QuotationConversion"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422":
+          description: >-
+            SLS-0030 not SENT or CONVERTED; SLS-0031 the validity has passed; SLS-0032 a line is not open;
+            SLS-0011 a line is not listed for the customer
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+  /v1/sales/holds:
+    get:
+      summary: Release queue - ACTIVE holds oldest first with the failed credit rule and the customer's limit (holdType=CREDIT is the credit release queue)
+      operationId: listHolds
+      x-passage-duty: sales.credit.release | sales.order.hold
+      parameters:
+        - $ref: "#/components/parameters/LegalEntityQuery"
+        - {name: holdType, in: query, schema: {type: string, enum: [CREDIT, FRAUD, MANUAL, PRICE_REVIEW]}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      responses:
+        "200":
+          description: active holds
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/HoldQueueItem"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+  /v1/sales/supplementary-item-rules:
+    get:
+      summary: Supplementary item rules in the caller's scope, optionally for one parent product
+      operationId: listSupplementaryRules
+      x-passage-duty: sales.order.read
+      parameters:
+        - $ref: "#/components/parameters/LegalEntityQuery"
+        - {name: parentProductId, in: query, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      responses:
+        "200":
+          description: rules
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/SupplementaryRule"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+    post:
+      summary: Create a supplementary item rule (FR-27.14); FREE rules carry no price, PRICED rules a positive one
+      operationId: createSupplementaryRule
+      x-passage-duty: sales.listing.maintain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/SupplementaryRuleRequest"}
+      responses:
+        "201":
+          description: the stored rule
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/SupplementaryRule"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "409":
+          description: SLS-0033 a rule for this parent, customer (or all customers) and item exists
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+  /v1/sales/supplementary-item-rules/{id}:
+    delete:
+      summary: Remove a supplementary item rule
+      operationId: deleteSupplementaryRule
+      x-passage-duty: sales.listing.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "204": {description: removed}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/sales/supplementary-items:evaluate:
+    post:
+      summary: >-
+        Stateless - the supplementary lines a parent line of a product and quantity triggers for a customer;
+        MANDATORY lines go with the parent, OPTIONAL lines are offered (FR-27.14)
+      operationId: evaluateSupplementary
+      x-passage-duty: sales.order.read
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [legalEntityId, productId, quantity]
+              properties:
+                legalEntityId: {type: string, format: uuid}
+                productId: {type: string, format: uuid}
+                customerId: {type: string, format: uuid}
+                quantity: {$ref: "#/components/schemas/Money"}
+      responses:
+        "200":
+          description: supplementary lines, empty when none apply
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/SupplementaryLine"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
 components:
   parameters:
     IdempotencyKey:
@@ -1052,3 +1331,127 @@ components:
               orderValue: {$ref: "#/components/schemas/Money"}
               demand: {$ref: "#/components/schemas/Money"}
               confirmed: {$ref: "#/components/schemas/Money"}
+    CreateQuotationRequest:
+      type: object
+      required: [legalEntityId, customerId, currency, lines]
+      properties:
+        legalEntityId: {type: string, format: uuid}
+        customerId: {type: string, format: uuid}
+        invoiceAccountId: {type: string, format: uuid, description: defaults to the customer}
+        currency: {type: string, pattern: "^[A-Z]{3}$"}
+        validUntil: {type: string, format: date, description: "today to today + 365 days; default today + 30 (quotation_expiry_days)"}
+        probabilityPct: {type: integer, minimum: 0, maximum: 100, default: 50}
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 2000
+          items: {$ref: "#/components/schemas/OrderLineRequest"}
+    QuotationLine:
+      allOf:
+        - $ref: "#/components/schemas/OrderLine"
+        - type: object
+          properties:
+            lineStatus: {type: string, enum: [OPEN, CONVERTED]}
+            convertedOrderId: {type: string, format: uuid, description: the order a CONVERTED line became}
+    Quotation:
+      type: object
+      required: [id, legalEntityId, quotationNumber, customerId, invoiceAccountId, currency, status, validUntil, probabilityPct, netTotal, version, lines, lineCount, openLines]
+      properties:
+        id: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        quotationNumber: {type: string, example: "SQ-0000001", description: unique per legal entity}
+        customerId: {type: string, format: uuid}
+        invoiceAccountId: {type: string, format: uuid}
+        currency: {type: string}
+        status: {type: string, enum: [DRAFT, SENT, CONVERTED, LOST, EXPIRED, CANCELLED]}
+        validUntil: {type: string, format: date, description: the last day the quotation can be sent or converted}
+        probabilityPct: {type: integer, minimum: 0, maximum: 100}
+        netTotal: {$ref: "#/components/schemas/Money"}
+        lostReason: {type: string}
+        version: {type: integer, minimum: 1}
+        createdBy: {type: string}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+        lines:
+          type: array
+          description: filled on a single read, empty in the list
+          items: {$ref: "#/components/schemas/QuotationLine"}
+        lineCount: {type: integer}
+        openLines: {type: integer, description: lines not yet converted}
+    ConvertQuotationRequest:
+      type: object
+      properties:
+        lineNos:
+          type: array
+          maxItems: 2000
+          items: {type: integer, minimum: 1}
+          description: quotation line numbers; empty converts every open line
+        listingOverrideReason:
+          type: string
+          maxLength: 500
+          description: With duty sales.order.approve, accepts lines the product listing denies (FR-27.15).
+    QuotationConversion:
+      type: object
+      required: [quotation, order]
+      properties:
+        quotation: {$ref: "#/components/schemas/Quotation"}
+        order: {$ref: "#/components/schemas/Order"}
+    HoldQueueItem:
+      type: object
+      required: [holdId, legalEntityId, orderId, orderNumber, orderVersion, customerId, holdType, reasonCode, amount, currency, appliedBy, appliedAt]
+      properties:
+        holdId: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        orderId: {type: string, format: uuid}
+        orderNumber: {type: string}
+        orderVersion: {type: integer, description: the order's ETag value for the release call}
+        customerId: {type: string, format: uuid}
+        holdType: {type: string, enum: [CREDIT, FRAUD, MANUAL, PRICE_REVIEW]}
+        reasonCode: {type: string, description: the failed rule id (CR-1..CR-6) for CREDIT holds}
+        amount: {$ref: "#/components/schemas/Money"}
+        currency: {type: string}
+        appliedBy: {type: string}
+        appliedAt: {type: string, format: date-time}
+        failedRule:
+          type: object
+          description: the failed rule of the order's last credit check (CREDIT holds); for CR-1 value is exposure plus the order and threshold the limit with tolerance
+          properties:
+            id: {type: string}
+            result: {type: string, enum: [FAIL]}
+            value: {type: string}
+            threshold: {type: string}
+            note: {type: string}
+        creditLimit: {$ref: "#/components/schemas/Money"}
+        limitCurrency: {type: string}
+    SupplementaryRuleRequest:
+      type: object
+      required: [legalEntityId, parentProductId, supplementaryProductId, unit, requirement, baseQuantity, quantityPerBase, pricing]
+      properties:
+        legalEntityId: {type: string, format: uuid}
+        parentProductId: {type: string, format: uuid}
+        customerId: {type: string, format: uuid, description: absent for every customer of the legal entity}
+        supplementaryProductId: {type: string, format: uuid}
+        unit: {type: string, minLength: 1, maxLength: 10}
+        requirement: {type: string, enum: [MANDATORY, OPTIONAL]}
+        baseQuantity: {$ref: "#/components/schemas/Money"}
+        quantityPerBase: {$ref: "#/components/schemas/Money"}
+        pricing: {type: string, enum: [FREE, PRICED]}
+        unitPrice: {$ref: "#/components/schemas/Money"}
+    SupplementaryRule:
+      allOf:
+        - $ref: "#/components/schemas/SupplementaryRuleRequest"
+        - type: object
+          required: [id, unitPrice]
+          properties:
+            id: {type: string, format: uuid}
+    SupplementaryLine:
+      type: object
+      required: [ruleId, productId, unit, requirement, quantity, unitPrice, supplementaryOf]
+      properties:
+        ruleId: {type: string, format: uuid}
+        productId: {type: string, format: uuid}
+        unit: {type: string}
+        requirement: {type: string, enum: [MANDATORY, OPTIONAL]}
+        quantity: {$ref: "#/components/schemas/Money"}
+        unitPrice: {$ref: "#/components/schemas/Money", description: zero for FREE items}
+        supplementaryOf: {type: string, format: uuid, description: the parent product}

@@ -176,14 +176,6 @@ describe("Sales orders list", () => {
     expect(await screen.findByText("SO-0000041")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
   });
-
-  it("the credit release queue asks only for orders on CREDIT hold", async () => {
-    handler = () => ({ status: 200, body: { items: [] } });
-    renderAt("/sales/credit-holds");
-    expect(await screen.findByRole("heading", { name: "No orders on credit hold" })).toBeInTheDocument();
-    expect(calls[0].url.searchParams.get("hold")).toBe("CREDIT");
-    expect(screen.queryByLabelText("Active hold")).not.toBeInTheDocument();
-  });
 });
 
 describe("Sales order detail", () => {

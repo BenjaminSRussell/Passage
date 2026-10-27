@@ -43,6 +43,7 @@ const (
 	dutyBackorder      = "sales.backorder.run"
 	dutyListing        = "sales.listing.maintain"
 	dutyOrderApprove   = "sales.order.approve"
+	dutyQuotation      = "sales.quotation.maintain"
 
 	orders          = "/v1/sales/orders"
 	creditProfiles  = "/v1/sales/credit-profiles"
@@ -50,6 +51,10 @@ const (
 	backorderRun    = "/v1/sales/backorder-runs:preview"
 	productListings = "/v1/sales/product-listings"
 	agreements      = "/v1/sales/agreements"
+	quotations      = "/v1/sales/quotations"
+	holdQueue       = "/v1/sales/holds"
+	suppRules       = "/v1/sales/supplementary-item-rules"
+	suppEvaluate    = "/v1/sales/supplementary-items:evaluate"
 )
 
 var (
@@ -118,6 +123,17 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRead)).Get(creditProfiles, a.listCreditProfiles)
 	r.With(authz.RequireDuty(dutyRead)).Get(creditProfiles+"/{customerId}", a.getCreditProfile)
 	r.With(authz.RequireDuty(dutyCreditMaintain)).Put(creditProfiles+"/{customerId}", a.putCreditProfile)
+	r.With(authz.RequireDuty(dutyQuotation)).Post(quotations, a.createQuotation)
+	r.With(authz.RequireDuty(dutyRead)).Get(quotations, a.listQuotations)
+	r.With(authz.RequireDuty(dutyRead)).Get(quotations+"/{id}", a.getQuotation)
+	r.With(authz.RequireDuty(dutyQuotation)).Post(quotations+"/{id}:send", a.sendQuotation)
+	r.With(authz.RequireDuty(dutyQuotation)).Post(quotations+"/{id}:lose", a.loseQuotation)
+	r.With(authz.RequireDuty(dutyQuotation)).Post(quotations+"/{id}:convert", a.convertQuotation)
+	r.With(requireAny(dutyCreditRelease, dutyHold)).Get(holdQueue, a.listHolds)
+	r.With(authz.RequireDuty(dutyListing)).Post(suppRules, a.createSupplementaryRule)
+	r.With(authz.RequireDuty(dutyRead)).Get(suppRules, a.listSupplementaryRules)
+	r.With(authz.RequireDuty(dutyListing)).Delete(suppRules+"/{id}", a.deleteSupplementaryRule)
+	r.With(authz.RequireDuty(dutyRead)).Post(suppEvaluate, a.evaluateSupplementary)
 }
 
 // Metrics serves the admin port's Prometheus text.

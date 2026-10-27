@@ -4,15 +4,18 @@ The sales bounded context: sales orders, order holds, the credit check and
 release, the stateless ATP promise check, credit profiles, order change and
 cancel with versions and diffs, the scheduling-release reconciliation check and
 the backorder run preview, holds applied by hand (MANUAL, FRAUD, PRICE_REVIEW),
-product listings and exclusions checked at order entry, and sales agreements
-whose releases create orders. Wave 27, slices 1 to 3 of PSG-27. Reference:
+product listings and exclusions checked at order entry, sales agreements whose
+releases create orders, quotations converted whole or by line into orders, the
+hold release queue, and supplementary item rules with a stateless evaluation.
+Wave 27, slices 1 to 4 of PSG-27. Reference:
 `docs/prd/phase-5-order-to-cash.md` §5.27.
 
-Out of these slices (see `NOT-IMPLEMENTED.md`): quotations, amount-based
-agreements and scheduling-agreement release storage, the ATP projection and
-reservations, change approval and `:cancel-remainder`, the committed backorder
-run, allocation, consignment, supplementary items, cross-selling, the intake
-dedup window beyond the order's own key, and the Temporal release workflow.
+Out of these slices (see `NOT-IMPLEMENTED.md`): amount-based agreements and
+scheduling-agreement release storage, the ATP projection and reservations,
+change approval and `:cancel-remainder`, the committed backorder run,
+allocation, consignment, supplementary lines added to orders at line commit,
+cross-selling, quotation expiry job and PDF, the intake dedup window beyond the
+order's own key, and the Temporal release workflow.
 
 ## Run
 
@@ -80,7 +83,7 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | Method | Path | Duty | Notes |
 |---|---|---|---|
 | POST | `/v1/sales/orders` | `sales.order.write` or `sales.channel.intake` | `Idempotency-Key` required; `(channel, externalRef)` dedup |
-| GET | `/v1/sales/orders` | `sales.order.read` | Newest first; `status`, `customerId`, `hold` (`hold=CREDIT` is the release queue), `cursor`, `limit` |
+| GET | `/v1/sales/orders` | `sales.order.read` | Newest first; `status`, `customerId`, `hold` (orders with an ACTIVE hold of the type), `cursor`, `limit` |
 | GET | `/v1/sales/orders/{id}` | `sales.order.read` | ETag = version |
 | POST | `/v1/sales/orders/{id}:confirm` | `sales.order.confirm` | `If-Match`; failing credit check places a CREDIT hold |
 | POST | `/v1/sales/orders/{id}/holds/{holdId}:release` | `sales.credit.release` (CREDIT) or `sales.order.hold` (other types) | `If-Match`; releasing the CREDIT hold confirms the order when nothing else blocks it (AC-27.3) |
@@ -98,6 +101,15 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | POST | `/v1/sales/backorder-runs:preview` | `sales.backorder.run` | Stateless FR-27.17 preview over supplied lines; nothing is committed |
 | GET | `/v1/sales/credit-profiles` | `sales.order.read` | Optional `legalEntityId`, `limit` |
 | GET / PUT | `/v1/sales/credit-profiles/{customerId}` | `sales.order.read` / `sales.credit.maintain` | `legalEntityId` query or the caller's `Passage-Legal-Entity`; PUT takes `If-Match` (`"0"` to create) |
+| GET / POST | `/v1/sales/quotations` | `sales.order.read` / `sales.quotation.maintain` | List (`legalEntityId`, `customerId`, `status`, `limit`) without lines; create a DRAFT with `Idempotency-Key`, numbered `SQ-`, validity default +30 days, probability 50 |
+| GET | `/v1/sales/quotations/{id}` | `sales.order.read` | With lines; converted lines name their order |
+| POST | `/v1/sales/quotations/{id}:send` | `sales.quotation.maintain` | `If-Match`; DRAFT to SENT while valid |
+| POST | `/v1/sales/quotations/{id}:lose` | `sales.quotation.maintain` | `If-Match`; `{reason}`; DRAFT or SENT to LOST |
+| POST | `/v1/sales/quotations/{id}:convert` | `sales.quotation.maintain` | `If-Match`; optional `{lineNos, listingOverrideReason}` (empty converts every open line); 201 with the CONVERTED quotation and one DRAFT order; emits `quotation.converted` |
+| GET | `/v1/sales/holds` | `sales.credit.release` or `sales.order.hold` | Release queue: ACTIVE holds oldest first (`legalEntityId`, `holdType`, `limit`) with the failed credit rule, the customer's credit limit and the order version for the release call |
+| GET / POST | `/v1/sales/supplementary-item-rules` | `sales.order.read` / `sales.listing.maintain` | List (`legalEntityId`, `parentProductId`, `limit`); create a rule (one per parent, customer or all customers, and item) |
+| DELETE | `/v1/sales/supplementary-item-rules/{id}` | `sales.listing.maintain` | Remove a rule |
+| POST | `/v1/sales/supplementary-items:evaluate` | `sales.order.read` | Stateless: the MANDATORY and OPTIONAL supplementary lines a parent product and quantity trigger for a customer |
 | GET | `/readyz` | none | Postgres `SELECT` within 500 ms |
 
 ## Rules implemented
@@ -159,10 +171,27 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
   REDISTRIBUTE may move confirmed quantity to higher priority; FILL serves by
   requested date; LOSE may deconfirm only lines at or above `loseThreshold`
   (default 3). A run that cannot keep a protected confirmation is refused.
+- **FR-27.1 / BR-27.5** quotations: DRAFT → SENT → CONVERTED or LOST (EXPIRED
+  and CANCELLED exist as states; nothing sets them yet). A quotation is valid
+  through its `validUntil` day (default +30 days, at most 365); an expired
+  quotation can be neither sent nor converted (`SLS-0031`). `:convert` takes
+  the quotation's row lock and, in one transaction, creates one DRAFT order
+  (channel `QUOTE`) from the selected OPEN lines at the quoted price and
+  discount, marks those lines CONVERTED with the order id, moves the quotation
+  to CONVERTED and writes `quotation.converted`; the remaining OPEN lines can
+  convert later into another order. The order passes the product listing check
+  like any order, so a denied line refuses the whole conversion (`SLS-0011`)
+  unless the caller has `sales.order.approve` and gives a reason (AC-27.6).
+- **FR-27.14** supplementary items: a rule gives `quantityPerBase` of an item
+  for every whole `baseQuantity` of the ordered product (AC-27.10: 1 per 10, so
+  25 gives 2), for one customer or every customer of the legal entity; a
+  customer's own rule replaces the all-customers rule for the same item. FREE
+  items carry unit price 0, PRICED items a positive price. The evaluation is
+  stateless; lines are not yet added to orders (see NOT-IMPLEMENTED).
 - **BR-27.10** intake: a repeat of `(channel, externalRef)` with the same body
   returns the original order with 200; a different body is a conflict.
 - **BR-27.6** optimistic concurrency with `If-Match` and the version column.
-- **Money** is `numeric(20,6)` decimal text on the wire; never float.
+- **Money** is decimal text on the wire (`numeric(19,4)` for nets and totals, `numeric(20,6)` for prices and quantities); never float.
 
 ## Error codes
 
@@ -173,7 +202,7 @@ Problem details are `application/problem+json` with `type` =
 |---|---|---|
 | `SLS-0005` | 422 | Credit hold applied (rule failed) |
 | `SLS-0006` | 412 / 428 | `If-Match` stale (412), or missing (428) |
-| `SLS-0007` | 409 | Duplicate `(channel, externalRef)` with a different payload; or a concurrent create of the same agreement or release |
+| `SLS-0007` | 409 | Duplicate `(channel, externalRef)` with a different payload; or a concurrent create of the same agreement, release or quotation |
 | `SLS-0008` | 422 | Agreement commitment exhausted (`AGREEMENT_EXHAUSTED`) |
 | `SLS-0011` | 422 | Product not listed for the customer (`PRODUCT_NOT_LISTED`) |
 | `SLS-0014` | 200 (held) | Cumulative quantity mismatch; the scheduling release is held (`code` = `CUM_QTY_MISMATCH`) |
@@ -188,11 +217,17 @@ Problem details are `application/problem+json` with `type` =
 | `SLS-0027` | 422 | Backorder run refused: unknown strategy, supply below zero, or a WIN, GAIN or LOSE run that cannot keep a protected confirmation |
 | `SLS-0028` | 422 | Hold cannot be applied: CREDIT by hand, the order is shipped, closed or cancelled, or an ACTIVE hold of the type exists |
 | `SLS-0029` | 422 | Agreement is not valid on the release date |
+| `SLS-0030` | 422 | Quotation status does not allow the action (send a non-DRAFT, convert a DRAFT or LOST, lose a CONVERTED) |
+| `SLS-0031` | 422 | Quotation validity has passed |
+| `SLS-0032` | 422 | Selected quotation lines are not open (already converted, unknown or repeated) or none remain |
+| `SLS-0033` | 409 | A supplementary item rule for the parent, customer (or all customers) and item exists |
 | `SLS-0100` | 404 | Order not found |
 | `SLS-0101` | 404 | Hold not found |
 | `SLS-0102` | 404 | Credit profile not found |
 | `SLS-0103` | 404 | Sales agreement not found |
 | `SLS-0104` | 404 | Product listing not found |
+| `SLS-0105` | 404 | Quotation not found |
+| `SLS-0106` | 404 | Supplementary item rule not found |
 | `idempotency_key_reuse` | 422 | Same `Idempotency-Key` with a different body (kernel) |
 | `COM-0001` | 400 | Request failed validation; field errors in `errors` |
 | `AUTH-0001` | 401 | Missing or malformed tenant |
