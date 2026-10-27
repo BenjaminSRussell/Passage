@@ -1,0 +1,457 @@
+openapi: 3.1.0
+info:
+  title: Passage Treasury (slice 1, PSG-36)
+  version: 0.1.0
+  summary: Bank accounts, statement import, statement lines and cash forecast entries.
+  description: |
+    Wave 36 slice 1. Matching, reconciliation close, checks, instruments, deals,
+    loans, payment requests, bank connectivity and IHC endpoints are later slices
+    (see NOT-IMPLEMENTED.md). Errors are RFC 9457 problem details with a stable `code`.
+servers:
+  - url: https://api.{env}.passage.dev
+    variables:
+      env:
+        default: dev
+paths:
+  /v1/treasury/bank-accounts:
+    post:
+      operationId: createBankAccount
+      summary: Create a bank account in Draft status
+      x-passage-duty: treasury.bank-account.write
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CreateBankAccountRequest"}
+      responses:
+        "201":
+          description: Account created (or the stored account for a repeated key)
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/BankAccount"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+    get:
+      operationId: listBankAccounts
+      summary: List bank accounts of a legal entity
+      x-passage-duty: treasury.view
+      parameters:
+        - name: legalEntityId
+          in: query
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: Accounts
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/BankAccount"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/bank-accounts/{id}:
+    get:
+      operationId: getBankAccount
+      summary: Read a bank account (IBAN masked)
+      x-passage-duty: treasury.view
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: Account
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/BankAccount"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/bank-accounts/{id}:activate:
+    post:
+      operationId: activateBankAccount
+      summary: Activate a Draft or Inactive bank account
+      description: Allowed from draft or inactive; any other status is TRS-0417.
+      x-passage-duty: treasury.bank-account.approve
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: New status stored; the version (ETag) is incremented
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/BankAccount"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/bank-accounts/{id}:deactivate:
+    post:
+      operationId: deactivateBankAccount
+      summary: Deactivate an Active bank account
+      description: Allowed from active only (TRS-0417 otherwise). New statements are refused (TRS-0412); re-uploads still replay.
+      x-passage-duty: treasury.bank-account.approve
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: New status stored; the version (ETag) is incremented
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/BankAccount"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/bank-accounts/{id}:close:
+    post:
+      operationId: closeBankAccount
+      summary: Close an Inactive bank account
+      description: Allowed from inactive only (TRS-0417 otherwise). Closed is final.
+      x-passage-duty: treasury.bank-account.approve
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: New status stored; the version (ETag) is incremented
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/BankAccount"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/bank-accounts/{id}/statements:
+    get:
+      operationId: listStatements
+      summary: List statements of a bank account
+      x-passage-duty: treasury.view
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: Statements
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/Statement"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/statements/import:
+    post:
+      operationId: importStatement
+      summary: Upload a camt.053 statement (multipart). Same bytes replay with 200.
+      x-passage-duty: treasury.statement.import
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [bankAccountId, file]
+              properties:
+                bankAccountId: {type: string, format: uuid}
+                file: {type: string, format: binary, description: camt.053 XML, max 50 MB by default}
+      responses:
+        "200":
+          description: Identical file, or the same statement id with the same closing balance, already imported; existing statement returned (TRS-0405, BR-36.8)
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ImportedStatement"}
+        "201":
+          description: Statement and lines committed; statement.imported.v1 written to the outbox. Warnings carry TRS-0407 for a sequence gap.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ImportedStatement"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "413": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/statements/{id}:
+    get:
+      operationId: getStatement
+      summary: Read a statement header
+      x-passage-duty: treasury.view
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: Statement
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Statement"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/statements/{id}/lines:
+    get:
+      operationId: listStatementLines
+      summary: Page through statement lines in line-number order
+      x-passage-duty: treasury.view
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - name: afterLineNo
+          in: query
+          schema: {type: integer, minimum: 0, default: 0}
+        - name: limit
+          in: query
+          description: Page size; 0 or more than 500 means 500
+          schema: {type: integer, minimum: 0, default: 100}
+      responses:
+        "200":
+          description: Lines
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/StatementLine"}
+                  nextAfterLineNo:
+                    type: [integer, "null"]
+        "400": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/cash-forecast-entries:
+    post:
+      operationId: createForecastEntry
+      summary: Register a forecast entry (manual or from a source)
+      x-passage-duty: treasury.forecast.write
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CreateForecastEntryRequest"}
+      responses:
+        "201":
+          description: Entry stored (or the stored entry for a repeated key)
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ForecastEntry"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/cash-forecast:
+    get:
+      operationId: getCashForecast
+      summary: Forecast buckets for a legal entity (contributions from 90 days back to 366 days ahead)
+      x-passage-duty: treasury.view
+      parameters:
+        - name: legalEntityId
+          in: query
+          required: true
+          schema: {type: string, format: uuid}
+        - name: layout
+          in: query
+          schema: {type: string, enum: [daily, weekly, monthly], default: daily}
+        - name: asOf
+          in: query
+          schema: {type: string, format: date}
+        - name: currency
+          in: query
+          schema: {type: string, pattern: "^[A-Z]{3}$"}
+      responses:
+        "200":
+          description: Buckets; each Net equals Inflow plus Outflow and Cumulative is the running Net
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Forecast"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+components:
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Same key and body replay the stored response; same key with another body is idempotency_key_reuse (422)
+      schema: {type: string, maxLength: 255}
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: ETag of the account as last read (428 when absent, 412 when stale)
+      schema: {type: string}
+  headers:
+    ETag:
+      description: Version of the resource, quoted integer
+      schema: {type: string}
+  responses:
+    Problem:
+      description: RFC 9457 problem
+      content:
+        application/problem+json:
+          schema: {$ref: "#/components/schemas/Problem"}
+  schemas:
+    Money:
+      type: string
+      pattern: "^-?[0-9]+(\\.[0-9]{1,6})?$"
+      description: Decimal amount as a string (never a float)
+    CreateBankAccountRequest:
+      type: object
+      required: [legalEntityId, accountCode, iban, currency, mainAccountId]
+      additionalProperties: false
+      properties:
+        legalEntityId: {type: string, format: uuid}
+        accountCode: {type: string, pattern: "^[A-Z0-9-]{1,20}$"}
+        iban: {type: string, description: "Validated mod-97 (TRS-0401). Only a SHA-256 lookup hash, the masked form and the last four characters are stored; the full IBAN is not retained (see NOT-IMPLEMENTED.md)."}
+        bic: {type: string, description: ISO 9362}
+        currency: {type: string, pattern: "^[A-Z]{3}$"}
+        mainAccountId: {type: string, format: uuid}
+    BankAccount:
+      type: object
+      required: [id, legalEntityId, accountCode, ibanMasked, ibanLast4, currency, mainAccountId, status, version]
+      properties:
+        id: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        accountCode: {type: string}
+        ibanMasked: {type: string}
+        ibanLast4: {type: string, minLength: 4, maxLength: 4}
+        bic: {type: [string, "null"]}
+        currency: {type: string}
+        mainAccountId: {type: string, format: uuid}
+        status: {type: string, enum: [draft, active, inactive, closed]}
+        version: {type: integer, minimum: 1}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    Statement:
+      type: object
+      required: [id, bankAccountId, legalEntityId, statementId, format, currency, openingDate, openingBalance, closingDate, closingBalance, lineCount, createdAt]
+      properties:
+        id: {type: string, format: uuid}
+        bankAccountId: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        statementId: {type: string}
+        sequence: {type: [integer, "null"]}
+        format: {type: string, pattern: "^camt\\.053\\."}
+        currency: {type: string}
+        openingDate: {type: string, format: date}
+        openingBalance: {$ref: "#/components/schemas/Money"}
+        closingDate: {type: string, format: date}
+        closingBalance: {$ref: "#/components/schemas/Money"}
+        lineCount: {type: integer, minimum: 0}
+        createdAt: {type: string, format: date-time}
+    ImportedStatement:
+      allOf:
+        - $ref: "#/components/schemas/Statement"
+        - type: object
+          required: [warnings]
+          properties:
+            warnings:
+              type: array
+              description: Non-blocking findings of a new import (TRS-0407 sequence gap); empty on a replay
+              items:
+                type: object
+                required: [code, detail]
+                properties:
+                  code: {type: string, example: TRS-0407}
+                  detail: {type: string}
+    StatementLine:
+      type: object
+      required: [lineNo, bookingDate, valueDate, amount, currency, status]
+      properties:
+        lineNo: {type: integer, minimum: 1}
+        bookingDate: {type: string, format: date}
+        valueDate: {type: string, format: date}
+        amount: {$ref: "#/components/schemas/Money"}
+        currency: {type: string}
+        btcCode: {type: string}
+        endToEndRef: {type: string}
+        reference: {type: string}
+        counterpartyName: {type: string}
+        status: {type: string, enum: [unmatched, suggested, matched, created, in_transit]}
+    CreateForecastEntryRequest:
+      type: object
+      required: [legalEntityId, sourceType, expectedDate, amount, currency]
+      additionalProperties: false
+      properties:
+        legalEntityId: {type: string, format: uuid}
+        sourceType: {type: string, enum: [AP, AR, PO, SO, Recurring, Manual, Payroll, Project]}
+        sourceId: {type: string, maxLength: 64, description: Generated when omitted}
+        expectedDate: {type: string, format: date}
+        amount: {$ref: "#/components/schemas/Money"}
+        currency: {type: string, pattern: "^[A-Z]{3}$"}
+        confidence: {type: string, description: Decimal between 0 and 1; default 1}
+    ForecastEntry:
+      type: object
+      required: [id, legalEntityId, sourceType, sourceId, expectedDate, amount, currency, confidence]
+      properties:
+        id: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        sourceType: {type: string}
+        sourceId: {type: string}
+        expectedDate: {type: string, format: date}
+        amount: {$ref: "#/components/schemas/Money"}
+        currency: {type: string}
+        confidence: {type: string}
+    Forecast:
+      type: object
+      required: [layout, asOf, buckets, outOfHorizon]
+      properties:
+        layout: {type: string, enum: [daily, weekly, monthly]}
+        asOf: {type: string, format: date}
+        buckets:
+          type: array
+          items:
+            type: object
+            required: [key, currency, inflow, outflow, net, cumulative]
+            properties:
+              key: {type: string, format: date}
+              currency: {type: string}
+              inflow: {$ref: "#/components/schemas/Money"}
+              outflow: {$ref: "#/components/schemas/Money"}
+              net: {$ref: "#/components/schemas/Money"}
+              cumulative: {$ref: "#/components/schemas/Money"}
+        outOfHorizon: {type: integer, minimum: 0}
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: {type: string, format: uri, example: "https://passage.dev/problems/TRS-0401"}
+        title: {type: string}
+        status: {type: integer}
+        detail: {type: string}
+        instance: {type: string}
+        code: {type: string, description: Stable code; see README error table}
+        serviceCode: {type: string, example: TRS-0401}
+        traceId: {type: string}
+        errors:
+          type: object
+          description: Field name to message; parse errors carry "line"
+          additionalProperties: {type: string}

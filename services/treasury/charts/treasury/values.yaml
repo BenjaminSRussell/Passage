@@ -1,0 +1,12 @@
+image: { repository: ghcr.io/benjaminsrussell/treasury, digest: "", tag: "", pullPolicy: IfNotPresent }
+databaseSecret: treasury-db
+migrateOnStart: false
+replicaCount: 2
+statement:
+  maxFileMb: 50
+# Scratch space for multipart uploads (two concurrent maximum-size files per pod).
+uploadSpoolSize: 128Mi
+resources:
+  requests: { cpu: 50m, memory: 64Mi }
+  limits: { cpu: 250m, memory: 256Mi }
+serviceMonitor: { enabled: false }

@@ -1,0 +1,58 @@
+asyncapi: 3.0.0
+info:
+  title: Passage Treasury events (slice 1, PSG-36)
+  version: 0.1.0
+  description: |
+    CloudEvents 1.0 structured envelope from platform/go/events (extensions
+    tenantid, correlationid, causationid, actor). Written to the transactional
+    outbox in the same transaction as the state change; the outbox aggregate is
+    the statement id, so events of one statement stay ordered. Other event types of the treasury context
+    (reconciled, check.voided, cashposition, instrument, deal, ...) are later slices.
+defaultContentType: application/json
+channels:
+  statementImported:
+    address: passage.treasury.statement
+    description: Topic for treasury statement events (Debezium outbox router).
+    messages:
+      statementImported:
+        $ref: "#/components/messages/StatementImported"
+operations:
+  publishStatementImported:
+    action: send
+    channel:
+      $ref: "#/channels/statementImported"
+    summary: A bank statement and its lines committed.
+    messages:
+      - $ref: "#/channels/statementImported/messages/statementImported"
+components:
+  messages:
+    StatementImported:
+      name: dev.passage.treasury.statement.imported.v1
+      title: Statement imported
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [specversion, id, source, type, time, datacontenttype, tenantid, data]
+        properties:
+          specversion: {type: string, const: "1.0"}
+          type: {type: string, const: dev.passage.treasury.statement.imported.v1}
+          source: {type: string, const: /passage/treasury/treasury}
+          id: {type: string}
+          subject: {type: string, description: statement id}
+          time: {type: string, format: date-time}
+          datacontenttype: {type: string, const: application/json}
+          tenantid: {type: string, format: uuid}
+          correlationid: {type: string}
+          causationid: {type: string}
+          actor: {type: string}
+          data:
+            type: object
+            required: [statementId, bankStatementRef, bankAccountId, legalEntityId, lineCount, openingBalance, closingBalance]
+            properties:
+              statementId: {type: string, format: uuid}
+              bankStatementRef: {type: string, description: Stmt/Id from the bank file}
+              bankAccountId: {type: string, format: uuid}
+              legalEntityId: {type: string, format: uuid}
+              lineCount: {type: integer, minimum: 0}
+              openingBalance: {type: string, description: decimal string}
+              closingBalance: {type: string, description: decimal string}
