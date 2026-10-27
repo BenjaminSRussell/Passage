@@ -22,6 +22,8 @@ import { NewReservationPage } from "./NewReservationPage";
 import { NewTransferPage } from "./NewTransferPage";
 import { OnHandPage } from "./OnHandPage";
 import { ReservationsPage } from "./ReservationsPage";
+import { StatusChangesPage } from "./StatusChangesPage";
+import { TransactionPage } from "./TransactionPage";
 import { TransactionsPage } from "./TransactionsPage";
 import { TransferOrderPage } from "./TransferOrderPage";
 import { TransferOrdersPage } from "./TransferOrdersPage";
@@ -30,7 +32,7 @@ const inventory: PassageModule = {
   id: "inventory",
   title: "Inventory",
   description:
-    "On-hand stock by any dimension, the journals that move it with their approval workflow, transactions, reservations, blocking, cycle and tag counts, journal reversals, transfer orders, vendor consignment and ABC classification.",
+    "On-hand stock by any dimension, the journals that move it with their approval workflow, transactions with their status history and backward moves, reservations, blocking, cycle and tag counts, journal reversals, transfer orders, vendor consignment and ABC classification.",
   routes: [
     { path: "/inventory", element: createElement(OnHandPage), handle: { title: "On-hand inquiry" } },
     { path: "/inventory/onhand", element: createElement(OnHandPage) },
@@ -38,6 +40,8 @@ const inventory: PassageModule = {
     { path: "/inventory/journals/new", element: createElement(NewJournalPage) },
     { path: "/inventory/journals/:id", element: createElement(JournalDetailPage), handle: { title: "Journal details" } },
     { path: "/inventory/transactions", element: createElement(TransactionsPage) },
+    { path: "/inventory/transactions/:id", element: createElement(TransactionPage), handle: { title: "Transaction" } },
+    { path: "/inventory/status-changes", element: createElement(StatusChangesPage) },
     { path: "/inventory/reservations", element: createElement(ReservationsPage) },
     { path: "/inventory/reservations/new", element: createElement(NewReservationPage) },
     { path: "/inventory/blockings", element: createElement(BlockingsPage) },
@@ -64,6 +68,7 @@ const inventory: PassageModule = {
     { label: "Journals", to: "/inventory/journals", duty: "inventory.read" },
     { label: "New journal", to: "/inventory/journals/new", duty: "inventory.journal.write" },
     { label: "Transactions", to: "/inventory/transactions", duty: "inventory.read" },
+    { label: "Status changes", to: "/inventory/status-changes", duty: "inventory.read" },
     { label: "Reservations", to: "/inventory/reservations", duty: "inventory.read" },
     { label: "Blocking", to: "/inventory/blockings", duty: "inventory.read" },
     { label: "Count plans", to: "/inventory/count-plans", duty: "inventory.read" },

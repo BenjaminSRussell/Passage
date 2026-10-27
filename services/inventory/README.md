@@ -14,7 +14,11 @@ the on-hand rebuild-and-compare (FR-16.3). Slice 5: the journal approval workflo
 (BR-16.11) and the `:validate` dry run, vendor consignment (replenishment orders received
 as vendor-owned, quantity-only stock; OWNERSHIP_CHANGE journals; the consignment stock
 report; FR-16.17, BR-16.14) and the segment dimension with segment-aware reservations
-(FR-16.20, BR-16.17). The web screens live in
+(FR-16.20, BR-16.17). Slice 6: the transaction status model as commands (FR-16.2, BR-16.1):
+the service-to-service `transactions:apply` (register a transaction for an external origin,
+step it forward), the named backward moves Unpick, Unregister and CancelReservation, the
+append-only status-change audit, the transaction detail and the status-change inquiry. The
+web screens live in
 `apps/web/src/modules/inventory`.
 
 Requirements source: `docs/prd/phase-3-procure-to-pay.md` section 3.16.
@@ -32,8 +36,8 @@ internal/api/             HTTP handlers, DTOs, validation, Problem responses
 internal/events/          event type constants and payloads
 migrations/               0001 ledger, 0002 reservations and batch expiry, 0003 blocking and counts,
                           0004 transfer orders, 0005 ABC runs, 0006 reversal links and count tags,
-                          0007 consignment orders, ownership-change origins, reservation segment
-                          (embedded, applied by dbx.Migrate)
+                          0007 consignment orders, ownership-change origins, reservation segment,
+                          0008 status-change audit (embedded, applied by dbx.Migrate)
 api/openapi.yaml          OpenAPI 3.1 for every endpoint (parity is tested)
 events/asyncapi.yaml      AsyncAPI 3 for every event published (payload parity is tested)
 charts/inventory/         Helm chart (Deployment, Service, HPA, ServiceMonitor toggle)
@@ -92,6 +96,12 @@ charts/inventory/         Helm chart (Deployment, Service, HPA, ServiceMonitor t
 | GET | `/v1/inventory/consignment-orders/{id}` | `inventory.read` | InventoryInquire |
 | POST | `/v1/inventory/consignment-orders/{id}:receive` | `inventory.consignment.write` | ConsignmentMaintain |
 | GET | `/v1/inventory/consignment/stock` | `inventory.read` | InventoryInquire |
+| POST | `/internal/v1/inventory/transactions:apply` | `inventory.transaction.apply` | service account (waves 17–20) |
+| POST | `/v1/inventory/transactions/{id}:unpick` | `inventory.transaction.step` | (no PRD duty; the warehouse user undoing a pick) |
+| POST | `/v1/inventory/transactions/{id}:unregister` | `inventory.transaction.step` | (no PRD duty; the receiving user undoing a registration) |
+| POST | `/v1/inventory/transactions/{id}:cancel-reservation` | `inventory.transaction.step` | (no PRD duty) |
+| GET | `/v1/inventory/transactions/{id}` | `inventory.read` | InventoryInquire |
+| GET | `/v1/inventory/status-changes` | `inventory.read` | InventoryInquire |
 
 Creating an OWNERSHIP_CHANGE journal also needs `inventory.consignment.write`
 (ConsignmentMaintain); its lines and posting use the journal duties.
@@ -207,6 +217,41 @@ compares it with the stored row in one snapshot and reports the differing rows a
 fields. `?repair=true` locks each differing row in posting lock order, rebuilds it again
 under the lock and overwrites it (a missing row is recreated, an orphan zeroed).
 
+## Status model commands (FR-16.2, BR-16.1)
+
+Journals, blockings, transfers and consignment write each transaction at its final status.
+Other services drive transactions through statuses with
+`POST /internal/v1/inventory/transactions:apply` (Idempotency-Key required):
+
+- **Register** (`origin` set): one transaction for an external origin (`PURCH_LINE`,
+  `RECEIPT_LINE`, `SALES_LINE`, `PROD_LINE`; one transaction per origin, `INV-STP-002`) at an
+  expected or physical status matching the sign of `qty` (receipts positive, issues
+  negative; never SOLD or PURCHASED). Receipts carry `qty × costPrice` as physical cost,
+  issues the row's running average; vendor-owned stock is never valued.
+- **Step** (`transactionId` set): forward to `toStatus` (skips allowed; backward or across
+  directions is `INV-STP-001`). `fromStatus` is the status the caller read; a mismatch is
+  412 `conflict_version`. Moving into SOLD / PURCHASED sets the financial date and
+  `cost_amount_posted` (issues at the running average, receipts at `costAmount` or their
+  physical cost); vendor-owned stock never reaches a financial status (`INV-OWN-001`).
+  Moving from an expected status into a physical or financial one sets the physical date.
+
+The named backward moves are user commands on one transaction:
+`:unpick` (PICKED → RESERVED_PHYSICAL), `:unregister` (REGISTERED → ARRIVED, AC-16.8) and
+`:cancel-reservation` (RESERVED_PHYSICAL or RESERVED_ORDERED → ON_ORDER). The move follows from
+the transaction's current status; a command that does not apply is `INV-STP-001`.
+
+Every registration or move runs in one database transaction: the transaction row is locked,
+the on-hand row is locked and moved by the whole quantity (old bucket out, new bucket in,
+the same arithmetic the rebuild uses), the negative policy is checked under the lock, the
+row's status and dates are updated (quantity and identity stay immutable), an
+`inventory_transaction_status_change` row is written (append-only, unique per
+Idempotency-Key; a replay answers 200 with `Idempotent-Replayed`, another request under the
+same key is `idempotency_key_reuse`), and `transaction.posted` (with `statusChangeId` and
+`previousStatus`) and `onhand.changed` (the bucket of the status reached) go to the outbox.
+No GL entry is produced: the calling document posts its own ledger entry.
+`GET /transactions/{id}` returns a transaction with its status history and
+`GET /status-changes` lists the audit newest first.
+
 ## Run
 
 ```
@@ -275,7 +320,12 @@ They skip without `PASSAGE_TEST_DATABASE_URL`. Domain property tests use `pgrego
 | `INV-TAG-004` | 422 | No used tag to transfer |
 | `INV-TAG-005` | 404 | Count tag not found |
 | `INV-TAG-006` | 403 | Marking open tags MISSING without `inventory.count.approve` |
-| `conflict_version` | 412 | `If-Match` does not match the journal, blocking or count sheet version |
+| `INV-OWN-001` | 422 | Vendor-owned stock valued, financially posted, or stepped to SOLD / PURCHASED |
+| `INV-STP-001` | 422 | Status move not allowed: backward or across directions under STEP, a named command that does not apply at the current status, or a registration at a financial status or one that does not match the quantity's sign |
+| `INV-STP-002` | 409 | The origin already has a transaction (one transaction per origin) |
+| `INV-TXN-001` | 404 | Transaction id not found in the tenant / legal-entity scope |
+| `idempotency_key_conflict` | 409 | The status-change Idempotency-Key is held by a change in a legal entity outside the caller's scope |
+| `conflict_version` | 412 | `If-Match` does not match the journal, blocking or count sheet version, or `fromStatus` of a STEP is not the transaction's current status |
 | `idempotency_key_reuse` | 422 | Idempotency-Key (or a line `clientKey`) reused with a different body |
 
 Problems are RFC 9457 `application/problem+json` with `type` =
@@ -283,7 +333,7 @@ Problems are RFC 9457 `application/problem+json` with `type` =
 
 ## Wave reference
 
-- Wave 16 / PSG-16 slices 1 to 4. Dependencies: wave 6 (sites, warehouses, UoM), wave 8
+- Wave 16 / PSG-16 slices 1 to 6. Dependencies: wave 6 (sites, warehouses, UoM), wave 8
   (products, dimension groups, item model groups), wave 11 (`Post(JournalEntry)`),
   wave 14 (period control), wave 4 (Temporal, outbox), wave 10 (migration framework).
 - Slice 1 posts synchronously in the request. The Temporal `PostInventoryJournal`

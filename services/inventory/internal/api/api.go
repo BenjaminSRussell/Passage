@@ -79,6 +79,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerJournalWorkflow(r)
 	a.registerConsignment(r)
 	a.registerOps(r)
+	a.registerStatusSteps(r)
 }
 
 // Metrics serves the counters for the admin port.

@@ -34,6 +34,11 @@ const (
 	dateLayout        = "2006-01-02"
 )
 
+// inquirySourceTypes are the origin types the transaction inquiry filters by:
+// the service's own documents and the external origins of transactions:apply.
+var inquirySourceTypes = append([]string{"INVENT_JOURNAL_LINE", "BLOCKING", "TRANSFER_LINE", "CONSIGNMENT_LINE", "OWNERSHIP_CHANGE"},
+	store.ExternalSourceTypes...)
+
 func (a *API) registerReservations(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRead)).Get(transactionsPath, a.listTransactions)
 	r.With(authz.RequireDuty(dutyReserve)).Post(reservationsPath, a.createReservation)
@@ -335,8 +340,8 @@ func (a *API) listTransactions(w http.ResponseWriter, r *http.Request) {
 	if _, _, ok := domain.Lookup(f.Status); f.Status != "" && !ok {
 		fields["status"] = "must be an issue or receipt status"
 	}
-	if f.SourceType != "" && f.SourceType != "INVENT_JOURNAL_LINE" && f.SourceType != "BLOCKING" && f.SourceType != "TRANSFER_LINE" {
-		fields["sourceType"] = "must be INVENT_JOURNAL_LINE, BLOCKING or TRANSFER_LINE"
+	if f.SourceType != "" && !slices.Contains(inquirySourceTypes, f.SourceType) {
+		fields["sourceType"] = "must be one of " + strings.Join(inquirySourceTypes, ", ")
 	}
 	for name, dst := range map[string]**time.Time{"from": &f.From, "to": &f.To} {
 		if v := q.Get(name); v != "" {
@@ -373,19 +378,23 @@ func (a *API) listTransactions(w http.ResponseWriter, r *http.Request) {
 	}
 	items := make([]transactionResponse, 0, len(rows))
 	for _, t := range rows {
-		item := transactionResponse{ID: t.ID, LegalEntityID: t.LegalEntityID, OriginID: t.OriginID, SourceType: t.SourceType, SourceID: t.SourceID,
-			JournalID: t.JournalID, Reference: t.Reference, ProductID: t.ProductID, Dimensions: t.Dims, Qty: t.Qty.String(),
-			EnteredQty: t.EnteredQty.String(), EnteredUnit: t.EnteredUnit, IssueStatus: t.IssueStatus, ReceiptStatus: t.ReceiptStatus,
-			PhysicalDate: t.PhysicalDate, FinancialDate: t.FinancialDate, Currency: t.Currency, CostAmountPhysical: t.CostAmountPhysical.String(),
-			CreatedAt: t.CreatedAt}
-		if t.CostAmountPosted != nil {
-			v := t.CostAmountPosted.String()
-			item.CostAmountPosted = &v
-		}
-		items = append(items, item)
+		items = append(items, toTransactionResponse(t))
 	}
 	body["items"] = items
 	httpx.JSON(w, http.StatusOK, body)
+}
+
+func toTransactionResponse(t store.TransactionRow) transactionResponse {
+	item := transactionResponse{ID: t.ID, LegalEntityID: t.LegalEntityID, OriginID: t.OriginID, SourceType: t.SourceType, SourceID: t.SourceID,
+		JournalID: t.JournalID, Reference: t.Reference, ProductID: t.ProductID, Dimensions: t.Dims, Qty: t.Qty.String(),
+		EnteredQty: t.EnteredQty.String(), EnteredUnit: t.EnteredUnit, IssueStatus: t.IssueStatus, ReceiptStatus: t.ReceiptStatus,
+		PhysicalDate: t.PhysicalDate, FinancialDate: t.FinancialDate, Currency: t.Currency, CostAmountPhysical: t.CostAmountPhysical.String(),
+		CreatedAt: t.CreatedAt}
+	if t.CostAmountPosted != nil {
+		v := t.CostAmountPosted.String()
+		item.CostAmountPosted = &v
+	}
+	return item
 }
 
 func toReservationResponse(res domain.Reservation) reservationResponse {

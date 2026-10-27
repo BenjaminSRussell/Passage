@@ -24,6 +24,9 @@ func All() []string {
 // journals and by blocking and transfer legs; BucketReservedPhysical is moved
 // by reservations; BucketReceived by vendor-owned consignment receipts and
 // BucketDeducted by the vendor-owned leg of an ownership change (FR-16.17).
+// A registration or status move through transactions:apply or a named
+// backward command names the bucket of the status it reached, which may be any
+// status bucket (ON_ORDER, PICKED, ARRIVED, ...), or POSTED for SOLD / PURCHASED.
 const (
 	BucketPosted           = "POSTED"
 	BucketReservedPhysical = "RESERVED_PHYSICAL"
@@ -57,6 +60,11 @@ type TransactionPostedData struct {
 	CostAmountPosted   *string           `json:"costAmountPosted"`
 	// CorrectsTransactionID is the transaction a reversal line negates (BR-16.12).
 	CorrectsTransactionID *string `json:"correctsTransactionId"`
+	// StatusChangeID is the audit row of a registration or status move through
+	// transactions:apply or a named backward command; null for document postings.
+	StatusChangeID *string `json:"statusChangeId"`
+	// PreviousStatus is the status a status move left; null for an insert.
+	PreviousStatus *string `json:"previousStatus"`
 }
 
 // OnhandChangedData is the projection row after a posting changed it.

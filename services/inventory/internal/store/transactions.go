@@ -23,6 +23,7 @@ const maxListLimit = 501
 // previous page; pages run newest first (ids are UUIDv7, so id order is
 // creation order).
 type TransactionFilter struct {
+	ID         string // one transaction (the detail page)
 	ProductID  string
 	Status     domain.Status
 	SourceType string
@@ -85,8 +86,9 @@ func (s *Postgres) ListTransactions(ctx context.Context, f TransactionFilter) ([
 			  and ($5::date is null or t.physical_date >= $5::date)
 			  and ($6::date is null or t.physical_date <= $6::date)
 			  and ($7::uuid is null or t.id < $7::uuid)
+			  and ($9 = '' or t.id::text = $9)
 			order by t.id desc
-			limit $8`, p.TenantID, f.ProductID, string(f.Status), f.SourceType, f.From, f.To, cursor, limit)
+			limit $8`, p.TenantID, f.ProductID, string(f.Status), f.SourceType, f.From, f.To, cursor, limit, f.ID)
 		if err != nil {
 			return err
 		}

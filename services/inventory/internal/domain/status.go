@@ -37,8 +37,8 @@ var statusSequence = map[Direction][]Status{
 }
 
 // ErrBackwardStep is returned when a forward-only step would move backwards or
-// change direction. Backward moves exist only as named commands (unpick,
-// unregister, cancel reservation), which are outside this slice.
+// change direction. Backward moves exist only as the named commands of
+// transaction_step.go (unpick, unregister, cancel reservation).
 var ErrBackwardStep = errors.New("inventory: status step is not forward")
 
 // ErrUnknownStatus is returned for a status outside the model.
@@ -76,6 +76,13 @@ func Step(from, to Status) error {
 		return fmt.Errorf("%w: %s to %s", ErrBackwardStep, from, to)
 	}
 	return nil
+}
+
+// IsPhysical reports whether s is a physical status (PICKED, DEDUCTED,
+// REGISTERED, RECEIVED): it affects physical on-hand but carries no posted
+// value (FR-16.2).
+func IsPhysical(s Status) bool {
+	return s == StatusPicked || s == StatusDeducted || s == StatusRegistered || s == StatusReceived
 }
 
 // IsFinancial reports whether s is a financial status (SOLD, PURCHASED). Only

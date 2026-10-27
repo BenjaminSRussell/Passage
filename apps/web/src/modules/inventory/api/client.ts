@@ -292,7 +292,22 @@ export const TRANSACTION_STATUSES = [
 ] as const;
 export type TransactionStatus = (typeof TRANSACTION_STATUSES)[number];
 
-export const SOURCE_TYPES = ["INVENT_JOURNAL_LINE", "BLOCKING", "TRANSFER_LINE", "CONSIGNMENT_LINE", "OWNERSHIP_CHANGE"] as const;
+/**
+ * Origin types: the service's own documents, then the external origins other
+ * services register through transactions:apply (purchase, receipt, sales and
+ * production lines).
+ */
+export const SOURCE_TYPES = [
+  "INVENT_JOURNAL_LINE",
+  "BLOCKING",
+  "TRANSFER_LINE",
+  "CONSIGNMENT_LINE",
+  "OWNERSHIP_CHANGE",
+  "PURCH_LINE",
+  "RECEIPT_LINE",
+  "SALES_LINE",
+  "PROD_LINE",
+] as const;
 export type SourceType = (typeof SOURCE_TYPES)[number];
 
 export interface Transaction {
@@ -345,6 +360,74 @@ function query(params: Record<string, string | undefined>): string {
 export async function listTransactions(q: TransactionQuery = {}, signal?: AbortSignal): Promise<Page<Transaction>> {
   const { body } = await send<Page<Transaction>>(`/transactions${query({ ...q })}`, {}, signal);
   return { items: body.items ?? [], nextCursor: body.nextCursor };
+}
+
+// ---- Transaction status changes (FR-16.2, BR-16.1) ----
+
+/**
+ * CREATE registers a transaction for an external origin and STEP moves it
+ * forward (both service-to-service); UNPICK, UNREGISTER and
+ * CANCEL_RESERVATION are the named backward moves a user runs.
+ */
+export const STATUS_COMMANDS = ["CREATE", "STEP", "UNPICK", "UNREGISTER", "CANCEL_RESERVATION"] as const;
+export type StatusCommand = (typeof STATUS_COMMANDS)[number];
+
+export type NamedCommand = Extract<StatusCommand, "UNPICK" | "UNREGISTER" | "CANCEL_RESERVATION">;
+
+/** The named backward moves (BR-16.1): the statuses each applies to and where it moves them. */
+export const NAMED_MOVES: Record<NamedCommand, { verb: string; from: Partial<Record<TransactionStatus, TransactionStatus>> }> = {
+  UNPICK: { verb: "unpick", from: { PICKED: "RESERVED_PHYSICAL" } },
+  UNREGISTER: { verb: "unregister", from: { REGISTERED: "ARRIVED" } },
+  CANCEL_RESERVATION: { verb: "cancel-reservation", from: { RESERVED_PHYSICAL: "ON_ORDER", RESERVED_ORDERED: "ON_ORDER" } },
+};
+
+/** One status-change audit row; fromStatus is absent for CREATE. */
+export interface StatusChange {
+  id: string;
+  legalEntityId: string;
+  transactionId: string;
+  command: StatusCommand;
+  fromStatus?: TransactionStatus;
+  toStatus: TransactionStatus;
+  qty: string;
+  date: string;
+  createdBy?: string;
+  occurredAt: string;
+}
+
+export interface TransactionDetail extends Transaction {
+  /** Status history, oldest first. Journal postings have none. */
+  statusChanges: StatusChange[];
+}
+
+export async function getTransaction(id: string, signal?: AbortSignal): Promise<TransactionDetail> {
+  const { body } = await send<TransactionDetail>(`/transactions/${encodeURIComponent(id)}`, {}, signal);
+  return { ...body, statusChanges: body.statusChanges ?? [] };
+}
+
+export interface StatusChangeQuery {
+  transaction?: string;
+  command?: StatusCommand | "";
+  cursor?: string;
+}
+
+export async function listStatusChanges(q: StatusChangeQuery = {}, signal?: AbortSignal): Promise<Page<StatusChange>> {
+  const { body } = await send<Page<StatusChange>>(`/status-changes${query({ ...q })}`, {}, signal);
+  return { items: body.items ?? [], nextCursor: body.nextCursor };
+}
+
+/**
+ * Runs a named backward move on a transaction. The caller keeps the key for a
+ * retry of the same move, so a lost response replays instead of failing.
+ */
+export async function applyNamedMove(transactionId: string, command: NamedCommand, date: string, key: string = newKey()): Promise<StatusChange> {
+  const init: RequestInit = { method: "POST", headers: { "Idempotency-Key": key } };
+  if (date) init.body = JSON.stringify({ date });
+  return (await send<StatusChange>(`/transactions/${encodeURIComponent(transactionId)}:${NAMED_MOVES[command].verb}`, init)).body;
+}
+
+export function newIdempotencyKey(): string {
+  return newKey();
 }
 
 // ---- Reservations (FR-16.7) ----

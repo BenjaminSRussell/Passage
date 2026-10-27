@@ -80,6 +80,9 @@ type document struct {
 	sourceType    string
 	journalID     string // set for journal lines
 	referenceID   string // set for other documents (blocking id)
+	// statusChangeID is the audit row of a transaction registered through
+	// transactions:apply (CREATE); empty for document postings.
+	statusChangeID string
 }
 
 // PostJournal posts a DRAFT or APPROVED journal in one transaction: it locks the
@@ -542,6 +545,9 @@ func writeTransaction(ctx context.Context, tx pgx.Tx, tenantID string, doc docum
 		data.JournalID = &doc.journalID
 	}
 	data.ReferenceID = reference
+	if doc.statusChangeID != "" {
+		data.StatusChangeID = &doc.statusChangeID
+	}
 	return txnID, enqueue(ctx, tx, "transaction", txnID, invevents.TransactionPosted, tenantID, data)
 }
 

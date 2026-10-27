@@ -210,7 +210,7 @@ paths:
       parameters:
         - { name: product, in: query, schema: { type: string, format: uuid } }
         - { name: status, in: query, schema: { $ref: '#/components/schemas/TransactionStatus' } }
-        - { name: sourceType, in: query, schema: { type: string, enum: [INVENT_JOURNAL_LINE, BLOCKING, TRANSFER_LINE] } }
+        - { name: sourceType, in: query, schema: { type: string, enum: [INVENT_JOURNAL_LINE, BLOCKING, TRANSFER_LINE, CONSIGNMENT_LINE, OWNERSHIP_CHANGE, PURCH_LINE, RECEIPT_LINE, SALES_LINE, PROD_LINE] } }
         - { name: from, in: query, schema: { type: string, format: date } }
         - { name: to, in: query, schema: { type: string, format: date } }
         - $ref: '#/components/parameters/Limit'
@@ -1466,6 +1466,194 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/transactions/{id}:unpick:
+    post:
+      operationId: unpickInventoryTransaction
+      summary: Unpick - named backward move PICKED to RESERVED_PHYSICAL (FR-16.2, BR-16.1)
+      description: |
+        Moves the whole transaction quantity, updates the on-hand buckets under the row lock with the
+        negative policy checked (INV-NEG-001 / INV-NEG-002), writes a status-change audit row and
+        emits transaction.posted and onhand.changed in the same database transaction. A transaction
+        at another status is INV-STP-001.
+      x-passage-duty: inventory.transaction.step
+      parameters:
+        - $ref: '#/components/parameters/TransactionId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NamedStepRequest' }
+      responses:
+        '201':
+          description: Move applied
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatusChange' }
+        '200':
+          description: Idempotent replay of the same move (Idempotent-Replayed true)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatusChange' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/transactions/{id}:unregister:
+    post:
+      operationId: unregisterInventoryTransaction
+      summary: Unregister - named backward move REGISTERED to ARRIVED (FR-16.2, AC-16.8)
+      description: |
+        Moves the whole transaction quantity, updates the on-hand buckets under the row lock with the
+        negative policy checked (INV-NEG-001 / INV-NEG-002), writes a status-change audit row and
+        emits transaction.posted and onhand.changed in the same database transaction. A transaction
+        at another status is INV-STP-001.
+      x-passage-duty: inventory.transaction.step
+      parameters:
+        - $ref: '#/components/parameters/TransactionId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NamedStepRequest' }
+      responses:
+        '201':
+          description: Move applied
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatusChange' }
+        '200':
+          description: Idempotent replay of the same move (Idempotent-Replayed true)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatusChange' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/transactions/{id}:cancel-reservation:
+    post:
+      operationId: cancelInventoryTransactionReservation
+      summary: CancelReservation - named backward move RESERVED_PHYSICAL or RESERVED_ORDERED to ON_ORDER (FR-16.2)
+      description: |
+        Moves the whole transaction quantity, updates the on-hand buckets under the row lock with the
+        negative policy checked (INV-NEG-001 / INV-NEG-002), writes a status-change audit row and
+        emits transaction.posted and onhand.changed in the same database transaction. A transaction
+        at another status is INV-STP-001.
+      x-passage-duty: inventory.transaction.step
+      parameters:
+        - $ref: '#/components/parameters/TransactionId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NamedStepRequest' }
+      responses:
+        '201':
+          description: Move applied
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatusChange' }
+        '200':
+          description: Idempotent replay of the same move (Idempotent-Replayed true)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatusChange' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/transactions/{id}:
+    get:
+      operationId: getInventoryTransaction
+      summary: One transaction with its origin and status history (FR-16.13)
+      x-passage-duty: inventory.read
+      parameters:
+        - $ref: '#/components/parameters/TransactionId'
+      responses:
+        '200':
+          description: The transaction
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransactionDetail' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/status-changes:
+    get:
+      operationId: listInventoryStatusChanges
+      summary: Status-change inquiry, newest first (FR-16.1, BR-16.1)
+      x-passage-duty: inventory.read
+      parameters:
+        - { name: transaction, in: query, schema: { type: string, format: uuid } }
+        - { name: command, in: query, schema: { $ref: '#/components/schemas/StatusCommand' } }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of status changes
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/StatusChange' }
+                  nextCursor: { type: string, format: uuid }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /internal/v1/inventory/transactions:apply:
+    post:
+      operationId: applyInventoryTransaction
+      summary: Service-to-service registration or forward status step of a transaction (FR-16.2, BR-16.1; waves 17-20)
+      description: |
+        With origin, registers one transaction for an external origin (purchase, receipt, sales or
+        production line) at an expected or physical status; one origin registers one transaction
+        (INV-STP-002). With transactionId, moves it forward to toStatus (skips allowed, never
+        backward: INV-STP-001); fromStatus must match the current status (412 conflict_version).
+        A move into SOLD / PURCHASED sets the financial date and the posted cost amount (issues at
+        the running average, receipts at costAmount or their physical cost); vendor-owned stock
+        never reaches a financial status (INV-OWN-001). The move applies to the whole quantity
+        (splitting, BR-16.2, is not built). The projection, the audit row and the events are
+        written in one database transaction. No GL entry is produced here: the calling document
+        posts its own ledger entry. Internal path: not exposed by the web BFF.
+      x-passage-duty: inventory.transaction.apply
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApplyTransactionRequest' }
+      responses:
+        '201':
+          description: Registration or move applied
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatusChange' }
+        '200':
+          description: Idempotent replay (Idempotent-Replayed true)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatusChange' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
 components:
   parameters:
     Limit:
@@ -1494,6 +1682,11 @@ components:
       required: true
       schema: { type: string, format: uuid }
     TransferId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    TransactionId:
       name: id
       in: path
       required: true
@@ -1655,10 +1848,10 @@ components:
         id: { type: string, format: uuid }
         legalEntityId: { type: string, format: uuid }
         originId: { type: string, format: uuid }
-        sourceType: { type: string, enum: [INVENT_JOURNAL_LINE, BLOCKING, TRANSFER_LINE, CONSIGNMENT_LINE, OWNERSHIP_CHANGE] }
+        sourceType: { type: string, enum: [INVENT_JOURNAL_LINE, BLOCKING, TRANSFER_LINE, CONSIGNMENT_LINE, OWNERSHIP_CHANGE, PURCH_LINE, RECEIPT_LINE, SALES_LINE, PROD_LINE], description: 'PURCH_LINE, RECEIPT_LINE, SALES_LINE and PROD_LINE are registered by other services through transactions:apply' }
         sourceId: { type: string, format: uuid }
         journalId: { type: string, format: uuid, description: Set for journal lines and the receipt leg of an ownership change }
-        reference: { type: string, description: 'Source document of other origins (blocking, transfer or replenishment order id)' }
+        reference: { type: string, description: 'Source document of other origins (blocking, transfer or replenishment order id, or the reference given to transactions:apply)' }
         productId: { type: string, format: uuid }
         dimensions: { $ref: '#/components/schemas/Dimensions' }
         qty: { $ref: '#/components/schemas/Decimal' }
@@ -1667,11 +1860,74 @@ components:
         issueStatus: { $ref: '#/components/schemas/TransactionStatus' }
         receiptStatus: { $ref: '#/components/schemas/TransactionStatus' }
         physicalDate: { type: string, format: date }
-        financialDate: { type: string, format: date, description: Absent for a physical status (a vendor-owned RECEIVED or DEDUCTED transaction) }
+        financialDate: { type: string, format: date, description: Absent until the transaction reaches a financial status (SOLD, PURCHASED) }
         currency: { type: string }
         costAmountPhysical: { $ref: '#/components/schemas/Decimal' }
         costAmountPosted: { $ref: '#/components/schemas/Decimal' }
         createdAt: { type: string, format: date-time }
+    StatusCommand:
+      type: string
+      enum: [CREATE, STEP, UNPICK, UNREGISTER, CANCEL_RESERVATION]
+      description: 'CREATE registers a transaction for an external origin; STEP moves it forward; UNPICK, UNREGISTER and CANCEL_RESERVATION are the named backward moves (BR-16.1)'
+    StatusChange:
+      type: object
+      description: Status-change audit row (InventoryTransactionStatusChange, FR-16.1); append-only
+      required: [id, legalEntityId, transactionId, command, toStatus, qty, date, occurredAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        transactionId: { type: string, format: uuid }
+        command: { $ref: '#/components/schemas/StatusCommand' }
+        fromStatus: { $ref: '#/components/schemas/TransactionStatus', description: Absent for CREATE }
+        toStatus: { $ref: '#/components/schemas/TransactionStatus' }
+        qty: { $ref: '#/components/schemas/Decimal', description: Quantity moved (the whole signed transaction quantity) }
+        date: { type: string, format: date, description: Physical or financial date the change set }
+        createdBy: { type: string, format: uuid }
+        occurredAt: { type: string, format: date-time }
+    TransactionDetail:
+      allOf:
+        - $ref: '#/components/schemas/Transaction'
+        - type: object
+          required: [statusChanges]
+          properties:
+            statusChanges:
+              type: array
+              description: Status history, oldest first
+              items: { $ref: '#/components/schemas/StatusChange' }
+    NamedStepRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        date: { type: string, format: date, description: 'Date of the move; default today (UTC)' }
+    ApplyTransactionRequest:
+      type: object
+      additionalProperties: false
+      description: |
+        Either origin (register a new transaction for an external origin at toStatus) or
+        transactionId with fromStatus (step an existing transaction forward to toStatus).
+      required: [toStatus]
+      properties:
+        transactionId: { type: string, format: uuid, description: STEP only }
+        fromStatus: { $ref: '#/components/schemas/TransactionStatus', description: 'STEP only: the status the caller read; a mismatch is 412 conflict_version' }
+        costAmount: { $ref: '#/components/schemas/Decimal', description: 'STEP of a receipt to PURCHASED only: the posted value (default its physical cost amount)' }
+        origin:
+          type: object
+          required: [sourceType, sourceId]
+          additionalProperties: false
+          properties:
+            sourceType: { type: string, enum: [PURCH_LINE, RECEIPT_LINE, SALES_LINE, PROD_LINE] }
+            sourceId: { type: string, format: uuid, description: 'Source document line; one origin registers one transaction' }
+            reference: { type: string, maxLength: 60, description: Document number shown in the inquiry }
+        legalEntityId: { type: string, format: uuid, description: Registration only }
+        productId: { type: string, format: uuid, description: Registration only }
+        dimensions: { $ref: '#/components/schemas/Dimensions' }
+        qty: { $ref: '#/components/schemas/Decimal', description: 'Registration only: positive for a receipt, negative for an issue; at most 6 decimals' }
+        enteredQty: { $ref: '#/components/schemas/Decimal', description: 'Registration only: default qty' }
+        enteredUnit: { type: string, pattern: '^[A-Z0-9_-]{1,12}$', description: Registration only }
+        currency: { type: string, pattern: '^[A-Z]{3}$', description: Registration only }
+        costPrice: { $ref: '#/components/schemas/Decimal', description: 'Registration only: unit cost of a receipt, or the fallback unit cost of an issue from a row with no posted stock; vendor-owned stock is never valued' }
+        toStatus: { $ref: '#/components/schemas/TransactionStatus', description: 'Registration: a physical or expected status matching the sign of qty (never SOLD or PURCHASED). STEP: a later status of the same direction' }
+        date: { type: string, format: date, description: 'Physical date of a registration or of a move into a physical status, financial date of a move into SOLD or PURCHASED; default today (UTC)' }
     ReserveRequest:
       type: object
       additionalProperties: false

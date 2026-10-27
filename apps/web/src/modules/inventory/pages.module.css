@@ -103,3 +103,12 @@
 .narrow {
   inline-size: 8rem;
 }
+
+.hints {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding-inline-start: var(--space-5);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm-size);
+  line-height: var(--text-sm-leading);
+}

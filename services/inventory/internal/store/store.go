@@ -89,6 +89,10 @@ type Store interface {
 	ListConsignments(ctx context.Context, f ConsignmentFilter) ([]domain.ConsignmentOrder, error)
 	ReceiveConsignment(ctx context.Context, id string, version int, receipts []domain.ConsignmentReceipt, receiptDate time.Time) (domain.ConsignmentOrder, error)
 	ListConsignmentStock(ctx context.Context, vendor string) ([]ConsignmentStockRow, error)
+	CreateTransaction(ctx context.Context, in CreateTransactionInput) (StatusChange, bool, error)
+	ApplyStatusStep(ctx context.Context, in StatusStepInput) (StatusChange, bool, error)
+	GetTransaction(ctx context.Context, id string) (TransactionRow, []StatusChange, error)
+	ListStatusChanges(ctx context.Context, f StatusChangeFilter) ([]StatusChange, error)
 	Ping(ctx context.Context) error
 }
 

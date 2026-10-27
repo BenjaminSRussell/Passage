@@ -24,6 +24,10 @@ const sourceLabels: Record<SourceType, string> = {
   TRANSFER_LINE: "Transfer order",
   CONSIGNMENT_LINE: "Consignment receipt",
   OWNERSHIP_CHANGE: "Ownership change",
+  PURCH_LINE: "Purchase order line",
+  RECEIPT_LINE: "Receipt line",
+  SALES_LINE: "Sales order line",
+  PROD_LINE: "Production order line",
 };
 
 function origin(row: Transaction) {
@@ -40,6 +44,16 @@ function origin(row: Transaction) {
 }
 
 const columns: DataTableColumn<Transaction>[] = [
+  {
+    key: "id",
+    header: "Transaction",
+    mono: true,
+    render: (row) => (
+      <Link to={`/inventory/transactions/${row.id}`} aria-label={`Transaction ${shortId(row.id)}`}>
+        {shortId(row.id)}
+      </Link>
+    ),
+  },
   { key: "physicalDate", header: "Physical date", mono: true },
   { key: "productId", header: "Product", mono: true, render: (row) => shortId(row.productId) },
   { key: "dimensions", header: "Dimensions", render: (row) => describeDimensions(row.dimensions, ALL_DIMENSIONS) },

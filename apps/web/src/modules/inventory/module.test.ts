@@ -15,6 +15,7 @@ describe("inventory module", () => {
       "/inventory/journals": "inventory.read",
       "/inventory/journals/new": "inventory.journal.write",
       "/inventory/transactions": "inventory.read",
+      "/inventory/status-changes": "inventory.read",
       "/inventory/reservations": "inventory.read",
       "/inventory/blockings": "inventory.read",
       "/inventory/count-plans": "inventory.read",
@@ -67,6 +68,13 @@ describe("inventory module", () => {
       "/inventory/consignment-orders/:id",
       "/inventory/consignment/stock",
     ]) {
+      expect(paths).toContain(path);
+    }
+  });
+
+  it("routes every slice 6 screen", () => {
+    const paths = inventory.routes.map((r) => r.path);
+    for (const path of ["/inventory/transactions/:id", "/inventory/status-changes"]) {
       expect(paths).toContain(path);
     }
   });
