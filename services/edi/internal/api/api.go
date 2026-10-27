@@ -1,6 +1,7 @@
 // Package api exposes the edi HTTP surface: partner profiles, the dry-run map
 // tester, inbound X12 receipt (850s mapped, 997s matched to outbound
-// documents) and outbound 855/856/810 generation. Handlers decode, validate,
+// documents), outbound 855/856/810 generation, and the message monitor with
+// reprocess and the partner SLA dashboard. Handlers decode, validate,
 // check duties, then call the domain and store.
 package api
 
@@ -39,6 +40,7 @@ const (
 	CodeUnsupportedSet   = "EDI-0006"
 	CodeOutbound         = "EDI-0007"
 	CodePartnerInactive  = "EDI-0008"
+	CodeNotInbound       = "EDI-0009"
 	CodeIdempotencyReuse = "idempotency_key_reuse"
 )
 
@@ -81,6 +83,10 @@ func (a *API) Routes() http.Handler {
 		r.With(authz.RequireDuty("EDI_OPERATE")).Post("/inbound/x12", a.receiveX12)
 		r.With(authz.RequireDuty("EDI_OPERATE")).Get("/interchanges", a.listInterchanges)
 		r.With(authz.RequireDuty("EDI_OPERATE")).Get("/interchanges/{id}", a.getInterchange)
+		r.With(authz.RequireDuty("EDI_OPERATE")).Post("/interchanges/{id}:reprocess", a.reprocessInterchange)
+		r.With(authz.RequireDuty("EDI_OPERATE")).Get("/messages", a.listMessages)
+		r.With(authz.RequireDuty("EDI_OPERATE")).Get("/messages/{id}", a.getMessage)
+		r.With(authz.RequireDuty("EDI_OPERATE")).Get("/partners/sla", a.partnerSLA)
 	})
 	return r
 }
@@ -273,7 +279,7 @@ func mapTransaction(t domain.Transaction) (txResult, error) {
 	var details []string
 	res.outcome.Code = domain.AckAccepted
 	for _, is := range issues {
-		details = append(details, is.Detail)
+		details = append(details, is.Code+": "+is.Detail)
 		if is.Reject {
 			res.outcome.Code = domain.AckRejected
 		} else if res.outcome.Code == domain.AckAccepted {

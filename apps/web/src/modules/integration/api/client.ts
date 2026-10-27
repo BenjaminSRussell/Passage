@@ -10,6 +10,7 @@ export type AckStatus = "PENDING" | "ACCEPTED" | "ACCEPTED_WITH_ERRORS" | "REJEC
 export const ACK_STATUSES: readonly AckStatus[] = ["PENDING", "ACCEPTED", "ACCEPTED_WITH_ERRORS", "REJECTED", "TIMEOUT"];
 
 export type MessageStatus = "RECEIVED" | "MAPPED" | "POSTED" | "FAILED" | "SENT" | "ACKED";
+export const MESSAGE_STATUSES: readonly MessageStatus[] = ["RECEIVED", "MAPPED", "POSTED", "FAILED", "SENT", "ACKED"];
 
 export type Direction = "IN" | "OUT";
 
@@ -214,6 +215,96 @@ export interface OutboundResult {
   x12: string;
 }
 
+/** One row of the message monitor (GET /messages): a transaction with its interchange envelope. */
+export interface MonitorMessage {
+  id: string;
+  interchangeId: string;
+  partnerId: string;
+  partnerName: string;
+  direction: Direction;
+  standard: "X12" | "EDIFACT" | "UBL" | "CXML";
+  /** ISA13 of the interchange. */
+  controlNumber: string;
+  ackStatus: AckStatus;
+  transactionSet: string;
+  stControl: string;
+  status: MessageStatus;
+  error?: string;
+  createdAt: string;
+}
+
+/** One message with its canonical document (GET /messages/{id}). The raw payload is never returned. */
+export interface MonitorMessageDetail extends MonitorMessage {
+  canonical?: CanonicalDocument;
+}
+
+export interface MessagePage {
+  items: MonitorMessage[];
+  /** Absent on the last page. */
+  nextCursor?: string;
+}
+
+export interface MessageFilter {
+  partnerId?: string;
+  direction?: Direction | "";
+  status?: MessageStatus | "";
+  /** Three digits, for example 850. */
+  transactionSet?: string;
+  /** ISA13, up to nine digits; the service zero-pads it. */
+  controlNumber?: string;
+  limit?: number;
+  cursor?: string;
+}
+
+/** Outcome of POST /interchanges/{id}:reprocess for one transaction that was FAILED. */
+export interface ReprocessedMessage {
+  messageId: string;
+  transactionSet: string;
+  stControl: string;
+  previousError?: string;
+  status: "MAPPED" | "FAILED";
+  error?: string;
+  /** False when the outcome is the same as before: nothing was (or would be) written. */
+  changed: boolean;
+}
+
+export interface ReprocessResult {
+  interchangeId: string;
+  dryRun: boolean;
+  changed: number;
+  messages: ReprocessedMessage[];
+}
+
+/** One partner on the SLA dashboard (GET /partners/sla). */
+export interface PartnerSla {
+  partnerId: string;
+  partnerName: string;
+  environment: Environment;
+  ackSlaMinutes: number;
+  /** Transactions in both directions in the window. */
+  messages: number;
+  failed: number;
+  /** failed / messages × 100, two decimals. */
+  failureRatePct: number;
+  /** Outbound interchanges recorded in the window, and how many have the partner's 997. */
+  outbound: number;
+  acked: number;
+  /** 95th percentile 997 latency in minutes; absent when nothing was acked. */
+  p95AckMinutes?: number;
+  /** Acked after ackSlaMinutes. */
+  lateAcks: number;
+  /** Still waiting past ackSlaMinutes. */
+  overdueAcks: number;
+}
+
+export interface PartnerSlaReport {
+  days: number;
+  items: PartnerSla[];
+}
+
+/** Window choices on the SLA dashboard; the service accepts 1 to 365 days. */
+export const SLA_WINDOWS: readonly number[] = [7, 30, 90, 365];
+
 export class EdiApiError extends Error {
   constructor(
     readonly status: number,
@@ -335,4 +426,39 @@ export function createOutbound(partnerId: string, transactionSet: OutboundSet, d
     headers: { "Content-Type": "application/json", "Idempotency-Key": key },
     body: JSON.stringify({ transactionSet, document }),
   });
+}
+
+/** One page of the message monitor, newest first. Pass nextCursor back as cursor for the next page. */
+export async function listMessages(filter: MessageFilter = {}, signal?: AbortSignal): Promise<MessagePage> {
+  const body = await send<MessagePage>(`/messages${query({ ...filter })}`, {}, signal);
+  if (!Array.isArray(body.items)) {
+    throw new EdiApiError(0, "COM-0001", "The response has no items");
+  }
+  return body;
+}
+
+export function getMessage(id: string, signal?: AbortSignal): Promise<MonitorMessageDetail> {
+  return send<MonitorMessageDetail>(`/messages/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/**
+ * Maps the failed transactions of an inbound interchange again from its raw
+ * payload. A dry run writes nothing and sends no key; otherwise reuse one key
+ * per attempt so a retried click cannot run twice.
+ */
+export function reprocessInterchange(id: string, options: { dryRun: boolean; key?: string }): Promise<ReprocessResult> {
+  const headers: Record<string, string> = {};
+  if (!options.dryRun) headers["Idempotency-Key"] = options.key ?? newKey();
+  return send<ReprocessResult>(`/interchanges/${encodeURIComponent(id)}:reprocess${query({ dryRun: options.dryRun ? "true" : undefined })}`, {
+    method: "POST",
+    headers,
+  });
+}
+
+export async function partnerSla(days: number, signal?: AbortSignal): Promise<PartnerSlaReport> {
+  const body = await send<PartnerSlaReport>(`/partners/sla${query({ days })}`, {}, signal);
+  if (!Array.isArray(body.items)) {
+    throw new EdiApiError(0, "COM-0001", "The response has no items");
+  }
+  return body;
 }

@@ -177,7 +177,7 @@ func TestReceiveInterchange_WritesMessagesAndEventInOneTransaction(t *testing.T)
 		t.Fatal(err)
 	}
 
-	rows, err := pool.Query(context.Background(), `select type, aggregate_id, payload from outbox order by aggregate_id`)
+	rows, err := pool.Query(context.Background(), `select type, aggregate_id, payload from outbox where type = $1 order by aggregate_id`, ediev.MessageReceived)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,6 +209,20 @@ func TestReceiveInterchange_WritesMessagesAndEventInOneTransaction(t *testing.T)
 	}
 	if n != 2 {
 		t.Fatalf("want one event per message, got %d", n)
+	}
+	// The failed 810 also gets one message.failed with its error (FR-35.10 monitor and tasks).
+	var failed struct {
+		Data ediev.MessageFailedData `json:"data"`
+	}
+	var payload []byte
+	if err := pool.QueryRow(context.Background(), `select payload from outbox where type = $1`, ediev.MessageFailed).Scan(&payload); err != nil {
+		t.Fatalf("one message.failed expected: %v", err)
+	}
+	if err := json.Unmarshal(payload, &failed); err != nil {
+		t.Fatal(err)
+	}
+	if f := failed.Data; f.MessageID != msgs[1].ID || f.InterchangeID != got.InterchangeID || f.Error != msgs[1].Error || f.Reprocessed {
+		t.Fatalf("message.failed data = %+v", f)
 	}
 
 	detail, err := st.GetInterchange(ctx, got.InterchangeID)
@@ -260,8 +274,10 @@ func TestRowLevelSecurity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.ReceiveInterchange(one, Inbound{PartnerID: p.ID, Version: "00401", ISAControl: "000000001", Raw: "raw",
-		AckStatus: "ACCEPTED", BuildAck: counting997}); err != nil {
+	in, err := st.ReceiveInterchange(one, Inbound{PartnerID: p.ID, Version: "00401", ISAControl: "000000001", Raw: "raw",
+		AckStatus: "ACCEPTED", BuildAck: counting997, Messages: []Message{{ID: "0195f0a0-0000-7000-8000-000000000031",
+			TransactionSet: "850", STControl: "0001", Status: "FAILED", Error: "EDI-0103: x"}}})
+	if err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := st.CreateOutbound(one, "out", "h", outbound(p.ID, "856")); err != nil {
@@ -278,6 +294,26 @@ func TestRowLevelSecurity(t *testing.T) {
 	}
 	if list, err := st.ListInterchanges(two, InterchangeFilter{Limit: 10}); err != nil || len(list) != 0 {
 		t.Fatalf("tenant 2 sees tenant 1 interchanges: %+v %v", list, err)
+	}
+	// The message monitor, SLA dashboard and reprocess see only the caller's tenant.
+	if list, err := st.ListMessages(two, MessageFilter{Limit: 10}); err != nil || len(list) != 0 {
+		t.Fatalf("tenant 2 sees tenant 1 messages: %+v %v", list, err)
+	}
+	if _, err := st.GetMessage(two, in.Messages[0].ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("tenant 2 reads tenant 1 message: %v", err)
+	}
+	if rows, err := st.PartnerSLAs(two, 30); err != nil || len(rows) != 0 {
+		t.Fatalf("tenant 2 sees tenant 1 SLA rows: %+v %v", rows, err)
+	}
+	noPlan := func(string, []Message) ([]Message, error) {
+		t.Fatal("plan must not run for another tenant")
+		return nil, nil
+	}
+	if _, _, err := st.ReprocessInterchange(two, "rp", "h", in.InterchangeID, false, noPlan); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("tenant 2 reprocesses tenant 1 interchange: %v", err)
+	}
+	if list, err := st.ListMessages(one, MessageFilter{Limit: 10}); err != nil || len(list) != 2 {
+		t.Fatalf("tenant 1 must see its own messages: %d %v", len(list), err)
 	}
 	// The same ISA identity and idempotency key are independent per tenant.
 	if _, created, err := st.CreatePartner(two, "k", "h", profile("SHARED")); err != nil || !created {

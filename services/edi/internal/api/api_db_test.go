@@ -302,3 +302,111 @@ func TestOutboundAPI_GenerateReplayAndMatchPartner997(t *testing.T) {
 		t.Fatalf("stray 997: %+v", got)
 	}
 }
+
+// FR-35.10: a failed inbound 850 shows in the monitor, a dry run and then a
+// reprocess map it again from the stored raw payload, and the SLA dashboard
+// measures the partner's 997 latency on our 856.
+func TestMonitorAPI_ReprocessAndSLA(t *testing.T) {
+	h, pool := dbHandlerPool(t)
+	rec := do(t, h, http.MethodPost, "/edi/v1/partners", distributor, "EDI_ADMIN", map[string]string{"Idempotency-Key": "p"})
+	var partner store.Partner
+	if err := json.Unmarshal(rec.Body.Bytes(), &partner); err != nil || rec.Code != http.StatusCreated {
+		t.Fatalf("create partner: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = do(t, h, http.MethodPost, "/edi/v1/inbound/x12?environment=TEST", sample850(t, "1"), "EDI_OPERATE", nil)
+	var received receiveResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &received); err != nil || rec.Code != http.StatusCreated {
+		t.Fatalf("receive: %d %s", rec.Code, rec.Body.String())
+	}
+	msgID := received.Messages[0].MessageID
+	// Stand-in for a map that failed at receipt and has since been fixed.
+	if _, err := pool.Exec(context.Background(), `update message set status = 'FAILED', error = 'EDI-0105: no item cross-reference', canonical = null where id = $1`, msgID); err != nil {
+		t.Fatal(err)
+	}
+
+	rec = do(t, h, http.MethodGet, "/edi/v1/messages?status=FAILED&direction=IN&transactionSet=850&controlNumber=1", "", "EDI_OPERATE", nil)
+	var page struct {
+		Items      []store.MessageRecord `json:"items"`
+		NextCursor string                `json:"nextCursor"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil || rec.Code != http.StatusOK || len(page.Items) != 1 || page.Items[0].ID != msgID {
+		t.Fatalf("monitor list: %d %s", rec.Code, rec.Body.String())
+	}
+	if page.NextCursor != "" || page.Items[0].PartnerName != "Demo distributor" || page.Items[0].InterchangeID != received.InterchangeID {
+		t.Fatalf("monitor row: %+v cursor %q", page.Items[0], page.NextCursor)
+	}
+
+	path := "/edi/v1/interchanges/" + received.InterchangeID + ":reprocess"
+	rec = do(t, h, http.MethodPost, path+"?dryRun=true", "", "EDI_OPERATE", nil)
+	var res store.ReprocessResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil || rec.Code != http.StatusOK || !res.DryRun || res.Changed != 1 || res.Messages[0].Status != "MAPPED" {
+		t.Fatalf("dry run: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = do(t, h, http.MethodGet, "/edi/v1/messages/"+msgID, "", "EDI_OPERATE", nil)
+	if !strings.Contains(rec.Body.String(), `"status":"FAILED"`) {
+		t.Fatalf("a dry run must not write: %s", rec.Body.String())
+	}
+
+	rec = do(t, h, http.MethodPost, path, "", "EDI_OPERATE", map[string]string{"Idempotency-Key": "rp-1"})
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil || rec.Code != http.StatusOK || res.DryRun || res.Changed != 1 {
+		t.Fatalf("reprocess: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = do(t, h, http.MethodGet, "/edi/v1/messages/"+msgID, "", "EDI_OPERATE", nil)
+	var m store.MessageRecord
+	if err := json.Unmarshal(rec.Body.Bytes(), &m); err != nil || m.Status != "MAPPED" || m.Error != "" || !strings.Contains(string(m.Canonical), "PO1234") {
+		t.Fatalf("message after reprocess: %d %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "BEG*00") {
+		t.Fatal("the raw payload must not be returned (BR-35.12)")
+	}
+	var mapped int
+	if err := pool.QueryRow(context.Background(), `select count(*) from outbox where type = $1 and aggregate_id = $2 and payload->'data'->>'status' = 'MAPPED'`,
+		ediev.MessageReceived, msgID).Scan(&mapped); err != nil || mapped != 2 {
+		t.Fatalf("message.received MAPPED events for the message = %d (receipt and reprocess), err=%v", mapped, err)
+	}
+	if rec := do(t, h, http.MethodGet, "/edi/v1/messages/0195f0a0-0000-7000-8000-0000000000aa", "", "EDI_OPERATE", nil); rec.Code != http.StatusNotFound || problemCode(t, rec) != CodeNotFound {
+		t.Fatalf("unknown message: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// An outbound 856, answered by the partner's 997.
+	rec = do(t, h, http.MethodPost, "/edi/v1/partners/"+partner.ID+"/outbound", `{"transactionSet":"856","document":`+asnDocument+`}`, "EDI_OPERATE",
+		map[string]string{"Idempotency-Key": "asn-1"})
+	var out store.OutboundResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || rec.Code != http.StatusCreated {
+		t.Fatalf("outbound: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := do(t, h, http.MethodPost, "/edi/v1/interchanges/"+out.InterchangeID+":reprocess", "", "EDI_OPERATE",
+		map[string]string{"Idempotency-Key": "rp-2"}); rec.Code != http.StatusConflict || problemCode(t, rec) != CodeNotInbound {
+		t.Fatalf("outbound reprocess: %d %s", rec.Code, rec.Body.String())
+	}
+	sent, err := domain.Parse(out.X12)
+	if err != nil {
+		t.Fatal(err)
+	}
+	partner997, err := domain.Ack997(sent, sent.Groups[0], []domain.TxOutcome{{SetID: "856", Control: "0001", Code: domain.AckAccepted}},
+		"000000077", "77", time.Date(2026, 10, 21, 13, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw997, err := domain.Serialize(partner997)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec := do(t, h, http.MethodPost, "/edi/v1/inbound/x12?environment=TEST", raw997, "EDI_OPERATE", nil); rec.Code != http.StatusCreated {
+		t.Fatalf("receive 997: %d %s", rec.Code, rec.Body.String())
+	}
+
+	rec = do(t, h, http.MethodGet, "/edi/v1/partners/sla?days=7", "", "EDI_OPERATE", nil)
+	var sla struct {
+		Days  int      `json:"days"`
+		Items []slaRow `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &sla); err != nil || rec.Code != http.StatusOK || sla.Days != 7 || len(sla.Items) != 1 {
+		t.Fatalf("sla: %d %s", rec.Code, rec.Body.String())
+	}
+	// 850 + 856 + the partner's 997; nothing failed now; the 856 was acked within the SLA.
+	if r := sla.Items[0]; r.PartnerID != partner.ID || r.Messages != 3 || r.Failed != 0 || r.FailureRatePct != 0 ||
+		r.Outbound != 1 || r.Acked != 1 || r.LateAcks != 0 || r.OverdueAcks != 0 || r.P95AckMinutes == nil || *r.P95AckMinutes > 1 {
+		t.Fatalf("sla row: %s", rec.Body.String())
+	}
+}

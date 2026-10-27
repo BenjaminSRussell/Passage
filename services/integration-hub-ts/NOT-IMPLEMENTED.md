@@ -1,13 +1,14 @@
 # NOT-IMPLEMENTED: integration-hub-ts (PSG-35, wave 35)
 
-Slice 1 implements the webhook delivery policy. Slice 2 adds the pure dispatch state machine (`src/dispatch.ts`, `nextStep`) and replay planning (`deliveryOrder`, `planReplay`, `replayHeaders`). Every other deliverable is listed here.
+Slice 1 implements the webhook delivery policy. Slice 2 adds the pure dispatch state machine (`src/dispatch.ts`, `nextStep`) and replay planning (`deliveryOrder`, `planReplay`, `replayHeaders`). Slice 3 adds the quota token bucket (`src/quota.ts`) and subscription event-type patterns (`src/filter.ts`). Every other deliverable is listed here.
 
 | Deliverable / criterion | Status | Reason |
 | --- | --- | --- |
 | FR-35.8 public REST and GraphQL APIs, OpenAPI 3.1 for entities since wave 3 | later slice of PSG-35 | Needs the entity APIs of waves 3 to 34 and a gateway policy set. |
 | FR-35.8 API clients (Keycloak client credentials), scopes mapped to duties, sandbox tenant per client | later slice of PSG-35 | Needs Keycloak client provisioning and the `ApiClient` store. |
-| FR-35.8 quotas: token bucket 600/min, burst 100, 429 with Retry-After (HUB-0113, BR-35.8) | later slice of PSG-35 | Enforced at Envoy Gateway (deploy/, not owned by this wave). |
+| FR-35.8 quotas: token bucket 600/min, burst 100, 429 with Retry-After (HUB-0113, BR-35.8) | partly built | The bucket arithmetic (`take`, `retryAfterSeconds`, parameter ranges, GraphQL cost per 100 complexity points) is built and tested in `src/quota.ts`, including the AC-35.6 burst of 700 requests. No request middleware, no per-client state store and no `ApiClient` quota fields; the Envoy Gateway rate-limit policy belongs to deploy/ (handoff to the deployment-cicd owner). The portal usage chart in AC-35.6 needs the developer portal. |
 | FR-35.9 webhook dispatcher (HTTPS POST, 8 retries, dead-letter, replay), subscription store | partly built | Pure policy (sign, verify, schedule, ordering) and the dispatch state machine `nextStep` (delivered, paused on 410, retry with `nextRetryAt`, dead-letter after the 8th retry) are built and tested. No HTTP client, subscription store, outbox consumer or `next_retry_at` poller yet. |
+| FR-35.9 subscription filter by CloudEvents type pattern | partly built | `validatePattern` and `matchesType`/`matchesAny` (`*` one segment, trailing `**`) are built and tested in `src/filter.ts`. The CESQL-style `filter` expression on event data (§6.35.4) is not built. |
 | FR-35.9 Kafka topic subscriptions `hub.<tenant>.<client>` with ACLs | later slice of PSG-35 | Needs Strimzi KafkaUser/KafkaTopic CRs (deploy/, handoff) and the consumer. |
 | FR-35.9 replay from timestamp as a Temporal workflow (BR-35.9, cap 1,000,000) | partly built | `planReplay` (time filter, cap with a `{fromSeconds, skip}` cursor that neither repeats nor loses events when many share a timestamp) over `deliveryOrder` (per-aggregate sequence order even when a producer clock ran behind) and `replayHeaders` (`ce-passagereplay: true`) are built and tested. Needs Temporal wiring, progress, the event archive and Kafka offset lookup. |
 | FR-35.10 message monitor and replay (hub side) | later slice of PSG-35 | Shared monitor lives in the edi service; hub side depends on subscriptions. |

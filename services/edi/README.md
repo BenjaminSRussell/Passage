@@ -55,6 +55,34 @@ Built in this slice:
   acknowledged.
 - **Interchange list** filters by direction (IN/OUT).
 
+## Slice 3 scope
+
+- **Message monitor** (FR-35.10, §6.35.14): `GET /edi/v1/messages` lists every stored
+  transaction in both directions, newest first, with its interchange envelope (partner,
+  ISA13, 997 status) and failing rule; filters by partner, direction, status, transaction
+  set and ISA13; keyset pages with an opaque `nextCursor`. `GET /edi/v1/messages/{id}`
+  adds the canonical document. Neither returns the raw payload (BR-35.12).
+- **Reprocess** (`POST /edi/v1/interchanges/{id}:reprocess`): maps every FAILED
+  transaction of an inbound interchange again from its stored raw payload, under a lock
+  on the interchange. A transaction that now maps becomes MAPPED and is announced again
+  with `message.received` (status MAPPED) so posting consumers pick it up; one that fails
+  with another error is updated with `message.failed` (`reprocessed: true`). Unchanged
+  outcomes write nothing, the 997 already sent and the interchange status stay as they
+  were, and received 997s are not reprocessed. `?dryRun=true` returns the outcome without
+  writing and needs no key; otherwise `Idempotency-Key` is required and a replay returns
+  the first result. An outbound interchange is refused with EDI-0009.
+- **`dev.passage.edi.message.failed.v1`**: published in the receiving transaction for
+  every transaction that fails mapping and every 997 that cannot be read or matched, and
+  after a reprocess as above. Stored errors now carry the catalog code
+  (`EDI-0103: CTT01 2 does not match PO1 count 1`).
+- **Partner SLA dashboard** (`GET /edi/v1/partners/sla?days=`): per partner with traffic
+  in the window, transactions in both directions, failures and failure rate, outbound
+  interchanges with the partner's 997 matched, p95 997 latency (from recording our
+  interchange to matching the 997, `interchange.acked_at`, migration 0002), and acks late
+  or still overdue against the profile's `ackSlaMinutes`.
+- Web: message monitor, message detail, a reprocess card with preview on inbound
+  interchange details, and the partner SLA dashboard.
+
 Not built yet: see `NOT-IMPLEMENTED.md`.
 
 ## Layout
@@ -65,9 +93,9 @@ internal/domain/    X12 codec, 997 out and in, 850 mapping, 855/856/810 builders
 internal/store/     Postgres repositories (RLS via dbx.WithTenantTx, outbox in the same tx)
 internal/api/       HTTP handlers, DTOs, duty checks
 internal/events/    event type constants and payloads
-migrations/         0001_init.sql (trading_partner, control_number_counter, interchange, message, outbox, idempotency_keys)
+migrations/         0001_init.sql (trading_partner, control_number_counter, interchange, message, outbox, idempotency_keys), 0002_monitor.sql (interchange.acked_at, monitor indexes)
 api/openapi.yaml    OpenAPI 3.1 for the routes above
-events/asyncapi.yaml AsyncAPI 3 for dev.passage.edi.message.received.v1 and message.acked.v1
+events/asyncapi.yaml AsyncAPI 3 for dev.passage.edi.message.received.v1, message.acked.v1 and message.failed.v1
 charts/edi/         Helm chart (api deployment, service, optional ServiceMonitor)
 ```
 
@@ -83,9 +111,13 @@ charts/edi/         Helm chart (api deployment, service, optional ServiceMonitor
 | POST | /edi/v1/inbound/x12?environment=TEST\|PROD | EDI_OPERATE | `text/plain` interchange; returns 201 with 997 text (none for an interchange of 997s) |
 | GET | /edi/v1/interchanges?partnerId=&ackStatus=&direction=&limit= | EDI_OPERATE | `{items}` newest first, limit 1 to 200 (default 50) |
 | GET | /edi/v1/interchanges/{id} | EDI_OPERATE | Messages with canonical documents and the 997 |
+| POST | /edi/v1/interchanges/{id}:reprocess?dryRun= | EDI_OPERATE | Re-map FAILED inbound transactions from the raw payload; `Idempotency-Key` unless `dryRun=true` |
+| GET | /edi/v1/messages?partnerId=&direction=&status=&transactionSet=&controlNumber=&limit=&cursor= | EDI_OPERATE | `{items, nextCursor}` newest first, limit 1 to 200 (default 50) |
+| GET | /edi/v1/messages/{id} | EDI_OPERATE | One message with envelope and canonical document |
+| GET | /edi/v1/partners/sla?days= | EDI_OPERATE | `{days, items}`, days 1 to 365 (default 30) |
 
 The web screens live in `apps/web/src/modules/integration` (partners, interchanges,
-receive, send EDI document, map tester).
+receive, send EDI document, message monitor with reprocess, partner SLA, map tester).
 
 ## Run and test
 
@@ -104,7 +136,7 @@ and `EDI_ISA_ID` (our ISA06/GS02 identity on outbound documents, default ZZ/PASS
 ## Dependencies
 
 Allowed set only: platform kernel, chi, pgx/v5, shopspring/decimal, rapid (tests).
-No new third-party dependencies in slices 1 and 2.
+No new third-party dependencies in slices 1 to 3.
 
 ## Error codes
 
@@ -112,12 +144,13 @@ No new third-party dependencies in slices 1 and 2.
 | --- | --- | --- |
 | EDI-0001 | 400 | Request failed validation; `errors` lists the fields |
 | EDI-0002 | 400 | `Idempotency-Key` header missing or longer than 255 characters |
-| EDI-0003 | 400 / 413 | Malformed X12 interchange, empty interchange, or over 4 MiB |
+| EDI-0003 | 400 / 413 / 422 | Malformed X12 interchange, empty interchange, or over 4 MiB; 422 on reprocess when the stored payload no longer parses |
 | EDI-0004 | 409 | Partner with this ISA identity already exists in the environment |
-| EDI-0005 | 404 | Partner or interchange not found |
+| EDI-0005 | 404 | Partner, interchange or message not found |
 | EDI-0006 | (in 200 map result) | Transaction set not supported yet; the transaction is rejected (AK5 R) |
 | EDI-0007 | 422 | Outbound document breaks a mapping rule (invalid SSCC, totals that do not add up, unknown field, a value holding a delimiter) |
 | EDI-0008 | 409 | The partner is inactive; nothing can be sent to it |
+| EDI-0009 | 409 | Only inbound interchanges are reprocessed (an outbound one is resent) |
 | EDI-0160 | (in 200 map result) | A required 850 segment or element is missing or invalid; rejected |
 | EDI-0161 | (message error) | A received 997 answers no outbound interchange of the partner, or its AK101 does not match |
 | idempotency_key_reuse | 422 | `Idempotency-Key` already used with a different request body |

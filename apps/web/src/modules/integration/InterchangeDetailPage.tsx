@@ -1,15 +1,19 @@
+import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, PageHeader, Skeleton } from "../../shell/ui";
 import { getInterchange, type InterchangeDetail } from "./api/client";
 import { formatDateTime } from "./format";
 import { AckPill, CanonicalView, MessagePill } from "./parts";
 import styles from "./pages.module.css";
+import { ReprocessCard } from "./ReprocessCard";
 import { useLoad } from "./useLoad";
 
 /** One interchange: envelope, each transaction with its canonical document, and the 997 either way. */
 export function InterchangeDetailPage() {
   const { id = "" } = useParams();
   const state = useLoad<InterchangeDetail>((signal) => getInterchange(id, signal), `interchange:${id}`);
+  // Keeps the reprocess outcome on screen after the reload clears the failures.
+  const [reprocessed, setReprocessed] = useState(false);
 
   if (state.error) {
     return (
@@ -64,6 +68,16 @@ export function InterchangeDetailPage() {
           </div>
         </dl>
       </Card>
+      {ic.direction === "IN" && (reprocessed || ic.messages.some((m) => m.status === "FAILED" && m.transactionSet !== "997")) ? (
+        <ReprocessCard
+          interchangeId={ic.id}
+          failedCount={ic.messages.filter((m) => m.status === "FAILED" && m.transactionSet !== "997").length}
+          onDone={() => {
+            setReprocessed(true);
+            state.reload();
+          }}
+        />
+      ) : null}
       <ul className={styles.results} aria-label="Transactions">
         {ic.messages.map((m) => (
           <li key={m.id}>
@@ -103,7 +117,7 @@ export function InterchangeDetailPage() {
           )}
         </Card>
       )}
-      <p className={styles.note}>The raw interchange is not shown here: it carries partner address data that only the message monitor shows, masked.</p>
+      <p className={styles.note}>The raw interchange is not shown here: it carries partner address data, and the masked raw viewer is not built yet.</p>
     </div>
   );
 }

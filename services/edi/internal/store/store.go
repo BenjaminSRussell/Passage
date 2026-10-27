@@ -295,8 +295,9 @@ func nextControl(ctx context.Context, tx pgx.Tx, tid, partnerID string) (int64, 
 	return n, err
 }
 
-// ReceiveInterchange records an inbound interchange, its messages and one
-// message.received event per transaction in a single transaction. A control
+// ReceiveInterchange records an inbound interchange, its messages, one
+// message.received event per transaction and one message.failed event per
+// failed transaction in a single transaction. A control
 // number already seen inside the duplicate window returns ErrDuplicate and
 // nothing is written. Outside the window the number may be reused (BR-35.5).
 func (s *Store) ReceiveInterchange(ctx context.Context, in Inbound) (Received, error) {
@@ -352,16 +353,20 @@ func (s *Store) ReceiveInterchange(ctx context.Context, in Inbound) (Received, e
 				tid, m.ID, interchangeID, m.TransactionSet, m.STControl, m.Status, nullBytes(m.Canonical), nullString(m.Error)); err != nil {
 				return err
 			}
-			evt, err := events.New(ediev.MessageReceived, eventSource, m.ID, tid, ediev.MessageReceivedData{
+			if err := enqueueReceived(ctx, tx, tid, ediev.MessageReceivedData{
 				MessageID: m.ID, InterchangeID: interchangeID, PartnerID: in.PartnerID, Standard: "X12",
 				TransactionSet: m.TransactionSet, ControlNumber: in.ISAControl, STControl: m.STControl,
 				Status: m.Status,
-			})
-			if err != nil {
+			}); err != nil {
 				return err
 			}
-			if err := outbox.Enqueue(ctx, tx, "message", m.ID, evt); err != nil {
-				return fmt.Errorf("edi: outbox: %w", err)
+			if m.Status == "FAILED" {
+				if err := enqueueFailed(ctx, tx, tid, ediev.MessageFailedData{
+					MessageID: m.ID, InterchangeID: interchangeID, PartnerID: in.PartnerID, TransactionSet: m.TransactionSet,
+					ControlNumber: in.ISAControl, STControl: m.STControl, Error: m.Error,
+				}); err != nil {
+					return err
+				}
 			}
 		}
 		out = Received{InterchangeID: interchangeID, AckPayload: ack, AckStatus: status, Messages: messages}
@@ -443,6 +448,30 @@ func (s *Store) GetInterchange(ctx context.Context, id string) (InterchangeDetai
 		return rows.Err()
 	})
 	return out, err
+}
+
+// enqueueReceived writes one message.received event to the outbox in tx.
+func enqueueReceived(ctx context.Context, tx pgx.Tx, tid string, data ediev.MessageReceivedData) error {
+	evt, err := events.New(ediev.MessageReceived, eventSource, data.MessageID, tid, data)
+	if err != nil {
+		return err
+	}
+	if err := outbox.Enqueue(ctx, tx, "message", data.MessageID, evt); err != nil {
+		return fmt.Errorf("edi: outbox: %w", err)
+	}
+	return nil
+}
+
+// enqueueFailed writes one message.failed event to the outbox in tx.
+func enqueueFailed(ctx context.Context, tx pgx.Tx, tid string, data ediev.MessageFailedData) error {
+	evt, err := events.New(ediev.MessageFailed, eventSource, data.MessageID, tid, data)
+	if err != nil {
+		return err
+	}
+	if err := outbox.Enqueue(ctx, tx, "message", data.MessageID, evt); err != nil {
+		return fmt.Errorf("edi: outbox: %w", err)
+	}
+	return nil
 }
 
 func nullString(s string) any {

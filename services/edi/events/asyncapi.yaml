@@ -15,6 +15,11 @@ channels:
     messages:
       messageAcked:
         $ref: '#/components/messages/MessageAcked'
+  messageFailed:
+    address: passage.edi.message
+    messages:
+      messageFailed:
+        $ref: '#/components/messages/MessageFailed'
 operations:
   publishMessageReceived:
     action: send
@@ -24,6 +29,10 @@ operations:
     action: send
     channel: { $ref: '#/channels/messageAcked' }
     summary: The partner's 997 answering one outbound transaction was matched (BR-35.5)
+  publishMessageFailed:
+    action: send
+    channel: { $ref: '#/channels/messageFailed' }
+    summary: An inbound transaction failed mapping, or a received 997 could not be read or matched; also after a reprocess that still fails with another error (FR-35.10)
 components:
   messages:
     MessageReceived:
@@ -75,3 +84,27 @@ components:
               st_control: { type: string }
               ack_status: { type: string, enum: [ACCEPTED, ACCEPTED_WITH_ERRORS, REJECTED] }
               ack_message_id: { type: string, format: uuid, description: the received 997 message }
+    MessageFailed:
+      name: dev.passage.edi.message.failed.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [type, source, id, tenantid, data]
+        properties:
+          type: { const: dev.passage.edi.message.failed.v1 }
+          source: { const: edi }
+          id: { type: string, format: uuid }
+          tenantid: { type: string, format: uuid }
+          subject: { type: string, description: message id }
+          data:
+            type: object
+            required: [message_id, interchange_id, partner_id, transaction_set, control_number, st_control, error, reprocessed]
+            properties:
+              message_id: { type: string, format: uuid }
+              interchange_id: { type: string, format: uuid, description: the inbound interchange }
+              partner_id: { type: string, format: uuid }
+              transaction_set: { type: string }
+              control_number: { type: string, description: ISA13 of the inbound interchange }
+              st_control: { type: string }
+              error: { type: string, description: catalog code and detail of the failing rule }
+              reprocessed: { type: boolean, description: true when a reprocess produced this failure }

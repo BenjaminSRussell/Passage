@@ -187,7 +187,7 @@ func matchAck(ctx context.Context, tx pgx.Tx, tid, partnerID string, m *Message)
 		}
 		applied++
 	}
-	if _, err := tx.Exec(ctx, `update interchange set ack_status = $2 where id = $1 and ack_status in ('PENDING', 'TIMEOUT')`,
+	if _, err := tx.Exec(ctx, `update interchange set ack_status = $2, acked_at = now() where id = $1 and ack_status in ('PENDING', 'TIMEOUT')`,
 		interchangeID, string(domain.InterchangeAckStatus(ack.Code))); err != nil {
 		return err
 	}

@@ -30,6 +30,20 @@ dependencies (`src/webhook.ts`):
   1 to 10,000,000, BR-35.9), with a `{fromSeconds, skip}` cursor for the next page.
 - `replayHeaders`: `ce-passagereplay: true` on replayed deliveries.
 
+## Slice 3 scope
+
+Two more pure modules:
+
+- `src/quota.ts`: the per-client token bucket (BR-35.8, FR-35.8). `take` refills
+  continuously at `ratePerMinute`, caps at `burst`, and on refusal returns
+  `retryAfterSeconds` for the 429 `Retry-After` (HUB-0113). Defaults 600/min and burst
+  100; both must be integers in 10..100,000 and 1..100,000 (§6.35.13). A clock that
+  moves backwards refills nothing. `graphqlCost` charges one unit per started 100
+  GraphQL complexity points. The gateway policy enforces the same numbers at the edge.
+- `src/filter.ts`: CloudEvents type patterns for subscriptions (FR-35.9). `*` matches
+  one segment, a trailing `**` one or more; `validatePattern` explains a bad pattern,
+  `matchesType` / `matchesAny` decide delivery.
+
 Everything that touches the network, the database or Kafka is later work. See
 `NOT-IMPLEMENTED.md`.
 
@@ -37,7 +51,7 @@ Everything that touches the network, the database or Kafka is later work. See
 
 ```sh
 cd services/integration-hub-ts
-npm test        # node --test on test/webhook.test.ts and test/dispatch.test.ts (Node 24+, native type stripping)
+npm test        # node --test on every file in test/ (Node 24+, native type stripping)
 ```
 
 There are no runtime dependencies. Strict typechecking needs `@types/node` and
@@ -47,6 +61,6 @@ There are no runtime dependencies. Strict typechecking needs `@types/node` and
 
 | Code | Meaning |
 | --- | --- |
-| HUB-0113 | Quota exceeded (429), enforced by the gateway, not in this package |
+| HUB-0113 | Quota exceeded (429); `take` in `src/quota.ts` computes it and `Retry-After`, the gateway enforces it |
 | HUB-0114 | Subscription paused after a 410 Gone response |
 | HUB-0115 | Event dead-lettered after the retry schedule is exhausted |

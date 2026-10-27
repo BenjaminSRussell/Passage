@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: Passage EDI engine API
   version: 0.1.0
-  description: Trading partner profiles, the map test harness, inbound X12 receipt with 997 matching, outbound 855/856/810 generation and the interchange list (PSG-35 slices 1 and 2).
+  description: Trading partner profiles, the map test harness, inbound X12 receipt with 997 matching, outbound 855/856/810 generation, the interchange list, the message monitor with reprocess and the partner SLA dashboard (PSG-35 slices 1 to 3).
 servers:
   - url: https://api.{env}.passage.dev/v1
     variables:
@@ -175,6 +175,148 @@ paths:
               schema: { $ref: '#/components/schemas/InterchangeDetail' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+  /edi/v1/interchanges/{id}:reprocess:
+    post:
+      operationId: reprocessInterchange
+      summary: Map the failed transactions of an inbound interchange again from its raw payload
+      description: >
+        Re-runs mapping for every FAILED transaction of an inbound interchange (received 997s are
+        left alone). A transaction that now maps becomes MAPPED and dev.passage.edi.message.received.v1
+        is published again with status MAPPED; one that still fails with another error is updated
+        and dev.passage.edi.message.failed.v1 is published. Unchanged outcomes write nothing. The 997
+        sent for the interchange and its ackStatus are never changed. With dryRun=true nothing is
+        written and no Idempotency-Key is needed. An outbound interchange is EDI-0009 (it is resent,
+        not reprocessed); a stored payload that no longer parses is EDI-0003.
+      x-passage-duty: EDI_OPERATE
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Required unless dryRun=true. A replay returns the first result.
+          schema: { type: string, maxLength: 255 }
+        - name: dryRun
+          in: query
+          required: false
+          schema: { type: boolean, default: false }
+      responses:
+        '200':
+          description: Outcome per previously failed transaction
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReprocessResult' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422':
+          description: EDI-0003 — the stored payload no longer parses; or idempotency_key_reuse
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /edi/v1/messages:
+    get:
+      operationId: listMessages
+      summary: Message monitor — every stored transaction, newest first
+      description: >
+        Filters combine. Pages are keyset pages: pass nextCursor back as cursor to continue; it is
+        absent on the last page. Rows carry no canonical document and never the raw payload.
+      x-passage-duty: EDI_OPERATE
+      parameters:
+        - name: partnerId
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+        - name: direction
+          in: query
+          required: false
+          schema: { type: string, enum: [IN, OUT] }
+        - name: status
+          in: query
+          required: false
+          schema: { $ref: '#/components/schemas/MessageStatus' }
+        - name: transactionSet
+          in: query
+          required: false
+          schema: { type: string, pattern: '^[0-9]{3}$' }
+        - name: controlNumber
+          in: query
+          required: false
+          description: ISA13 of the interchange; shorter values are zero-padded to nine digits
+          schema: { type: string, pattern: '^[0-9]{1,9}$' }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+        - name: cursor
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: One page of messages
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/MonitorMessage' }
+                  nextCursor: { type: string }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /edi/v1/messages/{id}:
+    get:
+      operationId: getMessage
+      summary: Read one message with its envelope and canonical document
+      description: The raw payload is not returned (BR-35.12).
+      x-passage-duty: EDI_OPERATE
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: The message
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/MonitorMessage'
+                  - type: object
+                    properties:
+                      canonical: { type: object, description: 'Canonical document by transaction set, as on InterchangeDetail' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /edi/v1/partners/sla:
+    get:
+      operationId: partnerSla
+      summary: Partner SLA dashboard — volume, failure rate and 997 latency per partner
+      description: >
+        Partners with traffic in the last `days` days, by name. Ack latency is measured on our
+        outbound interchanges from recording to the matched partner 997; lateAcks were matched after
+        the profile's ackSlaMinutes and overdueAcks are still waiting past it.
+      x-passage-duty: EDI_OPERATE
+      parameters:
+        - name: days
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 365, default: 30 }
+      responses:
+        '200':
+          description: One row per partner with traffic
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [days, items]
+                properties:
+                  days: { type: integer }
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/PartnerSla' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
   /edi/v1/maps:test:
     post:
       operationId: testMaps
@@ -273,6 +415,62 @@ components:
     AckStatus:
       type: string
       enum: [PENDING, ACCEPTED, ACCEPTED_WITH_ERRORS, REJECTED, TIMEOUT]
+    MessageStatus:
+      type: string
+      enum: [RECEIVED, MAPPED, POSTED, FAILED, SENT, ACKED]
+    MonitorMessage:
+      type: object
+      required: [id, interchangeId, partnerId, partnerName, direction, standard, controlNumber, ackStatus, transactionSet, stControl, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        interchangeId: { type: string, format: uuid }
+        partnerId: { type: string, format: uuid }
+        partnerName: { type: string }
+        direction: { type: string, enum: [IN, OUT] }
+        standard: { type: string, enum: [X12, EDIFACT, UBL, CXML] }
+        controlNumber: { type: string, description: ISA13 of the interchange }
+        ackStatus: { $ref: '#/components/schemas/AckStatus' }
+        transactionSet: { type: string }
+        stControl: { type: string }
+        status: { $ref: '#/components/schemas/MessageStatus' }
+        error: { type: string }
+        createdAt: { type: string, format: date-time }
+    ReprocessResult:
+      type: object
+      required: [interchangeId, dryRun, changed, messages]
+      properties:
+        interchangeId: { type: string, format: uuid }
+        dryRun: { type: boolean }
+        changed: { type: integer, description: transactions whose status or error changed }
+        messages:
+          type: array
+          items:
+            type: object
+            required: [messageId, transactionSet, stControl, status, changed]
+            properties:
+              messageId: { type: string, format: uuid }
+              transactionSet: { type: string }
+              stControl: { type: string }
+              previousError: { type: string }
+              status: { type: string, enum: [MAPPED, FAILED] }
+              error: { type: string }
+              changed: { type: boolean }
+    PartnerSla:
+      type: object
+      required: [partnerId, partnerName, environment, ackSlaMinutes, messages, failed, failureRatePct, outbound, acked, lateAcks, overdueAcks]
+      properties:
+        partnerId: { type: string, format: uuid }
+        partnerName: { type: string }
+        environment: { type: string, enum: [TEST, PROD] }
+        ackSlaMinutes: { type: integer }
+        messages: { type: integer, description: transactions in both directions }
+        failed: { type: integer }
+        failureRatePct: { type: number, description: failed / messages x 100, two decimals }
+        outbound: { type: integer, description: outbound interchanges recorded }
+        acked: { type: integer, description: outbound interchanges with the partner 997 matched }
+        p95AckMinutes: { type: number, description: 95th percentile 997 latency in minutes, one decimal; absent when nothing was acked }
+        lateAcks: { type: integer }
+        overdueAcks: { type: integer }
     Issue:
       type: object
       required: [code, detail, reject]
