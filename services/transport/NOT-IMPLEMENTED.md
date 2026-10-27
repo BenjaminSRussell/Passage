@@ -1,6 +1,6 @@
-# NOT-IMPLEMENTED: transport (PSG-34, wave 34, slices 1 and 2)
+# NOT-IMPLEMENTED: transport (PSG-34, wave 34, slices 1 to 3)
 
-Every ticket deliverable and acceptance criterion that slices 1 and 2 do not build, with its status.
+Every ticket deliverable and acceptance criterion that slices 1 to 3 do not build, with its status.
 Paths below use the PRD's `/tms/v1/...` names; the service mounts them under `/v1/transport/...`.
 Status is either `later slice of PSG-34` (same wave, next slice) or `handoff` (needs another
 owner's work, or a change outside this wave's paths).
@@ -9,9 +9,12 @@ owner's work, or a change outside this wave's paths).
 
 | # | Deliverable | Status | Reason |
 |---|---|---|---|
-| D1 | Load building by rule and manually (FR-34.1), load capacity checks (BR-34.8), `POST /tms/v1/loads:build` | later slice of PSG-34 | Slice 1 builds rating and reconciliation; load aggregate and store are not written yet |
+| D1 | Manual load planning: add or move a shipment by hand, the over-capacity warning with a logged planner override (BR-34.8 first half, TMS-0103) | later slice of PSG-34 | Slice 3 builds rule-based building (`POST /v1/transport/loads:build`, hard split, TMS-0115, TMS-0116); there is no endpoint that edits a load |
+| D1 | TMS shipments created from sales, transfer and purchase shipments (FR-34.1) | handoff (wave 28 shipping, purchasing receipts) | The build request carries each shipment's site, region, mode, pickup date, weight, volume and pallets; nothing consumes the shipment events yet or checks the ids |
+| D1 | Date window grouping (FR-34.1 "date window") and time-window constraints | later slice of PSG-34 | Loads group on the exact pickup date |
+| D1 | Load status moves after PLANNED (RATED, TENDERED, ACCEPTED, DISPATCHED, IN_TRANSIT, DELIVERED, CLOSED, CANCELLED) and the `version`/`If-Match` on load commands | later slice of PSG-34 | Loads stay PLANNED; tenders and tracking events do not update the load row yet |
 | D1 | Route planning endpoint `POST /tms/v1/routes:optimize` (FR-34.2) | later slice of PSG-34 | The solver exists in `services/routing-py`; the Go-to-optimizer HTTP client, request hash idempotency and route persistence are not built |
-| D1 | Load planning workbench UI | later slice of PSG-34 | The web module has the workspace, rate shop, rate cards, freight bills, carrier invoices, tenders, tracking and voyages; no load or route screens yet |
+| D1 | Load planning workbench map, route sequence and drag-and-drop between loads (§6.34.6) | later slice of PSG-34 | The web module has the load list, the build-loads form and the load detail; no route or map screens |
 | D2 | Rate shopping cache (10 min per input hash, FR-34.4) and route guides with fallbacks | later slice of PSG-34 | Rate shop is computed per call over every card of the tenant; no cache, route guide entity or GiST validity index |
 | D2 | Weighted ranking by transit time or score (FR-34.4) | later slice of PSG-34 | Options rank by total only; transit days are not modelled on carrier services |
 | D2 | Fuel index (TMSFuelIndex): weekly index effective on the ship date, `fuel_index_id` on the card (BR-34.2) | later slice of PSG-34 | The card carries a fixed `fuelPct`; there is no fuel index table or weekly import |
@@ -25,8 +28,8 @@ owner's work, or a change outside this wave's paths).
 | D2 | Tender history filters by carrier, outcome and period (§6.34.14) | later slice of PSG-34 | The list filters by status and load |
 | D2 | EDI 204 tender send and EDI 990 response receipt | handoff (wave 35 EDI) | Wave 35 maps 204/990 onto `tender.*` events and `:respond`; nothing is sent to carriers from this service |
 | D2 | Planner task when a tender fails (BR-34.3, TMS-0106) | handoff (workflow tasks) | The tender carries `plannerTask: true` and the board shows it; creating a task in the workflow inbox needs that service's API |
-| D2 | Accepted tender sets the load's carrier and status ACCEPTED (§6.34.4 Load) | later slice of PSG-34 | The load aggregate is not built (D1); `loadId` is not checked against a load table |
-| D2 | DG check and denied-party screening gate before a tender is sent (AC-34.13, BR-34.17) | later slice of PSG-34 | See D8 and D10; tenders are sent without these gates |
+| D2 | Accepted tender sets the load's carrier and status ACCEPTED (§6.34.4 Load) | later slice of PSG-34 | Slice 3 adds the load table, but tenders still take any `loadId` (loads built outside this service, such as by wms, are tendered too) and do not update the load |
+| D2 | Denied-party screening gate before a tender is sent (BR-34.17, AC-34.16) | later slice of PSG-34 | The DG gate is built: a load whose latest stored DG check is FAIL is refused with TMS-0130 and no tender is stored (AC-34.13). Screening decisions are not stored, so there is no hold to check (see D10) |
 | D3 | EDI 214 codes beyond X3, AF, X1 and D1 (for example AG estimated delivery, X6 en route, SD delays) | later slice of PSG-34 | Ingest rejects other codes rather than guessing their stop status |
 | D3 | Expected vs actual per stop and late-delivery alerts when ETA > window end (FR-34.6) | later slice of PSG-34 | Needs the planned stops and time windows of the load and route (D1); the timeline shows actuals only |
 | D3 | Proof of delivery upload (signature, photo) | later slice of PSG-34 | No file storage in this service yet |
@@ -34,8 +37,8 @@ owner's work, or a change outside this wave's paths).
 | D3 | POD and delivered timestamp on the sales shipment (AC-34.7 second half, wave-29 invoicing holds) | handoff (wave 28/29 sales) | `dev.passage.tms.tracking.event.v1` carries the D1; the sales side consumes it |
 | D3 | `tracking_event` monthly partitions and Kafka buffering (§6.34.19) | later slice of PSG-34 | One table with a `(tenant_id, load_id, occurred_at)` index |
 | D4 | Freight bill created at ship confirmation (FR-34.7) | later slice of PSG-34 | Slice 1 creates bills by API; the ship-confirmation trigger needs the shipment event from wave 28 |
-| D4 | Approve and release to AP `POST /tms/v1/freight-bills/{id}:approve` (BR-34.4 APPROVED / SETTLED) | later slice of PSG-34 | Approval duty and state transitions beyond MATCHED/VARIANCE not built |
-| D4 | DISPUTED state and dispute workflow (BR-34.4) | later slice of PSG-34 | Only MATCHED, VARIANCE and UNEXPECTED_INVOICE are stored |
+| D4 | SETTLED when the AP invoice is posted (BR-34.4) | handoff (wave 19 AP) | Slice 3 builds `:approve` (TMS_RECONCILE_APPROVE, If-Match) and publishes `dev.passage.tms.freightbill.approved.v1`; nothing consumes the AP posted event to set SETTLED |
+| D4 | Dispute resolved by a corrected carrier invoice, `DISPUTED → MATCHED` (BR-34.4) | later slice of PSG-34 | Slice 3 builds `:dispute` (VARIANCE to DISPUTED with a reason) and approval of a DISPUTED bill at the invoiced amount; a bill takes one invoice (TMS-0111), so a credit note or replacement invoice cannot re-match it. Disputes are not sent to the carrier (EDI or portal) |
 | D4 | Per-carrier tolerance parameters `match_tolerance_abs` / `match_tolerance_pct` and `TMS_MATCH_TOL_*` (§6.34.13) | later slice of PSG-34 | Every carrier uses the default $5.00 / 2 % |
 | D4 | Carrier invoice auto-match job and matching by load when the invoice names no bill (§6.34.16) | later slice of PSG-34 | An invoice is matched only to the bill it names; otherwise it is UNEXPECTED_INVOICE |
 | D4 | Linking an UNEXPECTED_INVOICE to a bill afterwards (TMS-0109 remediation) | later slice of PSG-34 | No endpoint changes an invoice after registration |
@@ -46,24 +49,29 @@ owner's work, or a change outside this wave's paths).
 | D5 | Receipt lines taken from purchase receipts | handoff (purchasing receipts) | The voyage form takes receipt line numbers with their value, weight, volume and quantity; they are not looked up or checked against a receipt |
 | D5 | Estimated vs actual differences to inventory or purchase price variance 5260 (BR-34.6 second sentence) | later slice of PSG-34 | Needs actual cost invoices and on-hand quantities; a voyage is allocated once from its cost lines |
 | D5 | Allocation per container first, then per line (FR-34.12 notes) | later slice of PSG-34 | Cost lines allocate directly to receipt lines |
-| D6 | Goods-in-transit orders and `POST /tms/v1/goods-in-transit/{id}:ship`, Incoterm transfer event per vendor (BR-34.11, TMS-0121, AC-34.9) | later slice of PSG-34 | Slice 2 builds voyages with legs, containers (ISO 6346), folios, cost lines and receipt lines; ownership does not move to an in-transit warehouse |
+| D6 | Goods-in-transit orders and `POST /tms/v1/goods-in-transit/{id}:ship`, the per vendor × Incoterm override of the transfer event (BR-34.11, AC-34.9) | later slice of PSG-34 | Slice 3 builds the default Incoterms 2020 transfer table (`domain.TransferFor`, `GET /v1/transport/transfer-rules/{incoterm}`, TMS-0121 for origin rules); no goods-in-transit order is created and ownership does not move to an in-transit warehouse |
 | D6 | Voyage statuses IN_TRANSIT, ARRIVED, RECEIVED, COSTED and tracking stages from TrackingEvent (FR-34.12) | later slice of PSG-34 | A voyage is ESTIMATED or POSTED (the §6.34.4 data model states); tracking events are per load, not per voyage |
 | D6 | Actual cost invoices on a voyage (ACTUAL state, §6.34.4) and the voyage estimate refresh job (§6.34.16) | later slice of PSG-34 | Cost lines are entered once on creation |
 | D6 | Auto-cost templates, cost type to accrual and clearing accounts, in-transit warehouse setup (§6.34.13) | later slice of PSG-34 | Cost types are free codes; no parameter model |
 | D6 | `container_check_digit_required` tenant parameter | later slice of PSG-34 | The check digit is always enforced (the default) |
 | D6 | Voyage cost statement PDF/XLSX (§6.34.15) | later slice of PSG-34 | The voyage detail screen shows the allocation per receipt line and cost line |
-| D7 | Yard locations, transport units, yard moves `POST /tms/v1/yard-moves`, detention (FR-34.13, BR-34.13) | later slice of PSG-34 | Not started |
-| D7 | Driver check-in and check-out `POST /tms/v1/gate/check-in`, `POST /tms/v1/gate/check-out`, gate log, seal check TMS-0129, PII pseudonymization (FR-34.14, BR-34.14) | later slice of PSG-34 | Not started; the `dev.passage.tms.gate.checkedin.v1` event is not published |
+| D7 | Yard locations, transport units, yard moves `POST /tms/v1/yard-moves`, slot conflicts TMS-0125, the DETENTION charge on the freight bill (FR-34.13, BR-34.13, AC-34.11) | later slice of PSG-34 | Slice 3 builds the detention rule as pure code (`domain.ComputeDetention`, ceil(hours) × rate, tested on AC-34.11's 08:00 to 11:20 = 2 h); no yard tables, endpoints or screens |
+| D7 | Driver check-in and check-out `POST /tms/v1/gate/check-in`, `POST /tms/v1/gate/check-out`, gate log, appointment matching by SCAC + trailer + date, PII pseudonymization after 90 days (FR-34.14, BR-34.14, AC-34.12) | later slice of PSG-34 | Slice 3 builds the pure rules: arrival ON_TIME/EARLY/LATE (TMS-0127), walk-in refusal (TMS-0128) and the seal match (TMS-0129). No gate log, endpoints or screens; the `dev.passage.tms.gate.checkedin.v1` event is not published |
 | D7 | Door release in wms (`wms` work type YARD_MOVE, DockAppointment) | handoff (wave 31 wms, wave 32 mobile) | Needs the wms API |
-| D8 | DG checks at rating, load build, tender and ship (FR-34.15, BR-34.15), `POST /tms/v1/loads:dg-check` | handoff (wave 31 HazmatProfile) + later slice of PSG-34 | Depends on the HazmatProfile master data from wave 31 |
-| D8 | DG shipping-paper lines and placard requirements | later slice of PSG-34 | Document generation not built |
+| D8 | DG lines from the wave-31 HazmatProfile and the emergency phone from legal-entity setup (FR-34.15) | handoff (wave 31 HazmatProfile, legal-entity setup) | Slice 3 builds `POST /v1/transport/loads/{id}:dg-check` (ADR and 49CFR): the caller sends the UN number, class, packing group, quantity, transport category and limited-quantity flag per line, and the phone |
+| D8 | DG checks at rating (carrier-service DG eligibility in rate shopping), at load build and at ship confirmation (FR-34.15, BR-34.15) | later slice of PSG-34 + handoff (wave 28 ship confirmation) | The check runs on request and the tender gate reads the latest stored result; rating and load build do not call it |
+| D8 | RID, ADN, IMDG, IATA DGR and Canada TDG rule sets; the full segregation tables (class 1 compatibility groups, ADR label 9, 6.2) from the `DgRegulationPack` (§6.34.17) | handoff (wave 48 DgRegulationPack) | A reference subset is coded: divisions 1.1 and 1.2 against classes 2 to 8 |
+| D8 | `dg_check_mode` per legal entity (BLOCK / WARN) and `dg_regulation_set` per mode × country (§6.34.13) | later slice of PSG-34 | BLOCK is fixed and the caller picks the regulation |
+| D8 | Placard requirements and the DG transport document PDF (§6.34.15) | later slice of PSG-34 | Slice 3 stores and shows the shipping-paper lines (UN number, proper shipping name, class, packing group, quantity, emergency phone); no placards or document rendering |
 | D9 | Own-fleet vehicles, trailers, drivers, hours-of-service rules as VRP constraints (FR-34.16, BR-34.16) | later slice of PSG-34 (routing-py side) | Driver-hours rule set and fleet tables not built; solver has no heterogeneous fleet |
 | D9 | Lane RFQ `POST /tms/v1/freight-rfqs/{id}:award` (FR-34.17, BR-34.18) | handoff (wave 17 RFQ engine) + later slice of PSG-34 | Award logic needs the RFQ engine. Award into rate cards uses this service's rate card API |
 | D9 | Layer-based load stacking (FR-34.18) | later slice of PSG-34 | Not in `services/routing-py` yet |
 | D10 | Customs data on shipments, commercial invoice and customs packing list (FR-34.19) | later slice of PSG-34 | Not started |
-| D10 | `ComplianceScreeningProvider` and `CustomsFilingProvider` hooks, screening gate and holds `POST /tms/v1/loads/{id}:screen`, TRADE_COMPLIANCE_RELEASE (BR-34.17, TMS-0133, TMS-0134) | later slice of PSG-34 (hooks); provider implementations handoff (wave 48) | No provider interface is defined yet |
+| D10 | Screening holds stored on the load, release by TRADE_COMPLIANCE_RELEASE with a logged reason, and the gate at load release, tender and ship confirmation (BR-34.17, AC-34.16) | later slice of PSG-34 | Slice 3 builds the `ScreeningProvider` hook (`domain.ScreeningProvider`, 5 s timeout, never auto-clears) and `POST /v1/transport/loads/{id}:screen`, which returns CLEAR, WARN (TMS-0134) or HOLD (TMS-0133) without storing it |
+| D10 | Screening result cache `screening_cache_h` per party and list version | later slice of PSG-34 | Every call goes to the provider |
+| D10 | Provider implementations (denied-party lists) and the `CustomsFilingProvider` hook (FR-34.19) | handoff (wave 48) + later slice of PSG-34 (filing hook) | No provider is registered, so cross-border loads screen as NOT_SCREENED; no filing interface is defined |
 | Deploy | Demo carriers, 12 services and rate cards (fixture `carriers-demo`) | later slice of PSG-34 | Seed data not written |
-| Deploy | Transportation web screens for load planning, yard and gate; tracking map | later slice of PSG-34 | The web module covers what slices 1 and 2 build: rate shop, rate cards, freight bills (with the reconciliation grid), carrier invoices, tender board, tracking timelines and landed cost voyages |
+| Deploy | Transportation web screens for yard and gate, route planning and a tracking map | later slice of PSG-34 | The web module covers what slices 1 to 3 build: rate shop, rate cards, freight bills (reconciliation grid, approve, dispute), carrier invoices, tender board, tracking timelines, landed cost voyages, loads (list, build, DG check, screening) |
 | Deploy | Feature flags `tms.enabled`, `tms.landed_cost`, `tms.vrp` | later slice of PSG-34 | The chart sets `TMS_FEATURE_*` env vars but the binary does not read them |
 | Deploy | Scheduled jobs: fuel index import, carrier invoice auto-match, accrual tie-out, KPI materialization (§6.34.16); a schedule for the tender expiry sweep | later slice of PSG-34 | No scheduler code yet; the sweep itself is `POST /v1/transport/tenders:expire` |
 | Migration | AX/SAP migration packs (§6.34.11) | handoff (migration-framework, `integration` DB) | Owned by the migration framework |
@@ -79,7 +87,7 @@ owner's work, or a change outside this wave's paths).
 | AC3 Match tolerance on 50 invoices and landed-cost sums | partial | Match rules and landed-cost sums are unit and property tested, and a posted voyage's allocations equal its cost total in the store test; the 50-invoice fixture (`carrier-invoices-50.json`) is not committed |
 | AC4 Tender cascade with timeouts on a test clock | met for the cascade | AC-34.3 is tested on a test clock in the domain, through the API and against Postgres (expired, declined, accepted events); the Temporal time-skip test waits for the workflow |
 | AC5 Each deliverable has code or a line here | met by this file | |
-| AC6 vet and test in Go, vitest and tsc in the web module, OpenAPI and AsyncAPI match code, chart lints | met for slices 1 and 2 | Store tests ran against Postgres 16 as a non-owner application role during review; `TestOpenAPI_MatchesRoutes` and `TestAsyncAPI_ListsEveryEventType` keep the specs and code in step; `pytest` in routing-py passes but has no wave pipeline check kind |
+| AC6 vet and test in Go, vitest and tsc in the web module, OpenAPI and AsyncAPI match code, chart lints | met for slices 1 to 3 | Store tests ran against Postgres 16 as a non-owner application role during review; `TestOpenAPI_MatchesRoutes` and `TestAsyncAPI_ListsEveryEventType` keep the specs and code in step; `pytest` in routing-py passes but has no wave pipeline check kind |
 
 ## Test plan items
 
@@ -94,12 +102,12 @@ owner's work, or a change outside this wave's paths).
 | Gap | Status | Reason |
 |---|---|---|
 | `Idempotency-Key` 24 h expiry and a stored-response replay table (`dbx.IdempotencyDDL`) | later slice of PSG-34 | Keys live on the created row with a request fingerprint: same body replays the row, another body is 422 `idempotency_key_reuse`; keys do not expire |
-| `If-Match` optimistic concurrency on tender and voyage commands | later slice of PSG-34 | Rows return `version`; commands serialise with a row lock (and a per-load advisory lock for tender start) instead of comparing a client version |
+| `If-Match` optimistic concurrency on tender, voyage and load commands | later slice of PSG-34 | Freight bill approve and dispute require `If-Match` (slice 3). Tenders and voyages return `version`; their commands serialise with a row lock (and a per-load advisory lock for tender start) instead of comparing a client version |
 | OpenTelemetry traces and latency histograms (rating p95 SLO) | handoff (platform kernel, wave 0) | The admin port serves `/metrics` with request counters only |
 | `/readyz` checks only the process; no Postgres SELECT 1, OPA bundle or migration check | handoff (platform kernel) | `httpx.NewRouter` provides the static probe |
 | OPA duty decisions (`data.passage.authz.decision`) | handoff (platform kernel, edge identity) | Slice 1 uses the kernel's local duty check through `authz.RequireDuty` |
 | `legal_entity_scope` RLS policy | later slice of PSG-34 | The tables do not carry `legal_entity_id` yet; add with the legal-entity-scoped tables |
 | Rate-card overlap enforced at database level | later slice of PSG-34 | Enforced in the store (`Overlaps`) only |
-| Events `dev.passage.tms.shipment.rated.v1` and `dev.passage.tms.gate.checkedin.v1` | later slice of PSG-34 | Slice 2 publishes `tender.accepted/declined/expired`, `tracking.event` and `landedcost.posted` besides the match event |
+| Events `dev.passage.tms.shipment.rated.v1`, `dev.passage.tms.gate.checkedin.v1`, and load or DG events | later slice of PSG-34 | Published: `freightbill.matched`, `freightbill.approved` (slice 3), `tender.accepted/declined/expired`, `tracking.event` and `landedcost.posted`. Load builds and DG checks publish nothing yet |
 | BFF route registration for `/api/v1/transport` | handoff (web-bff owner) | The service follows the `/v1/<service>` convention the BFF rewrites; registering the upstream is outside this wave's paths |
-| Error codes TMS-0103, 0104, 0107, 0121, 0125-0135 | later slice of PSG-34 | Raised only by features not built in slices 1 and 2 |
+| Error codes TMS-0103, 0104, 0107, 0125, 0132, 0135 | later slice of PSG-34 | Raised only by features not built in slices 1 to 3. TMS-0126 to 0129 come from the pure gate and detention rules, which no endpoint calls yet |

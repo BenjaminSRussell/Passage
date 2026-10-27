@@ -6,12 +6,15 @@ Screens for the transport service (`services/transport`), through the web BFF at
 | Route | Page | Duty |
 |---|---|---|
 | `/transport` | Workspace with links to each area | TMS_VIEW |
+| `/transport/loads` | Loads by status with weight and pallet fill against capacity | TMS_VIEW |
+| `/transport/loads/build` | Build loads from shipments by rule (TMS-0115, TMS-0116); shows the loads planned | TMS_PLAN |
+| `/transport/loads/:id` | Load detail: capacity, shipments, latest DG check with findings and shipping papers, DG check form, DG history, party screening; "Start tender" hidden while the latest DG check is FAIL | TMS_VIEW, TMS_PLAN to check and screen |
 | `/transport/rate-shop` | Rate a shipment, compare carrier services, read the explain trace | TMS_RATE |
 | `/transport/rate-cards` | Rate card list, filter by carrier | TMS_RATE |
 | `/transport/rate-cards/new` | Rate card form with rate rows and accessorials (TMS-0102 on overlap) | TMS_RATE_APPROVE |
 | `/transport/freight-bills` | Freight bill list, filter by match status | TMS_VIEW |
 | `/transport/freight-bills/new` | Expected charges for a load | TMS_RECONCILE |
-| `/transport/freight-bills/:id` | Bill detail with the expected-vs-invoiced grid; lines outside tolerance highlighted | TMS_VIEW |
+| `/transport/freight-bills/:id` | Bill detail with the expected-vs-invoiced grid; lines outside tolerance highlighted; approve (MATCHED, VARIANCE, DISPUTED) and dispute (VARIANCE) with a reason and `If-Match`; decision history | TMS_VIEW, TMS_RECONCILE_APPROVE to approve, TMS_RECONCILE to dispute |
 | `/transport/carrier-invoices` | Carrier invoices; UNEXPECTED_INVOICE is the exception queue | TMS_RECONCILE |
 | `/transport/carrier-invoices/new` | Register an invoice; prefilled from a bill's detail page | TMS_RECONCILE |
 | `/transport/tenders` | Tender board: status filter, overdue flag, "Cascade overdue tenders" runs the expiry sweep | TMS_TENDER |

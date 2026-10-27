@@ -1,8 +1,11 @@
 import { createElement } from "react";
 import type { PassageModule } from "../registry";
+import { BuildLoadsPage } from "./BuildLoadsPage";
 import { CarrierInvoicesPage } from "./CarrierInvoicesPage";
 import { FreightBillDetailPage } from "./FreightBillDetailPage";
 import { FreightBillsPage } from "./FreightBillsPage";
+import { LoadDetailPage } from "./LoadDetailPage";
+import { LoadsPage } from "./LoadsPage";
 import { LoadTrackingPage } from "./LoadTrackingPage";
 import { NewCarrierInvoicePage } from "./NewCarrierInvoicePage";
 import { NewFreightBillPage } from "./NewFreightBillPage";
@@ -22,9 +25,12 @@ import { VoyagesPage } from "./VoyagesPage";
 const transport: PassageModule = {
   id: "transport",
   title: "Transportation",
-  description: "Rate shop and tender loads to carriers, track shipments, reconcile carrier invoices and allocate landed cost.",
+  description: "Build loads, check dangerous goods and screen parties, rate shop and tender loads to carriers, track shipments, reconcile carrier invoices and allocate landed cost.",
   routes: [
     { path: "/transport", element: createElement(TransportHome), handle: { title: "Transportation" } },
+    { path: "/transport/loads", element: createElement(LoadsPage), handle: { title: "Loads" } },
+    { path: "/transport/loads/build", element: createElement(BuildLoadsPage), handle: { title: "Build loads" } },
+    { path: "/transport/loads/:id", element: createElement(LoadDetailPage), handle: { title: "Load" } },
     { path: "/transport/rate-shop", element: createElement(RateShopPage), handle: { title: "Rate shop" } },
     { path: "/transport/rate-cards", element: createElement(RateCardsPage), handle: { title: "Rate cards" } },
     { path: "/transport/rate-cards/new", element: createElement(NewRateCardPage), handle: { title: "New rate card" } },
@@ -45,6 +51,7 @@ const transport: PassageModule = {
   ],
   nav: [
     { label: "Transportation", to: "/transport", duty: "TMS_VIEW" },
+    { label: "Loads", to: "/transport/loads", duty: "TMS_VIEW" },
     { label: "Rate shop", to: "/transport/rate-shop", duty: "TMS_RATE" },
     { label: "Rate cards", to: "/transport/rate-cards", duty: "TMS_RATE" },
     { label: "Freight bills", to: "/transport/freight-bills", duty: "TMS_VIEW" },

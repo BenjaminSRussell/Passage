@@ -77,3 +77,26 @@ type LandedCostPostedPayload struct {
 	Total        string              `json:"total"`
 	ReceiptLines []ReceiptAllocation `json:"receiptLines"`
 }
+
+// FreightBillApproved is published when a freight bill is approved (BR-34.4,
+// BR-34.5). AP (wave 19) consumes it to post the vendor invoice for the invoiced
+// amount and the ledger to reverse the accrual; the variance goes to account
+// 5250. The subject is the freight bill id, the shared journal reference.
+const FreightBillApproved = "dev.passage.tms.freightbill.approved.v1"
+
+// FreightBillApprovedPayload is the data of FreightBillApproved. Amounts are
+// decimal strings with two places; invoicedTotal = expectedTotal + variance.
+type FreightBillApprovedPayload struct {
+	FreightBillID    string `json:"freightBillId"`
+	LoadID           string `json:"loadId"`
+	CarrierID        string `json:"carrierId"`
+	CarrierInvoiceID string `json:"carrierInvoiceId"`
+	Currency         string `json:"currency"`
+	ExpectedTotal    string `json:"expectedTotal"`
+	InvoicedTotal    string `json:"invoicedTotal"`
+	Variance         string `json:"variance"`
+	FromStatus       string `json:"fromStatus"`
+	Reason           string `json:"reason,omitempty"`
+	ApprovedBy       string `json:"approvedBy"`
+	ApprovedAt       string `json:"approvedAt"`
+}

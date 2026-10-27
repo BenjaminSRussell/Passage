@@ -1,5 +1,5 @@
-// Package store persists rate cards, freight bills, carrier invoices, tenders,
-// tracking events and landed-cost voyages. Every query runs inside
+// Package store persists rate cards, freight bills and their decisions, carrier
+// invoices, tenders, tracking events, landed-cost voyages, loads and DG checks. Every query runs inside
 // dbx.WithTenantTx so row-level security applies.
 package store
 
@@ -89,6 +89,13 @@ type Store interface {
 	GetVoyage(ctx context.Context, id string) (domain.Voyage, error)
 	ListVoyages(ctx context.Context, f VoyageFilter) ([]VoyageSummary, error)
 	AllocateVoyage(ctx context.Context, id string, now time.Time) (domain.Voyage, error)
+	BuildLoads(ctx context.Context, loads []domain.Load, idem Idem) ([]domain.Load, error)
+	ListLoads(ctx context.Context, f LoadFilter) ([]domain.Load, error)
+	GetLoad(ctx context.Context, id string) (domain.Load, error)
+	RecordDGCheck(ctx context.Context, in domain.DGCheck) (domain.DGCheck, error)
+	ListDGChecks(ctx context.Context, loadID string) ([]domain.DGCheck, error)
+	DecideFreightBill(ctx context.Context, id, action, reason string, version int, idem Idem, now time.Time) (domain.FreightBill, error)
+	ListBillDecisions(ctx context.Context, billID string) ([]domain.Decision, error)
 	Ping(ctx context.Context) error
 }
 

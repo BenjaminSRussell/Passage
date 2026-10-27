@@ -4,6 +4,11 @@ import styles from "./pages.module.css";
 
 const areas = [
   {
+    title: "Loads",
+    to: "/transport/loads",
+    text: "Consolidate shipments into loads by rule within weight, volume and pallet capacity, check their dangerous goods and screen their parties.",
+  },
+  {
     title: "Rate shop",
     to: "/transport/rate-shop",
     text: "Rate a shipment across carrier services and compare totals with the explain trace for every charge.",
@@ -46,7 +51,7 @@ export function TransportHome() {
     <div className={styles.stack}>
       <PageHeader
         title="Transportation"
-        description="Rate and tender loads to carriers, track them to delivery, reconcile carrier invoices against the freight you expected to pay, and put landed cost onto inventory. Load planning comes in a later release."
+        description="Build, rate and tender loads to carriers, track them to delivery, reconcile carrier invoices against the freight you expected to pay,, and put landed cost onto inventory. Route optimization, yard and gate come in a later release."
       />
       <CardGrid as="ul" label="Transportation areas">
         {areas.map((area) => (

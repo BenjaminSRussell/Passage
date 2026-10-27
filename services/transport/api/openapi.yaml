@@ -1,10 +1,12 @@
 openapi: 3.1.0
 info:
   title: Passage Transport (TMS) API
-  version: 0.2.0
+  version: 0.3.0
   description: |
-    Wave 34 slices 1 and 2: rate cards, rate shopping, freight bills, carrier
-    invoices, tenders, tracking events and landed-cost voyages. Errors are RFC 9457 problem details (application/problem+json)
+    Wave 34 slices 1 to 3: rate cards, rate shopping, freight bills with their
+    approval and dispute, carrier invoices, tenders, tracking events, landed-cost
+    voyages, rule-based load building, dangerous-goods checks and
+    trade-compliance screening. Errors are RFC 9457 problem details (application/problem+json)
     with a stable `code`; see README.md for the error code list. Browsers call
     /api/v1/transport/..., which the web BFF rewrites to these /v1/transport/...
     paths. Amounts are decimal strings, never floats. Identifiers are lower-case
@@ -153,13 +155,78 @@ paths:
           schema: { type: string, format: uuid }
       responses:
         '200':
-          description: Freight bill; `carrierInvoice` and `match` are present once an invoice is matched
+          description: Freight bill; `carrierInvoice` and `match` are present once an invoice is matched, `decisions` lists approvals and disputes. ETag is the version for If-Match.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/FreightBillDetail' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+  /v1/transport/freight-bills/{id}:approve:
+    post:
+      operationId: approveFreightBill
+      summary: Approve a freight bill for payment (BR-34.4)
+      description: |
+        MATCHED, VARIANCE and DISPUTED bills can be approved; approving a
+        VARIANCE or DISPUTED bill needs a `reason`. The bill becomes APPROVED and
+        `dev.passage.tms.freightbill.approved.v1` is published for AP (vendor
+        invoice for the invoiced amount) and the ledger (accrual reversal,
+        variance to 5250). Any other state is 422 TMS-0117. If-Match must carry
+        the bill version (428 without it, 412 conflict_version when stale).
+      x-passage-duty: TMS_RECONCILE_APPROVE
+      parameters:
+        - $ref: '#/components/parameters/BillId'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DecisionRequest' }
+      responses:
+        '200':
+          description: The approved bill (or, for a repeated Idempotency-Key, the bill as it is now); ETag is the new version
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FreightBill' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+  /v1/transport/freight-bills/{id}:dispute:
+    post:
+      operationId: disputeFreightBill
+      summary: Dispute a freight bill's variance with the carrier (BR-34.4)
+      description: |
+        Only a VARIANCE bill can be disputed; it becomes DISPUTED and stays so
+        until it is approved. A `reason` is required. Other states are 422
+        TMS-0117. If-Match must carry the bill version.
+      x-passage-duty: TMS_RECONCILE
+      parameters:
+        - $ref: '#/components/parameters/BillId'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DecisionRequest' }
+      responses:
+        '200':
+          description: The disputed bill; ETag is the new version
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FreightBill' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
   /v1/transport/carrier-invoices:
     post:
       operationId: registerCarrierInvoice
@@ -235,6 +302,162 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+  /v1/transport/loads:build:
+    post:
+      operationId: buildLoads
+      summary: Build loads from shipments by rule (FR-34.1, BR-34.8)
+      description: |
+        Groups the shipments by ship-from site, ship-to region, mode and pickup
+        date and packs each group first-fit decreasing by weight. No load
+        exceeds the capacity in weight, volume or pallets; a shipment that does
+        not fit opens another load. A shipment larger than an empty load is 422
+        TMS-0115; a shipment already on a load is 409 TMS-0116.
+      x-passage-duty: TMS_PLAN
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoadBuildRequest' }
+      responses:
+        '201':
+          description: The loads built (or the loads of the first request for a repeated Idempotency-Key)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Load' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /v1/transport/loads:
+    get:
+      operationId: listLoads
+      summary: List loads, newest first (at most 500); loads by status
+      x-passage-duty: TMS_VIEW
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, enum: [PLANNED, RATED, TENDERED, ACCEPTED, DISPATCHED, IN_TRANSIT, DELIVERED, CLOSED, CANCELLED] }
+      responses:
+        '200':
+          description: Loads
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Load' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/transport/loads/{id}:
+    get:
+      operationId: getLoad
+      summary: Get a load with its DG checks, newest first
+      x-passage-duty: TMS_VIEW
+      parameters:
+        - $ref: '#/components/parameters/LoadId'
+      responses:
+        '200':
+          description: Load
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoadDetail' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/transport/loads/{id}:dg-check:
+    post:
+      operationId: checkLoadDangerousGoods
+      summary: Run and store the dangerous-goods check of a load (FR-34.15, BR-34.15)
+      description: |
+        FAIL for a prohibited mixed load (TMS-0130, rule 49CFR-177.848 or
+        ADR-7.5.2) or a regulated load without a 24-hour emergency phone; WARN
+        for ADR 1.1.3.6 points above 1,000 (TMS-0131), transport category 0 and
+        limited-quantity marking. Returns the DG shipping-paper lines.
+      x-passage-duty: TMS_PLAN
+      parameters:
+        - $ref: '#/components/parameters/LoadId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DGRequest' }
+      responses:
+        '200':
+          description: The stored check
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DGCheck' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/transport/loads/{id}:screen:
+    post:
+      operationId: screenLoad
+      summary: Screen the parties of a load for denied parties and sanctions (FR-34.19, BR-34.17)
+      description: |
+        Calls the ComplianceScreeningProvider per party (5 s timeout each). Any
+        POTENTIAL_MATCH, BLOCKED or SCREENING_PENDING party makes the decision
+        HOLD (TMS-0133). Without a provider a cross-border load is NOT_SCREENED
+        and the decision is WARN (TMS-0134). A load is cross-border when the
+        request says so or the parties name more than one country. The decision
+        is not stored yet.
+      x-passage-duty: TMS_PLAN
+      parameters:
+        - $ref: '#/components/parameters/LoadId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ScreenRequest' }
+      responses:
+        '200':
+          description: Screening decision
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ScreeningDecision' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/transport/transfer-rules/{incoterm}:
+    get:
+      operationId: getTransferRule
+      summary: Default goods-in-transit transfer event for an Incoterms 2020 rule (BR-34.11)
+      description: |
+        EXW, FCA, FAS, FOB, CFR, CIF, CPT and CIP transfer at the origin shipment
+        and open a goods-in-transit order (TMS-0121); DAP, DPU and DDP transfer at
+        the destination receipt with no goods-in-transit order. Case is ignored.
+        Any other rule is 400 COM-0001.
+      x-passage-duty: TMS_VIEW
+      parameters:
+        - name: incoterm
+          in: path
+          required: true
+          schema: { type: string, minLength: 3, maxLength: 3 }
+      responses:
+        '200':
+          description: Transfer rule
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransferRule' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
   /v1/transport/loads/{id}:tender:
     post:
       operationId: startTender
@@ -244,7 +467,9 @@ paths:
         carrier has `timeoutMin` (default 120, 5 to 1,440) to respond. A load
         with an ACCEPTED tender, or a PENDING tender still inside its deadline,
         is refused with TMS-0114; a PENDING tender past its deadline is
-        cascaded first and no longer blocks once it has failed.
+        cascaded first and no longer blocks once it has failed. A load whose
+        latest dangerous-goods check is FAIL is refused with 422 TMS-0130 and no
+        tender is sent (AC-34.13).
       x-passage-duty: TMS_TENDER
       parameters:
         - name: id
@@ -539,6 +764,24 @@ paths:
         '422': { $ref: '#/components/responses/Problem' }
 components:
   parameters:
+    BillId:
+      name: id
+      in: path
+      required: true
+      description: Freight bill id
+      schema: { type: string, format: uuid }
+    LoadId:
+      name: id
+      in: path
+      required: true
+      description: Load id
+      schema: { type: string, format: uuid }
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: The version the client read, such as "2" (the ETag of the freight bill).
+      schema: { type: string }
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -555,6 +798,163 @@ components:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
   schemas:
+    Capacity:
+      type: object
+      required: [maxWeightKg, maxVolumeM3, maxPallets]
+      properties:
+        maxWeightKg: { type: string, description: Decimal string greater than zero }
+        maxVolumeM3: { type: string, description: Decimal string greater than zero }
+        maxPallets: { type: integer, minimum: 1 }
+    LoadShipment:
+      type: object
+      required: [id, shipFromSiteId, shipToRegion, mode, pickupDate, weightKg, volumeM3, pallets]
+      properties:
+        id: { type: string, format: uuid, description: Shipment id }
+        shipFromSiteId: { type: string, format: uuid }
+        shipToRegion: { type: string, minLength: 1, maxLength: 20 }
+        mode: { type: string, enum: [TL, LTL, PARCEL, INTERMODAL] }
+        pickupDate: { type: string, format: date }
+        weightKg: { type: string }
+        volumeM3: { type: string }
+        pallets: { type: integer, minimum: 0 }
+    LoadBuildRequest:
+      type: object
+      required: [capacity, shipments]
+      properties:
+        capacity: { $ref: '#/components/schemas/Capacity' }
+        shipments:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items: { $ref: '#/components/schemas/LoadShipment' }
+    Load:
+      type: object
+      required: [id, mode, status, shipFromSiteId, shipToRegion, pickupDate, totalWeightKg, totalVolumeM3, pallets, capacity, shipmentIds, version, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        mode: { type: string, enum: [TL, LTL, PARCEL, INTERMODAL] }
+        status: { type: string, enum: [PLANNED, RATED, TENDERED, ACCEPTED, DISPATCHED, IN_TRANSIT, DELIVERED, CLOSED, CANCELLED] }
+        shipFromSiteId: { type: string, format: uuid }
+        shipToRegion: { type: string }
+        pickupDate: { type: string, format: date }
+        totalWeightKg: { type: string }
+        totalVolumeM3: { type: string }
+        pallets: { type: integer }
+        capacity: { $ref: '#/components/schemas/Capacity' }
+        shipmentIds: { type: array, items: { type: string, format: uuid } }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+    LoadDetail:
+      allOf:
+        - $ref: '#/components/schemas/Load'
+        - type: object
+          required: [dgChecks]
+          properties:
+            dgChecks: { type: array, maxItems: 20, items: { $ref: '#/components/schemas/DGCheck' } }
+    DGLine:
+      type: object
+      required: [unNumber, properShippingName, class, quantity, transportCategory]
+      properties:
+        unNumber: { type: string, pattern: '^UN[0-9]{4}$' }
+        properShippingName: { type: string, minLength: 1, maxLength: 200 }
+        class: { type: string, description: Hazard class or division, with a compatibility group for class 1 (3, 2.1, 1.1D) }
+        packingGroup: { type: string, enum: ['', I, II, III] }
+        quantity: { type: string, description: Litres or kilograms as ADR 1.1.3.6 counts them; decimal string greater than zero }
+        transportCategory: { type: integer, minimum: 0, maximum: 4, description: ADR transport category }
+        limitedQuantity: { type: boolean }
+    DGRequest:
+      type: object
+      required: [regulation, lines]
+      properties:
+        regulation: { type: string, enum: [ADR, 49CFR] }
+        emergencyResponsePhone: { type: string, description: E.164 number; required before a regulated DG shipment }
+        lines: { type: array, minItems: 1, maxItems: 100, items: { $ref: '#/components/schemas/DGLine' } }
+    DGFinding:
+      type: object
+      required: [ruleId, severity, detail]
+      properties:
+        ruleId: { type: string, enum: [49CFR-177.848, ADR-7.5.2, ADR-1.1.3.6, ADR-1.1.3.6-CAT0, LQ-MARKING, DG-EMERGENCY-PHONE] }
+        severity: { type: string, enum: [WARN, FAIL] }
+        code: { type: string, enum: [TMS-0130, TMS-0131] }
+        detail: { type: string }
+    PaperLine:
+      type: object
+      required: [unNumber, properShippingName, class, quantity, limitedQuantity]
+      properties:
+        unNumber: { type: string }
+        properShippingName: { type: string }
+        class: { type: string }
+        packingGroup: { type: string }
+        quantity: { type: string }
+        limitedQuantity: { type: boolean }
+        emergencyResponsePhone: { type: string }
+    DGCheck:
+      type: object
+      required: [id, loadId, regulation, result, adrPoints, findings, shippingPapers, checkedBy, checkedAt]
+      properties:
+        id: { type: string, format: uuid }
+        loadId: { type: string, format: uuid }
+        regulation: { type: string, enum: [ADR, 49CFR] }
+        result: { type: string, enum: [PASS, WARN, FAIL] }
+        adrPoints: { type: string, description: ADR 1.1.3.6 points; zero under 49CFR }
+        findings: { type: array, items: { $ref: '#/components/schemas/DGFinding' } }
+        shippingPapers: { type: array, items: { $ref: '#/components/schemas/PaperLine' } }
+        checkedBy: { type: string }
+        checkedAt: { type: string, format: date-time }
+    ScreeningParty:
+      type: object
+      required: [role, name]
+      properties:
+        role: { type: string, enum: [SOLD_TO, SHIP_TO, CONSIGNEE, FORWARDER, CARRIER] }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        country: { type: string, description: ISO 3166-1 alpha-2 }
+    ScreenRequest:
+      type: object
+      required: [parties]
+      properties:
+        crossBorder: { type: boolean }
+        parties: { type: array, minItems: 1, maxItems: 20, items: { $ref: '#/components/schemas/ScreeningParty' } }
+    ScreeningDecision:
+      type: object
+      required: [loadId, crossBorder, decision, parties]
+      properties:
+        loadId: { type: string, format: uuid }
+        crossBorder: { type: boolean }
+        decision: { type: string, enum: [CLEAR, WARN, HOLD] }
+        parties:
+          type: array
+          items:
+            type: object
+            required: [role, name, status]
+            properties:
+              role: { type: string }
+              name: { type: string }
+              status: { type: string, enum: [CLEAR, POTENTIAL_MATCH, BLOCKED, SCREENING_PENDING, NOT_SCREENED] }
+              code: { type: string, enum: [TMS-0133, TMS-0134] }
+    TransferRule:
+      type: object
+      required: [incoterm, event, goodsInTransit]
+      properties:
+        incoterm: { type: string, enum: [EXW, FCA, FAS, FOB, CFR, CIF, CPT, CIP, DAP, DPU, DDP] }
+        event: { type: string, enum: [ORIGIN_SHIPMENT, DESTINATION_RECEIPT] }
+        goodsInTransit: { type: boolean }
+        code: { type: string, enum: [TMS-0121] }
+    DecisionRequest:
+      type: object
+      properties:
+        reason: { type: string, maxLength: 500, description: Required for a dispute and for approving a VARIANCE or DISPUTED bill }
+    Decision:
+      type: object
+      required: [id, freightBillId, action, fromStatus, toStatus, decidedBy, decidedAt]
+      properties:
+        id: { type: string, format: uuid }
+        freightBillId: { type: string, format: uuid }
+        action: { type: string, enum: [APPROVE, DISPUTE] }
+        fromStatus: { type: string, enum: [MATCHED, VARIANCE, DISPUTED] }
+        toStatus: { type: string, enum: [DISPUTED, APPROVED] }
+        reason: { type: string }
+        decidedBy: { type: string }
+        decidedAt: { type: string, format: date-time }
     Problem:
       type: object
       required: [type, title, status, code]
@@ -699,6 +1099,7 @@ components:
           properties:
             carrierInvoice: { $ref: '#/components/schemas/CarrierInvoice' }
             match: { $ref: '#/components/schemas/MatchResult' }
+            decisions: { type: array, items: { $ref: '#/components/schemas/Decision' } }
     MatchResult:
       type: object
       required: [status, lines, varianceTotal]

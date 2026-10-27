@@ -30,7 +30,9 @@ export interface RowsEditorProps {
 /** A repeating group of inputs, one row per item, with add and remove. */
 export function RowsEditor({ field, legend, noun, fields, rows, errors, min = 1, blank, onChange }: RowsEditorProps) {
   const update = (i: number, key: string, value: string) => onChange(rows.map((r, idx) => (idx === i ? { ...r, [key]: value } : r)));
-  const label = (f: RowField, i: number) => `${noun.charAt(0).toUpperCase()}${noun.slice(1)} ${i + 1} ${f.label.toLowerCase()}`;
+  // "Line 1 quantity", keeping a leading acronym such as UN as written.
+  const lower = (text: string) => (/^[A-Z]{2}/.test(text) ? text : text.toLowerCase());
+  const label = (f: RowField, i: number) => `${noun.charAt(0).toUpperCase()}${noun.slice(1)} ${i + 1} ${lower(f.label)}`;
   return (
     <fieldset className={styles.valueGroup}>
       <legend className={styles.legend}>{legend}</legend>

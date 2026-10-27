@@ -112,6 +112,26 @@ export function stateTone(status: string): BadgeTone {
   }
 }
 
+/** Badge tone for a DG check result or a screening decision or party status. */
+export function checkTone(result: string): BadgeTone {
+  switch (result) {
+    case "PASS":
+    case "CLEAR":
+      return "success";
+    case "WARN":
+    case "NOT_SCREENED":
+      return "warning";
+    case "FAIL":
+    case "HOLD":
+    case "POTENTIAL_MATCH":
+    case "BLOCKED":
+    case "SCREENING_PENDING":
+      return "danger";
+    default:
+      return "neutral";
+  }
+}
+
 const labels: Record<string, string> = {
   UNMATCHED: "Unmatched",
   MATCHED: "Matched",
@@ -133,6 +153,29 @@ const labels: Record<string, string> = {
   DELIVERED: "Delivered",
   ESTIMATED: "Estimated",
   POSTED: "Posted",
+  PLANNED: "Planned",
+  RATED: "Rated",
+  TENDERED: "Tendered",
+  DISPATCHED: "Dispatched",
+  IN_TRANSIT: "In transit",
+  CLOSED: "Closed",
+  CANCELLED: "Cancelled",
+  PASS: "Pass",
+  WARN: "Warning",
+  FAIL: "Fail",
+  CLEAR: "Clear",
+  HOLD: "Hold",
+  POTENTIAL_MATCH: "Potential match",
+  BLOCKED: "Blocked",
+  SCREENING_PENDING: "Screening pending",
+  NOT_SCREENED: "Not screened",
+  APPROVE: "Approved",
+  DISPUTE: "Disputed",
+  SOLD_TO: "Sold-to",
+  SHIP_TO: "Ship-to",
+  CONSIGNEE: "Consignee",
+  FORWARDER: "Forwarder",
+  CARRIER: "Carrier",
 };
 
 /** EDI 214 status codes the service accepts (FR-34.6). */

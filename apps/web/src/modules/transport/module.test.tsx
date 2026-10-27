@@ -16,6 +16,9 @@ describe("transport module", () => {
     expect(transport.id).toBe("transport");
     expect(transport.routes.map((r) => r.path)).toEqual([
       "/transport",
+      "/transport/loads",
+      "/transport/loads/build",
+      "/transport/loads/:id",
       "/transport/rate-shop",
       "/transport/rate-cards",
       "/transport/rate-cards/new",
@@ -39,6 +42,7 @@ describe("transport module", () => {
     expect(transport.nav.find((n) => n.to === "/transport/carrier-invoices")?.duty).toBe("TMS_RECONCILE");
     expect(transport.nav.find((n) => n.to === "/transport/tenders")?.duty).toBe("TMS_TENDER");
     expect(transport.nav.find((n) => n.to === "/transport/voyages")?.duty).toBe("TMS_LANDED_COST");
+    expect(transport.nav.find((n) => n.to === "/transport/loads")?.duty).toBe("TMS_VIEW");
   });
 
   it("is auto-discovered by the registry", () => {

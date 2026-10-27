@@ -38,6 +38,8 @@ type TenderFilter struct {
 // an ACCEPTED tender, or with a PENDING tender that is still inside its deadline
 // at now, refuses another (TMS-0114). A PENDING tender past its deadline is
 // cascaded first, so a tender that has failed by time no longer blocks a new one.
+// A load whose latest DG check FAILed is refused with TMS-0130 and nothing is
+// stored (AC-34.13, dg_check_mode BLOCK).
 func (s *Postgres) CreateTender(ctx context.Context, in domain.Tender, idem Idem, now time.Time) (domain.Tender, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out domain.Tender
@@ -67,6 +69,9 @@ func (s *Postgres) CreateTender(ctx context.Context, in domain.Tender, idem Idem
 		}
 		// A concurrent request with the same key may have committed while this one waited.
 		if done, err := replay(); done || err != nil {
+			return err
+		}
+		if err := dgGate(ctx, tx, p.TenantID, in.LoadID); err != nil {
 			return err
 		}
 		open, _, err := scanTender(tx.QueryRow(ctx, `select `+tenderColumns+` from tender

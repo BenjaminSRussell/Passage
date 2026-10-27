@@ -1,5 +1,6 @@
 // Package api exposes the transport HTTP routes: rate cards, rate shopping,
-// freight bills, carrier invoices, tenders, tracking events and landed-cost voyages.
+// freight bills and their approval, carrier invoices, tenders, tracking events,
+// landed-cost voyages, load building, DG checks and trade-compliance screening.
 package api
 
 import (
@@ -13,6 +14,7 @@ import (
 	"net/http"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -35,6 +37,8 @@ const (
 	DutyRate         = "TMS_RATE"
 	DutyRateApprove  = "TMS_RATE_APPROVE"
 	DutyReconcile    = "TMS_RECONCILE"
+	DutyApprove      = "TMS_RECONCILE_APPROVE"
+	DutyPlan         = "TMS_PLAN"
 	DutyTender       = "TMS_TENDER"
 	DutyRespond      = "TMS_CARRIER_RESPOND"
 	DutyTrackIngest  = "TMS_TRACK_INGEST"
@@ -51,15 +55,16 @@ const (
 // compare as stored.
 var uuidRe = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
-var billStatuses = []string{"UNMATCHED", domain.MatchMatched, domain.MatchVariance, "DISPUTED", "APPROVED", "SETTLED"}
+var billStatuses = []string{domain.BillUnmatched, domain.MatchMatched, domain.MatchVariance, domain.BillDisputed, domain.BillApproved, domain.BillSettled}
 
 var invoiceStatuses = []string{domain.MatchMatched, domain.MatchVariance, domain.MatchUnexpected}
 
 // API holds the store and serves the transport routes. The counters feed the
 // admin /metrics endpoint.
 type API struct {
-	store store.Store
-	clock func() time.Time
+	store     store.Store
+	clock     func() time.Time
+	screening domain.ScreeningProvider
 
 	rateShops        atomic.Int64
 	rateCardsCreated atomic.Int64
@@ -72,6 +77,11 @@ type API struct {
 	tendersExpired   atomic.Int64
 	trackingIngested atomic.Int64
 	voyagesPosted    atomic.Int64
+	loadsBuilt       atomic.Int64
+	dgChecks         atomic.Int64
+	screenings       atomic.Int64
+	billsApproved    atomic.Int64
+	billsDisputed    atomic.Int64
 	serverErrors     atomic.Int64
 }
 
@@ -81,6 +91,14 @@ func New(st store.Store) *API { return &API{store: st, clock: time.Now} }
 // WithClock replaces the time source; tests use it to step through tender deadlines.
 func (a *API) WithClock(now func() time.Time) *API {
 	a.clock = now
+	return a
+}
+
+// WithScreeningProvider plugs in a ComplianceScreeningProvider (FR-34.19).
+// Without one, cross-border loads screen as NOT_SCREENED (TMS-0134) until the
+// wave-48 providers exist.
+func (a *API) WithScreeningProvider(p domain.ScreeningProvider) *API {
+	a.screening = p
 	return a
 }
 
@@ -95,9 +113,17 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(DutyReconcile)).Post(prefix+"/freight-bills", a.createFreightBill)
 	r.With(authz.RequireDuty(DutyView)).Get(prefix+"/freight-bills", a.listFreightBills)
 	r.With(authz.RequireDuty(DutyView)).Get(prefix+"/freight-bills/{id}", a.getFreightBill)
+	r.With(authz.RequireDuty(DutyApprove)).Post(prefix+"/freight-bills/{id}:approve", a.approveFreightBill)
+	r.With(authz.RequireDuty(DutyReconcile)).Post(prefix+"/freight-bills/{id}:dispute", a.disputeFreightBill)
 	r.With(authz.RequireDuty(DutyReconcile)).Post(prefix+"/carrier-invoices", a.registerCarrierInvoice)
 	r.With(authz.RequireDuty(DutyReconcile)).Get(prefix+"/carrier-invoices", a.listCarrierInvoices)
 	r.With(authz.RequireDuty(DutyReconcile)).Get(prefix+"/carrier-invoices/{id}", a.getCarrierInvoice)
+	r.With(authz.RequireDuty(DutyPlan)).Post(prefix+"/loads:build", a.buildLoads)
+	r.With(authz.RequireDuty(DutyView)).Get(prefix+"/loads", a.listLoads)
+	r.With(authz.RequireDuty(DutyView)).Get(prefix+"/loads/{id}", a.getLoad)
+	r.With(authz.RequireDuty(DutyPlan)).Post(prefix+"/loads/{id}:dg-check", a.checkLoadDG)
+	r.With(authz.RequireDuty(DutyPlan)).Post(prefix+"/loads/{id}:screen", a.screenLoad)
+	r.With(authz.RequireDuty(DutyView)).Get(prefix+"/transfer-rules/{incoterm}", a.transferRule)
 	r.With(authz.RequireDuty(DutyTender)).Post(prefix+"/loads/{id}:tender", a.startTender)
 	r.With(authz.RequireDuty(DutyTender)).Get(prefix+"/tenders", a.listTenders)
 	r.With(authz.RequireDuty(DutyTender)).Post(prefix+"/tenders:expire", a.expireTenders)
@@ -165,12 +191,14 @@ type invoiceResponse struct {
 	FreightBill *domain.FreightBill   `json:"freightBill,omitempty"`
 }
 
-// freightBillDetail is a bill with its carrier invoice and the line-by-line
-// comparison the reconciliation grid shows (expected vs invoiced per charge).
+// freightBillDetail is a bill with its carrier invoice, the line-by-line
+// comparison the reconciliation grid shows (expected vs invoiced per charge)
+// and its approvals and disputes.
 type freightBillDetail struct {
 	domain.FreightBill
 	CarrierInvoice *domain.CarrierInvoice `json:"carrierInvoice,omitempty"`
 	Match          *domain.MatchResult    `json:"match,omitempty"`
+	Decisions      []domain.Decision      `json:"decisions"`
 }
 
 func (a *API) createRateCard(w http.ResponseWriter, r *http.Request) {
@@ -417,6 +445,15 @@ func (a *API) getFreightBill(w http.ResponseWriter, r *http.Request) {
 		match := domain.MatchBill(bill, inv)
 		detail.CarrierInvoice, detail.Match = &inv, &match
 	}
+	detail.Decisions, err = a.store.ListBillDecisions(r.Context(), id)
+	if err != nil {
+		a.fail(w, r, "list freight bill decisions failed", err)
+		return
+	}
+	if detail.Decisions == nil {
+		detail.Decisions = []domain.Decision{}
+	}
+	w.Header().Set("ETag", `"`+strconv.Itoa(bill.Version)+`"`)
 	httpx.JSON(w, http.StatusOK, detail)
 }
 
@@ -527,6 +564,11 @@ func (a *API) Metrics() http.Handler {
 			{"transport_tenders_expired_total", "Tenders cascaded by the expiry sweep.", a.tendersExpired.Load()},
 			{"transport_tracking_events_total", "Tracking events stored (replays excluded).", a.trackingIngested.Load()},
 			{"transport_voyages_posted_total", "Voyage allocate requests answered with a posted voyage, replays included.", a.voyagesPosted.Load()},
+			{"transport_loads_built_total", "Loads returned by rule-based load builds, replays included.", a.loadsBuilt.Load()},
+			{"transport_dg_checks_total", "Dangerous-goods checks run and stored.", a.dgChecks.Load()},
+			{"transport_screenings_total", "Load screening requests answered with a decision.", a.screenings.Load()},
+			{"transport_freight_bills_approved_total", "Freight bill approvals applied or replayed.", a.billsApproved.Load()},
+			{"transport_freight_bills_disputed_total", "Freight bill disputes applied or replayed.", a.billsDisputed.Load()},
 			{"transport_server_errors_total", "Requests that failed with a server error.", a.serverErrors.Load()},
 		} {
 			fmt.Fprintf(w, "# HELP %[1]s %[2]s\n# TYPE %[1]s counter\n%[1]s %[3]d\n", m.name, m.help, m.value)

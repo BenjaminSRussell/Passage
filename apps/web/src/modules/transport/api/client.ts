@@ -148,9 +148,24 @@ export interface MatchResult {
   varianceTotal: string;
 }
 
+export type DecisionAction = "APPROVE" | "DISPUTE";
+
+/** One approval or dispute of a freight bill, the audit trail of BR-34.4. */
+export interface Decision {
+  id: string;
+  freightBillId: string;
+  action: DecisionAction;
+  fromStatus: BillStatus;
+  toStatus: BillStatus;
+  reason?: string;
+  decidedBy: string;
+  decidedAt: string;
+}
+
 export interface FreightBillDetail extends FreightBill {
   carrierInvoice?: CarrierInvoice;
   match?: MatchResult;
+  decisions?: Decision[];
 }
 
 export interface InvoiceResponse {
@@ -227,8 +242,8 @@ export function newKey(): string {
   return crypto.randomUUID();
 }
 
-function post<T>(path: string, body: unknown, key?: string): Promise<T> {
-  const headers: Record<string, string> = {};
+function post<T>(path: string, body: unknown, key?: string, extra: Record<string, string> = {}): Promise<T> {
+  const headers: Record<string, string> = { ...extra };
   if (key) headers["Idempotency-Key"] = key;
   return send<T>(path, { method: "POST", headers, body: JSON.stringify(body) });
 }
@@ -263,6 +278,17 @@ export function listCarrierInvoices(
   signal?: AbortSignal,
 ): Promise<CarrierInvoice[]> {
   return items<CarrierInvoice>(`/carrier-invoices${query(filter)}`, signal);
+}
+
+/**
+ * Approves (MATCHED, VARIANCE or DISPUTED) or disputes (VARIANCE) a freight bill
+ * (BR-34.4). `version` is the bill version the user saw, sent as If-Match; a
+ * stale one is 412 conflict_version. A reason is required except to approve a
+ * MATCHED bill.
+ */
+export function decideFreightBill(id: string, action: DecisionAction, version: number, reason: string, key: string = newKey()): Promise<FreightBill> {
+  const verb = action === "APPROVE" ? "approve" : "dispute";
+  return post<FreightBill>(`/freight-bills/${encodeURIComponent(id)}:${verb}`, reason ? { reason } : {}, key, { "If-Match": `"${version}"` });
 }
 
 /** Registers a carrier invoice; the carrier and invoice number are its natural idempotency key (TMS-0108). */
@@ -499,4 +525,146 @@ export function getVoyage(id: string, signal?: AbortSignal): Promise<Voyage> {
 /** Allocates and posts the voyage's landed cost; a posted voyage comes back unchanged. */
 export function allocateVoyage(id: string): Promise<Voyage> {
   return post<Voyage>(`/landed-cost/voyages/${encodeURIComponent(id)}:allocate`, {});
+}
+
+// ---- Loads, DG checks and screening (FR-34.1, FR-34.15, FR-34.19) ------------
+
+export type LoadMode = "TL" | "LTL" | "PARCEL" | "INTERMODAL";
+export const LOAD_MODES: LoadMode[] = ["TL", "LTL", "PARCEL", "INTERMODAL"];
+
+export type LoadStatus = "PLANNED" | "RATED" | "TENDERED" | "ACCEPTED" | "DISPATCHED" | "IN_TRANSIT" | "DELIVERED" | "CLOSED" | "CANCELLED";
+export const LOAD_STATUSES: LoadStatus[] = ["PLANNED", "RATED", "TENDERED", "ACCEPTED", "DISPATCHED", "IN_TRANSIT", "DELIVERED", "CLOSED", "CANCELLED"];
+
+export interface Capacity {
+  maxWeightKg: string;
+  maxVolumeM3: string;
+  maxPallets: number;
+}
+
+export interface LoadShipment {
+  id: string;
+  shipFromSiteId: string;
+  shipToRegion: string;
+  mode: LoadMode;
+  pickupDate: string;
+  weightKg: string;
+  volumeM3: string;
+  pallets: number;
+}
+
+export interface LoadBuildRequest {
+  capacity: Capacity;
+  shipments: LoadShipment[];
+}
+
+export interface Load {
+  id: string;
+  mode: LoadMode;
+  status: LoadStatus;
+  shipFromSiteId: string;
+  shipToRegion: string;
+  pickupDate: string;
+  totalWeightKg: string;
+  totalVolumeM3: string;
+  pallets: number;
+  capacity: Capacity;
+  shipmentIds: string[];
+  version: number;
+  createdAt: string;
+}
+
+export type Regulation = "ADR" | "49CFR";
+export const REGULATIONS: Regulation[] = ["ADR", "49CFR"];
+
+export type DGResult = "PASS" | "WARN" | "FAIL";
+
+export interface DGLine {
+  unNumber: string;
+  properShippingName: string;
+  class: string;
+  packingGroup?: "" | "I" | "II" | "III";
+  quantity: string;
+  transportCategory: number;
+  limitedQuantity?: boolean;
+}
+
+export interface DGRequest {
+  regulation: Regulation;
+  emergencyResponsePhone?: string;
+  lines: DGLine[];
+}
+
+export interface DGFinding {
+  ruleId: string;
+  severity: "WARN" | "FAIL";
+  code?: string;
+  detail: string;
+}
+
+export interface PaperLine {
+  unNumber: string;
+  properShippingName: string;
+  class: string;
+  packingGroup?: string;
+  quantity: string;
+  limitedQuantity: boolean;
+  emergencyResponsePhone?: string;
+}
+
+export interface DGCheck {
+  id: string;
+  loadId: string;
+  regulation: Regulation;
+  result: DGResult;
+  adrPoints: string;
+  findings: DGFinding[];
+  shippingPapers: PaperLine[];
+  checkedBy: string;
+  checkedAt: string;
+}
+
+export interface LoadDetail extends Load {
+  dgChecks: DGCheck[];
+}
+
+export type PartyRole = "SOLD_TO" | "SHIP_TO" | "CONSIGNEE" | "FORWARDER" | "CARRIER";
+export const PARTY_ROLES: PartyRole[] = ["SOLD_TO", "SHIP_TO", "CONSIGNEE", "FORWARDER", "CARRIER"];
+
+export interface ScreeningParty {
+  role: PartyRole;
+  name: string;
+  country?: string;
+}
+
+export type ScreenStatus = "CLEAR" | "POTENTIAL_MATCH" | "BLOCKED" | "SCREENING_PENDING" | "NOT_SCREENED";
+
+export interface ScreeningDecision {
+  loadId: string;
+  crossBorder: boolean;
+  decision: "CLEAR" | "WARN" | "HOLD";
+  parties: { role: PartyRole; name: string; status: ScreenStatus; code?: string }[];
+}
+
+/** Builds loads by rule; reuse one key per form so a retried submit cannot plan the shipments twice. */
+export async function buildLoads(input: LoadBuildRequest, key: string = newKey()): Promise<Load[]> {
+  const body = await post<{ items?: Load[] }>("/loads:build", input, key);
+  return Array.isArray(body.items) ? body.items : [];
+}
+
+export function listLoads(filter: { status?: LoadStatus | "" } = {}, signal?: AbortSignal): Promise<Load[]> {
+  return items<Load>(`/loads${query(filter)}`, signal);
+}
+
+export function getLoad(id: string, signal?: AbortSignal): Promise<LoadDetail> {
+  return send<LoadDetail>(`/loads/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** Runs and stores the DG check of a load; a FAIL blocks tendering (AC-34.13). */
+export function checkLoadDG(id: string, input: DGRequest): Promise<DGCheck> {
+  return post<DGCheck>(`/loads/${encodeURIComponent(id)}:dg-check`, input);
+}
+
+/** Screens the parties of a load through the screening provider hook (BR-34.17). */
+export function screenLoad(id: string, input: { crossBorder?: boolean; parties: ScreeningParty[] }): Promise<ScreeningDecision> {
+  return post<ScreeningDecision>(`/loads/${encodeURIComponent(id)}:screen`, input);
 }

@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: Passage Transport events
-  version: 0.2.0
+  version: 0.3.0
   description: CloudEvents 1.0 envelope; amounts are decimal strings. Each event is written to the outbox in the transaction that makes the change; the Debezium outbox router sends it to the topic of its aggregate.
 defaultContentType: application/cloudevents+json
 channels:
@@ -11,6 +11,8 @@ channels:
     messages:
       freightBillMatched:
         $ref: '#/components/messages/FreightBillMatched'
+      freightBillApproved:
+        $ref: '#/components/messages/FreightBillApproved'
   tender:
     address: passage.tms.tender
     description: Topic for tender outcomes (BR-34.3); subject is the tender id.
@@ -41,6 +43,13 @@ operations:
     summary: A carrier invoice was matched to a freight bill.
     messages:
       - $ref: '#/channels/freightBillMatched/messages/freightBillMatched'
+  publishFreightBillApproved:
+    action: send
+    channel:
+      $ref: '#/channels/freightBillMatched'
+    summary: A freight bill was approved for payment (BR-34.4). Consumers AP (wave 19 vendor invoice for the invoiced amount) and the ledger (accrual reversal, variance to 5250).
+    messages:
+      - $ref: '#/channels/freightBillMatched/messages/freightBillApproved'
   publishTenderOutcome:
     action: send
     channel:
@@ -101,6 +110,38 @@ components:
                     invoiced: { type: string }
                     variance: { type: string, description: invoiced minus expected }
                     withinTolerance: { type: boolean }
+    FreightBillApproved:
+      name: dev.passage.tms.freightbill.approved.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [type, source, id, specversion, tenantid, data]
+        properties:
+          specversion: { type: string, const: '1.0' }
+          type: { type: string, const: dev.passage.tms.freightbill.approved.v1 }
+          source: { type: string, const: /passage/tms/transport }
+          id: { type: string }
+          tenantid: { type: string, format: uuid }
+          subject: { type: string, description: freight bill id, the journal reference shared by accrual, reversal and AP invoice (BR-34.5) }
+          time: { type: string, format: date-time }
+          datacontenttype: { type: string, const: application/json }
+          dataschema: { type: string }
+          data:
+            type: object
+            required: [freightBillId, loadId, carrierId, carrierInvoiceId, currency, expectedTotal, invoicedTotal, variance, fromStatus, approvedBy, approvedAt]
+            properties:
+              freightBillId: { type: string, format: uuid }
+              loadId: { type: string, format: uuid }
+              carrierId: { type: string, format: uuid }
+              carrierInvoiceId: { type: string, format: uuid }
+              currency: { type: string }
+              expectedTotal: { type: string, description: the accrued amount }
+              invoicedTotal: { type: string, description: the amount AP invoices }
+              variance: { type: string, description: invoicedTotal minus expectedTotal, posted to freight variance account 5250 }
+              fromStatus: { type: string, enum: [MATCHED, VARIANCE, DISPUTED] }
+              reason: { type: string, description: required when a variance or dispute is approved }
+              approvedBy: { type: string }
+              approvedAt: { type: string, format: date-time }
     TenderAccepted:
       name: dev.passage.tms.tender.accepted.v1
       contentType: application/cloudevents+json

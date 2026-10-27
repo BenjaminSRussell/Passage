@@ -54,6 +54,19 @@ type fakeStore struct {
 	voyage        domain.Voyage
 	voyageErr     error
 	createdVoyage domain.Voyage
+
+	// Slice 3: loads, DG checks and freight bill decisions (load_test.go).
+	builtLoads []domain.Load
+	buildIdem  store.Idem
+	buildErr   error
+	load       domain.Load
+	loadErr    error
+	loadFilter store.LoadFilter
+	dgChecks   []domain.DGCheck
+	recordedDG domain.DGCheck
+	decision   fakeDecision
+	decideErr  error
+	decisions  []domain.Decision
 }
 
 func (f *fakeStore) CreateRateCard(_ context.Context, in domain.RateCard, idem store.Idem) (domain.RateCard, error) {
