@@ -286,9 +286,9 @@ describe("agreements", () => {
   it("lists agreements and shows the empty state", async () => {
     handler = () => ({ status: 200, body: { items: [agreement], nextCursor: AGREEMENT } });
     const view = renderAt("/service/agreements");
-    expect(await screen.findByRole("table", { name: "Service agreements" })).toHaveTextContent("SA-000007");
+    await waitFor(() => expect(screen.getByRole("table", { name: "Service agreements" })).toHaveTextContent("SA-000007"));
     handler = () => ({ status: 200, body: { items: [] } });
-    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Load more" }));
     await waitFor(() => expect(calls.at(-1)?.url.searchParams.get("cursor")).toBe(AGREEMENT));
     view.unmount();
     renderAt("/service/agreements");

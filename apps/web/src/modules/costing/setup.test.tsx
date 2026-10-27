@@ -85,7 +85,7 @@ function bodyOf(fetchMock: ReturnType<typeof vi.fn>, method: string, fragment: s
 }
 
 function at(path: string) {
-  const route = (p: string, el: () => JSX.Element) => createElement(Route, { path: p, element: createElement(el) });
+  const route = (p: string, el: () => React.JSX.Element) => createElement(Route, { path: p, element: createElement(el) });
   return render(
     createElement(
       MemoryRouter,

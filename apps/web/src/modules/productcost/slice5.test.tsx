@@ -149,7 +149,7 @@ describe("cost components page", () => {
     expect(posts()).toHaveLength(1);
     expect(posts()[0].body).toEqual({ code: "DM", name: "Direct material", costGroupType: "DirectMaterial", behaviour: "Variable" });
     expect(posts()[0].key).toMatch(/.{8,}/);
-    expect(await within(screen.getByRole("table", { name: "Cost components" })).findByRole("row", { name: /DM/ })).toBeInTheDocument();
+    await waitFor(() => expect(within(screen.getByRole("table", { name: "Cost components" })).getByRole("row", { name: /DM/ })).toBeInTheDocument());
   });
 
   it("checks the form before calling the service", async () => {

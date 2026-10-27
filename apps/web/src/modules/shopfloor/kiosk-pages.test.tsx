@@ -142,6 +142,7 @@ describe("Kiosk", () => {
     fill("Badge", "B-42");
     fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
     expect(await screen.findByRole("heading", { name: "Ana Silva" })).toBeInTheDocument();
+    await act(async () => {});
     act(() => {
       vi.advanceTimersByTime(50_000);
     });
@@ -229,7 +230,7 @@ describe("Machine idle threshold", () => {
     fill("Ideal cycle time (seconds)", "60");
     fill("Idle threshold (seconds)", "600");
     fireEvent.click(screen.getByRole("button", { name: "Register machine" }));
-    expect(await screen.findByRole("table", { name: "Machines" })).toHaveTextContent("600 s");
+    await waitFor(() => expect(screen.getByRole("table", { name: "Machines" })).toHaveTextContent("600 s"));
     expect(posts("/machines")[0].body).toEqual({ ...base, siteId: null, idleThresholdSeconds: 600 });
   });
 });

@@ -451,7 +451,7 @@ describe("Deferred revenue", () => {
     fireEvent.click(screen.getByRole("button", { name: "Run recognition through 2027-03-31" }));
     expect(await screen.findByRole("status")).toHaveTextContent("Recognition run through 2027-03-31: 1 ratable line recognized.");
     expect(server.calls.find((c) => c.method === "POST")?.body).toEqual({ legalEntityId: LE, periodEnd: "2027-03-31" });
-    expect(await screen.findByRole("table", { name: "Recognition runs" })).toHaveTextContent("2027-04-01 01:00:00 UTC");
+    await waitFor(() => expect(screen.getByRole("table", { name: "Recognition runs" })).toHaveTextContent("2027-04-01 01:00:00 UTC"));
   });
 
   it("explains a run for a month that has not ended and a roll-forward failure", async () => {

@@ -202,7 +202,8 @@ describe("VersionDetailPage", () => {
     detailRoutes();
     const { container } = at(`/costing/versions/${V1}`);
     const table = await screen.findByRole("table", { name: "Item costs" });
-    const rows = await within(table).findAllByRole("row");
+    await waitFor(() => expect(within(table).getAllByRole("row")[1]).toHaveTextContent("11"));
+    const rows = within(table).getAllByRole("row");
     expect(rows[1]).toHaveTextContent("11");
     expect(rows[1]).toHaveTextContent("+1");
     expect(rows[2]).toHaveTextContent("5.5");

@@ -191,7 +191,7 @@ describe("item compliance", () => {
       init.method === "POST" ? json(201, { itemId: ITEM, version: 1, direct: { [DEHP]: "0.024" }, parts: [] }) : json(404, { code: "QM-0164", detail: "no composition is recorded for this item" });
     const { container } = renderAt(`/quality/compliance/items/${ITEM}`);
     expect(await screen.findByText("No composition declared yet")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("CAS number"), { target: { value: DEHP } });
+    fireEvent.change(await screen.findByLabelText("CAS number"), { target: { value: DEHP } });
     fireEvent.change(screen.getByLabelText("Mass fraction"), { target: { value: "0.024" } });
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Save composition" }));

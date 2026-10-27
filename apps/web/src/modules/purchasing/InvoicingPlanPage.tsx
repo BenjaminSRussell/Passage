@@ -192,8 +192,9 @@ export function InvoicingPlanPage() {
     }
   }, [loaded.data, loaded.loading, loaded.error]);
   useEffect(() => {
-    if (po.data && rowVersion === null) setRowVersion(po.data.body.rowVersion);
-  }, [po.data, rowVersion]);
+    const poRowVersion = po.data?.body.rowVersion;
+    if (poRowVersion !== undefined) setRowVersion((current) => current ?? poRowVersion);
+  }, [po.data]);
 
   const order = po.data?.body ?? null;
   const line: PurchaseOrderLine | undefined = order?.lines.find((l) => l.lineNo === lineNo);

@@ -73,7 +73,7 @@ function urls(fetchMock: ReturnType<typeof vi.fn>, method: string, fragment: str
 }
 
 function at(path: string) {
-  const route = (p: string, el: () => JSX.Element) => createElement(Route, { path: p, element: createElement(el) });
+  const route = (p: string, el: () => React.JSX.Element) => createElement(Route, { path: p, element: createElement(el) });
   return render(
     createElement(
       MemoryRouter,

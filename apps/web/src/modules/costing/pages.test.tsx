@@ -26,7 +26,7 @@ function sentUrl(fetchMock: ReturnType<typeof vi.fn>): string {
   return (fetchMock.mock.calls[0] as unknown as [string])[0];
 }
 
-const page = (el: () => JSX.Element) => render(createElement(MemoryRouter, null, createElement(el)));
+const page = (el: () => React.JSX.Element) => render(createElement(MemoryRouter, null, createElement(el)));
 
 afterEach(() => vi.unstubAllGlobals());
 
