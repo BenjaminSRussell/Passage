@@ -1,17 +1,20 @@
 # Cost accounting module (web)
 
-Cost accounting screens for PSG-38 slice 1, wired to `services/costacct` through the BFF at `/api/v1/controlling/...`.
+Cost accounting screens for PSG-38 slices 1 and 2, wired to `services/costacct` through the BFF at `/api/v1/controlling/...`.
 
 | Route | Page | Service calls |
 |---|---|---|
 | `/costacct` | Cost objects: list with legal entity and kind filters | `GET /cost-objects` |
 | `/costacct/cost-objects/new` | New cost object | `POST /cost-objects` |
-| `/costacct/cost-objects/:id` | Cost object with its entries for a period and the period total per currency | `GET /cost-objects/{id}`, `/cost-objects/{id}/entries`, `/cost-elements` |
+| `/costacct/cost-objects/:id` | Cost object with its entries for a period and the period total per currency; an internal order also shows its collected cost, the settlement form and its settlements | `GET /cost-objects/{id}`, `/cost-objects/{id}/entries`, `/cost-elements`, `/internal-orders/{id}/settlements`, `POST /internal-orders/{id}:settle` |
 | `/costacct/cost-elements` | Cost elements with main account ranges | `GET /cost-elements` |
 | `/costacct/cost-elements/new` | New primary (account range) or secondary element | `POST /cost-elements` |
 | `/costacct/allocation-runs` | Allocation runs with cost in / out and convergence | `GET /allocation-runs` |
 | `/costacct/allocation-runs/new` | Choose the centers and type the basis matrix, then run | `GET /cost-objects`, `/cost-elements`, `POST /allocation-runs` |
 | `/costacct/allocation-runs/:id` | Run totals, net postings and flows | `GET /allocation-runs/{id}` |
+| `/costacct/top-down-runs` | Top-down runs with amount, basis period and segment count | `GET /top-down-runs` |
+| `/costacct/top-down-runs/new` | Choose source, element, amount and segments, type each basis and see the cent-exact preview, then run | `GET /cost-objects`, `/cost-elements`, `POST /top-down-runs` |
+| `/costacct/top-down-runs/:id` | Run totals, shares per segment and zero-basis segments | `GET /top-down-runs/{id}` |
 | `/costacct/reconciliation` | Cost ledger against journal balances by element (FR-38.11) | `POST /reconciliations` |
 
 Every list has loading, empty and error (with "Try again") states, and pages use the shell primitives from

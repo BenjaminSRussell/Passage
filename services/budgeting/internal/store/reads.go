@@ -98,7 +98,7 @@ func (s *Postgres) Available(ctx context.Context, ruleVersionID, dim, span strin
 			return err
 		}
 		rows, err := tx.Query(ctx, `select id::text, rule_version_id::text, control_dimension_key, time_span_key, budget_total::text, actuals::text,
-			encumbrances::text, pre_encumbrances::text, version from budget_control_balance
+			encumbrances::text, pre_encumbrances::text, reservations::text, version from budget_control_balance
 			where tenant_id = $1 and rule_version_id = $2 and ($3 = '' or control_dimension_key = $3) and ($4 = '' or time_span_key = $4)
 			order by control_dimension_key, time_span_key limit $5`, tenantID, ruleVersionID, dim, span, listLimit)
 		if err != nil {
@@ -107,12 +107,12 @@ func (s *Postgres) Available(ctx context.Context, ruleVersionID, dim, span strin
 		defer rows.Close()
 		for rows.Next() {
 			var b BalanceView
-			var budget, actuals, enc, pre string
-			if err := rows.Scan(&b.ID, &b.RuleVersionID, &b.ControlDimensionKey, &b.TimeSpanKey, &budget, &actuals, &enc, &pre, &b.Version); err != nil {
+			var budget, actuals, enc, pre, res string
+			if err := rows.Scan(&b.ID, &b.RuleVersionID, &b.ControlDimensionKey, &b.TimeSpanKey, &budget, &actuals, &enc, &pre, &res, &b.Version); err != nil {
 				return err
 			}
-			bal := domain.Balance{Budget: parseDec(budget), Actuals: parseDec(actuals), Encumbrances: parseDec(enc), PreEncumbrances: parseDec(pre)}
-			b.BudgetTotal, b.Actuals, b.Encumbrances, b.PreEncumbrances, b.Available = bal.Budget, bal.Actuals, bal.Encumbrances, bal.PreEncumbrances, bal.Available()
+			bal := domain.Balance{Budget: parseDec(budget), Actuals: parseDec(actuals), Encumbrances: parseDec(enc), PreEncumbrances: parseDec(pre), Reservations: parseDec(res)}
+			b.BudgetTotal, b.Actuals, b.Encumbrances, b.PreEncumbrances, b.Reservations, b.Available = bal.Budget, bal.Actuals, bal.Encumbrances, bal.PreEncumbrances, bal.Reservations, bal.Available()
 			out = append(out, b)
 		}
 		return rows.Err()

@@ -30,6 +30,7 @@ const balance: Balance = {
   actuals: "60000",
   encumbrances: "30000",
   preEncumbrances: "0",
+  reservations: "0",
   available: "10000",
   version: 3,
 };

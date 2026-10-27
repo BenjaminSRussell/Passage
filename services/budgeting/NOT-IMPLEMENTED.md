@@ -1,6 +1,6 @@
-# NOT-IMPLEMENTED (budgeting, PSG-38 slice 1)
+# NOT-IMPLEMENTED (budgeting, PSG-38 slices 1 and 2)
 
-Every PSG-38 deliverable and acceptance criterion that slice 1 does not build, with its status and reason.
+Every PSG-38 deliverable and acceptance criterion that slices 1 and 2 do not build, with its status and reason.
 
 | Item | Ref | Status | Reason |
 |---|---|---|---|
@@ -9,7 +9,7 @@ Every PSG-38 deliverable and acceptance criterion that slice 1 does not build, w
 | Budget planning: processes, stages, up to 10 scenarios, top-down and bottom-up, distribution keys, plan grid, scenario comparison | FR-38.2, AC-38.7 (AC4) | later slice of PSG-38 | Large entity set; depends on the workflow above. |
 | Budget control rule activation and disable history; budget cycle time spans (year, quarter, period, custom) | FR-38.3, BR-38.5, CO-0603 | later slice of PSG-38 | Slice 1 takes the span key from the request; cycles need the fiscal calendar (wave 14). |
 | User-group overrides (`BudgetControlUserGroup` mapped to Keycloak groups) | FR-38.3, FR-38.4 step 7 | partial | Slice 1 uses the `budget.override` duty only. |
-| Documents under control: Expense, Project, Reservation | FR-38.3 | later slice of PSG-38 | Slice 1 accepts Requisition, PurchaseOrder, Invoice and Journal. |
+| Documents under control: Expense, Project | FR-38.3 | later slice of PSG-38 | Requisition, PurchaseOrder, Invoice and Journal are checked; Reservation is checked on creation (slice 2). |
 | `budget.unposted-in-available` flag; `fail-open` timeout policy; CO-0608 check timeout | FR-38.4, 7.38.10 | later slice of PSG-38 | Flags need the flag service; timeout policy needs load tests. |
 | Check latency SLO (p95 < 150 ms at 50 checks/s) and the concurrent-check E2E run | 7.38.9, 7.38.19 | later slice of PSG-38 | Needs a load harness. The row lock is in place. |
 | Pre-encumbrance from approved requisitions (requisition checks reserve as encumbrances, not pre-encumbrances); PO cancellation release; closed-PO residual release | FR-38.5 | later slice of PSG-38 | Slice 1 reserves at check time, adjusts on a re-check of the same line (net change, BR-38.3) and relieves on invoice. |
@@ -19,7 +19,12 @@ Every PSG-38 deliverable and acceptance criterion that slice 1 does not build, w
 | 5 s cache on the available-funds query | 7.38.5, 7.38.19 | later slice of PSG-38 | `GET /v1/budget/available` is built and reads the balance rows directly; the cache comes with the load harness. |
 | Balance rebuild from events (`budget-balance-rebuild`) and journal-event projection | 7.38.16, FR-38.4 | handoff | Consumes journal events from the eventing backbone (wave 0 / eventing-backbone). Balances are written by postings and checks only. |
 | Nightly reconciliation: budget balances equal posted register entries; Σ encumbrances equal open PO lines | 7.38.9 | later slice of PSG-38 | Reconcile job depends on the balance rebuild. |
-| Reservation expiry and earmarked funds (FundsReservation, Precommitment, FundsBlocking, RevenueForecast) | FR-38.20 | later slice of PSG-38 | Separate entity and document numbering. |
+| Budget reservation documents: four types, creation check, consumption into an encumbrance, close, expiry, per-type numbers | FR-38.20, BR-38.14, AC-38.12 | built (slice 2) | `budget_reservation` with lines and consumption history. |
+| RevenueForecast increasing available funds (`revenue-increases-budget` rule flag) | FR-38.20 | later slice of PSG-38 | The document is recorded and listed but holds nothing; the flag comes with rule activation settings. |
+| `reservation.documentTypes` parameter table (configurable per entity) | 7.38.13 | partial | The four types, their prefixes and consumability are fixed in code; the parameter table comes with the settings service. |
+| Consumption by reference inside the follow-on document's own check | FR-38.20 | partial | The follow-on service calls `:consume` per line; checking a PO line with a reservation reference in `POST /v1/budget/checks` comes with the procurement integration. |
+| Scheduling of `reservation-expiry` (daily 01:00), the CO-0632 notice and the "expiring in 7 days" alert | 7.38.16, CO-0632 | handoff | `POST /v1/budget/reservations:expire` is the job body; the schedule and notices belong to the scheduler and notification services. |
+| Segregation of duties BudgetReserve vs BudgetApprove of the same reservation; reservation approval workflow | 7.38.17 | later slice of PSG-38 | Reservations are effective on creation; approval comes with the register entry workflow. |
 | Budget plan worksheet templates and xlsx round-trip | FR-38.13 | later slice of PSG-38 | Needs the plan entity first. |
 | Plan generation from GL actuals, plans, FA, demand and position forecasts | FR-38.14 | later slice of PSG-38 | Needs the plan entity and sources (waves 22, 37, 39, 41). |
 | Position forecasting | FR-38.15 | later slice of PSG-38 | Wave 42 provides the HR source. |
@@ -31,4 +36,4 @@ Every PSG-38 deliverable and acceptance criterion that slice 1 does not build, w
 | Separation of duties (BudgetOverride vs ProcurementPurchaseOrderApprove for own POs) | 7.38.17 | handoff | Rego policy belongs in `policies/` (edge-identity owns it). |
 | Budget check fixtures (`budget-check-200`) under `testdata/` | 7.38.9 | later slice of PSG-38 | Domain tests cover the step order and relief; the 200-case fixture set needs the full rule set. |
 | Budget check ("budget check fixtures") acceptance AC-38.1 to AC-38.4 | 7.38.8 | partial | Domain and store tests cover the threshold outcomes, the last-dollar race and exact relief. The full fixture set is not built. |
-| Web module | apps/web | built | `apps/web/src/modules/budgeting/`: rule list and create, rule detail (available funds, register entries, encumbrances, checks), register entry form, budget check form, check detail, encumbrance detail with relief. The planning grid and the check inline in the PO form are later slices. |
+| Web module | apps/web | built | `apps/web/src/modules/budgeting/`: rule list and create, rule detail (available funds with reservations, register entries, encumbrances, checks), register entry form, budget check form, check detail, encumbrance detail with relief, earmarked funds list, reservation create form, reservation detail with consume and close. The planning grid and the check inline in the PO form are later slices. |

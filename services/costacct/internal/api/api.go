@@ -54,6 +54,11 @@ type Store interface {
 	ListRuns(ctx context.Context, legalEntityID string) ([]store.Run, error)
 	GetRun(ctx context.Context, id string) (store.Run, error)
 	Reconcile(ctx context.Context, in store.ReconcileRequest) (domain.Reconciliation, error)
+	RunTopDown(ctx context.Context, key, hash string, in store.TopDownRequest) (int, []byte, error)
+	ListTopDownRuns(ctx context.Context, legalEntityID string) ([]store.TopDownRun, error)
+	GetTopDownRun(ctx context.Context, id string) (store.TopDownRun, error)
+	SettleInternalOrder(ctx context.Context, key, hash string, in store.SettlementRequest) (int, []byte, error)
+	ListSettlements(ctx context.Context, orderID, period string) ([]store.Settlement, error)
 	Ping(ctx context.Context) error
 }
 
@@ -69,6 +74,8 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(DutyMaintain)).Post("/v1/controlling/cost-elements", a.createCostElement)
 	r.With(authz.RequireDuty(DutyMaintain)).Post("/v1/controlling/cost-entries:mirror", a.mirror)
 	r.With(authz.RequireDuty(DutyRun)).Post("/v1/controlling/allocation-runs", a.runAllocation)
+	r.With(authz.RequireDuty(DutyRun)).Post("/v1/controlling/top-down-runs", a.runTopDown)
+	r.With(authz.RequireDuty(DutyRun)).Post("/v1/controlling/internal-orders/{id}:settle", a.settle)
 	view := r.With(authz.RequireDuty(DutyView))
 	view.Get("/v1/controlling/cost-objects/{id}/entries", a.entries)
 	view.Get("/v1/controlling/cost-objects", a.listCostObjects)
@@ -77,6 +84,9 @@ func (a *API) Register(r chi.Router) {
 	view.Get("/v1/controlling/allocation-runs", a.listRuns)
 	view.Get("/v1/controlling/allocation-runs/{id}", a.getRun)
 	view.Post("/v1/controlling/reconciliations", a.reconcile)
+	view.Get("/v1/controlling/top-down-runs", a.listTopDownRuns)
+	view.Get("/v1/controlling/top-down-runs/{id}", a.getTopDownRun)
+	view.Get("/v1/controlling/internal-orders/{id}/settlements", a.listSettlements)
 }
 
 // prepare checks the Idempotency-Key, decodes the body into v and returns the

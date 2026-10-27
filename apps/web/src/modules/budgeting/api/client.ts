@@ -58,12 +58,14 @@ export interface Balance {
   actuals: string;
   encumbrances: string;
   preEncumbrances: string;
+  /** Open amounts of earmarked funds documents (FR-38.20). */
+  reservations: string;
   available: string;
   version: number;
 }
 
 export interface EncumbranceHistory {
-  type: "Reserve" | "Adjust" | "Relieve";
+  type: "Reserve" | "Adjust" | "Relieve" | "Consume";
   amount: string;
   documentId: string;
   at: string;
@@ -117,7 +119,8 @@ export interface CheckOutcome {
   id: string;
   ruleVersionId: string;
   documentId: string;
-  documentType: DocumentType;
+  /** A reservation's creation check is recorded with document type Reservation. */
+  documentType: DocumentType | "Reservation";
   result: CheckLineResult;
   overridden: boolean;
   checkedAt: string;
@@ -137,6 +140,87 @@ export interface ReliefOutcome {
   remaining: string;
   excess: string;
   status: EncumbranceStatus;
+}
+
+export type ReservationType = "FundsReservation" | "Precommitment" | "FundsBlocking" | "RevenueForecast";
+export type ReservationStatus = "Open" | "PartiallyConsumed" | "Consumed" | "Closed" | "Expired";
+
+export interface ReservationInput {
+  ruleVersionId: string;
+  type: ReservationType;
+  description: string;
+  /** YYYY-MM-DD, the first day the document no longer holds funds; omitted for no expiry. */
+  expiryDate?: string;
+  lines: RegisterLine[];
+}
+
+export interface ReservationLine {
+  lineId: string;
+  dimensionKey: string;
+  spanKey: string;
+  amount: string;
+  consumed: string;
+  released: string;
+  open: string;
+}
+
+export interface Consumption {
+  id: string;
+  lineId: string;
+  encumbranceId: string;
+  documentType: DocumentType;
+  documentId: string;
+  documentLineId: string;
+  amount: string;
+  consumedAt: string;
+}
+
+export interface Reservation {
+  id: string;
+  legalEntityId: string;
+  ruleVersionId: string;
+  type: ReservationType;
+  number: string;
+  description: string;
+  expiryDate?: string;
+  status: ReservationStatus;
+  total: string;
+  consumed: string;
+  released: string;
+  open: string;
+  checkId?: string;
+  version: number;
+  createdAt: string;
+  closedAt?: string;
+  lines: ReservationLine[];
+  consumptions: Consumption[];
+  check?: CheckOutcome;
+}
+
+export interface ConsumeInput {
+  lineId: string;
+  documentType: DocumentType;
+  documentId: string;
+  documentLineId: string;
+  amount: string;
+}
+
+export interface ConsumeOutcome {
+  reservationId: string;
+  lineId: string;
+  documentId: string;
+  encumbranceId: string;
+  consumed: string;
+  lineOpen: string;
+  open: string;
+  status: ReservationStatus;
+}
+
+export interface ReleaseOutcome {
+  reservationId: string;
+  number: string;
+  released: string;
+  status: ReservationStatus;
 }
 
 export interface Problem {
@@ -252,4 +336,34 @@ export function getCheck(id: string, signal?: AbortSignal): Promise<CheckOutcome
 /** Runs a budget check for a document's lines (FR-38.4). */
 export function checkBudget(input: CheckInput, idempotencyKey: string): Promise<CheckOutcome> {
   return command(`${BASE}/checks`, input, idempotencyKey);
+}
+
+export interface ReservationFilter {
+  rule?: string;
+  type?: ReservationType | "";
+  status?: ReservationStatus | "";
+}
+
+/** Earmarked funds list (PRD 7.38.14), newest first. */
+export function listReservations(f: ReservationFilter, signal?: AbortSignal): Promise<Items<Reservation>> {
+  return request(`${BASE}/reservations${query({ rule: f.rule, type: f.type || undefined, status: f.status || undefined })}`, { signal });
+}
+
+export function getReservation(id: string, signal?: AbortSignal): Promise<Reservation> {
+  return request(`${BASE}/reservations/${encodeURIComponent(id)}`, { signal });
+}
+
+/** Creates an earmarked funds document; fund-holding types run the budget check first (FR-38.20). */
+export function createReservation(input: ReservationInput, idempotencyKey: string): Promise<Reservation> {
+  return command(`${BASE}/reservations`, input, idempotencyKey);
+}
+
+/** A follow-on document line draws on a reservation line and becomes an encumbrance (AC-38.12). */
+export function consumeReservation(id: string, input: ConsumeInput, idempotencyKey: string): Promise<ConsumeOutcome> {
+  return command(`${BASE}/reservations/${encodeURIComponent(id)}:consume`, input, idempotencyKey);
+}
+
+/** Closes the document and releases its residual (BR-38.14). */
+export function closeReservation(id: string, idempotencyKey: string): Promise<ReleaseOutcome> {
+  return command(`${BASE}/reservations/${encodeURIComponent(id)}:close`, {}, idempotencyKey);
 }

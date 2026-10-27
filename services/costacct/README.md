@@ -1,8 +1,8 @@
 # costacct
 
-Cost accounting for Passage (PRD 7.38, ticket PSG-38, wave 38, slice 1). The service keeps cost objects and cost
-elements, mirrors primary costs from journal lines into cost entries, and runs reciprocal assessment allocations
-that conserve cost to the cent.
+Cost accounting for Passage (PRD 7.38, ticket PSG-38, wave 38, slices 1 and 2). The service keeps cost objects and cost
+elements, mirrors primary costs from journal lines into cost entries, runs reciprocal assessment allocations
+that conserve cost to the cent, distributes aggregated amounts top-down and settles internal orders.
 
 ## What slice 1 does
 
@@ -27,8 +27,25 @@ that conserve cost to the cent.
   to primary elements and compares them with Σ primary cost entries per element for the period and currency.
 - **Cost object line items**: entries of one object for one period, with origin and behavior.
 
+## What slice 2 adds
+
+- **Top-down distribution (FR-38.19, BR-38.13, AC-38.11)**: `POST /v1/controlling/top-down-runs` takes an amount
+  booked on an aggregated cost object (for example freight on the entity's cost center) and a reference basis per
+  segment (for example revenue of a reference period). Each share is rounded half away from zero to the currency's
+  minor unit and the rounding residual goes to the segment with the largest basis (the first on a tie), so the
+  shares sum to the amount exactly. The source is credited and the segments debited on the same cost element, so
+  the run nets to zero and the GL reconciliation of primary costs is unchanged. The amount may not exceed what is
+  booked on the source for the element and period (`CST-0012`); the source row is locked while it is read. Zero-basis
+  segments receive nothing and are listed in `excluded`. One completed run per source, element and period.
+- **Internal order settlement (FR-38.9, BR-38.9)**: `POST /v1/controlling/internal-orders/{id}:settle` moves part or
+  all of an internal order's collected cost for a period to a receiver cost object on a secondary (settlement)
+  element. Collected cost is the net of the order's entries for the period and currency, so earlier settlements
+  already reduce it. The order row is locked while collected cost is read, so concurrent settlements cannot together
+  exceed it; a settlement above it is `CO-0618`. Each settlement records the collected cost before it.
+
 Costs are `numeric(19,4)` with a currency. Commands require `Idempotency-Key` and write outbox events
-(`dev.passage.controlling.costentry.created.v1`, `dev.passage.controlling.allocation.completed.v1`).
+(`dev.passage.controlling.costentry.created.v1`, `dev.passage.controlling.allocation.completed.v1`; a top-down run
+emits `allocation.completed` with method `TopDown`).
 
 ## Algorithm note
 
@@ -44,7 +61,7 @@ A closed cycle with no leakage is singular (`CST-0005`) and is detected from the
 ```sh
 cd services/costacct
 go test ./...                      # domain and API tests; store tests skip without a database
-PASSAGE_TEST_DATABASE_URL=postgres://... go test ./...   # runs the store reconciliation test
+PASSAGE_TEST_DATABASE_URL=postgres://... go test ./...   # runs the store tests against Postgres
 DATABASE_URL=postgres://... MIGRATE_ON_START=true HTTP_ADDR=:8080 go run ./cmd/costacct
 ```
 
@@ -63,6 +80,10 @@ Health: `GET /healthz`, `GET /readyz` (provided by `httpx.NewRouter`).
 | GET | `/v1/controlling/allocation-runs?legalEntityId=`, `/v1/controlling/allocation-runs/{id}` | `controlling.view` |
 | GET | `/v1/controlling/cost-objects/{id}/entries?period=` | `controlling.view` |
 | POST | `/v1/controlling/reconciliations` | `controlling.view` (read-only, no Idempotency-Key) |
+| POST | `/v1/controlling/top-down-runs` | `controlling.run` |
+| GET | `/v1/controlling/top-down-runs?legalEntityId=`, `/v1/controlling/top-down-runs/{id}` | `controlling.view` |
+| POST | `/v1/controlling/internal-orders/{id}:settle` | `controlling.run` |
+| GET | `/v1/controlling/internal-orders/{id}/settlements?period=` | `controlling.view` |
 
 The PRD's `CostAccountingView`, `CostAccountingMaintain` and `CostAccountingRun` duties are named in the repository's
 dotted style. Lists return `{"items": [...]}`, at most 500 rows.
@@ -74,15 +95,19 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | Code | Meaning |
 |---|---|
 | `CST-0001` | Cost object not found |
-| `CST-0002` | The period already has a completed allocation run |
+| `CST-0002` | The period already has a completed allocation run, or the source and element a completed top-down run |
 | `CST-0003` | Duplicate cost object or element code |
 | `CST-0004` | No primary element maps a journal line's main account |
 | `CST-0005` | The cycle is closed: a sender reaches no final receiver (CO-0611) |
 | `CST-0006` | Allocation totals differ; the run rolled back (CO-0612) |
-| `CST-0007` | Secondary element not found |
+| `CST-0007` | Cost element not found (settlement: not a secondary element of the order's legal entity) |
 | `CST-0008` | Allocation input is invalid |
 | `CST-0009` | Primary account range overlaps an existing primary element |
 | `CST-0010` | Allocation run not found |
+| `CST-0011` | Top-down run not found |
+| `CST-0012` | Top-down amount exceeds what is booked on the source for the element and period |
+| `CST-0013` | Only an internal order can be settled |
+| `CO-0618` | Settlement exceeds collected cost (BR-38.9) |
 | `COM-0001` | Malformed body or request fields fail validation (400) |
 | `idempotency_key_reuse` | Same Idempotency-Key with a different body (422) |
 | `idempotency_in_progress` | A request with this key is still running (409) |

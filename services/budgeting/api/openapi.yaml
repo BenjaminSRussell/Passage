@@ -3,13 +3,18 @@ info:
   title: budgeting
   version: 0.1.0
   description: >-
-    Budget control (wave 38, slice 1). Budget control rule versions, budget register entries posted directly,
-    budget checks under FR-38.4 with row-locked balances, and encumbrance relief from matched invoice lines (FR-38.5).
+    Budget control (wave 38, slices 1 and 2). Budget control rule versions, budget register entries posted directly,
+    budget checks under FR-38.4 with row-locked balances, encumbrance relief from matched invoice lines (FR-38.5), and
+    budget reservation documents (earmarked funds, FR-38.20): create with a check, consume by a follow-on document line,
+    close, and the expiry run.
     Every command requires Idempotency-Key; a replay returns the stored response, a reused key with a different body is 422.
     Reads need budget.view and return {"items": [...]} for lists (at most 500 rows, newest first).
     Error codes: COM-0001 (validation), AUTH-0001, AUTH-0003, BUD-0001 (rule version not found), BUD-0002 (encumbrance not found),
-    BUD-0003 (line already reserved on another combination), BUD-0004 (check not found),
-    CO-0604 (transfer does not net to zero), idempotency_key_reuse, idempotency_in_progress.
+    BUD-0003 (line already reserved on another combination), BUD-0004 (check not found), BUD-0005 (reservation not found),
+    BUD-0006 (reservation closed, expired or fully consumed), BUD-0007 (consumption above the line's open amount),
+    BUD-0008 (RevenueForecast cannot be consumed), BUD-0009 (reservation reached its expiry date),
+    CO-0601 (reservation creation check failed), CO-0604 (transfer does not net to zero),
+    CO-0631 (funds blocking cannot be consumed), idempotency_key_reuse, idempotency_in_progress.
 servers:
   - url: https://app.local.passage.dev
 paths:
@@ -165,6 +170,105 @@ paths:
             relief and must be run through POST /v1/budget/checks as a new amount.
           content: { application/json: { schema: { $ref: '#/components/schemas/ReliefResult' } } }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/budget/reservations:
+    get:
+      operationId: listBudgetReservations
+      x-passage-duty: budget.view
+      description: Earmarked funds list (PRD 7.38.14), newest first, without lines and consumptions.
+      parameters:
+        - { name: rule, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: type, in: query, required: false, schema: { $ref: '#/components/schemas/ReservationType' } }
+        - { name: status, in: query, required: false, schema: { $ref: '#/components/schemas/ReservationStatus' } }
+      responses:
+        '200':
+          description: Reservation documents.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ReservationList' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: createBudgetReservation
+      x-passage-duty: budget.reserve
+      description: >-
+        Runs the FR-38.4 check on every line of a FundsReservation, Precommitment or FundsBlocking document and holds the
+        amounts in the balances' reservations, so available funds drop. A failing line refuses the document with CO-0601;
+        the budget.override duty turns fail into warn. A RevenueForecast holds nothing and is not checked. Numbers come from
+        a per-type sequence per legal entity (FR-, PC-, FB-, RF-).
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateReservation' } } }
+      responses:
+        '201':
+          description: The document, its lines and the recorded check (absent for RevenueForecast).
+          content: { application/json: { schema: { $ref: '#/components/schemas/Reservation' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/budget/reservations:expire:
+    post:
+      operationId: expireBudgetReservations
+      x-passage-duty: budget.reserve
+      description: >-
+        Job reservation-expiry (BR-38.14). Moves Open and PartiallyConsumed documents whose expiry date is on or before
+        asOf to Expired and releases their residual; at most 200 per call, a rerun picks up the rest.
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [asOf]
+              additionalProperties: false
+              properties:
+                asOf: { type: string, format: date }
+      responses:
+        '200':
+          description: The documents this run expired.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ExpireResult' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/budget/reservations/{id}:
+    get:
+      operationId: getBudgetReservation
+      x-passage-duty: budget.view
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: One document with its lines and consumption history.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Reservation' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/budget/reservations/{id}:consume:
+    post:
+      operationId: consumeBudgetReservation
+      x-passage-duty: budget.check
+      description: >-
+        A follow-on document line draws on one reservation line. In one transaction the line is relieved and the follow-on
+        line's encumbrance is created (or raised), so the balance moves the amount from reservations to encumbrances and
+        available funds do not change (AC-38.12). Emits dev.passage.budget.reservation.consumed.v1.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ConsumeReservation' } } }
+      responses:
+        '200':
+          description: The consumption and what is left open.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ConsumeResult' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/budget/reservations/{id}:close:
+    post:
+      operationId: closeBudgetReservation
+      x-passage-duty: budget.reserve
+      description: Releases the residual and marks the document Closed (BR-38.14). FundsBlocking closes from Open only.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
+      responses:
+        '200':
+          description: The released residual.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ReleaseResult' } } }
+        default: { $ref: '#/components/responses/Problem' }
 components:
   parameters:
     Rule:
@@ -260,7 +364,7 @@ components:
         items: { type: array, items: { $ref: '#/components/schemas/Rule' } }
     Balance:
       type: object
-      required: [id, ruleVersionId, controlDimensionKey, timeSpanKey, budgetTotal, actuals, encumbrances, preEncumbrances, available, version]
+      required: [id, ruleVersionId, controlDimensionKey, timeSpanKey, budgetTotal, actuals, encumbrances, preEncumbrances, reservations, available, version]
       properties:
         id: { type: string, format: uuid }
         ruleVersionId: { type: string, format: uuid }
@@ -270,7 +374,8 @@ components:
         actuals: { $ref: '#/components/schemas/Money' }
         encumbrances: { $ref: '#/components/schemas/Money' }
         preEncumbrances: { $ref: '#/components/schemas/Money' }
-        available: { $ref: '#/components/schemas/Money' }
+        reservations: { $ref: '#/components/schemas/Money', description: Open amounts of fund-holding reservation documents. }
+        available: { $ref: '#/components/schemas/Money', description: budgetTotal - actuals - encumbrances - preEncumbrances - reservations. }
         version: { type: integer }
     BalanceList:
       type: object
@@ -298,7 +403,7 @@ components:
             type: object
             required: [type, amount, documentId, at]
             properties:
-              type: { type: string, enum: [Reserve, Adjust, Relieve] }
+              type: { type: string, enum: [Reserve, Adjust, Relieve, Consume] }
               amount: { $ref: '#/components/schemas/Money' }
               documentId: { type: string, format: uuid }
               at: { type: string, format: date-time }
@@ -340,7 +445,7 @@ components:
         id: { type: string, format: uuid }
         ruleVersionId: { type: string, format: uuid }
         documentId: { type: string, format: uuid }
-        documentType: { type: string, enum: [Requisition, PurchaseOrder, Invoice, Journal] }
+        documentType: { type: string, enum: [Requisition, PurchaseOrder, Invoice, Journal, Reservation] }
         result: { type: string, enum: [pass, warn, fail] }
         overridden: { type: boolean }
         checkedAt: { type: string, format: date-time }
@@ -379,3 +484,119 @@ components:
         remaining: { $ref: '#/components/schemas/Money' }
         excess: { $ref: '#/components/schemas/Money' }
         status: { type: string, enum: [Open, PartiallyRelieved, Relieved] }
+    ReservationType:
+      type: string
+      enum: [FundsReservation, Precommitment, FundsBlocking, RevenueForecast]
+    ReservationStatus:
+      type: string
+      enum: [Open, PartiallyConsumed, Consumed, Closed, Expired]
+    CreateReservation:
+      type: object
+      required: [ruleVersionId, type, lines]
+      additionalProperties: false
+      properties:
+        ruleVersionId: { type: string, format: uuid }
+        type: { $ref: '#/components/schemas/ReservationType' }
+        description: { type: string, maxLength: 500 }
+        expiryDate: { type: string, format: date, description: First day the document no longer holds funds. Not allowed on FundsBlocking. }
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            type: object
+            required: [dimensionKey, spanKey, amount]
+            additionalProperties: false
+            properties:
+              dimensionKey: { type: string, maxLength: 200 }
+              spanKey: { type: string, maxLength: 40 }
+              amount: { $ref: '#/components/schemas/Money' }
+    Reservation:
+      type: object
+      required: [id, legalEntityId, ruleVersionId, type, number, description, status, total, consumed, released, open, version, createdAt, lines, consumptions]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        ruleVersionId: { type: string, format: uuid }
+        type: { $ref: '#/components/schemas/ReservationType' }
+        number: { type: string, examples: [FR-000001] }
+        description: { type: string }
+        expiryDate: { type: string, format: date }
+        status: { $ref: '#/components/schemas/ReservationStatus' }
+        total: { $ref: '#/components/schemas/Money' }
+        consumed: { $ref: '#/components/schemas/Money' }
+        released: { $ref: '#/components/schemas/Money' }
+        open: { $ref: '#/components/schemas/Money' }
+        checkId: { type: string, format: uuid }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+        closedAt: { type: string, format: date-time }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [lineId, dimensionKey, spanKey, amount, consumed, released, open]
+            properties:
+              lineId: { type: string, format: uuid }
+              dimensionKey: { type: string }
+              spanKey: { type: string }
+              amount: { $ref: '#/components/schemas/Money' }
+              consumed: { $ref: '#/components/schemas/Money' }
+              released: { $ref: '#/components/schemas/Money' }
+              open: { $ref: '#/components/schemas/Money' }
+        consumptions:
+          type: array
+          items:
+            type: object
+            required: [id, lineId, encumbranceId, documentType, documentId, documentLineId, amount, consumedAt]
+            properties:
+              id: { type: string, format: uuid }
+              lineId: { type: string, format: uuid }
+              encumbranceId: { type: string, format: uuid }
+              documentType: { type: string, enum: [Requisition, PurchaseOrder, Invoice, Journal] }
+              documentId: { type: string, format: uuid }
+              documentLineId: { type: string, format: uuid }
+              amount: { $ref: '#/components/schemas/Money' }
+              consumedAt: { type: string, format: date-time }
+        check: { $ref: '#/components/schemas/CheckResult', description: Present on the create response of a fund-holding document. }
+    ReservationList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Reservation' } }
+    ConsumeReservation:
+      type: object
+      required: [lineId, documentType, documentId, documentLineId, amount]
+      additionalProperties: false
+      properties:
+        lineId: { type: string, format: uuid, description: The reservation line drawn on. }
+        documentType: { type: string, enum: [Requisition, PurchaseOrder, Invoice, Journal] }
+        documentId: { type: string, format: uuid }
+        documentLineId: { type: string, format: uuid }
+        amount: { $ref: '#/components/schemas/Money' }
+    ConsumeResult:
+      type: object
+      required: [reservationId, lineId, documentId, encumbranceId, consumed, lineOpen, open, status]
+      properties:
+        reservationId: { type: string, format: uuid }
+        lineId: { type: string, format: uuid }
+        documentId: { type: string, format: uuid }
+        encumbranceId: { type: string, format: uuid }
+        consumed: { $ref: '#/components/schemas/Money' }
+        lineOpen: { $ref: '#/components/schemas/Money' }
+        open: { $ref: '#/components/schemas/Money' }
+        status: { $ref: '#/components/schemas/ReservationStatus' }
+    ReleaseResult:
+      type: object
+      required: [reservationId, number, released, status]
+      properties:
+        reservationId: { type: string, format: uuid }
+        number: { type: string }
+        released: { $ref: '#/components/schemas/Money' }
+        status: { $ref: '#/components/schemas/ReservationStatus' }
+    ExpireResult:
+      type: object
+      required: [asOf, expired]
+      properties:
+        asOf: { type: string, format: date }
+        expired: { type: array, items: { $ref: '#/components/schemas/ReleaseResult' } }

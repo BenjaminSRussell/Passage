@@ -117,3 +117,73 @@ export function parseJournalCsv(text: string): { ok: true; value: { mainAccount:
   }
   return { ok: true, value: out };
 }
+
+/** Ticks (1/10000) to whole cents, half away from zero. */
+function ticksToCents(t: bigint): bigint {
+  const negative = t < 0n;
+  const cents = ((negative ? -t : t) + 50n) / 100n;
+  return negative ? -cents : cents;
+}
+
+function divRound(n: bigint, d: bigint): bigint {
+  const q = (2n * n + d) / (2n * d);
+  return n >= 0n ? q : -((2n * -n + d) / (2n * d));
+}
+
+export interface SharePreview {
+  id: string;
+  /** Decimal string with two places. */
+  amount: string;
+}
+
+/**
+ * Previews a top-down distribution the way the service computes it (BR-38.13): each share is
+ * amount × basis / Σ basis rounded to cents, and the segment with the largest basis (the first
+ * on a tie) takes the rounding residual, so the shares sum to the amount exactly. Zero-basis
+ * segments get nothing. Returns null when the inputs are not valid amounts or no basis is positive.
+ */
+export function previewTopDown(amount: string, segments: { id: string; basis: string }[]): SharePreview[] | null {
+  const total = toTicks(amount);
+  if (total === null) return null;
+  const cents = ticksToCents(total);
+  const bases = segments.map((s) => toTicks(s.basis));
+  if (bases.some((b) => b === null || b < 0n)) return null;
+  const sum = (bases as bigint[]).reduce((a, b) => a + b, 0n);
+  if (sum === 0n) return null;
+  let largest = -1;
+  (bases as bigint[]).forEach((b, i) => {
+    if (b > 0n && (largest < 0 || b > (bases[largest] as bigint))) largest = i;
+  });
+  const out = (bases as bigint[]).map((b) => (b === 0n ? 0n : divRound(cents * b, sum)));
+  const others = out.reduce((acc, v, i) => (i === largest ? acc : acc + v), 0n);
+  out[largest] = cents - others;
+  return segments.map((s, i) => ({ id: s.id, amount: formatAmount(formatTicks(out[i] * 100n)) }));
+}
+
+/** Validates a top-down run form before it is sent (FR-38.19). */
+export function validateTopDown(f: { legalEntityId: string; period: string; referencePeriod: string; currency: string; sourceCostObjectId: string; costElementId: string; amount: string }, segments: { id: string; basis: string }[]): string[] {
+  const errors: string[] = [];
+  if (!UUID.test(f.legalEntityId)) errors.push("Enter the legal entity's id (a UUID).");
+  if (!isPeriod(f.period)) errors.push("Enter the period as YYYY-MM.");
+  if (f.referencePeriod !== "" && !isPeriod(f.referencePeriod)) errors.push("Enter the reference period as YYYY-MM, or leave it empty.");
+  if (!CURRENCY.test(f.currency)) errors.push("Use a three-letter currency code.");
+  if (!UUID.test(f.sourceCostObjectId)) errors.push("Choose the source cost object that holds the amount.");
+  if (!UUID.test(f.costElementId)) errors.push("Choose the cost element to distribute.");
+  const amount = toTicks(f.amount);
+  if (amount === null || amount <= 0n || amount % 100n !== 0n) errors.push("Enter a positive amount with at most 2 decimal places.");
+  if (segments.length === 0) errors.push("Choose at least one segment.");
+  segments.forEach((s, i) => {
+    const b = toTicks(s.basis);
+    if (b === null || b < 0n) errors.push(`Segment ${i + 1}: basis must be a non-negative decimal with at most 4 places.`);
+  });
+  if (segments.length > 0 && segments.every((s) => toTicks(s.basis) === 0n)) errors.push("At least one segment needs a positive basis.");
+  return errors;
+}
+
+/** BR-38.9: a settlement must be positive and cannot exceed the order's collected cost. */
+export function settlementError(amount: string, collected: bigint | null): string | null {
+  const t = toTicks(amount);
+  if (t === null || t <= 0n || t % 100n !== 0n) return "Enter a positive amount with at most 2 decimal places.";
+  if (collected !== null && t > collected) return `The settlement exceeds the collected cost of ${formatAmount(formatTicks(collected))}.`;
+  return null;
+}

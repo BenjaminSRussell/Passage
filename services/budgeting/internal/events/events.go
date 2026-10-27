@@ -9,11 +9,12 @@ var (
 	RegisterPosted      = events.Type(Context, "register", "posted", 1)
 	CheckCompleted      = events.Type(Context, "check", "completed", 1)
 	EncumbranceRelieved = events.Type(Context, "encumbrance", "relieved", 1)
+	ReservationConsumed = events.Type(Context, "reservation", "consumed", 1)
 )
 
 // All lists every event type this service publishes.
 func All() []string {
-	return []string{RegisterPosted, CheckCompleted, EncumbranceRelieved}
+	return []string{RegisterPosted, CheckCompleted, EncumbranceRelieved, ReservationConsumed}
 }
 
 type RegisterLineData struct {
@@ -46,6 +47,18 @@ type CheckCompletedData struct {
 type EncumbranceRelievedData struct {
 	EncumbranceID string `json:"encumbrance_id"`
 	InvoiceID     string `json:"invoice_id"`
+	Amount        string `json:"amount"`
+	Remaining     string `json:"remaining"`
+}
+
+// ReservationConsumedData is the payload of reservation.consumed.v1 (FR-38.20).
+type ReservationConsumedData struct {
+	ReservationID string `json:"reservation_id"`
+	Number        string `json:"number"`
+	LineID        string `json:"line_id"`
+	DocumentType  string `json:"document_type"`
+	DocumentID    string `json:"document_id"`
+	EncumbranceID string `json:"encumbrance_id"`
 	Amount        string `json:"amount"`
 	Remaining     string `json:"remaining"`
 }

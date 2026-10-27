@@ -15,6 +15,7 @@ import {
 import { formatAmount, formatTicks, isPeriod, sumTicks, UUID, validateCodeForm, type CodeForm } from "./logic";
 import styles from "./pages.module.css";
 import { Detail, ErrorList, kindLabel, LoadError, thisPeriod } from "./parts";
+import { SettlementPanel } from "./SettlementPanel";
 import { useLoad } from "./useLoad";
 
 export const KINDS: CostObjectKind[] = ["CostCenter", "InternalOrder", "Product", "Project"];
@@ -110,7 +111,7 @@ export function CreateCostObjectPage() {
 
   return (
     <div className={styles.stack}>
-      <PageHeader title="New cost object" description="Internal orders are a kind of cost object; their settlement comes in a later release." />
+      <PageHeader title="New cost object" description="Internal orders collect cost for a purpose and settle it to cost centers or other objects." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
           <FormField id="object-le" label="Legal entity" error={errors.legalEntityId}>
@@ -171,7 +172,16 @@ export function CostObjectDetailPage() {
       key: "sourceId",
       header: "Source",
       mono: true,
-      render: (e) => (e.allocationRunId ? <Link to={`/costacct/allocation-runs/${e.allocationRunId}`}>Allocation run</Link> : e.sourceId),
+      render: (e) =>
+        e.allocationRunId ? (
+          <Link to={`/costacct/allocation-runs/${e.allocationRunId}`}>Allocation run</Link>
+        ) : e.topDownRunId ? (
+          <Link to={`/costacct/top-down-runs/${e.topDownRunId}`}>Top-down run</Link>
+        ) : e.settlementId ? (
+          "Settlement"
+        ) : (
+          e.sourceId
+        ),
     },
   ];
 
@@ -233,6 +243,7 @@ export function CostObjectDetailPage() {
           empty={{ title: "No cost entries in this period", description: "Mirrored journal lines and allocation postings for the period appear here." }}
         />
       )}
+      {o.kind === "InternalOrder" && validPeriod && entries.data ? <SettlementPanel order={o} period={period} entries={rows} onSettled={entries.reload} /> : null}
     </div>
   );
 }

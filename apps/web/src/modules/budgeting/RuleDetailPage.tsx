@@ -39,6 +39,7 @@ const balanceColumns: DataTableColumn<Balance>[] = [
   { ...money("actuals", "Actuals"), render: (r) => formatAmount(r.actuals) },
   { ...money("encumbrances", "Encumbered"), render: (r) => formatAmount(r.encumbrances) },
   { ...money("preEncumbrances", "Pre-encumbered"), render: (r) => formatAmount(r.preEncumbrances) },
+  { ...money("reservations", "Earmarked"), render: (r) => formatAmount(r.reservations) },
   { ...money("available", "Available"), render: (r) => formatAmount(r.available) },
 ];
 
@@ -111,6 +112,9 @@ export function RuleDetailPage() {
             <Link className={buttonClassName("secondary")} to={`/budgeting/check?rule=${r.id}`}>
               Run a budget check
             </Link>
+            <Link className={buttonClassName("secondary")} to={`/budgeting/reservations?rule=${r.id}`}>
+              Earmarked funds
+            </Link>
             <Link className={buttonClassName("primary")} to={`/budgeting/rules/${r.id}/entries/new`}>
               Post register entry
             </Link>
@@ -135,6 +139,7 @@ export function RuleDetailPage() {
       <StatGroup label="Funds summary">
         <StatTile label={`Budget (${r.currency})`} value={total((b) => b.budgetTotal)} />
         <StatTile label="Encumbered" value={total((b) => b.encumbrances)} />
+        <StatTile label="Earmarked" value={total((b) => b.reservations)} />
         <StatTile label="Available" value={total((b) => b.available)} />
         <StatTile label="Over-budget combinations" value={overBudget} tone="danger" />
       </StatGroup>

@@ -3,13 +3,16 @@ info:
   title: costacct
   version: 0.1.0
   description: >-
-    Cost accounting (wave 38, slice 1). Cost objects and cost elements, mirroring of journal lines into primary
-    cost entries, reciprocal allocation runs that solve and conserve cost (FR-38.7), and cost object line items.
+    Cost accounting (wave 38, slices 1 and 2). Cost objects and cost elements, mirroring of journal lines into primary
+    cost entries, reciprocal allocation runs that solve and conserve cost (FR-38.7), cost object line items,
+    top-down distribution (FR-38.19) and internal order settlement (FR-38.9).
     Every command requires Idempotency-Key; a replay returns the stored response, a reused key with a different body is 422.
     Error codes: CST-0001 (cost object not found), CST-0002 (period already allocated), CST-0003 (duplicate code),
     CST-0004 (no primary element for a main account), CST-0005 (allocation did not converge, CO-0611),
     CST-0006 (allocation totals differ, CO-0612), CST-0007 (secondary element not found), CST-0008 (invalid allocation input),
-    CST-0009 (primary account range overlaps), CST-0010 (allocation run not found), COM-0001 (validation, 400),
+    CST-0009 (primary account range overlaps), CST-0010 (allocation run not found), CST-0011 (top-down run not found),
+    CST-0012 (top-down amount exceeds what is booked on the source), CST-0013 (settled object is not an internal order),
+    CO-0618 (settlement exceeds collected cost, BR-38.9), COM-0001 (validation, 400),
     idempotency_key_reuse, idempotency_in_progress, AUTH-0001, AUTH-0003.
     Reads need controlling.view and return {"items": [...]} for lists (at most 500 rows).
 servers:
@@ -157,6 +160,76 @@ paths:
         '200':
           description: Cost entries of the object for the period.
           content: { application/json: { schema: { $ref: '#/components/schemas/EntryList' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/controlling/top-down-runs:
+    get:
+      operationId: listTopDownRuns
+      x-passage-duty: controlling.view
+      parameters:
+        - { $ref: '#/components/parameters/LegalEntity' }
+      responses:
+        '200':
+          description: Top-down runs, newest period first.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/TopDownRun' } } } } } }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: runTopDown
+      x-passage-duty: controlling.run
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/TopDownRequest' } } }
+      responses:
+        '201':
+          description: >-
+            The completed run. The source is credited with amount and each segment is debited its share on the same
+            cost element, so the run nets to zero. Shares are proportional to basis and rounded to the currency's minor
+            unit; the rounding residual goes to the largest basis (BR-38.13), so Σ shares = amount to the cent. Segments
+            with a zero basis receive nothing and are listed in excluded. amount may not exceed what is booked on the
+            source for the element and period (CST-0012). One completed run per source, element and period (CST-0002).
+          content: { application/json: { schema: { $ref: '#/components/schemas/TopDownRun' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/controlling/top-down-runs/{id}:
+    get:
+      operationId: getTopDownRun
+      x-passage-duty: controlling.view
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: One top-down run with its shares.
+          content: { application/json: { schema: { $ref: '#/components/schemas/TopDownRun' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/controlling/internal-orders/{id}:settle:
+    post:
+      operationId: settleInternalOrder
+      x-passage-duty: controlling.run
+      parameters:
+        - { name: id, in: path, required: true, description: Internal order cost object id., schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/SettlementRequest' } } }
+      responses:
+        '201':
+          description: >-
+            The settlement. The order is credited and the receiver debited on the secondary element. Collected cost is
+            the net of all the order's entries for the period and currency, so earlier settlements already reduce it;
+            a settlement above it is CO-0618 (BR-38.9). Settlements may be partial and repeat until nothing is left.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Settlement' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/controlling/internal-orders/{id}/settlements:
+    get:
+      operationId: listSettlements
+      x-passage-duty: controlling.view
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: period, in: query, required: false, schema: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$' } }
+      responses:
+        '200':
+          description: Settlements of the order, newest first.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/Settlement' } } } } } }
         default: { $ref: '#/components/responses/Problem' }
 components:
   parameters:
@@ -318,6 +391,78 @@ components:
             properties:
               mainAccount: { type: string }
               amount: { type: string }
+    TopDownRequest:
+      type: object
+      required: [legalEntityId, period, currency, sourceCostObjectId, costElementId, amount, segments]
+      additionalProperties: false
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        period: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$' }
+        referencePeriod: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$', description: Period the basis was taken from; recorded on the run. }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        sourceCostObjectId: { type: string, format: uuid, description: The aggregated object the amount is booked on. }
+        costElementId: { type: string, format: uuid, description: The element distributed; primary or secondary. }
+        amount: { type: string, description: Positive decimal with no more decimals than the currency's minor unit. }
+        segments:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            type: object
+            required: [costObjectId, basis]
+            additionalProperties: false
+            properties:
+              costObjectId: { type: string, format: uuid }
+              basis: { type: string, description: Non-negative reference basis, for example revenue of the reference period. }
+    TopDownRun:
+      type: object
+      required: [id, legalEntityId, period, currency, sourceCostObjectId, costElementId, amount, shares, excluded, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        period: { type: string }
+        referencePeriod: { type: string }
+        currency: { type: string }
+        sourceCostObjectId: { type: string, format: uuid }
+        costElementId: { type: string, format: uuid }
+        amount: { type: string }
+        shares:
+          type: array
+          items:
+            type: object
+            required: [segmentId, basis, amount]
+            properties:
+              segmentId: { type: string, format: uuid }
+              basis: { type: string }
+              amount: { type: string }
+        excluded: { type: array, items: { type: string, format: uuid }, description: Segments with a zero basis. }
+        status: { type: string, enum: [Completed] }
+        createdAt: { type: string, format: date-time }
+    SettlementRequest:
+      type: object
+      required: [period, currency, receiverCostObjectId, secondaryElementId, amount]
+      additionalProperties: false
+      properties:
+        period: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$' }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        receiverCostObjectId: { type: string, format: uuid, description: Any cost object of the order's legal entity except the order. }
+        secondaryElementId: { type: string, format: uuid, description: Settlement cost element; must be Secondary. }
+        amount: { type: string, description: Positive decimal with no more decimals than the currency's minor unit. }
+    Settlement:
+      type: object
+      required: [id, legalEntityId, orderId, period, currency, receiverCostObjectId, secondaryElementId, amount, collectedBefore, remaining, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        period: { type: string }
+        currency: { type: string }
+        receiverCostObjectId: { type: string, format: uuid }
+        secondaryElementId: { type: string, format: uuid }
+        amount: { type: string }
+        collectedBefore: { type: string, description: Collected cost on the order just before this settlement. }
+        remaining: { type: string, description: collectedBefore - amount. }
+        createdAt: { type: string, format: date-time }
     EntryList:
       type: object
       required: [items]
@@ -330,8 +475,10 @@ components:
             properties:
               id: { type: string, format: uuid }
               costElementId: { type: string, format: uuid }
-              sourceId: { type: string, format: uuid, description: Journal line or allocation run. }
+              sourceId: { type: string, format: uuid, description: Journal line, allocation run, top-down run or settlement. }
               allocationRunId: { type: string, format: uuid }
+              topDownRunId: { type: string, format: uuid }
+              settlementId: { type: string, format: uuid }
               period: { type: string }
               currency: { type: string }
               amount: { type: string }

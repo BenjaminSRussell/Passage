@@ -70,6 +70,10 @@ func TestBalance_AvailableFormula(t *testing.T) {
 	if got := b.Available(); !got.Equal(d("65")) {
 		t.Fatalf("available = %s, want 65", got)
 	}
+	b.Reservations = d("15")
+	if got := b.Available(); !got.Equal(d("50")) {
+		t.Fatalf("available with 15 earmarked = %s, want 50", got)
+	}
 }
 
 func TestNetChange_RevisionNeverDropsBelowRelief(t *testing.T) {

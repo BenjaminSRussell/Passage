@@ -17,11 +17,13 @@ type Balance struct {
 	Actuals         decimal.Decimal
 	Encumbrances    decimal.Decimal
 	PreEncumbrances decimal.Decimal
+	Reservations    decimal.Decimal // open earmarked funds (FR-38.20)
 }
 
-// Available is budget - actuals - encumbrances - pre-encumbrances (FR-38.4 step 5).
+// Available is budget - actuals - encumbrances - pre-encumbrances - open
+// reservations (FR-38.4 step 5, FR-38.20).
 func (b Balance) Available() decimal.Decimal {
-	return b.Budget.Sub(b.Actuals).Sub(b.Encumbrances).Sub(b.PreEncumbrances)
+	return b.Budget.Sub(b.Actuals).Sub(b.Encumbrances).Sub(b.PreEncumbrances).Sub(b.Reservations)
 }
 
 // Thresholds are the rule's warn and block percentages of available funds.

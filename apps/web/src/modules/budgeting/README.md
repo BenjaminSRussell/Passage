@@ -1,6 +1,6 @@
 # Budgeting module (web)
 
-Budget control screens for PSG-38 slice 1, wired to `services/budgeting` through the BFF at `/api/v1/budget/...`.
+Budget control screens for PSG-38 slices 1 and 2, wired to `services/budgeting` through the BFF at `/api/v1/budget/...`.
 
 | Route | Page | Service calls |
 |---|---|---|
@@ -11,6 +11,9 @@ Budget control screens for PSG-38 slice 1, wired to `services/budgeting` through
 | `/budgeting/check` | Budget check form with per-line result, step trace and encumbrance link | `GET /control-rules`, `POST /checks` |
 | `/budgeting/checks/:id` | One recorded check | `GET /checks/{id}` |
 | `/budgeting/encumbrances/:id` | Encumbrance history and invoice relief (reports the price excess to re-check) | `GET /encumbrances/{id}`, `POST /encumbrances/{id}:relieve` |
+| `/budgeting/reservations` | Earmarked funds list with type and status filters (`?rule=` narrows to one rule version) | `GET /reservations` |
+| `/budgeting/reservations/new` | New reservation document (four types, optional expiry, lines); the creation check refuses over-budget documents | `POST /reservations` |
+| `/budgeting/reservations/:id` | Reservation detail: lines, consumption history with encumbrance links, consume by a follow-on document, close | `GET /reservations/{id}`, `POST /reservations/{id}:consume`, `POST /reservations/{id}:close` |
 
 Every list has loading (skeleton rows), empty and error (with "Try again") states. Pages use the shell primitives from
 `src/shell/ui` and `pages.module.css`. Commands send an `Idempotency-Key` that stays the same while the form content
@@ -28,5 +31,5 @@ npx tsc --noEmit
 ## Needs (for the shell owner, wave 5)
 
 - Nav duties `budget.view` and `budget.check` must exist in the duty catalogue (the service also uses
-  `budget.configure`, `budget.maintain` and `budget.override`).
+  `budget.configure`, `budget.maintain`, `budget.override` and `budget.reserve`).
 - The planning grid, the inline check inside the PO form and rule activation are later slices of PSG-38.

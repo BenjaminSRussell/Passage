@@ -1,8 +1,8 @@
 # budgeting
 
-Budget control for Passage (PRD 7.38, ticket PSG-38, wave 38, slice 1). The service holds budget control rule
+Budget control for Passage (PRD 7.38, ticket PSG-38, wave 38, slices 1 and 2). The service holds budget control rule
 versions, posts budget register entries, runs budget checks against per-combination balances under row locks,
-and relieves encumbrances from matched invoice lines.
+relieves encumbrances from matched invoice lines, and keeps budget reservation documents (earmarked funds).
 
 ## What slice 1 does
 
@@ -23,9 +23,27 @@ and relieves encumbrances from matched invoice lines.
 - **Encumbrance relief (FR-38.5, BR-38.4)**: relief = min(matched share, remaining reservation). The excess over
   the reservation is reported as `excess` so the caller can check it as a new amount.
 
+## What slice 2 adds
+
+- **Budget reservation documents (FR-38.20, BR-38.14)**: FundsReservation, Precommitment, FundsBlocking and
+  RevenueForecast documents with per-type numbers per legal entity (`FR-000001`, `PC-`, `FB-`, `RF-`). Creation runs
+  the FR-38.4 check on every line under the same row locks and records it with document type `Reservation`; a failing
+  line refuses the document (`CO-0601`). A fund-holding document adds its lines to the balance's `reservations`
+  column, so available = budget - actuals - encumbrances - pre-encumbrances - reservations. A RevenueForecast is
+  recorded but holds nothing (`revenue-increases-budget` is not built).
+- **Consumption**: `POST /v1/budget/reservations/{id}:consume` draws a follow-on document line (requisition, PO,
+  invoice or journal) on one reservation line. In one transaction the reservation line is relieved, the follow-on
+  line's encumbrance is created (or raised) and the balance moves the amount from reservations to encumbrances, so
+  available funds do not change (AC-38.12). FundsBlocking cannot be consumed (`CO-0631`). The event
+  `dev.passage.budget.reservation.consumed.v1` goes through the outbox in the same transaction.
+- **Close and expiry**: close releases the residual (FundsBlocking from Open only). The `reservation-expiry` job
+  calls `POST /v1/budget/reservations:expire` with a date; Open and PartiallyConsumed documents whose expiry date is
+  on or before it move to Expired and release their residual. The expiry date is the first day a document no longer
+  holds funds, so consumption on or after it is refused (`BUD-0009`).
+
 Money is `numeric(19,4)` with a currency. Every command requires `Idempotency-Key`. Commands emit outbox events
 (`dev.passage.budget.register.posted.v1`, `dev.passage.budget.check.completed.v1`,
-`dev.passage.budget.encumbrance.relieved.v1`).
+`dev.passage.budget.encumbrance.relieved.v1`, `dev.passage.budget.reservation.consumed.v1`).
 
 ## Run and test
 
@@ -51,6 +69,10 @@ Health: `GET /healthz`, `GET /readyz` (provided by `httpx.NewRouter`).
 | GET | `/v1/budget/checks?rule=&documentId=`, `/v1/budget/checks/{id}` | `budget.view` |
 | GET | `/v1/budget/encumbrances?rule=&status=`, `/v1/budget/encumbrances/{id}` | `budget.view` |
 | POST | `/v1/budget/encumbrances/{id}:relieve` | `budget.check` |
+| POST | `/v1/budget/reservations` | `budget.reserve` (`budget.override` turns fail into warn) |
+| POST | `/v1/budget/reservations/{id}:close`, `/v1/budget/reservations:expire` | `budget.reserve` |
+| POST | `/v1/budget/reservations/{id}:consume` | `budget.check` |
+| GET | `/v1/budget/reservations?rule=&type=&status=`, `/v1/budget/reservations/{id}` | `budget.view` |
 
 Lists return `{"items": [...]}`, at most 500 rows, newest first.
 
@@ -64,7 +86,14 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | `BUD-0002` | Encumbrance not found |
 | `BUD-0003` | The line is already reserved against another control combination or rule version (409) |
 | `BUD-0004` | Budget check not found |
+| `BUD-0005` | Reservation (or reservation line) not found |
+| `BUD-0006` | Reservation is closed, expired or fully consumed, or cannot be closed from its status (409) |
+| `BUD-0007` | Consumption above the line's open amount |
+| `BUD-0008` | RevenueForecast holds no funds to consume |
+| `BUD-0009` | Reservation reached its expiry date (409) |
+| `CO-0601` | Reservation creation check failed: available below the requested amount |
 | `CO-0604` | Transfer lines do not net to zero |
+| `CO-0631` | Funds blocking cannot be consumed |
 | `COM-0001` | Malformed request body |
 | `AUTH-0001` | No principal on the request |
 | `AUTH-0003` | Missing duty |

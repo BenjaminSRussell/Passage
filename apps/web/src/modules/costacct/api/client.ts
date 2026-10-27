@@ -33,6 +33,10 @@ export interface CostEntry {
   costElementId: string;
   sourceId: string;
   allocationRunId?: string;
+  /** Present on entries a top-down run posted (FR-38.19). */
+  topDownRunId?: string;
+  /** Present on entries an internal order settlement posted (FR-38.9). */
+  settlementId?: string;
   period: string;
   currency: string;
   amount: string;
@@ -106,6 +110,60 @@ export interface Reconciliation {
   reconciled: boolean;
   lines: { costElementId: string; journal: string; costLedger: string; difference: string }[];
   unmappedAccounts: JournalBalance[];
+}
+
+export interface TopDownSegment {
+  costObjectId: string;
+  basis: string;
+}
+
+export interface TopDownInput {
+  legalEntityId: string;
+  period: string;
+  referencePeriod?: string;
+  currency: string;
+  sourceCostObjectId: string;
+  costElementId: string;
+  amount: string;
+  segments: TopDownSegment[];
+}
+
+export interface TopDownShare {
+  segmentId: string;
+  basis: string;
+  amount: string;
+}
+
+export interface TopDownRun {
+  id: string;
+  legalEntityId: string;
+  period: string;
+  referencePeriod?: string;
+  currency: string;
+  sourceCostObjectId: string;
+  costElementId: string;
+  amount: string;
+  shares: TopDownShare[];
+  excluded: string[];
+  status: "Completed";
+  createdAt: string;
+}
+
+export interface SettlementInput {
+  period: string;
+  currency: string;
+  receiverCostObjectId: string;
+  secondaryElementId: string;
+  amount: string;
+}
+
+export interface Settlement extends SettlementInput {
+  id: string;
+  legalEntityId: string;
+  orderId: string;
+  collectedBefore: string;
+  remaining: string;
+  createdAt: string;
 }
 
 export interface Problem {
@@ -197,4 +255,26 @@ export function runAllocation(input: RunInput, idempotencyKey: string): Promise<
 /** Compares primary cost entries with journal balances (FR-38.11). Read-only, so no Idempotency-Key. */
 export function reconcile(input: ReconcileInput): Promise<Reconciliation> {
   return post(`${BASE}/reconciliations`, input);
+}
+
+export function listTopDownRuns(legalEntityId?: string, signal?: AbortSignal): Promise<Items<TopDownRun>> {
+  return request(`${BASE}/top-down-runs${query({ legalEntityId })}`, { signal });
+}
+
+export function getTopDownRun(id: string, signal?: AbortSignal): Promise<TopDownRun> {
+  return request(`${BASE}/top-down-runs/${encodeURIComponent(id)}`, { signal });
+}
+
+/** Distributes an amount booked on an aggregated object to segments by a reference basis (FR-38.19). */
+export function runTopDown(input: TopDownInput, idempotencyKey: string): Promise<TopDownRun> {
+  return post(`${BASE}/top-down-runs`, input, idempotencyKey);
+}
+
+export function listSettlements(orderId: string, period?: string, signal?: AbortSignal): Promise<Items<Settlement>> {
+  return request(`${BASE}/internal-orders/${encodeURIComponent(orderId)}/settlements${query({ period })}`, { signal });
+}
+
+/** Settles part or all of an internal order's collected cost to a receiver (FR-38.9, BR-38.9). */
+export function settleInternalOrder(orderId: string, input: SettlementInput, idempotencyKey: string): Promise<Settlement> {
+  return post(`${BASE}/internal-orders/${encodeURIComponent(orderId)}:settle`, input, idempotencyKey);
 }

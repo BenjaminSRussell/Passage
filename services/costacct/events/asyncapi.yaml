@@ -52,7 +52,7 @@ components:
         run_id: { type: string, format: uuid }
         legal_entity_id: { type: string, format: uuid }
         period: { type: string }
-        method: { type: string, enum: [exact-lu, gauss-seidel] }
+        method: { type: string, enum: [exact-lu, gauss-seidel, TopDown], description: TopDown marks a top-down distribution run (FR-38.19); iterations is 0. }
         iterations: { type: integer }
         converged: { type: boolean }
         total_in: { type: string, description: Cost the senders brought into the step. }

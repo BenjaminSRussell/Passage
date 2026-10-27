@@ -35,6 +35,7 @@ const (
 	dutyCheck        = "budget.check"
 	dutyOverride     = "budget.override"
 	dutyView         = "budget.view"
+	dutyReserve      = "budget.reserve"
 	validationDetail = "request failed validation"
 	maxCheckLines    = 500
 	maxBodyBytes     = 4 << 20
@@ -63,6 +64,12 @@ type Store interface {
 	GetEncumbrance(ctx context.Context, id string) (store.EncumbranceView, error)
 	ListChecks(ctx context.Context, ruleVersionID, documentID string) ([]store.CheckResponse, error)
 	GetCheck(ctx context.Context, id string) (store.CheckResponse, error)
+	CreateReservation(ctx context.Context, key, hash string, req store.ReservationRequest, override bool) (int, []byte, error)
+	ConsumeReservation(ctx context.Context, key, hash string, req store.ConsumeRequest) (int, []byte, error)
+	CloseReservation(ctx context.Context, key, hash, id string) (int, []byte, error)
+	ExpireReservations(ctx context.Context, key, hash, asOf string) (int, []byte, error)
+	ListReservations(ctx context.Context, f store.ReservationFilter) ([]store.Reservation, error)
+	GetReservation(ctx context.Context, id string) (store.Reservation, error)
 	Ping(ctx context.Context) error
 }
 
@@ -80,6 +87,10 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/budget/register-entries", a.postRegisterEntry)
 	r.With(authz.RequireDuty(dutyCheck)).Post("/v1/budget/checks", a.checkBudget)
 	r.With(authz.RequireDuty(dutyCheck)).Post("/v1/budget/encumbrances/{id}:relieve", a.relieve)
+	r.With(authz.RequireDuty(dutyReserve)).Post("/v1/budget/reservations", a.createReservation)
+	r.With(authz.RequireDuty(dutyReserve)).Post("/v1/budget/reservations:expire", a.expireReservations)
+	r.With(authz.RequireDuty(dutyReserve)).Post("/v1/budget/reservations/{id}:close", a.closeReservation)
+	r.With(authz.RequireDuty(dutyCheck)).Post("/v1/budget/reservations/{id}:consume", a.consumeReservation)
 
 	view := r.With(authz.RequireDuty(dutyView))
 	view.Get("/v1/budget/control-rules", a.listRules)
@@ -90,6 +101,8 @@ func (a *API) Register(r chi.Router) {
 	view.Get("/v1/budget/encumbrances/{id}", a.getEncumbrance)
 	view.Get("/v1/budget/checks", a.listChecks)
 	view.Get("/v1/budget/checks/{id}", a.getCheck)
+	view.Get("/v1/budget/reservations", a.listReservations)
+	view.Get("/v1/budget/reservations/{id}", a.getReservation)
 }
 
 type createRuleRequest struct {

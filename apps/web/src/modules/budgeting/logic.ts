@@ -150,3 +150,61 @@ export function validateEntryLines(entryType: string, lines: { dimensionKey: str
   }
   return errors;
 }
+
+export type ReservationTypeName = "FundsReservation" | "Precommitment" | "FundsBlocking" | "RevenueForecast";
+export type ReservationStatusName = "Open" | "PartiallyConsumed" | "Consumed" | "Closed" | "Expired";
+
+export const RESERVATION_TYPES: { value: ReservationTypeName; label: string; hint: string }[] = [
+  { value: "FundsReservation", label: "Funds reservation", hint: "Earmarks funds that later requisitions, POs, invoices or journals consume." },
+  { value: "Precommitment", label: "Precommitment", hint: "Earmarks funds for a planned purchase; consumed like a funds reservation." },
+  { value: "FundsBlocking", label: "Funds blocking", hint: "Blocks funds so nothing can use them. It cannot be consumed and does not expire." },
+  { value: "RevenueForecast", label: "Revenue forecast", hint: "Records expected revenue. It holds no funds." },
+];
+
+export function reservationTypeLabel(t: string): string {
+  return RESERVATION_TYPES.find((r) => r.value === t)?.label ?? t;
+}
+
+/** "PartiallyConsumed" as "Partially consumed"; other statuses read as they are. */
+export function reservationStatusLabel(s: string): string {
+  return s === "PartiallyConsumed" ? "Partially consumed" : s;
+}
+
+const OPEN_STATUSES = new Set<string>(["Open", "PartiallyConsumed"]);
+
+/** Only funds reservations and precommitments that are still open can be drawn on (BR-38.14). */
+export function canConsume(type: string, status: string): boolean {
+  return (type === "FundsReservation" || type === "Precommitment") && OPEN_STATUSES.has(status);
+}
+
+/** Every type closes from Open; consumable types also once partly or fully consumed. Closed and Expired are final. */
+export function canClose(type: string, status: string): boolean {
+  if (status === "Open") return true;
+  return (status === "PartiallyConsumed" || status === "Consumed") && (type === "FundsReservation" || type === "Precommitment");
+}
+
+export interface ReservationForm {
+  ruleVersionId: string;
+  type: ReservationTypeName;
+  description: string;
+  expiryDate: string;
+}
+
+/** Validates a reservation document the way the service does (FR-38.20). */
+export function validateReservation(f: ReservationForm, lines: { dimensionKey: string; spanKey: string; amount: string }[]): string[] {
+  const errors: string[] = [];
+  if (!UUID.test(f.ruleVersionId)) errors.push("Enter the budget control rule version id (a UUID).");
+  if (f.description.length > 500) errors.push("The description is at most 500 characters.");
+  if (f.expiryDate !== "") {
+    if (!DAY.test(f.expiryDate)) errors.push("Enter the expiry date as YYYY-MM-DD.");
+    else if (f.type === "FundsBlocking") errors.push("Funds blocking does not expire; leave the expiry date empty.");
+  }
+  if (lines.length === 0) errors.push("At least one line is required.");
+  lines.forEach((l, i) => {
+    const n = i + 1;
+    if (l.dimensionKey.trim() === "") errors.push(`Line ${n}: dimension is required.`);
+    if (l.spanKey.trim() === "") errors.push(`Line ${n}: time span is required.`);
+    if (!isMoney(l.amount) || toUnits(l.amount) <= 0n) errors.push(`Line ${n}: amount must be a positive decimal with at most 4 places.`);
+  });
+  return errors;
+}

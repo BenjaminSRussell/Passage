@@ -18,10 +18,12 @@ import (
 
 // fakeStore counts calls and returns fixed bodies so handler logic is tested alone.
 type fakeStore struct {
-	calls  int
-	run    store.RunRequest
-	filter string
-	recon  store.ReconcileRequest
+	calls   int
+	run     store.RunRequest
+	filter  string
+	recon   store.ReconcileRequest
+	topDown store.TopDownRequest
+	settle  store.SettlementRequest
 }
 
 func (f *fakeStore) CreateCostObject(context.Context, string, string, store.CostObject) (int, []byte, error) {

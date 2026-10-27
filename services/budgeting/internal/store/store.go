@@ -153,6 +153,7 @@ type BalanceView struct {
 	Actuals             decimal.Decimal `json:"actuals"`
 	Encumbrances        decimal.Decimal `json:"encumbrances"`
 	PreEncumbrances     decimal.Decimal `json:"preEncumbrances"`
+	Reservations        decimal.Decimal `json:"reservations"`
 	Available           decimal.Decimal `json:"available"`
 	Version             int64           `json:"version"`
 }
@@ -301,11 +302,11 @@ func lockBalance(ctx context.Context, tx pgx.Tx, tenantID string, rule Rule, dim
 		return nil, err
 	}
 	var b balance
-	var budget, actuals, enc, pre string
-	err := tx.QueryRow(ctx, `select id::text, budget_total::text, actuals::text, encumbrances::text, pre_encumbrances::text from budget_control_balance
+	var budget, actuals, enc, pre, res string
+	err := tx.QueryRow(ctx, `select id::text, budget_total::text, actuals::text, encumbrances::text, pre_encumbrances::text, reservations::text from budget_control_balance
 		where tenant_id = $1 and rule_version_id = $2 and control_dimension_key = $3 and time_span_key = $4 for update`,
-		tenantID, rule.ID, dim, span).Scan(&b.id, &budget, &actuals, &enc, &pre)
-	b.bal = domain.Balance{Budget: parseDec(budget), Actuals: parseDec(actuals), Encumbrances: parseDec(enc), PreEncumbrances: parseDec(pre)}
+		tenantID, rule.ID, dim, span).Scan(&b.id, &budget, &actuals, &enc, &pre, &res)
+	b.bal = domain.Balance{Budget: parseDec(budget), Actuals: parseDec(actuals), Encumbrances: parseDec(enc), PreEncumbrances: parseDec(pre), Reservations: parseDec(res)}
 	return &b, err
 }
 
