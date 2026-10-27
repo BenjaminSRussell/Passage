@@ -48,7 +48,7 @@ const filterInputs = [
 
 const emptyFilters: RouteVersionFilters = { productId: "", siteId: "", status: "", asOf: "" };
 
-function errorText(error: unknown): string {
+export function errorText(error: unknown): string {
   return error instanceof Error ? error.message : "Request failed";
 }
 

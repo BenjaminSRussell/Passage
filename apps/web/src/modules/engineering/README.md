@@ -5,7 +5,11 @@ Engineering workspace for wave 9. Discovered by the shell via `module.ts`.
 - Where-used report over `GET /api/v1/engineering/boms:where-used` (`/engineering/where-used`; optional `initialComponent` prefill).
 - Routings list at `/engineering/routes` over `GET /route-versions` (filters product, site, status, as-of; "Load more" follows `nextCursor`).
 - Route version detail at `/engineering/routes/:id` over `GET /route-versions/{id}`: operations in sequence with resource requirements, and a lead-time panel that posts the operations to the stateless `POST /routes:lead-time`. An Activate button shows only while the version is a draft (`POST /route-versions/{id}:activate`): it disables while the request runs, announces success in a polite live region, shows the problem title on a refusal and keeps the draft, and explains a 403 as missing permission.
-- Not yet built: BOM version list and detail screens (follow-up slice of PSG-907), and resource, group, capability and calendar list and detail screens, client calls, nav entries and module routes (slice 9 of PSG-908; the list endpoints are delivered).
+- Resources list at `/engineering/resources` over `GET /resources` (filters type, site, group, capability; the query string seeds them, so `?groupId=` and `?capabilityId=` links work; "Load more" follows `nextCursor`). A non-UUID filter shows the API's 422 problem title in the alert.
+- Resource detail at `/engineering/resources/:id` over `GET /resources/{id}`: header facts, capabilities with level and effective dates, and links to the group's resources and the effective calendar days. A 404 shows its own message without Retry.
+- Resource groups at `/engineering/resource-groups` (site filter) and capabilities at `/engineering/capabilities`; their code links open the resources list filtered by that group or capability.
+- Calendar days at `/engineering/calendars/:id` over `GET /calendars/{id}/days`: from and to dates (default: the current month) refetch on change; days show open or closed, shifts and total hours.
+- Not yet built: BOM version list and detail screens (follow-up slice of PSG-907), group, capability and calendar detail screens and a calendar list screen (they need `GET /resource-groups/{id}`, `/capabilities/{id}`, `/calendars` and `/calendars/{id}`; slice 10).
 
 `api/client.ts` routes every call through one `request` helper that turns a problem document into an `ApiError` carrying `code` and `title`.
 

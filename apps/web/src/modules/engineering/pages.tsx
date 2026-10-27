@@ -16,10 +16,21 @@ import styles from "./pages.module.css";
 export function EngineeringHome({
   onOpenWhereUsed,
   onOpenRoutes,
+  onOpenResources,
+  onOpenResourceGroups,
+  onOpenCapabilities,
 }: {
   onOpenWhereUsed?: () => void;
   onOpenRoutes?: () => void;
+  onOpenResources?: () => void;
+  onOpenResourceGroups?: () => void;
+  onOpenCapabilities?: () => void;
 }) {
+  const resourceCards = [
+    { title: "Resources", text: "Machines, tools, labor, vendors and locations, with their capabilities and calendars.", open: onOpenResources },
+    { title: "Resource groups", text: "Groups of resources by site, each linking to its members.", open: onOpenResourceGroups },
+    { title: "Capabilities", text: "Skills and abilities, each linking to the resources that hold it.", open: onOpenCapabilities },
+  ];
   return (
     <>
       <PageHeader title="Engineering data" description="Bills of material, routings and change orders." />
@@ -35,6 +46,21 @@ export function EngineeringHome({
       >
         <p className={styles.lead}>Browse route versions, their operations and resource requirements, and estimate lead time.</p>
       </Card>
+      {resourceCards.map(({ title, text, open }) => (
+        <Card
+          key={title}
+          title={title}
+          actions={
+            open ? (
+              <Button size="sm" onClick={open}>
+                Open {title}
+              </Button>
+            ) : undefined
+          }
+        >
+          <p className={styles.lead}>{text}</p>
+        </Card>
+      ))}
       <Card
         title="Where-used"
         actions={

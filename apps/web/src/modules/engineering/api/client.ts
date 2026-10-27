@@ -76,6 +76,61 @@ export interface RouteVersionFilters {
   asOf?: string;
 }
 
+export interface ResourceCapability {
+  capabilityId: string;
+  level: number;
+  effectiveFrom: string;
+  effectiveTo?: string;
+}
+
+export interface Resource {
+  id: string;
+  code: string;
+  name: string;
+  type: string;
+  siteId: string;
+  groupId?: string;
+  calendarId?: string;
+  efficiencyPct?: string;
+  capacityPerDayH?: string;
+  exclusive: boolean;
+  vendorPartyId?: string;
+  capabilities?: ResourceCapability[];
+  effectiveCalendarId?: string;
+}
+
+export interface ResourceGroup {
+  id: string;
+  code: string;
+  name: string;
+  siteId: string;
+  calendarId?: string;
+}
+
+export interface Capability {
+  id: string;
+  code: string;
+  name: string;
+}
+
+export interface CalendarDay {
+  date: string;
+  open: boolean;
+  shifts: Array<{ start: string; end: string }>;
+  totalH: string;
+}
+
+export interface ResourceFilters {
+  siteId?: string;
+  type?: string;
+  groupId?: string;
+  capabilityId?: string;
+}
+
+export interface ResourceGroupFilters {
+  siteId?: string;
+}
+
 export interface Page<T> {
   items: T[];
   nextCursor?: string;
@@ -110,13 +165,16 @@ export async function whereUsed(component: string, asOf: string): Promise<UsedBy
   return (await request<{ items: UsedBy[] }>(`/boms:where-used?${query}`)).items;
 }
 
-export function listRouteVersions(filters: RouteVersionFilters, cursor?: string): Promise<Page<RouteVersionHeader>> {
-  const query = new URLSearchParams();
-  for (const [key, value] of Object.entries({ ...filters, cursor })) {
-    if (value) query.set(key, value);
+function query(params: object): string {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value) search.set(key, value);
   }
-  const suffix = query.toString() ? `?${query}` : "";
-  return request(`/route-versions${suffix}`);
+  return search.toString() ? `?${search}` : "";
+}
+
+export function listRouteVersions(filters: RouteVersionFilters, cursor?: string): Promise<Page<RouteVersionHeader>> {
+  return request(`/route-versions${query({ ...filters, cursor })}`);
 }
 
 export function getRouteVersion(id: string): Promise<RouteVersion> {
@@ -133,4 +191,24 @@ export function computeLeadTime(body: LeadTimeRequest): Promise<LeadTime> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+}
+
+export function listResources(filters: ResourceFilters, cursor?: string): Promise<Page<Resource>> {
+  return request(`/resources${query({ ...filters, cursor })}`);
+}
+
+export function getResource(id: string): Promise<Resource> {
+  return request(`/resources/${encodeURIComponent(id)}`);
+}
+
+export function listResourceGroups(filters: ResourceGroupFilters, cursor?: string): Promise<Page<ResourceGroup>> {
+  return request(`/resource-groups${query({ ...filters, cursor })}`);
+}
+
+export function listCapabilities(cursor?: string): Promise<Page<Capability>> {
+  return request(`/capabilities${query({ cursor })}`);
+}
+
+export function getCalendarDays(id: string, from: string, to: string): Promise<Page<CalendarDay>> {
+  return request(`/calendars/${encodeURIComponent(id)}/days${query({ from, to })}`);
 }

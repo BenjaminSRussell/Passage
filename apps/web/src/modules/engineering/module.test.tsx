@@ -26,6 +26,40 @@ describe("engineering module", () => {
     expect(engineering.nav.map((n) => n.label)).toContain("Routings");
   });
 
+  it("declares the resource routes and duty-gated nav entries", () => {
+    expect(engineering.routes.map((r) => r.path)).toEqual(
+      expect.arrayContaining([
+        "/engineering/resources",
+        "/engineering/resources/:id",
+        "/engineering/resource-groups",
+        "/engineering/capabilities",
+        "/engineering/calendars/:id",
+      ]),
+    );
+    expect(engineering.routes.filter((r) => r.path !== "/engineering" && r.path !== "/engineering/where-used" && r.path !== "/engineering/routes").every((r) => r.handle?.title)).toBe(true);
+    const entries = engineering.nav.filter((n) => ["Resources", "Resource groups", "Capabilities"].includes(n.label));
+    expect(entries.map((n) => [n.label, n.to, n.duty])).toEqual([
+      ["Resources", "/engineering/resources", "engineering.read"],
+      ["Resource groups", "/engineering/resource-groups", "engineering.read"],
+      ["Capabilities", "/engineering/capabilities", "engineering.read"],
+    ]);
+  });
+
+  it("offers to open resources, groups and capabilities from the overview", () => {
+    const opened: string[] = [];
+    render(
+      <EngineeringHome
+        onOpenResources={() => opened.push("resources")}
+        onOpenResourceGroups={() => opened.push("groups")}
+        onOpenCapabilities={() => opened.push("capabilities")}
+      />,
+    );
+    for (const name of ["Open Resources", "Open Resource groups", "Open Capabilities"]) {
+      fireEvent.click(screen.getByRole("button", { name }));
+    }
+    expect(opened).toEqual(["resources", "groups", "capabilities"]);
+  });
+
   it("is auto-discovered by the registry", () => {
     expect(loadModules().map((m) => m.id)).toContain("engineering");
   });
