@@ -63,6 +63,14 @@ type CostElement struct {
 	Name            string `json:"name"`
 	MainAccountFrom string `json:"mainAccountFrom,omitempty"`
 	MainAccountTo   string `json:"mainAccountTo,omitempty"`
+	// DefaultBehavior is the class used when no behavior rule applies (FR-38.16).
+	DefaultBehavior string `json:"defaultBehavior,omitempty"`
+}
+
+// Warning is a non-fatal finding reported with a run (CO-0613, CO-0615).
+type Warning struct {
+	Code   string `json:"code"`
+	Detail string `json:"detail"`
 }
 
 // MirrorLine is one journal line mirrored into the cost ledger (FR-38.6).
@@ -92,11 +100,14 @@ type RunRequest struct {
 	Basis              [][]decimal.Decimal
 }
 
-// RunResponse reports the completed run and its cents-exact result.
+// RunResponse reports the completed run and its cents-exact result. A rerun
+// names the run it reversed (BR-38.7).
 type RunResponse struct {
-	RunID  string        `json:"runId"`
-	Period string        `json:"period"`
-	Result domain.Result `json:"result"`
+	RunID         string        `json:"runId"`
+	Period        string        `json:"period"`
+	ReversedRunID string        `json:"reversedRunId,omitempty"`
+	Result        domain.Result `json:"result"`
+	Warnings      []Warning     `json:"warnings"`
 }
 
 // Entry is one cost entry as listed for a cost object.
@@ -171,6 +182,8 @@ func (s *Postgres) run(ctx context.Context, key, hash string, fn command) (int, 
 			return 0, nil, problem(http.StatusConflict, CodePeriodAllocated, "this source and element already have a completed top-down run for the period")
 		case oneTemplateRun:
 			return 0, nil, problem(http.StatusConflict, CodePeriodAllocated, "this template already has a completed run for the period")
+		case oneBehaviorRule:
+			return 0, nil, problem(http.StatusConflict, CodeBehaviorRuleExists, "a behavior rule already exists for this element, object kind and date")
 		default:
 			// Two concurrent creates of the same code: the loser sees the same answer as a sequential duplicate.
 			return 0, nil, problem(http.StatusConflict, CodeDuplicateCode, "a cost object or element with this code already exists")
@@ -239,9 +252,9 @@ func (s *Postgres) CreateCostElement(ctx context.Context, key, hash string, in C
 			}
 		}
 		in.ID = ids.New()
-		if _, err := tx.Exec(ctx, `insert into cost_element (tenant_id, id, legal_entity_id, kind, code, name, main_account_from, main_account_to)
-			values ($1, $2, $3, $4, $5, $6, $7, $8)`, p.TenantID, in.ID, in.LegalEntityID, in.Kind, in.Code, in.Name,
-			nullIfEmpty(in.MainAccountFrom), nullIfEmpty(in.MainAccountTo)); err != nil {
+		if _, err := tx.Exec(ctx, `insert into cost_element (tenant_id, id, legal_entity_id, kind, code, name, main_account_from, main_account_to, default_behavior)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`, p.TenantID, in.ID, in.LegalEntityID, in.Kind, in.Code, in.Name,
+			nullIfEmpty(in.MainAccountFrom), nullIfEmpty(in.MainAccountTo), nullIfEmpty(in.DefaultBehavior)); err != nil {
 			return 0, nil, err
 		}
 		return http.StatusCreated, in, nil
@@ -255,8 +268,10 @@ func nullIfEmpty(s string) any {
 	return s
 }
 
-// MirrorJournalLines writes one primary cost entry per journal line (FR-38.6).
-// Lines already mirrored are skipped, so replays are safe.
+// MirrorJournalLines writes one primary cost entry per journal line (FR-38.6),
+// classified Fixed, Variable or Unclassified by the behavior rules and element
+// defaults in force for its period (FR-38.16). Lines already mirrored are
+// skipped, so replays are safe.
 func (s *Postgres) MirrorJournalLines(ctx context.Context, key, hash string, in MirrorRequest) (int, []byte, error) {
 	p, _ := tenant.FromContext(ctx)
 	return s.run(ctx, key, hash, func(ctx context.Context, tx pgx.Tx) (int, any, error) {
@@ -275,6 +290,10 @@ func (s *Postgres) MirrorJournalLines(ctx context.Context, key, hash string, in 
 		if err := requireObjects(ctx, tx, p.TenantID, in.LegalEntityID, objects); err != nil {
 			return 0, nil, err
 		}
+		classify, err := behaviorClassifier(ctx, tx, p.TenantID, in.LegalEntityID, objects)
+		if err != nil {
+			return 0, nil, err
+		}
 		resp := struct {
 			Mirrored int `json:"mirrored"`
 			Skipped  int `json:"skipped"`
@@ -286,10 +305,11 @@ func (s *Postgres) MirrorJournalLines(ctx context.Context, key, hash string, in 
 					fmt.Sprintf("no primary cost element maps main account %s", l.MainAccount))
 			}
 			var entryID string
-			err = tx.QueryRow(ctx, `insert into cost_entry (tenant_id, id, legal_entity_id, cost_object_id, cost_element_id, period_key, currency, amount, origin, source_id)
-				values ($1, $2, $3, $4, $5, $6, $7, $8, 'Journal', $9)
+			err = tx.QueryRow(ctx, `insert into cost_entry (tenant_id, id, legal_entity_id, cost_object_id, cost_element_id, period_key, currency, amount, behavior, origin, source_id)
+				values ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'Journal', $10)
 				on conflict (tenant_id, source_id) where origin = 'Journal' do nothing returning id`,
-				p.TenantID, ids.New(), in.LegalEntityID, l.CostObjectID, elementID, l.Period, l.Currency, l.Amount.StringFixed(4), l.JournalLineID).Scan(&entryID)
+				p.TenantID, ids.New(), in.LegalEntityID, l.CostObjectID, elementID, l.Period, l.Currency, l.Amount.StringFixed(4),
+				classify(elementID, l.CostObjectID, l.Period), l.JournalLineID).Scan(&entryID)
 			if errors.Is(err, pgx.ErrNoRows) {
 				resp.Skipped++
 				continue
@@ -327,20 +347,22 @@ func primaryRanges(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID strin
 }
 
 // RunAllocation runs one reciprocal step for a period, stores the run and
-// posts Allocation entries (FR-38.7). The step rolls back as a whole on error.
+// posts Allocation entries (FR-38.7). When the period already has a completed
+// run, that run is reversed in the same transaction and the new one replaces
+// it (BR-38.7). The step rolls back as a whole on error.
 func (s *Postgres) RunAllocation(ctx context.Context, key, hash string, in RunRequest) (int, []byte, error) {
 	p, _ := tenant.FromContext(ctx)
 	return s.run(ctx, key, hash, func(ctx context.Context, tx pgx.Tx) (int, any, error) {
-		var done bool
-		if err := tx.QueryRow(ctx, `select exists(select 1 from allocation_run where tenant_id = $1 and legal_entity_id = $2
-			and period_key = $3 and status = 'Completed')`, p.TenantID, in.LegalEntityID, in.Period).Scan(&done); err != nil {
+		// Lock the period's completed run so two reruns serialize; the loser
+		// finds it Reversed, inserts a second Completed run and gets CST-0002.
+		var priorID string
+		err := tx.QueryRow(ctx, `select id::text from allocation_run where tenant_id = $1 and legal_entity_id = $2
+			and period_key = $3 and status = 'Completed' for update`, p.TenantID, in.LegalEntityID, in.Period).Scan(&priorID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return 0, nil, err
 		}
-		if done {
-			return 0, nil, problem(http.StatusConflict, CodePeriodAllocated, "this period already has a completed allocation run")
-		}
 		var kind string
-		err := tx.QueryRow(ctx, `select kind from cost_element where tenant_id = $1 and legal_entity_id = $2 and id = $3`,
+		err = tx.QueryRow(ctx, `select kind from cost_element where tenant_id = $1 and legal_entity_id = $2 and id = $3`,
 			p.TenantID, in.LegalEntityID, in.SecondaryElementID).Scan(&kind)
 		if errors.Is(err, pgx.ErrNoRows) || (err == nil && kind != domain.ElementSecondary) {
 			return 0, nil, problem(http.StatusUnprocessableEntity, CodeSecondaryNotFound, "secondary cost element not found")
@@ -351,6 +373,8 @@ func (s *Postgres) RunAllocation(ctx context.Context, key, hash string, in RunRe
 		if err := requireObjects(ctx, tx, p.TenantID, in.LegalEntityID, in.CostObjectIDs); err != nil {
 			return 0, nil, err
 		}
+		// The cost base is journal-origin cost only, so the prior run's
+		// postings never feed the rerun.
 		costs, err := journalCosts(ctx, tx, p.TenantID, in.LegalEntityID, in.Period, in.Currency, in.CostObjectIDs)
 		if err != nil {
 			return 0, nil, err
@@ -365,43 +389,108 @@ func (s *Postgres) RunAllocation(ctx context.Context, key, hash string, in RunRe
 		if res.Flows == nil {
 			res.Flows = []domain.Flow{}
 		}
+		runID := ids.New()
+		if priorID != "" {
+			if err := reverseRun(ctx, tx, p.TenantID, in.LegalEntityID, priorID, runID); err != nil {
+				return 0, nil, err
+			}
+		}
 		objects, _ := json.Marshal(in.CostObjectIDs)
 		flows, _ := json.Marshal(res.Flows)
 		postings, _ := json.Marshal(res.Postings)
 		unalloc, _ := json.Marshal(res.Unallocated)
-		runID := ids.New()
 		if _, err := tx.Exec(ctx, `insert into allocation_run (tenant_id, id, legal_entity_id, period_key, currency, secondary_element_id, method,
-			iterations, residual, converged, swept, total_in, total_out, status, cost_object_ids, flows, postings, unallocated)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'Completed', $14, $15, $16, $17)`,
+			iterations, residual, converged, swept, total_in, total_out, status, cost_object_ids, flows, postings, unallocated, reverses_run_id)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'Completed', $14, $15, $16, $17, $18)`,
 			p.TenantID, runID, in.LegalEntityID, in.Period, in.Currency, in.SecondaryElementID, res.Method, res.Iterations,
 			res.Residual.StringFixed(12), res.Converged, res.Swept.StringFixed(4), res.TotalIn.StringFixed(4), res.TotalOut.StringFixed(4),
-			objects, flows, postings, unalloc); err != nil {
+			objects, flows, postings, unalloc, nullIfEmpty(priorID)); err != nil {
 			return 0, nil, err
 		}
 		for _, post := range res.Postings {
 			if post.Amount.IsZero() {
 				continue
 			}
-			entryID := ids.New()
-			if _, err := tx.Exec(ctx, `insert into cost_entry (tenant_id, id, legal_entity_id, cost_object_id, cost_element_id, period_key, currency, amount,
-				origin, source_id, allocation_run_id) values ($1, $2, $3, $4, $5, $6, $7, $8, 'Allocation', $9, $9)`,
-				p.TenantID, entryID, in.LegalEntityID, post.CenterID, in.SecondaryElementID, in.Period, in.Currency, post.Amount.StringFixed(4), runID); err != nil {
-				return 0, nil, err
-			}
-			if err := enqueue(ctx, tx, "cost_entry", entryID, ccevents.CostEntryCreated, p.TenantID, ccevents.CostEntryCreatedData{
-				EntryID: entryID, CostObjectID: post.CenterID, ElementID: in.SecondaryElementID, Period: in.Period, Amount: post.Amount, Origin: "Allocation",
-			}); err != nil {
+			if err := postAllocationEntry(ctx, tx, p.TenantID, in.LegalEntityID, runID, post.CenterID, in.SecondaryElementID, in.Period, in.Currency, post.Amount); err != nil {
 				return 0, nil, err
 			}
 		}
 		if err := enqueue(ctx, tx, "allocation_run", runID, ccevents.AllocationCompleted, p.TenantID, ccevents.AllocationCompletedData{
 			RunID: runID, LegalEntityID: in.LegalEntityID, Period: in.Period, Method: res.Method, Iterations: res.Iterations, Converged: res.Converged,
-			TotalIn: res.TotalIn, TotalOut: res.TotalOut, Residual: res.Residual, Swept: res.Swept,
+			TotalIn: res.TotalIn, TotalOut: res.TotalOut, Residual: res.Residual, Swept: res.Swept, ReversedRunID: priorID,
 		}); err != nil {
 			return 0, nil, err
 		}
-		return http.StatusCreated, RunResponse{RunID: runID, Period: in.Period, Result: res}, nil
+		return http.StatusCreated, RunResponse{RunID: runID, Period: in.Period, ReversedRunID: priorID, Result: res,
+			Warnings: runWarnings(res.Unallocated, false, in.Period)}, nil
 	})
+}
+
+// postAllocationEntry writes one Allocation entry of a run and its event.
+func postAllocationEntry(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, runID, objectID, elementID, period, currency string, amount decimal.Decimal) error {
+	entryID := ids.New()
+	if _, err := tx.Exec(ctx, `insert into cost_entry (tenant_id, id, legal_entity_id, cost_object_id, cost_element_id, period_key, currency, amount,
+		origin, source_id, allocation_run_id) values ($1, $2, $3, $4, $5, $6, $7, $8, 'Allocation', $9, $9)`,
+		tenantID, entryID, legalEntityID, objectID, elementID, period, currency, amount.StringFixed(4), runID); err != nil {
+		return err
+	}
+	return enqueue(ctx, tx, "cost_entry", entryID, ccevents.CostEntryCreated, tenantID, ccevents.CostEntryCreatedData{
+		EntryID: entryID, CostObjectID: objectID, ElementID: elementID, Period: period, Amount: amount, Origin: "Allocation",
+	})
+}
+
+// reverseRun posts the negation of every Allocation entry of runID (BR-38.7)
+// and marks it Reversed by byRunID. The negations carry runID, so the reversed
+// run nets to zero per cost object and the new run's entries stand alone.
+func reverseRun(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, runID, byRunID string) error {
+	rows, err := tx.Query(ctx, `select cost_object_id::text, cost_element_id::text, period_key, currency, sum(amount)::text
+		from cost_entry where tenant_id = $1 and allocation_run_id = $2 and origin = 'Allocation'
+		group by cost_object_id, cost_element_id, period_key, currency order by cost_object_id`, tenantID, runID)
+	if err != nil {
+		return err
+	}
+	type line struct {
+		object, element, period, currency string
+		amount                            decimal.Decimal
+	}
+	var lines []line
+	for rows.Next() {
+		var l line
+		var amount string
+		if err := rows.Scan(&l.object, &l.element, &l.period, &l.currency, &amount); err != nil {
+			rows.Close()
+			return err
+		}
+		l.amount = parseDec(amount)
+		lines = append(lines, l)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, l := range lines {
+		if l.amount.IsZero() {
+			continue
+		}
+		if err := postAllocationEntry(ctx, tx, tenantID, legalEntityID, runID, l.object, l.element, l.period, l.currency, l.amount.Neg()); err != nil {
+			return err
+		}
+	}
+	_, err = tx.Exec(ctx, `update allocation_run set status = 'Reversed', reversed_by_run_id = $3 where tenant_id = $1 and id = $2`, tenantID, runID, byRunID)
+	return err
+}
+
+// runWarnings lists CO-0613 for each sender with zero basis (BR-38.8) and
+// CO-0615 when journal cost arrived after the run (BR-38.7).
+func runWarnings(unallocated []string, late bool, period string) []Warning {
+	out := []Warning{}
+	for _, id := range unallocated {
+		out = append(out, Warning{Code: "CO-0613", Detail: fmt.Sprintf("sender %s has zero basis; its cost was not allocated", id)})
+	}
+	if late {
+		out = append(out, Warning{Code: "CO-0615", Detail: fmt.Sprintf("journal postings after the last allocation run for %s; rerun the allocation", period)})
+	}
+	return out
 }
 
 func allocationProblem(err error) error {

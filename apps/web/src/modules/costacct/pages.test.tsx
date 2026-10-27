@@ -56,6 +56,7 @@ const run: Run = {
   ],
   unallocated: [],
   createdAt: "2026-10-01T08:00:00Z",
+  warnings: [],
 };
 
 type Handler = (url: string, init: RequestInit) => Response | Promise<Response>;
@@ -197,6 +198,7 @@ describe("CostElementsPage", () => {
     expect(await screen.findByText(/is reversed/)).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Main account from"), { target: { value: "600000" } });
     fireEvent.change(screen.getByLabelText("Main account to"), { target: { value: "609999" } });
+    fireEvent.change(screen.getByLabelText("Default behavior"), { target: { value: "Fixed" } });
     fireEvent.click(screen.getByRole("button", { name: "Save cost element" }));
     expect(await screen.findByRole("table", { name: "Cost elements" })).toBeInTheDocument();
     expect(JSON.parse(calls(fetchMock, "POST", "cost-elements")[0][1].body as string)).toEqual({
@@ -206,6 +208,7 @@ describe("CostElementsPage", () => {
       kind: "Primary",
       mainAccountFrom: "600000",
       mainAccountTo: "609999",
+      defaultBehavior: "Fixed",
     });
   });
 });
@@ -257,6 +260,48 @@ describe("Allocation runs", () => {
         ["0", "0", "0"],
       ],
     });
+  });
+
+  it("marks a stale run with CO-0615 and links a reversed run to its rerun (BR-38.7, BR-38.8)", async () => {
+    const NEW = "88888888-8888-4888-8888-888888888888";
+    const stale: Run = {
+      ...run,
+      unallocated: [C],
+      warnings: [
+        { code: "CO-0613", detail: `sender ${C} has zero basis; its cost was not allocated` },
+        { code: "CO-0615", detail: "journal postings after the last allocation run for 2026-09; rerun the allocation" },
+      ],
+    };
+    const reversed: Run = { ...run, status: "Reversed", reversedByRunId: NEW, warnings: [] };
+    const current: Run = { ...run, id: NEW, reversesRunId: RUN, warnings: [] };
+    let first = stale;
+    lists({
+      [`GET /api/v1/controlling/allocation-runs/${RUN}`]: () => json(200, first),
+      [`GET /api/v1/controlling/allocation-runs/${NEW}`]: () => json(200, current),
+    });
+    const { container, unmount } = at(`/costacct/allocation-runs/${RUN}`);
+    expect(await screen.findByText("CO-0615: journal postings after this run")).toBeInTheDocument();
+    expect(screen.getByText("CO-0613: senders with zero basis")).toBeInTheDocument();
+    expect(await screen.findByText(/no basis, so the cost stayed where it was: CC-C/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Rerun allocation" })).toHaveAttribute("href", "/costacct/allocation-runs/new");
+    expect(pageViolations(container)).toEqual([]);
+    unmount();
+
+    first = reversed;
+    at(`/costacct/allocation-runs/${RUN}`);
+    expect(await screen.findByText("This run was reversed")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Rerun allocation" })).not.toBeInTheDocument();
+    expect(screen.queryByText("CO-0615: journal postings after this run")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("link", { name: "Open the current run" }));
+    expect(await screen.findByRole("link", { name: "The earlier run of 2026-09" })).toHaveAttribute("href", `/costacct/allocation-runs/${RUN}`);
+  });
+
+  it("shows each run's status in the list", async () => {
+    lists({ "GET /api/v1/controlling/allocation-runs": () => json(200, { items: [{ ...run, id: "r2", warnings: [] }, { ...run, status: "Reversed", reversedByRunId: "r2" }] }) });
+    at("/costacct/allocation-runs");
+    const table = await screen.findByRole("table", { name: "Allocation runs" });
+    expect(await within(table).findByText("Reversed")).toBeInTheDocument();
+    expect(within(table).getByText("Completed")).toBeInTheDocument();
   });
 
   it("shows a closed-cycle refusal", async () => {

@@ -17,6 +17,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/budgeting/internal/domain"
+	budgetevents "github.com/BenjaminSRussell/passage/services/budgeting/internal/events"
 	"github.com/BenjaminSRussell/passage/services/budgeting/migrations"
 )
 
@@ -185,7 +186,7 @@ func TestCommand_IdempotencyReplayAndReuse(t *testing.T) {
 func assertEncumbranceInvariant(t *testing.T, ctx context.Context, st *Postgres, ruleID string) {
 	t.Helper()
 	err := dbx.WithTenantTx(ctx, st.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `select b.control_dimension_key, b.encumbrances::text, coalesce(sum(e.reserved - e.relieved), 0)::text
+		rows, err := tx.Query(ctx, `select b.control_dimension_key, b.encumbrances::text, coalesce(sum(e.reserved - e.relieved - e.released), 0)::text
 			from budget_control_balance b left join encumbrance e on e.tenant_id = b.tenant_id and e.balance_id = b.id
 			where b.rule_version_id = $1 group by b.tenant_id, b.id`, ruleID)
 		if err != nil {
@@ -316,6 +317,87 @@ func TestRelieve_ZeroMatchKeepsOpen(t *testing.T) {
 		t.Fatalf("relief = %+v (%v)", rel, err)
 	}
 	if _, _, err := st.RelieveEncumbrance(ctx, "inv-x", "h", RelieveRequest{EncumbranceID: ids.New(), InvoiceID: ids.New()}); !hasCode(err, CodeEncumbranceNotFound) {
+		t.Fatalf("unknown encumbrance: err = %v", err)
+	}
+}
+
+// FR-38.5: closing a PO after a partial invoice releases exactly the open
+// remainder back to available funds; the line is then Released, a second
+// release, a re-check of the line and a consumption onto it are refused, and a
+// late invoice relieves nothing (its whole amount is excess).
+func TestRelease_ClosedPOGivesBackResidual(t *testing.T) {
+	ctx, st, pool, rule := setup(t)
+	req := checkReq(rule.ID, "500")
+	_, raw, err := st.CheckBudget(ctx, "po", "h", req, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encID := decodeCheck(t, raw).Lines[0].EncumbranceID
+	if _, _, err := st.RelieveEncumbrance(ctx, "inv-1", "h", RelieveRequest{EncumbranceID: encID, InvoiceID: ids.New(), InvoiceAmount: d("320"), MatchedShare: d("320")}); err != nil {
+		t.Fatal(err)
+	}
+	// Relief moves 320 out of encumbrances (actuals arrive from journal events).
+	if got := availableOf(t, ctx, st, rule.ID); !got.Equal(d("99820")) {
+		t.Fatalf("available before release = %s, want 99820", got)
+	}
+	poID := req.DocumentID
+	status, raw, err := st.ReleaseEncumbrance(ctx, "rel-1", "h-rel", ReleaseRequest{EncumbranceID: encID, DocumentID: poID, Reason: ReleaseClosed})
+	if err != nil || status != 200 {
+		t.Fatalf("release: status %d err %v", status, err)
+	}
+	var rel ReleaseResponse
+	if err := json.Unmarshal(raw, &rel); err != nil || !rel.Released.Equal(d("180")) || !rel.Relieved.Equal(d("320")) || rel.Status != domain.StatusReleased {
+		t.Fatalf("release = %+v (%v)", rel, err)
+	}
+	// The 180 residual is back in available funds and no encumbrance is left.
+	if got := availableOf(t, ctx, st, rule.ID); !got.Equal(d("100000")) {
+		t.Fatalf("available after release = %s, want 100000", got)
+	}
+	assertEncumbranceInvariant(t, ctx, st, rule.ID)
+
+	// A replay with the same key returns the stored answer and moves nothing.
+	_, again, err := st.ReleaseEncumbrance(ctx, "rel-1", "h-rel", ReleaseRequest{EncumbranceID: encID, DocumentID: poID, Reason: ReleaseClosed})
+	var replay ReleaseResponse
+	if err != nil || json.Unmarshal(again, &replay) != nil || replay.EncumbranceID != encID || !replay.Released.Equal(rel.Released) || replay.Status != rel.Status {
+		t.Fatalf("replay: %s (%v), want %+v", again, err, rel)
+	}
+	if got := availableOf(t, ctx, st, rule.ID); !got.Equal(d("100000")) {
+		t.Fatalf("available after replay = %s, want 100000", got)
+	}
+	if _, _, err := st.ReleaseEncumbrance(ctx, "rel-2", "h", ReleaseRequest{EncumbranceID: encID, DocumentID: poID, Reason: ReleaseCancelled}); !hasCode(err, CodeNothingToRelease) {
+		t.Fatalf("second release: err = %v, want %s", err, CodeNothingToRelease)
+	}
+	if _, _, err := st.CheckBudget(ctx, "po-v2", "h", req, false); !hasCode(err, CodeLineReleased) {
+		t.Fatalf("re-check of a released line: err = %v, want %s", err, CodeLineReleased)
+	}
+	res := earmark(t, ctx, st, rule.ID, domain.FundsReservation, "2099-12-31", "100")
+	if _, _, err := st.ConsumeReservation(ctx, "con-1", "h", ConsumeRequest{ReservationID: res.ID, LineID: res.Lines[0].LineID,
+		DocumentType: "PurchaseOrder", DocumentID: poID, DocumentLineID: req.Lines[0].LineID, Amount: d("10")}); !hasCode(err, CodeLineReleased) {
+		t.Fatalf("consumption onto a released line: err = %v, want %s", err, CodeLineReleased)
+	}
+	_, raw, err = st.RelieveEncumbrance(ctx, "inv-2", "h", RelieveRequest{EncumbranceID: encID, InvoiceID: ids.New(), InvoiceAmount: d("50"), MatchedShare: d("50")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var late RelieveResponse
+	if err := json.Unmarshal(raw, &late); err != nil || !late.Relieved.IsZero() || !late.Excess.Equal(d("50")) || late.Status != domain.StatusReleased {
+		t.Fatalf("late invoice = %+v (%v)", late, err)
+	}
+	got, err := st.GetEncumbrance(ctx, encID)
+	if err != nil || !got.Released.Equal(d("180")) || !got.Remaining.IsZero() || got.Status != domain.StatusReleased || got.History[len(got.History)-1].Type != "Release" {
+		t.Fatalf("encumbrance = %+v (%v)", got, err)
+	}
+	if list, err := st.ListEncumbrances(ctx, rule.ID, domain.StatusReleased); err != nil || len(list) != 1 {
+		t.Fatalf("released filter = %+v (%v)", list, err)
+	}
+	var payload map[string]string
+	if err := pool.QueryRow(ctx, `select payload->'data' from outbox where type = $1`, budgetevents.EncumbranceReleased).Scan(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["amount"] != "180" || payload["reason"] != ReleaseClosed || payload["document_id"] != poID {
+		t.Fatalf("released event = %v", payload)
+	}
+	if _, _, err := st.ReleaseEncumbrance(ctx, "rel-x", "h", ReleaseRequest{EncumbranceID: ids.New(), DocumentID: poID, Reason: ReleaseCancelled}); !hasCode(err, CodeEncumbranceNotFound) {
 		t.Fatalf("unknown encumbrance: err = %v", err)
 	}
 }

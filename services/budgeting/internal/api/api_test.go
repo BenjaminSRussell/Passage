@@ -20,6 +20,7 @@ import (
 type fakeStore struct {
 	checkOverride bool
 	relieveIn     store.RelieveRequest
+	releaseIn     store.ReleaseRequest
 	calls         int
 	lastFilter    string
 }
@@ -39,6 +40,12 @@ func (f *fakeStore) RelieveEncumbrance(_ context.Context, _, _ string, in store.
 	f.calls++
 	f.relieveIn = in
 	return http.StatusOK, []byte(`{}`), nil
+}
+
+func (f *fakeStore) ReleaseEncumbrance(_ context.Context, _, _ string, in store.ReleaseRequest) (int, []byte, error) {
+	f.calls++
+	f.releaseIn = in
+	return http.StatusOK, []byte(`{"status":"Released"}`), nil
 }
 
 func (f *fakeStore) PostRegisterEntry(context.Context, string, string, store.RegisterRequest) (int, []byte, error) {
@@ -174,6 +181,46 @@ func TestRelieve_MatchedShareIsQuantityTimesPrice(t *testing.T) {
 	}
 	if !st.relieveIn.MatchedShare.Equal(decimal.NewFromInt(500)) || !st.relieveIn.InvoiceAmount.Equal(decimal.RequireFromString("520")) {
 		t.Fatalf("store input = %+v", st.relieveIn)
+	}
+}
+
+// FR-38.5: a PO line cancellation or close names the purchase order and the
+// reason; the route needs budget.check and an Idempotency-Key.
+func TestRelease_ValidatesAndNeedsDuty(t *testing.T) {
+	path := "/v1/budget/encumbrances/" + lineID + ":release"
+	good := `{"documentId":"` + docID + `","reason":"Cancelled"}`
+	st := &fakeStore{}
+	rec := serve(t, st, http.MethodPost, path, good, "budget.check", "rel-1")
+	if rec.Code != http.StatusOK || st.releaseIn.EncumbranceID != lineID || st.releaseIn.Reason != store.ReleaseCancelled || st.releaseIn.DocumentID != docID {
+		t.Fatalf("status = %d input = %+v body = %s", rec.Code, st.releaseIn, rec.Body.String())
+	}
+	cases := map[string]struct{ body, field string }{
+		"unknown reason": {`{"documentId":"` + docID + `","reason":"Expired"}`, "reason"},
+		"no document":    {`{"reason":"Closed"}`, "documentId"},
+	}
+	for name, c := range cases {
+		st := &fakeStore{}
+		rec := serve(t, st, http.MethodPost, path, c.body, "budget.check", "rel-2")
+		var p httpx.Problem
+		_ = json.Unmarshal(rec.Body.Bytes(), &p)
+		if rec.Code != http.StatusBadRequest || p.Errors[c.field] == "" || st.calls != 0 {
+			t.Errorf("%s: status = %d errors = %v calls = %d", name, rec.Code, p.Errors, st.calls)
+		}
+	}
+	if rec := serve(t, &fakeStore{}, http.MethodPost, path, good, "budget.check", ""); rec.Code != http.StatusBadRequest {
+		t.Errorf("without Idempotency-Key: status = %d, want 400", rec.Code)
+	}
+	if rec := serve(t, &fakeStore{}, http.MethodPost, path, good, "budget.view", "rel-3"); rec.Code != http.StatusForbidden {
+		t.Errorf("without budget.check: status = %d, want 403", rec.Code)
+	}
+	st = &fakeStore{}
+	rec = serve(t, st, http.MethodPost, "/v1/budget/encumbrances/not-a-uuid:release", good, "budget.check", "rel-4")
+	if rec.Code != http.StatusNotFound || problemCode(t, rec) != store.CodeEncumbranceNotFound || st.calls != 0 {
+		t.Errorf("bad id: status = %d calls = %d", rec.Code, st.calls)
+	}
+	st = &fakeStore{}
+	if rec := serve(t, st, http.MethodGet, "/v1/budget/encumbrances?rule="+ruleID+"&status=Released", "", "budget.view", ""); rec.Code != http.StatusOK || st.lastFilter != "Released" {
+		t.Errorf("Released filter: status = %d filter = %q", rec.Code, st.lastFilter)
 	}
 }
 

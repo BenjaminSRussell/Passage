@@ -11,11 +11,12 @@ var (
 	EncumbranceRelieved   = events.Type(Context, "encumbrance", "relieved", 1)
 	ReservationConsumed   = events.Type(Context, "reservation", "consumed", 1)
 	ProgramCarriedForward = events.Type(Context, "program", "carriedforward", 1)
+	EncumbranceReleased   = events.Type(Context, "encumbrance", "released", 1)
 )
 
 // All lists every event type this service publishes.
 func All() []string {
-	return []string{RegisterPosted, CheckCompleted, EncumbranceRelieved, ReservationConsumed, ProgramCarriedForward}
+	return []string{RegisterPosted, CheckCompleted, EncumbranceRelieved, ReservationConsumed, ProgramCarriedForward, EncumbranceReleased}
 }
 
 // ProgramCarriedForwardData is the payload of dev.passage.budget.program.carriedforward.v1.
@@ -66,6 +67,16 @@ type EncumbranceRelievedData struct {
 	InvoiceID     string `json:"invoice_id"`
 	Amount        string `json:"amount"`
 	Remaining     string `json:"remaining"`
+}
+
+// EncumbranceReleasedData is the payload of encumbrance.released.v1 (FR-38.5):
+// the open remainder given back to available funds on a PO line cancellation
+// or a PO close.
+type EncumbranceReleasedData struct {
+	EncumbranceID string `json:"encumbrance_id"`
+	DocumentID    string `json:"document_id"`
+	Reason        string `json:"reason"`
+	Amount        string `json:"amount"`
 }
 
 // ReservationConsumedData is the payload of reservation.consumed.v1 (FR-38.20).

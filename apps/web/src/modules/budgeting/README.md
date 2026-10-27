@@ -1,6 +1,6 @@
 # Budgeting module (web)
 
-Budget control screens for PSG-38 slices 1 to 3, wired to `services/budgeting` through the BFF at `/api/v1/budget/...`.
+Budget control screens for PSG-38 slices 1 to 4, wired to `services/budgeting` through the BFF at `/api/v1/budget/...`.
 
 | Route | Page | Service calls |
 |---|---|---|
@@ -10,7 +10,7 @@ Budget control screens for PSG-38 slices 1 to 3, wired to `services/budgeting` t
 | `/budgeting/rules/:id/entries/new` | Post a register entry (Original, Revision, Transfer, Carry-forward); transfers must net to zero | `POST /register-entries` |
 | `/budgeting/check` | Budget check form with per-line result, step trace and encumbrance link | `GET /control-rules`, `POST /checks` |
 | `/budgeting/checks/:id` | One recorded check | `GET /checks/{id}` |
-| `/budgeting/encumbrances/:id` | Encumbrance history and invoice relief (reports the price excess to re-check) | `GET /encumbrances/{id}`, `POST /encumbrances/{id}:relieve` |
+| `/budgeting/encumbrances/:id` | Encumbrance history, invoice relief (reports the price excess to re-check) and release of the open remainder on PO cancellation or close, after a confirmation (FR-38.5) | `GET /encumbrances/{id}`, `POST /encumbrances/{id}:relieve`, `POST /encumbrances/{id}:release` |
 | `/budgeting/reservations` | Earmarked funds list with type and status filters (`?rule=` narrows to one rule version) | `GET /reservations` |
 | `/budgeting/reservations/new` | New reservation document (four types, optional expiry, lines); the creation check refuses over-budget documents | `POST /reservations` |
 | `/budgeting/reservations/:id` | Reservation detail: lines, consumption history with encumbrance links, consume by a follow-on document, close | `GET /reservations/{id}`, `POST /reservations/{id}:consume`, `POST /reservations/{id}:close` |

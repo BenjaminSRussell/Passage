@@ -19,6 +19,8 @@ channels:
     messages:
       relieved:
         $ref: '#/components/messages/encumbranceRelieved'
+      released:
+        $ref: '#/components/messages/encumbranceReleased'
   passage.budget.reservation:
     address: passage.budget.reservation
     messages:
@@ -42,6 +44,10 @@ operations:
     action: send
     channel: { $ref: '#/channels/passage.budget.encumbrance' }
     messages: [{ $ref: '#/channels/passage.budget.encumbrance/messages/relieved' }]
+  onEncumbranceReleased:
+    action: send
+    channel: { $ref: '#/channels/passage.budget.encumbrance' }
+    messages: [{ $ref: '#/channels/passage.budget.encumbrance/messages/released' }]
   onReservationConsumed:
     action: send
     channel: { $ref: '#/channels/passage.budget.reservation' }
@@ -107,6 +113,21 @@ components:
           amount: { type: string }
           remaining: { type: string }
       x-passage-type: dev.passage.budget.encumbrance.relieved.v1
+    encumbranceReleased:
+      name: released
+      title: Encumbrance released
+      description: >-
+        A PO line was cancelled or a PO closed, and the open remainder of the line's encumbrance went back to available
+        funds (FR-38.5). Written in the same transaction as the balance change. The line is Released afterwards.
+      payload:
+        type: object
+        required: [encumbrance_id, document_id, reason, amount]
+        properties:
+          encumbrance_id: { type: string, format: uuid }
+          document_id: { type: string, format: uuid }
+          reason: { type: string, enum: [Cancelled, Closed] }
+          amount: { type: string }
+      x-passage-type: dev.passage.budget.encumbrance.released.v1
     reservationConsumed:
       name: consumed
       title: Budget reservation consumed

@@ -181,6 +181,7 @@ export function RuleDetailPage() {
               <option value="Open">Open</option>
               <option value="PartiallyRelieved">Partially relieved</option>
               <option value="Relieved">Relieved</option>
+              <option value="Released">Released</option>
             </Select>
           )}
         </FormField>

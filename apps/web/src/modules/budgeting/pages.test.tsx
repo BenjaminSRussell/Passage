@@ -53,6 +53,7 @@ const encumbrance: Encumbrance = {
   sourceLineId: L1,
   reserved: "500",
   relieved: "0",
+  released: "0",
   remaining: "500",
   status: "Open",
   history: [{ type: "Reserve", amount: "500", documentId: D1, at: "2026-10-02T08:00:00Z" }],
@@ -317,5 +318,54 @@ describe("EncumbrancePage", () => {
     const [, init] = calls(fetchMock, "POST", ":relieve")[0];
     expect(JSON.parse(init.body as string)).toEqual({ invoiceId: D1, invoiceQuantity: "10", poUnitPrice: "50.00", invoiceAmount: "520.00" });
     await waitFor(() => expect(calls(fetchMock, "GET", `/encumbrances/${E1}`).length).toBeGreaterThan(1));
+  });
+
+  it("releases the open remainder on a PO close after a confirmation (FR-38.5)", async () => {
+    let released = false;
+    const fetchMock = stubRoutes({
+      [`GET /api/v1/budget/encumbrances/${E1}`]: () =>
+        json(
+          200,
+          released
+            ? { ...encumbrance, relieved: "320", released: "180", remaining: "0", status: "Released", history: [...encumbrance.history, { type: "Release", amount: "180", documentId: D1, at: "2026-10-04T08:00:00Z" }] }
+            : { ...encumbrance, relieved: "320", remaining: "180", status: "PartiallyRelieved" },
+        ),
+      [`POST /api/v1/budget/encumbrances/${E1}:release`]: () => {
+        released = true;
+        return json(200, { encumbranceId: E1, reason: "Closed", released: "180", relieved: "320", remaining: "0", status: "Released" });
+      },
+    });
+    const { container } = at(`/budgeting/encumbrances/${E1}`);
+    expect(await screen.findByRole("heading", { name: "Release on PO cancellation or close" })).toBeInTheDocument();
+    expect(pageViolations(container)).toEqual([]);
+    expect(screen.getByLabelText("Purchase order id")).toHaveValue(D1);
+    fireEvent.change(screen.getByLabelText("Purchase order id"), { target: { value: "not-a-po" } });
+    fireEvent.click(screen.getByRole("button", { name: "Release remaining funds" }));
+    expect(await screen.findByText("Enter the purchase order id (a UUID).")).toBeInTheDocument();
+    expect(calls(fetchMock, "POST", ":release")).toHaveLength(0);
+    fireEvent.change(screen.getByLabelText("Purchase order id"), { target: { value: D1 } });
+    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "Closed" } });
+    fireEvent.click(screen.getByRole("button", { name: "Release remaining funds" }));
+    expect(await screen.findByText("Release 180.00?")).toBeInTheDocument();
+    expect(calls(fetchMock, "POST", ":release")).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Confirm release" }));
+    expect(await screen.findByText(/The open remainder went back to available funds/)).toBeInTheDocument();
+    const [, init] = calls(fetchMock, "POST", ":release")[0];
+    expect(JSON.parse(init.body as string)).toEqual({ documentId: D1, reason: "Closed" });
+    expect((init.headers as Record<string, string>)["Idempotency-Key"]).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Relieve encumbrance" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Release remaining funds" })).not.toBeInTheDocument();
+  });
+
+  it("shows the service's refusal when nothing is left to release", async () => {
+    stubRoutes({
+      [`GET /api/v1/budget/encumbrances/${E1}`]: () => json(200, encumbrance),
+      [`POST /api/v1/budget/encumbrances/${E1}:release`]: () =>
+        json(409, { title: "Conflict", status: 409, code: "BUD-0010", detail: "the encumbrance has nothing open to release" }),
+    });
+    at(`/budgeting/encumbrances/${E1}`);
+    fireEvent.click(await screen.findByRole("button", { name: "Release remaining funds" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm release" }));
+    expect(await screen.findByText("BUD-0010: the encumbrance has nothing open to release")).toBeInTheDocument();
   });
 });

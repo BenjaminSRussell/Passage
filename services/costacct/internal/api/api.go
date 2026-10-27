@@ -70,6 +70,8 @@ type Store interface {
 	RunTemplate(ctx context.Context, key, hash string, in store.TemplateRunRequest) (int, []byte, error)
 	ListTemplateRuns(ctx context.Context, legalEntityID, templateID string) ([]store.TemplateRun, error)
 	GetTemplateRun(ctx context.Context, id string) (store.TemplateRun, error)
+	CreateBehaviorRule(ctx context.Context, key, hash string, in store.BehaviorRule) (int, []byte, error)
+	ListBehaviorRules(ctx context.Context, legalEntityID, elementID string) ([]store.BehaviorRule, error)
 	Ping(ctx context.Context) error
 }
 
@@ -99,6 +101,7 @@ func (a *API) Register(r chi.Router) {
 	view.Get("/v1/controlling/top-down-runs/{id}", a.getTopDownRun)
 	view.Get("/v1/controlling/internal-orders/{id}/settlements", a.listSettlements)
 	a.registerTemplates(r)
+	a.registerBehavior(r)
 }
 
 // prepare checks the Idempotency-Key, decodes the body into v and returns the
@@ -192,6 +195,10 @@ func (a *API) createCostElement(w http.ResponseWriter, r *http.Request) {
 	}
 	if !ids.Valid(in.LegalEntityID) || !domain.ValidCode(in.Code) || in.Name == "" || len(in.Name) > 200 || in.ID != "" {
 		invalid(w, r, "legalEntityId (UUID), code (2-40 characters of A-Z, 0-9, _ or -) and name (at most 200 characters) are required; id is assigned by the service")
+		return
+	}
+	if in.DefaultBehavior != "" && !domain.ValidBehavior(in.DefaultBehavior) {
+		invalid(w, r, "defaultBehavior must be Fixed or Variable when set")
 		return
 	}
 	switch in.Kind {

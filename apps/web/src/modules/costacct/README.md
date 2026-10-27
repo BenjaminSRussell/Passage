@@ -1,17 +1,19 @@
 # Cost accounting module (web)
 
-Cost accounting screens for PSG-38 slices 1 to 3, wired to `services/costacct` through the BFF at `/api/v1/controlling/...`.
+Cost accounting screens for PSG-38 slices 1 to 4, wired to `services/costacct` through the BFF at `/api/v1/controlling/...`.
 
 | Route | Page | Service calls |
 |---|---|---|
 | `/costacct` | Cost objects: list with legal entity and kind filters | `GET /cost-objects` |
 | `/costacct/cost-objects/new` | New cost object | `POST /cost-objects` |
 | `/costacct/cost-objects/:id` | Cost object with its entries for a period and the period total per currency; an internal order also shows its collected cost, the settlement form and its settlements | `GET /cost-objects/{id}`, `/cost-objects/{id}/entries`, `/cost-elements`, `/internal-orders/{id}/settlements`, `POST /internal-orders/{id}:settle` |
-| `/costacct/cost-elements` | Cost elements with main account ranges | `GET /cost-elements` |
-| `/costacct/cost-elements/new` | New primary (account range) or secondary element | `POST /cost-elements` |
-| `/costacct/allocation-runs` | Allocation runs with cost in / out and convergence | `GET /allocation-runs` |
-| `/costacct/allocation-runs/new` | Choose the centers and type the basis matrix, then run | `GET /cost-objects`, `/cost-elements`, `POST /allocation-runs` |
-| `/costacct/allocation-runs/:id` | Run totals, net postings and flows | `GET /allocation-runs/{id}` |
+| `/costacct/cost-elements` | Cost elements with main account ranges and default behavior | `GET /cost-elements` |
+| `/costacct/cost-elements/new` | New primary (account range) or secondary element, with an optional default behavior (FR-38.16) | `POST /cost-elements` |
+| `/costacct/behavior-rules` | Cost behavior rules: element, cost object kind, Fixed / Variable, effective date (FR-38.16) | `GET /cost-behavior-rules`, `/cost-elements` |
+| `/costacct/behavior-rules/new` | New behavior rule; the duplicate refusal (CST-0020) is shown | `GET /cost-elements`, `POST /cost-behavior-rules` |
+| `/costacct/allocation-runs` | Allocation runs with status (Completed / Reversed), cost in / out and convergence | `GET /allocation-runs` |
+| `/costacct/allocation-runs/new` | Choose the centers and type the basis matrix, then run; a period already allocated is rerun by reversal (BR-38.7) | `GET /cost-objects`, `/cost-elements`, `POST /allocation-runs` |
+| `/costacct/allocation-runs/:id` | Run totals, net postings and flows; CO-0613 (zero basis) and CO-0615 (journal postings after the run, with a rerun link) warnings; links between a reversed run and its rerun | `GET /allocation-runs/{id}` |
 | `/costacct/top-down-runs` | Top-down runs with amount, basis period and segment count | `GET /top-down-runs` |
 | `/costacct/top-down-runs/new` | Choose source, element, amount and segments, type each basis and see the cent-exact preview, then run | `GET /cost-objects`, `/cost-elements`, `POST /top-down-runs` |
 | `/costacct/top-down-runs/:id` | Run totals, shares per segment and zero-basis segments | `GET /top-down-runs/{id}` |

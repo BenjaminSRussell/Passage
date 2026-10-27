@@ -29,6 +29,7 @@ type fakeStore struct {
 	template      store.AllocationTemplate
 	expected      int
 	templateRun   store.TemplateRunRequest
+	behavior      store.BehaviorRule
 }
 
 func (f *fakeStore) CreateCostObject(context.Context, string, string, store.CostObject) (int, []byte, error) {

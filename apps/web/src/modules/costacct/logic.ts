@@ -74,6 +74,30 @@ export function validateCodeForm(f: CodeForm): Partial<Record<keyof CodeForm, st
   return errors;
 }
 
+/** True for a real calendar date written YYYY-MM-DD (2026-02-30 is not one). */
+export function isDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const d = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
+}
+
+export interface BehaviorRuleForm {
+  legalEntityId: string;
+  costElementId: string;
+  objectKind: "" | "CostCenter" | "InternalOrder" | "Product" | "Project";
+  behavior: "Fixed" | "Variable";
+  effectiveFrom: string;
+}
+
+/** Field errors for a cost behavior rule (FR-38.16); the service checks the same rules. */
+export function validateBehaviorRule(f: BehaviorRuleForm): Partial<Record<keyof BehaviorRuleForm, string>> {
+  const errors: Partial<Record<keyof BehaviorRuleForm, string>> = {};
+  if (!UUID.test(f.legalEntityId)) errors.legalEntityId = "Enter the legal entity's id (a UUID).";
+  if (!UUID.test(f.costElementId)) errors.costElementId = "Choose the cost element the rule classifies.";
+  if (!isDate(f.effectiveFrom)) errors.effectiveFrom = "Enter the first day the rule applies, as YYYY-MM-DD.";
+  return errors;
+}
+
 /** A primary element maps an inclusive main account range; From must not sort after To. */
 export function validateAccountRange(from: string, to: string): string | null {
   if (from === "" || to === "") return "A primary element needs both main account bounds.";

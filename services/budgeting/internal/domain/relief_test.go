@@ -58,15 +58,57 @@ func TestRelief_Property(t *testing.T) {
 }
 
 func TestEncumbranceStatus(t *testing.T) {
-	tests := []struct{ reserved, relieved, want string }{
-		{"500", "0", StatusOpen},
-		{"500", "200", StatusPartiallyRelieved},
-		{"500", "500", StatusRelieved},
-		{"0", "0", StatusRelieved}, // a line revised to zero has nothing open
+	tests := []struct{ reserved, relieved, released, want string }{
+		{"500", "0", "0", StatusOpen},
+		{"500", "200", "0", StatusPartiallyRelieved},
+		{"500", "500", "0", StatusRelieved},
+		{"0", "0", "0", StatusRelieved},          // a line revised to zero has nothing open
+		{"500", "0", "500", StatusReleased},      // PO line cancelled before any invoice
+		{"500", "200", "300", StatusReleased},    // PO closed with a residual
+		{"500", "500", "0.0001", StatusReleased}, // any release closes the line
 	}
 	for _, tc := range tests {
-		if got := EncumbranceStatus(d(tc.reserved), d(tc.relieved)); got != tc.want {
-			t.Errorf("EncumbranceStatus(%s, %s) = %s, want %s", tc.reserved, tc.relieved, got, tc.want)
+		if got := EncumbranceStatus(d(tc.reserved), d(tc.relieved), d(tc.released)); got != tc.want {
+			t.Errorf("EncumbranceStatus(%s, %s, %s) = %s, want %s", tc.reserved, tc.relieved, tc.released, got, tc.want)
 		}
 	}
+}
+
+// FR-38.5: cancelling or closing a PO line releases exactly the open remainder.
+func TestRelease_Table(t *testing.T) {
+	tests := []struct{ reserved, relieved, released, want string }{
+		{"500", "0", "0", "500"},   // cancelled before any invoice
+		{"500", "320", "0", "180"}, // closed after a partial invoice
+		{"500", "500", "0", "0"},   // fully invoiced: nothing to release
+		{"500", "320", "180", "0"}, // already released
+		{"0", "0", "0", "0"},       // revised to zero
+		{"500.0050", "0.0025", "0", "500.0025"},
+	}
+	for _, tc := range tests {
+		if got := Release(d(tc.reserved), d(tc.relieved), d(tc.released)); !got.Equal(d(tc.want)) {
+			t.Errorf("Release(%s, %s, %s) = %s, want %s", tc.reserved, tc.relieved, tc.released, got, tc.want)
+		}
+	}
+}
+
+// Property: after a release the reservation is fully accounted for
+// (relieved + released = reserved) and a second release gives nothing.
+func TestRelease_Property(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		reserved := decimal.New(rapid.Int64Range(0, 10_000_000).Draw(t, "reserved"), -2)
+		relieved := decimal.New(rapid.Int64Range(0, reserved.Shift(2).IntPart()).Draw(t, "relieved"), -2)
+		rel := Release(reserved, relieved, decimal.Zero)
+		if rel.Sign() < 0 {
+			t.Fatalf("negative release %s", rel)
+		}
+		if !relieved.Add(rel).Equal(reserved) {
+			t.Fatalf("relieved %s + released %s != reserved %s", relieved, rel, reserved)
+		}
+		if again := Release(reserved, relieved, rel); !again.IsZero() {
+			t.Fatalf("second release gave %s", again)
+		}
+		if after := Relief(reserved.Sub(rel), relieved, reserved); !after.IsZero() {
+			t.Fatalf("relief after release gave %s", after)
+		}
+	})
 }

@@ -142,7 +142,7 @@ paths:
       x-passage-duty: budget.view
       parameters:
         - { $ref: '#/components/parameters/Rule' }
-        - { name: status, in: query, required: false, schema: { type: string, enum: [Open, PartiallyRelieved, Relieved] } }
+        - { name: status, in: query, required: false, schema: { type: string, enum: [Open, PartiallyRelieved, Relieved, Released] } }
       responses:
         '200':
           description: Reservations of the rule version, newest first.
@@ -175,6 +175,27 @@ paths:
             Relief is min(invoiceQuantity x poUnitPrice, remaining reservation). excess is the invoice amount above the
             relief and must be run through POST /v1/budget/checks as a new amount.
           content: { application/json: { schema: { $ref: '#/components/schemas/ReliefResult' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/budget/encumbrances/{id}:release:
+    post:
+      operationId: releaseEncumbrance
+      x-passage-duty: budget.check
+      description: >-
+        Gives the open remainder of an encumbrance (reserved less relieved) back to available funds when the PO line is
+        cancelled or the PO is closed (FR-38.5). The balance and the encumbrance move in one transaction and
+        encumbrance.released.v1 is written to the outbox. The line is then Released: a later check or consumption for the
+        same line is refused with BUD-0011, and an invoice against it relieves nothing (its whole amount is excess).
+        Nothing open to release is BUD-0010 (409).
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/Release' } } }
+      responses:
+        '200':
+          description: The released amount; remaining is 0.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ReleaseResult' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/budget/reservations:
     get:
@@ -490,7 +511,7 @@ components:
         items: { type: array, items: { $ref: '#/components/schemas/Balance' } }
     Encumbrance:
       type: object
-      required: [id, ruleVersionId, controlDimensionKey, timeSpanKey, sourceType, sourceDocumentId, sourceLineId, reserved, relieved, remaining, status, history, createdAt]
+      required: [id, ruleVersionId, controlDimensionKey, timeSpanKey, sourceType, sourceDocumentId, sourceLineId, reserved, relieved, released, remaining, status, history, createdAt]
       properties:
         id: { type: string, format: uuid }
         ruleVersionId: { type: string, format: uuid }
@@ -501,15 +522,16 @@ components:
         sourceLineId: { type: string, format: uuid }
         reserved: { $ref: '#/components/schemas/Money' }
         relieved: { $ref: '#/components/schemas/Money' }
-        remaining: { $ref: '#/components/schemas/Money' }
-        status: { type: string, enum: [Open, PartiallyRelieved, Relieved] }
+        released: { $ref: '#/components/schemas/Money', description: Open remainder given back on a PO line cancellation or PO close. }
+        remaining: { $ref: '#/components/schemas/Money', description: reserved - relieved - released. }
+        status: { type: string, enum: [Open, PartiallyRelieved, Relieved, Released] }
         history:
           type: array
           items:
             type: object
             required: [type, amount, documentId, at]
             properties:
-              type: { type: string, enum: [Reserve, Adjust, Relieve, Consume] }
+              type: { type: string, enum: [Reserve, Adjust, Relieve, Consume, Release] }
               amount: { $ref: '#/components/schemas/Money' }
               documentId: { type: string, format: uuid }
               at: { type: string, format: date-time }
@@ -589,7 +611,24 @@ components:
         relieved: { $ref: '#/components/schemas/Money' }
         remaining: { $ref: '#/components/schemas/Money' }
         excess: { $ref: '#/components/schemas/Money' }
-        status: { type: string, enum: [Open, PartiallyRelieved, Relieved] }
+        status: { type: string, enum: [Open, PartiallyRelieved, Relieved, Released] }
+    Release:
+      type: object
+      required: [documentId, reason]
+      additionalProperties: false
+      properties:
+        documentId: { type: string, format: uuid, description: The cancelled or closed purchase order. }
+        reason: { type: string, enum: [Cancelled, Closed], description: Cancelled for a PO line cancellation, Closed for a PO closed with a residual. }
+    ReleaseResult:
+      type: object
+      required: [encumbranceId, reason, released, relieved, remaining, status]
+      properties:
+        encumbranceId: { type: string, format: uuid }
+        reason: { type: string, enum: [Cancelled, Closed] }
+        released: { $ref: '#/components/schemas/Money' }
+        relieved: { $ref: '#/components/schemas/Money' }
+        remaining: { $ref: '#/components/schemas/Money' }
+        status: { type: string, enum: [Released] }
     ReservationType:
       type: string
       enum: [FundsReservation, Precommitment, FundsBlocking, RevenueForecast]

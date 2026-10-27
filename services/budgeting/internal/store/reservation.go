@@ -321,7 +321,7 @@ func (s *Postgres) ConsumeReservation(ctx context.Context, key, hash string, req
 			encumbranceID = pr.id
 			reserved := pr.reserved.Add(req.Amount)
 			if _, err := tx.Exec(ctx, `update encumbrance set reserved = $3, status = $4, lines = lines || $5::jsonb where tenant_id = $1 and id = $2`,
-				p.TenantID, pr.id, reserved, domain.EncumbranceStatus(reserved, pr.relieved), string(hist)); err != nil {
+				p.TenantID, pr.id, reserved, domain.EncumbranceStatus(reserved, pr.relieved, decimal.Zero), string(hist)); err != nil {
 				return 0, nil, err
 			}
 		} else if _, err := tx.Exec(ctx, `insert into encumbrance (tenant_id, id, legal_entity_id, balance_id, source_type, source_line_id, source_document_id, reserved, status, lines)

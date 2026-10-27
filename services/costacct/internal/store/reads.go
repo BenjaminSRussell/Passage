@@ -38,6 +38,13 @@ type Run struct {
 	Postings           []domain.Posting `json:"postings"`
 	Unallocated        []string         `json:"unallocated"`
 	CreatedAt          string           `json:"createdAt"`
+	// ReversesRunID is the run this rerun replaced; ReversedByRunID the rerun
+	// that replaced this one (BR-38.7).
+	ReversesRunID   string `json:"reversesRunId,omitempty"`
+	ReversedByRunID string `json:"reversedByRunId,omitempty"`
+	// Warnings: CO-0613 per zero-basis sender; CO-0615 when journal cost for
+	// the run's objects arrived after a completed run, so it needs a rerun.
+	Warnings []Warning `json:"warnings"`
 }
 
 // ReconcileRequest carries the journal balances of one legal entity, period and currency.
@@ -98,7 +105,8 @@ func (s *Postgres) GetCostObject(ctx context.Context, id string) (CostObject, er
 func (s *Postgres) ListCostElements(ctx context.Context, legalEntityID string) ([]CostElement, error) {
 	out := []CostElement{}
 	err := s.read(ctx, func(tx pgx.Tx, tenantID string) error {
-		rows, err := tx.Query(ctx, `select id::text, legal_entity_id::text, kind, code, name, coalesce(main_account_from, ''), coalesce(main_account_to, '')
+		rows, err := tx.Query(ctx, `select id::text, legal_entity_id::text, kind, code, name, coalesce(main_account_from, ''), coalesce(main_account_to, ''),
+				coalesce(default_behavior, '')
 			from cost_element where tenant_id = $1 and ($2 = '' or legal_entity_id::text = $2) order by code limit $3`, tenantID, legalEntityID, listLimit)
 		if err != nil {
 			return err
@@ -106,7 +114,7 @@ func (s *Postgres) ListCostElements(ctx context.Context, legalEntityID string) (
 		defer rows.Close()
 		for rows.Next() {
 			var e CostElement
-			if err := rows.Scan(&e.ID, &e.LegalEntityID, &e.Kind, &e.Code, &e.Name, &e.MainAccountFrom, &e.MainAccountTo); err != nil {
+			if err := rows.Scan(&e.ID, &e.LegalEntityID, &e.Kind, &e.Code, &e.Name, &e.MainAccountFrom, &e.MainAccountTo, &e.DefaultBehavior); err != nil {
 				return err
 			}
 			out = append(out, e)
@@ -116,16 +124,25 @@ func (s *Postgres) ListCostElements(ctx context.Context, legalEntityID string) (
 	return out, err
 }
 
-const runColumns = `id::text, legal_entity_id::text, period_key, currency, secondary_element_id::text, method, iterations, residual::text,
-	converged, swept::text, total_in::text, total_out::text, status, cost_object_ids, flows, postings, unallocated, created_at`
+// runColumns reads a run from allocation_run r. late is true when a journal
+// entry for one of the run's objects, its period and currency was written
+// after a completed run (CO-0615, BR-38.7).
+const runColumns = `r.id::text, r.legal_entity_id::text, r.period_key, r.currency, r.secondary_element_id::text, r.method, r.iterations, r.residual::text,
+	r.converged, r.swept::text, r.total_in::text, r.total_out::text, r.status, r.cost_object_ids, r.flows, r.postings, r.unallocated, r.created_at,
+	coalesce(r.reverses_run_id::text, ''), coalesce(r.reversed_by_run_id::text, ''),
+	r.status = 'Completed' and exists(select 1 from cost_entry e where e.tenant_id = r.tenant_id and e.legal_entity_id = r.legal_entity_id
+		and e.period_key = r.period_key and e.currency = r.currency and e.origin = 'Journal' and e.created_at > r.created_at
+		and e.cost_object_id in (select jsonb_array_elements_text(r.cost_object_ids)::uuid))`
 
 func scanRun(row pgx.Row) (Run, error) {
 	var r Run
 	var residual, swept, in, out string
 	var objects, flows, postings, unalloc []byte
 	var created time.Time
+	var late bool
 	if err := row.Scan(&r.ID, &r.LegalEntityID, &r.Period, &r.Currency, &r.SecondaryElementID, &r.Method, &r.Iterations, &residual,
-		&r.Converged, &swept, &in, &out, &r.Status, &objects, &flows, &postings, &unalloc, &created); err != nil {
+		&r.Converged, &swept, &in, &out, &r.Status, &objects, &flows, &postings, &unalloc, &created,
+		&r.ReversesRunID, &r.ReversedByRunID, &late); err != nil {
 		return r, err
 	}
 	r.Residual, r.Swept, r.TotalIn, r.TotalOut, r.CreatedAt = parseDec(residual), parseDec(swept), parseDec(in), parseDec(out), stamp(created)
@@ -137,6 +154,7 @@ func scanRun(row pgx.Row) (Run, error) {
 			return r, err
 		}
 	}
+	r.Warnings = runWarnings(r.Unallocated, late, r.Period)
 	return r, nil
 }
 
@@ -144,8 +162,8 @@ func scanRun(row pgx.Row) (Run, error) {
 func (s *Postgres) ListRuns(ctx context.Context, legalEntityID string) ([]Run, error) {
 	out := []Run{}
 	err := s.read(ctx, func(tx pgx.Tx, tenantID string) error {
-		rows, err := tx.Query(ctx, `select `+runColumns+` from allocation_run
-			where tenant_id = $1 and ($2 = '' or legal_entity_id::text = $2) order by period_key desc, created_at desc limit $3`,
+		rows, err := tx.Query(ctx, `select `+runColumns+` from allocation_run r
+			where r.tenant_id = $1 and ($2 = '' or r.legal_entity_id::text = $2) order by r.period_key desc, r.created_at desc limit $3`,
 			tenantID, legalEntityID, listLimit)
 		if err != nil {
 			return err
@@ -168,7 +186,7 @@ func (s *Postgres) GetRun(ctx context.Context, id string) (Run, error) {
 	var r Run
 	err := s.read(ctx, func(tx pgx.Tx, tenantID string) error {
 		var err error
-		r, err = scanRun(tx.QueryRow(ctx, `select `+runColumns+` from allocation_run where tenant_id = $1 and id = $2`, tenantID, id))
+		r, err = scanRun(tx.QueryRow(ctx, `select `+runColumns+` from allocation_run r where r.tenant_id = $1 and r.id = $2`, tenantID, id))
 		if errors.Is(err, pgx.ErrNoRows) {
 			return problem(http.StatusNotFound, CodeRunNotFound, "allocation run not found")
 		}

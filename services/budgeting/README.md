@@ -1,8 +1,8 @@
 # budgeting
 
-Budget control for Passage (PRD 7.38, ticket PSG-38, wave 38, slices 1 to 3). The service holds budget control rule
+Budget control for Passage (PRD 7.38, ticket PSG-38, wave 38, slices 1 to 4). The service holds budget control rule
 versions, posts budget register entries, runs budget checks against per-combination balances under row locks,
-relieves encumbrances from matched invoice lines, keeps budget reservation documents (earmarked funds) and maintains
+relieves encumbrances from matched invoice lines, releases them on PO cancellation or close, keeps budget reservation documents (earmarked funds) and maintains
 investment programs.
 
 ## What slice 1 does
@@ -60,9 +60,21 @@ investment programs.
   position carries once (`BUD-0021` when nothing is left); only approval year + 1 is accepted (`BUD-0032`). The event
   `dev.passage.budget.program.carriedforward.v1` goes through the outbox in the same transaction.
 
+## What slice 4 adds
+
+- **Encumbrance release (FR-38.5)**: `POST /v1/budget/encumbrances/{id}:release` with the purchase order id and a
+  reason (`Cancelled` for a PO line cancellation, `Closed` for a PO closed with a residual) gives the open remainder
+  (reserved − relieved) back to available funds. What invoices already relieved stays relieved. The balance row and
+  the encumbrance are locked in the same order as a check, move together, and
+  `dev.passage.budget.encumbrance.released.v1` goes through the outbox in the same transaction. The encumbrance
+  becomes `Released` and is final: a later check or reservation consumption for the same line is refused
+  (`BUD-0011`), an invoice against it relieves nothing (its whole amount is `excess`), and a second release is
+  `BUD-0010`. Revisions of a live line (raise or lower) still go through a re-check of the line (BR-38.3).
+
 Money is `numeric(19,4)` with a currency. Every command requires `Idempotency-Key`. Commands emit outbox events
 (`dev.passage.budget.register.posted.v1`, `dev.passage.budget.check.completed.v1`,
-`dev.passage.budget.encumbrance.relieved.v1`, `dev.passage.budget.reservation.consumed.v1`,
+`dev.passage.budget.encumbrance.relieved.v1`, `dev.passage.budget.encumbrance.released.v1`,
+`dev.passage.budget.reservation.consumed.v1`,
 `dev.passage.budget.program.carriedforward.v1`).
 
 ## Run and test
@@ -88,7 +100,7 @@ Health: `GET /healthz`, `GET /readyz` (provided by `httpx.NewRouter`).
 | POST | `/v1/budget/checks` | `budget.check` (`budget.override` turns fail into warn) |
 | GET | `/v1/budget/checks?rule=&documentId=`, `/v1/budget/checks/{id}` | `budget.view` |
 | GET | `/v1/budget/encumbrances?rule=&status=`, `/v1/budget/encumbrances/{id}` | `budget.view` |
-| POST | `/v1/budget/encumbrances/{id}:relieve` | `budget.check` |
+| POST | `/v1/budget/encumbrances/{id}:relieve`, `/v1/budget/encumbrances/{id}:release` | `budget.check` |
 | POST | `/v1/budget/reservations` | `budget.reserve` (`budget.override` turns fail into warn) |
 | POST | `/v1/budget/reservations/{id}:close`, `/v1/budget/reservations:expire` | `budget.reserve` |
 | POST | `/v1/budget/reservations/{id}:consume` | `budget.check` |
@@ -113,6 +125,8 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | `BUD-0007` | Consumption above the line's open amount |
 | `BUD-0008` | RevenueForecast holds no funds to consume |
 | `BUD-0009` | Reservation reached its expiry date (409) |
+| `BUD-0010` | The encumbrance has nothing open to release: fully relieved or already released (409) |
+| `BUD-0011` | The line's encumbrance was released (PO line cancelled or PO closed); it takes no new check or consumption (409) |
 | `CO-0601` | Reservation creation check failed: available below the requested amount |
 | `CO-0604` | Transfer lines do not net to zero |
 | `CO-0631` | Funds blocking cannot be consumed |

@@ -1,9 +1,10 @@
 # costacct
 
-Cost accounting for Passage (PRD 7.38, ticket PSG-38, wave 38, slices 1 to 3). The service keeps cost objects and cost
+Cost accounting for Passage (PRD 7.38, ticket PSG-38, wave 38, slices 1 to 4). The service keeps cost objects and cost
 elements, mirrors primary costs from journal lines into cost entries, runs reciprocal assessment allocations
-that conserve cost to the cent, distributes aggregated amounts top-down, settles internal orders and runs template
-(driver-formula) allocations over statistical measures.
+that conserve cost to the cent, distributes aggregated amounts top-down, settles internal orders, runs template
+(driver-formula) allocations over statistical measures, reruns allocations by reversal and classifies cost as fixed
+or variable.
 
 ## What slice 1 does
 
@@ -23,7 +24,7 @@ that conserve cost to the cent, distributes aggregated amounts top-down, settles
   receiver, so every sender ends at exactly zero and `totalIn` (senders' cost) equals `totalOut` (cost taken by
   final receivers) to the cent, or the run rolls back (`CST-0006`). A closed cycle, where some sender reaches no
   final receiver, is `CST-0005`. Senders with no basis keep their cost and are reported as unallocated. Only one
-  completed run exists per legal entity and period.
+  completed run exists per legal entity and period (a second request is a rerun, slice 4).
 - **Reconciliation (FR-38.11, AC-38.6)**: `POST /v1/controlling/reconciliations` maps the supplied journal balances
   to primary elements and compares them with Σ primary cost entries per element for the period and currency.
 - **Cost object line items**: entries of one object for one period, with origin and behavior.
@@ -64,6 +65,24 @@ that conserve cost to the cent, distributes aggregated amounts top-down, settles
   template row is locked and one completed run exists per template and period (`CST-0002`). The run emits
   `allocation.completed` with method `Template` and `template_id`, plus `costentry.created` per entry.
 
+## What slice 4 adds
+
+- **Allocation rerun with reversal (BR-38.7)**: posting an allocation run for a period that already has a completed
+  run is a rerun. In one transaction the earlier run's Allocation entries are negated (the negations carry the old
+  run id, so each run nets to zero per cost object), the old run becomes `Reversed` with `reversedByRunId`, and the
+  new run is computed from the current journal cost and stored with `reversesRunId`. `allocation.completed` carries
+  `reversed_run_id`. The completed-run row is locked first, so two concurrent reruns serialize; the loser is
+  `CST-0002`.
+- **Warnings (BR-38.7, BR-38.8)**: runs report `warnings`. `CO-0613` names each sender with cost and zero basis (its
+  cost stays where it is). A completed run read back (`GET /allocation-runs`, `/{id}`) carries `CO-0615` when journal
+  cost for its cost objects, period and currency was mirrored after the run, so the period needs a rerun.
+- **Cost behavior (FR-38.16)**: a cost element may carry a `defaultBehavior` (Fixed or Variable), and
+  `POST /v1/controlling/cost-behavior-rules` stores effective-dated rules per element, for every cost object kind or
+  one kind (one rule per element, kind and date, `CST-0020`). Journal lines are classified when they are mirrored: a
+  rule for the object's kind beats a rule for any kind, the latest rule effective on or before the first day of the
+  period wins within a tier, then the element default, else `Unclassified`. Entries already in the ledger keep their
+  class; allocation, top-down, settlement and template entries stay `Unclassified`.
+
 Costs are `numeric(19,4)` with a currency. Commands require `Idempotency-Key` and write outbox events
 (`dev.passage.controlling.costentry.created.v1`, `dev.passage.controlling.allocation.completed.v1`; a top-down run
 emits `allocation.completed` with method `TopDown`, a template run with method `Template`).
@@ -96,6 +115,8 @@ Health: `GET /healthz`, `GET /readyz` (provided by `httpx.NewRouter`).
 | GET | `/v1/controlling/cost-objects?legalEntityId=&kind=`, `/v1/controlling/cost-objects/{id}` | `controlling.view` |
 | POST | `/v1/controlling/cost-elements` | `controlling.maintain` |
 | GET | `/v1/controlling/cost-elements?legalEntityId=` | `controlling.view` |
+| POST | `/v1/controlling/cost-behavior-rules` | `controlling.maintain` |
+| GET | `/v1/controlling/cost-behavior-rules?legalEntityId=&costElementId=` | `controlling.view` |
 | POST | `/v1/controlling/cost-entries:mirror` | `controlling.maintain` |
 | POST | `/v1/controlling/allocation-runs` | `controlling.run` |
 | GET | `/v1/controlling/allocation-runs?legalEntityId=`, `/v1/controlling/allocation-runs/{id}` | `controlling.view` |
@@ -122,7 +143,7 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | Code | Meaning |
 |---|---|
 | `CST-0001` | Cost object not found |
-| `CST-0002` | The period already has a completed allocation run, the source and element a completed top-down run, or the template a completed run |
+| `CST-0002` | A concurrent rerun of the period won the race, the source and element already have a completed top-down run, or the template a completed run |
 | `CST-0003` | Duplicate cost object or element code |
 | `CST-0004` | No primary element maps a journal line's main account |
 | `CST-0005` | The cycle is closed: a sender reaches no final receiver (CO-0611) |
@@ -139,9 +160,12 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | `CST-0017` | Allocation template not found |
 | `CST-0018` | Template version conflict: the code is at another version than the one sent (409) |
 | `CST-0019` | Template run not found |
+| `CST-0020` | A cost behavior rule already exists for the element, object kind and date (409) |
 | `CO-0618` | Settlement exceeds collected cost (BR-38.9) |
 | `CO-0621` | Formula error in a template line: syntax, or a reference to an unknown measure or element |
 | `CO-0622` | Warning on a dry run or run: a divisor is zero for a receiver; that division evaluates to 0 |
+| `CO-0613` | Warning on an allocation run: a sender with cost has zero basis; its cost is not allocated (BR-38.8) |
+| `CO-0615` | Warning on a completed allocation run: journal postings arrived after it; rerun the allocation (BR-38.7) |
 | `COM-0001` | Malformed body or request fields fail validation (400) |
 | `idempotency_key_reuse` | Same Idempotency-Key with a different body (422) |
 | `idempotency_in_progress` | A request with this key is still running (409) |

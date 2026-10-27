@@ -42,4 +42,6 @@ type AllocationCompletedData struct {
 	TotalOut      decimal.Decimal `json:"total_out"`
 	Residual      decimal.Decimal `json:"residual"`
 	Swept         decimal.Decimal `json:"swept"`
+	// ReversedRunID names the run a rerun reversed (BR-38.7).
+	ReversedRunID string `json:"reversed_run_id,omitempty"`
 }

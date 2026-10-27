@@ -1,7 +1,8 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Badge, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
-import { createCostElement, describeError, listCostElements, type CostElement, type CostElementKind } from "./api/client";
+import { createCostElement, describeError, listCostElements, type Behavior, type CostElement, type CostElementKind } from "./api/client";
+import { BehaviorBadge } from "./BehaviorRulesPage";
 import { UUID, validateAccountRange, validateCodeForm, type CodeForm } from "./logic";
 import styles from "./pages.module.css";
 import { dash, ErrorList, LoadError } from "./parts";
@@ -12,6 +13,7 @@ const columns: DataTableColumn<CostElement>[] = [
   { key: "name", header: "Name" },
   { key: "kind", header: "Kind", render: (e) => <Badge tone={e.kind === "Primary" ? "info" : "neutral"}>{e.kind}</Badge> },
   { key: "range", header: "Main accounts", mono: true, render: (e) => (e.mainAccountFrom ? `${e.mainAccountFrom}..${e.mainAccountTo}` : dash) },
+  { key: "defaultBehavior", header: "Default behavior", render: (e) => <BehaviorBadge behavior={e.defaultBehavior} /> },
   { key: "legalEntityId", header: "Legal entity", mono: true },
 ];
 
@@ -55,13 +57,14 @@ export function CostElementsPage() {
 /** Creates a primary or secondary cost element. Primary ranges may not overlap (CST-0009). */
 export function CreateCostElementPage() {
   const navigate = useNavigate();
-  const [form, setForm] = useState<CodeForm & { kind: CostElementKind; from: string; to: string }>({
+  const [form, setForm] = useState<CodeForm & { kind: CostElementKind; from: string; to: string; behavior: Behavior | "" }>({
     legalEntityId: "",
     code: "",
     name: "",
     kind: "Primary",
     from: "",
     to: "",
+    behavior: "",
   });
   const [errors, setErrors] = useState<Partial<Record<keyof CodeForm | "range", string>>>({});
   const [failure, setFailure] = useState<string | null>(null);
@@ -80,7 +83,10 @@ export function CreateCostElementPage() {
     setErrors(found);
     setFailure(null);
     if (Object.keys(found).length > 0) return;
-    const input = primary ? { ...base, kind: form.kind, mainAccountFrom: form.from.trim(), mainAccountTo: form.to.trim() } : { ...base, kind: form.kind };
+    const behavior = form.behavior ? { defaultBehavior: form.behavior } : {};
+    const input = primary
+      ? { ...base, kind: form.kind, mainAccountFrom: form.from.trim(), mainAccountTo: form.to.trim(), ...behavior }
+      : { ...base, kind: form.kind, ...behavior };
     const body = JSON.stringify(input);
     if (key.current.body !== body) key.current = { body, value: crypto.randomUUID() };
     setBusy(true);
@@ -126,6 +132,15 @@ export function CreateCostElementPage() {
               </FormField>
             </>
           ) : null}
+          <FormField id="element-behavior" label="Default behavior" hint="Used for journal cost on this element when no behavior rule applies.">
+            {(c) => (
+              <Select {...c} value={form.behavior} onChange={(e) => setForm({ ...form, behavior: e.target.value as Behavior | "" })}>
+                <option value="">Unclassified</option>
+                <option value="Fixed">Fixed</option>
+                <option value="Variable">Variable</option>
+              </Select>
+            )}
+          </FormField>
           <div className={styles.formActions}>
             <Button type="submit" variant="primary" loading={busy}>
               Save cost element

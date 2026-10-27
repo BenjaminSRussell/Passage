@@ -5,6 +5,7 @@ const BASE = "/api/v1/controlling";
 
 export type CostObjectKind = "CostCenter" | "InternalOrder" | "Product" | "Project";
 export type CostElementKind = "Primary" | "Secondary";
+export type Behavior = "Fixed" | "Variable";
 
 export interface CostObject {
   id: string;
@@ -24,9 +25,32 @@ export interface CostElement {
   name: string;
   mainAccountFrom?: string;
   mainAccountTo?: string;
+  /** Class of journal cost on this element when no behavior rule applies (FR-38.16). */
+  defaultBehavior?: Behavior;
 }
 
 export type NewCostElement = Omit<CostElement, "id">;
+
+/** A Fixed / Variable classification of one element from a date, for one cost object kind or every kind (FR-38.16). */
+export interface BehaviorRule {
+  id: string;
+  legalEntityId: string;
+  costElementId: string;
+  /** Absent for every kind. */
+  objectKind?: CostObjectKind;
+  behavior: Behavior;
+  /** YYYY-MM-DD; applies to periods starting on or after it. */
+  effectiveFrom: string;
+  createdAt: string;
+}
+
+export type NewBehaviorRule = Omit<BehaviorRule, "id" | "createdAt">;
+
+/** CO-0613: a sender with zero basis kept its cost. CO-0615: journal cost arrived after the run; rerun it. */
+export interface RunWarning {
+  code: "CO-0613" | "CO-0615";
+  detail: string;
+}
 
 export interface CostEntry {
   id: string;
@@ -82,7 +106,10 @@ export interface RunInput {
 export interface RunResponse {
   runId: string;
   period: string;
+  /** Set when this run reversed the period's completed run (BR-38.7). */
+  reversedRunId?: string;
   result: AllocationResult;
+  warnings: RunWarning[];
 }
 
 export interface Run extends AllocationResult {
@@ -91,9 +118,14 @@ export interface Run extends AllocationResult {
   period: string;
   currency: string;
   secondaryElementId: string;
-  status: "Completed";
+  status: "Completed" | "Reversed";
   costObjectIds: string[];
   createdAt: string;
+  /** The run this rerun replaced. */
+  reversesRunId?: string;
+  /** On a Reversed run: the rerun that replaced it. */
+  reversedByRunId?: string;
+  warnings: RunWarning[];
 }
 
 export interface JournalBalance {
@@ -241,6 +273,15 @@ export function createCostElement(input: NewCostElement, idempotencyKey: string)
   return post(`${BASE}/cost-elements`, input, idempotencyKey);
 }
 
+export function listBehaviorRules(filter: { legalEntityId?: string; costElementId?: string } = {}, signal?: AbortSignal): Promise<Items<BehaviorRule>> {
+  return request(`${BASE}/cost-behavior-rules${query(filter)}`, { signal });
+}
+
+/** Classifies an element's journal cost as Fixed or Variable from a date (FR-38.16). */
+export function createBehaviorRule(input: NewBehaviorRule, idempotencyKey: string): Promise<BehaviorRule> {
+  return post(`${BASE}/cost-behavior-rules`, input, idempotencyKey);
+}
+
 export function listRuns(legalEntityId?: string, signal?: AbortSignal): Promise<Items<Run>> {
   return request(`${BASE}/allocation-runs${query({ legalEntityId })}`, { signal });
 }
@@ -249,7 +290,7 @@ export function getRun(id: string, signal?: AbortSignal): Promise<Run> {
   return request(`${BASE}/allocation-runs/${encodeURIComponent(id)}`, { signal });
 }
 
-/** Runs one reciprocal allocation step for a period (FR-38.7). */
+/** Runs one reciprocal allocation step for a period (FR-38.7); for a period already allocated it is a rerun that reverses the earlier run (BR-38.7). */
 export function runAllocation(input: RunInput, idempotencyKey: string): Promise<RunResponse> {
   return post(`${BASE}/allocation-runs`, input, idempotencyKey);
 }

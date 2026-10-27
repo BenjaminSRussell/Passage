@@ -121,19 +121,19 @@ func (s *Postgres) Available(ctx context.Context, ruleVersionID, dim, span strin
 }
 
 const encumbranceColumns = `e.id::text, b.rule_version_id::text, b.control_dimension_key, b.time_span_key, e.source_type, e.source_document_id::text,
-	e.source_line_id::text, e.reserved::text, e.relieved::text, e.status, e.lines, e.created_at`
+	e.source_line_id::text, e.reserved::text, e.relieved::text, e.released::text, e.status, e.lines, e.created_at`
 
 func scanEncumbrance(row pgx.Row) (EncumbranceView, error) {
 	var e EncumbranceView
-	var reserved, relieved string
+	var reserved, relieved, released string
 	var history []byte
 	var created time.Time
 	if err := row.Scan(&e.ID, &e.RuleVersionID, &e.ControlDimensionKey, &e.TimeSpanKey, &e.SourceType, &e.SourceDocumentID,
-		&e.SourceLineID, &reserved, &relieved, &e.Status, &history, &created); err != nil {
+		&e.SourceLineID, &reserved, &relieved, &released, &e.Status, &history, &created); err != nil {
 		return e, err
 	}
-	e.Reserved, e.Relieved, e.CreatedAt = parseDec(reserved), parseDec(relieved), stamp(created)
-	e.Remaining = e.Reserved.Sub(e.Relieved)
+	e.Reserved, e.Relieved, e.Released, e.CreatedAt = parseDec(reserved), parseDec(relieved), parseDec(released), stamp(created)
+	e.Remaining = domain.Release(e.Reserved, e.Relieved, e.Released)
 	e.History = []historyEntry{}
 	return e, json.Unmarshal(history, &e.History)
 }

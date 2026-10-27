@@ -31,12 +31,28 @@ const (
 	StatusOpen              = "Open"
 	StatusPartiallyRelieved = "PartiallyRelieved"
 	StatusRelieved          = "Relieved"
+	StatusReleased          = "Released"
 )
 
-// EncumbranceStatus derives the status from the reserved and relieved totals:
-// nothing relieved is Open, everything relieved is Relieved, otherwise partial.
-func EncumbranceStatus(reserved, relieved decimal.Decimal) string {
+// Release is the amount a PO line cancellation or a PO close gives back to
+// available funds (FR-38.5): the open remainder of the reservation, never
+// negative. What invoices already relieved stays relieved.
+func Release(reserved, relieved, released decimal.Decimal) decimal.Decimal {
+	open := reserved.Sub(relieved).Sub(released)
+	if open.Sign() <= 0 {
+		return decimal.Zero
+	}
+	return open
+}
+
+// EncumbranceStatus derives the status from the totals. A release is final:
+// once a residual is released the line is closed and stays Released. Without
+// one, nothing relieved is Open, everything relieved is Relieved, otherwise
+// partial.
+func EncumbranceStatus(reserved, relieved, released decimal.Decimal) string {
 	switch {
+	case released.Sign() > 0:
+		return StatusReleased
 	case relieved.Sign() <= 0 && reserved.Sign() > 0:
 		return StatusOpen
 	case relieved.GreaterThanOrEqual(reserved):

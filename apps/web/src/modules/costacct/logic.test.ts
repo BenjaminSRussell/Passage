@@ -5,12 +5,14 @@ import {
   buildBasis,
   formatAmount,
   formatTicks,
+  isDate,
   isPeriod,
   netPostingsBalanced,
   parseJournalCsv,
   sumTicks,
   toTicks,
   validateAccountRange,
+  validateBehaviorRule,
   validateCodeForm,
 } from "./logic";
 
@@ -107,6 +109,30 @@ describe("isPeriod", () => {
   });
 });
 
+describe("isDate", () => {
+  it("accepts real calendar dates only", () => {
+    expect(isDate("2026-09-01")).toBe(true);
+    expect(isDate("2028-02-29")).toBe(true);
+    expect(isDate("2026-02-30")).toBe(false);
+    expect(isDate("2026-9-01")).toBe(false);
+    expect(isDate("")).toBe(false);
+  });
+});
+
+describe("validateBehaviorRule", () => {
+  const ok = { legalEntityId: "11111111-1111-4111-8111-111111111111", costElementId: "22222222-2222-4222-8222-222222222222", objectKind: "" as const, behavior: "Fixed" as const, effectiveFrom: "2026-09-01" };
+  it("passes a complete rule for every kind", () => {
+    expect(validateBehaviorRule(ok)).toEqual({});
+  });
+  it("names each missing or malformed field", () => {
+    expect(Object.keys(validateBehaviorRule({ ...ok, legalEntityId: "x", costElementId: "", effectiveFrom: "2026-13-01" })).sort()).toEqual([
+      "costElementId",
+      "effectiveFrom",
+      "legalEntityId",
+    ]);
+  });
+});
+
 describe("costacct module manifest", () => {
   it("routes every nav entry behind a controlling duty", () => {
     expect(costacct.id).toBe("costacct");
@@ -116,6 +142,12 @@ describe("costacct module manifest", () => {
       expect(paths).toContain(n.to);
       expect(n.duty).toMatch(/^controlling\./);
     }
+  });
+
+  it("lists the behavior rules for maintainers to find", () => {
+    const paths = costacct.routes.map((r) => r.path);
+    expect(paths).toEqual(expect.arrayContaining(["/costacct/behavior-rules", "/costacct/behavior-rules/new"]));
+    expect(costacct.nav.find((n) => n.to === "/costacct/behavior-rules")?.duty).toBe("controlling.view");
   });
 
   it("is auto-discovered by the registry", () => {

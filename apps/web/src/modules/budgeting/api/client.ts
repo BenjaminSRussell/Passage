@@ -5,7 +5,7 @@ import type { CheckLineResult, DocumentType } from "../logic";
 const BASE = "/api/v1/budget";
 
 export type EntryType = "Original" | "Revision" | "Transfer" | "CarryForward";
-export type EncumbranceStatus = "Open" | "PartiallyRelieved" | "Relieved";
+export type EncumbranceStatus = "Open" | "PartiallyRelieved" | "Relieved" | "Released";
 
 export interface Rule {
   id: string;
@@ -65,7 +65,7 @@ export interface Balance {
 }
 
 export interface EncumbranceHistory {
-  type: "Reserve" | "Adjust" | "Relieve" | "Consume";
+  type: "Reserve" | "Adjust" | "Relieve" | "Consume" | "Release";
   amount: string;
   documentId: string;
   at: string;
@@ -81,6 +81,9 @@ export interface Encumbrance {
   sourceLineId: string;
   reserved: string;
   relieved: string;
+  /** Open remainder given back on a PO line cancellation or PO close (FR-38.5). */
+  released: string;
+  /** reserved - relieved - released. */
   remaining: string;
   status: EncumbranceStatus;
   history: EncumbranceHistory[];
@@ -140,6 +143,24 @@ export interface ReliefOutcome {
   remaining: string;
   excess: string;
   status: EncumbranceStatus;
+}
+
+/** Cancelled: the PO line was cancelled. Closed: the PO was closed with a residual. */
+export type EncumbranceReleaseReason = "Cancelled" | "Closed";
+
+export interface EncumbranceReleaseInput {
+  /** The cancelled or closed purchase order. */
+  documentId: string;
+  reason: EncumbranceReleaseReason;
+}
+
+export interface EncumbranceReleaseOutcome {
+  encumbranceId: string;
+  reason: EncumbranceReleaseReason;
+  released: string;
+  relieved: string;
+  remaining: string;
+  status: "Released";
 }
 
 export type ReservationType = "FundsReservation" | "Precommitment" | "FundsBlocking" | "RevenueForecast";
@@ -323,6 +344,11 @@ export function getEncumbrance(id: string, signal?: AbortSignal): Promise<Encumb
 /** Relieves an encumbrance from a matched invoice (FR-38.5). */
 export function relieveEncumbrance(id: string, input: ReliefInput, idempotencyKey: string): Promise<ReliefOutcome> {
   return command(`${BASE}/encumbrances/${encodeURIComponent(id)}:relieve`, input, idempotencyKey);
+}
+
+/** Gives an encumbrance's open remainder back to available funds (FR-38.5). The line is final afterwards. */
+export function releaseEncumbrance(id: string, input: EncumbranceReleaseInput, idempotencyKey: string): Promise<EncumbranceReleaseOutcome> {
+  return command(`${BASE}/encumbrances/${encodeURIComponent(id)}:release`, input, idempotencyKey);
 }
 
 export function listChecks(rule: string, signal?: AbortSignal): Promise<Items<CheckOutcome>> {

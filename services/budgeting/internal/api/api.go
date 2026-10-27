@@ -46,7 +46,8 @@ var (
 	currencyCode = regexp.MustCompile(`^[A-Z]{3}$`)
 	dateLayout   = "2006-01-02"
 	docTypes     = map[string]bool{"Requisition": true, "PurchaseOrder": true, "Invoice": true, "Journal": true}
-	statuses     = map[string]bool{"": true, domain.StatusOpen: true, domain.StatusPartiallyRelieved: true, domain.StatusRelieved: true}
+	statuses     = map[string]bool{"": true, domain.StatusOpen: true, domain.StatusPartiallyRelieved: true, domain.StatusRelieved: true, domain.StatusReleased: true}
+	releaseWhy   = map[string]bool{store.ReleaseCancelled: true, store.ReleaseClosed: true}
 )
 
 // Store is the persistence surface the handlers need. Commands return the
@@ -55,6 +56,7 @@ type Store interface {
 	CreateRule(ctx context.Context, key, hash string, in store.NewRule) (int, []byte, error)
 	CheckBudget(ctx context.Context, key, hash string, req store.CheckRequest, override bool) (int, []byte, error)
 	RelieveEncumbrance(ctx context.Context, key, hash string, in store.RelieveRequest) (int, []byte, error)
+	ReleaseEncumbrance(ctx context.Context, key, hash string, in store.ReleaseRequest) (int, []byte, error)
 	PostRegisterEntry(ctx context.Context, key, hash string, req store.RegisterRequest) (int, []byte, error)
 	ListRules(ctx context.Context, legalEntityID string) ([]store.Rule, error)
 	GetRule(ctx context.Context, id string) (store.Rule, error)
@@ -93,6 +95,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/budget/register-entries", a.postRegisterEntry)
 	r.With(authz.RequireDuty(dutyCheck)).Post("/v1/budget/checks", a.checkBudget)
 	r.With(authz.RequireDuty(dutyCheck)).Post("/v1/budget/encumbrances/{id}:relieve", a.relieve)
+	r.With(authz.RequireDuty(dutyCheck)).Post("/v1/budget/encumbrances/{id}:release", a.release)
 	r.With(authz.RequireDuty(dutyReserve)).Post("/v1/budget/reservations", a.createReservation)
 	r.With(authz.RequireDuty(dutyReserve)).Post("/v1/budget/reservations:expire", a.expireReservations)
 	r.With(authz.RequireDuty(dutyReserve)).Post("/v1/budget/reservations/{id}:close", a.closeReservation)
@@ -140,6 +143,11 @@ type relieveRequest struct {
 	InvoiceAmount   decimal.Decimal `json:"invoiceAmount"`
 	InvoiceQuantity decimal.Decimal `json:"invoiceQuantity"`
 	POUnitPrice     decimal.Decimal `json:"poUnitPrice"`
+}
+
+type releaseRequest struct {
+	DocumentID string `json:"documentId"`
+	Reason     string `json:"reason"`
 }
 
 type registerLineRequest struct {
@@ -323,6 +331,39 @@ func (a *API) relieve(w http.ResponseWriter, r *http.Request) {
 	a.replay(w, r)(a.store.RelieveEncumbrance(r.Context(), key, hash, in))
 }
 
+// release gives an encumbrance's open remainder back on a PO line
+// cancellation or a PO close (FR-38.5).
+func (a *API) release(w http.ResponseWriter, r *http.Request) {
+	body, composite, ok := readCommand(w, r)
+	if !ok {
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if !ids.Valid(id) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeEncumbranceNotFound, "encumbrance not found"))
+		return
+	}
+	var req releaseRequest
+	if err := decodeBody(body, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	fields := map[string]string{}
+	if !ids.Valid(req.DocumentID) {
+		fields["documentId"] = "must be a UUID (the cancelled or closed purchase order)"
+	}
+	if !releaseWhy[req.Reason] {
+		fields["reason"] = "must be Cancelled or Closed"
+	}
+	if len(fields) > 0 {
+		validationFailed(w, r, fields)
+		return
+	}
+	key, hash := splitKey(composite)
+	in := store.ReleaseRequest{EncumbranceID: id, DocumentID: req.DocumentID, Reason: req.Reason}
+	a.replay(w, r)(a.store.ReleaseEncumbrance(r.Context(), key, hash, in))
+}
+
 func (a *API) postRegisterEntry(w http.ResponseWriter, r *http.Request) {
 	body, composite, ok := readCommand(w, r)
 	if !ok {
@@ -471,7 +512,7 @@ func (a *API) listEncumbrances(w http.ResponseWriter, r *http.Request) {
 	}
 	status := r.URL.Query().Get("status")
 	if !statuses[status] {
-		validationFailed(w, r, map[string]string{"status": "must be Open, PartiallyRelieved or Relieved"})
+		validationFailed(w, r, map[string]string{"status": "must be Open, PartiallyRelieved, Relieved or Released"})
 		return
 	}
 	rows, err := a.store.ListEncumbrances(r.Context(), rule, status)

@@ -43,7 +43,7 @@ components:
         cost_object_id: { type: string, format: uuid }
         element_id: { type: string, format: uuid }
         period: { type: string }
-        amount: { type: string, description: Decimal string. }
+        amount: { type: string, description: 'Decimal string. Negative on the reversal of a rerun (BR-38.7).' }
         origin: { type: string, enum: [Journal, Allocation, Activity, Statistical, Manual] }
     AllocationCompletedData:
       type: object
@@ -60,3 +60,9 @@ components:
         total_out: { type: string, description: Cost the final receivers took out; equals total_in to the cent. }
         residual: { type: string }
         swept: { type: string }
+        reversed_run_id:
+          type: string
+          format: uuid
+          description: >-
+            Present on a rerun (BR-38.7): the completed run of the period that this run reversed. The reversal's
+            negated entries are published as costentry.created with origin Allocation in the same transaction.

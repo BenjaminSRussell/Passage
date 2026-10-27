@@ -1,6 +1,6 @@
-# NOT-IMPLEMENTED (budgeting, PSG-38 slices 1 to 3)
+# NOT-IMPLEMENTED (budgeting, PSG-38 slices 1 to 4)
 
-Every PSG-38 deliverable and acceptance criterion that slices 1 to 3 do not build, with its status and reason.
+Every PSG-38 deliverable and acceptance criterion that slices 1 to 4 do not build, with its status and reason.
 
 | Item | Ref | Status | Reason |
 |---|---|---|---|
@@ -12,8 +12,10 @@ Every PSG-38 deliverable and acceptance criterion that slices 1 to 3 do not buil
 | Documents under control: Expense, Project | FR-38.3 | later slice of PSG-38 | Requisition, PurchaseOrder, Invoice and Journal are checked; Reservation is checked on creation (slice 2). |
 | `budget.unposted-in-available` flag; `fail-open` timeout policy; CO-0608 check timeout | FR-38.4, 7.38.10 | later slice of PSG-38 | Flags need the flag service; timeout policy needs load tests. |
 | Check latency SLO (p95 < 150 ms at 50 checks/s) and the concurrent-check E2E run | 7.38.9, 7.38.19 | later slice of PSG-38 | Needs a load harness. The row lock is in place. |
-| Pre-encumbrance from approved requisitions (requisition checks reserve as encumbrances, not pre-encumbrances); PO cancellation release; closed-PO residual release | FR-38.5 | later slice of PSG-38 | Slice 1 reserves at check time, adjusts on a re-check of the same line (net change, BR-38.3) and relieves on invoice. |
-| A revised line that moves to another control combination or rule version | FR-38.5 | later slice of PSG-38 | Refused with BUD-0003 so nothing is double reserved; moving needs a release on the old combination, which comes with PO cancellation. |
+| PO cancellation release and closed-PO residual release | FR-38.5 | built (slice 4) | `POST /v1/budget/encumbrances/{id}:release` (reason Cancelled or Closed), `dev.passage.budget.encumbrance.released.v1`; the line is Released and final. |
+| Pre-encumbrance from approved requisitions, converted to an encumbrance on PO confirmation | FR-38.5 | later slice of PSG-38 | Requisition checks reserve as encumbrances, not pre-encumbrances; the conversion needs the requisition to PO link from procurement (wave 22). |
+| Release triggered by procurement events (PO line cancelled, PO closed) | FR-38.5 | handoff | Procurement owns those events; its consumer calls `:release`. |
+| A revised line that moves to another control combination or rule version | FR-38.5 | later slice of PSG-38 | Refused with BUD-0003 so nothing is double reserved. The caller can now cancel the old line (`:release`) and check a new line id; moving the same line id in one step is not built. |
 | Year-end carry-forward of open encumbrances (CarryForward entry, atomic release) | FR-38.5, BR-38.10 | later slice of PSG-38 | Needs the close checklist (wave 14). |
 | Price-difference excess is reported (`excess`) but not checked automatically | FR-38.5, BR-38.4 | partial | The caller runs the new check. Automatic chaining moves into the procurement flow. |
 | 5 s cache on the available-funds query | 7.38.5, 7.38.19 | later slice of PSG-38 | `GET /v1/budget/available` is built and reads the balance rows directly; the cache comes with the load harness. |
@@ -42,4 +44,4 @@ Every PSG-38 deliverable and acceptance criterion that slices 1 to 3 do not buil
 | Separation of duties (BudgetOverride vs ProcurementPurchaseOrderApprove for own POs) | 7.38.17 | handoff | Rego policy belongs in `policies/` (edge-identity owns it). |
 | Budget check fixtures (`budget-check-200`) under `testdata/` | 7.38.9 | later slice of PSG-38 | Domain tests cover the step order and relief; the 200-case fixture set needs the full rule set. |
 | Budget check ("budget check fixtures") acceptance AC-38.1 to AC-38.4 | 7.38.8 | partial | Domain and store tests cover the threshold outcomes, the last-dollar race and exact relief. The full fixture set is not built. |
-| Web module | apps/web | built | `apps/web/src/modules/budgeting/`: rule list and create, rule detail (available funds with reservations, register entries, encumbrances, checks), register entry form, budget check form, check detail, encumbrance detail with relief, earmarked funds list, reservation create form, reservation detail with consume and close, investment program list and create, program detail (totals, position hierarchy with rollup, distribution, assignment, carry-forward). The planning grid and the check inline in the PO form are later slices. |
+| Web module | apps/web | built | `apps/web/src/modules/budgeting/`: rule list and create, rule detail (available funds with reservations, register entries, encumbrances with a Released filter, checks), register entry form, budget check form, check detail, encumbrance detail with relief and release (PO cancelled or closed), earmarked funds list, reservation create form, reservation detail with consume and close, investment program list and create, program detail (totals, position hierarchy with rollup, distribution, assignment, carry-forward). The planning grid and the check inline in the PO form are later slices. |

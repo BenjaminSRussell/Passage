@@ -33,6 +33,8 @@ const (
 	CodeEncumbranceNotFound   = "BUD-0002"
 	CodeLineMoved             = "BUD-0003"
 	CodeCheckNotFound         = "BUD-0004"
+	CodeNothingToRelease      = "BUD-0010"
+	CodeLineReleased          = "BUD-0011"
 	CodeIdempotencyReuse      = "idempotency_key_reuse"
 	CodeIdempotencyInProgress = "idempotency_in_progress"
 	uniqueViolation           = "23505"
@@ -125,6 +127,30 @@ type RelieveResponse struct {
 	Status        string          `json:"status"`
 }
 
+// Release reasons (FR-38.5): the PO line was cancelled, or the PO was closed
+// with a residual no invoice will match.
+const (
+	ReleaseCancelled = "Cancelled"
+	ReleaseClosed    = "Closed"
+)
+
+// ReleaseRequest releases the open remainder of an encumbrance (FR-38.5).
+type ReleaseRequest struct {
+	EncumbranceID string
+	DocumentID    string
+	Reason        string
+}
+
+// ReleaseResponse reports the amount given back to available funds.
+type ReleaseResponse struct {
+	EncumbranceID string          `json:"encumbranceId"`
+	Reason        string          `json:"reason"`
+	Released      decimal.Decimal `json:"released"`
+	Relieved      decimal.Decimal `json:"relieved"`
+	Remaining     decimal.Decimal `json:"remaining"`
+	Status        string          `json:"status"`
+}
+
 // RegisterRequest posts a budget register entry directly (workflow is a later slice).
 type RegisterRequest struct {
 	RuleVersionID string
@@ -169,6 +195,7 @@ type EncumbranceView struct {
 	SourceLineID        string          `json:"sourceLineId"`
 	Reserved            decimal.Decimal `json:"reserved"`
 	Relieved            decimal.Decimal `json:"relieved"`
+	Released            decimal.Decimal `json:"released"`
 	Remaining           decimal.Decimal `json:"remaining"`
 	Status              string          `json:"status"`
 	History             []historyEntry  `json:"history"`
@@ -349,16 +376,22 @@ type prior struct {
 	relieved  decimal.Decimal
 }
 
+// lockPrior locks the line's encumbrance. A released line (its PO line was
+// cancelled or its PO closed) takes no further reservation: BUD-0011.
 func lockPrior(ctx context.Context, tx pgx.Tx, tenantID, lineID string) (*prior, error) {
 	var p prior
-	var reserved, relieved string
-	err := tx.QueryRow(ctx, `select id::text, balance_id::text, reserved::text, relieved::text from encumbrance
-		where tenant_id = $1 and source_line_id = $2 for update`, tenantID, lineID).Scan(&p.id, &p.balanceID, &reserved, &relieved)
+	var reserved, relieved, released string
+	err := tx.QueryRow(ctx, `select id::text, balance_id::text, reserved::text, relieved::text, released::text from encumbrance
+		where tenant_id = $1 and source_line_id = $2 for update`, tenantID, lineID).Scan(&p.id, &p.balanceID, &reserved, &relieved, &released)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
+	}
+	if parseDec(released).Sign() > 0 {
+		return nil, httpx.NewProblem(http.StatusConflict, CodeLineReleased,
+			fmt.Sprintf("line %s was released (PO line cancelled or PO closed); a closed line takes no new reservation", lineID))
 	}
 	p.reserved, p.relieved = parseDec(reserved), parseDec(relieved)
 	return &p, nil
@@ -452,7 +485,7 @@ func reserve(ctx context.Context, tx pgx.Tx, tenantID string, rule Rule, balance
 	if pr != nil {
 		reserved := pr.reserved.Add(amount)
 		_, err := tx.Exec(ctx, `update encumbrance set reserved = $3, status = $4, lines = lines || $5::jsonb where tenant_id = $1 and id = $2`,
-			tenantID, pr.id, reserved, domain.EncumbranceStatus(reserved, pr.relieved), string(hist))
+			tenantID, pr.id, reserved, domain.EncumbranceStatus(reserved, pr.relieved, decimal.Zero), string(hist))
 		return pr.id, err
 	}
 	id := ids.New()
@@ -497,16 +530,20 @@ func (s *Postgres) RelieveEncumbrance(ctx context.Context, key, hash string, in 
 		if _, err := tx.Exec(ctx, `select 1 from budget_control_balance where tenant_id = $1 and id = $2 for update`, p.TenantID, balanceID); err != nil {
 			return 0, nil, err
 		}
-		var reservedText, relievedText string
-		if err := tx.QueryRow(ctx, `select reserved::text, relieved::text from encumbrance where tenant_id = $1 and id = $2 for update`,
-			p.TenantID, in.EncumbranceID).Scan(&reservedText, &relievedText); err != nil {
+		var reservedText, relievedText, releasedText string
+		if err := tx.QueryRow(ctx, `select reserved::text, relieved::text, released::text from encumbrance where tenant_id = $1 and id = $2 for update`,
+			p.TenantID, in.EncumbranceID).Scan(&reservedText, &relievedText, &releasedText); err != nil {
 			return 0, nil, err
 		}
-		reserved, relieved := parseDec(reservedText), parseDec(relievedText)
-		relief := domain.Relief(reserved, relieved, in.MatchedShare)
+		reserved, relieved, released := parseDec(reservedText), parseDec(relievedText), parseDec(releasedText)
+		// A released remainder is back in available funds, so an invoice
+		// against a cancelled or closed line relieves nothing: the whole
+		// invoice is excess and runs a new check (BR-38.4).
+		relief := domain.Relief(reserved.Sub(released), relieved, in.MatchedShare)
 		next := relieved.Add(relief)
-		status := domain.EncumbranceStatus(reserved, next)
-		resp := RelieveResponse{EncumbranceID: in.EncumbranceID, Relieved: relief, Remaining: reserved.Sub(next), Excess: domain.Excess(in.InvoiceAmount, relief), Status: status}
+		status := domain.EncumbranceStatus(reserved, next, released)
+		resp := RelieveResponse{EncumbranceID: in.EncumbranceID, Relieved: relief, Remaining: domain.Release(reserved, next, released),
+			Excess: domain.Excess(in.InvoiceAmount, relief), Status: status}
 		if relief.IsZero() {
 			return http.StatusOK, resp, nil
 		}
@@ -528,6 +565,59 @@ func (s *Postgres) RelieveEncumbrance(ctx context.Context, key, hash string, in 
 			return 0, nil, err
 		}
 		return http.StatusOK, resp, nil
+	})
+}
+
+// ReleaseEncumbrance gives the open remainder of an encumbrance back to
+// available funds when its PO line is cancelled or its PO is closed (FR-38.5).
+// The balance and the encumbrance move together; the line is then Released
+// and takes no further check or consumption. Nothing open is BUD-0010.
+func (s *Postgres) ReleaseEncumbrance(ctx context.Context, key, hash string, in ReleaseRequest) (int, []byte, error) {
+	p, _ := tenant.FromContext(ctx)
+	return s.run(ctx, key, hash, func(ctx context.Context, tx pgx.Tx) (int, any, error) {
+		var balanceID string
+		err := tx.QueryRow(ctx, `select balance_id::text from encumbrance where tenant_id = $1 and id = $2`, p.TenantID, in.EncumbranceID).Scan(&balanceID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, nil, httpx.NewProblem(http.StatusNotFound, CodeEncumbranceNotFound, "encumbrance not found")
+		}
+		if err != nil {
+			return 0, nil, err
+		}
+		// Lock order matches CheckBudget: balance first, then the encumbrance.
+		if _, err := tx.Exec(ctx, `select 1 from budget_control_balance where tenant_id = $1 and id = $2 for update`, p.TenantID, balanceID); err != nil {
+			return 0, nil, err
+		}
+		var reservedText, relievedText, releasedText string
+		if err := tx.QueryRow(ctx, `select reserved::text, relieved::text, released::text from encumbrance where tenant_id = $1 and id = $2 for update`,
+			p.TenantID, in.EncumbranceID).Scan(&reservedText, &relievedText, &releasedText); err != nil {
+			return 0, nil, err
+		}
+		reserved, relieved, released := parseDec(reservedText), parseDec(relievedText), parseDec(releasedText)
+		amount := domain.Release(reserved, relieved, released)
+		if amount.IsZero() {
+			return 0, nil, httpx.NewProblem(http.StatusConflict, CodeNothingToRelease, "the encumbrance has nothing open to release: it is fully relieved or already released")
+		}
+		total := released.Add(amount)
+		status := domain.EncumbranceStatus(reserved, relieved, total)
+		hist, err := json.Marshal([]historyEntry{{Type: "Release", Amount: amount.String(), DocumentID: in.DocumentID, At: now()}})
+		if err != nil {
+			return 0, nil, err
+		}
+		if _, err := tx.Exec(ctx, `update encumbrance set released = $3, status = $4, lines = lines || $5::jsonb where tenant_id = $1 and id = $2`,
+			p.TenantID, in.EncumbranceID, total, status, string(hist)); err != nil {
+			return 0, nil, err
+		}
+		if _, err := tx.Exec(ctx, `update budget_control_balance set encumbrances = encumbrances - $3, version = version + 1 where tenant_id = $1 and id = $2`,
+			p.TenantID, balanceID, amount); err != nil {
+			return 0, nil, err
+		}
+		if err := enqueue(ctx, tx, "encumbrance", in.EncumbranceID, budgetevents.EncumbranceReleased, p.TenantID, budgetevents.EncumbranceReleasedData{
+			EncumbranceID: in.EncumbranceID, DocumentID: in.DocumentID, Reason: in.Reason, Amount: amount.String(),
+		}); err != nil {
+			return 0, nil, err
+		}
+		return http.StatusOK, ReleaseResponse{EncumbranceID: in.EncumbranceID, Reason: in.Reason, Released: amount, Relieved: relieved,
+			Remaining: decimal.Zero, Status: status}, nil
 	})
 }
 

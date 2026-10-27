@@ -1,6 +1,7 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
+  Alert,
   Badge,
   Button,
   buttonClassName,
@@ -26,6 +27,7 @@ const MAX_GRID = 12;
 
 const runColumns: DataTableColumn<Run>[] = [
   { key: "period", header: "Period", mono: true },
+  { key: "status", header: "Status", render: (r) => <Badge tone={r.status === "Completed" ? "success" : "neutral"}>{r.status}</Badge> },
   { key: "method", header: "Method", render: (r) => (r.method === "exact-lu" ? "Exact solve" : "Iterative") },
   { key: "iterations", header: "Iterations", align: "end" },
   { key: "totalIn", header: "Cost in", align: "end", mono: true, render: (r) => formatAmount(r.totalIn) },
@@ -35,7 +37,7 @@ const runColumns: DataTableColumn<Run>[] = [
   { key: "createdAt", header: "Run at", render: (r) => formatDateTime(r.createdAt) },
 ];
 
-/** Allocation runs (FR-38.7): one completed reciprocal step per legal entity and period. */
+/** Allocation runs (FR-38.7): one completed reciprocal step per legal entity and period; reruns reverse it (BR-38.7). */
 export function AllocationRunsPage() {
   const navigate = useNavigate();
   const [legalEntityId, setLegalEntityId] = useState("");
@@ -45,7 +47,7 @@ export function AllocationRunsPage() {
     <div className={styles.stack}>
       <PageHeader
         title="Allocation runs"
-        description="Each run moves service-center cost to the centers it serves, solving reciprocal service exactly, and conserves cost to the cent."
+        description="Each run moves service-center cost to the centers it serves, solving reciprocal service exactly, and conserves cost to the cent. Running a period again reverses its completed run."
         actions={
           <Link className={buttonClassName("primary")} to="/costacct/allocation-runs/new">
             New allocation run
@@ -128,7 +130,7 @@ export function NewAllocationRunPage() {
     <div className={styles.stack}>
       <PageHeader
         title="New allocation run"
-        description="Each center's cost is its mirrored journal cost for the period. A center with no basis keeps its cost and is reported as unallocated."
+        description="Each center's cost is its mirrored journal cost for the period. A center with no basis keeps its cost and is reported as unallocated. If the period already has a completed run, this run reverses it and replaces it."
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
@@ -253,6 +255,9 @@ export function AllocationRunDetailPage() {
     );
   }
   const r = run.data;
+  const late = r.warnings.some((w) => w.code === "CO-0615");
+  // A reversed run's warnings are history; only the current run asks for action.
+  const zeroBasis = r.status === "Completed" ? r.warnings.filter((w) => w.code === "CO-0613") : [];
   const flowColumns: DataTableColumn<Flow>[] = [
     { key: "from", header: "Sender", mono: true, render: (f) => code(f.from) },
     { key: "to", header: "Receiver", mono: true, render: (f) => code(f.to) },
@@ -269,8 +274,37 @@ export function AllocationRunDetailPage() {
       <PageHeader
         title={`Allocation run ${r.period}`}
         description="Senders end at zero; the final receivers take exactly the cost the senders brought in."
-        meta={<Badge tone={balanced ? "success" : "danger"}>{balanced ? "Conserved to the cent" : "Totals differ"}</Badge>}
+        meta={
+          <>
+            <Badge tone={r.status === "Completed" ? "success" : "neutral"}>{r.status}</Badge>{" "}
+            <Badge tone={balanced ? "success" : "danger"}>{balanced ? "Conserved to the cent" : "Totals differ"}</Badge>
+          </>
+        }
+        actions={
+          r.status === "Completed" ? (
+            <Link className={buttonClassName(late ? "primary" : "secondary")} to="/costacct/allocation-runs/new">
+              Rerun allocation
+            </Link>
+          ) : null
+        }
       />
+      {r.status === "Reversed" && r.reversedByRunId ? (
+        <Alert tone="info" title="This run was reversed">
+          A rerun of {r.period} negated its entries and replaced it. <Link to={`/costacct/allocation-runs/${r.reversedByRunId}`}>Open the current run</Link>
+        </Alert>
+      ) : null}
+      {late ? (
+        <Alert tone="warning" title="CO-0615: journal postings after this run">
+          Journal cost for these cost objects arrived after the run, so the period's allocation is out of date. Rerun the allocation to reverse this run and
+          allocate the current cost.
+        </Alert>
+      ) : null}
+      {zeroBasis.length > 0 ? (
+        <Alert tone="warning" title="CO-0613: senders with zero basis">
+          {zeroBasis.length === 1 ? "One sender has" : `${zeroBasis.length} senders have`} cost but no basis, so the cost stayed where it was: {r.unallocated.map(code).join(", ")}.
+          Load a basis for them and rerun.
+        </Alert>
+      ) : null}
       <StatGroup label="Run totals">
         <StatTile label="Cost in" value={formatAmount(r.totalIn)} />
         <StatTile label="Cost out" value={formatAmount(r.totalOut)} />
@@ -291,6 +325,11 @@ export function AllocationRunDetailPage() {
           <Detail term="Unallocated" mono>
             {r.unallocated.length > 0 ? r.unallocated.map(code).join(", ") : "None"}
           </Detail>
+          {r.reversesRunId ? (
+            <Detail term="Reverses">
+              <Link to={`/costacct/allocation-runs/${r.reversesRunId}`}>The earlier run of {r.period}</Link>
+            </Detail>
+          ) : null}
         </dl>
       </Card>
       <DataTable label="Net postings" columns={postingColumns} rows={r.postings} getRowKey={(p) => p.centerId} />

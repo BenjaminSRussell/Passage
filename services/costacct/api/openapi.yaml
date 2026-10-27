@@ -85,6 +85,37 @@ paths:
           description: The stored element. Primary elements carry a main account range that may not overlap another primary element.
           content: { application/json: { schema: { $ref: '#/components/schemas/CostElement' } } }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/controlling/cost-behavior-rules:
+    get:
+      operationId: listCostBehaviorRules
+      x-passage-duty: controlling.view
+      parameters:
+        - { $ref: '#/components/parameters/LegalEntity' }
+        - { name: costElementId, in: query, required: false, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Behavior rules by element, latest effective date first.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/BehaviorRule' } } } } } }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: createCostBehaviorRule
+      x-passage-duty: controlling.maintain
+      description: >-
+        Classifies journal cost on one cost element as Fixed or Variable from a date (FR-38.16), for every cost object
+        kind or one kind. Journal lines are classified when they are mirrored: a rule for the object's kind beats a rule
+        for any kind, the latest effective date wins within a tier, then the element default applies, else
+        Unclassified. Entries already in the ledger keep their class. The element must belong to the legal entity
+        (CST-0007); a second rule for the same element, kind and date is CST-0020.
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/BehaviorRule' } } }
+      responses:
+        '201':
+          description: The stored rule.
+          content: { application/json: { schema: { $ref: '#/components/schemas/BehaviorRule' } } }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/controlling/cost-entries:mirror:
     post:
       operationId: mirrorJournalLines
@@ -126,8 +157,11 @@ paths:
             The completed run. The cost base of each center is its Journal-origin entries in the run currency. Every
             sender ends at exactly zero after the residual sweep, and totalIn (senders' cost) equals totalOut (cost
             taken by final receivers) to the cent. A run whose iterative solve stops at the iteration limit completes
-            with converged false and the residual swept. A closed cycle is CST-0005. Only one completed run exists per
-            legal entity and period (CST-0002).
+            with converged false and the residual swept. A closed cycle is CST-0005. A sender with cost and zero basis
+            keeps its cost and is reported in unallocated with a CO-0613 warning (BR-38.8). When the period already has
+            a completed run, this request is a rerun (BR-38.7): in the same transaction the earlier run's Allocation
+            entries are negated, it becomes Reversed and reversedRunId names it. Only one completed run exists per legal
+            entity and period; a concurrent rerun that loses the race is CST-0002.
           content: { application/json: { schema: { $ref: '#/components/schemas/RunResponse' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/controlling/allocation-runs/{id}:
@@ -138,7 +172,9 @@ paths:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
         '200':
-          description: One stored run with its flows and postings.
+          description: >-
+            One stored run with its flows and postings. warnings carries CO-0613 per zero-basis sender and CO-0615 when
+            journal cost for the run's objects, period and currency was mirrored after a completed run (rerun needed).
           content: { application/json: { schema: { $ref: '#/components/schemas/Run' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/controlling/reconciliations:
@@ -458,6 +494,25 @@ components:
         name: { type: string, maxLength: 200 }
         mainAccountFrom: { type: string, maxLength: 40, description: Required for Primary elements. }
         mainAccountTo: { type: string, maxLength: 40, description: Required for Primary elements; inclusive. }
+        defaultBehavior: { type: string, enum: [Fixed, Variable], description: 'Class of journal cost on this element when no behavior rule applies (FR-38.16). Absent means Unclassified.' }
+    BehaviorRule:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId, costElementId, behavior, effectiveFrom]
+      properties:
+        id: { type: string, format: uuid, readOnly: true }
+        legalEntityId: { type: string, format: uuid }
+        costElementId: { type: string, format: uuid }
+        objectKind: { type: string, enum: [CostCenter, InternalOrder, Product, Project], description: Absent for every kind. }
+        behavior: { type: string, enum: [Fixed, Variable] }
+        effectiveFrom: { type: string, format: date, description: 'Applies to periods starting on or after this date.' }
+        createdAt: { type: string, format: date-time, readOnly: true }
+    Warning:
+      type: object
+      required: [code, detail]
+      properties:
+        code: { type: string, enum: [CO-0613, CO-0615] }
+        detail: { type: string }
     MirrorRequest:
       type: object
       required: [legalEntityId, lines]
@@ -511,10 +566,12 @@ components:
         amount: { type: string, description: Net secondary-element posting (received minus sent). }
     RunResponse:
       type: object
-      required: [runId, period, result]
+      required: [runId, period, result, warnings]
       properties:
         runId: { type: string, format: uuid }
         period: { type: string }
+        reversedRunId: { type: string, format: uuid, description: The completed run this rerun reversed (BR-38.7). }
+        warnings: { type: array, items: { $ref: '#/components/schemas/Warning' } }
         result:
           type: object
           required: [method, iterations, residual, converged, swept, totalIn, totalOut, flows, postings, unallocated]
@@ -531,7 +588,7 @@ components:
             unallocated: { type: array, items: { type: string, format: uuid } }
     Run:
       type: object
-      required: [id, legalEntityId, period, currency, secondaryElementId, method, iterations, residual, converged, swept, totalIn, totalOut, status, costObjectIds, flows, postings, unallocated, createdAt]
+      required: [id, legalEntityId, period, currency, secondaryElementId, method, iterations, residual, converged, swept, totalIn, totalOut, status, costObjectIds, flows, postings, unallocated, createdAt, warnings]
       properties:
         id: { type: string, format: uuid }
         legalEntityId: { type: string, format: uuid }
@@ -545,12 +602,15 @@ components:
         swept: { type: string }
         totalIn: { type: string }
         totalOut: { type: string }
-        status: { type: string, enum: [Completed] }
+        status: { type: string, enum: [Completed, Reversed] }
         costObjectIds: { type: array, items: { type: string, format: uuid } }
         flows: { type: array, items: { $ref: '#/components/schemas/Flow' } }
         postings: { type: array, items: { $ref: '#/components/schemas/Posting' } }
         unallocated: { type: array, items: { type: string, format: uuid } }
         createdAt: { type: string, format: date-time }
+        reversesRunId: { type: string, format: uuid, description: The run this rerun replaced. }
+        reversedByRunId: { type: string, format: uuid, description: Set on a Reversed run; the rerun that replaced it. }
+        warnings: { type: array, items: { $ref: '#/components/schemas/Warning' } }
     ReconcileRequest:
       type: object
       required: [legalEntityId, period, currency, journalBalances]
