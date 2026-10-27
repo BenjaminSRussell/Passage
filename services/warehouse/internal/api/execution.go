@@ -75,6 +75,14 @@ type Store interface {
 	AssignNext(ctx context.Context, idem store.Idem, warehouseID, user string, timeout time.Duration, now time.Time) (store.Assigned, bool, error)
 	ConfirmLine(ctx context.Context, idem store.Idem, in store.ConfirmInput) (domain.Work, bool, error)
 	ExceptWork(ctx context.Context, idem store.Idem, in store.ExceptionInput) (store.Excepted, bool, error)
+	CreateDoor(ctx context.Context, idem store.Idem, d domain.DockDoor) (domain.DockDoor, bool, error)
+	ListDoors(ctx context.Context, warehouseID string) ([]domain.DockDoor, error)
+	CreateAppointment(ctx context.Context, idem store.Idem, a domain.Appointment) (domain.Appointment, bool, error)
+	ListAppointments(ctx context.Context, f store.AppointmentFilter) ([]domain.Appointment, error)
+	RegisterASN(ctx context.Context, idem store.Idem, r domain.Receipt) (domain.Receipt, bool, error)
+	ListReceipts(ctx context.Context, f store.ReceiptFilter) ([]domain.ReceiptSummary, error)
+	GetReceipt(ctx context.Context, id string) (domain.Receipt, error)
+	ReceiveLine(ctx context.Context, idem store.Idem, in store.ReceiveInput) (store.Received, bool, error)
 }
 
 // registerPersisted mounts the routes that read and write warehouse state.
@@ -92,6 +100,7 @@ func (a *API) registerPersisted(r chi.Router) {
 		r.With(authz.RequireDuty(dutyWorkExecute)).Post("/v1/warehouse/work:assign", a.assignWork)
 		r.With(authz.RequireDuty(dutyWorkExecute)).Post("/v1/warehouse/work/{id}/lines/{n}:confirm", a.confirmLine)
 		r.With(authz.RequireDuty(dutyWorkExecute)).Post("/v1/warehouse/work/{id}:exception", a.exceptWork)
+		a.registerReceiving(r)
 	})
 }
 
@@ -113,16 +122,21 @@ func fail(w http.ResponseWriter, r *http.Request, err error, notFound string) {
 	switch {
 	case errors.As(err, &de):
 		status := http.StatusUnprocessableEntity
-		if de.Code == domain.CodeLineConfirmed || de.Code == domain.CodeIllegalTransition {
+		switch de.Code {
+		case domain.CodeLineConfirmed, domain.CodeIllegalTransition, domain.CodeDoorOverlap, domain.CodeLineReceived:
 			status = http.StatusConflict
 		}
 		httpx.Fail(w, r, httpx.NewProblem(status, de.Code, de.Detail))
 	case errors.Is(err, domain.ErrLineNotFound):
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, codeLineNotFound, "the work has no such line"))
+	case errors.Is(err, domain.ErrPalletNotFound):
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, codeLineNotFound, "the receipt has no such line"))
+	case errors.Is(err, domain.ErrReceivedQty):
+		validationFailed(w, r, map[string]string{"qty": "must be greater than zero"})
 	case errors.Is(err, store.ErrNotFound):
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, notFound, "not found"))
 	case errors.Is(err, store.ErrConflict):
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, codeDuplicate, "a record with the same name or sequence already exists"))
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, codeDuplicate, "a record with the same name, sequence, door code or ASN reference already exists"))
 	case errors.Is(err, store.ErrVersionConflict):
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, codeVersionConflict, err.Error()))
 	case errors.Is(err, store.ErrIdempotencyReuse):
@@ -172,13 +186,19 @@ func answer(w http.ResponseWriter, status int, replayed bool, v any) {
 
 // ifMatch reads the optional If-Match header: a work version as "3" or 3.
 func ifMatch(r *http.Request, fields map[string]string) int {
+	return ifMatchVersion(r, fields, "work")
+}
+
+// ifMatchVersion reads the optional If-Match header: the version of the
+// command's record (what names it in the error) as "3" or 3.
+func ifMatchVersion(r *http.Request, fields map[string]string, what string) int {
 	raw := strings.Trim(strings.TrimSpace(r.Header.Get("If-Match")), `"`)
 	if raw == "" {
 		return 0
 	}
 	n, err := strconv.Atoi(raw)
 	if err != nil || n < 1 {
-		fields["If-Match"] = "must be the work version, a positive integer"
+		fields["If-Match"] = "must be the " + what + " version, a positive integer"
 		return 0
 	}
 	return n

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
-  title: Passage warehouse (wave 31, slice 3)
-  version: 0.3.0
+  title: Passage warehouse (wave 31, slice 4)
+  version: 0.4.0
   description: >
     Location-directive simulation (stateless, with optional hazmat compliance
     data), and with a database: locations with their stock, location
@@ -9,9 +9,10 @@ info:
     cancel). Commands require an Idempotency-Key (kept 24 hours): a repeat with
     the same request returns the first answer with Idempotent-Replayed: true; a
     repeat with another request is 422 idempotency_key_reuse. Work commands
-    accept an optional If-Match with the work version. Waves, replenishment,
-    loads, receiving and the other wave-31 endpoints are later slices (see
-    NOT-IMPLEMENTED.md).
+    accept an optional If-Match with the work version. Slice 4 adds dock doors
+    and appointments and ASN receiving (register the ASN, then receive each
+    pallet into put-away work). Waves, replenishment, loads and the other
+    wave-31 endpoints are later slices (see NOT-IMPLEMENTED.md).
 servers:
   - url: https://api.{env}.passage.dev
     variables:
@@ -362,6 +363,278 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         "422": { $ref: "#/components/responses/Unprocessable" }
+  /v1/warehouse/dock-doors:
+    post:
+      operationId: createDockDoor
+      summary: Add a dock door to a warehouse (FR-31.8)
+      description: The code is unique in the warehouse (409 WMS-DUPLICATE).
+      x-passage-duty: warehouse.setup.maintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [warehouseId, code]
+              properties:
+                warehouseId: { type: string, format: uuid }
+                code: { type: string, minLength: 1, maxLength: 20, examples: [D1] }
+      responses:
+        "201":
+          description: Created (or replayed).
+          headers: { Idempotent-Replayed: { $ref: "#/components/headers/IdempotentReplayed" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DockDoor" }
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+    get:
+      operationId: listDockDoors
+      summary: List a warehouse's dock doors by code (at most 200)
+      x-passage-duty: warehouse.inquiry.view
+      parameters:
+        - { name: warehouseId, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The doors.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/DockDoor" } }
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/warehouse/dock-appointments:
+    post:
+      operationId: createDockAppointment
+      summary: Book a door for a window (FR-31.8)
+      description: >
+        start and end are on the 15-minute grid, end is after start and at most
+        24 hours later. The window is half open, so 09:00–09:45 and 09:45–10:00
+        do not overlap. An appointment overlapping another on the door is 409
+        WMS-0108 (AC-31.8 DOOR_SLOT_OVERLAP); a door that is not in the
+        warehouse is 404 WMS-DOOR-NOT-FOUND. INBOUND needs
+        warehouse.receipt.register, OUTBOUND needs warehouse.shipment.confirm.
+      x-passage-duty: warehouse.receipt.register or warehouse.shipment.confirm
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [warehouseId, doorId, direction, reference, start, end]
+              properties:
+                warehouseId: { type: string, format: uuid }
+                doorId: { type: string, format: uuid }
+                direction: { $ref: "#/components/schemas/AppointmentDirection" }
+                reference: { type: string, minLength: 1, maxLength: 100, description: The ASN, shipment or load number. }
+                start: { type: string, format: date-time }
+                end: { type: string, format: date-time }
+      responses:
+        "201":
+          description: Booked (or replayed). Times are returned in UTC.
+          headers: { Idempotent-Replayed: { $ref: "#/components/headers/IdempotentReplayed" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Appointment" }
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+    get:
+      operationId: listDockAppointments
+      summary: List a warehouse's appointments overlapping a window, earliest first (at most 500)
+      x-passage-duty: warehouse.inquiry.view
+      parameters:
+        - { name: warehouseId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: doorId, in: query, schema: { type: string, format: uuid } }
+        - { name: from, in: query, description: Appointments ending after this time; open when absent., schema: { type: string, format: date-time } }
+        - { name: to, in: query, description: Appointments starting before this time; open when absent., schema: { type: string, format: date-time } }
+      responses:
+        "200":
+          description: The appointments.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/Appointment" } }
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/warehouse/receipts:from-asn:
+    post:
+      operationId: registerASNReceipt
+      summary: Register a receipt from an ASN packing structure (FR-31.9)
+      description: >
+        Stores the ASN's pallets (one license plate each) as an OPEN receipt with
+        every pallet EXPECTED; nothing is put away until a pallet is received.
+        The PRD keys this command by the ASN: send the ASN reference as
+        Idempotency-Key to make a resend a replay. A second receipt for the same
+        ASN in the warehouse under another key is 409 WMS-DUPLICATE.
+        tolerancePct is the ASN variance tolerance (default 2, 0–20, BR-31.10).
+        weight and volume are for the expected quantity.
+      x-passage-duty: warehouse.receipt.register
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [warehouseId, asnRef, lines]
+              properties:
+                warehouseId: { type: string, format: uuid }
+                asnRef: { type: string, minLength: 1, maxLength: 100 }
+                tolerancePct: { $ref: "#/components/schemas/Decimal" }
+                lines:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [lineNo, itemId, lpId, expectedQty]
+                    properties:
+                      lineNo: { type: integer, minimum: 1 }
+                      itemId: { type: string, minLength: 1, maxLength: 60 }
+                      lpId: { type: string, pattern: "^[A-Za-z0-9._-]{1,40}$" }
+                      poLineRef: { type: string, maxLength: 100 }
+                      expectedQty: { $ref: "#/components/schemas/Decimal" }
+                      weight: { $ref: "#/components/schemas/Decimal" }
+                      volume: { $ref: "#/components/schemas/Decimal" }
+      responses:
+        "201":
+          description: Registered (or replayed).
+          headers: { Idempotent-Replayed: { $ref: "#/components/headers/IdempotentReplayed" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Receipt" }
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+  /v1/warehouse/receipts:
+    get:
+      operationId: listReceipts
+      summary: List a warehouse's receipts by ASN reference, with pallet counts
+      x-passage-duty: warehouse.inquiry.view
+      parameters:
+        - { name: warehouseId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/ReceiptStatus" } }
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: One page of receipts.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/ReceiptSummary" } }
+                  nextCursor: { type: string }
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/warehouse/receipts/{id}:
+    get:
+      operationId: getReceipt
+      summary: Read one receipt with its pallets
+      x-passage-duty: warehouse.inquiry.view
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The receipt.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Receipt" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/warehouse/receipts/{id}/lines/{n}:receive:
+    post:
+      operationId: receiveASNPallet
+      summary: Receive one ASN pallet with the quantity that arrived (FR-31.9, BR-31.10)
+      description: >
+        Records qty on pallet n under a row lock on the receipt. The variance
+        (received − ASN, and as a % of the ASN quantity) beyond the receipt's
+        tolerance is a discrepancy: the pallet is still received at the actual
+        quantity and the answer carries a WMS-0107 warning (AC-31.7). The
+        pallet becomes PURCHASE_PUTAWAY work of one LP placed by the
+        warehouse's directives (BLOCKED_NO_LOCATION when none places it), with
+        the LP id, receipt id and ASN line as line attributes; stock reaches the
+        location when the put-away is confirmed. Emits
+        dev.passage.wms.work.created.v1 and dev.passage.wms.receipt.registered.v1.
+        A pallet already received is 409 WMS-RECEIPT-LINE-RECEIVED. The user is
+        X-Passage-User.
+      x-passage-duty: warehouse.receipt.register
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: n, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - name: If-Match
+          in: header
+          required: false
+          description: The receipt version last read, as "3" or 3. A stale version is 409 WMS-VERSION-CONFLICT.
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [qty]
+              properties:
+                qty: { $ref: "#/components/schemas/Decimal" }
+      responses:
+        "200":
+          description: The receipt, the put-away work, its directive trace and any warnings (or replayed).
+          headers: { Idempotent-Replayed: { $ref: "#/components/headers/IdempotentReplayed" } }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [receipt, work, traces, warnings]
+                properties:
+                  receipt: { $ref: "#/components/schemas/Receipt" }
+                  work: { $ref: "#/components/schemas/Work" }
+                  traces: { $ref: "#/components/schemas/Planned/properties/traces" }
+                  warnings:
+                    type: array
+                    items:
+                      type: object
+                      required: [code, detail]
+                      properties:
+                        code: { type: string, enum: [WMS-0107] }
+                        detail: { type: string }
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
   /healthz:
     get:
       operationId: healthz
@@ -421,16 +694,21 @@ components:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
     NotFound:
-      description: No such work (WMS-WORK-NOT-FOUND) or line (WMS-LINE-NOT-FOUND) in the tenant.
+      description: >
+        No such work (WMS-WORK-NOT-FOUND), receipt (WMS-RECEIPT-NOT-FOUND),
+        dock door in the warehouse (WMS-DOOR-NOT-FOUND), or work or receipt
+        line (WMS-LINE-NOT-FOUND) in the tenant.
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
     Conflict:
       description: >
-        WMS-DUPLICATE (location name or directive sequence taken), WMS-0105
-        (line already confirmed with another key), WMS-0110 (illegal work or
-        line transition, or a blocked location status at confirmation) or
-        WMS-VERSION-CONFLICT (stale If-Match).
+        WMS-DUPLICATE (location name, directive sequence, door code or ASN
+        reference taken), WMS-0105 (line already confirmed with another key),
+        WMS-0108 (door already booked for an overlapping window),
+        WMS-RECEIPT-LINE-RECEIVED (pallet already received), WMS-0110 (illegal
+        work or line transition, or a blocked location status at confirmation)
+        or WMS-VERSION-CONFLICT (stale If-Match).
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
@@ -591,6 +869,80 @@ components:
         action: { type: integer }
         outcome: { type: string, enum: [hit, miss, skip] }
         reason: { type: string }
+    DockDoor:
+      type: object
+      required: [id, warehouseId, code, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        warehouseId: { type: string, format: uuid }
+        code: { type: string }
+        createdAt: { type: string, format: date-time }
+    AppointmentDirection:
+      type: string
+      enum: [INBOUND, OUTBOUND]
+    Appointment:
+      type: object
+      required: [id, warehouseId, doorId, doorCode, direction, reference, start, end, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        warehouseId: { type: string, format: uuid }
+        doorId: { type: string, format: uuid }
+        doorCode: { type: string }
+        direction: { $ref: "#/components/schemas/AppointmentDirection" }
+        reference: { type: string }
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+    ReceiptStatus:
+      type: string
+      enum: [OPEN, PARTIALLY_RECEIVED, RECEIVED]
+    ReceiptLine:
+      type: object
+      required: [lineNo, itemId, lpId, expectedQty, weight, volume, status, receivedQty, varianceQty, variancePct, discrepancy]
+      properties:
+        lineNo: { type: integer }
+        itemId: { type: string }
+        lpId: { type: string }
+        poLineRef: { type: string }
+        expectedQty: { $ref: "#/components/schemas/Decimal" }
+        weight: { $ref: "#/components/schemas/Decimal" }
+        volume: { $ref: "#/components/schemas/Decimal" }
+        status: { type: string, enum: [EXPECTED, RECEIVED] }
+        receivedQty: { $ref: "#/components/schemas/Decimal" }
+        varianceQty: { $ref: "#/components/schemas/Decimal" }
+        variancePct: { $ref: "#/components/schemas/Decimal" }
+        discrepancy: { type: boolean, description: The variance is beyond the receipt's tolerance (BR-31.10). }
+        reason: { type: string, description: The WMS-0107 text of a discrepancy. }
+        workId: { type: string, format: uuid }
+        receivedBy: { type: string }
+        receivedAt: { type: string, format: date-time }
+    Receipt:
+      type: object
+      required: [id, warehouseId, asnRef, tolerancePct, status, version, createdAt, updatedAt, lines]
+      properties:
+        id: { type: string, format: uuid }
+        warehouseId: { type: string, format: uuid }
+        asnRef: { type: string }
+        tolerancePct: { $ref: "#/components/schemas/Decimal" }
+        status: { $ref: "#/components/schemas/ReceiptStatus" }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        lines: { type: array, items: { $ref: "#/components/schemas/ReceiptLine" } }
+    ReceiptSummary:
+      type: object
+      required: [id, warehouseId, asnRef, tolerancePct, status, lines, received, discrepancies, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        warehouseId: { type: string, format: uuid }
+        asnRef: { type: string }
+        tolerancePct: { $ref: "#/components/schemas/Decimal" }
+        status: { $ref: "#/components/schemas/ReceiptStatus" }
+        lines: { type: integer, description: Pallets on the ASN. }
+        received: { type: integer, description: Pallets received. }
+        discrepancies: { type: integer, description: Received pallets outside tolerance. }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
     Decimal:
       type: string
       description: Decimal as a string, never a float.

@@ -442,6 +442,14 @@ func TestStore_TenantIsolation(t *testing.T) {
 	mustLocations(t, st, ctx1, wh, loc("A-01", "A", 1, domain.Capacity{AllowMixedItems: true}))
 	mustDirective(t, st, ctx1, directive(wh, "PURCHASE_PUTAWAY", domain.DirectionPut, domain.StrategyConsolidate, "A"))
 	w := plan(t, st, ctx1, wh, "PURCHASE_PUTAWAY", domain.NewLine{ItemID: "BOLT", Direction: domain.DirectionPut, Qty: dq("1")})
+	d1 := door(t, st, ctx1, wh, "D1")
+	if _, _, err := st.CreateAppointment(ctx1, key("t1-appt"), booking(wh, d1.ID, "ASN-1", slot(9, 0), slot(9, 45))); err != nil {
+		t.Fatal(err)
+	}
+	rec, _, err := st.RegisterASN(ctx1, key("t1-asn"), asn(wh))
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if locs, err := st.ListLocations(ctx2, LocationFilter{WarehouseID: wh, Limit: 10}); err != nil || len(locs) != 0 {
 		t.Fatalf("tenant 2 locations = %+v err=%v", locs, err)
@@ -454,6 +462,24 @@ func TestStore_TenantIsolation(t *testing.T) {
 	}
 	if a, _, err := st.AssignNext(ctx2, key("t2"), wh, "u", 30*time.Minute, time.Now()); err != nil || a.Work != nil {
 		t.Fatalf("tenant 2 assigned tenant 1's work: %+v err=%v", a, err)
+	}
+	if doors, err := st.ListDoors(ctx2, wh); err != nil || len(doors) != 0 {
+		t.Fatalf("tenant 2 doors = %+v err=%v", doors, err)
+	}
+	if appts, err := st.ListAppointments(ctx2, AppointmentFilter{WarehouseID: wh, Limit: 10}); err != nil || len(appts) != 0 {
+		t.Fatalf("tenant 2 appointments = %+v err=%v", appts, err)
+	}
+	if _, _, err := st.CreateAppointment(ctx2, key("t2-appt"), booking(wh, d1.ID, "ASN-2", slot(10, 0), slot(10, 15))); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("tenant 2 booking tenant 1's door: err = %v", err)
+	}
+	if _, err := st.GetReceipt(ctx2, rec.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("tenant 2 reading tenant 1's receipt: err = %v", err)
+	}
+	if _, _, err := st.ReceiveLine(ctx2, key("t2-recv"), ReceiveInput{ReceiptID: rec.ID, LineNo: 1, Qty: dq("1"), User: "u", Now: time.Now()}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("tenant 2 receiving tenant 1's pallet: err = %v", err)
+	}
+	if sums, err := st.ListReceipts(ctx2, ReceiptFilter{WarehouseID: wh, Limit: 10}); err != nil || len(sums) != 0 {
+		t.Fatalf("tenant 2 receipts = %+v err=%v", sums, err)
 	}
 	var n int
 	if err := dbx.WithTenantTx(ctx2, app, func(tx pgx.Tx) error {

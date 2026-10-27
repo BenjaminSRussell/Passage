@@ -14,6 +14,11 @@ describe("warehouse module", () => {
       "/warehouse/work",
       "/warehouse/work/new",
       "/warehouse/work/:id",
+      "/warehouse/receipts",
+      "/warehouse/receipts/new",
+      "/warehouse/receipts/:id",
+      "/warehouse/docks",
+      "/warehouse/docks/new",
     ]);
     expect(warehouse.routes.every((r) => r.element != null)).toBe(true);
   });
@@ -24,6 +29,8 @@ describe("warehouse module", () => {
       { label: "Locations", to: "/warehouse/locations", duty: "warehouse.setup.view" },
       { label: "Location directives", to: "/warehouse/directives", duty: "warehouse.setup.view" },
       { label: "Work", to: "/warehouse/work", duty: "warehouse.inquiry.view" },
+      { label: "Receiving", to: "/warehouse/receipts", duty: "warehouse.inquiry.view" },
+      { label: "Dock schedule", to: "/warehouse/docks", duty: "warehouse.inquiry.view" },
     ]);
   });
 

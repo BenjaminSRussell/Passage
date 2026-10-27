@@ -43,34 +43,40 @@ func (s *Store) PlanWork(ctx context.Context, idem Idem, in PlanInput) (Planned,
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
 		var err error
 		out, replayed, err = once(ctx, tx, idem, http.StatusCreated, func() (Planned, error) {
-			dirs, err := loadDirectives(ctx, tx, in.WarehouseID, in.WorkType, "")
-			if err != nil {
-				return Planned{}, err
-			}
-			locs, err := loadLocations(ctx, tx, in.WarehouseID)
-			if err != nil {
-				return Planned{}, err
-			}
-			open, err := openLines(ctx, tx, in.WarehouseID)
-			if err != nil {
-				return Planned{}, err
-			}
-			domain.Reserve(locs, open)
-			w, res, err := domain.Plan(ids.New(), in.WarehouseID, in.WorkType, in.Priority, in.Lines, dirs, locs, domain.Compliance{})
-			if err != nil {
-				return Planned{}, err
-			}
-			if err := insertWork(ctx, tx, &w); err != nil {
-				return Planned{}, err
-			}
-			if err := enqueue(ctx, tx, w.ID, evts.WorkCreated, createdData(w)); err != nil {
-				return Planned{}, err
-			}
-			return Planned{Work: w, Traces: res}, nil
+			return planWork(ctx, tx, in)
 		})
 		return err
 	})
 	return out, replayed, err
+}
+
+// planWork places and inserts a work within tx and enqueues work.created.
+// PlanWork and receiving share it.
+func planWork(ctx context.Context, tx pgx.Tx, in PlanInput) (Planned, error) {
+	dirs, err := loadDirectives(ctx, tx, in.WarehouseID, in.WorkType, "")
+	if err != nil {
+		return Planned{}, err
+	}
+	locs, err := loadLocations(ctx, tx, in.WarehouseID)
+	if err != nil {
+		return Planned{}, err
+	}
+	open, err := openLines(ctx, tx, in.WarehouseID)
+	if err != nil {
+		return Planned{}, err
+	}
+	domain.Reserve(locs, open)
+	w, res, err := domain.Plan(ids.New(), in.WarehouseID, in.WorkType, in.Priority, in.Lines, dirs, locs, domain.Compliance{})
+	if err != nil {
+		return Planned{}, err
+	}
+	if err := insertWork(ctx, tx, &w); err != nil {
+		return Planned{}, err
+	}
+	if err := enqueue(ctx, tx, w.ID, evts.WorkCreated, createdData(w)); err != nil {
+		return Planned{}, err
+	}
+	return Planned{Work: w, Traces: res}, nil
 }
 
 // openLines returns the OPEN lines of the warehouse's live work: the

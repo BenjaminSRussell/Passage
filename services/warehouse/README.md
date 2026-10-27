@@ -1,8 +1,62 @@
-# warehouse (wave 31 — Advanced Warehouse Management, slices 1–3)
+# warehouse (wave 31 — Advanced Warehouse Management, slices 1–4)
 
 Directed warehouse work: location hierarchy, license plates, and the location
 directive engine that decides where a put-away or pick line goes, with a
 rule-by-rule trace. PRD: §6.31 of `docs/prd/phase-6-logistics.md`; ticket PSG-31.
+
+## What slice 4 adds (dock appointments and ASN receiving)
+
+- `migrations/0002_docks_receiving.sql`: `dock_door` (code unique per
+  warehouse), `dock_appointment` (direction, reference, a half-open window on
+  the 15-minute grid of at most 24 hours, checked by the table too),
+  `receipt` (one per ASN reference and warehouse, tolerance, status, version)
+  and `receipt_line` (one row per ASN pallet: LP id, item, PO line reference,
+  expected quantity, weight and volume, and once received the quantity, the
+  variance, the discrepancy flag and reason, the put-away work, who and when).
+  Forced row-level security on all four.
+- `internal/domain/dock.go` (FR-31.8): `OnSlotGrid`, `Overlaps` (half open:
+  09:00–09:45 and 09:45–10:00 do not overlap) and `CheckDoorSlot`, which
+  refuses an overlap on the same door with WMS-0108 (AC-31.8
+  DOOR_SLOT_OVERLAP).
+- `internal/domain/receiving.go` (FR-31.9, BR-31.10): `Receipt.Receive`
+  records what arrived on one pallet. The variance is received − ASN and
+  that difference as a % of the ASN quantity (4 decimals); a variance beyond
+  the receipt's tolerance (default ±2%, 0–20) is a discrepancy with the
+  WMS-0107 text, compared exactly before rounding. The actual quantity is
+  received either way. A pallet is received once. `PutAwayLine` makes the
+  pallet one PURCHASE_PUTAWAY line of one LP, with weight and volume scaled to
+  the received quantity and the LP id, receipt id and ASN line as attributes.
+- `internal/store`: `CreateDoor`, `ListDoors`, `CreateAppointment` (locks the
+  door row, then checks overlaps, so concurrent bookings of one door are
+  serialized), `ListAppointments`, `RegisterASN`, `ListReceipts`,
+  `GetReceipt` and `ReceiveLine` (row lock on the receipt, optional If-Match
+  receipt version; creates the pallet's put-away work through the same
+  planning path as `POST /work`, so it respects open reservations; enqueues
+  `work.created` and `receipt.registered` in the same transaction). Every
+  command runs once per Idempotency-Key.
+- Event `dev.passage.wms.receipt.registered.v1` (topic `passage.wms.receipt`):
+  one per received pallet with `receipt_id`, `po_line_refs`, `lp_ids` and
+  `items` (qty by item, the PRD's fields) plus the ASN quantity and variance.
+- Web: Receiving (receipt list with pallets received and discrepancies,
+  status filter), Register ASN (one row per pallet), the receipt page (receive
+  each pallet with the quantity that arrived; shows the variance, the WMS-0107
+  warning and a link to the put-away work), and Dock schedule (a day's
+  appointments in local time with a door filter, the doors with Add door) and
+  Book a dock appointment.
+
+| Route | Duty (PRD duty) |
+|---|---|
+| `POST /v1/warehouse/dock-doors` | `warehouse.setup.maintain` (WMS_SETUP_MAINTAIN) |
+| `GET /v1/warehouse/dock-doors?warehouseId=` | `warehouse.inquiry.view` (WMS_INQUIRY) |
+| `POST /v1/warehouse/dock-appointments` | INBOUND `warehouse.receipt.register` (WMS_RECEIVE), OUTBOUND `warehouse.shipment.confirm` (WMS_SHIP_CONFIRM) |
+| `GET /v1/warehouse/dock-appointments?warehouseId=&doorId=&from=&to=` | `warehouse.inquiry.view` |
+| `POST /v1/warehouse/receipts:from-asn` | `warehouse.receipt.register` (WMS_RECEIVE) |
+| `GET /v1/warehouse/receipts?warehouseId=&status=&limit=&cursor=`, `GET /v1/warehouse/receipts/{id}` | `warehouse.inquiry.view` |
+| `POST /v1/warehouse/receipts/{id}/lines/{n}:receive` | `warehouse.receipt.register` |
+
+Receiving is two steps, as in AC-31.7: the ASN is registered with every
+pallet EXPECTED, then each pallet is received as it is scanned at the dock.
+A pallet that never arrives stays EXPECTED and is not a discrepancy.
 
 ## What slice 3 adds (persistence and directed work)
 
@@ -144,8 +198,8 @@ Rules worth knowing:
   directive can place.
 
 Not yet built: waves, replenishment, license plates in the store, loads,
-receiving, sorting, VAS, labor endpoints, and the rest of the wave. See
-`NOT-IMPLEMENTED.md`.
+receipt without an ASN, sorting, VAS, labor endpoints, and the rest of the
+wave. See `NOT-IMPLEMENTED.md`.
 
 ## Run and test
 
@@ -181,15 +235,19 @@ quantities and weights.
 | WMS-0103 | 422 | Confirmed PUT would mix items in a location that forbids it. |
 | WMS-0105 | 409 | Line already confirmed with another Idempotency-Key (BR-31.8). |
 | WMS-0106 | 422 | Confirmed quantity above the open quantity (over-pick tolerance 0%). |
+| WMS-0107 | 200 receive (`warnings`), and the pallet's `reason` | Received quantity beyond the receipt's ASN tolerance; the discrepancy is recorded and the quantity received (BR-31.10). |
+| WMS-0108 | 409 | The door is already booked for an overlapping window (AC-31.8 DOOR_SLOT_OVERLAP). |
+| WMS-RECEIPT-LINE-RECEIVED | 409 | The ASN pallet is already received (with another Idempotency-Key). |
 | WMS-0110 | 409 | Illegal work or line transition: confirming unassigned or finished work, a quantity below the open one (use a short pick), short picking a PUT line, cancelling after a confirmation, or a location status/stock that refuses the move. |
-| WMS-DUPLICATE | 409 | Location name taken in the warehouse, or directive sequence taken for the work type and direction. |
-| WMS-VERSION-CONFLICT | 409 | `If-Match` is not the work's current version. |
+| WMS-DUPLICATE | 409 | Location name or door code taken in the warehouse, directive sequence taken for the work type and direction, or the ASN already registered in the warehouse. |
+| WMS-VERSION-CONFLICT | 409 | `If-Match` is not the work's (or receipt's) current version. |
 | WMS-NOT-ASSIGNEE | 403 | The work is assigned to another user (or unassigned, for a cancel without the supervise duty). |
-| WMS-WORK-NOT-FOUND, WMS-LINE-NOT-FOUND | 404 | No such work in the tenant, or no such line on it. |
+| WMS-WORK-NOT-FOUND, WMS-RECEIPT-NOT-FOUND, WMS-LINE-NOT-FOUND | 404 | No such work or receipt in the tenant, or no such line on it. |
+| WMS-DOOR-NOT-FOUND | 404 | No such dock door in the appointment's warehouse. |
 | idempotency_key_reuse | 422 | The Idempotency-Key was used for another request (method, path, user and body). |
 | COM-0001 | 400 | Malformed body, unknown field, missing Idempotency-Key or X-Passage-User, or failed field validation (`errors` names the fields). |
 | AUTH-0001 | 401 | No tenant on the request, or (persisted routes) a tenant that is not a UUID. |
-| AUTH-0003 | 403 | The route's duty is missing. |
+| AUTH-0003 | 403 | The route's duty is missing (for an appointment, the duty of its direction). |
 
 Domain warnings returned by the domain functions (no endpoint serves them yet):
 `WMS-0113` (supply under quality hold, cross-dock deferred, from `PlanReceipt`) and

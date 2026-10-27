@@ -11,14 +11,15 @@ const Context = "wms"
 // Source is the CloudEvents source of this service.
 const Source = "warehouse"
 
-// Event types published in this slice.
+// Event types published so far.
 var (
-	WorkCreated   = events.Type(Context, "work", "created", 1)
-	WorkCompleted = events.Type(Context, "work", "completed", 1)
+	WorkCreated       = events.Type(Context, "work", "created", 1)
+	WorkCompleted     = events.Type(Context, "work", "completed", 1)
+	ReceiptRegistered = events.Type(Context, "receipt", "registered", 1)
 )
 
 // All lists every published type; asyncapi.yaml must name each one.
-func All() []string { return []string{WorkCreated, WorkCompleted} }
+func All() []string { return []string{WorkCreated, WorkCompleted, ReceiptRegistered} }
 
 // Line is one line of a work event.
 type Line struct {
@@ -55,4 +56,30 @@ type WorkCompletedData struct {
 	User        string `json:"user"`
 	DurationS   int64  `json:"duration_s"`
 	Lines       []Line `json:"lines"`
+}
+
+// ItemQty is a quantity of one item.
+type ItemQty struct {
+	ItemID string `json:"item_id"`
+	Qty    string `json:"qty"`
+}
+
+// ReceiptRegisteredData is the payload of dev.passage.wms.receipt.registered.v1,
+// emitted when a received ASN pallet is committed (FR-31.9): one event per
+// pallet, so purchasing and quality see each receipt as it happens. Quantities
+// are what arrived; the variance is against the ASN (BR-31.10).
+type ReceiptRegisteredData struct {
+	ReceiptID   string    `json:"receipt_id"`
+	WarehouseID string    `json:"warehouse_id"`
+	ASNRef      string    `json:"asn_ref"`
+	LineNo      int       `json:"line_no"`
+	POLineRefs  []string  `json:"po_line_refs"`
+	LPIDs       []string  `json:"lp_ids"`
+	Items       []ItemQty `json:"items"`
+	ExpectedQty string    `json:"expected_qty"`
+	VarianceQty string    `json:"variance_qty"`
+	VariancePct string    `json:"variance_pct"`
+	Discrepancy bool      `json:"discrepancy"`
+	WorkID      string    `json:"work_id"`
+	User        string    `json:"user"`
 }

@@ -388,17 +388,25 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		}
 	}
 	duties := map[string]string{
-		"POST " + simulatePath:                           dutySetupView,
-		"POST /v1/warehouse/locations:bulk":              dutySetupMaintain,
-		"GET /v1/warehouse/locations":                    dutySetupView,
-		"POST /v1/warehouse/location-directives":         dutySetupMaintain,
-		"GET /v1/warehouse/location-directives":          dutySetupView,
-		"POST /v1/warehouse/work":                        dutyWorkSupervise,
-		"GET /v1/warehouse/work":                         dutyInquiry,
-		"GET /v1/warehouse/work/{id}":                    dutyInquiry,
-		"POST /v1/warehouse/work:assign":                 dutyWorkExecute,
-		"POST /v1/warehouse/work/{id}/lines/{n}:confirm": dutyWorkExecute,
-		"POST /v1/warehouse/work/{id}:exception":         dutyWorkExecute,
+		"POST " + simulatePath:                               dutySetupView,
+		"POST /v1/warehouse/locations:bulk":                  dutySetupMaintain,
+		"GET /v1/warehouse/locations":                        dutySetupView,
+		"POST /v1/warehouse/location-directives":             dutySetupMaintain,
+		"GET /v1/warehouse/location-directives":              dutySetupView,
+		"POST /v1/warehouse/work":                            dutyWorkSupervise,
+		"GET /v1/warehouse/work":                             dutyInquiry,
+		"GET /v1/warehouse/work/{id}":                        dutyInquiry,
+		"POST /v1/warehouse/work:assign":                     dutyWorkExecute,
+		"POST /v1/warehouse/work/{id}/lines/{n}:confirm":     dutyWorkExecute,
+		"POST /v1/warehouse/work/{id}:exception":             dutyWorkExecute,
+		"POST /v1/warehouse/dock-doors":                      dutySetupMaintain,
+		"GET /v1/warehouse/dock-doors":                       dutyInquiry,
+		"POST /v1/warehouse/dock-appointments":               dutyReceive + " or " + dutyShipConfirm,
+		"GET /v1/warehouse/dock-appointments":                dutyInquiry,
+		"POST /v1/warehouse/receipts:from-asn":               dutyReceive,
+		"GET /v1/warehouse/receipts":                         dutyInquiry,
+		"GET /v1/warehouse/receipts/{id}":                    dutyInquiry,
+		"POST /v1/warehouse/receipts/{id}/lines/{n}:receive": dutyReceive,
 	}
 	served := 0
 	router := httpx.NewRouter()

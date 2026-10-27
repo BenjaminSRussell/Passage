@@ -1,14 +1,14 @@
 asyncapi: 3.0.0
 info:
-  title: Passage warehouse events (wave 31, slice 3)
-  version: 0.3.0
+  title: Passage warehouse events (wave 31, slice 4)
+  version: 0.4.0
   description: >
-    Work events, written to the outbox in the same transaction as the change
-    and relayed by Debezium as CloudEvents 1.0 (source "warehouse", subject =
-    work id, Kafka key = work id). Payload fields are snake_case and
-    quantities are decimal strings. wave.released.v1, load.shipped.v1 and
-    receipt.registered.v1 arrive with waves, loads and receiving in later
-    slices. Nothing is consumed yet.
+    Work and receipt events, written to the outbox in the same transaction as
+    the change and relayed by Debezium as CloudEvents 1.0 (source "warehouse",
+    subject = work or receipt id, Kafka key = that id). Payload fields are
+    snake_case and quantities are decimal strings. wave.released.v1 and
+    load.shipped.v1 arrive with waves and loads in later slices. Nothing is
+    consumed yet.
 defaultContentType: application/json
 channels:
   wmsWork:
@@ -17,6 +17,11 @@ channels:
     messages:
       workCreated: { $ref: "#/components/messages/workCreated" }
       workCompleted: { $ref: "#/components/messages/workCompleted" }
+  wmsReceipt:
+    address: passage.wms.receipt
+    description: Topic of every receipt event (platform events.Topic).
+    messages:
+      receiptRegistered: { $ref: "#/components/messages/receiptRegistered" }
 operations:
   publishWorkCreated:
     action: send
@@ -26,6 +31,10 @@ operations:
     action: send
     channel: { $ref: "#/channels/wmsWork" }
     messages: [{ $ref: "#/channels/wmsWork/messages/workCompleted" }]
+  publishReceiptRegistered:
+    action: send
+    channel: { $ref: "#/channels/wmsReceipt" }
+    messages: [{ $ref: "#/channels/wmsReceipt/messages/receiptRegistered" }]
 components:
   messages:
     workCreated:
@@ -44,6 +53,17 @@ components:
         PARTIALLY_COMPLETED. confirmed_qty per line is what moved. Consumers:
         inventory (post the transfer), sales fulfillment, production.
       payload: { $ref: "#/components/schemas/WorkCompleted" }
+    receiptRegistered:
+      name: dev.passage.wms.receipt.registered.v1
+      title: Receipt registered
+      summary: >
+        One ASN pallet (license plate) was received by
+        POST /v1/warehouse/receipts/{id}/lines/{n}:receive, committed with its
+        PURCHASE_PUTAWAY work. One event per pallet; items[].qty is what
+        arrived, and the variance is against the ASN quantity (BR-31.10,
+        discrepancy true beyond the receipt's tolerance). Consumers: purchasing
+        (PO receipt), quality.
+      payload: { $ref: "#/components/schemas/ReceiptRegistered" }
   schemas:
     Decimal:
       type: string
@@ -82,3 +102,26 @@ components:
         user: { type: string }
         duration_s: { type: integer, description: Seconds from assignment to the last confirmation. }
         lines: { type: array, items: { $ref: "#/components/schemas/Line" } }
+    ItemQty:
+      type: object
+      required: [item_id, qty]
+      properties:
+        item_id: { type: string }
+        qty: { $ref: "#/components/schemas/Decimal" }
+    ReceiptRegistered:
+      type: object
+      required: [receipt_id, warehouse_id, asn_ref, line_no, po_line_refs, lp_ids, items, expected_qty, variance_qty, variance_pct, discrepancy, work_id, user]
+      properties:
+        receipt_id: { type: string, format: uuid }
+        warehouse_id: { type: string, format: uuid }
+        asn_ref: { type: string }
+        line_no: { type: integer, description: The ASN line (pallet) received. }
+        po_line_refs: { type: array, items: { type: string }, description: Purchase order line references of the pallet; empty when the ASN gave none. }
+        lp_ids: { type: array, items: { type: string, maxLength: 40 } }
+        items: { type: array, items: { $ref: "#/components/schemas/ItemQty" } }
+        expected_qty: { $ref: "#/components/schemas/Decimal" }
+        variance_qty: { $ref: "#/components/schemas/Decimal" }
+        variance_pct: { $ref: "#/components/schemas/Decimal" }
+        discrepancy: { type: boolean }
+        work_id: { type: string, format: uuid, description: The put-away work created for the pallet. }
+        user: { type: string }

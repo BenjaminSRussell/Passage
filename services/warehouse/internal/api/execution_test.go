@@ -33,6 +33,13 @@ type fakeStore struct {
 	wfilter  store.WorkFilter
 	lfilter  store.LocationFilter
 	calls    int
+	door     domain.DockDoor
+	appt     domain.Appointment
+	afilter  store.AppointmentFilter
+	receipt  domain.Receipt
+	rfilter  store.ReceiptFilter
+	receive  store.ReceiveInput
+	received store.Received
 }
 
 func (f *fakeStore) CreateLocations(_ context.Context, idem store.Idem, _ string, locs []domain.Location) ([]domain.Location, bool, error) {
@@ -85,6 +92,45 @@ func (f *fakeStore) ExceptWork(_ context.Context, idem store.Idem, in store.Exce
 	f.calls++
 	f.idem, f.except = idem, in
 	return store.Excepted{Work: f.work}, f.replayed, f.err
+}
+
+func (f *fakeStore) CreateDoor(_ context.Context, idem store.Idem, d domain.DockDoor) (domain.DockDoor, bool, error) {
+	f.calls++
+	f.idem, f.door = idem, d
+	return d, f.replayed, f.err
+}
+func (f *fakeStore) ListDoors(context.Context, string) ([]domain.DockDoor, error) {
+	f.calls++
+	return nil, f.err
+}
+func (f *fakeStore) CreateAppointment(_ context.Context, idem store.Idem, a domain.Appointment) (domain.Appointment, bool, error) {
+	f.calls++
+	f.idem, f.appt = idem, a
+	return a, f.replayed, f.err
+}
+func (f *fakeStore) ListAppointments(_ context.Context, af store.AppointmentFilter) ([]domain.Appointment, error) {
+	f.calls++
+	f.afilter = af
+	return nil, f.err
+}
+func (f *fakeStore) RegisterASN(_ context.Context, idem store.Idem, r domain.Receipt) (domain.Receipt, bool, error) {
+	f.calls++
+	f.idem, f.receipt = idem, r
+	return r, f.replayed, f.err
+}
+func (f *fakeStore) ListReceipts(_ context.Context, rf store.ReceiptFilter) ([]domain.ReceiptSummary, error) {
+	f.calls++
+	f.rfilter = rf
+	return nil, f.err
+}
+func (f *fakeStore) GetReceipt(context.Context, string) (domain.Receipt, error) {
+	f.calls++
+	return f.receipt, f.err
+}
+func (f *fakeStore) ReceiveLine(_ context.Context, idem store.Idem, in store.ReceiveInput) (store.Received, bool, error) {
+	f.calls++
+	f.idem, f.receive = idem, in
+	return f.received, f.replayed, f.err
 }
 
 func persistedRouter(st Store) http.Handler {

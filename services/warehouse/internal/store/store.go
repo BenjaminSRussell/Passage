@@ -1,4 +1,5 @@
-// Package store persists locations, directives and work in the warehouse
+// Package store persists locations, directives, work, dock doors and
+// appointments, and ASN receipts in the warehouse
 // database. Every method runs in a transaction scoped to the caller's tenant
 // (dbx.WithTenantTx), so row-level security applies. Events are written to the
 // outbox in the same transaction as the change they describe, and commands
@@ -29,8 +30,9 @@ const MaxPageSize = 200
 var (
 	// ErrNotFound is returned when a row does not exist in the caller's tenant.
 	ErrNotFound = errors.New("store: not found")
-	// ErrConflict is a unique violation: a duplicate location name or a
-	// duplicate directive sequence for the same work type and direction.
+	// ErrConflict is a unique violation: a duplicate location name, directive
+	// sequence (per work type and direction), dock door code, or ASN reference
+	// in the warehouse.
 	ErrConflict = errors.New("store: conflict")
 	// ErrIdempotencyReuse is an Idempotency-Key replayed with another request.
 	ErrIdempotencyReuse = errors.New("store: idempotency key was used for another request")
@@ -132,11 +134,17 @@ func once[T any](ctx context.Context, tx pgx.Tx, idem Idem, status int, fn func(
 
 // enqueue writes one work event into the outbox within tx.
 func enqueue(ctx context.Context, tx pgx.Tx, workID, typ string, data any) error {
-	evt, err := kernelevents.New(typ, evts.Source, workID, tenantID(ctx), data)
+	return enqueueFor(ctx, tx, "work", workID, typ, data)
+}
+
+// enqueueFor writes one event of an aggregate (work, receipt) into the outbox
+// within tx; the aggregate id is the event subject.
+func enqueueFor(ctx context.Context, tx pgx.Tx, aggregate, id, typ string, data any) error {
+	evt, err := kernelevents.New(typ, evts.Source, id, tenantID(ctx), data)
 	if err != nil {
 		return err
 	}
-	return outbox.Enqueue(ctx, tx, "work", workID, evt)
+	return outbox.Enqueue(ctx, tx, aggregate, id, evt)
 }
 
 // dec parses a numeric column read as text.
