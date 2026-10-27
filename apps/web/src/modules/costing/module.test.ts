@@ -16,7 +16,7 @@ describe("costing module", () => {
 
   it("routes every nav entry, each behind costing.read", () => {
     const paths = costing.routes.map((r) => r.path);
-    expect(costing.nav.map((n) => n.to)).toEqual(["/costing", "/costing/valuation-ledgers", "/costing/aging"]);
+    expect(costing.nav.map((n) => n.to)).toEqual(["/costing", "/costing/valuation-ledgers", "/costing/aging", "/costing/versions"]);
     for (const n of costing.nav) {
       expect(paths).toContain(n.to);
       expect(n.duty).toBe("costing.read");

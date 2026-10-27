@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
@@ -28,16 +29,19 @@ const (
 
 // CostingVersion is a set of planned or standard costs (AX CostingVersion).
 type CostingVersion struct {
-	ID              string    `json:"id"`
-	LegalEntityID   string    `json:"legalEntityId"`
-	Code            string    `json:"code"`
-	Type            string    `json:"type"`
-	Status          string    `json:"status"`
-	Currency        string    `json:"currency"`
-	EffectiveFrom   string    `json:"effectiveFrom"`
-	BlockActivation bool      `json:"blockActivation"`
-	Version         int       `json:"version"`
-	CreatedAt       time.Time `json:"createdAt"`
+	ID              string     `json:"id"`
+	LegalEntityID   string     `json:"legalEntityId"`
+	Code            string     `json:"code"`
+	Type            string     `json:"type"`
+	Status          string     `json:"status"`
+	Currency        string     `json:"currency"`
+	EffectiveFrom   string     `json:"effectiveFrom"`
+	BlockActivation bool       `json:"blockActivation"`
+	Version         int        `json:"version"`
+	CreatedAt       time.Time  `json:"createdAt"`
+	ActivatedAt     *time.Time `json:"activatedAt,omitempty"`
+	// ItemCount is the number of item costs in the version; list and get fill it.
+	ItemCount int `json:"itemCount"`
 }
 
 // ItemCost is one product x site cost in a version, unit cost as a decimal string.
@@ -52,6 +56,15 @@ type Store interface {
 	// CreateCostingVersion reports created=false for an idempotent replay.
 	CreateCostingVersion(ctx context.Context, in CostingVersion, idempotencyKey string) (v CostingVersion, created bool, err error)
 	ImportItemCosts(ctx context.Context, versionID string, items []ItemCost) (int, error)
+	ListVersions(ctx context.Context, f VersionFilter, after string, limit int) (VersionPage, error)
+	GetVersion(ctx context.Context, id string) (CostingVersion, error)
+	ListItemCosts(ctx context.Context, versionID, after string, limit int) (ItemCostPage, error)
+	CopyItemCosts(ctx context.Context, targetID, sourceID string, percent decimal.Decimal) (int, error)
+	PreviewActivation(ctx context.Context, versionID string, onHand OnHand) (ActivationResult, error)
+	// ActivateVersion commits the activation when the version is still at
+	// expectedVersion (If-Match); an ACTIVE version replays its stored result.
+	ActivateVersion(ctx context.Context, versionID string, expectedVersion int, onHand OnHand) (ActivationResult, error)
+	CurrentCost(ctx context.Context, productID, siteID, asOf string) (CostLookup, error)
 	Ping(ctx context.Context) error
 }
 
@@ -66,12 +79,12 @@ func New(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
 // Ping checks the database connection for readiness.
 func (s *Postgres) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 
-const versionColumns = "id, legal_entity_id, code, type, status, currency, effective_from::text, block_activation, version, created_at"
+const versionColumns = "id, legal_entity_id, code, type, status, currency, effective_from::text, block_activation, version, created_at, activated_at"
 
 func scanVersion(row pgx.Row, extra ...any) (CostingVersion, error) {
 	var v CostingVersion
 	err := row.Scan(append([]any{&v.ID, &v.LegalEntityID, &v.Code, &v.Type, &v.Status, &v.Currency, &v.EffectiveFrom,
-		&v.BlockActivation, &v.Version, &v.CreatedAt}, extra...)...)
+		&v.BlockActivation, &v.Version, &v.CreatedAt, &v.ActivatedAt}, extra...)...)
 	return v, err
 }
 
@@ -140,7 +153,7 @@ func (s *Postgres) ImportItemCosts(ctx context.Context, versionID string, items 
 			from costing_version v
 			cross join unnest($3::uuid[], $4::uuid[], $5::uuid[], $6::numeric[]) as i(id, product_id, site_id, unit_cost)
 			where v.tenant_id = $1 and v.id = $2
-			on conflict (tenant_id, version_id, product_id, site_id) do update set unit_cost = excluded.unit_cost, updated_at = now()`,
+			on conflict (tenant_id, version_id, product_id, site_id) do update set unit_cost = excluded.unit_cost, source = 'IMPORT', updated_at = now()`,
 			p.TenantID, versionID, rowIDs, products, sites, costs); err != nil {
 			return err
 		}

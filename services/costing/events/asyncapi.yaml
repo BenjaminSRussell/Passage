@@ -1,21 +1,53 @@
 asyncapi: 3.0.0
 info:
   title: Passage Costing Events
-  version: 0.1.0
+  version: 0.3.0
   description: >-
-    Slice 1 of PSG-20 (wave 20) publishes and consumes no events. Settlement
-    preview and PPV are request/response only, and costing versions persist
-    without an outbox row. The events below are the wave 20 catalog for later
-    slices; they are listed here so consumers can plan, not because code emits them yet.
+    Costing publishes dev.passage.costing.cost.changed.v1 when a STANDARD costing
+    version is activated: one event per product x site, written to the outbox in the
+    activation transaction and relayed by Debezium (CloudEvents 1.0 envelope with
+    tenantid; subject is the product id). Settlement, ledger and aging previews and
+    PPV remain request/response only, and costing consumes no events yet. The
+    x-planned-events are the wave 20 catalog for later slices and are not emitted.
 defaultContentType: application/json
-channels: {}
-operations: {}
+channels:
+  cost:
+    address: passage.costing.cost
+    description: Standard cost changes per product x site; the Kafka key is "<productId>|<siteId>".
+    messages:
+      costChanged:
+        $ref: "#/components/messages/CostChanged"
+operations:
+  publishCostChanged:
+    action: send
+    channel:
+      $ref: "#/channels/cost"
+    summary: A costing version activation changed the standard cost of a product at a site.
+    messages:
+      - $ref: "#/channels/cost/messages/costChanged"
 components:
-  messages: {}
+  messages:
+    CostChanged:
+      name: dev.passage.costing.cost.changed.v1
+      contentType: application/cloudevents+json
+      summary: Consumers (inventory cost price cache, planning, product costing) refresh the product x site cost.
+      payload:
+        type: object
+        required: [productId, siteId, versionId, versionCode, currency, newCost, effectiveFrom, onHandQty, revaluationAmount]
+        properties:
+          productId: { type: string, format: uuid }
+          siteId: { type: string, format: uuid }
+          versionId: { type: string, format: uuid, description: The costing version that was activated (the PRD's "version"). }
+          versionCode: { type: string, example: STD-2026 }
+          currency: { type: string, pattern: "^[A-Z]{3}$" }
+          oldCost: { type: string, description: "Decimal string; the superseded standard. Absent when the product x site had none." }
+          newCost: { type: string, description: Decimal string. }
+          effectiveFrom: { type: string, format: date }
+          onHandQty: { type: string, description: Decimal string; the physical on-hand the activation revalued. }
+          revaluationAmount: { type: string, description: "Decimal string at the currency's minor unit: (new − old) × on-hand, or new × on-hand − book value for a first standard." }
 x-planned-events:
   - dev.passage.costing.close.completed.v1
   - dev.passage.costing.close.cancelled.v1
   - dev.passage.costing.close.failed.v1
-  - dev.passage.costing.cost.changed.v1
   - dev.passage.costing.reconciliation.diff.v1
   - dev.passage.costing.agingsnapshot.created.v1

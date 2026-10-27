@@ -1,13 +1,15 @@
 openapi: 3.1.0
 info:
   title: Passage Costing API
-  version: 0.1.0
+  version: 0.3.0
   description: >-
-    Inventory costing (PSG-20, wave 20), slices 1 and 2. Settlement preview under the
+    Inventory costing (PSG-20, wave 20), slices 1 to 3. Settlement preview under the
     item model group's costing method (with marking and split valuation types),
     parallel valuation ledger preview, inventory aging preview, costing versions with
-    item-cost import, and the internal purchase price variance hook. Settlement,
-    ledger, aging and PPV are stateless; versions and item costs are persisted with RLS.
+    item-cost import (JSON or CSV), copy with percent change, standard cost activation
+    with revaluation preview, the as-of standard cost lookup, and the internal purchase
+    price variance hook. Settlement, ledger, aging and PPV are stateless; versions and
+    item costs are persisted with RLS.
 servers:
   - url: https://api.{env}.passage.dev
     variables:
@@ -123,23 +125,99 @@ paths:
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
+    get:
+      operationId: listCostingVersions
+      summary: List costing versions visible to the caller, ordered by code
+      x-passage-duty: costing.read
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/Duties"
+        - { name: legalEntityId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: status, in: query, required: false, schema: { type: string, enum: [DRAFT, ACTIVE, ARCHIVED] } }
+        - { name: type, in: query, required: false, schema: { type: string, enum: [STANDARD, PLANNED] } }
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: one page of versions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/CostingVersion" } }
+                  nextCursor: { type: string, description: Absent on the last page. }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/costing/versions/{id}:
+    get:
+      operationId: getCostingVersion
+      summary: One costing version with its item count; the ETag is its optimistic version
+      x-passage-duty: costing.read
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/Duties"
+        - $ref: "#/components/parameters/VersionId"
+      responses:
+        "200":
+          description: the version
+          headers:
+            ETag: { schema: { type: string }, description: 'The version number in quotes, e.g. "3".' }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CostingVersion" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem", description: CST-VER-NOT-FOUND }
+  /v1/costing/versions/{id}/item-costs:
+    get:
+      operationId: listItemCosts
+      summary: A version's item costs by site and product, each compared to the standard cost active in another version
+      x-passage-duty: costing.read
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/Duties"
+        - $ref: "#/components/parameters/VersionId"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: one page of item costs
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/ItemCostRow" } }
+                  nextCursor: { type: string, description: Absent on the last page. }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem", description: CST-VER-NOT-FOUND }
   /v1/costing/versions/{id}/item-costs:import:
     post:
       operationId: importItemCosts
-      summary: Import pending item costs into a DRAFT version (idempotent per product and site; bumps the version's optimistic version)
+      summary: Import pending item costs into a DRAFT version from JSON or CSV (all or nothing; idempotent per product and site; bumps the version's optimistic version)
       x-passage-duty: costing.version.write
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
         - $ref: "#/components/parameters/Duties"
-        - name: id
-          in: path
-          required: true
-          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/VersionId"
       requestBody:
         required: true
         content:
           application/json:
             schema: { $ref: "#/components/schemas/ImportItemCostsRequest" }
+          text/csv:
+            schema:
+              type: string
+              description: >-
+                Header row naming productId, siteId and unitCost (any order, case-insensitive,
+                extra columns ignored), then one row per product and site; at most 50,000 rows
+                and 8 MiB. Any bad row refuses the whole file with CST-IMP-001 naming the line.
       responses:
         "200":
           description: imported
@@ -155,7 +233,142 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
-        "409": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem", description: CST-VER-NOT-DRAFT }
+        "422": { $ref: "#/components/responses/Problem", description: CST-IMP-001 invalid CSV file }
+  /v1/costing/versions/{id}/item-costs:copy:
+    post:
+      operationId: copyItemCosts
+      summary: Copy another version's item costs into a DRAFT version, moved by a percent change (idempotent per product and site; bumps the optimistic version)
+      x-passage-duty: costing.version.write
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/Duties"
+        - $ref: "#/components/parameters/VersionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CopyItemCostsRequest" }
+      responses:
+        "200":
+          description: copied
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [versionId, copied]
+                properties:
+                  versionId: { type: string, format: uuid }
+                  copied: { type: integer }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem", description: CST-VER-NOT-FOUND (target or source) }
+        "409": { $ref: "#/components/responses/Problem", description: CST-VER-NOT-DRAFT }
+        "422":
+          $ref: "#/components/responses/Problem"
+          description: >-
+            CST-COPY-001 percent change at or below -100 or a cost past 14 integer digits,
+            CST-COPY-002 empty source, CST-COPY-003 source is the target,
+            CST-COPY-004 source in another legal entity or currency
+  /v1/costing/versions/{id}:preview-activation:
+    post:
+      operationId: previewActivation
+      summary: Revaluation of activating a version, without writing anything (the UI requires it before activation); for an ACTIVE version, the revaluation it recorded
+      x-passage-duty: costing.read
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/Duties"
+        - $ref: "#/components/parameters/VersionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ActivationRequest" }
+      responses:
+        "200":
+          description: revaluation preview (status PREVIEW, or ALREADY_ACTIVE); the ETag is the version to send as If-Match
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ActivationResponse" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem", description: CST-VER-NOT-DRAFT (ARCHIVED) }
+        "422": { $ref: "#/components/responses/ActivationRefused" }
+  /v1/costing/versions/{id}:activate:
+    post:
+      operationId: activateVersion
+      summary: >-
+        Activate a DRAFT STANDARD version in one transaction. The previous ACTIVE cost of each
+        product and site is superseded, the pending costs become ACTIVE with their revaluation
+        recorded, and cost.changed is emitted per product and site. Idempotent per version id:
+        an ACTIVE version answers ALREADY_ACTIVE with the recorded revaluation.
+      x-passage-duty: costing.version.activate
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/Duties"
+        - $ref: "#/components/parameters/VersionId"
+        - name: If-Match
+          in: header
+          required: true
+          description: The version from the activation preview (its ETag); a change since then is 412.
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ActivationRequest" }
+      responses:
+        "200":
+          description: activated (status ACTIVATED) or already active (status ALREADY_ACTIVE)
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ActivationResponse" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem", description: CST-VER-NOT-DRAFT (ARCHIVED) or CST-ACT-008 concurrent activation }
+        "412": { $ref: "#/components/responses/Problem", description: conflict_version, the version changed since the preview }
+        "422": { $ref: "#/components/responses/ActivationRefused" }
+        "428": { $ref: "#/components/responses/Problem", description: COM-0428 If-Match missing }
+  /v1/costing/products/{id}/cost:
+    get:
+      operationId: getProductCost
+      summary: Standard cost of a product at a site in force at the end of a date (waves 21 and 27)
+      x-passage-duty: costing.read
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/Duties"
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: site
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+        - name: date
+          in: query
+          required: false
+          description: Date (UTC), default today. The cost activated last on or before it, even if superseded since.
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: the cost in force
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CostLookup" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem", description: CST-COST-001 no standard cost in force on that date }
   /internal/v1/costing/ppv:
     post:
       operationId: calculatePpv
@@ -198,9 +411,34 @@ components:
       in: header
       required: true
       schema: { type: string, maxLength: 255 }
+    VersionId:
+      name: id
+      in: path
+      required: true
+      description: Costing version id; a malformed id is 404 CST-VER-NOT-FOUND.
+      schema: { type: string, format: uuid }
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: nextCursor from the previous page.
+      schema: { type: string }
   responses:
     Problem:
       description: RFC 9457 problem details
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    ActivationRefused:
+      description: >-
+        CST-ACT-001 blocked version, CST-ACT-002 zero pending cost, CST-ACT-003 nothing pending,
+        CST-ACT-005 not a STANDARD version, CST-ACT-006 effective date still ahead,
+        CST-ACT-007 stock without a standard and no bookValue
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
@@ -420,7 +658,7 @@ components:
         blockActivation: { type: boolean, default: false }
     CostingVersion:
       type: object
-      required: [id, legalEntityId, code, type, status, currency, effectiveFrom, blockActivation, version, createdAt]
+      required: [id, legalEntityId, code, type, status, currency, effectiveFrom, blockActivation, version, createdAt, itemCount]
       properties:
         id: { type: string, format: uuid }
         legalEntityId: { type: string, format: uuid }
@@ -430,8 +668,10 @@ components:
         currency: { type: string }
         effectiveFrom: { type: string, format: date }
         blockActivation: { type: boolean }
-        version: { type: integer }
+        version: { type: integer, description: Optimistic version; every import, copy and the activation bump it. }
         createdAt: { type: string, format: date-time }
+        activatedAt: { type: string, format: date-time, description: Set once the version is ACTIVE. }
+        itemCount: { type: integer, description: Item costs in the version (0 on the create response). }
     ItemCost:
       type: object
       required: [productId, siteId, unitCost]
@@ -442,6 +682,21 @@ components:
           type: string
           pattern: "^[0-9]{1,14}(\\.[0-9]{1,6})?$"
           description: Non-negative unit cost in the version currency; at most 14 integer digits and 6 decimals (numeric(20,6)).
+    ItemCostRow:
+      type: object
+      required: [productId, siteId, unitCost, status, source]
+      properties:
+        productId: { type: string, format: uuid }
+        siteId: { type: string, format: uuid }
+        unitCost: { $ref: "#/components/schemas/Decimal" }
+        status: { type: string, enum: [PENDING, ACTIVE, SUPERSEDED] }
+        source: { type: string, enum: [MANUAL, IMPORT, COPY, ROLLUP] }
+        activeCost: { $ref: "#/components/schemas/Decimal", description: The standard cost active for this product and site in another version, if any. }
+        previousUnitCost: { $ref: "#/components/schemas/Decimal", description: Set on activation when an older standard was superseded. }
+        bookValue: { $ref: "#/components/schemas/Decimal", description: Set on activation when there was no older standard. }
+        onHandQty: { $ref: "#/components/schemas/Decimal", description: On-hand the activation revalued. }
+        revaluationAmount: { $ref: "#/components/schemas/Decimal" }
+        activatedAt: { type: string, format: date-time }
     ImportItemCostsRequest:
       type: object
       required: [items]
@@ -451,6 +706,77 @@ components:
           minItems: 1
           maxItems: 50000
           items: { $ref: "#/components/schemas/ItemCost" }
+    CopyItemCostsRequest:
+      type: object
+      required: [sourceVersionId, percentChange]
+      properties:
+        sourceVersionId: { type: string, format: uuid, description: Another version of the same legal entity and currency. }
+        percentChange: { $ref: "#/components/schemas/Decimal", description: "Percent applied to every copied cost, e.g. 2.5 or -1; greater than -100. Results round half-even to 6 places." }
+    ActivationRequest:
+      type: object
+      properties:
+        onHand:
+          type: array
+          maxItems: 50000
+          description: >-
+            Physical on-hand per product and site at activation time (BR-20.7). A pending cost
+            whose pair is missing revalues zero quantity. Where the pair has no active standard
+            yet and its quantity is not zero, bookValue is required (CST-ACT-007).
+          items:
+            type: object
+            required: [productId, siteId, qty]
+            properties:
+              productId: { type: string, format: uuid }
+              siteId: { type: string, format: uuid }
+              qty: { $ref: "#/components/schemas/Decimal", description: "At most 22 integer digits and 6 decimals; negative stock is allowed." }
+              bookValue: { $ref: "#/components/schemas/Decimal", description: Current inventory value of that on-hand in the version currency. }
+    ActivationResponse:
+      type: object
+      required: [versionId, versionCode, version, status, currency, lineCount, revaluationTotal, sites, topDeltas]
+      properties:
+        versionId: { type: string, format: uuid }
+        versionCode: { type: string }
+        version: { type: integer, description: Optimistic version; send it as If-Match to activate. }
+        status: { type: string, enum: [PREVIEW, ACTIVATED, ALREADY_ACTIVE] }
+        currency: { type: string }
+        lineCount: { type: integer }
+        revaluationTotal: { $ref: "#/components/schemas/Decimal" }
+        sites:
+          type: array
+          description: One revaluation voucher per site, the sum of its rounded lines.
+          items:
+            type: object
+            required: [siteId, revaluation]
+            properties:
+              siteId: { type: string, format: uuid }
+              revaluation: { $ref: "#/components/schemas/Decimal" }
+        topDeltas:
+          type: array
+          maxItems: 20
+          description: Largest absolute revaluations first.
+          items:
+            type: object
+            required: [productId, siteId, newCost, onHandQty, revaluation]
+            properties:
+              productId: { type: string, format: uuid }
+              siteId: { type: string, format: uuid }
+              previousCost: { $ref: "#/components/schemas/Decimal", description: The superseded standard; absent for a first standard. }
+              bookValue: { $ref: "#/components/schemas/Decimal", description: The value replaced when there was no standard. }
+              newCost: { $ref: "#/components/schemas/Decimal" }
+              onHandQty: { $ref: "#/components/schemas/Decimal" }
+              revaluation: { $ref: "#/components/schemas/Decimal", description: "(new − old) × on-hand, or new × on-hand − book value, rounded half-even to the currency." }
+    CostLookup:
+      type: object
+      required: [productId, siteId, unitCost, currency, versionId, versionCode, effectiveFrom, activatedAt]
+      properties:
+        productId: { type: string, format: uuid }
+        siteId: { type: string, format: uuid }
+        unitCost: { $ref: "#/components/schemas/Decimal" }
+        currency: { type: string }
+        versionId: { type: string, format: uuid }
+        versionCode: { type: string }
+        effectiveFrom: { type: string, format: date }
+        activatedAt: { type: string, format: date-time }
     PpvRequest:
       type: object
       required: [kind, currency, qty, poUnitPrice, sourceDocumentId]

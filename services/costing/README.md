@@ -1,10 +1,52 @@
 # costing
 
-Passage inventory costing service: wave 20 (ticket PSG-20, "Inventory Costing & Supplier Collaboration"), **slices 1 and 2**.
+Passage inventory costing service: wave 20 (ticket PSG-20, "Inventory Costing & Supplier Collaboration"), **slices 1 to 3**.
 
-The service owns its tables and applies its own migrations (`migrations/0001_costing.sql`) through
+The service owns its tables and applies its own migrations (`migrations/0001_costing.sql`, `0002_activation.sql`) through
 `dbx.Migrate`. The PRD places them in schema `costing` of `inventory-db` (`inventory/v20.*`); that
 placement is a deploy decision recorded as a handoff in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
+
+## What slice 3 adds
+
+Standard cost versions end to end (FR-20.5, BR-20.7): read, fill, compare, preview, activate, look up.
+
+- **Reads.** `GET /v1/costing/versions` (filter by `legalEntityId`, `status`, `type`; ordered by
+  code; cursor pages), `GET /v1/costing/versions/{id}` (with `itemCount`; the `ETag` is the
+  optimistic `version`) and `GET /v1/costing/versions/{id}/item-costs` (by site and product, each
+  with `activeCost`, the standard active for that product × site in another version, so the screen
+  can compare pending to active, plus what activation recorded once the row is activated).
+- **CSV import.** `item-costs:import` also takes `Content-Type: text/csv` with the header
+  `productId,siteId,unitCost` (any order, case-insensitive, extra columns ignored). The file is all
+  or nothing: the first bad row refuses it with `CST-IMP-001` naming the line.
+- **Copy with percent change** `POST /v1/costing/versions/{id}/item-costs:copy`: copies another
+  version of the same legal entity and currency into a DRAFT target, each cost moved by
+  `percentChange` and rounded half-even to six places. A repeat replaces the pending costs.
+- **Activation preview** `POST /v1/costing/versions/{id}:preview-activation` (duty `costing.read`):
+  the revaluation without writing anything — total, one amount per site (the per-site voucher, the
+  sum of its rounded lines) and the 20 largest deltas — plus the `version` to activate against.
+- **Activation** `POST /v1/costing/versions/{id}:activate` with `If-Match: "<version>"`. In one
+  transaction it supersedes the ACTIVE standard of each product × site, makes the pending costs
+  ACTIVE with the revaluation recorded on each row, marks the version ACTIVE and writes one
+  `dev.passage.costing.cost.changed.v1` per product × site to the outbox. The revaluation is
+  `(new − old) × on-hand`, rounded half-even to the currency (BR-20.4); where a product × site has
+  no standard yet it is `new × on-hand − bookValue`, so the caller must give the book value of
+  that stock (`CST-ACT-007`) instead of the service revaluing it from zero. Activations in one
+  legal entity are serialised by a transaction advisory lock, and a partial unique index keeps at
+  most one ACTIVE cost per product × site. Activating an ACTIVE version answers `ALREADY_ACTIVE`
+  with the recorded revaluation and writes nothing (idempotent per version id). Only DRAFT
+  STANDARD versions whose effective date has arrived activate; PLANNED versions feed the wave 39
+  roll-up and never become the inventory standard. On-hand (and book value) come in the request
+  body: the service does not read the wave 16 inventory ledger yet (see NOT-IMPLEMENTED).
+- **Cost lookup** `GET /v1/costing/products/{id}/cost?site=&date=` for waves 21 and 27: the
+  standard activated last on or before the end of `date` (UTC, default today), even if it has been
+  superseded since; `CST-COST-001` when there is none.
+- Migration `0002_activation.sql`: `costing_version.activated_at`; on `item_cost` the recorded
+  `previous_unit_cost`, `book_value`, `on_hand_qty`, `revaluation_amount`, `activated_at`; the
+  one-ACTIVE partial unique index and an index for the as-of lookup.
+- **Web screens**: `/costing/versions` (list with filters), `/costing/versions/new` (create form)
+  and `/costing/versions/:id` (details, item costs compared to active, CSV import, copy with
+  percent, and activation that stays disabled until the revaluation preview for the same on-hand
+  has been shown).
 
 ## What slice 2 adds
 
@@ -88,8 +130,8 @@ PASSAGE_TEST_DATABASE_URL=postgres://admin@... PASSAGE_TEST_APP_DATABASE_URL=pos
 ## Contracts
 
 - HTTP: [`api/openapi.yaml`](api/openapi.yaml)
-- Events: [`events/asyncapi.yaml`](events/asyncapi.yaml). Slice 1 publishes no events; the planned
-  catalog is listed under `x-planned-events`.
+- Events: [`events/asyncapi.yaml`](events/asyncapi.yaml). `dev.passage.costing.cost.changed.v1` is
+  published on activation; the planned catalog is listed under `x-planned-events`.
 - Chart: [`charts/costing`](charts/costing) (`helm lint charts/costing`).
 
 ## Error codes
@@ -107,7 +149,22 @@ PASSAGE_TEST_DATABASE_URL=postgres://admin@... PASSAGE_TEST_APP_DATABASE_URL=pos
 | `CST-VLG-001` | 422 | Valuation ledger set invalid (no or two primaries, duplicate id, non-positive rate, primary rate not 1) |
 | `CST-VER-CODE-DUPLICATE` | 409 | A costing version with this code already exists for the legal entity |
 | `CST-VER-NOT-FOUND` | 404 | Costing version not found in this tenant |
-| `CST-VER-NOT-DRAFT` | 409 | Item costs can only be imported into a DRAFT version |
+| `CST-VER-NOT-DRAFT` | 409 | Item costs can only be imported or copied into, and only a DRAFT version activated (an ARCHIVED one is refused) |
+| `CST-IMP-001` | 422 | Item-cost CSV refused (header, a bad row named by line, duplicates, too many rows) |
+| `CST-ACT-001` | 422 | Costing version is blocked for activation |
+| `CST-ACT-002` | 422 | Pending costs include zero and zero cost is not allowed |
+| `CST-ACT-003` | 422 | The version has no pending item costs |
+| `CST-ACT-005` | 422 | Only a STANDARD version can be activated |
+| `CST-ACT-006` | 422 | The version's effective date is still ahead |
+| `CST-ACT-007` | 422 | A product × site has stock but no active standard, and no `bookValue` was given |
+| `CST-ACT-008` | 409 | Another activation changed the same product costs at the same moment; preview again |
+| `CST-COPY-001` | 422 | Percent change at or below -100, or a copied cost past 14 integer digits |
+| `CST-COPY-002` | 422 | The source version has no item costs |
+| `CST-COPY-003` | 422 | The source is the target version itself |
+| `CST-COPY-004` | 422 | The source belongs to another legal entity or uses another currency |
+| `CST-COST-001` | 404 | No standard cost in force for the product and site on that date |
+| `conflict_version` | 412 | `If-Match` is not the version's current optimistic version |
+| `COM-0428` | 428 | `If-Match` missing on activation |
 | `idempotency_key_reuse` | 422 | `Idempotency-Key` reused with a different body |
 | `AUTH-0003` | 403 | Missing duty (kernel `authz.RequireDuty`) |
 | `COM-0500` | 500 | Unexpected error; detail hidden, logged with the request id |
@@ -116,8 +173,9 @@ PASSAGE_TEST_DATABASE_URL=postgres://admin@... PASSAGE_TEST_APP_DATABASE_URL=pos
 
 | Duty | Routes | PRD duty (§3.20.17) |
 |---|---|---|
-| `costing.read` | `POST /v1/costing/settlements:preview`, `POST /v1/costing/valuation-ledgers:preview`, `POST /v1/costing/aging:preview` | CostingInquire |
-| `costing.version.write` | `POST /v1/costing/versions`, `POST /v1/costing/versions/{id}/item-costs:import` | CostingVersionMaintain |
+| `costing.read` | `POST /v1/costing/settlements:preview`, `POST /v1/costing/valuation-ledgers:preview`, `POST /v1/costing/aging:preview`, `GET /v1/costing/versions`, `GET /v1/costing/versions/{id}`, `GET /v1/costing/versions/{id}/item-costs`, `POST /v1/costing/versions/{id}:preview-activation`, `GET /v1/costing/products/{id}/cost` | CostingInquire |
+| `costing.version.write` | `POST /v1/costing/versions`, `POST /v1/costing/versions/{id}/item-costs:import`, `POST /v1/costing/versions/{id}/item-costs:copy` | CostingVersionMaintain |
+| `costing.version.activate` | `POST /v1/costing/versions/{id}:activate` | CostingVersionActivate |
 | `costing.ppv.post` | `POST /internal/v1/costing/ppv` | service account of receiving and payables |
 
 ## Dependencies

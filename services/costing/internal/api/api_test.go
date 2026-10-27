@@ -15,12 +15,15 @@ import (
 
 const (
 	testTenant = "00000000-0000-0000-0000-000000000001"
-	allDuties  = "costing.read,costing.version.write,costing.ppv.post"
+	allDuties  = "costing.read,costing.version.write,costing.version.activate,costing.ppv.post"
 )
 
+// fakeStore records calls; slice3 (activation_test.go) holds the activation,
+// copy, read and lookup fakes.
 type fakeStore struct {
 	imported []store.ItemCost
 	versions map[string]store.CostingVersion
+	slice3
 }
 
 func (f *fakeStore) CreateCostingVersion(_ context.Context, in store.CostingVersion, key string) (store.CostingVersion, bool, error) {

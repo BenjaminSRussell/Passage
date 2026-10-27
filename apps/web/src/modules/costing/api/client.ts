@@ -140,12 +140,11 @@ export class CostingApiError extends Error {
   }
 }
 
-async function post<T>(path: string, body: unknown, fetchImpl: typeof fetch): Promise<T> {
+async function request<T>(path: string, init: RequestInit, fetchImpl: typeof fetch): Promise<T> {
   const res = await fetchImpl(path, {
-    method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json" },
+    ...init,
+    headers: { accept: "application/json", ...(init.headers as Record<string, string> | undefined) },
     credentials: "same-origin",
-    body: JSON.stringify(body),
   });
   if (!res.ok) {
     const problem = (await res.json().catch(() => ({}))) as Partial<Problem>;
@@ -158,6 +157,10 @@ async function post<T>(path: string, body: unknown, fetchImpl: typeof fetch): Pr
     });
   }
   return (await res.json()) as T;
+}
+
+function post<T>(path: string, body: unknown, fetchImpl: typeof fetch, headers: Record<string, string> = {}): Promise<T> {
+  return request<T>(path, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) }, fetchImpl);
 }
 
 export function previewSettlements(body: SettlePreviewRequest, fetchImpl: typeof fetch = fetch): Promise<SettlePreviewResponse> {
@@ -181,4 +184,145 @@ export function describeError(err: unknown, fallback: string): string {
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([field, msg]) => `${field} ${msg}`);
   return [`${err.problem.code}: ${err.message}`, ...fields].join("; ");
+}
+
+// ---- costing versions (FR-20.5) ----
+
+export type VersionType = "STANDARD" | "PLANNED";
+export type VersionStatus = "DRAFT" | "ACTIVE" | "ARCHIVED";
+
+export interface CostingVersion {
+  id: string;
+  legalEntityId: string;
+  code: string;
+  type: VersionType;
+  status: VersionStatus;
+  currency: string;
+  effectiveFrom: string;
+  blockActivation: boolean;
+  /** Optimistic version: send it as If-Match to activate. */
+  version: number;
+  createdAt: string;
+  activatedAt?: string;
+  itemCount: number;
+}
+
+export interface Page<T> {
+  items: T[];
+  nextCursor?: string;
+}
+
+export interface VersionFilter {
+  legalEntityId?: string;
+  status?: VersionStatus | "";
+  type?: VersionType | "";
+  cursor?: string;
+}
+
+export interface CreateVersionRequest {
+  legalEntityId: string;
+  code: string;
+  type: VersionType;
+  currency: string;
+  effectiveFrom: string;
+  blockActivation: boolean;
+}
+
+export type ItemCostStatus = "PENDING" | "ACTIVE" | "SUPERSEDED";
+
+export interface ItemCostRow {
+  productId: string;
+  siteId: string;
+  unitCost: string;
+  status: ItemCostStatus;
+  source: "MANUAL" | "IMPORT" | "COPY" | "ROLLUP";
+  /** Standard active for this product and site in another version. */
+  activeCost?: string;
+  previousUnitCost?: string;
+  bookValue?: string;
+  onHandQty?: string;
+  revaluationAmount?: string;
+  activatedAt?: string;
+}
+
+export interface OnHandLine {
+  productId: string;
+  siteId: string;
+  qty: string;
+  /** Current inventory value; needed where the product and site has no standard yet. */
+  bookValue?: string;
+}
+
+export interface ActivationDelta {
+  productId: string;
+  siteId: string;
+  previousCost?: string;
+  bookValue?: string;
+  newCost: string;
+  onHandQty: string;
+  revaluation: string;
+}
+
+/** Revaluation preview (PREVIEW), committed activation (ACTIVATED) or a replay (ALREADY_ACTIVE). */
+export interface ActivationResponse {
+  versionId: string;
+  versionCode: string;
+  version: number;
+  status: "PREVIEW" | "ACTIVATED" | "ALREADY_ACTIVE";
+  currency: string;
+  lineCount: number;
+  revaluationTotal: string;
+  sites: { siteId: string; revaluation: string }[];
+  topDeltas: ActivationDelta[];
+}
+
+const versionsPath = "/api/v1/costing/versions";
+const versionPath = (id: string) => `${versionsPath}/${encodeURIComponent(id)}`;
+
+function query(params: Record<string, string | undefined>): string {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) if (v) q.set(k, v);
+  const s = q.toString();
+  return s ? `?${s}` : "";
+}
+
+export function listVersions(filter: VersionFilter = {}, signal?: AbortSignal, fetchImpl: typeof fetch = fetch): Promise<Page<CostingVersion>> {
+  const q = query({ legalEntityId: filter.legalEntityId, status: filter.status, type: filter.type, cursor: filter.cursor });
+  return request(`${versionsPath}${q}`, { method: "GET", signal }, fetchImpl);
+}
+
+export function getVersion(id: string, signal?: AbortSignal, fetchImpl: typeof fetch = fetch): Promise<CostingVersion> {
+  return request(versionPath(id), { method: "GET", signal }, fetchImpl);
+}
+
+export function listItemCosts(id: string, cursor?: string, signal?: AbortSignal, fetchImpl: typeof fetch = fetch): Promise<Page<ItemCostRow>> {
+  return request(`${versionPath(id)}/item-costs${query({ cursor })}`, { method: "GET", signal }, fetchImpl);
+}
+
+/** Creates a DRAFT version; the Idempotency-Key makes a retried submit safe. */
+export function createVersion(body: CreateVersionRequest, idempotencyKey: string, fetchImpl: typeof fetch = fetch): Promise<CostingVersion> {
+  return post(versionsPath, body, fetchImpl, { "Idempotency-Key": idempotencyKey });
+}
+
+/** Imports a CSV file (header productId,siteId,unitCost) into a DRAFT version, all or nothing. */
+export function importItemCostsCsv(id: string, csv: string, fetchImpl: typeof fetch = fetch): Promise<{ versionId: string; imported: number }> {
+  return request(`${versionPath(id)}/item-costs:import`, { method: "POST", headers: { "content-type": "text/csv" }, body: csv }, fetchImpl);
+}
+
+export function copyItemCosts(
+  targetId: string,
+  sourceVersionId: string,
+  percentChange: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ versionId: string; copied: number }> {
+  return post(`${versionPath(targetId)}/item-costs:copy`, { sourceVersionId, percentChange }, fetchImpl);
+}
+
+export function previewActivation(id: string, onHand: OnHandLine[], fetchImpl: typeof fetch = fetch): Promise<ActivationResponse> {
+  return post(`${versionPath(id)}:preview-activation`, { onHand }, fetchImpl);
+}
+
+/** Activates at the version the preview returned; a change since then is 412 conflict_version. */
+export function activateVersion(id: string, version: number, onHand: OnHandLine[], fetchImpl: typeof fetch = fetch): Promise<ActivationResponse> {
+  return post(`${versionPath(id)}:activate`, { onHand }, fetchImpl, { "If-Match": `"${version}"` });
 }

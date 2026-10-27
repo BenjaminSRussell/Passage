@@ -37,6 +37,7 @@ const (
 	maxTxns           = 20000
 	maxIdempotencyKey = 255
 	maxValuationType  = 64
+	maxCSVBytes       = 8 << 20
 )
 
 var (
@@ -45,9 +46,7 @@ var (
 	versionTypes    = map[string]bool{"STANDARD": true, "PLANNED": true}
 	ppvKinds        = map[string]bool{"RECEIPT": true, "INVOICE": true}
 	fallbacks       = map[string]bool{"": true, "RUNNING_AVG": true, "STANDARD": true, "LAST_RECEIPT": true}
-	// maxUnitCost bounds a unit cost to numeric(20,6): 14 integer digits.
-	maxUnitCost = decimal.New(1, 14)
-	txnKinds    = map[string]domain.Kind{"RECEIPT": domain.Receipt, "ISSUE": domain.Issue}
+	txnKinds        = map[string]domain.Kind{"RECEIPT": domain.Receipt, "ISSUE": domain.Issue}
 )
 
 // API holds the handlers and their counters.
@@ -58,6 +57,9 @@ type API struct {
 	previews        atomic.Int64
 	ppvCalculated   atomic.Int64
 	domainRefusals  atomic.Int64
+	activations     atomic.Int64
+	costsActivated  atomic.Int64
+	itemsCopied     atomic.Int64
 }
 
 // New returns an API over s.
@@ -70,7 +72,14 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRead)).Post("/v1/costing/valuation-ledgers:preview", a.previewValuationLedgers)
 	r.With(authz.RequireDuty(dutyRead)).Post("/v1/costing/aging:preview", a.previewAging)
 	r.With(authz.RequireDuty(dutyVersionWrite)).Post("/v1/costing/versions", a.createVersion)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/costing/versions", a.listVersions)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/costing/versions/{id}", a.getVersion)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/costing/versions/{id}/item-costs", a.listItemCosts)
 	r.With(authz.RequireDuty(dutyVersionWrite)).Post("/v1/costing/versions/{id}/item-costs:import", a.importItemCosts)
+	r.With(authz.RequireDuty(dutyVersionWrite)).Post("/v1/costing/versions/{id}/item-costs:copy", a.copyItemCosts)
+	r.With(authz.RequireDuty(dutyRead)).Post("/v1/costing/versions/{id}:preview-activation", a.previewActivation)
+	r.With(authz.RequireDuty(dutyVersionActivate)).Post("/v1/costing/versions/{id}:activate", a.activateVersion)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/costing/products/{id}/cost", a.currentCost)
 	r.With(authz.RequireDuty(dutyPPVPost)).Post("/internal/v1/costing/ppv", a.postPPV)
 }
 
@@ -81,6 +90,9 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP costing_versions_created_total Costing versions created; idempotent replays are not counted.\n# TYPE costing_versions_created_total counter\ncosting_versions_created_total %d\n", a.versionsCreated.Load())
 		fmt.Fprintf(w, "# HELP costing_item_costs_imported_total Item costs written by imports.\n# TYPE costing_item_costs_imported_total counter\ncosting_item_costs_imported_total %d\n", a.itemsImported.Load())
 		fmt.Fprintf(w, "# HELP costing_settlement_previews_total Settlement previews computed.\n# TYPE costing_settlement_previews_total counter\ncosting_settlement_previews_total %d\n", a.previews.Load())
+		fmt.Fprintf(w, "# HELP costing_versions_activated_total Costing versions activated (committed, not previews).\n# TYPE costing_versions_activated_total counter\ncosting_versions_activated_total %d\n", a.activations.Load())
+		fmt.Fprintf(w, "# HELP costing_item_costs_activated_total Item costs made ACTIVE by activations.\n# TYPE costing_item_costs_activated_total counter\ncosting_item_costs_activated_total %d\n", a.costsActivated.Load())
+		fmt.Fprintf(w, "# HELP costing_item_costs_copied_total Item costs written by copies.\n# TYPE costing_item_costs_copied_total counter\ncosting_item_costs_copied_total %d\n", a.itemsCopied.Load())
 		fmt.Fprintf(w, "# HELP costing_ppv_calculated_total PPV amounts calculated.\n# TYPE costing_ppv_calculated_total counter\ncosting_ppv_calculated_total %d\n", a.ppvCalculated.Load())
 		fmt.Fprintf(w, "# HELP costing_domain_refusals_total Requests refused by a domain rule.\n# TYPE costing_domain_refusals_total counter\ncosting_domain_refusals_total %d\n", a.domainRefusals.Load())
 	})
@@ -118,6 +130,12 @@ func (a *API) fail(w http.ResponseWriter, r *http.Request, op string, err error)
 	if errors.As(err, &de) {
 		a.domainRefusals.Add(1)
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, de.Code, de.Detail))
+		return
+	}
+	// A problem below 500 is the caller's to fix (not found, conflict, stale
+	// version); httpx already logs the request with its status.
+	if p := (*httpx.Problem)(nil); errors.As(err, &p) && p.Status < http.StatusInternalServerError {
+		httpx.Fail(w, r, err)
 		return
 	}
 	slog.Error(op+" failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
@@ -378,27 +396,61 @@ type importItemCostsRequest struct {
 	Items []store.ItemCost `json:"items"`
 }
 
+// importItemCosts writes pending costs into a DRAFT version from JSON
+// ({"items": [...]}) or, with Content-Type text/csv, from a file with the
+// header productId,siteId,unitCost (FR-20.5 import). Either is all or nothing.
 func (a *API) importItemCosts(w http.ResponseWriter, r *http.Request) {
-	if !validTenant(w, r) {
+	id, ok := versionID(w, r)
+	if !ok {
 		return
 	}
-	versionID := chi.URLParam(r, "id")
-	if !ids.Valid(versionID) {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeVersionNotFound, "costing version not found"))
+	var items []store.ItemCost
+	if mediaType(r) == "text/csv" {
+		rows, err := domain.ParseItemCostCSV(http.MaxBytesReader(w, r.Body, maxCSVBytes), maxImportItems)
+		if err != nil {
+			a.fail(w, r, "import item costs", err)
+			return
+		}
+		items = make([]store.ItemCost, len(rows))
+		for i, row := range rows {
+			items[i] = store.ItemCost{ProductID: row.ProductID, SiteID: row.SiteID, UnitCost: row.UnitCost.String()}
+		}
+	} else {
+		var req importItemCostsRequest
+		if err := httpx.Decode(r, &req); err != nil {
+			httpx.Fail(w, r, err)
+			return
+		}
+		fields := validateItems(req.Items)
+		if len(fields) > 0 {
+			validationFailed(w, r, fields)
+			return
+		}
+		items = req.Items
+	}
+	n, err := a.store.ImportItemCosts(r.Context(), id, items)
+	if err != nil {
+		a.fail(w, r, "import item costs", err)
 		return
 	}
-	var req importItemCostsRequest
-	if err := httpx.Decode(r, &req); err != nil {
-		httpx.Fail(w, r, err)
-		return
-	}
+	a.itemsImported.Add(int64(n))
+	httpx.JSON(w, http.StatusOK, map[string]any{"versionId": id, "imported": n})
+}
+
+func mediaType(r *http.Request) string {
+	ct, _, _ := strings.Cut(r.Header.Get("Content-Type"), ";")
+	return strings.ToLower(strings.TrimSpace(ct))
+}
+
+// validateItems checks JSON import lines and normalises their ids and costs in place.
+func validateItems(items []store.ItemCost) map[string]string {
 	fields := map[string]string{}
-	if len(req.Items) == 0 || len(req.Items) > maxImportItems {
+	if len(items) == 0 || len(items) > maxImportItems {
 		fields["items"] = fmt.Sprintf("must hold 1 to %d item costs", maxImportItems)
 	}
 	type pair struct{ product, site string }
 	seen := map[pair]bool{}
-	for i, it := range req.Items {
+	for i, it := range items {
 		key := fmt.Sprintf("items[%d]", i)
 		if !ids.Valid(it.ProductID) {
 			fields[key+".productId"] = "must be a UUID"
@@ -408,28 +460,19 @@ func (a *API) importItemCosts(w http.ResponseWriter, r *http.Request) {
 		}
 		d := parseDecimal(fields, key+".unitCost", it.UnitCost, true)
 		if _, bad := fields[key+".unitCost"]; !bad {
-			if !d.Equal(d.Truncate(6)) || d.GreaterThanOrEqual(maxUnitCost) {
+			if !domain.ValidUnitCost(d) {
 				fields[key+".unitCost"] = "must have at most 14 integer digits and 6 decimal places"
 			}
-			req.Items[i].UnitCost = d.String()
+			items[i].UnitCost = d.String()
 		}
-		p := pair{it.ProductID, it.SiteID}
+		items[i].ProductID, items[i].SiteID = strings.ToLower(it.ProductID), strings.ToLower(it.SiteID)
+		p := pair{items[i].ProductID, items[i].SiteID}
 		if seen[p] {
 			fields[key] = "duplicates an earlier product and site in this import"
 		}
 		seen[p] = true
 	}
-	if len(fields) > 0 {
-		validationFailed(w, r, fields)
-		return
-	}
-	n, err := a.store.ImportItemCosts(r.Context(), versionID, req.Items)
-	if err != nil {
-		a.fail(w, r, "import item costs", err)
-		return
-	}
-	a.itemsImported.Add(int64(n))
-	httpx.JSON(w, http.StatusOK, map[string]any{"versionId": versionID, "imported": n})
+	return fields
 }
 
 // ---- internal PPV hook ----
