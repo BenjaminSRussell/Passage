@@ -588,3 +588,123 @@ export function listCostTransactions(filter: CostTransactionFilter, signal?: Abo
   });
   return request(`/api/v1/costing/cost-transactions${q}`, { method: "GET", signal }, fetchImpl);
 }
+
+// ---- manual cost adjustments (FR-20.6) ----
+
+export type AdjustmentKind = "ON_HAND" | "RECEIPT";
+export type AdjustmentMode = "UNIT_COST" | "AMOUNT";
+
+/**
+ * ON_HAND names the product and site (warehouse and valuation type optional);
+ * RECEIPT names receiptTransactionId and is by AMOUNT. unitCost is for
+ * UNIT_COST, amount for AMOUNT; expectedValue is the value the preview showed.
+ */
+export interface AdjustmentRequest {
+  legalEntityId: string;
+  kind: AdjustmentKind;
+  mode: AdjustmentMode;
+  productId?: string;
+  siteId?: string;
+  warehouseId?: string;
+  valuationType?: string;
+  valuationLedgerId?: string;
+  receiptTransactionId?: string;
+  financialDate: string;
+  unitCost?: string;
+  amount?: string;
+  expectedValue?: string;
+  reason?: string;
+}
+
+export interface Adjustment {
+  /** Absent on a preview. */
+  id?: string;
+  legalEntityId: string;
+  kind: AdjustmentKind;
+  mode: AdjustmentMode;
+  productId: string;
+  siteId: string;
+  warehouseId?: string;
+  valuationType?: string;
+  /** Absent for the primary valuation. */
+  valuationLedgerId?: string;
+  receiptTransactionId?: string;
+  currency: string;
+  financialDate: string;
+  reason?: string;
+  unitCost?: string;
+  amount?: string;
+  qty: string;
+  oldValue: string;
+  newValue: string;
+  /** newValue − oldValue: the MANUAL_ADJ cost transaction's amount. */
+  delta: string;
+  oldUnitCost?: string;
+  newUnitCost?: string;
+  costTransactionId?: string;
+  createdAt?: string;
+}
+
+export interface AdjustmentFilter {
+  legalEntityId?: string;
+  kind?: AdjustmentKind | "";
+  productId?: string;
+  cursor?: string;
+}
+
+const adjustmentsPath = "/api/v1/costing/adjustments";
+
+/** What the adjustment would post, without posting it. */
+export function previewAdjustment(body: AdjustmentRequest, fetchImpl: typeof fetch = fetch): Promise<Adjustment> {
+  return post(`${adjustmentsPath}:preview`, body, fetchImpl);
+}
+
+/** Posts an adjustment; the Idempotency-Key makes a retried submit a replay, not a second adjustment. */
+export function createAdjustment(body: AdjustmentRequest, idempotencyKey: string, fetchImpl: typeof fetch = fetch): Promise<Adjustment> {
+  return post(adjustmentsPath, body, fetchImpl, { "Idempotency-Key": idempotencyKey });
+}
+
+export function listAdjustments(filter: AdjustmentFilter = {}, signal?: AbortSignal, fetchImpl: typeof fetch = fetch): Promise<Page<Adjustment>> {
+  const q = query({ legalEntityId: filter.legalEntityId, kind: filter.kind || undefined, productId: filter.productId, cursor: filter.cursor });
+  return request(`${adjustmentsPath}${q}`, { method: "GET", signal }, fetchImpl);
+}
+
+export function getAdjustment(id: string, signal?: AbortSignal, fetchImpl: typeof fetch = fetch): Promise<Adjustment> {
+  return request(`${adjustmentsPath}/${encodeURIComponent(id)}`, { method: "GET", signal }, fetchImpl);
+}
+
+// ---- stored reconciliation runs (FR-20.4) ----
+
+export interface ReconciliationRun extends ReportHeader {
+  id: string;
+  differences: number;
+  totalDiff: string;
+  ties: boolean;
+  rowCount: number;
+  /** Absent from list results. */
+  rows?: TieOutRow[];
+  createdAt: string;
+}
+
+const reconciliationsPath = "/api/v1/costing/reconciliations";
+
+/** Runs the tie-out and stores it; each differing group emits reconciliation.diff. */
+export function createReconciliation(
+  body: ValueReportParams & { glBalances: LedgerBalance[] },
+  idempotencyKey: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<ReconciliationRun> {
+  return post(reconciliationsPath, body, fetchImpl, { "Idempotency-Key": idempotencyKey });
+}
+
+export function listReconciliations(
+  filter: { legalEntityId?: string; cursor?: string } = {},
+  signal?: AbortSignal,
+  fetchImpl: typeof fetch = fetch,
+): Promise<Page<ReconciliationRun>> {
+  return request(`${reconciliationsPath}${query({ legalEntityId: filter.legalEntityId, cursor: filter.cursor })}`, { method: "GET", signal }, fetchImpl);
+}
+
+export function getReconciliation(id: string, signal?: AbortSignal, fetchImpl: typeof fetch = fetch): Promise<ReconciliationRun> {
+  return request(`${reconciliationsPath}/${encodeURIComponent(id)}`, { method: "GET", signal }, fetchImpl);
+}

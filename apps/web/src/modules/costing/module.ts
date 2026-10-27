@@ -1,9 +1,11 @@
 import { createElement } from "react";
 import type { PassageModule } from "../registry";
+import { AdjustmentDetailPage, AdjustmentsPage, CreateAdjustmentPage } from "./AdjustmentsPage";
 import { AgingPage } from "./AgingPage";
 import { AgingSnapshotsPage, BucketSetsPage, CreateSnapshotPage, SnapshotDetailPage } from "./AgingSnapshotsPage";
 import { CostTransactionsPage } from "./CostTransactionsPage";
 import { CostingHome } from "./pages";
+import { CreateReconciliationPage, ReconciliationDetailPage, ReconciliationsPage } from "./ReconciliationsPage";
 import { ValuationLedgersPage } from "./ValuationLedgersPage";
 import { CreateCategoryPage, CreateLedgerPage, ValuationSetupPage } from "./ValuationSetupPage";
 import { VersionDetailPage } from "./VersionDetailPage";
@@ -14,7 +16,7 @@ const costing: PassageModule = {
   id: "costing",
   title: "Inventory costing",
   description:
-    "Preview issue costs under each costing method, compare valuation ledgers, age your inventory and store month-end aging snapshots, set up valuation ledgers and categories, maintain and activate standard cost versions, and report inventory value by dimension with its general ledger tie-out.",
+    "Preview issue costs under each costing method, compare valuation ledgers, age your inventory and store month-end aging snapshots, set up valuation ledgers and categories, maintain and activate standard cost versions, report inventory value by dimension with its general ledger tie-out, post manual cost adjustments and store reconciliation runs.",
   routes: [
     { path: "/costing", element: createElement(CostingHome), handle: { title: "Settlement preview" } },
     { path: "/costing/valuation-ledgers", element: createElement(ValuationLedgersPage), handle: { title: "Valuation ledgers" } },
@@ -31,6 +33,12 @@ const costing: PassageModule = {
     { path: "/costing/versions/:id", element: createElement(VersionDetailPage), handle: { title: "Costing version" } },
     { path: "/costing/value-report", element: createElement(ValueReportPage), handle: { title: "Inventory value report" } },
     { path: "/costing/cost-transactions", element: createElement(CostTransactionsPage), handle: { title: "Cost transactions" } },
+    { path: "/costing/adjustments", element: createElement(AdjustmentsPage), handle: { title: "Cost adjustments" } },
+    { path: "/costing/adjustments/new", element: createElement(CreateAdjustmentPage), handle: { title: "New cost adjustment" } },
+    { path: "/costing/adjustments/:id", element: createElement(AdjustmentDetailPage), handle: { title: "Cost adjustment" } },
+    { path: "/costing/reconciliations", element: createElement(ReconciliationsPage), handle: { title: "Reconciliations" } },
+    { path: "/costing/reconciliations/new", element: createElement(CreateReconciliationPage), handle: { title: "New reconciliation" } },
+    { path: "/costing/reconciliations/:id", element: createElement(ReconciliationDetailPage), handle: { title: "Reconciliation" } },
   ],
   nav: [
     { label: "Settlement preview", to: "/costing", duty: "costing.read" },
@@ -41,6 +49,8 @@ const costing: PassageModule = {
     { label: "Costing versions", to: "/costing/versions", duty: "costing.read" },
     { label: "Inventory value report", to: "/costing/value-report", duty: "costing.read" },
     { label: "Cost transactions", to: "/costing/cost-transactions", duty: "costing.read" },
+    { label: "Cost adjustments", to: "/costing/adjustments", duty: "costing.read" },
+    { label: "Reconciliations", to: "/costing/reconciliations", duty: "costing.read" },
   ],
 };
 

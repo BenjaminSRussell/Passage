@@ -109,12 +109,17 @@ type ItemCostPage struct {
 }
 
 // costChanged is the payload of dev.passage.costing.cost.changed.v1 (3.20.5).
-// oldCost is absent when the product x site had no active standard.
+// oldCost is absent when the product x site had no active standard. An
+// activation names its version; a manual on-hand adjustment (FR-20.6) names
+// the adjustment instead, with the warehouse and valuation type it revalued.
 type costChanged struct {
 	ProductID         string  `json:"productId"`
 	SiteID            string  `json:"siteId"`
-	VersionID         string  `json:"versionId"`
-	VersionCode       string  `json:"versionCode"`
+	VersionID         string  `json:"versionId,omitempty"`
+	VersionCode       string  `json:"versionCode,omitempty"`
+	AdjustmentID      string  `json:"adjustmentId,omitempty"`
+	WarehouseID       string  `json:"warehouseId,omitempty"`
+	ValuationType     string  `json:"valuationType,omitempty"`
 	Currency          string  `json:"currency"`
 	OldCost           *string `json:"oldCost,omitempty"`
 	NewCost           string  `json:"newCost"`
@@ -547,7 +552,7 @@ func commitActivation(ctx context.Context, tx pgx.Tx, tenantID string, v Costing
 			old := l.PreviousCost.String()
 			payload.OldCost = &old
 		}
-		evt, err := events.New(events.Type("costing", "cost", "changed", 1), eventSource, l.ProductID, tenantID, payload)
+		evt, err := events.New(CostChangedEventType, eventSource, l.ProductID, tenantID, payload)
 		if err != nil {
 			return time.Time{}, err
 		}

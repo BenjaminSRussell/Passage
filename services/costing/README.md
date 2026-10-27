@@ -1,11 +1,57 @@
 # costing
 
-Passage inventory costing service: wave 20 (ticket PSG-20, "Inventory Costing & Supplier Collaboration"), **slices 1 to 5**.
+Passage inventory costing service: wave 20 (ticket PSG-20, "Inventory Costing & Supplier Collaboration"), **slices 1 to 6**.
 
 The service owns its tables and applies its own migrations (`migrations/0001_costing.sql`, `0002_activation.sql`,
-`0003_valuation_setup_and_aging.sql`, `0004_cost_transaction.sql`) through
+`0003_valuation_setup_and_aging.sql`, `0004_cost_transaction.sql`, `0005_adjustment_reconciliation.sql`) through
 `dbx.Migrate`. The PRD places them in schema `costing` of `inventory-db` (`inventory/v20.*`); that
 placement is a deploy decision recorded as a handoff in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
+
+## What slice 6 adds
+
+Manual cost adjustments (FR-20.6) and stored reconciliation runs that emit `reconciliation.diff`
+(FR-20.4, the run of the daily `costing.reconcile` job).
+
+- **Adjustment preview** `POST /v1/costing/adjustments:preview` (duty `costing.read`) and **post**
+  `POST /v1/costing/adjustments` (duty `costing.adjust`, the PRD's CostAdjust; `Idempotency-Key`
+  required). `kind` ON_HAND adjusts the stock of a product × site × warehouse (optional) × valuation
+  type (optional) in a valuation ledger (absent is the primary valuation) at `financialDate` (not
+  after today): `mode` UNIT_COST sets a new `unitCost` (the value becomes round-half-even(unit cost
+  × on-hand) at the currency's minor unit) and AMOUNT adds a signed `amount`. `kind` RECEIPT changes
+  the value of one receipt (`receiptTransactionId`, as recorded on its cost transactions) by an
+  amount; product, site, warehouse and type come from the receipt, and the next close flows it to
+  the receipt's issues. The current quantity and value are the sums of the cost transactions (PPV
+  excluded) up to the date, read in the post's own transaction; the currency is the stock's. A post
+  appends one MANUAL_ADJ cost transaction (quantity 0, amount = delta, source key
+  `manual-adjustment:<id>`), so the value report moves at once. Posts on one product × site are
+  serialised by an advisory lock; with `expectedValue` (the value the preview showed) a value that
+  moved since is refused with `CST-ADJ-006` before any other check. An ON_HAND adjustment of the
+  primary valuation that changes the unit cost of positive stock writes
+  `dev.passage.costing.cost.changed.v1` (with `adjustmentId`, warehouse and valuation type) to the
+  outbox in the same transaction. Refusals: `CST-ADJ-002` nothing to adjust (or not a receipt),
+  `CST-ADJ-003` a unit cost without positive stock, `CST-ADJ-004` no change, `CST-ADJ-005` a negative
+  value on positive stock. A replay returns the stored adjustment with 200. The ledger voucher is a
+  handoff (see NOT-IMPLEMENTED).
+- **Adjustment reads** `GET /v1/costing/adjustments?legalEntityId=&kind=&productId=` (newest
+  financial date first, paged) and `GET /v1/costing/adjustments/{id}` (`CST-ADJ-007` not found).
+- **Reconciliation runs** `POST /v1/costing/reconciliations` (duty `costing.reconcile`; the job's
+  service account or a cost accountant; `Idempotency-Key` required): the same request and tie-out as
+  `value-report:tie-out`, stored as a run (rows, differences, net difference, ties). Each group
+  whose difference is not zero writes one `dev.passage.costing.reconciliation.diff.v1` (run,
+  legal entity, ledger, date, currency, dimensions, inventory value, ledger balance, diff) to the
+  outbox in the same transaction. A replay returns the stored run and emits nothing, even if the
+  inventory moved since. `GET /v1/costing/reconciliations` lists runs without rows and
+  `GET /v1/costing/reconciliations/{id}` returns one with its rows (`CST-REC-002` not found).
+- Migration `0005_adjustment_reconciliation.sql`: `cost_adjustment` and `reconciliation_run`, each
+  with tenant RLS (ENABLE and FORCE), the restrictive legal-entity scope policy, an append-only
+  trigger, a unique `Idempotency-Key` per tenant with the request hash, and check constraints that
+  hold the kind, mode and `new − old = delta` rules.
+- **Web screens**: `/costing/adjustments` (filter by legal entity and kind, list, load more),
+  `/costing/adjustments/new` (on-hand or receipt, preview of quantity, current and new value and
+  the change, post with a reason) and `/costing/adjustments/:id` (detail with a drill to its cost
+  transaction); `/costing/reconciliations` (list), `/costing/reconciliations/new` (legal entity,
+  date, ledger, site, grouping and pasted ledger balances) and `/costing/reconciliations/:id`
+  (result and every group compared, with a link to the value report).
 
 ## What slice 5 adds
 
@@ -41,8 +87,8 @@ valuation ledger of FR-20.15 and the valuation type of FR-20.16).
   the grouping dimensions (`CST-RPT-002`) and once (`CST-RPT-003`). Each group is compared with
   its ledger balance, a group on one side only with zero, so an unexplained ledger balance is a
   difference, never dropped. The response counts the differing groups and the net difference.
-  It only reads; the daily `costing.reconcile` job that reads the ledger itself and emits
-  `reconciliation.diff` is a later slice.
+  It only reads; `POST /v1/costing/reconciliations` (slice 6) stores the same tie-out and emits
+  `reconciliation.diff`.
 - **Drill-down** `GET /v1/costing/cost-transactions?legalEntityId=&valuationLedgerId=&productId=&siteId=&kind=&asOf=`
   pages the cost transactions, newest financial date first.
 - Migration `0004_cost_transaction.sql`: `cost_transaction` with tenant RLS (ENABLE and FORCE), the
@@ -216,8 +262,10 @@ PASSAGE_TEST_DATABASE_URL=postgres://admin@... PASSAGE_TEST_APP_DATABASE_URL=pos
 
 - HTTP: [`api/openapi.yaml`](api/openapi.yaml)
 - Events: [`events/asyncapi.yaml`](events/asyncapi.yaml). `dev.passage.costing.cost.changed.v1` is
-  published on activation and `dev.passage.costing.agingsnapshot.created.v1` when a snapshot is
-  stored; the planned catalog is listed under `x-planned-events`.
+  published on activation and on a manual on-hand adjustment of the primary valuation,
+  `dev.passage.costing.agingsnapshot.created.v1` when a snapshot is stored and
+  `dev.passage.costing.reconciliation.diff.v1` per differing group of a stored reconciliation run;
+  the planned catalog is listed under `x-planned-events`.
 - Chart: [`charts/costing`](charts/costing) (`helm lint charts/costing`).
 
 ## Error codes
@@ -243,6 +291,13 @@ PASSAGE_TEST_DATABASE_URL=postgres://admin@... PASSAGE_TEST_APP_DATABASE_URL=pos
 | `CST-RPT-002` | 422 | A tie-out ledger balance does not name exactly the grouping dimensions |
 | `CST-RPT-003` | 422 | Two tie-out ledger balances name the same dimension values |
 | `CST-RPT-004` | 422 | The valuation ledger holds cost transactions in more than one currency |
+| `CST-ADJ-002` | 422 | Nothing on hand to adjust at the date (or the transaction is not a receipt of the legal entity and ledger) |
+| `CST-ADJ-003` | 422 | A new unit cost needs positive stock; adjust by amount instead |
+| `CST-ADJ-004` | 422 | The adjustment does not change the value |
+| `CST-ADJ-005` | 422 | The adjustment would leave a negative value on positive stock |
+| `CST-ADJ-006` | 409 | The value changed since the preview (`expectedValue`); preview again |
+| `CST-ADJ-007` | 404 | Cost adjustment not found |
+| `CST-REC-002` | 404 | Reconciliation run not found |
 | `CST-VAL-003` | 422 | Valuation category types invalid: a batch category with types, a split category without, or a type listed twice |
 | `CST-VAL-004` | 409 | A valuation category with this code already exists |
 | `CST-AGE-002` | 409 | An aging bucket set with this name already exists in the legal entity |
@@ -274,12 +329,14 @@ PASSAGE_TEST_DATABASE_URL=postgres://admin@... PASSAGE_TEST_APP_DATABASE_URL=pos
 
 | Duty | Routes | PRD duty (§3.20.17) |
 |---|---|---|
-| `costing.read` | `POST /v1/costing/settlements:preview`, `POST /v1/costing/valuation-ledgers:preview`, `POST /v1/costing/aging:preview`, `GET /v1/costing/versions`, `GET /v1/costing/versions/{id}`, `GET /v1/costing/versions/{id}/item-costs`, `POST /v1/costing/versions/{id}:preview-activation`, `GET /v1/costing/products/{id}/cost`, `GET /v1/costing/valuation-ledgers`, `GET /v1/costing/valuation-categories`, `GET /v1/costing/aging/bucket-sets`, `GET /v1/costing/aging/snapshots`, `GET /v1/costing/aging/snapshots/{id}`, `GET /v1/costing/value-report`, `POST /v1/costing/value-report:tie-out`, `GET /v1/costing/cost-transactions` | CostingInquire |
+| `costing.read` | `POST /v1/costing/settlements:preview`, `POST /v1/costing/valuation-ledgers:preview`, `POST /v1/costing/aging:preview`, `GET /v1/costing/versions`, `GET /v1/costing/versions/{id}`, `GET /v1/costing/versions/{id}/item-costs`, `POST /v1/costing/versions/{id}:preview-activation`, `GET /v1/costing/products/{id}/cost`, `GET /v1/costing/valuation-ledgers`, `GET /v1/costing/valuation-categories`, `GET /v1/costing/aging/bucket-sets`, `GET /v1/costing/aging/snapshots`, `GET /v1/costing/aging/snapshots/{id}`, `GET /v1/costing/value-report`, `POST /v1/costing/value-report:tie-out`, `GET /v1/costing/cost-transactions`, `POST /v1/costing/adjustments:preview`, `GET /v1/costing/adjustments`, `GET /v1/costing/adjustments/{id}`, `GET /v1/costing/reconciliations`, `GET /v1/costing/reconciliations/{id}` | CostingInquire |
 | `costing.version.write` | `POST /v1/costing/versions`, `POST /v1/costing/versions/{id}/item-costs:import`, `POST /v1/costing/versions/{id}/item-costs:copy` | CostingVersionMaintain |
 | `costing.version.activate` | `POST /v1/costing/versions/{id}:activate` | CostingVersionActivate |
 | `costing.ppv.post` | `POST /internal/v1/costing/ppv` | service account of receiving and payables |
 | `costing.cost-transaction.post` | `POST /internal/v1/costing/cost-transactions` | service account of the producers (wave 16 postings, the close, the PPV hook) |
 | `costing.valuation.write` | `POST /v1/costing/valuation-ledgers`, `POST /v1/costing/valuation-categories` | ValuationSetupMaintain |
+| `costing.adjust` | `POST /v1/costing/adjustments` | CostAdjust |
+| `costing.reconcile` | `POST /v1/costing/reconciliations` | service account of the daily `costing.reconcile` job (and cost accountants running one by hand) |
 | `costing.aging.write` | `POST /v1/costing/aging/bucket-sets`, `POST /v1/costing/aging/snapshots` | CostingInquire saves report setups; the month-end snapshot job's service account stores snapshots |
 
 ## Dependencies

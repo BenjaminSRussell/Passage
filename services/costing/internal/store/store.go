@@ -1,5 +1,6 @@
 // Package store persists costing versions, item costs, valuation setup, aging
-// snapshots and the cost transaction projection in the costing schema.
+// snapshots, the cost transaction projection, manual cost adjustments and
+// reconciliation runs in the costing schema.
 // Every query runs inside dbx.WithTenantTx, so row-level security applies.
 package store
 
@@ -87,6 +88,17 @@ type Store interface {
 	RecordCostTransactions(ctx context.Context, in []CostTransaction) (int, error)
 	ValueBalances(ctx context.Context, q BalanceQuery) ([]domain.Balance, error)
 	ListCostTransactions(ctx context.Context, f CostTxnFilter, after string, limit int) (CostTxnPage, error)
+	// Manual cost adjustments (FR-20.6). CreateAdjustment reports created=false
+	// for an idempotent replay.
+	PreviewAdjustment(ctx context.Context, in AdjustmentRequest) (Adjustment, error)
+	CreateAdjustment(ctx context.Context, in AdjustmentRequest, idempotencyKey, requestHash string) (a Adjustment, created bool, err error)
+	GetAdjustment(ctx context.Context, id string) (Adjustment, error)
+	ListAdjustments(ctx context.Context, f AdjustmentFilter, after string, limit int) (AdjustmentPage, error)
+	// Stored reconciliation runs (FR-20.4). CreateReconciliationRun reports
+	// created=false for an idempotent replay.
+	CreateReconciliationRun(ctx context.Context, in ReconciliationRun, idempotencyKey, requestHash string) (run ReconciliationRun, created bool, err error)
+	GetReconciliationRun(ctx context.Context, id string) (ReconciliationRun, error)
+	ListReconciliationRuns(ctx context.Context, legalEntityID, after string, limit int) (ReconciliationPage, error)
 	Ping(ctx context.Context) error
 }
 

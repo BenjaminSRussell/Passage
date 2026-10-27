@@ -431,20 +431,8 @@ type tieOutResponse struct {
 	Ties        bool        `json:"ties"`
 }
 
-// tieOutValueReport compares the value report with the ledger balances of the
-// inventory accounts, grouped the same way (FR-20.4). It only reads: the
-// differences go back to the caller; the daily costing.reconcile job that reads
-// the ledger itself and emits reconciliation.diff is a later slice.
-func (a *API) tieOutValueReport(w http.ResponseWriter, r *http.Request) {
-	if !validTenant(w, r) {
-		return
-	}
-	var req tieOutRequest
-	if err := httpx.Decode(r, &req); err != nil {
-		httpx.Fail(w, r, err)
-		return
-	}
-	fields := map[string]string{}
+// parseTieOut validates a tie-out request and returns its ledger balances.
+func parseTieOut(fields map[string]string, req *tieOutRequest) []domain.GLBalance {
 	req.validate(fields)
 	if len(req.GLBalances) == 0 || len(req.GLBalances) > maxGLBalances {
 		fields["glBalances"] = fmt.Sprintf("must hold 1 to %d balances", maxGLBalances)
@@ -462,26 +450,52 @@ func (a *API) tieOutValueReport(w http.ResponseWriter, r *http.Request) {
 		}
 		gl = append(gl, domain.GLBalance{Dims: dims, Balance: amt})
 	}
-	if len(fields) > 0 {
-		validationFailed(w, r, fields)
-		return
-	}
-	rep, sel, err := a.loadReport(r, req.reportParams)
+	return gl
+}
+
+// tieOut loads the value report and compares it with the ledger balances.
+func (a *API) tieOut(r *http.Request, p reportParams, gl []domain.GLBalance) (tieOutResponse, error) {
+	rep, sel, err := a.loadReport(r, p)
 	if err != nil {
-		a.fail(w, r, "value report tie-out", err)
-		return
+		return tieOutResponse{}, err
 	}
 	res, err := domain.TieOutReport(rep, gl)
 	if err != nil {
-		a.fail(w, r, "tie-out", err)
-		return
+		return tieOutResponse{}, err
 	}
 	scale := money.MinorUnits(rep.Currency)
-	out := tieOutResponse{reportHeader: header(req.reportParams, sel, rep), Rows: []tieRowDTO{}, Differences: res.Differences,
+	out := tieOutResponse{reportHeader: header(p, sel, rep), Rows: []tieRowDTO{}, Differences: res.Differences,
 		TotalDiff: formatAmount(res.TotalDiff, scale), Ties: res.Ties()}
 	for _, row := range res.Rows {
 		out.Rows = append(out.Rows, tieRowDTO{Key: row.Key, Inventory: formatAmount(row.Inventory, scale),
 			Ledger: formatAmount(row.Ledger, scale), Diff: formatAmount(row.Diff, scale)})
+	}
+	return out, nil
+}
+
+// tieOutValueReport compares the value report with the ledger balances of the
+// inventory accounts, grouped the same way (FR-20.4). It only reads: the
+// differences go back to the caller. POST /v1/costing/reconciliations runs the
+// same tie-out, stores it and emits reconciliation.diff per differing group.
+func (a *API) tieOutValueReport(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	var req tieOutRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	fields := map[string]string{}
+	gl := parseTieOut(fields, &req)
+	if len(fields) > 0 {
+		validationFailed(w, r, fields)
+		return
+	}
+	out, err := a.tieOut(r, req.reportParams, gl)
+	if err != nil {
+		a.fail(w, r, "value report tie-out", err)
+		return
 	}
 	httpx.JSON(w, http.StatusOK, out)
 }

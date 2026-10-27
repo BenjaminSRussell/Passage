@@ -1,9 +1,9 @@
 openapi: 3.1.0
 info:
   title: Passage Costing API
-  version: 0.5.0
+  version: 0.6.0
   description: >-
-    Inventory costing (PSG-20, wave 20), slices 1 to 5. Settlement preview under the
+    Inventory costing (PSG-20, wave 20), slices 1 to 6. Settlement preview under the
     item model group's costing method (with marking and split valuation types),
     parallel valuation ledger preview, inventory aging preview, costing versions with
     item-cost import (JSON or CSV), copy with percent change, standard cost activation
@@ -12,8 +12,10 @@ info:
     registries, saved aging bucket sets and stored month-end aging snapshots. Slice 5
     adds the append-only cost transaction projection, the inventory value report by
     product, site, warehouse and valuation type per valuation ledger, and its tie-out
-    to ledger balances. Settlement, ledger, aging previews and PPV are stateless; versions, item costs,
-    valuation setup, bucket sets, snapshots and cost transactions are persisted with RLS.
+    to ledger balances. Slice 6 adds manual cost adjustments of on-hand value and of receipts
+    (with a preview) and stored reconciliation runs that emit reconciliation.diff. Settlement,
+    ledger, aging previews and PPV are stateless; versions, item costs, valuation setup, bucket
+    sets, snapshots, cost transactions, adjustments and reconciliation runs are persisted with RLS.
 servers:
   - url: https://api.{env}.passage.dev
     variables:
@@ -634,8 +636,8 @@ paths:
       description: >-
         The caller supplies the ledger balances grouped like the report; each balance names exactly
         the grouping dimensions (CST-RPT-002) and at most once (CST-RPT-003). A group on one side only
-        is compared with zero. The daily costing.reconcile job that reads the ledger itself and emits
-        reconciliation.diff is a later slice.
+        is compared with zero. It only reads; POST /v1/costing/reconciliations runs the same
+        tie-out, stores it and emits reconciliation.diff.
       x-passage-duty: costing.read
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
@@ -723,6 +725,190 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
+  /v1/costing/adjustments:preview:
+    post:
+      operationId: previewAdjustment
+      summary: Show what a manual cost adjustment would post, without posting it (FR-20.6 voucher preview)
+      description: >-
+        Reads the current quantity and value of the stock (ON_HAND) or the receipt (RECEIPT) up to
+        financialDate in the valuation ledger and returns the new value and the delta the post would
+        write. A reason is not needed. The same refusals as the post apply.
+      x-passage-duty: costing.read
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/Duties"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AdjustmentRequest" }
+      responses:
+        "200":
+          description: the planned adjustment (no id)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Adjustment" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem", description: "CST-VLG-005 valuation ledger not found" }
+        "422": { $ref: "#/components/responses/AdjustmentRefused" }
+  /v1/costing/adjustments:
+    get:
+      operationId: listAdjustments
+      summary: Posted manual cost adjustments in the caller's scope, newest financial date first
+      x-passage-duty: costing.read
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/Duties"
+        - $ref: "#/components/parameters/LegalEntityFilter"
+        - { name: productId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: kind, in: query, required: false, schema: { type: string, enum: [ON_HAND, RECEIPT] } }
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: one page of adjustments
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdjustmentList" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createAdjustment
+      summary: Post a manual adjustment of on-hand value or of one receipt (FR-20.6)
+      description: >-
+        ON_HAND revalues the stock of a product x site x warehouse x valuation type at financialDate,
+        to a new unitCost (round half-even at the currency's minor unit) or by a signed amount;
+        RECEIPT changes the value of one receipt transaction by an amount, which flows to its issues
+        on the next close. The post appends one MANUAL_ADJ cost transaction (qty 0, amount = delta,
+        source key manual-adjustment:<id>) in the same transaction, so the value report moves at once.
+        An ON_HAND adjustment of the primary valuation that changes the unit cost of positive stock
+        writes dev.passage.costing.cost.changed.v1 to the outbox. Adjustments of one product x site
+        are serialised; with expectedValue (the value the caller previewed) a value that moved since
+        is refused with CST-ADJ-006. A replayed Idempotency-Key returns the stored adjustment with 200
+        and writes nothing; the same key with another body is idempotency_key_reuse. The ledger
+        voucher (inventory / cost adjustment account) is not posted yet.
+      x-passage-duty: costing.adjust
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/Duties"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AdjustmentRequest" }
+      responses:
+        "201":
+          description: posted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Adjustment" }
+        "200":
+          description: idempotent replay of the stored adjustment
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Adjustment" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem", description: "CST-VLG-005 valuation ledger not found" }
+        "409": { $ref: "#/components/responses/Problem", description: "CST-ADJ-006 the value changed since the preview" }
+        "422": { $ref: "#/components/responses/AdjustmentRefused" }
+  /v1/costing/adjustments/{id}:
+    get:
+      operationId: getAdjustment
+      summary: One posted manual cost adjustment
+      x-passage-duty: costing.read
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/Duties"
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: the adjustment
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Adjustment" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem", description: "CST-ADJ-007 not found" }
+  /v1/costing/reconciliations:
+    get:
+      operationId: listReconciliations
+      summary: Stored reconciliation runs in the caller's scope, newest as-of date first, without their rows
+      x-passage-duty: costing.read
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/Duties"
+        - $ref: "#/components/parameters/LegalEntityFilter"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: one page of run summaries
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReconciliationList" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createReconciliation
+      summary: Run the value report tie-out against ledger balances and store it (FR-20.4, costing.reconcile)
+      description: >-
+        The same tie-out as POST /v1/costing/value-report:tie-out, stored as a run. Every group whose
+        difference is not zero writes one dev.passage.costing.reconciliation.diff.v1 to the outbox in
+        the same transaction. The caller (the daily costing.reconcile job, or a cost accountant)
+        supplies the ledger balances until the ledger balance read exists. A replayed Idempotency-Key
+        returns the stored run with 200 and emits nothing, even if the inventory moved since; the same
+        key with another body is idempotency_key_reuse. The job uses "<entity>|<ledger>|<asOf>" as its key.
+      x-passage-duty: costing.reconcile
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/Duties"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TieOutRequest" }
+      responses:
+        "201":
+          description: stored
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReconciliationRun" }
+        "200":
+          description: idempotent replay of the stored run
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReconciliationRun" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem", description: "CST-RPT-001 to 004 as for the tie-out; idempotency_key_reuse" }
+  /v1/costing/reconciliations/{id}:
+    get:
+      operationId: getReconciliation
+      summary: One stored reconciliation run with its rows
+      x-passage-duty: costing.read
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/Duties"
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: the run
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReconciliationRun" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem", description: "CST-REC-002 not found" }
 components:
   parameters:
     TenantHeader:
@@ -774,6 +960,15 @@ components:
   responses:
     Problem:
       description: RFC 9457 problem details
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    AdjustmentRefused:
+      description: >-
+        CST-ADJ-002 nothing on hand to adjust (or not a receipt of the legal entity and ledger),
+        CST-ADJ-003 a unit cost without positive stock, CST-ADJ-004 the adjustment changes nothing,
+        CST-ADJ-005 a negative value on positive stock, CST-RPT-004 the stock is held in two
+        currencies, idempotency_key_reuse
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
@@ -1387,6 +1582,90 @@ components:
             differences: { type: integer, description: "Groups whose diff is not zero." }
             totalDiff: { $ref: "#/components/schemas/Decimal" }
             ties: { type: boolean }
+    AdjustmentRequest:
+      type: object
+      required: [legalEntityId, kind, mode, financialDate]
+      description: >-
+        ON_HAND needs productId and siteId (warehouseId and valuationType name the finer grain; absent
+        is none). RECEIPT needs receiptTransactionId, takes product, site, warehouse and valuation type
+        from the receipt, and is by AMOUNT. reason is required to post, not to preview.
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        kind: { type: string, enum: [ON_HAND, RECEIPT] }
+        mode: { type: string, enum: [UNIT_COST, AMOUNT] }
+        productId: { type: string, format: uuid }
+        siteId: { type: string, format: uuid }
+        warehouseId: { type: string, format: uuid }
+        valuationType: { type: string, maxLength: 64 }
+        valuationLedgerId: { type: string, format: uuid, description: "Absent (or the primary ledger's id) for the primary valuation." }
+        receiptTransactionId: { type: string, format: uuid, description: "The wave 16 receipt transaction, as recorded on its cost transactions." }
+        financialDate: { type: string, format: date, description: "Not after today; the value is read up to and including this date." }
+        unitCost: { $ref: "#/components/schemas/Decimal", description: "UNIT_COST only: greater than 0, at most 14 integer digits and 6 decimals." }
+        amount: { $ref: "#/components/schemas/Decimal", description: "AMOUNT only: signed, at most 15 integer digits and 4 decimals." }
+        expectedValue: { $ref: "#/components/schemas/Decimal", description: "The current value the caller previewed; a different value refuses the post (CST-ADJ-006)." }
+        reason: { type: string, maxLength: 500 }
+    Adjustment:
+      type: object
+      required: [legalEntityId, kind, mode, productId, siteId, currency, financialDate, qty, oldValue, newValue, delta]
+      properties:
+        id: { type: string, format: uuid, description: Absent on a preview. }
+        legalEntityId: { type: string, format: uuid }
+        kind: { type: string, enum: [ON_HAND, RECEIPT] }
+        mode: { type: string, enum: [UNIT_COST, AMOUNT] }
+        productId: { type: string, format: uuid }
+        siteId: { type: string, format: uuid }
+        warehouseId: { type: string, format: uuid }
+        valuationType: { type: string }
+        valuationLedgerId: { type: string, format: uuid, description: "Absent for the primary valuation." }
+        receiptTransactionId: { type: string, format: uuid }
+        currency: { type: string, pattern: "^[A-Z]{3}$", description: "The currency the stock is valued in." }
+        financialDate: { type: string, format: date }
+        reason: { type: string }
+        unitCost: { $ref: "#/components/schemas/Decimal" }
+        amount: { $ref: "#/components/schemas/Decimal" }
+        qty: { $ref: "#/components/schemas/Decimal", description: "On-hand (or receipt) quantity; never changed by an adjustment." }
+        oldValue: { $ref: "#/components/schemas/Decimal" }
+        newValue: { $ref: "#/components/schemas/Decimal" }
+        delta: { $ref: "#/components/schemas/Decimal", description: "newValue - oldValue; the MANUAL_ADJ amount." }
+        oldUnitCost: { $ref: "#/components/schemas/Decimal", description: "Present when the quantity is positive." }
+        newUnitCost: { $ref: "#/components/schemas/Decimal", description: "Present when the quantity is positive." }
+        costTransactionId: { type: string, format: uuid, description: "The MANUAL_ADJ cost transaction; absent on a preview." }
+        createdAt: { type: string, format: date-time }
+    AdjustmentList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Adjustment" } }
+        nextCursor: { type: string, description: Absent on the last page. }
+    ReconciliationRun:
+      allOf:
+        - $ref: "#/components/schemas/ReportHeader"
+        - type: object
+          required: [id, differences, totalDiff, ties, rowCount, createdAt]
+          properties:
+            id: { type: string, format: uuid }
+            differences: { type: integer, description: "Groups whose diff is not zero; one reconciliation.diff event each." }
+            totalDiff: { $ref: "#/components/schemas/Decimal" }
+            ties: { type: boolean }
+            rowCount: { type: integer }
+            rows:
+              type: array
+              description: Absent from list results.
+              items:
+                type: object
+                required: [key, inventory, ledger, diff]
+                properties:
+                  key: { type: object, additionalProperties: { type: string } }
+                  inventory: { $ref: "#/components/schemas/Decimal" }
+                  ledger: { $ref: "#/components/schemas/Decimal" }
+                  diff: { $ref: "#/components/schemas/Decimal", description: "inventory - ledger" }
+            createdAt: { type: string, format: date-time }
+    ReconciliationList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/ReconciliationRun" } }
+        nextCursor: { type: string, description: Absent on the last page. }
     PpvRequest:
       type: object
       required: [kind, currency, qty, poUnitPrice, sourceDocumentId]

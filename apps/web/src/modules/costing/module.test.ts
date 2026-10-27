@@ -25,6 +25,8 @@ describe("costing module", () => {
       "/costing/versions",
       "/costing/value-report",
       "/costing/cost-transactions",
+      "/costing/adjustments",
+      "/costing/reconciliations",
     ]);
     for (const n of costing.nav) {
       expect(paths).toContain(n.to);

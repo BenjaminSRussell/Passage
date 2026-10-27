@@ -1,18 +1,19 @@
 asyncapi: 3.0.0
 info:
   title: Passage Costing Events
-  version: 0.4.0
+  version: 0.5.0
   description: >-
     Costing publishes dev.passage.costing.cost.changed.v1 when a STANDARD costing
-    version is activated (one event per product x site) and
+    version is activated (one event per product x site) or a manual on-hand
+    adjustment of the primary valuation changes the unit cost of positive stock,
     dev.passage.costing.agingsnapshot.created.v1 when a month-end aging snapshot is
-    stored. Both are written to the outbox in the same transaction as the change and
-    relayed by Debezium (CloudEvents 1.0 envelope with tenantid); an idempotent replay
-    emits nothing. Settlement, ledger and aging previews and PPV remain
-    request/response only. Recording cost transactions and the value report and its
-    tie-out (slice 5) emit no events; reconciliation.diff waits for the daily
-    costing.reconcile job. Costing consumes no events yet. The x-planned-events
-    are the wave 20 catalog for later slices and are not emitted.
+    stored, and dev.passage.costing.reconciliation.diff.v1 for every differing group
+    of a stored reconciliation run. All are written to the outbox in the same
+    transaction as the change and relayed by Debezium (CloudEvents 1.0 envelope with
+    tenantid); an idempotent replay emits nothing. Settlement, ledger, aging and
+    adjustment previews, PPV, recording cost transactions and the read-only value
+    report tie-out emit no events. Costing consumes no events yet. The
+    x-planned-events are the wave 20 catalog for later slices and are not emitted.
 defaultContentType: application/json
 channels:
   cost:
@@ -21,6 +22,12 @@ channels:
     messages:
       costChanged:
         $ref: "#/components/messages/CostChanged"
+  reconciliation:
+    address: passage.costing.reconciliation
+    description: Inventory-to-GL differences of stored reconciliation runs (alerting); the Kafka key is the legal entity id.
+    messages:
+      reconciliationDiff:
+        $ref: "#/components/messages/ReconciliationDiff"
   agingSnapshot:
     address: passage.costing.agingsnapshot
     description: Stored month-end aging snapshots (Debezium outbox router topic).
@@ -32,9 +39,16 @@ operations:
     action: send
     channel:
       $ref: "#/channels/cost"
-    summary: A costing version activation changed the standard cost of a product at a site.
+    summary: A costing version activation or a manual adjustment changed the cost of a product at a site.
     messages:
       - $ref: "#/channels/cost/messages/costChanged"
+  publishReconciliationDiff:
+    action: send
+    channel:
+      $ref: "#/channels/reconciliation"
+    summary: A group of a stored reconciliation run does not tie to the ledger (one event per differing group).
+    messages:
+      - $ref: "#/channels/reconciliation/messages/reconciliationDiff"
   publishAgingSnapshotCreated:
     action: send
     channel:
@@ -44,6 +58,27 @@ operations:
       - $ref: "#/channels/agingSnapshot/messages/agingSnapshotCreated"
 components:
   messages:
+    ReconciliationDiff:
+      name: dev.passage.costing.reconciliation.diff.v1
+      contentType: application/cloudevents+json
+      summary: >-
+        One group of a stored reconciliation run whose inventory value differs from the ledger
+        balance (FR-20.4). The CloudEvents subject is the run id. The group's dimensions stand for
+        the PRD's account and dimension until posting profiles resolve inventory accounts; sample
+        vouchers are not sent yet.
+      payload:
+        type: object
+        required: [runId, legalEntityId, asOf, currency, dimensions, inventoryValue, ledgerBalance, diff]
+        properties:
+          runId: { type: string, format: uuid }
+          legalEntityId: { type: string, format: uuid }
+          valuationLedgerId: { type: string, format: uuid, description: "The valuation ledger reconciled; absent for the primary valuation requested without an id." }
+          asOf: { type: string, format: date }
+          currency: { type: string, description: "The ledger's currency; empty when neither a ledger nor any row names one." }
+          dimensions: { type: object, additionalProperties: { type: string }, description: "The group: product, site, warehouse and/or valuationType." }
+          inventoryValue: { type: string, description: Decimal string. }
+          ledgerBalance: { type: string, description: Decimal string. }
+          diff: { type: string, description: "Decimal string; inventoryValue - ledgerBalance, never zero." }
     AgingSnapshotCreated:
       name: dev.passage.costing.agingsnapshot.created.v1
       contentType: application/cloudevents+json
@@ -77,23 +112,28 @@ components:
     CostChanged:
       name: dev.passage.costing.cost.changed.v1
       contentType: application/cloudevents+json
-      summary: Consumers (inventory cost price cache, planning, product costing) refresh the product x site cost.
+      summary: >-
+        Consumers (inventory cost price cache, planning, product costing) refresh the product x site
+        cost. An activation names versionId and versionCode; a manual on-hand adjustment names
+        adjustmentId instead, with the warehouse and valuation type it revalued.
       payload:
         type: object
-        required: [productId, siteId, versionId, versionCode, currency, newCost, effectiveFrom, onHandQty, revaluationAmount]
+        required: [productId, siteId, currency, newCost, effectiveFrom, onHandQty, revaluationAmount]
         properties:
           productId: { type: string, format: uuid }
           siteId: { type: string, format: uuid }
-          versionId: { type: string, format: uuid, description: The costing version that was activated (the PRD's "version"). }
-          versionCode: { type: string, example: STD-2026 }
+          versionId: { type: string, format: uuid, description: "The costing version that was activated (the PRD's \"version\"); absent for an adjustment." }
+          versionCode: { type: string, example: STD-2026, description: Absent for an adjustment. }
+          adjustmentId: { type: string, format: uuid, description: The manual cost adjustment; absent for an activation. }
+          warehouseId: { type: string, format: uuid, description: The warehouse an adjustment revalued; absent when none. }
+          valuationType: { type: string, description: The valuation type an adjustment revalued; absent when none. }
           currency: { type: string, pattern: "^[A-Z]{3}$" }
           oldCost: { type: string, description: "Decimal string; the superseded standard. Absent when the product x site had none." }
           newCost: { type: string, description: Decimal string. }
           effectiveFrom: { type: string, format: date }
-          onHandQty: { type: string, description: Decimal string; the physical on-hand the activation revalued. }
-          revaluationAmount: { type: string, description: "Decimal string at the currency's minor unit: (new − old) × on-hand, or new × on-hand − book value for a first standard." }
+          onHandQty: { type: string, description: Decimal string; the physical on-hand the activation or adjustment revalued. }
+          revaluationAmount: { type: string, description: "Decimal string at the currency's minor unit: (new − old) × on-hand, or new × on-hand − book value for a first standard; for an adjustment, its delta." }
 x-planned-events:
   - dev.passage.costing.close.completed.v1
   - dev.passage.costing.close.cancelled.v1
   - dev.passage.costing.close.failed.v1
-  - dev.passage.costing.reconciliation.diff.v1
