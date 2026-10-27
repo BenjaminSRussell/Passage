@@ -1,0 +1,6 @@
+apiVersion: v2
+name: budgeting
+description: "Passage budget control: control rules, register entries, budget checks and encumbrance relief"
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

@@ -1,0 +1,61 @@
+asyncapi: 3.0.0
+info:
+  title: costacct events
+  version: 0.1.0
+  description: Events published by the costacct service (wave 38, slice 1). CloudEvents 1.0, source /passage/controlling/costacct.
+defaultContentType: application/cloudevents+json
+channels:
+  costEntryCreated:
+    address: passage.controlling.costentry
+    messages:
+      costEntryCreated:
+        $ref: '#/components/messages/CostEntryCreated'
+  allocationCompleted:
+    address: passage.controlling.allocation
+    messages:
+      allocationCompleted:
+        $ref: '#/components/messages/AllocationCompleted'
+operations:
+  publishCostEntryCreated:
+    action: send
+    channel:
+      $ref: '#/channels/costEntryCreated'
+  publishAllocationCompleted:
+    action: send
+    channel:
+      $ref: '#/channels/allocationCompleted'
+components:
+  messages:
+    CostEntryCreated:
+      name: dev.passage.controlling.costentry.created.v1
+      payload:
+        $ref: '#/components/schemas/CostEntryCreatedData'
+    AllocationCompleted:
+      name: dev.passage.controlling.allocation.completed.v1
+      payload:
+        $ref: '#/components/schemas/AllocationCompletedData'
+  schemas:
+    CostEntryCreatedData:
+      type: object
+      required: [entry_id, cost_object_id, element_id, period, amount, origin]
+      properties:
+        entry_id: { type: string, format: uuid }
+        cost_object_id: { type: string, format: uuid }
+        element_id: { type: string, format: uuid }
+        period: { type: string }
+        amount: { type: string, description: Decimal string. }
+        origin: { type: string, enum: [Journal, Allocation, Activity, Statistical, Manual] }
+    AllocationCompletedData:
+      type: object
+      required: [run_id, legal_entity_id, period, method, iterations, converged, total_in, total_out, residual, swept]
+      properties:
+        run_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
+        period: { type: string }
+        method: { type: string, enum: [exact-lu, gauss-seidel] }
+        iterations: { type: integer }
+        converged: { type: boolean }
+        total_in: { type: string, description: Cost the senders brought into the step. }
+        total_out: { type: string, description: Cost the final receivers took out; equals total_in to the cent. }
+        residual: { type: string }
+        swept: { type: string }

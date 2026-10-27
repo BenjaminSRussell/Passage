@@ -1,0 +1,6 @@
+apiVersion: v2
+name: costacct
+description: "Passage cost accounting: cost objects, cost elements, journal mirroring and reciprocal allocation runs"
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

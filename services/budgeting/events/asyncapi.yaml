@@ -1,0 +1,91 @@
+asyncapi: 3.0.0
+info:
+  title: budgeting
+  version: 0.1.0
+  description: CloudEvents 1.0 envelope from platform/go/events; payloads below are the data member. Emitted through the transactional outbox in the same transaction as the state change.
+channels:
+  passage.budget.register:
+    address: passage.budget.register
+    messages:
+      posted:
+        $ref: '#/components/messages/registerPosted'
+  passage.budget.check:
+    address: passage.budget.check
+    messages:
+      completed:
+        $ref: '#/components/messages/checkCompleted'
+  passage.budget.encumbrance:
+    address: passage.budget.encumbrance
+    messages:
+      relieved:
+        $ref: '#/components/messages/encumbranceRelieved'
+operations:
+  onRegisterPosted:
+    action: send
+    channel: { $ref: '#/channels/passage.budget.register' }
+    messages: [{ $ref: '#/channels/passage.budget.register/messages/posted' }]
+  onCheckCompleted:
+    action: send
+    channel: { $ref: '#/channels/passage.budget.check' }
+    messages: [{ $ref: '#/channels/passage.budget.check/messages/completed' }]
+  onEncumbranceRelieved:
+    action: send
+    channel: { $ref: '#/channels/passage.budget.encumbrance' }
+    messages: [{ $ref: '#/channels/passage.budget.encumbrance/messages/relieved' }]
+components:
+  messages:
+    registerPosted:
+      name: posted
+      title: Budget register entry posted
+      payload:
+        type: object
+        required: [entry_id, rule_version_id, entry_type, lines]
+        properties:
+          entry_id: { type: string, format: uuid }
+          rule_version_id: { type: string, format: uuid }
+          entry_type: { type: string, enum: [Original, Revision, Transfer, CarryForward] }
+          lines:
+            type: array
+            items:
+              type: object
+              required: [dimension_key, span_key, amount]
+              properties:
+                dimension_key: { type: string }
+                span_key: { type: string }
+                amount: { type: string }
+      x-passage-type: dev.passage.budget.register.posted.v1
+    checkCompleted:
+      name: completed
+      title: Budget check completed
+      description: Emitted for every recorded check, pass, warn or fail. Replays emit nothing.
+      payload:
+        type: object
+        required: [check_id, source_document_id, result, line_results]
+        properties:
+          check_id: { type: string, format: uuid }
+          source_document_id: { type: string, format: uuid }
+          result: { type: string, enum: [pass, warn, fail] }
+          line_results:
+            type: array
+            items:
+              type: object
+              required: [line_id, result, available, amount]
+              properties:
+                line_id: { type: string, format: uuid }
+                result: { type: string, enum: [pass, warn, fail] }
+                available: { type: string }
+                amount: { type: string }
+      x-passage-type: dev.passage.budget.check.completed.v1
+    encumbranceRelieved:
+      name: relieved
+      title: Encumbrance relieved
+      description: Emitted when an invoice relieves a non-zero amount. A relief of 0.00 changes nothing and emits nothing.
+      payload:
+        type: object
+        required: [encumbrance_id, invoice_id, amount, remaining]
+        properties:
+          encumbrance_id: { type: string, format: uuid }
+          invoice_id: { type: string, format: uuid }
+          amount: { type: string }
+          remaining: { type: string }
+      x-passage-type: dev.passage.budget.encumbrance.relieved.v1

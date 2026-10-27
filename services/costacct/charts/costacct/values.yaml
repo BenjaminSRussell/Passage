@@ -1,0 +1,8 @@
+image: { repository: ghcr.io/benjaminsrussell/costacct, digest: "", tag: "", pullPolicy: IfNotPresent }
+databaseSecret: costacct-db
+migrateOnStart: false
+replicaCount: 2
+resources:
+  requests: { cpu: 50m, memory: 64Mi }
+  limits: { cpu: 500m, memory: 192Mi }
+serviceMonitor: { enabled: false }

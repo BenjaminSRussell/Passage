@@ -1,0 +1,381 @@
+openapi: 3.1.0
+info:
+  title: budgeting
+  version: 0.1.0
+  description: >-
+    Budget control (wave 38, slice 1). Budget control rule versions, budget register entries posted directly,
+    budget checks under FR-38.4 with row-locked balances, and encumbrance relief from matched invoice lines (FR-38.5).
+    Every command requires Idempotency-Key; a replay returns the stored response, a reused key with a different body is 422.
+    Reads need budget.view and return {"items": [...]} for lists (at most 500 rows, newest first).
+    Error codes: COM-0001 (validation), AUTH-0001, AUTH-0003, BUD-0001 (rule version not found), BUD-0002 (encumbrance not found),
+    BUD-0003 (line already reserved on another combination), BUD-0004 (check not found),
+    CO-0604 (transfer does not net to zero), idempotency_key_reuse, idempotency_in_progress.
+servers:
+  - url: https://app.local.passage.dev
+paths:
+  /v1/budget/control-rules:
+    get:
+      operationId: listBudgetControlRules
+      x-passage-duty: budget.view
+      parameters:
+        - { name: legalEntityId, in: query, required: false, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Rule versions by code, newest version first.
+          content: { application/json: { schema: { $ref: '#/components/schemas/RuleList' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: createBudgetControlRule
+      x-passage-duty: budget.configure
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateRule' } } }
+      responses:
+        '201':
+          description: The new rule version. Version numbers count up per legal entity and code.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Rule' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/budget/control-rules/{id}:
+    get:
+      operationId: getBudgetControlRule
+      x-passage-duty: budget.view
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: One rule version.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Rule' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/budget/register-entries:
+    get:
+      operationId: listBudgetRegisterEntries
+      x-passage-duty: budget.view
+      parameters:
+        - { $ref: '#/components/parameters/Rule' }
+      responses:
+        '200':
+          description: Posted entries of the rule version, newest first.
+          content: { application/json: { schema: { $ref: '#/components/schemas/PostedEntryList' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: postBudgetRegisterEntry
+      x-passage-duty: budget.maintain
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/RegisterEntry' } } }
+      responses:
+        '201':
+          description: The posted entry. Transfer lines must net to zero (CO-0604, 422).
+          content: { application/json: { schema: { $ref: '#/components/schemas/PostedEntry' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/budget/available:
+    get:
+      operationId: getAvailableFunds
+      x-passage-duty: budget.view
+      parameters:
+        - { $ref: '#/components/parameters/Rule' }
+        - { name: dims, in: query, required: false, description: Control dimension key., schema: { type: string } }
+        - { name: span, in: query, required: false, description: Time span key., schema: { type: string } }
+      responses:
+        '200':
+          description: Control combinations with available = budget − actuals − encumbrances − pre-encumbrances.
+          content: { application/json: { schema: { $ref: '#/components/schemas/BalanceList' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/budget/checks:
+    get:
+      operationId: listBudgetChecks
+      x-passage-duty: budget.view
+      parameters:
+        - { $ref: '#/components/parameters/Rule' }
+        - { name: documentId, in: query, required: false, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Recorded checks (pass, warn and fail), newest first.
+          content: { application/json: { schema: { $ref: '#/components/schemas/CheckList' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: checkBudget
+      x-passage-duty: budget.check
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/Check' } } }
+      responses:
+        '200':
+          description: >-
+            The recorded check. The document result is the worst line result. A fail result reserves nothing and is still
+            recorded. The budget.override duty turns fail into warn with the trace step override. A line seen before is
+            checked for its net change against its stored reservation (FR-38.4 step 4); the same line on another
+            combination is BUD-0003 (409).
+          content: { application/json: { schema: { $ref: '#/components/schemas/CheckResult' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/budget/checks/{id}:
+    get:
+      operationId: getBudgetCheck
+      x-passage-duty: budget.view
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: One recorded check with its per-line trace.
+          content: { application/json: { schema: { $ref: '#/components/schemas/CheckResult' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/budget/encumbrances:
+    get:
+      operationId: listEncumbrances
+      x-passage-duty: budget.view
+      parameters:
+        - { $ref: '#/components/parameters/Rule' }
+        - { name: status, in: query, required: false, schema: { type: string, enum: [Open, PartiallyRelieved, Relieved] } }
+      responses:
+        '200':
+          description: Reservations of the rule version, newest first.
+          content: { application/json: { schema: { $ref: '#/components/schemas/EncumbranceList' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/budget/encumbrances/{id}:
+    get:
+      operationId: getEncumbrance
+      x-passage-duty: budget.view
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: One reservation with its Reserve / Adjust / Relieve history.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Encumbrance' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/budget/encumbrances/{id}:relieve:
+    post:
+      operationId: relieveEncumbrance
+      x-passage-duty: budget.check
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/Relieve' } } }
+      responses:
+        '200':
+          description: >-
+            Relief is min(invoiceQuantity x poUnitPrice, remaining reservation). excess is the invoice amount above the
+            relief and must be run through POST /v1/budget/checks as a new amount.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ReliefResult' } } }
+        default: { $ref: '#/components/responses/Problem' }
+components:
+  parameters:
+    Rule:
+      name: rule
+      in: query
+      required: true
+      description: Budget control rule version id.
+      schema: { type: string, format: uuid }
+  responses:
+    Problem:
+      description: RFC 9457 problem details.
+      content:
+        application/problem+json:
+          schema:
+            type: object
+            required: [type, title, status]
+            properties:
+              type: { type: string }
+              title: { type: string }
+              status: { type: integer }
+              detail: { type: string }
+              instance: { type: string }
+              code: { type: string }
+              traceId: { type: string }
+              errors: { type: object, additionalProperties: { type: string } }
+  schemas:
+    Money:
+      type: string
+      description: Decimal string, never a JSON number in responses.
+    CreateRule:
+      type: object
+      required: [legalEntityId, code, warnPct, blockPct, currency, effectiveFrom]
+      additionalProperties: false
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        code: { type: string, pattern: '^[A-Z0-9_-]{2,40}$' }
+        warnPct: { $ref: '#/components/schemas/Money' }
+        blockPct: { $ref: '#/components/schemas/Money' }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        effectiveFrom: { type: string, format: date }
+    Rule:
+      type: object
+      required: [id, legalEntityId, code, version, warnPct, blockPct, currency, effectiveFrom]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        code: { type: string }
+        version: { type: integer }
+        warnPct: { $ref: '#/components/schemas/Money' }
+        blockPct: { $ref: '#/components/schemas/Money' }
+        currency: { type: string }
+        effectiveFrom: { type: string, format: date }
+    RegisterEntry:
+      type: object
+      required: [ruleVersionId, entryType, lines]
+      additionalProperties: false
+      properties:
+        ruleVersionId: { type: string, format: uuid }
+        entryType: { type: string, enum: [Original, Revision, Transfer, CarryForward] }
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items: { $ref: '#/components/schemas/RegisterLine' }
+    RegisterLine:
+      type: object
+      required: [dimensionKey, spanKey, amount]
+      additionalProperties: false
+      properties:
+        dimensionKey: { type: string, maxLength: 200 }
+        spanKey: { type: string, maxLength: 40 }
+        amount: { $ref: '#/components/schemas/Money' }
+    PostedEntry:
+      type: object
+      required: [id, ruleVersionId, entryType, status, total, postedAt, lines]
+      properties:
+        id: { type: string, format: uuid }
+        ruleVersionId: { type: string, format: uuid }
+        entryType: { type: string, enum: [Original, Revision, Transfer, CarryForward] }
+        status: { type: string, enum: [Posted] }
+        total: { $ref: '#/components/schemas/Money' }
+        postedAt: { type: string, format: date-time }
+        lines: { type: array, items: { $ref: '#/components/schemas/RegisterLine' } }
+    PostedEntryList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/PostedEntry' } }
+    RuleList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Rule' } }
+    Balance:
+      type: object
+      required: [id, ruleVersionId, controlDimensionKey, timeSpanKey, budgetTotal, actuals, encumbrances, preEncumbrances, available, version]
+      properties:
+        id: { type: string, format: uuid }
+        ruleVersionId: { type: string, format: uuid }
+        controlDimensionKey: { type: string }
+        timeSpanKey: { type: string }
+        budgetTotal: { $ref: '#/components/schemas/Money' }
+        actuals: { $ref: '#/components/schemas/Money' }
+        encumbrances: { $ref: '#/components/schemas/Money' }
+        preEncumbrances: { $ref: '#/components/schemas/Money' }
+        available: { $ref: '#/components/schemas/Money' }
+        version: { type: integer }
+    BalanceList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Balance' } }
+    Encumbrance:
+      type: object
+      required: [id, ruleVersionId, controlDimensionKey, timeSpanKey, sourceType, sourceDocumentId, sourceLineId, reserved, relieved, remaining, status, history, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        ruleVersionId: { type: string, format: uuid }
+        controlDimensionKey: { type: string }
+        timeSpanKey: { type: string }
+        sourceType: { type: string, enum: [Requisition, PurchaseOrder, Invoice, Journal] }
+        sourceDocumentId: { type: string, format: uuid }
+        sourceLineId: { type: string, format: uuid }
+        reserved: { $ref: '#/components/schemas/Money' }
+        relieved: { $ref: '#/components/schemas/Money' }
+        remaining: { $ref: '#/components/schemas/Money' }
+        status: { type: string, enum: [Open, PartiallyRelieved, Relieved] }
+        history:
+          type: array
+          items:
+            type: object
+            required: [type, amount, documentId, at]
+            properties:
+              type: { type: string, enum: [Reserve, Adjust, Relieve] }
+              amount: { $ref: '#/components/schemas/Money' }
+              documentId: { type: string, format: uuid }
+              at: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+    EncumbranceList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Encumbrance' } }
+    CheckList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/CheckResult' } }
+    Check:
+      type: object
+      required: [ruleVersionId, documentId, documentType, lines]
+      additionalProperties: false
+      properties:
+        ruleVersionId: { type: string, format: uuid }
+        documentId: { type: string, format: uuid }
+        documentType: { type: string, enum: [Requisition, PurchaseOrder, Invoice, Journal] }
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            type: object
+            required: [lineId, dimensionKey, spanKey, amount]
+            properties:
+              lineId: { type: string, format: uuid }
+              dimensionKey: { type: string, maxLength: 200 }
+              spanKey: { type: string, maxLength: 40, description: 'For example FY2026, 2026-Q3 or 2026-09.' }
+              amount: { $ref: '#/components/schemas/Money' }
+    CheckResult:
+      type: object
+      required: [id, ruleVersionId, documentId, documentType, result, overridden, checkedAt, lines]
+      properties:
+        id: { type: string, format: uuid }
+        ruleVersionId: { type: string, format: uuid }
+        documentId: { type: string, format: uuid }
+        documentType: { type: string, enum: [Requisition, PurchaseOrder, Invoice, Journal] }
+        result: { type: string, enum: [pass, warn, fail] }
+        overridden: { type: boolean }
+        checkedAt: { type: string, format: date-time }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [lineId, dimensionKey, spanKey, amount, prior, result, available, net, overPct, trace]
+            properties:
+              lineId: { type: string, format: uuid }
+              dimensionKey: { type: string }
+              spanKey: { type: string }
+              amount: { $ref: '#/components/schemas/Money' }
+              prior: { $ref: '#/components/schemas/Money', description: The line's stored reservation before this check (step 4). }
+              encumbranceId: { type: string, format: uuid, description: Present once the line holds a reservation. }
+              result: { type: string, enum: [pass, warn, fail] }
+              available: { $ref: '#/components/schemas/Money' }
+              net: { $ref: '#/components/schemas/Money' }
+              overPct: { $ref: '#/components/schemas/Money' }
+              trace: { type: array, items: { type: string } }
+    Relieve:
+      type: object
+      required: [invoiceId, invoiceAmount, invoiceQuantity, poUnitPrice]
+      additionalProperties: false
+      properties:
+        invoiceId: { type: string, format: uuid }
+        invoiceAmount: { $ref: '#/components/schemas/Money' }
+        invoiceQuantity: { $ref: '#/components/schemas/Money' }
+        poUnitPrice: { $ref: '#/components/schemas/Money' }
+    ReliefResult:
+      type: object
+      required: [encumbranceId, relieved, remaining, excess, status]
+      properties:
+        encumbranceId: { type: string, format: uuid }
+        relieved: { $ref: '#/components/schemas/Money' }
+        remaining: { $ref: '#/components/schemas/Money' }
+        excess: { $ref: '#/components/schemas/Money' }
+        status: { type: string, enum: [Open, PartiallyRelieved, Relieved] }
