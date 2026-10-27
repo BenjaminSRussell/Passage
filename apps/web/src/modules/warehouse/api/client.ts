@@ -100,3 +100,237 @@ export async function simulateDirectives(request: SimulateRequest, signal?: Abor
   }
   return (await res.json()) as SimulateResponse;
 }
+
+/* ---------- Persisted setup and work (slice 3) ---------- */
+
+export type LocationStatus = "ACTIVE" | "BLOCKED_IN" | "BLOCKED_OUT" | "BLOCKED" | "INACTIVE";
+export const LOCATION_STATUSES: LocationStatus[] = ["ACTIVE", "BLOCKED_IN", "BLOCKED_OUT", "BLOCKED", "INACTIVE"];
+
+export const WORK_TYPES = [
+  "PURCHASE_PUTAWAY",
+  "SALES_PICK",
+  "TRANSFER_ISSUE",
+  "TRANSFER_RECEIPT",
+  "PRODUCTION_PICK",
+  "RAF_PUTAWAY",
+  "REPLENISHMENT",
+  "MOVEMENT",
+  "COUNT",
+  "RETURN",
+] as const;
+export type WorkType = (typeof WORK_TYPES)[number];
+
+export const WORK_STATUSES = ["OPEN", "ASSIGNED", "IN_PROGRESS", "COMPLETED", "PARTIALLY_COMPLETED", "CANCELLED", "BLOCKED_NO_LOCATION"] as const;
+export type WorkStatus = (typeof WORK_STATUSES)[number];
+
+export const STRATEGIES = ["consolidate", "fifo", "lifo", "fefo", "empty_location", "match_packing_quantity", "round_up_to_lp", "outbound_staging"] as const;
+
+/** Capacity limits; a missing limit is unlimited. Weights (kg) and volumes (m³) are decimal strings. */
+export interface Capacity {
+  maxWeight?: string;
+  maxVolume?: string;
+  maxLps?: number;
+  maxItems?: number;
+  allowMixedItems?: boolean;
+}
+
+export interface Location {
+  id: string;
+  name: string;
+  zone: string;
+  pickSequence: number;
+  status: LocationStatus;
+  capacity: Capacity;
+  used: { weight: string; volume: string; lps: number };
+  stock?: Record<string, string>;
+  fireSection?: string;
+  rackGroup?: string;
+  allowedStorageClasses?: string[];
+  version?: number;
+}
+
+export interface LocationInput {
+  name: string;
+  zone: string;
+  pickSequence: number;
+  status: LocationStatus;
+  capacity: Capacity;
+}
+
+export interface DirectiveAction {
+  seq: number;
+  strategy: string;
+  zone?: string;
+}
+
+export interface DirectiveLine {
+  seq: number;
+  fromQty: string;
+  toQty?: string;
+  actions: DirectiveAction[];
+}
+
+export interface Directive {
+  id: string;
+  sequence: number;
+  workType: string;
+  direction: Direction;
+  warehouseId: string;
+  query?: Record<string, string>;
+  lines: DirectiveLine[];
+}
+
+export type DirectiveInput = Omit<Directive, "id">;
+
+export type LineStatus = "OPEN" | "COMPLETED" | "SHORT" | "CANCELLED";
+
+export interface WorkLine {
+  lineNo: number;
+  itemId: string;
+  direction: Direction;
+  qty: string;
+  confirmedQty: string;
+  weight: string;
+  volume: string;
+  lps: number;
+  fromLocationId?: string;
+  toLocationId?: string;
+  status: LineStatus;
+  reason?: string;
+  attributes?: Record<string, string>;
+}
+
+export interface Work {
+  id: string;
+  warehouseId: string;
+  workType: string;
+  status: WorkStatus;
+  priority: number;
+  parentWorkId?: string;
+  assignedUser?: string;
+  assignedAt?: string;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  lines: WorkLine[];
+}
+
+export interface WorkLineInput {
+  itemId: string;
+  direction: Direction;
+  qty: string;
+  weight?: string;
+  volume?: string;
+  lps?: number;
+}
+
+export interface WorkInput {
+  warehouseId: string;
+  workType: string;
+  priority?: number;
+  lines: WorkLineInput[];
+}
+
+export interface Planned {
+  work: Work;
+  traces: { directive?: string; blocked: boolean; code?: string; trace: TraceStep[] }[];
+}
+
+export interface Page<T> {
+  items: T[];
+  nextCursor?: string;
+}
+
+/** A fresh Idempotency-Key for one user action; a retry of the same action reuses it. */
+export function newKey(): string {
+  return crypto.randomUUID();
+}
+
+async function send<T>(path: string, init: RequestInit & { key?: string; version?: number } = {}): Promise<T> {
+  const { key, version, headers, ...rest } = init;
+  const res = await fetch(`${base}${path}`, {
+    ...rest,
+    headers: {
+      Accept: "application/json",
+      ...(rest.body !== undefined ? { "Content-Type": "application/json" } : {}),
+      ...(key ? { "Idempotency-Key": key } : {}),
+      ...(version ? { "If-Match": `"${version}"` } : {}),
+      ...headers,
+    },
+    credentials: "same-origin",
+  });
+  if (!res.ok) {
+    throw await toError(res);
+  }
+  return (await res.json()) as T;
+}
+
+function query(params: Record<string, string | number | undefined>): string {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== "") q.set(k, String(v));
+  }
+  return q.toString();
+}
+
+/** GET /v1/warehouse/locations (duty warehouse.setup.view): one page by name, with stock. */
+export function listLocations(p: { warehouseId: string; zone?: string; cursor?: string; limit?: number }, signal?: AbortSignal) {
+  return send<Page<Location>>(`/locations?${query(p)}`, { signal });
+}
+
+/** POST /v1/warehouse/locations:bulk (duty warehouse.setup.maintain). */
+export function createLocations(warehouseId: string, locations: LocationInput[], key: string) {
+  return send<Page<Location>>("/locations:bulk", { method: "POST", key, body: JSON.stringify({ warehouseId, locations }) });
+}
+
+/** GET /v1/warehouse/location-directives (duty warehouse.setup.view). */
+export function listDirectives(p: { warehouseId: string; workType?: string; direction?: string }, signal?: AbortSignal) {
+  return send<Page<Directive>>(`/location-directives?${query(p)}`, { signal });
+}
+
+/** POST /v1/warehouse/location-directives (duty warehouse.setup.maintain). */
+export function createDirective(input: DirectiveInput, key: string) {
+  return send<Directive>("/location-directives", { method: "POST", key, body: JSON.stringify(input) });
+}
+
+/** GET /v1/warehouse/work (duty warehouse.inquiry.view): headers only, best priority then oldest first. */
+export function listWork(p: { warehouseId: string; status?: string; cursor?: string; limit?: number }, signal?: AbortSignal) {
+  return send<Page<Work>>(`/work?${query(p)}`, { signal });
+}
+
+/** GET /v1/warehouse/work/{id} (duty warehouse.inquiry.view). */
+export function getWork(id: string, signal?: AbortSignal) {
+  return send<Work>(`/work/${encodeURIComponent(id)}`, { signal });
+}
+
+/** POST /v1/warehouse/work (duty warehouse.work.supervise): the directives choose each line's location. */
+export function createWork(input: WorkInput, key: string) {
+  return send<Planned>("/work", { method: "POST", key, body: JSON.stringify(input) });
+}
+
+/** POST /v1/warehouse/work:assign (duty warehouse.work.execute): work is null when nothing is assignable. */
+export function assignNextWork(warehouseId: string, key: string) {
+  return send<{ work: Work | null }>("/work:assign", { method: "POST", key, body: JSON.stringify({ warehouseId }) });
+}
+
+/** POST /v1/warehouse/work/{id}/lines/{n}:confirm (duty warehouse.work.execute). */
+export function confirmLine(work: Pick<Work, "id" | "version">, lineNo: number, qty: string, key: string) {
+  return send<Work>(`/work/${encodeURIComponent(work.id)}/lines/${lineNo}:confirm`, {
+    method: "POST",
+    key,
+    version: work.version,
+    body: JSON.stringify({ qty }),
+  });
+}
+
+export type WorkException = { action: "SHORT_PICK"; lineNo: number; confirmedQty: string; reason: string } | { action: "CANCEL"; reason: string };
+
+/** POST /v1/warehouse/work/{id}:exception (duty warehouse.work.execute): short pick a line or cancel the work. */
+export function workException(work: Pick<Work, "id" | "version">, exception: WorkException, key: string) {
+  return send<{ work: Work; remainder: Work | null }>(`/work/${encodeURIComponent(work.id)}:exception`, {
+    method: "POST",
+    key,
+    version: work.version,
+    body: JSON.stringify(exception),
+  });
+}

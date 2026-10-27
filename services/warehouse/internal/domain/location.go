@@ -103,6 +103,11 @@ type Location struct {
 	RackGroup string `json:"rackGroup,omitempty"`
 	// AllowedStorageClasses restricts hazmat storage; empty allows any class.
 	AllowedStorageClasses []string `json:"allowedStorageClasses,omitempty"`
+	// Version counts stored changes of a persisted location.
+	Version int `json:"version,omitempty"`
+	// inbound holds items that open PUT lines will bring (Reserve, planning
+	// only): they count as items for mixing, the item limit and emptiness.
+	inbound map[string]bool
 }
 
 // load returns the current usage with Items derived from the stock map.
@@ -116,6 +121,11 @@ func (l Location) itemCount() int {
 	n := 0
 	for _, q := range l.Stock {
 		if q.IsPositive() {
+			n++
+		}
+	}
+	for item := range l.inbound {
+		if !l.holds(item) {
 			n++
 		}
 	}
@@ -136,9 +146,14 @@ func (l Location) mixing(item string) (string, bool) {
 	if l.Capacity.AllowMixedItems {
 		return "", true
 	}
-	others := make([]string, 0, len(l.Stock))
+	others := make([]string, 0, len(l.Stock)+len(l.inbound))
 	for other, q := range l.Stock {
 		if q.IsPositive() && other != item {
+			others = append(others, other)
+		}
+	}
+	for other := range l.inbound {
+		if other != item && !l.holds(other) {
 			others = append(others, other)
 		}
 	}
@@ -154,7 +169,7 @@ func (l Location) admitPut(item string, add Usage) (string, bool) {
 	if reason, ok := l.mixing(item); !ok {
 		return reason, false
 	}
-	if !l.holds(item) {
+	if !l.holds(item) && !l.inbound[item] {
 		add.Items = 1
 	}
 	if reason, ok := l.Capacity.Fits(l.load(), add); !ok {

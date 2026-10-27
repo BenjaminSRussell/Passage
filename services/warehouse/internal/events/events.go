@@ -1,0 +1,58 @@
+// Package events holds the event types and payloads the warehouse service
+// publishes (PRD §6.31.5). Schemas are in events/asyncapi.yaml. Payload fields
+// are snake_case like the PRD; quantities are decimal strings.
+package events
+
+import "github.com/BenjaminSRussell/passage/platform/events"
+
+// Context is the event context the PRD names for warehouse management.
+const Context = "wms"
+
+// Source is the CloudEvents source of this service.
+const Source = "warehouse"
+
+// Event types published in this slice.
+var (
+	WorkCreated   = events.Type(Context, "work", "created", 1)
+	WorkCompleted = events.Type(Context, "work", "completed", 1)
+)
+
+// All lists every published type; asyncapi.yaml must name each one.
+func All() []string { return []string{WorkCreated, WorkCompleted} }
+
+// Line is one line of a work event.
+type Line struct {
+	LineNo         int    `json:"line_no"`
+	ItemID         string `json:"item_id"`
+	Direction      string `json:"direction"`
+	Qty            string `json:"qty"`
+	ConfirmedQty   string `json:"confirmed_qty"`
+	Status         string `json:"status"`
+	FromLocationID string `json:"from_location_id,omitempty"`
+	ToLocationID   string `json:"to_location_id,omitempty"`
+}
+
+// WorkCreatedData is the payload of dev.passage.wms.work.created.v1, emitted
+// when a work header is committed, including a short-pick remainder.
+type WorkCreatedData struct {
+	WorkID       string `json:"work_id"`
+	WorkType     string `json:"work_type"`
+	WarehouseID  string `json:"warehouse_id"`
+	Priority     int    `json:"priority"`
+	Status       string `json:"status"`
+	ParentWorkID string `json:"parent_work_id,omitempty"`
+	Lines        []Line `json:"lines"`
+}
+
+// WorkCompletedData is the payload of dev.passage.wms.work.completed.v1,
+// emitted when the last open line is confirmed or short picked: the work is
+// COMPLETED or PARTIALLY_COMPLETED. Inventory posts the confirmed quantities.
+type WorkCompletedData struct {
+	WorkID      string `json:"work_id"`
+	WorkType    string `json:"work_type"`
+	WarehouseID string `json:"warehouse_id"`
+	Status      string `json:"status"`
+	User        string `json:"user"`
+	DurationS   int64  `json:"duration_s"`
+	Lines       []Line `json:"lines"`
+}

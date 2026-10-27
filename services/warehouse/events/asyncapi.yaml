@@ -1,14 +1,84 @@
 asyncapi: 3.0.0
 info:
-  title: Passage warehouse events (wave 31, slice 1)
-  version: 0.1.0
+  title: Passage warehouse events (wave 31, slice 3)
+  version: 0.3.0
   description: >
-    Slice 1 publishes no events: the simulation endpoint is read-only and no
-    work, wave, load or receipt is created yet. The wave-31 events
-    (dev.passage.wms.work.created.v1, work.completed.v1, wave.released.v1,
-    load.shipped.v1, receipt.registered.v1) arrive with their state changes in
-    later slices. Nothing is consumed.
-channels: {}
-operations: {}
+    Work events, written to the outbox in the same transaction as the change
+    and relayed by Debezium as CloudEvents 1.0 (source "warehouse", subject =
+    work id, Kafka key = work id). Payload fields are snake_case and
+    quantities are decimal strings. wave.released.v1, load.shipped.v1 and
+    receipt.registered.v1 arrive with waves, loads and receiving in later
+    slices. Nothing is consumed yet.
+defaultContentType: application/json
+channels:
+  wmsWork:
+    address: passage.wms.work
+    description: Topic of every work event (platform events.Topic).
+    messages:
+      workCreated: { $ref: "#/components/messages/workCreated" }
+      workCompleted: { $ref: "#/components/messages/workCompleted" }
+operations:
+  publishWorkCreated:
+    action: send
+    channel: { $ref: "#/channels/wmsWork" }
+    messages: [{ $ref: "#/channels/wmsWork/messages/workCreated" }]
+  publishWorkCompleted:
+    action: send
+    channel: { $ref: "#/channels/wmsWork" }
+    messages: [{ $ref: "#/channels/wmsWork/messages/workCompleted" }]
 components:
-  messages: {}
+  messages:
+    workCreated:
+      name: dev.passage.wms.work.created.v1
+      title: Work created
+      summary: >
+        A work header was committed: by POST /v1/warehouse/work, or as the OPEN
+        remainder of a short pick (parent_work_id set). Consumers: wms-mobile,
+        analytics.
+      payload: { $ref: "#/components/schemas/WorkCreated" }
+    workCompleted:
+      name: dev.passage.wms.work.completed.v1
+      title: Work completed
+      summary: >
+        The last open line was confirmed or short picked: status COMPLETED or
+        PARTIALLY_COMPLETED. confirmed_qty per line is what moved. Consumers:
+        inventory (post the transfer), sales fulfillment, production.
+      payload: { $ref: "#/components/schemas/WorkCompleted" }
+  schemas:
+    Decimal:
+      type: string
+      pattern: "^-?[0-9]+(\\.[0-9]+)?$"
+    Line:
+      type: object
+      required: [line_no, item_id, direction, qty, confirmed_qty, status]
+      properties:
+        line_no: { type: integer }
+        item_id: { type: string }
+        direction: { type: string, enum: [PUT, PICK] }
+        qty: { $ref: "#/components/schemas/Decimal" }
+        confirmed_qty: { $ref: "#/components/schemas/Decimal" }
+        status: { type: string, enum: [OPEN, COMPLETED, SHORT, CANCELLED] }
+        from_location_id: { type: string, format: uuid }
+        to_location_id: { type: string, format: uuid }
+    WorkCreated:
+      type: object
+      required: [work_id, work_type, warehouse_id, priority, status, lines]
+      properties:
+        work_id: { type: string, format: uuid }
+        work_type: { type: string }
+        warehouse_id: { type: string, format: uuid }
+        priority: { type: integer, minimum: 1, maximum: 99 }
+        status: { type: string, enum: [OPEN, BLOCKED_NO_LOCATION] }
+        parent_work_id: { type: string, format: uuid }
+        lines: { type: array, items: { $ref: "#/components/schemas/Line" } }
+    WorkCompleted:
+      type: object
+      required: [work_id, work_type, warehouse_id, status, user, duration_s, lines]
+      properties:
+        work_id: { type: string, format: uuid }
+        work_type: { type: string }
+        warehouse_id: { type: string, format: uuid }
+        status: { type: string, enum: [COMPLETED, PARTIALLY_COMPLETED] }
+        user: { type: string }
+        duration_s: { type: integer, description: Seconds from assignment to the last confirmation. }
+        lines: { type: array, items: { $ref: "#/components/schemas/Line" } }

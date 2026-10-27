@@ -1,6 +1,7 @@
-// Package api exposes the warehouse HTTP surface: location-directive simulation
-// in this slice. Handlers decode, validate, call the domain and answer with
-// httpx.JSON or httpx.Problem.
+// Package api exposes the warehouse HTTP surface: location-directive
+// simulation (stateless), and with a store the location and directive setup
+// and work execution routes (execution.go). Handlers decode, validate, call
+// the domain or store and answer with httpx.JSON or httpx.Problem.
 package api
 
 import (
@@ -8,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sync/atomic"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -31,18 +33,34 @@ const (
 // /api/v1/warehouse/... onto it.
 const simulatePath = "/v1/warehouse/location-directives:simulate"
 
-// API holds the handlers and their counters.
+// API holds the handlers and their counters. st is nil in stateless mode (no
+// DATABASE_URL): only the simulation route is mounted then.
 type API struct {
 	simulations atomic.Int64
 	blocked     atomic.Int64
+	workCreated atomic.Int64
+	workBlocked atomic.Int64
+	assignments atomic.Int64
+	st          Store
+	lockTimeout time.Duration
 }
 
-// New returns an API with zeroed counters.
+// New returns a stateless API with zeroed counters.
 func New() *API { return &API{} }
+
+// NewWithStore returns an API that persists locations, directives and work in
+// st. lockTimeout is the idle time after which ASSIGNED work returns to OPEN
+// (WMS_LOCK_TIMEOUT_MIN, BR-31.3).
+func NewWithStore(st Store, lockTimeout time.Duration) *API {
+	return &API{st: st, lockTimeout: lockTimeout}
+}
 
 // Register mounts the routes on r.
 func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutySetupView)).Post(simulatePath, a.simulate)
+	if a.st != nil {
+		a.registerPersisted(r)
+	}
 }
 
 // Metrics serves the admin-port counters in Prometheus text format.
@@ -51,11 +69,15 @@ func (a *API) Metrics() http.Handler {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 		fmt.Fprintf(w, "# HELP warehouse_directive_simulations_total Directive simulations evaluated.\n# TYPE warehouse_directive_simulations_total counter\nwarehouse_directive_simulations_total %d\n", a.simulations.Load())
 		fmt.Fprintf(w, "# HELP warehouse_directive_blocked_total Simulated lines that resolved to no location (WMS-0101).\n# TYPE warehouse_directive_blocked_total counter\nwarehouse_directive_blocked_total %d\n", a.blocked.Load())
+		fmt.Fprintf(w, "# HELP warehouse_work_created_total Works created.\n# TYPE warehouse_work_created_total counter\nwarehouse_work_created_total %d\n", a.workCreated.Load())
+		fmt.Fprintf(w, "# HELP warehouse_work_blocked_total Works created BLOCKED_NO_LOCATION (WMS-0101).\n# TYPE warehouse_work_blocked_total counter\nwarehouse_work_blocked_total %d\n", a.workBlocked.Load())
+		fmt.Fprintf(w, "# HELP warehouse_work_assignments_total Works assigned to a user.\n# TYPE warehouse_work_assignments_total counter\nwarehouse_work_assignments_total %d\n", a.assignments.Load())
 	})
 }
 
 // simulateRequest is a hypothetical line with the directives and candidate
-// locations to evaluate it against. Persisted directives arrive in a later slice.
+// locations to evaluate it against. It never reads or writes the database, so
+// a directive can be tried before it is saved.
 type simulateRequest struct {
 	Line       domain.Line        `json:"line"`
 	Directives []domain.Directive `json:"directives"`

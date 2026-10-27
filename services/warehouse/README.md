@@ -1,8 +1,61 @@
-# warehouse (wave 31 — Advanced Warehouse Management, slices 1–2)
+# warehouse (wave 31 — Advanced Warehouse Management, slices 1–3)
 
 Directed warehouse work: location hierarchy, license plates, and the location
 directive engine that decides where a put-away or pick line goes, with a
 rule-by-rule trace. PRD: §6.31 of `docs/prd/phase-6-logistics.md`; ticket PSG-31.
+
+## What slice 3 adds (persistence and directed work)
+
+- `migrations/0001_init.sql`: `location` (capacity limits and current use as
+  numeric columns), `location_stock` (on-hand by location and item, the
+  stand-in for quants), `location_directive` (bands and actions as jsonb),
+  `work`, `work_line`, `outbox` and `idempotency_keys`. Every table has
+  `tenant_id` first and forced row-level security. Quantities are
+  `numeric(20,6)`, weights and volumes `numeric(18,6)`.
+- `internal/domain/execution.go`: `Plan` places each line with the directives
+  and reserves what it takes for the following lines (BR-31.2); `Reserve`
+  applies every open line of the warehouse before planning, so open PUT lines
+  use room (weight, volume, LPs and their item for mixing and emptiness) and
+  open PICK lines hold their stock. `Assign`, `ConfirmLine` (only by the
+  assignee; quantity must equal the open quantity, over-pick tolerance 0%,
+  WMS-0106), `ShortPick` (PICK lines only; remainder becomes a child OPEN work,
+  AC-31.5), `Cancel` (with a reason; assignee, or anyone with the supervise
+  duty), and `Location.Move`/`Issue` for the confirmed stock movement.
+- `internal/store`: tenant-scoped transactions; every command runs once per
+  `Idempotency-Key` (`once`: same key and request returns the stored answer,
+  same key with another request is `idempotency_key_reuse`; a failed command
+  releases its key). `AssignNext` first returns ASSIGNED work idle past
+  `WMS_LOCK_TIMEOUT_MIN` to OPEN, then takes the best OPEN work, both with
+  `FOR UPDATE SKIP LOCKED` (BR-31.8). Confirmation locks the work and the
+  location rows and re-checks status, mixing and capacity (FR-31.1). Work events
+  go to the outbox in the same transaction.
+- `internal/api/execution.go`: the routes below, under `/v1/warehouse/` like
+  the simulator. Work commands take an optional `If-Match` work version.
+- Events `dev.passage.wms.work.created.v1` (new work, including a short-pick
+  remainder) and `dev.passage.wms.work.completed.v1` (last open line confirmed
+  or short picked), source `warehouse`, documented in `events/asyncapi.yaml`.
+- Web (`apps/web/src/modules/warehouse`): Locations (list with capacity, use and
+  stock; Add locations generates names from a LocationFormat such as
+  A-01-02-03), Location directives (list; New directive), Work (list with status
+  filter and "Assign next work to me"; Create work shows where each line went
+  and why; work details confirm, short pick or cancel each line). The warehouse
+  id travels in the `?warehouse=` URL parameter and is remembered per browser.
+
+| Route | Duty (PRD duty) |
+|---|---|
+| `POST /v1/warehouse/locations:bulk` | `warehouse.setup.maintain` (WMS_SETUP_MAINTAIN) |
+| `GET /v1/warehouse/locations?warehouseId=&zone=&limit=&cursor=` | `warehouse.setup.view` (WMS_SETUP_VIEW) |
+| `POST /v1/warehouse/location-directives` | `warehouse.setup.maintain` |
+| `GET /v1/warehouse/location-directives?warehouseId=&workType=&direction=` | `warehouse.setup.view` |
+| `POST /v1/warehouse/work` (CreateWorkFromOrderLines) | `warehouse.work.supervise` (WMS_WORK_SUPERVISE) |
+| `GET /v1/warehouse/work?warehouseId=&status=&limit=&cursor=`, `GET /v1/warehouse/work/{id}` | `warehouse.inquiry.view` (WMS_INQUIRY) |
+| `POST /v1/warehouse/work:assign` | `warehouse.work.execute` (WMS_WORK_EXECUTE) |
+| `POST /v1/warehouse/work/{id}/lines/{n}:confirm` | `warehouse.work.execute` |
+| `POST /v1/warehouse/work/{id}:exception` (SHORT_PICK, CANCEL) | `warehouse.work.execute`; cancelling another user's work also needs `warehouse.work.supervise` |
+
+Configuration: `DATABASE_URL` (without it only the simulator is served),
+`MIGRATE_ON_START=true` to apply migrations at start, `WMS_LOCK_TIMEOUT_MIN`
+(5–240, default 30).
 
 ## What slice 2 adds (pure domain, plus the simulate request)
 
@@ -90,17 +143,20 @@ Rules worth knowing:
   allowed although BR-31.3 does not name it, so a wave can drop a line no
   directive can place.
 
-Not yet built: persistence, migrations, waves, work creation, assignment,
-replenishment, loads, receiving, sorting, VAS, labor endpoints, and the rest of the
-wave. See `NOT-IMPLEMENTED.md`.
+Not yet built: waves, replenishment, license plates in the store, loads,
+receiving, sorting, VAS, labor endpoints, and the rest of the wave. See
+`NOT-IMPLEMENTED.md`.
 
 ## Run and test
 
 ```sh
 cd services/warehouse
-go test ./...          # domain and API tests; no database needed
+go test ./...          # domain and API tests; store and API database tests skip
 go vet ./...
-go run ./cmd/warehouse # HTTP_ADDR defaults to :8080, ADMIN_ADDR to :9090
+PASSAGE_TEST_DATABASE_URL=postgres://... go test ./...   # adds the store and HTTP flow tests
+PASSAGE_TEST_APP_DATABASE_URL=postgres://app@... # also runs the RLS isolation test (non-owner role)
+DATABASE_URL=postgres://... MIGRATE_ON_START=true go run ./cmd/warehouse
+                       # HTTP_ADDR defaults to :8080, ADMIN_ADDR to :9090
 ```
 
 Test fixtures: `testdata/directive-scenarios-100.json` holds the AC-31.1
@@ -112,17 +168,28 @@ Property test: `location_test.go` checks that a location never exceeds its
 capacity under random receive sequences (AC-31.9 for the capacity half).
 
 Dependencies beyond the platform module: `pgregory.net/rapid` (tests only, as
-the conventions allow) and `github.com/go-chi/chi/v5` (via the platform). The
-`shopspring/decimal` package is used for money-like quantities and weights.
+the conventions allow), and `github.com/go-chi/chi/v5` and `github.com/jackc/pgx/v5`
+(both via the platform). The `shopspring/decimal` package is used for
+quantities and weights.
 
 ## Error codes
 
 | Code | Status | Meaning |
 |---|---|---|
-| WMS-0101 | 200 (in the body: `blocked: true`) | No directive action yielded a location for the line (BLOCKED_NO_LOCATION). |
-| COM-0001 | 400 | Malformed body, unknown field, or failed field validation (`errors` names the fields). |
-| AUTH-0001 | 401 | No tenant on the request. |
-| AUTH-0003 | 403 | Duty `warehouse.setup.view` missing. |
+| WMS-0101 | 200 simulate (`blocked: true`); on work, the line `reason` | No directive action yielded a location for the line (BLOCKED_NO_LOCATION). |
+| WMS-0102 | 422 | Confirmed PUT would exceed the location's capacity. |
+| WMS-0103 | 422 | Confirmed PUT would mix items in a location that forbids it. |
+| WMS-0105 | 409 | Line already confirmed with another Idempotency-Key (BR-31.8). |
+| WMS-0106 | 422 | Confirmed quantity above the open quantity (over-pick tolerance 0%). |
+| WMS-0110 | 409 | Illegal work or line transition: confirming unassigned or finished work, a quantity below the open one (use a short pick), short picking a PUT line, cancelling after a confirmation, or a location status/stock that refuses the move. |
+| WMS-DUPLICATE | 409 | Location name taken in the warehouse, or directive sequence taken for the work type and direction. |
+| WMS-VERSION-CONFLICT | 409 | `If-Match` is not the work's current version. |
+| WMS-NOT-ASSIGNEE | 403 | The work is assigned to another user (or unassigned, for a cancel without the supervise duty). |
+| WMS-WORK-NOT-FOUND, WMS-LINE-NOT-FOUND | 404 | No such work in the tenant, or no such line on it. |
+| idempotency_key_reuse | 422 | The Idempotency-Key was used for another request (method, path, user and body). |
+| COM-0001 | 400 | Malformed body, unknown field, missing Idempotency-Key or X-Passage-User, or failed field validation (`errors` names the fields). |
+| AUTH-0001 | 401 | No tenant on the request, or (persisted routes) a tenant that is not a UUID. |
+| AUTH-0003 | 403 | The route's duty is missing. |
 
 Domain warnings returned by the domain functions (no endpoint serves them yet):
 `WMS-0113` (supply under quality hold, cross-dock deferred, from `PlanReceipt`) and
@@ -130,6 +197,8 @@ Domain warnings returned by the domain functions (no endpoint serves them yet):
 
 Trace reasons name the rejecting rule in plain text, for example
 `capacity: lps 1/1` (AC-31.2), `mixing: holds NUT-M8` and
-`hazmat: class 3 vs 5.1 prohibited in FCS-02` (AC-31.14). Later slices add
-`WMS-0102` (capacity exceeded on confirmation), `WMS-0103` (mixing) and
-`WMS-0110` (illegal transition) as HTTP responses once work is persisted.
+`hazmat: class 3 vs 5.1 prohibited in FCS-02` (AC-31.14).
+
+Metrics on the admin port: `warehouse_directive_simulations_total`,
+`warehouse_directive_blocked_total`, `warehouse_work_created_total`,
+`warehouse_work_blocked_total`, `warehouse_work_assignments_total`.

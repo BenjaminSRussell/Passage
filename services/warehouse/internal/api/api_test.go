@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -386,18 +387,34 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 			declared[op] = strings.TrimPrefix(line, "      x-passage-duty: ")
 		}
 	}
+	duties := map[string]string{
+		"POST " + simulatePath:                           dutySetupView,
+		"POST /v1/warehouse/locations:bulk":              dutySetupMaintain,
+		"GET /v1/warehouse/locations":                    dutySetupView,
+		"POST /v1/warehouse/location-directives":         dutySetupMaintain,
+		"GET /v1/warehouse/location-directives":          dutySetupView,
+		"POST /v1/warehouse/work":                        dutyWorkSupervise,
+		"GET /v1/warehouse/work":                         dutyInquiry,
+		"GET /v1/warehouse/work/{id}":                    dutyInquiry,
+		"POST /v1/warehouse/work:assign":                 dutyWorkExecute,
+		"POST /v1/warehouse/work/{id}/lines/{n}:confirm": dutyWorkExecute,
+		"POST /v1/warehouse/work/{id}:exception":         dutyWorkExecute,
+	}
 	served := 0
 	router := httpx.NewRouter()
-	New().Register(router)
+	NewWithStore(&fakeStore{}, time.Minute).Register(router)
 	_ = chi.Walk(router, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
 		served++
 		key := method + " " + route
 		duty, ok := declared[key]
+		want, business := duties[key]
 		switch {
 		case !ok:
 			t.Errorf("openapi.yaml does not document %s", key)
-		case route == simulatePath && duty != dutySetupView:
-			t.Errorf("%s x-passage-duty = %q, want %s", key, duty, dutySetupView)
+		case business && duty != want:
+			t.Errorf("%s x-passage-duty = %q, want %s", key, duty, want)
+		case !business && route != "/healthz" && route != "/readyz":
+			t.Errorf("%s has no expected duty in this test", key)
 		}
 		delete(declared, key)
 		return nil

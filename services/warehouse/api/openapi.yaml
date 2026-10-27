@@ -1,13 +1,17 @@
 openapi: 3.1.0
 info:
-  title: Passage warehouse (wave 31, slice 2)
-  version: 0.2.0
+  title: Passage warehouse (wave 31, slice 3)
+  version: 0.3.0
   description: >
-    Location-directive simulation. Stateless: the caller sends the line, the
-    directives, the candidate locations and optional hazmat compliance data, and
-    receives the location the rules choose with a rule-by-rule trace. Slice 2 adds
-    hazmat storage compatibility (FR-31.19) to the simulation. Persistence, work,
-    waves and the other wave-31 endpoints are later slices (see NOT-IMPLEMENTED.md).
+    Location-directive simulation (stateless, with optional hazmat compliance
+    data), and with a database: locations with their stock, location
+    directives, and directed work (create, list, assign, confirm, short pick,
+    cancel). Commands require an Idempotency-Key (kept 24 hours): a repeat with
+    the same request returns the first answer with Idempotent-Replayed: true; a
+    repeat with another request is 422 idempotency_key_reuse. Work commands
+    accept an optional If-Match with the work version. Waves, replenishment,
+    loads, receiving and the other wave-31 endpoints are later slices (see
+    NOT-IMPLEMENTED.md).
 servers:
   - url: https://api.{env}.passage.dev
     variables:
@@ -64,6 +68,300 @@ paths:
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
+  /v1/warehouse/locations:bulk:
+    post:
+      operationId: createLocations
+      summary: Create the locations of a warehouse (FR-31.1)
+      description: >
+        Creates 1 to 1,000 locations in one transaction with zero usage and no
+        stock (stock arrives through confirmed PUT work). Status defaults to
+        ACTIVE. A name already used in the warehouse refuses the whole batch
+        (409 WMS-DUPLICATE). Updating locations is a later slice.
+      x-passage-duty: warehouse.setup.maintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LocationsRequest" }
+      responses:
+        "201":
+          description: Created (or replayed, with Idempotent-Replayed true).
+          headers: { Idempotent-Replayed: { $ref: "#/components/headers/IdempotentReplayed" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LocationPage" }
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+  /v1/warehouse/locations:
+    get:
+      operationId: listLocations
+      summary: List a warehouse's locations with their stock, by name
+      x-passage-duty: warehouse.setup.view
+      parameters:
+        - { name: warehouseId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: zone, in: query, schema: { type: string } }
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: One page, ordered by name.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LocationPage" }
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/warehouse/location-directives:
+    post:
+      operationId: createLocationDirective
+      summary: Create a location directive (FR-31.3)
+      description: >
+        The server assigns the id. The sequence must be unique per warehouse,
+        work type and direction (409 WMS-DUPLICATE). Quantity bands must not
+        overlap. Versioning and effective dating are a later slice.
+      x-passage-duty: warehouse.setup.maintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DirectiveInput" }
+      responses:
+        "201":
+          description: Created (or replayed).
+          headers: { Idempotent-Replayed: { $ref: "#/components/headers/IdempotentReplayed" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Directive" }
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+    get:
+      operationId: listLocationDirectives
+      summary: List a warehouse's directives in evaluation order
+      x-passage-duty: warehouse.setup.view
+      parameters:
+        - { name: warehouseId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: workType, in: query, schema: { $ref: "#/components/schemas/WorkType" } }
+        - { name: direction, in: query, schema: { type: string, enum: [PUT, PICK] } }
+      responses:
+        "200":
+          description: Every matching directive, by work type, direction and sequence.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/Directive" } }
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/warehouse/work:
+    post:
+      operationId: createWork
+      summary: Create work and direct each line to a location (CreateWorkFromOrderLines)
+      description: >
+        Each line is evaluated against the warehouse's persisted directives
+        (BR-31.1) with remaining capacity and stock net of every open line
+        (BR-31.2). A line no directive can place has no location and reason
+        WMS-0101, and the work is BLOCKED_NO_LOCATION. Emits
+        dev.passage.wms.work.created.v1. Priority defaults to 50 (1 highest).
+      x-passage-duty: warehouse.work.supervise
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WorkRequest" }
+      responses:
+        "201":
+          description: Created (or replayed). traces holds each line's directive result and rule trace.
+          headers: { Idempotent-Replayed: { $ref: "#/components/headers/IdempotentReplayed" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Planned" }
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+    get:
+      operationId: listWork
+      summary: List a warehouse's work headers, highest priority then oldest first
+      x-passage-duty: warehouse.inquiry.view
+      parameters:
+        - { name: warehouseId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/WorkStatus" } }
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: One page of work headers; lines is empty here, read one work for its lines.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WorkPage" }
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/warehouse/work/{id}:
+    get:
+      operationId: getWork
+      summary: Read one work with its lines
+      x-passage-duty: warehouse.inquiry.view
+      parameters:
+        - $ref: "#/components/parameters/WorkId"
+      responses:
+        "200":
+          description: The work.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Work" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/warehouse/work:assign:
+    post:
+      operationId: assignWork
+      summary: Assign the next work of a warehouse to the calling user (FR-31.7)
+      description: >
+        ASSIGNED work idle past WMS_LOCK_TIMEOUT_MIN (default 30) returns to
+        OPEN first (BR-31.3). The OPEN work with the best priority, then the
+        oldest, is taken with FOR UPDATE SKIP LOCKED (BR-31.8), so no work goes
+        to two users. The user is X-Passage-User. work is null when nothing is
+        assignable. Work class and user filters are a later slice.
+      x-passage-duty: warehouse.work.execute
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [warehouseId]
+              properties:
+                warehouseId: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The assigned work, or null.
+          headers: { Idempotent-Replayed: { $ref: "#/components/headers/IdempotentReplayed" } }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [work]
+                properties:
+                  work:
+                    oneOf:
+                      - { $ref: "#/components/schemas/Work" }
+                      - { type: "null" }
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+  /v1/warehouse/work/{id}/lines/{n}:confirm:
+    post:
+      operationId: confirmWorkLine
+      summary: Confirm a line at its open quantity (ConfirmWorkLine)
+      description: >
+        Only the assignee confirms (403 WMS-NOT-ASSIGNEE), and only while the
+        work is ASSIGNED or IN_PROGRESS (409 WMS-0110). qty must equal the open
+        quantity: the over-pick tolerance is 0 (422 WMS-0106 above it; a lower
+        quantity is a short pick). The stock moves at the line's location under
+        a row lock: a PUT receives with capacity and mixing checked again
+        (422 WMS-0102, WMS-0103), a PICK issues. The last open line completes the
+        work and emits dev.passage.wms.work.completed.v1. A second confirmation
+        of the line with another key is 409 WMS-0105 (BR-31.8).
+      x-passage-duty: warehouse.work.execute
+      parameters:
+        - $ref: "#/components/parameters/WorkId"
+        - { name: n, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [qty]
+              properties:
+                qty: { $ref: "#/components/schemas/Decimal" }
+      responses:
+        "200":
+          description: The work after the confirmation (or replayed).
+          headers: { Idempotent-Replayed: { $ref: "#/components/headers/IdempotentReplayed" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Work" }
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+  /v1/warehouse/work/{id}:exception:
+    post:
+      operationId: workException
+      summary: Short pick a line or cancel a work, with a reason (FR-31.7)
+      description: >
+        SHORT_PICK (assignee only) confirms a PICK line at confirmedQty, 0 or
+        more and below the open quantity: the line becomes SHORT, only that
+        quantity leaves the location, the work becomes PARTIALLY_COMPLETED once
+        no line is open, and the remainder is a new OPEN work with parentWorkId
+        (AC-31.5). CANCEL is allowed from OPEN, ASSIGNED and BLOCKED_NO_LOCATION
+        while no line is confirmed; the assignee, or a holder of
+        warehouse.work.supervise, may cancel. Skip location is a later slice.
+      x-passage-duty: warehouse.work.execute
+      parameters:
+        - $ref: "#/components/parameters/WorkId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [action, reason]
+              properties:
+                action: { type: string, enum: [SHORT_PICK, CANCEL] }
+                lineNo: { type: integer, minimum: 1, description: "Required for SHORT_PICK." }
+                confirmedQty: { $ref: "#/components/schemas/Decimal" }
+                reason: { type: string, minLength: 1, maxLength: 200, examples: [EMPTY, DAMAGED] }
+      responses:
+        "200":
+          description: The work after the exception and, for a short pick, the remainder work.
+          headers: { Idempotent-Replayed: { $ref: "#/components/headers/IdempotentReplayed" } }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [work, remainder]
+                properties:
+                  work: { $ref: "#/components/schemas/Work" }
+                  remainder:
+                    oneOf:
+                      - { $ref: "#/components/schemas/Work" }
+                      - { type: "null" }
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
   /healthz:
     get:
       operationId: healthz
@@ -75,7 +373,224 @@ paths:
       responses:
         "200": { description: Process is ready to serve }
 components:
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: One key per user action, at most 200 characters, kept 24 hours.
+      schema: { type: string, maxLength: 200 }
+    IfMatch:
+      name: If-Match
+      in: header
+      required: false
+      description: The work version last read, as "3" or 3. A stale version is 409 WMS-VERSION-CONFLICT.
+      schema: { type: string }
+    WorkId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+    Cursor:
+      name: cursor
+      in: query
+      description: nextCursor of the previous page.
+      schema: { type: string }
+  headers:
+    IdempotentReplayed:
+      description: true when the answer is the stored answer of an earlier request with the same key.
+      schema: { type: string, enum: ["true"] }
+  responses:
+    Validation:
+      description: Validation failed (COM-0001); errors names the fields, including Idempotency-Key and X-Passage-User.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Unauthorized:
+      description: No tenant, or a tenant that is not a UUID (AUTH-0001).
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Forbidden:
+      description: Missing duty (AUTH-0003), or the work is assigned to another user (WMS-NOT-ASSIGNEE).
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    NotFound:
+      description: No such work (WMS-WORK-NOT-FOUND) or line (WMS-LINE-NOT-FOUND) in the tenant.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Conflict:
+      description: >
+        WMS-DUPLICATE (location name or directive sequence taken), WMS-0105
+        (line already confirmed with another key), WMS-0110 (illegal work or
+        line transition, or a blocked location status at confirmation) or
+        WMS-VERSION-CONFLICT (stale If-Match).
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Unprocessable:
+      description: >
+        idempotency_key_reuse (key used for another request), WMS-0101 (line
+        without location), WMS-0102 (capacity), WMS-0103 (mixed items) or
+        WMS-0106 (over-pick).
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
   schemas:
+    WorkType:
+      type: string
+      enum: [PURCHASE_PUTAWAY, SALES_PICK, TRANSFER_ISSUE, TRANSFER_RECEIPT, PRODUCTION_PICK, RAF_PUTAWAY, REPLENISHMENT, MOVEMENT, COUNT, RETURN]
+    WorkStatus:
+      type: string
+      enum: [OPEN, ASSIGNED, IN_PROGRESS, COMPLETED, PARTIALLY_COMPLETED, CANCELLED, BLOCKED_NO_LOCATION]
+    LocationInput:
+      type: object
+      additionalProperties: false
+      required: [name, zone]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 60, examples: [A-01-02-03] }
+        zone: { type: string, minLength: 1, maxLength: 40 }
+        pickSequence: { type: integer, minimum: 0 }
+        status: { type: string, enum: [ACTIVE, BLOCKED_IN, BLOCKED_OUT, BLOCKED, INACTIVE], default: ACTIVE }
+        capacity: { $ref: "#/components/schemas/Capacity" }
+        fireSection: { type: string }
+        rackGroup: { type: string }
+        allowedStorageClasses: { type: array, items: { type: string, minLength: 1 } }
+    LocationsRequest:
+      type: object
+      additionalProperties: false
+      required: [warehouseId, locations]
+      properties:
+        warehouseId: { type: string, format: uuid }
+        locations:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items: { $ref: "#/components/schemas/LocationInput" }
+    LocationPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Location" } }
+        nextCursor: { type: string }
+    Capacity:
+      type: object
+      additionalProperties: false
+      description: A missing limit is unlimited.
+      properties:
+        maxWeight: { $ref: "#/components/schemas/Decimal" }
+        maxVolume: { $ref: "#/components/schemas/Decimal" }
+        maxLps: { type: integer, minimum: 0 }
+        maxItems: { type: integer, minimum: 0 }
+        allowMixedItems: { type: boolean }
+    DirectiveInput:
+      type: object
+      additionalProperties: false
+      required: [warehouseId, sequence, workType, direction, lines]
+      properties:
+        warehouseId: { type: string, format: uuid }
+        sequence: { type: integer, minimum: 1 }
+        workType: { $ref: "#/components/schemas/WorkType" }
+        direction: { type: string, enum: [PUT, PICK] }
+        query: { type: object, additionalProperties: { type: string } }
+        lines:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/Band" }
+    WorkLineInput:
+      type: object
+      additionalProperties: false
+      required: [itemId, direction, qty]
+      properties:
+        itemId: { type: string, minLength: 1, maxLength: 60 }
+        direction: { type: string, enum: [PUT, PICK] }
+        qty: { $ref: "#/components/schemas/Decimal" }
+        weight: { $ref: "#/components/schemas/Decimal" }
+        volume: { $ref: "#/components/schemas/Decimal" }
+        lps: { type: integer, minimum: 0 }
+        attributes: { type: object, additionalProperties: { type: string } }
+    WorkRequest:
+      type: object
+      additionalProperties: false
+      required: [warehouseId, workType, lines]
+      properties:
+        warehouseId: { type: string, format: uuid }
+        workType: { $ref: "#/components/schemas/WorkType" }
+        priority: { type: integer, minimum: 1, maximum: 99, description: "1 is the highest; default 50." }
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items: { $ref: "#/components/schemas/WorkLineInput" }
+    WorkLine:
+      type: object
+      required: [lineNo, itemId, direction, qty, confirmedQty, weight, volume, lps, status]
+      properties:
+        lineNo: { type: integer }
+        itemId: { type: string }
+        direction: { type: string, enum: [PUT, PICK] }
+        qty: { $ref: "#/components/schemas/Decimal" }
+        confirmedQty: { $ref: "#/components/schemas/Decimal" }
+        weight: { $ref: "#/components/schemas/Decimal" }
+        volume: { $ref: "#/components/schemas/Decimal" }
+        lps: { type: integer }
+        fromLocationId: { type: string, format: uuid, description: "Source of a PICK line." }
+        toLocationId: { type: string, format: uuid, description: "Destination of a PUT line." }
+        status: { type: string, enum: [OPEN, COMPLETED, SHORT, CANCELLED] }
+        reason: { type: string, description: "WMS-0101 on a blocked line; the short-pick or cancel reason otherwise." }
+        attributes: { type: object, additionalProperties: { type: string } }
+    Work:
+      type: object
+      required: [id, warehouseId, workType, status, priority, version, createdAt, updatedAt, lines]
+      properties:
+        id: { type: string, format: uuid }
+        warehouseId: { type: string, format: uuid }
+        workType: { $ref: "#/components/schemas/WorkType" }
+        status: { $ref: "#/components/schemas/WorkStatus" }
+        priority: { type: integer, minimum: 1, maximum: 99 }
+        parentWorkId: { type: string, format: uuid }
+        assignedUser: { type: string }
+        assignedAt: { type: string, format: date-time }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        lines: { type: array, items: { $ref: "#/components/schemas/WorkLine" } }
+    WorkPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Work" } }
+        nextCursor: { type: string }
+    Planned:
+      type: object
+      required: [work, traces]
+      properties:
+        work: { $ref: "#/components/schemas/Work" }
+        traces:
+          type: array
+          items:
+            type: object
+            required: [blocked, trace]
+            properties:
+              directive: { type: string }
+              blocked: { type: boolean }
+              code: { type: string }
+              trace: { type: array, items: { $ref: "#/components/schemas/Step" } }
+    Step:
+      type: object
+      required: [directive, outcome, reason]
+      properties:
+        directive: { type: string }
+        band: { type: integer }
+        action: { type: integer }
+        outcome: { type: string, enum: [hit, miss, skip] }
+        reason: { type: string }
     Decimal:
       type: string
       description: Decimal as a string, never a float.
@@ -155,6 +670,7 @@ components:
     Directive:
       type: object
       additionalProperties: false
+      description: A directive as the simulation takes it and the directive routes return it.
       required: [id, sequence, workType, direction, warehouseId, lines]
       properties:
         id: { type: string }
@@ -226,6 +742,7 @@ components:
           type: array
           description: Storage classes a hazmat item may have here; empty allows any.
           items: { type: string, minLength: 1 }
+        version: { type: integer, readOnly: true, description: "Stored version of a persisted location; ignored by the simulation." }
     SimulateResponse:
       type: object
       required: [blocked, trace]

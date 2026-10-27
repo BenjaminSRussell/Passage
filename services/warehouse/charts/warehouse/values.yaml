@@ -1,4 +1,10 @@
 image: { repository: ghcr.io/benjaminsrussell/warehouse, digest: "", tag: "", pullPolicy: IfNotPresent }
+# Secret holding DATABASE_URL. Without a database the service serves only the
+# stateless directive simulation.
+databaseSecret: warehouse-db
+migrateOnStart: false
+# Idle minutes before ASSIGNED work returns to OPEN (BR-31.3), 5-240.
+lockTimeoutMin: 30
 replicaCount: 2
 resources:
   requests: { cpu: 50m, memory: 64Mi }
