@@ -1,6 +1,6 @@
-# NOT-IMPLEMENTED (budgeting, PSG-38 slices 1 and 2)
+# NOT-IMPLEMENTED (budgeting, PSG-38 slices 1 to 3)
 
-Every PSG-38 deliverable and acceptance criterion that slices 1 and 2 do not build, with its status and reason.
+Every PSG-38 deliverable and acceptance criterion that slices 1 to 3 do not build, with its status and reason.
 
 | Item | Ref | Status | Reason |
 |---|---|---|---|
@@ -28,7 +28,13 @@ Every PSG-38 deliverable and acceptance criterion that slices 1 and 2 do not bui
 | Budget plan worksheet templates and xlsx round-trip | FR-38.13 | later slice of PSG-38 | Needs the plan entity first. |
 | Plan generation from GL actuals, plans, FA, demand and position forecasts | FR-38.14 | later slice of PSG-38 | Needs the plan entity and sources (waves 22, 37, 39, 41). |
 | Position forecasting | FR-38.15 | later slice of PSG-38 | Wave 42 provides the HR source. |
-| Investment programs, budget distribution, roll-up and carry-forward | FR-38.21 | later slice of PSG-38 | Depends on the capex requests of wave 37. |
+| Investment programs: position hierarchy (≤ 6 levels), top-down distribution capped by the parent, assignment of capex requests, assets under construction and projects with plan / actual / commitment, rollup, carry-forward once per position to the next approval year | FR-38.21, BR-38.15, AC-38.13 | built (slice 3) | `investment_program`, `program_position`, `program_assignment`, `investment_carry_forward`; `dev.passage.budget.program.carriedforward.v1`. |
+| Carry-forward posts a CarryForward register entry and raises the next year's program | FR-38.21 | later slice of PSG-38 | The carried amount per position is recorded and published; a register entry needs the position mapped to a control rule and dimension combination, which comes with the capex budget control below. |
+| Budget control of capex documents with the program position as a control dimension | FR-38.21 | later slice of PSG-38 | Needs the position as a dimension of the budget check (FR-38.4) and capex requests from wave 37. |
+| Assigned amounts fed from the owning services | FR-38.21, FR-37.17 | handoff | `:assign` takes the plan, actual and commitment the owner reports; the push from fixedassets (capex requests, assets under construction, wave 37) and projects (wave 41) belongs to those services. |
+| Program types table (`program.types`: levels, budget categories, plan / budget profiles) | 7.38.13 | partial | One built-in Capex type: 6 levels and the categories Capex, Opex-related and Contingency. The configurable table comes with the settings service. |
+| Program budget changes, program close and the program budget letter (PDF) | FR-38.21, 7.38.14 | later slice of PSG-38 | The program budget is set at creation; changing it needs the same check as a position (not below Σ top-level positions). |
+| Segregation of duties InvestmentProgramMaintain vs CapexRequestApprove on assigned requests | 7.38.17 | handoff | Rego policy belongs in `policies/` (edge-identity owns it). |
 | Management reporting cubes via CDC to the lakehouse | FR-38.12 | handoff | Star schema is owned by wave 46 and the analytics service. |
 | Retention: check results 7 years, monthly partitions | 7.38.19 | later slice of PSG-38 | Results are recorded in `budget_check_result`; partitioning and the purge job are a migration on a larger table. |
 | ETag on reads; If-Match on custom methods (`:relieve` takes no If-Match yet) | Platform kernel | later slice of PSG-38 | Slice 1 has no versioned read. Relief uses the row version under lock. |
@@ -36,4 +42,4 @@ Every PSG-38 deliverable and acceptance criterion that slices 1 and 2 do not bui
 | Separation of duties (BudgetOverride vs ProcurementPurchaseOrderApprove for own POs) | 7.38.17 | handoff | Rego policy belongs in `policies/` (edge-identity owns it). |
 | Budget check fixtures (`budget-check-200`) under `testdata/` | 7.38.9 | later slice of PSG-38 | Domain tests cover the step order and relief; the 200-case fixture set needs the full rule set. |
 | Budget check ("budget check fixtures") acceptance AC-38.1 to AC-38.4 | 7.38.8 | partial | Domain and store tests cover the threshold outcomes, the last-dollar race and exact relief. The full fixture set is not built. |
-| Web module | apps/web | built | `apps/web/src/modules/budgeting/`: rule list and create, rule detail (available funds with reservations, register entries, encumbrances, checks), register entry form, budget check form, check detail, encumbrance detail with relief, earmarked funds list, reservation create form, reservation detail with consume and close. The planning grid and the check inline in the PO form are later slices. |
+| Web module | apps/web | built | `apps/web/src/modules/budgeting/`: rule list and create, rule detail (available funds with reservations, register entries, encumbrances, checks), register entry form, budget check form, check detail, encumbrance detail with relief, earmarked funds list, reservation create form, reservation detail with consume and close, investment program list and create, program detail (totals, position hierarchy with rollup, distribution, assignment, carry-forward). The planning grid and the check inline in the PO form are later slices. |

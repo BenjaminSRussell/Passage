@@ -37,6 +37,8 @@ export interface CostEntry {
   topDownRunId?: string;
   /** Present on entries an internal order settlement posted (FR-38.9). */
   settlementId?: string;
+  /** Present on entries a template allocation run posted (FR-38.17). */
+  templateRunId?: string;
   period: string;
   currency: string;
   amount: string;
@@ -277,4 +279,137 @@ export function listSettlements(orderId: string, period?: string, signal?: Abort
 /** Settles part or all of an internal order's collected cost to a receiver (FR-38.9, BR-38.9). */
 export function settleInternalOrder(orderId: string, input: SettlementInput, idempotencyKey: string): Promise<Settlement> {
   return post(`${BASE}/internal-orders/${encodeURIComponent(orderId)}:settle`, input, idempotencyKey);
+}
+
+/** A driver quantity per cost object and period; formulas read it as m.<code> (FR-38.17). */
+export interface StatisticalMeasure {
+  id: string;
+  legalEntityId: string;
+  code: string;
+  name: string;
+  unit: string;
+}
+
+export type NewStatisticalMeasure = Omit<StatisticalMeasure, "id">;
+
+export interface MeasureValue {
+  costObjectId: string;
+  value: string;
+  updatedAt?: string;
+}
+
+export interface MeasureValuesInput {
+  legalEntityId: string;
+  period: string;
+  values: { costObjectId: string; value: string }[];
+}
+
+export interface TemplateLine {
+  receiverCostObjectId: string;
+  secondaryElementId: string;
+  formula: string;
+}
+
+export interface AllocationTemplate {
+  id: string;
+  legalEntityId: string;
+  code: string;
+  name: string;
+  currency: string;
+  senderCostObjectId: string;
+  allowNegative: boolean;
+  lines: TemplateLine[];
+  version: number;
+  updatedAt: string;
+}
+
+export interface SaveTemplateInput {
+  legalEntityId: string;
+  code: string;
+  name: string;
+  currency: string;
+  senderCostObjectId: string;
+  allowNegative: boolean;
+  lines: TemplateLine[];
+  /** 0 for a new code, else the version last read (CST-0018 when stale). */
+  expectedVersion: number;
+}
+
+export interface TemplateLineResult {
+  receiverCostObjectId: string;
+  secondaryElementId: string;
+  amount: string;
+  divByZero: boolean;
+}
+
+export interface DryRunResult {
+  templateId: string;
+  templateVersion: number;
+  period: string;
+  lines: TemplateLineResult[];
+  totalIn: string;
+  warnings: string[];
+}
+
+export interface TemplateRun {
+  id: string;
+  legalEntityId: string;
+  templateId: string;
+  templateVersion: number;
+  period: string;
+  currency: string;
+  senderCostObjectId: string;
+  total: string;
+  lines: TemplateLineResult[];
+  warnings: string[];
+  status: "Completed";
+  createdAt: string;
+}
+
+export function listMeasures(legalEntityId?: string, signal?: AbortSignal): Promise<Items<StatisticalMeasure>> {
+  return request(`${BASE}/statistical-measures${query({ legalEntityId })}`, { signal });
+}
+
+export function createMeasure(input: NewStatisticalMeasure, idempotencyKey: string): Promise<StatisticalMeasure> {
+  return post(`${BASE}/statistical-measures`, input, idempotencyKey);
+}
+
+export function listMeasureValues(measureId: string, period: string, signal?: AbortSignal): Promise<Items<MeasureValue>> {
+  return request(`${BASE}/statistical-measures/${encodeURIComponent(measureId)}/values${query({ period })}`, { signal });
+}
+
+/** Upserts one period's values per cost object. */
+export function loadMeasureValues(measureId: string, input: MeasureValuesInput, idempotencyKey: string): Promise<{ measureId: string; period: string; loaded: number }> {
+  return post(`${BASE}/statistical-measures/${encodeURIComponent(measureId)}/values`, input, idempotencyKey);
+}
+
+export function listTemplates(legalEntityId?: string, signal?: AbortSignal): Promise<Items<AllocationTemplate>> {
+  return request(`${BASE}/allocation-templates${query({ legalEntityId })}`, { signal });
+}
+
+export function getTemplate(id: string, signal?: AbortSignal): Promise<AllocationTemplate> {
+  return request(`${BASE}/allocation-templates/${encodeURIComponent(id)}`, { signal });
+}
+
+/** Saves a template; the service parses every formula and checks its references (CO-0621). */
+export function saveTemplate(input: SaveTemplateInput, idempotencyKey: string): Promise<AllocationTemplate> {
+  return post(`${BASE}/allocation-templates`, input, idempotencyKey);
+}
+
+/** Evaluates a template for a period without posting. Read-only, so no Idempotency-Key. */
+export function dryRunTemplate(id: string, period: string): Promise<DryRunResult> {
+  return post(`${BASE}/allocation-templates/${encodeURIComponent(id)}:dry-run`, { period });
+}
+
+/** Runs a template for a period and posts its entries (FR-38.17). */
+export function runTemplate(templateId: string, period: string, idempotencyKey: string): Promise<TemplateRun> {
+  return post(`${BASE}/template-allocations/runs`, { templateId, period }, idempotencyKey);
+}
+
+export function listTemplateRuns(filter: { legalEntityId?: string; templateId?: string } = {}, signal?: AbortSignal): Promise<Items<TemplateRun>> {
+  return request(`${BASE}/template-allocations/runs${query(filter)}`, { signal });
+}
+
+export function getTemplateRun(id: string, signal?: AbortSignal): Promise<TemplateRun> {
+  return request(`${BASE}/template-allocations/runs/${encodeURIComponent(id)}`, { signal });
 }

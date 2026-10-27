@@ -1,8 +1,9 @@
 # costacct
 
-Cost accounting for Passage (PRD 7.38, ticket PSG-38, wave 38, slices 1 and 2). The service keeps cost objects and cost
+Cost accounting for Passage (PRD 7.38, ticket PSG-38, wave 38, slices 1 to 3). The service keeps cost objects and cost
 elements, mirrors primary costs from journal lines into cost entries, runs reciprocal assessment allocations
-that conserve cost to the cent, distributes aggregated amounts top-down and settles internal orders.
+that conserve cost to the cent, distributes aggregated amounts top-down, settles internal orders and runs template
+(driver-formula) allocations over statistical measures.
 
 ## What slice 1 does
 
@@ -43,9 +44,29 @@ that conserve cost to the cent, distributes aggregated amounts top-down and sett
   already reduce it. The order row is locked while collected cost is read, so concurrent settlements cannot together
   exceed it; a settlement above it is `CO-0618`. Each settlement records the collected cost before it.
 
+## What slice 3 adds
+
+- **Statistical measures (FR-38.17 inputs, PRD 7.38.5)**: measures per legal entity (code, name, unit) and their
+  values per cost object and period, loaded as upserts (`POST /statistical-measures/{id}/values`). Values are
+  non-negative with up to 4 decimals.
+- **Template (driver-formula) allocation (FR-38.17, BR-38.12, AC-38.14)**: a template names a sender cost object, a
+  currency and lines of (receiver, secondary element, formula). The formula grammar is restricted: numbers,
+  `+ - * /` (and `× ÷ −`), `min(a, b)`, `max(a, b)`, `if(cond, a, b)` with `< <= > >= = !=`, `m.<measure code>` (the
+  receiver's measure value in the period) and `b.<cost element code>` (the receiver's Journal and Manual cost on that
+  element in the period and the template currency; allocated cost is never a driver, so runs do not feed on runs).
+  Formulas are parsed at save and may reference only measures and elements of the legal entity (`CO-0621` naming
+  the template and line). Every save of a code is a new version kept in `allocation_template_version`; the caller
+  sends the version it read (`expectedVersion`, 0 for a new code), so a concurrent edit is refused (`CST-0018`).
+- **Dry run and run**: `:dry-run` evaluates a period and posts nothing. A run evaluates each line once, rounds it to
+  the currency's minor unit, debits the receiver and credits the sender on the line's secondary element (origin
+  `Allocation`, linked by `template_run_id`), so the run nets to zero. A negative line fails the run unless the
+  template sets `allowNegative` (`CST-0015`); dividing by zero gives 0 for that line with a `CO-0622` warning. The
+  template row is locked and one completed run exists per template and period (`CST-0002`). The run emits
+  `allocation.completed` with method `Template` and `template_id`, plus `costentry.created` per entry.
+
 Costs are `numeric(19,4)` with a currency. Commands require `Idempotency-Key` and write outbox events
 (`dev.passage.controlling.costentry.created.v1`, `dev.passage.controlling.allocation.completed.v1`; a top-down run
-emits `allocation.completed` with method `TopDown`).
+emits `allocation.completed` with method `TopDown`, a template run with method `Template`).
 
 ## Algorithm note
 
@@ -84,6 +105,12 @@ Health: `GET /healthz`, `GET /readyz` (provided by `httpx.NewRouter`).
 | GET | `/v1/controlling/top-down-runs?legalEntityId=`, `/v1/controlling/top-down-runs/{id}` | `controlling.view` |
 | POST | `/v1/controlling/internal-orders/{id}:settle` | `controlling.run` |
 | GET | `/v1/controlling/internal-orders/{id}/settlements?period=` | `controlling.view` |
+| POST | `/v1/controlling/statistical-measures`, `/v1/controlling/statistical-measures/{id}/values` | `controlling.maintain` |
+| GET | `/v1/controlling/statistical-measures?legalEntityId=`, `/v1/controlling/statistical-measures/{id}/values?period=` | `controlling.view` |
+| POST | `/v1/controlling/allocation-templates`, `/v1/controlling/allocation-templates/{id}:dry-run` | `controlling.maintain` (dry run takes no Idempotency-Key) |
+| GET | `/v1/controlling/allocation-templates?legalEntityId=`, `/v1/controlling/allocation-templates/{id}` | `controlling.view` |
+| POST | `/v1/controlling/template-allocations/runs` | `controlling.run` |
+| GET | `/v1/controlling/template-allocations/runs?legalEntityId=&templateId=`, `/v1/controlling/template-allocations/runs/{id}` | `controlling.view` |
 
 The PRD's `CostAccountingView`, `CostAccountingMaintain` and `CostAccountingRun` duties are named in the repository's
 dotted style. Lists return `{"items": [...]}`, at most 500 rows.
@@ -95,7 +122,7 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | Code | Meaning |
 |---|---|
 | `CST-0001` | Cost object not found |
-| `CST-0002` | The period already has a completed allocation run, or the source and element a completed top-down run |
+| `CST-0002` | The period already has a completed allocation run, the source and element a completed top-down run, or the template a completed run |
 | `CST-0003` | Duplicate cost object or element code |
 | `CST-0004` | No primary element maps a journal line's main account |
 | `CST-0005` | The cycle is closed: a sender reaches no final receiver (CO-0611) |
@@ -107,7 +134,14 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | `CST-0011` | Top-down run not found |
 | `CST-0012` | Top-down amount exceeds what is booked on the source for the element and period |
 | `CST-0013` | Only an internal order can be settled |
+| `CST-0015` | A template line evaluates below zero and the template does not allow negative amounts (BR-38.12) |
+| `CST-0016` | Statistical measure not found |
+| `CST-0017` | Allocation template not found |
+| `CST-0018` | Template version conflict: the code is at another version than the one sent (409) |
+| `CST-0019` | Template run not found |
 | `CO-0618` | Settlement exceeds collected cost (BR-38.9) |
+| `CO-0621` | Formula error in a template line: syntax, or a reference to an unknown measure or element |
+| `CO-0622` | Warning on a dry run or run: a divisor is zero for a receiver; that division evaluates to 0 |
 | `COM-0001` | Malformed body or request fields fail validation (400) |
 | `idempotency_key_reuse` | Same Idempotency-Key with a different body (422) |
 | `idempotency_in_progress` | A request with this key is still running (409) |

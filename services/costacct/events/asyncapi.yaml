@@ -2,7 +2,7 @@ asyncapi: 3.0.0
 info:
   title: costacct events
   version: 0.1.0
-  description: Events published by the costacct service (wave 38, slice 1). CloudEvents 1.0, source /passage/controlling/costacct.
+  description: Events published by the costacct service (wave 38, slices 1 to 3). CloudEvents 1.0, source /passage/controlling/costacct.
 defaultContentType: application/cloudevents+json
 channels:
   costEntryCreated:
@@ -52,7 +52,8 @@ components:
         run_id: { type: string, format: uuid }
         legal_entity_id: { type: string, format: uuid }
         period: { type: string }
-        method: { type: string, enum: [exact-lu, gauss-seidel, TopDown], description: TopDown marks a top-down distribution run (FR-38.19); iterations is 0. }
+        method: { type: string, enum: [exact-lu, gauss-seidel, TopDown, Template], description: TopDown marks a top-down distribution run (FR-38.19) and Template a template allocation run (FR-38.17); iterations is 0 for both. }
+        template_id: { type: string, format: uuid, description: Present when method is Template. }
         iterations: { type: integer }
         converged: { type: boolean }
         total_in: { type: string, description: Cost the senders brought into the step. }

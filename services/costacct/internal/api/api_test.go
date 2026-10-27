@@ -24,6 +24,11 @@ type fakeStore struct {
 	recon   store.ReconcileRequest
 	topDown store.TopDownRequest
 	settle  store.SettlementRequest
+
+	measureValues store.MeasureValuesRequest
+	template      store.AllocationTemplate
+	expected      int
+	templateRun   store.TemplateRunRequest
 }
 
 func (f *fakeStore) CreateCostObject(context.Context, string, string, store.CostObject) (int, []byte, error) {

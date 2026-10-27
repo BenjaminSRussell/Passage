@@ -1,6 +1,6 @@
 # Budgeting module (web)
 
-Budget control screens for PSG-38 slices 1 and 2, wired to `services/budgeting` through the BFF at `/api/v1/budget/...`.
+Budget control screens for PSG-38 slices 1 to 3, wired to `services/budgeting` through the BFF at `/api/v1/budget/...`.
 
 | Route | Page | Service calls |
 |---|---|---|
@@ -14,6 +14,9 @@ Budget control screens for PSG-38 slices 1 and 2, wired to `services/budgeting` 
 | `/budgeting/reservations` | Earmarked funds list with type and status filters (`?rule=` narrows to one rule version) | `GET /reservations` |
 | `/budgeting/reservations/new` | New reservation document (four types, optional expiry, lines); the creation check refuses over-budget documents | `POST /reservations` |
 | `/budgeting/reservations/:id` | Reservation detail: lines, consumption history with encumbrance links, consume by a follow-on document, close | `GET /reservations/{id}`, `POST /reservations/{id}:consume`, `POST /reservations/{id}:close` |
+| `/budgeting/programs` | Investment programs with legal entity filter | `GET /investment-programs` |
+| `/budgeting/programs/new` | New program for an approval year | `POST /investment-programs` |
+| `/budgeting/programs/:id` | Program totals, position hierarchy with rolled-up plan / actual / commitment, distribute budget (checked against the parent on the page, CO-0641), assign capex requests / assets under construction / projects, carry forward to the next year | `GET /investment-programs/{id}`, `POST /investment-programs/{id}:distribute`, `:assign`, `:carry-forward` |
 
 Every list has loading (skeleton rows), empty and error (with "Try again") states. Pages use the shell primitives from
 `src/shell/ui` and `pages.module.css`. Commands send an `Idempotency-Key` that stays the same while the form content
@@ -31,5 +34,5 @@ npx tsc --noEmit
 ## Needs (for the shell owner, wave 5)
 
 - Nav duties `budget.view` and `budget.check` must exist in the duty catalogue (the service also uses
-  `budget.configure`, `budget.maintain`, `budget.override` and `budget.reserve`).
+  `budget.configure`, `budget.maintain`, `budget.override`, `budget.reserve` and `budget.program.maintain`).
 - The planning grid, the inline check inside the PO form and rule activation are later slices of PSG-38.

@@ -1,8 +1,9 @@
 # budgeting
 
-Budget control for Passage (PRD 7.38, ticket PSG-38, wave 38, slices 1 and 2). The service holds budget control rule
+Budget control for Passage (PRD 7.38, ticket PSG-38, wave 38, slices 1 to 3). The service holds budget control rule
 versions, posts budget register entries, runs budget checks against per-combination balances under row locks,
-relieves encumbrances from matched invoice lines, and keeps budget reservation documents (earmarked funds).
+relieves encumbrances from matched invoice lines, keeps budget reservation documents (earmarked funds) and maintains
+investment programs.
 
 ## What slice 1 does
 
@@ -41,9 +42,28 @@ relieves encumbrances from matched invoice lines, and keeps budget reservation d
   on or before it move to Expired and release their residual. The expiry date is the first day a document no longer
   holds funds, so consumption on or after it is refused (`BUD-0009`).
 
+## What slice 3 adds
+
+- **Investment programs (FR-38.21, BR-38.15, AC-38.13)**: a Capex program per legal entity, code and approval year
+  with a budget. `:distribute` sets the budgets of child positions under one parent (the program itself, or a
+  position), creating positions for new codes one level down (at most 6 levels, `BUD-0020`). Position codes are
+  unique within the program; a code used under another parent is `BUD-0026`. Σ child budgets never exceed the
+  parent's budget (`CO-0641` with the excess) and a position cannot drop below what it distributes (`BUD-0023`). The
+  program row is locked for every command, so concurrent distributions serialize and the invariant holds.
+- **Assignment and rollup**: `:assign` puts a capex request, asset under construction or project on a position with
+  the plan, actual and commitment its owning service reports; assigning the same object again replaces its amounts
+  and may move it. The program view rolls plan, actual and commitment up every subtree; available is budget −
+  rolled-up actual − rolled-up commitment.
+- **Carry-forward**: `:carry-forward` to the next approval year records, per position, its own unused slice: budget −
+  distributed − the actual and commitment of its own assignments, floored at zero. Summed over positions this counts
+  each unit of program budget once, so a parent and its children are never both carried for the same money. Each
+  position carries once (`BUD-0021` when nothing is left); only approval year + 1 is accepted (`BUD-0032`). The event
+  `dev.passage.budget.program.carriedforward.v1` goes through the outbox in the same transaction.
+
 Money is `numeric(19,4)` with a currency. Every command requires `Idempotency-Key`. Commands emit outbox events
 (`dev.passage.budget.register.posted.v1`, `dev.passage.budget.check.completed.v1`,
-`dev.passage.budget.encumbrance.relieved.v1`, `dev.passage.budget.reservation.consumed.v1`).
+`dev.passage.budget.encumbrance.relieved.v1`, `dev.passage.budget.reservation.consumed.v1`,
+`dev.passage.budget.program.carriedforward.v1`).
 
 ## Run and test
 
@@ -73,6 +93,8 @@ Health: `GET /healthz`, `GET /readyz` (provided by `httpx.NewRouter`).
 | POST | `/v1/budget/reservations/{id}:close`, `/v1/budget/reservations:expire` | `budget.reserve` |
 | POST | `/v1/budget/reservations/{id}:consume` | `budget.check` |
 | GET | `/v1/budget/reservations?rule=&type=&status=`, `/v1/budget/reservations/{id}` | `budget.view` |
+| POST | `/v1/budget/investment-programs`, `/v1/budget/investment-programs/{id}:distribute`, `:assign`, `:carry-forward` | `budget.program.maintain` (InvestmentProgramMaintain) |
+| GET | `/v1/budget/investment-programs?legalEntityId=`, `/v1/budget/investment-programs/{id}` | `budget.view` |
 
 Lists return `{"items": [...]}`, at most 500 rows, newest first.
 
@@ -94,6 +116,15 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | `CO-0601` | Reservation creation check failed: available below the requested amount |
 | `CO-0604` | Transfer lines do not net to zero |
 | `CO-0631` | Funds blocking cannot be consumed |
+| `CO-0641` | Distribution exceeds the parent position budget by the amount named (BR-38.15) |
+| `BUD-0020` | A new position would sit below level 6 |
+| `BUD-0021` | Every position of the program was already carried forward (409) |
+| `BUD-0023` | A position's budget would drop below what it distributes to its children |
+| `BUD-0024` | Position not found in this program |
+| `BUD-0026` | The position code already exists under another parent of the program (409) |
+| `BUD-0030` | Investment program not found |
+| `BUD-0031` | A program with this code exists for the legal entity and approval year (409) |
+| `BUD-0032` | Carry-forward goes to the program's approval year + 1 only |
 | `COM-0001` | Malformed request body |
 | `AUTH-0001` | No principal on the request |
 | `AUTH-0003` | Missing duty |

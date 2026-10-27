@@ -24,6 +24,11 @@ channels:
     messages:
       consumed:
         $ref: '#/components/messages/reservationConsumed'
+  passage.budget.program:
+    address: passage.budget.program
+    messages:
+      carriedforward:
+        $ref: '#/components/messages/programCarriedForward'
 operations:
   onRegisterPosted:
     action: send
@@ -41,6 +46,10 @@ operations:
     action: send
     channel: { $ref: '#/channels/passage.budget.reservation' }
     messages: [{ $ref: '#/channels/passage.budget.reservation/messages/consumed' }]
+  onProgramCarriedForward:
+    action: send
+    channel: { $ref: '#/channels/passage.budget.program' }
+    messages: [{ $ref: '#/channels/passage.budget.program/messages/carriedforward' }]
 components:
   messages:
     registerPosted:
@@ -117,3 +126,27 @@ components:
           amount: { type: string }
           remaining: { type: string }
       x-passage-type: dev.passage.budget.reservation.consumed.v1
+    programCarriedForward:
+      name: carriedforward
+      title: Investment program carried forward
+      description: >-
+        Unused budget of an investment program's positions was carried to the next approval year (FR-38.21, BR-38.15).
+        Each position is carried once; amount is the sum over positions.
+      payload:
+        type: object
+        required: [program_id, from_year, to_year, amount, positions]
+        properties:
+          program_id: { type: string, format: uuid }
+          from_year: { type: integer }
+          to_year: { type: integer }
+          amount: { type: string }
+          positions:
+            type: array
+            items:
+              type: object
+              required: [position_id, code, amount]
+              properties:
+                position_id: { type: string, format: uuid }
+                code: { type: string }
+                amount: { type: string }
+      x-passage-type: dev.passage.budget.program.carriedforward.v1

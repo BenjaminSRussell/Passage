@@ -1,6 +1,6 @@
-# NOT-IMPLEMENTED (costacct, PSG-38 slices 1 and 2)
+# NOT-IMPLEMENTED (costacct, PSG-38 slices 1 to 3)
 
-Every PSG-38 deliverable and acceptance criterion that slices 1 and 2 do not build, with its status and reason.
+Every PSG-38 deliverable and acceptance criterion that slices 1 to 3 do not build, with its status and reason.
 
 | Item | Ref | Status | Reason |
 |---|---|---|---|
@@ -20,12 +20,18 @@ Every PSG-38 deliverable and acceptance criterion that slices 1 and 2 do not bui
 | Internal order settlement to a cost object with the settlement cap | FR-38.9, BR-38.9, CO-0618 | built (slice 2) | `POST /v1/controlling/internal-orders/{id}:settle`, partial settlements, row lock on the order. |
 | Internal order budgets, persisted settlement rules (percent or equivalence distribution, period settlement of the full balance) | FR-38.9 | later slice of PSG-38 | Each settlement names one receiver and an amount; rules and order budgets need their entities. |
 | Settlement to assets (wave 37) or to P&L accounts | FR-38.9 | handoff | Receivers are cost objects. Asset and G/L receivers need a posting to fixedassets and the journal, which those services own. |
-| Statistical measure values endpoint (`/statistical-measures/{id}/values`) | 7.38.5 | later slice of PSG-38 | Needs the measure entity. |
+| Statistical measures and the values endpoint (`/statistical-measures/{id}/values`) | 7.38.5, FR-38.17 | built (slice 3) | `statistical_measure`, `statistical_measure_value`; loads are upserts per object and period. |
+| Statistical measure as an allocation basis of the reciprocal step | FR-38.7 | later slice of PSG-38 | The reciprocal step still takes an inline basis matrix; reading it from measures comes with the policy entity. Template allocation reads measures already. |
 | Cost control workspace: plan vs actual vs committed, variance %, period comparison | FR-38.10 | later slice of PSG-38 | Plan comes from the budget plan (budgeting, later slice). Slice 1 lists actual entries per object. |
 | Reconciliation job: nightly `cost-gl-reconcile` reading journal balances from the ledger, the alert on a difference, and the `costledger-month` fixture | FR-38.11, AC-38.6, AC3 | partial | `POST /v1/controlling/reconciliations` compares supplied journal balances with Σ primary entries per element (domain and store tests cover AC-38.6). Reading balances from the ledger (wave 11) and scheduling are not built. |
 | Management reporting cubes and star schema for wave 46 | FR-38.12 | handoff | Star schema is owned by wave 46 and analytics. Events and CDC feed it. |
 | Cost behavior/ overhead rate / cost rollup policies | FR-38.16 | later slice of PSG-38 | Policy entities are not built. |
-| Template (driver-formula) allocation, formula grammar, dry run | FR-38.17, AC-38.14, BR-38.12 | later slice of PSG-38 | Needs the restricted expression grammar and its validator. |
+| Template (driver-formula) allocation: restricted grammar validated at save, references checked, versions, dry run, run that nets to zero, negative and zero-divisor rules | FR-38.17, AC-38.14, BR-38.12 | built (slice 3) | `allocation_template` (+ versions), `template_run`; method `Template` on `allocation.completed`. |
+| Template lines with a receiver filter (one line for many receivers) and `alloc.templateEnvironment` | FR-38.17, 7.38.13 | partial | Each line names one receiver; formulas read measures and cost element balances of that receiver. Filters and receiver attributes (environments) come with the cost object hierarchy and attribute model. |
+| Template runs for the plan version | FR-38.17 | later slice of PSG-38 | Cost entries carry no ledger version yet (Actual only); the Plan version comes with the ledger entity above. |
+| Dry run defaults to the last closed period | FR-38.17 | later slice of PSG-38 | The caller names the period; the period lock and close state come with the ledger entity. |
+| Template rerun with reversal; template run scheduling (`template-allocation` job) | BR-38.7, 7.38.16 | later slice of PSG-38 | A second run of a template and period is refused (CST-0002), as for allocation runs. |
+| Cost element codes with a hyphen in formulas | FR-38.17 | partial | `b.<code>` needs a code of letters, digits and `_` (a hyphen reads as minus); such elements cannot be referenced yet. |
 | Cost object hierarchies and hierarchy distribution (`hierarchy.distributed.v1`) | FR-38.18 | later slice of PSG-38 | Needs the hierarchy entity. |
 | Top-down distribution with residual to the largest basis (worked example AC-38.11) | FR-38.19, BR-38.13 | built (slice 2) | `POST /v1/controlling/top-down-runs`; the basis is supplied per segment. |
 | Top-down policy entity, reading the reference basis from the ledger or the sales cube, rerun with reversal | FR-38.19, 7.38.5 `(policy, period, version)` | later slice of PSG-38 | The run takes the basis inline and records the reference period; a second run for the same source, element and period is refused (CST-0002). |
@@ -38,4 +44,4 @@ Every PSG-38 deliverable and acceptance criterion that slices 1 and 2 do not bui
 | Jobs `cost-mirror-lag-check` and alerts | 7.38.10 | handoff | Monitoring rules belong to `deploy/` and the observability owner. |
 | AX/SAP migration (cost objects, elements, hierarchies, cycles T811C/S/K, KSH1) | 7.38.11 | later slice of PSG-38 | Migration packs are owned by the migration framework. |
 | Demo entity cost objects loaded | 7.38.1 Deploy | handoff | Seed data belongs in `deploy/`. |
-| Web module | apps/web | built | `apps/web/src/modules/costacct/`: cost objects (list, create, detail with period entries, and for internal orders the settlement form and history), cost elements (list, create), allocation runs (list, new run with a basis grid, run detail), top-down runs (list, new run with a segment grid, run detail), reconciliation. The cost control workspace and variance views are later slices. |
+| Web module | apps/web | built | `apps/web/src/modules/costacct/`: cost objects (list, create, detail with period entries, and for internal orders the settlement form and history), cost elements (list, create), allocation runs (list, new run with a basis grid, run detail), top-down runs (list, new run with a segment grid, run detail), statistical measures (list, create, values per period with a load form), allocation templates (list, create, edit with optimistic version, detail with dry run, run and run history), template run detail, reconciliation. The cost control workspace and variance views are later slices. |

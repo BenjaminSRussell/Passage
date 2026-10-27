@@ -3,10 +3,12 @@ info:
   title: budgeting
   version: 0.1.0
   description: >-
-    Budget control (wave 38, slices 1 and 2). Budget control rule versions, budget register entries posted directly,
+    Budget control (wave 38, slices 1 to 3). Budget control rule versions, budget register entries posted directly,
     budget checks under FR-38.4 with row-locked balances, encumbrance relief from matched invoice lines (FR-38.5), and
     budget reservation documents (earmarked funds, FR-38.20): create with a check, consume by a follow-on document line,
-    close, and the expiry run.
+    close, and the expiry run; investment programs (FR-38.21): position hierarchy, top-down budget distribution capped by
+    the parent (BR-38.15), assignment of capex requests, assets under construction and projects with rollup of plan,
+    actual and commitment, and carry-forward of unused budget to the next approval year.
     Every command requires Idempotency-Key; a replay returns the stored response, a reused key with a different body is 422.
     Reads need budget.view and return {"items": [...]} for lists (at most 500 rows, newest first).
     Error codes: COM-0001 (validation), AUTH-0001, AUTH-0003, BUD-0001 (rule version not found), BUD-0002 (encumbrance not found),
@@ -14,7 +16,11 @@ info:
     BUD-0006 (reservation closed, expired or fully consumed), BUD-0007 (consumption above the line's open amount),
     BUD-0008 (RevenueForecast cannot be consumed), BUD-0009 (reservation reached its expiry date),
     CO-0601 (reservation creation check failed), CO-0604 (transfer does not net to zero),
-    CO-0631 (funds blocking cannot be consumed), idempotency_key_reuse, idempotency_in_progress.
+    CO-0631 (funds blocking cannot be consumed), CO-0641 (distribution exceeds the parent position budget),
+    BUD-0020 (position below level 6), BUD-0021 (program already carried forward), BUD-0023 (position budget below what
+    it distributes), BUD-0024 (position not found in the program), BUD-0026 (position code used under another parent),
+    BUD-0030 (program not found), BUD-0031 (program code exists for the year), BUD-0032 (carry-forward goes to the next
+    approval year only), idempotency_key_reuse, idempotency_in_progress.
 servers:
   - url: https://app.local.passage.dev
 paths:
@@ -268,6 +274,106 @@ paths:
         '200':
           description: The released residual.
           content: { application/json: { schema: { $ref: '#/components/schemas/ReleaseResult' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/budget/investment-programs:
+    get:
+      operationId: listInvestmentPrograms
+      x-passage-duty: budget.view
+      parameters:
+        - { name: legalEntityId, in: query, required: false, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Programs, newest approval year first.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ProgramList' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: createInvestmentProgram
+      x-passage-duty: budget.program.maintain
+      description: Creates a Capex program for one approval year. The code is unique per legal entity and year (BUD-0031).
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateProgram' } } }
+      responses:
+        '201':
+          description: The program, with no positions yet.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ProgramView' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/budget/investment-programs/{id}:
+    get:
+      operationId: getInvestmentProgram
+      x-passage-duty: budget.view
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The program with every position (parents first), assignments and rolled-up plan, actual and commitment.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ProgramView' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/budget/investment-programs/{id}:distribute:
+    post:
+      operationId: distributeInvestmentProgram
+      x-passage-duty: budget.program.maintain
+      description: >-
+        Sets the budgets of child positions under one parent (the program itself when parentPositionId is absent),
+        creating positions for new codes one level down. Σ child budgets never exceed the parent budget (CO-0641 with the
+        excess, AC-38.13) and a position cannot drop below what it distributes (BUD-0023). The program row is locked, so
+        concurrent distributions serialize.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/DistributeProgram' } } }
+      responses:
+        '200':
+          description: The program after the distribution.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ProgramView' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/budget/investment-programs/{id}:assign:
+    post:
+      operationId: assignToInvestmentProgram
+      x-passage-duty: budget.program.maintain
+      description: >-
+        Puts a capex request, asset under construction or project on a position with the plan, actual and commitment its
+        owning service reports. Re-assigning the same object replaces its amounts and may move it to another position.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/AssignToProgram' } } }
+      responses:
+        '200':
+          description: The program after the assignment.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ProgramView' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/budget/investment-programs/{id}:carry-forward:
+    post:
+      operationId: carryForwardInvestmentProgram
+      x-passage-duty: budget.program.maintain
+      description: >-
+        Records each position's unused budget (its undistributed slice less the actual and commitment of its own
+        assignments) for the next approval year, once per position (BR-38.15). Emits
+        dev.passage.budget.program.carriedforward.v1 when anything is carried; a rerun with nothing left is BUD-0021.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [toYear]
+              additionalProperties: false
+              properties:
+                toYear: { type: integer, description: The program's approval year + 1. }
+      responses:
+        '200':
+          description: The carried amounts per position.
+          content: { application/json: { schema: { $ref: '#/components/schemas/CarryForwardResult' } } }
         default: { $ref: '#/components/responses/Problem' }
 components:
   parameters:
@@ -600,3 +706,125 @@ components:
       properties:
         asOf: { type: string, format: date }
         expired: { type: array, items: { $ref: '#/components/schemas/ReleaseResult' } }
+    CreateProgram:
+      type: object
+      required: [legalEntityId, code, approvalYear, currency, budget]
+      additionalProperties: false
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        code: { type: string, pattern: '^[A-Z0-9_-]{2,40}$' }
+        name: { type: string, maxLength: 200 }
+        approvalYear: { type: integer, minimum: 1900, maximum: 2999 }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        budget: { $ref: '#/components/schemas/Money' }
+    Program:
+      type: object
+      required: [id, legalEntityId, code, name, approvalYear, programType, currency, budget, distributed, status, version, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        approvalYear: { type: integer }
+        programType: { type: string, enum: [Capex] }
+        currency: { type: string }
+        budget: { $ref: '#/components/schemas/Money' }
+        distributed: { $ref: '#/components/schemas/Money', description: Σ budgets of the top-level positions. }
+        status: { type: string, enum: [Open, Closed] }
+        version: { type: integer, description: Increases with every distribution, assignment and carry-forward. }
+        createdAt: { type: string, format: date-time }
+    ProgramList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Program' } }
+    ProgramView:
+      allOf:
+        - { $ref: '#/components/schemas/Program' }
+        - type: object
+          required: [plan, actual, commitment, available, carriedForward, positions]
+          properties:
+            plan: { $ref: '#/components/schemas/Money' }
+            actual: { $ref: '#/components/schemas/Money' }
+            commitment: { $ref: '#/components/schemas/Money' }
+            available: { $ref: '#/components/schemas/Money', description: budget − actual − commitment. }
+            carriedForward: { $ref: '#/components/schemas/Money' }
+            positions: { type: array, items: { $ref: '#/components/schemas/ProgramPosition' } }
+    ProgramPosition:
+      type: object
+      required: [id, programId, code, level, category, budget, distributed, undistributed, plan, actual, commitment, available, carriedForward, assignments]
+      properties:
+        id: { type: string, format: uuid }
+        programId: { type: string, format: uuid }
+        parentId: { type: string, format: uuid, description: Absent on a top-level position. }
+        code: { type: string }
+        level: { type: integer, minimum: 1, maximum: 6 }
+        category: { type: string, enum: [Capex, Opex-related, Contingency] }
+        budget: { $ref: '#/components/schemas/Money' }
+        distributed: { $ref: '#/components/schemas/Money', description: Σ budgets of the child positions. }
+        undistributed: { $ref: '#/components/schemas/Money' }
+        plan: { $ref: '#/components/schemas/Money', description: Rolled up over the subtree. }
+        actual: { $ref: '#/components/schemas/Money', description: Rolled up over the subtree. }
+        commitment: { $ref: '#/components/schemas/Money', description: Rolled up over the subtree. }
+        available: { $ref: '#/components/schemas/Money', description: budget − rolled-up actual − rolled-up commitment. }
+        carriedForward: { $ref: '#/components/schemas/Money' }
+        assignments:
+          type: array
+          items:
+            type: object
+            required: [id, positionId, objectType, objectRef, plan, actual, commitment, updatedAt]
+            properties:
+              id: { type: string, format: uuid }
+              positionId: { type: string, format: uuid }
+              objectType: { type: string, enum: [CapexRequest, AssetUnderConstruction, Project] }
+              objectRef: { type: string }
+              plan: { $ref: '#/components/schemas/Money' }
+              actual: { $ref: '#/components/schemas/Money' }
+              commitment: { $ref: '#/components/schemas/Money' }
+              updatedAt: { type: string, format: date-time }
+    DistributeProgram:
+      type: object
+      required: [allocations]
+      additionalProperties: false
+      properties:
+        parentPositionId: { type: string, format: uuid, description: Absent or empty distributes the program budget. }
+        allocations:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items:
+            type: object
+            required: [positionCode, budget]
+            additionalProperties: false
+            properties:
+              positionCode: { type: string, pattern: '^[A-Z0-9_.-]{1,40}$', description: Unique within the program; a new code creates the position. }
+              category: { type: string, enum: [Capex, Opex-related, Contingency], description: Defaults to Capex for a new position; absent keeps an existing one. }
+              budget: { $ref: '#/components/schemas/Money' }
+    AssignToProgram:
+      type: object
+      required: [positionId, objectType, objectRef]
+      additionalProperties: false
+      properties:
+        positionId: { type: string, format: uuid }
+        objectType: { type: string, enum: [CapexRequest, AssetUnderConstruction, Project] }
+        objectRef: { type: string, minLength: 1, maxLength: 80 }
+        plan: { $ref: '#/components/schemas/Money' }
+        actual: { $ref: '#/components/schemas/Money' }
+        commitment: { $ref: '#/components/schemas/Money' }
+    CarryForwardResult:
+      type: object
+      required: [programId, fromYear, toYear, amount, positions]
+      properties:
+        programId: { type: string, format: uuid }
+        fromYear: { type: integer }
+        toYear: { type: integer }
+        amount: { $ref: '#/components/schemas/Money' }
+        positions:
+          type: array
+          items:
+            type: object
+            required: [positionId, code, amount]
+            properties:
+              positionId: { type: string, format: uuid }
+              code: { type: string }
+              amount: { $ref: '#/components/schemas/Money' }

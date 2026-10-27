@@ -6,15 +6,32 @@ import "github.com/BenjaminSRussell/passage/platform/events"
 const Context = "budget"
 
 var (
-	RegisterPosted      = events.Type(Context, "register", "posted", 1)
-	CheckCompleted      = events.Type(Context, "check", "completed", 1)
-	EncumbranceRelieved = events.Type(Context, "encumbrance", "relieved", 1)
-	ReservationConsumed = events.Type(Context, "reservation", "consumed", 1)
+	RegisterPosted        = events.Type(Context, "register", "posted", 1)
+	CheckCompleted        = events.Type(Context, "check", "completed", 1)
+	EncumbranceRelieved   = events.Type(Context, "encumbrance", "relieved", 1)
+	ReservationConsumed   = events.Type(Context, "reservation", "consumed", 1)
+	ProgramCarriedForward = events.Type(Context, "program", "carriedforward", 1)
 )
 
 // All lists every event type this service publishes.
 func All() []string {
-	return []string{RegisterPosted, CheckCompleted, EncumbranceRelieved, ReservationConsumed}
+	return []string{RegisterPosted, CheckCompleted, EncumbranceRelieved, ReservationConsumed, ProgramCarriedForward}
+}
+
+// ProgramCarriedForwardData is the payload of dev.passage.budget.program.carriedforward.v1.
+type ProgramCarriedForwardData struct {
+	ProgramID string                `json:"program_id"`
+	FromYear  int                   `json:"from_year"`
+	ToYear    int                   `json:"to_year"`
+	Amount    string                `json:"amount"`
+	Positions []CarriedPositionData `json:"positions"`
+}
+
+// CarriedPositionData is one position's carried amount.
+type CarriedPositionData struct {
+	PositionID string `json:"position_id"`
+	Code       string `json:"code"`
+	Amount     string `json:"amount"`
 }
 
 type RegisterLineData struct {

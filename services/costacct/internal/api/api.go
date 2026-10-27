@@ -59,6 +59,17 @@ type Store interface {
 	GetTopDownRun(ctx context.Context, id string) (store.TopDownRun, error)
 	SettleInternalOrder(ctx context.Context, key, hash string, in store.SettlementRequest) (int, []byte, error)
 	ListSettlements(ctx context.Context, orderID, period string) ([]store.Settlement, error)
+	CreateMeasure(ctx context.Context, key, hash string, in store.StatisticalMeasure) (int, []byte, error)
+	LoadMeasureValues(ctx context.Context, key, hash string, in store.MeasureValuesRequest) (int, []byte, error)
+	ListMeasures(ctx context.Context, legalEntityID string) ([]store.StatisticalMeasure, error)
+	MeasureValues(ctx context.Context, measureID, period string) ([]store.MeasureValue, error)
+	SaveTemplate(ctx context.Context, key, hash string, in store.AllocationTemplate, expectedVersion int) (int, []byte, error)
+	ListTemplates(ctx context.Context, legalEntityID string) ([]store.AllocationTemplate, error)
+	GetTemplate(ctx context.Context, id string) (store.AllocationTemplate, error)
+	DryRunTemplate(ctx context.Context, in store.TemplateRunRequest) (store.DryRunResult, error)
+	RunTemplate(ctx context.Context, key, hash string, in store.TemplateRunRequest) (int, []byte, error)
+	ListTemplateRuns(ctx context.Context, legalEntityID, templateID string) ([]store.TemplateRun, error)
+	GetTemplateRun(ctx context.Context, id string) (store.TemplateRun, error)
 	Ping(ctx context.Context) error
 }
 
@@ -87,6 +98,7 @@ func (a *API) Register(r chi.Router) {
 	view.Get("/v1/controlling/top-down-runs", a.listTopDownRuns)
 	view.Get("/v1/controlling/top-down-runs/{id}", a.getTopDownRun)
 	view.Get("/v1/controlling/internal-orders/{id}/settlements", a.listSettlements)
+	a.registerTemplates(r)
 }
 
 // prepare checks the Idempotency-Key, decodes the body into v and returns the

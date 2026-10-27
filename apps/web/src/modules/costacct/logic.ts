@@ -187,3 +187,70 @@ export function settlementError(amount: string, collected: bigint | null): strin
   if (collected !== null && t > collected) return `The settlement exceeds the collected cost of ${formatAmount(formatTicks(collected))}.`;
   return null;
 }
+
+export const MEASURE_CODE = /^[A-Za-z_][A-Za-z0-9_]{0,39}$/;
+export const MAX_FORMULA_LENGTH = 500;
+
+/**
+ * The references a template formula reads: m.<measure code> and b.<cost element code>.
+ * The service parses the full grammar at save; the page uses this to warn early about
+ * names the legal entity does not have.
+ */
+export function formulaRefs(formula: string): { measures: string[]; elements: string[] } {
+  const measures = new Set<string>();
+  const elements = new Set<string>();
+  for (const m of formula.matchAll(/(?<![A-Za-z0-9_.])([mb])\.([A-Za-z_][A-Za-z0-9_]*)/g)) {
+    (m[1] === "m" ? measures : elements).add(m[2]);
+  }
+  return { measures: [...measures].sort(), elements: [...elements].sort() };
+}
+
+export interface TemplateForm {
+  legalEntityId: string;
+  code: string;
+  name: string;
+  currency: string;
+  senderCostObjectId: string;
+}
+
+/** Checks a template before it is saved: shape, lines and known references (FR-38.17). */
+export function validateTemplate(
+  f: TemplateForm,
+  lines: { receiverCostObjectId: string; secondaryElementId: string; formula: string }[],
+  known: { measures: string[]; elements: string[] },
+): string[] {
+  const errors: string[] = [];
+  if (!UUID.test(f.legalEntityId)) errors.push("Enter the legal entity's id (a UUID).");
+  if (!CODE.test(f.code)) errors.push("Use 2 to 40 characters for the code: A-Z, 0-9, _ or -.");
+  if (f.name.trim() === "" || f.name.length > 200) errors.push("Enter a name of up to 200 characters.");
+  if (!CURRENCY.test(f.currency)) errors.push("Use a three-letter currency code.");
+  if (!UUID.test(f.senderCostObjectId)) errors.push("Choose the sender cost object.");
+  if (lines.length === 0) errors.push("Add at least one line.");
+  const measures = new Set(known.measures);
+  const elements = new Set(known.elements);
+  lines.forEach((l, i) => {
+    const n = i + 1;
+    if (!UUID.test(l.receiverCostObjectId)) errors.push(`Line ${n}: choose a receiver.`);
+    else if (l.receiverCostObjectId === f.senderCostObjectId) errors.push(`Line ${n}: the receiver must differ from the sender.`);
+    if (!UUID.test(l.secondaryElementId)) errors.push(`Line ${n}: choose a secondary cost element.`);
+    if (l.formula.trim() === "") errors.push(`Line ${n}: enter a formula.`);
+    else if (l.formula.length > MAX_FORMULA_LENGTH) errors.push(`Line ${n}: keep the formula to ${MAX_FORMULA_LENGTH} characters.`);
+    const refs = formulaRefs(l.formula);
+    for (const m of refs.measures) if (!measures.has(m)) errors.push(`Line ${n}: m.${m} is not a statistical measure of this legal entity.`);
+    for (const e of refs.elements) if (!elements.has(e)) errors.push(`Line ${n}: b.${e} is not a cost element of this legal entity.`);
+  });
+  return errors;
+}
+
+/** Validates one period's measure values: decimals of zero or more with up to 4 places; blank rows are skipped. */
+export function validateMeasureValues(period: string, rows: { costObjectId: string; label?: string; value: string }[]): string[] {
+  const errors: string[] = [];
+  if (!isPeriod(period)) errors.push("Enter the period as YYYY-MM.");
+  const filled = rows.filter((r) => r.value.trim() !== "");
+  if (filled.length === 0) errors.push("Enter at least one value.");
+  for (const r of filled) {
+    const t = toTicks(r.value.trim());
+    if (t === null || t < 0n) errors.push(`${r.label ?? r.costObjectId}: enter zero or more with up to 4 decimals.`);
+  }
+  return errors;
+}

@@ -128,3 +128,28 @@
   margin: 0;
   padding-inline-start: var(--space-5);
 }
+
+/* Position hierarchy indentation (investment programs), one step per level. */
+.depth0 {
+  padding-inline-start: 0;
+}
+
+.depth1 {
+  padding-inline-start: var(--space-4);
+}
+
+.depth2 {
+  padding-inline-start: var(--space-8);
+}
+
+.depth3 {
+  padding-inline-start: var(--space-12);
+}
+
+.depth4 {
+  padding-inline-start: calc(var(--space-12) + var(--space-4));
+}
+
+.depth5 {
+  padding-inline-start: calc(var(--space-12) + var(--space-8));
+}

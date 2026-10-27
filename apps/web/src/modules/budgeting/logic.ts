@@ -208,3 +208,110 @@ export function validateReservation(f: ReservationForm, lines: { dimensionKey: s
   });
   return errors;
 }
+
+export const POSITION_CODE = /^[A-Z0-9_.-]{1,40}$/;
+export const MAX_PROGRAM_LEVELS = 6;
+export const POSITION_CATEGORIES = ["Capex", "Opex-related", "Contingency"] as const;
+export const ASSIGNED_OBJECT_TYPES: { value: "CapexRequest" | "AssetUnderConstruction" | "Project"; label: string }[] = [
+  { value: "CapexRequest", label: "Capex request" },
+  { value: "AssetUnderConstruction", label: "Asset under construction" },
+  { value: "Project", label: "Project" },
+];
+
+/** A non-negative decimal string with at most 4 places. */
+function isAmount(value: string): boolean {
+  return isMoney(value) && !value.startsWith("-");
+}
+
+export interface ProgramForm {
+  legalEntityId: string;
+  code: string;
+  name: string;
+  approvalYear: string;
+  currency: string;
+  budget: string;
+}
+
+export function validateProgram(f: ProgramForm): Partial<Record<keyof ProgramForm, string>> {
+  const errors: Partial<Record<keyof ProgramForm, string>> = {};
+  if (!UUID.test(f.legalEntityId)) errors.legalEntityId = "Enter the legal entity id (a UUID).";
+  if (!RULE_CODE.test(f.code)) errors.code = "Use 2 to 40 characters: A-Z, 0-9, _ or -.";
+  if (f.name.length > 200) errors.name = "Keep the name to 200 characters.";
+  const year = Number(f.approvalYear);
+  if (!/^\d{4}$/.test(f.approvalYear) || year < 1900 || year > 2999) errors.approvalYear = "Enter a four-digit year.";
+  if (!CURRENCY.test(f.currency)) errors.currency = "Use a three-letter currency code.";
+  if (!isAmount(f.budget)) errors.budget = "Enter an amount of zero or more with up to 4 decimals.";
+  return errors;
+}
+
+export interface AllocationRow {
+  positionCode: string;
+  category: string;
+  budget: string;
+}
+
+/**
+ * Checks a distribution on the page before it is sent: codes, amounts, no
+ * duplicates, and Σ children within the parent's budget (BR-38.15). Existing
+ * children not in the rows keep their budget and count towards the total.
+ */
+export function validateDistribution(parentBudget: string, existing: { code: string; budget: string }[], rows: AllocationRow[]): string[] {
+  const errors: string[] = [];
+  if (rows.length === 0) errors.push("Add at least one position.");
+  const seen = new Set<string>();
+  rows.forEach((r, i) => {
+    const n = i + 1;
+    if (!POSITION_CODE.test(r.positionCode)) errors.push(`Row ${n}: the position code uses 1 to 40 characters of A-Z, 0-9, _, . or -.`);
+    else if (seen.has(r.positionCode)) errors.push(`Row ${n}: ${r.positionCode} appears twice.`);
+    seen.add(r.positionCode);
+    if (!isAmount(r.budget)) errors.push(`Row ${n}: the budget is an amount of zero or more with up to 4 decimals.`);
+  });
+  if (errors.length > 0 || !isMoney(parentBudget)) return errors;
+  const kept = existing.filter((e) => !seen.has(e.code) && isMoney(e.budget)).reduce((acc, e) => acc + toUnits(e.budget), 0n);
+  const total = kept + rows.reduce((acc, r) => acc + toUnits(r.budget), 0n);
+  const over = total - toUnits(parentBudget);
+  if (over > 0n) errors.push(`The positions would exceed the parent budget by ${fromUnits(over)} (CO-0641).`);
+  return errors;
+}
+
+export interface AssignForm {
+  positionId: string;
+  objectType: string;
+  objectRef: string;
+  plan: string;
+  actual: string;
+  commitment: string;
+}
+
+export function validateAssignment(f: AssignForm): string[] {
+  const errors: string[] = [];
+  if (!UUID.test(f.positionId)) errors.push("Choose a position.");
+  if (!ASSIGNED_OBJECT_TYPES.some((t) => t.value === f.objectType)) errors.push("Choose what is assigned.");
+  if (f.objectRef.trim() === "" || f.objectRef.length > 80) errors.push("Enter the object's reference (1 to 80 characters).");
+  for (const [label, v] of [["Plan", f.plan], ["Actual", f.actual], ["Commitment", f.commitment]] as const) {
+    if (!isAmount(v)) errors.push(`${label} is an amount of zero or more with up to 4 decimals.`);
+  }
+  return errors;
+}
+
+/** Positions in tree order (each parent followed by its children, by code) with their depth. */
+export function positionTree<T extends { id: string; parentId?: string; code: string }>(positions: T[]): { position: T; depth: number }[] {
+  const children = new Map<string, T[]>();
+  for (const p of positions) {
+    const key = p.parentId ?? "";
+    children.set(key, [...(children.get(key) ?? []), p]);
+  }
+  for (const list of children.values()) list.sort((a, b) => a.code.localeCompare(b.code));
+  const out: { position: T; depth: number }[] = [];
+  const ids = new Set(positions.map((p) => p.id));
+  const walk = (parent: string, depth: number) => {
+    for (const p of children.get(parent) ?? []) {
+      out.push({ position: p, depth });
+      walk(p.id, depth + 1);
+    }
+  };
+  walk("", 0);
+  // Positions whose parent is missing from the list are shown at the top level.
+  for (const p of positions) if (p.parentId && !ids.has(p.parentId) && !out.some((o) => o.position.id === p.id)) out.push({ position: p, depth: 0 });
+  return out;
+}

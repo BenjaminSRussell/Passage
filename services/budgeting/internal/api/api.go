@@ -70,6 +70,12 @@ type Store interface {
 	ExpireReservations(ctx context.Context, key, hash, asOf string) (int, []byte, error)
 	ListReservations(ctx context.Context, f store.ReservationFilter) ([]store.Reservation, error)
 	GetReservation(ctx context.Context, id string) (store.Reservation, error)
+	CreateProgram(ctx context.Context, key, hash string, in store.NewProgram) (int, []byte, error)
+	DistributePositions(ctx context.Context, key, hash, programID string, req store.DistributeRequest) (int, []byte, error)
+	AssignObject(ctx context.Context, key, hash, programID string, req store.AssignRequest) (int, []byte, error)
+	CarryForward(ctx context.Context, key, hash, programID string, toYear int) (int, []byte, error)
+	ListPrograms(ctx context.Context, legalEntityID string) ([]store.Program, error)
+	GetProgram(ctx context.Context, id string) (store.ProgramView, error)
 	Ping(ctx context.Context) error
 }
 
@@ -103,6 +109,7 @@ func (a *API) Register(r chi.Router) {
 	view.Get("/v1/budget/checks/{id}", a.getCheck)
 	view.Get("/v1/budget/reservations", a.listReservations)
 	view.Get("/v1/budget/reservations/{id}", a.getReservation)
+	a.registerPrograms(r)
 }
 
 type createRuleRequest struct {

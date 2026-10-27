@@ -1,6 +1,6 @@
 # Cost accounting module (web)
 
-Cost accounting screens for PSG-38 slices 1 and 2, wired to `services/costacct` through the BFF at `/api/v1/controlling/...`.
+Cost accounting screens for PSG-38 slices 1 to 3, wired to `services/costacct` through the BFF at `/api/v1/controlling/...`.
 
 | Route | Page | Service calls |
 |---|---|---|
@@ -15,6 +15,13 @@ Cost accounting screens for PSG-38 slices 1 and 2, wired to `services/costacct` 
 | `/costacct/top-down-runs` | Top-down runs with amount, basis period and segment count | `GET /top-down-runs` |
 | `/costacct/top-down-runs/new` | Choose source, element, amount and segments, type each basis and see the cent-exact preview, then run | `GET /cost-objects`, `/cost-elements`, `POST /top-down-runs` |
 | `/costacct/top-down-runs/:id` | Run totals, shares per segment and zero-basis segments | `GET /top-down-runs/{id}` |
+| `/costacct/measures` | Statistical measures with their formula name (`m.<code>`) | `GET /statistical-measures` |
+| `/costacct/measures/new` | New statistical measure | `POST /statistical-measures` |
+| `/costacct/measures/:id` | Values of a period per cost object and a form to load them | `GET /statistical-measures`, `/statistical-measures/{id}/values`, `/cost-objects`, `POST /statistical-measures/{id}/values` |
+| `/costacct/templates` | Allocation templates with version | `GET /allocation-templates` |
+| `/costacct/templates/new`, `/costacct/templates/:id/edit` | Template editor: sender, lines of receiver, secondary element and formula; unknown `m.` / `b.` references are caught on the page; edits send the version read | `GET /cost-objects`, `/cost-elements`, `/statistical-measures`, `POST /allocation-templates` |
+| `/costacct/templates/:id` | Template lines, dry run for a period, run, run history | `GET /allocation-templates/{id}`, `/template-allocations/runs`, `POST /allocation-templates/{id}:dry-run`, `/template-allocations/runs` |
+| `/costacct/template-runs/:id` | Run totals (receivers and sender credit), lines, zero-divisor warnings | `GET /template-allocations/runs/{id}` |
 | `/costacct/reconciliation` | Cost ledger against journal balances by element (FR-38.11) | `POST /reconciliations` |
 
 Every list has loading, empty and error (with "Try again") states, and pages use the shell primitives from

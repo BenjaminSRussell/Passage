@@ -367,3 +367,129 @@ export function consumeReservation(id: string, input: ConsumeInput, idempotencyK
 export function closeReservation(id: string, idempotencyKey: string): Promise<ReleaseOutcome> {
   return command(`${BASE}/reservations/${encodeURIComponent(id)}:close`, {}, idempotencyKey);
 }
+
+export type PositionCategory = "Capex" | "Opex-related" | "Contingency";
+export type AssignedObjectType = "CapexRequest" | "AssetUnderConstruction" | "Project";
+
+/** An investment program for one approval year (FR-38.21). */
+export interface Program {
+  id: string;
+  legalEntityId: string;
+  code: string;
+  name: string;
+  approvalYear: number;
+  programType: "Capex";
+  currency: string;
+  budget: string;
+  /** Σ budgets of the top-level positions. */
+  distributed: string;
+  status: "Open" | "Closed";
+  version: number;
+  createdAt: string;
+}
+
+export interface ProgramAssignment {
+  id: string;
+  positionId: string;
+  objectType: AssignedObjectType;
+  objectRef: string;
+  plan: string;
+  actual: string;
+  commitment: string;
+  updatedAt: string;
+}
+
+/** A program position; plan, actual and commitment roll up the whole subtree. */
+export interface ProgramPosition {
+  id: string;
+  programId: string;
+  parentId?: string;
+  code: string;
+  level: number;
+  category: PositionCategory;
+  budget: string;
+  distributed: string;
+  undistributed: string;
+  plan: string;
+  actual: string;
+  commitment: string;
+  available: string;
+  carriedForward: string;
+  assignments: ProgramAssignment[];
+}
+
+export interface ProgramView extends Program {
+  plan: string;
+  actual: string;
+  commitment: string;
+  available: string;
+  carriedForward: string;
+  /** Parents before children. */
+  positions: ProgramPosition[];
+}
+
+export interface CreateProgramInput {
+  legalEntityId: string;
+  code: string;
+  name: string;
+  approvalYear: number;
+  currency: string;
+  budget: string;
+}
+
+export interface AllocationInput {
+  positionCode: string;
+  /** Absent keeps an existing position's category; a new position defaults to Capex. */
+  category?: PositionCategory;
+  budget: string;
+}
+
+export interface DistributeInput {
+  /** Absent distributes the program budget to top-level positions. */
+  parentPositionId?: string;
+  allocations: AllocationInput[];
+}
+
+export interface AssignInput {
+  positionId: string;
+  objectType: AssignedObjectType;
+  objectRef: string;
+  plan: string;
+  actual: string;
+  commitment: string;
+}
+
+export interface CarryForwardOutcome {
+  programId: string;
+  fromYear: number;
+  toYear: number;
+  amount: string;
+  positions: { positionId: string; code: string; amount: string }[];
+}
+
+export function listPrograms(legalEntityId?: string, signal?: AbortSignal): Promise<Items<Program>> {
+  return request(`${BASE}/investment-programs${query({ legalEntityId })}`, { signal });
+}
+
+export function getProgram(id: string, signal?: AbortSignal): Promise<ProgramView> {
+  return request(`${BASE}/investment-programs/${encodeURIComponent(id)}`, { signal });
+}
+
+export function createProgram(input: CreateProgramInput, idempotencyKey: string): Promise<ProgramView> {
+  return command(`${BASE}/investment-programs`, input, idempotencyKey);
+}
+
+/** Sets child budgets under one parent; Σ children never exceed the parent (BR-38.15, CO-0641). */
+export function distributeProgram(id: string, input: DistributeInput, idempotencyKey: string): Promise<ProgramView> {
+  return command(`${BASE}/investment-programs/${encodeURIComponent(id)}:distribute`, input, idempotencyKey);
+}
+
+/** Puts a capex request, asset under construction or project on a position with its amounts. */
+export function assignToProgram(id: string, input: AssignInput, idempotencyKey: string): Promise<ProgramView> {
+  return command(`${BASE}/investment-programs/${encodeURIComponent(id)}:assign`, input, idempotencyKey);
+}
+
+/** Carries each position's unused budget into the next approval year, once (FR-38.21). */
+export function carryForwardProgram(id: string, toYear: number, idempotencyKey: string): Promise<CarryForwardOutcome> {
+  return command(`${BASE}/investment-programs/${encodeURIComponent(id)}:carry-forward`, { toYear }, idempotencyKey);
+}

@@ -3,16 +3,23 @@ info:
   title: costacct
   version: 0.1.0
   description: >-
-    Cost accounting (wave 38, slices 1 and 2). Cost objects and cost elements, mirroring of journal lines into primary
+    Cost accounting (wave 38, slices 1 to 3). Cost objects and cost elements, mirroring of journal lines into primary
     cost entries, reciprocal allocation runs that solve and conserve cost (FR-38.7), cost object line items,
-    top-down distribution (FR-38.19) and internal order settlement (FR-38.9).
+    top-down distribution (FR-38.19), internal order settlement (FR-38.9), statistical measures and template
+    (driver-formula) allocation (FR-38.17). Template formulas use a restricted grammar: numbers, + - * / (× ÷ − too),
+    min(a, b), max(a, b), if(cond, a, b) with < <= > >= = !=, m.<measure code> (the receiver's measure value in the
+    period) and b.<cost element code> (the receiver's Journal and Manual cost on that element in the period and the
+    template currency).
     Every command requires Idempotency-Key; a replay returns the stored response, a reused key with a different body is 422.
     Error codes: CST-0001 (cost object not found), CST-0002 (period already allocated), CST-0003 (duplicate code),
     CST-0004 (no primary element for a main account), CST-0005 (allocation did not converge, CO-0611),
     CST-0006 (allocation totals differ, CO-0612), CST-0007 (secondary element not found), CST-0008 (invalid allocation input),
     CST-0009 (primary account range overlaps), CST-0010 (allocation run not found), CST-0011 (top-down run not found),
     CST-0012 (top-down amount exceeds what is booked on the source), CST-0013 (settled object is not an internal order),
-    CO-0618 (settlement exceeds collected cost, BR-38.9), COM-0001 (validation, 400),
+    CO-0618 (settlement exceeds collected cost, BR-38.9), CO-0621 (formula error in a template line),
+    CST-0015 (a template line is negative and the template does not allow it, BR-38.12), CST-0016 (statistical measure
+    not found), CST-0017 (allocation template not found), CST-0018 (template version conflict), CST-0019 (template run
+    not found), COM-0001 (validation, 400),
     idempotency_key_reuse, idempotency_in_progress, AUTH-0001, AUTH-0003.
     Reads need controlling.view and return {"items": [...]} for lists (at most 500 rows).
 servers:
@@ -230,6 +237,198 @@ paths:
         '200':
           description: Settlements of the order, newest first.
           content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/Settlement' } } } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/controlling/statistical-measures:
+    get:
+      operationId: listStatisticalMeasures
+      x-passage-duty: controlling.view
+      parameters:
+        - { $ref: '#/components/parameters/LegalEntity' }
+      responses:
+        '200':
+          description: Measures by code.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/StatisticalMeasure' } } } } } }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: createStatisticalMeasure
+      x-passage-duty: controlling.maintain
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/StatisticalMeasure' } } }
+      responses:
+        '201':
+          description: The measure. The code is unique per legal entity (CST-0003); formulas reference it as m.<code>.
+          content: { application/json: { schema: { $ref: '#/components/schemas/StatisticalMeasure' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/controlling/statistical-measures/{id}/values:
+    get:
+      operationId: listStatisticalMeasureValues
+      x-passage-duty: controlling.view
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: period, in: query, required: true, schema: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$' } }
+      responses:
+        '200':
+          description: The measure's value per cost object in the period.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/MeasureValue' } } } } } }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: loadStatisticalMeasureValues
+      x-passage-duty: controlling.maintain
+      description: Upserts one period's values per cost object (PRD 7.38.5). Every cost object must belong to the legal entity.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [legalEntityId, period, values]
+              additionalProperties: false
+              properties:
+                legalEntityId: { type: string, format: uuid }
+                period: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$' }
+                values:
+                  type: array
+                  minItems: 1
+                  maxItems: 5000
+                  items:
+                    type: object
+                    required: [costObjectId, value]
+                    additionalProperties: false
+                    properties:
+                      costObjectId: { type: string, format: uuid }
+                      value: { type: string, description: Decimal string, zero or positive, at most 4 decimal places. }
+      responses:
+        '200':
+          description: How many values were loaded.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [measureId, period, loaded]
+                properties:
+                  measureId: { type: string, format: uuid }
+                  period: { type: string }
+                  loaded: { type: integer }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/controlling/allocation-templates:
+    get:
+      operationId: listAllocationTemplates
+      x-passage-duty: controlling.view
+      parameters:
+        - { $ref: '#/components/parameters/LegalEntity' }
+      responses:
+        '200':
+          description: Templates by code, current version.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/AllocationTemplate' } } } } } }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: saveAllocationTemplate
+      x-passage-duty: controlling.maintain
+      description: >-
+        Saves a template. A new code needs expectedVersion 0 and becomes version 1 (201); an existing code needs the
+        version last read and becomes the next version (200), else CST-0018. Every formula is parsed and may reference
+        only measures and cost elements of the legal entity (CO-0621). Line elements must be secondary (CST-0007).
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/SaveTemplate' } } }
+      responses:
+        '201':
+          description: Version 1 of a new template.
+          content: { application/json: { schema: { $ref: '#/components/schemas/AllocationTemplate' } } }
+        '200':
+          description: The next version of an existing template.
+          content: { application/json: { schema: { $ref: '#/components/schemas/AllocationTemplate' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/controlling/allocation-templates/{id}:
+    get:
+      operationId: getAllocationTemplate
+      x-passage-duty: controlling.view
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The template at its current version.
+          content: { application/json: { schema: { $ref: '#/components/schemas/AllocationTemplate' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/controlling/allocation-templates/{id}:dry-run:
+    post:
+      operationId: dryRunAllocationTemplate
+      x-passage-duty: controlling.maintain
+      description: Evaluates the template for a period and posts nothing, so it takes no Idempotency-Key (FR-38.17).
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [period]
+              additionalProperties: false
+              properties:
+                period: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$' }
+      responses:
+        '200':
+          description: The amount per line, the total and any CO-0622 warnings.
+          content: { application/json: { schema: { $ref: '#/components/schemas/DryRunResult' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/controlling/template-allocations/runs:
+    get:
+      operationId: listTemplateRuns
+      x-passage-duty: controlling.view
+      parameters:
+        - { $ref: '#/components/parameters/LegalEntity' }
+        - { name: templateId, in: query, required: false, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Completed template runs, newest first.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/TemplateRun' } } } } } }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: runTemplateAllocation
+      x-passage-duty: controlling.run
+      description: >-
+        Runs the template's current version for a period. Each line debits its receiver and credits the sender with the
+        line amount on the line's secondary element (origin Allocation), so the run nets to zero. A negative line fails
+        the run unless the template allows it (CST-0015, BR-38.12); a zero divisor gives 0 and a CO-0622 warning. One
+        completed run per template and period (CST-0002). Emits allocation.completed with method Template and one
+        costentry.created per entry.
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [templateId, period]
+              additionalProperties: false
+              properties:
+                templateId: { type: string, format: uuid }
+                period: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$' }
+      responses:
+        '201':
+          description: The completed run.
+          content: { application/json: { schema: { $ref: '#/components/schemas/TemplateRun' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/controlling/template-allocations/runs/{id}:
+    get:
+      operationId: getTemplateRun
+      x-passage-duty: controlling.view
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: One template run with its lines.
+          content: { application/json: { schema: { $ref: '#/components/schemas/TemplateRun' } } }
         default: { $ref: '#/components/responses/Problem' }
 components:
   parameters:
@@ -475,15 +674,101 @@ components:
             properties:
               id: { type: string, format: uuid }
               costElementId: { type: string, format: uuid }
-              sourceId: { type: string, format: uuid, description: Journal line, allocation run, top-down run or settlement. }
+              sourceId: { type: string, format: uuid, description: Journal line, allocation run, top-down run, settlement or template run. }
               allocationRunId: { type: string, format: uuid }
               topDownRunId: { type: string, format: uuid }
               settlementId: { type: string, format: uuid }
+              templateRunId: { type: string, format: uuid }
               period: { type: string }
               currency: { type: string }
               amount: { type: string }
               behavior: { type: string, enum: [Fixed, Variable, Unclassified] }
               origin: { type: string, enum: [Journal, Allocation, Activity, Statistical, Manual] }
+    StatisticalMeasure:
+      type: object
+      required: [legalEntityId, code, name, unit]
+      properties:
+        id: { type: string, format: uuid, readOnly: true }
+        legalEntityId: { type: string, format: uuid }
+        code: { type: string, pattern: '^[A-Za-z_][A-Za-z0-9_]{0,39}$' }
+        name: { type: string, maxLength: 200 }
+        unit: { type: string, maxLength: 20 }
+    MeasureValue:
+      type: object
+      required: [costObjectId, value]
+      properties:
+        costObjectId: { type: string, format: uuid }
+        value: { type: string }
+        updatedAt: { type: string, format: date-time }
+    TemplateLine:
+      type: object
+      required: [receiverCostObjectId, secondaryElementId, formula]
+      additionalProperties: false
+      properties:
+        receiverCostObjectId: { type: string, format: uuid }
+        secondaryElementId: { type: string, format: uuid }
+        formula: { type: string, maxLength: 500, examples: ['25.00 × m.inspectionLots + 0.005 × b.MATERIAL'] }
+    SaveTemplate:
+      type: object
+      required: [legalEntityId, code, name, currency, senderCostObjectId, lines]
+      additionalProperties: false
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        code: { type: string, pattern: '^[A-Z0-9_-]{2,40}$' }
+        name: { type: string, maxLength: 200 }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        senderCostObjectId: { type: string, format: uuid }
+        allowNegative: { type: boolean, default: false }
+        expectedVersion: { type: integer, minimum: 0, default: 0, description: 0 for a new code, else the version last read. }
+        lines: { type: array, minItems: 1, maxItems: 200, items: { $ref: '#/components/schemas/TemplateLine' } }
+    AllocationTemplate:
+      type: object
+      required: [id, legalEntityId, code, name, currency, senderCostObjectId, allowNegative, lines, version, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        currency: { type: string }
+        senderCostObjectId: { type: string, format: uuid }
+        allowNegative: { type: boolean }
+        lines: { type: array, items: { $ref: '#/components/schemas/TemplateLine' } }
+        version: { type: integer }
+        updatedAt: { type: string, format: date-time }
+    TemplateLineResult:
+      type: object
+      required: [receiverCostObjectId, secondaryElementId, amount, divByZero]
+      properties:
+        receiverCostObjectId: { type: string, format: uuid }
+        secondaryElementId: { type: string, format: uuid }
+        amount: { type: string, description: Rounded once to the currency minor unit. }
+        divByZero: { type: boolean }
+    DryRunResult:
+      type: object
+      required: [templateId, templateVersion, period, lines, totalIn, warnings]
+      properties:
+        templateId: { type: string, format: uuid }
+        templateVersion: { type: integer }
+        period: { type: string }
+        lines: { type: array, items: { $ref: '#/components/schemas/TemplateLineResult' } }
+        totalIn: { type: string }
+        warnings: { type: array, items: { type: string } }
+    TemplateRun:
+      type: object
+      required: [id, legalEntityId, templateId, templateVersion, period, currency, senderCostObjectId, total, lines, warnings, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        templateId: { type: string, format: uuid }
+        templateVersion: { type: integer }
+        period: { type: string }
+        currency: { type: string }
+        senderCostObjectId: { type: string, format: uuid }
+        total: { type: string, description: Σ line amounts; the sender is credited the same total. }
+        lines: { type: array, items: { $ref: '#/components/schemas/TemplateLineResult' } }
+        warnings: { type: array, items: { type: string } }
+        status: { type: string, enum: [Completed] }
+        createdAt: { type: string, format: date-time }
   responses:
     Problem:
       description: RFC 9457 problem details.

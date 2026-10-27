@@ -3,13 +3,15 @@ import type { PassageModule } from "../registry";
 import { AllocationRunDetailPage, AllocationRunsPage, NewAllocationRunPage } from "./AllocationRunsPage";
 import { CostElementsPage, CreateCostElementPage } from "./CostElementsPage";
 import { CostObjectDetailPage, CostObjectsPage, CreateCostObjectPage } from "./CostObjectsPage";
+import { CreateMeasurePage, MeasuresPage, MeasureValuesPage } from "./MeasuresPage";
 import { ReconciliationPage } from "./ReconciliationPage";
+import { TemplateDetailPage, TemplateEditorPage, TemplateRunDetailPage, TemplatesPage } from "./TemplatesPage";
 import { NewTopDownRunPage, TopDownRunDetailPage, TopDownRunsPage } from "./TopDownRunsPage";
 
 const costacct: PassageModule = {
   id: "costacct",
   title: "Cost accounting",
-  description: "Cost objects and elements, mirrored journal cost, reciprocal allocation runs, top-down distribution, internal order settlement and the cost ledger reconciliation.",
+  description: "Cost objects and elements, mirrored journal cost, reciprocal allocation runs, top-down distribution, internal order settlement, statistical measures, template allocation and the cost ledger reconciliation.",
   routes: [
     { path: "/costacct", element: createElement(CostObjectsPage), handle: { title: "Cost objects" } },
     { path: "/costacct/cost-objects/new", element: createElement(CreateCostObjectPage), handle: { title: "New cost object" } },
@@ -22,6 +24,14 @@ const costacct: PassageModule = {
     { path: "/costacct/top-down-runs", element: createElement(TopDownRunsPage), handle: { title: "Top-down distribution" } },
     { path: "/costacct/top-down-runs/new", element: createElement(NewTopDownRunPage), handle: { title: "New top-down run" } },
     { path: "/costacct/top-down-runs/:id", element: createElement(TopDownRunDetailPage), handle: { title: "Top-down run" } },
+    { path: "/costacct/measures", element: createElement(MeasuresPage), handle: { title: "Statistical measures" } },
+    { path: "/costacct/measures/new", element: createElement(CreateMeasurePage), handle: { title: "New statistical measure" } },
+    { path: "/costacct/measures/:id", element: createElement(MeasureValuesPage), handle: { title: "Statistical measure" } },
+    { path: "/costacct/templates", element: createElement(TemplatesPage), handle: { title: "Template allocation" } },
+    { path: "/costacct/templates/new", element: createElement(TemplateEditorPage), handle: { title: "New allocation template" } },
+    { path: "/costacct/templates/:id", element: createElement(TemplateDetailPage), handle: { title: "Allocation template" } },
+    { path: "/costacct/templates/:id/edit", element: createElement(TemplateEditorPage), handle: { title: "Edit allocation template" } },
+    { path: "/costacct/template-runs/:id", element: createElement(TemplateRunDetailPage), handle: { title: "Template run" } },
     { path: "/costacct/reconciliation", element: createElement(ReconciliationPage), handle: { title: "Cost ledger reconciliation" } },
   ],
   nav: [
@@ -29,6 +39,8 @@ const costacct: PassageModule = {
     { label: "Cost elements", to: "/costacct/cost-elements", duty: "controlling.view" },
     { label: "Allocation runs", to: "/costacct/allocation-runs", duty: "controlling.view" },
     { label: "Top-down distribution", to: "/costacct/top-down-runs", duty: "controlling.view" },
+    { label: "Statistical measures", to: "/costacct/measures", duty: "controlling.view" },
+    { label: "Template allocation", to: "/costacct/templates", duty: "controlling.view" },
     { label: "Reconciliation", to: "/costacct/reconciliation", duty: "controlling.view" },
   ],
 };

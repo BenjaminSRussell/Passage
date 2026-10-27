@@ -33,6 +33,7 @@ type CostEntryCreatedData struct {
 type AllocationCompletedData struct {
 	RunID         string          `json:"run_id"`
 	LegalEntityID string          `json:"legal_entity_id"`
+	TemplateID    string          `json:"template_id,omitempty"`
 	Period        string          `json:"period"`
 	Method        string          `json:"method"`
 	Iterations    int             `json:"iterations"`
