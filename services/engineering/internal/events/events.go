@@ -51,3 +51,12 @@ type CalendarGeneratedData struct {
 	To         string `json:"to"`
 	OpenDays   int    `json:"openDays"`
 }
+
+const RouteVersionActivated = "dev.passage.engineering.routeversion.activated.v1"
+
+type RouteVersionActivatedData struct {
+	RouteVersionID string `json:"routeVersionId"`
+	ProductID      string `json:"productId"`
+	SiteID         string `json:"siteId"`
+	EffectiveFrom  string `json:"effectiveFrom"`
+}

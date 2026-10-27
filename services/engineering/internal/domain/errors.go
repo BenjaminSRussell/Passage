@@ -41,6 +41,15 @@ const (
 	CodeEcoDryRun       = "ENG-ECO-DRYRUN"
 	CodeEcoDate         = "ENG-ECO-DATE"
 
+	CodeRouteOpsLimit    = "ENG-ROUTE-OPS-LIMIT"
+	CodeRouteOpDup       = "ENG-ROUTE-OP-DUP"
+	CodeRouteNext        = "ENG-ROUTE-NEXT"
+	CodeRouteUnsatisfied = "ENG-ROUTE-UNSATISFIED"
+	CodeRouteOverlap     = "ENG-ROUTE-OVERLAP"
+	CodeRouteReqKind     = "ENG-ROUTE-REQ-KIND"
+	CodeRouteVersion     = "ENG-ROUTE-VERSION"
+	CodeRouteState       = "ENG-ROUTE-STATE"
+
 	CodeBomTooLarge            = "ENG-BOM-TOOLARGE"
 	CodeBomEcoRequired         = "ENG-BOM-ECO-REQUIRED"
 	CodeEcoApproverUnavailable = "ENG-ECO-APPROVER-UNAVAILABLE"

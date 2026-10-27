@@ -37,6 +37,9 @@ const (
 	aggregateEco         = "eco"
 	aggregateResource    = "resource"
 	aggregateCalendar    = "calendar"
+
+	CodeRouteNotFound     = "ENG-ROUTE-NOTFOUND"
+	aggregateRouteVersion = "routeversion"
 )
 
 type Idem struct{ Key, Hash string }
@@ -84,6 +87,9 @@ type Store interface {
 	CreateCapability(ctx context.Context, c domain.Capability, idem Idem) (domain.Capability, error)
 	CreateResource(ctx context.Context, r domain.Resource, idem Idem) (ResourceRecord, error)
 	GetResource(ctx context.Context, id string) (ResourceRecord, error)
+	CreateRouteVersion(ctx context.Context, v domain.RouteVersion, idem Idem) (domain.RouteVersion, error)
+	GetRouteVersion(ctx context.Context, id string) (domain.RouteVersion, error)
+	ActivateRouteVersion(ctx context.Context, id string) (domain.RouteVersion, error)
 	Ping(ctx context.Context) error
 }
 

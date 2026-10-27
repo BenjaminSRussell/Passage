@@ -11,7 +11,7 @@ import (
 )
 
 func TestEventTypes_Valid(t *testing.T) {
-	for _, typ := range []string{events.ResourceChanged, events.CalendarGenerated} {
+	for _, typ := range []string{events.ResourceChanged, events.CalendarGenerated, events.RouteVersionActivated} {
 		if !platformevents.ValidType(typ) {
 			t.Errorf("%s is not a valid event type", typ)
 		}

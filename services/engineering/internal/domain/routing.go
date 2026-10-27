@@ -1,9 +1,15 @@
 package domain
 
 import (
+	"fmt"
+	"slices"
 	"sort"
+	"strings"
+	"time"
 
 	"github.com/shopspring/decimal"
+
+	"github.com/BenjaminSRussell/passage/services/engineering/internal/events"
 )
 
 const PriorityPrimary = "primary"
@@ -133,4 +139,148 @@ func LeadTime(ops []RouteOperation, qty, hoursPerDay decimal.Decimal) (LeadTimeR
 		return LeadTimeResult{}, errf(CodeRouteCycle, "route has no final operation")
 	}
 	return LeadTimeResult{Hours: total.Round(4), CalendarDays: int(total.Div(hoursPerDay).Ceil().IntPart())}, nil
+}
+
+const (
+	LinkHard = "hard"
+	LinkSoft = "soft"
+
+	maxRouteOperations   = 500
+	maxOperationIDLength = 20
+	timeDecimals         = 4
+)
+
+type OperationRequirement struct {
+	Kind     string
+	RefID    string
+	Level    int
+	Quantity int
+}
+
+type VersionOperation struct {
+	RouteOperation
+	OperationID  string
+	LinkType     string
+	OverlapQty   decimal.Decimal
+	ScrapPercent decimal.Decimal
+	Requirements []OperationRequirement
+}
+
+type RouteVersion struct {
+	ID            string
+	ProductID     string
+	SiteID        string
+	RouteCode     string
+	VersionNo     int
+	EffectiveFrom time.Time
+	EffectiveTo   time.Time
+	Status        string
+	Operations    []VersionOperation
+}
+
+func (v RouteVersion) ActivatedEvent() events.RouteVersionActivatedData {
+	return events.RouteVersionActivatedData{
+		RouteVersionID: v.ID, ProductID: v.ProductID, SiteID: v.SiteID, EffectiveFrom: v.EffectiveFrom.Format(dateLayout),
+	}
+}
+
+func (v RouteVersion) EnsureDraft() error {
+	if v.Status != StatusDraft {
+		return errf(CodeRouteState, "route version %s is %s, only a draft can be activated", v.ID, v.Status)
+	}
+	return nil
+}
+
+func validateVersionOperation(o VersionOperation) error {
+	if err := validateOperation(o.RouteOperation); err != nil {
+		return err
+	}
+	for _, h := range []decimal.Decimal{o.SetupH, o.RunH, o.QueueBeforeH, o.QueueAfterH, o.TransitH} {
+		if !h.Round(timeDecimals).Equal(h) {
+			return errf(CodeRouteQty, "operation %d times are in hours with at most %d decimals", o.No, timeDecimals)
+		}
+	}
+	if !slices.Contains([]string{"", PriorityPrimary, "secondary1", "secondary2", "secondary3"}, o.Priority) || (o.LinkType != "" && o.LinkType != LinkHard && o.LinkType != LinkSoft) ||
+		len(o.OperationID) > maxOperationIDLength || o.OverlapQty.IsNegative() || o.ScrapPercent.IsNegative() || o.ScrapPercent.GreaterThan(hundred) {
+		return errf(CodeRouteQty, "operation %d has an invalid priority, link type, operation id, overlap quantity or scrap percent", o.No)
+	}
+	for i, r := range o.Requirements {
+		if !slices.Contains([]string{ReqResource, ReqGroup, ReqCapability, ReqType}, r.Kind) || r.RefID == "" || r.Quantity < 1 || r.Level < 0 {
+			return errf(CodeRouteReqKind, "operation %d requirement[%d] needs a supported kind, a reference, quantity of at least 1 and a level of 0 or more", o.No, i)
+		}
+	}
+	return nil
+}
+
+func ValidateRouteVersion(v RouteVersion) error {
+	switch {
+	case v.ProductID == "" || v.SiteID == "" || v.RouteCode == "" || v.VersionNo < 1 || v.EffectiveFrom.IsZero() ||
+		(!v.EffectiveTo.IsZero() && v.EffectiveTo.Before(v.EffectiveFrom)):
+		return errf(CodeRouteVersion, "route version needs product, site, route code, version number and a valid date range")
+	case len(v.Operations) == 0:
+		return errf(CodeRouteQty, "route version needs at least one operation")
+	case len(v.Operations) > maxRouteOperations:
+		return errf(CodeRouteOpsLimit, "route version has %d operations, the limit is %d", len(v.Operations), maxRouteOperations)
+	}
+	next := make(map[int]int, len(v.Operations))
+	for _, o := range v.Operations {
+		if _, dup := next[o.No]; dup {
+			return errf(CodeRouteOpDup, "operation number %d appears more than once", o.No)
+		}
+		next[o.No] = o.NextNo
+	}
+	for _, o := range v.Operations {
+		if _, ok := next[o.NextNo]; o.NextNo != 0 && !ok {
+			return errf(CodeRouteNext, "operation %d points to operation %d, which is not in this version", o.No, o.NextNo)
+		}
+		if err := validateVersionOperation(o); err != nil {
+			return err
+		}
+	}
+	for start := range next {
+		for step, at := 0, start; at != 0; step, at = step+1, next[at] {
+			if step > len(next) {
+				return errf(CodeRouteCycle, "operation %d is part of a cycle", start)
+			}
+		}
+	}
+	return nil
+}
+
+func CheckRequirements(v RouteVersion, resources []Resource) error {
+	var atSite []Resource
+	var groups []ResourceGroup
+	for _, r := range resources {
+		if r.SiteID == v.SiteID {
+			atSite = append(atSite, r)
+			groups = append(groups, ResourceGroup{ID: r.GroupID})
+		}
+	}
+	var unmet []string
+	for _, o := range v.Operations {
+		for i, r := range o.Requirements {
+			need := r.Quantity
+			if r.Kind == ReqResource {
+				need = 1
+			}
+			req := Requirement{Kind: r.Kind, ID: r.RefID, MinLevel: r.Level, Type: r.RefID}
+			if len(Satisfies(req, atSite, groups, v.EffectiveFrom)) < need {
+				unmet = append(unmet, fmt.Sprintf("operation %d requirement[%d]", o.No, i))
+			}
+		}
+	}
+	if len(unmet) > 0 {
+		return errf(CodeRouteUnsatisfied, "no stored resource at site %s satisfies: %s", v.SiteID, strings.Join(unmet, ", "))
+	}
+	return nil
+}
+
+func CheckRouteNoOverlap(existing []RouteVersion, candidate RouteVersion) error {
+	for _, other := range existing {
+		if other.ID != candidate.ID && other.Status == StatusActive && other.ProductID == candidate.ProductID &&
+			other.SiteID == candidate.SiteID && rangesOverlap(other.EffectiveFrom, other.EffectiveTo, candidate.EffectiveFrom, candidate.EffectiveTo) {
+			return errf(CodeRouteOverlap, "Version overlaps active route version %s for this site and date.", other.ID)
+		}
+	}
+	return nil
 }
