@@ -1,0 +1,71 @@
+// Package events holds the event types and payloads the costing service
+// publishes through the outbox (events/asyncapi.yaml).
+package events
+
+import (
+	"time"
+
+	"github.com/BenjaminSRussell/passage/platform/events"
+)
+
+// Context is the bounded-context segment of every event type (PRD 7.39.5).
+const Context = "costing"
+
+// Slice 5 events. They are not in the PRD event table: they announce the cost
+// structure and the costing version lifecycle, which inventory costing (wave
+// 20), production (wave 21) and budgeting read to know which version and split
+// apply.
+var (
+	CostComponentCreated = events.Type(Context, "costcomponent", "created", 1)
+	CostGroupCreated     = events.Type(Context, "costgroup", "created", 1)
+	VersionCreated       = events.Type(Context, "version", "created", 1)
+	VersionTransitioned  = events.Type(Context, "version", "transitioned", 1)
+)
+
+// CostComponentCreatedData is the payload of CostComponentCreated.
+type CostComponentCreatedData struct {
+	ID            string `json:"id"`
+	Code          string `json:"code"`
+	Name          string `json:"name"`
+	CostGroupType string `json:"costGroupType"`
+	Behaviour     string `json:"behaviour"`
+}
+
+// CostGroupCreatedData is the payload of CostGroupCreated.
+type CostGroupCreatedData struct {
+	ID            string `json:"id"`
+	Code          string `json:"code"`
+	Name          string `json:"name"`
+	Type          string `json:"type"`
+	Behaviour     string `json:"behaviour"`
+	ComponentID   string `json:"componentId"`
+	ComponentCode string `json:"componentCode"`
+}
+
+// VersionCreatedData is the payload of VersionCreated. A new version is Open.
+type VersionCreatedData struct {
+	ID                string     `json:"id"`
+	LegalEntityID     string     `json:"legalEntityId"`
+	Code              string     `json:"code"`
+	Type              string     `json:"type"`
+	Status            string     `json:"status"`
+	Fallback          string     `json:"fallback"`
+	FallbackVersionID *string    `json:"fallbackVersionId"`
+	SiteIDs           []string   `json:"siteIds"`
+	EffectiveFrom     *time.Time `json:"effectiveFrom"`
+}
+
+// VersionTransitionedData is the payload of VersionTransitioned: one lifecycle
+// action (block, unblock, activate, close) and the status it moved between.
+type VersionTransitionedData struct {
+	ID            string     `json:"id"`
+	LegalEntityID string     `json:"legalEntityId"`
+	Code          string     `json:"code"`
+	Type          string     `json:"type"`
+	Action        string     `json:"action"`
+	FromStatus    string     `json:"fromStatus"`
+	ToStatus      string     `json:"toStatus"`
+	Version       int        `json:"version"`
+	ActivatedAt   *time.Time `json:"activatedAt"`
+	Actor         string     `json:"actor,omitempty"`
+}

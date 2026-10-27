@@ -3,7 +3,8 @@
 // service returns the rolled standard, the mass-roll run, the variance
 // decomposition, the activation preview, the mixed cost, component postings,
 // sales order estimates and their versions, ad-hoc estimates, comparisons or
-// the standard reconciliation. Nothing is stored yet.
+// the standard reconciliation. From slice 5 the cost structure (components and
+// cost groups) and the costing versions are stored (persist.go).
 package api
 
 import (
@@ -57,6 +58,7 @@ type Config struct {
 type API struct {
 	pinger Pinger
 	cfg    Config
+	store  Store
 
 	calculations     atomic.Int64
 	massRolls        atomic.Int64
@@ -65,6 +67,9 @@ type API struct {
 	varianceComputes atomic.Int64
 	previews         atomic.Int64
 	estimates        atomic.Int64
+
+	structureChanges   atomic.Int64
+	versionTransitions atomic.Int64
 
 	reconciliationDifferences atomic.Int64
 }
@@ -108,6 +113,16 @@ func (a *API) routes() []route {
 		{http.MethodPost, "/v1/costing/estimates", dutyCalculate, a.adHocEstimate},
 		{http.MethodPost, "/v1/costing/sales-order-estimates:refresh", dutyCalculate, a.refreshSalesEstimate},
 		{http.MethodPost, "/v1/costing/sales-order-estimates:freeze", dutyCalculate, a.freezeSalesEstimate},
+		// Slice 5 (persist.go): stored cost structure and costing versions.
+		{http.MethodGet, "/v1/costing/cost-components", dutyView, a.listComponents},
+		{http.MethodPost, "/v1/costing/cost-components", dutyMaintain, a.createComponent},
+		{http.MethodGet, "/v1/costing/cost-groups", dutyView, a.listGroups},
+		{http.MethodPost, "/v1/costing/cost-groups", dutyMaintain, a.createGroup},
+		{http.MethodGet, "/v1/costing/versions", dutyView, a.listVersions},
+		{http.MethodPost, "/v1/costing/versions", dutyMaintain, a.createVersion},
+		{http.MethodGet, "/v1/costing/versions/{id}", dutyView, a.getVersion},
+		{http.MethodPost, "/v1/costing/versions/{id}/transition", dutyMaintain, a.transitionStoredVersion},
+		{http.MethodPost, "/v1/costing/versions/{id}/activate", dutyActivate, a.activateStoredVersion},
 	}
 }
 
@@ -133,6 +148,8 @@ func (a *API) Metrics() http.Handler {
 		counter("productcost_variance_computes_total", "Production order variance decompositions computed.", a.varianceComputes.Load())
 		counter("productcost_activation_previews_total", "Activation revaluation previews computed.", a.previews.Load())
 		counter("productcost_adhoc_estimates_total", "Ad-hoc estimates computed from costing models.", a.estimates.Load())
+		counter("productcost_cost_structure_created_total", "Cost components and cost groups created (replays not counted).", a.structureChanges.Load())
+		counter("productcost_version_transitions_total", "Stored costing version lifecycle actions applied.", a.versionTransitions.Load())
 		counter("productcost_reconciliation_differences_total", "Sites whose standard value differs from the GL balance.", a.reconciliationDifferences.Load())
 	})
 }

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
@@ -6,7 +6,6 @@ import type { ConversionReport, ConversionRun, CostResult } from "./api/client";
 import { ac3910, stepRows, validateInput } from "./ConversionPage";
 import productcost from "./module";
 import { subtotalRows } from "./RollPage";
-import { movesFor, validateVersion } from "./VersionsPage";
 
 type Reply = { status: number; body: unknown };
 type Handler = (url: URL, body: unknown) => Reply | undefined;
@@ -49,31 +48,6 @@ function renderAt(path: string) {
 }
 
 describe("slice 3 helpers", () => {
-  it("offers only the moves the version state machine allows", () => {
-    expect(movesFor({ id: "v", type: "Standard", status: "Open", fallback: "Active" })).toEqual(["block", "activate"]);
-    expect(movesFor({ id: "v", type: "Standard", status: "Blocked", fallback: "Active" })).toEqual(["unblock", "activate"]);
-    expect(movesFor({ id: "s", type: "Simulation", status: "Open", fallback: "None" })).toEqual(["block"]);
-    expect(movesFor({ id: "v", type: "Standard", status: "Active", fallback: "Active" })).toEqual(["close"]);
-    expect(movesFor({ id: "v", type: "Standard", status: "Closed", fallback: "Active" })).toEqual([]);
-  });
-
-  it("checks a new version's code and specified fallback", () => {
-    const base = { id: "STD-2027", type: "Standard" as const, fallback: "SpecifiedVersion" as const, fallbackVersionId: "", sites: "" };
-    expect(validateVersion(base, []).errors["version.fallbackVersionId"]).toMatch(/Name the version/);
-    expect(validateVersion({ ...base, fallbackVersionId: "STD-2027" }, []).errors["version.fallbackVersionId"]).toMatch(/itself/);
-    expect(validateVersion({ ...base, fallback: "Active" }, [{ id: "STD-2027", type: "Standard", status: "Open", fallback: "Active" }]).errors["version.id"]).toMatch(
-      /already/,
-    );
-    expect(validateVersion({ ...base, fallbackVersionId: "STD-2026", sites: "P1, P2" }, []).version).toEqual({
-      id: "STD-2027",
-      type: "Standard",
-      status: "Open",
-      fallback: "SpecifiedVersion",
-      fallbackVersionId: "STD-2026",
-      siteIds: ["P1", "P2"],
-    });
-  });
-
   it("builds the conversion input and refuses duplicates and bad counts", () => {
     const { input } = validateInput(ac3910);
     expect(input).toEqual({
@@ -105,59 +79,6 @@ describe("slice 3 helpers", () => {
       { node: "B", value: "7.5" },
       { node: "T", value: "22.5" },
     ]);
-  });
-});
-
-describe("costing versions page", () => {
-  it("starts empty, adds a version and blocks then activates it through the service", async () => {
-    handler = (url, body) => {
-      const { version } = body as { version: { status: string } };
-      if (url.pathname === "/api/v1/costing/versions:transition") return { status: 200, body: { version: { ...version, status: "Blocked" } } };
-      if (url.pathname === "/api/v1/costing/versions:activate") return { status: 200, body: { version: { ...version, status: "Active" } } };
-      return undefined;
-    };
-    const { container } = renderAt("/productcost/versions");
-    expect(screen.getByRole("heading", { name: "No costing versions yet" })).toBeInTheDocument();
-    expect(pageViolations(container)).toEqual([]);
-
-    fireEvent.change(screen.getByLabelText("Version code"), { target: { value: "STD-2027" } });
-    fireEvent.click(screen.getByRole("button", { name: "Add version" }));
-    const table = await screen.findByRole("table", { name: "Costing versions" });
-    expect(within(table).getByRole("row", { name: /STD-2027/ })).toHaveTextContent("Open");
-    expect(calls).toHaveLength(0);
-
-    fireEvent.click(screen.getByRole("button", { name: "Block STD-2027" }));
-    await waitFor(() => expect(within(table).getByRole("row", { name: /STD-2027/ })).toHaveTextContent("Blocked"));
-    expect(calls[0].body).toEqual({ version: { id: "STD-2027", type: "Standard", status: "Open", fallback: "Active" }, action: "block" });
-
-    fireEvent.click(screen.getByRole("button", { name: "Activate STD-2027" }));
-    await waitFor(() => expect(within(table).getByRole("row", { name: /STD-2027/ })).toHaveTextContent("Active"));
-    expect(calls[1].url.pathname).toBe("/api/v1/costing/versions:activate");
-    expect(calls[1].body).toEqual({ version: { id: "STD-2027", type: "Standard", status: "Blocked", fallback: "Active" } });
-    expect(screen.getByRole("button", { name: "Close STD-2027" })).toBeInTheDocument();
-    expect(pageViolations(container)).toEqual([]);
-  });
-
-  it("shows the service's refusal and keeps the version unchanged", async () => {
-    handler = (url) =>
-      url.pathname === "/api/v1/costing/versions:activate"
-        ? { status: 403, body: { code: "AUTH-0003", detail: "missing duty CostingActivate" } }
-        : undefined;
-    renderAt("/productcost/versions");
-    fireEvent.change(screen.getByLabelText("Version code"), { target: { value: "STD-2027" } });
-    fireEvent.click(screen.getByRole("button", { name: "Add version" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Activate STD-2027" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("missing duty CostingActivate (AUTH-0003)");
-    expect(screen.getByRole("row", { name: /STD-2027/ })).toHaveTextContent("Open");
-  });
-
-  it("refuses a specified fallback without a version before adding it", () => {
-    renderAt("/productcost/versions");
-    fireEvent.change(screen.getByLabelText("Version code"), { target: { value: "STD-2027" } });
-    fireEvent.change(screen.getByLabelText("Fallback principle"), { target: { value: "SpecifiedVersion" } });
-    fireEvent.click(screen.getByRole("button", { name: "Add version" }));
-    expect(screen.getByText("Name the version to fall back to.")).toBeInTheDocument();
-    expect(screen.queryByRole("table", { name: "Costing versions" })).not.toBeInTheDocument();
   });
 });
 

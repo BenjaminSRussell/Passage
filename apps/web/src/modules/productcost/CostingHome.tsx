@@ -71,10 +71,23 @@ const tools = [
       "See what activating new standards would do to on-hand inventory: the revaluation per item and site and the journal it would post.",
   },
   {
+    title: "Cost components",
+    to: "/productcost/cost-components",
+    action: "Maintain components",
+    description: "Define the columns of the cost component split, such as direct material, direct labor and the overheads, at most 20.",
+  },
+  {
+    title: "Cost groups",
+    to: "/productcost/cost-groups",
+    action: "Maintain cost groups",
+    description: "Classify item costs, cost categories and indirect costs into cost groups and map each to a cost component.",
+  },
+  {
     title: "Costing versions",
     to: "/productcost/versions",
     action: "Manage versions",
-    description: "Set up standard, planned, simulation and conversion versions with their fallback principle, then block, activate or close them.",
+    description:
+      "Create standard, planned, simulation and conversion versions per legal entity with their fallback principle, then block, activate or close them.",
   },
   {
     title: "Standard cost conversion",
@@ -91,7 +104,7 @@ export function CostingHome() {
     <div className={styles.stack}>
       <PageHeader
         title="Costing workspace"
-        description="Compute and compare standard costs, cost and version sales lines, estimate quotes from costing models, explain production variances, preview component postings, reconcile inventory at standard, check a revaluation before activating new standards, manage costing versions and convert items to standard cost. Stored versions, calculations and posting arrive with the persistence slice."
+        description="Compute and compare standard costs, cost and version sales lines, estimate quotes from costing models, explain production variances, preview component postings, reconcile inventory at standard, check a revaluation before activating new standards, maintain the cost components, cost groups and costing versions, and convert items to standard cost. Cost components, cost groups and versions are stored; calculations and postings are not stored yet."
       />
       <CardGrid as="ul" label="Costing tools">
         {tools.map((tool) => (

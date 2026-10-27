@@ -34,7 +34,8 @@ func TestMigrationsApplyWithRLS(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer rows.Close()
-	want := map[string]bool{"costing_version": false, "cost_component": false, "cost_calculation": false, "cost_component_split": false, "variance_entry": false}
+	want := map[string]bool{"costing_version": false, "cost_component": false, "cost_calculation": false, "cost_component_split": false, "variance_entry": false,
+		"cost_group": false, "idempotency_keys": false, "outbox": false}
 	for rows.Next() {
 		var name, first string
 		var rls, force, hasLE, tenantPolicy, scopePolicy bool

@@ -78,7 +78,9 @@ describe("productcost module", () => {
       ["/productcost/postings", "CostingCalculate"],
       ["/productcost/reconciliation", "CostingView"],
       ["/productcost/activation-preview", "CostingActivate"],
-      ["/productcost/versions", "CostingMaintain"],
+      ["/productcost/cost-components", "CostingView"],
+      ["/productcost/cost-groups", "CostingView"],
+      ["/productcost/versions", "CostingView"],
       ["/productcost/conversion", "CostingActivate"],
     ]);
     expect(productcost.routes.map((r) => r.path)).toEqual(productcost.nav.map((n) => n.to));
@@ -95,6 +97,9 @@ describe("productcost module", () => {
     expect(screen.getByRole("link", { name: "Compare estimates" })).toHaveAttribute("href", "/productcost/compare");
     expect(screen.getByRole("link", { name: "Preview postings" })).toHaveAttribute("href", "/productcost/postings");
     expect(screen.getByRole("link", { name: "Reconcile inventory" })).toHaveAttribute("href", "/productcost/reconciliation");
+    expect(screen.getByRole("link", { name: "Maintain components" })).toHaveAttribute("href", "/productcost/cost-components");
+    expect(screen.getByRole("link", { name: "Maintain cost groups" })).toHaveAttribute("href", "/productcost/cost-groups");
+    expect(screen.getByRole("link", { name: "Manage versions" })).toHaveAttribute("href", "/productcost/versions");
     expect(pageViolations(container)).toEqual([]);
   });
 });

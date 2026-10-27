@@ -1,15 +1,117 @@
 asyncapi: 3.0.0
 info:
-  title: Passage product costing events (wave 39, slice 1)
-  version: 0.1.0
-  description: >
-    Slice 1 computes statelessly and writes no state, so it publishes no events.
-    The events in PSG-39 section 7.39.5 (calculation.completed, rollrun.completed,
-    standardcost.activated, variance.posted, conversion.activated,
-    salesorderestimate.completed) arrive with the persistence slice and are
-    listed as not implemented in NOT-IMPLEMENTED.md.
+  title: Passage product costing events (wave 39, slices 1-5)
+  version: 0.5.0
+  description: |
+    Events published by the costing service through the outbox, in the same
+    transaction as the change. CloudEvents 1.0 envelope; type
+    dev.passage.costing.<entity>.<verb>.v1; source productcost; subject and
+    Kafka key are the aggregate id; actor is the calling user.
+    Slice 5 publishes the cost structure and the costing version lifecycle.
+    These four events are not in the PRD event table (section 7.39.5); they
+    are added so inventory costing (wave 20), production (wave 21) and
+    budgeting learn which split and which version apply. The six PRD events
+    (calculation.completed, rollrun.completed, standardcost.activated,
+    variance.posted, conversion.activated, salesorderestimate.completed) need
+    stored calculations and are listed in NOT-IMPLEMENTED.md.
 defaultContentType: application/cloudevents+json
-channels: {}
-operations: {}
+channels:
+  costComponentCreated:
+    address: passage.costing.costcomponent
+    messages:
+      costComponentCreated:
+        $ref: "#/components/messages/CostComponentCreated"
+  costGroupCreated:
+    address: passage.costing.costgroup
+    messages:
+      costGroupCreated:
+        $ref: "#/components/messages/CostGroupCreated"
+  versionCreated:
+    address: passage.costing.version
+    messages:
+      versionCreated:
+        $ref: "#/components/messages/VersionCreated"
+  versionTransitioned:
+    address: passage.costing.version
+    messages:
+      versionTransitioned:
+        $ref: "#/components/messages/VersionTransitioned"
+operations:
+  publishCostComponentCreated:
+    action: send
+    channel: { $ref: "#/channels/costComponentCreated" }
+  publishCostGroupCreated:
+    action: send
+    channel: { $ref: "#/channels/costGroupCreated" }
+  publishVersionCreated:
+    action: send
+    channel: { $ref: "#/channels/versionCreated" }
+  publishVersionTransitioned:
+    action: send
+    channel: { $ref: "#/channels/versionTransitioned" }
 components:
-  messages: {}
+  messages:
+    CostComponentCreated:
+      name: dev.passage.costing.costcomponent.created.v1
+      contentType: application/cloudevents+json
+      payload: { $ref: "#/components/schemas/CostComponentCreatedData" }
+    CostGroupCreated:
+      name: dev.passage.costing.costgroup.created.v1
+      contentType: application/cloudevents+json
+      payload: { $ref: "#/components/schemas/CostGroupCreatedData" }
+    VersionCreated:
+      name: dev.passage.costing.version.created.v1
+      contentType: application/cloudevents+json
+      payload: { $ref: "#/components/schemas/VersionCreatedData" }
+    VersionTransitioned:
+      name: dev.passage.costing.version.transitioned.v1
+      contentType: application/cloudevents+json
+      payload: { $ref: "#/components/schemas/VersionTransitionedData" }
+  schemas:
+    CostComponentCreatedData:
+      type: object
+      required: [id, code, name, costGroupType, behaviour]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        costGroupType: { type: string, enum: [DirectMaterial, DirectManufacturing, Indirect, Undefined] }
+        behaviour: { type: string, enum: [Fixed, Variable] }
+    CostGroupCreatedData:
+      type: object
+      required: [id, code, name, type, behaviour, componentId, componentCode]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        type: { type: string, enum: [DirectMaterial, DirectManufacturing, Indirect, Undefined] }
+        behaviour: { type: string, enum: [Fixed, Variable] }
+        componentId: { type: string, format: uuid }
+        componentCode: { type: string }
+    VersionCreatedData:
+      type: object
+      required: [id, legalEntityId, code, type, status, fallback, fallbackVersionId, siteIds, effectiveFrom]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        code: { type: string }
+        type: { type: string, enum: [Standard, Planned, Simulation, Conversion] }
+        status: { type: string, enum: [Open] }
+        fallback: { type: string, enum: [None, Active, SpecifiedVersion] }
+        fallbackVersionId: { type: [string, "null"], format: uuid }
+        siteIds: { type: array, items: { type: string, format: uuid }, description: Empty means every site }
+        effectiveFrom: { type: [string, "null"], format: date-time }
+    VersionTransitionedData:
+      type: object
+      required: [id, legalEntityId, code, type, action, fromStatus, toStatus, version, activatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        code: { type: string }
+        type: { type: string, enum: [Standard, Planned, Simulation, Conversion] }
+        action: { type: string, enum: [block, unblock, activate, close] }
+        fromStatus: { type: string, enum: [Open, Blocked, Active] }
+        toStatus: { type: string, enum: [Open, Blocked, Active, Closed] }
+        version: { type: integer, minimum: 2 }
+        activatedAt: { type: [string, "null"], format: date-time }
+        actor: { type: string }

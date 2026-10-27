@@ -383,36 +383,15 @@ export function reconcileStandard(
   return post<Reconciliation>("/reconciliations", req, signal);
 }
 
-// Slice 3: costing version lifecycle and the standard cost conversion checklist.
+// Slice 3: costing version enumerations and the standard cost conversion checklist.
+// The stored versions (slice 5) are at the end of this file.
 
 export type VersionType = "Standard" | "Planned" | "Simulation" | "Conversion";
 export type VersionStatus = "Open" | "Blocked" | "Active" | "Closed";
 export type FallbackPrinciple = "None" | "Active" | "SpecifiedVersion";
 
-export interface CostingVersion {
-  id: string;
-  type: VersionType;
-  status: VersionStatus;
-  fallback: FallbackPrinciple;
-  fallbackVersionId?: string;
-  siteIds?: string[];
-}
-
 /** Lifecycle actions under CostingMaintain; activation is separate (CostingActivate). */
 export type VersionAction = "block" | "unblock" | "close";
-
-/** Block, unblock or close a version (BR-39.2). The service is stateless: it returns the next state. */
-export function transitionVersion(
-  req: { version: CostingVersion; action: VersionAction },
-  signal?: AbortSignal,
-): Promise<{ version: CostingVersion }> {
-  return post<{ version: CostingVersion }>("/versions:transition", req, signal);
-}
-
-/** Activate an Open or Blocked version (BR-39.2). Simulation versions are refused with CST-0711. */
-export function activateVersion(req: { version: CostingVersion }, signal?: AbortSignal): Promise<{ version: CostingVersion }> {
-  return post<{ version: CostingVersion }>("/versions:activate", req, signal);
-}
 
 export type ConversionBlocker = "NegativeOnHand" | "InTransit" | "StartedOrders";
 
@@ -589,4 +568,148 @@ export function freezeSalesEstimate(
   signal?: AbortSignal,
 ): Promise<{ versions: EstimateVersion[]; confirmed: EstimateVersion }> {
   return post<{ versions: EstimateVersion[]; confirmed: EstimateVersion }>("/sales-order-estimates:freeze", req, signal);
+}
+
+// Slice 5: the stored cost structure (FR-39.1) and costing versions (FR-39.3).
+
+export type CostGroupType = "DirectMaterial" | "DirectManufacturing" | "Indirect" | "Undefined";
+export type CostBehaviour = "Fixed" | "Variable";
+
+export interface CostComponentInput {
+  code: string;
+  name: string;
+  costGroupType: CostGroupType;
+  behaviour?: CostBehaviour;
+}
+
+export interface CostComponent extends CostComponentInput {
+  id: string;
+  behaviour: CostBehaviour;
+  createdAt: string;
+}
+
+export interface CostGroupInput {
+  code: string;
+  name: string;
+  type: CostGroupType;
+  behaviour?: CostBehaviour;
+  /** The cost component the group's costs are split into. */
+  componentId: string;
+}
+
+export interface CostGroup extends CostGroupInput {
+  id: string;
+  behaviour: CostBehaviour;
+  componentCode: string;
+  createdAt: string;
+}
+
+export interface StoredVersionInput {
+  legalEntityId: string;
+  code: string;
+  type?: VersionType;
+  fallback?: FallbackPrinciple;
+  fallbackVersionId?: string;
+  siteIds?: string[];
+  effectiveFrom?: string;
+}
+
+export interface StoredVersion {
+  id: string;
+  legalEntityId: string;
+  code: string;
+  type: VersionType;
+  status: VersionStatus;
+  fallback: FallbackPrinciple;
+  fallbackVersionId?: string;
+  siteIds: string[];
+  effectiveFrom?: string;
+  activatedAt?: string;
+  /** Optimistic-concurrency counter; every lifecycle action names the one it read. */
+  version: number;
+  createdAt: string;
+}
+
+export interface VersionPage {
+  items: StoredVersion[];
+  next?: string;
+}
+
+export interface VersionFilter {
+  legalEntityId?: string;
+  status?: VersionStatus;
+  type?: VersionType;
+  after?: string;
+  limit?: number;
+}
+
+/** A fresh Idempotency-Key for one create; a retry of the same request reuses it. */
+export function newIdempotencyKey(): string {
+  const c = globalThis.crypto as Crypto | undefined;
+  if (c && typeof c.randomUUID === "function") return c.randomUUID();
+  return `ui-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
+async function call<T>(method: "GET" | "POST", path: string, body?: unknown, options: { idempotencyKey?: string; signal?: AbortSignal } = {}): Promise<T> {
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  if (options.idempotencyKey) headers["Idempotency-Key"] = options.idempotencyKey;
+  const res = await fetch(`${base}${path}`, {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+    credentials: "same-origin",
+    signal: options.signal,
+  });
+  if (!res.ok) {
+    throw await toError(res);
+  }
+  return (await res.json()) as T;
+}
+
+export function listCostComponents(signal?: AbortSignal): Promise<{ items: CostComponent[] }> {
+  return call<{ items: CostComponent[] }>("GET", "/cost-components", undefined, { signal });
+}
+
+/** Create a cost component (at most 20 per tenant, CST-0790; unique code, CST-0791). */
+export function createCostComponent(input: CostComponentInput, idempotencyKey: string, signal?: AbortSignal): Promise<CostComponent> {
+  return call<CostComponent>("POST", "/cost-components", input, { idempotencyKey, signal });
+}
+
+export function listCostGroups(signal?: AbortSignal): Promise<{ items: CostGroup[] }> {
+  return call<{ items: CostGroup[] }>("GET", "/cost-groups", undefined, { signal });
+}
+
+/** Create a cost group mapped to a component (at most 50 per tenant, CST-0792; unique code, CST-0793). */
+export function createCostGroup(input: CostGroupInput, idempotencyKey: string, signal?: AbortSignal): Promise<CostGroup> {
+  return call<CostGroup>("POST", "/cost-groups", input, { idempotencyKey, signal });
+}
+
+/** One page of stored versions in creation order; pass `next` as `after` for the following page. */
+export function listStoredVersions(filter: VersionFilter = {}, signal?: AbortSignal): Promise<VersionPage> {
+  const q = new URLSearchParams();
+  for (const [key, value] of Object.entries(filter)) {
+    if (value !== undefined && value !== "") q.set(key, String(value));
+  }
+  const query = q.toString();
+  return call<VersionPage>("GET", `/versions${query ? `?${query}` : ""}`, undefined, { signal });
+}
+
+export function getStoredVersion(id: string, signal?: AbortSignal): Promise<StoredVersion> {
+  return call<StoredVersion>("GET", `/versions/${encodeURIComponent(id)}`, undefined, { signal });
+}
+
+/** Create an Open version (FR-39.3). A code is unique per legal entity (CST-0713). */
+export function createStoredVersion(input: StoredVersionInput, idempotencyKey: string, signal?: AbortSignal): Promise<StoredVersion> {
+  return call<StoredVersion>("POST", "/versions", input, { idempotencyKey, signal });
+}
+
+/** Block, unblock or close a stored version; a stale `version` is refused with CST-0714. */
+export function transitionStoredVersion(id: string, action: VersionAction, version: number, signal?: AbortSignal): Promise<StoredVersion> {
+  return call<StoredVersion>("POST", `/versions/${encodeURIComponent(id)}/transition`, { action, version }, { signal });
+}
+
+/** Activate a stored Open or Blocked version (CostingActivate; Simulation is refused, CST-0711). */
+export function activateStoredVersion(id: string, version: number, signal?: AbortSignal): Promise<StoredVersion> {
+  return call<StoredVersion>("POST", `/versions/${encodeURIComponent(id)}/activate`, { version }, { signal });
 }

@@ -99,6 +99,9 @@ subtotals named in `refs`). See slice 3 below.
 | `POST /v1/costing/variances/compute` | `CostingSystem` |
 | `POST /v1/costing/activations:preview`, `/versions:activate`, `/conversions:validate`, `/conversions:advance` | `CostingActivate` |
 | `POST /v1/costing/versions:transition` (block, unblock, close) | `CostingMaintain` |
+| `GET /v1/costing/cost-components`, `/cost-groups`, `/versions`, `/versions/{id}` | `CostingView` |
+| `POST /v1/costing/cost-components`, `/cost-groups`, `/versions`, `/versions/{id}/transition` | `CostingMaintain` |
+| `POST /v1/costing/versions/{id}/activate` | `CostingActivate` |
 
 The comparison and the reconciliation compute an inquiry without changing anything, so they
 take the PRD's read duty `CostingView` (the PRD's `GET /costing/compare` and the inventory
@@ -116,7 +119,11 @@ reconciliation (`/productcost/reconciliation`) and, from slice 3, costing versio
 (`/productcost/conversion`), and from slice 4 ad-hoc estimates (`/productcost/estimates`) and
 sales order estimate versions with refresh and freeze (`/productcost/sales-order-versions`).
 The roll-up page offers the valuation view (Legal, Group, ProfitCenter) and shows the costing
-sheet subtotals.
+sheet subtotals. From slice 5 the cost components (`/productcost/cost-components`) and cost
+groups (`/productcost/cost-groups`) pages list and create the stored cost structure, and the
+costing versions page lists the stored versions (status filter, next-page cursor), creates them
+and blocks, unblocks, activates or closes them under their version counter; it replaced the
+session-only version list of slice 3.
 
 ## Slice 3 (stateless)
 
@@ -202,6 +209,54 @@ the next state. Nothing is stored and no event is published until the persistenc
   - The caller sends the versions it holds; versions of another line, duplicate version
     numbers or an unknown status are 400.
 
+## Slice 5 (stored cost structure and costing versions)
+
+The first persisted records. Every read and write runs in a tenant transaction
+(`dbx.WithTenantTx`), so row-level security applies (tenant policy on every table, plus the
+legal-entity scope on `costing_version`). Every create takes a required `Idempotency-Key`
+(at most 200 characters) recorded in `idempotency_keys` with a hash of the command and its
+body: a repeated key with the same body returns the stored response with
+`Idempotent-Replayed: true` and writes nothing; a key reused with another body, or on another
+command, is `idempotency_key_reuse` (422). Every change writes its event to the outbox in the
+same transaction (see `events/asyncapi.yaml`).
+
+- **Cost components** (FR-39.1): `GET` and `POST /v1/costing/cost-components`. A code is 1–20
+  upper-case letters, digits or hyphens (`DM`, `IND-MAT`), with a name (≤ 120), a cost group
+  type (`DirectMaterial`, `DirectManufacturing`, `Indirect`, `Undefined`) and a behaviour
+  (`Fixed` or `Variable`, default `Variable`). At most 20 per tenant (`CST-0790`, checked under
+  a per-tenant advisory lock so concurrent creates cannot exceed it); a duplicate code is
+  `CST-0791` (409). Event `dev.passage.costing.costcomponent.created.v1`.
+- **Cost groups** (FR-39.1): `GET` and `POST /v1/costing/cost-groups`. Same code, name, type and
+  behaviour rules, and `componentId`, the cost component the group's costs are split into
+  (`CST-0794`, 422, when it is not a component of the tenant). At most 50 per tenant
+  (`CST-0792`); a duplicate code is `CST-0793` (409). Event
+  `dev.passage.costing.costgroup.created.v1`.
+- **Costing versions** (FR-39.3): `POST /v1/costing/versions` creates an Open version for a
+  legal entity with a code (≤ 30, unique per legal entity, `CST-0713`, 409), a type (default
+  `Standard`, `costing.versionType`), a fallback principle (default `Active`,
+  `costing.fallback`), the site scope (`siteIds`, unique, empty for every site) and
+  `effectiveFrom`. `SpecifiedVersion` needs `fallbackVersionId`, a stored version of the same
+  legal entity (`CST-0716`). A legal entity outside the caller's scope is `CST-0718` (403).
+  `GET /v1/costing/versions` pages in creation order (`limit` 1–500, default 100; `after` is
+  the previous page's `next`) and filters by `legalEntityId`, `status` and `type`;
+  `GET /v1/costing/versions/{id}` reads one (`CST-0717`, 404). Event
+  `dev.passage.costing.version.created.v1`.
+- **Lifecycle** (BR-39.2): `POST /v1/costing/versions/{id}/transition` with `{action, version}`
+  blocks, unblocks or closes (CostingMaintain); `POST /v1/costing/versions/{id}/activate` with
+  `{version}` activates (CostingActivate, segregated). `version` is the counter the caller read;
+  a stale one is `CST-0714` (409) and changes nothing. The rules are those of slice 3
+  (`CST-0711`, `CST-0715`). Activation stamps `activatedAt`. No pending prices are stored yet,
+  so activating a version revalues and posts nothing (D6). Event
+  `dev.passage.costing.version.transitioned.v1` with the action and both statuses.
+- The slice-3 stateless routes (`/versions:transition`, `/versions:activate`) still serve
+  callers that carry a version themselves.
+- Without a store (no database) the stored routes answer `CST-0799` (503).
+
+Migration `0002_cost_structure.sql` adds `cost_group`, `idempotency_keys` and `outbox`
+(tenant_id first, RLS forced). Store tests run against Postgres with
+`PASSAGE_TEST_DATABASE_URL`; with `PASSAGE_TEST_APP_DATABASE_URL` (a role without BYPASSRLS)
+they also run as the application role and check tenant and legal-entity isolation.
+
 ## Layout
 
 ```
@@ -212,12 +267,17 @@ internal/domain/        roll-up, planner, mass roll, variances, pricing, mixed c
                         conversion checklist (pure, no I/O)
 internal/api/           HTTP handlers, DTOs, validation (commercial.go holds the slice-2 routes,
                         lifecycle.go the slice-3 version and conversion routes, estimates.go
-                        the slice-4 ad-hoc and sales order estimate version routes)
+                        the slice-4 ad-hoc and sales order estimate version routes, persist.go
+                        the slice-5 stored routes)
+internal/store/         Postgres repository for cost components, cost groups and costing
+                        versions (pgx, tenant transactions, idempotency, outbox)
+internal/events/        event types and payloads (events_test.go checks events/asyncapi.yaml)
 migrations/             costing schema (costing_version, cost_calculation, cost_component_split,
-                        cost_component, variance_entry) with RLS; not yet written to by slices 1-2;
-                        migrations_test.go applies it and checks RLS when a database is set
+                        cost_component, variance_entry; from 0002 cost_group, idempotency_keys,
+                        outbox) with RLS; migrations_test.go applies it and checks RLS when a
+                        database is set
 api/openapi.yaml        OpenAPI 3.1 for every endpoint
-events/asyncapi.yaml    AsyncAPI 3 (no channels in slices 1-2)
+events/asyncapi.yaml    AsyncAPI 3 for the slice-5 events
 charts/productcost/     Helm chart
 ```
 
@@ -227,6 +287,7 @@ charts/productcost/     Helm chart
 go run ./cmd/productcost            # requires DATABASE_URL for dbx.Connect
 go test ./...                       # runs without a database; DB tests skip
 PASSAGE_TEST_DATABASE_URL=... go test ./...   # enables testkit-backed tests
+PASSAGE_TEST_APP_DATABASE_URL=...             # plus: store tests as the application role (RLS)
 go vet ./...
 helm lint charts/productcost
 ```
@@ -272,6 +333,18 @@ Problem `type` is `https://passage.dev/problems/<code>`.
 | CST-0762 | item error | ProfitCenter view: no transfer price and no cost-plus basis for a profit-center item (new code) |
 | CST-0763 | 422 | no usable sales order estimate to freeze (new code) |
 | CST-0764 | 422 | ad-hoc estimate refused: invalid model, formula or characteristic value, or a negative quantity or price (new code) |
+| CST-0713 | 409 | the legal entity already has a costing version with this code (new code) |
+| CST-0714 | 409 | the costing version changed since the caller read it: the `version` in the request is stale (new code) |
+| CST-0716 | 422 | also: the `SpecifiedVersion` fallback version does not exist or belongs to another legal entity |
+| CST-0717 | 404 | costing version not found in the caller's tenant and legal-entity scope (new code) |
+| CST-0718 | 403 | the legal entity is outside the caller's legal-entity scope (new code) |
+| CST-0790 | 422 | the tenant already holds 20 cost components (new code) |
+| CST-0791 | 409 | a cost component with this code already exists (new code) |
+| CST-0792 | 422 | the tenant already holds 50 cost groups (new code) |
+| CST-0793 | 409 | a cost group with this code already exists (new code) |
+| CST-0794 | 422 | the cost group names a cost component that does not exist (new code) |
+| CST-0799 | 503 | the stored routes were called without a database (new code) |
+| idempotency_key_reuse | 422 | the Idempotency-Key was already used with a different request (platform convention) |
 
 Problem codes for the mass roll, the activation preview, the postings, the comparison and
 the reconciliation are not in the catalog; their failures are per-item diagnostics or

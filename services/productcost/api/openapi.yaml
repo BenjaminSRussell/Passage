@@ -1,14 +1,18 @@
 openapi: 3.1.0
 info:
-  title: Passage product costing (wave 39, slices 1-4)
-  version: 0.4.0
+  title: Passage product costing (wave 39, slices 1-5)
+  version: 0.5.0
   description: >
     Stateless costing computations. The caller supplies items, prices and
     actuals; the service returns rolled standards, mass-roll runs, variance
     decompositions, activation previews, mixed costs, component postings,
     sales order estimates and their versions, ad-hoc estimates from costing
     models, comparisons, standard reconciliations, the costing version
-    lifecycle and the conversion checklist. Nothing is persisted yet.
+    lifecycle and the conversion checklist; those routes store nothing. From
+    slice 5 the cost structure (cost components and cost groups) and the
+    costing versions are stored per tenant under row-level security, with
+    Idempotency-Key on every create, an optimistic version counter on every
+    lifecycle action and an outbox event for every change.
 servers:
   - url: https://api.{env}.passage.dev
     variables:
@@ -363,7 +367,238 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem", description: "CST-0763 no estimate to freeze, or the current estimate failed to roll" }
+  /v1/costing/cost-components:
+    get:
+      operationId: listCostComponents
+      summary: List the tenant's cost components (at most 20), ordered by code (FR-39.1)
+      x-passage-duty: CostingView
+      responses:
+        "200":
+          description: Components
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/CostComponent" } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem", description: "CST-0799 no store configured" }
+    post:
+      operationId: createCostComponent
+      summary: Create a cost component of the split (FR-39.1); publishes dev.passage.costing.costcomponent.created.v1
+      x-passage-duty: CostingMaintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CostComponentInput" }
+      responses:
+        "201":
+          description: Created, or replayed for a repeated Idempotency-Key
+          headers:
+            Idempotent-Replayed: { $ref: "#/components/headers/IdempotentReplayed" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CostComponent" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem", description: "CST-0791 a component with this code exists" }
+        "422": { $ref: "#/components/responses/Problem", description: "CST-0790 the tenant holds 20 components; idempotency_key_reuse" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/costing/cost-groups:
+    get:
+      operationId: listCostGroups
+      summary: List the tenant's cost groups (at most 50) with the component each maps to (FR-39.1)
+      x-passage-duty: CostingView
+      responses:
+        "200":
+          description: Cost groups
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/CostGroup" } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createCostGroup
+      summary: Create a cost group mapped to a cost component (FR-39.1); publishes dev.passage.costing.costgroup.created.v1
+      x-passage-duty: CostingMaintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CostGroupInput" }
+      responses:
+        "201":
+          description: Created, or replayed for a repeated Idempotency-Key
+          headers:
+            Idempotent-Replayed: { $ref: "#/components/headers/IdempotentReplayed" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CostGroup" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem", description: "CST-0793 a cost group with this code exists" }
+        "422": { $ref: "#/components/responses/Problem", description: "CST-0792 the tenant holds 50 cost groups; CST-0794 unknown cost component; idempotency_key_reuse" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/costing/versions:
+    get:
+      operationId: listCostingVersions
+      summary: Page through the stored costing versions in the caller's legal-entity scope, in creation order (FR-39.3)
+      x-passage-duty: CostingView
+      parameters:
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [Open, Blocked, Active, Closed] } }
+        - { name: type, in: query, schema: { type: string, enum: [Standard, Planned, Simulation, Conversion] } }
+        - { name: after, in: query, description: The next cursor of the previous page, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+      responses:
+        "200":
+          description: One page of versions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/StoredCostingVersion" } }
+                  next: { type: string, format: uuid, description: Cursor of the next page; absent on the last page }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createCostingVersion
+      summary: Create an Open costing version (FR-39.3); publishes dev.passage.costing.version.created.v1
+      x-passage-duty: CostingMaintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CostingVersionInput" }
+      responses:
+        "201":
+          description: Created, or replayed for a repeated Idempotency-Key
+          headers:
+            Idempotent-Replayed: { $ref: "#/components/headers/IdempotentReplayed" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StoredCostingVersion" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem", description: "CST-0718 the legal entity is outside the caller's scope" }
+        "409": { $ref: "#/components/responses/Problem", description: "CST-0713 the legal entity has a version with this code" }
+        "422": { $ref: "#/components/responses/Problem", description: "CST-0716 SpecifiedVersion fallback missing, unknown or of another legal entity; idempotency_key_reuse" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/costing/versions/{id}:
+    get:
+      operationId: getCostingVersion
+      summary: Read one stored costing version
+      x-passage-duty: CostingView
+      parameters:
+        - $ref: "#/components/parameters/VersionId"
+      responses:
+        "200":
+          description: The version
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StoredCostingVersion" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem", description: "CST-0717 no such version in the caller's scope" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/costing/versions/{id}/transition:
+    post:
+      operationId: transitionStoredCostingVersion
+      summary: Block, unblock or close a stored version (BR-39.2) under its optimistic version; publishes dev.passage.costing.version.transitioned.v1
+      x-passage-duty: CostingMaintain
+      parameters:
+        - $ref: "#/components/parameters/VersionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, version]
+              additionalProperties: false
+              properties:
+                action: { type: string, enum: [block, unblock, close] }
+                version: { type: integer, minimum: 1, description: The version counter the caller read }
+      responses:
+        "200":
+          description: The version in its next state, its counter incremented
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StoredCostingVersion" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem", description: "CST-0717" }
+        "409": { $ref: "#/components/responses/Problem", description: "CST-0714 the version changed since it was read" }
+        "422": { $ref: "#/components/responses/Problem", description: "CST-0715 transition not allowed from the current status" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/costing/versions/{id}/activate:
+    post:
+      operationId: activateStoredCostingVersion
+      summary: Move a stored Open or Blocked version to Active (BR-39.2); segregated from CostingMaintain. Sets activatedAt; no pending prices are stored yet, so nothing is revalued or posted
+      x-passage-duty: CostingActivate
+      parameters:
+        - $ref: "#/components/parameters/VersionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              additionalProperties: false
+              properties:
+                version: { type: integer, minimum: 1 }
+      responses:
+        "200":
+          description: The version, now Active
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StoredCostingVersion" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem", description: "CST-0717" }
+        "409": { $ref: "#/components/responses/Problem", description: "CST-0714 the version changed since it was read" }
+        "422": { $ref: "#/components/responses/Problem", description: "CST-0711 simulation versions cannot be activated, CST-0715 not Open or Blocked" }
+        "503": { $ref: "#/components/responses/Problem" }
 components:
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Replays the stored response for 24 hours; reusing a key with a different request is 422 idempotency_key_reuse
+      schema: { type: string, minLength: 1, maxLength: 200 }
+    VersionId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  headers:
+    IdempotentReplayed:
+      description: "true when the response is the stored answer to an earlier request with this Idempotency-Key"
+      schema: { type: string, enum: ["true"] }
   responses:
     Problem:
       description: RFC 9457 problem details
@@ -371,6 +606,70 @@ components:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
   schemas:
+    CostComponentInput:
+      type: object
+      required: [code, name, costGroupType]
+      additionalProperties: false
+      properties:
+        code: { type: string, pattern: "^[A-Z0-9][A-Z0-9-]{0,19}$", examples: [DM, IND-MAT] }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        costGroupType: { type: string, enum: [DirectMaterial, DirectManufacturing, Indirect, Undefined] }
+        behaviour: { type: string, enum: [Fixed, Variable], default: Variable }
+    CostComponent:
+      allOf:
+        - $ref: "#/components/schemas/CostComponentInput"
+        - type: object
+          required: [id, behaviour, createdAt]
+          properties:
+            id: { type: string, format: uuid }
+            createdAt: { type: string, format: date-time }
+    CostGroupInput:
+      type: object
+      required: [code, name, type, componentId]
+      additionalProperties: false
+      properties:
+        code: { type: string, pattern: "^[A-Z0-9][A-Z0-9-]{0,19}$" }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        type: { type: string, enum: [DirectMaterial, DirectManufacturing, Indirect, Undefined] }
+        behaviour: { type: string, enum: [Fixed, Variable], default: Variable }
+        componentId: { type: string, format: uuid, description: The cost component the group's costs are split into }
+    CostGroup:
+      allOf:
+        - $ref: "#/components/schemas/CostGroupInput"
+        - type: object
+          required: [id, behaviour, componentCode, createdAt]
+          properties:
+            id: { type: string, format: uuid }
+            componentCode: { type: string }
+            createdAt: { type: string, format: date-time }
+    CostingVersionInput:
+      type: object
+      required: [legalEntityId, code]
+      additionalProperties: false
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        code: { type: string, minLength: 1, maxLength: 30, description: Unique per legal entity }
+        type: { type: string, enum: [Standard, Planned, Simulation, Conversion], default: Standard }
+        fallback: { type: string, enum: [None, Active, SpecifiedVersion], default: Active }
+        fallbackVersionId: { type: string, format: uuid, description: "Required with SpecifiedVersion: a version of the same legal entity" }
+        siteIds: { type: array, maxItems: 500, uniqueItems: true, items: { type: string, format: uuid }, description: Empty means every site }
+        effectiveFrom: { type: string, format: date-time }
+    StoredCostingVersion:
+      type: object
+      required: [id, legalEntityId, code, type, status, fallback, siteIds, version, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        code: { type: string }
+        type: { type: string, enum: [Standard, Planned, Simulation, Conversion] }
+        status: { type: string, enum: [Open, Blocked, Active, Closed] }
+        fallback: { type: string, enum: [None, Active, SpecifiedVersion] }
+        fallbackVersionId: { type: string, format: uuid }
+        siteIds: { type: array, items: { type: string, format: uuid } }
+        effectiveFrom: { type: string, format: date-time }
+        activatedAt: { type: string, format: date-time }
+        version: { type: integer, minimum: 1, description: Optimistic-concurrency counter; a lifecycle action names it }
+        createdAt: { type: string, format: date-time }
     Problem:
       type: object
       required: [type, title, status, code]
