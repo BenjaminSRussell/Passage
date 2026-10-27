@@ -63,6 +63,10 @@ type API struct {
 	requestsCreated  atomic.Int64
 	decisions        atomic.Int64
 	yearCloses       atomic.Int64
+	benefitPlans     atomic.Int64
+	simulations      atomic.Int64
+	enrollments      atomic.Int64
+	enrollmentsEnded atomic.Int64
 }
 
 // New builds the API over a store.
@@ -93,6 +97,14 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyMssApprove)).Post("/v1/hr/absence/requests/{id}/decide", absenceRequestRoute(a.decideAbsenceRequest))
 	r.With(authz.RequireDuty(dutyEssAbsence)).Post("/v1/hr/absence/requests/{id}/cancel", absenceRequestRoute(a.cancelAbsenceRequest))
 	r.With(authz.RequireDuty(dutyEssAbsence)).Get("/v1/hr/workers/{id}/absence/balances", workerRoute(a.absenceBalances))
+	r.With(authz.RequireDuty(dutySetupAdmin)).Post("/v1/hr/benefits/plans", a.createBenefitPlan)
+	r.With(authz.RequireDuty(dutyEssBenefits)).Get("/v1/hr/benefits/plans", a.listBenefitPlans)
+	r.With(authz.RequireDuty(dutyEssBenefits)).Get("/v1/hr/benefits/plans/{id}", benefitPlanRoute(a.getBenefitPlan))
+	r.With(authz.RequireDuty(dutySetupAdmin)).Get("/v1/hr/benefits/plans/{id}/simulate", benefitPlanRoute(a.simulateBenefitPlan))
+	r.With(authz.RequireDuty(dutyEssBenefits)).Post("/v1/hr/benefits/life-events", a.createLifeEvent)
+	r.With(authz.RequireDuty(dutyEssBenefits)).Post("/v1/hr/benefits/enrollments", a.createBenefitEnrollment)
+	r.With(authz.RequireDuty(dutyWorkerMaintain)).Post("/v1/hr/benefits/enrollments/{id}/end", enrollmentRoute(a.endBenefitEnrollment))
+	r.With(authz.RequireDuty(dutyEssBenefits)).Get("/v1/hr/workers/{id}/benefits", workerRoute(a.workerBenefits))
 }
 
 // ready replaces the kernel's static /readyz: it pings the database within
@@ -126,6 +138,10 @@ func (a *API) Metrics() http.Handler {
 		counter("hr_absence_requests_created_total", "Absence requests submitted; idempotent replays are not counted.", a.requestsCreated.Load())
 		counter("hr_absence_decisions_total", "Absence decisions that changed a request's status.", a.decisions.Load())
 		counter("hr_absence_year_closes_total", "Year-end and carry-over expiry calls that closed at least one worker.", a.yearCloses.Load())
+		counter("hr_benefit_plans_created_total", "Benefit plans created; idempotent replays are not counted.", a.benefitPlans.Load())
+		counter("hr_benefit_simulations_total", "Whole-workforce eligibility simulations run.", a.simulations.Load())
+		counter("hr_benefit_enrollments_total", "Benefit enrollments recorded; idempotent replays are not counted.", a.enrollments.Load())
+		counter("hr_benefit_enrollments_ended_total", "Benefit enrollments ended; repeated ends are not counted.", a.enrollmentsEnded.Load())
 	})
 }
 

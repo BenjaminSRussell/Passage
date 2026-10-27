@@ -436,3 +436,150 @@ export function decideAbsenceRequest(requestId: string, decision: "APPROVE" | "R
 export function cancelAbsenceRequest(requestId: string): Promise<AbsenceRequest> {
   return command<AbsenceRequest>(`/absence/requests/${id(requestId)}/cancel`);
 }
+
+// Benefits (FR-42.8, BR-42.6). Rates are decimal strings in the plan currency.
+
+export type BenefitPlanType = "MEDICAL" | "DENTAL" | "VISION" | "LIFE" | "RETIREMENT_401K" | "HSA" | "FSA" | "OTHER";
+export type RateBasis = "PER_PAY_PERIOD" | "MONTHLY";
+export type LifeEventKind = "MARRIAGE" | "BIRTH" | "ADOPTION" | "DIVORCE" | "LOSS_OF_COVERAGE" | "OTHER";
+export type EnrollmentEndReason = "TERMINATION" | "LIFE_EVENT" | "PLAN_END";
+export type EnrollmentStatus = "PENDING" | "ACTIVE" | "ENDED";
+
+export interface BenefitOption {
+  code: string;
+  coverageLevel: string;
+  employeeRate: string;
+  employerRate: string;
+  rateBasis: RateBasis;
+}
+
+export interface NewBenefitPlan {
+  code: string;
+  planType: BenefitPlanType;
+  providerPartyId?: string;
+  currency: string;
+  eligibilityRule: string;
+  enrollmentStart: string;
+  enrollmentEnd: string;
+  waitingDays: number;
+  preTax: boolean;
+  payrollDeductionCode?: string;
+  options: BenefitOption[];
+}
+
+export interface BenefitPlan extends NewBenefitPlan {
+  id: string;
+  createdAt: string;
+}
+
+export interface BenefitSimulationRow {
+  workerId: string;
+  personnelNumber: string;
+  legalName: string;
+  employmentId?: string;
+  legalEntityId?: string;
+  employmentType?: EmploymentType;
+  serviceDays?: number;
+  fte?: string;
+  eligible: boolean;
+  reason: string;
+}
+
+export interface BenefitSimulation {
+  planId: string;
+  planCode: string;
+  rule: string;
+  asOf: string;
+  total: number;
+  eligible: number;
+  rows: BenefitSimulationRow[];
+}
+
+export interface LifeEvent {
+  id: string;
+  workerId: string;
+  kind: LifeEventKind;
+  eventDate: string;
+  /** The last effective date an enrollment may take because of this event. */
+  windowEnd: string;
+  recordedBy?: string;
+  createdAt: string;
+}
+
+export interface NewLifeEvent {
+  workerId: string;
+  kind: LifeEventKind;
+  eventDate: string;
+}
+
+export interface BenefitEnrollment {
+  id: string;
+  workerId: string;
+  planId: string;
+  planCode: string;
+  planType: BenefitPlanType;
+  optionCode: string;
+  coverageLevel: string;
+  validFrom: string;
+  validTo?: string;
+  status: EnrollmentStatus;
+  lifeEventId?: string;
+  dependentCount: number;
+  endReason?: EnrollmentEndReason;
+  cobraQualifyingEvent: boolean;
+  employeeRate: string;
+  employerRate: string;
+  currency: string;
+  rateBasis: RateBasis;
+  preTax: boolean;
+  payrollDeductionCode?: string;
+}
+
+export interface NewBenefitEnrollment {
+  workerId: string;
+  planId: string;
+  optionCode: string;
+  effectiveDate: string;
+  lifeEventId?: string;
+  dependentCount: number;
+}
+
+export interface WorkerBenefits {
+  workerId: string;
+  enrollments: BenefitEnrollment[];
+  lifeEvents: LifeEvent[];
+}
+
+export function listBenefitPlans(filter: { cursor?: string } = {}, signal?: AbortSignal): Promise<Page<BenefitPlan>> {
+  return page<BenefitPlan>(`/benefits/plans${query({ cursor: filter.cursor })}`, signal);
+}
+
+export function getBenefitPlan(planId: string, signal?: AbortSignal): Promise<BenefitPlan> {
+  return send<BenefitPlan>(`/benefits/plans/${id(planId)}`, {}, signal);
+}
+
+export function createBenefitPlan(input: NewBenefitPlan, key: string = newKey()): Promise<BenefitPlan> {
+  return post<BenefitPlan>("/benefits/plans", input, key);
+}
+
+/** Evaluates the plan for the whole workforce as of a date; writes nothing. */
+export function simulateBenefitPlan(planId: string, asOf: string, signal?: AbortSignal): Promise<BenefitSimulation> {
+  return send<BenefitSimulation>(`/benefits/plans/${id(planId)}/simulate${query({ asOf })}`, {}, signal);
+}
+
+export function getWorkerBenefits(workerId: string, signal?: AbortSignal): Promise<WorkerBenefits> {
+  return send<WorkerBenefits>(`/workers/${id(workerId)}/benefits`, {}, signal);
+}
+
+export function recordLifeEvent(input: NewLifeEvent, key: string = newKey()): Promise<LifeEvent> {
+  return post<LifeEvent>("/benefits/life-events", input, key);
+}
+
+export function createBenefitEnrollment(input: NewBenefitEnrollment, key: string = newKey()): Promise<BenefitEnrollment> {
+  return post<BenefitEnrollment>("/benefits/enrollments", input, key);
+}
+
+/** Ending again with the same last day and reason is a no-op on the service. */
+export function endBenefitEnrollment(enrollmentId: string, lastDay: string, reason: EnrollmentEndReason): Promise<BenefitEnrollment> {
+  return command<BenefitEnrollment>(`/benefits/enrollments/${id(enrollmentId)}/end`, { lastDay, reason });
+}

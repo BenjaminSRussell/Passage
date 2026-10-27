@@ -1,17 +1,27 @@
 package events
 
 import (
+	"os"
+	"regexp"
 	"testing"
 
 	"github.com/BenjaminSRussell/passage/platform/events"
 )
 
+// TestEveryTypeFollowsTheKernelNamingRule keeps All() and events/asyncapi.yaml
+// in step: every published type follows the kernel rule and has a message
+// named after it, and every documented message is published.
 func TestEveryTypeFollowsTheKernelNamingRule(t *testing.T) {
-	want := map[string]bool{
-		"dev.passage.hr.worker.created.v1":             true,
-		"dev.passage.hr.employment.changed.v1":         true,
-		"dev.passage.hr.positionassignment.changed.v1": true,
-		"dev.passage.hr.absence.approved.v1":           true,
+	raw, err := os.ReadFile("../../events/asyncapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{}
+	for _, m := range regexp.MustCompile(`(?m)^      name: (dev\.passage\.\S+)$`).FindAllStringSubmatch(string(raw), -1) {
+		want[m[1]] = true
+	}
+	if len(want) == 0 {
+		t.Fatal("no message names found in asyncapi.yaml")
 	}
 	for _, typ := range All() {
 		if !events.ValidType(typ) {

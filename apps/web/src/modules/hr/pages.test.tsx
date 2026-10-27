@@ -108,6 +108,7 @@ describe("hr module", () => {
       { label: "Positions", to: "/hr/positions", duty: "HcmOrgInquire" },
       { label: "Absence plans", to: "/hr/absence/plans", duty: "HcmAbsenceAdmin" },
       { label: "Absence requests", to: "/hr/absence/requests", duty: "EssAbsence" },
+      { label: "Benefit plans", to: "/hr/benefits/plans", duty: "HcmSetupAdmin" },
     ]);
     expect(loadModules().map((m) => m.id)).toContain("hr");
   });

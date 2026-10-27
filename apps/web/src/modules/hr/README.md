@@ -1,4 +1,4 @@
-# HR module (web, PSG-42 slices 1 and 2)
+# HR module (web, PSG-42 slices 1 to 3)
 
 The HR workspace for the HR service (`services/hr/api/openapi.yaml`).
 Routes and nav are in `module.ts`; the shell discovers it through the registry.
@@ -15,6 +15,10 @@ Routes and nav are in `module.ts`; the shell discovers it through the registry.
 | `/hr/absence/plans/new` | New absence plan; decimals stay strings, defaults are PRD 8.42.13 | `POST /absence/plans` |
 | `/hr/absence/plans/:id` | Plan detail: the rule, a run-accrual form (suggests the last whole period), the accrual periods, and the plan-year close and carry-over expiry with their history | `GET /absence/plans/{id}`, `POST /absence/accrue`, `POST /absence/plans/{id}/year-end`, `POST /absence/plans/{id}/carry-over-expiry` |
 | `/hr/absence/requests?status=` | Request queue, oldest first, filtered by status (default submitted), with approve, reject and cancel. An employee sees their own requests, a manager or absence admin the tenant's | `GET /absence/requests?status=&cursor=`, `POST /absence/requests/{id}/decide`, `POST /absence/requests/{id}/cancel` |
+| `/hr/benefits/plans` | Benefit plans with type, open enrollment window, waiting days and options (setup admin) | `GET /benefits/plans?cursor=` |
+| `/hr/benefits/plans/new` | New benefit plan: options with employee and employer rates (decimals stay strings, places per currency), eligibility rule, window, waiting days | `POST /benefits/plans` |
+| `/hr/benefits/plans/:id` | Plan detail: terms, coverage options, and the eligibility simulation as of a date (totals, each worker with the reason, eligible-only filter) | `GET /benefits/plans/{id}`, `GET /benefits/plans/{id}/simulate?asOf=` |
+| `/hr/workers/:id` (Benefits card) | The worker's enrollments with the employee cost per period, life events with their window, an enroll form with the cost preview (window, eligibility and overlap refusals land on the fields or show the eligibility reason), a record-life-event form and an end-coverage form (termination keeps coverage to the month end) | `GET /workers/{id}/benefits`, `GET /benefits/plans`, `POST /benefits/enrollments`, `POST /benefits/life-events`, `POST /benefits/enrollments/{id}/end` |
 | `/hr/workers/:id` (Absence card) | The worker's balances for the current plan year (carry-over, accrued, used, available), their requests with cancel, and a request form whose balance and overlap refusals land on the fields; overlap warnings are shown after submit | `GET /workers/{id}/absence/balances?asOf=`, `GET /absence/requests?workerId=`, `GET /absence/plans`, `POST /absence/requests` |
 
 The as-of date is kept in the URL (`?date=`), so it survives reloads and can be
@@ -29,7 +33,7 @@ and `npx tsc --noEmit` in `apps/web`.
 ## Needs
 
 - Shell owner (wave 5): nav entries carry `HcmWorkerInquire`,
-  `HcmOrgInquire`, `HcmAbsenceAdmin` and `EssAbsence`; the shell filters by
+  `HcmOrgInquire`, `HcmAbsenceAdmin`, `EssAbsence` and `HcmSetupAdmin`; the shell filters by
   duty once duties reach the client. Until then the absence screens show the
   service's 403 as an error.
 - Pickers for legal entity and department ids need the wave-6 org read
@@ -39,5 +43,8 @@ and `npx tsc --noEmit` in `apps/web`.
   `HcmWorkerInquire`, so an employee with only `EssAbsence` sees their own
   requests in the queue (the service filters them) but their balances only
   once the ESS portal (`apps/ess`) or a "my absence" page exists.
-- Org chart, personnel actions, absence calendars, benefits and the ESS/MSS
-  portals come with the later slices listed in `services/hr/NOT-IMPLEMENTED.md`.
+- The Benefits card sits on the worker page too, so an employee with only
+  `EssBenefits` enrolls through the API until a "my benefits" page or the
+  ESS portal exists (same need as "my absence").
+- Org chart, personnel actions, absence calendars and the ESS/MSS portals
+  come with the later slices listed in `services/hr/NOT-IMPLEMENTED.md`.

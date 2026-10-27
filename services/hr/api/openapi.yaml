@@ -3,12 +3,13 @@ info:
   title: Passage HR API
   version: 0.1.0
   description: |
-    Wave 42 slices 1 and 2 (PSG-42): workers, employments, positions and
+    Wave 42 slices 1 to 3 (PSG-42): workers, employments, positions and
     position assignments with effective dating, the as-of manager query, the
-    audited PII vault, and absence plans, accrual, year end and carry-over,
-    balances and requests with approval. Personnel actions, benefits, learning,
-    questionnaires, incidents, recruiting and compensation cycles are later
-    slices (see NOT-IMPLEMENTED.md).
+    audited PII vault, absence plans, accrual, year end and carry-over,
+    balances and requests with approval, and benefit plans with CEL
+    eligibility, a workforce simulation, life events and enrollments.
+    Personnel actions, learning, questionnaires, incidents, recruiting and
+    compensation cycles are later slices (see NOT-IMPLEMENTED.md).
 servers:
   - url: https://api.{env}.passage.dev
     variables:
@@ -694,6 +695,279 @@ paths:
           $ref: "#/components/responses/Problem"
         "404":
           $ref: "#/components/responses/Problem"
+  /v1/hr/benefits/plans:
+    get:
+      operationId: listBenefitPlans
+      summary: List benefit plans by code, each with its options
+      x-passage-duty: EssBenefits
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: One page of plans
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BenefitPlanList"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createBenefitPlan
+      summary: Create a benefit plan with its options, eligibility rule and open enrollment window (FR-42.8)
+      description: |
+        The eligibility rule is compiled before it is stored; a rule that does
+        not parse is a 400 naming eligibilityRule. Rates take at most the
+        currency's minor-unit places.
+      x-passage-duty: HcmSetupAdmin
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateBenefitPlanRequest"
+      responses:
+        "201":
+          description: Plan created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BenefitPlan"
+        "200":
+          description: The stored plan on an idempotent replay
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BenefitPlan"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "409":
+          description: HCM-BEN-PLAN-DUPLICATE (code taken) or idempotency_key_in_flight
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/benefits/plans/{id}:
+    get:
+      operationId: getBenefitPlan
+      summary: A benefit plan with its options
+      x-passage-duty: EssBenefits
+      parameters:
+        - $ref: "#/components/parameters/BenefitPlanId"
+      responses:
+        "200":
+          description: The plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BenefitPlan"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/benefits/plans/{id}/simulate:
+    get:
+      operationId: simulateBenefitEligibility
+      summary: Evaluate the plan for every worker with a PRIMARY employment on asOf (BR-42.6, AC-42.5); writes nothing
+      description: |
+        The waiting period (from the hire date) and then the rule are applied
+        exactly as enrollment applies them, one row per worker (a worker with
+        PRIMARY employments in several legal entities is eligible when one of
+        them is). A rule that reads a fact the worker lacks (fte without a
+        position assignment, age, job.type) is not eligible and the reason
+        says so. The read runs under the caller's legal-entity scope.
+      x-passage-duty: HcmSetupAdmin
+      parameters:
+        - $ref: "#/components/parameters/BenefitPlanId"
+        - name: asOf
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: The eligibility of the workforce
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BenefitSimulation"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/benefits/life-events:
+    post:
+      operationId: recordLifeEvent
+      summary: Record a life event, which opens a 30-day enrollment window from its date (8.42.5)
+      description: |
+        A caller without HcmWorkerMaintain records only their own worker's
+        events (HCM-BEN-NOT-OWN otherwise).
+      x-passage-duty: EssBenefits
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateLifeEventRequest"
+      responses:
+        "201":
+          description: Life event recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LifeEvent"
+        "200":
+          description: The stored event on an idempotent replay
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LifeEvent"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/benefits/enrollments:
+    post:
+      operationId: createBenefitEnrollment
+      summary: Enroll a worker in one option of a plan (FR-42.8, BR-42.6)
+      description: |
+        The effective date must fall in the plan's open enrollment window or
+        within 30 days on or after the worker's life event (HCM-BEN-001); the
+        worker must pass the waiting period and the rule as of that date
+        (HCM-BEN-002, with the reason); the option must be the plan's
+        (HCM-BEN-003); and the worker must not hold an enrollment in the plan
+        that overlaps it (HCM-BEN-004, end it first). The
+        benefitenrollment.changed event (START) is written in the same
+        transaction. A caller without HcmWorkerMaintain enrolls only their own
+        worker (HCM-BEN-NOT-OWN).
+      x-passage-duty: EssBenefits
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateBenefitEnrollmentRequest"
+      responses:
+        "201":
+          description: Enrolled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BenefitEnrollment"
+        "200":
+          description: The stored enrollment on an idempotent replay (no second event)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BenefitEnrollment"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          description: HCM-BEN-004 (overlapping enrollment) or idempotency_key_in_flight
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/benefits/enrollments/{id}/end:
+    post:
+      operationId: endBenefitEnrollment
+      summary: End an enrollment after its last covered day (BR-42.6)
+      description: |
+        A TERMINATION keeps coverage to the end of the month of lastDay and
+        marks a COBRA qualifying event on MEDICAL, DENTAL, VISION and FSA
+        plans; other reasons end the day after lastDay. Ending again with the
+        same values returns the enrollment unchanged; otherwise an ended
+        enrollment is HCM-BEN-ENDED. The END event commits with the change.
+      x-passage-duty: HcmWorkerMaintain
+      parameters:
+        - $ref: "#/components/parameters/EnrollmentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EndBenefitEnrollmentRequest"
+      responses:
+        "200":
+          description: The ended enrollment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BenefitEnrollment"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/workers/{id}/benefits:
+    get:
+      operationId: getWorkerBenefits
+      summary: A worker's enrollments (oldest first) and life events (newest first)
+      description: |
+        A caller with only EssBenefits reads their own worker (HCM-BEN-NOT-OWN
+        otherwise); HcmWorkerInquire or HcmWorkerMaintain read anyone's.
+      x-passage-duty: EssBenefits
+      parameters:
+        - $ref: "#/components/parameters/WorkerId"
+      responses:
+        "200":
+          description: The worker's benefits
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkerBenefits"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
 components:
   securitySchemes:
     bearerAuth:
@@ -723,6 +997,20 @@ components:
         type: string
         format: uuid
     RequestId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    BenefitPlanId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    EnrollmentId:
       name: id
       in: path
       required: true
@@ -1505,3 +1793,337 @@ components:
         balance:
           type: string
           description: accrued - used + adjusted - expired
+    BenefitOptionInput:
+      type: object
+      additionalProperties: false
+      required: [code, coverageLevel, employeeRate, employerRate]
+      properties:
+        code:
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9_-]{0,19}$"
+          description: Stored upper-case; unique in the plan.
+        coverageLevel:
+          type: string
+          minLength: 1
+          maxLength: 40
+        employeeRate:
+          type: string
+          description: Decimal string in the plan currency, never a float; at most its minor-unit places.
+        employerRate:
+          type: string
+        rateBasis:
+          type: string
+          enum: [PER_PAY_PERIOD, MONTHLY]
+          default: PER_PAY_PERIOD
+    BenefitOption:
+      type: object
+      required: [code, coverageLevel, employeeRate, employerRate, rateBasis]
+      properties:
+        code:
+          type: string
+        coverageLevel:
+          type: string
+        employeeRate:
+          type: string
+        employerRate:
+          type: string
+        rateBasis:
+          type: string
+          enum: [PER_PAY_PERIOD, MONTHLY]
+    CreateBenefitPlanRequest:
+      type: object
+      additionalProperties: false
+      required: [code, planType, currency, eligibilityRule, enrollmentStart, enrollmentEnd, options]
+      properties:
+        code:
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9_-]{0,19}$"
+          description: Stored upper-case; unique per tenant.
+        planType:
+          type: string
+          enum: [MEDICAL, DENTAL, VISION, LIFE, RETIREMENT_401K, HSA, FSA, OTHER]
+        providerPartyId:
+          type: [string, "null"]
+          format: uuid
+          description: The provider's wave-7 party; not checked against the party service yet.
+        currency:
+          type: string
+          pattern: "^[A-Z]{3}$"
+        eligibilityRule:
+          type: string
+          maxLength: 2000
+          description: |
+            CEL subset (BR-42.6) over employment_type, fte, service_days and
+            legal_entity (age and job.type are not available yet): && || !
+            == != < <= > >= in, list literals, numbers, quoted strings,
+            true and false. Example: employment_type in ['FULL_TIME'] && service_days >= 30.
+        enrollmentStart:
+          type: string
+          format: date
+        enrollmentEnd:
+          type: string
+          format: date
+          description: Inclusive; on or after enrollmentStart and within 366 days of it.
+        waitingDays:
+          type: integer
+          minimum: 0
+          maximum: 365
+          default: 0
+          description: Days from the hire date before the worker is eligible.
+        preTax:
+          type: boolean
+          default: false
+        payrollDeductionCode:
+          type: [string, "null"]
+          maxLength: 20
+        options:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/BenefitOptionInput"
+    BenefitPlan:
+      type: object
+      required: [id, code, planType, currency, eligibilityRule, enrollmentStart, enrollmentEnd, waitingDays, preTax, options, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        planType:
+          type: string
+          enum: [MEDICAL, DENTAL, VISION, LIFE, RETIREMENT_401K, HSA, FSA, OTHER]
+        providerPartyId:
+          type: string
+          format: uuid
+        currency:
+          type: string
+        eligibilityRule:
+          type: string
+        enrollmentStart:
+          type: string
+          format: date
+        enrollmentEnd:
+          type: string
+          format: date
+        waitingDays:
+          type: integer
+        preTax:
+          type: boolean
+        payrollDeductionCode:
+          type: string
+        options:
+          type: array
+          items:
+            $ref: "#/components/schemas/BenefitOption"
+        createdAt:
+          type: string
+          format: date-time
+    BenefitPlanList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/BenefitPlan"
+        nextCursor:
+          type: string
+    BenefitSimulation:
+      type: object
+      required: [planId, planCode, rule, asOf, total, eligible, rows]
+      properties:
+        planId:
+          type: string
+          format: uuid
+        planCode:
+          type: string
+        rule:
+          type: string
+        asOf:
+          type: string
+          format: date
+        total:
+          type: integer
+        eligible:
+          type: integer
+        rows:
+          type: array
+          description: One row per worker, by personnel number.
+          items:
+            type: object
+            required: [workerId, personnelNumber, legalName, eligible, reason]
+            properties:
+              workerId:
+                type: string
+                format: uuid
+              personnelNumber:
+                type: string
+              legalName:
+                type: string
+              employmentId:
+                type: string
+                format: uuid
+              legalEntityId:
+                type: string
+                format: uuid
+              employmentType:
+                type: string
+              serviceDays:
+                type: integer
+              fte:
+                type: string
+                description: Sum of the employment's position assignments on asOf; absent without one.
+              eligible:
+                type: boolean
+              reason:
+                type: string
+    CreateLifeEventRequest:
+      type: object
+      additionalProperties: false
+      required: [workerId, kind, eventDate]
+      properties:
+        workerId:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [MARRIAGE, BIRTH, ADOPTION, DIVORCE, LOSS_OF_COVERAGE, OTHER]
+        eventDate:
+          type: string
+          format: date
+    LifeEvent:
+      type: object
+      required: [id, workerId, kind, eventDate, windowEnd, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        workerId:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [MARRIAGE, BIRTH, ADOPTION, DIVORCE, LOSS_OF_COVERAGE, OTHER]
+        eventDate:
+          type: string
+          format: date
+        windowEnd:
+          type: string
+          format: date
+          description: The last effective date an enrollment may take because of this event (eventDate + 30 days).
+        recordedBy:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    CreateBenefitEnrollmentRequest:
+      type: object
+      additionalProperties: false
+      required: [workerId, planId, optionCode, effectiveDate]
+      properties:
+        workerId:
+          type: string
+          format: uuid
+        planId:
+          type: string
+          format: uuid
+        optionCode:
+          type: string
+        effectiveDate:
+          type: string
+          format: date
+        lifeEventId:
+          type: [string, "null"]
+          format: uuid
+          description: The worker's life event that opens the window outside open enrollment.
+        dependentCount:
+          type: integer
+          minimum: 0
+          maximum: 20
+          default: 0
+    EndBenefitEnrollmentRequest:
+      type: object
+      additionalProperties: false
+      required: [lastDay, reason]
+      properties:
+        lastDay:
+          type: string
+          format: date
+          description: The last covered day; for TERMINATION, the termination date.
+        reason:
+          type: string
+          enum: [TERMINATION, LIFE_EVENT, PLAN_END]
+    BenefitEnrollment:
+      type: object
+      required: [id, workerId, planId, planCode, planType, optionCode, coverageLevel, validFrom, status, dependentCount,
+        cobraQualifyingEvent, employeeRate, employerRate, currency, rateBasis, preTax]
+      properties:
+        id:
+          type: string
+          format: uuid
+        workerId:
+          type: string
+          format: uuid
+        planId:
+          type: string
+          format: uuid
+        planCode:
+          type: string
+        planType:
+          type: string
+        optionCode:
+          type: string
+        coverageLevel:
+          type: string
+        validFrom:
+          type: string
+          format: date-time
+        validTo:
+          type: string
+          format: date-time
+          description: Exclusive end; absent while open.
+        status:
+          type: string
+          enum: [PENDING, ACTIVE, ENDED]
+          description: Derived from the validity range at the time of the read.
+        lifeEventId:
+          type: string
+          format: uuid
+        dependentCount:
+          type: integer
+        endReason:
+          type: string
+          enum: [TERMINATION, LIFE_EVENT, PLAN_END]
+        cobraQualifyingEvent:
+          type: boolean
+        employeeRate:
+          type: string
+          description: The option's employee cost per rateBasis (the cost preview).
+        employerRate:
+          type: string
+        currency:
+          type: string
+        rateBasis:
+          type: string
+          enum: [PER_PAY_PERIOD, MONTHLY]
+        preTax:
+          type: boolean
+        payrollDeductionCode:
+          type: string
+    WorkerBenefits:
+      type: object
+      required: [workerId, enrollments, lifeEvents]
+      properties:
+        workerId:
+          type: string
+          format: uuid
+        enrollments:
+          type: array
+          items:
+            $ref: "#/components/schemas/BenefitEnrollment"
+        lifeEvents:
+          type: array
+          items:
+            $ref: "#/components/schemas/LifeEvent"

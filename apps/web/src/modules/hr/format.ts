@@ -113,3 +113,63 @@ export function addFixed2(a: string, b: string): string {
   const abs = Math.abs(total);
   return `${total < 0 ? "-" : ""}${Math.floor(abs / 100)}.${String(abs % 100).padStart(2, "0")}`;
 }
+
+export const planTypeLabel: Record<string, string> = {
+  MEDICAL: "Medical",
+  DENTAL: "Dental",
+  VISION: "Vision",
+  LIFE: "Life",
+  RETIREMENT_401K: "Retirement (401k)",
+  HSA: "Health savings (HSA)",
+  FSA: "Flexible spending (FSA)",
+  OTHER: "Other",
+};
+
+export const rateBasisLabel: Record<string, string> = { PER_PAY_PERIOD: "per pay period", MONTHLY: "a month" };
+
+export const lifeEventLabel: Record<string, string> = {
+  MARRIAGE: "Marriage",
+  BIRTH: "Birth",
+  ADOPTION: "Adoption",
+  DIVORCE: "Divorce",
+  LOSS_OF_COVERAGE: "Loss of other coverage",
+  OTHER: "Other",
+};
+
+export const endReasonLabel: Record<string, string> = {
+  TERMINATION: "Termination",
+  LIFE_EVENT: "Life event",
+  PLAN_END: "Plan end",
+};
+
+export const enrollmentStatusLabel: Record<string, { label: string; tone: "neutral" | "success" | "warning" | "danger" | "info" }> = {
+  PENDING: { label: "Starts later", tone: "info" },
+  ACTIVE: { label: "Active", tone: "success" },
+  ENDED: { label: "Ended", tone: "neutral" },
+};
+
+/** ISO 4217 minor units that differ from 2 (as platform money.MinorUnits). */
+const minorUnits: Record<string, number> = {
+  BHD: 3, IQD: 3, JOD: 3, KWD: 3, LYD: 3, OMR: 3, TND: 3,
+  BIF: 0, CLP: 0, DJF: 0, GNF: 0, ISK: 0, JPY: 0, KMF: 0, KRW: 0, PYG: 0, RWF: 0, UGX: 0, UYI: 0, VND: 0, VUV: 0, XAF: 0, XOF: 0, XPF: 0,
+  CLF: 4, UYW: 4,
+};
+
+/** Decimal places a rate in this currency may have. */
+export function currencyPlaces(currency: string): number {
+  return minorUnits[currency] ?? 2;
+}
+
+/** A non-negative money string with at most the currency's places ("12.50"; "1500" for JPY). No floats. */
+export function validRate(raw: string, currency: string): boolean {
+  const places = currencyPlaces(currency);
+  const pattern = places === 0 ? /^\d{1,14}$/ : new RegExp(`^\\d{1,14}(?:\\.\\d{1,${places}})?$`);
+  return pattern.test(raw.trim());
+}
+
+/** "12.5" in USD shown as "12.50 USD"; the string is padded, never parsed into a float. */
+export function formatRate(rate: string, currency: string): string {
+  const places = currencyPlaces(currency);
+  const [whole, frac = ""] = rate.split(".");
+  return places === 0 ? `${whole} ${currency}` : `${whole}.${frac.padEnd(places, "0")} ${currency}`;
+}

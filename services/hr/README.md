@@ -3,7 +3,8 @@
 Human resources core: workers, employments, positions and position assignments
 with effective dating, the as-of manager query, the audited PII vault, and
 absence (plans, accrual, year end and carry-over, balances, requests and
-approval). Built for PSG-42, **slices 1 and 2**. The wave's remaining
+approval), and benefits (plans with CEL eligibility, a workforce simulation,
+life events and enrollments). Built for PSG-42, **slices 1 to 3**. The wave's remaining
 deliverables are listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
 
 ## What slice 1 does
@@ -83,6 +84,45 @@ deliverables are listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
   `HcmAbsenceAdmin` may request or cancel for anyone. An approver cannot
   decide their own request (8.42.17).
 
+## What slice 3 does (benefits)
+
+- **Plans** (FR-42.8): code, type (MEDICAL, DENTAL, VISION, LIFE,
+  RETIREMENT_401K, HSA, FSA, OTHER), provider party, currency, eligibility
+  rule, open enrollment window (inclusive dates), waiting days, pre-tax flag,
+  payroll deduction code and 1–20 options (coverage level, employee and
+  employer rate, PER_PAY_PERIOD or MONTHLY). Rates are decimal strings with at
+  most the currency's minor-unit places (`money.MinorUnits`), stored as
+  `numeric(20,6)`.
+- **Eligibility** (BR-42.6, `internal/domain/cel.go`): a CEL subset over
+  `employment_type`, `fte` (sum of the employment's position assignments on
+  the date), `service_days` (from the hire date) and `legal_entity`, with
+  `&& || ! == != < <= > >= in`, list literals, numbers, strings and booleans.
+  The rule is compiled when the plan is saved, so a broken rule is a 400. A
+  fact the worker lacks (`fte` without an assignment, `age`, `job.type`) makes
+  the rule fail with a reason rather than guess. The waiting period is checked
+  first. A worker with PRIMARY employments in several legal entities is
+  eligible when one of them is.
+- **Simulation** (`GET /benefits/plans/{id}/simulate?asOf=`, AC-42.5): the
+  same evaluation for every worker with a PRIMARY employment on the date, one
+  row per worker with the reason. Nothing is written. The `hr-benefit-100`
+  fixture (`testdata/`) checks 100 employees against 6 plans with expected sets
+  computed by an independent reference.
+- **Life events** (8.42.5): MARRIAGE, BIRTH, ADOPTION, DIVORCE,
+  LOSS_OF_COVERAGE, OTHER; each opens an enrollment window from its date to 30
+  days after (`windowEnd`).
+- **Enrollments**: one option of one plan from an effective date, inside the
+  open window or a life event's window (HCM-BEN-001), for an eligible worker
+  (HCM-BEN-002), with a dependent count. One enrollment per worker and plan at
+  any instant (exclusion constraint, HCM-BEN-004). Ending takes the last
+  covered day and a reason; a TERMINATION keeps coverage to the end of that
+  month and marks a COBRA qualifying event on health plans. Both write
+  `dev.passage.hr.benefitenrollment.changed.v1` (START or END, with the rates,
+  currency, pre-tax flag and deduction code payroll needs) in the same
+  transaction. Enrollment and ending lock the rows they change.
+- **Own data**: `EssBenefits` alone enrolls, records life events and reads
+  benefits only for the caller's own worker; `HcmWorkerMaintain` acts for
+  anyone and `HcmWorkerInquire` reads anyone's.
+
 Domain rules that are not yet exposed by an endpoint, but are implemented and
 tested: hierarchy cycle detection (BR-42.7) and the reveal gate (`CheckReveal`).
 
@@ -135,7 +175,10 @@ go vet ./... && go test ./...
   `PASSAGE_TEST_DATABASE_URL` is set**. `TestRowLevelSecurity` also needs
   `PASSAGE_TEST_APP_DATABASE_URL` (a role without BYPASSRLS) and checks every
   table, including the legal-entity scope on employments and positions and a
-  scoped accrual run followed by an all-entity rerun.
+  scoped accrual run followed by an all-entity rerun. Benefits: plan replay
+  and duplicates, the window, life-event, eligibility, option and overlap
+  rules with the outbox events, the end rules, the simulation agreeing with
+  enrollment, and own-data refusals.
 
 To run the store tests:
 
@@ -172,6 +215,14 @@ kernel `authz.RequireDuty` (`x-passage-duty` in the spec).
 | POST | `/v1/hr/absence/requests/{id}/decide` | MssApprove |
 | POST | `/v1/hr/absence/requests/{id}/cancel` | EssAbsence (own unless HcmAbsenceAdmin) |
 | GET | `/v1/hr/workers/{id}/absence/balances?asOf=` | EssAbsence (own unless MssApprove or HcmAbsenceAdmin) |
+| POST | `/v1/hr/benefits/plans` | HcmSetupAdmin |
+| GET | `/v1/hr/benefits/plans?limit=&cursor=` | EssBenefits |
+| GET | `/v1/hr/benefits/plans/{id}` | EssBenefits |
+| GET | `/v1/hr/benefits/plans/{id}/simulate?asOf=` | HcmSetupAdmin |
+| POST | `/v1/hr/benefits/life-events` | EssBenefits (own worker unless HcmWorkerMaintain) |
+| POST | `/v1/hr/benefits/enrollments` | EssBenefits (own worker unless HcmWorkerMaintain) |
+| POST | `/v1/hr/benefits/enrollments/{id}/end` | HcmWorkerMaintain |
+| GET | `/v1/hr/workers/{id}/benefits` | EssBenefits (own unless HcmWorkerInquire or HcmWorkerMaintain) |
 
 ## Error codes
 
@@ -209,6 +260,17 @@ type is `https://passage.dev/problems/<code>`.
 | `HCM-ABS-STATE` | 422 | The request's status does not allow this decision or cancellation |
 | `HCM-ABS-SELF-APPROVAL` | 403 | An approver tried to decide their own request |
 | `HCM-ABS-NOT-OWN` | 403 | An employee-only caller acted on another worker's absence |
+| `HCM-BEN-001` | 422 | Enrollment outside the open window or the life event's 30 days |
+| `HCM-BEN-002` | 422 | Worker not eligible for the plan on the effective date; the detail gives the reason |
+| `HCM-BEN-003` | 422 | The option is not offered by the plan |
+| `HCM-BEN-004` | 409 | The worker already has an enrollment in the plan that overlaps the effective date |
+| `HCM-BEN-005` | 422 | The last covered day is before the enrollment start |
+| `HCM-BEN-ENDED` | 409 | The enrollment has already ended with another date or reason |
+| `HCM-BEN-PLAN-NOT-FOUND` | 404 | Benefit plan does not exist for this tenant |
+| `HCM-BEN-PLAN-DUPLICATE` | 409 | Benefit plan code already used in this tenant |
+| `HCM-BEN-ENR-NOT-FOUND` | 404 | Benefit enrollment does not exist for this tenant |
+| `HCM-BEN-LE-NOT-FOUND` | 422 | The life event does not exist or is another worker's |
+| `HCM-BEN-NOT-OWN` | 403 | An employee-only caller acted on another worker's benefits |
 | `idempotency_key_reuse` | 422 | Same key used with a different request body |
 | `idempotency_key_in_flight` | 409 | A concurrent request with the same key committed first; retry |
 | `AUTH-0003` | 403 | Caller lacks the duty (kernel `authz`) |
@@ -220,13 +282,14 @@ The other catalog codes in PRD 8.42.18 belong to later slices.
 
 ```
 cmd/hr/            entrypoint: config, dbx.Connect, api.Register, httpx.Serve
-internal/domain/   pure rules: effective dating, hierarchy, accrual, PII sealing
+internal/domain/   pure rules: effective dating, hierarchy, accrual, PII sealing, benefit eligibility (CEL subset)
 internal/store/    pgx repositories, RLS-scoped transactions, outbox writes
 internal/api/      HTTP handlers, DTOs, validation, duties
 internal/events/   event type constants and payloads
-migrations/        0001_hr_core.sql, 0002_absence.sql (applied in order by dbx.Migrate)
+migrations/        0001_hr_core.sql, 0002_absence.sql, 0003_benefits.sql (applied in order by dbx.Migrate)
+testdata/          hr-benefit-100.json (AC-42.5 fixture)
 api/openapi.yaml   OpenAPI 3.1 for every endpoint above
-events/asyncapi.yaml  AsyncAPI 3 for the four events published
+events/asyncapi.yaml  AsyncAPI 3 for the five events published
 charts/hr/         Helm chart passage-hr (lint: helm lint charts/hr)
 ```
 

@@ -82,12 +82,26 @@ func TestRowLevelSecurity(t *testing.T) {
 		t.Fatalf("approve: %v", err)
 	}
 
+	// Benefits: a plan, a life event and an enrollment of tenant 1.
+	bplan := mustBenefitPlan(t, s, one, medicalPlan("MED-RLS"))
+	if _, _, err := s.RecordLifeEvent(one, w.ID, "BIRTH", day(time.December, 1), "", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.CreateBenefitEnrollment(one, BenefitEnrollmentInput{WorkerID: w.ID, PlanID: bplan.ID, OptionCode: "EE",
+		EffectiveDate: day(time.November, 15)}, "", false); err != nil {
+		t.Fatalf("enroll: %v", err)
+	}
+
 	two := scoped(testkit.TenantID(2), "")
+	if _, err := s.GetBenefitPlan(two, bplan.ID); err == nil {
+		t.Error("tenant 2 read tenant 1's benefit plan")
+	}
 	if _, err := s.Balances(two, w.ID, day(time.January, 31), false); err == nil {
 		t.Error("tenant 2 read tenant 1's balances")
 	}
 	for _, table := range []string{"worker", "worker_pii", "employment", "hr_position", "position_hierarchy", "position_assignment", "audit_event", "outbox",
-		"absence_plan", "absence_balance", "absence_accrual_period", "absence_accrual_line", "absence_close_line", "absence_request"} {
+		"absence_plan", "absence_balance", "absence_accrual_period", "absence_accrual_line", "absence_close_line", "absence_request",
+		"benefit_plan", "benefit_plan_option", "benefit_life_event", "benefit_enrollment"} {
 		if n := count(two, table); n != 0 {
 			t.Errorf("tenant 2 sees %d rows in %s", n, table)
 		}

@@ -1,0 +1,1124 @@
+{
+ "description": "hr-benefit-100 (PRD 8.42.9, AC-42.5): 100 employees with one PRIMARY employment each, 6 plans, and the expected eligible set per plan as of asOf. Eligible = service days >= waitingDays and the rule is true; a rule that reads fte for an employee without a primary position assignment (fte null) is not eligible. The expectation was computed by an independent reference (Python), not by the Go evaluator. The first 12 employees are hand-picked boundaries.",
+ "asOf": "2026-11-15",
+ "plans": [
+  {
+   "code": "MED-FT",
+   "rule": "employment_type in ['FULL_TIME'] && service_days >= 30",
+   "waitingDays": 0
+  },
+  {
+   "code": "DEN-STAFF",
+   "rule": "employment_type in ['FULL_TIME', 'PART_TIME']",
+   "waitingDays": 60
+  },
+  {
+   "code": "VIS-HALF",
+   "rule": "fte >= 0.5 && employment_type != 'CONTRACTOR'",
+   "waitingDays": 0
+  },
+  {
+   "code": "LIFE-US",
+   "rule": "legal_entity == '8f1c2a10-0000-4000-8000-000000000001'",
+   "waitingDays": 90
+  },
+  {
+   "code": "RET-401K",
+   "rule": "service_days >= 365 || (employment_type == 'FULL_TIME' && fte >= 0.8)",
+   "waitingDays": 0
+  },
+  {
+   "code": "HSA-PERM",
+   "rule": "!(employment_type in ['TEMP', 'CONTRACTOR']) && service_days > 0",
+   "waitingDays": 30
+  }
+ ],
+ "employees": [
+  {
+   "id": "E001",
+   "employmentType": "FULL_TIME",
+   "fte": "1.00",
+   "hireDate": "2026-10-16",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E002",
+   "employmentType": "FULL_TIME",
+   "fte": "1.00",
+   "hireDate": "2026-10-17",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E003",
+   "employmentType": "FULL_TIME",
+   "fte": "1.00",
+   "hireDate": "2026-11-15",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E004",
+   "employmentType": "FULL_TIME",
+   "fte": null,
+   "hireDate": "2025-11-15",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E005",
+   "employmentType": "FULL_TIME",
+   "fte": null,
+   "hireDate": "2025-11-16",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000002"
+  },
+  {
+   "id": "E006",
+   "employmentType": "PART_TIME",
+   "fte": "0.50",
+   "hireDate": "2026-09-16",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000003"
+  },
+  {
+   "id": "E007",
+   "employmentType": "PART_TIME",
+   "fte": "0.49",
+   "hireDate": "2026-09-17",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000003"
+  },
+  {
+   "id": "E008",
+   "employmentType": "TEMP",
+   "fte": "1.00",
+   "hireDate": "2025-10-11",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E009",
+   "employmentType": "CONTRACTOR",
+   "fte": "0.80",
+   "hireDate": "2026-10-15",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000002"
+  },
+  {
+   "id": "E010",
+   "employmentType": "FULL_TIME",
+   "fte": "0.80",
+   "hireDate": "2026-08-17",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E011",
+   "employmentType": "FULL_TIME",
+   "fte": "0.79",
+   "hireDate": "2026-08-18",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E012",
+   "employmentType": "PART_TIME",
+   "fte": null,
+   "hireDate": "2026-11-14",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000002"
+  },
+  {
+   "id": "E013",
+   "employmentType": "PART_TIME",
+   "fte": "0.50",
+   "hireDate": "2024-07-25",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000003"
+  },
+  {
+   "id": "E014",
+   "employmentType": "FULL_TIME",
+   "fte": "1.00",
+   "hireDate": "2024-12-20",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E015",
+   "employmentType": "FULL_TIME",
+   "fte": "0.25",
+   "hireDate": "2025-07-02",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000003"
+  },
+  {
+   "id": "E016",
+   "employmentType": "FULL_TIME",
+   "fte": "1.00",
+   "hireDate": "2025-09-28",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E017",
+   "employmentType": "PART_TIME",
+   "fte": "1.00",
+   "hireDate": "2025-04-27",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000003"
+  },
+  {
+   "id": "E018",
+   "employmentType": "PART_TIME",
+   "fte": "0.60",
+   "hireDate": "2025-11-21",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E019",
+   "employmentType": "PART_TIME",
+   "fte": "1.00",
+   "hireDate": "2026-03-14",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E020",
+   "employmentType": "PART_TIME",
+   "fte": null,
+   "hireDate": "2024-07-12",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000003"
+  },
+  {
+   "id": "E021",
+   "employmentType": "TEMP",
+   "fte": "0.25",
+   "hireDate": "2025-05-09",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E022",
+   "employmentType": "FULL_TIME",
+   "fte": null,
+   "hireDate": "2024-12-28",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E023",
+   "employmentType": "FULL_TIME",
+   "fte": "0.80",
+   "hireDate": "2024-09-06",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000003"
+  },
+  {
+   "id": "E024",
+   "employmentType": "FULL_TIME",
+   "fte": "0.25",
+   "hireDate": "2024-06-11",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000002"
+  },
+  {
+   "id": "E025",
+   "employmentType": "FULL_TIME",
+   "fte": "0.60",
+   "hireDate": "2026-06-15",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000003"
+  },
+  {
+   "id": "E026",
+   "employmentType": "TEMP",
+   "fte": null,
+   "hireDate": "2026-09-25",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000002"
+  },
+  {
+   "id": "E027",
+   "employmentType": "PART_TIME",
+   "fte": "0.40",
+   "hireDate": "2024-09-14",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000002"
+  },
+  {
+   "id": "E028",
+   "employmentType": "TEMP",
+   "fte": "0.60",
+   "hireDate": "2024-11-21",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000003"
+  },
+  {
+   "id": "E029",
+   "employmentType": "FULL_TIME",
+   "fte": "0.80",
+   "hireDate": "2025-04-17",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000003"
+  },
+  {
+   "id": "E030",
+   "employmentType": "FULL_TIME",
+   "fte": null,
+   "hireDate": "2026-05-27",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E031",
+   "employmentType": "PART_TIME",
+   "fte": "1.00",
+   "hireDate": "2025-09-10",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000003"
+  },
+  {
+   "id": "E032",
+   "employmentType": "FULL_TIME",
+   "fte": "1.00",
+   "hireDate": "2025-01-12",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000003"
+  },
+  {
+   "id": "E033",
+   "employmentType": "TEMP",
+   "fte": null,
+   "hireDate": "2024-07-27",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000003"
+  },
+  {
+   "id": "E034",
+   "employmentType": "FULL_TIME",
+   "fte": "0.25",
+   "hireDate": "2026-05-02",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000002"
+  },
+  {
+   "id": "E035",
+   "employmentType": "FULL_TIME",
+   "fte": "1.00",
+   "hireDate": "2025-01-08",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E036",
+   "employmentType": "CONTRACTOR",
+   "fte": "0.50",
+   "hireDate": "2026-04-27",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E037",
+   "employmentType": "CONTRACTOR",
+   "fte": "1.00",
+   "hireDate": "2025-04-11",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E038",
+   "employmentType": "PART_TIME",
+   "fte": "1.00",
+   "hireDate": "2024-12-09",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E039",
+   "employmentType": "PART_TIME",
+   "fte": "0.40",
+   "hireDate": "2025-06-21",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E040",
+   "employmentType": "FULL_TIME",
+   "fte": "0.40",
+   "hireDate": "2026-10-09",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E041",
+   "employmentType": "PART_TIME",
+   "fte": "0.50",
+   "hireDate": "2026-07-11",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000002"
+  },
+  {
+   "id": "E042",
+   "employmentType": "FULL_TIME",
+   "fte": "1.00",
+   "hireDate": "2025-03-27",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E043",
+   "employmentType": "FULL_TIME",
+   "fte": "1.00",
+   "hireDate": "2025-04-18",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000003"
+  },
+  {
+   "id": "E044",
+   "employmentType": "PART_TIME",
+   "fte": "0.80",
+   "hireDate": "2026-01-11",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E045",
+   "employmentType": "PART_TIME",
+   "fte": "1.00",
+   "hireDate": "2026-06-04",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000002"
+  },
+  {
+   "id": "E046",
+   "employmentType": "CONTRACTOR",
+   "fte": "1.00",
+   "hireDate": "2025-03-19",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000003"
+  },
+  {
+   "id": "E047",
+   "employmentType": "FULL_TIME",
+   "fte": "0.80",
+   "hireDate": "2024-08-11",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E048",
+   "employmentType": "PART_TIME",
+   "fte": "0.25",
+   "hireDate": "2025-02-08",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E049",
+   "employmentType": "CONTRACTOR",
+   "fte": null,
+   "hireDate": "2026-01-29",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000002"
+  },
+  {
+   "id": "E050",
+   "employmentType": "FULL_TIME",
+   "fte": null,
+   "hireDate": "2024-10-03",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000003"
+  },
+  {
+   "id": "E051",
+   "employmentType": "FULL_TIME",
+   "fte": "1.00",
+   "hireDate": "2026-09-05",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000003"
+  },
+  {
+   "id": "E052",
+   "employmentType": "TEMP",
+   "fte": "0.40",
+   "hireDate": "2024-06-10",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000002"
+  },
+  {
+   "id": "E053",
+   "employmentType": "FULL_TIME",
+   "fte": "1.00",
+   "hireDate": "2026-06-25",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000002"
+  },
+  {
+   "id": "E054",
+   "employmentType": "PART_TIME",
+   "fte": "1.00",
+   "hireDate": "2024-06-25",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000003"
+  },
+  {
+   "id": "E055",
+   "employmentType": "PART_TIME",
+   "fte": "1.00",
+   "hireDate": "2026-02-20",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E056",
+   "employmentType": "CONTRACTOR",
+   "fte": "1.00",
+   "hireDate": "2026-09-30",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000003"
+  },
+  {
+   "id": "E057",
+   "employmentType": "FULL_TIME",
+   "fte": "1.00",
+   "hireDate": "2026-07-12",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E058",
+   "employmentType": "PART_TIME",
+   "fte": "1.00",
+   "hireDate": "2025-11-22",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000002"
+  },
+  {
+   "id": "E059",
+   "employmentType": "TEMP",
+   "fte": null,
+   "hireDate": "2025-06-05",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000003"
+  },
+  {
+   "id": "E060",
+   "employmentType": "FULL_TIME",
+   "fte": "0.40",
+   "hireDate": "2025-01-22",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000003"
+  },
+  {
+   "id": "E061",
+   "employmentType": "FULL_TIME",
+   "fte": "1.00",
+   "hireDate": "2025-02-04",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000002"
+  },
+  {
+   "id": "E062",
+   "employmentType": "PART_TIME",
+   "fte": "0.60",
+   "hireDate": "2026-06-24",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000003"
+  },
+  {
+   "id": "E063",
+   "employmentType": "PART_TIME",
+   "fte": "0.50",
+   "hireDate": "2024-07-04",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E064",
+   "employmentType": "CONTRACTOR",
+   "fte": "1.00",
+   "hireDate": "2026-11-14",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E065",
+   "employmentType": "FULL_TIME",
+   "fte": null,
+   "hireDate": "2024-10-19",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E066",
+   "employmentType": "FULL_TIME",
+   "fte": "1.00",
+   "hireDate": "2025-10-12",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E067",
+   "employmentType": "PART_TIME",
+   "fte": "1.00",
+   "hireDate": "2024-10-31",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E068",
+   "employmentType": "FULL_TIME",
+   "fte": "1.00",
+   "hireDate": "2025-07-11",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000002"
+  },
+  {
+   "id": "E069",
+   "employmentType": "FULL_TIME",
+   "fte": "0.40",
+   "hireDate": "2025-08-24",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000003"
+  },
+  {
+   "id": "E070",
+   "employmentType": "PART_TIME",
+   "fte": "1.00",
+   "hireDate": "2025-02-16",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000003"
+  },
+  {
+   "id": "E071",
+   "employmentType": "FULL_TIME",
+   "fte": "0.40",
+   "hireDate": "2024-09-28",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E072",
+   "employmentType": "CONTRACTOR",
+   "fte": "0.60",
+   "hireDate": "2026-06-13",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000003"
+  },
+  {
+   "id": "E073",
+   "employmentType": "FULL_TIME",
+   "fte": "0.25",
+   "hireDate": "2024-10-01",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E074",
+   "employmentType": "FULL_TIME",
+   "fte": "0.40",
+   "hireDate": "2025-03-09",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000002"
+  },
+  {
+   "id": "E075",
+   "employmentType": "FULL_TIME",
+   "fte": null,
+   "hireDate": "2025-09-05",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E076",
+   "employmentType": "PART_TIME",
+   "fte": "1.00",
+   "hireDate": "2025-03-09",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000003"
+  },
+  {
+   "id": "E077",
+   "employmentType": "FULL_TIME",
+   "fte": "0.80",
+   "hireDate": "2024-11-14",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000002"
+  },
+  {
+   "id": "E078",
+   "employmentType": "CONTRACTOR",
+   "fte": "1.00",
+   "hireDate": "2026-10-06",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E079",
+   "employmentType": "FULL_TIME",
+   "fte": "0.60",
+   "hireDate": "2025-06-25",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E080",
+   "employmentType": "FULL_TIME",
+   "fte": "0.50",
+   "hireDate": "2026-03-29",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E081",
+   "employmentType": "CONTRACTOR",
+   "fte": "1.00",
+   "hireDate": "2025-11-10",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E082",
+   "employmentType": "FULL_TIME",
+   "fte": "0.80",
+   "hireDate": "2024-07-23",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E083",
+   "employmentType": "FULL_TIME",
+   "fte": "0.50",
+   "hireDate": "2025-09-02",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E084",
+   "employmentType": "FULL_TIME",
+   "fte": "0.25",
+   "hireDate": "2026-03-03",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000002"
+  },
+  {
+   "id": "E085",
+   "employmentType": "PART_TIME",
+   "fte": "0.80",
+   "hireDate": "2025-06-12",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E086",
+   "employmentType": "FULL_TIME",
+   "fte": "0.80",
+   "hireDate": "2025-11-20",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E087",
+   "employmentType": "FULL_TIME",
+   "fte": "1.00",
+   "hireDate": "2025-01-13",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E088",
+   "employmentType": "FULL_TIME",
+   "fte": "0.80",
+   "hireDate": "2024-09-17",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000002"
+  },
+  {
+   "id": "E089",
+   "employmentType": "FULL_TIME",
+   "fte": "1.00",
+   "hireDate": "2026-06-13",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E090",
+   "employmentType": "FULL_TIME",
+   "fte": "1.00",
+   "hireDate": "2026-01-08",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E091",
+   "employmentType": "FULL_TIME",
+   "fte": "1.00",
+   "hireDate": "2025-10-29",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E092",
+   "employmentType": "PART_TIME",
+   "fte": "0.25",
+   "hireDate": "2025-10-04",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E093",
+   "employmentType": "PART_TIME",
+   "fte": "0.50",
+   "hireDate": "2025-02-07",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000003"
+  },
+  {
+   "id": "E094",
+   "employmentType": "FULL_TIME",
+   "fte": "0.80",
+   "hireDate": "2025-10-11",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000002"
+  },
+  {
+   "id": "E095",
+   "employmentType": "PART_TIME",
+   "fte": "0.60",
+   "hireDate": "2026-01-21",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000002"
+  },
+  {
+   "id": "E096",
+   "employmentType": "PART_TIME",
+   "fte": "1.00",
+   "hireDate": "2026-06-26",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000001"
+  },
+  {
+   "id": "E097",
+   "employmentType": "FULL_TIME",
+   "fte": "0.80",
+   "hireDate": "2025-11-26",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000002"
+  },
+  {
+   "id": "E098",
+   "employmentType": "TEMP",
+   "fte": null,
+   "hireDate": "2026-09-30",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000002"
+  },
+  {
+   "id": "E099",
+   "employmentType": "PART_TIME",
+   "fte": "0.80",
+   "hireDate": "2025-06-17",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000003"
+  },
+  {
+   "id": "E100",
+   "employmentType": "PART_TIME",
+   "fte": "1.00",
+   "hireDate": "2026-11-08",
+   "legalEntity": "8f1c2a10-0000-4000-8000-000000000002"
+  }
+ ],
+ "expected": {
+  "MED-FT": [
+   "E001",
+   "E004",
+   "E005",
+   "E010",
+   "E011",
+   "E014",
+   "E015",
+   "E016",
+   "E022",
+   "E023",
+   "E024",
+   "E025",
+   "E029",
+   "E030",
+   "E032",
+   "E034",
+   "E035",
+   "E040",
+   "E042",
+   "E043",
+   "E047",
+   "E050",
+   "E051",
+   "E053",
+   "E057",
+   "E060",
+   "E061",
+   "E065",
+   "E066",
+   "E068",
+   "E069",
+   "E071",
+   "E073",
+   "E074",
+   "E075",
+   "E077",
+   "E079",
+   "E080",
+   "E082",
+   "E083",
+   "E084",
+   "E086",
+   "E087",
+   "E088",
+   "E089",
+   "E090",
+   "E091",
+   "E094",
+   "E097"
+  ],
+  "DEN-STAFF": [
+   "E004",
+   "E005",
+   "E006",
+   "E010",
+   "E011",
+   "E013",
+   "E014",
+   "E015",
+   "E016",
+   "E017",
+   "E018",
+   "E019",
+   "E020",
+   "E022",
+   "E023",
+   "E024",
+   "E025",
+   "E027",
+   "E029",
+   "E030",
+   "E031",
+   "E032",
+   "E034",
+   "E035",
+   "E038",
+   "E039",
+   "E041",
+   "E042",
+   "E043",
+   "E044",
+   "E045",
+   "E047",
+   "E048",
+   "E050",
+   "E051",
+   "E053",
+   "E054",
+   "E055",
+   "E057",
+   "E058",
+   "E060",
+   "E061",
+   "E062",
+   "E063",
+   "E065",
+   "E066",
+   "E067",
+   "E068",
+   "E069",
+   "E070",
+   "E071",
+   "E073",
+   "E074",
+   "E075",
+   "E076",
+   "E077",
+   "E079",
+   "E080",
+   "E082",
+   "E083",
+   "E084",
+   "E085",
+   "E086",
+   "E087",
+   "E088",
+   "E089",
+   "E090",
+   "E091",
+   "E092",
+   "E093",
+   "E094",
+   "E095",
+   "E096",
+   "E097",
+   "E099"
+  ],
+  "VIS-HALF": [
+   "E001",
+   "E002",
+   "E003",
+   "E006",
+   "E008",
+   "E010",
+   "E011",
+   "E013",
+   "E014",
+   "E016",
+   "E017",
+   "E018",
+   "E019",
+   "E023",
+   "E025",
+   "E028",
+   "E029",
+   "E031",
+   "E032",
+   "E035",
+   "E038",
+   "E041",
+   "E042",
+   "E043",
+   "E044",
+   "E045",
+   "E047",
+   "E051",
+   "E053",
+   "E054",
+   "E055",
+   "E057",
+   "E058",
+   "E061",
+   "E062",
+   "E063",
+   "E066",
+   "E067",
+   "E068",
+   "E070",
+   "E076",
+   "E077",
+   "E079",
+   "E080",
+   "E082",
+   "E083",
+   "E085",
+   "E086",
+   "E087",
+   "E088",
+   "E089",
+   "E090",
+   "E091",
+   "E093",
+   "E094",
+   "E095",
+   "E096",
+   "E097",
+   "E099",
+   "E100"
+  ],
+  "LIFE-US": [
+   "E004",
+   "E008",
+   "E010",
+   "E014",
+   "E016",
+   "E018",
+   "E019",
+   "E021",
+   "E022",
+   "E030",
+   "E035",
+   "E036",
+   "E037",
+   "E038",
+   "E039",
+   "E042",
+   "E044",
+   "E047",
+   "E048",
+   "E055",
+   "E057",
+   "E063",
+   "E065",
+   "E066",
+   "E067",
+   "E071",
+   "E073",
+   "E075",
+   "E079",
+   "E080",
+   "E081",
+   "E082",
+   "E083",
+   "E085",
+   "E086",
+   "E087",
+   "E089",
+   "E090",
+   "E091",
+   "E092",
+   "E096"
+  ],
+  "RET-401K": [
+   "E001",
+   "E002",
+   "E003",
+   "E004",
+   "E008",
+   "E010",
+   "E013",
+   "E014",
+   "E015",
+   "E016",
+   "E017",
+   "E020",
+   "E021",
+   "E022",
+   "E023",
+   "E024",
+   "E027",
+   "E028",
+   "E029",
+   "E031",
+   "E032",
+   "E033",
+   "E035",
+   "E037",
+   "E038",
+   "E039",
+   "E042",
+   "E043",
+   "E046",
+   "E047",
+   "E048",
+   "E050",
+   "E051",
+   "E052",
+   "E053",
+   "E054",
+   "E057",
+   "E059",
+   "E060",
+   "E061",
+   "E063",
+   "E065",
+   "E066",
+   "E067",
+   "E068",
+   "E069",
+   "E070",
+   "E071",
+   "E073",
+   "E074",
+   "E075",
+   "E076",
+   "E077",
+   "E079",
+   "E081",
+   "E082",
+   "E083",
+   "E085",
+   "E086",
+   "E087",
+   "E088",
+   "E089",
+   "E090",
+   "E091",
+   "E092",
+   "E093",
+   "E094",
+   "E097",
+   "E099"
+  ],
+  "HSA-PERM": [
+   "E001",
+   "E004",
+   "E005",
+   "E006",
+   "E007",
+   "E010",
+   "E011",
+   "E013",
+   "E014",
+   "E015",
+   "E016",
+   "E017",
+   "E018",
+   "E019",
+   "E020",
+   "E022",
+   "E023",
+   "E024",
+   "E025",
+   "E027",
+   "E029",
+   "E030",
+   "E031",
+   "E032",
+   "E034",
+   "E035",
+   "E038",
+   "E039",
+   "E040",
+   "E041",
+   "E042",
+   "E043",
+   "E044",
+   "E045",
+   "E047",
+   "E048",
+   "E050",
+   "E051",
+   "E053",
+   "E054",
+   "E055",
+   "E057",
+   "E058",
+   "E060",
+   "E061",
+   "E062",
+   "E063",
+   "E065",
+   "E066",
+   "E067",
+   "E068",
+   "E069",
+   "E070",
+   "E071",
+   "E073",
+   "E074",
+   "E075",
+   "E076",
+   "E077",
+   "E079",
+   "E080",
+   "E082",
+   "E083",
+   "E084",
+   "E085",
+   "E086",
+   "E087",
+   "E088",
+   "E089",
+   "E090",
+   "E091",
+   "E092",
+   "E093",
+   "E094",
+   "E095",
+   "E096",
+   "E097",
+   "E099"
+  ]
+ }
+}

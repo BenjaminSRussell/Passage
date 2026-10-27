@@ -16,6 +16,7 @@ import {
   type DataTableColumn,
 } from "../../shell/ui";
 import { AbsenceCard } from "./AbsenceCard";
+import { BenefitsCard } from "./BenefitsCard";
 import { getWorker, listEmployments, workerAsOf, type Employment, type WorkerDetail } from "./api/client";
 import { EmploymentForm } from "./EmploymentForm";
 import { assignmentKindLabel, dash, DATE, dayOf, employmentTypeLabel, lastDay, todayIso, workerTypeLabel } from "./format";
@@ -212,6 +213,7 @@ export function WorkerDetailPage() {
       </Card>
       <AsOfCard workerId={worker.id} />
       <AbsenceCard workerId={worker.id} />
+      <BenefitsCard workerId={worker.id} />
     </div>
   );
 }

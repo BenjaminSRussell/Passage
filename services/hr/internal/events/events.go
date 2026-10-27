@@ -15,11 +15,16 @@ var (
 	// AbsenceApproved is written in the same transaction as the balance
 	// consumption it reports (FR-42.7). Time, projects and payroll consume it.
 	AbsenceApproved = events.Type(Context, "absence", "approved", 1)
+	// BenefitEnrollmentChanged is written in the same transaction as an
+	// enrollment starts or ends (8.42.5); payroll deductions consume it. The
+	// PRD name benefit.enrollment.changed collapses to one entity segment like
+	// positionassignment.
+	BenefitEnrollmentChanged = events.Type(Context, "benefitenrollment", "changed", 1)
 )
 
 // All lists every event type the service publishes (asyncapi.yaml).
 func All() []string {
-	return []string{WorkerCreated, EmploymentChanged, PositionAssignmentChanged, AbsenceApproved}
+	return []string{WorkerCreated, EmploymentChanged, PositionAssignmentChanged, AbsenceApproved, BenefitEnrollmentChanged}
 }
 
 // ActionHire is the employment.changed action for a new employment. Transfer,
@@ -39,6 +44,35 @@ type AbsenceApprovedData struct {
 	DateTo   string `json:"date_to"`
 	Quantity string `json:"quantity"`
 }
+
+// BenefitEnrollmentChangedData is the 8.42.5 contract (workerId, planId,
+// option, validity, employeeRate) plus what payroll needs to take the
+// deduction: the plan's currency, pre-tax flag and deduction code. Action is
+// START or END; an END carries valid_to and end_reason. Dependents are never
+// included.
+type BenefitEnrollmentChangedData struct {
+	ID                   string  `json:"id"`
+	WorkerID             string  `json:"worker_id"`
+	PlanID               string  `json:"plan_id"`
+	PlanCode             string  `json:"plan_code"`
+	OptionCode           string  `json:"option_code"`
+	Action               string  `json:"action"`
+	ValidFrom            string  `json:"valid_from"`
+	ValidTo              *string `json:"valid_to"`
+	EndReason            *string `json:"end_reason"`
+	EmployeeRate         string  `json:"employee_rate"`
+	EmployerRate         string  `json:"employer_rate"`
+	Currency             string  `json:"currency"`
+	RateBasis            string  `json:"rate_basis"`
+	PreTax               bool    `json:"pre_tax"`
+	PayrollDeductionCode *string `json:"payroll_deduction_code"`
+}
+
+// Benefit enrollment actions.
+const (
+	BenefitStart = "START"
+	BenefitEnd   = "END"
+)
 
 // WorkerCreatedData carries no P2/P3 values: the vault holds those.
 type WorkerCreatedData struct {

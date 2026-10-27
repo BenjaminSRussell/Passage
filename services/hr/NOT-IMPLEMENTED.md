@@ -8,8 +8,12 @@ for all of them. Slice 2 builds absence: plans, accrual runs keyed per
 balances per plan year, requests with the balance, span and overlap checks,
 approval with the `absence.approved` event, rejection and cancellation of
 submitted requests, and the web screens for plans, the request queue and the
-worker's absence. Everything
-below is either a later slice of PSG-42 or a handoff to another wave or owner.
+worker's absence. Slice 3 builds benefits: plans with options and rates,
+the CEL eligibility rule with the waiting period, the whole-workforce
+simulation, life events, enrollment inside the open window or a life event's
+window, ending an enrollment (termination to the end of the month), the
+`benefitenrollment.changed` event, and the web screens for plans, the
+simulation and the worker's benefits. Everything below is either a later slice of PSG-42 or a handoff to another wave or owner.
 Statuses: **later slice of PSG-42** (same wave, next slice) or **handoff** (needs
 another owner).
 
@@ -44,7 +48,17 @@ another owner).
 | 2 | Time integration (wave 25 absence registrations) and the reconciliation Σ usage = approved = time registrations | handoff (wave 25) | `absence.approved` is published; the reconciliation test needs wave 25's registrations |
 | 2 | `absence.approved` carries hours | handoff (wave 8 work calendars) | The event carries `quantity` and `unit`; a DAYS plan can't be turned into hours without the worker's work calendar |
 | 2 | Accrual balance events to ESS | later slice of PSG-42 | Depends on the ESS portal; balances are read through the API |
-| 3 | Benefit plans, options, eligibility (CEL), open enrollment, life events | later slice of PSG-42 | Not started; eligibility fixture (`hr-benefit-100`) comes with it |
+| 3 | Benefit plans, options, eligibility (CEL), simulation, open enrollment, life events, enrollments and ending them | **built** | See the service README. The rule language is a CEL subset implemented in `internal/domain/cel.go` (no new dependency); it has no arithmetic, macros or functions, and `!` applies to the whole comparison after it |
+| 3 | Eligibility facts `age` and `job.type` (BR-42.6) | later slice of PSG-42 | Not available to rules yet: the date of birth is not collected (ESS personal data) and the `Job` entity comes with compensation. A rule that reads them is not eligible with the reason "unknown identifier" |
+| 3 | Dependents as records (`dependents[]`: name, relationship, birth date) | later slice of PSG-42 | Only `dependentCount` is stored. Dependent names and birth dates are PII and need the vault (FR-42.1) and ESS personal data |
+| 3 | Per-dependent or coverage-tier pricing, per-pay-period cost from a pay calendar | handoff (wave 43 payroll) | The enrollment returns the option's employee and employer rate with its basis (PER_PAY_PERIOD or MONTHLY) as the cost preview; converting MONTHLY to a pay period needs the wave-43 pay calendar |
+| 3 | Ending enrollments automatically when an employment terminates (BR-42.6) | later slice of PSG-42 | Termination actions (FR-42.5) are not built. `POST /benefits/enrollments/{id}/end` with `TERMINATION` applies the end-of-month rule and is what the action will call |
+| 3 | Changing the option of an open enrollment in place | later slice of PSG-42 | A change is end (LIFE_EVENT) then enroll again; no single "change option" call |
+| 3 | Life-event window per legal entity (8.42.13, default 30, 0–90) | later slice of PSG-42 | The window is the 30-day default for every entity; the parameter store is not built |
+| 3 | Life-event evidence and HR verification | later slice of PSG-42 | An employee records their own life event and it opens the window at once; no evidence document or approval step |
+| 3 | COBRA notices and premium billing | handoff (wave 48 US pack) | `cobra_qualifying_event` is set on a TERMINATION end of a MEDICAL, DENTAL, VISION or FSA enrollment, whatever the country; wave 48 decides where COBRA applies and sends notices |
+| 3 | Plan provider checked against the wave-7 party service; plan end and retirement of options | handoff (wave 7) and later slice | `providerPartyId` is stored as a uuid; plans and options cannot be edited or retired yet (no update endpoint, so no ETag) |
+| 3 | Benefits enrollment wizard in ESS and "My benefits" for employees | later slice of PSG-42 (ESS) and handoff (shell) | The web module has the HR screens. An employee with only `EssBenefits` can call the API for their own worker but has no page until the shell gives the signed-in user's worker id or `apps/ess` exists |
 | 3 | Employee self-service and manager self-service | later slice of PSG-42 (ESS) and handoff (shell) | See `apps/ess/README.md`; MSS needs the approval flows |
 | 4 | Skills, certifications, goals, performance reviews | later slice of PSG-42 | Not started |
 | 4 | Recruitment pipeline basics | later slice of PSG-42 | Not started (FR-42.21) |
@@ -65,9 +79,9 @@ another owner).
 
 Deploy items: **HR workspace** is built as the web module
 `apps/web/src/modules/hr` (workers, positions, worker detail with PII reveal,
-employments, the as-of view and the worker's absence; position detail with
-assignments; absence plans with accrual and year end; the absence request
-queue). The org chart, personnel actions, absence calendars and the
+employments, the as-of view, the worker's absence and benefits; position
+detail with assignments; absence plans with accrual and year end; the absence
+request queue; benefit plans with the eligibility simulation). The org chart, personnel actions, absence calendars and the
 self-service portal screens are not. The **ESS
 portal** is not built here (apps/ess README). **Demo workforce loaded** is not
 built (needs the `hr-workforce-1200` generator under `testdata/`).
@@ -80,7 +94,7 @@ built (needs the `hr-workforce-1200` generator under `testdata/`).
 | AC-42.2 overlapping assignment rejected unless overfill | **built** (store test) | Overfill check is conservative: it sums every assignment that overlaps the new range, not per instant. The DB test needs `PASSAGE_TEST_DATABASE_URL` |
 | AC-42.3 accrual on US-PTO-15 | **built** (domain and store tests) | `TestUSPTO15AccrualYearEndAndCarryOver` runs 0.65, 11.90, 7.90, 5.00 carried, 2.90 expired and 6.25 through the database. The DB test needs `PASSAGE_TEST_DATABASE_URL`. The 36-case fixture set is a separate row below |
 | AC-42.4 negative balance beyond request | **built** (domain and store tests) | A 3.00 request on a 2.00 balance is HCM-ABS-002 at submission and again at approval |
-| AC-42.5 eligibility on 100 fixtures | later slice of PSG-42 | Eligibility (CEL) not started |
+| AC-42.5 eligibility on 100 fixtures | **built** (domain and store tests) | `TestEligibilityFixtureHundred` runs the PRD rule and 5 more over the 100 employees of `testdata/hr-benefit-100.json`, whose expected sets come from an independent reference. `TestSimulateMatchesEnrollment` checks the simulation against enrollment through the database (needs `PASSAGE_TEST_DATABASE_URL`) |
 | AC-42.6 future-dated transfer on its date | later slice of PSG-42 | Personnel actions and the Temporal timer not started |
 | AC-42.7 masked national ID and audited read | **built** (store and API tests) | DB test needs `PASSAGE_TEST_DATABASE_URL`; the no-DB API test covers the duty and reason gate |
 | AC-42.8 SCIM user within 60 s | handoff (platform / Keycloak) and later slice | SCIM worker not built; needs Keycloak admin access and the personnel-action events |
@@ -98,13 +112,13 @@ built (needs the `hr-workforce-1200` generator under `testdata/`).
 | Item | Status | Reason |
 |---|---|---|
 | Kernel `httpx` idempotency middleware (replay headers, 60 s lease, 24 h expiry) | handoff (platform) and later slice | Slice 1 stores the `Idempotency-Key` on the worker, employment, position and assignment rows (the org pattern): a replay with the same body returns the stored row, another body is `idempotency_key_reuse`, a concurrent duplicate is `idempotency_key_in_flight`. Keys do not expire and there is no replay header |
-| `ETag` on reads and `If-Match` on PUT/PATCH/DELETE | later slice of PSG-42 | Slices 1 and 2 have no update endpoints; `ETag` is not set on reads yet, so the OpenAPI does not declare it. Absence decisions are guarded by row locks and the request state instead |
-| `Idempotency-Key` on absence decide, accrue and close | built differently | Accrual, year end and expiry are keyed per (plan, period or year, worker) in the database, so retries are safe without a key. A decision or cancel replayed on a request that already has that outcome returns it unchanged; a different outcome is HCM-ABS-STATE |
+| `ETag` on reads and `If-Match` on PUT/PATCH/DELETE | later slice of PSG-42 | Slices 1 to 3 have no update endpoints; `ETag` is not set on reads yet, so the OpenAPI does not declare it. Absence decisions and benefit enrollment ends are guarded by row locks and the row state instead |
+| `Idempotency-Key` on absence decide, accrue and close, and on ending an enrollment | built differently | Accrual, year end and expiry are keyed per (plan, period or year, worker) in the database, so retries are safe without a key. A decision or cancel replayed on a request that already has that outcome returns it unchanged; a different outcome is HCM-ABS-STATE. Ending an enrollment again with the same last day and reason returns it unchanged; otherwise HCM-BEN-ENDED |
 | OPA decision and `legalEntityScopes` | handoff (platform / edge-identity) | Duties are checked locally by `authz.RequireDuty`; legal-entity scoping is not enforced yet |
 | Effective-date granularity TIMESTAMP and tenant-local midnight | later slice of PSG-42 | Slice 1 uses UTC days (DAY granularity) |
 | Future-dated actions (up to 365 days) and workflow approval | later slice of PSG-42 | Depends on personnel actions and wave-4 workflow |
 | `party_person_id` checked against the wave-7 party service | handoff (wave 7 party) | Stored as a uuid; existence is not checked |
-| Outbox events `position.changed`, `employment.changed` for terminations, personnel action events | later slice of PSG-42 | Slice 2 adds `absence.approved`. Slice 1 emits `worker.created`, `employment.changed` (action HIRE, with the exclusive end when a termination date is given) and `positionassignment.changed` (with `manager_position_id`). The PRD name `position.assignment.changed` is written as `positionassignment` to fit the kernel event-type rule (see asyncapi) |
+| Outbox events `position.changed`, `employment.changed` for terminations, personnel action events | later slice of PSG-42 | Slice 2 adds `absence.approved`; slice 3 adds `benefitenrollment.changed` (the PRD's `benefit.enrollment.changed`, collapsed like `positionassignment`). Slice 1 emits `worker.created`, `employment.changed` (action HIRE, with the exclusive end when a termination date is given) and `positionassignment.changed` (with `manager_position_id`). The PRD name `position.assignment.changed` is written as `positionassignment` to fit the kernel event-type rule (see asyncapi) |
 
 ## Reference fixtures (PRD 8.42.9)
 
@@ -112,7 +126,7 @@ built (needs the `hr-workforce-1200` generator under `testdata/`).
 |---|---|---|
 | `hr-workforce-1200` (generated workforce, 3 entities, 5 years) | later slice of PSG-42 | Needs the workforce generator and the actions to replay history |
 | `hr-accrual-cases` (36 hire-date × plan cases) | partly built | 11 proration cases and the US-PTO-15 scenario are inline in `accrual_cases_test.go`, and US-PTO-15 runs end to end in the store test. The full 36-case fixture under `testdata/` is not built |
-| `hr-benefit-100` | later slice of PSG-42 | Benefits not started |
+| `hr-benefit-100` | **built** | `testdata/hr-benefit-100.json`: 100 employees (12 hand-picked boundaries), 6 plans, expected eligible sets. It is evaluated in the domain test; loading it into the database is not needed for the check |
 | `hr-pii-contract` (role × field matrix) | later slice of PSG-42 | The API tests cover the duty gate for `HcmPIIRead` and the reason rule. The full role matrix needs the OPA role model (handoff, platform) |
 
 ## Operations

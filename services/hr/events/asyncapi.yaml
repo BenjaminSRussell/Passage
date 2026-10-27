@@ -28,7 +28,18 @@ channels:
     messages:
       absenceApproved:
         $ref: "#/components/messages/AbsenceApproved"
+  benefitEnrollmentChanged:
+    address: passage.hr.benefitenrollment
+    messages:
+      benefitEnrollmentChanged:
+        $ref: "#/components/messages/BenefitEnrollmentChanged"
 operations:
+  publishBenefitEnrollmentChanged:
+    action: send
+    channel:
+      $ref: "#/channels/benefitEnrollmentChanged"
+    messages:
+      - $ref: "#/channels/benefitEnrollmentChanged/messages/benefitEnrollmentChanged"
   publishAbsenceApproved:
     action: send
     channel:
@@ -84,7 +95,65 @@ components:
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/AbsenceApprovedData"
+    BenefitEnrollmentChanged:
+      name: dev.passage.hr.benefitenrollment.changed.v1
+      description: Published in the same transaction as an enrollment starts or ends (8.42.5). Payroll deductions consume it; dependents are never included.
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/BenefitEnrollmentChangedData"
   schemas:
+    BenefitEnrollmentChangedData:
+      type: object
+      description: |
+        One enrollment starting or ending (BR-42.6). validity is
+        [valid_from, valid_to) at UTC day starts; a TERMINATION end keeps
+        coverage to the end of the termination month. Rates are decimal strings
+        in the plan currency (never float); rate_basis says whether a rate is
+        per pay period or monthly.
+      required: [id, worker_id, plan_id, plan_code, option_code, action, valid_from, valid_to, end_reason,
+        employee_rate, employer_rate, currency, rate_basis, pre_tax, payroll_deduction_code]
+      properties:
+        id:
+          type: string
+          format: uuid
+        worker_id:
+          type: string
+          format: uuid
+        plan_id:
+          type: string
+          format: uuid
+        plan_code:
+          type: string
+        option_code:
+          type: string
+        action:
+          type: string
+          enum: [START, END]
+        valid_from:
+          type: string
+          format: date-time
+        valid_to:
+          type: [string, "null"]
+          format: date-time
+        end_reason:
+          type: [string, "null"]
+          enum: [TERMINATION, LIFE_EVENT, PLAN_END, null]
+        employee_rate:
+          type: string
+          pattern: '^\d+(\.\d+)?$'
+        employer_rate:
+          type: string
+          pattern: '^\d+(\.\d+)?$'
+        currency:
+          type: string
+          pattern: '^[A-Z]{3}$'
+        rate_basis:
+          type: string
+          enum: [PER_PAY_PERIOD, MONTHLY]
+        pre_tax:
+          type: boolean
+        payroll_deduction_code:
+          type: [string, "null"]
     AbsenceApprovedData:
       type: object
       required: [id, worker_id, plan_id, unit, date_from, date_to, quantity]
