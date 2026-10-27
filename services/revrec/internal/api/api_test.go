@@ -25,7 +25,7 @@ const bundleBody = `{
 func serve(t *testing.T, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	router := httpx.NewRouter()
-	New().Register(router)
+	New(nil).Register(router)
 	req := httptest.NewRequest(http.MethodPost, "/v1/revrec/allocations:preview", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
@@ -105,7 +105,7 @@ func TestPreview_ValidationProblems(t *testing.T) {
 
 func TestPreview_RequiresTenant(t *testing.T) {
 	router := httpx.NewRouter()
-	New().Register(router)
+	New(nil).Register(router)
 	req := httptest.NewRequest(http.MethodPost, "/v1/revrec/allocations:preview", strings.NewReader(bundleBody))
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -116,7 +116,7 @@ func TestPreview_RequiresTenant(t *testing.T) {
 
 func TestPreview_RequiresDuty(t *testing.T) {
 	router := httpx.NewRouter()
-	New().Register(router)
+	New(nil).Register(router)
 	req := httptest.NewRequest(http.MethodPost, "/v1/revrec/allocations:preview", strings.NewReader(bundleBody))
 	req.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
 	req.Header.Set("X-Passage-Duties", "billing.invoice.view")
@@ -129,7 +129,7 @@ func TestPreview_RequiresDuty(t *testing.T) {
 
 // BR-29.1: a contract price of 10,799.99 leaves 0.02 that goes to the largest obligation.
 func TestPreview_ResidualToLargestAndMetrics(t *testing.T) {
-	a := New()
+	a := New(nil)
 	router := httpx.NewRouter()
 	a.Register(router)
 	body := strings.Replace(bundleBody, `"10800.00"`, `"10799.99"`, 1)

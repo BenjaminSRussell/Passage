@@ -38,14 +38,14 @@ spec:
               value: ":{{ .Values.service.port }}"
             - name: ADMIN_ADDR
               value: ":{{ .Values.service.adminPort }}"
-            # Slice 1 does not connect to Postgres; the secret is wired so the
-            # revrec store can land without a chart change.
+            - name: MIGRATE_ON_START
+              value: {{ .Values.migrateOnStart | quote }}
+            # Required since slice 2: contracts, schedules and runs live in revrec-db.
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.databaseSecret }}
                   key: DATABASE_URL
-                  optional: true
           livenessProbe:
             httpGet: { path: /healthz, port: http }
           readinessProbe:

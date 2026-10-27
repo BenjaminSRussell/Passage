@@ -1,10 +1,14 @@
 openapi: 3.1.0
 info:
   title: Passage Revenue Recognition API
-  version: 0.1.0
+  version: 0.2.0
   description: >
-    Stateless ASC 606 / IFRS 15 allocation preview (PSG-29, slice 1). Contracts,
-    recognition runs and roll-forward are persisted in a later slice.
+    ASC 606 / IFRS 15 revenue recognition (PSG-29, slices 1 and 2): the
+    stateless allocation preview, persisted revenue contracts with SSP
+    allocation and schedules, milestone satisfaction, period recognition runs
+    and the deferred revenue roll-forward. Duties are enforced with
+    platform/authz: 401 AUTH-0001 without a principal, 403 AUTH-0003 without
+    the duty or outside the caller's legal-entity scope.
 servers:
   - url: https://api.{env}.passage.dev
     variables:
@@ -41,7 +45,223 @@ paths:
           $ref: "#/components/responses/Problem"
         "422":
           $ref: "#/components/responses/Problem"
+  /v1/revrec/contracts:
+    post:
+      operationId: createContract
+      summary: Create a revenue contract, allocate its transaction price by SSP and plan its schedules (FR-29.7, FR-29.8).
+      x-passage-duty: revrec.maintain (RevRecMaintain)
+      description: >
+        POINT_IN_TIME obligations are recognized at their transfer date
+        (satisfiedOn) because the invoice credits that revenue directly;
+        MILESTONE obligations wait for :satisfy; RATABLE obligations get one
+        line per calendar month of the term, dated at the period end; USAGE
+        obligations have no line until usage posts. Emits
+        dev.passage.revrec.contract.allocated.v1. A contract with nothing left
+        to recognize is COMPLETE at once. BIL-0009 warns for a RESIDUAL SSP.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContractRequest"
+      responses:
+        "201":
+          description: Contract created.
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Contract" }
+        "200":
+          description: Idempotent replay (same key and body); header Idempotent-Replayed is true.
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Contract" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+    get:
+      operationId: listContracts
+      summary: Revenue contracts inquiry (§5.29.14), newest first, with recognized and remaining amounts.
+      x-passage-duty: revrec.view (RevRecView)
+      parameters:
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
+        - { name: customerId, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [OPEN, COMPLETE, CANCELLED] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 100 } }
+      responses:
+        "200":
+          description: At most `limit` contract headers.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/ContractSummary" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/revrec/contracts/{id}:
+    get:
+      operationId: getContract
+      summary: A revenue contract with its obligations and schedule lines.
+      x-passage-duty: revrec.view (RevRecView)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The contract.
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Contract" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/revrec/milestones/{id}:satisfy:
+    post:
+      operationId: satisfyMilestone
+      summary: Satisfy a MILESTONE obligation and recognize its revenue (Dr 2400 / Cr 4000).
+      x-passage-duty: revrec.maintain (RevRecMaintain)
+      description: >
+        `id` is the obligation id. Emits dev.passage.revrec.schedule.recognized.v1
+        and bumps the contract version. A retry with the same date returns the
+        recorded satisfaction (Idempotent-Replayed: true) and changes nothing,
+        so no Idempotency-Key is needed. If-Match, when sent, must carry the
+        contract version the caller reviewed.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: If-Match, in: header, required: false, schema: { type: string }, description: 'Contract version as an entity tag, e.g. "1".' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [satisfiedOn]
+              additionalProperties: false
+              properties:
+                satisfiedOn: { type: string, format: date, description: "On or after the contract date." }
+      responses:
+        "200":
+          description: Satisfied (or replayed).
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Satisfaction" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/revrec/recognition-runs:
+    post:
+      operationId: runRecognition
+      summary: Recognize every due RATABLE schedule line of a legal entity through a period end (FR-29.8).
+      x-passage-duty: revrec.post (RevRecPost)
+      description: >
+        Key = (legal entity, period end): the first call creates the run (201)
+        and emits one dev.passage.revrec.schedule.recognized.v1 per line; a
+        rerun returns the recorded run (200, Idempotent-Replayed) and recognizes
+        nothing twice. Lines are recognized on the period end. A period end
+        after today is refused (REV-0007).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [legalEntityId, periodEnd]
+              additionalProperties: false
+              properties:
+                legalEntityId: { type: string, format: uuid }
+                periodEnd: { type: string, format: date }
+      responses:
+        "201":
+          description: Run created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecognitionRun" }
+        "200":
+          description: The run already recorded for this entity and period end.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecognitionRun" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+    get:
+      operationId: listRecognitionRuns
+      summary: Recognition runs, latest period first.
+      x-passage-duty: revrec.view (RevRecView)
+      parameters:
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 100 } }
+      responses:
+        "200":
+          description: At most `limit` runs.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/RecognitionRun" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/revrec/roll-forward:
+    get:
+      operationId: getRollForward
+      summary: Deferred revenue roll-forward of one legal entity, currency and calendar month (FR-29.9).
+      x-passage-duty: revrec.view (RevRecView)
+      description: >
+        Opening + additions − recognized ± adjustments = closing. Additions are
+        the RATABLE and MILESTONE allocations of contracts dated in the month;
+        recognized are their lines recognized in it. Adjustments stay 0.00
+        until credit notes reverse schedules (BR-29.6, later slice). The tie to
+        GL 2400 needs the ledger (wave 11).
+      parameters:
+        - { name: legalEntityId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: currency, in: query, required: true, schema: { type: string, pattern: "^[A-Z]{3}$" } }
+        - { name: period, in: query, required: true, schema: { type: string, pattern: "^[0-9]{4}-[0-9]{2}$" }, description: "YYYY-MM" }
+      responses:
+        "200":
+          description: The month's movement.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RollForward" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
 components:
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 255 }
+  headers:
+    ETag:
+      description: The contract version as a strong entity tag, e.g. "1".
+      schema: { type: string }
   responses:
     Problem:
       description: RFC 9457 problem document.
@@ -104,6 +324,127 @@ components:
               start: { type: string, format: date }
               end: { type: string, format: date }
               amount: { type: string }
+    ContractRequest:
+      type: object
+      required: [legalEntityId, orderId, customerId, currency, transactionPrice, contractDate, obligations]
+      additionalProperties: false
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        customerId: { type: string, format: uuid }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        transactionPrice: { type: string, pattern: "^[0-9]{1,14}(\\.[0-9]{1,6})?$" }
+        residualRule: { type: string, enum: [LARGEST, FIRST, LAST], default: LARGEST }
+        contractDate: { type: string, format: date, description: "The invoice date that opens the deferral." }
+        obligations:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            type: object
+            required: [productId, ssp, sspSource, method]
+            additionalProperties: false
+            properties:
+              productId: { type: string, format: uuid, description: "May repeat across lines." }
+              ssp: { type: string, pattern: "^[0-9]{1,14}(\\.[0-9]{1,6})?$", description: "Positive standalone selling price." }
+              sspSource: { type: string, enum: [EXPLICIT, LIST, PCT_OF_LIST, RESIDUAL], description: "At most one RESIDUAL per contract (REV-0003)." }
+              method: { type: string, enum: [POINT_IN_TIME, RATABLE, MILESTONE, USAGE] }
+              termStart: { type: string, format: date, description: "Required for RATABLE." }
+              termEnd: { type: string, format: date, description: "Required for RATABLE; on or after termStart." }
+              satisfiedOn: { type: string, format: date, description: "Required for POINT_IN_TIME (the transfer date); refused for other methods." }
+    ContractSummary:
+      type: object
+      required: [id, legalEntityId, orderId, customerId, currency, transactionPrice, recognized, remaining, residualRule, contractDate, status, version]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        customerId: { type: string, format: uuid }
+        currency: { type: string }
+        transactionPrice: { type: string }
+        recognized: { type: string, description: "Revenue recognized so far, every method." }
+        remaining: { type: string, description: "transactionPrice − recognized." }
+        residualRule: { type: string, enum: [LARGEST, FIRST, LAST] }
+        contractDate: { type: string, format: date }
+        status: { type: string, enum: [OPEN, COMPLETE, CANCELLED] }
+        version: { type: integer }
+    Contract:
+      allOf:
+        - $ref: "#/components/schemas/ContractSummary"
+        - type: object
+          required: [obligations, warnings]
+          properties:
+            obligations:
+              type: array
+              items: { $ref: "#/components/schemas/ContractObligation" }
+            warnings:
+              type: array
+              items:
+                type: object
+                required: [code, detail]
+                properties:
+                  code: { type: string, description: "BIL-0009 when an obligation uses the RESIDUAL SSP source." }
+                  detail: { type: string }
+    ContractObligation:
+      type: object
+      required: [id, lineNo, productId, ssp, sspSource, allocated, recognized, method, schedule]
+      properties:
+        id: { type: string, format: uuid }
+        lineNo: { type: integer }
+        productId: { type: string, format: uuid }
+        ssp: { type: string }
+        sspSource: { type: string, enum: [EXPLICIT, LIST, PCT_OF_LIST, RESIDUAL] }
+        allocated: { type: string }
+        recognized: { type: string }
+        method: { type: string, enum: [POINT_IN_TIME, RATABLE, MILESTONE, USAGE] }
+        termStart: { type: string, format: date }
+        termEnd: { type: string, format: date }
+        satisfiedOn: { type: string, format: date }
+        schedule:
+          type: array
+          items:
+            type: object
+            required: [id, seq, amount, status]
+            properties:
+              id: { type: string, format: uuid }
+              seq: { type: integer }
+              date: { type: string, format: date, description: "Absent for a milestone awaiting satisfaction." }
+              amount: { type: string }
+              status: { type: string, enum: [SCHEDULED, RECOGNIZED, REVERSED] }
+              recognizedOn: { type: string, format: date }
+    Satisfaction:
+      type: object
+      required: [contractId, contractVersion, obligationId, scheduleId, amount, recognizedOn]
+      properties:
+        contractId: { type: string, format: uuid }
+        contractVersion: { type: integer }
+        obligationId: { type: string, format: uuid }
+        scheduleId: { type: string, format: uuid }
+        amount: { type: string }
+        recognizedOn: { type: string, format: date }
+    RecognitionRun:
+      type: object
+      required: [id, legalEntityId, periodEnd, lineCount, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        periodEnd: { type: string, format: date }
+        lineCount: { type: integer, description: "Schedule lines recognized by this run." }
+        createdAt: { type: string, format: date-time }
+    RollForward:
+      type: object
+      required: [legalEntityId, currency, period, start, end, opening, additions, recognized, adjustments, closing]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        currency: { type: string }
+        period: { type: string }
+        start: { type: string, format: date }
+        end: { type: string, format: date }
+        opening: { type: string }
+        additions: { type: string }
+        recognized: { type: string }
+        adjustments: { type: string }
+        closing: { type: string }
     Problem:
       type: object
       required: [type, title, status]

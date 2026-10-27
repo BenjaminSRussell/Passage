@@ -2,13 +2,18 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
 
+	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/services/revrec/internal/api"
+	"github.com/BenjaminSRussell/passage/services/revrec/internal/store"
+	"github.com/BenjaminSRussell/passage/services/revrec/migrations"
 )
 
 const (
@@ -35,11 +40,25 @@ func newLogger(w io.Writer) *slog.Logger {
 	return slog.New(handler).With("service", "revrec")
 }
 
-// run serves the stateless allocation API on HTTP_ADDR and its metrics on
-// ADMIN_ADDR. Slice 1 has no database: contracts and recognition runs arrive
-// with the revrec store in a later slice.
+// run serves the revrec API on HTTP_ADDR and its metrics on ADMIN_ADDR.
+// DATABASE_URL is required; migrations run at start only when
+// MIGRATE_ON_START=true (dev), otherwise the migrator job applies them.
 func run(ctx context.Context, getenv func(string) string) error {
-	a := api.New()
+	databaseURL := getenv("DATABASE_URL")
+	if databaseURL == "" {
+		return errors.New("DATABASE_URL is required")
+	}
+	pool, err := dbx.Connect(ctx, databaseURL)
+	if err != nil {
+		return fmt.Errorf("connect database: %w", err)
+	}
+	defer pool.Close()
+	if getenv("MIGRATE_ON_START") == "true" {
+		if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
+			return fmt.Errorf("migrate: %w", err)
+		}
+	}
+	a := api.New(store.New(pool))
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()

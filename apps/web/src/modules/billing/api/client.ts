@@ -210,3 +210,173 @@ export function createFreeTextInvoice(input: FreeTextInvoiceInput, idempotencyKe
 export function previewAllocation(input: AllocationPreviewInput): Promise<AllocationPreview> {
   return send<AllocationPreview>(`${revrecBase}/allocations:preview`, { method: "POST", body: JSON.stringify(input) });
 }
+
+// Revenue contracts, milestones, recognition runs and the roll-forward (revrec slice 2).
+
+export const CONTRACT_STATUSES = ["OPEN", "COMPLETE", "CANCELLED"] as const;
+export type ContractStatus = (typeof CONTRACT_STATUSES)[number];
+export type ScheduleStatus = "SCHEDULED" | "RECOGNIZED" | "REVERSED";
+
+/** A revenue contract header as the list returns it (OpenAPI ContractSummary). */
+export interface RevenueContractSummary {
+  id: string;
+  legalEntityId: string;
+  orderId: string;
+  customerId: string;
+  currency: string;
+  transactionPrice: string;
+  recognized: string;
+  remaining: string;
+  residualRule: ResidualRule;
+  contractDate: string;
+  status: ContractStatus;
+  version: number;
+}
+
+export interface ScheduleLine {
+  id: string;
+  seq: number;
+  date?: string;
+  amount: string;
+  status: ScheduleStatus;
+  recognizedOn?: string;
+}
+
+export interface ContractObligation {
+  id: string;
+  lineNo: number;
+  productId: string;
+  ssp: string;
+  sspSource: SspSource;
+  allocated: string;
+  recognized: string;
+  method: RecognitionMethod;
+  termStart?: string;
+  termEnd?: string;
+  satisfiedOn?: string;
+  schedule: ScheduleLine[];
+}
+
+export interface RevenueContract extends RevenueContractSummary {
+  obligations: ContractObligation[];
+  warnings: { code: string; detail: string }[];
+}
+
+export interface ContractObligationInput {
+  productId: string;
+  ssp: string;
+  sspSource: SspSource;
+  method: RecognitionMethod;
+  termStart?: string;
+  termEnd?: string;
+  satisfiedOn?: string;
+}
+
+export interface RevenueContractInput {
+  legalEntityId: string;
+  orderId: string;
+  customerId: string;
+  currency: string;
+  transactionPrice: string;
+  residualRule: ResidualRule;
+  contractDate: string;
+  obligations: ContractObligationInput[];
+}
+
+export interface Satisfaction {
+  contractId: string;
+  contractVersion: number;
+  obligationId: string;
+  scheduleId: string;
+  amount: string;
+  recognizedOn: string;
+}
+
+export interface RecognitionRun {
+  id: string;
+  legalEntityId: string;
+  periodEnd: string;
+  lineCount: number;
+  createdAt: string;
+}
+
+export interface RollForward {
+  legalEntityId: string;
+  currency: string;
+  period: string;
+  start: string;
+  end: string;
+  opening: string;
+  additions: string;
+  recognized: string;
+  adjustments: string;
+  closing: string;
+}
+
+export interface ContractFilter {
+  status?: ContractStatus | "";
+  customerId?: string;
+  legalEntityId?: string;
+  limit?: number;
+}
+
+function query(params: Record<string, string | number | undefined>): string {
+  const q = new URLSearchParams();
+  for (const [name, value] of Object.entries(params)) {
+    if (value !== undefined && value !== "") q.set(name, String(value));
+  }
+  const s = q.toString();
+  return s ? `?${s}` : "";
+}
+
+/** GET /revrec/contracts: headers with recognized and remaining, newest first. */
+export async function listContracts(filter: ContractFilter = {}, signal?: AbortSignal): Promise<RevenueContractSummary[]> {
+  const page = await send<{ items: RevenueContractSummary[] }>(`${revrecBase}/contracts${query({ ...filter })}`, {}, signal);
+  return page.items;
+}
+
+/** GET /revrec/contracts/{id}: obligations with their schedule lines. */
+export function getContract(id: string, signal?: AbortSignal): Promise<RevenueContract> {
+  return send<RevenueContract>(`${revrecBase}/contracts/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** POST /revrec/contracts: allocate and plan a contract; the key makes retries return the same contract. */
+export function createContract(input: RevenueContractInput, idempotencyKey: string): Promise<RevenueContract> {
+  return send<RevenueContract>(`${revrecBase}/contracts`, {
+    method: "POST",
+    headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify(input),
+  });
+}
+
+/** POST /revrec/milestones/{obligationId}:satisfy with If-Match on the contract version the user reviewed. */
+export function satisfyMilestone(obligationId: string, satisfiedOn: string, contractVersion: number): Promise<Satisfaction> {
+  return send<Satisfaction>(`${revrecBase}/milestones/${encodeURIComponent(obligationId)}:satisfy`, {
+    method: "POST",
+    headers: { "If-Match": `"${contractVersion}"` },
+    body: JSON.stringify({ satisfiedOn }),
+  });
+}
+
+/** POST /revrec/recognition-runs: recognize due ratable lines; a rerun of the period returns the recorded run. */
+export function runRecognition(legalEntityId: string, periodEnd: string): Promise<RecognitionRun> {
+  return send<RecognitionRun>(`${revrecBase}/recognition-runs`, { method: "POST", body: JSON.stringify({ legalEntityId, periodEnd }) });
+}
+
+/** GET /revrec/recognition-runs: latest period first. */
+export async function listRuns(legalEntityId: string, signal?: AbortSignal): Promise<RecognitionRun[]> {
+  const page = await send<{ items: RecognitionRun[] }>(`${revrecBase}/recognition-runs${query({ legalEntityId, limit: 24 })}`, {}, signal);
+  return page.items;
+}
+
+/** GET /revrec/roll-forward: one entity, currency and month. */
+export function getRollForward(legalEntityId: string, currency: string, period: string, signal?: AbortSignal): Promise<RollForward> {
+  return send<RollForward>(`${revrecBase}/roll-forward${query({ legalEntityId, currency, period })}`, {}, signal);
+}
+
+/** The last day of a YYYY-MM month as YYYY-MM-DD. */
+export function periodEndOf(period: string): string {
+  const [year, month] = period.split("-").map(Number);
+  const last = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return `${period}-${String(last).padStart(2, "0")}`;
+}

@@ -10,6 +10,10 @@ describe("billing module", () => {
       "/billing/free-text-invoices/new",
       "/billing/invoices/:id",
       "/billing/revenue-allocation",
+      "/billing/revenue-contracts",
+      "/billing/revenue-contracts/new",
+      "/billing/revenue-contracts/:id",
+      "/billing/deferred-revenue",
     ]);
     expect(billing.nav.every((n) => n.to.startsWith("/billing"))).toBe(true);
   });
@@ -18,6 +22,8 @@ describe("billing module", () => {
     expect(Object.fromEntries(billing.nav.map((n) => [n.to, n.duty]))).toEqual({
       "/billing": "billing.invoice.view",
       "/billing/free-text-invoices/new": "billing.invoice.maintain",
+      "/billing/revenue-contracts": "revrec.view",
+      "/billing/deferred-revenue": "revrec.view",
       "/billing/revenue-allocation": "revrec.view",
     });
   });

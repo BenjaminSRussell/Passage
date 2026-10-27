@@ -1,8 +1,11 @@
-# NOT-IMPLEMENTED — billing (PSG-29, wave 29, slice 1)
+# NOT-IMPLEMENTED — billing (PSG-29, wave 29, slices 1–2)
 
 Slice 1 builds free-text invoice proposal, posting, read and list, the totals and
 tax-recheck rules, the schema and event contract, and the billing web screens
-(`apps/web/src/modules/billing`). Everything below is outstanding. Status is `later slice of PSG-29` (same service, later build) or
+(`apps/web/src/modules/billing`). Slice 2 changed no billing service behaviour: it
+built revenue contracts, milestones, recognition runs and the roll-forward in
+`services/revrec`, and the billing web module gained the revenue contract and
+roll-forward screens that call revrec. Everything below is outstanding. Status is `later slice of PSG-29` (same service, later build) or
 `handoff` (needs another owner, outside this wave's paths).
 
 | # | Ticket item / acceptance criterion | Status | Reason |
@@ -11,7 +14,7 @@ tax-recheck rules, the schema and event contract, and the billing web screens
 | 2 | D1 Consolidated invoices (FR-29.2, BR-29.5 consolidation keys, 2000-line split) | later slice of PSG-29 | Depends on the proposal builder from item 1 |
 | 3 | D1 Credit notes (FR-29.5, BR-29.6 partial recognition reversal) | later slice of PSG-29 | `CanReverse` domain rule exists; credit-note document flow and revrec reversal not built |
 | 4 | D1 Invoice layouts: PDF and UBL 2.1 JSON, `GET .../document?format=` (FR-29.11) | handoff | Document rendering is wave 5 (docgen) and UBL transmission wave 35; this service needs the docgen client |
-| 5 | D2 Revenue recognition (contracts, obligations, schedules, deferred postings on invoice post) | later slice of PSG-29 (contracts) + handoff (ledger postings to 2400/4000) | Revenue contracts live in `services/revrec`; posting to the ledger needs the ledger.Post client (wave 11/12) |
+| 5 | D2 Invoice-to-revenue wiring: posting an invoice creates its revenue contract and books the deferred share to 2400 | later slice of PSG-29 (wiring) + handoff (ledger postings to 2400/4000) | Revenue contracts, schedules, milestones, runs and the roll-forward are built in `services/revrec` (slice 2). Creating the contract from `invoice.posted` needs the revrec consumer (revrec NOT-IMPLEMENTED item 2) and invoice lines with order and obligation references (item 37); the journal needs the ledger.Post client (wave 11/12) |
 | 6 | D3 Subscription billing (recurring schedules, proration on invoice, usage lines, daily job 03:00, FR-29.10) | later slice of PSG-29 | Proration domain function exists; subscription aggregate, job and usage ingestion not built |
 | 7 | D4 Intercompany invoicing hook (`intercompany=true`) | later slice of PSG-29 (hook is present, always false) | Intercompany parties arrive in wave 40 |
 | 8 | D5 Billing audit trace `GET /invoices/{id}/trace` (FR-29.12) | later slice of PSG-29 | Needs packing-slip, order-line and price-explain references from waves 26 and 28 |

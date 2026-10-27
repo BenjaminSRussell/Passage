@@ -1,4 +1,4 @@
-import type { InvoiceStatus, RecognitionMethod, SspSource } from "./api/client";
+import type { ContractStatus, InvoiceStatus, RecognitionMethod, ScheduleStatus, SspSource } from "./api/client";
 
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -31,6 +31,26 @@ export const SSP_SOURCE_LABELS: Record<SspSource, string> = {
   PCT_OF_LIST: "Percent of list",
   RESIDUAL: "Residual",
 };
+
+export const PERIOD = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+export const CONTRACT_STATUS_LABELS: Record<ContractStatus, string> = {
+  OPEN: "Open",
+  COMPLETE: "Complete",
+  CANCELLED: "Cancelled",
+};
+
+export const SCHEDULE_STATUS_LABELS: Record<ScheduleStatus, string> = {
+  SCHEDULED: "Scheduled",
+  RECOGNIZED: "Recognized",
+  REVERSED: "Reversed",
+};
+
+/** The month before today's, as YYYY-MM: the period a controller usually closes. */
+export function lastMonth(now: Date = new Date()): string {
+  const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
 
 export const METHOD_LABELS: Record<RecognitionMethod, string> = {
   POINT_IN_TIME: "Point in time",

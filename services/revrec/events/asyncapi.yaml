@@ -1,11 +1,91 @@
 asyncapi: 3.0.0
 info:
   title: Passage Revenue Recognition events
-  version: 0.1.0
+  version: 0.2.0
   description: >
-    Slice 1 of revrec publishes no events: the allocation preview is a pure
-    computation and writes nothing. The planned events (contract.allocated.v1,
-    schedule.recognized.v1) arrive with the revrec store in a later slice of PSG-29.
+    CloudEvents published by the revrec context (PSG-29, slice 2). Each event is
+    written to the outbox in the transaction that makes the change and relayed
+    by Debezium; the Kafka key is the contract id (aggregate revenue_contract),
+    so a contract's events stay ordered within each topic. The allocation preview publishes
+    nothing. Revrec consumes no events yet: the invoice.posted consumer that
+    creates contracts from billing arrives in a later slice.
 defaultContentType: application/cloudevents+json
-channels: {}
-operations: {}
+channels:
+  revenueContract:
+    address: passage.revrec.contract
+    description: Outbox relay topic for revenue contract events.
+    messages:
+      contractAllocated:
+        $ref: "#/components/messages/ContractAllocated"
+  revenueSchedule:
+    address: passage.revrec.schedule
+    description: Outbox relay topic for revenue schedule events.
+    messages:
+      scheduleRecognized:
+        $ref: "#/components/messages/ScheduleRecognized"
+operations:
+  publishContractAllocated:
+    action: send
+    channel:
+      $ref: "#/channels/revenueContract"
+    summary: Revrec publishes contract.allocated when a revenue contract is created (POST /v1/revrec/contracts).
+  publishScheduleRecognized:
+    action: send
+    channel:
+      $ref: "#/channels/revenueSchedule"
+    summary: >
+      Revrec publishes schedule.recognized for each deferred line it recognizes
+      (Dr 2400 / Cr 4000): a milestone satisfaction or a recognition run line.
+      POINT_IN_TIME lines recognized at contract creation publish nothing,
+      because the invoice already credited that revenue to 4000.
+components:
+  messages:
+    ContractAllocated:
+      name: dev.passage.revrec.contract.allocated.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [contract_id, legal_entity_id, order_id, customer_id, currency, transaction_price, contract_date, obligations]
+        additionalProperties: false
+        properties:
+          contract_id: { type: string, format: uuid }
+          legal_entity_id: { type: string, format: uuid }
+          order_id: { type: string, format: uuid }
+          customer_id: { type: string, format: uuid }
+          currency: { type: string, pattern: "^[A-Z]{3}$" }
+          transaction_price: { type: string, description: "Decimal string at the currency's minor unit." }
+          contract_date: { type: string, format: date }
+          obligations:
+            type: array
+            items:
+              type: object
+              required: [id, product_id, ssp, ssp_source, allocated, method]
+              additionalProperties: false
+              properties:
+                id: { type: string, format: uuid }
+                product_id: { type: string, format: uuid }
+                ssp: { type: string }
+                ssp_source: { type: string, enum: [EXPLICIT, LIST, PCT_OF_LIST, RESIDUAL] }
+                allocated: { type: string }
+                method: { type: string, enum: [POINT_IN_TIME, RATABLE, MILESTONE, USAGE] }
+    ScheduleRecognized:
+      name: dev.passage.revrec.schedule.recognized.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [schedule_id, obligation_id, contract_id, legal_entity_id, period_id, recognized_on, currency, amount, deferred_account, revenue_account, journal_posting_id]
+        additionalProperties: false
+        properties:
+          schedule_id: { type: string, format: uuid }
+          obligation_id: { type: string, format: uuid }
+          contract_id: { type: string, format: uuid }
+          legal_entity_id: { type: string, format: uuid }
+          period_id: { type: string, description: "Calendar month YYYY-MM of recognized_on until the fiscal calendar (wave 14) supplies period ids." }
+          recognized_on: { type: string, format: date }
+          currency: { type: string, pattern: "^[A-Z]{3}$" }
+          amount: { type: string, description: "Decimal string at the currency's minor unit." }
+          deferred_account: { type: string, description: "Debit account, 2400." }
+          revenue_account: { type: string, description: "Credit account, 4000." }
+          journal_posting_id:
+            type: [string, "null"]
+            description: Null until the ledger posting is wired (wave 11 handoff).

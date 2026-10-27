@@ -1,11 +1,13 @@
-// Package api serves the revrec HTTP surface. Slice 1 exposes the stateless
-// allocation preview (POST /v1/revrec/allocations:preview); contracts and
-// recognition runs are persisted in a later slice of PSG-29.
+// Package api serves the revrec HTTP surface: the stateless allocation preview,
+// persisted revenue contracts with milestone satisfaction, period recognition
+// runs and the deferred revenue roll-forward (PSG-29 slices 1 and 2).
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -13,6 +15,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/authz"
@@ -24,10 +27,15 @@ import (
 const (
 	maxObligations = 50
 	maxIDLength    = 64
-	// dutyView is RevRecView (§5.29.17): the preview computes and stores nothing.
+	// Duties (§5.29.17): RevRecView reads (preview, contracts, runs,
+	// roll-forward); RevRecMaintain creates contracts and satisfies milestones;
+	// RevRecPost runs the period recognition.
 	dutyView         = "revrec.view"
+	dutyMaintain     = "revrec.maintain"
+	dutyPost         = "revrec.post"
 	validationDetail = "request failed validation"
 	dateLayout       = "2006-01-02"
+	readyTimeout     = 500 * time.Millisecond
 )
 
 var (
@@ -35,25 +43,56 @@ var (
 	decimalText  = regexp.MustCompile(`^[0-9]{1,14}(\.[0-9]{1,6})?$`)
 )
 
-// API holds the handlers and their counters.
+// API holds the dependencies of the handlers and their counters.
 type API struct {
-	previews atomic.Int64
+	store Store
+	now   func() time.Time
+
+	previews            atomic.Int64
+	contractsCreated    atomic.Int64
+	milestonesSatisfied atomic.Int64
+	linesRecognized     atomic.Int64
 }
 
-// New returns an API with zeroed counters.
-func New() *API { return &API{} }
+// New returns the handlers backed by s. The preview never touches the store.
+func New(s Store) *API { return &API{store: s, now: time.Now} }
 
 // Register mounts the revrec routes on r.
 func (a *API) Register(r chi.Router) {
+	r.Get("/readyz", a.ready)
 	r.With(authz.RequireDuty(dutyView)).Post("/v1/revrec/allocations:preview", a.preview)
+	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/revrec/contracts", a.createContract)
+	r.With(authz.RequireDuty(dutyView)).Get("/v1/revrec/contracts", a.listContracts)
+	r.With(authz.RequireDuty(dutyView)).Get("/v1/revrec/contracts/{id}", a.getContract)
+	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/revrec/milestones/{id}:satisfy", a.satisfyMilestone)
+	r.With(authz.RequireDuty(dutyPost)).Post("/v1/revrec/recognition-runs", a.runRecognition)
+	r.With(authz.RequireDuty(dutyView)).Get("/v1/revrec/recognition-runs", a.listRuns)
+	r.With(authz.RequireDuty(dutyView)).Get("/v1/revrec/roll-forward", a.rollForward)
 }
 
 // Metrics serves the counters in the Prometheus text format on the admin port.
 func (a *API) Metrics() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-		fmt.Fprintf(w, "# HELP revrec_allocation_previews_total Allocation previews answered.\n# TYPE revrec_allocation_previews_total counter\nrevrec_allocation_previews_total %d\n", a.previews.Load())
+		counter := func(name, help string, v int64) {
+			fmt.Fprintf(w, "# HELP %[1]s %[2]s\n# TYPE %[1]s counter\n%[1]s %[3]d\n", name, help, v)
+		}
+		counter("revrec_allocation_previews_total", "Allocation previews answered.", a.previews.Load())
+		counter("revrec_contracts_created_total", "Revenue contracts created; idempotent replays are not counted.", a.contractsCreated.Load())
+		counter("revrec_milestones_satisfied_total", "Milestone obligations satisfied; replays are not counted.", a.milestonesSatisfied.Load())
+		counter("revrec_schedule_lines_recognized_total", "Ratable schedule lines recognized by recognition runs.", a.linesRecognized.Load())
 	})
+}
+
+func (a *API) ready(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), readyTimeout)
+	defer cancel()
+	if err := a.store.Ping(ctx); err != nil {
+		slog.Error("readiness check failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.JSON(w, http.StatusServiceUnavailable, map[string]string{"status": "unavailable"})
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]string{"status": "ready"})
 }
 
 // Previews returns how many allocation previews were answered.
@@ -203,12 +242,17 @@ func parseTerm(start, end *string) (time.Time, time.Time, bool) {
 	return s, e, err1 == nil && err2 == nil && !e.Before(s)
 }
 
+// problemFrom maps a domain rule violation to its problem: 400 for COM-0001,
+// 409 for a state conflict (REV-0004), 422 for every other rule.
 func problemFrom(err error) error {
 	var de *domain.Error
 	if errors.As(err, &de) {
 		status := http.StatusUnprocessableEntity
-		if de.Code == "COM-0001" {
+		switch de.Code {
+		case "COM-0001":
 			status = http.StatusBadRequest
+		case "REV-0004":
+			status = http.StatusConflict
 		}
 		return httpx.NewProblem(status, de.Code, de.Detail)
 	}

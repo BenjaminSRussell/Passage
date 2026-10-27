@@ -4,8 +4,10 @@ image:
   digest: ""
   tag: ""
   pullPolicy: IfNotPresent
-# Slice 1 is stateless; the secret is wired (optional) so the revrec store can land without a chart change.
+# DATABASE_URL is read from this secret, never from values.
 databaseSecret: revrec-db
+# Dev only: apply migrations at start. Elsewhere the migrator job applies them.
+migrateOnStart: false
 replicaCount: 2
 service:
   port: 8080
