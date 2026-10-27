@@ -38,6 +38,14 @@ const (
 	CodeCompositionCycle    = "QM-0165" // the declared BOM loops back on itself
 	CodeSPCUnsupported      = "QM-0166" // the results cannot form the requested chart
 	CodeStudyRace           = "QM-0167" // the same Idempotency-Key is creating a study concurrently
+
+	// Slice 3: nonconformance and 8D correction (FR-33.7, FR-33.8, BR-33.9).
+	CodeNCRMissing          = "QM-0170" // nonconformance not found
+	CodeNCRStatus           = "QM-0171" // the NCR lifecycle does not allow the change
+	CodeNCRRace             = "QM-0172" // the same Idempotency-Key is creating an NCR or correction concurrently
+	CodeCAPAStep            = "QM-0173" // not the current 8D step, or the correction is not open
+	CodeEffectivenessNotDue = "QM-0174" // the effectiveness period has not elapsed
+	CodeEffectivenessSoD    = "QM-0175" // the effectiveness checker completed D7
 )
 
 // Error is a rule violation with a stable code. Reason is an optional machine

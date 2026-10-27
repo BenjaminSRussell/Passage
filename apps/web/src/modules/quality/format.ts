@@ -1,5 +1,5 @@
 import type { BadgeTone } from "../../shell/ui";
-import type { CalibrationStatus, DecisionKind, OrderStatus, PullStatus, SamplingPlan, StudyStatus, Trigger } from "./api/client";
+import type { CalibrationStatus, CorrectionStatus, DecisionKind, NcrSeverity, NcrSource, NcrStatus, OrderStatus, PullStatus, SamplingPlan, StudyStatus, Trigger } from "./api/client";
 
 export const dash = "—";
 
@@ -127,4 +127,38 @@ export const PULL_STATUS_LABELS: Record<PullStatus, { label: string; tone: Badge
   ORDERED: { label: "Order created", tone: "info" },
   PULLED: { label: "Pulled", tone: "success" },
   MISSED: { label: "Missed", tone: "danger" },
+};
+
+export const NCR_STATUS_LABELS: Record<NcrStatus, { label: string; tone: BadgeTone }> = {
+  NEW: { label: "New", tone: "warning" },
+  APPROVED: { label: "Approved", tone: "info" },
+  REFUSED: { label: "Refused", tone: "neutral" },
+  IN_CORRECTION: { label: "In correction", tone: "info" },
+  CLOSED: { label: "Closed", tone: "success" },
+};
+
+export const NCR_STATUSES = Object.keys(NCR_STATUS_LABELS) as NcrStatus[];
+
+export const NCR_SOURCE_LABELS: Record<NcrSource, string> = {
+  CUSTOMER: "Customer",
+  VENDOR: "Vendor",
+  INTERNAL: "Internal",
+  PRODUCTION: "Production",
+  SERVICE: "Service request",
+};
+
+export const NCR_SOURCES = Object.keys(NCR_SOURCE_LABELS) as NcrSource[];
+
+export const NCR_SEVERITY_LABELS: Record<NcrSeverity, { label: string; tone: BadgeTone }> = {
+  MINOR: { label: "Minor", tone: "neutral" },
+  MAJOR: { label: "Major", tone: "warning" },
+  CRITICAL: { label: "Critical", tone: "danger" },
+};
+
+export const NCR_SEVERITIES = Object.keys(NCR_SEVERITY_LABELS) as NcrSeverity[];
+
+export const CORRECTION_STATUS_LABELS: Record<CorrectionStatus, { label: string; tone: BadgeTone }> = {
+  OPEN: { label: "8D open", tone: "info" },
+  EFFECTIVENESS_PENDING: { label: "Effectiveness check pending", tone: "warning" },
+  CLOSED: { label: "8D closed", tone: "success" },
 };

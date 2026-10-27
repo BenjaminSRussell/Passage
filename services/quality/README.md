@@ -1,6 +1,6 @@
 # quality
 
-Passage quality management service. Wave 33 (ticket PSG-33), slices 1 and 2.
+Passage quality management service. Wave 33 (ticket PSG-33), slices 1 to 3.
 
 ## What it does (slice 1)
 
@@ -56,10 +56,31 @@ Passage quality management service. Wave 33 (ticket PSG-33), slices 1 and 2.
   Electric rules 1 to 4. Chart statistics are numbers, not money; the stored results stay
   decimal.
 
+## What it does (slice 3)
+
+- **Nonconformances (FR-33.7):** source (customer, vendor, internal, production,
+  service), problem type code, severity MINOR/MAJOR/CRITICAL, item, dims, quantity and
+  unit, links to the quality order, vendor, customer, production order and quarantine
+  order. Lifecycle NEW → APPROVED → IN_CORRECTION → CLOSED, or NEW → REFUSED (with a
+  reason). An NCR naming a quality order takes its item, dims and unit, and cannot exceed
+  its lot; on a closed order it is the order's amendment (BR-33.4).
+- **NCR from a usage decision (FR-33.6, `auto_ncr_on_reject`):** a decision with a
+  non-accepting quantity (reject, rework, return to vendor, scrap) raises a MAJOR NCR for
+  that quantity in the decision's transaction; the decision carries `nonconformanceId`.
+- **8D correction (FR-33.8, BR-33.9):** starting it moves the NCR to IN_CORRECTION and
+  opens D1; D1 to D7 complete in order with notes; D3 is due two business days and D5
+  30 days after start; completing D7 schedules the effectiveness check
+  `effectivenessCheckDays` later (30 to 365, default 90). The check is refused before it
+  is due (QM-0174) and from the user who completed D7 (QM-0175). EFFECTIVE completes D8,
+  closes the correction and the NCR and writes `capa.closed`; NOT_EFFECTIVE reopens the
+  8D at D4 with a new D5 due date. Overdue steps are computed on read. The NCR's version
+  (ETag) covers its correction. The Temporal timers and escalations are a handoff
+  (NOT-IMPLEMENTED.md).
+
 Code layout: `internal/domain` (pure rules and unit/property tests),
 `internal/store` (pgx, RLS-scoped transactions, outbox), `internal/api` (HTTP),
 `internal/events` (event names and payloads), `migrations/` (`0001_init.sql`,
-`0002_compliance_stability.sql`).
+`0002_compliance_stability.sql`, `0003_nonconformance_capa.sql`).
 
 ## Run
 
@@ -110,12 +131,22 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | POST | `/v1/quality/stability-studies` | QM_STABILITY_MAINTAIN |
 | GET | `/v1/quality/stability-studies/{id}` | QM_VIEW |
 | GET | `/v1/quality/spc?itemId=&testId=&orders=` | QM_VIEW |
+| GET | `/v1/quality/nonconformances?status=&source=&severity=&qualityOrderId=&limit=` | QM_VIEW |
+| POST | `/v1/quality/nonconformances` | QM_NCR_MAINTAIN |
+| GET | `/v1/quality/nonconformances/{id}` | QM_VIEW |
+| POST | `/v1/quality/nonconformances/{id}:approve` | QM_NCR_MAINTAIN |
+| POST | `/v1/quality/nonconformances/{id}:refuse` | QM_NCR_MAINTAIN |
+| POST | `/v1/quality/nonconformances/{id}/corrections` | QM_CAPA_MAINTAIN |
+| POST | `/v1/quality/nonconformances/{id}:complete-step` | QM_CAPA_MAINTAIN |
+| POST | `/v1/quality/nonconformances/{id}:check-effectiveness` | QM_CAPA_MAINTAIN |
 
 The PRD writes paths as `/quality/v1/...`; the service follows the repository
 convention `/v1/<context>/...`. Lists answer `{"items": [...]}` with `limit` 1 to 500
 (default 100). Creating and posting calls require `Idempotency-Key`; `:calibrate` and
 `:evaluate-compliance` are idempotent by value. The usage decision requires
-`If-Match` carrying the order's ETag (428 when absent, 412 when stale). Duties are checked
+`If-Match` carrying the order's ETag (428 when absent, 412 when stale). Every change to a
+nonconformance (approve, refuse, start the 8D, complete a step, the effectiveness check)
+requires `If-Match` with the NCR's ETag; starting the 8D also takes `Idempotency-Key`. Duties are checked
 through the platform `authz` package; they are not read from the token.
 
 ## Error codes
@@ -125,7 +156,7 @@ Problems are RFC 9457 (`application/problem+json`) with `code` set to the stable
 | Code | HTTP | Meaning |
 |---|---|---|
 | COM-0001 | 400 | Validation failed; `errors` names the fields |
-| COM-0428 | 428 | `If-Match` required on the usage decision |
+| COM-0428 | 428 | `If-Match` required on the usage decision and NCR changes |
 | AUTH-0001 | 401 | Missing or malformed tenant |
 | QM-0100 | 422 | No quality association matches the trigger |
 | QM-0102 | 422 | `INSTRUMENT_OVERDUE`: instrument past its calibration due date |
@@ -152,13 +183,19 @@ Problems are RFC 9457 (`application/problem+json`) with `code` set to the stable
 | QM-0165 | 422 | Declared components loop back on the item |
 | QM-0166 | 422 | Results cannot form the chart (subgroup size outside 2 to 25, mixed sizes) |
 | QM-0167 | 409 | The same `Idempotency-Key` is creating a study concurrently; retry |
+| QM-0170 | 404 | Nonconformance not found |
+| QM-0171 | 409 | The NCR lifecycle does not allow the change (for example approving a refused NCR, starting an 8D on a NEW one) |
+| QM-0172 | 409 | The same `Idempotency-Key` is creating an NCR or starting a correction concurrently; retry |
+| QM-0173 | 409 | Not the current 8D step, or the correction is not open |
+| QM-0174 | 422 | The effectiveness check is not due yet |
+| QM-0175 | 422 | The effectiveness check must be made by another user than the one who completed D7 |
 | conflict_version | 412 | Stale `If-Match` |
-| idempotency_key_reuse | 422 | Decision `Idempotency-Key` already used on another order |
+| idempotency_key_reuse | 422 | Decision or correction `Idempotency-Key` already used on another order or NCR |
 | AUTH-0003 | 403 | Missing duty |
 
 ## Wave reference
 
-Wave 33, PRD section 6.33. Slice 1 and 2 scope and deferred items are listed in
+Wave 33, PRD section 6.33. Slice 1 to 3 scope and deferred items are listed in
 `NOT-IMPLEMENTED.md`. The web workspace is `apps/web/src/modules/quality`.
 
 Tenant isolation: every table forces RLS with a tenant policy, and every read and

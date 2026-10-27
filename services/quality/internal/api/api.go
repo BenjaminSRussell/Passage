@@ -50,6 +50,7 @@ type API struct {
 	instrumentRefuse atomic.Int64
 	evaluations      atomic.Int64
 	studiesCreated   atomic.Int64
+	ncrsCreated      atomic.Int64
 }
 
 // New returns the API over s.
@@ -81,6 +82,14 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/quality/stability-studies", a.listStudies)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/quality/stability-studies/{id}", a.getStudy)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/quality/spc", a.spcChart)
+	r.With(authz.RequireDuty(dutyNCR)).Post("/v1/quality/nonconformances", a.createNonconformance)
+	r.With(authz.RequireDuty(dutyView)).Get("/v1/quality/nonconformances", a.listNonconformances)
+	r.With(authz.RequireDuty(dutyView)).Get("/v1/quality/nonconformances/{id}", a.getNonconformance)
+	r.With(authz.RequireDuty(dutyNCR)).Post("/v1/quality/nonconformances/{id}:approve", a.approveNonconformance)
+	r.With(authz.RequireDuty(dutyNCR)).Post("/v1/quality/nonconformances/{id}:refuse", a.refuseNonconformance)
+	r.With(authz.RequireDuty(dutyCAPA)).Post("/v1/quality/nonconformances/{id}/corrections", a.startCorrection)
+	r.With(authz.RequireDuty(dutyCAPA)).Post("/v1/quality/nonconformances/{id}:complete-step", a.completeStep)
+	r.With(authz.RequireDuty(dutyCAPA)).Post("/v1/quality/nonconformances/{id}:check-effectiveness", a.checkEffectiveness)
 }
 
 // Metrics serves the admin port's Prometheus text output.
@@ -93,6 +102,7 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP quality_instrument_refusals_total Result batches refused for an unknown or overdue instrument.\n# TYPE quality_instrument_refusals_total counter\nquality_instrument_refusals_total %d\n", a.instrumentRefuse.Load())
 		fmt.Fprintf(w, "# HELP quality_compliance_evaluations_total Item compliance evaluations run.\n# TYPE quality_compliance_evaluations_total counter\nquality_compliance_evaluations_total %d\n", a.evaluations.Load())
 		fmt.Fprintf(w, "# HELP quality_stability_studies_created_total Stability studies created; idempotent replays are not counted.\n# TYPE quality_stability_studies_created_total counter\nquality_stability_studies_created_total %d\n", a.studiesCreated.Load())
+		fmt.Fprintf(w, "# HELP quality_nonconformances_created_total Nonconformances raised through the API; idempotent replays and NCRs raised by decisions are not counted.\n# TYPE quality_nonconformances_created_total counter\nquality_nonconformances_created_total %d\n", a.ncrsCreated.Load())
 	})
 }
 
@@ -848,11 +858,11 @@ func (a *API) writeDecision(w http.ResponseWriter, r *http.Request, order domain
 func ifMatch(r *http.Request) (int, error) {
 	raw := r.Header.Get("If-Match")
 	if raw == "" {
-		return 0, httpx.NewProblem(http.StatusPreconditionRequired, "COM-0428", "If-Match with the order's ETag is required")
+		return 0, httpx.NewProblem(http.StatusPreconditionRequired, "COM-0428", "If-Match with the resource's ETag is required")
 	}
 	v, err := strconv.Atoi(strings.Trim(strings.TrimPrefix(raw, "W/"), `"`))
 	if err != nil || v < 1 {
-		return 0, validation(map[string]string{"If-Match": "must be the order's ETag"})
+		return 0, validation(map[string]string{"If-Match": "must be the resource's ETag"})
 	}
 	return v, nil
 }
@@ -901,10 +911,11 @@ func httpStatus(code string) int {
 	switch code {
 	case domain.CodeValidation:
 		return http.StatusBadRequest
-	case domain.CodeTestGroupMissing, domain.CodeOrderMissing, domain.CodeInstrumentMissing, domain.CodeStudyMissing, domain.CodeCompositionMissing:
+	case domain.CodeTestGroupMissing, domain.CodeOrderMissing, domain.CodeInstrumentMissing, domain.CodeStudyMissing, domain.CodeCompositionMissing,
+		domain.CodeNCRMissing:
 		return http.StatusNotFound
 	case domain.CodeClosed, domain.CodeResultDuplicate, domain.CodeInstrumentDupe, domain.CodeStatus, domain.CodeSourceLineDupe,
-		domain.CodeListRace, domain.CodeCompositionRace, domain.CodeStudyRace:
+		domain.CodeListRace, domain.CodeCompositionRace, domain.CodeStudyRace, domain.CodeNCRStatus, domain.CodeNCRRace, domain.CodeCAPAStep:
 		return http.StatusConflict
 	}
 	return http.StatusUnprocessableEntity

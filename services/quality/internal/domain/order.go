@@ -142,6 +142,8 @@ type Decision struct {
 	Split     Split          `json:"split"`
 	DecidedBy string         `json:"decidedBy"`
 	DecidedAt time.Time      `json:"decidedAt"`
+	// NonconformanceID is the NCR raised for the rejected quantity (FR-33.6).
+	NonconformanceID string `json:"nonconformanceId,omitempty"`
 }
 
 // SplitDecision checks a decision's lines and sums them into buckets. Accept

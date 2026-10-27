@@ -66,6 +66,10 @@ type Store interface {
 	GetStudy(ctx context.Context, id string) (domain.Study, error)
 	ListStudies(ctx context.Context, f StudyFilter) ([]domain.Study, error)
 	ListSPCObservations(ctx context.Context, itemID, testID string, maxOrders int) ([]domain.Observation, error)
+	CreateNonconformance(ctx context.Context, in domain.Nonconformance, key string) (domain.Nonconformance, bool, error)
+	GetNonconformance(ctx context.Context, id string) (domain.Nonconformance, error)
+	ListNonconformances(ctx context.Context, f NCRFilter) ([]domain.Nonconformance, error)
+	UpdateNonconformance(ctx context.Context, id string, expectedVersion int, key string, change func(domain.Nonconformance) (domain.Nonconformance, error)) (domain.Nonconformance, bool, error)
 	Ping(ctx context.Context) error
 }
 
@@ -626,13 +630,14 @@ func staleOrMissing(ctx context.Context, tx pgx.Tx, orderID string, expectedVers
 
 // --- usage decisions -------------------------------------------------------
 
-const decisionColumns = "id, quality_order_id, lines, accept_qty::text, reject_qty::text, deviation_qty::text, decided_by, decided_at"
+const decisionColumns = "id, quality_order_id, lines, accept_qty::text, reject_qty::text, deviation_qty::text, decided_by, decided_at, " +
+	"coalesce(nonconformance_id::text, '')"
 
 func scanDecision(row pgx.Row) (domain.Decision, error) {
 	var d domain.Decision
 	var lines []byte
 	var accept, reject, deviation string
-	err := row.Scan(&d.ID, &d.OrderID, &lines, &accept, &reject, &deviation, &d.DecidedBy, &d.DecidedAt)
+	err := row.Scan(&d.ID, &d.OrderID, &lines, &accept, &reject, &deviation, &d.DecidedBy, &d.DecidedAt, &d.NonconformanceID)
 	if err != nil {
 		return d, err
 	}
@@ -678,7 +683,9 @@ func (s *Postgres) GetDecision(ctx context.Context, orderID string) (domain.Deci
 
 // PostUsageDecision closes a pending order with its decision and enqueues
 // usagedecision.posted in the same transaction. The guard on version and status
-// is part of the update, so concurrent decisions cannot both win.
+// is part of the update, so concurrent decisions cannot both win. A decision that
+// rejects quantity raises its NCR in the same transaction (FR-33.6,
+// auto_ncr_on_reject), and nonconformance.created goes out with it.
 func (s *Postgres) PostUsageDecision(ctx context.Context, orderID string, expectedVersion int, d domain.Decision, key string) (domain.Order, domain.Decision, error) {
 	p, _ := tenant.FromContext(ctx)
 	var order domain.Order
@@ -708,11 +715,18 @@ func (s *Postgres) PostUsageDecision(ctx context.Context, orderID string, expect
 			return err
 		}
 		d.ID, d.OrderID, d.DecidedAt = ids.New(), orderID, time.Now().UTC()
+		if ncr, ok := domain.NCRFromDecision(o, d, d.DecidedAt); ok {
+			saved, err := insertNCR(ctx, tx, p.TenantID, ncr, "")
+			if err != nil {
+				return err
+			}
+			d.NonconformanceID = saved.ID
+		}
 		if _, err := tx.Exec(ctx, `insert into quality_usage_decision (tenant_id, id, quality_order_id, lines, accept_qty, reject_qty,
-			deviation_qty, decided_by, decided_at, idempotency_key)
-			values ($1, $2, $3, $4, $5::numeric, $6::numeric, $7::numeric, $8, $9, $10)`,
+			deviation_qty, decided_by, decided_at, idempotency_key, nonconformance_id)
+			values ($1, $2, $3, $4, $5::numeric, $6::numeric, $7::numeric, $8, $9, $10, $11)`,
 			p.TenantID, d.ID, orderID, string(lines), d.Split.Accept.String(), d.Split.Reject.String(), d.Split.Deviation.String(),
-			d.DecidedBy, d.DecidedAt, keyArg(key)); err != nil {
+			d.DecidedBy, d.DecidedAt, keyArg(key), nullable(d.NonconformanceID)); err != nil {
 			if isUnique(err) {
 				return httpx.NewProblem(http.StatusConflict, domain.CodeClosed, "this order already has a usage decision")
 			}
@@ -724,7 +738,7 @@ func (s *Postgres) PostUsageDecision(ctx context.Context, orderID string, expect
 		}
 		if err := enqueue(ctx, tx, "order", orderID, qevents.UsageDecisionPosted, p.TenantID, qevents.UsageDecisionPostedData{
 			QualityOrderID: orderID, Decisions: kinds, AcceptQty: d.Split.Accept.String(), RejectQty: d.Split.Reject.String(),
-			DeviationQty: d.Split.Deviation.String(), User: d.DecidedBy,
+			DeviationQty: d.Split.Deviation.String(), User: d.DecidedBy, NCRID: d.NonconformanceID,
 		}); err != nil {
 			return err
 		}

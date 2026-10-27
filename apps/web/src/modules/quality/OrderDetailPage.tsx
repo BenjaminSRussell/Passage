@@ -159,6 +159,16 @@ export function OrderDetailPage() {
               <li key={i}>{`${DECISION_LABELS[line.decision] ?? line.decision}: ${qty(line.quantity)} ${order.uom}${line.reason ? ` (${line.reason})` : ""}`}</li>
             ))}
           </ul>
+          <div className={`${styles.actions} ${styles.spaced}`}>
+            {order.decision.nonconformanceId ? (
+              <Link className={buttonClassName("secondary", "sm")} to={`/quality/nonconformances/${order.decision.nonconformanceId}`}>
+                {`Open NCR ${shortId(order.decision.nonconformanceId)} for the rejected quantity`}
+              </Link>
+            ) : null}
+            <Link className={buttonClassName("ghost", "sm")} to={`/quality/nonconformances/new?qualityOrderId=${order.id}`}>
+              Amend through a nonconformance
+            </Link>
+          </div>
         </Card>
       ) : order.status === "PENDING_DECISION" ? (
         <UsageDecisionForm order={order} onPosted={state.reload} />

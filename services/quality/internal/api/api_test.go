@@ -37,12 +37,17 @@ type fakeStore struct {
 	evals       map[string][]domain.ComplianceResult
 	studies     map[string]domain.Study
 	obs         map[string][]domain.Observation
+	ncrs        map[string]domain.Nonconformance
+	ncrKeys     map[string]string
+	capaKeys    map[string]string
+	ncrFilter   store.NCRFilter
 }
 
 func newFake() *fakeStore {
 	return &fakeStore{groups: map[string]domain.TestGroup{}, instruments: map[string]domain.Instrument{},
 		orders: map[string]domain.Order{}, results: map[string][]domain.Result{}, decisions: map[string]domain.Decision{}, batches: map[string]bool{},
-		comps: map[string]domain.Composition{}, evals: map[string][]domain.ComplianceResult{}, studies: map[string]domain.Study{}, obs: map[string][]domain.Observation{}}
+		comps: map[string]domain.Composition{}, evals: map[string][]domain.ComplianceResult{}, studies: map[string]domain.Study{}, obs: map[string][]domain.Observation{},
+		ncrs: map[string]domain.Nonconformance{}, ncrKeys: map[string]string{}, capaKeys: map[string]string{}}
 }
 
 func (f *fakeStore) Ping(context.Context) error { return nil }
@@ -193,7 +198,7 @@ func (f *fakeStore) PostUsageDecision(_ context.Context, id string, expected int
 }
 
 type reqSpec struct {
-	method, path, body, duties, key, ifMatch string
+	method, path, body, duties, key, ifMatch, user string
 }
 
 func call(h http.Handler, s reqSpec) *httptest.ResponseRecorder {
@@ -206,6 +211,9 @@ func call(h http.Handler, s reqSpec) *httptest.ResponseRecorder {
 	}
 	if s.ifMatch != "" {
 		req.Header.Set("If-Match", s.ifMatch)
+	}
+	if s.user != "" {
+		req.Header.Set("X-Passage-User", s.user)
 	}
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)

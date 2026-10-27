@@ -38,6 +38,16 @@ channels:
     messages:
       stabilityStudyCreated:
         $ref: "#/components/messages/StabilityStudyCreated"
+  qualityNonconformance:
+    address: passage.quality.nonconformance
+    messages:
+      nonconformanceCreated:
+        $ref: "#/components/messages/NonconformanceCreated"
+  qualityCapa:
+    address: passage.quality.capa
+    messages:
+      capaClosed:
+        $ref: "#/components/messages/CAPAClosed"
 operations:
   publishOrderCreated:
     action: send
@@ -69,6 +79,16 @@ operations:
     channel: { $ref: "#/channels/qualityStabilityStudy" }
     messages:
       - $ref: "#/channels/qualityStabilityStudy/messages/stabilityStudyCreated"
+  publishNonconformanceCreated:
+    action: send
+    channel: { $ref: "#/channels/qualityNonconformance" }
+    messages:
+      - $ref: "#/channels/qualityNonconformance/messages/nonconformanceCreated"
+  publishCAPAClosed:
+    action: send
+    channel: { $ref: "#/channels/qualityCapa" }
+    messages:
+      - $ref: "#/channels/qualityCapa/messages/capaClosed"
 components:
   messages:
     OrderCreated:
@@ -104,6 +124,18 @@ components:
       summary: A planned stability study with its pull schedule; the scheduling workflow starts from it (BR-33.14).
       payload:
         $ref: "#/components/schemas/StabilityStudyCreatedData"
+    NonconformanceCreated:
+      name: dev.passage.quality.nonconformance.created.v1
+      contentType: application/cloudevents+json
+      summary: A nonconformance raised through the API or by a usage decision that rejected quantity (FR-33.6, FR-33.7); the vendor scorecard counts it by severity.
+      payload:
+        $ref: "#/components/schemas/NonconformanceCreatedData"
+    CAPAClosed:
+      name: dev.passage.quality.capa.closed.v1
+      contentType: application/cloudevents+json
+      summary: The 8D correction of a nonconformance closed with an effective check (FR-33.8); the nonconformance is CLOSED.
+      payload:
+        $ref: "#/components/schemas/CAPAClosedData"
   schemas:
     OrderCreatedData:
       type: object
@@ -148,6 +180,7 @@ components:
         reject_qty: { type: string }
         deviation_qty: { type: string }
         user: { type: string }
+        ncr_id: { type: string, format: uuid, description: The nonconformance raised for the rejected quantity, when there is one. }
     ComplianceListCreatedData:
       type: object
       required: [list_id, code, version, kind, block_mode, regions, cas_count]
@@ -200,3 +233,26 @@ components:
               pull_date: { type: string, format: date }
               order_date: { type: string, format: date }
               test_group_id: { type: string, format: uuid }
+    NonconformanceCreatedData:
+      type: object
+      required: [ncr_id, source, severity, problem_type, item_id, qty, uom]
+      properties:
+        ncr_id: { type: string, format: uuid }
+        source: { type: string, enum: [CUSTOMER, VENDOR, INTERNAL, PRODUCTION, SERVICE] }
+        severity: { type: string, enum: [MINOR, MAJOR, CRITICAL] }
+        problem_type: { type: string }
+        item_id: { type: string, format: uuid }
+        vendor_id: { type: string, format: uuid }
+        customer_id: { type: string, format: uuid }
+        qty: { type: string, description: Decimal string }
+        uom: { type: string }
+        quality_order_id: { type: string, format: uuid }
+    CAPAClosedData:
+      type: object
+      required: [ncr_id, correction_id, effectiveness_result, reopened, closed_at]
+      properties:
+        ncr_id: { type: string, format: uuid }
+        correction_id: { type: string, format: uuid }
+        effectiveness_result: { type: string, enum: [EFFECTIVE] }
+        reopened: { type: integer, description: Times a NOT_EFFECTIVE check sent the 8D back to D4. }
+        closed_at: { type: string, format: date-time }

@@ -4,6 +4,7 @@ import { AssociationsPage, NewAssociationPage } from "./AssociationsPage";
 import { ComplianceListsPage, NewComplianceListPage } from "./ComplianceListsPage";
 import { InstrumentsPage, NewInstrumentPage } from "./InstrumentsPage";
 import { ItemCompliancePage, ItemLookupPage } from "./ItemCompliancePage";
+import { NewNonconformancePage, NonconformanceDetailPage, NonconformancesPage } from "./NonconformancesPage";
 import { NewOrderPage } from "./NewOrderPage";
 import { OrderDetailPage } from "./OrderDetailPage";
 import { OrdersPage } from "./OrdersPage";
@@ -16,7 +17,7 @@ const quality: PassageModule = {
   id: "quality",
   title: "Quality",
   description:
-    "Quality orders with results and usage decisions, test groups, instruments, quality associations, AQL sampling, product compliance, stability studies and SPC charts.",
+    "Quality orders with results and usage decisions, nonconformances with their 8D correction, test groups, instruments, quality associations, AQL sampling, product compliance, stability studies and SPC charts.",
   routes: [
     { path: "/quality", element: createElement(OrdersPage), handle: { title: "Quality orders" } },
     { path: "/quality/orders", element: createElement(OrdersPage) },
@@ -37,10 +38,14 @@ const quality: PassageModule = {
     { path: "/quality/stability/new", element: createElement(NewStudyPage), handle: { title: "Plan a stability study" } },
     { path: "/quality/stability/:id", element: createElement(StudyDetailPage), handle: { title: "Stability study" } },
     { path: "/quality/spc", element: createElement(SpcPage), handle: { title: "SPC charts" } },
+    { path: "/quality/nonconformances", element: createElement(NonconformancesPage), handle: { title: "Nonconformances" } },
+    { path: "/quality/nonconformances/new", element: createElement(NewNonconformancePage), handle: { title: "Raise a nonconformance" } },
+    { path: "/quality/nonconformances/:id", element: createElement(NonconformanceDetailPage), handle: { title: "Nonconformance" } },
   ],
   nav: [
     { label: "Quality orders", to: "/quality/orders", duty: "QM_VIEW" },
     { label: "New quality order", to: "/quality/orders/new", duty: "QM_ORDER_MAINTAIN" },
+    { label: "Nonconformances", to: "/quality/nonconformances", duty: "QM_VIEW" },
     { label: "Test groups", to: "/quality/test-groups", duty: "QM_VIEW" },
     { label: "Instruments", to: "/quality/instruments", duty: "QM_VIEW" },
     { label: "Quality associations", to: "/quality/associations", duty: "QM_VIEW" },

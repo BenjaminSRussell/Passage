@@ -1,4 +1,4 @@
-# Quality web module (wave 33, PSG-33 slices 1 and 2)
+# Quality web module (wave 33, PSG-33 slices 1 to 3)
 
 Auto-discovered by the shell through `module.ts`. Pages use the shell primitives from
 `src/shell/ui` and `pages.module.css`; every list has loading, empty and error states.
@@ -7,7 +7,7 @@ Auto-discovered by the shell through `module.ts`. Pages use the shell primitives
 |---|---|---|---|
 | `/quality`, `/quality/orders` | `OrdersPage`: quality order worklist, filter by status and site | `GET /quality-orders` | QM_VIEW |
 | `/quality/orders/new` | `NewOrderPage`: manual order (test group + sampling plan) or a trigger matched to an association | `GET /test-groups`, `POST /quality-orders` | QM_ORDER_MAINTAIN |
-| `/quality/orders/:id` | `OrderDetailPage`: lot, sample, Ac/Re, evaluation, results; `ResultsEntry` (one sample, a row per test) and `UsageDecisionForm` (split lines that sum to the lot, `If-Match`) | `GET /quality-orders/{id}`, `GET /instruments`, `POST …/results`, `POST …:usage-decision` | QM_VIEW, QM_RESULTS_RECORD, QM_USAGE_DECISION |
+| `/quality/orders/:id` | `OrderDetailPage`: lot, sample, Ac/Re, evaluation, results; `ResultsEntry` (one sample, a row per test) and `UsageDecisionForm` (split lines that sum to the lot, `If-Match`); a decided order links to the NCR its decision raised and to an amending NCR | `GET /quality-orders/{id}`, `GET /instruments`, `POST …/results`, `POST …:usage-decision` | QM_VIEW, QM_RESULTS_RECORD, QM_USAGE_DECISION |
 | `/quality/test-groups`, `/new` | Test group versions; create the next version with variable and attribute tests | `GET`/`POST /test-groups` | QM_VIEW, QM_SETUP_MAINTAIN |
 | `/quality/instruments`, `/new` | Instruments with calibration state, "Calibrated today"; register | `GET`/`POST /instruments`, `POST /instruments/{id}:calibrate` | QM_VIEW, QM_SETUP_MAINTAIN |
 | `/quality/associations`, `/new` | Quality associations with scope, test group and sampling | `GET`/`POST /associations` | QM_VIEW, QM_SETUP_MAINTAIN |
@@ -15,6 +15,9 @@ Auto-discovered by the shell through `module.ts`. Pages use the shell primitives
 | `/quality/compliance/lists`, `/new` | Compliance list versions (restricted and reporting); create the next version with CAS numbers and thresholds (CAS check digit validated) | `GET`/`POST /compliance-lists` | QM_VIEW, QM_COMPLIANCE_MAINTAIN |
 | `/quality/compliance/items`, `/:id` | Item lookup; an item's current composition (substances and components), a form for its next version, and evaluation for a region with hits, block state and undeclared components | `GET`/`POST /items/{id}/composition`, `POST /items/{id}:evaluate-compliance` | QM_VIEW, QM_COMPLIANCE_MAINTAIN |
 | `/quality/stability`, `/new`, `/:id` | Stability studies by status with the next pull; plan a study (ICH condition, test group, pull months, lead and window days); the study with its pull schedule | `GET`/`POST /stability-studies`, `GET /stability-studies/{id}`, `GET /test-groups` | QM_VIEW, QM_STABILITY_MAINTAIN |
+| `/quality/nonconformances` | `NonconformancesPage`: NCRs newest first, filter by status, source and severity, links to the quality order | `GET /nonconformances` | QM_VIEW |
+| `/quality/nonconformances/new` | `NewNonconformancePage`: raise an NCR; `?qualityOrderId=` prefills the order (item and unit then default to the order's) | `POST /nonconformances` | QM_NCR_MAINTAIN |
+| `/quality/nonconformances/:id` | `NonconformanceDetailPage`: report, approve or refuse (`NcrActions`), start the 8D, the D1 to D8 steps with due dates and overdue flags, complete the current step and record the effectiveness check (`CorrectionPanel`); every change sends `If-Match` | `GET /nonconformances/{id}`, `POST …:approve`, `…:refuse`, `…/corrections`, `…:complete-step`, `…:check-effectiveness` | QM_VIEW, QM_NCR_MAINTAIN, QM_CAPA_MAINTAIN |
 | `/quality/spc` | SPC dashboard: X-bar/R or p (and np) charts as inline SVG with limits and flagged points, and a table of points with Western Electric rule hits | `GET /spc`, `GET /test-groups` | QM_VIEW |
 
 `api/client.ts` is the typed `fetch` client for `services/quality/api/openapi.yaml`.
@@ -35,6 +38,6 @@ cd apps/web && npx vitest --run src/modules/quality && npx tsc --noEmit
 
 ## Not yet in this module
 
-Nonconformance and CAPA, certificate receipt, CoA preview, supplier scorecard, SDS,
+Cost of quality, an overdue-CAPA filter on the NCR list, certificate receipt, CoA preview, supplier scorecard, SDS,
 stability study status changes and pull recording, and the compliance reporting extract.
 See `services/quality/NOT-IMPLEMENTED.md`.

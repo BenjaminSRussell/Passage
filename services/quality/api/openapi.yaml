@@ -645,6 +645,247 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
+  /v1/quality/nonconformances:
+    get:
+      tags: [nonconformance]
+      operationId: listNonconformances
+      x-passage-duty: QM_VIEW
+      summary: Nonconformances, newest first (NCR and CAPA status inquiry)
+      parameters:
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/NcrStatus" } }
+        - { name: source, in: query, schema: { $ref: "#/components/schemas/NcrSource" } }
+        - { name: severity, in: query, schema: { $ref: "#/components/schemas/NcrSeverity" } }
+        - { name: qualityOrderId, in: query, schema: { type: string, format: uuid } }
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: List; the correction is not included.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Nonconformance" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    post:
+      tags: [nonconformance]
+      operationId: createNonconformance
+      x-passage-duty: QM_NCR_MAINTAIN
+      summary: Raise a nonconformance (FR-33.7)
+      description: |
+        Starts in NEW and writes dev.passage.quality.nonconformance.created.v1. With
+        qualityOrderId the item, dims and unit default to the order's, the item must be the
+        order's and qty at most its lot quantity; an NCR on a closed order amends its
+        decision (BR-33.4). A usage decision that rejects quantity raises one itself.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NcrRequest" }
+      responses:
+        "201":
+          description: Created
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Nonconformance" }
+        "200":
+          description: Idempotent replay
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Nonconformance" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+  /v1/quality/nonconformances/{id}:
+    get:
+      tags: [nonconformance]
+      operationId: getNonconformance
+      x-passage-duty: QM_VIEW
+      summary: One nonconformance with its 8D correction
+      parameters:
+        - $ref: "#/components/parameters/NcrId"
+      responses:
+        "200":
+          description: Nonconformance
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Nonconformance" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/quality/nonconformances/{id}:approve:
+    post:
+      tags: [nonconformance]
+      operationId: approveNonconformance
+      x-passage-duty: QM_NCR_MAINTAIN
+      summary: Approve a NEW nonconformance
+      parameters:
+        - $ref: "#/components/parameters/NcrId"
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: Updated
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Nonconformance" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/quality/nonconformances/{id}:refuse:
+    post:
+      tags: [nonconformance]
+      operationId: refuseNonconformance
+      x-passage-duty: QM_NCR_MAINTAIN
+      summary: Refuse a NEW nonconformance with a reason (final)
+      parameters:
+        - $ref: "#/components/parameters/NcrId"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReasonRequest" }
+      responses:
+        "200":
+          description: Updated
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Nonconformance" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/quality/nonconformances/{id}/corrections:
+    post:
+      tags: [nonconformance]
+      operationId: startCorrection
+      x-passage-duty: QM_CAPA_MAINTAIN
+      summary: Start the 8D correction of an APPROVED nonconformance (FR-33.8)
+      description: |
+        Moves the NCR to IN_CORRECTION and opens D1. D3 containment is due two business days
+        (Monday to Friday) after start and D5 corrective action 30 days after start (BR-33.9).
+        A replayed Idempotency-Key answers 200 with the NCR as it is now.
+      parameters:
+        - $ref: "#/components/parameters/NcrId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CorrectionRequest" }
+      responses:
+        "201":
+          description: Started
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Nonconformance" }
+        "200":
+          description: Idempotent replay
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Nonconformance" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/quality/nonconformances/{id}:complete-step:
+    post:
+      tags: [nonconformance]
+      operationId: completeCorrectionStep
+      x-passage-duty: QM_CAPA_MAINTAIN
+      summary: Complete the current 8D step, D1 to D7
+      description: Steps complete in order (QM-0173 otherwise). Completing D7 starts the effectiveness timer.
+      parameters:
+        - $ref: "#/components/parameters/NcrId"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StepRequest" }
+      responses:
+        "200":
+          description: Updated
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Nonconformance" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/quality/nonconformances/{id}:check-effectiveness:
+    post:
+      tags: [nonconformance]
+      operationId: checkEffectiveness
+      x-passage-duty: QM_CAPA_MAINTAIN
+      summary: Record the effectiveness check once it is due
+      description: |
+        Allowed once effectivenessDueAt has passed (QM-0174), by a user other than the one who
+        completed D7 (QM-0175). EFFECTIVE completes D8, closes the correction and the NCR and writes
+        dev.passage.quality.capa.closed.v1; NOT_EFFECTIVE reopens the 8D at D4.
+      parameters:
+        - $ref: "#/components/parameters/NcrId"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EffectivenessRequest" }
+      responses:
+        "200":
+          description: Updated
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Nonconformance" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
 components:
   securitySchemes:
     bearerAuth:
@@ -661,7 +902,7 @@ components:
       name: If-Match
       in: header
       required: true
-      description: The order's ETag from its last read.
+      description: The resource's ETag from its last read.
       schema: { type: string }
     Limit:
       name: limit
@@ -678,6 +919,11 @@ components:
       required: true
       description: Item (product) id.
       schema: { type: string, format: uuid }
+    NcrId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
     StudyId:
       name: id
       in: path
@@ -685,7 +931,7 @@ components:
       schema: { type: string, format: uuid }
   headers:
     ETag:
-      description: Order version, quoted.
+      description: Resource version, quoted.
       schema: { type: string }
   responses:
     Problem:
@@ -962,6 +1208,7 @@ components:
             deviationQty: { $ref: "#/components/schemas/Decimal" }
         decidedBy: { type: string }
         decidedAt: { type: string, format: date-time }
+        nonconformanceId: { type: string, format: uuid, description: NCR raised for the rejected quantity (FR-33.6). }
     DecisionResponse:
       type: object
       properties:
@@ -1160,3 +1407,106 @@ components:
                 subgroupSize: { type: integer }
                 points: { type: array, items: { type: integer } }
                 limits: { $ref: "#/components/schemas/SpcLimits" }
+    NcrStatus:
+      type: string
+      enum: [NEW, APPROVED, REFUSED, IN_CORRECTION, CLOSED]
+    NcrSource:
+      type: string
+      enum: [CUSTOMER, VENDOR, INTERNAL, PRODUCTION, SERVICE]
+    NcrSeverity:
+      type: string
+      enum: [MINOR, MAJOR, CRITICAL]
+    NcrRequest:
+      type: object
+      required: [source, qty, problemType, severity]
+      properties:
+        source: { $ref: "#/components/schemas/NcrSource" }
+        itemId: { type: string, format: uuid, description: Required unless qualityOrderId is given. }
+        dims: { type: object, additionalProperties: { type: string } }
+        qty: { $ref: "#/components/schemas/Decimal" }
+        uom: { type: string, minLength: 1, maxLength: 10, description: Required unless qualityOrderId is given. }
+        problemType: { type: string, pattern: "^[A-Z0-9][A-Z0-9_-]{1,31}$" }
+        severity: { $ref: "#/components/schemas/NcrSeverity" }
+        description: { type: string, maxLength: 2000 }
+        qualityOrderId: { type: string, format: uuid }
+        vendorId: { type: string, format: uuid }
+        customerId: { type: string, format: uuid }
+        productionOrderId: { type: string, format: uuid }
+        quarantineOrderId: { type: string, format: uuid }
+    ReasonRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 1, maxLength: 500 }
+    CorrectionRequest:
+      type: object
+      properties:
+        effectivenessCheckDays: { type: integer, minimum: 30, maximum: 365, default: 90, description: effectiveness_check_days }
+    StepRequest:
+      type: object
+      required: [step, notes]
+      properties:
+        step: { type: integer, minimum: 1, maximum: 7 }
+        notes: { type: string, minLength: 1, maxLength: 2000 }
+    EffectivenessRequest:
+      type: object
+      required: [result, note]
+      properties:
+        result: { type: string, enum: [EFFECTIVE, NOT_EFFECTIVE] }
+        note: { type: string, minLength: 1, maxLength: 2000 }
+    CorrectionStep:
+      type: object
+      properties:
+        step: { type: integer, minimum: 1, maximum: 8 }
+        name: { type: string }
+        dueAt: { type: string, format: date-time }
+        notes: { type: string }
+        completedBy: { type: string }
+        completedAt: { type: string, format: date-time }
+    Correction:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [OPEN, EFFECTIVENESS_PENDING, CLOSED] }
+        currentStep: { type: integer, minimum: 1, maximum: 8 }
+        steps:
+          type: array
+          minItems: 8
+          maxItems: 8
+          items: { $ref: "#/components/schemas/CorrectionStep" }
+        startedBy: { type: string }
+        startedAt: { type: string, format: date-time }
+        effectivenessDays: { type: integer }
+        effectivenessDueAt: { type: string, format: date-time }
+        effectivenessResult: { type: string, enum: [EFFECTIVE, NOT_EFFECTIVE] }
+        effectivenessNote: { type: string }
+        effectivenessBy: { type: string }
+        effectivenessAt: { type: string, format: date-time }
+        reopened: { type: integer, description: Times a NOT_EFFECTIVE check sent the 8D back to D4. }
+        closedAt: { type: string, format: date-time }
+        overdueSteps: { type: array, description: Steps past their due date (computed on read)., items: { type: integer } }
+        effectivenessCheckDue: { type: boolean, description: D7 is complete and the effectiveness period has elapsed (computed on read). }
+    Nonconformance:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        source: { $ref: "#/components/schemas/NcrSource" }
+        itemId: { type: string, format: uuid }
+        dims: { type: object, additionalProperties: { type: string } }
+        qty: { $ref: "#/components/schemas/Decimal" }
+        uom: { type: string }
+        problemType: { type: string }
+        severity: { $ref: "#/components/schemas/NcrSeverity" }
+        description: { type: string }
+        qualityOrderId: { type: string, format: uuid }
+        vendorId: { type: string, format: uuid }
+        customerId: { type: string, format: uuid }
+        productionOrderId: { type: string, format: uuid }
+        quarantineOrderId: { type: string, format: uuid }
+        status: { $ref: "#/components/schemas/NcrStatus" }
+        statusReason: { type: string, description: Refusal reason. }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        version: { type: integer }
+        correction: { $ref: "#/components/schemas/Correction" }

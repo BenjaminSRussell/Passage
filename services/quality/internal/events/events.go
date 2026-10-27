@@ -14,11 +14,15 @@ var (
 	ComplianceListCreated    = events.Type(Context, "compliancelist", "created", 1)
 	ComplianceResultRecorded = events.Type(Context, "complianceresult", "recorded", 1)
 	StabilityStudyCreated    = events.Type(Context, "stabilitystudy", "created", 1)
+	// Slice 3.
+	NonconformanceCreated = events.Type(Context, "nonconformance", "created", 1)
+	CAPAClosed            = events.Type(Context, "capa", "closed", 1)
 )
 
 // All lists every event type this service publishes.
 func All() []string {
-	return []string{OrderCreated, ResultRecorded, UsageDecisionPosted, ComplianceListCreated, ComplianceResultRecorded, StabilityStudyCreated}
+	return []string{OrderCreated, ResultRecorded, UsageDecisionPosted, ComplianceListCreated, ComplianceResultRecorded, StabilityStudyCreated,
+		NonconformanceCreated, CAPAClosed}
 }
 
 // OrderCreatedData is the data member of dev.passage.quality.order.created.v1.
@@ -54,6 +58,8 @@ type UsageDecisionPostedData struct {
 	RejectQty      string   `json:"reject_qty"`
 	DeviationQty   string   `json:"deviation_qty"`
 	User           string   `json:"user"`
+	// NCRID is the nonconformance the decision raised for its rejected quantity.
+	NCRID string `json:"ncr_id,omitempty"`
 }
 
 // ComplianceListCreatedData is the data member of dev.passage.quality.compliancelist.created.v1.
@@ -108,4 +114,30 @@ type StabilityStudyCreatedData struct {
 	Condition string          `json:"condition"`
 	StartDate string          `json:"start_date"`
 	Pulls     []StabilityPull `json:"pulls"`
+}
+
+// NonconformanceCreatedData is the data member of dev.passage.quality.nonconformance.created.v1.
+// The vendor scorecard counts it by severity; quality_order_id links an NCR raised
+// by a usage decision (or amending one, BR-33.4) to its order.
+type NonconformanceCreatedData struct {
+	NCRID          string `json:"ncr_id"`
+	Source         string `json:"source"`
+	Severity       string `json:"severity"`
+	ProblemType    string `json:"problem_type"`
+	ItemID         string `json:"item_id"`
+	VendorID       string `json:"vendor_id,omitempty"`
+	CustomerID     string `json:"customer_id,omitempty"`
+	Qty            string `json:"qty"`
+	UOM            string `json:"uom"`
+	QualityOrderID string `json:"quality_order_id,omitempty"`
+}
+
+// CAPAClosedData is the data member of dev.passage.quality.capa.closed.v1: the 8D
+// closed with an effective check.
+type CAPAClosedData struct {
+	NCRID               string `json:"ncr_id"`
+	CorrectionID        string `json:"correction_id"`
+	EffectivenessResult string `json:"effectiveness_result"`
+	Reopened            int    `json:"reopened"`
+	ClosedAt            string `json:"closed_at"`
 }

@@ -183,6 +183,8 @@ export interface Decision {
   split: { acceptQty: string; rejectQty: string; deviationQty: string };
   decidedBy: string;
   decidedAt: string;
+  /** The NCR the decision raised for its rejected quantity (FR-33.6). */
+  nonconformanceId?: string;
 }
 
 export interface OrderView extends Order {
@@ -512,4 +514,119 @@ export interface SpcResult {
 /** The SPC chart of one item and test (QM_VIEW); chart NONE when no results exist yet. */
 export function getSpc(itemId: string, testId: string, signal?: AbortSignal): Promise<SpcResult> {
   return send<SpcResult>(`/spc${query({ itemId, testId })}`, {}, signal);
+}
+
+// ---- Slice 3: nonconformance (FR-33.7) and the 8D correction (FR-33.8, BR-33.9) ----
+
+export type NcrStatus = "NEW" | "APPROVED" | "REFUSED" | "IN_CORRECTION" | "CLOSED";
+export type NcrSource = "CUSTOMER" | "VENDOR" | "INTERNAL" | "PRODUCTION" | "SERVICE";
+export type NcrSeverity = "MINOR" | "MAJOR" | "CRITICAL";
+export type CorrectionStatus = "OPEN" | "EFFECTIVENESS_PENDING" | "CLOSED";
+export type EffectivenessResult = "EFFECTIVE" | "NOT_EFFECTIVE";
+
+export interface CorrectionStep {
+  step: number;
+  name: string;
+  dueAt?: string;
+  notes?: string;
+  completedBy?: string;
+  completedAt?: string;
+}
+
+export interface Correction {
+  id: string;
+  status: CorrectionStatus;
+  currentStep: number;
+  steps: CorrectionStep[];
+  startedBy: string;
+  startedAt: string;
+  effectivenessDays: number;
+  effectivenessDueAt?: string;
+  effectivenessResult?: EffectivenessResult;
+  effectivenessNote?: string;
+  effectivenessBy?: string;
+  effectivenessAt?: string;
+  reopened: number;
+  closedAt?: string;
+  overdueSteps: number[];
+  effectivenessCheckDue: boolean;
+}
+
+export interface NewNonconformance {
+  source: NcrSource;
+  itemId?: string;
+  qty: string;
+  uom?: string;
+  problemType: string;
+  severity: NcrSeverity;
+  description?: string;
+  qualityOrderId?: string;
+  vendorId?: string;
+  customerId?: string;
+  productionOrderId?: string;
+  quarantineOrderId?: string;
+}
+
+export interface Nonconformance extends Omit<NewNonconformance, "itemId" | "uom" | "description"> {
+  id: string;
+  itemId: string;
+  uom: string;
+  description: string;
+  dims: Record<string, string>;
+  status: NcrStatus;
+  statusReason?: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  version: number;
+  correction?: Correction;
+}
+
+export interface NcrFilter {
+  status?: NcrStatus | "";
+  source?: NcrSource | "";
+  severity?: NcrSeverity | "";
+  qualityOrderId?: string;
+}
+
+export function listNonconformances(filter: NcrFilter, signal?: AbortSignal): Promise<Nonconformance[]> {
+  return items<Nonconformance>(
+    `/nonconformances${query({ status: filter.status, source: filter.source, severity: filter.severity, qualityOrderId: filter.qualityOrderId })}`,
+    signal,
+  );
+}
+
+/** One NCR with its 8D correction (QM_VIEW); version is its ETag. */
+export function getNonconformance(id: string, signal?: AbortSignal): Promise<Nonconformance> {
+  return send<Nonconformance>(`/nonconformances/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** Raises an NCR in NEW (QM_NCR_MAINTAIN). */
+export function createNonconformance(input: NewNonconformance, key: string = newKey()): Promise<Nonconformance> {
+  return post<Nonconformance>("/nonconformances", input, { "Idempotency-Key": key });
+}
+
+function ifMatch(version: number): Record<string, string> {
+  return { "If-Match": `"${version}"` };
+}
+
+export function approveNonconformance(id: string, version: number): Promise<Nonconformance> {
+  return post<Nonconformance>(`/nonconformances/${encodeURIComponent(id)}:approve`, {}, ifMatch(version));
+}
+
+export function refuseNonconformance(id: string, version: number, reason: string): Promise<Nonconformance> {
+  return post<Nonconformance>(`/nonconformances/${encodeURIComponent(id)}:refuse`, { reason }, ifMatch(version));
+}
+
+/** Starts the 8D of an approved NCR (QM_CAPA_MAINTAIN). */
+export function startCorrection(id: string, version: number, effectivenessCheckDays: number, key: string = newKey()): Promise<Nonconformance> {
+  return post<Nonconformance>(`/nonconformances/${encodeURIComponent(id)}/corrections`, { effectivenessCheckDays }, { ...ifMatch(version), "Idempotency-Key": key });
+}
+
+export function completeCorrectionStep(id: string, version: number, step: number, notes: string): Promise<Nonconformance> {
+  return post<Nonconformance>(`/nonconformances/${encodeURIComponent(id)}:complete-step`, { step, notes }, ifMatch(version));
+}
+
+export function checkEffectiveness(id: string, version: number, result: EffectivenessResult, note: string): Promise<Nonconformance> {
+  return post<Nonconformance>(`/nonconformances/${encodeURIComponent(id)}:check-effectiveness`, { result, note }, ifMatch(version));
 }
