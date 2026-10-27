@@ -57,6 +57,10 @@ type fakeStore struct {
 		ifMatch    int
 		idem       store.Idem
 	}
+
+	// RFQ cycle: the one stored RFQ and what the RFQ methods received.
+	rfq    *domain.RFQ
+	rfqLog rfqLog
 }
 
 func newFake() *fakeStore {

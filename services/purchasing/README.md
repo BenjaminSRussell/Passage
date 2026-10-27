@@ -1,11 +1,12 @@
 # purchasing
 
-Passage purchasing service. Wave 17 (PSG-17), slices 1 to 3 of the procurement
+Passage purchasing service. Wave 17 (PSG-17), slices 1 to 4 of the procurement
 context: purchase requisitions with amount/category approval routing,
 consolidation of approved requisition lines into purchase orders, purchase orders
 with persisted totals, the PO approval lifecycle with versioned change
 management, purchase agreements with release tracking, trade agreement
-price lookup with explain, and the web workspace module at
+price lookup with explain, the RFQ cycle (send, replies, compare, award to
+purchase orders), and the web workspace module at
 `apps/web/src/modules/purchasing`.
 
 Full ticket scope and the list of what is not yet built are in
@@ -16,13 +17,15 @@ Full ticket scope and the list of what is not yet built are in
 ```
 cmd/purchasing/        entrypoint: dbx.Connect -> dbx.Migrate -> api.Register -> httpx.Serve
 internal/domain/       pure rules: approval bands, trade agreement lookup, PO totals, reapproval,
-                       PO state machine, version snapshots and RFC 6902 diffs, agreement releases (limits, validity, threshold), consolidation grouping
+                       PO state machine, version snapshots and RFC 6902 diffs, agreement releases (limits, validity, threshold), consolidation grouping,
+                       RFQ state machine, reply ranking and award checks
 internal/store/        Postgres repositories (pgx), every transaction via dbx.WithTenantTx
 internal/api/          HTTP handlers under /v1/procurement, duties via authz.RequireDuty
 internal/events/       event types and payloads (dev.passage.procurement.*)
 migrations/            0001_init.sql (tables, sequences, RLS, outbox, idempotency, total trigger)
                        0002_agreements_consolidation.sql (purchase agreements, PO line and requisition line links)
                        0003_po_lifecycle.sql (PO versions, received/invoiced quantities on PO lines)
+                       0004_rfq.sql (RFQs, lines, invitations, replies; PO line link to the awarded reply)
 api/openapi.yaml       OpenAPI 3.1 for every route
 events/asyncapi.yaml   AsyncAPI 3 for every event emitted
 charts/purchasing/     Helm chart (probes on /healthz and /readyz, DATABASE_URL from a secret)
@@ -79,6 +82,13 @@ row-level-security test also needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-owner
 | POST `/trade-agreements` | TradeAgreementMaintain | PRICE relation only in this slice; PRC-TA-002 on an overlapping row |
 | GET `/trade-agreements` | TradeAgreementMaintain | Newest first; `accountId`, `itemId`, `status`, `limit`, `cursor` |
 | GET `/trade-agreements/{id}` | TradeAgreementMaintain | |
+| POST `/rfqs` | RFQMaintain | Idempotency-Key required; DRAFT RFQ with lines (max 500), a future `replyDeadline` and `rankingRule` LOWEST_PRICE (default) or LEAD_TIME |
+| GET `/rfqs` | RFQMaintain or RFQAward | Newest first; `status` (comma list), `limit`, `cursor`; rows carry line, vendor and reply counts |
+| GET `/rfqs/{id}` | RFQMaintain or RFQAward | Lines, invitations and replies; ETag = version |
+| POST `/rfqs/{id}:send` / `:close` / `:cancel` | RFQMaintain | Idempotency-Key and If-Match (version) required; `:send` takes `vendorIds` |
+| POST `/rfqs/{id}/replies` | RFQMaintain | Idempotency-Key required; one invited vendor's prices for some lines, in one currency; late lines come back with PRC-RFQ-003 warnings |
+| GET `/rfqs/{id}/compare` | RFQMaintain or RFQAward | Ranking per line by the RFQ rule or `rule`; late replies listed as excluded |
+| POST `/rfqs/{id}:award` | RFQAward | Idempotency-Key and If-Match required; `awards` (line, reply, override reason); answers the RFQ and the DRAFT POs created |
 
 Writes for a legal entity outside the caller's `X-Passage-Legal-Entity` scope are
 refused with AUTH-0003 before they reach the database (RLS would refuse them too).
@@ -108,7 +118,7 @@ down). Metrics: `GET :9090/metrics` (Prometheus text counters).
   `total = subtotal − discount_total + charges_total + tax_total` is checked by a
   deferred constraint trigger in the database.
 - **Price source (FR-17.7).** Each PO line stores `MANUAL`, `AGREEMENT:<agreement
-  line id>`, `TRADE_AGREEMENT:<id>` or `REQUISITION_ESTIMATE`; the price date is the
+  line id>`, `TRADE_AGREEMENT:<id>`, `REQUISITION_ESTIMATE` or `RFQ_REPLY:<reply id>`; the price date is the
   order date (BR-17.3 default).
 - **Consolidation (FR-17.3).** Approved requisition lines are grouped by legal
   entity, vendor (the buyer's choice, else the preferred vendor), currency, site and
@@ -161,6 +171,24 @@ down). Metrics: `GET :9090/metrics` (Prometheus text counters).
   product, unit, quantity and amount, and a new delivery date must stay within the
   agreement validity (PRC-AGR-005). An existing line that omits `unitPrice` keeps its
   price and price source while its product and unit are unchanged.
+- **RFQ cycle (FR-17.4, BR-17.11).** `DRAFT →:send→ SENT →first reply→ REPLIES_OPEN
+  →:close→ CLOSED`, `REPLIES_OPEN|CLOSED →:award→ AWARDED`, `:cancel` from anything
+  but AWARDED and CANCELLED; a wrong status is 409 PRC-RFQ-STATE and a stale If-Match
+  409 PRC-VERSION-CONFLICT. Only invited vendors reply (PRC-RFQ-002), only while SENT
+  or REPLIES_OPEN. A reply received after `replyDeadline` is stored with `late=true`
+  and a PRC-RFQ-003 warning; replying again to a line replaces the vendor's reply,
+  but a late reply cannot replace an on-time one (PRC-RFQ-006). The compare view
+  ranks on-time replies per line by price per unit of measure (price ÷ price unit)
+  then lead time (LOWEST_PRICE), or lead time then price (LEAD_TIME), with vendor
+  and reply id as the last tie-breakers, and lists late replies as excluded. An
+  award names one reply per line; the reply must answer that line and still be valid
+  on the award day (PRC-RFQ-005), and a late reply needs an override reason, kept on
+  the reply (PRC-RFQ-003). The award creates one DRAFT PO per winning vendor and
+  currency: each line has the RFQ quantity and unit, the reply price and price unit
+  (`RFQ_REPLY:<reply id>`, and `purchase_order_line.rfq_reply_id`), and is due today
+  plus the reply lead time, or on the line's required date when that is later. The
+  POs, the awarded replies, the AWARDED status and `rfq.awarded.v1` are written in
+  one transaction; `:send` writes `rfq.sent.v1`.
 - **Idempotency.** Creates and custom methods store the key with a hash of the operation
   and body; a replay returns the original resource, a different body (or endpoint)
   with the same key is `idempotency_key_reuse`.
@@ -192,11 +220,11 @@ store codes are returned as the `code` field.
 | PRC-PO-VERSION-NOT-FOUND | 404 | The PO has no such version |
 | PRC-TA-NOT-FOUND | 404 | Trade agreement not found |
 | PRC-TA-002 | 409 | Overlapping ACTIVE trade agreement row with equal specificity and valid_from |
-| PRC-VERSION-CONFLICT | 409 | Requisition or agreement is at another version than If-Match |
+| PRC-VERSION-CONFLICT | 409 | Requisition, agreement or RFQ is at another version than If-Match |
 | PRC-PRICE-001 | 422 | No trade agreement price for the line; enter a unit price |
 | PRC-PRICE-002 | 422 | Unknown tie rule |
 | PRC-PO-TOTAL | 500 (COM-0500) | Database total identity violated; the trigger refuses the write and the client sees COM-0500. Should not occur because totals come from `domain.Price` |
-| PRC-ACTION-001 | 404 | Unknown custom action on a requisition, purchase order or agreement |
+| PRC-ACTION-001 | 404 | Unknown custom action on a requisition, purchase order, agreement or RFQ |
 | PRC-REQ-005 | 422 | A PO line names a requisition line of another legal entity |
 | PRC-REQ-LINE-NOT-FOUND | 404 | Requisition line not found |
 | PRC-CONS-001 | 422 | Consolidation window outside 1–60 days |
@@ -210,6 +238,12 @@ store codes are returned as the `code` field.
 | PRC-AGR-006 | 422 | Agreement is for another legal entity, vendor or currency |
 | PRC-AGR-007 | 422 | Agreement is not EFFECTIVE |
 | PRC-AGR-008 | 422 | PO line product or unit does not match the agreement line |
+| PRC-RFQ-NOT-FOUND | 404 | RFQ not found |
+| PRC-RFQ-STATE | 409 | The RFQ's status does not allow the action or a reply |
+| PRC-RFQ-002 | 422 | The replying vendor was not invited |
+| PRC-RFQ-003 | warning / 422 | Warning on a reply after the deadline; 422 when such a reply is awarded without an override reason |
+| PRC-RFQ-005 | 422 | Award rule: line not on the RFQ, line awarded twice, reply of another line, reply expired, or no awards |
+| PRC-RFQ-006 | 422 | A late reply cannot replace the vendor's on-time reply to the line |
 | idempotency_key_reuse | 422 | Idempotency key reused with a different body or on another endpoint |
 
 ## Dependencies

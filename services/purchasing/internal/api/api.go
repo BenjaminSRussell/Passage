@@ -96,6 +96,11 @@ type API struct {
 	orderEdits      atomic.Int64
 	ordersConfirmed atomic.Int64
 	ordersCancelled atomic.Int64
+
+	rfqsCreated        atomic.Int64
+	rfqsSent           atomic.Int64
+	rfqRepliesRecorded atomic.Int64
+	rfqsAwarded        atomic.Int64
 }
 
 // New returns the API over s using the default approval policy (FR-17.2) and
@@ -149,6 +154,17 @@ func (a *API) Register(r chi.Router) {
 		pa.Get("/agreements", a.listPurchaseAgreements)
 		pa.Get("/agreements/{id}", a.getPurchaseAgreement)
 		pa.Post("/agreements/{id}", a.purchaseAgreementAction)
+		// RFQ cycle (FR-17.4). Custom methods (":send", ":close", ":cancel",
+		// ":award") arrive as one path segment and check their own duty in
+		// rfqAction, since :award needs RFQAward.
+		rfqMaintain := r.With(authz.RequireDuty(dutyRFQMaintain))
+		rfqRead := r.With(authz.Require(anyDuty{dutyRFQMaintain, dutyRFQAward}, dutyRFQMaintain+" or "+dutyRFQAward, ""))
+		rfqMaintain.Post("/rfqs", a.createRFQ)
+		rfqRead.Get("/rfqs", a.listRFQs)
+		rfqRead.Get("/rfqs/{id}", a.getRFQ)
+		r.Post("/rfqs/{id}", a.rfqAction)
+		rfqMaintain.Post("/rfqs/{id}/replies", a.recordRFQReplies)
+		rfqRead.Get("/rfqs/{id}/compare", a.compareRFQ)
 	})
 }
 
@@ -169,6 +185,10 @@ func (a *API) Metrics() http.Handler {
 			{"purchasing_purchase_order_edits_total", "Purchase order edits accepted.", a.orderEdits.Load()},
 			{"purchasing_purchase_orders_confirmed_total", "Purchase order versions confirmed.", a.ordersConfirmed.Load()},
 			{"purchasing_purchase_orders_cancelled_total", "Purchase orders cancelled.", a.ordersCancelled.Load()},
+			{"purchasing_rfqs_created_total", "RFQs created; idempotent replays are counted.", a.rfqsCreated.Load()},
+			{"purchasing_rfqs_sent_total", "RFQs sent to vendors.", a.rfqsSent.Load()},
+			{"purchasing_rfq_replies_recorded_total", "RFQ reply lines recorded.", a.rfqRepliesRecorded.Load()},
+			{"purchasing_rfqs_awarded_total", "RFQ awards accepted.", a.rfqsAwarded.Load()},
 		} {
 			fmt.Fprintf(w, "# HELP %[1]s %[2]s\n# TYPE %[1]s counter\n%[1]s %[3]d\n", c.name, c.help, c.value)
 		}

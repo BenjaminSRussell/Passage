@@ -588,3 +588,168 @@ export function consolidateRequisitions(input: ConsolidationInput, idempotencyKe
     headers: { "Idempotency-Key": idempotencyKey },
   });
 }
+
+// --- Requests for quotation (FR-17.4, BR-17.11) ---
+
+export type RFQStatus = "DRAFT" | "SENT" | "REPLIES_OPEN" | "CLOSED" | "AWARDED" | "CANCELLED";
+export type RankingRule = "LOWEST_PRICE" | "LEAD_TIME";
+export type RFQAction = "send" | "close" | "cancel";
+
+export interface RFQLine {
+  id: string;
+  lineNo: number;
+  productId?: string;
+  description?: string;
+  qty: string;
+  unit: string;
+  requiredDate?: string;
+}
+
+export interface RFQInvitation {
+  vendorId: string;
+  status: "INVITED" | "REPLIED";
+  sentAt: string;
+}
+
+export interface RFQReply {
+  id: string;
+  lineId: string;
+  vendorId: string;
+  unitPrice: string;
+  priceUnit: string;
+  currency: string;
+  leadTimeDays: number;
+  validUntil?: string;
+  notes?: string;
+  receivedAt: string;
+  late: boolean;
+  awarded: boolean;
+  overrideReason?: string;
+}
+
+export interface RFQ {
+  id: string;
+  number: string;
+  legalEntityId: string;
+  status: RFQStatus;
+  replyDeadline: string;
+  rankingRule: RankingRule;
+  version: number;
+  lines: RFQLine[];
+  invitations: RFQInvitation[];
+  replies: RFQReply[];
+  createdAt: string;
+  updatedAt: string;
+  /** Returned when replies are recorded: PRC-RFQ-003 for each late line. */
+  warnings?: Warning[];
+}
+
+export interface RFQSummary {
+  id: string;
+  number: string;
+  legalEntityId: string;
+  status: RFQStatus;
+  replyDeadline: string;
+  rankingRule: RankingRule;
+  lineCount: number;
+  vendorCount: number;
+  replyCount: number;
+  version: number;
+  createdAt: string;
+}
+
+export interface RFQInput {
+  legalEntityId: string;
+  /** RFC 3339 instant, in the future. */
+  replyDeadline: string;
+  rankingRule?: RankingRule;
+  lines: { productId?: string; description?: string; qty: string; unit: string; requiredDate?: string }[];
+}
+
+export interface RFQReplyInput {
+  vendorId: string;
+  currency: string;
+  replies: { lineId: string; unitPrice: string; priceUnit?: string; leadTimeDays: number; validUntil?: string; notes?: string }[];
+}
+
+export interface RFQAward {
+  lineId: string;
+  replyId: string;
+  overrideReason?: string;
+}
+
+export interface RankedReply {
+  rank: number;
+  replyId: string;
+  vendorId: string;
+  unitPrice: string;
+  currency: string;
+  leadTimeDays: number;
+  validUntil?: string;
+  total: string;
+}
+
+export interface RFQComparisonLine {
+  lineId: string;
+  lineNo: number;
+  productId?: string;
+  description?: string;
+  qty: string;
+  unit: string;
+  ranked: RankedReply[];
+  excluded: { replyId: string; vendorId: string; reason: "LATE" }[];
+}
+
+export interface RFQComparison {
+  rfqId: string;
+  rankingRule: RankingRule;
+  lines: RFQComparisonLine[];
+}
+
+export function listRFQs(filters: { statuses?: RFQStatus[] } = {}, options: ListOptions = {}) {
+  const status = filters.statuses && filters.statuses.length > 0 ? filters.statuses.join(",") : undefined;
+  return list<RFQSummary>("/rfqs", { status }, options);
+}
+
+export function getRFQ(id: string, signal?: AbortSignal) {
+  return send<RFQ>("GET", `/rfqs/${encodeURIComponent(id)}`, { signal });
+}
+
+export function createRFQ(input: RFQInput, idempotencyKey = newIdempotencyKey()) {
+  return send<RFQ>("POST", "/rfqs", { body: input, headers: { "Idempotency-Key": idempotencyKey } });
+}
+
+/** Sends a DRAFT RFQ to vendors; version is the ETag read when it was loaded. */
+export function sendRFQ(id: string, version: number, vendorIds: string[], idempotencyKey = newIdempotencyKey()) {
+  return send<RFQ>("POST", `/rfqs/${encodeURIComponent(id)}:send`, {
+    body: { vendorIds },
+    headers: { "Idempotency-Key": idempotencyKey, "If-Match": `"${version}"` },
+  });
+}
+
+/** Closes or cancels an RFQ; version is the ETag read when it was loaded. */
+export function changeRFQ(id: string, action: Exclude<RFQAction, "send">, version: number, idempotencyKey = newIdempotencyKey()) {
+  return send<RFQ>("POST", `/rfqs/${encodeURIComponent(id)}:${action}`, {
+    headers: { "Idempotency-Key": idempotencyKey, "If-Match": `"${version}"` },
+  });
+}
+
+/** Records one invited vendor's prices for some lines; late lines come back as PRC-RFQ-003 warnings. */
+export function recordRFQReplies(id: string, input: RFQReplyInput, idempotencyKey = newIdempotencyKey()) {
+  return send<RFQ>("POST", `/rfqs/${encodeURIComponent(id)}/replies`, {
+    body: input,
+    headers: { "Idempotency-Key": idempotencyKey },
+  });
+}
+
+export function compareRFQ(id: string, rule?: RankingRule, signal?: AbortSignal) {
+  return send<RFQComparison>("GET", `/rfqs/${encodeURIComponent(id)}/compare${query({ rule })}`, { signal });
+}
+
+/** Awards lines to replies (duty RFQAward) and creates one DRAFT PO per vendor and currency. */
+export function awardRFQ(id: string, version: number, awards: RFQAward[], idempotencyKey = newIdempotencyKey()) {
+  return send<{ rfq: RFQ; purchaseOrders: PurchaseOrder[] }>("POST", `/rfqs/${encodeURIComponent(id)}:award`, {
+    body: { awards },
+    headers: { "Idempotency-Key": idempotencyKey, "If-Match": `"${version}"` },
+  });
+}

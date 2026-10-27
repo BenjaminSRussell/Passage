@@ -1,13 +1,14 @@
 openapi: 3.1.0
 info:
   title: Passage Purchasing API
-  version: 0.3.0
+  version: 0.4.0
   description: |
-    Wave 17 (PSG-17) slices 1 to 3: purchase requisitions with policy-routed approval,
+    Wave 17 (PSG-17) slices 1 to 4: purchase requisitions with policy-routed approval,
     consolidation of approved requisition lines into purchase orders, purchase orders
     with agreement and trade-agreement pricing, the purchase order lifecycle (submit,
     approve, reject, confirm, cancel) with versioned change management, purchase
-    agreements with release tracking, trade agreements and price lookup.
+    agreements with release tracking, trade agreements and price lookup, and the request
+    for quotation cycle (create, send, replies, compare, award to purchase orders).
     Mounted at /v1/procurement. The browser reaches the same paths under /api/v1/procurement
     through the web BFF. Errors are RFC 9457 problem details; see README for codes.
 servers:
@@ -551,6 +552,169 @@ components:
               matched: { type: boolean }
               rank: { type: integer }
               reason: { type: string }
+    RFQLineInput:
+      type: object
+      required: [qty, unit]
+      description: A product, a description, or both.
+      properties:
+        productId: { type: string, format: uuid }
+        description: { type: string }
+        qty: { $ref: '#/components/schemas/Money' }
+        unit: { type: string }
+        requiredDate: { $ref: '#/components/schemas/Day' }
+    RFQInput:
+      type: object
+      required: [legalEntityId, replyDeadline, lines]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        replyDeadline: { type: string, format: date-time, description: Must lie in the future. }
+        rankingRule: { type: string, enum: [LOWEST_PRICE, LEAD_TIME], default: LOWEST_PRICE }
+        lines: { type: array, minItems: 1, maxItems: 500, items: { $ref: '#/components/schemas/RFQLineInput' } }
+    RFQLine:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        lineNo: { type: integer }
+        productId: { type: string, format: uuid }
+        description: { type: string }
+        qty: { $ref: '#/components/schemas/Money' }
+        unit: { type: string }
+        requiredDate: { $ref: '#/components/schemas/Day' }
+    RFQInvitation:
+      type: object
+      properties:
+        vendorId: { type: string, format: uuid }
+        status: { type: string, enum: [INVITED, REPLIED] }
+        sentAt: { type: string, format: date-time }
+    RFQReply:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        lineId: { type: string, format: uuid }
+        vendorId: { type: string, format: uuid }
+        unitPrice: { $ref: '#/components/schemas/Money' }
+        priceUnit: { $ref: '#/components/schemas/Money' }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        leadTimeDays: { type: integer, minimum: 0 }
+        validUntil: { $ref: '#/components/schemas/Day' }
+        notes: { type: string }
+        receivedAt: { type: string, format: date-time }
+        late: { type: boolean, description: Received after the reply deadline; excluded from ranking (BR-17.11). }
+        awarded: { type: boolean }
+        overrideReason: { type: string, description: Why a late reply was awarded. }
+    RFQ:
+      type: object
+      description: Request for quotation (FR-17.4).
+      properties:
+        id: { type: string, format: uuid }
+        number: { type: string, example: RFQ-00000001 }
+        legalEntityId: { type: string, format: uuid }
+        status: { type: string, enum: [DRAFT, SENT, REPLIES_OPEN, CLOSED, AWARDED, CANCELLED] }
+        replyDeadline: { type: string, format: date-time }
+        rankingRule: { type: string, enum: [LOWEST_PRICE, LEAD_TIME] }
+        version: { type: integer, minimum: 1 }
+        lines: { type: array, items: { $ref: '#/components/schemas/RFQLine' } }
+        invitations: { type: array, items: { $ref: '#/components/schemas/RFQInvitation' } }
+        replies: { type: array, items: { $ref: '#/components/schemas/RFQReply' } }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    RFQSummary:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        number: { type: string }
+        legalEntityId: { type: string, format: uuid }
+        status: { type: string, enum: [DRAFT, SENT, REPLIES_OPEN, CLOSED, AWARDED, CANCELLED] }
+        replyDeadline: { type: string, format: date-time }
+        rankingRule: { type: string, enum: [LOWEST_PRICE, LEAD_TIME] }
+        lineCount: { type: integer }
+        vendorCount: { type: integer, description: Vendors invited }
+        replyCount: { type: integer, description: Reply lines recorded }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+    RFQPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/RFQSummary' } }
+        nextCursor: { type: string, format: uuid }
+    RFQReplyInput:
+      type: object
+      required: [vendorId, currency, replies]
+      properties:
+        vendorId: { type: string, format: uuid, description: An invited vendor }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        replies:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            type: object
+            required: [lineId, unitPrice]
+            properties:
+              lineId: { type: string, format: uuid, description: At most once per request }
+              unitPrice: { $ref: '#/components/schemas/Money' }
+              priceUnit: { $ref: '#/components/schemas/Money' }
+              leadTimeDays: { type: integer, minimum: 0, maximum: 3650 }
+              validUntil: { $ref: '#/components/schemas/Day' }
+              notes: { type: string, maxLength: 2000 }
+    RFQReplyResult:
+      allOf:
+        - $ref: '#/components/schemas/RFQ'
+        - type: object
+          properties:
+            warnings:
+              type: array
+              description: PRC-RFQ-003 for each line replied to after the deadline.
+              items: { $ref: '#/components/schemas/Warning' }
+    RFQAward:
+      type: object
+      required: [lineId, replyId]
+      properties:
+        lineId: { type: string, format: uuid }
+        replyId: { type: string, format: uuid, description: A reply to that line, valid on the award day }
+        overrideReason: { type: string, description: Required to award a late reply (BR-17.11) }
+    RFQAwardResult:
+      type: object
+      properties:
+        rfq: { $ref: '#/components/schemas/RFQ' }
+        purchaseOrders: { type: array, items: { $ref: '#/components/schemas/PurchaseOrder' } }
+    RankedReply:
+      type: object
+      properties:
+        rank: { type: integer, minimum: 1 }
+        replyId: { type: string, format: uuid }
+        vendorId: { type: string, format: uuid }
+        unitPrice: { $ref: '#/components/schemas/Money' }
+        currency: { type: string }
+        leadTimeDays: { type: integer }
+        validUntil: { $ref: '#/components/schemas/Day' }
+        total: { $ref: '#/components/schemas/Money' }
+    RFQComparison:
+      type: object
+      properties:
+        rfqId: { type: string, format: uuid }
+        rankingRule: { type: string, enum: [LOWEST_PRICE, LEAD_TIME] }
+        lines:
+          type: array
+          items:
+            type: object
+            properties:
+              lineId: { type: string, format: uuid }
+              lineNo: { type: integer }
+              productId: { type: string, format: uuid }
+              description: { type: string }
+              qty: { $ref: '#/components/schemas/Money' }
+              unit: { type: string }
+              ranked: { type: array, items: { $ref: '#/components/schemas/RankedReply' } }
+              excluded:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    replyId: { type: string, format: uuid }
+                    vendorId: { type: string, format: uuid }
+                    reason: { type: string, enum: [LATE] }
 paths:
   /v1/procurement/requisitions:
     post:
@@ -1077,3 +1241,206 @@ paths:
         '404': { description: Agreement not found (PRC-AGR-NOT-FOUND) or unknown action (PRC-ACTION-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '409': { description: Version changed (PRC-VERSION-CONFLICT) or transition not allowed (PRC-AGR-STATE), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/rfqs:
+    post:
+      operationId: createRFQ
+      summary: Create a DRAFT request for quotation with lines and a reply deadline (FR-17.4; duty RFQMaintain)
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RFQInput' }
+      responses:
+        '201':
+          description: Created as DRAFT
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RFQ' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { description: Missing duty or legal entity outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: "Validation (COM-0001): deadline not in the future, unknown ranking rule, no lines or more than 500, line without product or description; or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    get:
+      operationId: listRFQs
+      summary: List RFQs newest first with line, vendor and reply counts (duty RFQMaintain or RFQAward)
+      parameters:
+        - { name: status, in: query, required: false, description: 'Comma-separated statuses, e.g. SENT,REPLIES_OPEN', schema: { type: string } }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses:
+        '200':
+          description: One page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RFQPage' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /v1/procurement/rfqs/{id}:
+    get:
+      operationId: getRFQ
+      summary: Read an RFQ with lines, invitations and replies (ETag = version; duty RFQMaintain or RFQAward)
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: OK
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RFQ' }
+        '404': { description: Not found (PRC-RFQ-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/rfqs/{id}:send:
+    post:
+      operationId: sendRFQ
+      summary: Invite vendors and move a DRAFT RFQ to SENT; writes rfq.sent.v1 (duty RFQMaintain). A replayed Idempotency-Key returns the RFQ as it is now.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [vendorIds]
+              properties:
+                vendorIds: { type: array, minItems: 1, items: { type: string, format: uuid }, description: Repeats are dropped }
+      responses:
+        '200':
+          description: Now SENT
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RFQ' }
+        '400': { description: Missing Idempotency-Key (PRC-IDEM-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: RFQ not found (PRC-RFQ-NOT-FOUND) or unknown action (PRC-ACTION-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: Version changed (PRC-VERSION-CONFLICT) or transition not allowed (PRC-RFQ-STATE), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: vendorIds empty or not UUIDs (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/rfqs/{id}:close:
+    post:
+      operationId: closeRFQ
+      summary: Stop taking replies, SENT or REPLIES_OPEN to CLOSED (duty RFQMaintain). A replayed Idempotency-Key returns the RFQ as it is now.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      responses:
+        '200':
+          description: Now CLOSED
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RFQ' }
+        '400': { description: Missing Idempotency-Key (PRC-IDEM-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: RFQ not found (PRC-RFQ-NOT-FOUND) or unknown action (PRC-ACTION-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: Version changed (PRC-VERSION-CONFLICT) or transition not allowed (PRC-RFQ-STATE), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/rfqs/{id}:cancel:
+    post:
+      operationId: cancelRFQ
+      summary: Cancel an RFQ that is not yet awarded (duty RFQMaintain). A replayed Idempotency-Key returns the RFQ as it is now.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      responses:
+        '200':
+          description: Now CANCELLED
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RFQ' }
+        '400': { description: Missing Idempotency-Key (PRC-IDEM-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: RFQ not found (PRC-RFQ-NOT-FOUND) or unknown action (PRC-ACTION-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: Version changed (PRC-VERSION-CONFLICT) or transition not allowed (PRC-RFQ-STATE), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/rfqs/{id}:award:
+    post:
+      operationId: awardRFQ
+      summary: Award lines to replies and create one DRAFT purchase order per winning vendor and currency (FR-17.4; duty RFQAward)
+      description: >-
+        Each awarded line becomes a PO line with the RFQ quantity and unit, the reply price and price unit
+        (priceSource RFQ_REPLY:<replyId>), due today plus the reply lead time or on the line's required date
+        when later. A late reply needs overrideReason (PRC-RFQ-003, BR-17.11); an expired reply, a reply of
+        another line or a line awarded twice is PRC-RFQ-005. Lines left out stay unawarded; the RFQ becomes
+        AWARDED. Writes rfq.awarded.v1 in the same transaction. A replayed Idempotency-Key returns the RFQ
+        and the purchase orders the first request created.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [awards]
+              properties:
+                awards: { type: array, minItems: 1, items: { $ref: '#/components/schemas/RFQAward' } }
+      responses:
+        '200':
+          description: Awarded; the RFQ and the purchase orders created
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RFQAwardResult' }
+        '400': { description: Missing Idempotency-Key (PRC-IDEM-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty RFQAward (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: RFQ not found (PRC-RFQ-NOT-FOUND) or unknown action (PRC-ACTION-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: Version changed (PRC-VERSION-CONFLICT) or the RFQ is not REPLIES_OPEN or CLOSED (PRC-RFQ-STATE), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: Late reply without override reason (PRC-RFQ-003), award rule (PRC-RFQ-005) or validation (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/rfqs/{id}/replies:
+    post:
+      operationId: recordRFQReplies
+      summary: Record an invited vendor's prices for lines of a SENT or REPLIES_OPEN RFQ (FR-17.4; duty RFQMaintain)
+      description: >-
+        A reply received after the deadline is stored with late=true and answered with a PRC-RFQ-003 warning
+        (BR-17.11). Replying again to a line replaces the vendor's earlier reply, except that a late reply cannot
+        replace an on-time one (PRC-RFQ-006). The first reply moves a SENT RFQ to REPLIES_OPEN.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RFQReplyInput' }
+      responses:
+        '201':
+          description: Replies stored
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RFQReplyResult' }
+        '400': { description: Missing Idempotency-Key (PRC-IDEM-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: RFQ not found (PRC-RFQ-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: The RFQ does not take replies in its status (PRC-RFQ-STATE), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: Validation (COM-0001), vendor not invited (PRC-RFQ-002), late revision of an on-time reply (PRC-RFQ-006) or idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/rfqs/{id}/compare:
+    get:
+      operationId: compareRFQ
+      summary: Rank the replies per line by the RFQ's rule or ?rule=; late replies are listed as excluded (FR-17.4, BR-17.11; duty RFQMaintain or RFQAward)
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { name: rule, in: query, required: false, schema: { type: string, enum: [LOWEST_PRICE, LEAD_TIME] } }
+      responses:
+        '200':
+          description: Ranking per line
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RFQComparison' }
+        '404': { description: RFQ not found (PRC-RFQ-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: Unknown rule (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }

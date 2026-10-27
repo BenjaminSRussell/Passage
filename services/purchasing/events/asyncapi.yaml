@@ -1,9 +1,9 @@
 asyncapi: 3.0.0
 info:
   title: Passage Purchasing events
-  version: 0.4.0
+  version: 0.5.0
   description: |
-    Events published by the purchasing service in wave 17 slices 1 to 3. Each is written to the
+    Events published by the purchasing service in wave 17 slices 1 to 4. Each is written to the
     outbox in the same transaction as the state change and relayed by Debezium to the topic
     passage.<context>.<entity>. Payload structs live in internal/events. Schema evolution is
     additive only (BACKWARD_TRANSITIVE).
@@ -37,6 +37,14 @@ channels:
     messages:
       poVersionCreated:
         $ref: '#/components/messages/POVersionCreated'
+  rfq:
+    address: passage.procurement.rfq
+    description: Request for quotation send and award; the Kafka key is the RFQ id so events stay ordered.
+    messages:
+      rfqSent:
+        $ref: '#/components/messages/RFQSent'
+      rfqAwarded:
+        $ref: '#/components/messages/RFQAwarded'
 operations:
   publishRequisitionSubmitted:
     action: send
@@ -74,6 +82,18 @@ operations:
       $ref: '#/channels/poversion'
     messages:
       - $ref: '#/channels/poversion/messages/poVersionCreated'
+  publishRFQSent:
+    action: send
+    channel:
+      $ref: '#/channels/rfq'
+    messages:
+      - $ref: '#/channels/rfq/messages/rfqSent'
+  publishRFQAwarded:
+    action: send
+    channel:
+      $ref: '#/channels/rfq'
+    messages:
+      - $ref: '#/channels/rfq/messages/rfqAwarded'
 components:
   messages:
     RequisitionSubmitted:
@@ -152,6 +172,32 @@ components:
               type: { type: string, const: dev.passage.procurement.po.cancelled.v1 }
               subject: { type: string, format: uuid, description: purchase order id }
               data: { $ref: '#/components/schemas/POCancelledData' }
+    RFQSent:
+      name: RFQSent
+      title: rfq.sent.v1
+      summary: A DRAFT RFQ was sent; carries the invited vendors, the deadline and the lines to quote (FR-17.4). Consumed by the supplier portal (wave 20) and notifications.
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.rfq.sent.v1 }
+              subject: { type: string, format: uuid, description: RFQ id }
+              data: { $ref: '#/components/schemas/RFQSentData' }
+    RFQAwarded:
+      name: RFQAwarded
+      title: rfq.awarded.v1
+      summary: RFQ lines were awarded and their DRAFT purchase orders created in the same transaction (FR-17.4); one entry per awarded line with the winning vendor, price and purchase order.
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.rfq.awarded.v1 }
+              subject: { type: string, format: uuid, description: RFQ id }
+              data: { $ref: '#/components/schemas/RFQAwardedData' }
   schemas:
     Envelope:
       type: object
@@ -162,7 +208,7 @@ components:
         id: { type: string, format: uuid }
         source: { type: string, const: /passage/procurement/purchasing }
         type: { type: string }
-        subject: { type: string, format: uuid, description: id of the aggregate (requisition, agreement or purchase order) }
+        subject: { type: string, format: uuid, description: id of the aggregate (requisition, agreement, purchase order or RFQ) }
         time: { type: string, format: date-time }
         datacontenttype: { type: string, const: application/json }
         tenantid: { type: string, format: uuid }
@@ -284,3 +330,52 @@ components:
               product_id: { type: string, format: uuid }
               unit: { type: string }
               remaining_qty: { type: string, description: decimal string still to be received when cancelled }
+    RFQSentData:
+      type: object
+      required: [rfq_id, number, legal_entity_id, vendor_ids, reply_deadline, lines]
+      additionalProperties: false
+      properties:
+        rfq_id: { type: string, format: uuid }
+        number: { type: string, example: RFQ-00000001 }
+        legal_entity_id: { type: string, format: uuid }
+        vendor_ids: { type: array, items: { type: string, format: uuid } }
+        reply_deadline: { type: string, format: date-time }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [line_no, line_id, qty, unit]
+            additionalProperties: false
+            properties:
+              line_no: { type: integer }
+              line_id: { type: string, format: uuid }
+              product_id: { type: string, format: uuid }
+              description: { type: string }
+              qty: { type: string, description: decimal string }
+              unit: { type: string }
+              required_date: { type: string, format: date }
+    RFQAwardedData:
+      type: object
+      required: [rfq_id, number, legal_entity_id, awards]
+      additionalProperties: false
+      properties:
+        rfq_id: { type: string, format: uuid }
+        number: { type: string, example: RFQ-00000001 }
+        legal_entity_id: { type: string, format: uuid }
+        awards:
+          type: array
+          items:
+            type: object
+            required: [line_no, line_id, reply_id, vendor_id, unit_price, price_unit, currency, lead_time_days, purchase_order_id]
+            additionalProperties: false
+            properties:
+              line_no: { type: integer }
+              line_id: { type: string, format: uuid }
+              reply_id: { type: string, format: uuid }
+              vendor_id: { type: string, format: uuid }
+              unit_price: { type: string, description: decimal string }
+              price_unit: { type: string, description: decimal string }
+              currency: { type: string, pattern: '^[A-Z]{3}$' }
+              lead_time_days: { type: integer, minimum: 0 }
+              purchase_order_id: { type: string, format: uuid }
+              override_reason: { type: string, description: present when a late reply was awarded (BR-17.11) }

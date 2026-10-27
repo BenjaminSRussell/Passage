@@ -64,6 +64,13 @@ type Store interface {
 	ListOpenRequisitionLines(ctx context.Context, f SourcingFilter, after string, limit int) (Page[SourcingLine], error)
 	RequisitionLinesByID(ctx context.Context, lineIDs []string) ([]SourcingLine, error)
 	ConsolidateRequisitionLines(ctx context.Context, orders []PurchaseOrder, lineIDs []string, idem Idem) ([]PurchaseOrder, error)
+	CreateRFQ(ctx context.Context, in domain.RFQ, idem Idem) (domain.RFQ, error)
+	GetRFQ(ctx context.Context, id string) (domain.RFQ, error)
+	ListRFQs(ctx context.Context, f RFQFilter, after string, limit int) (Page[RFQSummary], error)
+	SendRFQ(ctx context.Context, id string, ifMatch int, vendorIDs []string, idem Idem) (domain.RFQ, error)
+	ActOnRFQ(ctx context.Context, id string, ifMatch int, action string, idem Idem) (domain.RFQ, error)
+	RecordRFQReplies(ctx context.Context, rfqID, vendorID string, replies []domain.RFQReply, idem Idem) (domain.RFQ, error)
+	AwardRFQ(ctx context.Context, id string, ifMatch int, awards []domain.Award, orders []AwardedOrder, today domain.Day, idem Idem) (domain.RFQ, []PurchaseOrder, error)
 	Ping(ctx context.Context) error
 }
 

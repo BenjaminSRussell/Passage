@@ -5,6 +5,7 @@ import {
   listPurchaseAgreements,
   listPurchaseOrders,
   listRequisitions,
+  listRFQs,
   listTradeAgreements,
   type Page,
 } from "./api/client";
@@ -25,6 +26,14 @@ const sections = [
     links: [
       { label: "All requisitions", to: "/purchasing/requisitions" },
       { label: "New requisition", to: "/purchasing/requisitions/new" },
+    ],
+  },
+  {
+    title: "Sourcing",
+    description: "Requests for quotation: send lines to several vendors, record and compare their replies, and award the best as purchase orders.",
+    links: [
+      { label: "Requests for quotation", to: "/purchasing/rfqs" },
+      { label: "New RFQ", to: "/purchasing/rfqs/new" },
     ],
   },
   {
@@ -60,6 +69,7 @@ export function WorkspacePage() {
         listPurchaseAgreements({ status: "EFFECTIVE" }, { limit: COUNT_LIMIT, signal }),
         listPurchaseOrders({ approvalStatus: "IN_REVIEW" }, { limit: COUNT_LIMIT, signal }),
         listPurchaseOrders({ approvalStatus: "APPROVED" }, { limit: COUNT_LIMIT, signal }),
+        listRFQs({ statuses: ["SENT", "REPLIES_OPEN"] }, { limit: COUNT_LIMIT, signal }),
       ]),
     [],
   );
@@ -78,6 +88,7 @@ export function WorkspacePage() {
           <StatTile label="Requisitions in review" value={countLabel(counts.data[0])} />
           <StatTile label="Approved requisitions to source" value={countLabel(counts.data[1])} />
           <StatTile label="Lines needing a vendor" value={countLabel(counts.data[4])} />
+          <StatTile label="RFQs awaiting replies" value={countLabel(counts.data[8])} />
           <StatTile label="Draft purchase orders" value={countLabel(counts.data[2])} />
           <StatTile label="Purchase orders in review" value={countLabel(counts.data[6])} />
           <StatTile label="Purchase orders to confirm" value={countLabel(counts.data[7])} />

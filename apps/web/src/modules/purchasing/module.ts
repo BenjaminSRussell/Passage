@@ -5,19 +5,23 @@ import { ConsolidationPage } from "./ConsolidationPage";
 import { PriceLookupPage } from "./PricingPage";
 import { PurchaseOrderCreatePage, PurchaseOrderDetailPage, PurchaseOrderEditPage, PurchaseOrdersPage } from "./PurchaseOrderPages";
 import { RequisitionCreatePage, RequisitionDetailPage, RequisitionsPage } from "./RequisitionPages";
+import { RFQCreatePage, RFQDetailPage, RFQsPage } from "./RfqPages";
 import { TradeAgreementCreatePage, TradeAgreementDetailPage, TradeAgreementsPage } from "./TradeAgreementPages";
 import { WorkspacePage } from "./WorkspacePage";
 
 const purchasing: PassageModule = {
   id: "purchasing",
   title: "Purchasing",
-  description: "Requisitions, consolidation, purchase orders with approval and change versions, purchase and trade agreements, and price lookup.",
+  description: "Requisitions, consolidation, requests for quotation, purchase orders with approval and change versions, purchase and trade agreements, and price lookup.",
   routes: [
     { path: "/purchasing", element: createElement(WorkspacePage) },
     { path: "/purchasing/requisitions", element: createElement(RequisitionsPage) },
     { path: "/purchasing/requisitions/new", element: createElement(RequisitionCreatePage), handle: { title: "New requisition" } },
     { path: "/purchasing/requisitions/:id", element: createElement(RequisitionDetailPage), handle: { title: "Requisition" } },
     { path: "/purchasing/consolidation", element: createElement(ConsolidationPage) },
+    { path: "/purchasing/rfqs", element: createElement(RFQsPage) },
+    { path: "/purchasing/rfqs/new", element: createElement(RFQCreatePage), handle: { title: "New request for quotation" } },
+    { path: "/purchasing/rfqs/:id", element: createElement(RFQDetailPage), handle: { title: "Request for quotation" } },
     { path: "/purchasing/purchase-orders", element: createElement(PurchaseOrdersPage) },
     { path: "/purchasing/purchase-orders/new", element: createElement(PurchaseOrderCreatePage), handle: { title: "New purchase order" } },
     { path: "/purchasing/purchase-orders/:id", element: createElement(PurchaseOrderDetailPage), handle: { title: "Purchase order" } },
@@ -34,6 +38,7 @@ const purchasing: PassageModule = {
     { label: "Overview", to: "/purchasing", duty: "PurchaseOrderInquire" },
     { label: "Requisitions", to: "/purchasing/requisitions", duty: "RequisitionCreate" },
     { label: "Consolidation", to: "/purchasing/consolidation", duty: "PurchaseOrderMaintain" },
+    { label: "Requests for quotation", to: "/purchasing/rfqs", duty: "RFQMaintain" },
     { label: "Purchase orders", to: "/purchasing/purchase-orders", duty: "PurchaseOrderInquire" },
     { label: "Purchase agreements", to: "/purchasing/agreements", duty: "AgreementMaintain" },
     { label: "Trade agreements", to: "/purchasing/trade-agreements", duty: "TradeAgreementMaintain" },

@@ -620,6 +620,9 @@ function PriceSource({ source }: { source: string }) {
   if (source.startsWith("AGREEMENT:")) {
     return <Badge tone="info">Purchase agreement</Badge>;
   }
+  if (source.startsWith("RFQ_REPLY:")) {
+    return <Badge tone="info">RFQ award</Badge>;
+  }
   return <Badge tone="neutral">{statusLabel(source)}</Badge>;
 }
 

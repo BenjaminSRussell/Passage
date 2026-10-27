@@ -5,11 +5,14 @@ Procurement workspace for wave 17 (PSG-17), wired to `services/purchasing` throu
 
 | Route | Page | Service calls |
 |---|---|---|
-| `/purchasing` | Workspace: tiles for requisitions in review, approved requisitions, lines needing a vendor, draft POs, POs in review, POs to confirm, effective purchase agreements, active price rows; links to each area | `GET requisitions`, `requisition-lines`, `purchase-orders`, `agreements`, `trade-agreements` (filters, `limit=200`; a full page shows `200+`) |
+| `/purchasing` | Workspace: tiles for requisitions in review, approved requisitions, lines needing a vendor, RFQs awaiting replies, draft POs, POs in review, POs to confirm, effective purchase agreements, active price rows; links to each area | `GET requisitions`, `requisition-lines`, `rfqs`, `purchase-orders`, `agreements`, `trade-agreements` (filters, `limit=200`; a full page shows `200+`) |
 | `/purchasing/requisitions` | List with status and "only mine" filters, load more | `GET /requisitions` |
 | `/purchasing/requisitions/new` | Header and line editor; blank estimates default from the preferred vendor's trade agreement; PRC-REQ-003 warnings shown on the detail page | `POST /requisitions` (Idempotency-Key) |
 | `/purchasing/requisitions/:id` | Summary, approver chain, lines with the PO line that orders each consolidated line, Submit for approval | `GET /requisitions/{id}`, `POST /requisitions/{id}:submit` (If-Match + Idempotency-Key) |
 | `/purchasing/consolidation` | Consolidation board: open lines of approved requisitions (all / needs sourcing / has a vendor), select lines, override the vendor per line, set the delivery window, create POs and link to them | `GET /requisition-lines`, `POST /requisitions:consolidate` (Idempotency-Key) |
+| `/purchasing/rfqs` | RFQ list with status filter, deadline and line / vendor / reply counts, load more | `GET /rfqs` |
+| `/purchasing/rfqs/new` | Legal entity, reply deadline (local time, sent as an instant), ranking rule, lines with product or description, quantity, unit and required date | `POST /rfqs` (Idempotency-Key) |
+| `/purchasing/rfqs/:id` | Summary and lines; Send to vendors (draft); invited vendors and replies with Late / Awarded flags; Record a reply per vendor (lines without a price are not quoted; PRC-RFQ-003 late warning); Compare and award: ranking per line by either rule, rank 1 preselected, late replies set apart and awardable only with a reason, links to the draft POs created; Close replies / Cancel RFQ | `GET /rfqs/{id}`, `POST /rfqs/{id}:send|close|cancel|award` (If-Match + Idempotency-Key), `POST /rfqs/{id}/replies`, `GET /rfqs/{id}/compare` |
 | `/purchasing/purchase-orders` | List with approval-status filter, load more | `GET /purchase-orders` |
 | `/purchasing/purchase-orders/new` | Header, lines (blank unit price = agreement override or trade agreement; optional agreement line), header charges | `POST /purchase-orders` |
 | `/purchasing/purchase-orders/:id` | Summary, totals panel, lines with price source, received quantity and status, charges, version history with each change in business terms; Submit / Approve / Reject / Confirm and send / Cancel order (with a confirmation step) as the status allows; PRC-AGR-004 warnings after create | `GET /purchase-orders/{id}`, `GET /purchase-orders/{id}/versions`, `POST /purchase-orders/{id}:submit|approve|reject|confirm|cancel` (If-Match + Idempotency-Key) |
@@ -29,5 +32,5 @@ floats. Ids are typed as UUIDs until the vendor, product and legal-entity picker
 waves 6 to 8 are available to modules.
 
 Tests: `npx vitest --run src/modules/purchasing` (`pages.test.tsx`, `agreements.test.tsx`,
-`consolidation.test.tsx` and `orderLifecycle.test.tsx` drive every route against a stubbed `fetch` through
+`consolidation.test.tsx`, `orderLifecycle.test.tsx` and `rfq.test.tsx` drive every route against a stubbed `fetch` through
 `testHarness.tsx`).

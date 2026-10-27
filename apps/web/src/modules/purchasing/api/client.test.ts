@@ -2,6 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ProcurementApiError,
   actOnPurchaseOrder,
+  awardRFQ,
+  changeRFQ,
+  compareRFQ,
   changePurchaseAgreement,
   consolidateRequisitions,
   describeProblem,
@@ -9,6 +12,7 @@ import {
   listOpenRequisitionLines,
   listPurchaseOrderVersions,
   listPurchaseOrders,
+  listRFQs,
   lookupPrice,
   submitRequisition,
 } from "./client";
@@ -156,5 +160,36 @@ describe("purchasing API client", () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ items: [{ versionNo: 1, patch: [] }] })));
     const versions = await listPurchaseOrderVersions("po1");
     expect(versions.map((v) => v.versionNo)).toEqual([1]);
+  });
+
+  it("lists RFQs by a comma-joined status set and compares with an optional rule", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ items: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    await listRFQs({ statuses: ["SENT", "REPLIES_OPEN"] }, { limit: 200 });
+    await listRFQs();
+    await compareRFQ("q1");
+    await compareRFQ("q1", "LEAD_TIME");
+    const urls = fetchMock.mock.calls.map((c) => (c as unknown as [string])[0]);
+    expect(urls).toEqual([
+      "/api/v1/procurement/rfqs?status=SENT%2CREPLIES_OPEN&limit=200",
+      "/api/v1/procurement/rfqs",
+      "/api/v1/procurement/rfqs/q1/compare",
+      "/api/v1/procurement/rfqs/q1/compare?rule=LEAD_TIME",
+    ]);
+  });
+
+  it("awards and closes RFQs with If-Match and an Idempotency-Key", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ rfq: { id: "q1" }, purchaseOrders: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    await awardRFQ("q1", 4, [{ lineId: "l1", replyId: "r1" }], "key-a");
+    await changeRFQ("q1", "close", 5, "key-c");
+    const [awardUrl, awardInit] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(awardUrl).toBe("/api/v1/procurement/rfqs/q1:award");
+    expect(awardInit.headers).toMatchObject({ "If-Match": '"4"', "Idempotency-Key": "key-a" });
+    expect(JSON.parse(String(awardInit.body))).toEqual({ awards: [{ lineId: "l1", replyId: "r1" }] });
+    const [closeUrl, closeInit] = fetchMock.mock.calls[1] as unknown as [string, RequestInit];
+    expect(closeUrl).toBe("/api/v1/procurement/rfqs/q1:close");
+    expect(closeInit.body).toBeUndefined();
+    expect(closeInit.headers).toMatchObject({ "If-Match": '"5"', "Idempotency-Key": "key-c" });
   });
 });

@@ -11,7 +11,7 @@ describe("purchasing module", () => {
 
   it("gives every nav entry a route and a PRD duty", () => {
     const paths = new Set(purchasing.routes.map((r) => r.path));
-    const duties = new Set(["PurchaseOrderInquire", "RequisitionCreate", "PurchaseOrderMaintain", "TradeAgreementMaintain", "AgreementMaintain"]);
+    const duties = new Set(["PurchaseOrderInquire", "RequisitionCreate", "PurchaseOrderMaintain", "TradeAgreementMaintain", "AgreementMaintain", "RFQMaintain"]);
     for (const n of purchasing.nav) {
       expect(paths.has(n.to)).toBe(true);
       expect(duties.has(n.duty ?? "")).toBe(true);
@@ -20,7 +20,7 @@ describe("purchasing module", () => {
 
   it("has a list, a create form and a detail page for each document", () => {
     const paths = purchasing.routes.map((r) => r.path);
-    for (const doc of ["requisitions", "purchase-orders", "agreements", "trade-agreements"]) {
+    for (const doc of ["requisitions", "rfqs", "purchase-orders", "agreements", "trade-agreements"]) {
       expect(paths).toEqual(expect.arrayContaining([`/purchasing/${doc}`, `/purchasing/${doc}/new`, `/purchasing/${doc}/:id`]));
     }
   });
