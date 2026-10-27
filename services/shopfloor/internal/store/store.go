@@ -63,8 +63,12 @@ type Registration struct {
 	DeviceID      *string
 	Offline       bool
 	Note          *string
-	// Hours is the elapsed time of a closed registration; nil while open.
+	// Hours is the elapsed time of a closed registration, or its share of a
+	// bundle's time (BR-25.1); nil while open.
 	Hours *decimal.Decimal
+	// ClockOffsetSeconds is the device clock correction applied to the times
+	// (server minus device, BR-25.7); nil when no correction was needed.
+	ClockOffsetSeconds *int64
 }
 
 // RegistrationResult reports whether an item was stored or was a replay.
@@ -152,6 +156,9 @@ func (s *Postgres) CreateRegistrations(ctx context.Context, items []Registration
 	sort.SliceStable(order, func(a, b int) bool { return items[order[a]].StartedAt.Before(items[order[b]].StartedAt) })
 	results := make([]RegistrationResult, len(items))
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		if err := guardBundles(ctx, tx, p.TenantID, items); err != nil {
+			return err
+		}
 		for _, i := range order {
 			in := items[i]
 			var hours *string
@@ -160,12 +167,12 @@ func (s *Postgres) CreateRegistrations(ctx context.Context, items []Registration
 				hours = &h
 			}
 			var id string
-			err := tx.QueryRow(ctx, `insert into time_registration (tenant_id, id, worker_id, kind, job_id, bundle_id, qty_good, qty_scrap, scrap_reason_id, started_at, stopped_at, device_id, offline, hours, note)
-				select $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+			err := tx.QueryRow(ctx, `insert into time_registration (tenant_id, id, worker_id, kind, job_id, bundle_id, qty_good, qty_scrap, scrap_reason_id, started_at, stopped_at, device_id, offline, hours, note, clock_offset_s)
+				select $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
 				where exists (select 1 from worker where tenant_id = $1 and id = $3 and active)
 				on conflict (tenant_id, id) do nothing returning id::text`,
 				p.TenantID, in.ID, in.WorkerID, in.Kind, in.JobID, in.BundleID, in.QtyGood.String(), in.QtyScrap.String(), in.ScrapReasonID,
-				in.StartedAt, in.StoppedAt, in.DeviceID, in.Offline, hours, in.Note).Scan(&id)
+				in.StartedAt, in.StoppedAt, in.DeviceID, in.Offline, hours, in.Note, in.ClockOffsetSeconds).Scan(&id)
 			if errors.Is(err, pgx.ErrNoRows) {
 				// Either a replayed client UUID or an unknown/inactive worker.
 				var exists bool
@@ -183,7 +190,7 @@ func (s *Postgres) CreateRegistrations(ctx context.Context, items []Registration
 			}
 			results[i] = RegistrationResult{ID: in.ID, Status: StatusAccepted}
 			if err := enqueue(ctx, tx, "registration", in.ID, sfevents.RegistrationPosted, p.TenantID, sfevents.RegistrationPostedData{
-				RegistrationID: in.ID, WorkerID: in.WorkerID, Kind: in.Kind, JobID: in.JobID, Hours: in.Hours,
+				RegistrationID: in.ID, WorkerID: in.WorkerID, Kind: in.Kind, JobID: in.JobID, BundleID: in.BundleID, Hours: in.Hours,
 				QtyGood: in.QtyGood, QtyScrap: in.QtyScrap, Offline: in.Offline,
 			}); err != nil {
 				return err
@@ -195,6 +202,49 @@ func (s *Postgres) CreateRegistrations(ctx context.Context, items []Registration
 		return nil, err
 	}
 	return results, nil
+}
+
+// guardBundles refuses closed bundle jobs when the bundle already holds closed
+// jobs stored by another batch. The BR-25.1 split covers the jobs of one batch,
+// so a second batch would count the bundle's time again (SF-0113). A resend whose
+// items are all stored already is a replay and passes. Concurrent batches of one
+// bundle serialize on a transaction advisory lock.
+func guardBundles(ctx context.Context, tx pgx.Tx, tenantID string, items []Registration) error {
+	byBundle := map[string][]string{}
+	for _, in := range items {
+		if in.BundleID != nil && in.StoppedAt != nil {
+			byBundle[*in.BundleID] = append(byBundle[*in.BundleID], in.ID)
+		}
+	}
+	bundles := make([]string, 0, len(byBundle))
+	for b := range byBundle {
+		bundles = append(bundles, b)
+	}
+	sort.Strings(bundles) // one lock order, so two batches cannot deadlock
+	for _, b := range bundles {
+		regIDs := byBundle[b]
+		if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended('shopfloor.bundle:' || $1 || ':' || $2, 0))`, tenantID, b); err != nil {
+			return err
+		}
+		var others bool
+		if err := tx.QueryRow(ctx, `select exists (select 1 from time_registration where tenant_id = $1 and bundle_id = $2
+			and stopped_at is not null and not (id = any($3::uuid[])))`, tenantID, b, regIDs).Scan(&others); err != nil {
+			return err
+		}
+		if !others {
+			continue
+		}
+		var stored int
+		if err := tx.QueryRow(ctx, `select count(*) from time_registration where tenant_id = $1 and id = any($2::uuid[])`,
+			tenantID, regIDs).Scan(&stored); err != nil {
+			return err
+		}
+		if stored < len(regIDs) {
+			return httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeBundleInvalid,
+				fmt.Sprintf("bundle %s already has closed jobs from another batch; send every job of a bundle in one batch", b))
+		}
+	}
+	return nil
 }
 
 // lockWorker takes a row lock on the worker so calculation and approval for one

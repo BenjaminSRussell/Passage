@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import type { PassageModule } from "../registry";
 import { AndonPage } from "./AndonPage";
+import { BundleDetailPage } from "./BundleDetailPage";
 import { DowntimesPage } from "./DowntimesPage";
 import { MachinesPage } from "./MachinesPage";
 import { NewMachinePage } from "./NewMachinePage";
@@ -15,11 +16,12 @@ import { WorkersPage } from "./WorkersPage";
 const shopfloor: PassageModule = {
   id: "shopfloor",
   title: "Shop floor",
-  description: "Workers and their time, pay approval and payroll export; machines, downtimes, andon alerts and OEE.",
+  description: "Workers and their time, job bundles, pay approval and payroll export; machines, downtimes, andon alerts and OEE.",
   routes: [
     { path: "/shopfloor/workers", element: createElement(WorkersPage), handle: { title: "Workers" } },
     { path: "/shopfloor/workers/new", element: createElement(NewWorkerPage), handle: { title: "New worker" } },
     { path: "/shopfloor/workers/:id", element: createElement(WorkerDetailPage), handle: { title: "Worker" } },
+    { path: "/shopfloor/bundles/:id", element: createElement(BundleDetailPage), handle: { title: "Bundle" } },
     { path: "/shopfloor/time", element: createElement(TimeApprovalPage), handle: { title: "Time approval" } },
     { path: "/shopfloor/pay-exports", element: createElement(PayExportsPage), handle: { title: "Payroll export" } },
     { path: "/shopfloor/pay-exports/:id", element: createElement(PayExportDetailPage), handle: { title: "Export batch" } },

@@ -40,6 +40,7 @@ type fakeStore struct {
 	workers    []store.Worker
 	days       []store.WorkerDay
 	dayFilter  store.DayFilter
+	bundleRead string
 }
 
 func (f *fakeStore) Ping(context.Context) error { return nil }
@@ -80,6 +81,11 @@ func (f *fakeStore) ListRegistrations(context.Context, string, time.Time, time.T
 	return []store.RegistrationView{}, nil
 }
 
+func (f *fakeStore) ListBundleRegistrations(_ context.Context, bundleID string, _ int) ([]store.RegistrationView, error) {
+	f.bundleRead = bundleID
+	return []store.RegistrationView{}, nil
+}
+
 func (f *fakeStore) LoadPunches(_ context.Context, _ string, start, end time.Time) (store.PunchInput, error) {
 	f.loadStart, f.loadEnd = start, end
 	if f.punchErr != nil {
@@ -105,8 +111,15 @@ func (f *fakeStore) ListWorkerDays(_ context.Context, filter store.DayFilter) ([
 }
 
 func newRouter(s Store) chi.Router {
+	return newRouterAt(s, time.Now)
+}
+
+// newRouterAt serves the API with a fixed server clock.
+func newRouterAt(s Store, now func() time.Time) chi.Router {
 	r := httpx.NewRouter()
-	New(s).Register(r)
+	a := New(s)
+	a.now = now
+	a.Register(r)
 	return r
 }
 
@@ -484,5 +497,155 @@ func TestRegistrationsList_NeedsWorker(t *testing.T) {
 	rec := call(t, h, http.MethodGet, "/api/v1/shopfloor/registrations?workerId="+workerID+"&from=2026-10-19&to=2026-10-20", "", allDuty)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+const (
+	bundleID = "0195f0a0-0000-7000-8000-000000000010"
+	jobID2   = "0195f0a0-0000-7000-8000-000000000011"
+	regID2   = "0195f0a0-0000-7000-8000-000000000012"
+)
+
+func bundled(id, job, start, stop, good string) string {
+	return fmt.Sprintf(`{"id":%q,"workerId":%q,"kind":"job-stop","jobId":%q,"bundleId":%q,"startedAt":%q,"stoppedAt":%q,"qtyGood":%q}`,
+		id, workerID, job, bundleID, start, stop, good)
+}
+
+// BR-25.1: a bundle's two hours are split 3:1 by good quantity, so the bundle
+// carries the time worked once instead of once per job.
+func TestRegistrations_BundleHoursSplitByGoodQuantity(t *testing.T) {
+	fs := &fakeStore{}
+	rec := call(t, newRouter(fs), http.MethodPost, "/api/v1/shopfloor/registrations", registrationBody(
+		bundled(regID, jobID, "2026-10-20T09:00:00Z", "2026-10-20T11:00:00Z", "30"),
+		bundled(regID2, jobID2, "2026-10-20T09:00:00Z", "2026-10-20T11:00:00Z", "10"),
+	), allDuty)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	got := map[string]string{}
+	for _, r := range fs.registered {
+		got[r.ID] = r.Hours.StringFixed(2)
+	}
+	if got[regID] != "1.50" || got[regID2] != "0.50" {
+		t.Fatalf("hours = %v, want 1.50 and 0.50", got)
+	}
+}
+
+func TestRegistrations_BundleRulesNameTheItem(t *testing.T) {
+	clockIn := fmt.Sprintf(`{"id":%q,"workerId":%q,"kind":"clock-in","bundleId":%q,"startedAt":"2026-10-20T08:00:00Z"}`,
+		"0195f0a0-0000-7000-8000-000000000013", workerID, bundleID)
+	tests := []struct {
+		name  string
+		items []string
+		field string
+	}{
+		{"intervals differ", []string{
+			bundled(regID, jobID, "2026-10-20T09:00:00Z", "2026-10-20T11:00:00Z", "1"),
+			bundled(regID2, jobID2, "2026-10-20T09:00:00Z", "2026-10-20T10:00:00Z", "1"),
+		}, "items[1].bundleId"},
+		{"job twice", []string{
+			bundled(regID, jobID, "2026-10-20T09:00:00Z", "2026-10-20T11:00:00Z", "1"),
+			bundled(regID2, jobID, "2026-10-20T09:00:00Z", "2026-10-20T11:00:00Z", "1"),
+		}, "items[1].bundleId"},
+		{"clock registration bundled", []string{clockIn}, "items[0].bundleId"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			fs := &fakeStore{}
+			rec := call(t, newRouter(fs), http.MethodPost, "/api/v1/shopfloor/registrations", registrationBody(tc.items...), allDuty)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+			}
+			var p httpx.Problem
+			_ = json.Unmarshal(rec.Body.Bytes(), &p)
+			if _, ok := p.Errors[tc.field]; !ok {
+				t.Fatalf("missing %s in %v", tc.field, p.Errors)
+			}
+			if len(fs.registered) != 0 {
+				t.Fatal("a refused batch reached the store")
+			}
+		})
+	}
+}
+
+// BR-25.7: a device 7 minutes behind the server has its times moved forward by
+// the measured offset, and the offset is recorded; 3 minutes is left as sent.
+func TestRegistrations_ClockSkewCorrectedAndRecorded(t *testing.T) {
+	server := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	item := fmt.Sprintf(`{"id":%q,"workerId":%q,"kind":"job-stop","jobId":%q,"startedAt":"2026-10-20T09:00:00Z","stoppedAt":"2026-10-20T10:00:00Z","offline":true}`,
+		regID, workerID, jobID)
+	tests := []struct {
+		name        string
+		deviceAt    time.Time
+		wantStart   time.Time
+		wantOffset  int64
+		wantApplied bool
+	}{
+		{"seven minutes behind is corrected", server.Add(-7 * time.Minute), time.Date(2026, 10, 20, 9, 7, 0, 0, time.UTC), 420, true},
+		{"seven minutes ahead is corrected", server.Add(7 * time.Minute), time.Date(2026, 10, 20, 8, 53, 0, 0, time.UTC), -420, true},
+		{"three minutes is within tolerance", server.Add(-3 * time.Minute), time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC), 180, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			fs := &fakeStore{}
+			body := fmt.Sprintf(`{"deviceSentAt":%q,"items":[%s]}`, tc.deviceAt.Format(time.RFC3339), item)
+			rec := call(t, newRouterAt(fs, func() time.Time { return server }), http.MethodPost, "/api/v1/shopfloor/registrations", body, allDuty)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+			}
+			reg := fs.registered[0]
+			if !reg.StartedAt.Equal(tc.wantStart) || !reg.StoppedAt.Equal(tc.wantStart.Add(time.Hour)) {
+				t.Fatalf("times %s..%s, want start %s", reg.StartedAt, reg.StoppedAt, tc.wantStart)
+			}
+			if h := reg.Hours.StringFixed(4); h != "1.0000" {
+				t.Fatalf("hours %s changed by the correction", h)
+			}
+			if tc.wantApplied != (reg.ClockOffsetSeconds != nil) || (tc.wantApplied && *reg.ClockOffsetSeconds != tc.wantOffset) {
+				t.Fatalf("recorded offset %v, want %d applied=%v", reg.ClockOffsetSeconds, tc.wantOffset, tc.wantApplied)
+			}
+			var out registrationResponse
+			if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+				t.Fatal(err)
+			}
+			if out.ClockOffsetSeconds == nil || *out.ClockOffsetSeconds != tc.wantOffset || out.ClockCorrected != tc.wantApplied {
+				t.Fatalf("response offset %v corrected %v", out.ClockOffsetSeconds, out.ClockCorrected)
+			}
+		})
+	}
+}
+
+// A missing startedAt stays a validation error when the clock is corrected.
+func TestRegistrations_SkewCorrectionKeepsMissingStartInvalid(t *testing.T) {
+	server := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	body := fmt.Sprintf(`{"deviceSentAt":"2026-10-20T11:00:00Z","items":[{"id":%q,"workerId":%q,"kind":"clock-in"}]}`, regID, workerID)
+	rec := call(t, newRouterAt(&fakeStore{}, func() time.Time { return server }), http.MethodPost, "/api/v1/shopfloor/registrations", body, allDuty)
+	var p httpx.Problem
+	_ = json.Unmarshal(rec.Body.Bytes(), &p)
+	if _, ok := p.Errors["items[0].startedAt"]; rec.Code != http.StatusBadRequest || !ok {
+		t.Fatalf("status %d errors %v", rec.Code, p.Errors)
+	}
+}
+
+func TestRegistrations_WithoutDeviceClockNothingIsMeasured(t *testing.T) {
+	fs := &fakeStore{}
+	rec := call(t, newRouter(fs), http.MethodPost, "/api/v1/shopfloor/registrations",
+		registrationBody(clock(regID, "clock-in", "2026-10-20T09:00:00Z")), allDuty)
+	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "clockOffsetSeconds") || fs.registered[0].ClockOffsetSeconds != nil {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestRegistrationsList_ByBundle(t *testing.T) {
+	fs := &fakeStore{}
+	h := newRouter(fs)
+	if rec := call(t, h, http.MethodGet, "/api/v1/shopfloor/registrations?bundleId=nope", "", allDuty); rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad bundle id: status %d", rec.Code)
+	}
+	rec := call(t, h, http.MethodGet, "/api/v1/shopfloor/registrations?bundleId="+bundleID, "", allDuty)
+	if rec.Code != http.StatusOK || fs.bundleRead != bundleID {
+		t.Fatalf("status %d, read %q: %s", rec.Code, fs.bundleRead, rec.Body.String())
+	}
+	if rec := call(t, h, http.MethodGet, "/api/v1/shopfloor/registrations?bundleId="+bundleID, "", "shopfloor.time.register"); rec.Code != http.StatusForbidden {
+		t.Fatalf("without view duty: status %d", rec.Code)
 	}
 }

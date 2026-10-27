@@ -143,3 +143,49 @@ func TestHTTP_MachineDowntimeAndOEE(t *testing.T) {
 		t.Fatalf("bucket %+v", b)
 	}
 }
+
+// End to end over HTTP and Postgres (BR-25.1, BR-25.7): an offline kiosk whose
+// clock is 7 minutes behind replays a two-job bundle; the server corrects the
+// times, records the offset, stores the 3:1 split, and the supervisor reads the
+// bundle back. A later batch adding a closed job to the bundle is SF-0113.
+func TestHTTP_OfflineBundleReplay(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	server := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	h := newRouterAt(store.New(app), func() time.Time { return server })
+	created := callWith(t, h, http.MethodPost, "/api/v1/shopfloor/workers", `{"partyId":"`+jobID+`","name":"Ben Ode","costRate":"20","currency":"USD"}`,
+		allDuty, map[string]string{"Idempotency-Key": "w-bundle"})
+	var w store.Worker
+	_ = json.Unmarshal(created.Body.Bytes(), &w)
+	item := func(id, job, good string) string {
+		return fmt.Sprintf(`{"id":%q,"workerId":%q,"kind":"job-stop","jobId":%q,"bundleId":%q,"startedAt":"2026-10-20T09:00:00Z","stoppedAt":"2026-10-20T11:00:00Z","qtyGood":%q,"offline":true}`,
+			id, w.ID, job, bundleID, good)
+	}
+	batch := fmt.Sprintf(`{"deviceSentAt":"2026-10-20T11:53:00Z","items":[%s,%s]}`, item(regID, jobID, "30"), item(regID2, jobID2, "10"))
+	rec := call(t, h, http.MethodPost, "/api/v1/shopfloor/registrations", batch, allDuty)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"clockOffsetSeconds":420`) || !strings.Contains(rec.Body.String(), `"clockCorrected":true`) {
+		t.Fatalf("replay: %d %s", rec.Code, rec.Body.String())
+	}
+	list := call(t, h, http.MethodGet, "/api/v1/shopfloor/registrations?bundleId="+bundleID, "", allDuty)
+	var out struct{ Items []store.RegistrationView }
+	_ = json.Unmarshal(list.Body.Bytes(), &out)
+	if len(out.Items) != 2 {
+		t.Fatalf("bundle: %s", list.Body.String())
+	}
+	hours := map[string]string{}
+	for _, r := range out.Items {
+		if r.StartedAt.UTC().Format(time.RFC3339) != "2026-10-20T09:07:00Z" || r.ClockOffsetSeconds == nil || *r.ClockOffsetSeconds != 420 {
+			t.Fatalf("row not corrected: %+v", r)
+		}
+		hours[r.ID] = r.Hours.StringFixed(2)
+	}
+	if hours[regID] != "1.50" || hours[regID2] != "0.50" {
+		t.Fatalf("shares %v", hours)
+	}
+	late := fmt.Sprintf(`{"items":[%s]}`, item("0195f0a0-0000-7000-8000-000000000014", "0195f0a0-0000-7000-8000-000000000015", "5"))
+	if rec := call(t, h, http.MethodPost, "/api/v1/shopfloor/registrations", late, allDuty); rec.Code != http.StatusUnprocessableEntity || problemCode(t, rec) != "SF-0113" {
+		t.Fatalf("late member: %d %s", rec.Code, rec.Body.String())
+	}
+}

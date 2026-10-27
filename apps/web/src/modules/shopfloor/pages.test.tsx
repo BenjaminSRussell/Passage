@@ -11,6 +11,9 @@ import { approvalRuns } from "./TimeApprovalPage";
 const ANA = "0195f0a0-0000-7000-8000-000000000001";
 const BEN = "0195f0a0-0000-7000-8000-000000000002";
 const PARTY = "0195f0a0-0000-7000-8000-0000000000aa";
+const BUNDLE = "0195f0a0-0000-7000-8000-0000000000b1";
+const JOB1 = "0195f0a0-0000-7000-8000-0000000000c1";
+const JOB2 = "0195f0a0-0000-7000-8000-0000000000c2";
 
 type Reply = { status: number; body: unknown };
 type Handler = (url: URL, init: RequestInit) => Reply | undefined;
@@ -196,6 +199,25 @@ describe("Worker detail", () => {
       deviceId: "kiosk-1",
       offline: true,
       note: null,
+      clockOffsetSeconds: null,
+    },
+    {
+      id: "0195f0a0-0000-7000-8000-0000000000a2",
+      workerId: ANA,
+      kind: "job-stop",
+      jobId: JOB1,
+      bundleId: BUNDLE,
+      qtyGood: "30",
+      qtyScrap: "0",
+      scrapReasonId: null,
+      startedAt: "2026-10-20T09:07:00Z",
+      stoppedAt: "2026-10-20T11:07:00Z",
+      hours: "1.50",
+      serverReceivedAt: "2026-10-20T12:00:00Z",
+      deviceId: "kiosk-1",
+      offline: true,
+      note: null,
+      clockOffsetSeconds: 420,
     },
   ];
 
@@ -218,6 +240,8 @@ describe("Worker detail", () => {
     const regs = await screen.findByRole("table", { name: "Registrations" });
     await waitFor(() => expect(regs).toHaveTextContent("clock-in"));
     expect(regs).toHaveTextContent("Offline replay");
+    expect(regs).toHaveTextContent("Clock corrected +7 min");
+    expect(within(regs).getByRole("link", { name: "View bundle" })).toHaveAttribute("href", `/shopfloor/bundles/${BUNDLE}`);
     const days = screen.getByRole("table", { name: "Worker-days" });
     expect(days).toHaveTextContent("base 8.00 h, overtime-1.5 2.00 h");
     expect(days).toHaveTextContent("220.00 USD");
@@ -354,5 +378,72 @@ describe("approvalRuns", () => {
       { workerId: ANA, workerName: "Ana Silva", from: "2026-10-20", to: "2026-10-20", days: 1 },
       { workerId: ANA, workerName: "Ana Silva", from: "2026-10-22", to: "2026-10-24", days: 2 },
     ]);
+  });
+});
+
+describe("Bundle detail", () => {
+  const job = (id: string, jobId: string, good: string, hours: string | null, offset: number | null): Registration => ({
+    id,
+    workerId: ANA,
+    kind: "job-stop",
+    jobId,
+    bundleId: BUNDLE,
+    qtyGood: good,
+    qtyScrap: "0",
+    scrapReasonId: null,
+    startedAt: "2026-10-20T09:07:00Z",
+    stoppedAt: hours === null ? null : "2026-10-20T11:07:00Z",
+    hours,
+    serverReceivedAt: "2026-10-20T12:00:00Z",
+    deviceId: "kiosk-1",
+    offline: offset !== null,
+    note: null,
+    clockOffsetSeconds: offset,
+  });
+
+  it("shows the jobs with their hours share and the bundle total, worked once", async () => {
+    handler = (url) => {
+      if (url.pathname.endsWith("/registrations") && url.searchParams.get("bundleId") === BUNDLE) {
+        return json(200, { items: [job("0195f0a0-0000-7000-8000-0000000000d1", JOB1, "30", "1.50", 420), job("0195f0a0-0000-7000-8000-0000000000d2", JOB2, "10", "0.50", 420)] });
+      }
+      if (url.pathname.endsWith(`/workers/${ANA}`)) return json(200, workers[0]);
+      return undefined;
+    };
+    const { container } = renderAt(`/shopfloor/bundles/${BUNDLE}`);
+    const table = await screen.findByRole("table", { name: "Bundle jobs" });
+    expect(table).toHaveTextContent(JOB1);
+    expect(table).toHaveTextContent("1.50 h");
+    expect(table).toHaveTextContent("0.50 h");
+    expect(table).toHaveTextContent("Clock corrected +7 min");
+    expect(screen.getByText("2.00 h")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Ana Silva" })).toHaveAttribute("href", `/shopfloor/workers/${ANA}`);
+    expect(screen.getByRole("link", { name: "Back to Ana Silva" })).toBeInTheDocument();
+    expect(pageViolations(container)).toEqual([]);
+  });
+
+  it("shows a running bundle without a total", async () => {
+    handler = (url) => {
+      if (url.pathname.endsWith("/registrations")) return json(200, { items: [job("0195f0a0-0000-7000-8000-0000000000d3", JOB1, "0", null, null)] });
+      if (url.pathname.endsWith(`/workers/${ANA}`)) return json(200, workers[0]);
+      return undefined;
+    };
+    renderAt(`/shopfloor/bundles/${BUNDLE}`);
+    expect(await screen.findByText("Still running")).toBeInTheDocument();
+  });
+
+  it("shows the empty state for an unknown bundle without asking for a worker", async () => {
+    handler = (url) => (url.pathname.endsWith("/registrations") ? json(200, { items: [] }) : undefined);
+    renderAt(`/shopfloor/bundles/${BUNDLE}`);
+    expect(await screen.findByText("No registrations in this bundle")).toBeInTheDocument();
+    expect(calls.some((c) => c.url.pathname.includes("/workers/"))).toBe(false);
+  });
+
+  it("shows a load failure with its code and retries", async () => {
+    handler = () => json(400, { code: "COM-0001", detail: "request failed validation" });
+    renderAt(`/shopfloor/bundles/${BUNDLE}`);
+    expect(await screen.findByText(/request failed validation \(COM-0001\)/)).toBeInTheDocument();
+    handler = (url) => (url.pathname.endsWith("/registrations") ? json(200, { items: [] }) : undefined);
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("No registrations in this bundle")).toBeInTheDocument();
   });
 });

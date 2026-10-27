@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -118,17 +119,31 @@ type RegistrationView struct {
 	DeviceID         *string          `json:"deviceId"`
 	Offline          bool             `json:"offline"`
 	Note             *string          `json:"note"`
+	// ClockOffsetSeconds is the device clock correction applied (BR-25.7).
+	ClockOffsetSeconds *int64 `json:"clockOffsetSeconds"`
 }
 
 // ListRegistrations returns a worker's registrations that start in [start, end),
 // oldest first, at most limit rows.
 func (s *Postgres) ListRegistrations(ctx context.Context, workerID string, start, end time.Time, limit int) ([]RegistrationView, error) {
+	return s.listRegistrations(ctx, `worker_id = $1 and started_at >= $2 and started_at < $3`, limit, workerID, start, end)
+}
+
+// ListBundleRegistrations returns every registration of one bundle (BR-25.1),
+// oldest first, at most limit rows.
+func (s *Postgres) ListBundleRegistrations(ctx context.Context, bundleID string, limit int) ([]RegistrationView, error) {
+	return s.listRegistrations(ctx, `bundle_id = $1`, limit, bundleID)
+}
+
+// listRegistrations reads registrations matching where; its arguments are $1..$n
+// and the limit is appended as the last parameter.
+func (s *Postgres) listRegistrations(ctx context.Context, where string, limit int, args ...any) ([]RegistrationView, error) {
 	out := []RegistrationView{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `select id::text, worker_id::text, kind, job_id::text, bundle_id::text, qty_good::text, qty_scrap::text,
-				scrap_reason_id, started_at, stopped_at, hours::text, server_received_at, device_id, offline, note
-			from time_registration where worker_id = $1 and started_at >= $2 and started_at < $3
-			order by started_at, id limit $4`, workerID, start, end, limit)
+		rows, err := tx.Query(ctx, fmt.Sprintf(`select id::text, worker_id::text, kind, job_id::text, bundle_id::text, qty_good::text, qty_scrap::text,
+				scrap_reason_id, started_at, stopped_at, hours::text, server_received_at, device_id, offline, note, clock_offset_s
+			from time_registration where %s
+			order by started_at, id limit $%d`, where, len(args)+1), append(args, limit)...)
 		if err != nil {
 			return err
 		}
@@ -138,7 +153,7 @@ func (s *Postgres) ListRegistrations(ctx context.Context, workerID string, start
 			var good, scrap string
 			var hours *string
 			if err := rows.Scan(&r.ID, &r.WorkerID, &r.Kind, &r.JobID, &r.BundleID, &good, &scrap, &r.ScrapReasonID,
-				&r.StartedAt, &r.StoppedAt, &hours, &r.ServerReceivedAt, &r.DeviceID, &r.Offline, &r.Note); err != nil {
+				&r.StartedAt, &r.StoppedAt, &hours, &r.ServerReceivedAt, &r.DeviceID, &r.Offline, &r.Note, &r.ClockOffsetSeconds); err != nil {
 				return err
 			}
 			if r.QtyGood, err = decimal.NewFromString(good); err != nil {

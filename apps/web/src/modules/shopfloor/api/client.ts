@@ -72,6 +72,8 @@ export interface Registration {
   deviceId: string | null;
   offline: boolean;
   note: string | null;
+  /** Device clock correction applied to the times, server minus device, in seconds (BR-25.7); null when none. */
+  clockOffsetSeconds: number | null;
 }
 
 export interface PayRange {
@@ -234,6 +236,11 @@ export function listRegistrations(
   return items<Registration>(`/registrations${query(filter)}`, signal);
 }
 
+/** Every registration of one bundle, oldest first (BR-25.1). */
+export function listBundle(bundleId: string, signal?: AbortSignal): Promise<Registration[]> {
+  return items<Registration>(`/registrations${query({ bundleId })}`, signal);
+}
+
 export function listWorkerDays(
   filter: { from: string; to: string; workerId?: string; status?: DayStatus | "" },
   signal?: AbortSignal,
@@ -241,12 +248,16 @@ export function listWorkerDays(
   return items<WorkerDay>(`/worker-days${query(filter)}`, signal);
 }
 
-/** Sends one batch of at most MAX_BATCH registrations (each item is idempotent by its id). */
-export async function createRegistrations(batch: RegistrationInput[]): Promise<RegistrationResult[]> {
+/**
+ * Sends one batch of at most MAX_BATCH registrations (each item is idempotent by its id).
+ * A kiosk replaying its offline queue passes its own clock as `deviceSentAt`, so the
+ * server can correct a device clock more than 5 minutes off (BR-25.7).
+ */
+export async function createRegistrations(batch: RegistrationInput[], deviceSentAt?: string): Promise<RegistrationResult[]> {
   if (batch.length < 1 || batch.length > MAX_BATCH) {
     throw new RangeError(`a batch holds 1 to ${MAX_BATCH} registrations`);
   }
-  const res = await post<{ items: RegistrationResult[] }>("/registrations", { items: batch });
+  const res = await post<{ items: RegistrationResult[] }>("/registrations", deviceSentAt ? { deviceSentAt, items: batch } : { items: batch });
   return res.items;
 }
 

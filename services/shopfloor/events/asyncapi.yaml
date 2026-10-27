@@ -148,7 +148,7 @@ components:
           format: date-time
     RegistrationPostedData:
       type: object
-      required: [registrationId, workerId, kind, jobId, hours, qtyGood, qtyScrap, offline]
+      required: [registrationId, workerId, kind, jobId, bundleId, hours, qtyGood, qtyScrap, offline]
       additionalProperties: false
       properties:
         registrationId:
@@ -163,9 +163,16 @@ components:
         jobId:
           type: [string, "null"]
           format: uuid
+        bundleId:
+          type: [string, "null"]
+          format: uuid
+          description: Set when the job was worked in a bundle; its hours are then the job's share (BR-25.1).
         hours:
           type: [string, "null"]
-          description: Elapsed hours (decimal, 4 places) of a closed registration; null while open.
+          description: |
+            Elapsed hours (decimal, 4 places) of a closed registration; for a
+            bundled job, its share of the bundle's time in 0.01 h (BR-25.1).
+            Null while open.
         qtyGood:
           type: string
         qtyScrap:

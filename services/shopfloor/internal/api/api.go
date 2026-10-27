@@ -66,6 +66,7 @@ type Store interface {
 	ListWorkers(ctx context.Context, activeOnly bool, limit int) ([]store.Worker, error)
 	CreateRegistrations(ctx context.Context, items []store.Registration) ([]store.RegistrationResult, error)
 	ListRegistrations(ctx context.Context, workerID string, start, end time.Time, limit int) ([]store.RegistrationView, error)
+	ListBundleRegistrations(ctx context.Context, bundleID string, limit int) ([]store.RegistrationView, error)
 	LoadPunches(ctx context.Context, workerID string, start, end time.Time) (store.PunchInput, error)
 	SavePay(ctx context.Context, calc store.PayCalculation, idem store.Idem, response any) error
 	ApprovePay(ctx context.Context, workerID, fromDate, toDate, approvedBy string, idem store.Idem) (store.ApproveResult, error)
@@ -85,6 +86,7 @@ type Store interface {
 // API holds the handlers and the counters served on the admin port.
 type API struct {
 	store          Store
+	now            func() time.Time
 	registrations  atomic.Int64
 	duplicates     atomic.Int64
 	calculations   atomic.Int64
@@ -99,7 +101,7 @@ type API struct {
 }
 
 // New returns the API over s.
-func New(s Store) *API { return &API{store: s} }
+func New(s Store) *API { return &API{store: s, now: time.Now} }
 
 type registrationItem struct {
 	ID            string           `json:"id"`
@@ -119,10 +121,17 @@ type registrationItem struct {
 
 type registrationBatch struct {
 	Items []registrationItem `json:"items"`
+	// DeviceSentAt is the kiosk's own clock when it sent the batch. The server
+	// measures the device clock offset from it (BR-25.7).
+	DeviceSentAt *time.Time `json:"deviceSentAt"`
 }
 
 type registrationResponse struct {
 	Items []store.RegistrationResult `json:"items"`
+	// ClockOffsetSeconds is server time minus device time, measured when the
+	// batch carried deviceSentAt; ClockCorrected says it was applied (over 5 min).
+	ClockOffsetSeconds *int64 `json:"clockOffsetSeconds,omitempty"`
+	ClockCorrected     bool   `json:"clockCorrected"`
 }
 
 type payRangeRequest struct {
@@ -414,8 +423,11 @@ func validateRegistration(it registrationItem) map[string]string {
 			fields[name] = "must be a UUID"
 		}
 	}
-	if (it.Kind == "job-start" || it.Kind == "job-stop") && it.JobID == nil {
+	if jobKind(it.Kind) && it.JobID == nil {
 		fields["jobId"] = "is required for job registrations"
+	}
+	if it.BundleID != nil && !jobKind(it.Kind) {
+		fields["bundleId"] = "only job registrations can be bundled"
 	}
 	for name, v := range map[string]*decimal.Decimal{"qtyGood": it.QtyGood, "qtyScrap": it.QtyScrap} {
 		if v != nil && v.IsNegative() {
@@ -430,6 +442,67 @@ func validateRegistration(it registrationItem) map[string]string {
 		fields["note"] = "must be at most 500 characters"
 	}
 	return fields
+}
+
+func jobKind(kind string) bool { return kind == domain.KindJobStart || kind == "job-stop" }
+
+// splitBundles applies BR-25.1 to the batch: the closed job registrations that
+// share a bundleId must belong to one worker, cover the same interval and name
+// each job once, and the interval's hours are split across them by good quantity
+// (the site setting "Bundle split basis" defaults to quantity and is not yet
+// configurable). Each item's hours become its share, so Σ hours of the bundle is
+// the time worked once, not once per job. Problems are added to fields.
+func splitBundles(items []registrationItem, regs []store.Registration, fields map[string]string) {
+	groups := map[string][]int{}
+	var order []string
+	for i, it := range items {
+		if it.BundleID == nil || it.StoppedAt == nil || !jobKind(it.Kind) {
+			continue
+		}
+		if _, ok := groups[*it.BundleID]; !ok {
+			order = append(order, *it.BundleID)
+		}
+		groups[*it.BundleID] = append(groups[*it.BundleID], i)
+	}
+	for _, bundle := range order {
+		idx := groups[bundle]
+		first := items[idx[0]]
+		jobs := map[string]bool{}
+		members := make([]domain.BundleMember, 0, len(idx))
+		valid := true
+		for _, i := range idx {
+			it := items[i]
+			key := fmt.Sprintf("items[%d].bundleId", i)
+			switch {
+			case it.JobID == nil:
+				valid = false // reported as items[i].jobId
+				continue
+			case it.WorkerID != first.WorkerID:
+				fields[key] = "a bundle belongs to one worker"
+			case !it.StartedAt.Equal(first.StartedAt) || !it.StoppedAt.Equal(*first.StoppedAt):
+				fields[key] = "the closed jobs of a bundle share startedAt and stoppedAt"
+			case jobs[*it.JobID]:
+				fields[key] = "a job appears twice in the bundle"
+			default:
+				jobs[*it.JobID] = true
+				members = append(members, domain.BundleMember{JobID: *it.JobID, QtyGood: regs[i].QtyGood})
+				continue
+			}
+			valid = false
+		}
+		if !valid {
+			continue
+		}
+		shares, err := domain.SplitBundleHours(*regs[idx[0]].Hours, members, domain.SplitByQuantity)
+		if err != nil {
+			fields[fmt.Sprintf("items[%d].bundleId", idx[0])] = err.Error()
+			continue
+		}
+		for k, i := range idx {
+			share := shares[k]
+			regs[i].Hours = &share
+		}
+	}
 }
 
 func (it registrationItem) toStore() store.Registration {
@@ -463,18 +536,47 @@ func (a *API) createRegistrations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields := map[string]string{}
+	// BR-25.7: a device clock more than 5 minutes off is corrected by the offset
+	// measured now, and the offset is recorded on every registration it moved.
+	var offsetSeconds *int64
+	var correction time.Duration
+	if req.DeviceSentAt != nil {
+		if req.DeviceSentAt.IsZero() {
+			fields["deviceSentAt"] = "must be a date-time"
+		} else {
+			offset := domain.ClockOffset(*req.DeviceSentAt, a.now()).Round(time.Second)
+			secs := int64(offset / time.Second)
+			offsetSeconds = &secs
+			if domain.SkewExceeded(offset) {
+				correction = offset
+			}
+		}
+	}
 	seen := make(map[string]int, len(req.Items))
 	items := make([]store.Registration, 0, len(req.Items))
-	for i, it := range req.Items {
-		for field, rule := range validateRegistration(it) {
+	for i := range req.Items {
+		it := &req.Items[i]
+		if correction != 0 && !it.StartedAt.IsZero() {
+			it.StartedAt = domain.CorrectedClientTime(it.StartedAt, correction)
+			if it.StoppedAt != nil {
+				stopped := domain.CorrectedClientTime(*it.StoppedAt, correction)
+				it.StoppedAt = &stopped
+			}
+		}
+		for field, rule := range validateRegistration(*it) {
 			fields[fmt.Sprintf("items[%d].%s", i, field)] = rule
 		}
 		if j, dup := seen[it.ID]; dup {
 			fields[fmt.Sprintf("items[%d].id", i)] = fmt.Sprintf("repeats items[%d].id", j)
 		}
 		seen[it.ID] = i
-		items = append(items, it.toStore())
+		reg := it.toStore()
+		if correction != 0 {
+			reg.ClockOffsetSeconds = offsetSeconds
+		}
+		items = append(items, reg)
 	}
+	splitBundles(req.Items, items, fields)
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
 		return
@@ -491,7 +593,7 @@ func (a *API) createRegistrations(w http.ResponseWriter, r *http.Request) {
 			a.registrations.Add(1)
 		}
 	}
-	httpx.JSON(w, http.StatusOK, registrationResponse{Items: results})
+	httpx.JSON(w, http.StatusOK, registrationResponse{Items: results, ClockOffsetSeconds: offsetSeconds, ClockCorrected: correction != 0})
 }
 
 // rangeWindow is a validated worker and date range with the local instants that bound it.
@@ -573,6 +675,10 @@ func (a *API) listRegistrations(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
 	}
+	if bundleID := r.URL.Query().Get("bundleId"); bundleID != "" {
+		a.listBundle(w, r, bundleID)
+		return
+	}
 	win, ok := queryRange(w, r, true)
 	if !ok {
 		return
@@ -584,6 +690,24 @@ func (a *API) listRegistrations(w http.ResponseWriter, r *http.Request) {
 	items, err := a.store.ListRegistrations(r.Context(), win.workerID, win.start, win.end, limit)
 	if err != nil {
 		a.fail(w, r, "list registrations", err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, itemsResponse[store.RegistrationView]{Items: items})
+}
+
+// listBundle returns every registration of one bundle (BR-25.1), oldest first.
+func (a *API) listBundle(w http.ResponseWriter, r *http.Request, bundleID string) {
+	if !ids.Valid(bundleID) {
+		validationFailed(w, r, map[string]string{"bundleId": "must be a UUID"})
+		return
+	}
+	limit, ok := limitParam(w, r, 500, 1000)
+	if !ok {
+		return
+	}
+	items, err := a.store.ListBundleRegistrations(r.Context(), bundleID, limit)
+	if err != nil {
+		a.fail(w, r, "list bundle registrations", err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, itemsResponse[store.RegistrationView]{Items: items})

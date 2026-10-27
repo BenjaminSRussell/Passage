@@ -59,6 +59,7 @@ type RegistrationPostedData struct {
 	WorkerID       string           `json:"workerId"`
 	Kind           string           `json:"kind"`
 	JobID          *string          `json:"jobId"`
+	BundleID       *string          `json:"bundleId"`
 	Hours          *decimal.Decimal `json:"hours"`
 	QtyGood        decimal.Decimal  `json:"qtyGood"`
 	QtyScrap       decimal.Decimal  `json:"qtyScrap"`

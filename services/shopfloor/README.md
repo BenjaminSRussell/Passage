@@ -3,6 +3,30 @@
 Shop floor execution service. Wave reference: **PSG-25 / Wave 25**
 (Shop Floor Execution, Time Registration & IoT), PRD section 4.25.
 
+## Slice 3: job bundles and offline replay
+
+- Bundle split (FR-25.3, BR-25.1) in `POST registrations`: the closed job registrations of
+  a batch that share a `bundleId` must belong to one worker, cover the same interval and
+  name each job once. The interval's hours are split across them by good quantity
+  (`domain.SplitBundleHours`; equal split when no good quantity is reported) in 0.01 h
+  shares that sum exactly to the rounded total (largest remainder, exact integer
+  arithmetic on the decimal quantities). The bundle therefore counts its time once, and
+  `registration.posted` carries each job's share with its `bundleId`. Every closed job of
+  a bundle must arrive in one batch: a later batch adding a closed job to a bundle is
+  SF-0113 (a resend of stored items is still a no-op). `GET registrations?bundleId=`
+  reads a bundle back.
+- Offline clock skew (FR-25.12, BR-25.7): a batch may carry `deviceSentAt`, the kiosk's
+  own clock when it sent the batch. The server measures its clock minus the device clock;
+  above 5 minutes the offset is added to every item's times and stored on each
+  registration (`clock_offset_s`, `clockOffsetSeconds`). The response returns the measured
+  offset and whether it was applied. Client-timestamp ordering and duplicate client UUIDs
+  were already handled by the store (slice 1).
+- Domain rules the kiosk and job paths will reuse: `OrderReplay`, `FinishedConflicts`
+  (`job-finished-conflict`, needs the job model) and `CheckQueueCapacity` (SF-0010, the
+  PWA queue cap). They have no endpoint yet; see NOT-IMPLEMENTED.md.
+- Web: the worker detail registrations show the bundle link and any clock correction; a
+  bundle page lists the jobs with their hours share, the bundle total and the worker.
+
 ## Slice 2: machines, floor monitoring and payroll export
 
 - Machines (`POST/GET machines`): an edge machine code mapped to one resource with its ideal
@@ -145,6 +169,7 @@ Problem details use `application/problem+json` with `type` `https://passage.dev/
 | `SF-0110` | 404 | Downtime not found |
 | `SF-0111` | 422 | No approved pay lines left to export in the range |
 | `SF-0112` | 404 | Export batch not found |
+| `SF-0113` | 422 | A bundle already has closed jobs from another batch; send every job of a bundle in one batch |
 | `idempotency_key_reuse` | 422 | `Idempotency-Key` already used with a different request |
 
 Catalog entries SF-0001..SF-0020 (PRD 4.25.18) are reserved; only the codes above are raised.

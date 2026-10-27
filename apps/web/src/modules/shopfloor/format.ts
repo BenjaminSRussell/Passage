@@ -124,3 +124,11 @@ export function durationMinutes(start: string, end?: string | null, now: number 
   if (Number.isNaN(from) || Number.isNaN(to)) return dash;
   return `${Math.max(0, Math.floor((to - from) / 60_000))} min`;
 }
+
+/** A device clock correction in seconds as "+7 min" or "−45 s" (server minus device). */
+export function formatOffset(seconds?: number | null): string {
+  if (seconds === undefined || seconds === null) return dash;
+  const sign = seconds < 0 ? "−" : "+";
+  const abs = Math.abs(seconds);
+  return abs % 60 === 0 ? `${sign}${abs / 60} min` : abs < 60 ? `${sign}${abs} s` : `${sign}${Math.floor(abs / 60)} min ${abs % 60} s`;
+}

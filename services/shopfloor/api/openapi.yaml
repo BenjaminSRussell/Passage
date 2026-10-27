@@ -106,17 +106,35 @@ paths:
   /api/v1/shopfloor/registrations:
     get:
       operationId: listRegistrations
-      summary: A worker's registrations that start in a date range
+      summary: A worker's registrations in a date range, or every registration of a bundle
       x-passage-duty: shopfloor.view
+      description: |
+        With `bundleId`, returns the bundle's registrations (BR-25.1) and ignores
+        the other filters. Otherwise `workerId`, `from` and `to` are required.
       parameters:
         - name: workerId
           in: query
-          required: true
+          description: Required unless bundleId is given.
           schema:
             type: string
             format: uuid
-        - $ref: "#/components/parameters/From"
-        - $ref: "#/components/parameters/To"
+        - name: bundleId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: from
+          in: query
+          description: First local day (YYYY-MM-DD). Required unless bundleId is given.
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          description: Last local day (YYYY-MM-DD), at most 31 days after from. Required unless bundleId is given.
+          schema:
+            type: string
+            format: date
         - $ref: "#/components/parameters/TimeZone"
         - $ref: "#/components/parameters/Limit"
       responses:
@@ -148,6 +166,17 @@ paths:
         in client timestamp order; results are in request order. New items emit
         dev.passage.shopfloor.registration.posted.v1 in the same transaction.
         An unknown or inactive worker fails the whole batch (SF-0101).
+
+        Bundles (BR-25.1): the closed job registrations sharing a `bundleId` must
+        belong to one worker, cover the same interval and name each job once;
+        the interval's hours are split across them by good quantity (equal split
+        when no good quantity is reported), in 0.01 h shares that sum to the
+        rounded total. Every closed job of a bundle must arrive in one batch; a
+        later batch adding closed jobs to the same bundle is SF-0113.
+
+        Clock skew (BR-25.7): when the batch carries `deviceSentAt`, the server
+        measures its clock minus the device clock. An offset above 5 minutes is
+        added to every item's times and recorded on the stored registrations.
       requestBody:
         required: true
         content:
@@ -749,7 +778,7 @@ components:
           format: date-time
     StoredRegistration:
       type: object
-      required: [id, workerId, kind, jobId, bundleId, qtyGood, qtyScrap, scrapReasonId, startedAt, stoppedAt, hours, serverReceivedAt, deviceId, offline, note]
+      required: [id, workerId, kind, jobId, bundleId, qtyGood, qtyScrap, scrapReasonId, startedAt, stoppedAt, hours, serverReceivedAt, deviceId, offline, note, clockOffsetSeconds]
       properties:
         id:
           type: string
@@ -778,7 +807,7 @@ components:
           format: date-time
         hours:
           type: [string, "null"]
-          description: Elapsed hours (4 places) of a closed registration.
+          description: Elapsed hours (4 places) of a closed registration, or a bundled job's share in 0.01 h (BR-25.1).
         serverReceivedAt:
           type: string
           format: date-time
@@ -788,6 +817,9 @@ components:
           type: boolean
         note:
           type: [string, "null"]
+        clockOffsetSeconds:
+          type: [integer, "null"]
+          description: Device clock correction applied to the times, server minus device (BR-25.7); null when none was needed.
     WorkerDay:
       type: object
       required: [workerId, workerName, workDate, hours, flags, status, timeZone, calculatedAt, approvedBy, approvedAt, payLines]
@@ -835,6 +867,10 @@ components:
       type: object
       required: [items]
       properties:
+        deviceSentAt:
+          type: [string, "null"]
+          format: date-time
+          description: The kiosk's own clock when it sent the batch (BR-25.7).
         items:
           type: array
           minItems: 1
@@ -887,7 +923,7 @@ components:
           maxLength: 500
     RegistrationResponse:
       type: object
-      required: [items]
+      required: [items, clockCorrected]
       properties:
         items:
           type: array
@@ -901,7 +937,12 @@ components:
               status:
                 type: string
                 enum: [accepted, duplicate]
-    PayRange:
+        clockOffsetSeconds:
+          type: integer
+          description: Server clock minus device clock, present when the batch carried deviceSentAt (BR-25.7).
+        clockCorrected:
+          type: boolean
+          description: True when the offset exceeded 5 minutes and was applied to the items.
       type: object
       required: [workerId, from, to]
       properties:

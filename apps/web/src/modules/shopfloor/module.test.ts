@@ -11,6 +11,7 @@ import {
   exportPay,
   getOee,
   listAndon,
+  listBundle,
   listDowntimes,
   describeProblem,
   listWorkerDays,
@@ -18,7 +19,7 @@ import {
   ShopfloorApiError,
   type RegistrationInput,
 } from "./api/client";
-import { durationMinutes, fixed, formatPayTotal, percent, sumDecimals } from "./format";
+import { durationMinutes, fixed, formatOffset, formatPayTotal, percent, sumDecimals } from "./format";
 
 const item: RegistrationInput = {
   id: "0190a0b0-0000-7000-8000-000000000001",
@@ -34,11 +35,12 @@ describe("shopfloor module", () => {
     expect(shopfloor.nav.every((n) => n.to.startsWith("/shopfloor"))).toBe(true);
   });
 
-  it("has list and create or detail pages for workers, exports and machines, and the floor monitoring pages", () => {
+  it("has list and create or detail pages for workers, bundles, exports and machines, and the floor monitoring pages", () => {
     expect(shopfloor.routes.map((r) => r.path)).toEqual([
       "/shopfloor/workers",
       "/shopfloor/workers/new",
       "/shopfloor/workers/:id",
+      "/shopfloor/bundles/:id",
       "/shopfloor/time",
       "/shopfloor/pay-exports",
       "/shopfloor/pay-exports/:id",
@@ -87,6 +89,20 @@ describe("shopfloor client", () => {
     expect(init.method).toBe("POST");
     expect(new Headers(init.headers).get("Idempotency-Key")).toBeNull();
     expect(JSON.parse(init.body as string)).toEqual({ items: [item] });
+  });
+
+  it("sends the kiosk clock with an offline replay so the server can correct skew (BR-25.7)", async () => {
+    reply(200, { items: [{ id: item.id, status: "accepted" }], clockOffsetSeconds: 420, clockCorrected: true });
+    await createRegistrations([item], "2026-10-21T07:53:00Z");
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({ deviceSentAt: "2026-10-21T07:53:00Z", items: [item] });
+  });
+
+  it("reads a bundle by its id", async () => {
+    reply(200, { items: [] });
+    expect(await listBundle("0190a0b0-0000-7000-8000-0000000000b1")).toEqual([]);
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/v1/shopfloor/registrations?bundleId=0190a0b0-0000-7000-8000-0000000000b1");
   });
 
   it("sends the caller's Idempotency-Key on pay commands", async () => {
@@ -173,6 +189,16 @@ describe("chunk", () => {
 
   it("rejects a non-positive size", () => {
     expect(() => chunk([1], 0)).toThrow(RangeError);
+  });
+});
+
+describe("clock offset formatting", () => {
+  it("signs the correction and uses minutes where it can", () => {
+    expect(formatOffset(420)).toBe("+7 min");
+    expect(formatOffset(-420)).toBe("−7 min");
+    expect(formatOffset(-45)).toBe("−45 s");
+    expect(formatOffset(390)).toBe("+6 min 30 s");
+    expect(formatOffset(null)).toBe("—");
   });
 });
 

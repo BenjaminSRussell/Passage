@@ -26,7 +26,7 @@ import {
   type Worker,
   type WorkerDay,
 } from "./api/client";
-import { addDays, browserZone, dash, daysBetween, fixed, formatDateTime, formatHours, today } from "./format";
+import { addDays, browserZone, dash, daysBetween, fixed, formatDateTime, formatHours, formatOffset, today } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { dayColumns } from "./dayColumns";
@@ -47,7 +47,21 @@ const registrationColumns: DataTableColumn<Registration>[] = [
   { key: "hours", header: "Hours", align: "end", render: (row) => formatHours(row.hours) },
   { key: "qtyGood", header: "Good", align: "end", render: (row) => fixed(row.qtyGood, 2) },
   { key: "qtyScrap", header: "Scrap", align: "end", render: (row) => fixed(row.qtyScrap, 2) },
-  { key: "offline", header: "Source", render: (row) => (row.offline ? <Badge tone="info">Offline replay</Badge> : "Online") },
+  {
+    key: "bundleId",
+    header: "Bundle",
+    render: (row) => (row.bundleId ? <Link to={`/shopfloor/bundles/${row.bundleId}`}>View bundle</Link> : dash),
+  },
+  {
+    key: "offline",
+    header: "Source",
+    render: (row) => (
+      <span className={styles.flags}>
+        {row.offline ? <Badge tone="info">Offline replay</Badge> : "Online"}
+        {row.clockOffsetSeconds !== null ? <Badge tone="warning">{`Clock corrected ${formatOffset(row.clockOffsetSeconds)}`}</Badge> : null}
+      </span>
+    ),
+  },
 ];
 
 
