@@ -193,6 +193,9 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutySchedule)).Post("/v1/scheduling/campaigns/{id}:sequence", a.sequenceCampaign)
 	r.With(authz.RequireDuty(dutyCampaign)).Post("/v1/scheduling/campaigns/{id}:start", a.startCampaign)
 	r.With(authz.RequireDuty(dutyCampaign)).Post("/v1/scheduling/campaigns/{id}:allocate-cost", a.allocateCampaignCost)
+
+	// Slice 8: campaign proposals from scheduled orders sharing a key (FR-23.14).
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/campaign-proposals", a.campaignProposals)
 }
 
 // Metrics serves Prometheus text on the admin port.
@@ -424,7 +427,8 @@ func (a *API) createOperation(w http.ResponseWriter, r *http.Request) {
 }
 
 // validAttributes checks the attributes block conditions match on: at most 20
-// named values, names and values of bounded length.
+// named values, names and values of bounded length. The campaignKey attribute
+// becomes a proposed campaign's key, so it keeps to the campaign key limit.
 func validAttributes(attrs map[string]string) string {
 	if len(attrs) > maxAttributes {
 		return fmt.Sprintf("must hold at most %d attributes", maxAttributes)
@@ -435,6 +439,9 @@ func validAttributes(attrs map[string]string) string {
 		}
 		if len(value) > maxAttributeValue {
 			return fmt.Sprintf("values must be at most %d characters", maxAttributeValue)
+		}
+		if name == domain.CampaignKeyAttribute && len(strings.TrimSpace(value)) > maxCampaignKey {
+			return fmt.Sprintf("%s must be at most %d characters, the campaign key limit", domain.CampaignKeyAttribute, maxCampaignKey)
 		}
 	}
 	return ""

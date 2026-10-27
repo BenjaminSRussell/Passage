@@ -514,6 +514,8 @@ describe("Operations", () => {
   it("reads attributes as name = value lines", () => {
     expect(parseAttributes(" color = white \n\ngrade=2")).toEqual({ attributes: { color: "white", grade: "2" } });
     expect(parseAttributes("color white").error).toBe("Line 1: write name = value.");
+    expect(parseAttributes(`campaignKey = ${"F".repeat(65)}`).error).toBe("Line 1: a campaign key is at most 64 characters.");
+    expect(parseAttributes(`campaignKey = ${"F".repeat(64)}`).error).toBeUndefined();
     expect(parseAttributes("color=white\ncolor=red").error).toBe("Line 2: color is listed twice.");
     expect(parseAttributes(" = white").error).toBe("Line 1: the name is 1 to 64 characters.");
     expect(describeAttributes({ grade: "2", color: "white" })).toBe("color=white, grade=2");

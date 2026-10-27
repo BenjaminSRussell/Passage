@@ -147,6 +147,20 @@ Slice 5:
   the block condition in that time, `unusedMinutes` the rest. Inactive blocks
   and infinite-run bookings are left out.
 
+Slice 8:
+
+- **Campaign proposals** (`GET /campaign-proposals?from&windowDays&resourceId`,
+  window 1 to 90 days, default 14 from the current minute, FR-23.14): the
+  first segment of every job that starts in the window, of an operation with
+  a setup group whose order is in no campaign, planned or firmed alike. An
+  order is offered once, with its earliest such job. Orders are grouped per
+  resource by campaign key: the operation attribute `campaignKey` (at most 64
+  characters, checked on `POST /operations`) when set, otherwise the setup
+  group. Two or more orders make a proposal, in the order their jobs start,
+  with the earliest start as planned start; more than 1000 are split into
+  consecutive proposals. Nothing is stored: the planner enters each order's
+  quantity and creates the campaign with `POST /campaigns`.
+
 ## API
 
 All routes need the tenant headers set by the gateway; duties in brackets.
@@ -178,6 +192,7 @@ All routes need the tenant headers set by the gateway; duties in brackets.
 | POST | `/v1/scheduling/campaigns/{id}:sequence` (Idempotency-Key, If-Match) | `scheduling.schedule.write` |
 | POST | `/v1/scheduling/campaigns/{id}:start` (Idempotency-Key, If-Match) | `scheduling.campaign.write` |
 | POST | `/v1/scheduling/campaigns/{id}:allocate-cost` (computes only; nothing is stored) | `scheduling.campaign.write` |
+| GET | `/v1/scheduling/campaign-proposals?from&windowDays&resourceId` (computes only; nothing is stored) | `scheduling.read` |
 
 The browser reaches these as `/api/v1/scheduling/...` through the web BFF.
 `api/openapi.yaml` is checked against the router by `internal/api/openapi_test.go`.

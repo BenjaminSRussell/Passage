@@ -39,7 +39,8 @@ export const emptyOperation: Values = {
 
 /**
  * Reads one attribute per line as name = value (for example color = white),
- * the values capacity block conditions match on (FR-23.17).
+ * the values capacity block conditions match on (FR-23.17). campaignKey is
+ * the key campaign proposals group the order by (FR-23.14).
  */
 export function parseAttributes(text: string): { attributes: Record<string, string>; error?: string } {
   const attributes: Record<string, string> = {};
@@ -52,6 +53,7 @@ export function parseAttributes(text: string): { attributes: Record<string, stri
     const value = line.slice(eq + 1).trim();
     if (name === "" || name.length > 64) return { attributes, error: `${at}: the name is 1 to 64 characters.` };
     if (value.length > 120) return { attributes, error: `${at}: the value is at most 120 characters.` };
+    if (name === "campaignKey" && value.length > 64) return { attributes, error: `${at}: a campaign key is at most 64 characters.` };
     if (name in attributes) return { attributes, error: `${at}: ${name} is listed twice.` };
     attributes[name] = value;
   }
@@ -267,7 +269,7 @@ export function NewOperationPage() {
               id="operation-attributes"
               label="Attributes"
               optional
-              hint="One per line as name = value, for example color = white. Capacity blocks match on these."
+              hint="One per line as name = value, for example color = white. Capacity blocks match on these; campaignKey = a formula family groups the order in campaign proposals."
               error={errors.attributes}
             >
               {(control) => (

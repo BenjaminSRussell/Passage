@@ -133,6 +133,7 @@ type CampaignStore interface {
 	SequenceCampaign(ctx context.Context, cmd CampaignCommand, idem Idem) (Campaign, bool, error)
 	StartCampaign(ctx context.Context, cmd CampaignCommand, idem Idem) (Campaign, bool, error)
 	CampaignSetupMatrix(ctx context.Context, resourceID string, on time.Time) (domain.SetupMatrix, error)
+	ProposeCampaigns(ctx context.Context, f ProposalFilter) ([]domain.ProposedCampaign, error)
 }
 
 const campaignCols = `c.id::text, c.resource_id::text, c.campaign_key, c.status, c.planned_start, c.max_orders, c.max_qty::text, c.max_minutes,

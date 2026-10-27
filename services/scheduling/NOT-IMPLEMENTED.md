@@ -149,6 +149,31 @@ campaign `cleanouts` field main does not serve; and its `CampaignPage.tsx`
 (main already has the campaign list, create and detail screens from slice 2,
 with the plan's cleanouts and the slice 6 optimizer outcome).
 
+Slice 8 builds campaign proposals (FR-23.14): `GET /campaign-proposals`
+(`domain.ProposeCampaigns`, `store.ProposeCampaigns`) groups the orders
+already scheduled, planned or firmed, that belong to no campaign and whose
+jobs start inside a window (default 14 days, 1-90) by resource and campaign
+key, the operation attribute `campaignKey` or else the setup group, into
+proposals of two or more orders in the order their jobs start. Each order is
+offered once, with its earliest job in the window. `POST /operations` now
+keeps a `campaignKey` attribute within the 64-character campaign key limit.
+Web: the campaign proposals screen (filters for start date, window and
+resource; each proposal's orders with a quantity per order and a sequence
+rule; "Create campaign" posts the campaign with its orders), linked from the
+campaign list.
+
+The swarm draft of this slice was built on its own unreviewed slices 1-7 and
+was not cherry-picked as is. Only its proposal rules were ported, and changed:
+they now read scheduled jobs from the database and are served and shown
+(the draft had a domain function with no caller), group by start rather than
+due date, never offer an order twice, and split groups over the campaign
+order limit. Not taken: its `PlanMove` successor repricing and network
+checks (main has repriced successors and checked every network step a move
+changes since slice 3, with networks loaded onto operations, which the draft
+noted it lacked); its `SetupPage.tsx` and `setup.ts` (main has had list,
+create and detail screens for networks, setup matrices, cleanout rules and
+capacity blocks since slice 2).
+
 Everything else in the ticket and PRD 4.23 is listed here.
 
 No file outside the wave 23 ownership entry was changed, so there are no
@@ -189,7 +214,9 @@ moved-out handoff rows.
 | 7 | Placing a sequenced campaign contiguously on the Gantt (changeover and cleanout jobs as scheduled jobs; cleanout never split, BR-23.13) | later slice of PSG-23 | The plan is stored on the campaign; schedule runs do not place campaign jobs yet. |
 | 7 | Cleanout and setup orders as lightweight production orders of type `cleanout` (`cleanout_order_id`, `setup_order_id`), consuming cleaning materials and labour | handoff — wave 21 (production orders) | Columns exist and stay null; `campaign.sequenced` carries the cleanouts for wave 21 to create them. |
 | 7 | Campaign start from the first order Started; complete and cancel transitions | partial — wave 21 (order status events) | `:start` freezes a planned campaign explicitly; there are no complete or cancel endpoints yet (later slice of PSG-23). |
-| 7 | `campaign-proposal` job proposing campaigns from planned and firmed orders sharing a campaign key within 14 days | later slice of PSG-23 (needs wave 22 planned orders) | Campaigns are created by hand with their orders. |
+| 7 | Campaign proposals from planned and firmed orders sharing a campaign key within a window (default 14 days) | built (slice 8) as an inquiry | `GET /campaign-proposals` over scheduled jobs and the campaign proposals screen; the planner enters quantities and creates the campaign. The window is a query parameter until site parameters exist. |
+| 7 | The nightly `campaign-proposal` job (23:00 per site and key) storing `proposed` campaigns and replacing them per key, with the count reported | later slice of PSG-23 | Needs the job runner (FR-23.11) and an order quantity to store: scheduling operations carry no quantity, so proposals are not stored and quantities are typed when a campaign is created. |
+| 7 | Proposals from wave 22 planned orders not yet scheduled, and orders excluded once Started | handoff — wave 22 (planned orders) and wave 25 (order start) | Only orders with a scheduled job are proposed; scheduling has no Started status yet, so every scheduled order outside a campaign is eligible. |
 | 7 | CP-SAT circuit sequencing (`AddCircuit`, at most 50 orders) | built (slice 6) | `sequenceRule: cp-sat`; `:sequence` calls `POST /v1/optimize/campaign-sequence` and keeps a certified, strictly cheaper order (BR-23.9), otherwise nearest-neighbour with SCHED-0006. The solver gets 20 s, not the PRD's 30 s, because the platform router ends every request at 30 s; a longer limit needs the asynchronous run path (FR-23.11). |
 | 7 | Setup matrix and campaign per resource group; setup group taken from the product (w8) or formula (w24) | handoff — wave 9 (resource groups), waves 8 and 24 | Matrices and campaigns are per resource; each campaign order carries its setup group. |
 | 7 | Batch and run-hour counters carried in from the resource's history | built for campaigns (slice 6); actual counts are a handoff to wave 25 | `scheduling_cleanout_counter` carries the planned batches and run minutes from each started campaign into the next; a cleaning changeover or a cleanout resets it. Batches run outside campaigns and actual run hours from shop-floor feedback (wave 25) do not move it yet, and there is no endpoint to reset it by hand after an unplanned cleanout. |

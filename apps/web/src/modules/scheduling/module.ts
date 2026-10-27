@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import type { PassageModule } from "../registry";
 import { CampaignDetailPage } from "./CampaignDetailPage";
+import { CampaignProposalsPage } from "./CampaignProposalsPage";
 import { CampaignsPage } from "./CampaignsPage";
 import { CapacityBlocksPage } from "./CapacityBlocksPage";
 import { CapacityLoadPage } from "./CapacityLoadPage";
@@ -30,7 +31,7 @@ const scheduling: PassageModule = {
   id: "scheduling",
   title: "Scheduling",
   description:
-    "Finite capacity scheduling: the Gantt workspace, schedule runs, capacity load, resources, operations, order pegs, campaigns, setup matrices, cleanout rules, resource networks and capacity blocks.",
+    "Finite capacity scheduling: the Gantt workspace, schedule runs, capacity load, resources, operations, order pegs, campaigns and campaign proposals, setup matrices, cleanout rules, resource networks and capacity blocks.",
   routes: [
     { path: "/scheduling", element: createElement(WorkspacePage), handle: { title: "Scheduling workspace" } },
     { path: "/scheduling/load", element: createElement(CapacityLoadPage), handle: { title: "Capacity load" } },
@@ -46,6 +47,7 @@ const scheduling: PassageModule = {
     { path: "/scheduling/order-pegs/new", element: createElement(NewOrderPegPage), handle: { title: "New order peg" } },
     { path: "/scheduling/campaigns", element: createElement(CampaignsPage), handle: { title: "Campaigns" } },
     { path: "/scheduling/campaigns/new", element: createElement(NewCampaignPage), handle: { title: "New campaign" } },
+    { path: "/scheduling/campaign-proposals", element: createElement(CampaignProposalsPage), handle: { title: "Campaign proposals" } },
     { path: "/scheduling/campaigns/:id", element: createElement(CampaignDetailPage), handle: { title: "Campaign" } },
     { path: "/scheduling/setup-matrices", element: createElement(SetupMatricesPage), handle: { title: "Setup matrices" } },
     { path: "/scheduling/setup-matrices/new", element: createElement(NewSetupMatrixPage), handle: { title: "New setup matrix version" } },
@@ -66,6 +68,7 @@ const scheduling: PassageModule = {
     { label: "Operations", to: "/scheduling/operations", duty: "scheduling.read" },
     { label: "Order pegs", to: "/scheduling/order-pegs", duty: "scheduling.read" },
     { label: "Campaigns", to: "/scheduling/campaigns", duty: "scheduling.read" },
+    { label: "Campaign proposals", to: "/scheduling/campaign-proposals", duty: "scheduling.read" },
     { label: "Setup matrices", to: "/scheduling/setup-matrices", duty: "scheduling.read" },
     { label: "Cleanout rules", to: "/scheduling/cleanout-rules", duty: "scheduling.read" },
     { label: "Resource networks", to: "/scheduling/networks", duty: "scheduling.read" },

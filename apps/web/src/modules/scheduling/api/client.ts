@@ -579,6 +579,38 @@ export interface NewCampaign {
   orders: NewCampaignOrder[];
 }
 
+/** One scheduled order a campaign proposal groups (FR-23.14). */
+export interface ProposedCampaignOrder {
+  orderId: string;
+  operationId: string;
+  operNumber: number;
+  resourceId: string;
+  setupGroup: string;
+  runMinutes: number;
+  routeSetupMinutes: number;
+  start: string;
+  dueAt?: string;
+  firmed: boolean;
+}
+
+/** Orders sharing a campaign key on one resource within the window. Nothing is stored until a campaign is created from it. */
+export interface ProposedCampaign {
+  campaignKey: string;
+  resourceId: string;
+  plannedStart: string;
+  runMinutes: number;
+  orders: ProposedCampaignOrder[];
+}
+
+export interface CampaignProposals {
+  from: string;
+  to: string;
+  windowDays: number;
+  items: ProposedCampaign[];
+}
+
+export const PROPOSAL_WINDOWS = [7, 14, 30, 60, 90] as const;
+
 export const ALLOCATION_BASES = ["quantity", "equal", "run-minutes"] as const;
 export type AllocationBasis = (typeof ALLOCATION_BASES)[number];
 
@@ -651,6 +683,21 @@ export function getCampaign(id: string, signal?: AbortSignal): Promise<Campaign>
 
 export function createCampaign(input: NewCampaign, key: string = newKey()): Promise<Campaign> {
   return post<Campaign>("/campaigns", input, key);
+}
+
+export async function proposeCampaigns(
+  filter: { from?: string; windowDays?: number; resourceId?: string } = {},
+  signal?: AbortSignal,
+): Promise<CampaignProposals> {
+  const body = await send<CampaignProposals>(
+    `/campaign-proposals${query({ from: filter.from, windowDays: filter.windowDays, resourceId: filter.resourceId })}`,
+    {},
+    signal,
+  );
+  if (!Array.isArray(body.items)) {
+    throw new SchedulingApiError(0, "COM-0001", "The response has no items");
+  }
+  return body;
 }
 
 /** A campaign command carries the version the planner saw (If-Match) and an Idempotency-Key. */

@@ -27,6 +27,7 @@ describe("scheduling module", () => {
         "/scheduling/campaigns",
         "/scheduling/campaigns/new",
         "/scheduling/campaigns/:id",
+        "/scheduling/campaign-proposals",
         "/scheduling/setup-matrices",
         "/scheduling/setup-matrices/new",
         "/scheduling/setup-matrices/:id",

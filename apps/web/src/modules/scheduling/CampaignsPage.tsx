@@ -45,9 +45,14 @@ export function CampaignsPage() {
         title="Campaigns"
         description="Orders grouped to run back to back on one resource, sequenced by the setup matrix with a leading setup and cleanouts."
         actions={
-          <Link className={buttonClassName("primary")} to="/scheduling/campaigns/new">
-            New campaign
-          </Link>
+          <>
+            <Link className={buttonClassName("ghost")} to="/scheduling/campaign-proposals">
+              Proposals
+            </Link>
+            <Link className={buttonClassName("primary")} to="/scheduling/campaigns/new">
+              New campaign
+            </Link>
+          </>
         }
       />
       <div className={styles.toolbar}>

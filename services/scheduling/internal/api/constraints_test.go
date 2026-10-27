@@ -45,6 +45,7 @@ func TestCreateOperation_ValidatesSetupAttributesAndNetwork(t *testing.T) {
 		{"too many attributes", `,"attributes":{` + strings.Join(many, ",") + `}`, `"attributes"`},
 		{"attribute name with spaces", `,"attributes":{" color":"white"}`, `"attributes"`},
 		{"attribute value too long", `,"attributes":{"color":"` + strings.Repeat("w", 121) + `"}`, `"attributes"`},
+		{"campaign key attribute over 64", `,"attributes":{"campaignKey":"` + strings.Repeat("F", 65) + `"}`, `"attributes"`},
 		{"network id not a UUID", `,"networkId":"MIX-FILL"`, `"networkId"`},
 	}
 	for _, c := range cases {

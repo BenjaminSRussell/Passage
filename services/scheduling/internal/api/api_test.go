@@ -58,6 +58,9 @@ type fakeStore struct {
 	// slice 6
 	matrix    domain.SetupMatrix
 	matrixErr error
+
+	// slice 8
+	lastProposal store.ProposalFilter
 }
 
 func (f *fakeStore) CreateResource(_ context.Context, in store.Resource, _ store.Idem) (store.Resource, bool, error) {
