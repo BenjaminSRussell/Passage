@@ -263,9 +263,15 @@ func publishTx(ctx context.Context, tx pgx.Tx, code, actor string) (domain.Defin
 			where id=$1::uuid`, draftID, next, published); err != nil {
 			return err
 		}
-		return enqueue(ctx, tx, "definition", code, events.DefinitionPublished, tenantID(ctx), events.DefinitionPublishedData{
+		if err := enqueue(ctx, tx, "definition", code, events.DefinitionPublished, tenantID(ctx), events.DefinitionPublishedData{
 			Code: code, Version: next, Actor: actor, DiffSummary: fmt.Sprintf("%d rows, %d columns", len(out.Rows), len(out.Columns)),
-		})
+		}); err != nil {
+			return err
+		}
+		return recordAuditTx(ctx, tx, domain.AuditEntry{Kind: domain.AuditDefinitionPublished, ActorID: actor,
+			ObjectRef: auditDefinition(code, next), Details: map[string]any{
+				"code": code, "version": next, "kind": string(out.Kind), "rows": len(out.Rows), "columns": len(out.Columns),
+			}})
 	}()
 	return out, err
 }
@@ -283,7 +289,8 @@ func (s *Postgres) RetireDefinition(ctx context.Context, code string) (retired i
 			return err
 		}
 		if retired = int(tag.RowsAffected()); retired > 0 {
-			return nil
+			return recordAuditTx(ctx, tx, domain.AuditEntry{Kind: domain.AuditDefinitionRetired, ObjectRef: "definition:" + code,
+				Details: map[string]any{"code": code, "retiredVersions": retired}})
 		}
 		var already bool
 		if err := tx.QueryRow(ctx, `select exists(select 1 from report_definition where code=$1 and status='retired')`, code).Scan(&already); err != nil {

@@ -218,7 +218,10 @@ func (s *Postgres) PublishHierarchy(ctx context.Context, code, actor string, mem
 			}
 		}
 		mem = m
-		return nil
+		return recordAuditTx(ctx, tx, domain.AuditEntry{Kind: domain.AuditHierarchyPublished, ActorID: actor,
+			ObjectRef: fmt.Sprintf("hierarchy:%s@%d", code, next), Details: map[string]any{
+				"code": code, "version": next, "strict": out.Strict, "members": len(members), "unassigned": len(m.Unassigned),
+			}})
 	})
 	return out, mem, err
 }

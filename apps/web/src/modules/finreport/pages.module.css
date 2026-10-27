@@ -235,3 +235,17 @@
   content: "›";
   margin-inline-end: var(--space-2);
 }
+
+.json {
+  margin: var(--space-4) 0 0;
+  padding: var(--space-3);
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm-size);
+  line-height: var(--text-sm-leading);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

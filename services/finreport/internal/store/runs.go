@@ -167,11 +167,18 @@ func (s *Postgres) CreateRun(ctx context.Context, spec RunSpec) (Run, error) {
 			return err
 		}
 		period := fmt.Sprintf("%04d-%02d", spec.PeriodYear, spec.PeriodNo)
-		return enqueue(ctx, tx, "statement", run.ID, events.StatementGenerated, tenantID(ctx), events.StatementGeneratedData{
+		if err := enqueue(ctx, tx, "statement", run.ID, events.StatementGenerated, tenantID(ctx), events.StatementGeneratedData{
 			RunID: run.ID, DefinitionCode: def.Code, DefinitionVersion: def.Version, LedgerID: spec.LedgerID, Period: period,
 			CurrencyType: spec.CurrencyType, HWMByLedger: hwm, ResultHash: res.Hash, Outputs: []events.OutputRef{},
 			Parameters: map[string]string{"period": period},
-		})
+		}); err != nil {
+			return err
+		}
+		return recordAuditTx(ctx, tx, domain.AuditEntry{Kind: domain.AuditStatementRun, LedgerID: spec.LedgerID, Period: period,
+			ActorID: spec.RequestedBy, ObjectRef: "run:" + run.ID, Details: map[string]any{
+				"definition": def.Code, "version": def.Version, "currencyType": spec.CurrencyType,
+				"hwm": hwm[spec.LedgerID], "resultHash": res.Hash, "cells": len(res.Cells),
+			}})
 	})
 	return run, err
 }

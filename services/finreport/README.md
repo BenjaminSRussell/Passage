@@ -6,9 +6,39 @@ keys and on to the journal lines, their source documents and traces. Phase 2
 exit wave. Reads from its own `reporting` database, fed by ledger
 events.
 
-## Status: slice 5
+## Status: slice 6
 
-Slice 5 adds drill level 2 (FR-15.7, BR-15.4; on top of slices 1 to 4, below):
+Slice 6 adds the audit trail report (FR-15.10; on top of slices 1 to 5, below):
+
+- `audit_trail_entry` (migration 0006, RLS): `AuditTrailEntry` with occurred
+  at, ledger, period, kind, actor, object reference, details (JSON) and trace
+  id, indexed on (ledger, occurred at). Kinds are the PRD's ledger kinds
+  (posted, replayed, reversed, batch submitted/approved/rejected, period
+  changed, reopen approved, rate override, tax fallback, allocation, year-end
+  and rebuild runs) and this service's own: `statement_run`,
+  `definition_published` (also on standard install), `definition_retired`,
+  `hierarchy_published`, `schedule_saved` and `audit_exported`. The reporting
+  kinds are written in the same transaction as the change (a refused or
+  replayed change writes none), with the request id as trace.
+  `PutAuditEntries` takes the ledger kinds from other services' events, one
+  entry per source event id (a redelivery is a replay); the consumers that will
+  call it are a later slice, and tests load entries through it.
+- `GET /audit-trail?ledger=&period=&kind=&actor=&from=&to=&cursor=&limit=`:
+  entries oldest first, keyset paged (default 100, at most 1,000), each with
+  `traceUrl` from `REPORTING_TRACE_URL`. Every query is narrowed (PRD
+  §2.15.19): a period, or from and to at most 366 days apart, else 400.
+- `GET /audit-trail:export?…`: every matching entry as CSV (details as JSON
+  with sorted keys, formula text neutralized), with `X-Passage-Export-Sha256`
+  of the body and `X-Passage-Export-Id`; the export is itself recorded
+  (`audit_exported` with the filter, entry count and digest). More than 50,000
+  entries is refused with REPORT-0030, never cut short.
+- Duty `reporting.audit.view` ("View audit trail", PRD §2.15.17).
+- AC-15.9 at store level: a reopen with two approvals, a posting and the
+  re-close, loaded out of order, list in time order with their trace ids.
+- Web: Audit trail page (filter, entries, entry details, load more, export
+  with the digest shown).
+
+Slice 5 added drill level 2 (FR-15.7, BR-15.4):
 
 - `reporting_journal_line` (migration 0005, RLS): one row per ledger line with
   posting sequence, line number, posting date, period, account, combination,
@@ -165,7 +195,7 @@ internal/store/         Postgres store (pgx), tenant transactions, outbox writes
 internal/api/           HTTP handlers under /api/v1/reporting
 internal/events/        event types and payloads
 internal/config/        REPORTING_* tunables, validated at startup
-migrations/             SQL applied in order (0003 run checks, 0004 schedules, 0005 journal lines); FS embedded in migrations.go
+migrations/             SQL applied in order (0003 run checks, 0004 schedules, 0005 journal lines, 0006 audit trail); FS embedded in migrations.go
 api/openapi.yaml        OpenAPI 3.1 for every endpoint
 events/asyncapi.yaml    AsyncAPI 3 for every event
 charts/finreport/       Helm chart
@@ -227,6 +257,7 @@ later slices (NOT-IMPLEMENTED.md).
 | `reporting.statement.view` | definition list and GET, run list and reads, cells, drill level 1, CSV, HTML and XLSX output, lag |
 | `reporting.statement.schedule` | schedule list, GET and PUT |
 | `ledger.journal.read` (wave 11, "View ledger transactions") | drill level 2 (`.../lines`) |
+| `reporting.audit.view` ("View audit trail") | audit trail list and export |
 
 ## Error codes
 
@@ -251,13 +282,15 @@ Problem details use `type` `https://passage.dev/problems/<code>`.
 | REPORT-0024 | 404 | Statement run not found (also for a run id that is not a UUID) |
 | REPORT-0025 | 404 | Cell not found in the run; balance key position past the cell's keys, or a key of a computed cell (drill level 2) |
 | REPORT-0028 | 422 | Journal line refused by the read model (date, period, amounts beyond six places, currency type, unsafe source link) |
+| REPORT-0029 | 422 | Audit entry refused by the trail (unknown or reporting-only kind on ingest, missing actor, object or source event id, bad ledger or period) |
+| REPORT-0030 | 422 | Audit trail export matches more than 50,000 entries; narrow the filter |
 | REPORT-0099 | 500 | Drill invariant failed: balance keys do not sum to the cell (never served) |
 | conflict_version | 412 | Draft or schedule revision in `If-Match` is stale (409 when two creates race) |
 | precondition_required | 428 | Draft or schedule exists and `If-Match` was not sent |
 | idempotency_key_reuse | 422 | Idempotency-Key reused for a different run or import request |
 | idempotency_key_in_flight | 409 | A concurrent request with the same Idempotency-Key won; retry to get the replay |
 | COM-0001 | 422 | Shape violation in a definition or hierarchy (codes, names, labels, rules, members without id or key); hierarchy body code mismatches the path |
-| COM-0002 | 400/422 | Malformed body, bad If-Match, bad list or line page limit, key or cursor, or run parameters (ledgerId not a UUID, calendar quarter not 1-4) |
+| COM-0002 | 400/422 | Malformed body, bad If-Match, bad list or line page limit, key or cursor, or run parameters (ledgerId not a UUID, calendar quarter not 1-4); audit trail filter malformed or not narrowed to a period or a window of at most 366 days |
 | COM-0003 | 400 | `Idempotency-Key` header missing on `POST /runs` |
 | REPORT-0026 | 422 | Definition has no rows or columns, or more than 2,000 rows or 60 columns; hierarchy has no nodes, more than 20,000 nodes, more than 12 levels or a cycle |
 | REPORT-0027 | 404 | Hierarchy, its draft or a published version not found |

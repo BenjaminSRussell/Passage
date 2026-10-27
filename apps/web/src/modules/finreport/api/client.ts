@@ -508,3 +508,100 @@ export async function saveSchedule(schedule: ScheduleInput, etag: string | null)
   const sent = await send<Schedule>(`/schedules/${seg(schedule.code)}`, { method: "PUT", headers, body: JSON.stringify(schedule) });
   return { schedule: sent.body, etag: sent.etag };
 }
+
+// --- audit trail (FR-15.10) ------------------------------------------------
+
+/** Ledger kinds (posted, approvals, reversals, period changes, ...) then the reporting service's own kinds. */
+export const AUDIT_KINDS = [
+  "posted",
+  "replayed",
+  "reversed",
+  "batch_submitted",
+  "batch_approved",
+  "batch_rejected",
+  "period_changed",
+  "reopen_approved",
+  "rate_override",
+  "tax_fallback",
+  "allocation_run",
+  "year_end_run",
+  "rebuild",
+  "statement_run",
+  "definition_published",
+  "definition_retired",
+  "hierarchy_published",
+  "schedule_saved",
+  "audit_exported",
+] as const;
+export type AuditKind = (typeof AUDIT_KINDS)[number];
+
+export interface AuditEntry {
+  id: string;
+  occurredAt: string;
+  ledgerId?: string;
+  period?: string;
+  kind: AuditKind;
+  actorId: string;
+  objectRef: string;
+  details: Record<string, unknown>;
+  traceId?: string;
+  traceUrl?: string;
+}
+
+/** The service needs a period, or from and to (RFC 3339, to exclusive) at most 366 days apart. */
+export interface AuditQuery {
+  ledger?: string;
+  period?: string;
+  kind?: AuditKind;
+  actor?: string;
+  from?: string;
+  to?: string;
+}
+
+export interface AuditPage {
+  items: AuditEntry[];
+  limit: number;
+  nextCursor: string | null;
+}
+
+export interface AuditExport {
+  id: string;
+  sha256: string;
+  entries: number;
+  fileName: string;
+  csv: string;
+}
+
+function auditParams(q: AuditQuery): URLSearchParams {
+  const params = new URLSearchParams();
+  for (const [name, value] of Object.entries(q)) {
+    if (typeof value === "string" && value !== "") params.set(name, value);
+  }
+  return params;
+}
+
+/** One page of the audit trail, oldest first. */
+export function listAuditTrail(q: AuditQuery, cursor?: string, signal?: AbortSignal): Promise<AuditPage> {
+  const params = auditParams(q);
+  if (cursor) params.set("cursor", cursor);
+  return get<AuditPage>(`/audit-trail?${params.toString()}`, signal);
+}
+
+/** Exports every matching entry as CSV. The service records the export and sends the file's SHA-256. */
+export async function exportAuditTrail(q: AuditQuery): Promise<AuditExport> {
+  const res = await fetch(`${base}/audit-trail:export?${auditParams(q).toString()}`, {
+    headers: { Accept: "text/csv" },
+    credentials: "same-origin",
+  });
+  if (!res.ok) {
+    throw await toError(res);
+  }
+  const id = res.headers.get("X-Passage-Export-Id") ?? "";
+  return {
+    id,
+    sha256: res.headers.get("X-Passage-Export-Sha256") ?? "",
+    entries: Number(res.headers.get("X-Passage-Export-Entries") ?? "0"),
+    fileName: `audit-trail-${id || "export"}.csv`,
+    csv: await res.text(),
+  };
+}

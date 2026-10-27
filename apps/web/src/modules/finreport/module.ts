@@ -1,5 +1,6 @@
 import { createElement } from "react";
 import type { PassageModule } from "../registry";
+import { AuditTrailPage } from "./AuditTrailPage";
 import { DefinitionEditorPage } from "./DefinitionEditorPage";
 import { DefinitionsPage } from "./DefinitionsPage";
 import { HierarchiesPage } from "./HierarchiesPage";
@@ -13,7 +14,7 @@ import { SchedulesPage } from "./SchedulesPage";
 const finreport: PassageModule = {
   id: "finreport",
   title: "Financial statements",
-  description: "Report definitions, statement runs over the journal with drill-down to the balances and journal lines behind every amount, downloads and distribution schedules.",
+  description: "Report definitions, statement runs over the journal with drill-down to the balances and journal lines behind every amount, downloads, distribution schedules and the audit trail.",
   routes: [
     { path: "/finreport", element: createElement(RunsPage), handle: { title: "Financial statements" } },
     { path: "/finreport/runs/new", element: createElement(NewRunPage), handle: { title: "Run a statement" } },
@@ -27,12 +28,14 @@ const finreport: PassageModule = {
     { path: "/finreport/schedules", element: createElement(SchedulesPage), handle: { title: "Distribution schedules" } },
     { path: "/finreport/schedules/new", element: createElement(ScheduleEditorPage), handle: { title: "New schedule" } },
     { path: "/finreport/schedules/:code", element: createElement(ScheduleEditorPage), handle: { title: "Distribution schedule" } },
+    { path: "/finreport/audit-trail", element: createElement(AuditTrailPage), handle: { title: "Audit trail" } },
   ],
   nav: [
     { label: "Statements", to: "/finreport", duty: "reporting.statement.view" },
     { label: "Report definitions", to: "/finreport/definitions", duty: "reporting.statement.view" },
     { label: "Derived hierarchies", to: "/finreport/hierarchies", duty: "reporting.definition.maintain" },
     { label: "Distribution schedules", to: "/finreport/schedules", duty: "reporting.statement.schedule" },
+    { label: "Audit trail", to: "/finreport/audit-trail", duty: "reporting.audit.view" },
   ],
 };
 

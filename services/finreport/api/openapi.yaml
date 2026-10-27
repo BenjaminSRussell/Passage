@@ -693,6 +693,94 @@ paths:
         '412': {$ref: '#/components/responses/Problem'}
         '422': {$ref: '#/components/responses/Problem'}
         '428': {$ref: '#/components/responses/Problem'}
+  /api/v1/reporting/audit-trail:
+    get:
+      operationId: listAuditTrail
+      summary: Audit trail report (FR-15.10)
+      description: >-
+        Who posted, approved, reversed, reopened or overrode what, and who ran,
+        published, retired or scheduled reporting objects, oldest first and
+        keyset paged by (occurredAt, id). The range is always narrowed: name a
+        period, or both from and to at most 366 days apart; otherwise 400
+        COM-0002. Ledger kinds come from other services' events (later slice);
+        reporting kinds are written with the change they record.
+      x-passage-duty: reporting.audit.view
+      parameters:
+        - $ref: '#/components/parameters/AuditLedger'
+        - $ref: '#/components/parameters/AuditPeriod'
+        - $ref: '#/components/parameters/AuditKind'
+        - $ref: '#/components/parameters/AuditActor'
+        - $ref: '#/components/parameters/AuditFrom'
+        - $ref: '#/components/parameters/AuditTo'
+        - name: cursor
+          in: query
+          required: false
+          description: nextCursor of the previous page
+          schema: {type: string}
+        - name: limit
+          in: query
+          required: false
+          description: Entries per page, 1 to 1000; default 100
+          schema: {type: integer, minimum: 1, maximum: 1000}
+      responses:
+        '200':
+          description: One page of audit entries
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, limit, nextCursor]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/AuditEntry'}
+                  limit: {type: integer}
+                  nextCursor: {type: [string, 'null']}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+  /api/v1/reporting/audit-trail:export:
+    get:
+      operationId: exportAuditTrail
+      summary: Audit trail as a CSV file with its SHA-256 (FR-15.10)
+      description: >-
+        Every entry matching the filter (same rules as the list), oldest first,
+        as CSV with the columns occurred_at, kind, ledger_id, period, actor_id,
+        object_ref, details (JSON, sorted keys), trace_id. Text a spreadsheet
+        would read as a formula is prefixed with an apostrophe. The export is
+        recorded in the trail (kind audit_exported, with the filter, entry
+        count and digest) under the export id. More than 50,000 matching
+        entries is refused with 422 REPORT-0030 rather than cut short. PDF is a
+        later slice.
+      x-passage-duty: reporting.audit.view
+      parameters:
+        - $ref: '#/components/parameters/AuditLedger'
+        - $ref: '#/components/parameters/AuditPeriod'
+        - $ref: '#/components/parameters/AuditKind'
+        - $ref: '#/components/parameters/AuditActor'
+        - $ref: '#/components/parameters/AuditFrom'
+        - $ref: '#/components/parameters/AuditTo'
+      responses:
+        '200':
+          description: The CSV file
+          headers:
+            Content-Disposition:
+              description: attachment; filename="audit-trail-<export id>.csv"
+              schema: {type: string}
+            X-Passage-Export-Id:
+              description: Id of the audit_exported entry that records this export
+              schema: {type: string, format: uuid}
+            X-Passage-Export-Sha256:
+              description: Hex SHA-256 of the response body
+              schema: {type: string, pattern: '^[0-9a-f]{64}$'}
+            X-Passage-Export-Entries:
+              description: Number of entries in the file
+              schema: {type: integer}
+          content:
+            text/csv:
+              schema: {type: string}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
 components:
   securitySchemes:
     bearerAuth:
@@ -700,6 +788,41 @@ components:
       scheme: bearer
       bearerFormat: JWT
   parameters:
+    AuditLedger:
+      name: ledger
+      in: query
+      required: false
+      description: Ledger id
+      schema: {type: string, format: uuid}
+    AuditPeriod:
+      name: period
+      in: query
+      required: false
+      description: Fiscal year and period number, such as 2026-03 (2026-00 is the opening period)
+      schema: {type: string, pattern: '^[0-9]{4}-[0-9]{2,3}$'}
+    AuditKind:
+      name: kind
+      in: query
+      required: false
+      schema: {$ref: '#/components/schemas/AuditKind'}
+    AuditActor:
+      name: actor
+      in: query
+      required: false
+      description: User id of the actor
+      schema: {type: string}
+    AuditFrom:
+      name: from
+      in: query
+      required: false
+      description: Inclusive start, RFC 3339
+      schema: {type: string, format: date-time}
+    AuditTo:
+      name: to
+      in: query
+      required: false
+      description: Exclusive end, RFC 3339; at most 366 days after from
+      schema: {type: string, format: date-time}
     Code:
       name: code
       in: path
@@ -1023,3 +1146,25 @@ components:
         unassigned:
           type: array
           items: {type: string}
+
+    AuditKind:
+      type: string
+      description: >-
+        Ledger kinds (PRD AuditTrailEntry) then the reporting service's own kinds.
+      enum: [posted, replayed, reversed, batch_submitted, batch_approved, batch_rejected, period_changed, reopen_approved,
+        rate_override, tax_fallback, allocation_run, year_end_run, rebuild,
+        statement_run, definition_published, definition_retired, hierarchy_published, schedule_saved, audit_exported]
+    AuditEntry:
+      type: object
+      required: [id, occurredAt, kind, actorId, objectRef, details]
+      properties:
+        id: {type: string, format: uuid}
+        occurredAt: {type: string, format: date-time}
+        ledgerId: {type: string, format: uuid, description: Absent for changes to reporting objects}
+        period: {type: string, description: Fiscal year and period number, such as 2026-03}
+        kind: {$ref: '#/components/schemas/AuditKind'}
+        actorId: {type: string}
+        objectRef: {type: string, description: 'What the entry concerns, such as run:<id>, definition:BS-STD@2 or period:2026-03'}
+        details: {type: object, additionalProperties: true}
+        traceId: {type: string}
+        traceUrl: {type: string, format: uri, description: Trace viewer link (REPORTING_TRACE_URL); absent when not configured}

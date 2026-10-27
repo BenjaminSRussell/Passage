@@ -35,6 +35,8 @@ const (
 	DutyRun      = "reporting.statement.run"
 	DutyView     = "reporting.statement.view"
 	DutySchedule = "reporting.statement.schedule"
+	// DutyAudit is "View audit trail" (PRD §2.15.17): audit trail query and export.
+	DutyAudit = "reporting.audit.view"
 	// DutyLines is the ledger's "View ledger transactions" duty (wave 11,
 	// ledger.journal.read): PRD §2.15.5 and §2.15.17 put drill level 2 under
 	// it, separately from viewing statements.
@@ -71,6 +73,8 @@ type Store interface {
 	ListSchedules(ctx context.Context) ([]domain.Schedule, error)
 	GetSchedule(ctx context.Context, code string) (domain.Schedule, int, error)
 	SaveSchedule(ctx context.Context, sc domain.Schedule, ifMatch *int) (domain.Schedule, int, error)
+	AuditTrail(ctx context.Context, f domain.AuditFilter, after *domain.AuditCursor, limit int) (store.AuditPage, error)
+	ExportAuditTrail(ctx context.Context, f domain.AuditFilter) (store.AuditExport, error)
 }
 
 // API holds the handlers.
@@ -121,6 +125,8 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(DutySchedule)).Get("/schedules", a.listSchedules)
 		r.With(authz.RequireDuty(DutySchedule)).Get("/schedules/{code}", a.getSchedule)
 		r.With(authz.RequireDuty(DutySchedule)).Put("/schedules/{code}", a.putSchedule)
+		r.With(authz.RequireDuty(DutyAudit)).Get("/audit-trail", a.auditTrail)
+		r.With(authz.RequireDuty(DutyAudit)).Get("/audit-trail:export", a.exportAuditTrail)
 	})
 }
 

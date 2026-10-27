@@ -92,7 +92,10 @@ func (s *Postgres) SaveSchedule(ctx context.Context, sc domain.Schedule, ifMatch
 			if isUniqueViolation(err) {
 				return problem(409, CodeRevisionConflict, "schedule "+sc.Code+" was created concurrently")
 			}
-			return err
+			if err != nil {
+				return err
+			}
+			return auditScheduleTx(ctx, tx, sc, rev)
 		case err != nil:
 			return err
 		}
@@ -105,7 +108,20 @@ func (s *Postgres) SaveSchedule(ctx context.Context, sc domain.Schedule, ifMatch
 		rev = current + 1
 		_, err = tx.Exec(ctx, `update report_schedule set definition_code=$2, enabled=$3, body=$4, revision=$5, updated_by=$6, updated_at=now()
 			where code=$1`, sc.Code, sc.Definition, sc.Enabled, body, rev, sc.UpdatedBy)
-		return err
+		if err != nil {
+			return err
+		}
+		return auditScheduleTx(ctx, tx, sc, rev)
 	})
 	return sc, rev, err
+}
+
+// auditScheduleTx records a schedule save in the audit trail inside the save
+// transaction.
+func auditScheduleTx(ctx context.Context, tx pgx.Tx, sc domain.Schedule, rev int) error {
+	return recordAuditTx(ctx, tx, domain.AuditEntry{Kind: domain.AuditScheduleSaved, ActorID: sc.UpdatedBy,
+		ObjectRef: "schedule:" + sc.Code, Details: map[string]any{
+			"code": sc.Code, "revision": rev, "definition": sc.Definition, "enabled": sc.Enabled,
+			"formats": sc.Formats, "recipients": len(sc.Recipients),
+		}})
 }

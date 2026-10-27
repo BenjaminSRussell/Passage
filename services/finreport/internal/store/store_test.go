@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -428,6 +429,23 @@ func TestTenantIsolation(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	// The audit trail is tenant-scoped, and source event ids are per tenant.
+	window := domain.AuditFilter{From: time.Now().Add(-time.Hour), To: time.Now().Add(time.Hour)}
+	if page, err := st.AuditTrail(ctx1, window, nil, 100); err != nil || len(page.Items) == 0 {
+		t.Fatalf("tenant 1 audit trail = %+v, %v", page.Items, err)
+	}
+	if page, err := st.AuditTrail(ctx2, window, nil, 100); err != nil || len(page.Items) != 0 {
+		t.Fatalf("tenant 2 sees tenant 1's audit entries: %+v, %v", page.Items, err)
+	}
+	posted := domain.AuditEntry{OccurredAt: time.Now(), Kind: domain.AuditPosted, ActorID: "u", ObjectRef: "journal:J-1", SourceEventID: "evt-1"}
+	for _, ctx := range []context.Context{ctx1, ctx2} {
+		if n, err := st.PutAuditEntries(ctx, []domain.AuditEntry{posted}); err != nil || n != 1 {
+			t.Fatalf("each tenant records its own event: %d, %v", n, err)
+		}
+	}
+	if exp, err := st.ExportAuditTrail(ctx2, window); err != nil || exp.Entries != 1 {
+		t.Fatalf("tenant 2 export = %+v, %v", exp, err)
 	}
 	// The same code and Idempotency-Key are independent per tenant.
 	if _, _, err := st.SaveDraft(ctx2, storeFixtureDefinition("TENANT-ONE"), nil); err != nil {

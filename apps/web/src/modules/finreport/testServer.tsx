@@ -6,7 +6,7 @@ import { afterEach, beforeEach, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
 import finreport from "./module";
 
-export type Reply = { status: number; body: unknown; headers?: Record<string, string> };
+export type Reply = { status: number; body: unknown; headers?: Record<string, string>; text?: string };
 export type Handler = (url: URL, init: RequestInit) => Reply | undefined;
 export interface Call {
   method: string;
@@ -19,6 +19,11 @@ export const server: { handler: Handler; calls: Call[] } = { handler: () => unde
 
 export function json(status: number, body: unknown, headers?: Record<string, string>): Reply {
   return { status, body, headers };
+}
+
+/** A non-JSON reply, such as a CSV file. */
+export function text(status: number, body: string, headers?: Record<string, string>): Reply {
+  return { status, body: null, text: body, headers: { "Content-Type": "text/csv", ...headers } };
 }
 
 export function problem(status: number, code: string, detail: string): Reply {
@@ -36,7 +41,8 @@ export function useFakeServer() {
         const url = new URL(input, "http://localhost");
         server.calls.push({ method: init.method ?? "GET", url, init, body: init.body ? JSON.parse(String(init.body)) : undefined });
         const reply = server.handler(url, init) ?? problem(404, "TEST-404", `no fake for ${init.method ?? "GET"} ${url.pathname}`);
-        return new Response(JSON.stringify(reply.body), { status: reply.status, headers: { "Content-Type": "application/json", ...reply.headers } });
+        const payload = reply.text ?? JSON.stringify(reply.body);
+        return new Response(payload, { status: reply.status, headers: { "Content-Type": "application/json", ...reply.headers } });
       }),
     );
   });

@@ -1,4 +1,4 @@
-# finreport web module (PSG-15, wave 15 slices 1-5)
+# finreport web module (PSG-15, wave 15 slices 1-6)
 
 Financial statements workspace over the `services/finreport` API
 (`/api/v1/reporting`). Pages use the shell primitives and `pages.module.css`.
@@ -14,6 +14,7 @@ Financial statements workspace over the `services/finreport` API
 | `/finreport/hierarchies/new`, `/finreport/hierarchies/:code` | Hierarchy editor: nodes and leaf rules, save draft (If-Match), publish with the members to classify, membership per leaf and unassigned members | `GET/PUT /hierarchies/{code}`, `:publish`, `/members` |
 | `/finreport/schedules` | Distribution schedules: definition, cron and zone, ledgers, formats, recipients, next run or paused | `GET /schedules` |
 | `/finreport/schedules/new`, `/finreport/schedules/:code` | Schedule form: published definition, currency type, cron, time zone, ledgers, formats, recipients, attachment limit, enabled; replace with If-Match | `GET /definitions`, `GET/PUT /schedules/{code}` |
+| `/finreport/audit-trail` | Audit trail: filter by dates (the current month by default), period, ledger, kind and actor; entries oldest first with kind, actor, object, details and trace link; load more; open an entry for its full details; Export CSV with the SHA-256 and export id shown | `GET /audit-trail?…&cursor=`, `GET /audit-trail:export?…` |
 
 The drill panel checks exactly that the keys sum to the cell value (decimal
 strings summed as integer micro-units, no floats) and warns otherwise.
@@ -43,8 +44,16 @@ the service enforces on those routes; the schedule entry needs
 would refuse (code, UUID ledgers, email recipients, formats, limit) before
 sending; the service checks the cron and time zone (REPORT-0018).
 
+The audit trail page needs `reporting.audit.view` ("View audit trail"). Its
+filter mirrors the service rule that every query is narrowed: a period, or
+both dates at most 366 days apart (the end date is included; the request sends
+the next day as the exclusive `to`). Export fetches the CSV, saves it as a file
+and shows the entry count, the SHA-256 the service computed and the id under
+which the export is recorded in the trail; an export over 50,000 entries
+explains REPORT-0030.
+
 Not yet here: reporting trees, hierarchies as statement row sets, live preview and drag reorder in the designer,
-PDF downloads, the schedule run history, share links, audit trail, keyboard
+PDF downloads (statements and audit trail), the schedule run history, share links, keyboard
 cell-by-cell navigation of the statement and the dimension-security
 "filtered amount" warning. See `services/finreport/NOT-IMPLEMENTED.md`.
 
