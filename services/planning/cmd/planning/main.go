@@ -50,6 +50,11 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if err != nil {
 		return err
 	}
+	flags, err := featureFlags(getenv("PLANNING_FEATURE_FLAGS"))
+	if err != nil {
+		return err
+	}
+	slog.Info("feature flags", "enabled", flags)
 	pool, err := dbx.Connect(ctx, databaseURL)
 	if err != nil {
 		return fmt.Errorf("connect database: %w", err)

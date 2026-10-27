@@ -196,12 +196,14 @@ func (c *calendarDTO) toDomain(asOf time.Time) *domain.Calendar {
 }
 
 type itemDTO struct {
-	ItemID       string           `json:"itemId"`
-	Coverage     coverageDTO      `json:"coverage"`
-	OnHand       decimal.Decimal  `json:"onHand"`
-	SafetyStock  decimal.Decimal  `json:"safetyStock"`
+	ItemID      string          `json:"itemId"`
+	Coverage    coverageDTO     `json:"coverage"`
+	OnHand      decimal.Decimal `json:"onHand"`
+	SafetyStock decimal.Decimal `json:"safetyStock"`
+	// OrderType, LeadTimeDays and a coverage without a code are taken from
+	// the item's stored site-scope item coverage when left out (run_coverage.go).
 	OrderType    string           `json:"orderType"`
-	LeadTimeDays int              `json:"leadTimeDays"`
+	LeadTimeDays *int             `json:"leadTimeDays"`
 	Lot          lotDTO           `json:"lot"`
 	Demand       []requirementDTO `json:"demand"`
 	Receipts     []requirementDTO `json:"receipts"`
@@ -276,7 +278,7 @@ func (req runRequest) validate() map[string]string {
 		if !ids.Valid(it.ItemID) {
 			fields[prefix+".itemId"] = "must be a UUID"
 		}
-		if it.LeadTimeDays < 0 || it.LeadTimeDays > 3650 {
+		if it.LeadTimeDays != nil && (*it.LeadTimeDays < 0 || *it.LeadTimeDays > 3650) {
 			fields[prefix+".leadTimeDays"] = "must be 0 to 3650"
 		}
 		c := it.Coverage
@@ -328,7 +330,7 @@ func (req runRequest) toDomain(asOf time.Time) ([]domain.Item, error) {
 			ReorderMin: it.Coverage.ReorderMin, ReorderMax: it.Coverage.ReorderMax,
 			FreezeDays: it.Coverage.FreezeFenceDays, ActionDays: it.Coverage.ActionFenceDays, FuturesDays: it.Coverage.FuturesFenceDays,
 			CoverageDays: it.Coverage.CoverageFenceDays, FirmingDays: it.Coverage.FirmingFenceDays, AutoFirm: it.Coverage.AutoFirm,
-			OnHand: it.OnHand, SafetyStock: it.SafetyStock, OrderType: it.OrderType, LeadTimeDays: it.LeadTimeDays,
+			OnHand: it.OnHand, SafetyStock: it.SafetyStock, OrderType: it.OrderType, LeadTimeDays: deref(it.LeadTimeDays),
 			MinOrderQty: it.Lot.MinOrderQty, MultipleQty: it.Lot.MultipleQty, MaxOrderQty: it.Lot.MaxOrderQty, StandardQty: it.Lot.StandardQty,
 		}
 		var err error
@@ -389,6 +391,22 @@ func (a *API) runPlan(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
+	// The idempotency fingerprint covers the plan code and the snapshot as
+	// sent, so the same key on another plan or input is a reuse, not a replay,
+	// and a retry still replays after the stored item coverage has changed.
+	body, _ := json.Marshal(struct {
+		PlanCode string     `json:"planCode"`
+		Request  runRequest `json:"request"`
+	}{code, req})
+	stored, err := a.store.RunCoverages(r.Context(), req.SiteID, itemIDsOf(req.Items))
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if fields := withStoredCoverage(req.Items, stored); len(fields) > 0 {
+		validationFailed(w, r, fields)
+		return
+	}
 	asOf, _ := time.Parse(dateLayout, req.AsOf)
 	items, err := req.toDomain(asOf)
 	if err != nil {
@@ -407,12 +425,6 @@ func (a *API) runPlan(w http.ResponseWriter, r *http.Request) {
 		}
 		addForecastDemand(items, req.ForecastModel, asOf, lines)
 	}
-	// The idempotency fingerprint covers the plan code and the whole snapshot,
-	// so the same key on another plan or input is a reuse, not a replay.
-	body, _ := json.Marshal(struct {
-		PlanCode string     `json:"planCode"`
-		Request  runRequest `json:"request"`
-	}{code, req})
 	started := a.now()
 	result, err := domain.RunWithCalendar(0, req.Calendar.toDomain(asOf), items)
 	if err != nil {

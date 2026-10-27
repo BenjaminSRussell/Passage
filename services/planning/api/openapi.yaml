@@ -26,6 +26,7 @@ paths:
     post:
       operationId: runPlan
       summary: Run a static plan and make its version current on success
+      description: 'An item sent without a coverage code, without orderType or without leadTimeDays takes them from its stored site-scope item coverage at siteId and that coverage''s group (FR-22.2, FR-22.5): the whole coverage block (group settings with the item coverage''s min, max and receipt margin), the planned order type and the lead-time override. Inline values always win, including an explicit leadTimeDays of 0. An item left without a coverage code or order type is a 400 naming items[i].coverage.code or items[i].orderType. The Idempotency-Key fingerprint is the request as sent, so a retry replays even after the stored coverage changed. Warehouse and subcontractor scopes are not read (FR-22.18).'
       x-passage-duty: planning.run
       parameters:
         - name: planCode
@@ -1612,14 +1613,14 @@ components:
           items: {$ref: '#/components/schemas/RunItem'}
     RunItem:
       type: object
-      required: [itemId, coverage, orderType]
+      required: [itemId]
       properties:
         itemId: {type: string, format: uuid}
         coverage:
           type: object
-          required: [code]
+          description: Omit it, or send it without a code, to use the stored item coverage of the item at the site; a block without a code is replaced whole.
           properties:
-            code: {type: string, enum: [requirement, period, minmax, manual]}
+            code: {type: string, enum: [requirement, period, minmax, manual], description: Required unless the item has a stored site-scope item coverage}
             periodDays: {type: integer, minimum: 0}
             marginDays: {type: integer, minimum: 0}
             positiveDays: {type: integer, minimum: 0}
@@ -1634,8 +1635,8 @@ components:
             autoFirm: {type: boolean, default: false, description: Needs firmingFenceDays of at least 1}
         onHand: {type: string, description: Decimal string}
         safetyStock: {type: string, description: Decimal string}
-        orderType: {type: string, enum: [purchase, production, transfer]}
-        leadTimeDays: {type: integer, minimum: 0, maximum: 3650}
+        orderType: {type: string, enum: [purchase, production, transfer], description: Required unless the item has a stored site-scope item coverage}
+        leadTimeDays: {type: integer, minimum: 0, maximum: 3650, description: 'Omitted: the stored item coverage''s lead-time override, else 0'}
         lot:
           type: object
           properties:

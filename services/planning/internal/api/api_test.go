@@ -68,6 +68,10 @@ type fakeStore struct {
 	quotas      []store.QuotaArrangement
 	quotaKeys   map[string]string
 	quotaQuery  store.QuotaQuery
+	// Stored site-scope coverage by item that runs read (run_coverage_test.go)
+	// and the site of the last read.
+	runCovs    map[string]store.RunCoverage
+	runCovSite string
 }
 
 func (f *fakeStore) RunPlan(_ context.Context, req store.RunRequest) (store.Version, bool, error) {

@@ -37,6 +37,8 @@ spec:
               value: {{ .Values.migrateOnStart | quote }}
             - name: PLANNING_MAX_VERSIONS
               value: {{ .Values.maxVersions | quote }}
+            - name: PLANNING_FEATURE_FLAGS
+              value: {{ .Values.featureFlags | quote }}
           ports:
             - { name: http, containerPort: 8080 }
             - { name: admin, containerPort: 9090 }

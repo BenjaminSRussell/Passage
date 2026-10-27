@@ -133,7 +133,7 @@ cd services/planning
 go test ./...                # domain + API; store tests skip without a database
 PASSAGE_TEST_DATABASE_URL=postgres://admin@host/db \
 PASSAGE_TEST_APP_DATABASE_URL=postgres://app@host/db go test ./...   # store tests as the RLS-bound app role
-DATABASE_URL=postgres://... MIGRATE_ON_START=true go run ./cmd/planning   # HTTP_ADDR (:8080), ADMIN_ADDR (:9090, /metrics), PLANNING_MAX_VERSIONS (20, 2 to 100)
+DATABASE_URL=postgres://... MIGRATE_ON_START=true go run ./cmd/planning   # HTTP_ADDR (:8080), ADMIN_ADDR (:9090, /metrics), PLANNING_MAX_VERSIONS (20, 2 to 100), PLANNING_FEATURE_FLAGS (comma-separated planning.dynamic, planning.statistical-forecast, planning.mps-scope; unknown names stop startup)
 ```
 
 Store tests cover persistence, replay and key reuse, version numbering, the
@@ -258,6 +258,21 @@ nothing again. As with manual firming, the next run does not carry firmed
 orders forward: until the target orders reach the snapshot as receipts, the
 caller sends them as `receipts`, or the next run would plan (and firm) the same
 demand again.
+
+## Runs read stored item coverage (slice 11)
+
+`POST /plans/{code}:run` reads the site-scope item coverage at `siteId` of the
+snapshot's items (one query, under RLS). An item sent without a coverage code
+takes the whole coverage block from it (the group's code, fences, period,
+positive and negative days and auto-firm, with the item coverage's min, max and
+receipt margin); one without `orderType` takes the planned order type; one
+without `leadTimeDays` takes the lead-time override when there is one. Inline
+values always win, including an explicit `leadTimeDays: 0`. An item left
+without coverage or order type is 400 with `items[i].coverage.code` or
+`items[i].orderType`. The Idempotency-Key fingerprint is taken before the
+stored values are filled in, so a retry of the same request replays the first
+version even if the coverage was edited in between. Warehouse and
+subcontractor scopes are not read (FR-22.18).
 
 ## Buffer profiles, stored buffers and quota arrangements (slice 10)
 

@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import { Alert, Badge, Button, Card, DataTable, FormField, Select, type DataTableColumn } from "../../shell/ui";
 import {
   firmPlannedOrders,
@@ -36,6 +36,60 @@ export function validateFirmSelection(ids: readonly string[]): string | null {
   return null;
 }
 
+/**
+ * Ids of the firmable planned orders from the row of fromId to the row of
+ * toId, inclusive and in either direction (keyboard and shift-click range
+ * selection, 4.22.6 interaction rules). Empty when either row is not listed.
+ */
+export function rangeIds(rows: readonly PlannedOrder[], fromId: string, toId: string): string[] {
+  const from = rows.findIndex((o) => o.id === fromId);
+  const to = rows.findIndex((o) => o.id === toId);
+  if (from < 0 || to < 0) return [];
+  return rows
+    .slice(Math.min(from, to), Math.max(from, to) + 1)
+    .filter(isFirmable)
+    .map((o) => o.id);
+}
+
+const NON_TEXT_INPUTS = new Set(["checkbox", "radio", "button", "submit", "reset", "range", "color", "file", "image"]);
+
+/** True when a key press goes to a field that takes text, where the `F` shortcut must not fire. */
+export function isTypingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable || target.closest('[contenteditable]:not([contenteditable="false"])')) return true;
+  if (target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return true;
+  return target instanceof HTMLInputElement && !NON_TEXT_INPUTS.has(target.type);
+}
+
+/**
+ * Tracks whether Shift is held, so Shift+Space on a focused checkbox extends
+ * the selection like Shift+click does (the click a key press makes need not
+ * carry the modifier).
+ */
+export function useShiftHeld(): MutableRefObject<boolean> {
+  const held = useRef(false);
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => {
+      if (e.key === "Shift") held.current = true;
+    };
+    const up = (e: KeyboardEvent) => {
+      if (e.key === "Shift") held.current = false;
+    };
+    const reset = () => {
+      held.current = false;
+    };
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    window.addEventListener("blur", reset);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+      window.removeEventListener("blur", reset);
+    };
+  }, []);
+  return held;
+}
+
 function newKey(): string {
   const c = globalThis.crypto as Crypto | undefined;
   return c?.randomUUID ? c.randomUUID() : `firm-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -65,7 +119,8 @@ interface Props {
  * Firm planned orders (FR-22.10): the selected orders become purchase,
  * production and transfer orders, planned purchases merged per the grouping.
  * The Idempotency-Key is kept while selection and grouping are unchanged, so
- * a retry after a network error replays the same firming.
+ * a retry after a network error replays the same firming. Pressing `F`
+ * outside a text field firms the selection (4.22.6 interaction rules).
  */
 export function FirmCard({ selected, openCount, onSelectAllOpen, onClear, onFirmed }: Props) {
   const [grouping, setGrouping] = useState<FirmGrouping>("vendor-date");
@@ -95,6 +150,22 @@ export function FirmCard({ selected, openCount, onSelectAllOpen, onClear, onFirm
     }
   }
 
+  // The `F` shortcut calls the latest firm(); with nothing to firm (or a
+  // firming under way) the key is left alone.
+  const shortcut = useRef({ firm, ready: false });
+  shortcut.current = { firm, ready: !busy && problem === null };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "f" && e.key !== "F") return;
+      if (e.ctrlKey || e.metaKey || e.altKey || e.repeat || e.defaultPrevented || isTypingTarget(e.target)) return;
+      if (!shortcut.current.ready) return;
+      e.preventDefault();
+      void shortcut.current.firm();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   const count = selected.length;
   return (
     <Card title="Firm planned orders">
@@ -103,6 +174,10 @@ export function FirmCard({ selected, openCount, onSelectAllOpen, onClear, onFirm
           {count === 0
             ? "Select open planned orders in the list below. Firmed orders become purchase, production and transfer orders."
             : `${count} planned ${count === 1 ? "order" : "orders"} selected.`}
+        </p>
+        <p className={styles.summary}>
+          Hold <kbd>Shift</kbd> while ticking a box (click or <kbd>Space</kbd>) to select every open order from the last box
+          ticked; press <kbd>F</kbd> to firm the selection.
         </p>
         <Alert tone="danger" title={failure ? "The orders were not firmed" : undefined} live="alert">
           {failure ? `${failure.message} (${failure.code})` : null}
@@ -128,7 +203,7 @@ export function FirmCard({ selected, openCount, onSelectAllOpen, onClear, onFirm
               )}
             </FormField>
           </div>
-          <Button variant="primary" loading={busy} disabled={problem !== null} onClick={firm}>
+          <Button variant="primary" loading={busy} disabled={problem !== null} onClick={firm} aria-keyshortcuts="F">
             Firm selected
           </Button>
           <Button onClick={onSelectAllOpen} disabled={openCount === 0 || busy}>

@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"context"
+	"strings"
+	"testing"
+)
 
 func TestIntEnv(t *testing.T) {
 	env := map[string]string{"SET": "35", "LOW": "1", "HIGH": "101", "TEXT": "twenty"}
@@ -15,5 +19,13 @@ func TestIntEnv(t *testing.T) {
 		if _, err := intEnv(getenv, key, 20, 2, 100); err == nil {
 			t.Errorf("%s = %q must be refused", key, env[key])
 		}
+	}
+}
+
+func TestRun_RefusesUnknownFeatureFlagBeforeConnecting(t *testing.T) {
+	env := map[string]string{"DATABASE_URL": "postgres://unused.invalid/db", "PLANNING_FEATURE_FLAGS": "planning.dynamc"}
+	err := run(context.Background(), func(k string) string { return env[k] })
+	if err == nil || !strings.Contains(err.Error(), "PLANNING_FEATURE_FLAGS") {
+		t.Fatalf("run = %v; want the unknown flag refused", err)
 	}
 }

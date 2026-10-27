@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   Alert,
@@ -30,7 +30,7 @@ import {
   type PlannedOrder,
   type PlanVersion,
 } from "./api/client";
-import { FirmCard, isFirmable } from "./Firming";
+import { FirmCard, isFirmable, rangeIds, useShiftHeld } from "./Firming";
 import { PLAN_CODE, useLoad, usePlanCode, withPlan, type LoadError } from "./hooks";
 import { MaintainOrderCard } from "./MaintainOrder";
 import styles from "./pages.module.css";
@@ -241,7 +241,18 @@ export function PlannedOrdersPage() {
   const open = (state.data ?? []).filter(isFirmable);
   // Only orders still listed and open stay selected when the list changes.
   const picked = selected.filter((id) => open.some((o) => o.id === id));
-  const toggle = (id: string, on: boolean) => setSelected((cur) => (on ? [...cur.filter((x) => x !== id), id] : cur.filter((x) => x !== id)));
+  // The last box ticked anchors a Shift range (4.22.6 interaction rules).
+  const anchor = useRef<string | null>(null);
+  const shiftHeld = useShiftHeld();
+  const pick = (order: PlannedOrder, on: boolean, shift: boolean) => {
+    const ids = shift && anchor.current ? rangeIds(state.data ?? [], anchor.current, order.id) : [];
+    const change = ids.length > 0 ? ids : [order.id];
+    setSelected((cur) => {
+      const rest = cur.filter((x) => !change.includes(x));
+      return on ? [...rest, ...change] : rest;
+    });
+    anchor.current = order.id;
+  };
   const columns: DataTableColumn<PlannedOrder>[] = [
     { key: "number", header: "Number", mono: true },
     { key: "itemId", header: "Item", mono: true },
@@ -268,7 +279,10 @@ export function PlannedOrdersPage() {
             aria-label={`Select ${o.number} for firming`}
             checked={picked.includes(o.id)}
             onClick={(e) => e.stopPropagation()}
-            onChange={(e) => toggle(o.id, e.target.checked)}
+            onChange={(e) => {
+              const native = e.nativeEvent as Partial<MouseEvent>;
+              pick(o, e.target.checked, shiftHeld.current || native.shiftKey === true);
+            }}
           />
         ) : (
           dash

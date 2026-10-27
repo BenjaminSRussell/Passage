@@ -1,6 +1,6 @@
-# NOT-IMPLEMENTED (PSG-22, planning web module, slices 1 to 10)
+# NOT-IMPLEMENTED (PSG-22, planning web module, slices 1 to 11)
 
-Screens of slices 1 to 10, all registered in `module.ts` and built from the
+Screens of slices 1 to 11, all registered in `module.ts` and built from the
 shell primitives (`src/shell/ui`) with CSS Modules:
 
 - `/planning`: master planning workspace with plan picker, summary tiles
@@ -14,7 +14,10 @@ shell primitives (`src/shell/ui`) with CSS Modules:
   grouping and firm them; the card shows the orders created (type, id, vendor,
   delivery, quantity), keeps the Idempotency-Key across a retry of the same
   selection, shows the 409 problem, and reloads the list. A firmed order's page
-  shows the order it became.
+  shows the order it became. Since slice 11 Shift with a click or Space on a
+  box ticks (or unticks) every open order from the last box ticked, and `F`
+  outside a text field firms the selection (`aria-keyshortcuts` on the button;
+  tests in `keys.test.tsx`).
 - `/planning/messages`: action and delay messages with an action filter
   (slice 4 adds cancel and decrease, slice 6 increase).
 - `/planning/net-requirements` (slice 5): the MD04-style view of one item
@@ -105,7 +108,8 @@ Each list has loading, empty and error states; the plan in view is kept in the
 | Run plan from source data (no pasted snapshot) | later slice of PSG-22 | The run API takes its snapshot inline until sales, inventory and purchasing feed the planning service (see the service NOT-IMPLEMENTED.md). The form takes the snapshot as JSON. |
 | Planned orders: change, approve, delete one order | built | Maintenance card on the planned-order page (`MaintainOrder.tsx`). |
 | Planned orders: firm (grouped) | built | Firm card on `/planning/planned-orders` (`Firming.tsx`). |
-| Planned orders: bulk approve, change and delete; keyboard range selection with `F` to firm | later slice of PSG-22 | Selection is by checkbox (or all open orders) and is used for firming only; maintenance stays one order at a time. |
+| Planned orders: keyboard range selection with `F` to firm | built | Shift range selection and the `F` shortcut on `/planning/planned-orders` (`Firming.tsx`, `keys.test.tsx`). |
+| Planned orders: bulk approve, change and delete | later slice of PSG-22 | The selection is used for firming only; maintenance stays one order at a time. |
 | Firming result report (PDF, email) | later slice of PSG-22 | The service renders no document yet; the card lists the orders created. |
 | Hide maintenance, firming, consensus, coverage-group, item-coverage, buffer-profile, recalculation and quota-arrangement controls from users without `planning.order.maintain`, `planning.order.firm`, `planning.forecast.maintain`, `planning.forecast.approve`, `planning.setup.maintain` or `planning.run` | later slice of PSG-22 | The shell exposes no per-duty check to pages yet; the service refuses the write with 403 and the card shows the problem. |
 | Net requirements (MD04) list of one item with drill to pegging | built | `/planning/net-requirements` (`NetRequirementsPage.tsx`); the drill goes through the item's planned orders. |
@@ -119,7 +123,8 @@ Each list has loading, empty and error states; the plan in view is kept in the
 | Coverage groups: list, create, edit | built | `CoverageGroupsPage.tsx` (slice 7). |
 | Item coverage: list, create, edit | built | `ItemCoveragePage.tsx` (slice 9). |
 | Item, site, warehouse and vendor pickers by name instead of ids | handoff (PSG-6, PSG-9, PSG-16, PSG-17) | Items, sites, warehouses and vendors are read from their owning modules, which this module may not call yet; the form takes UUIDs. |
-| Choosing a coverage group on the run form | later slice of PSG-22 | The run does not resolve coverage groups or item coverage yet; the run form takes coverage (including `firmingFenceDays` and `autoFirm`) in the item JSON. |
+| Run items without coverage use the stored item coverage | built | Since slice 11 the service fills coverage, order type and lead time from the item's site coverage; the run form's hint says so and the service's 400 names an item left without either. |
+| Choosing a coverage group on the run form | later slice of PSG-22 | The form takes the snapshot as JSON; a group is chosen through the item coverage, not per run. |
 | Mark auto-firmed planned orders apart from those a planner firmed | later slice of PSG-22 | Both show as firmed with the order they became; the service does not return the firming batch on a planned order. |
 | Pegging tree lazy-loads children per node | later slice of PSG-22 | The API returns the tree to depth 20 in one response; it is rendered fully. |
 | Supply schedule and inventory forecast on entered figures | built | Calculator card on `/planning/calculators` (`calculators.tsx`). |
