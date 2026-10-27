@@ -1,0 +1,35 @@
+asyncapi: 3.0.0
+info:
+  title: Passage Metadata events
+  version: 0.1.0
+  description: >
+    CloudEvents 1.0 published through the transactional outbox (Debezium
+    outbox router), in the same transaction as the entity version it reports.
+    Payloads match EntityPublishedData in internal/registry/postgres.go.
+defaultContentType: application/cloudevents+json
+channels:
+  entity:
+    address: passage.metadata.entity
+    messages:
+      entityPublished:
+        $ref: '#/components/messages/EntityPublished'
+operations:
+  publishEntityPublished:
+    action: send
+    channel: { $ref: '#/channels/entity' }
+    messages: [{ $ref: '#/channels/entity/messages/entityPublished' }]
+    summary: A new immutable entity version was published, directly or by applying an extension
+components:
+  messages:
+    EntityPublished:
+      name: dev.passage.metadata.entity.published.v1
+      contentType: application/cloudevents+json
+      payload: { $ref: '#/components/schemas/EntityPublishedData' }
+  schemas:
+    EntityPublishedData:
+      type: object
+      required: [entity, version, changes]
+      properties:
+        entity: { type: string }
+        version: { type: integer, minimum: 1 }
+        changes: { type: integer, minimum: 0, description: Number of diff entries against the previous version. }

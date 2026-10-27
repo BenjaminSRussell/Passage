@@ -3,6 +3,8 @@ package registry_test
 import (
 	"testing"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/metadata/internal/domain"
@@ -41,5 +43,31 @@ func TestPostgresRegistryPublishesExtensionAndRecords(t *testing.T) {
 	rows, err := store.ListRecords(ctx, testkit.TenantID(1), "Vendor", 100)
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("rows=%#v err=%v", rows, err)
+	}
+}
+
+func TestPostgresPublishWritesOutboxEvent(t *testing.T) {
+	pool := testkit.DB(t)
+	if err := dbx.Migrate(testkit.Ctx(testkit.TenantID(2)), pool, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	store := registry.NewPostgres(pool)
+	ctx := testkit.Ctx(testkit.TenantID(2))
+	entity := baseEntity()
+	if _, err := store.Publish(ctx, testkit.TenantID(2), entity); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	var version string
+	err := dbx.WithTenantTx(ctx, pool, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `select count(*), coalesce(max(payload->'data'->>'version'), '')
+			from outbox where tenant_id=$1 and type=$2 and aggregate_id=$3`,
+			testkit.TenantID(2), registry.EntityPublished, entity.Name).Scan(&count, &version)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 || version != "1" {
+		t.Fatalf("count=%d version=%q", count, version)
 	}
 }

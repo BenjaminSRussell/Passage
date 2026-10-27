@@ -10,10 +10,23 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/events"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/outbox"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/metadata/internal/domain"
 )
+
+const (
+	EntityPublished = "dev.passage.metadata.entity.published.v1"
+	eventSource     = "metadata"
+)
+
+type EntityPublishedData struct {
+	Entity  string `json:"entity"`
+	Version int    `json:"version"`
+	Changes int    `json:"changes"`
+}
 
 type Postgres struct {
 	pool *pgxpool.Pool
@@ -64,6 +77,15 @@ func publishTx(ctx context.Context, tx pgx.Tx, tenantID string, entity *domain.E
 		tenantID, entity.Name, version.Number, definition, changes, actor)
 	if err != nil {
 		return Version{}, fmt.Errorf("publish metadata version: %w", err)
+	}
+	evt, err := events.New(EntityPublished, eventSource, entity.Name, tenantID, EntityPublishedData{
+		Entity: entity.Name, Version: version.Number, Changes: len(version.Changes),
+	})
+	if err != nil {
+		return Version{}, err
+	}
+	if err := outbox.Enqueue(ctx, tx, "entity", entity.Name, evt); err != nil {
+		return Version{}, fmt.Errorf("enqueue metadata event: %w", err)
 	}
 	return version, nil
 }
