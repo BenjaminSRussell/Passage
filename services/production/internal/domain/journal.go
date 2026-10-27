@@ -79,6 +79,18 @@ func ProposeQty(mode Proposal, required, consumed, share decimal.Decimal) decima
 	return propose(mode, required, consumed, share, CeilQty)
 }
 
+// StartIssueQty is the quantity the Released → Started backflush issues on a
+// BOM line (FR-21.5, BR-21.1): the remaining requirement of a start-flushed
+// line, and nothing for any other flushing principle (finish lines are
+// consumed at report as finished; manual and available-at-location lines by
+// picking lists).
+func StartIssueQty(f Flushing, required, consumed decimal.Decimal) decimal.Decimal {
+	if f != FlushStart {
+		return decimal.Zero
+	}
+	return ProposeQty(ProposeRemaining, required, consumed, decimal.Zero)
+}
+
 // ProposeHours is the route-card proposal for an operation on the same basis,
 // rounded to 2 places (FR-21.6).
 func ProposeHours(mode Proposal, planned, reported, share decimal.Decimal) decimal.Decimal {

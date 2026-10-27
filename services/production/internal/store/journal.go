@@ -651,10 +651,7 @@ func startOrder(ctx context.Context, tx pgx.Tx, tenantID string, h *orderHead, a
 	}
 	var issues []IssueInput
 	for _, l := range lines {
-		if l.Flushing != domain.FlushStart {
-			continue
-		}
-		if q := domain.ProposeQty(domain.ProposeRemaining, l.QtyRequired, l.QtyConsumed, decimal.Zero); q.IsPositive() {
+		if q := domain.StartIssueQty(l.Flushing, l.QtyRequired, l.QtyConsumed); q.IsPositive() {
 			issues = append(issues, IssueInput{LineNo: l.LineNo, Qty: q})
 		}
 	}
