@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-receivables
+  labels:
+    app.kubernetes.io/name: passage-receivables
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: passage-receivables
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http
+    - name: admin
+      port: {{ .Values.service.adminPort }}
+      targetPort: admin
+---
+{{- if .Values.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ .Release.Name }}-receivables
+  labels:
+    app.kubernetes.io/name: passage-receivables
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: passage-receivables
+  endpoints:
+    - port: admin
+      path: /metrics
+      interval: {{ .Values.serviceMonitor.interval }}
+{{- end }}

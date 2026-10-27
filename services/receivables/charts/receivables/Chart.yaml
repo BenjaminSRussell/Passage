@@ -1,0 +1,6 @@
+apiVersion: v2
+name: passage-receivables
+description: Passage receivables service (cash application, open items, aging)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

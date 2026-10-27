@@ -1,0 +1,34 @@
+image:
+  repository: ghcr.io/benjaminsrussell/passage-receivables
+  tag: "0.1.0"
+  # Pin by digest in Argo CD overlays; tag is a dev default only.
+  digest: ""
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+service:
+  port: 8080
+  # /metrics is served on the admin port, not the API port.
+  adminPort: 9090
+
+database:
+  # Secret holding DATABASE_URL (passage_app role, no BYPASSRLS).
+  secretName: receivables-db
+  secretKey: DATABASE_URL
+
+migrations:
+  # Dev only; stage and prod run migrations as an Argo PreSync Job.
+  migrateOnStart: false
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+
+serviceMonitor:
+  enabled: false
+  interval: 30s

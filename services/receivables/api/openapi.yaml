@@ -1,0 +1,347 @@
+openapi: 3.1.0
+info:
+  title: Passage Receivables API
+  version: 1.0.0
+  description: |
+    Wave 30 slice 1 of the receivables context: open items, aging and manual
+    cash application. Errors are RFC 9457 problem details with a stable `code`
+    (see README). Every operation names its duty in `x-passage-duty`.
+servers:
+  - url: https://api.{env}.passage.dev
+    variables:
+      env:
+        default: dev
+security:
+  - bearerAuth: []
+paths:
+  /api/v1/receivables/open-items:
+    get:
+      operationId: listOpenItems
+      summary: Open items (FBL5N style)
+      x-passage-duty: ARView
+      parameters:
+        - { name: customer, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [open, all], default: open } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 500 } }
+      responses:
+        "200":
+          description: Open items
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/OpenItem" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/aging:
+    get:
+      operationId: agingSnapshot
+      summary: Aging snapshot by currency and bucket
+      x-passage-duty: ARView
+      parameters:
+        - { name: asOf, in: query, schema: { type: string, format: date } }
+      responses:
+        "200":
+          description: Aging totals
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [asOf, totals]
+                properties:
+                  asOf: { type: string, format: date }
+                  totals:
+                    type: array
+                    items: { $ref: "#/components/schemas/AgingTotal" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/payments:
+    get:
+      operationId: listPayments
+      summary: Payments, newest received first
+      x-passage-duty: ARView
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [RECEIVED, SUGGESTED, APPLIED, ON_ACCOUNT, REVERSED] } }
+        - { name: customer, in: query, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 500 } }
+      responses:
+        "200":
+          description: Payments
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Payment" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createPayment
+      summary: Record a manual payment (CHECK, ACH, WIRE, CARD, CASH)
+      x-passage-duty: ARPaymentPost
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreatePaymentRequest" }
+      responses:
+        "201":
+          description: Payment received
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Payment" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/payments/{id}:
+    get:
+      operationId: getPayment
+      summary: Read a payment
+      x-passage-duty: ARView
+      parameters:
+        - { $ref: "#/components/parameters/PaymentId" }
+      responses:
+        "200":
+          description: Payment
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Payment" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/payments/{id}:match:
+    post:
+      operationId: matchPayment
+      summary: Score candidate settlements for a payment (BR-30.1); changes no state
+      x-passage-duty: ARPaymentPost
+      parameters:
+        - { $ref: "#/components/parameters/PaymentId" }
+      responses:
+        "200":
+          description: Decision and ranked candidates
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MatchResult" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/payments/{id}:apply:
+    post:
+      operationId: applyPayment
+      summary: Apply a payment to open items; requires If-Match
+      description: |
+        Settlements plus `onAccount` must equal the unapplied amount (AR-0001).
+        Items must be in the payment's legal entity and currency and belong to
+        the payment's customer; an unidentified payment takes the customer of
+        its items. A cash discount needs the value date on or before the
+        discount date and may not exceed the item's discount; write-offs above
+        tolerance are 422 AR-0006; a locked item is 409 AR-0002. A repeated
+        Idempotency-Key with the same body replays the first response.
+      x-passage-duty: ARPaymentPost
+      parameters:
+        - { $ref: "#/components/parameters/PaymentId" }
+        - { $ref: "#/components/parameters/IfMatch" }
+        - { $ref: "#/components/parameters/OptionalIdempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ApplyRequest" }
+      responses:
+        "200":
+          description: Payment applied
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApplyResult" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 200 }
+    OptionalIdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema: { type: string, minLength: 1, maxLength: 200 }
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: Payment version from the last read (ETag). Missing header returns 428.
+      schema: { type: string }
+    PaymentId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  headers:
+    ETag:
+      description: Payment version, quoted.
+      schema: { type: string }
+  responses:
+    Problem:
+      description: RFC 9457 problem details
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string }
+        traceId: { type: string }
+        errors:
+          type: object
+          additionalProperties: { type: string }
+    Money:
+      type: string
+      pattern: "^-?[0-9]+(\\.[0-9]{1,6})?$"
+      description: Decimal string, never a float.
+    RemittanceLine:
+      type: object
+      required: [reference, amount]
+      properties:
+        reference: { type: string, maxLength: 200 }
+        amount: { $ref: "#/components/schemas/Money" }
+    CreatePaymentRequest:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId, paymentMode, source, amount, currency, receivedDate, valueDate]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        customerId: { type: [string, "null"], format: uuid }
+        paymentMode: { type: string, enum: [CHECK, ACH, WIRE, CARD, CASH] }
+        source: { type: string, enum: [MANUAL] }
+        sourceRef: { type: [string, "null"], maxLength: 120 }
+        amount: { $ref: "#/components/schemas/Money" }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        receivedDate: { type: string, format: date }
+        valueDate: { type: string, format: date }
+        payerName: { type: [string, "null"] }
+        remittance:
+          type: array
+          items: { $ref: "#/components/schemas/RemittanceLine" }
+    Payment:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        customerId: { type: [string, "null"], format: uuid }
+        paymentMode: { type: string }
+        source: { type: string }
+        sourceRef: { type: [string, "null"] }
+        amount: { $ref: "#/components/schemas/Money" }
+        unappliedAmount: { $ref: "#/components/schemas/Money" }
+        currency: { type: string }
+        receivedDate: { type: string, format: date }
+        valueDate: { type: string, format: date }
+        payerName: { type: [string, "null"] }
+        remittance:
+          type: array
+          items: { $ref: "#/components/schemas/RemittanceLine" }
+        status: { type: string, enum: [RECEIVED, SUGGESTED, APPLIED, ON_ACCOUNT, REVERSED] }
+        version: { type: integer }
+    OpenItem:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        customerId: { type: string, format: uuid }
+        sourceType: { type: string }
+        documentNumber: { type: string }
+        documentDate: { type: string, format: date }
+        dueDate: { type: string, format: date }
+        currency: { type: string }
+        amount: { $ref: "#/components/schemas/Money" }
+        openAmount: { $ref: "#/components/schemas/Money" }
+        cashDiscountDate: { type: [string, "null"], format: date }
+        cashDiscountAmount: { $ref: "#/components/schemas/Money" }
+        dunningLevel: { type: integer }
+        dunningBlock: { type: boolean }
+        status: { type: string }
+        version: { type: integer }
+    AgingTotal:
+      type: object
+      properties:
+        currency: { type: string }
+        bucket: { type: string, enum: ["CURRENT", "1-30", "31-60", "61-90", "91-180", "OVER-180"] }
+        amount: { $ref: "#/components/schemas/Money" }
+    MatchResult:
+      type: object
+      required: [decision, candidates]
+      properties:
+        decision: { type: string, enum: [AUTO_APPLY, SUGGESTED, ON_ACCOUNT] }
+        candidates:
+          type: array
+          maxItems: 3
+          items:
+            type: object
+            required: [openItemIds, score, rules]
+            properties:
+              openItemIds: { type: array, items: { type: string, format: uuid } }
+              score: { type: integer }
+              rules: { type: array, items: { type: string, enum: [R1, R2, R2-SUBSET, R3, R6] } }
+    ApplyRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        settlements:
+          type: array
+          items:
+            type: object
+            required: [openItemId, amount]
+            properties:
+              openItemId: { type: string, format: uuid }
+              amount: { $ref: "#/components/schemas/Money" }
+              cashDiscount: { $ref: "#/components/schemas/Money" }
+              writeOff: { $ref: "#/components/schemas/Money" }
+        onAccount: { $ref: "#/components/schemas/Money" }
+    ApplyResult:
+      type: object
+      properties:
+        payment: { $ref: "#/components/schemas/Payment" }
+        settlements:
+          type: array
+          items:
+            type: object
+            properties:
+              openItemId: { type: string, format: uuid }
+              amount: { $ref: "#/components/schemas/Money" }
+              cashDiscount: { $ref: "#/components/schemas/Money" }
+              writeOff: { $ref: "#/components/schemas/Money" }
+              openAfter: { $ref: "#/components/schemas/Money" }
+              itemStatus: { type: string }

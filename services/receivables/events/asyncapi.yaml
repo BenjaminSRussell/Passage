@@ -1,0 +1,80 @@
+asyncapi: 3.0.0
+info:
+  title: Passage Receivables Events
+  version: 1.0.0
+  description: |
+    CloudEvents 1.0 published through the transactional outbox (Debezium relays
+    rows to Kafka). Types follow dev.passage.<context>.<entity>.<verb>.v<n>.
+    Additive-only schema evolution.
+defaultContentType: application/cloudevents+json
+channels:
+  paymentEvents:
+    address: passage.receivables.payment
+    messages:
+      paymentReceived:
+        $ref: "#/components/messages/PaymentReceived"
+      paymentApplied:
+        $ref: "#/components/messages/PaymentApplied"
+operations:
+  publishPaymentReceived:
+    action: send
+    channel: { $ref: "#/channels/paymentEvents" }
+    messages:
+      - { $ref: "#/channels/paymentEvents/messages/paymentReceived" }
+  publishPaymentApplied:
+    action: send
+    channel: { $ref: "#/channels/paymentEvents" }
+    messages:
+      - { $ref: "#/channels/paymentEvents/messages/paymentApplied" }
+components:
+  messages:
+    PaymentReceived:
+      name: dev.passage.receivables.payment.received.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/PaymentReceivedData"
+    PaymentApplied:
+      name: dev.passage.receivables.payment.applied.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/PaymentAppliedData"
+  schemas:
+    PaymentReceivedData:
+      type: object
+      required: [payment_id, legal_entity_id, source, amount, currency, remittance]
+      properties:
+        payment_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
+        customer_id: { type: [string, "null"], format: uuid }
+        source: { type: string, enum: [MANUAL, LOCKBOX, CAMT053, PORTAL, REMITTANCE] }
+        amount: { type: string, description: "decimal string" }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        remittance:
+          type: array
+          items:
+            type: object
+            required: [reference, amount]
+            properties:
+              reference: { type: string }
+              amount: { type: string }
+    PaymentAppliedData:
+      type: object
+      required: [payment_id, legal_entity_id, customer_id, currency, settlements, residual, status, journal_posting_id]
+      properties:
+        payment_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
+        customer_id: { type: [string, "null"], format: uuid, description: "null only when nothing was settled and the payer is unidentified" }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        journal_posting_id: { type: [string, "null"], format: uuid, description: "null until ledger posting is wired (NOT-IMPLEMENTED.md)" }
+        settlements:
+          type: array
+          items:
+            type: object
+            required: [open_item_id, amount, cash_discount, write_off]
+            properties:
+              open_item_id: { type: string, format: uuid }
+              amount: { type: string }
+              cash_discount: { type: string }
+              write_off: { type: string }
+        residual: { type: string, description: "amount placed on account" }
+        status: { type: string, enum: [APPLIED, ON_ACCOUNT] }
