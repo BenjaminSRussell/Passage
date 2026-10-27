@@ -1,0 +1,6 @@
+apiVersion: v2
+name: planning
+description: Passage master planning (MRP, plan versions, pegging, messages)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

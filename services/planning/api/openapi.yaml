@@ -1,0 +1,338 @@
+openapi: 3.1.0
+info:
+  title: Passage Planning API
+  version: 0.1.0
+  description: |
+    Master planning (wave 22, slice 1). Covers static plan runs, run history and
+    version status, planned orders, explain-tree pegging and action/delay
+    messages. Every planned order is pegged to the demand it serves. Browser
+    clients call these paths under /api (the web BFF strips the prefix). Not yet
+    exposed (see NOT-IMPLEMENTED.md): planned-order PATCH, firming, net
+    requirements, coverage groups, forecasts.
+servers:
+  - url: https://api.{env}.passage.dev
+    variables:
+      env:
+        default: dev
+paths:
+  /v1/planning/plans/{planCode}:run:
+    post:
+      operationId: runPlan
+      summary: Run a static plan and make its version current on success
+      x-passage-duty: planning.run
+      parameters:
+        - name: planCode
+          in: path
+          required: true
+          schema: {type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{1,19}$'}
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RunRequest'}
+      responses:
+        '201':
+          description: Version created and made current
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PlanVersion'}
+        '200':
+          description: 'Replay of an earlier run with the same Idempotency-Key (Idempotent-Replayed: true)'
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PlanVersion'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
+        '500': {$ref: '#/components/responses/Problem'}
+  /v1/planning/plans/{planCode}/versions:
+    get:
+      operationId: listVersions
+      summary: Plan run history, newest version first
+      x-passage-duty: planning.read
+      parameters:
+        - name: planCode
+          in: path
+          required: true
+          schema: {type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{1,19}$'}
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Versions of the plan
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/PlanVersion'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+  /v1/planning/plans/{planCode}/versions/{number}:
+    get:
+      operationId: getVersion
+      summary: Version status, counts and plan hash
+      x-passage-duty: planning.read
+      parameters:
+        - name: planCode
+          in: path
+          required: true
+          schema: {type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{1,19}$'}
+        - name: number
+          in: path
+          required: true
+          schema: {type: integer, minimum: 1}
+      responses:
+        '200':
+          description: Plan version
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PlanVersion'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+  /v1/planning/planned-orders:
+    get:
+      operationId: listPlannedOrders
+      summary: Planned orders of the current version of a plan
+      x-passage-duty: planning.read
+      parameters:
+        - name: planCode
+          in: query
+          required: true
+          schema: {type: string}
+        - name: status
+          in: query
+          schema: {type: string, enum: [unprocessed, approved, firmed]}
+        - name: itemId
+          in: query
+          schema: {type: string, format: uuid}
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Planned orders
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/PlannedOrder'}
+        '400': {$ref: '#/components/responses/Problem'}
+  /v1/planning/planned-orders/{id}:
+    get:
+      operationId: getPlannedOrder
+      summary: One planned order of any version
+      x-passage-duty: planning.read
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Planned order
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PlannedOrder'}
+        '404': {$ref: '#/components/responses/Problem'}
+  /v1/planning/planned-orders/{id}/pegging:
+    get:
+      operationId: getPegging
+      summary: Explain tree from a planned order to the demand it serves
+      x-passage-duty: planning.read
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - name: depth
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 20, default: 5}
+      responses:
+        '200':
+          description: Explain tree; the root's children sum to the planned quantity
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Pegging'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+  /v1/planning/messages:
+    get:
+      operationId: listMessages
+      summary: Action and delay messages of the current version
+      x-passage-duty: planning.read
+      parameters:
+        - name: planCode
+          in: query
+          required: true
+          schema: {type: string}
+        - name: action
+          in: query
+          schema: {type: string, enum: [delay, postpone, advance, shortage]}
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Messages
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/Message'}
+        '400': {$ref: '#/components/responses/Problem'}
+components:
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: {type: string, maxLength: 255}
+    Limit:
+      name: limit
+      in: query
+      schema: {type: integer, minimum: 1, maximum: 500, default: 500}
+  responses:
+    Problem:
+      description: RFC 9457 problem details
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+  schemas:
+    RunRequest:
+      type: object
+      required: [asOf, siteId, items]
+      properties:
+        asOf: {type: string, format: date, description: Day 0 of the plan}
+        siteId: {type: string, format: uuid}
+        items:
+          type: array
+          minItems: 1
+          maxItems: 100000
+          items: {$ref: '#/components/schemas/RunItem'}
+    RunItem:
+      type: object
+      required: [itemId, coverage, orderType]
+      properties:
+        itemId: {type: string, format: uuid}
+        coverage:
+          type: object
+          required: [code]
+          properties:
+            code: {type: string, enum: [requirement, period, minmax, manual]}
+            periodDays: {type: integer, minimum: 0}
+            marginDays: {type: integer, minimum: 0}
+            positiveDays: {type: integer, minimum: 0}
+            negativeDays: {type: integer, minimum: 0}
+            reorderMin: {type: string, description: Decimal string}
+            reorderMax: {type: string, description: Decimal string}
+        onHand: {type: string, description: Decimal string}
+        safetyStock: {type: string, description: Decimal string}
+        orderType: {type: string, enum: [purchase, production, transfer]}
+        leadTimeDays: {type: integer, minimum: 0, maximum: 3650}
+        lot:
+          type: object
+          properties:
+            minOrderQty: {type: string}
+            multipleQty: {type: string}
+            maxOrderQty: {type: string}
+            standardQty: {type: string}
+        demand: {type: array, items: {$ref: '#/components/schemas/RunRequirement'}}
+        receipts: {type: array, items: {$ref: '#/components/schemas/RunRequirement'}}
+        components:
+          type: array
+          items:
+            type: object
+            required: [itemId, qty]
+            properties:
+              itemId: {type: string, format: uuid}
+              qty: {type: string}
+    RunRequirement:
+      type: object
+      required: [ref, refType, date, qty]
+      properties:
+        ref: {type: string}
+        refType: {type: string, enum: [sales-line, forecast, safety-stock, bom-line, transfer-issue, on-hand, purchase-line, production-order, transfer-receipt, planned-order]}
+        date: {type: string, format: date}
+        qty: {type: string, description: Positive decimal string}
+        priority: {type: integer, description: 'Lower nets first; default sales-line 1, forecast 2, others 4'}
+    PlanVersion:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        planCode: {type: string}
+        number: {type: integer}
+        status: {type: string, enum: [running, complete, failed, current]}
+        asOf: {type: string, format: date}
+        itemsPlanned: {type: integer}
+        plannedOrders: {type: integer}
+        messages: {type: integer}
+        durationMs: {type: integer, format: int64}
+        planHash: {type: string, description: sha256 hex over orders, pegging and messages}
+    PlannedOrder:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        versionId: {type: string, format: uuid}
+        number: {type: string}
+        itemId: {type: string, format: uuid}
+        orderType: {type: string, enum: [purchase, production, transfer]}
+        qty: {type: string}
+        orderDate: {type: string, format: date}
+        deliveryDate: {type: string, format: date}
+        futuresDate: {type: [string, 'null'], format: date}
+        delayDays: {type: integer}
+        lotRule: {type: string}
+        status: {type: string, enum: [unprocessed, approved, firmed]}
+    Pegging:
+      type: object
+      required: [orderId, number, qty, tree]
+      properties:
+        orderId: {type: string, format: uuid}
+        number: {type: string}
+        qty: {type: string}
+        tree: {$ref: '#/components/schemas/PegNode'}
+    PegNode:
+      type: object
+      required: [ref, refType, qty, children]
+      properties:
+        ref: {type: string}
+        refType: {type: string}
+        qty: {type: string}
+        children:
+          type: array
+          items: {$ref: '#/components/schemas/PegNode'}
+    Message:
+      type: object
+      properties:
+        action: {type: string, enum: [delay, postpone, advance, shortage]}
+        itemId: {type: string, format: uuid}
+        supplyRef: {type: string, description: Planned order number or receipt ref; empty for a shortage}
+        demandRef: {type: string, description: Demand the message is about; empty when none}
+        suggestedDate: {type: string, format: date, description: 'delay: expected date; postpone/advance: suggested receipt date; shortage: demand date'}
+        delayDays: {type: integer}
+        qty: {type: string}
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: {type: string, format: uri, example: 'https://passage.dev/problems/PLAN-0001'}
+        title: {type: string}
+        status: {type: integer}
+        detail: {type: string}
+        instance: {type: string}
+        code: {type: string, example: PLAN-0001}
+        serviceCode: {type: string, example: PLN-0001}
+        traceId: {type: string}
+        errors:
+          type: object
+          additionalProperties: {type: string}

@@ -1,0 +1,530 @@
+// Package api exposes the planning HTTP surface under /v1/planning.
+package api
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"regexp"
+	"strconv"
+	"sync/atomic"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+	"github.com/shopspring/decimal"
+
+	"github.com/BenjaminSRussell/passage/platform/authz"
+	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/BenjaminSRussell/passage/services/planning/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/planning/internal/store"
+)
+
+const (
+	dutyRun  = "planning.run"
+	dutyRead = "planning.read"
+
+	idempotencyKey = "Idempotency-Key"
+	dateLayout     = "2006-01-02"
+	maxItems       = 100000
+	maxPegDepth    = 20
+	defaultDepth   = 5
+	readyTimeout   = 2 * time.Second
+
+	codeValidation = "COM-0001"
+	codeInput      = "PLAN-INPUT-INVALID"
+)
+
+var (
+	planCodePattern = regexp.MustCompile(`^[A-Z0-9][A-Z0-9_-]{1,19}$`)
+	knownRefTypes   = map[string]bool{"sales-line": true, "forecast": true, "safety-stock": true, "bom-line": true,
+		"transfer-issue": true, "on-hand": true, "purchase-line": true, "production-order": true, "transfer-receipt": true, "planned-order": true}
+	defaultPriority = map[string]int{"sales-line": domain.PrioritySales, "forecast": domain.PriorityForecast}
+)
+
+// API holds the handlers and their counters.
+type API struct {
+	store store.Store
+	now   func() time.Time
+
+	runsCompleted atomic.Int64
+	runsReplayed  atomic.Int64
+	runsRefused   atomic.Int64
+}
+
+// New returns an API over st.
+func New(st store.Store) *API { return &API{store: st, now: time.Now} }
+
+// Register mounts the routes on r. /readyz replaces the router's static probe
+// with one that checks the database, so the chart's readiness probe fails
+// closed when Postgres is unreachable.
+func (a *API) Register(r chi.Router) {
+	r.Get("/readyz", a.ready)
+	r.With(authz.RequireDuty(dutyRun)).Post("/v1/planning/plans/{planCode}:run", a.runPlan)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/plans/{planCode}/versions", a.listVersions)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/plans/{planCode}/versions/{number}", a.getVersion)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/planned-orders", a.listPlannedOrders)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/planned-orders/{id}", a.getPlannedOrder)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/planned-orders/{id}/pegging", a.pegging)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/messages", a.listMessages)
+}
+
+// Metrics renders the counters in Prometheus text format.
+func (a *API) Metrics() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprintf(w, "# HELP planning_plan_runs_completed_total Plan versions that became current.\n# TYPE planning_plan_runs_completed_total counter\nplanning_plan_runs_completed_total %d\n", a.runsCompleted.Load())
+		fmt.Fprintf(w, "# HELP planning_plan_runs_replayed_total Plan runs answered from an Idempotency-Key replay.\n# TYPE planning_plan_runs_replayed_total counter\nplanning_plan_runs_replayed_total %d\n", a.runsReplayed.Load())
+		fmt.Fprintf(w, "# HELP planning_plan_runs_refused_total Plan runs refused (invalid input, cycle, lock).\n# TYPE planning_plan_runs_refused_total counter\nplanning_plan_runs_refused_total %d\n", a.runsRefused.Load())
+	})
+}
+
+func (a *API) ready(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), readyTimeout)
+	defer cancel()
+	if err := a.store.Ping(ctx); err != nil {
+		slog.Error("readiness check failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.JSON(w, http.StatusServiceUnavailable, map[string]string{"status": "unavailable"})
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]string{"status": "ready"})
+}
+
+func validTenant(w http.ResponseWriter, r *http.Request) bool {
+	p, ok := tenant.FromContext(r.Context())
+	if !ok || !ids.Valid(p.TenantID) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnauthorized, "AUTH-0001", "missing or malformed tenant"))
+		return false
+	}
+	return true
+}
+
+func validationFailed(w http.ResponseWriter, r *http.Request, fields map[string]string) {
+	p := httpx.NewProblem(http.StatusBadRequest, codeValidation, "request failed validation")
+	p.Errors = fields
+	httpx.Fail(w, r, p)
+}
+
+type runRequest struct {
+	AsOf   string    `json:"asOf"`
+	SiteID string    `json:"siteId"`
+	Items  []itemDTO `json:"items"`
+}
+
+type itemDTO struct {
+	ItemID       string           `json:"itemId"`
+	Coverage     coverageDTO      `json:"coverage"`
+	OnHand       decimal.Decimal  `json:"onHand"`
+	SafetyStock  decimal.Decimal  `json:"safetyStock"`
+	OrderType    string           `json:"orderType"`
+	LeadTimeDays int              `json:"leadTimeDays"`
+	Lot          lotDTO           `json:"lot"`
+	Demand       []requirementDTO `json:"demand"`
+	Receipts     []requirementDTO `json:"receipts"`
+	Components   []bomDTO         `json:"components"`
+}
+
+type coverageDTO struct {
+	Code         string          `json:"code"`
+	PeriodDays   int             `json:"periodDays"`
+	MarginDays   int             `json:"marginDays"`
+	PositiveDays int             `json:"positiveDays"`
+	NegativeDays int             `json:"negativeDays"`
+	ReorderMin   decimal.Decimal `json:"reorderMin"`
+	ReorderMax   decimal.Decimal `json:"reorderMax"`
+}
+
+type lotDTO struct {
+	MinOrderQty decimal.Decimal `json:"minOrderQty"`
+	MultipleQty decimal.Decimal `json:"multipleQty"`
+	MaxOrderQty decimal.Decimal `json:"maxOrderQty"`
+	StandardQty decimal.Decimal `json:"standardQty"`
+}
+
+type requirementDTO struct {
+	Ref      string          `json:"ref"`
+	RefType  string          `json:"refType"`
+	Date     string          `json:"date"`
+	Qty      decimal.Decimal `json:"qty"`
+	Priority *int            `json:"priority"`
+}
+
+type bomDTO struct {
+	ItemID string          `json:"itemId"`
+	Qty    decimal.Decimal `json:"qty"`
+}
+
+// validate checks the snapshot and returns field errors.
+func (req runRequest) validate() map[string]string {
+	fields := map[string]string{}
+	if _, err := time.Parse(dateLayout, req.AsOf); err != nil {
+		fields["asOf"] = "must be a date as YYYY-MM-DD"
+	}
+	if !ids.Valid(req.SiteID) {
+		fields["siteId"] = "must be a UUID"
+	}
+	if len(req.Items) == 0 || len(req.Items) > maxItems {
+		fields["items"] = fmt.Sprintf("must hold 1 to %d items", maxItems)
+	}
+	for i, it := range req.Items {
+		prefix := fmt.Sprintf("items[%d]", i)
+		if !ids.Valid(it.ItemID) {
+			fields[prefix+".itemId"] = "must be a UUID"
+		}
+		if it.LeadTimeDays < 0 || it.LeadTimeDays > 3650 {
+			fields[prefix+".leadTimeDays"] = "must be 0 to 3650"
+		}
+		c := it.Coverage
+		if c.PeriodDays < 0 || c.MarginDays < 0 || c.PositiveDays < 0 || c.NegativeDays < 0 {
+			fields[prefix+".coverage"] = "periodDays, marginDays, positiveDays and negativeDays must be 0 or more"
+		}
+		if c.ReorderMin.IsNegative() || c.ReorderMax.IsNegative() || it.OnHand.IsNegative() || it.SafetyStock.IsNegative() ||
+			it.Lot.MinOrderQty.IsNegative() || it.Lot.MultipleQty.IsNegative() || it.Lot.MaxOrderQty.IsNegative() || it.Lot.StandardQty.IsNegative() {
+			fields[prefix+".quantities"] = "on-hand, safety stock, min/max and lot quantities must be 0 or more"
+		}
+		validateRequirements(fields, prefix+".demand", it.Demand)
+		validateRequirements(fields, prefix+".receipts", it.Receipts)
+		for _, b := range it.Components {
+			if !ids.Valid(b.ItemID) || !b.Qty.IsPositive() {
+				fields[prefix+".components"] = "each component needs an itemId UUID and a positive qty"
+			}
+		}
+	}
+	return fields
+}
+
+func validateRequirements(fields map[string]string, prefix string, reqs []requirementDTO) {
+	for _, r := range reqs {
+		if !knownRefTypes[r.RefType] || r.Ref == "" || len(r.Ref) > 128 || !r.Qty.IsPositive() {
+			fields[prefix] = "each line needs a ref (at most 128 characters), a known refType and a positive qty"
+		}
+		if _, err := time.Parse(dateLayout, r.Date); err != nil {
+			fields[prefix+".date"] = "must be a date as YYYY-MM-DD"
+		}
+	}
+}
+
+// toDomain converts the request snapshot into engine items; day 0 is asOf.
+func (req runRequest) toDomain(asOf time.Time) ([]domain.Item, error) {
+	items := make([]domain.Item, 0, len(req.Items))
+	for _, it := range req.Items {
+		item := domain.Item{
+			ID: it.ItemID, Coverage: it.Coverage.Code, PeriodDays: it.Coverage.PeriodDays, MarginDays: it.Coverage.MarginDays,
+			PositiveDays: it.Coverage.PositiveDays, NegativeDays: it.Coverage.NegativeDays,
+			ReorderMin: it.Coverage.ReorderMin, ReorderMax: it.Coverage.ReorderMax,
+			OnHand: it.OnHand, SafetyStock: it.SafetyStock, OrderType: it.OrderType, LeadTimeDays: it.LeadTimeDays,
+			MinOrderQty: it.Lot.MinOrderQty, MultipleQty: it.Lot.MultipleQty, MaxOrderQty: it.Lot.MaxOrderQty, StandardQty: it.Lot.StandardQty,
+		}
+		var err error
+		if item.Demand, err = toRequirements(it.Demand, asOf); err != nil {
+			return nil, err
+		}
+		if item.Receipts, err = toRequirements(it.Receipts, asOf); err != nil {
+			return nil, err
+		}
+		for _, c := range it.Components {
+			item.Components = append(item.Components, domain.BOMLine{ItemID: c.ItemID, Qty: c.Qty})
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}
+
+func toRequirements(in []requirementDTO, asOf time.Time) ([]domain.Requirement, error) {
+	out := make([]domain.Requirement, 0, len(in))
+	for _, r := range in {
+		d, err := time.Parse(dateLayout, r.Date)
+		if err != nil {
+			return nil, err
+		}
+		prio, ok := defaultPriority[r.RefType]
+		if !ok {
+			prio = domain.PriorityDependent
+		}
+		if r.Priority != nil {
+			prio = *r.Priority
+		}
+		day := int(d.Sub(asOf) / (24 * time.Hour))
+		out = append(out, domain.Requirement{Ref: r.Ref, RefType: r.RefType, Date: day, Qty: r.Qty, Priority: prio})
+	}
+	return out, nil
+}
+
+func (a *API) runPlan(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	code := chi.URLParam(r, "planCode")
+	if !planCodePattern.MatchString(code) {
+		validationFailed(w, r, map[string]string{"planCode": "must be 2 to 20 characters of A-Z, 0-9, _ or -"})
+		return
+	}
+	key := r.Header.Get(idempotencyKey)
+	if key == "" {
+		validationFailed(w, r, map[string]string{idempotencyKey: "header is required on plan runs"})
+		return
+	}
+	var req runRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if fields := req.validate(); len(fields) > 0 {
+		validationFailed(w, r, fields)
+		return
+	}
+	asOf, _ := time.Parse(dateLayout, req.AsOf)
+	items, err := req.toDomain(asOf)
+	if err != nil {
+		validationFailed(w, r, map[string]string{"items": err.Error()})
+		return
+	}
+	// The idempotency fingerprint covers the plan code and the whole snapshot,
+	// so the same key on another plan or input is a reuse, not a replay.
+	body, _ := json.Marshal(struct {
+		PlanCode string     `json:"planCode"`
+		Request  runRequest `json:"request"`
+	}{code, req})
+	started := a.now()
+	result, err := domain.Run(0, items)
+	if err != nil {
+		a.runsRefused.Add(1)
+		httpx.Fail(w, r, runProblem(err))
+		return
+	}
+	elapsed := a.now().Sub(started).Milliseconds()
+	v, replayed, err := a.store.RunPlan(r.Context(), store.RunRequest{
+		PlanCode: code, SiteID: req.SiteID, AsOf: asOf, ItemsPlanned: len(items), DurationMs: elapsed,
+		InputHash: fmt.Sprintf("%x", sha256.Sum256(body)), IdempotencyKey: key, Result: result,
+	})
+	if err != nil {
+		var p *httpx.Problem
+		if errors.As(err, &p) && p.Code == store.CodeAlreadyRunning {
+			a.runsRefused.Add(1)
+		}
+		slog.Error("plan run failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.Fail(w, r, err)
+		return
+	}
+	if replayed {
+		a.runsReplayed.Add(1)
+		w.Header().Set("Idempotent-Replayed", "true")
+		httpx.JSON(w, http.StatusOK, v)
+		return
+	}
+	a.runsCompleted.Add(1)
+	httpx.JSON(w, http.StatusCreated, v)
+}
+
+func runProblem(err error) error {
+	switch {
+	case errors.Is(err, domain.ErrBOMCycle):
+		return httpx.NewProblem(http.StatusUnprocessableEntity, "PLAN-0004", "BOM cycle detected; low-level codes not updated")
+	case errors.Is(err, domain.ErrTooManySplits):
+		return httpx.NewProblem(http.StatusUnprocessableEntity, "PLAN-0005", "a requirement splits into more orders than the limit of 1000")
+	case errors.Is(err, domain.ErrInvalidItem):
+		return httpx.NewProblem(http.StatusUnprocessableEntity, codeInput, err.Error())
+	}
+	return err
+}
+
+func (a *API) listVersions(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	code := chi.URLParam(r, "planCode")
+	if !planCodePattern.MatchString(code) {
+		validationFailed(w, r, map[string]string{"planCode": "must be 2 to 20 characters of A-Z, 0-9, _ or -"})
+		return
+	}
+	limit, ok := limitParam(w, r)
+	if !ok {
+		return
+	}
+	versions, err := a.store.ListVersions(r.Context(), code, limit)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": versions})
+}
+
+func (a *API) getVersion(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	code := chi.URLParam(r, "planCode")
+	number, err := strconv.Atoi(chi.URLParam(r, "number"))
+	fields := map[string]string{}
+	if err != nil || number < 1 {
+		fields["number"] = "must be a positive integer"
+	}
+	if !planCodePattern.MatchString(code) {
+		fields["planCode"] = "must be 2 to 20 characters of A-Z, 0-9, _ or -"
+	}
+	if len(fields) > 0 {
+		validationFailed(w, r, fields)
+		return
+	}
+	v, err := a.store.GetVersion(r.Context(), code, number)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, v)
+}
+
+func limitParam(w http.ResponseWriter, r *http.Request) (int, bool) {
+	limit := store.MaxPageSize
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > store.MaxPageSize {
+			validationFailed(w, r, map[string]string{"limit": fmt.Sprintf("must be 1 to %d", store.MaxPageSize)})
+			return 0, false
+		}
+		limit = n
+	}
+	return limit, true
+}
+
+func (a *API) listPlannedOrders(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	q := r.URL.Query()
+	code := q.Get("planCode")
+	f := store.OrderFilter{Status: q.Get("status"), ItemID: q.Get("itemId")}
+	fields := map[string]string{}
+	if !planCodePattern.MatchString(code) {
+		fields["planCode"] = "is required"
+	}
+	if f.Status != "" && f.Status != "unprocessed" && f.Status != "approved" && f.Status != "firmed" {
+		fields["status"] = "must be unprocessed, approved or firmed"
+	}
+	if f.ItemID != "" && !ids.Valid(f.ItemID) {
+		fields["itemId"] = "must be a UUID"
+	}
+	if len(fields) > 0 {
+		validationFailed(w, r, fields)
+		return
+	}
+	limit, ok := limitParam(w, r)
+	if !ok {
+		return
+	}
+	orders, err := a.store.ListPlannedOrders(r.Context(), code, f, limit)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": orders})
+}
+
+func (a *API) getPlannedOrder(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if !ids.Valid(id) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeOrderNotFound, "planned order not found"))
+		return
+	}
+	order, err := a.store.GetPlannedOrder(r.Context(), id)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, order)
+}
+
+// pegNode is the JSON shape of one explain-tree node. Children is always an
+// array (empty on a leaf) so clients can recurse without null checks.
+type pegNode struct {
+	Ref      string    `json:"ref"`
+	RefType  string    `json:"refType"`
+	Qty      string    `json:"qty"`
+	Children []pegNode `json:"children"`
+}
+
+func toPegNode(n domain.TreeNode) pegNode {
+	out := pegNode{Ref: n.Ref, RefType: n.RefType, Qty: n.Qty.String(), Children: []pegNode{}}
+	for _, c := range n.Children {
+		out.Children = append(out.Children, toPegNode(c))
+	}
+	return out
+}
+
+func (a *API) pegging(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if !ids.Valid(id) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeOrderNotFound, "planned order not found"))
+		return
+	}
+	depth := defaultDepth
+	if raw := r.URL.Query().Get("depth"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > maxPegDepth {
+			validationFailed(w, r, map[string]string{"depth": fmt.Sprintf("must be 1 to %d", maxPegDepth)})
+			return
+		}
+		depth = n
+	}
+	order, err := a.store.GetPlannedOrder(r.Context(), id)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	var lookupErr error
+	pegsOf := func(ref string) []domain.PegLine {
+		lines, err := a.store.PegsOf(r.Context(), order.VersionID, ref)
+		if err != nil && lookupErr == nil {
+			lookupErr = err
+		}
+		return lines
+	}
+	tree := domain.BuildTree(order.Number, depth, pegsOf)
+	if lookupErr != nil {
+		httpx.Fail(w, r, lookupErr)
+		return
+	}
+	root := toPegNode(tree)
+	root.Qty = order.Qty
+	httpx.JSON(w, http.StatusOK, map[string]any{"orderId": order.ID, "number": order.Number, "qty": order.Qty, "tree": root})
+}
+
+func (a *API) listMessages(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	q := r.URL.Query()
+	code := q.Get("planCode")
+	action := q.Get("action")
+	if !planCodePattern.MatchString(code) {
+		validationFailed(w, r, map[string]string{"planCode": "is required"})
+		return
+	}
+	switch action {
+	case "", domain.ActionDelay, domain.ActionPostpone, domain.ActionAdvance, domain.ActionShortage:
+	default:
+		validationFailed(w, r, map[string]string{"action": "must be delay, postpone, advance or shortage"})
+		return
+	}
+	limit, ok := limitParam(w, r)
+	if !ok {
+		return
+	}
+	msgs, err := a.store.ListMessages(r.Context(), code, action, limit)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": msgs})
+}

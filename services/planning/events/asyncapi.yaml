@@ -1,0 +1,45 @@
+asyncapi: 3.0.0
+info:
+  title: Passage Planning events
+  version: 0.1.0
+  description: CloudEvents 1.0 with Passage extensions (tenantid, correlationid, causationid, actor). Published through the outbox in the same transaction as the plan version change.
+defaultContentType: application/cloudevents+json
+channels:
+  planCompleted:
+    address: passage.planning.plan
+    messages:
+      planCompletedV1:
+        $ref: '#/components/messages/PlanCompletedV1'
+operations:
+  publishPlanCompleted:
+    action: send
+    channel:
+      $ref: '#/channels/planCompleted'
+    summary: A plan version became the current version of its plan.
+components:
+  messages:
+    PlanCompletedV1:
+      name: dev.passage.planning.plan.completed.v1
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/PlanCompletedData'
+  schemas:
+    PlanCompletedData:
+      type: object
+      required: [plan_id, plan_code, version_id, version_number, items_planned, planned_orders, messages, duration_ms, plan_hash]
+      properties:
+        plan_id: {type: string, format: uuid}
+        plan_code: {type: string}
+        version_id: {type: string, format: uuid}
+        version_number: {type: integer}
+        items_planned: {type: integer}
+        planned_orders:
+          type: object
+          required: [purchase, production, transfer]
+          properties:
+            purchase: {type: integer}
+            production: {type: integer}
+            transfer: {type: integer}
+        messages: {type: integer}
+        duration_ms: {type: integer}
+        plan_hash: {type: string, description: sha256 hex (FR-22.14)}
