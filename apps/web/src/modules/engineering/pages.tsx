@@ -13,10 +13,28 @@ import {
 import { whereUsed, type UsedBy } from "./api/client";
 import styles from "./pages.module.css";
 
-export function EngineeringHome({ onOpenWhereUsed }: { onOpenWhereUsed?: () => void }) {
+export function EngineeringHome({
+  onOpenWhereUsed,
+  onOpenRoutes,
+}: {
+  onOpenWhereUsed?: () => void;
+  onOpenRoutes?: () => void;
+}) {
   return (
     <>
       <PageHeader title="Engineering data" description="Bills of material, routings and change orders." />
+      <Card
+        title="Routings"
+        actions={
+          onOpenRoutes ? (
+            <Button size="sm" onClick={onOpenRoutes}>
+              Open Routings
+            </Button>
+          ) : undefined
+        }
+      >
+        <p className={styles.lead}>Browse route versions, their operations and resource requirements, and estimate lead time.</p>
+      </Card>
       <Card
         title="Where-used"
         actions={
@@ -58,8 +76,8 @@ const columns: DataTableColumn<UsedBy>[] = [
   { key: "siteId", header: "Site" },
 ];
 
-export function WhereUsedPage() {
-  const [component, setComponent] = useState("");
+export function WhereUsedPage({ initialComponent = "" }: { initialComponent?: string }) {
+  const [component, setComponent] = useState(initialComponent);
   const [asOf, setAsOf] = useState("");
   const [rows, setRows] = useState<UsedBy[] | null>(null);
   const [error, setError] = useState("");

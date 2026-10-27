@@ -19,6 +19,13 @@ describe("engineering module", () => {
     expect(engineering.nav.every((n) => n.to.startsWith("/engineering") && n.duty === "engineering.read")).toBe(true);
   });
 
+  it("declares the routing routes and nav entries", () => {
+    expect(engineering.routes.map((r) => r.path)).toEqual(
+      expect.arrayContaining(["/engineering/routes", "/engineering/routes/:id"]),
+    );
+    expect(engineering.nav.map((n) => n.label)).toContain("Routings");
+  });
+
   it("is auto-discovered by the registry", () => {
     expect(loadModules().map((m) => m.id)).toContain("engineering");
   });
@@ -33,6 +40,18 @@ describe("engineering module", () => {
     render(<EngineeringHome onOpenWhereUsed={() => opened.push("where-used")} />);
     fireEvent.click(screen.getByRole("button", { name: "Open Where-used" }));
     expect(opened).toEqual(["where-used"]);
+  });
+
+  it("offers to open routings from the overview", () => {
+    const opened: string[] = [];
+    render(<EngineeringHome onOpenRoutes={() => opened.push("routes")} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open Routings" }));
+    expect(opened).toEqual(["routes"]);
+  });
+
+  it("prefills the where-used component from initialComponent", () => {
+    render(<WhereUsedPage initialComponent="SPOKE" />);
+    expect(screen.getByLabelText("Component")).toHaveValue("SPOKE");
   });
 
   it("lists every parent level returned by the where-used report", async () => {
