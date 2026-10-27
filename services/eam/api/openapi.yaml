@@ -1,0 +1,586 @@
+openapi: 3.1.0
+info:
+  title: Passage EAM API
+  version: 0.1.0
+  description: Enterprise asset management (wave 44, slice 1). Errors are RFC 9457 problem details with a stable code.
+servers:
+  - url: https://api.{env}.passage.dev
+    variables:
+      env:
+        default: dev
+security: []
+x-passage-slice: "PSG-44 slice 1; remaining deliverables are listed in NOT-IMPLEMENTED.md"
+paths:
+  /healthz:
+    get:
+      operationId: healthz
+      responses:
+        "200": { description: alive }
+  /readyz:
+    get:
+      operationId: readyz
+      responses:
+        "200": { description: ready }
+        "503": { $ref: "#/components/responses/Problem" }
+  /api/v1/eam/workspace:
+    get:
+      operationId: getWorkspace
+      description: Asset management workspace tiles (8.44.6), counted at request time.
+      x-passage-duty: EamInquire
+      responses:
+        "200": { description: tiles, content: { application/json: { schema: { $ref: "#/components/schemas/Workspace" } } } }
+  /api/v1/eam/assets:
+    get:
+      operationId: listAssets
+      x-passage-duty: EamInquire
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { name: status, in: query, schema: { type: string, enum: [CREATED, ACTIVE, INACTIVE, DISPOSED] } }
+      responses:
+        "200": { description: page, content: { application/json: { schema: { $ref: "#/components/schemas/AssetPage" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createAsset
+      x-passage-duty: EamAssetMaintain
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/AssetIn" } } }
+      responses:
+        "201": { description: created, content: { application/json: { schema: { $ref: "#/components/schemas/Asset" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /api/v1/eam/assets/{id}:
+    get:
+      operationId: getAsset
+      x-passage-duty: EamInquire
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: asset, content: { application/json: { schema: { $ref: "#/components/schemas/AssetDetail" } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+  /api/v1/eam/assets/{id}/activate:
+    post:
+      operationId: activateAsset
+      x-passage-duty: EamAssetMaintain
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IfMatch" }]
+      responses:
+        "200": { description: active, content: { application/json: { schema: { $ref: "#/components/schemas/Asset" } } } }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /api/v1/eam/assets/{id}/counters:
+    post:
+      operationId: createCounter
+      x-passage-duty: EamAssetMaintain
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/CounterIn" } } }
+      responses:
+        "201": { description: created, content: { application/json: { schema: { $ref: "#/components/schemas/Counter" } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+  /api/v1/eam/counters/{id}/rules:
+    post:
+      operationId: createRule
+      x-passage-duty: EamAssetMaintain
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/RuleIn" } } }
+      responses:
+        "201": { description: created (or replayed for a repeated Idempotency-Key), content: { application/json: { schema: { $ref: "#/components/schemas/Rule" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /api/v1/eam/counters/{id}/readings:
+    get:
+      operationId: listReadings
+      description: The counter's latest readings, newest first (8.44.14 Measurement documents).
+      x-passage-duty: EamInquire
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/Limit" }]
+      responses:
+        "200":
+          description: readings
+          content:
+            application/json:
+              schema: { type: object, properties: { items: { type: array, items: { $ref: "#/components/schemas/Reading" } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: recordReading
+      description: >-
+        Replays with the same Idempotency-Key or messageId return the stored reading (200, Idempotent-Replayed: true).
+        A cumulative reading must not be below the reading before it in time, nor above the reading after it, unless
+        reset is set (EAM-CTR-001). The counter's average daily usage is recomputed over the last 30 days.
+      x-passage-duty: EamCounterRegister
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/ReadingIn" } } }
+      responses:
+        "200": { description: replayed, content: { application/json: { schema: { $ref: "#/components/schemas/Reading" } } } }
+        "201": { description: recorded, content: { application/json: { schema: { $ref: "#/components/schemas/Reading" } } } }
+        "422": { $ref: "#/components/responses/Problem" }
+  /api/v1/eam/plans:
+    get:
+      operationId: listPlans
+      x-passage-duty: EamInquire
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { name: asset, in: query, description: only plans with a line on this asset, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: page, content: { application/json: { schema: { $ref: "#/components/schemas/PlanPage" } } } }
+    post:
+      operationId: createPlan
+      description: Creates a plan with its lines and schedules the lines at once (BR-44.1).
+      x-passage-duty: EamPlanAdmin
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/PlanIn" } } }
+      responses:
+        "201": { description: created, content: { application/json: { schema: { $ref: "#/components/schemas/Plan" } } } }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /api/v1/eam/plans/schedule:
+    post:
+      operationId: schedulePlans
+      description: Nightly sweep over every active plan line. Idempotent by construction (one open work order per line).
+      x-passage-duty: EamPlanAdmin
+      responses:
+        "200": { description: run, content: { application/json: { schema: { $ref: "#/components/schemas/ScheduleResult" } } } }
+  /api/v1/eam/requests:
+    get:
+      operationId: listRequests
+      x-passage-duty: EamInquire
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { name: status, in: query, schema: { type: string, enum: [NEW, TRIAGED, CONVERTED, REJECTED, DEFERRED] } }
+        - { name: asset, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: page, content: { application/json: { schema: { $ref: "#/components/schemas/RequestPage" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createRequest
+      x-passage-duty: EamRequestCreate
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/RequestIn" } } }
+      responses:
+        "201": { description: created, content: { application/json: { schema: { $ref: "#/components/schemas/Request" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+  /api/v1/eam/requests/{id}/convert:
+    post:
+      operationId: convertRequest
+      x-passage-duty: EamPlanner
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        content: { application/json: { schema: { $ref: "#/components/schemas/ConvertIn" } } }
+      responses:
+        "201": { description: work order, content: { application/json: { schema: { $ref: "#/components/schemas/WorkOrder" } } } }
+        "422": { $ref: "#/components/responses/Problem" }
+  /api/v1/eam/work-orders:
+    get:
+      operationId: listWorkOrders
+      x-passage-duty: EamInquire
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { name: status, in: query, schema: { type: string, enum: [CREATED, SCHEDULED, RELEASED, IN_PROGRESS, ON_HOLD, COMPLETED, CLOSED, CANCELED] } }
+        - { name: asset, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: page, content: { application/json: { schema: { $ref: "#/components/schemas/WorkOrderPage" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createWorkOrder
+      description: >-
+        The asset must be ACTIVE (EAM-AST-001). Without a priority, EMERGENCY gets 1, CORRECTIVE gets 6 - criticality
+        (BR-44.15) and the other types 3. CAPITAL orders are rejected with EAM-WO-005 until a fixed asset or CIP
+        project can be linked (wave 37).
+      x-passage-duty: EamPlanner
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/WorkOrderIn" } } }
+      responses:
+        "201": { description: created, content: { application/json: { schema: { $ref: "#/components/schemas/WorkOrder" } } } }
+        "422": { $ref: "#/components/responses/Problem" }
+  /api/v1/eam/work-orders/{id}:
+    get:
+      operationId: getWorkOrder
+      x-passage-duty: EamInquire
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: work order, content: { application/json: { schema: { $ref: "#/components/schemas/WorkOrderDetail" } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+  /api/v1/eam/work-orders/{id}/status:
+    post:
+      operationId: transitionWorkOrder
+      description: A repeated Idempotency-Key returns the work order as it is now, without a second transition.
+      x-passage-duty: EamPlanner | EamTechnician
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }, { $ref: "#/components/parameters/IfMatch" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/StatusIn" } } }
+      responses:
+        "200": { description: transitioned, content: { application/json: { schema: { $ref: "#/components/schemas/WorkOrder" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /api/v1/eam/work-orders/{id}/labor:
+    post:
+      operationId: recordLabor
+      x-passage-duty: EamTechnician
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/LaborIn" } } }
+      responses:
+        "201": { description: booked, content: { application/json: { schema: { $ref: "#/components/schemas/WorkOrder" } } } }
+        "422": { $ref: "#/components/responses/Problem" }
+  /api/v1/eam/kpis:
+    get:
+      operationId: getKpis
+      x-passage-duty: EamInquire
+      parameters:
+        - { name: asset, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: from, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date-time } }
+      responses:
+        "200": { description: kpis, content: { application/json: { schema: { $ref: "#/components/schemas/Kpi" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+components:
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, maxLength: 128 }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+    Cursor:
+      name: cursor
+      in: query
+      description: nextCursor of the previous page.
+      schema: { type: string, format: uuid }
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: Expected aggregate version, quoted (for example "3").
+      schema: { type: string }
+  responses:
+    Problem:
+      description: RFC 9457 problem details
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties:
+        type: { type: string, example: "https://passage.dev/problems/EAM-CTR-001" }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string }
+        serviceCode: { type: string }
+        traceId: { type: string }
+        errors: { type: array, items: { type: object } }
+    AssetIn:
+      type: object
+      required: [name, assetType, siteId, criticality]
+      properties:
+        name: { type: string, maxLength: 120 }
+        assetType: { type: string, pattern: "^[A-Z0-9_]{2,20}$" }
+        siteId: { type: string, format: uuid }
+        criticality: { type: integer, minimum: 1, maximum: 5 }
+        productionResourceId: { type: string, format: uuid }
+    Asset:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        assetNumber: { type: string }
+        name: { type: string }
+        assetType: { type: string }
+        siteId: { type: string, format: uuid }
+        criticality: { type: integer }
+        lifecycleState: { type: string, enum: [CREATED, ACTIVE, INACTIVE, DISPOSED] }
+        productionResourceId: { type: string, format: uuid }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+    AssetPage:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Asset" } }
+        nextCursor: { type: string, format: uuid }
+    AssetDetail:
+      allOf:
+        - $ref: "#/components/schemas/Asset"
+        - type: object
+          properties:
+            counters: { type: array, items: { $ref: "#/components/schemas/Counter" } }
+            rules: { type: array, items: { $ref: "#/components/schemas/Rule" } }
+            openWorkOrders: { type: integer }
+            partsCost: { type: string, description: decimal string, sum over the asset's work orders }
+            laborCost: { type: string, description: decimal string, sum over the asset's work orders }
+    Workspace:
+      type: object
+      properties:
+        requestsToTriage: { type: integer, description: NEW or TRIAGED requests }
+        dueIn7Days: { type: integer, description: open work orders due in the next 7 days }
+        overdue: { type: integer, description: open work orders past their due date }
+        openWorkOrders: { type: integer }
+    CounterIn:
+      type: object
+      required: [name, unit]
+      properties:
+        name: { type: string, maxLength: 60 }
+        unit: { type: string, maxLength: 12 }
+        cumulative: { type: boolean, default: true }
+        source: { type: string, enum: [MANUAL, IOT], default: MANUAL }
+    Counter:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        assetId: { type: string, format: uuid }
+        name: { type: string }
+        unit: { type: string }
+        cumulative: { type: boolean }
+        source: { type: string }
+        lastReading: { type: number }
+        lastReadingAt: { type: string, format: date-time }
+        avgDailyUsage: { type: number }
+    RuleIn:
+      type: object
+      required: [name, operator, threshold, severity]
+      properties:
+        name: { type: string, maxLength: 120 }
+        operator: { type: string, enum: [">", "<"] }
+        threshold: { type: number }
+        severity: { type: integer, minimum: 1, maximum: 5 }
+        cooldownMinutes: { type: integer, minimum: 1, maximum: 1440, default: 60 }
+    Rule:
+      allOf:
+        - $ref: "#/components/schemas/RuleIn"
+        - type: object
+          properties:
+            id: { type: string, format: uuid }
+            counterId: { type: string, format: uuid }
+    ReadingIn:
+      type: object
+      required: [value]
+      properties:
+        value: { type: number }
+        readingAt: { type: string, format: date-time }
+        source: { type: string, enum: [MANUAL, IOT], default: MANUAL }
+        reset: { type: boolean, default: false }
+        messageId: { type: string, maxLength: 128 }
+    Reading:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        counterId: { type: string, format: uuid }
+        readingAt: { type: string, format: date-time }
+        value: { type: number }
+        reset: { type: boolean }
+        source: { type: string }
+        messageId: { type: string }
+    PlanLineIn:
+      type: object
+      required: [assetId, kind, jobType]
+      properties:
+        assetId: { type: string, format: uuid }
+        kind: { type: string, enum: [TIME, COUNTER, TIME_OR_COUNTER, TIME_AND_COUNTER] }
+        intervalValue: { type: integer, minimum: 1 }
+        intervalUnit: { type: string, enum: [DAYS, WEEKS, MONTHS, YEARS] }
+        counterId: { type: string, format: uuid }
+        counterInterval: { type: number, exclusiveMinimum: 0 }
+        jobType: { type: string, pattern: "^[A-Z0-9_]{2,20}$" }
+        earlyTolerancePct: { type: integer, minimum: 0, maximum: 100, default: 10 }
+        horizonDays: { type: integer, minimum: 1, maximum: 730, default: 90 }
+        startAt: { type: string, format: date-time }
+        lastCompletedAt: { type: string, format: date-time, description: last completion carried over from a migrated plan; not in the future }
+        lastCompletedReading: { type: number, minimum: 0, description: counter reading at that completion (counter-based lines) }
+    PlanLine:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        assetId: { type: string, format: uuid }
+        kind: { type: string, enum: [TIME, COUNTER, TIME_OR_COUNTER, TIME_AND_COUNTER] }
+        intervalValue: { type: integer }
+        intervalUnit: { type: string }
+        counterId: { type: string, format: uuid }
+        counterInterval: { type: number }
+        jobType: { type: string }
+        earlyTolerancePct: { type: integer }
+        horizonDays: { type: integer }
+        startAt: { type: string, format: date-time }
+        lastCompletedAt: { type: string, format: date-time }
+        lastCompletedReading: { type: number }
+        nextDueAt: { type: string, format: date-time }
+        nextDueReading: { type: number }
+        nextDueForecastAt: { type: string, format: date-time }
+    PlanView:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        currency: { type: string }
+        active: { type: boolean }
+        lines: { type: array, items: { $ref: "#/components/schemas/PlanLine" } }
+    PlanPage:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/PlanView" } }
+        nextCursor: { type: string, format: uuid }
+    PlanIn:
+      type: object
+      required: [code, name, currency, lines]
+      properties:
+        code: { type: string, pattern: "^[A-Z0-9][A-Z0-9_-]{1,29}$" }
+        name: { type: string, maxLength: 120 }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        lines: { type: array, minItems: 1, items: { $ref: "#/components/schemas/PlanLineIn" } }
+    Plan:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        currency: { type: string }
+        lineIds: { type: array, items: { type: string, format: uuid } }
+    ScheduleResult:
+      type: object
+      properties:
+        evaluated: { type: integer }
+        generated: { type: integer }
+        skipped: { type: integer }
+    RequestIn:
+      type: object
+      required: [assetId, source, severity, description]
+      properties:
+        assetId: { type: string, format: uuid }
+        source: { type: string, enum: [USER, MOBILE, QUALITY] }
+        severity: { type: integer, minimum: 1, maximum: 5 }
+        description: { type: string, maxLength: 1000 }
+    Request:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        assetId: { type: string, format: uuid }
+        source: { type: string }
+        severity: { type: integer }
+        description: { type: string }
+        readingValue: { type: number }
+        status: { type: string, enum: [NEW, TRIAGED, CONVERTED, REJECTED, DEFERRED] }
+        workOrderId: { type: string, format: uuid }
+        dedupeKey: { type: string }
+        conditionRuleId: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+    RequestPage:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Request" } }
+        nextCursor: { type: string, format: uuid }
+    ConvertIn:
+      type: object
+      properties:
+        currency: { type: string, pattern: "^[A-Z]{3}$", default: USD }
+    WorkOrderIn:
+      type: object
+      required: [assetId, workOrderType, currency]
+      properties:
+        assetId: { type: string, format: uuid }
+        workOrderType: { type: string, enum: [PREVENTIVE, CORRECTIVE, INSPECTION, EMERGENCY, CAPITAL] }
+        priority: { type: integer, minimum: 1, maximum: 5, description: defaults from the type and the asset criticality }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        jobType: { type: string, pattern: "^[A-Z0-9_]{2,20}$" }
+        dueAt: { type: string, format: date-time }
+    WorkOrder:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        number: { type: string }
+        assetId: { type: string, format: uuid }
+        workOrderType: { type: string }
+        status: { type: string, enum: [CREATED, SCHEDULED, RELEASED, IN_PROGRESS, ON_HOLD, COMPLETED, CLOSED, CANCELED] }
+        priority: { type: integer }
+        currency: { type: string }
+        planLineId: { type: string, format: uuid }
+        requestId: { type: string, format: uuid }
+        jobType: { type: string }
+        dueAt: { type: string, format: date-time }
+        actualStart: { type: string, format: date-time }
+        actualEnd: { type: string, format: date-time }
+        downtimeMinutes: { type: integer }
+        partsCost: { type: string, description: decimal string }
+        laborCost: { type: string, description: decimal string }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+    WorkOrderPage:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/WorkOrder" } }
+        nextCursor: { type: string, format: uuid }
+    WorkOrderDetail:
+      allOf:
+        - $ref: "#/components/schemas/WorkOrder"
+        - type: object
+          properties:
+            labor:
+              type: array
+              items:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+                  hours: { type: string }
+                  rate: { type: string }
+                  cost: { type: string }
+                  workerId: { type: string, format: uuid }
+                  createdAt: { type: string, format: date-time }
+            history:
+              type: array
+              items:
+                type: object
+                properties:
+                  from: { type: string }
+                  to: { type: string }
+                  at: { type: string, format: date-time }
+                  actor: { type: string }
+    StatusIn:
+      type: object
+      required: [to]
+      properties:
+        to: { type: string, enum: [CREATED, SCHEDULED, RELEASED, IN_PROGRESS, ON_HOLD, COMPLETED, CLOSED, CANCELED] }
+        actualStart: { type: string, format: date-time }
+        actualEnd: { type: string, format: date-time }
+        downtimeMinutes: { type: integer, minimum: 0, description: asset downtime, only with to = COMPLETED }
+    LaborIn:
+      type: object
+      required: [hours, rate]
+      properties:
+        hours: { type: string, description: positive decimal }
+        rate: { type: string, description: non-negative decimal }
+        workerId: { type: string, format: uuid }
+    Kpi:
+      type: object
+      properties:
+        failures: { type: integer }
+        mtbfHours: { type: number }
+        mttrHours: { type: number }
+        availability: { type: number }

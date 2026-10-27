@@ -1,0 +1,117 @@
+asyncapi: 3.0.0
+info:
+  title: Passage EAM events
+  version: 0.1.0
+  description: CloudEvents published through the transactional outbox (Debezium relay). Downtime and budget events arrive in later slices.
+defaultContentType: application/cloudevents+json
+channels:
+  requestCreated:
+    address: passage.eam.request
+    messages:
+      requestCreated:
+        $ref: "#/components/messages/RequestCreated"
+  workOrderCreated:
+    address: passage.eam.workorder
+    messages:
+      workOrderCreated:
+        $ref: "#/components/messages/WorkOrderCreated"
+  workOrderCompleted:
+    address: passage.eam.workorder
+    messages:
+      workOrderCompleted:
+        $ref: "#/components/messages/WorkOrderCompleted"
+  workOrderStatusChanged:
+    address: passage.eam.workorderstatus
+    messages:
+      workOrderStatusChanged:
+        $ref: "#/components/messages/WorkOrderStatusChanged"
+  counterReadingRegistered:
+    address: passage.eam.counterreading
+    messages:
+      counterReadingRegistered:
+        $ref: "#/components/messages/CounterReadingRegistered"
+operations:
+  publishRequestCreated:
+    action: send
+    channel: { $ref: "#/channels/requestCreated" }
+  publishWorkOrderCreated:
+    action: send
+    channel: { $ref: "#/channels/workOrderCreated" }
+  publishWorkOrderCompleted:
+    action: send
+    channel: { $ref: "#/channels/workOrderCompleted" }
+  publishWorkOrderStatusChanged:
+    action: send
+    channel: { $ref: "#/channels/workOrderStatusChanged" }
+  publishCounterReadingRegistered:
+    action: send
+    channel: { $ref: "#/channels/counterReadingRegistered" }
+components:
+  messages:
+    RequestCreated:
+      name: dev.passage.eam.request.created.v1
+      payload:
+        $ref: "#/components/schemas/RequestCreated"
+    WorkOrderCreated:
+      name: dev.passage.eam.workorder.created.v1
+      payload:
+        $ref: "#/components/schemas/WorkOrderCreated"
+    WorkOrderCompleted:
+      name: dev.passage.eam.workorder.completed.v1
+      payload:
+        $ref: "#/components/schemas/WorkOrderCompleted"
+    WorkOrderStatusChanged:
+      name: dev.passage.eam.workorderstatus.changed.v1
+      payload:
+        $ref: "#/components/schemas/WorkOrderStatusChanged"
+    CounterReadingRegistered:
+      name: dev.passage.eam.counterreading.registered.v1
+      payload:
+        $ref: "#/components/schemas/CounterReadingRegistered"
+  schemas:
+    RequestCreated:
+      type: object
+      required: [requestId, assetId, source, severity]
+      properties:
+        requestId: { type: string, format: uuid }
+        assetId: { type: string, format: uuid }
+        source: { type: string, enum: [USER, MOBILE, IOT, QUALITY, ROUND] }
+        severity: { type: integer, minimum: 1, maximum: 5 }
+        dedupeKey: { type: string }
+    WorkOrderCreated:
+      type: object
+      required: [workOrderId, assetId, type]
+      properties:
+        workOrderId: { type: string, format: uuid }
+        assetId: { type: string, format: uuid }
+        type: { type: string }
+        planLineId: { type: string, format: uuid }
+    WorkOrderCompleted:
+      type: object
+      required: [workOrderId, assetId, currency, partsCost, laborCost, downtimeMinutes, completedAt]
+      properties:
+        workOrderId: { type: string, format: uuid }
+        assetId: { type: string, format: uuid }
+        currency: { type: string }
+        partsCost: { type: string }
+        laborCost: { type: string }
+        downtimeMinutes: { type: integer }
+        completedAt: { type: string, format: date-time }
+    WorkOrderStatusChanged:
+      type: object
+      required: [workOrderId, from, to, at]
+      properties:
+        workOrderId: { type: string, format: uuid }
+        from: { type: string }
+        to: { type: string }
+        at: { type: string, format: date-time }
+        actor: { type: string, description: user who made the transition }
+    CounterReadingRegistered:
+      type: object
+      required: [counterId, assetId, value, at, source]
+      properties:
+        counterId: { type: string, format: uuid }
+        assetId: { type: string, format: uuid }
+        value: { type: number }
+        at: { type: string, format: date-time }
+        source: { type: string, enum: [MANUAL, IOT] }

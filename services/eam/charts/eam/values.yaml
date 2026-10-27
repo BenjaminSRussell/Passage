@@ -1,0 +1,39 @@
+image:
+  repository: ghcr.io/benjaminsrussell/passage-eam
+  # Pin by digest in GitOps overlays (rollback by digest).
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+service:
+  port: 8080
+
+# DATABASE_URL is read from this secret (Vault via External Secrets).
+database:
+  secretName: eam-database
+  secretKey: url
+
+config:
+  serviceName: eam
+  httpAddr: ":8080"
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+probes:
+  liveness:
+    path: /healthz
+    initialDelaySeconds: 5
+  readiness:
+    path: /readyz
+    initialDelaySeconds: 3
+
+serviceMonitor:
+  enabled: false
+  interval: 30s

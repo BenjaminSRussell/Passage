@@ -1,0 +1,6 @@
+apiVersion: v2
+name: eam
+description: Passage enterprise asset management API (wave 44)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
