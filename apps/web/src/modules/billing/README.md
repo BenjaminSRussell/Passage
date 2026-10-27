@@ -1,13 +1,15 @@
 # billing (web module)
 
-Billing and revenue recognition screens for wave 29 (PSG-29), slices 1 and 2. Built from the shell primitives in
+Billing and revenue recognition screens for wave 29 (PSG-29), slices 1 to 3. Built from the shell primitives in
 `src/shell/ui` and CSS Modules (`pages.module.css`), per `apps/web/docs/design-system.md`.
 
 | Route | Page | Service call | Duty |
 |---|---|---|---|
 | `/billing` | Invoices list with a status filter (loading, empty, error + retry) | `GET /api/v1/billing/invoices` | `billing.invoice.view` |
-| `/billing/free-text-invoices/new` | Free-text invoice form: header and repeatable lines with revenue account and tax code | `POST /api/v1/billing/free-text-invoices` (Idempotency-Key) | `billing.invoice.maintain` |
-| `/billing/invoices/:id` | Invoice detail: totals, lines, post action (If-Match on the version shown), BIL-0001/0002/0103 explained | `GET /api/v1/billing/invoices/{id}`, `POST …/{id}:post` | `billing.invoice.view` / `billing.invoice.post` |
+| `/billing/free-text-invoices/new` | Free-text invoice form: header, repeatable lines with revenue account and tax code, optional installment plan (shares must total 100%) | `POST /api/v1/billing/free-text-invoices` (Idempotency-Key) | `billing.invoice.maintain` |
+| `/billing/invoices/:id` | Invoice or credit note detail: totals, lines, installments, post action (If-Match on the version shown; BIL-0001/0002/0005/0103 explained). A posted invoice shows credited and left-to-credit amounts, credited quantity per line, its credit notes and a Credit invoice action; a credit note shows its original and reason and posts through the credit-note endpoint | `GET /api/v1/billing/invoices/{id}`, `GET …/invoices?type=CREDIT_NOTE&originalInvoiceId=`, `POST …/invoices/{id}:post`, `POST …/credit-notes/{id}:post` | `billing.invoice.view` / `billing.invoice.post` / `billing.creditnote.post` |
+| `/billing/credit-notes` | Credit notes list with a status filter: original invoice, credit date, gross (loading, empty, error + retry) | `GET /api/v1/billing/invoices?type=CREDIT_NOTE` | `billing.invoice.view` |
+| `/billing/credit-notes/new?invoice=:id` | Credit note form: whole remainder or chosen line quantities (left-to-credit shown per line), charges, credit date and reason; BIL-0005 explained | `GET /api/v1/billing/invoices/{id}`, `POST /api/v1/billing/credit-notes` (Idempotency-Key) | `billing.invoice.maintain` |
 | `/billing/revenue-allocation` | Revenue allocation preview: SSP allocation per obligation and ratable schedules (BR-29.1) | `POST /api/v1/revrec/allocations:preview` | `revrec.view` |
 | `/billing/revenue-contracts` | Revenue contracts list with status and customer filters: price, recognized, remaining (loading, empty, error + retry) | `GET /api/v1/revrec/contracts` | `revrec.view` |
 | `/billing/revenue-contracts/new` | Revenue contract form: header and repeatable obligations (product, SSP and source, method, transfer date or term) | `POST /api/v1/revrec/contracts` (Idempotency-Key) | `revrec.maintain` |
@@ -21,7 +23,7 @@ Tests: `npx vitest --run src/modules/billing` and `npx tsc --noEmit` in `apps/we
 `testServer.tsx` stubs `fetch` and mounts the module's routes; pages are checked with axe.
 
 Not yet here (see `services/billing/NOT-IMPLEMENTED.md`): billing workspace tiles, due
-list and shipment proposals, credit notes, subscriptions, document delivery, the
+list and shipment proposals, subscriptions, document delivery, credit-note documents (PDF), the
 roll-forward drill-down per contract and its tie to GL 2400.
 
 ## Needs

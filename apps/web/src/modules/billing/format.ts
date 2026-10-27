@@ -59,9 +59,12 @@ export const METHOD_LABELS: Record<RecognitionMethod, string> = {
   USAGE: "Usage",
 };
 
-/** The invoice's name for people: its number once posted, otherwise "Proposal". */
-export function invoiceName(inv: { number?: string; status: InvoiceStatus }): string {
-  return inv.number ? inv.number : inv.status === "PROPOSAL" ? "Proposal" : "Invoice";
+/** The document's name for people: its number once posted, otherwise "Proposal" or "Credit note proposal". */
+export function invoiceName(inv: { number?: string; status: InvoiceStatus; type?: string }): string {
+  if (inv.number) return inv.number;
+  const creditNote = inv.type === "CREDIT_NOTE";
+  if (inv.status === "PROPOSAL") return creditNote ? "Credit note proposal" : "Proposal";
+  return creditNote ? "Credit note" : "Invoice";
 }
 
 /** Today's calendar day in the browser's zone, as YYYY-MM-DD. */

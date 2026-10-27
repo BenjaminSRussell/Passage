@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -31,6 +32,8 @@ type fakeStore struct {
 	invoices      map[string]store.Invoice
 	creates       int
 	posts         int
+	creditCreates int
+	creditPosts   int
 	postedVersion int
 	lastFilter    store.ListFilter
 }
@@ -60,14 +63,69 @@ func (f *fakeStore) GetInvoice(_ context.Context, id string) (store.Invoice, err
 	if !ok {
 		return store.Invoice{}, httpx.NewProblem(http.StatusNotFound, store.CodeNotFound, "invoice not found")
 	}
+	if inv.Type != domain.TypeCreditNote {
+		inv.Credited = f.usage(id)
+	}
 	return inv, nil
+}
+
+// usage sums the posted credit notes of an original, as the store does.
+func (f *fakeStore) usage(id string) domain.CreditUsage {
+	u := domain.CreditUsage{Lines: map[int]domain.Credited{}, Charges: decimal.Zero, Gross: decimal.Zero}
+	for _, cn := range f.invoices {
+		if cn.OriginalInvoiceID != id || cn.Status != domain.StatusPosted {
+			continue
+		}
+		for _, l := range cn.Lines {
+			c := u.Lines[l.OriginalLineNo]
+			u.Lines[l.OriginalLineNo] = domain.Credited{Qty: c.Qty.Add(l.Qty), Net: c.Net.Add(l.Net), Tax: c.Tax.Add(l.Tax)}
+		}
+		u.Charges = u.Charges.Add(cn.Totals.Charges)
+		u.Gross = u.Gross.Add(cn.Totals.Gross)
+	}
+	return u
+}
+
+func (f *fakeStore) CreateCreditNote(_ context.Context, cn store.Invoice) (store.Invoice, error) {
+	f.creditCreates++
+	cn.Version = 1
+	f.invoices[cn.ID] = cn
+	return cn, nil
+}
+
+// PostCreditNote re-checks the remaining creditable amount like the store does
+// under the original's lock, so two proposals cannot both post.
+func (f *fakeStore) PostCreditNote(_ context.Context, id string, postingDate time.Time, _ int) (store.Invoice, error) {
+	cn := f.invoices[id]
+	orig := f.invoices[cn.OriginalInvoiceID]
+	original := make([]domain.PostedLine, len(orig.Lines))
+	for i, l := range orig.Lines {
+		original[i] = domain.PostedLine{Line: l.Line, Net: l.Net, Tax: l.Tax}
+	}
+	credit := make([]domain.CreditLine, len(cn.Lines))
+	for i, l := range cn.Lines {
+		credit[i] = domain.CreditLine{OriginalLineNo: l.OriginalLineNo, Line: l.Line, Net: l.Net, Tax: l.Tax}
+	}
+	if err := domain.VerifyCredit(cn.Currency, original, orig.Totals, f.usage(orig.ID), credit, cn.Totals); err != nil {
+		var de *domain.Error
+		errors.As(err, &de)
+		return store.Invoice{}, httpx.NewProblem(http.StatusUnprocessableEntity, de.Code, de.Detail)
+	}
+	f.creditPosts++
+	cn.Status = domain.StatusPosted
+	cn.Number = fmt.Sprintf("CN-%d-%07d", postingDate.Year(), f.creditPosts)
+	cn.PostingDate = postingDate
+	cn.Version++
+	f.invoices[id] = cn
+	return cn, nil
 }
 
 func (f *fakeStore) ListInvoices(_ context.Context, filter store.ListFilter) ([]store.Invoice, error) {
 	f.lastFilter = filter
 	var out []store.Invoice
 	for _, inv := range f.invoices {
-		if filter.Status == "" || inv.Status == filter.Status {
+		if (filter.Status == "" || inv.Status == filter.Status) && (filter.Type == "" || inv.Type == filter.Type) &&
+			(filter.OriginalInvoiceID == "" || inv.OriginalInvoiceID == filter.OriginalInvoiceID) {
 			out = append(out, inv)
 		}
 	}
@@ -103,7 +161,7 @@ func (f *fakeTax) Quote(_ context.Context, _ string, lines []domain.Line) ([]dec
 	return out, nil
 }
 
-const allDuties = "billing.invoice.view,billing.invoice.maintain,billing.invoice.post"
+const allDuties = "billing.invoice.view,billing.invoice.maintain,billing.invoice.post,billing.creditnote.post"
 
 // setup mounts the routes on the platform router, so tenant and duty headers
 // go through the same middleware as in production.

@@ -203,4 +203,227 @@ func TestRLS_TenantAndLegalEntityIsolation(t *testing.T) {
 	if mine, err := s.ListInvoices(t1, ListFilter{Limit: 10}); err != nil || len(mine) != 1 {
 		t.Fatalf("tenant 1 lists %d invoices, err %v", len(mine), err)
 	}
+	// Tenant 2 cannot credit tenant 1's invoice: the original is invisible to it.
+	foreign := newProposal(t, le)
+	foreign.Type, foreign.OriginalInvoiceID, foreign.Reason = domain.TypeCreditNote, a.ID, "x"
+	foreign.Lines[0].OriginalLineNo = 1
+	var p *httpx.Problem
+	if _, err := s.CreateCreditNote(t2, foreign); !errors.As(err, &p) || p.Code != domain.CodeCreditExceeded {
+		t.Fatalf("tenant 2 credit note on tenant 1's invoice: %v, want %s", err, domain.CodeCreditExceeded)
+	}
+}
+
+// postedOriginal stores and posts a 2-line invoice (100 + 19 tax, 3 × 10 + 5.70
+// tax) with 10.00 charges: gross 164.70.
+func postedOriginal(t *testing.T, s *Postgres, ctx context.Context, le string) Invoice {
+	t.Helper()
+	inv := newProposal(t, le)
+	second := domain.Line{No: 2, Description: "Parts", Qty: decimal.NewFromInt(3), UnitPrice: decimal.NewFromInt(10), RevenueAccount: "4010", TaxCode: "DE19"}
+	inv.Lines = append(inv.Lines, Line{Line: second, Net: decimal.NewFromInt(30), Tax: decimal.RequireFromString("5.70")})
+	inv.Totals = domain.Totals{Net: decimal.NewFromInt(130), Charges: decimal.NewFromInt(10), Tax: decimal.RequireFromString("24.70"), Gross: decimal.RequireFromString("164.70")}
+	if _, err := s.CreateProposal(ctx, inv); err != nil {
+		t.Fatal(err)
+	}
+	posted, err := s.PostProposal(ctx, inv.ID, time.Date(2027, 3, 12, 0, 0, 0, 0, time.UTC), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return posted
+}
+
+// creditNote plans a credit note against orig as the API does.
+func creditNote(t *testing.T, s *Postgres, ctx context.Context, origID string, req []domain.CreditQty) (Invoice, error) {
+	t.Helper()
+	orig, err := s.GetInvoice(ctx, origID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := make([]domain.PostedLine, len(orig.Lines))
+	for i, l := range orig.Lines {
+		original[i] = domain.PostedLine{Line: l.Line, Net: l.Net, Tax: l.Tax}
+	}
+	planned, totals, err := domain.PlanCredit(orig.Currency, original, orig.Totals, orig.Credited, req, nil)
+	if err != nil {
+		return Invoice{}, err
+	}
+	day := time.Date(2027, 3, 20, 0, 0, 0, 0, time.UTC)
+	cn := Invoice{ID: ids.New(), LegalEntityID: orig.LegalEntityID, CustomerID: orig.CustomerID, InvoiceAccountID: orig.InvoiceAccountID,
+		Type: domain.TypeCreditNote, Currency: orig.Currency, InvoiceDate: day, DueDate: day, Totals: totals,
+		OriginalInvoiceID: orig.ID, Reason: "Damaged in transit", IdempotencyKey: ids.New(), RequestHash: "h"}
+	for _, l := range planned {
+		cn.Lines = append(cn.Lines, Line{Line: l.Line, Net: l.Net, Tax: l.Tax, OriginalLineNo: l.OriginalLineNo})
+	}
+	return s.CreateCreditNote(ctx, cn)
+}
+
+func TestCreditNote_PostNumbersChecksRemainderAndPublishes(t *testing.T) {
+	pool := testkit.DB(t)
+	ctx := context.Background()
+	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	tctx := ctxAllEntities(testkit.TenantID(1))
+	s := New(pool)
+	le := ids.New()
+	orig := postedOriginal(t, s, tctx, le)
+
+	// Two proposals for 2 of the 3 parts each fit alone; only one can post.
+	first, err := creditNote(t, s, tctx, orig.ID, []domain.CreditQty{{LineNo: 2, Qty: decimal.NewFromInt(2)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := creditNote(t, s, tctx, orig.ID, []domain.CreditQty{{LineNo: 2, Qty: decimal.NewFromInt(2)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.PostProposal(tctx, first.ID, time.Now(), 0); err == nil {
+		t.Fatal("a credit note must not post through PostProposal")
+	}
+	postDay := time.Date(2027, 3, 21, 0, 0, 0, 0, time.UTC)
+	if _, err := s.PostCreditNote(tctx, orig.ID, postDay, 0); err == nil {
+		t.Fatal("an invoice must not post through PostCreditNote")
+	}
+	p1, err := s.PostCreditNote(tctx, first.ID, postDay, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p1.Number != "CN-2027-0000001" || p1.OriginalNumber != orig.Number || !p1.Totals.Gross.Equal(decimal.RequireFromString("23.80")) {
+		t.Fatalf("posted credit note %s for %s gross %s, want CN-2027-0000001 for %s gross 23.80", p1.Number, p1.OriginalNumber, p1.Totals.Gross, orig.Number)
+	}
+	_, err = s.PostCreditNote(tctx, second.ID, postDay, 0)
+	var p *httpx.Problem
+	if !errors.As(err, &p) || p.Status != http.StatusUnprocessableEntity || p.Code != domain.CodeCreditExceeded {
+		t.Fatalf("overtaken credit note: got %v, want 422 %s", err, domain.CodeCreditExceeded)
+	}
+
+	after, err := s.GetInvoice(tctx, orig.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := after.Credited.Lines[2]; !c.Qty.Equal(decimal.NewFromInt(2)) || !c.Net.Equal(decimal.NewFromInt(20)) || !c.Tax.Equal(decimal.RequireFromString("3.80")) || !after.Credited.Gross.Equal(decimal.RequireFromString("23.80")) {
+		t.Fatalf("credit usage %+v, want 2 parts, 20.00 net, 3.80 tax, 23.80 gross; the refused note must not count", after.Credited)
+	}
+	// The rest of the invoice credits to the cent and leaves nothing.
+	rest, err := creditNote(t, s, tctx, orig.ID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rest.Totals.Gross.Equal(decimal.RequireFromString("140.90")) {
+		t.Fatalf("remainder %s, want 164.70 - 23.80 = 140.90", rest.Totals.Gross)
+	}
+	p2, err := s.PostCreditNote(tctx, rest.ID, postDay, 0)
+	if err != nil || p2.Number != "CN-2027-0000002" {
+		t.Fatalf("post the remainder: %s %v; the refused post must not consume a CN number", p2.Number, err)
+	}
+	if _, err := creditNote(t, s, tctx, orig.ID, nil); err == nil {
+		t.Fatal("a fully credited invoice must not be credited again")
+	}
+
+	var payload struct {
+		Type string `json:"type"`
+		Data struct {
+			CreditNoteID      string `json:"credit_note_id"`
+			Number            string `json:"number"`
+			OriginalInvoiceID string `json:"original_invoice_id"`
+			OriginalNumber    string `json:"original_number"`
+			Reason            string `json:"reason"`
+			Lines             []struct {
+				OriginalLineNo int    `json:"original_line_no"`
+				Qty            string `json:"qty"`
+				Tax            string `json:"tax"`
+			} `json:"lines"`
+			Totals struct {
+				Gross string `json:"gross"`
+			} `json:"totals"`
+		} `json:"data"`
+	}
+	var raw []byte
+	if err := pool.QueryRow(ctx, `select payload from outbox where aggregate_id = $1`, first.ID).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatal(err)
+	}
+	d := payload.Data
+	if payload.Type != "dev.passage.billing.creditnote.posted.v1" || d.Number != p1.Number || d.OriginalInvoiceID != orig.ID || d.OriginalNumber != orig.Number ||
+		d.Reason != "Damaged in transit" || d.Totals.Gross != "23.80" || len(d.Lines) != 1 || d.Lines[0].OriginalLineNo != 2 || d.Lines[0].Qty != "2" || d.Lines[0].Tax != "3.80" {
+		t.Errorf("creditnote.posted payload %s %+v", payload.Type, d)
+	}
+	cns, err := s.ListInvoices(tctx, ListFilter{Type: domain.TypeCreditNote, OriginalInvoiceID: orig.ID, Limit: 10})
+	if err != nil || len(cns) != 3 || cns[0].OriginalNumber != orig.Number {
+		t.Fatalf("credit notes of the original: %d, err %v", len(cns), err)
+	}
+}
+
+func TestCreditNote_OriginalMustBePosted(t *testing.T) {
+	pool := testkit.DB(t)
+	ctx := context.Background()
+	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	tctx := ctxAllEntities(testkit.TenantID(1))
+	s := New(pool)
+	prop, err := s.CreateProposal(tctx, newProposal(t, ids.New()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cn := prop
+	cn.ID, cn.Type, cn.OriginalInvoiceID, cn.Reason, cn.IdempotencyKey = ids.New(), domain.TypeCreditNote, prop.ID, "x", ids.New()
+	for i := range cn.Lines {
+		cn.Lines[i].OriginalLineNo = cn.Lines[i].No
+	}
+	_, err = s.CreateCreditNote(tctx, cn)
+	var p *httpx.Problem
+	if !errors.As(err, &p) || p.Code != domain.CodeCreditExceeded {
+		t.Fatalf("credit note on a proposal: got %v, want %s", err, domain.CodeCreditExceeded)
+	}
+}
+
+func TestInstallments_StoredAndPublished(t *testing.T) {
+	pool := testkit.DB(t)
+	ctx := context.Background()
+	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	tctx := ctxAllEntities(testkit.TenantID(1))
+	s := New(pool)
+	inv := newProposal(t, ids.New())
+	terms := []domain.InstallmentTerm{{Percent: decimal.NewFromInt(30), OffsetDays: 0}, {Percent: decimal.NewFromInt(70), OffsetDays: 30}}
+	split, err := domain.SplitInstallments(inv.Currency, inv.Totals.Gross, inv.InvoiceDate, terms)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, in := range split {
+		inv.Installments = append(inv.Installments, Installment{Installment: in, Term: terms[i]})
+	}
+	if _, err := s.CreateProposal(tctx, inv); err != nil {
+		t.Fatal(err)
+	}
+	posted, err := s.PostProposal(tctx, inv.ID, time.Date(2027, 3, 12, 0, 0, 0, 0, time.UTC), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(posted.Installments) != 2 || !posted.Installments[0].Amount.Equal(decimal.RequireFromString("35.70")) || posted.Installments[1].Term.OffsetDays != 30 {
+		t.Fatalf("installments read back %+v", posted.Installments)
+	}
+	var payload struct {
+		Data struct {
+			Installments []struct {
+				No      int    `json:"no"`
+				Amount  string `json:"amount"`
+				DueDate string `json:"due_date"`
+			} `json:"installments"`
+		} `json:"data"`
+	}
+	var raw []byte
+	if err := pool.QueryRow(ctx, `select payload from outbox where aggregate_id = $1`, inv.ID).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatal(err)
+	}
+	got := payload.Data.Installments
+	if len(got) != 2 || got[0].Amount != "35.70" || got[1].Amount != "83.30" || got[1].DueDate != "2027-04-09" {
+		t.Errorf("invoice.posted installments %+v, want 35.70 due 03-10 and 83.30 due 04-09", got)
+	}
 }

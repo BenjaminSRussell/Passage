@@ -2,7 +2,7 @@ asyncapi: 3.0.0
 info:
   title: Passage Billing events
   version: 0.1.0
-  description: CloudEvents published by the billing context (PSG-29, slice 1).
+  description: CloudEvents published by the billing context (PSG-29, slices 1 and 3).
 defaultContentType: application/cloudevents+json
 channels:
   invoicePosted:
@@ -11,12 +11,23 @@ channels:
     messages:
       invoicePosted:
         $ref: "#/components/messages/InvoicePosted"
+      creditNotePosted:
+        $ref: "#/components/messages/CreditNotePosted"
 operations:
   publishInvoicePosted:
     action: send
     channel:
       $ref: "#/channels/invoicePosted"
     summary: Billing publishes invoice.posted when a free-text proposal posts.
+    messages:
+      - $ref: "#/channels/invoicePosted/messages/invoicePosted"
+  publishCreditNotePosted:
+    action: send
+    channel:
+      $ref: "#/channels/invoicePosted"
+    summary: Billing publishes creditnote.posted when a credit note proposal posts (FR-29.5).
+    messages:
+      - $ref: "#/channels/invoicePosted/messages/creditNotePosted"
 components:
   messages:
     InvoicePosted:
@@ -24,7 +35,7 @@ components:
       contentType: application/cloudevents+json
       payload:
         type: object
-        required: [invoice_id, number, type, legal_entity_id, customer, invoice_account, currency, invoice_date, posting_date, due_date, lines, totals, journal_posting_id, intercompany]
+        required: [invoice_id, number, type, legal_entity_id, customer, invoice_account, currency, invoice_date, posting_date, due_date, lines, totals, installments, journal_posting_id, intercompany]
         additionalProperties: false
         properties:
           invoice_id: { type: string, format: uuid }
@@ -60,7 +71,75 @@ components:
               charges: { type: string }
               tax: { type: string }
               gross: { type: string }
+          installments:
+            type: array
+            description: >
+              One open item per installment (FR-29.18, BR-29.11), all under the
+              invoice number; amounts sum to totals.gross exactly. Empty when the
+              invoice has no installment plan (one open item for the gross, due on
+              due_date). Tax is reported once on the invoice, not per installment.
+            items:
+              type: object
+              required: [no, amount, due_date]
+              additionalProperties: false
+              properties:
+                no: { type: integer, minimum: 1 }
+                amount: { type: string, description: "Decimal string at the currency's minor unit." }
+                due_date: { type: string, format: date }
           journal_posting_id:
             type: [string, "null"]
             description: Null until the ledger journal is wired (later slice).
           intercompany: { type: boolean }
+    CreditNotePosted:
+      name: dev.passage.billing.creditnote.posted.v1
+      contentType: application/cloudevents+json
+      description: >
+        The PRD names this event passage.billing.credit-note.posted.v1; the
+        platform type grammar allows lowercase letters and digits per segment, so
+        the entity is "creditnote". Amounts are positive magnitudes that reduce
+        AR, revenue and tax. Receivables settles the original's open items with
+        it; revrec reverses recognized and deferred revenue (BR-29.6); the ledger
+        books the reversal journal.
+      payload:
+        type: object
+        required: [credit_note_id, number, original_invoice_id, original_number, reason, legal_entity_id, customer, invoice_account, currency, credit_date, posting_date, lines, totals, journal_posting_id]
+        additionalProperties: false
+        properties:
+          credit_note_id: { type: string, format: uuid }
+          number: { type: string, description: "CN-<year>-<7 digits>, gap-free per entity and year." }
+          original_invoice_id: { type: string, format: uuid }
+          original_number: { type: string }
+          reason: { type: string }
+          legal_entity_id: { type: string, format: uuid }
+          customer: { type: string, format: uuid }
+          invoice_account: { type: string, format: uuid }
+          currency: { type: string, pattern: "^[A-Z]{3}$" }
+          credit_date: { type: string, format: date }
+          posting_date: { type: string, format: date }
+          lines:
+            type: array
+            items:
+              type: object
+              required: [line_no, original_line_no, description, qty, net, tax, tax_code, revenue_account]
+              additionalProperties: false
+              properties:
+                line_no: { type: integer }
+                original_line_no: { type: integer, description: "The credited line of the original invoice." }
+                description: { type: string }
+                qty: { type: string }
+                net: { type: string, description: "Decimal string at the currency's minor unit." }
+                tax: { type: string, description: "Decimal string at the currency's minor unit." }
+                tax_code: { type: string }
+                revenue_account: { type: string }
+          totals:
+            type: object
+            required: [net, charges, tax, gross]
+            additionalProperties: false
+            properties:
+              net: { type: string }
+              charges: { type: string }
+              tax: { type: string }
+              gross: { type: string }
+          journal_posting_id:
+            type: [string, "null"]
+            description: Null until the ledger journal is wired (later slice).

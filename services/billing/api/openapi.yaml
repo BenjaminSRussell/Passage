@@ -3,9 +3,11 @@ info:
   title: Passage Billing API
   version: 0.1.0
   description: >
-    Invoice proposals, posting and reads for the billing context (PSG-29, slice 1).
-    Slice 1 covers free-text invoices only. Shipment, consolidated, subscription
-    and credit-note flows arrive in later slices (see NOT-IMPLEMENTED.md).
+    Invoice proposals, posting and reads for the billing context (PSG-29).
+    Slice 1 covers free-text invoices; slice 3 adds installment plans on the
+    free-text proposal (FR-29.18) and credit notes against posted invoices
+    (FR-29.5). Shipment, consolidated and subscription flows arrive in later
+    slices (see NOT-IMPLEMENTED.md).
 servers:
   - url: https://api.{env}.passage.dev
     variables:
@@ -20,7 +22,10 @@ paths:
         Quotes tax per line through the tax engine (FR-29.6). When the engine is
         unavailable nothing is stored (503 BIL-0001); a tax code the engine does
         not know is refused (422 BIL-0102). A caller scoped to one legal entity
-        may only invoice for that entity (403 AUTH-0003).
+        may only invoice for that entity (403 AUTH-0003). With installmentTerms
+        the gross is split into one open item per installment (BR-29.11):
+        round_half_even(gross × pct) each, the residual on the last, due on the
+        invoice date + offset; the invoice's due date is the last installment's.
       x-passage-duty: billing.invoice.maintain (InvoiceMaintain)
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -64,7 +69,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
         "422":
-          description: Idempotency-Key reused with another body (idempotency_key_reuse) or unknown tax code (BIL-0102).
+          description: >
+            Idempotency-Key reused with another body (idempotency_key_reuse), unknown
+            tax code (BIL-0102) or installment percentages not totalling 100 (BIL-0011).
           content:
             application/problem+json:
               schema:
@@ -80,8 +87,15 @@ paths:
         - name: status
           in: query
           schema: { type: string, enum: [PROPOSAL, POSTED, PARTIALLY_SETTLED, SETTLED, REVERSED] }
+        - name: type
+          in: query
+          schema: { type: string, enum: [SHIPMENT, CONSOLIDATED, FREE_TEXT, SUBSCRIPTION, MILESTONE, CREDIT_NOTE] }
         - name: customerId
           in: query
+          schema: { type: string, format: uuid }
+        - name: originalInvoiceId
+          in: query
+          description: Only the credit notes of this invoice.
           schema: { type: string, format: uuid }
         - name: limit
           in: query
@@ -108,7 +122,11 @@ paths:
   /v1/billing/invoices/{id}:
     get:
       operationId: getInvoice
-      summary: Read one invoice with its lines and totals.
+      summary: Read one invoice or credit note with its lines, installments and totals.
+      description: >
+        A posted invoice that can be credited also carries `credited` (gross of its
+        posted credit notes and the remaining creditable amount) and per line the
+        quantity credited so far.
       x-passage-duty: billing.invoice.view (InvoiceView)
       parameters:
         - $ref: "#/components/parameters/InvoiceId"
@@ -175,6 +193,125 @@ paths:
           $ref: "#/components/responses/Problem"
         "503":
           $ref: "#/components/responses/Problem"
+  /v1/billing/credit-notes:
+    post:
+      operationId: createCreditNote
+      summary: Propose a credit note against a posted invoice (FR-29.5).
+      description: >
+        Without `lines` the whole remainder of the original is credited, header
+        charges included; with `lines` only those quantities of the original's
+        lines are credited, plus `chargeAmount` when given. Lines copy the
+        original's description, price, revenue account and tax code. Tax is the
+        original's, pro rata to the quantity (half-even to the minor unit), and
+        the last remaining quantity of a line takes exactly what is left, so
+        partial credits sum to the original to the cent; tax is not re-quoted.
+        A credit beyond what the original still allows, or of an invoice that is
+        not posted, is refused with 422 BIL-0005. Amounts are positive
+        magnitudes; the type CREDIT_NOTE carries the sign.
+      x-passage-duty: billing.invoice.maintain (InvoiceMaintain)
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreditNoteRequest"
+      responses:
+        "201":
+          description: Credit note proposal created.
+          headers:
+            ETag:
+              description: The credit note version, to send as If-Match when posting.
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Invoice"
+        "200":
+          description: Idempotent replay of an earlier completed request with the same body.
+          headers:
+            Idempotent-Replayed:
+              schema: { type: string, enum: ["true"] }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Invoice"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          description: The original invoice does not exist (BIL-0100).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: A concurrent request holds the same Idempotency-Key (idempotency_in_progress).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: Credit beyond the remaining creditable amount or original not posted (BIL-0005), or Idempotency-Key reuse (idempotency_key_reuse).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/billing/credit-notes/{id}:post:
+    post:
+      operationId: postCreditNote
+      summary: Post a credit note proposal with the next gap-free CN- number.
+      x-passage-duty: billing.creditnote.post (CreditNotePost)
+      description: >
+        Locks the original invoice and re-checks the remaining creditable amount
+        against the credit notes posted since the proposal (422 BIL-0005), then
+        assigns `CN-<year>-<7 digits>` and publishes creditnote.posted. Posting an
+        already posted credit note returns it unchanged. An invoice id is refused
+        with 409 BIL-0101 (invoices post through /v1/billing/invoices/{id}:post,
+        which in turn refuses credit notes).
+      parameters:
+        - $ref: "#/components/parameters/InvoiceId"
+        - name: If-Match
+          in: header
+          required: false
+          description: The ETag (version) the caller reviewed; a stale value returns 412 BIL-0103.
+          schema: { type: string }
+      responses:
+        "200":
+          description: The posted credit note with its number.
+          headers:
+            ETag:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Invoice"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          description: Not a credit note proposal (BIL-0101).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "422":
+          description: The credit no longer fits the original (BIL-0005).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
 components:
   parameters:
     IdempotencyKey:
@@ -213,6 +350,20 @@ components:
         invoiceDate: { type: string, format: date }
         paymentTermDays: { type: integer, minimum: 0, maximum: 365 }
         chargeAmount: { type: string, pattern: "^[0-9]{1,14}(\\.[0-9]{1,6})?$", description: "Header charge, non-negative decimal." }
+        installmentTerms:
+          type: array
+          maxItems: 24
+          description: >
+            Installment plan (FR-29.18); percentages must total 100 (BIL-0011) and
+            offsets must not decrease. Until the wave-7 payment-terms client is
+            wired the plan is sent with the proposal.
+          items:
+            type: object
+            required: [percent, offsetDays]
+            additionalProperties: false
+            properties:
+              percent: { type: string, pattern: "^[0-9]{1,14}(\\.[0-9]{1,6})?$", description: "Above 0, at most 100." }
+              offsetDays: { type: integer, minimum: 0, maximum: 365 }
         lines:
           type: array
           minItems: 1
@@ -230,6 +381,29 @@ components:
         discountPct: { type: string, pattern: "^[0-9]{1,14}(\\.[0-9]{1,6})?$", description: "Percent 0 to 100." }
         revenueAccount: { type: string, pattern: "^[A-Za-z0-9._-]{1,20}$", description: "Ledger account; missing returns the field error ending (BIL-0004)." }
         taxCode: { type: string, pattern: "^[A-Z0-9_-]{1,20}$", description: "Tax code quoted by the tax engine (FR-29.4)." }
+    CreditNoteRequest:
+      type: object
+      required: [originalInvoiceId, creditDate, reason]
+      additionalProperties: false
+      properties:
+        originalInvoiceId: { type: string, format: uuid, description: "The posted invoice to credit." }
+        creditDate: { type: string, format: date, description: "Document date of the credit note; not before the original's invoice date." }
+        reason: { type: string, minLength: 1, maxLength: 200, description: "Printed on the credit note (EU VAT Directive art. 219)." }
+        chargeAmount:
+          type: string
+          pattern: "^[0-9]{1,14}(\\.[0-9]{1,6})?$"
+          description: Header charges to credit; only with lines (a whole credit includes the remaining charges).
+        lines:
+          type: array
+          maxItems: 2000
+          description: Quantities of the original's lines to credit; omit to credit the whole remainder.
+          items:
+            type: object
+            required: [lineNo, qty]
+            additionalProperties: false
+            properties:
+              lineNo: { type: integer, minimum: 1 }
+              qty: { type: string, pattern: "^[0-9]{1,14}(\\.[0-9]{1,6})?$", description: "Positive; at most the line's remaining quantity." }
     Money:
       type: string
       pattern: "^-?[0-9]+\\.[0-9]+$"
@@ -238,8 +412,28 @@ components:
       allOf:
         - $ref: "#/components/schemas/InvoiceSummary"
         - type: object
-          required: [lines]
+          required: [lines, installments]
           properties:
+            reason: { type: string, description: "Credit note reason." }
+            credited:
+              type: object
+              description: On a posted invoice that can be credited.
+              required: [gross, remaining]
+              properties:
+                gross: { $ref: "#/components/schemas/Money" }
+                remaining: { $ref: "#/components/schemas/Money" }
+            installments:
+              type: array
+              description: Open items of the installment plan; empty without a plan.
+              items:
+                type: object
+                required: [no, percent, offsetDays, amount, dueDate]
+                properties:
+                  no: { type: integer }
+                  percent: { type: string }
+                  offsetDays: { type: integer }
+                  amount: { $ref: "#/components/schemas/Money" }
+                  dueDate: { type: string, format: date }
             lines:
               type: array
               items:
@@ -255,6 +449,8 @@ components:
                   tax: { $ref: "#/components/schemas/Money" }
                   revenueAccount: { type: string }
                   taxCode: { type: string }
+                  originalLineNo: { type: integer, description: "On a credit note: the credited line of the original." }
+                  creditedQty: { type: string, description: "On a creditable invoice: quantity credited by posted credit notes." }
     InvoiceSummary:
       type: object
       required: [id, legalEntityId, customerId, invoiceAccountId, type, status, currency, invoiceDate, dueDate, paymentTermDays, totals, version]
@@ -263,14 +459,16 @@ components:
         legalEntityId: { type: string, format: uuid }
         customerId: { type: string, format: uuid }
         invoiceAccountId: { type: string, format: uuid }
-        type: { type: string, enum: [SHIPMENT, CONSOLIDATED, FREE_TEXT, SUBSCRIPTION, MILESTONE, CREDIT_NOTE], description: "Slice 1 creates FREE_TEXT only." }
-        status: { type: string, enum: [PROPOSAL, POSTED, PARTIALLY_SETTLED, SETTLED, REVERSED], description: "Slice 1 reaches PROPOSAL and POSTED." }
-        number: { type: string, description: "INV-<year>-<7 digits>, present once posted." }
+        type: { type: string, enum: [SHIPMENT, CONSOLIDATED, FREE_TEXT, SUBSCRIPTION, MILESTONE, CREDIT_NOTE], description: "Slices 1 and 3 create FREE_TEXT and CREDIT_NOTE." }
+        status: { type: string, enum: [PROPOSAL, POSTED, PARTIALLY_SETTLED, SETTLED, REVERSED], description: "PROPOSAL and POSTED are reached so far." }
+        number: { type: string, description: "INV-<year>-<7 digits> for an invoice, CN-<year>-<7 digits> for a credit note; present once posted." }
         currency: { type: string }
         invoiceDate: { type: string, format: date }
         dueDate: { type: string, format: date }
         postingDate: { type: string, format: date }
         paymentTermDays: { type: integer }
+        originalInvoiceId: { type: string, format: uuid, description: "On a credit note." }
+        originalNumber: { type: string, description: "On a credit note: the original's invoice number." }
         totals:
           type: object
           required: [net, charges, tax, gross]

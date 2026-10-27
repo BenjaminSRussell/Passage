@@ -1,5 +1,6 @@
-// Package api serves the billing HTTP surface: free-text invoice proposals,
-// their posting (tax, gap-free number, invoice.posted) and invoice reads.
+// Package api serves the billing HTTP surface: free-text invoice proposals
+// with optional installment plans, their posting (tax, gap-free number,
+// invoice.posted), credit notes against posted invoices and invoice reads.
 package api
 
 import (
@@ -39,10 +40,14 @@ const (
 	defaultListLimit = 100
 	maxListLimit     = 200
 	maxAccountLength = 20
-	// Duties (§5.29.17): InvoiceView, InvoiceMaintain, InvoicePost.
-	dutyView     = "billing.invoice.view"
-	dutyMaintain = "billing.invoice.maintain"
-	dutyPost     = "billing.invoice.post"
+	maxReasonLength  = 200
+	maxInstallments  = 24
+	maxOffsetDays    = 365
+	// Duties (§5.29.17): InvoiceView, InvoiceMaintain, InvoicePost, CreditNotePost.
+	dutyView       = "billing.invoice.view"
+	dutyMaintain   = "billing.invoice.maintain"
+	dutyPost       = "billing.invoice.post"
+	dutyCreditPost = "billing.creditnote.post"
 	// CodeTaxUnavailable is BIL-0001: the tax engine did not answer, so nothing posts.
 	CodeTaxUnavailable = "BIL-0001"
 	// CodeTaxMoved is BIL-0002: the tax re-quote at post moved beyond tolerance.
@@ -56,6 +61,7 @@ var (
 	decimalText  = regexp.MustCompile(`^[0-9]{1,14}(\.[0-9]{1,6})?$`)
 	accountText  = regexp.MustCompile(`^[A-Za-z0-9._-]{1,20}$`)
 	statuses     = map[string]bool{domain.StatusProposal: true, domain.StatusPosted: true, domain.StatusPartiallySettled: true, domain.StatusSettled: true, domain.StatusReversed: true}
+	types        = map[string]bool{domain.TypeShipment: true, domain.TypeConsolidated: true, domain.TypeFreeText: true, domain.TypeSubscription: true, domain.TypeMilestone: true, domain.TypeCreditNote: true}
 )
 
 // Store is the persistence the handlers need; store.Postgres implements it.
@@ -63,9 +69,11 @@ type Store interface {
 	Ping(ctx context.Context) error
 	FindByIdempotencyKey(ctx context.Context, key string) (store.Invoice, bool, error)
 	CreateProposal(ctx context.Context, inv store.Invoice) (store.Invoice, error)
+	CreateCreditNote(ctx context.Context, cn store.Invoice) (store.Invoice, error)
 	GetInvoice(ctx context.Context, id string) (store.Invoice, error)
 	ListInvoices(ctx context.Context, f store.ListFilter) ([]store.Invoice, error)
 	PostProposal(ctx context.Context, id string, postingDate time.Time, expectedVersion int) (store.Invoice, error)
+	PostCreditNote(ctx context.Context, id string, postingDate time.Time, expectedVersion int) (store.Invoice, error)
 }
 
 // API holds the dependencies of the handlers and their counters.
@@ -75,9 +83,11 @@ type API struct {
 	maxLines int
 	now      func() time.Time
 
-	proposalsCreated atomic.Int64
-	invoicesPosted   atomic.Int64
-	postsRefused     atomic.Int64
+	proposalsCreated   atomic.Int64
+	invoicesPosted     atomic.Int64
+	postsRefused       atomic.Int64
+	creditNotesCreated atomic.Int64
+	creditNotesPosted  atomic.Int64
 }
 
 // New returns the handlers. maxLines bounds a proposal (BILLING_MAX_LINES).
@@ -92,6 +102,8 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/billing/invoices", a.listInvoices)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/billing/invoices/{id}", a.getInvoice)
 	r.With(authz.RequireDuty(dutyPost)).Post("/v1/billing/invoices/{id}:post", a.postInvoice)
+	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/billing/credit-notes", a.createCreditNote)
+	r.With(authz.RequireDuty(dutyCreditPost)).Post("/v1/billing/credit-notes/{id}:post", a.postCreditNote)
 }
 
 // Metrics serves the counters in the Prometheus text format on the admin port.
@@ -101,6 +113,8 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP billing_proposals_created_total Invoice proposals created; idempotent replays are not counted.\n# TYPE billing_proposals_created_total counter\nbilling_proposals_created_total %d\n", a.proposalsCreated.Load())
 		fmt.Fprintf(w, "# HELP billing_invoices_posted_total Invoices posted with a number.\n# TYPE billing_invoices_posted_total counter\nbilling_invoices_posted_total %d\n", a.invoicesPosted.Load())
 		fmt.Fprintf(w, "# HELP billing_posts_refused_total Posts refused because tax was unavailable, unknown or moved.\n# TYPE billing_posts_refused_total counter\nbilling_posts_refused_total %d\n", a.postsRefused.Load())
+		fmt.Fprintf(w, "# HELP billing_credit_notes_created_total Credit note proposals created; idempotent replays are not counted.\n# TYPE billing_credit_notes_created_total counter\nbilling_credit_notes_created_total %d\n", a.creditNotesCreated.Load())
+		fmt.Fprintf(w, "# HELP billing_credit_notes_posted_total Credit notes posted with a number.\n# TYPE billing_credit_notes_posted_total counter\nbilling_credit_notes_posted_total %d\n", a.creditNotesPosted.Load())
 	})
 }
 
@@ -124,15 +138,24 @@ type lineDTO struct {
 	TaxCode        string `json:"taxCode"`
 }
 
+// installmentTermDTO is one installment of the payment terms: a percentage of
+// the gross due offsetDays after the invoice date (FR-29.18). Until the wave-7
+// terms client is wired, the plan is sent with the proposal.
+type installmentTermDTO struct {
+	Percent    string `json:"percent"`
+	OffsetDays int    `json:"offsetDays"`
+}
+
 type proposalRequest struct {
-	LegalEntityID    string    `json:"legalEntityId"`
-	CustomerID       string    `json:"customerId"`
-	InvoiceAccountID string    `json:"invoiceAccountId"`
-	Currency         string    `json:"currency"`
-	InvoiceDate      string    `json:"invoiceDate"`
-	PaymentTermDays  int       `json:"paymentTermDays"`
-	ChargeAmount     string    `json:"chargeAmount,omitempty"`
-	Lines            []lineDTO `json:"lines"`
+	LegalEntityID    string               `json:"legalEntityId"`
+	CustomerID       string               `json:"customerId"`
+	InvoiceAccountID string               `json:"invoiceAccountId"`
+	Currency         string               `json:"currency"`
+	InvoiceDate      string               `json:"invoiceDate"`
+	PaymentTermDays  int                  `json:"paymentTermDays"`
+	ChargeAmount     string               `json:"chargeAmount,omitempty"`
+	InstallmentTerms []installmentTermDTO `json:"installmentTerms,omitempty"`
+	Lines            []lineDTO            `json:"lines"`
 }
 
 type totalsDTO struct {
@@ -152,6 +175,22 @@ type lineOutDTO struct {
 	Tax            string `json:"tax"`
 	RevenueAccount string `json:"revenueAccount"`
 	TaxCode        string `json:"taxCode"`
+	OriginalLineNo int    `json:"originalLineNo,omitempty"`
+	CreditedQty    string `json:"creditedQty,omitempty"`
+}
+
+type installmentOutDTO struct {
+	No         int    `json:"no"`
+	Percent    string `json:"percent"`
+	OffsetDays int    `json:"offsetDays"`
+	Amount     string `json:"amount"`
+	DueDate    string `json:"dueDate"`
+}
+
+// creditedDTO is what posted credit notes took from an invoice and what is left.
+type creditedDTO struct {
+	Gross     string `json:"gross"`
+	Remaining string `json:"remaining"`
 }
 
 type summaryDTO struct {
@@ -168,12 +207,18 @@ type summaryDTO struct {
 	PostingDate      string    `json:"postingDate,omitempty"`
 	PaymentTermDays  int       `json:"paymentTermDays"`
 	Totals           totalsDTO `json:"totals"`
-	Version          int       `json:"version"`
+	// OriginalInvoiceID and OriginalNumber are set on a credit note.
+	OriginalInvoiceID string `json:"originalInvoiceId,omitempty"`
+	OriginalNumber    string `json:"originalNumber,omitempty"`
+	Version           int    `json:"version"`
 }
 
 type invoiceDTO struct {
 	summaryDTO
-	Lines []lineOutDTO `json:"lines"`
+	Reason       string              `json:"reason,omitempty"`
+	Lines        []lineOutDTO        `json:"lines"`
+	Installments []installmentOutDTO `json:"installments"`
+	Credited     *creditedDTO        `json:"credited,omitempty"`
 }
 
 type listDTO struct {
@@ -185,6 +230,7 @@ func toSummary(inv store.Invoice) summaryDTO {
 	out := summaryDTO{ID: inv.ID, LegalEntityID: inv.LegalEntityID, CustomerID: inv.CustomerID, InvoiceAccountID: inv.InvoiceAccountID,
 		Type: inv.Type, Status: inv.Status, Number: inv.Number, Currency: inv.Currency, InvoiceDate: inv.InvoiceDate.Format(dateLayout),
 		DueDate: inv.DueDate.Format(dateLayout), PaymentTermDays: inv.PaymentTermDays, Version: inv.Version,
+		OriginalInvoiceID: inv.OriginalInvoiceID, OriginalNumber: inv.OriginalNumber,
 		Totals: totalsDTO{Net: fixed(inv.Totals.Net, exp), Charges: fixed(inv.Totals.Charges, exp), Tax: fixed(inv.Totals.Tax, exp), Gross: fixed(inv.Totals.Gross, exp)}}
 	if !inv.PostingDate.IsZero() {
 		out.PostingDate = inv.PostingDate.Format(dateLayout)
@@ -194,10 +240,27 @@ func toSummary(inv store.Invoice) summaryDTO {
 
 func toDTO(inv store.Invoice) invoiceDTO {
 	exp := money.MinorUnits(inv.Currency)
-	out := invoiceDTO{summaryDTO: toSummary(inv), Lines: []lineOutDTO{}}
+	out := invoiceDTO{summaryDTO: toSummary(inv), Reason: inv.Reason, Lines: []lineOutDTO{}, Installments: []installmentOutDTO{}}
+	creditable := inv.Type != domain.TypeCreditNote && domain.CanBeCredited(inv.Status, inv.Type) == nil
 	for _, l := range inv.Lines {
-		out.Lines = append(out.Lines, lineOutDTO{LineNo: l.No, Description: l.Description, Qty: l.Qty.String(), UnitPrice: l.UnitPrice.String(),
-			DiscountPct: l.DiscountPct.String(), Net: fixed(l.Net, exp), Tax: fixed(l.Tax, exp), RevenueAccount: l.RevenueAccount, TaxCode: l.TaxCode})
+		line := lineOutDTO{LineNo: l.No, Description: l.Description, Qty: l.Qty.String(), UnitPrice: l.UnitPrice.String(),
+			DiscountPct: l.DiscountPct.String(), Net: fixed(l.Net, exp), Tax: fixed(l.Tax, exp), RevenueAccount: l.RevenueAccount,
+			TaxCode: l.TaxCode, OriginalLineNo: l.OriginalLineNo}
+		if creditable {
+			line.CreditedQty = decimal.Zero.String()
+			if c, ok := inv.Credited.Lines[l.No]; ok {
+				line.CreditedQty = c.Qty.String()
+			}
+		}
+		out.Lines = append(out.Lines, line)
+	}
+	for _, in := range inv.Installments {
+		out.Installments = append(out.Installments, installmentOutDTO{No: in.No, Percent: in.Term.Percent.String(), OffsetDays: in.Term.OffsetDays,
+			Amount: fixed(in.Amount, exp), DueDate: in.DueDate.Format(dateLayout)})
+	}
+	if creditable {
+		gross := inv.Credited.Gross
+		out.Credited = &creditedDTO{Gross: fixed(gross, exp), Remaining: fixed(inv.Totals.Gross.Sub(gross), exp)}
 	}
 	return out
 }
@@ -216,6 +279,7 @@ func (a *API) createProposal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	inv, lines, charges, fields := a.validate(req)
+	terms := toTerms(req.InstallmentTerms, fields)
 	if len(fields) > 0 {
 		writeFields(w, r, fields)
 		return
@@ -254,6 +318,18 @@ func (a *API) createProposal(w http.ResponseWriter, r *http.Request) {
 		inv.Lines = append(inv.Lines, store.Line{Line: lines[i], Net: nets[i], Tax: taxes[i].RoundBank(money.MinorUnits(inv.Currency))})
 	}
 	inv.Totals = totals
+	if len(terms) > 0 {
+		split, err := domain.SplitInstallments(inv.Currency, totals.Gross, inv.InvoiceDate, terms)
+		if err != nil {
+			httpx.Fail(w, r, problemFrom(err))
+			return
+		}
+		for i, in := range split {
+			inv.Installments = append(inv.Installments, store.Installment{Installment: in, Term: terms[i]})
+		}
+		// The whole gross is due by the last installment.
+		inv.DueDate = split[len(split)-1].DueDate
+	}
 	inv.IdempotencyKey = key
 	inv.RequestHash = hash
 	created, err := a.store.CreateProposal(r.Context(), inv)
@@ -304,6 +380,33 @@ func (a *API) validate(req proposalRequest) (store.Invoice, []domain.Line, decim
 		Type: domain.TypeFreeText, Status: domain.StatusProposal, Currency: req.Currency, InvoiceDate: invoiceDate,
 		DueDate: invoiceDate.AddDate(0, 0, req.PaymentTermDays), PaymentTermDays: req.PaymentTermDays}
 	return inv, lines, charges, fields
+}
+
+// toTerms converts the installment plan, recording each problem under its
+// field name. The percentages' total is checked by SplitInstallments (BIL-0011).
+func toTerms(in []installmentTermDTO, fields map[string]string) []domain.InstallmentTerm {
+	if len(in) > maxInstallments {
+		fields["installmentTerms"] = fmt.Sprintf("must hold at most %d installments", maxInstallments)
+		return nil
+	}
+	out := make([]domain.InstallmentTerm, 0, len(in))
+	for i, t := range in {
+		field := func(name string) string { return fmt.Sprintf("installmentTerms[%d].%s", i, name) }
+		term := domain.InstallmentTerm{OffsetDays: t.OffsetDays}
+		if !decimalText.MatchString(t.Percent) || !decimal.RequireFromString(t.Percent).IsPositive() || decimal.RequireFromString(t.Percent).GreaterThan(decimal.NewFromInt(100)) {
+			fields[field("percent")] = "must be a percentage above 0 and at most 100"
+		} else {
+			term.Percent = decimal.RequireFromString(t.Percent)
+		}
+		if t.OffsetDays < 0 || t.OffsetDays > maxOffsetDays {
+			fields[field("offsetDays")] = fmt.Sprintf("must be 0 to %d days", maxOffsetDays)
+		}
+		if i > 0 && t.OffsetDays < in[i-1].OffsetDays {
+			fields[field("offsetDays")] = "must not fall before the previous installment"
+		}
+		out = append(out, term)
+	}
+	return out
 }
 
 // toLine converts line i, recording each problem under its field name.
@@ -364,13 +467,20 @@ func lineField(detail string) string {
 
 func (a *API) listInvoices(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	f := store.ListFilter{Status: q.Get("status"), CustomerID: q.Get("customerId"), Limit: defaultListLimit}
+	f := store.ListFilter{Status: q.Get("status"), Type: q.Get("type"), CustomerID: q.Get("customerId"),
+		OriginalInvoiceID: q.Get("originalInvoiceId"), Limit: defaultListLimit}
 	fields := map[string]string{}
 	if f.Status != "" && !statuses[f.Status] {
 		fields["status"] = "must be PROPOSAL, POSTED, PARTIALLY_SETTLED, SETTLED or REVERSED"
 	}
+	if f.Type != "" && !types[f.Type] {
+		fields["type"] = "must be SHIPMENT, CONSOLIDATED, FREE_TEXT, SUBSCRIPTION, MILESTONE or CREDIT_NOTE"
+	}
 	if f.CustomerID != "" && !ids.Valid(f.CustomerID) {
 		fields["customerId"] = "must be a UUID"
+	}
+	if f.OriginalInvoiceID != "" && !ids.Valid(f.OriginalInvoiceID) {
+		fields["originalInvoiceId"] = "must be a UUID"
 	}
 	if raw := q.Get("limit"); raw != "" {
 		n, err := strconv.Atoi(raw)
@@ -428,6 +538,10 @@ func (a *API) postInvoice(w http.ResponseWriter, r *http.Request) {
 	inv, err := a.store.GetInvoice(r.Context(), id)
 	if err != nil {
 		httpx.Fail(w, r, err)
+		return
+	}
+	if inv.Type == domain.TypeCreditNote {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, store.CodeNotProposal, "a credit note posts through /v1/billing/credit-notes/{id}:post"))
 		return
 	}
 	if inv.Status == domain.StatusPosted {

@@ -16,6 +16,11 @@ export interface LineValues {
   taxCode: string;
 }
 
+export interface InstallmentValues {
+  percent: string;
+  offsetDays: string;
+}
+
 export interface FreeTextValues {
   legalEntityId: string;
   customerId: string;
@@ -25,9 +30,12 @@ export interface FreeTextValues {
   paymentTermDays: string;
   chargeAmount: string;
   lines: LineValues[];
+  /** Optional installment plan (FR-29.18); empty means one open item due after the payment terms. */
+  installments: InstallmentValues[];
 }
 
 const MAX_LINES = 50;
+const MAX_INSTALLMENTS = 24;
 const emptyLine: LineValues = { description: "", qty: "1", unitPrice: "", discountPct: "", revenueAccount: "", taxCode: "" };
 
 export function emptyFreeText(day = today()): FreeTextValues {
@@ -40,6 +48,7 @@ export function emptyFreeText(day = today()): FreeTextValues {
     paymentTermDays: "30",
     chargeAmount: "",
     lines: [{ ...emptyLine }],
+    installments: [],
   };
 }
 
@@ -65,6 +74,19 @@ export function validateFreeText(v: FreeTextValues): Errors {
     if (!ACCOUNT.test(l.revenueAccount.trim())) errors[at("revenueAccount")] = "Enter the revenue account, for example 4900.";
     if (!TAX_CODE.test(l.taxCode.trim())) errors[at("taxCode")] = "Enter the tax code in capitals, for example DE19.";
   });
+  let total = 0;
+  v.installments.forEach((t, i) => {
+    const at = (f: string) => `installmentTerms[${i}].${f}`;
+    const pct = t.percent.trim();
+    if (!DECIMAL.test(pct) || Number(pct) <= 0 || Number(pct) > 100) errors[at("percent")] = "Enter a share above 0 and at most 100.";
+    else total += Math.round(Number(pct) * 1_000_000);
+    const days = t.offsetDays.trim();
+    if (!/^\d{1,3}$/.test(days) || Number(days) > 365) errors[at("offsetDays")] = "Enter 0 to 365 days after the invoice date.";
+    else if (i > 0 && Number(days) < Number(v.installments[i - 1].offsetDays)) errors[at("offsetDays")] = "Must not fall before the previous installment.";
+  });
+  if (v.installments.length > 0 && !Object.keys(errors).some((k) => k.startsWith("installmentTerms[")) && total !== 100_000_000) {
+    errors.installmentTerms = `The shares total ${total / 1_000_000}%; they must total 100%.`;
+  }
   return errors;
 }
 
@@ -86,10 +108,13 @@ export function toFreeTextInput(v: FreeTextValues): FreeTextInvoiceInput {
       revenueAccount: l.revenueAccount.trim(),
       taxCode: l.taxCode.trim(),
     })),
+    ...(v.installments.length > 0
+      ? { installmentTerms: v.installments.map((t) => ({ percent: t.percent.trim(), offsetDays: Number(t.offsetDays) })) }
+      : {}),
   };
 }
 
-type HeaderField = Exclude<keyof FreeTextValues, "lines">;
+type HeaderField = Exclude<keyof FreeTextValues, "lines" | "installments">;
 
 /** Free-text invoice (FR-29.4): account-driven lines with a tax code each, saved as a proposal. */
 export function NewFreeTextInvoicePage() {
@@ -107,6 +132,28 @@ export function NewFreeTextInvoicePage() {
 
   function setLine(i: number, patch: Partial<LineValues>) {
     update({ lines: values.lines.map((l, j) => (j === i ? { ...l, ...patch } : l)) });
+  }
+
+  function setInstallment(i: number, patch: Partial<InstallmentValues>) {
+    update({ installments: values.installments.map((t, j) => (j === i ? { ...t, ...patch } : t)) });
+  }
+
+  function installment(i: number, field: keyof InstallmentValues, label: string, hint: string) {
+    const name = `installmentTerms[${i}].${field}`;
+    return (
+      <FormField id={`ft-inst-${i}-${field}`} label={label} hint={hint} error={errors[name]}>
+        {(c) => (
+          <Input
+            {...c}
+            className={styles.mono}
+            inputMode="decimal"
+            value={values.installments[i][field]}
+            onChange={(e) => setInstallment(i, { [field]: e.target.value })}
+            invalid={Boolean(errors[name])}
+          />
+        )}
+      </FormField>
+    );
   }
 
   async function submit(event: FormEvent) {
@@ -205,6 +252,33 @@ export function NewFreeTextInvoicePage() {
             ) : null}
             <span className={styles.note}>Net, tax and gross are calculated by the service with per-line rounding.</span>
           </div>
+          {values.installments.map((_, i) => (
+            <fieldset key={i} className={styles.lineSet}>
+              <legend className={styles.groupsLegend}>{`Installment ${i + 1}`}</legend>
+              {installment(i, "percent", "Share %", "Of the gross.")}
+              {installment(i, "offsetDays", "Due after (days)", "Days after the invoice date.")}
+              <Button variant="ghost" size="sm" onClick={() => update({ installments: values.installments.filter((_, j) => j !== i) })}>
+                {`Remove installment ${i + 1}`}
+              </Button>
+            </fieldset>
+          ))}
+          <div className={styles.formActions}>
+            {values.installments.length < MAX_INSTALLMENTS ? (
+              <Button variant="secondary" onClick={() => update({ installments: [...values.installments, { percent: "", offsetDays: values.installments.length === 0 ? "0" : "" }] })}>
+                Add installment
+              </Button>
+            ) : null}
+            <span className={styles.note}>
+              Optional. Split the gross into installments, each its own open item with its own due date; the shares must total 100% and the last one takes the rounding.
+            </span>
+          </div>
+          {errors.installmentTerms ? (
+            <div className={styles.formActions}>
+              <Alert tone="danger" live="alert">
+                {errors.installmentTerms}
+              </Alert>
+            </div>
+          ) : null}
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title={failure.code === "BIL-0001" ? "The tax engine is unavailable; nothing was saved" : "Could not save the invoice"} live="alert">

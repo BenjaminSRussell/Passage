@@ -9,6 +9,8 @@ describe("billing module", () => {
       "/billing",
       "/billing/free-text-invoices/new",
       "/billing/invoices/:id",
+      "/billing/credit-notes",
+      "/billing/credit-notes/new",
       "/billing/revenue-allocation",
       "/billing/revenue-contracts",
       "/billing/revenue-contracts/new",
@@ -22,6 +24,7 @@ describe("billing module", () => {
     expect(Object.fromEntries(billing.nav.map((n) => [n.to, n.duty]))).toEqual({
       "/billing": "billing.invoice.view",
       "/billing/free-text-invoices/new": "billing.invoice.maintain",
+      "/billing/credit-notes": "billing.invoice.view",
       "/billing/revenue-contracts": "revrec.view",
       "/billing/deferred-revenue": "revrec.view",
       "/billing/revenue-allocation": "revrec.view",

@@ -27,6 +27,7 @@ const proposal: Invoice = {
   lines: [
     { lineNo: 1, description: "Consulting March", qty: "1", unitPrice: "100", discountPct: "0", net: "100.00", tax: "19.00", revenueAccount: "4900", taxCode: "DE19" },
   ],
+  installments: [],
   version: 1,
 };
 

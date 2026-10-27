@@ -6,6 +6,8 @@ export const revrecBase = "/api/v1/revrec";
 
 export const INVOICE_STATUSES = ["PROPOSAL", "POSTED", "PARTIALLY_SETTLED", "SETTLED", "REVERSED"] as const;
 export type InvoiceStatus = (typeof INVOICE_STATUSES)[number];
+export const INVOICE_TYPES = ["SHIPMENT", "CONSOLIDATED", "FREE_TEXT", "SUBSCRIPTION", "MILESTONE", "CREDIT_NOTE"] as const;
+export type InvoiceType = (typeof INVOICE_TYPES)[number];
 
 export interface InvoiceTotals {
   net: string;
@@ -29,6 +31,9 @@ export interface InvoiceSummary {
   postingDate?: string;
   paymentTermDays: number;
   totals: InvoiceTotals;
+  /** On a credit note: the invoice it credits. */
+  originalInvoiceId?: string;
+  originalNumber?: string;
   version: number;
 }
 
@@ -42,10 +47,28 @@ export interface InvoiceLine {
   tax: string;
   revenueAccount: string;
   taxCode: string;
+  /** On a credit note: the credited line of the original. */
+  originalLineNo?: number;
+  /** On a creditable invoice: the quantity posted credit notes took. */
+  creditedQty?: string;
+}
+
+/** One open item of the installment plan (FR-29.18). */
+export interface Installment {
+  no: number;
+  percent: string;
+  offsetDays: number;
+  amount: string;
+  dueDate: string;
 }
 
 export interface Invoice extends InvoiceSummary {
   lines: InvoiceLine[];
+  installments: Installment[];
+  /** On a credit note: why it was issued. */
+  reason?: string;
+  /** On a posted invoice that can be credited: what credit notes took and what is left. */
+  credited?: { gross: string; remaining: string };
 }
 
 export interface FreeTextLineInput {
@@ -65,7 +88,17 @@ export interface FreeTextInvoiceInput {
   invoiceDate: string;
   paymentTermDays: number;
   chargeAmount?: string;
+  installmentTerms?: { percent: string; offsetDays: number }[];
   lines: FreeTextLineInput[];
+}
+
+/** A credit note request: without lines the whole remainder of the original is credited. */
+export interface CreditNoteInput {
+  originalInvoiceId: string;
+  creditDate: string;
+  reason: string;
+  chargeAmount?: string;
+  lines?: { lineNo: number; qty: string }[];
 }
 
 export const SSP_SOURCES = ["EXPLICIT", "LIST", "PCT_OF_LIST", "RESIDUAL"] as const;
@@ -169,7 +202,9 @@ async function send<T>(url: string, init: RequestInit = {}, signal?: AbortSignal
 
 export interface InvoiceFilter {
   status?: InvoiceStatus | "";
+  type?: InvoiceType | "";
   customerId?: string;
+  originalInvoiceId?: string;
   limit?: number;
 }
 
@@ -203,6 +238,23 @@ export function createFreeTextInvoice(input: FreeTextInvoiceInput, idempotencyKe
     method: "POST",
     headers: { "Idempotency-Key": idempotencyKey },
     body: JSON.stringify(input),
+  });
+}
+
+/** POST /credit-notes: a credit note proposal against a posted invoice; the key makes retries return the same proposal. */
+export function createCreditNote(input: CreditNoteInput, idempotencyKey: string): Promise<Invoice> {
+  return send<Invoice>(`${billingBase}/credit-notes`, {
+    method: "POST",
+    headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify(input),
+  });
+}
+
+/** POST /credit-notes/{id}:post with If-Match on the version the user reviewed. */
+export function postCreditNote(id: string, version: number): Promise<Invoice> {
+  return send<Invoice>(`${billingBase}/credit-notes/${encodeURIComponent(id)}:post`, {
+    method: "POST",
+    headers: { "If-Match": `"${version}"` },
   });
 }
 
