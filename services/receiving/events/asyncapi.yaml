@@ -1,0 +1,144 @@
+asyncapi: 3.0.0
+info:
+  title: Passage Receiving Events
+  version: 1.0.0
+  description: |
+    CloudEvents 1.0 published through the transactional outbox (Debezium relays
+    rows to Kafka). Each event is written in the same database transaction as the
+    state change it announces, so a rolled-back change emits nothing. Types follow
+    dev.passage.<context>.<entity>.<verb>.v<n>. Additive-only schema evolution.
+    The invoice event uses the payables context named by the PRD (3.18.5) although
+    the receiving service posts the invoice today.
+defaultContentType: application/cloudevents+json
+channels:
+  receiptEvents:
+    address: passage.receiving.receipt
+    messages:
+      receiptPosted:
+        $ref: "#/components/messages/ReceiptPosted"
+      receiptCorrected:
+        $ref: "#/components/messages/ReceiptCorrected"
+  invoiceEvents:
+    address: passage.payables.invoice
+    messages:
+      invoicePosted:
+        $ref: "#/components/messages/InvoicePosted"
+operations:
+  publishReceiptPosted:
+    action: send
+    channel: { $ref: "#/channels/receiptEvents" }
+    messages:
+      - { $ref: "#/channels/receiptEvents/messages/receiptPosted" }
+  publishReceiptCorrected:
+    action: send
+    channel: { $ref: "#/channels/receiptEvents" }
+    messages:
+      - { $ref: "#/channels/receiptEvents/messages/receiptCorrected" }
+  publishInvoicePosted:
+    action: send
+    channel: { $ref: "#/channels/invoiceEvents" }
+    messages:
+      - { $ref: "#/channels/invoiceEvents/messages/invoicePosted" }
+components:
+  messages:
+    ReceiptPosted:
+      name: dev.passage.receiving.receipt.posted.v1
+      summary: >-
+        POST /v1/receiving/receipts/{id}:post moved a receipt to POSTED, posted Dr inventory / Cr GR/IR to the ledger and
+        opened one GR/IR item per line. Consumers: inventory, payables (re-match, ERS), costing, supplier portal.
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/ReceiptPostedData"
+    ReceiptCorrected:
+      name: dev.passage.receiving.receipt.corrected.v1
+      summary: >-
+        A POSTED receipt was corrected by a quantity delta (kind CORRECTION) or fully reversed (kind CANCELLATION).
+        Cancelling an ARRIVED or REGISTERED receipt posts nothing and emits nothing. Consumers: payables, costing.
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/ReceiptCorrectedData"
+    InvoicePosted:
+      name: dev.passage.payables.invoice.posted.v1
+      summary: >-
+        POST /v1/receiving/invoices:post posted a vendor invoice against GR/IR items and persisted it. Consumers: ledger
+        reconciliation, costing, tax, analytics.
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/InvoicePostedData"
+  schemas:
+    ReceiptPostedData:
+      type: object
+      required: [receipt_id, receipt_number, po_id, legal_entity_id, vendor_id, posting_date, currency, ledger_entry_id, lines]
+      properties:
+        receipt_id: { type: string, format: uuid }
+        receipt_number: { type: string, pattern: "^RCV-\\d{8}$" }
+        po_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
+        vendor_id: { type: string, format: uuid }
+        posting_date: { type: string, format: date }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        ledger_entry_id: { type: string }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [line_no, po_line_id, product_id, unit, qty, batch, serials, location_id, inventory_status, amount, amount_acct]
+            properties:
+              line_no: { type: integer, minimum: 1 }
+              po_line_id: { type: string }
+              product_id: { type: string, format: uuid }
+              unit: { type: string }
+              qty: { type: string, description: "decimal string" }
+              batch: { type: string }
+              serials: { type: array, items: { type: string } }
+              location_id: { type: string }
+              inventory_status: { type: string, enum: [AVAILABLE, QUARANTINE, BLOCKED] }
+              amount: { type: string, description: "decimal string, receipt currency" }
+              amount_acct: { type: string, description: "decimal string, accounting currency (amount times the receipt exchange rate)" }
+    ReceiptCorrectedData:
+      type: object
+      required: [receipt_id, receipt_number, kind, correction_seq, ledger_entry_id, currency, lines]
+      properties:
+        receipt_id: { type: string, format: uuid }
+        receipt_number: { type: string }
+        kind: { type: string, enum: [CORRECTION, CANCELLATION] }
+        correction_seq: { type: integer, minimum: 0, description: "1-based sequence of the correction; the count so far on a cancellation" }
+        ledger_entry_id: { type: string }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [line_no, po_line_id, product_id, qty_delta, amount_delta, amount_acct_delta]
+            properties:
+              line_no: { type: integer, minimum: 1 }
+              po_line_id: { type: string }
+              product_id: { type: string, format: uuid }
+              qty_delta: { type: string, description: "decimal string, negative when the received quantity falls" }
+              amount_delta: { type: string, description: "decimal string, receipt currency" }
+              amount_acct_delta: { type: string, description: "decimal string, accounting currency" }
+    InvoicePostedData:
+      type: object
+      required: [invoice_id, legal_entity_id, vendor_id, invoice_number, invoice_date, posting_date, currency, total, ledger_entry_id, lines]
+      properties:
+        invoice_id: { type: string, format: uuid, description: "derived from tenant, vendor and invoice number; stable across retries" }
+        legal_entity_id: { type: string, format: uuid }
+        vendor_id: { type: string, format: uuid }
+        invoice_number: { type: string }
+        invoice_date: { type: string, format: date }
+        posting_date: { type: string, format: date }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        total: { type: string, description: "decimal string; the vendor control credit" }
+        ledger_entry_id: { type: string }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [line_no, receipt_id, receipt_line_no, qty, unit_price, amount]
+            properties:
+              line_no: { type: integer, minimum: 1 }
+              receipt_id: { type: string, format: uuid }
+              receipt_line_no: { type: integer, minimum: 1 }
+              qty: { type: string }
+              unit_price: { type: string }
+              amount: { type: string }

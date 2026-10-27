@@ -177,3 +177,66 @@ func TestMigration0002_TenantAndLegalEntityIsolation(t *testing.T) {
 		t.Errorf("PARTIAL must be accepted: %v", err)
 	}
 }
+
+func TestMigration0005_InvoiceTablesIsolationAndUniqueNumber(t *testing.T) {
+	admin, pool := testkit.DBWithApp(t)
+	ctx := context.Background()
+	one := principal(1)
+	if err := dbx.Migrate(tenant.With(ctx, one), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	const receiptID, invoiceID = "00000000-0000-0000-0000-0000000000c1", "00000000-0000-0000-0000-0000000000c2"
+	run := func(p tenant.Principal, sql string, args ...any) error {
+		return dbx.WithTenantTx(tenant.With(ctx, p), pool, func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, sql, args...)
+			return err
+		})
+	}
+	insertInvoice := func(id, number string) error {
+		return run(one, `insert into receiving_vendor_invoice (tenant_id, id, legal_entity_id, vendor_id, invoice_number, invoice_date, posting_date, currency, ledger_id, fiscal_period_id, ledger_entry_id, total)
+			values ($1, $2, $3, $4, $5, current_date, current_date, 'USD', $6, $6, 'e1', 10)`, one.TenantID, id, one.LegalEntityID, vendorID, number, poID)
+	}
+	for _, step := range []func() error{
+		func() error {
+			return run(one, `insert into receiving_receipt (tenant_id, id, legal_entity_id, vendor_id, purchase_order_id, packing_slip, state, receipt_date)
+				values ($1, $2, $3, $4, $5, 'PS-1', 'POSTED', current_date)`, one.TenantID, receiptID, one.LegalEntityID, vendorID, poID)
+		},
+		func() error {
+			return run(one, `insert into receiving_receipt_line (tenant_id, receipt_id, line_no, legal_entity_id, product_id, qty, unit_price, currency)
+				values ($1, $2, 1, $3, $4, 5, 2, 'USD')`, one.TenantID, receiptID, one.LegalEntityID, poID)
+		},
+		func() error { return insertInvoice(invoiceID, "INV-1") },
+		func() error {
+			return run(one, `insert into receiving_vendor_invoice_line (tenant_id, invoice_id, line_no, legal_entity_id, receipt_id, receipt_line_no, qty, unit_price, amount)
+				values ($1, $2, 1, $3, $4, 1, 5, 2, 10)`, one.TenantID, invoiceID, one.LegalEntityID, receiptID)
+		},
+	} {
+		if err := step(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := insertInvoice("00000000-0000-0000-0000-0000000000c3", "inv-1"); err == nil {
+		t.Fatal("the same invoice number in another case must be rejected for the vendor")
+	}
+	count := func(p tenant.Principal, table string) (n int) {
+		err := dbx.WithTenantTx(tenant.With(ctx, p), pool, func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `select count(*) from `+table).Scan(&n)
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	otherEntity := tenant.Principal{TenantID: one.TenantID, LegalEntityID: testkit.TenantID(8)}
+	for _, table := range []string{"receiving_vendor_invoice", "receiving_vendor_invoice_line"} {
+		if got := count(one, table); got != 1 {
+			t.Errorf("%s: owner sees %d rows, want 1", table, got)
+		}
+		if got := count(principal(2), table); got != 0 {
+			t.Errorf("%s: other tenant sees %d rows, want 0", table, got)
+		}
+		if got := count(otherEntity, table); got != 0 {
+			t.Errorf("%s: other legal entity sees %d rows, want 0", table, got)
+		}
+	}
+}

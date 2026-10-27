@@ -31,5 +31,34 @@ func buildPorts(getenv func(string) string) (api.Ports, error) {
 	default:
 		return api.Ports{}, fmt.Errorf("CLOSE_URL is required (set PASSAGE_ALLOW_FAKES=1 only for local development)")
 	}
-	return ports, nil
+	profile, err := buildProfile(getenv, allowFakes)
+	ports.Profile = profile
+	return ports, err
+}
+
+var profileEnv = []struct {
+	key, fake string
+	field     func(*domain.PostingProfile) *string
+}{
+	{"POSTING_ACCOUNT_INVENTORY", "1400", func(p *domain.PostingProfile) *string { return &p.Inventory }},
+	{"POSTING_ACCOUNT_GRIR", "2100", func(p *domain.PostingProfile) *string { return &p.GRIR }},
+	{"POSTING_ACCOUNT_PPV", "5200", func(p *domain.PostingProfile) *string { return &p.PPV }},
+	{"POSTING_ACCOUNT_VENDOR_CONTROL", "2000", func(p *domain.PostingProfile) *string { return &p.VendorControl }},
+}
+
+func buildProfile(getenv func(string) string, allowFakes bool) (domain.PostingProfile, error) {
+	var profile domain.PostingProfile
+	for _, e := range profileEnv {
+		value := getenv(e.key)
+		switch {
+		case value != "":
+		case allowFakes:
+			slog.Warn("posting account is empty: using the development default", "key", e.key, "account", e.fake)
+			value = e.fake
+		default:
+			return domain.PostingProfile{}, fmt.Errorf("%s is required (set PASSAGE_ALLOW_FAKES=1 only for local development)", e.key)
+		}
+		*e.field(&profile) = value
+	}
+	return profile, nil
 }

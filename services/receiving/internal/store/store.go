@@ -12,7 +12,10 @@ import (
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
 )
 
-var ErrNotFound = errors.New("receipt not found")
+var (
+	ErrNotFound     = errors.New("receipt not found")
+	ErrGrirNotFound = errors.New("no open GR/IR item for the receipt line")
+)
 
 type DuplicatePackingSlipError struct{ ReceiptNumber string }
 
@@ -25,6 +28,7 @@ type Line struct {
 	POLineID         string
 	ProductID        string
 	Qty              decimal.Decimal
+	InvoicedQty      decimal.Decimal
 	OrderedRemaining decimal.Decimal
 	OverDeliveryPct  decimal.Decimal
 	UnitPrice        decimal.Decimal
@@ -50,6 +54,8 @@ type Receipt struct {
 	Carrier         string
 	PalletCount     *int
 	State           domain.ReceiptState
+	Version         int
+	CorrectionSeq   int
 	Date            time.Time
 	Currency        string
 	ExchangeRate    decimal.Decimal
@@ -73,6 +79,54 @@ type PostOutcome struct {
 	Event         events.Event
 }
 
+type LineChange struct {
+	LineNo     int
+	Qty        decimal.Decimal
+	Amount     decimal.Decimal
+	AmountAcct decimal.Decimal
+}
+
+type Adjustment struct {
+	Lines         []LineChange
+	LedgerEntryID string
+	Event         *events.Event
+}
+
+type AdjustFunc func(Receipt) (Adjustment, error)
+
+type InvoiceLine struct {
+	ReceiptID     string
+	ReceiptLineNo int
+	Qty           decimal.Decimal
+	UnitPrice     decimal.Decimal
+	Amount        decimal.Decimal
+	StandardCost  bool
+}
+
+type Invoice struct {
+	ID             string
+	LegalEntityID  string
+	VendorID       string
+	InvoiceNumber  string
+	InvoiceDate    time.Time
+	PostingDate    time.Time
+	Currency       string
+	LedgerID       string
+	FiscalPeriodID string
+	LedgerEntryID  string
+	Total          decimal.Decimal
+	CreatedAt      time.Time
+	Lines          []InvoiceLine
+}
+
+type InvoiceOutcome struct {
+	LedgerEntryID string
+	Total         decimal.Decimal
+	Event         events.Event
+}
+
+type InvoiceFunc func(items []*domain.GrirItem) (InvoiceOutcome, error)
+
 type ReceiptFilter struct {
 	VendorID        string
 	PurchaseOrderID string
@@ -94,6 +148,9 @@ type Store interface {
 	RecordedSerials(ctx context.Context, productIDs []string) (map[domain.SerialKey]struct{}, error)
 	Register(ctx context.Context, id string, fn RegisterFunc) (Receipt, error)
 	Post(ctx context.Context, id string, fn PostFunc) (Receipt, error)
+	Correct(ctx context.Context, id string, fn AdjustFunc) (Receipt, error)
+	Cancel(ctx context.Context, id string, fn AdjustFunc) (Receipt, error)
+	PostInvoice(ctx context.Context, in Invoice, fn InvoiceFunc) (Invoice, error)
 	GetReceipt(ctx context.Context, id string) (Receipt, error)
 	ListReceipts(ctx context.Context, f ReceiptFilter) ([]Receipt, error)
 	ListGrir(ctx context.Context, f GrirFilter) (GrirPage, error)

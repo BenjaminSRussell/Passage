@@ -92,13 +92,15 @@ func PostInvoice(ctx context.Context, in VendorInvoice, periods PeriodControl, l
 		}
 	}
 	entry.Lines = append(entry.Lines, JournalLine{Account: profile.VendorControl, Amount: payable.Neg()})
-	if _, err := ledger.Post(ctx, entry); err != nil {
+	entryID, err := ledger.Post(ctx, entry)
+	if err != nil {
 		if errors.Is(err, ErrPeriodClosed) {
 			return JournalEntry{}, fail(CodePeriodClosed, "ledger rejected invoice %s: period closed", in.ID)
 		}
 		slog.ErrorContext(ctx, "invoice ledger post failed", "err", err, "invoiceId", in.ID)
 		return JournalEntry{}, fmt.Errorf("post invoice %s: %w", in.ID, err)
 	}
+	entry.LedgerEntryID = entryID
 	for i, l := range in.Lines {
 		l.Item.InvoicedQty = l.Item.InvoicedQty.Add(l.Qty)
 		l.Item.ClearedAmount.Value = l.Item.ClearedAmount.Value.Add(clearings[i].Value)

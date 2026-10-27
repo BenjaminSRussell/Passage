@@ -26,6 +26,9 @@ const (
 	readyTimeout       = 500 * time.Millisecond
 	dutyMatchingPolicy = "MatchingPolicyMaintain"
 	dutyReceiving      = "ReceivingMaintain"
+	dutyReceivingPost  = "ReceivingPost"
+	dutyInvoicePost    = "VendorInvoicePost"
+	dutyAPInquire      = "APInquire"
 	maxLines           = 500
 	maxMagnitude       = 1e12
 	maxExponent        = 12
@@ -36,6 +39,7 @@ const (
 type Ports struct {
 	Periods domain.PeriodControl
 	Ledger  domain.LedgerPoster
+	Profile domain.PostingProfile
 }
 
 type API struct {
@@ -45,6 +49,9 @@ type API struct {
 	rejected   atomic.Int64
 	arrived    atomic.Int64
 	registered atomic.Int64
+	posted     atomic.Int64
+	adjusted   atomic.Int64
+	invoiced   atomic.Int64
 	http       requestMetrics
 }
 
@@ -63,15 +70,35 @@ func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
 	r.With(authz.RequireDuty(dutyMatchingPolicy)).Post("/v1/receiving/matching:evaluate", a.evaluate)
 	r.With(authz.RequireDuty(dutyReceiving)).Post("/v1/receiving/arrivals", a.idempotent(a.arrive))
+	r.With(authz.RequireDuty(dutyReceiving)).Post("/v1/receiving/receipts", a.idempotent(a.directReceipt))
+	r.With(authz.RequireDuty(dutyReceiving)).Get("/v1/receiving/receipts", a.listReceipts)
+	r.With(authz.RequireDuty(dutyReceiving)).Get("/v1/receiving/receipts/{id}", a.getReceipt)
+	r.With(authz.RequireDuty(dutyReceiving)).Post("/v1/receiving/receipts/{id}:register", a.idempotent(a.registerReceipt))
+	r.With(authz.RequireDuty(dutyReceivingPost)).Post("/v1/receiving/receipts/{id}:post", a.idempotent(a.postReceipt))
+	r.With(authz.RequireDuty(dutyReceivingPost)).Post("/v1/receiving/receipts/{id}:correct", a.idempotent(a.correctReceipt))
+	r.With(authz.RequireDuty(dutyReceivingPost)).Post("/v1/receiving/receipts/{id}:cancel", a.idempotent(a.cancelReceipt))
+	r.With(authz.RequireDuty(dutyAPInquire)).Get("/v1/receiving/grir", a.listGrir)
+	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/invoices:post", a.idempotent(a.postVendorInvoice))
 }
 
 func (a *API) Metrics() http.Handler {
+	counters := []struct {
+		name, help string
+		value      *atomic.Int64
+	}{
+		{"receiving_matches_evaluated_total", "Invoices evaluated by the matching engine.", &a.evaluated},
+		{"receiving_evaluate_rejected_total", "Evaluate requests rejected by validation.", &a.rejected},
+		{"receiving_receipts_arrived_total", "Receipts recorded at arrival.", &a.arrived},
+		{"receiving_receipts_registered_total", "Receipts registered, including direct receipts.", &a.registered},
+		{"receiving_receipts_posted_total", "Receipts posted to the ledger.", &a.posted},
+		{"receiving_receipts_adjusted_total", "Posted receipts corrected or cancelled.", &a.adjusted},
+		{"receiving_invoices_posted_total", "Vendor invoices posted against GR/IR items.", &a.invoiced},
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-		_, _ = fmt.Fprintf(w, "# HELP receiving_matches_evaluated_total Invoices evaluated by the matching engine.\n# TYPE receiving_matches_evaluated_total counter\nreceiving_matches_evaluated_total %d\n", a.evaluated.Load())
-		_, _ = fmt.Fprintf(w, "# HELP receiving_evaluate_rejected_total Evaluate requests rejected by validation.\n# TYPE receiving_evaluate_rejected_total counter\nreceiving_evaluate_rejected_total %d\n", a.rejected.Load())
-		_, _ = fmt.Fprintf(w, "# HELP receiving_receipts_arrived_total Receipts recorded at arrival.\n# TYPE receiving_receipts_arrived_total counter\nreceiving_receipts_arrived_total %d\n", a.arrived.Load())
-		_, _ = fmt.Fprintf(w, "# HELP receiving_receipts_registered_total Receipts registered, including direct receipts.\n# TYPE receiving_receipts_registered_total counter\nreceiving_receipts_registered_total %d\n", a.registered.Load())
+		for _, c := range counters {
+			_, _ = fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s counter\n%s %d\n", c.name, c.help, c.name, c.name, c.value.Load())
+		}
 		a.http.write(w)
 	})
 }

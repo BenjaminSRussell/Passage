@@ -188,7 +188,7 @@ func TestArrival_StoreErrorsMapToProblems(t *testing.T) {
 		{"invalid transition", &domain.Error{Code: domain.CodeInvalidTransition, Detail: "not arrived"}, http.StatusConflict, "RCV-STA-001", "not arrived"},
 		{"duplicate packing slip", &store.DuplicatePackingSlipError{ReceiptNumber: "RCV-00000042"}, http.StatusConflict, "RCV-DUP-001", "RCV-00000042"},
 		{"wrapped not found", fmt.Errorf("lookup: %w", store.ErrNotFound), http.StatusNotFound, "RCV-NF-001", ""},
-		{"unmapped domain code", &domain.Error{Code: domain.CodePeriodClosed, Detail: "closed"}, http.StatusInternalServerError, "COM-0500", "internal error"},
+		{"unmapped domain code", &domain.Error{Code: "XXX-UNMAPPED", Detail: "closed"}, http.StatusInternalServerError, "COM-0500", "internal error"},
 		{"arbitrary error", errors.New("connection refused to 10.0.0.7"), http.StatusInternalServerError, "COM-0500", "internal error"},
 	}
 	for _, tc := range tests {

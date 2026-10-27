@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: receiving
   version: 0.1.0
-  description: Receiving, product receipts and three-way match. This slice serves the pure matching policy tester and probes.
+  description: Receiving, product receipts, GR/IR and vendor invoice posting, and the pure matching policy tester.
 servers:
   - url: https://app.local.passage.dev
 paths:
@@ -61,6 +61,214 @@ paths:
         '409': { $ref: '#/components/responses/Problem', description: 'RCV-DUP-001 packing slip already used for the vendor; COM-0410 key in flight (Retry-After: 1).' }
         '422': { $ref: '#/components/responses/Problem', description: 'COM-0409 idempotency key reused with a different request.' }
         '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/receipts:
+    post:
+      operationId: createReceipt
+      x-passage-duty: ReceivingMaintain
+      description: Direct receipt. Creates the receipt and registers it in one transaction (state REGISTERED, version 2) without a prior arrival.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DirectReceiptRequest' }
+      responses:
+        '201':
+          description: Receipt in state REGISTERED.
+          headers:
+            Location: { schema: { type: string }, description: '/v1/receiving/receipts/{id}' }
+            ETag: { schema: { type: string }, description: Row version in quotes. }
+            Idempotent-Replayed: { schema: { type: string, enum: ['true'] }, description: Present on replays only. }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Receipt' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001 validation, with errors naming each field.' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '409': { $ref: '#/components/responses/Problem', description: 'RCV-DUP-001 packing slip already used; COM-0410 key in flight.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'RCV-OVR-001 over-delivery; INV-SER-001 serial already recorded; RCV-VAL-001 tracking rule; COM-0409 key reused with a different request.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+    get:
+      operationId: listReceipts
+      x-passage-duty: ReceivingMaintain
+      description: Receipts newest first. Lines are omitted from list items; fetch one receipt for its lines. Page with nextCursor.
+      parameters:
+        - { name: vendorId, in: query, schema: { type: string, format: uuid } }
+        - { name: purchaseOrderId, in: query, schema: { type: string, format: uuid } }
+        - { name: state, in: query, schema: { type: string, enum: [ARRIVED, REGISTERED, POSTED, CORRECTED, CANCELLED] } }
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: One page of receipts.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReceiptPage' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/receipts/{id}:
+    get:
+      operationId: getReceipt
+      x-passage-duty: ReceivingMaintain
+      parameters:
+        - $ref: '#/components/parameters/ReceiptId'
+      responses:
+        '200':
+          description: The receipt with its lines.
+          headers:
+            ETag: { schema: { type: string }, description: Row version in quotes; send it back in If-Match. }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Receipt' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-001' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/receipts/{id}:register:
+    post:
+      operationId: registerReceipt
+      x-passage-duty: ReceivingMaintain
+      description: Registers an ARRIVED receipt with received quantities, batch, serials and location. Needs If-Match.
+      parameters:
+        - $ref: '#/components/parameters/ReceiptId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/ReceiptChanged' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-001' }
+        '409': { $ref: '#/components/responses/Problem', description: 'RCV-STA-001 receipt is not ARRIVED; COM-0410 key in flight.' }
+        '412': { $ref: '#/components/responses/Problem', description: 'COM-0412 If-Match differs from the current version.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'RCV-OVR-001, INV-SER-001, RCV-VAL-001, COM-0409.' }
+        '428': { $ref: '#/components/responses/Problem', description: 'COM-0428 If-Match missing.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/receipts/{id}:post:
+    post:
+      operationId: postReceipt
+      x-passage-duty: ReceivingPost
+      description: Posts a REGISTERED receipt (Dr inventory, Cr GR/IR through the ledger, idempotency key = receipt id), opens one GR/IR item per line and writes dev.passage.receiving.receipt.posted.v1 to the outbox in the same transaction. No body.
+      parameters:
+        - $ref: '#/components/parameters/ReceiptId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200': { $ref: '#/components/responses/ReceiptChanged' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-001' }
+        '409': { $ref: '#/components/responses/Problem', description: 'RCV-STA-001 receipt is not REGISTERED; COM-0410.' }
+        '412': { $ref: '#/components/responses/Problem', description: 'COM-0412' }
+        '422': { $ref: '#/components/responses/Problem', description: 'PER-AP-001 ledger period closed; COM-0409.' }
+        '428': { $ref: '#/components/responses/Problem', description: 'COM-0428' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/receipts/{id}:correct:
+    post:
+      operationId: correctReceipt
+      x-passage-duty: ReceivingPost
+      description: Delta quantity correction of a POSTED receipt (FR-18.3). A line cannot go below its invoiced quantity or to zero (cancel instead), serial-tracked lines are refused. The receipt stays POSTED and its row version and correction sequence advance; dev.passage.receiving.receipt.corrected.v1 is written to the outbox.
+      parameters:
+        - $ref: '#/components/parameters/ReceiptId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CorrectRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/ReceiptChanged' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-001' }
+        '409': { $ref: '#/components/responses/Problem', description: 'RCV-STA-001 receipt not POSTED or correction below invoiced quantity; COM-0410.' }
+        '412': { $ref: '#/components/responses/Problem', description: 'COM-0412' }
+        '422': { $ref: '#/components/responses/Problem', description: 'RCV-VAL-001, RCV-OVR-001, PER-AP-001, COM-0409.' }
+        '428': { $ref: '#/components/responses/Problem', description: 'COM-0428' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/receipts/{id}:cancel:
+    post:
+      operationId: cancelReceipt
+      x-passage-duty: ReceivingPost
+      description: Cancels an ARRIVED, REGISTERED or POSTED receipt. A POSTED receipt is fully reversed in the ledger and its GR/IR items close at zero, and is refused once any line is invoiced. Serials recorded by a registered receipt are released. No body.
+      parameters:
+        - $ref: '#/components/parameters/ReceiptId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200': { $ref: '#/components/responses/ReceiptChanged' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-001' }
+        '409': { $ref: '#/components/responses/Problem', description: 'RCV-STA-001 already cancelled or has invoiced quantity; COM-0410.' }
+        '412': { $ref: '#/components/responses/Problem', description: 'COM-0412' }
+        '422': { $ref: '#/components/responses/Problem', description: 'PER-AP-001, COM-0409.' }
+        '428': { $ref: '#/components/responses/Problem', description: 'COM-0428' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/grir:
+    get:
+      operationId: listGrir
+      x-passage-duty: APInquire
+      description: GR/IR open items newest first with per-currency open totals over the whole filter (not just the page).
+      parameters:
+        - { name: vendorId, in: query, schema: { type: string, format: uuid } }
+        - { name: purchaseOrderId, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [OPEN, PARTIAL, CLEARED, WRITTEN_OFF] } }
+        - { name: ageGt, in: query, schema: { type: integer, minimum: 0, maximum: 3650 }, description: Only items older than this many days. }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: One page of open items.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GrirPage' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/invoices:post:
+    post:
+      operationId: postVendorInvoice
+      x-passage-duty: VendorInvoicePost
+      description: Posts a vendor invoice against GR/IR items. Checks the AP period, clears GR/IR pro rata (the last quantity clears the exact remainder), posts to the ledger, persists the invoice and writes dev.passage.payables.invoice.posted.v1 to the outbox. The invoice id derives from tenant, vendor and invoice number, so the ledger idempotency key is stable across retries.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InvoiceRequest' }
+      responses:
+        '201':
+          description: Posted invoice.
+          headers:
+            Idempotent-Replayed: { schema: { type: string, enum: ['true'] }, description: Present on replays only. }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Invoice' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-002 receipt line has no open GR/IR item.' }
+        '409': { $ref: '#/components/responses/Problem', description: 'AP-DUP-001 invoice number already posted for the vendor; COM-0410.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'PER-AP-001 closed AP period; AP-QTY-001 more than received and uninvoiced; RCV-VAL-001 other vendor or entity; COM-0409.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
   /healthz:
     get:
       operationId: liveness
@@ -82,7 +290,32 @@ paths:
       responses:
         '200': { description: Prometheus text format. }
 components:
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 255 }
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: The receipt row version from the last response (body version or ETag), quoted or bare.
+      schema: { type: string }
+    ReceiptId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
   responses:
+    ReceiptChanged:
+      description: The receipt after the change; ETag carries the new row version.
+      headers:
+        ETag: { schema: { type: string } }
+        Idempotent-Replayed: { schema: { type: string, enum: ['true'] }, description: Present on replays only. }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Receipt' }
     Problem:
       description: RFC 9457 problem details.
       content:
@@ -204,11 +437,12 @@ components:
         amountAcct: { type: [string, 'null'], description: Null until posted. }
     Receipt:
       type: object
-      required: [id, receiptNumber, state, vendorId, purchaseOrderId, legalEntityId, packingSlip, carrier, receiptDate, currency, exchangeRate, createdAt, lines]
+      required: [id, receiptNumber, state, version, vendorId, purchaseOrderId, legalEntityId, packingSlip, carrier, receiptDate, currency, exchangeRate, createdAt, lines]
       properties:
         id: { type: string, format: uuid }
         receiptNumber: { type: string, pattern: '^RCV-\d{8}$' }
-        state: { type: string }
+        state: { type: string, enum: [ARRIVED, REGISTERED, POSTED, CORRECTED, CANCELLED] }
+        version: { type: integer, description: Row version; send it in If-Match. }
         vendorId: { type: string, format: uuid }
         purchaseOrderId: { type: string, format: uuid }
         legalEntityId: { type: string, format: uuid }
@@ -224,6 +458,171 @@ components:
         lines:
           type: array
           items: { $ref: '#/components/schemas/ReceiptLine' }
+    DirectReceiptRequest:
+      type: object
+      additionalProperties: false
+      required: [vendorId, purchaseOrderId, legalEntityId, packingSlip, receiptDate, currency, lines]
+      properties:
+        vendorId: { type: string, format: uuid }
+        purchaseOrderId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        packingSlip: { type: string, minLength: 1, maxLength: 64 }
+        carrier: { type: string, maxLength: 128 }
+        palletCount: { type: integer, minimum: 0 }
+        receiptDate: { type: string, format: date }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        exchangeRate: { type: number, exclusiveMinimum: 0, default: 1 }
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            type: object
+            additionalProperties: false
+            required: [poLineId, productId, orderedRemaining, unitPrice, unit, qty, locationId]
+            properties:
+              poLineId: { type: string, format: uuid }
+              productId: { type: string, format: uuid }
+              orderedRemaining: { type: number, exclusiveMinimum: 0 }
+              overDeliveryPct: { type: number, minimum: 0, maximum: 100, default: 0 }
+              unitPrice: { type: number, minimum: 0 }
+              unit: { type: string, minLength: 1, maxLength: 16 }
+              batchTracked: { type: boolean, default: false }
+              serialTracked: { type: boolean, default: false }
+              qty: { type: number, exclusiveMinimum: 0 }
+              batch: { type: string, maxLength: 128 }
+              serials: { type: array, maxItems: 1000, items: { type: string, minLength: 1, maxLength: 64 } }
+              locationId: { type: string, format: uuid }
+              inventoryStatus: { type: string, enum: [AVAILABLE, QUARANTINE, BLOCKED], default: AVAILABLE }
+    RegisterRequest:
+      type: object
+      additionalProperties: false
+      required: [lines]
+      properties:
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            type: object
+            additionalProperties: false
+            required: [lineNo, qty, locationId]
+            properties:
+              lineNo: { type: integer, minimum: 1 }
+              qty: { type: number, exclusiveMinimum: 0 }
+              batch: { type: string, maxLength: 128 }
+              serials: { type: array, maxItems: 1000, items: { type: string, minLength: 1, maxLength: 64 } }
+              locationId: { type: string, format: uuid }
+              inventoryStatus: { type: string, enum: [AVAILABLE, QUARANTINE, BLOCKED], default: AVAILABLE }
+    CorrectRequest:
+      type: object
+      additionalProperties: false
+      required: [lines]
+      properties:
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            type: object
+            additionalProperties: false
+            required: [lineNo, qtyDelta]
+            properties:
+              lineNo: { type: integer, minimum: 1 }
+              qtyDelta: { type: number, description: Non-zero; negative reduces the received quantity. }
+    ReceiptPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Receipt' } }
+        nextCursor: { type: string, description: Absent on the last page. }
+    GrirItem:
+      type: object
+      required: [id, receiptId, receiptNumber, lineNo, vendorId, poLineId, receivedQty, invoicedQty, receivedAmount, clearedAmount, openAmount, currency, status, ageDays, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        receiptId: { type: string, format: uuid }
+        receiptNumber: { type: string }
+        lineNo: { type: integer }
+        vendorId: { type: string }
+        poLineId: { type: string }
+        receivedQty: { type: string }
+        invoicedQty: { type: string }
+        receivedAmount: { type: string }
+        clearedAmount: { type: string }
+        openAmount: { type: string }
+        currency: { type: string }
+        status: { type: string, enum: [OPEN, PARTIAL, CLEARED, WRITTEN_OFF] }
+        ageDays: { type: integer }
+        createdAt: { type: string, format: date-time }
+    GrirPage:
+      type: object
+      required: [items, totals]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/GrirItem' } }
+        totals:
+          type: object
+          required: [count, openAmount]
+          properties:
+            count: { type: integer }
+            openAmount: { type: array, items: { $ref: '#/components/schemas/Money' } }
+        nextCursor: { type: string }
+    InvoiceRequest:
+      type: object
+      additionalProperties: false
+      required: [vendorId, legalEntityId, invoiceNumber, invoiceDate, postingDate, currency, ledgerId, fiscalPeriodId, lines]
+      properties:
+        vendorId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        invoiceNumber: { type: string, minLength: 1, maxLength: 64, description: Trimmed; unique per vendor ignoring case. }
+        invoiceDate: { type: string, format: date }
+        postingDate: { type: string, format: date }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        ledgerId: { type: string, format: uuid }
+        fiscalPeriodId: { type: string, format: uuid }
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            type: object
+            additionalProperties: false
+            required: [receiptId, receiptLineNo, qty, unitPrice]
+            properties:
+              receiptId: { type: string, format: uuid }
+              receiptLineNo: { type: integer, minimum: 1 }
+              qty: { type: number, exclusiveMinimum: 0 }
+              unitPrice: { type: number, minimum: 0 }
+              standardCost: { type: boolean, default: false, description: Price difference posts to PPV instead of inventory. }
+    Invoice:
+      type: object
+      required: [id, vendorId, legalEntityId, invoiceNumber, invoiceDate, postingDate, currency, ledgerId, fiscalPeriodId, total, ledgerEntryId, createdAt, lines]
+      properties:
+        id: { type: string, format: uuid }
+        vendorId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        invoiceNumber: { type: string }
+        invoiceDate: { type: string, format: date }
+        postingDate: { type: string, format: date }
+        currency: { type: string }
+        ledgerId: { type: string, format: uuid }
+        fiscalPeriodId: { type: string, format: uuid }
+        total: { type: string }
+        ledgerEntryId: { type: string }
+        createdAt: { type: string, format: date-time }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [lineNo, receiptId, receiptLineNo, qty, unitPrice, amount, standardCost]
+            properties:
+              lineNo: { type: integer }
+              receiptId: { type: string, format: uuid }
+              receiptLineNo: { type: integer }
+              qty: { type: string }
+              unitPrice: { type: string }
+              amount: { type: string }
+              standardCost: { type: boolean }
     Status:
       type: string
       enum: [NOT_MATCHED, MATCHED, PRICE_VARIANCE, QTY_VARIANCE, TOTAL_VARIANCE, NO_RECEIPT, WAITING_RECEIPT]

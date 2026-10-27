@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/events"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/money"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/store"
@@ -41,6 +43,7 @@ type tenantData struct {
 	serials  map[domain.SerialKey]struct{}
 	grir     []store.GrirItem
 	keys     map[string]*claim
+	invoices map[string]struct{}
 	counter  int
 }
 
@@ -67,7 +70,7 @@ func (s *Store) with(ctx context.Context, fn func(*tenantData) error) error {
 	defer s.mu.Unlock()
 	t := s.tenants[p.TenantID]
 	if t == nil {
-		t = &tenantData{receipts: map[string]store.Receipt{}, serials: map[domain.SerialKey]struct{}{}, keys: map[string]*claim{}}
+		t = &tenantData{receipts: map[string]store.Receipt{}, serials: map[domain.SerialKey]struct{}{}, keys: map[string]*claim{}, invoices: map[string]struct{}{}}
 		s.tenants[p.TenantID] = t
 	}
 	return fn(t)
@@ -121,7 +124,7 @@ func (t *tenantData) newArrival(in store.Receipt) (store.Receipt, error) {
 	if in.ExchangeRate.Sign() == 0 {
 		in.ExchangeRate = decimal.NewFromInt(1)
 	}
-	in.State, in.Number, in.CreatedAt = domain.Arrived, fmt.Sprintf("RCV-%08d", t.counter+1), time.Now().UTC()
+	in.State, in.Version, in.Number, in.CreatedAt = domain.Arrived, 1, fmt.Sprintf("RCV-%08d", t.counter+1), time.Now().UTC()
 	for i := range in.Lines {
 		l := &in.Lines[i]
 		if l.LineNo == 0 {
@@ -169,6 +172,7 @@ func (t *tenantData) register(r store.Receipt, fn store.RegisterFunc) (store.Rec
 		t.serials[key] = struct{}{}
 	}
 	r.State = domain.Registered
+	r.Version++
 	for _, l := range lines {
 		for i := range r.Lines {
 			if r.Lines[i].LineNo != l.LineNo {
@@ -269,6 +273,7 @@ func (s *Store) Post(ctx context.Context, id string, fn store.PostFunc) (out sto
 			})
 		}
 		current.State, current.PostingDate, current.PostedAt, current.LedgerEntryID = domain.Posted, &outcome.PostingDate, &now, outcome.LedgerEntryID
+		current.Version++
 		t.receipts[id] = current
 		t.grir = append(t.grir, items...)
 		s.events = append(s.events, outcome.Event)
@@ -286,6 +291,10 @@ func (s *Store) GetReceipt(ctx context.Context, id string) (out store.Receipt, e
 	return out, err
 }
 
+func skipForCursor(at time.Time, id string, cursorAt time.Time, cursorID string) bool {
+	return !cursorAt.IsZero() && !at.Before(cursorAt) && !(at.Equal(cursorAt) && id < cursorID)
+}
+
 func pageLimit(limit int) int {
 	if limit <= 0 {
 		limit = defaultListLimit
@@ -300,6 +309,9 @@ func (s *Store) ListReceipts(ctx context.Context, f store.ReceiptFilter) (out []
 			r := t.receipts[id]
 			if (f.VendorID != "" && r.VendorID != f.VendorID) || (f.PurchaseOrderID != "" && r.PurchaseOrderID != f.PurchaseOrderID) ||
 				(f.State != "" && r.State != f.State) || (!f.From.IsZero() && r.Date.Before(f.From)) || (!f.To.IsZero() && r.Date.After(f.To)) {
+				continue
+			}
+			if skipForCursor(r.CreatedAt, r.ID, f.CursorCreatedAt, f.CursorID) {
 				continue
 			}
 			r.Lines = nil
@@ -324,7 +336,8 @@ func (s *Store) ListGrir(ctx context.Context, f store.GrirFilter) (page store.Gr
 				continue
 			}
 			g.AgeDays = int(time.Since(g.CreatedAt).Hours() / 24)
-			if len(page.Items) <= limit {
+			g.OpenAmount = g.ReceivedAmount.Sub(g.ClearedAmount)
+			if len(page.Items) <= limit && !skipForCursor(g.CreatedAt, g.ID, f.CursorCreatedAt, f.CursorID) {
 				page.Items = append(page.Items, g)
 			}
 			open[g.Currency] = open[g.Currency].Add(g.ReceivedAmount.Sub(g.ClearedAmount))
@@ -389,4 +402,154 @@ func (s *Store) ReleaseKey(ctx context.Context, key string) error {
 		delete(t.keys, key)
 		return nil
 	})
+}
+
+func (t *tenantData) grirFor(receiptID string, lineNo int) int {
+	return slices.IndexFunc(t.grir, func(g store.GrirItem) bool { return g.ReceiptID == receiptID && g.LineNo == lineNo })
+}
+
+func (s *Store) emit(adj store.Adjustment) {
+	if adj.Event != nil {
+		s.events = append(s.events, *adj.Event)
+	}
+}
+
+func (s *Store) Correct(ctx context.Context, id string, fn store.AdjustFunc) (out store.Receipt, err error) {
+	err = s.with(ctx, func(t *tenantData) error {
+		current, err := t.find(id)
+		if err != nil {
+			return err
+		}
+		if current.State != domain.Posted {
+			return &domain.Error{Code: domain.CodeInvalidTransition, Detail: fmt.Sprintf("receipt %s is %s, not POSTED", id, current.State)}
+		}
+		adj, err := fn(cloneReceipt(current))
+		if err != nil {
+			return err
+		}
+		for _, c := range adj.Lines {
+			for i := range current.Lines {
+				if l := &current.Lines[i]; l.LineNo == c.LineNo {
+					l.Qty, l.Amount, l.AmountAcct = c.Qty, decimal.NullDecimal{Decimal: c.Amount, Valid: true}, decimal.NullDecimal{Decimal: c.AmountAcct, Valid: true}
+				}
+			}
+			if g := t.grirFor(id, c.LineNo); g >= 0 {
+				item := &t.grir[g]
+				item.ReceivedQty, item.ReceivedAmount = c.Qty, c.Amount
+				item.Status = grirStatus(item.InvoicedQty, c.Qty)
+			}
+		}
+		current.CorrectionSeq++
+		current.Version++
+		t.receipts[id] = current
+		s.emit(adj)
+		out = cloneReceipt(current)
+		return nil
+	})
+	return out, err
+}
+
+func grirStatus(invoiced, received decimal.Decimal) string {
+	switch {
+	case invoiced.GreaterThanOrEqual(received):
+		return "CLEARED"
+	case invoiced.Sign() > 0:
+		return "PARTIAL"
+	}
+	return "OPEN"
+}
+
+func (s *Store) Cancel(ctx context.Context, id string, fn store.AdjustFunc) (out store.Receipt, err error) {
+	err = s.with(ctx, func(t *tenantData) error {
+		current, err := t.find(id)
+		if err != nil {
+			return err
+		}
+		if !slices.Contains([]domain.ReceiptState{domain.Arrived, domain.Registered, domain.Posted}, current.State) {
+			return &domain.Error{Code: domain.CodeInvalidTransition, Detail: fmt.Sprintf("receipt %s is %s and cannot be cancelled", id, current.State)}
+		}
+		adj, err := fn(cloneReceipt(current))
+		if err != nil {
+			return err
+		}
+		if current.State == domain.Posted {
+			for i := range t.grir {
+				if g := &t.grir[i]; g.ReceiptID == id {
+					g.ReceivedQty, g.ReceivedAmount, g.ClearedAmount, g.Status = decimal.Zero, decimal.Zero, decimal.Zero, "CLEARED"
+				}
+			}
+		} else {
+			t.releaseSerials(current)
+		}
+		current.State = domain.Cancelled
+		current.Version++
+		t.receipts[id] = current
+		s.emit(adj)
+		out = cloneReceipt(current)
+		return nil
+	})
+	return out, err
+}
+
+func (t *tenantData) releaseSerials(r store.Receipt) {
+	for _, l := range r.Lines {
+		for _, serial := range l.Serials {
+			delete(t.serials, domain.SerialKey{ProductID: l.ProductID, Serial: serial})
+		}
+	}
+}
+
+func invoiceKey(vendorID, number string) string { return vendorID + "|" + strings.ToLower(number) }
+
+func (s *Store) PostInvoice(ctx context.Context, in store.Invoice, fn store.InvoiceFunc) (out store.Invoice, err error) {
+	err = s.with(ctx, func(t *tenantData) error {
+		key := invoiceKey(in.VendorID, in.InvoiceNumber)
+		if _, dup := t.invoices[key]; dup {
+			return &domain.Error{Code: domain.CodeDuplicateInvoice, Detail: fmt.Sprintf("invoice %q is already posted for the vendor", in.InvoiceNumber)}
+		}
+		working := map[store.ItemKey]*domain.GrirItem{}
+		indexes := map[store.ItemKey]int{}
+		items := make([]*domain.GrirItem, len(in.Lines))
+		for i, l := range in.Lines {
+			k := l.ItemKey()
+			if working[k] == nil {
+				g := t.grirFor(k.ReceiptID, k.LineNo)
+				if g < 0 {
+					return store.ErrGrirNotFound
+				}
+				item := t.grir[g]
+				if t.receipts[k.ReceiptID].LegalEntityID != in.LegalEntityID || item.VendorID != in.VendorID {
+					return &domain.Error{Code: domain.CodeInvalidReceipt, Detail: fmt.Sprintf("receipt %s line %d belongs to another vendor or legal entity", k.ReceiptID, k.LineNo)}
+				}
+				working[k], indexes[k] = &domain.GrirItem{
+					ReceiptID: k.ReceiptID, LineNo: k.LineNo, ReceivedQty: item.ReceivedQty, InvoicedQty: item.InvoicedQty,
+					ReceivedAmount: money.Amount{Value: item.ReceivedAmount, Currency: item.Currency},
+					ClearedAmount:  money.Amount{Value: item.ClearedAmount, Currency: item.Currency},
+				}, g
+			}
+			items[i] = working[k]
+		}
+		outcome, err := fn(items)
+		if err != nil {
+			return err
+		}
+		for k, item := range working {
+			g := &t.grir[indexes[k]]
+			g.InvoicedQty, g.ClearedAmount = item.InvoicedQty, item.ClearedAmount.Value
+			g.Status = grirStatus(g.InvoicedQty, g.ReceivedQty)
+			r := t.receipts[k.ReceiptID]
+			for i := range r.Lines {
+				if r.Lines[i].LineNo == k.LineNo {
+					r.Lines[i].InvoicedQty = item.InvoicedQty
+				}
+			}
+			t.receipts[k.ReceiptID] = r
+		}
+		t.invoices[key] = struct{}{}
+		s.events = append(s.events, outcome.Event)
+		in.LedgerEntryID, in.Total, in.CreatedAt = outcome.LedgerEntryID, outcome.Total, time.Now().UTC()
+		out = in
+		return nil
+	})
+	return out, err
 }

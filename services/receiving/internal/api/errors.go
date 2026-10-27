@@ -17,6 +17,9 @@ var domainStatus = map[string]int{
 	domain.CodeDuplicateSerial:   http.StatusUnprocessableEntity,
 	domain.CodeInvalidReceipt:    http.StatusUnprocessableEntity,
 	domain.CodeInvalidTransition: http.StatusConflict,
+	domain.CodePeriodClosed:      http.StatusUnprocessableEntity,
+	domain.CodeOverInvoice:       http.StatusUnprocessableEntity,
+	domain.CodeDuplicateInvoice:  http.StatusConflict,
 }
 
 func writeError(w http.ResponseWriter, r *http.Request, err error) {
@@ -32,6 +35,8 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, "RCV-DUP-001", "Packing slip already used on receipt "+duplicate.ReceiptNumber))
 	case errors.Is(err, store.ErrNotFound):
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, "RCV-NF-001", "receipt not found"))
+	case errors.Is(err, store.ErrGrirNotFound):
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, "RCV-NF-002", "receipt line has no open GR/IR item"))
 	default:
 		slog.Error("receipt request failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusInternalServerError, "COM-0500", "internal error"))

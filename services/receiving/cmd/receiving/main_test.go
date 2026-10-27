@@ -69,13 +69,34 @@ func TestNotImplementedListsEveryDeliverable(t *testing.T) {
 	}
 }
 
+func withAccounts(env map[string]string) map[string]string {
+	env["POSTING_ACCOUNT_INVENTORY"], env["POSTING_ACCOUNT_GRIR"], env["POSTING_ACCOUNT_PPV"], env["POSTING_ACCOUNT_VENDOR_CONTROL"] = "1400", "2100", "5200", "2000"
+	return env
+}
+
+func TestBuildProfile(t *testing.T) {
+	profile, err := buildProfile(func(k string) string { return withAccounts(map[string]string{})[k] }, false)
+	if err != nil || profile.Inventory != "1400" || profile.GRIR != "2100" || profile.PPV != "5200" || profile.VendorControl != "2000" {
+		t.Fatalf("profile %+v err %v", profile, err)
+	}
+	partial := map[string]string{"POSTING_ACCOUNT_INVENTORY": "1400"}
+	if _, err := buildProfile(func(k string) string { return partial[k] }, false); err == nil || !strings.Contains(err.Error(), "POSTING_ACCOUNT_GRIR is required") {
+		t.Fatalf("got %v, want the GR/IR account reported missing", err)
+	}
+	fake, err := buildProfile(func(string) string { return "" }, true)
+	if err != nil || fake.GRIR == "" || fake.VendorControl == "" {
+		t.Fatalf("fake profile %+v err %v", fake, err)
+	}
+}
+
 func TestBuildPorts(t *testing.T) {
 	tests := []struct {
 		name    string
 		env     map[string]string
 		wantErr string
 	}{
-		{"both urls", map[string]string{"LEDGER_URL": "http://ledger", "CLOSE_URL": "http://close"}, ""},
+		{"both urls and accounts", withAccounts(map[string]string{"LEDGER_URL": "http://ledger", "CLOSE_URL": "http://close"}), ""},
+		{"both urls without accounts", map[string]string{"LEDGER_URL": "http://ledger", "CLOSE_URL": "http://close"}, "POSTING_ACCOUNT_INVENTORY is required"},
 		{"fakes allowed with both urls empty", map[string]string{"PASSAGE_ALLOW_FAKES": "1"}, ""},
 		{"empty urls without the flag", map[string]string{}, "LEDGER_URL is required"},
 		{"flag must be exactly 1", map[string]string{"PASSAGE_ALLOW_FAKES": "true"}, "LEDGER_URL is required"},

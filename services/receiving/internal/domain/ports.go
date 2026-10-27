@@ -38,6 +38,7 @@ type DocumentSource struct {
 
 type JournalEntry struct {
 	IdempotencyKey string         `json:"-"`
+	LedgerEntryID  string         `json:"-"`
 	LegalEntityID  string         `json:"legalEntityId"`
 	PostingDate    time.Time      `json:"postingDate"`
 	DocumentDate   time.Time      `json:"documentDate"`

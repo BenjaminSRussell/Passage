@@ -27,8 +27,8 @@ const (
 
 	receiptColumns = `id::text, COALESCE(receipt_number, ''), legal_entity_id::text, vendor_id::text, purchase_order_id::text, packing_slip,
 		COALESCE(carrier, ''), pallet_count, state, receipt_date, COALESCE(currency, ''), exchange_rate, posting_date, posted_at,
-		COALESCE(ledger_entry_id, ''), created_at`
-	lineColumns = `line_no, COALESCE(po_line_id::text, ''), product_id::text, qty, COALESCE(ordered_remaining, 0), COALESCE(over_delivery_pct, 0),
+		COALESCE(ledger_entry_id, ''), created_at, row_version, correction_seq`
+	lineColumns = `line_no, COALESCE(po_line_id::text, ''), product_id::text, qty, invoiced_qty, COALESCE(ordered_remaining, 0), COALESCE(over_delivery_pct, 0),
 		unit_price, currency, COALESCE(unit, ''), COALESCE(batch, ''), COALESCE(location_id::text, ''), inventory_status,
 		batch_tracked, serial_tracked, amount, amount_acct`
 )
@@ -77,13 +77,13 @@ func allocateNumber(ctx context.Context, tx pgx.Tx, tenantID string) (string, er
 func scanReceipt(row scanner) (Receipt, error) {
 	var r Receipt
 	err := row.Scan(&r.ID, &r.Number, &r.LegalEntityID, &r.VendorID, &r.PurchaseOrderID, &r.PackingSlip, &r.Carrier, &r.PalletCount,
-		&r.State, &r.Date, &r.Currency, &r.ExchangeRate, &r.PostingDate, &r.PostedAt, &r.LedgerEntryID, &r.CreatedAt)
+		&r.State, &r.Date, &r.Currency, &r.ExchangeRate, &r.PostingDate, &r.PostedAt, &r.LedgerEntryID, &r.CreatedAt, &r.Version, &r.CorrectionSeq)
 	return r, err
 }
 
 func scanLine(row scanner) (Line, error) {
 	var l Line
-	err := row.Scan(&l.LineNo, &l.POLineID, &l.ProductID, &l.Qty, &l.OrderedRemaining, &l.OverDeliveryPct, &l.UnitPrice, &l.Currency,
+	err := row.Scan(&l.LineNo, &l.POLineID, &l.ProductID, &l.Qty, &l.InvoicedQty, &l.OrderedRemaining, &l.OverDeliveryPct, &l.UnitPrice, &l.Currency,
 		&l.Unit, &l.Batch, &l.LocationID, &l.InventoryStatus, &l.BatchTracked, &l.SerialTracked, &l.Amount, &l.AmountAcct)
 	return l, err
 }
@@ -290,7 +290,7 @@ func registerTx(ctx context.Context, tx pgx.Tx, tenantID, id string, fn Register
 	if err != nil {
 		return Receipt{}, err
 	}
-	tag, err := tx.Exec(ctx, `UPDATE receiving_receipt SET state = 'REGISTERED', updated_at = now() WHERE tenant_id = $1 AND id = $2 AND state = 'ARRIVED'`, tenantID, id)
+	tag, err := tx.Exec(ctx, `UPDATE receiving_receipt SET state = 'REGISTERED', row_version = row_version + 1, updated_at = now() WHERE tenant_id = $1 AND id = $2 AND state = 'ARRIVED'`, tenantID, id)
 	if err != nil {
 		return Receipt{}, err
 	}
@@ -371,7 +371,7 @@ func (s *Postgres) Post(ctx context.Context, id string, fn PostFunc) (Receipt, e
 			lineRows = append(lineRows, []any{tenantID, id, l.LineNo, a.Amount, a.AmountAcct})
 			grirRows = append(grirRows, []any{tenantID, ids.New(), current.LegalEntityID, id, l.LineNo, l.Qty, a.Amount, l.Currency, current.VendorID, l.POLineID})
 		}
-		if _, err := tx.Exec(ctx, `UPDATE receiving_receipt SET state = 'POSTED', posting_date = $3, posted_at = now(), ledger_entry_id = $4, updated_at = now()
+		if _, err := tx.Exec(ctx, `UPDATE receiving_receipt SET state = 'POSTED', posting_date = $3, posted_at = now(), ledger_entry_id = $4, row_version = row_version + 1, updated_at = now()
 			WHERE tenant_id = $1 AND id = $2`, tenantID, id, outcome.PostingDate, outcome.LedgerEntryID); err != nil {
 			return err
 		}
