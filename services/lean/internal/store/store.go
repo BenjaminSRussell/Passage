@@ -172,6 +172,8 @@ type Store interface {
 	OpenPeriod(ctx context.Context, in OpenPeriod, idem Idem) (Period, bool, error)
 	ListPeriods(ctx context.Context, flowID string, limit int) ([]Period, error)
 	SettlePeriod(ctx context.Context, in SettlePeriod, idem Idem) (Period, bool, error)
+	RuleActivity(ctx context.Context, ruleID string, from, to time.Time) (RuleActivity, error)
+	PeriodWork(ctx context.Context, flowID, periodID string) (PeriodWork, error)
 	Ping(ctx context.Context) error
 }
 
@@ -644,8 +646,8 @@ func (s *Postgres) GenerateKanbans(ctx context.Context, in Generate, idem Idem) 
 			if domain.Replenishment(r.Replenishment) == domain.ReplenishEvent {
 				k.EventRefType, k.EventRefID = in.EventRefType, in.EventRefID
 			}
-			if err := tx.QueryRow(ctx, `insert into kanban (tenant_id, id, rule_id, card_number, qty, state, due, event_ref_type, event_ref_id)
-				values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning created_at, updated_at`,
+			if err := tx.QueryRow(ctx, `insert into kanban (tenant_id, id, rule_id, card_number, qty, state, due, event_ref_type, event_ref_id, planned_at)
+				values ($1, $2, $3, $4, $5, $6, $7, $8, $9, case when $6 = 'not-planned' then null else now() end) returning created_at, updated_at`,
 				p.TenantID, k.ID, k.RuleID, k.CardNumber, k.Qty, string(k.State), k.Due, k.EventRefType, k.EventRefID).Scan(&k.CreatedAt, &k.UpdatedAt); err != nil {
 				return err
 			}
@@ -747,6 +749,7 @@ func (s *Postgres) MoveKanban(ctx context.Context, id string, to domain.State, v
 				           when $2 = 'planned' then coalesce(k.due, date_trunc('second', now()) + make_interval(hours => r.lead_time_h))
 				           else k.due end,
 				handling_units = case when $2 = 'not-planned' then null else k.handling_units end,
+				planned_at = case when $2 = 'not-planned' then null when $2 = 'planned' then coalesce(k.planned_at, now()) else k.planned_at end,
 				version = k.version + 1, updated_at = now()
 			from kanban_rule r where r.id = k.rule_id and k.id = $1
 			returning k.due, k.handling_units, k.version, k.updated_at`, id, string(to)).Scan(&k.Due, &k.HandlingUnits, &k.Version, &k.UpdatedAt); err != nil {
@@ -755,6 +758,11 @@ func (s *Postgres) MoveKanban(ctx context.Context, id string, to domain.State, v
 		k.State = to
 		if k.JobCount > 0 && domain.ValidJobState(to) {
 			if err := followCard(ctx, tx, k.ID, to); err != nil {
+				return err
+			}
+		}
+		if to == domain.Completed {
+			if err := recordCycle(ctx, tx, k.ID); err != nil {
 				return err
 			}
 		}

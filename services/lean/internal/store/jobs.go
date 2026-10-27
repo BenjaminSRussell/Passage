@@ -179,6 +179,11 @@ func stepCard(ctx context.Context, tx pgx.Tx, k *Kanban, to domain.State, j Job,
 		return err
 	}
 	k.State = to
+	if to == domain.Completed {
+		if err := recordCycle(ctx, tx, k.ID); err != nil {
+			return err
+		}
+	}
 	data := leanevents.KanbanStateChangedData{KanbanID: k.ID, RuleID: k.RuleID, CardNumber: k.CardNumber, ItemID: k.ItemID, RuleType: k.RuleType,
 		From: string(from), To: string(to), Qty: k.Qty.String(), Version: k.Version, JobID: &j.ID}
 	if done != nil {
@@ -296,6 +301,9 @@ func (s *Postgres) CompleteJob(ctx context.Context, id string, version int, c do
 		if _, err := tx.Exec(ctx, `update kanban_job set state = 'completed', completed_at = now(), reported_qty = $2, scrap_qty = $3,
 				handling_units = $4, version = version + 1, updated_at = now()
 			where id = $1`, id, c.ReportedQty, c.ScrapQty, c.HandlingUnits); err != nil {
+			return err
+		}
+		if err := recordJobCompletion(ctx, tx, id); err != nil {
 			return err
 		}
 		if j, err = getJob(ctx, tx, id, ""); err != nil {

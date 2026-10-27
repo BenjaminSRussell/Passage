@@ -153,6 +153,27 @@ paths:
           description: LEAN-0101 when the flow does not exist.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/lean/flows/{id}/costing-periods:export:
+    get:
+      operationId: exportCostingPeriods
+      summary: A flow's costing periods as CSV, oldest first (PRD 4.24.14 flow costing period report)
+      x-passage-duty: lean.read
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: >-
+            One header row (period_start, period_end, status, currency, material_cost, conversion_cost,
+            output_value, variance, kanbans, settled_at, settled_by, journal_entry_id) and one row per period,
+            at most 200. Open periods have empty amounts. Sent as an attachment.
+          content:
+            text/csv:
+              schema: { type: string }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404':
+          description: LEAN-0101 when the flow does not exist.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/lean/flows/{id}/costing-periods/{periodId}:settle:
     post:
       operationId: settleCostingPeriod
@@ -183,6 +204,38 @@ paths:
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '422':
           description: idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/lean/flows/{id}/costing-periods/{periodId}:backflush:
+    post:
+      operationId: previewBackflush
+      summary: Preview the conversion cost of a period by backflush, cycle time × cost rate per activity (FR-24.12)
+      description: >-
+        For every activity of the flow, the kanban jobs completed within the period's days (UTC), including
+        those of cards reused since, and the quantity they processed (reported plus scrap). Hours are the
+        activity's cycle time per unit × that quantity; cost is hours × the activity's hourly rate in the
+        period currency, rounded once per activity to the minor unit, and conversionCost is the sum of the
+        activity costs. Service activities are priced by their purchase agreement (FR-24.20) and get no
+        rate here. Nothing is stored, so no Idempotency-Key is taken; the settle command takes the amounts.
+      x-passage-duty: lean.flow.settle
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - { name: periodId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/BackflushRequest' } } }
+      responses:
+        '200':
+          description: The conversion cost by activity, in sequence order.
+          content: { application/json: { schema: { $ref: '#/components/schemas/BackflushPreview' } } }
+        '400':
+          description: >-
+            COM-0001: a malformed or duplicate rate, a rate for an activity that is not in the flow or is a
+            service activity, a negative rate or one with more than six decimals, or no rate for a process or
+            transfer activity with completed jobs in the period.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '404':
+          description: LEAN-0110 when the period does not exist on this flow.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/lean/kanban-rules:
@@ -240,6 +293,30 @@ paths:
         '200':
           description: The rule
           content: { application/json: { schema: { $ref: '#/components/schemas/Rule' } } }
+        '404':
+          description: LEAN-0102
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/lean/kanban-rules/{id}/analysis:
+    get:
+      operationId: analyseKanbanRule
+      summary: Kanban rule analysis over a period (PRD 4.24.14)
+      description: >-
+        Cycles are the completions of the rule's cards within the period's days (UTC); a reused card counts
+        once per completion. Lead time runs from planning (when the rule's lead time starts and the due time
+        is set) to completion. A cycle is late when it completed after its due time.
+      x-passage-duty: lean.read
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - { name: from, in: query, schema: { type: string, format: date }, description: 'First day, inclusive (UTC). Default: 29 days before to.' }
+        - { name: to, in: query, schema: { type: string, format: date }, description: 'Last day, inclusive (UTC). Default: today.' }
+      responses:
+        '200':
+          description: The rule's KPI.
+          content: { application/json: { schema: { $ref: '#/components/schemas/RuleAnalysis' } } }
+        '400':
+          description: COM-0001 for a malformed date, to before from, or a period longer than 366 days.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '404':
           description: LEAN-0102
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
@@ -827,6 +904,64 @@ components:
         version: { type: integer }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+    RuleAnalysis:
+      type: object
+      required: [ruleId, ruleCode, from, to, cycles, timedCycles, avgLeadTimeH, targetLeadTimeH, dueCycles, lateCycles, latePct, activeKanbans, maxKanbans, overdueOpen]
+      properties:
+        ruleId: { type: string, format: uuid }
+        ruleCode: { type: string }
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        cycles: { type: integer, description: Card completions in the period. }
+        timedCycles: { type: integer, description: Cycles with a recorded planning time; the average lead time is over these. }
+        avgLeadTimeH: { type: [string, 'null'], description: Mean hours from planning to completion, two decimals; null when no cycle is timed. }
+        targetLeadTimeH: { type: integer, description: The rule's lead time in hours. }
+        dueCycles: { type: integer, description: Cycles with a due time. }
+        lateCycles: { type: integer, description: Due cycles completed after their due time. }
+        latePct: { type: [string, 'null'], description: lateCycles ÷ dueCycles × 100, two decimals; null when no cycle had a due time. }
+        activeKanbans: { type: integer, description: Cards now in circulation (not emptied). }
+        maxKanbans: { type: [integer, 'null'], description: The fixed rule's number of kanbans; null for scheduled and event rules. }
+        overdueOpen: { type: integer, description: Active cards not yet completed whose due time has passed. }
+    BackflushRequest:
+      type: object
+      required: [rates]
+      properties:
+        rates:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            required: [activityId, ratePerHour]
+            properties:
+              activityId: { type: string, format: uuid }
+              ratePerHour: { $ref: '#/components/schemas/Decimal', description: 'Cost per hour in the period currency: zero or more, below 10^14, at most six decimals.' }
+    BackflushPreview:
+      type: object
+      required: [periodId, flowId, periodStart, periodEnd, currency, status, conversionCost, activities]
+      properties:
+        periodId: { type: string, format: uuid }
+        flowId: { type: string, format: uuid }
+        periodStart: { type: string, format: date }
+        periodEnd: { type: string, format: date }
+        currency: { type: string }
+        status: { type: string, enum: [open, settled] }
+        conversionCost: { type: string, description: Sum of the activity costs at the currency's minor unit. }
+        activities:
+          type: array
+          items:
+            type: object
+            required: [activityId, sequence, name, kind, cycleTimeS, jobs, processedQty, hours, ratePerHour, cost]
+            properties:
+              activityId: { type: string, format: uuid }
+              sequence: { type: integer }
+              name: { type: string }
+              kind: { $ref: '#/components/schemas/ActivityKind' }
+              cycleTimeS: { type: integer, description: Cycle time per unit in seconds. }
+              jobs: { type: integer, description: Jobs completed in the period. }
+              processedQty: { type: string, description: Reported plus scrap quantity of those jobs. }
+              hours: { type: string, description: cycleTimeS × processedQty ÷ 3600, four decimals. }
+              ratePerHour: { type: [string, 'null'], description: The rate given; null when none was given (no jobs) and for service activities. }
+              cost: { type: [string, 'null'], description: Hours × rate at the currency's minor unit; null for service activities. }
     Problem:
       type: object
       description: RFC 9457 problem details.

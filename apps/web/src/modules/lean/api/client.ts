@@ -445,3 +445,84 @@ export function openPeriod(flowId: string, input: OpenPeriodInput, key: string =
 export function settlePeriod(flowId: string, periodId: string, input: SettlePeriodInput, key: string = newKey()): Promise<CostingPeriod> {
   return post<CostingPeriod>(`/flows/${encodeURIComponent(flowId)}/costing-periods/${encodeURIComponent(periodId)}:settle`, input, key);
 }
+
+// Kanban rule analysis (PRD 4.24.14): a rule's cycles over a period. Lead time
+// runs from planning to completion; a cycle is late when it completed after its
+// due time. Decimals are strings; null when nothing was measured.
+
+export interface RuleAnalysis {
+  ruleId: string;
+  ruleCode: string;
+  from: string;
+  to: string;
+  /** Card completions in the period; a reused card counts once per completion. */
+  cycles: number;
+  /** Cycles with a recorded planning time; the average is over these. */
+  timedCycles: number;
+  avgLeadTimeH: string | null;
+  targetLeadTimeH: number;
+  dueCycles: number;
+  lateCycles: number;
+  latePct: string | null;
+  activeKanbans: number;
+  /** The fixed rule's number of kanbans; null for scheduled and event rules. */
+  maxKanbans: number | null;
+  /** Active cards not completed whose due time has passed. */
+  overdueOpen: number;
+}
+
+/** The rule's KPI from `from` to `to` (inclusive UTC days); the service defaults to the last 30 days. */
+export function getRuleAnalysis(id: string, period: { from?: string; to?: string } = {}, signal?: AbortSignal): Promise<RuleAnalysis> {
+  return send<RuleAnalysis>(`/kanban-rules/${encodeURIComponent(id)}/analysis${query({ from: period.from, to: period.to })}`, {}, signal);
+}
+
+// Backflush (FR-24.12): conversion cost of a costing period by activity, from
+// the jobs completed in it, cycle time per unit and the hourly rates given.
+// A preview: nothing is stored, so no Idempotency-Key.
+
+export interface ActivityRate {
+  activityId: string;
+  ratePerHour: string;
+}
+
+export interface ConversionLine {
+  activityId: string;
+  sequence: number;
+  name: string;
+  kind: ActivityKind;
+  cycleTimeS: number;
+  jobs: number;
+  processedQty: string;
+  hours: string;
+  /** Null for a service activity, and for an idle activity given no rate. */
+  ratePerHour: string | null;
+  /** Null for a service activity: its cost is the purchase price (FR-24.20). */
+  cost: string | null;
+}
+
+export interface BackflushPreview {
+  periodId: string;
+  flowId: string;
+  periodStart: string;
+  periodEnd: string;
+  currency: string;
+  status: PeriodStatus;
+  conversionCost: string;
+  activities: ConversionLine[];
+}
+
+export function previewBackflush(flowId: string, periodId: string, rates: ActivityRate[]): Promise<BackflushPreview> {
+  return post<BackflushPreview>(`/flows/${encodeURIComponent(flowId)}/costing-periods/${encodeURIComponent(periodId)}:backflush`, { rates });
+}
+
+/** The flow costing period report as CSV text, oldest period first. */
+export async function exportPeriods(flowId: string): Promise<string> {
+  const res = await fetch(`${base}/flows/${encodeURIComponent(flowId)}/costing-periods:export`, {
+    headers: { Accept: "text/csv" },
+    credentials: "same-origin",
+  });
+  if (!res.ok) {
+    throw await toError(res);
+  }
+  return res.text();
+}

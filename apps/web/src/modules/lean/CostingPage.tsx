@@ -1,8 +1,9 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   Alert,
   Button,
+  buttonClassName,
   Card,
   DataTable,
   EmptyState,
@@ -10,6 +11,7 @@ import {
   Input,
   PageHeader,
   Select,
+  Skeleton,
   StatGroup,
   StatTile,
   StatusPill,
@@ -17,11 +19,16 @@ import {
 } from "../../shell/ui";
 import {
   describeProblem,
+  exportPeriods,
+  getFlow,
   listFlows,
   listPeriods,
   newKey,
   openPeriod,
+  previewBackflush,
   settlePeriod,
+  type BackflushPreview,
+  type ConversionLine,
   type CostingPeriod,
   type Problem,
 } from "./api/client";
@@ -124,13 +131,30 @@ const SETTLE_FIELDS: { field: SettleField; label: string }[] = [
   { field: "outputValue", label: "Output value" },
 ];
 
-function SettleForm({ flowId, period, onSettled }: { flowId: string; period: CostingPeriod; onSettled(p: CostingPeriod): void }) {
+function SettleForm({
+  flowId,
+  period,
+  conversion,
+  onSettled,
+}: {
+  flowId: string;
+  period: CostingPeriod;
+  /** A backflushed conversion cost carried into the form. */
+  conversion?: string;
+  onSettled(p: CostingPeriod): void;
+}) {
   const [values, setValues] = useState<Record<SettleField, string>>({ materialCost: "", conversionCost: "", outputValue: "" });
   const [errors, setErrors] = useState<Partial<Record<SettleField, string>>>({});
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useRef(newKey());
   const preview = variance(values.materialCost, values.conversionCost, values.outputValue);
+
+  useEffect(() => {
+    if (conversion === undefined) return;
+    setValues((v) => ({ ...v, conversionCost: conversion }));
+    key.current = newKey();
+  }, [conversion]);
 
   function update(field: SettleField, value: string) {
     setValues({ ...values, [field]: value.trim() });
@@ -194,6 +218,162 @@ function SettleForm({ flowId, period, onSettled }: { flowId: string; period: Cos
   );
 }
 
+function lineCost(l: ConversionLine, currency: string): string {
+  if (l.cost === null) return "From the purchase agreement";
+  return `${l.cost} ${currency}`;
+}
+
+const conversionColumns = (currency: string): DataTableColumn<ConversionLine>[] => [
+  { key: "name", header: "Activity", render: (l) => `${l.sequence}. ${l.name}` },
+  { key: "kind", header: "Kind" },
+  { key: "jobs", header: "Jobs", align: "end" },
+  { key: "processedQty", header: "Quantity", align: "end" },
+  { key: "hours", header: "Hours", align: "end" },
+  { key: "ratePerHour", header: "Rate per hour", align: "end", render: (l) => (l.ratePerHour === null ? dash : `${l.ratePerHour} ${currency}`) },
+  { key: "cost", header: "Conversion", align: "end", render: (l) => lineCost(l, currency) },
+];
+
+/**
+ * Backflush preview (FR-24.12): the conversion cost of a period from the jobs
+ * completed in it, each activity's cycle time and an hourly rate per activity.
+ * Nothing is stored; an open period can carry the total into its settlement.
+ */
+function BackflushCard({ flowId, period, onUse }: { flowId: string; period: CostingPeriod; onUse?(conversion: string): void }) {
+  const flow = useLoad((signal) => getFlow(flowId, signal), `flow|${flowId}`);
+  const [rates, setRates] = useState<Record<string, string>>({});
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [failure, setFailure] = useState<Problem | null>(null);
+  const [result, setResult] = useState<BackflushPreview | null>(null);
+  const [busy, setBusy] = useState(false);
+  const rated = (flow.data?.activities ?? []).filter((a) => a.kind !== "service");
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    const found: Record<string, string> = {};
+    for (const a of rated) {
+      const v = (rates[a.id] ?? "").trim();
+      if (v !== "" && !AMOUNT.test(v)) found[a.id] = `Enter a rate of zero or more in ${period.currency}, with at most six decimals.`;
+    }
+    setErrors(found);
+    setFailure(null);
+    if (Object.keys(found).length > 0) return;
+    setBusy(true);
+    try {
+      const given = rated.filter((a) => (rates[a.id] ?? "").trim() !== "").map((a) => ({ activityId: a.id, ratePerHour: rates[a.id].trim() }));
+      setResult(await previewBackflush(flowId, period.id, given));
+    } catch (error) {
+      setResult(null);
+      setFailure(describeProblem(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card title={`Backflush conversion ${period.periodStart} to ${period.periodEnd}`}>
+      <div className={styles.stack}>
+        <p className={styles.note}>
+          Conversion cost is each activity&apos;s cycle time per unit times the quantity its completed jobs processed in the period, at the activity&apos;s hourly
+          rate. Every activity with completed jobs needs a rate. Service activities are priced by their purchase agreement.
+        </p>
+        {flow.error ? (
+          <Alert tone="danger" title="Could not load the flow's activities" live="alert" action={<Button size="sm" onClick={flow.reload}>Try again</Button>}>
+            {flow.error.message} ({flow.error.code})
+          </Alert>
+        ) : !flow.data ? (
+          <div aria-busy="true">
+            <span className="visually-hidden">Loading the activities…</span>
+            <Skeleton height="control" />
+          </div>
+        ) : rated.length === 0 ? (
+          <EmptyState title="No activities to rate" description="This flow has no process or transfer activities." />
+        ) : (
+          <form className={styles.stack} onSubmit={submit} noValidate>
+            <div className={styles.form}>
+              {rated.map((a) => (
+                <FormField key={a.id} id={`rate-${a.id}`} label={`${a.sequence}. ${a.name}`} hint={`${period.currency} per hour · cycle ${a.cycleTimeS} s`} error={errors[a.id]}>
+                  {(c) => (
+                    <Input {...c} inputMode="decimal" value={rates[a.id] ?? ""} onChange={(e) => setRates({ ...rates, [a.id]: e.target.value })} invalid={Boolean(errors[a.id])} />
+                  )}
+                </FormField>
+              ))}
+            </div>
+            <div className={styles.formActions}>
+              <Button type="submit" variant="secondary" loading={busy}>
+                Preview backflush
+              </Button>
+            </div>
+          </form>
+        )}
+        {failure ? (
+          <Alert tone="danger" title="Could not preview the backflush" live="alert">
+            {failure.message} ({failure.code})
+          </Alert>
+        ) : null}
+        {result ? (
+          <>
+            <DataTable
+              label="Conversion by activity"
+              columns={conversionColumns(result.currency)}
+              rows={result.activities}
+              getRowKey={(l) => l.activityId}
+              empty={{ title: "No activities", description: "The flow has no activities." }}
+            />
+            <div className={styles.toolbar}>
+              <p className={styles.muted} role="status">{`Conversion cost ${result.conversionCost} ${result.currency}`}</p>
+              {onUse ? (
+                <Button variant="secondary" onClick={() => onUse(result.conversionCost)}>
+                  Use as conversion cost
+                </Button>
+              ) : null}
+            </div>
+          </>
+        ) : null}
+      </div>
+    </Card>
+  );
+}
+
+/** Fetches the flow costing period report as CSV and offers it as a download. */
+function ExportPeriods({ flowId }: { flowId: string }) {
+  const [csv, setCsv] = useState<string | null>(null);
+  const [failure, setFailure] = useState<Problem | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function prepare() {
+    setBusy(true);
+    setFailure(null);
+    try {
+      setCsv(await exportPeriods(flowId));
+    } catch (error) {
+      setCsv(null);
+      setFailure(describeProblem(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className={styles.stack}>
+      <div className={styles.toolbar}>
+        <Button variant="secondary" loading={busy} onClick={prepare}>
+          Export periods
+        </Button>
+        {csv !== null ? (
+          <a className={buttonClassName("primary")} href={`data:text/csv;charset=utf-8,${encodeURIComponent(csv)}`} download="flow-costing-periods.csv">
+            Download CSV
+          </a>
+        ) : null}
+      </div>
+      {failure ? (
+        <Alert tone="danger" title="Could not export the periods" live="alert">
+          {failure.message} ({failure.code})
+        </Alert>
+      ) : null}
+    </div>
+  );
+}
+
 function SettledFacts({ period }: { period: CostingPeriod }) {
   return (
     <Card title={`Settled ${period.periodStart} to ${period.periodEnd}`}>
@@ -221,11 +401,13 @@ export function CostingPage() {
   const periods = useLoad((signal) => (flowId ? listPeriods(flowId, signal) : Promise.resolve([])), `periods|${flowId}`);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [carried, setCarried] = useState<{ periodId: string; conversion: string } | null>(null);
   const selected = periods.data?.find((p) => p.id === selectedId) ?? null;
 
   function chooseFlow(id: string) {
     setSelectedId(null);
     setNotice(null);
+    setCarried(null);
     setParams(id ? { flowId: id } : {});
   }
 
@@ -233,7 +415,7 @@ export function CostingPage() {
     <div className={styles.stack}>
       <PageHeader
         title="Flow costing"
-        description="Periodic backflush costing of a production flow. Open a period, then settle it after its last day with material, conversion and output amounts."
+        description="Periodic backflush costing of a production flow. Open a period, preview its conversion cost by activity, then settle it after its last day with material, conversion and output amounts."
       />
       <div className={styles.toolbar}>
         <FormField id="costing-flow" label="Production flow">
@@ -264,6 +446,7 @@ export function CostingPage() {
         </Alert>
       ) : (
         <>
+          <ExportPeriods key={flowId} flowId={flowId} />
           <DataTable
             label="Costing periods"
             columns={columns}
@@ -281,6 +464,7 @@ export function CostingPage() {
               key={selected.id}
               flowId={flowId}
               period={selected}
+              conversion={carried?.periodId === selected.id ? carried.conversion : undefined}
               onSettled={(p) => {
                 setNotice(`Settled ${p.periodStart} to ${p.periodEnd} with a variance of ${p.variance ?? dash} ${p.currency}.`);
                 periods.reload();
@@ -288,6 +472,14 @@ export function CostingPage() {
             />
           ) : null}
           {selected?.status === "settled" ? <SettledFacts period={selected} /> : null}
+          {selected ? (
+            <BackflushCard
+              key={`backflush-${selected.id}`}
+              flowId={flowId}
+              period={selected}
+              onUse={selected.status === "open" ? (conversion) => setCarried({ periodId: selected.id, conversion }) : undefined}
+            />
+          ) : null}
           <OpenPeriodForm
             flowId={flowId}
             onOpened={(p) => {

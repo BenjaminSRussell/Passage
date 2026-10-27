@@ -1,6 +1,6 @@
 # lean
 
-Lean manufacturing for Passage (wave 24, PSG-24, slices 1, 2, 4 and 5). Production flows with their
+Lean manufacturing for Passage (wave 24, PSG-24, slices 1, 2, 4, 5 and 6). Production flows with their
 activities and activation, kanban rules (fixed, scheduled, event), kanban generation, the
 kanban card state machine and the kanban board (slice 1). Slice 2 adds takt vs cycle on the
 board (FR-24.14) and the lean subcontracting price rule as a preview of the purchase order
@@ -10,11 +10,16 @@ and handling units; the jobs drive their card to In progress and Completed (FR-2
 Slice 5 adds flow costing periods (FR-24.12): a period is opened for a flow and date range and
 settled after its last day, only when every card with jobs in it is Completed or Emptied
 (BR-24.9, LEAN-0003), with variance = material + conversion − output in the period currency
-(AC-24.8) and the `flowperiod.settled` event.
+(AC-24.8) and the `flowperiod.settled` event. Slice 6 adds the kanban rule analysis (PRD 4.24.14:
+cycles, lead time from planning to completion, late share, active cards against the maximum),
+the backflush preview of a period's conversion cost (FR-24.12: cycle time × processed quantity ×
+the activity's hourly rate) and the CSV export of a flow's costing periods. Every card completion
+and job completion is recorded in an append-only history, so a reused fixed card's earlier
+cycles still count.
 
 Flows, activities, rules, cards and jobs are stored in Postgres (RLS on every table, outbox
 events in the same transaction). The subcontracting preview stores nothing. Deriving period
-costs from material issues and cycle times, the ledger journal, and PO creation and receipt in
+material cost from material issues, conversion rates from the resources service, the ledger journal, and PO creation and receipt in
 purchasing are later slices or handoffs; see `NOT-IMPLEMENTED.md`.
 
 ## Layout
@@ -25,16 +30,19 @@ internal/domain       pure rules (no I/O): kanban.go (BR-24.6 state machine, eve
                       rules.go (FR-24.9 rule check, BR-24.7 count and capacity, BR-24.8
                       quantities), flow.go (FR-24.8 connectivity, FR-24.14 takt vs cycle),
                       flowcost.go (BR-24.9 gate, variance in money), subcontract.go (FR-24.20, BR-24.16), jobs.go
-                      (job start and completion and the card steps they cause, BR-24.6)
+                      (job start and completion and the card steps they cause, BR-24.6),
+                      analysis.go (PRD 4.24.14 rule KPI), backflush.go (FR-24.12 conversion)
 internal/store        Postgres repository: flows, rules, generation, moves, board (store.go);
                       kanban jobs and the work-cell board (jobs.go); flow costing
-                      periods and the settlement gate (costing.go)
+                      periods and the settlement gate (costing.go); cycle and job-completion
+                      history and the reads of the analysis and backflush (analysis.go)
 internal/api          HTTP handlers: decode → validate → tenant → store/domain → JSON/problem
 internal/events       event types and payloads
 migrations/           0001_init.sql (production_flow, flow_activity, kanban_rule, kanban,
                       idempotency_keys, outbox), 0002_kanban_jobs.sql (kanban_job,
                       kanban.handling_units), 0003_flow_costing.sql
-                      (flow_costing_period), RLS on every table
+                      (flow_costing_period), 0004_kanban_history.sql (kanban_cycle,
+                      kanban_job_completion, kanban.planned_at), RLS on every table
 api/openapi.yaml      OpenAPI 3.1, checked against the router by internal/api/openapi_test.go
 events/asyncapi.yaml  AsyncAPI 3, checked against internal/events by events_test.go
 charts/lean           Helm chart (helm lint), 2 replicas as in PRD 4.24.10
@@ -84,6 +92,13 @@ skipped when `PASSAGE_TEST_DATABASE_URL` is unset.
   includes today is LEAN-0112; overlapping periods are LEAN-0109; amounts finer than the
   currency's minor unit are refused, not rounded (domain table and rapid property: output +
   variance = material + conversion).
+- PRD 4.24.14 kanban rule analysis (domain table and rapid property; store against Postgres): a
+  fixed card reused once has two cycles, each timed from its planning; a jobless event card
+  completed after its due time is late (100 %); an open card past due is overdue now; the period
+  filter is by completion day (UTC); nothing measured is null, not zero.
+- FR-24.12 backflush (domain table and rapid property: the total equals the sum of the activity
+  costs at the minor unit; store): Mix 40 s × 45.5 units at 90/h and Fill 30 s × 45.5 at 60/h give
+  68.25, counting the completions of a card reused since; service activities take no rate.
 - AC-24.17: a service job of 20 on vendor V in `po-per-kanban` mode gives one PO line of 20 at
   the agreement price; periodic-po accumulates per vendor, item and price (rapid property:
   quantity and amount are conserved); the agreement valid on the completion date prices the
@@ -110,6 +125,9 @@ skipped when `PASSAGE_TEST_DATABASE_URL` is unset.
 | POST | `/v1/lean/flows/{id}/costing-periods` | `lean.flow.settle` | Open a costing period (`periodStart`, `periodEnd`, `currency`); no overlap with the flow's other periods; Idempotency-Key |
 | GET | `/v1/lean/flows/{id}/costing-periods` | `lean.read` | The flow's periods, latest first; `limit` |
 | POST | `/v1/lean/flows/{id}/costing-periods/{periodId}:settle` | `lean.flow.settle` | Settle after the last day with `materialCost`, `conversionCost`, `outputValue` (BR-24.9, AC-24.8); `version`; Idempotency-Key |
+| GET | `/v1/lean/kanban-rules/{id}/analysis` | `lean.read` | Rule KPI over `from`..`to` (default the last 30 days, at most 366): cycles, average lead time against the rule's, late share, active against maximum, overdue now (PRD 4.24.14) |
+| POST | `/v1/lean/flows/{id}/costing-periods/{periodId}:backflush` | `lean.flow.settle` | Conversion cost of the period by activity from the hourly `rates` given (FR-24.12); writes nothing |
+| GET | `/v1/lean/flows/{id}/costing-periods:export` | `lean.read` | The flow's periods as CSV, oldest first (PRD 4.24.14 flow costing period report) |
 | POST | `/v1/lean/subcontracting:preview` | `lean.flow.write` | PO lines for completed service jobs priced by purchase agreement (FR-24.20, BR-24.16); writes nothing |
 
 Duties are enforced with the kernel `authz.RequireDuty`. The OPA entries are a handoff to
@@ -155,6 +173,8 @@ Duties are enforced with the kernel `authz.RequireDuty`. The OPA entries are a h
 
 Amounts are validated against the period currency's minor unit (COM-0001 when finer), so the
 stored variance is exact; the table also checks variance = material + conversion − output.
+Backflush rates take at most six decimals; each activity cost is rounded once to the minor unit
+and the conversion cost is their sum.
 
 ## Wave reference
 

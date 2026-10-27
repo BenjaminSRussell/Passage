@@ -38,6 +38,7 @@ import {
 } from "./api/client";
 import { dash, formatDateTime, positiveQuantity, QUANTITY, REPLENISHMENT_LABELS, shortId, STATE_LABELS, today, UUID } from "./format";
 import styles from "./pages.module.css";
+import { RuleAnalysisCard } from "./RuleAnalysis";
 import { useLoad } from "./useLoad";
 
 function capacity(r: Rule): string {
@@ -488,6 +489,7 @@ export function RuleDetailPage() {
         getRowKey={(k) => k.id}
         empty={{ title: "No cards yet", description: "Generate kanbans to put cards in circulation." }}
       />
+      <RuleAnalysisCard ruleId={rule.id} />
       <p className={styles.muted}>{`Item ${rule.itemId} · site ${rule.siteId} · effective from ${rule.effectiveFrom}${rule.effectiveTo ? ` to ${rule.effectiveTo}` : ""}`}</p>
     </div>
   );

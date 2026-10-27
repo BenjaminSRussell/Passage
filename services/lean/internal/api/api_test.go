@@ -52,6 +52,11 @@ type fakeStore struct {
 	gotDone    domain.Completion
 	gotOpen    store.OpenPeriod
 	gotSettle  store.SettlePeriod
+	activity   store.RuleActivity
+	work       store.PeriodWork
+	gotRange   [2]time.Time
+	gotPeriod  string
+	periods    []store.Period
 }
 
 func (f *fakeStore) CreateFlow(_ context.Context, in store.Flow, idem store.Idem) (store.Flow, bool, error) {
@@ -133,12 +138,27 @@ func (f *fakeStore) OpenPeriod(_ context.Context, in store.OpenPeriod, idem stor
 
 func (f *fakeStore) ListPeriods(_ context.Context, flow string, limit int) ([]store.Period, error) {
 	f.gotFlowID, f.gotLimit = flow, limit
-	return []store.Period{}, f.err
+	if f.periods == nil {
+		return []store.Period{}, f.err
+	}
+	return f.periods, f.err
 }
 
 func (f *fakeStore) SettlePeriod(_ context.Context, in store.SettlePeriod, idem store.Idem) (store.Period, bool, error) {
 	f.gotSettle, f.gotIdem = in, idem
 	return store.Period{ID: in.PeriodID, FlowID: in.FlowID, Status: "settled", Version: in.Version + 1}, !f.replay, f.err
+}
+
+func (f *fakeStore) RuleActivity(_ context.Context, ruleID string, from, to time.Time) (store.RuleActivity, error) {
+	f.gotRange = [2]time.Time{from, to}
+	out := f.activity
+	out.Rule.ID = ruleID
+	return out, f.err
+}
+
+func (f *fakeStore) PeriodWork(_ context.Context, flow, period string) (store.PeriodWork, error) {
+	f.gotFlowID, f.gotPeriod = flow, period
+	return f.work, f.err
 }
 
 func (f *fakeStore) Ping(context.Context) error { return f.err }

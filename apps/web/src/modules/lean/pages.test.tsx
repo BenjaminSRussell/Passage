@@ -3,12 +3,13 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
 import { loadModules } from "../registry";
-import type { Board, CostingPeriod, Flow, JobBoard, JobState, Kanban, KanbanJob, KanbanState, Rule } from "./api/client";
+import type { BackflushPreview, Board, CostingPeriod, Flow, JobBoard, JobState, Kanban, KanbanJob, KanbanState, Rule, RuleAnalysis } from "./api/client";
 import { REFRESH_MS } from "./BoardPage";
 import { validatePeriod } from "./CostingPage";
 import { validateFlow } from "./FlowPages";
 import { nextState, overdue, variance } from "./format";
 import lean from "./module";
+import { shiftDays, validateAnalysisPeriod } from "./RuleAnalysis";
 import { validateRule } from "./RulePages";
 import { validateCompletion, workCells } from "./WorkCellBoardPage";
 
@@ -22,7 +23,7 @@ const LOC = "10000000-0000-4000-8000-000000000001";
 const K1 = "c0000000-0000-4000-8000-000000000001";
 const K2 = "c0000000-0000-4000-8000-000000000002";
 
-type Reply = { status: number; body: unknown };
+type Reply = { status: number; body: unknown; text?: string };
 type Handler = (url: URL, init: RequestInit) => Reply | undefined;
 
 const shellRules = new Set(["page-has-heading-one", "landmark-unique", "region", "bypass"]);
@@ -46,6 +47,7 @@ beforeEach(() => {
       const url = new URL(input, "http://localhost");
       calls.push({ method: init.method ?? "GET", url, init, body: init.body ? JSON.parse(String(init.body)) : undefined });
       const reply = handler(url, init) ?? json(404, { code: "TEST-404", detail: `no fake for ${init.method ?? "GET"} ${url.pathname}` });
+      if (reply.text !== undefined) return new Response(reply.text, { status: reply.status, headers: { "Content-Type": "text/csv" } });
       return new Response(JSON.stringify(reply.body), { status: reply.status, headers: { "Content-Type": "application/json" } });
     }),
   );
@@ -245,6 +247,16 @@ describe("production flows", () => {
   });
 });
 
+/** The rule page's analysis card: no cycles yet. */
+function quietAnalysis(url: URL): Reply | undefined {
+  const m = /^\/api\/v1\/lean\/kanban-rules\/([^/]+)\/analysis$/.exec(url.pathname);
+  if (!m) return undefined;
+  return json(200, {
+    ruleId: m[1], ruleCode: "", from: "2026-09-27", to: "2026-10-26", cycles: 0, timedCycles: 0, avgLeadTimeH: null, targetLeadTimeH: 8,
+    dueCycles: 0, lateCycles: 0, latePct: null, activeKanbans: 0, maxKanbans: null, overdueOpen: 0,
+  });
+}
+
 describe("kanban rules", () => {
   it("lists rules with their active cards", async () => {
     handler = (url) => (url.pathname === "/api/v1/lean/kanban-rules" ? json(200, { items: [rule, eventRule] }) : undefined);
@@ -316,7 +328,7 @@ describe("kanban rules", () => {
         cards = [1, 2, 3].map((n) => card(`c0000000-0000-4000-8000-00000000001${n}`, `FILL-EV-000${n}`, "planned", { qty: "20", eventRefId: "SO-1/10" }));
         return json(201, { items: cards });
       }
-      return undefined;
+      return quietAnalysis(url);
     };
     const { container } = renderAt(`/lean/rules/${EVENT_RULE}`);
     expect(await screen.findByText("No cards yet")).toBeInTheDocument();
@@ -337,7 +349,7 @@ describe("kanban rules", () => {
       if (url.pathname === `/api/v1/lean/kanban-rules/${RULE}`) return json(200, { ...rule, activeKanbans: 3 });
       if (url.pathname === "/api/v1/lean/board") return json(200, boardOf([]));
       if (init.method === "POST") return json(409, { code: "LEAN-0002", detail: "rule MIX-A already has 3 active kanbans (max 3)" });
-      return undefined;
+      return quietAnalysis(url);
     };
     renderAt(`/lean/rules/${RULE}`);
     fireEvent.click(await screen.findByRole("button", { name: "Generate kanbans" }));
@@ -735,6 +747,7 @@ describe("slice 5: flow costing", () => {
     version: 2,
   };
   const flowList = () => json(200, { items: [{ ...flow, status: "active", activities: undefined }] });
+  const flowDetail = (url: URL) => (url.pathname === `/api/v1/lean/flows/${FLOW}` ? json(200, flow) : undefined);
 
   it("computes the variance exactly and checks a period before opening it", () => {
     expect(variance("900.10", "300", "1150.25")).toBe("49.85");
@@ -750,7 +763,7 @@ describe("slice 5: flow costing", () => {
     handler = (url) => {
       if (url.pathname === "/api/v1/lean/flows") return flowList();
       if (url.pathname === periodsPath) return json(200, { items: [open, settled] });
-      return undefined;
+      return flowDetail(url);
     };
     const { container } = renderAt("/lean/costing");
     expect(await screen.findByText("Choose a production flow")).toBeInTheDocument();
@@ -764,6 +777,8 @@ describe("slice 5: flow costing", () => {
     expect(screen.getByRole("list", { name: "Settlement" })).toHaveTextContent("Variance 49.85 USD");
     expect(screen.getByText(/journal entry pending the ledger integration/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Settle period" })).toBeNull();
+    // A settled period can still be backflushed, but nothing is carried into a settlement.
+    expect(await screen.findByLabelText("1. Mix")).toBeInTheDocument();
   });
 
   it("shows the empty and failed period lists", async () => {
@@ -823,10 +838,11 @@ describe("slice 5: flow costing", () => {
         return json(200, done);
       }
       if (url.pathname === periodsPath) return json(200, { items: periods });
-      return undefined;
+      return flowDetail(url);
     };
     const { container } = renderAt(`/lean/costing?flowId=${FLOW}`);
     fireEvent.click(await screen.findByRole("button", { name: "2026-09-01 to 2026-09-30" }));
+    await screen.findByLabelText("1. Mix");
     fireEvent.change(screen.getByLabelText("Material cost"), { target: { value: "900.10" } });
     fireEvent.change(screen.getByLabelText("Conversion cost"), { target: { value: "300" } });
     fireEvent.click(screen.getByRole("button", { name: "Settle period" }));
@@ -846,6 +862,197 @@ describe("slice 5: flow costing", () => {
     const second = calls.filter((c) => c.method === "POST").at(-1)!;
     expect(header(second, "Idempotency-Key")).not.toBe(header(first, "Idempotency-Key"));
     expect(await screen.findByRole("list", { name: "Settlement" })).toHaveTextContent("Cards 10");
+  });
+});
+
+describe("slice 6: rule analysis, backflush and export", () => {
+  const P1 = "e0000000-0000-4000-8000-000000000001";
+  const MIX = "ac000000-0000-4000-8000-000000000001";
+  const FILL = "ac000000-0000-4000-8000-000000000002";
+  const analysisPath = `/api/v1/lean/kanban-rules/${RULE}/analysis`;
+  const periodsPath = `/api/v1/lean/flows/${FLOW}/costing-periods`;
+  const analysis: RuleAnalysis = {
+    ruleId: RULE,
+    ruleCode: "MIX-A",
+    from: "2026-09-27",
+    to: "2026-10-26",
+    cycles: 12,
+    timedCycles: 10,
+    avgLeadTimeH: "8.50",
+    targetLeadTimeH: 8,
+    dueCycles: 12,
+    lateCycles: 3,
+    latePct: "25.00",
+    activeKanbans: 3,
+    maxKanbans: 3,
+    overdueOpen: 1,
+  };
+  const open: CostingPeriod = {
+    id: P1,
+    flowId: FLOW,
+    periodStart: "2026-09-01",
+    periodEnd: "2026-09-30",
+    currency: "USD",
+    status: "open",
+    materialCost: null,
+    conversionCost: null,
+    outputValue: null,
+    variance: null,
+    kanbans: null,
+    journalEntryId: null,
+    settledAt: null,
+    settledBy: null,
+    version: 1,
+    createdAt: "2026-10-01T08:00:00Z",
+    updatedAt: "2026-10-01T08:00:00Z",
+  };
+  const preview: BackflushPreview = {
+    periodId: P1,
+    flowId: FLOW,
+    periodStart: "2026-09-01",
+    periodEnd: "2026-09-30",
+    currency: "USD",
+    status: "open",
+    conversionCost: "415.07",
+    activities: [
+      { activityId: MIX, sequence: 1, name: "Mix", kind: "process", cycleTimeS: 45, jobs: 10, processedQty: "250", hours: "3.1250", ratePerHour: "90", cost: "281.25" },
+      { activityId: FILL, sequence: 2, name: "Fill", kind: "process", cycleTimeS: 30, jobs: 9, processedQty: "221.5", hours: "1.8458", ratePerHour: "72.5", cost: "133.82" },
+    ],
+  };
+
+  function ruleHandler(reply: () => Reply): Handler {
+    return (url) => {
+      if (url.pathname === `/api/v1/lean/kanban-rules/${RULE}`) return json(200, rule);
+      if (url.pathname === "/api/v1/lean/board") return json(200, boardOf([]));
+      if (url.pathname === analysisPath) return reply();
+      return undefined;
+    };
+  }
+
+  it("checks an analysis period like the service", () => {
+    expect(shiftDays("2026-10-26", -29)).toBe("2026-09-27");
+    expect(shiftDays("2024-02-28", 1)).toBe("2024-02-29");
+    expect(validateAnalysisPeriod({ from: "2026-09-01", to: "2026-09-30" })).toEqual({});
+    expect(validateAnalysisPeriod({ from: "2026-09-30", to: "2026-09-01" }).to).toBe("The last day cannot be before the first day.");
+    // 366 days is the most; a leap year fits, one more day does not.
+    expect(validateAnalysisPeriod({ from: "2024-01-01", to: "2024-12-31" })).toEqual({});
+    expect(validateAnalysisPeriod({ from: "2025-08-31", to: "2026-09-01" }).from).toBe("Choose a period of at most 366 days.");
+    expect(validateAnalysisPeriod({ from: "", to: "x" })).toMatchObject({ from: expect.any(String), to: expect.any(String) });
+  });
+
+  it("shows a rule's analysis for the last 30 days and for a chosen period (PRD 4.24.14)", async () => {
+    handler = ruleHandler(() => json(200, analysis));
+    const { container } = renderAt(`/lean/rules/${RULE}`);
+    const tiles = await screen.findByRole("list", { name: "Rule analysis" });
+    expect(tiles).toHaveTextContent("Cycles 12");
+    expect(tiles).toHaveTextContent("Average lead time 8.50 h");
+    expect(tiles).toHaveTextContent("Target 8 h");
+    expect(tiles).toHaveTextContent("Late 25.00 %");
+    expect(tiles).toHaveTextContent("3 of 12 with a due time");
+    expect(tiles).toHaveTextContent("Active cards 3 of 3");
+    expect(tiles).toHaveTextContent("Overdue now 1");
+    expect(screen.getByText(/2 older cycles have no planning time/)).toBeInTheDocument();
+    const first = calls.find((c) => c.url.pathname === analysisPath)!;
+    const to = first.url.searchParams.get("to")!;
+    expect(to).toBe(new Date().toISOString().slice(0, 10));
+    expect(first.url.searchParams.get("from")).toBe(shiftDays(to, -29));
+    expect(pageViolations(container)).toEqual([]);
+
+    fireEvent.change(screen.getByLabelText("First day"), { target: { value: "2026-09-30" } });
+    fireEvent.change(screen.getByLabelText("Last day"), { target: { value: "2026-09-01" } });
+    fireEvent.click(screen.getByRole("button", { name: "Analyse" }));
+    expect(await screen.findByText("The last day cannot be before the first day.")).toBeInTheDocument();
+    expect(calls.filter((c) => c.url.pathname === analysisPath)).toHaveLength(1);
+    fireEvent.change(screen.getByLabelText("First day"), { target: { value: "2026-09-01" } });
+    fireEvent.change(screen.getByLabelText("Last day"), { target: { value: "2026-09-30" } });
+    fireEvent.click(screen.getByRole("button", { name: "Analyse" }));
+    await waitFor(() => expect(calls.filter((c) => c.url.pathname === analysisPath)).toHaveLength(2));
+    const second = calls.filter((c) => c.url.pathname === analysisPath)[1];
+    expect(second.url.searchParams.get("from")).toBe("2026-09-01");
+    expect(second.url.searchParams.get("to")).toBe("2026-09-30");
+  });
+
+  it("shows an analysis without cycles and one that cannot load", async () => {
+    let fail = false;
+    handler = ruleHandler(() =>
+      fail
+        ? json(400, { code: "COM-0001", detail: "request failed validation" })
+        : json(200, { ...analysis, cycles: 0, timedCycles: 0, avgLeadTimeH: null, dueCycles: 0, lateCycles: 0, latePct: null, maxKanbans: null, overdueOpen: 0 }),
+    );
+    renderAt(`/lean/rules/${RULE}`);
+    expect(await screen.findByText("No completed cycles in this period")).toBeInTheDocument();
+    const tiles = screen.getByRole("list", { name: "Rule analysis" });
+    expect(tiles).toHaveTextContent("Average lead time —");
+    expect(tiles).toHaveTextContent("Late —");
+    expect(tiles).toHaveTextContent("Active cards 3");
+    fail = true;
+    cleanupAndRender(`/lean/rules/${RULE}`);
+    expect(await screen.findByRole("alert")).toHaveTextContent("request failed validation (COM-0001)");
+    fail = false;
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("No completed cycles in this period")).toBeInTheDocument();
+  });
+
+  it("previews a period's backflush and carries it into the settlement (FR-24.12)", async () => {
+    let refuse = true;
+    handler = (url, init) => {
+      if (url.pathname === "/api/v1/lean/flows") return json(200, { items: [{ ...flow, activities: undefined }] });
+      if (url.pathname === `/api/v1/lean/flows/${FLOW}`) return json(200, flow);
+      if (url.pathname === periodsPath) return json(200, { items: [open] });
+      if (url.pathname === `${periodsPath}/${P1}:backflush` && init.method === "POST") {
+        return refuse ? json(400, { code: "COM-0001", detail: "activity Fill completed 9 jobs in the period and needs a cost rate" }) : json(200, preview);
+      }
+      return undefined;
+    };
+    const { container } = renderAt(`/lean/costing?flowId=${FLOW}`);
+    fireEvent.click(await screen.findByRole("button", { name: "2026-09-01 to 2026-09-30" }));
+    const mix = await screen.findByLabelText("1. Mix");
+    fireEvent.change(mix, { target: { value: "ninety" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview backflush" }));
+    expect(await screen.findByText("Enter a rate of zero or more in USD, with at most six decimals.")).toBeInTheDocument();
+    expect(calls.some((c) => c.url.pathname.endsWith(":backflush"))).toBe(false);
+
+    fireEvent.change(mix, { target: { value: "90" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview backflush" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Fill completed 9 jobs in the period and needs a cost rate (COM-0001)");
+    const sent = calls.find((c) => c.url.pathname.endsWith(":backflush"))!;
+    // A read-only preview: only the rates given, and no Idempotency-Key.
+    expect(sent.body).toEqual({ rates: [{ activityId: MIX, ratePerHour: "90" }] });
+    expect(header(sent, "Idempotency-Key")).toBeNull();
+
+    refuse = false;
+    fireEvent.change(screen.getByLabelText("2. Fill"), { target: { value: "72.5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview backflush" }));
+    const table = await screen.findByRole("table", { name: "Conversion by activity" });
+    expect(within(table).getByText("281.25 USD")).toBeInTheDocument();
+    expect(within(table).getByText("1.8458")).toBeInTheDocument();
+    expect(screen.getByText("Conversion cost 415.07 USD")).toBeInTheDocument();
+    expect(pageViolations(container)).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Use as conversion cost" }));
+    expect(screen.getByLabelText("Conversion cost")).toHaveValue("415.07");
+  });
+
+  it("exports the periods as CSV and shows a failed export", async () => {
+    let fail = false;
+    const csv = "period_start,period_end,status\n2026-09-01,2026-09-30,open\n";
+    handler = (url) => {
+      if (url.pathname === "/api/v1/lean/flows") return json(200, { items: [{ ...flow, activities: undefined }] });
+      if (url.pathname === periodsPath) return json(200, { items: [open] });
+      if (url.pathname === `${periodsPath}:export`) return fail ? json(403, { code: "AUTH-0003", detail: "missing duty lean.read" }) : { status: 200, body: null, text: csv };
+      return undefined;
+    };
+    renderAt(`/lean/costing?flowId=${FLOW}`);
+    await screen.findByRole("table", { name: "Costing periods" });
+    fireEvent.click(screen.getByRole("button", { name: "Export periods" }));
+    const link = await screen.findByRole("link", { name: "Download CSV" });
+    expect(link).toHaveAttribute("href", `data:text/csv;charset=utf-8,${encodeURIComponent(csv)}`);
+    expect(link).toHaveAttribute("download", "flow-costing-periods.csv");
+    const sent = calls.find((c) => c.url.pathname.endsWith(":export"))!;
+    expect(header(sent, "Accept")).toBe("text/csv");
+    fail = true;
+    fireEvent.click(screen.getByRole("button", { name: "Export periods" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("missing duty lean.read (AUTH-0003)");
+    expect(screen.queryByRole("link", { name: "Download CSV" })).toBeNull();
   });
 });
 

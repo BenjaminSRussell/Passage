@@ -5,9 +5,9 @@ import styles from "./pages.module.css";
 const AREAS = [
   { to: "/lean/board", title: "Kanban board", text: "Cards by state for a flow or rule; move each card as its work progresses (FR-24.10)." },
   { to: "/lean/work-cell", title: "Work-cell board", text: "The kanban jobs at one work cell; start them and complete them with quantity, scrap and handling units (FR-24.10)." },
-  { to: "/lean/rules", title: "Kanban rules", text: "Fixed, scheduled and event replenishment per item, and kanban generation (FR-24.9, FR-24.11)." },
+  { to: "/lean/rules", title: "Kanban rules", text: "Fixed, scheduled and event replenishment per item, kanban generation and the rule analysis of cycles, lead time and late cards (FR-24.9, FR-24.11)." },
   { to: "/lean/flows", title: "Production flows", text: "Value-stream activities with cycle times, outputs and predecessors; activate when connected (FR-24.8)." },
-  { to: "/lean/costing", title: "Flow costing", text: "Costing periods of a production flow, settled with material, conversion, output and variance once every card is done (FR-24.12)." },
+  { to: "/lean/costing", title: "Flow costing", text: "Costing periods of a production flow: conversion cost by backflush, settlement with material, conversion, output and variance once every card is done, and a CSV export (FR-24.12)." },
   { to: "/lean/subcontracting", title: "Lean subcontracting", text: "Purchase order lines for service jobs on vendor work cells, priced by agreement (FR-24.20)." },
 ];
 
