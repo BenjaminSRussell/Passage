@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { Alert, Button, Card, FormField, Input } from "../../shell/ui";
 import { deletePlannedOrder, isOpen, updatePlannedOrder, type PlannedOrder, type PlannedOrderPatch } from "./api/client";
 import { describeError, type LoadError } from "./hooks";
@@ -70,10 +70,14 @@ export function MaintainOrderCard({ order, onChanged, onDeleted, onReload }: Pro
   const [confirming, setConfirming] = useState(false);
 
   // A new version (saved here or reloaded) becomes the starting point of the form.
-  useEffect(() => {
+  // Adjusted during render, not in an effect: an effect also runs after the first
+  // mount and could then overwrite what the planner had already typed.
+  const [base, setBase] = useState({ id: order.id, version: order.version });
+  if (base.id !== order.id || base.version !== order.version) {
+    setBase({ id: order.id, version: order.version });
     setDraft(draftOf(order));
     setErrors({});
-  }, [order.id, order.version]);
+  }
 
   if (order.status === "deleted") {
     return (
