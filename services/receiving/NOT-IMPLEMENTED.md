@@ -25,7 +25,7 @@ Delivered: domain model (receipt state machine, registration with over-delivery 
 | Deliverable 7: stochastic invoice audit block | open | not started |
 | Deliverable 8: consignment, invoicing plan, subsequent debit/credit, one-time payee | open | needs wave 16 ownership events; one-time payee needs wave 2 field encryption (no PII is accepted or logged) |
 | Credit notes (BR-18.12) | open | `PostInvoice` rejects non-positive quantities |
-| Web modules `apps/web/src/modules/receiving/` and `ap-invoices/` | open | see the web commit |
+| Web modules `apps/web/src/modules/receiving/` and `ap-invoices/` | built | receiving: receipt list with paging, record arrival, receipt page with register, post, correct and cancel (row version and idempotency key per action); AP: GR/IR open items with filters and per-currency totals, vendor invoice posting from selected items. Direct receipts have no screen (arrival then register covers the same data), and there is no invoice list because the service has no invoice read endpoint. Playwright e2e routes are not extended |
 | PO lines, received quantities from procurement and inventory | blocked on PSG-17 and wave 16 | no procurement service exists, so no `POLines` port is defined; evaluate takes the lines from the request body, and the port and its HTTP adapter belong with PSG-17 |
 | `serviceCode` in error bodies; `passage.legal_entity_ids` and `passage.actor` GUCs | handoff to platform kernel | `platform/go/httpx` and `dbx` are not editable here; the RLS policy uses the `passage.legal_entity_scopes` GUC the kernel sets |
 | Makefile image target | handoff | the root Makefile is outside wave 18 ownership |

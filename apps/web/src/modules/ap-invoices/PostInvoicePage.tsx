@@ -1,0 +1,227 @@
+import { useQueryClient } from "@tanstack/react-query";
+import { useRef, useState, type FormEvent } from "react";
+import { Link, useLocation } from "react-router-dom";
+import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader } from "../../shell/ui";
+import { newKey, postVendorInvoice, type Invoice, type InvoiceInput } from "./api/client";
+import { DECIMAL, describeFailure, fieldErrors, UUID, type InvoiceNavState } from "./parts";
+import styles from "./pages.module.css";
+
+const MAX_LINES = 500;
+
+export interface InvoiceLineDraft {
+  receiptId: string;
+  receiptLineNo: string;
+  qty: string;
+  unitPrice: string;
+  standardCost: boolean;
+}
+
+export interface InvoiceDraft {
+  vendorId: string;
+  legalEntityId: string;
+  invoiceNumber: string;
+  invoiceDate: string;
+  postingDate: string;
+  currency: string;
+  ledgerId: string;
+  fiscalPeriodId: string;
+  lines: InvoiceLineDraft[];
+}
+
+type Errors = Record<string, string>;
+
+export const emptyInvoiceLine: InvoiceLineDraft = { receiptId: "", receiptLineNo: "1", qty: "", unitPrice: "", standardCost: false };
+
+export const emptyInvoice: InvoiceDraft = {
+  vendorId: "",
+  legalEntityId: "",
+  invoiceNumber: "",
+  invoiceDate: "",
+  postingDate: "",
+  currency: "USD",
+  ledgerId: "",
+  fiscalPeriodId: "",
+  lines: [emptyInvoiceLine],
+};
+
+/** Client checks that mirror POST /invoices:post; the service has the last word. */
+export function validateInvoice(v: InvoiceDraft): Errors {
+  const errors: Errors = {};
+  for (const key of ["vendorId", "legalEntityId", "ledgerId", "fiscalPeriodId"] as const) {
+    if (!UUID.test(v[key])) errors[key] = "Enter a UUID.";
+  }
+  if (v.invoiceNumber.trim() === "" || v.invoiceNumber.trim().length > 64) errors.invoiceNumber = "Enter an invoice number of up to 64 characters.";
+  for (const key of ["invoiceDate", "postingDate"] as const) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(v[key])) errors[key] = "Enter a date.";
+  }
+  if (!/^[A-Z]{3}$/.test(v.currency)) errors.currency = "Use a 3-letter upper-case currency code.";
+  if (v.lines.length < 1 || v.lines.length > MAX_LINES) errors.lines = `Enter 1 to ${MAX_LINES} lines.`;
+  v.lines.forEach((l, i) => {
+    const at = (field: string) => `lines[${i}].${field}`;
+    if (!UUID.test(l.receiptId)) errors[at("receiptId")] = "Enter a receipt UUID.";
+    if (!/^\d+$/.test(l.receiptLineNo) || Number(l.receiptLineNo) < 1) errors[at("receiptLineNo")] = "Enter a line number from 1.";
+    if (!DECIMAL.test(l.qty) || Number(l.qty) <= 0) errors[at("qty")] = "Enter a quantity above zero.";
+    if (!DECIMAL.test(l.unitPrice)) errors[at("unitPrice")] = "Enter a price of zero or more.";
+  });
+  return errors;
+}
+
+export function toInvoiceInput(v: InvoiceDraft): InvoiceInput {
+  return {
+    vendorId: v.vendorId,
+    legalEntityId: v.legalEntityId,
+    invoiceNumber: v.invoiceNumber.trim(),
+    invoiceDate: v.invoiceDate,
+    postingDate: v.postingDate,
+    currency: v.currency,
+    ledgerId: v.ledgerId,
+    fiscalPeriodId: v.fiscalPeriodId,
+    lines: v.lines.map((l) => ({ receiptId: l.receiptId, receiptLineNo: Number(l.receiptLineNo), qty: Number(l.qty), unitPrice: Number(l.unitPrice), standardCost: l.standardCost })),
+  };
+}
+
+function initialDraft(state: InvoiceNavState | null): InvoiceDraft {
+  const items = state?.items ?? [];
+  if (items.length === 0) return emptyInvoice;
+  return {
+    ...emptyInvoice,
+    vendorId: items[0].vendorId,
+    currency: items[0].currency,
+    lines: items.map((i) => ({ receiptId: i.receiptId, receiptLineNo: String(i.receiptLineNo), qty: i.qty, unitPrice: i.unitPrice, standardCost: false })),
+  };
+}
+
+/** Post a vendor invoice against GR/IR items (POST /invoices:post). */
+export function PostInvoicePage() {
+  const location = useLocation();
+  const queryClient = useQueryClient();
+  const key = useRef(newKey());
+  const [values, setValues] = useState<InvoiceDraft>(() => initialDraft(location.state as InvoiceNavState | null));
+  const [errors, setErrors] = useState<Errors>({});
+  const [failure, setFailure] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [posted, setPosted] = useState<Invoice | null>(null);
+
+  const update = (patch: Partial<InvoiceDraft>) => setValues((prev) => ({ ...prev, ...patch }));
+  const updateLine = (index: number, patch: Partial<InvoiceLineDraft>) =>
+    setValues((prev) => ({ ...prev, lines: prev.lines.map((l, i) => (i === index ? { ...l, ...patch } : l)) }));
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    const found = validateInvoice(values);
+    setErrors(found);
+    setFailure(null);
+    if (Object.keys(found).length > 0) return;
+    setBusy(true);
+    try {
+      setPosted(await postVendorInvoice(toInvoiceInput(values), key.current));
+      key.current = newKey();
+      await queryClient.invalidateQueries({ queryKey: ["ap-invoices", "grir"] });
+    } catch (error) {
+      setErrors(fieldErrors(error));
+      setFailure(describeFailure(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (posted) {
+    return (
+      <div className={styles.stack}>
+        <PageHeader title="Post vendor invoice" description="The invoice cleared the GR/IR items it was posted against." />
+        <Alert tone="success" title={`Invoice ${posted.invoiceNumber} posted`} live="status">
+          Total {posted.total} {posted.currency} across {posted.lines.length} {posted.lines.length === 1 ? "line" : "lines"}, ledger entry {posted.ledgerEntryId}.
+        </Alert>
+        <div className={styles.filters}>
+          <Link className={buttonClassName("primary")} to="/ap-invoices/grir">
+            Back to GR/IR open items
+          </Link>
+          <Button
+            onClick={() => {
+              setPosted(null);
+              setValues(emptyInvoice);
+            }}
+          >
+            Post another invoice
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  const text = (field: keyof Omit<InvoiceDraft, "lines">, label: string, extra: { hint?: string; type?: string; mono?: boolean } = {}) => (
+    <FormField id={`invoice-${field}`} label={label} hint={extra.hint} error={errors[field]}>
+      {(c) => <Input {...c} type={extra.type} className={extra.mono ? styles.mono : undefined} value={values[field]} onChange={(e) => update({ [field]: e.target.value })} invalid={Boolean(errors[field])} />}
+    </FormField>
+  );
+
+  return (
+    <div className={styles.stack}>
+      <PageHeader title="Post vendor invoice" description="Checks the AP period, clears GR/IR for the quantities invoiced and posts the vendor liability. A price difference goes to inventory, or to PPV for standard-cost lines." />
+      <Card>
+        <form className={styles.form} onSubmit={submit} noValidate aria-label="Vendor invoice">
+          {text("vendorId", "Vendor ID", { mono: true })}
+          {text("legalEntityId", "Legal entity ID", { mono: true })}
+          {text("invoiceNumber", "Invoice number", { hint: "Unique per vendor, ignoring case." })}
+          {text("invoiceDate", "Invoice date", { type: "date" })}
+          {text("postingDate", "Posting date", { type: "date", hint: "Must fall in an open AP period." })}
+          {text("currency", "Currency", { hint: "Must match the receipt currency." })}
+          {text("ledgerId", "Ledger ID", { mono: true })}
+          {text("fiscalPeriodId", "Fiscal period ID", { mono: true })}
+          {errors.lines ? (
+            <div className={styles.formActions}>
+              <Alert tone="danger" live="alert">
+                {errors.lines}
+              </Alert>
+            </div>
+          ) : null}
+          {values.lines.map((line, i) => {
+            const n = i + 1;
+            const at = (field: string) => `lines[${i}].${field}`;
+            const field = (name: "receiptId" | "receiptLineNo" | "qty" | "unitPrice", label: string, mono = false) => (
+              <FormField id={`inv-line-${i}-${name}`} label={`Line ${n} ${label}`} error={errors[at(name)]}>
+                {(c) => <Input {...c} className={mono ? styles.mono : undefined} value={line[name]} onChange={(e) => updateLine(i, { [name]: e.target.value })} invalid={Boolean(errors[at(name)])} />}
+              </FormField>
+            );
+            return (
+              <fieldset key={i} className={styles.group}>
+                <legend className={styles.legend}>Line {n}</legend>
+                {field("receiptId", "receipt ID", true)}
+                {field("receiptLineNo", "receipt line")}
+                {field("qty", "quantity")}
+                {field("unitPrice", "unit price")}
+                <span className={styles.check}>
+                  <Input id={`inv-line-${i}-standardCost`} type="checkbox" checked={line.standardCost} onChange={(e) => updateLine(i, { standardCost: e.target.checked })} />
+                  <label htmlFor={`inv-line-${i}-standardCost`}>{`Line ${n} standard cost`}</label>
+                </span>
+                {values.lines.length > 1 ? (
+                  <div>
+                    <Button onClick={() => update({ lines: values.lines.filter((_, j) => j !== i) })}>{`Remove line ${n}`}</Button>
+                  </div>
+                ) : null}
+              </fieldset>
+            );
+          })}
+          <div className={styles.formActions}>
+            <Button onClick={() => update({ lines: [...values.lines, emptyInvoiceLine] })}>Add line</Button>
+          </div>
+          {failure ? (
+            <div className={styles.formActions}>
+              <Alert tone="danger" title="Could not post the invoice" live="alert">
+                {failure}
+              </Alert>
+            </div>
+          ) : null}
+          <div className={styles.formActions}>
+            <Button type="submit" variant="primary" loading={busy}>
+              Post invoice
+            </Button>
+            <Link className={buttonClassName("ghost")} to="/ap-invoices/grir">
+              Cancel
+            </Link>
+          </div>
+        </form>
+      </Card>
+    </div>
+  );
+}
