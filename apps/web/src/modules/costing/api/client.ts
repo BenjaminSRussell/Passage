@@ -326,3 +326,143 @@ export function previewActivation(id: string, onHand: OnHandLine[], fetchImpl: t
 export function activateVersion(id: string, version: number, onHand: OnHandLine[], fetchImpl: typeof fetch = fetch): Promise<ActivationResponse> {
   return post(`${versionPath(id)}:activate`, { onHand }, fetchImpl, { "If-Match": `"${version}"` });
 }
+
+// ---- valuation setup (FR-20.15, FR-20.16) ----
+
+export type RateType = "SPOT" | "AVERAGE" | "HISTORICAL";
+
+export interface ValuationLedgerRequest {
+  legalEntityId: string;
+  /** The wave 12 ledger group the ledger posts to; one valuation ledger per group. */
+  ledgerGroupId: string;
+  code: string;
+  method: CostMethod;
+  currency: string;
+  rateType: RateType;
+  primary: boolean;
+}
+
+export interface ValuationLedger extends ValuationLedgerRequest {
+  id: string;
+  createdAt: string;
+}
+
+export interface ValuationType {
+  code: string;
+  /** Inventory account of the type (the valuation class equivalent). */
+  account: string;
+}
+
+export interface ValuationCategoryRequest {
+  code: string;
+  /** A batch category lists no types: each batch becomes its own type at receipt. */
+  batch: boolean;
+  types: ValuationType[];
+}
+
+export interface ValuationCategory extends ValuationCategoryRequest {
+  id: string;
+  createdAt: string;
+}
+
+export function listValuationLedgers(legalEntityId = "", signal?: AbortSignal, fetchImpl: typeof fetch = fetch): Promise<{ items: ValuationLedger[] }> {
+  return request(`/api/v1/costing/valuation-ledgers${query({ legalEntityId })}`, { method: "GET", signal }, fetchImpl);
+}
+
+export function createValuationLedger(body: ValuationLedgerRequest, fetchImpl: typeof fetch = fetch): Promise<ValuationLedger> {
+  return post("/api/v1/costing/valuation-ledgers", body, fetchImpl);
+}
+
+export function listValuationCategories(signal?: AbortSignal, fetchImpl: typeof fetch = fetch): Promise<{ items: ValuationCategory[] }> {
+  return request("/api/v1/costing/valuation-categories", { method: "GET", signal }, fetchImpl);
+}
+
+export function createValuationCategory(body: ValuationCategoryRequest, fetchImpl: typeof fetch = fetch): Promise<ValuationCategory> {
+  return post("/api/v1/costing/valuation-categories", body, fetchImpl);
+}
+
+// ---- aging bucket sets and month-end snapshots (FR-20.17) ----
+
+export interface BucketSet {
+  id: string;
+  legalEntityId: string;
+  name: string;
+  bounds: number[];
+  createdAt: string;
+}
+
+export interface SnapshotLineRequest {
+  productId: string;
+  siteId: string;
+  standardUnitCost?: string;
+  defaultValuationType?: string;
+  transactions: SettleTransaction[];
+}
+
+export interface SnapshotRequest {
+  legalEntityId: string;
+  /** With a ledger the snapshot takes its method and currency. */
+  valuationLedgerId?: string;
+  asOf: string;
+  method?: CostMethod;
+  currency?: string;
+  fallback?: Fallback;
+  bucketSetId?: string;
+  bucketBounds?: number[];
+  lines: SnapshotLineRequest[];
+}
+
+export interface SnapshotLine {
+  productId: string;
+  siteId: string;
+  buckets: AgingBucket[];
+  totalQty: string;
+  totalValue: string;
+  remainingValue: string;
+  tiesToRemaining: boolean;
+  valuationTypes?: AgingTypeResult[];
+}
+
+export interface AgingSnapshot {
+  id: string;
+  legalEntityId: string;
+  valuationLedgerId?: string;
+  asOf: string;
+  method: string;
+  currency: string;
+  bucketSetId?: string;
+  buckets: AgingBucket[];
+  totalQty: string;
+  totalValue: string;
+  remainingValue: string;
+  tiesToRemaining: boolean;
+  lineCount: number;
+  /** Absent from list results. */
+  lines?: SnapshotLine[];
+  createdAt: string;
+}
+
+export function listBucketSets(legalEntityId = "", signal?: AbortSignal, fetchImpl: typeof fetch = fetch): Promise<{ items: BucketSet[] }> {
+  return request(`/api/v1/costing/aging/bucket-sets${query({ legalEntityId })}`, { method: "GET", signal }, fetchImpl);
+}
+
+export function createBucketSet(body: { legalEntityId: string; name: string; bounds: number[] }, fetchImpl: typeof fetch = fetch): Promise<BucketSet> {
+  return post("/api/v1/costing/aging/bucket-sets", body, fetchImpl);
+}
+
+export function listAgingSnapshots(
+  filter: { legalEntityId?: string; cursor?: string } = {},
+  signal?: AbortSignal,
+  fetchImpl: typeof fetch = fetch,
+): Promise<Page<AgingSnapshot>> {
+  return request(`/api/v1/costing/aging/snapshots${query({ legalEntityId: filter.legalEntityId, cursor: filter.cursor })}`, { method: "GET", signal }, fetchImpl);
+}
+
+export function getAgingSnapshot(id: string, signal?: AbortSignal, fetchImpl: typeof fetch = fetch): Promise<AgingSnapshot> {
+  return request(`/api/v1/costing/aging/snapshots/${encodeURIComponent(id)}`, { method: "GET", signal }, fetchImpl);
+}
+
+/** Stores a month-end snapshot; the Idempotency-Key makes a retried submit a replay, not a second snapshot. */
+export function createAgingSnapshot(body: SnapshotRequest, idempotencyKey: string, fetchImpl: typeof fetch = fetch): Promise<AgingSnapshot> {
+  return post("/api/v1/costing/aging/snapshots", body, fetchImpl, { "Idempotency-Key": idempotencyKey });
+}

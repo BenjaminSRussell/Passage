@@ -1,15 +1,17 @@
 openapi: 3.1.0
 info:
   title: Passage Costing API
-  version: 0.3.0
+  version: 0.4.0
   description: >-
-    Inventory costing (PSG-20, wave 20), slices 1 to 3. Settlement preview under the
+    Inventory costing (PSG-20, wave 20), slices 1 to 4. Settlement preview under the
     item model group's costing method (with marking and split valuation types),
     parallel valuation ledger preview, inventory aging preview, costing versions with
     item-cost import (JSON or CSV), copy with percent change, standard cost activation
     with revaluation preview, the as-of standard cost lookup, and the internal purchase
-    price variance hook. Settlement, ledger, aging and PPV are stateless; versions and
-    item costs are persisted with RLS.
+    price variance hook. Slice 4 adds the valuation ledger and valuation category
+    registries, saved aging bucket sets and stored month-end aging snapshots.
+    Settlement, ledger, aging previews and PPV are stateless; versions, item costs,
+    valuation setup, bucket sets and snapshots are persisted with RLS.
 servers:
   - url: https://api.{env}.passage.dev
     variables:
@@ -369,6 +371,203 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem", description: CST-COST-001 no standard cost in force on that date }
+  /v1/costing/valuation-ledgers:
+    get:
+      operationId: listValuationLedgers
+      summary: Valuation ledgers in the caller's scope, primary first (FR-20.15)
+      x-passage-duty: costing.read
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/Duties"
+        - $ref: "#/components/parameters/LegalEntityFilter"
+      responses:
+        "200":
+          description: the ledgers
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ValuationLedgerList" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createValuationLedger
+      summary: Register a valuation ledger of a legal entity bound to a ledger group (FR-20.15)
+      description: >-
+        A code or ledger group already used in the legal entity is refused, and so is a
+        second primary ledger. Re-sending the same ledger is refused as a duplicate, so a
+        retried create cannot add a second ledger.
+      x-passage-duty: costing.valuation.write
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/Duties"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ValuationLedgerRequest" }
+      responses:
+        "201":
+          description: created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ValuationLedger" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem", description: "CST-VLG-002 code taken; CST-VLG-003 primary taken; CST-VLG-004 ledger group taken" }
+  /v1/costing/valuation-categories:
+    get:
+      operationId: listValuationCategories
+      summary: Valuation categories of the tenant by code (FR-20.16)
+      x-passage-duty: costing.read
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/Duties"
+      responses:
+        "200":
+          description: the categories
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ValuationCategoryList" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createValuationCategory
+      summary: Register a split or batch valuation category (FR-20.16, BR-20.14)
+      x-passage-duty: costing.valuation.write
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/Duties"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ValuationCategoryRequest" }
+      responses:
+        "201":
+          description: created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ValuationCategory" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem", description: "CST-VAL-004 code taken" }
+        "422": { $ref: "#/components/responses/Problem", description: "CST-VAL-003 a batch category with types, a split category without, or a type listed twice" }
+  /v1/costing/aging/bucket-sets:
+    get:
+      operationId: listAgingBucketSets
+      summary: Saved aging bucket sets in the caller's scope, by name (FR-20.17)
+      x-passage-duty: costing.read
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/Duties"
+        - $ref: "#/components/parameters/LegalEntityFilter"
+      responses:
+        "200":
+          description: the bucket sets
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BucketSetList" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createAgingBucketSet
+      summary: Save an aging bucket set for a legal entity (FR-20.17)
+      x-passage-duty: costing.aging.write
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/Duties"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BucketSetRequest" }
+      responses:
+        "201":
+          description: created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BucketSet" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem", description: "CST-AGE-002 name taken in the legal entity" }
+  /v1/costing/aging/snapshots:
+    get:
+      operationId: listAgingSnapshots
+      summary: Stored aging snapshots in the caller's scope, newest as-of date first, without their lines
+      x-passage-duty: costing.read
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/Duties"
+        - $ref: "#/components/parameters/LegalEntityFilter"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: one page of snapshot summaries
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SnapshotList" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createAgingSnapshot
+      summary: Age every product x site line as of a date and store it as month-end evidence (FR-20.17)
+      description: >-
+        Each line is aged the way the aging preview ages one product (per valuation type
+        when split). Buckets come from a saved bucket set, from bucketBounds, or default to
+        30/90/180/365 days. With valuationLedgerId the snapshot takes the ledger's method
+        and currency. Writes dev.passage.costing.agingsnapshot.created.v1 to the outbox in
+        the same transaction. A replayed Idempotency-Key returns the stored snapshot with
+        200 and writes nothing.
+      x-passage-duty: costing.aging.write
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/Duties"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SnapshotRequest" }
+      responses:
+        "201":
+          description: stored
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Snapshot" }
+        "200":
+          description: idempotent replay of the stored snapshot
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Snapshot" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem", description: "CST-VLG-005 valuation ledger or CST-AGE-003 bucket set not found" }
+        "422": { $ref: "#/components/responses/Problem", description: "CST-TXN-001 invalid stream or a product x site listed twice; CST-VAL-001 untyped issue; idempotency_key_reuse" }
+  /v1/costing/aging/snapshots/{id}:
+    get:
+      operationId: getAgingSnapshot
+      summary: One stored aging snapshot with its lines
+      x-passage-duty: costing.read
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/Duties"
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: the snapshot
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Snapshot" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem", description: "CST-AGE-004 not found" }
   /internal/v1/costing/ppv:
     post:
       operationId: calculatePpv
@@ -422,6 +621,12 @@ components:
       in: query
       required: false
       schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+    LegalEntityFilter:
+      name: legalEntityId
+      in: query
+      required: false
+      description: Only this legal entity; without it, every legal entity in the caller's scope.
+      schema: { type: string, format: uuid }
     Cursor:
       name: cursor
       in: query
@@ -777,6 +982,164 @@ components:
         versionCode: { type: string }
         effectiveFrom: { type: string, format: date }
         activatedAt: { type: string, format: date-time }
+    ValuationLedgerRequest:
+      type: object
+      required: [legalEntityId, ledgerGroupId, code, method, currency, rateType]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        ledgerGroupId: { type: string, format: uuid, description: "Wave 12 ledger group; one valuation ledger per ledger group and legal entity." }
+        code: { type: string, pattern: "^[A-Z0-9][A-Z0-9_-]{1,31}$", example: IFRS }
+        method: { type: string, enum: [FIFO, LIFO, LIFO_DATE, WEIGHTED_AVG_RUNNING, WEIGHTED_AVG_PERIODIC, MOVING_AVG, STANDARD] }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        rateType: { type: string, enum: [SPOT, AVERAGE, HISTORICAL] }
+        primary: { type: boolean, default: false, description: "At most one primary ledger per legal entity." }
+    ValuationLedger:
+      allOf:
+        - $ref: "#/components/schemas/ValuationLedgerRequest"
+        - type: object
+          required: [id, primary, createdAt]
+          properties:
+            id: { type: string, format: uuid }
+            createdAt: { type: string, format: date-time }
+    ValuationLedgerList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/ValuationLedger" } }
+    ValuationType:
+      type: object
+      required: [code, account]
+      properties:
+        code: { type: string, pattern: "^[A-Z0-9][A-Z0-9_-]{1,31}$", example: IMPORT }
+        account: { type: string, minLength: 1, maxLength: 64, description: "Inventory account of the type (valuation class equivalent)." }
+    ValuationCategoryRequest:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string, pattern: "^[A-Z0-9][A-Z0-9_-]{1,31}$", example: ORIGIN }
+        batch: { type: boolean, default: false, description: "A batch category lists no types: each batch becomes its own type at receipt." }
+        types: { type: array, maxItems: 50, items: { $ref: "#/components/schemas/ValuationType" } }
+    ValuationCategory:
+      type: object
+      required: [id, code, batch, types, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        batch: { type: boolean }
+        types: { type: array, items: { $ref: "#/components/schemas/ValuationType" } }
+        createdAt: { type: string, format: date-time }
+    ValuationCategoryList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/ValuationCategory" } }
+    BucketBounds:
+      type: array
+      description: Strictly ascending upper bounds in days; the last bucket is open-ended.
+      minItems: 1
+      maxItems: 12
+      items: { type: integer, minimum: 0 }
+    BucketSetRequest:
+      type: object
+      required: [legalEntityId, name, bounds]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 64 }
+        bounds: { $ref: "#/components/schemas/BucketBounds" }
+    BucketSet:
+      type: object
+      required: [id, legalEntityId, name, bounds, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        name: { type: string }
+        bounds: { $ref: "#/components/schemas/BucketBounds" }
+        createdAt: { type: string, format: date-time }
+    BucketSetList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/BucketSet" } }
+    SnapshotLineRequest:
+      type: object
+      required: [productId, siteId, transactions]
+      properties:
+        productId: { type: string, format: uuid }
+        siteId: { type: string, format: uuid }
+        standardUnitCost: { $ref: "#/components/schemas/Decimal" }
+        defaultValuationType: { type: string, maxLength: 64 }
+        transactions: { type: array, minItems: 1, items: { $ref: "#/components/schemas/Transaction" } }
+    SnapshotRequest:
+      type: object
+      required: [legalEntityId, asOf, lines]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        valuationLedgerId: { type: string, format: uuid, description: "Optional; the snapshot then takes the ledger's method and currency." }
+        asOf: { type: string, format: date }
+        method: { type: string, enum: [FIFO, LIFO, LIFO_DATE, WEIGHTED_AVG_RUNNING, WEIGHTED_AVG_PERIODIC, MOVING_AVG, STANDARD], description: "Required without a valuation ledger." }
+        currency: { type: string, pattern: "^[A-Z]{3}$", description: "Required without a valuation ledger." }
+        fallback: { type: string, enum: [RUNNING_AVG, STANDARD, LAST_RECEIPT] }
+        bucketSetId: { type: string, format: uuid, description: "A saved bucket set of the same legal entity; not with bucketBounds." }
+        bucketBounds: { $ref: "#/components/schemas/BucketBounds" }
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 2000
+          description: One line per product x site; at most 20,000 transactions in total.
+          items: { $ref: "#/components/schemas/SnapshotLineRequest" }
+    SnapshotBucket:
+      type: object
+      required: [label, qty, value]
+      properties:
+        label: { type: string, example: "0-30" }
+        qty: { $ref: "#/components/schemas/Decimal" }
+        value: { $ref: "#/components/schemas/Decimal" }
+    SnapshotTypeAging:
+      type: object
+      required: [valuationType, buckets, totalQty, totalValue, remainingValue]
+      properties:
+        valuationType: { type: string }
+        buckets: { type: array, items: { $ref: "#/components/schemas/SnapshotBucket" } }
+        totalQty: { $ref: "#/components/schemas/Decimal" }
+        totalValue: { $ref: "#/components/schemas/Decimal" }
+        remainingValue: { $ref: "#/components/schemas/Decimal" }
+    SnapshotLine:
+      type: object
+      required: [productId, siteId, buckets, totalQty, totalValue, remainingValue, tiesToRemaining]
+      properties:
+        productId: { type: string, format: uuid }
+        siteId: { type: string, format: uuid }
+        buckets: { type: array, items: { $ref: "#/components/schemas/SnapshotBucket" } }
+        totalQty: { $ref: "#/components/schemas/Decimal" }
+        totalValue: { $ref: "#/components/schemas/Decimal" }
+        remainingValue: { $ref: "#/components/schemas/Decimal" }
+        tiesToRemaining: { type: boolean }
+        valuationTypes: { type: array, items: { $ref: "#/components/schemas/SnapshotTypeAging" }, description: "Present when the product is split by valuation type." }
+    Snapshot:
+      type: object
+      required: [id, legalEntityId, asOf, method, currency, buckets, totalQty, totalValue, remainingValue, tiesToRemaining, lineCount, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        valuationLedgerId: { type: string, format: uuid }
+        asOf: { type: string, format: date }
+        method: { type: string }
+        currency: { type: string }
+        bucketSetId: { type: string, format: uuid }
+        buckets: { type: array, items: { $ref: "#/components/schemas/SnapshotBucket" } }
+        totalQty: { $ref: "#/components/schemas/Decimal" }
+        totalValue: { $ref: "#/components/schemas/Decimal" }
+        remainingValue: { $ref: "#/components/schemas/Decimal" }
+        tiesToRemaining: { type: boolean, description: "True when every line's buckets equal its settled remaining value." }
+        lineCount: { type: integer }
+        lines: { type: array, items: { $ref: "#/components/schemas/SnapshotLine" }, description: "Absent from list results." }
+        createdAt: { type: string, format: date-time }
+    SnapshotList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Snapshot" } }
+        nextCursor: { type: string, description: Absent on the last page. }
     PpvRequest:
       type: object
       required: [kind, currency, qty, poUnitPrice, sourceDocumentId]

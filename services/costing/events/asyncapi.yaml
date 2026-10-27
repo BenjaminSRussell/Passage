@@ -1,14 +1,16 @@
 asyncapi: 3.0.0
 info:
   title: Passage Costing Events
-  version: 0.3.0
+  version: 0.4.0
   description: >-
     Costing publishes dev.passage.costing.cost.changed.v1 when a STANDARD costing
-    version is activated: one event per product x site, written to the outbox in the
-    activation transaction and relayed by Debezium (CloudEvents 1.0 envelope with
-    tenantid; subject is the product id). Settlement, ledger and aging previews and
-    PPV remain request/response only, and costing consumes no events yet. The
-    x-planned-events are the wave 20 catalog for later slices and are not emitted.
+    version is activated (one event per product x site) and
+    dev.passage.costing.agingsnapshot.created.v1 when a month-end aging snapshot is
+    stored. Both are written to the outbox in the same transaction as the change and
+    relayed by Debezium (CloudEvents 1.0 envelope with tenantid); an idempotent replay
+    emits nothing. Settlement, ledger and aging previews and PPV remain
+    request/response only, and costing consumes no events yet. The x-planned-events
+    are the wave 20 catalog for later slices and are not emitted.
 defaultContentType: application/json
 channels:
   cost:
@@ -17,6 +19,12 @@ channels:
     messages:
       costChanged:
         $ref: "#/components/messages/CostChanged"
+  agingSnapshot:
+    address: passage.costing.agingsnapshot
+    description: Stored month-end aging snapshots (Debezium outbox router topic).
+    messages:
+      agingSnapshotCreated:
+        $ref: "#/components/messages/AgingSnapshotCreated"
 operations:
   publishCostChanged:
     action: send
@@ -25,8 +33,45 @@ operations:
     summary: A costing version activation changed the standard cost of a product at a site.
     messages:
       - $ref: "#/channels/cost/messages/costChanged"
+  publishAgingSnapshotCreated:
+    action: send
+    channel:
+      $ref: "#/channels/agingSnapshot"
+    summary: A month-end aging snapshot was stored (analytics, close checklist of wave 14).
+    messages:
+      - $ref: "#/channels/agingSnapshot/messages/agingSnapshotCreated"
 components:
   messages:
+    AgingSnapshotCreated:
+      name: dev.passage.costing.agingsnapshot.created.v1
+      contentType: application/cloudevents+json
+      summary: >-
+        A month-end aging snapshot was stored (analytics, wave 14 close checklist). The
+        PRD's dev.passage.costing.aging.snapshot.created.v1 has one segment too many for
+        the kernel type pattern, so the entity is the single token "agingsnapshot". The
+        CloudEvents subject is the snapshot id; the Kafka key is the legal entity id.
+      payload:
+        type: object
+        required: [snapshotId, legalEntityId, asOf, method, currency, buckets, totalQty, totalValue]
+        properties:
+          snapshotId: { type: string, format: uuid }
+          legalEntityId: { type: string, format: uuid }
+          valuationLedgerId: { type: string, format: uuid, description: "The valuation ledger the snapshot was taken for; absent when none was named." }
+          asOf: { type: string, format: date }
+          method: { type: string, description: "Costing method the layers were settled under." }
+          currency: { type: string, pattern: "^[A-Z]{3}$" }
+          buckets:
+            type: array
+            description: Totals per bucket over every line of the snapshot.
+            items:
+              type: object
+              required: [label, qty, value]
+              properties:
+                label: { type: string, example: "0-30" }
+                qty: { type: string, description: Decimal string. }
+                value: { type: string, description: Decimal string at the currency's minor unit. }
+          totalQty: { type: string, description: Decimal string. }
+          totalValue: { type: string, description: "Decimal string; the sum of the bucket values." }
     CostChanged:
       name: dev.passage.costing.cost.changed.v1
       contentType: application/cloudevents+json
@@ -50,4 +95,3 @@ x-planned-events:
   - dev.passage.costing.close.cancelled.v1
   - dev.passage.costing.close.failed.v1
   - dev.passage.costing.reconciliation.diff.v1
-  - dev.passage.costing.agingsnapshot.created.v1

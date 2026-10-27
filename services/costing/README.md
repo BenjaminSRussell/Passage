@@ -1,10 +1,50 @@
 # costing
 
-Passage inventory costing service: wave 20 (ticket PSG-20, "Inventory Costing & Supplier Collaboration"), **slices 1 to 3**.
+Passage inventory costing service: wave 20 (ticket PSG-20, "Inventory Costing & Supplier Collaboration"), **slices 1 to 4**.
 
-The service owns its tables and applies its own migrations (`migrations/0001_costing.sql`, `0002_activation.sql`) through
+The service owns its tables and applies its own migrations (`migrations/0001_costing.sql`, `0002_activation.sql`,
+`0003_valuation_setup_and_aging.sql`) through
 `dbx.Migrate`. The PRD places them in schema `costing` of `inventory-db` (`inventory/v20.*`); that
 placement is a deploy decision recorded as a handoff in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
+
+## What slice 4 adds
+
+Valuation setup (FR-20.15, FR-20.16) and stored month-end aging (FR-20.17, 3.20.15).
+
+- **Valuation ledgers** `POST /v1/costing/valuation-ledgers` (duty `costing.valuation.write`) registers a
+  ledger of a legal entity bound to a wave 12 ledger group, with its costing method, currency and
+  exchange rate type (SPOT, AVERAGE, HISTORICAL). At most one ledger per legal entity is primary
+  (`CST-VLG-003`), a ledger group carries one valuation ledger (`CST-VLG-004`) and codes are unique
+  per legal entity (`CST-VLG-002`). `GET /v1/costing/valuation-ledgers?legalEntityId=` lists them,
+  primary first. The ledger group id is not checked against the ledger service yet.
+- **Valuation categories** `POST /v1/costing/valuation-categories` (tenant-wide): a split category
+  lists its valuation types, each with its inventory account; a BATCH category lists none, because
+  each batch becomes its own type at receipt (BR-20.14). A batch category with types, a split
+  category without, or a type listed twice is refused with `CST-VAL-003`; the table repeats the
+  batch rule as a check constraint. `GET /v1/costing/valuation-categories` lists them.
+- **Aging bucket sets** `POST|GET /v1/costing/aging/bucket-sets` (duty `costing.aging.write` to save):
+  named day bounds per legal entity, validated like the aging preview's `bucketBounds`; a name is
+  unique in its legal entity (`CST-AGE-002`).
+- **Aging snapshots** `POST /v1/costing/aging/snapshots` (duty `costing.aging.write`, `Idempotency-Key`
+  required) ages every product × site line as of a date exactly as the aging preview ages one
+  product (per valuation type when split, average methods repriced from FIFO layers) and stores the
+  result as month-end evidence that is never edited. Buckets come from a saved set of the same
+  legal entity, from `bucketBounds`, or the default. With `valuationLedgerId` the snapshot takes the
+  ledger's method and currency. The same transaction writes
+  `dev.passage.costing.agingsnapshot.created.v1` to the outbox (Kafka key: the legal entity). A
+  replayed key returns the stored snapshot with 200 and writes nothing; the key with input that
+  computes a different snapshot is `idempotency_key_reuse` (compared by a SHA-256 of the computed
+  snapshot). `GET /v1/costing/aging/snapshots` pages summaries without lines, newest as-of first;
+  `GET /v1/costing/aging/snapshots/{id}` returns the lines. The lines carry their transactions until
+  the `CostTransaction` projection exists (see NOT-IMPLEMENTED).
+- Migration `0003_valuation_setup_and_aging.sql`: `valuation_ledger`, `valuation_category`,
+  `aging_bucket_set`, `aging_snapshot`, each with tenant RLS (ENABLE and FORCE) and, where the table
+  carries `legal_entity_id`, the restrictive legal-entity scope policy.
+- **Web screens**: `/costing/valuation-setup` (ledgers with a legal-entity filter, and categories),
+  `/costing/valuation-setup/ledgers/new`, `/costing/valuation-setup/categories/new`,
+  `/costing/aging/snapshots` (list, load more), `/costing/aging/snapshots/new` (ledger and saved
+  bucket set pickers), `/costing/aging/snapshots/:id` (totals, tie-out, buckets, lines by valuation
+  type) and `/costing/aging/bucket-sets` (save and list).
 
 ## What slice 3 adds
 
@@ -131,7 +171,8 @@ PASSAGE_TEST_DATABASE_URL=postgres://admin@... PASSAGE_TEST_APP_DATABASE_URL=pos
 
 - HTTP: [`api/openapi.yaml`](api/openapi.yaml)
 - Events: [`events/asyncapi.yaml`](events/asyncapi.yaml). `dev.passage.costing.cost.changed.v1` is
-  published on activation; the planned catalog is listed under `x-planned-events`.
+  published on activation and `dev.passage.costing.agingsnapshot.created.v1` when a snapshot is
+  stored; the planned catalog is listed under `x-planned-events`.
 - Chart: [`charts/costing`](charts/costing) (`helm lint charts/costing`).
 
 ## Error codes
@@ -147,6 +188,15 @@ PASSAGE_TEST_DATABASE_URL=postgres://admin@... PASSAGE_TEST_APP_DATABASE_URL=pos
 | `CST-VAL-001` | 422 | An untyped issue must name a valuation type because several types hold stock |
 | `CST-VAL-002` | 422 | A valuation category cannot change while the product holds stock (domain guard; no endpoint changes a category yet) |
 | `CST-VLG-001` | 422 | Valuation ledger set invalid (no or two primaries, duplicate id, non-positive rate, primary rate not 1) |
+| `CST-VLG-002` | 409 | A valuation ledger with this code already exists in the legal entity |
+| `CST-VLG-003` | 409 | The legal entity already has a primary valuation ledger |
+| `CST-VLG-004` | 409 | The ledger group already carries a valuation ledger in this legal entity |
+| `CST-VLG-005` | 404 | Valuation ledger not found (a snapshot named an unknown ledger) |
+| `CST-VAL-003` | 422 | Valuation category types invalid: a batch category with types, a split category without, or a type listed twice |
+| `CST-VAL-004` | 409 | A valuation category with this code already exists |
+| `CST-AGE-002` | 409 | An aging bucket set with this name already exists in the legal entity |
+| `CST-AGE-003` | 404 | Aging bucket set not found (a snapshot named an unknown set) |
+| `CST-AGE-004` | 404 | Aging snapshot not found |
 | `CST-VER-CODE-DUPLICATE` | 409 | A costing version with this code already exists for the legal entity |
 | `CST-VER-NOT-FOUND` | 404 | Costing version not found in this tenant |
 | `CST-VER-NOT-DRAFT` | 409 | Item costs can only be imported or copied into, and only a DRAFT version activated (an ARCHIVED one is refused) |
@@ -173,10 +223,12 @@ PASSAGE_TEST_DATABASE_URL=postgres://admin@... PASSAGE_TEST_APP_DATABASE_URL=pos
 
 | Duty | Routes | PRD duty (§3.20.17) |
 |---|---|---|
-| `costing.read` | `POST /v1/costing/settlements:preview`, `POST /v1/costing/valuation-ledgers:preview`, `POST /v1/costing/aging:preview`, `GET /v1/costing/versions`, `GET /v1/costing/versions/{id}`, `GET /v1/costing/versions/{id}/item-costs`, `POST /v1/costing/versions/{id}:preview-activation`, `GET /v1/costing/products/{id}/cost` | CostingInquire |
+| `costing.read` | `POST /v1/costing/settlements:preview`, `POST /v1/costing/valuation-ledgers:preview`, `POST /v1/costing/aging:preview`, `GET /v1/costing/versions`, `GET /v1/costing/versions/{id}`, `GET /v1/costing/versions/{id}/item-costs`, `POST /v1/costing/versions/{id}:preview-activation`, `GET /v1/costing/products/{id}/cost`, `GET /v1/costing/valuation-ledgers`, `GET /v1/costing/valuation-categories`, `GET /v1/costing/aging/bucket-sets`, `GET /v1/costing/aging/snapshots`, `GET /v1/costing/aging/snapshots/{id}` | CostingInquire |
 | `costing.version.write` | `POST /v1/costing/versions`, `POST /v1/costing/versions/{id}/item-costs:import`, `POST /v1/costing/versions/{id}/item-costs:copy` | CostingVersionMaintain |
 | `costing.version.activate` | `POST /v1/costing/versions/{id}:activate` | CostingVersionActivate |
 | `costing.ppv.post` | `POST /internal/v1/costing/ppv` | service account of receiving and payables |
+| `costing.valuation.write` | `POST /v1/costing/valuation-ledgers`, `POST /v1/costing/valuation-categories` | ValuationSetupMaintain |
+| `costing.aging.write` | `POST /v1/costing/aging/bucket-sets`, `POST /v1/costing/aging/snapshots` | CostingInquire saves report setups; the month-end snapshot job's service account stores snapshots |
 
 ## Dependencies
 

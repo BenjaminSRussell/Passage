@@ -1,4 +1,5 @@
-// Package store persists costing versions and item costs in the costing schema.
+// Package store persists costing versions, item costs, valuation setup and
+// aging snapshots in the costing schema.
 // Every query runs inside dbx.WithTenantTx, so row-level security applies.
 package store
 
@@ -65,6 +66,21 @@ type Store interface {
 	// expectedVersion (If-Match); an ACTIVE version replays its stored result.
 	ActivateVersion(ctx context.Context, versionID string, expectedVersion int, onHand OnHand) (ActivationResult, error)
 	CurrentCost(ctx context.Context, productID, siteID, asOf string) (CostLookup, error)
+	// Valuation setup (FR-20.15, FR-20.16). An empty legalEntityID lists every
+	// legal entity in the caller's scope.
+	CreateValuationLedger(ctx context.Context, in ValuationLedger) (ValuationLedger, error)
+	ListValuationLedgers(ctx context.Context, legalEntityID string) ([]ValuationLedger, error)
+	GetValuationLedger(ctx context.Context, id string) (ValuationLedger, error)
+	CreateValuationCategory(ctx context.Context, in ValuationCategory) (ValuationCategory, error)
+	ListValuationCategories(ctx context.Context) ([]ValuationCategory, error)
+	// Aging setups and month-end snapshots (FR-20.17). CreateAgingSnapshot
+	// reports created=false for an idempotent replay.
+	CreateBucketSet(ctx context.Context, in BucketSet) (BucketSet, error)
+	ListBucketSets(ctx context.Context, legalEntityID string) ([]BucketSet, error)
+	GetBucketSet(ctx context.Context, id string) (BucketSet, error)
+	CreateAgingSnapshot(ctx context.Context, in AgingSnapshot, idempotencyKey string) (snap AgingSnapshot, created bool, err error)
+	GetAgingSnapshot(ctx context.Context, id string) (AgingSnapshot, error)
+	ListAgingSnapshots(ctx context.Context, legalEntityID, after string, limit int) (SnapshotPage, error)
 	Ping(ctx context.Context) error
 }
 
