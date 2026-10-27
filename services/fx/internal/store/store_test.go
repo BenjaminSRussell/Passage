@@ -348,7 +348,7 @@ func TestFinishRunFailedEnqueuesDegradedEventAndAllowsRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.FinishRunFailed(ctx, run.ID, 4, errors.New("ecb: request failed: timeout")); err != nil {
+	if err := s.FinishRunFailed(ctx, run.ID, 4, errors.New("ecb: request failed: timeout"), true); err != nil {
 		t.Fatal(err)
 	}
 	runs, err := s.ListRuns(ctx, "ecb")
@@ -361,6 +361,9 @@ func TestFinishRunFailedEnqueuesDegradedEventAndAllowsRestart(t *testing.T) {
 	if n := count(t, ctx, pool, `select count(*) from outbox where payload->'data'->>'provider' = 'ecb' and payload->'data'->>'rate_type' = 'CLOSING'
 		and payload->'data'->>'error' = 'ecb: request failed: timeout' and payload->'data'->'last_success_at' = 'null'::jsonb`); n != 1 {
 		t.Fatalf("degraded payload rows = %d, want 1", n)
+	}
+	if n := count(t, ctx, pool, `select count(*) from outbox where aggregate_id = '`+run.ID+`' and payload->'data'->>'fallback' = 'none' and payload->'data'->>'retryable' = 'true' and payload->'data'->>'status' = 'failed'`); n != 1 {
+		t.Fatalf("failed fallback rows = %d, want 1", n)
 	}
 	if got := count(t, ctx, pool, `select count(*) from exchange_rate`); got != rates {
 		t.Fatalf("rates changed from %d to %d", rates, got)
@@ -376,14 +379,14 @@ func TestFinishRunFailedEnqueuesDegradedEventAndAllowsRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.FinishRunFailed(ctx, next.ID, 4, errors.New("down")); err != nil {
+	if err := s.FinishRunFailed(ctx, next.ID, 4, errors.New("down"), true); err != nil {
 		t.Fatal(err)
 	}
 	if n := count(t, ctx, pool, `select count(*) from outbox where type = 'dev.passage.fx.provider.degraded.v1' and payload->'data'->>'last_success_at' is not null`); n != 1 {
 		t.Fatalf("degraded events carrying last_success_at = %d, want 1", n)
 	}
 	missing := ids.New()
-	if err := s.FinishRunFailed(ctx, missing, 1, errors.New("x")); !errors.Is(err, store.ErrRunNotFound) {
+	if err := s.FinishRunFailed(ctx, missing, 1, errors.New("x"), true); !errors.Is(err, store.ErrRunNotFound) {
 		t.Fatalf("failed unknown run err = %v", err)
 	}
 	if err := s.FinishRunSucceeded(ctx, missing, 1, 0); !errors.Is(err, store.ErrRunNotFound) {
@@ -391,6 +394,57 @@ func TestFinishRunFailedEnqueuesDegradedEventAndAllowsRestart(t *testing.T) {
 	}
 	if err := s.RecordAttempt(ctx, missing, 1); !errors.Is(err, store.ErrRunNotFound) {
 		t.Fatalf("attempt unknown run err = %v", err)
+	}
+}
+
+func TestFinishRunDegradedMarksRunAndEnqueuesDegradedEvent(t *testing.T) {
+	s, pool, ctx := migrated(t)
+	ok, _, err := s.StartRun(ctx, "ecb", "CLOSING", valid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.FinishRunSucceeded(ctx, ok.ID, 1, 0); err != nil {
+		t.Fatal(err)
+	}
+	run, _, err := s.StartRun(ctx, "ecb", "CLOSING", valid.AddDate(0, 0, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.FinishRunDegraded(ctx, run.ID, 4, errors.New("ecb: unexpected status 503"), true); err != nil {
+		t.Fatal(err)
+	}
+	runs, err := s.ListRuns(ctx, "ecb")
+	if err != nil || len(runs) != 2 || runs[0].Status != store.RunDegraded || runs[0].Attempts != 4 || runs[0].FinishedAt == nil {
+		t.Fatalf("runs = %+v, %v", runs, err)
+	}
+	if n := count(t, ctx, pool, `select count(*) from outbox where type = 'dev.passage.fx.provider.degraded.v1' and aggregate_id = '`+run.ID+`'
+		and payload->'data'->>'last_success_at' is not null and payload->'data'->>'fallback' = 'last_known' and payload->'data'->>'retryable' = 'true' and payload->'data'->>'status' = 'degraded'`); n != 1 {
+		t.Fatalf("degraded events = %d, want 1", n)
+	}
+	restarted, done, err := s.StartRun(ctx, "ecb", "CLOSING", valid.AddDate(0, 0, 1))
+	if err != nil || done || restarted.Status != store.RunRunning {
+		t.Fatalf("restart = %+v done=%v err=%v", restarted, done, err)
+	}
+}
+
+func TestFinishRunAbortedMarksFailedWithoutDegradedEvent(t *testing.T) {
+	s, pool, ctx := migrated(t)
+	run, _, err := s.StartRun(ctx, "ecb", "CLOSING", valid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.FinishRunAborted(ctx, run.ID, 2, errors.New("context canceled")); err != nil {
+		t.Fatal(err)
+	}
+	runs, err := s.ListRuns(ctx, "ecb")
+	if err != nil || len(runs) != 1 || runs[0].Status != store.RunFailed || runs[0].Attempts != 2 || runs[0].Error != "context canceled" || runs[0].FinishedAt == nil {
+		t.Fatalf("runs = %+v, %v", runs, err)
+	}
+	if n := count(t, ctx, pool, `select count(*) from outbox where type = 'dev.passage.fx.provider.degraded.v1'`); n != 0 {
+		t.Fatalf("degraded events = %d, want 0", n)
+	}
+	if err := s.FinishRunAborted(ctx, ids.New(), 1, errors.New("x")); !errors.Is(err, store.ErrRunNotFound) {
+		t.Fatalf("aborted unknown run err = %v", err)
 	}
 }
 
@@ -510,7 +564,7 @@ func TestRLSHidesOtherTenantRunsAndIdempotencyKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.FinishRunFailed(ctx, run.ID, 4, errors.New("down")); err != nil {
+	if err := s.FinishRunFailed(ctx, run.ID, 4, errors.New("down"), true); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.PutIdempotency(ctx, store.IdempotencyRecord{Key: "k1", RequestHash: "h1", ResponseStatus: 200, ResponseBody: json.RawMessage(`{}`)}); err != nil {
@@ -526,7 +580,7 @@ func TestRLSHidesOtherTenantRunsAndIdempotencyKeys(t *testing.T) {
 	if _, _, err := s.StartRun(other, "ecb", "CLOSING", valid); !errors.Is(err, domain.ErrInvalidRate) {
 		t.Fatalf("tenant 2 must not start a run on tenant 1 rate type: %v", err)
 	}
-	if err := s.FinishRunFailed(other, run.ID, 1, errors.New("x")); !errors.Is(err, store.ErrRunNotFound) {
+	if err := s.FinishRunFailed(other, run.ID, 1, errors.New("x"), true); !errors.Is(err, store.ErrRunNotFound) {
 		t.Fatalf("tenant 2 must not finish tenant 1 run: %v", err)
 	}
 	if _, ok, err := s.GetIdempotency(other, "k1"); ok || err != nil {

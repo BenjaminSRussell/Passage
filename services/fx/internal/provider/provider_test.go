@@ -111,6 +111,8 @@ func TestECBRejectsBadPayloads(t *testing.T) {
 	srv := serve(t, http.StatusInternalServerError, nil)
 	if _, err := provider.NewECB(srv.Client(), srv.URL).Fetch(context.Background(), "CLOSING", time.Time{}); err == nil || errors.Is(err, provider.ErrMalformed) || !strings.Contains(err.Error(), "500") {
 		t.Fatalf("http 500 err = %v", err)
+	} else if se := new(provider.StatusError); !errors.As(err, &se) || se.Code != 500 {
+		t.Fatalf("http 500 err = %v, want StatusError", err)
 	}
 }
 

@@ -20,6 +20,10 @@ const (
 	RunRunning       = "running"
 	RunSucceeded     = "succeeded"
 	RunFailed        = "failed"
+	RunDegraded      = "degraded"
+
+	FallbackLastKnown = "last_known"
+	FallbackNone      = "none"
 )
 
 var ErrRunNotFound = errors.New("import run not found")
@@ -121,16 +125,36 @@ func (s *Postgres) FinishRunSucceeded(ctx context.Context, runID string, importe
 	})
 }
 
-func (s *Postgres) FinishRunFailed(ctx context.Context, runID string, attempts int, cause error) error {
+func (s *Postgres) FinishRunFailed(ctx context.Context, runID string, attempts int, cause error, retryable bool) error {
+	return s.finishUnhealthy(ctx, runID, attempts, cause, RunFailed, FallbackNone, retryable)
+}
+
+func (s *Postgres) FinishRunDegraded(ctx context.Context, runID string, attempts int, cause error, retryable bool) error {
+	return s.finishUnhealthy(ctx, runID, attempts, cause, RunDegraded, FallbackLastKnown, retryable)
+}
+
+func (s *Postgres) FinishRunAborted(ctx context.Context, runID string, attempts int, cause error) error {
 	p, _ := tenant.FromContext(ctx)
-	message := "unknown error"
-	if cause != nil {
-		message = cause.Error()
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		return exactlyOne(tx.Exec(ctx, `update provider_import_run set status='failed', attempts=$3, error=$4, finished_at=$5
+			where tenant_id=$1 and id=$2`, p.TenantID, runID, attempts, errorMessage(cause), s.now()))
+	})
+}
+
+func errorMessage(cause error) string {
+	if cause == nil {
+		return "unknown error"
 	}
+	return cause.Error()
+}
+
+func (s *Postgres) finishUnhealthy(ctx context.Context, runID string, attempts int, cause error, status, fallback string, retryable bool) error {
+	p, _ := tenant.FromContext(ctx)
+	message := errorMessage(cause)
 	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var provider, typeID string
-		err := tx.QueryRow(ctx, `update provider_import_run set status='failed', attempts=$3, error=$4, finished_at=$5
-			where tenant_id=$1 and id=$2 returning provider, rate_type_id`, p.TenantID, runID, attempts, message, s.now()).Scan(&provider, &typeID)
+		err := tx.QueryRow(ctx, `update provider_import_run set status=$6, attempts=$3, error=$4, finished_at=$5
+			where tenant_id=$1 and id=$2 returning provider, rate_type_id`, p.TenantID, runID, attempts, message, s.now(), status).Scan(&provider, &typeID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrRunNotFound
 		}
@@ -146,6 +170,7 @@ func (s *Postgres) FinishRunFailed(ctx context.Context, runID string, attempts i
 		}
 		evt, err := events.New(ProviderDegraded, "passage/fx", runID, p.TenantID, map[string]any{
 			"provider": provider, "last_success_at": lastSuccess, "rate_type": code, "error": message,
+			"status": status, "fallback": fallback, "retryable": retryable,
 		})
 		if err != nil {
 			return fmt.Errorf("build %s: %w", ProviderDegraded, err)
