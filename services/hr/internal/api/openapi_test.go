@@ -72,7 +72,8 @@ func TestOpenAPIMatchesRoutes(t *testing.T) {
 		t.Fatalf("OpenAPI drift: undocumented routes %v; documented but not mounted %v", missing, extra)
 	}
 
-	all := []string{dutyWorkerMaintain, dutyWorkerInquire, dutyPIIRead, dutyActionMaintain, dutyOrgMaintain, dutyOrgInquire}
+	all := []string{dutyWorkerMaintain, dutyWorkerInquire, dutyPIIRead, dutyActionMaintain, dutyOrgMaintain, dutyOrgInquire,
+		dutyAbsenceAdmin, dutyEssAbsence, dutyMssApprove}
 	for op, duty := range documented {
 		if duty == "" {
 			t.Errorf("%s has no x-passage-duty", op)

@@ -15,6 +15,7 @@ import {
   StatusPill,
   type DataTableColumn,
 } from "../../shell/ui";
+import { AbsenceCard } from "./AbsenceCard";
 import { getWorker, listEmployments, workerAsOf, type Employment, type WorkerDetail } from "./api/client";
 import { EmploymentForm } from "./EmploymentForm";
 import { assignmentKindLabel, dash, DATE, dayOf, employmentTypeLabel, lastDay, todayIso, workerTypeLabel } from "./format";
@@ -96,7 +97,7 @@ function AsOfCard({ workerId }: { workerId: string }) {
   );
 }
 
-/** One worker: identity, masked personal data, employments and the as-of view. */
+/** One worker: identity, masked personal data, employments, the as-of view and absence. */
 export function WorkerDetailPage() {
   const { id = "" } = useParams();
   const [adding, setAdding] = useState(false);
@@ -210,6 +211,7 @@ export function WorkerDetailPage() {
         </div>
       </Card>
       <AsOfCard workerId={worker.id} />
+      <AbsenceCard workerId={worker.id} />
     </div>
   );
 }

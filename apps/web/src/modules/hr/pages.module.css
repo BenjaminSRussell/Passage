@@ -74,3 +74,14 @@
   display: flex;
   justify-content: center;
 }
+
+.rowActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.warnings {
+  margin: 0;
+  padding-inline-start: var(--space-5);
+}

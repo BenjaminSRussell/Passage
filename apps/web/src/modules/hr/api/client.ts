@@ -249,3 +249,190 @@ export function createPosition(input: NewPosition, key: string = newKey()): Prom
 export function createAssignment(positionId: string, input: NewAssignment, key: string = newKey()): Promise<PositionAssignment> {
   return post<PositionAssignment>(`/positions/${id(positionId)}/assignments`, input, key);
 }
+
+// Absence (slice 2): plans, accrual, year end, balances and requests.
+
+export type AbsenceUnit = "HOURS" | "DAYS";
+export type AccrualFrequency = "MONTHLY" | "BIWEEKLY" | "ANNUAL" | "PER_HOUR_WORKED";
+export type AccrualDay = "LAST_DAY" | "FIRST_DAY" | "PAYDATE";
+export type Proration = "DAYS_IN_PERIOD" | "NONE";
+export type AbsenceRequestStatus = "SUBMITTED" | "APPROVED" | "REJECTED" | "CANCELED";
+
+export interface NewAbsencePlan {
+  code: string;
+  unit: AbsenceUnit;
+  accrualFrequency: AccrualFrequency;
+  /** Decimal strings, never numbers (no float reaches the ledger). */
+  accrualRate: string;
+  accrualDay: AccrualDay;
+  proration: Proration;
+  maxBalance: string;
+  carryOverMax: string;
+  carryOverExpiryMonths: number;
+  /** MM-DD. */
+  planYearStart: string;
+  negativeBalanceAllowed: boolean;
+  minServiceDays: number;
+}
+
+export interface AbsencePlan extends NewAbsencePlan {
+  id: string;
+  createdAt: string;
+}
+
+export interface AccrualPeriod {
+  periodStart: string;
+  periodEnd: string;
+  workers: number;
+  accrued: string;
+  discarded: string;
+}
+
+export interface PlanClose {
+  planYearStart: string;
+  kind: "YEAR_END" | "CARRY_EXPIRY";
+  workers: number;
+  carried: string;
+  expired: string;
+}
+
+export interface AbsencePlanDetail extends AbsencePlan {
+  periods: AccrualPeriod[];
+  closes: PlanClose[];
+}
+
+export interface AccrualRun {
+  planId: string;
+  periodStart: string;
+  periodEnd: string;
+  planYearStart: string;
+  credited: number;
+  alreadyAccrued: number;
+  accrued: string;
+  discarded: string;
+  replayed: boolean;
+}
+
+export interface CloseRun {
+  planId: string;
+  planYearStart: string;
+  kind: "YEAR_END" | "CARRY_EXPIRY";
+  workers: number;
+  alreadyClosed: number;
+  carried: string;
+  expired: string;
+}
+
+export interface BucketBalance {
+  accrued: string;
+  used: string;
+  adjusted: string;
+  expired: string;
+  balance: string;
+}
+
+export interface AbsenceBalance {
+  planId: string;
+  planCode: string;
+  unit: AbsenceUnit;
+  planYearStart: string;
+  carryOver: BucketBalance;
+  current: BucketBalance;
+  total: string;
+}
+
+export interface AbsenceBalances {
+  workerId: string;
+  asOf: string;
+  balances: AbsenceBalance[];
+}
+
+export interface NewAbsenceRequest {
+  workerId: string;
+  planId: string;
+  from: string;
+  to: string;
+  quantity: string;
+  reason?: string;
+}
+
+export interface AbsenceRequest {
+  id: string;
+  workerId: string;
+  personnelNumber: string;
+  workerName: string;
+  planId: string;
+  planCode: string;
+  unit: AbsenceUnit;
+  from: string;
+  to: string;
+  quantity: string;
+  status: AbsenceRequestStatus;
+  reason?: string;
+  requestedBy?: string;
+  decidedBy?: string;
+  decidedAt?: string;
+  createdAt: string;
+}
+
+export interface RuleWarning {
+  code: string;
+  detail: string;
+}
+
+export interface AbsenceRequestResult extends AbsenceRequest {
+  warnings: RuleWarning[];
+}
+
+function command<T>(path: string, body?: unknown): Promise<T> {
+  return send<T>(path, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) });
+}
+
+export function listAbsencePlans(filter: { cursor?: string } = {}, signal?: AbortSignal): Promise<Page<AbsencePlan>> {
+  return page<AbsencePlan>(`/absence/plans${query({ cursor: filter.cursor })}`, signal);
+}
+
+export function getAbsencePlan(planId: string, signal?: AbortSignal): Promise<AbsencePlanDetail> {
+  return send<AbsencePlanDetail>(`/absence/plans/${id(planId)}`, {}, signal);
+}
+
+export function createAbsencePlan(input: NewAbsencePlan, key: string = newKey()): Promise<AbsencePlan> {
+  return post<AbsencePlan>("/absence/plans", input, key);
+}
+
+/** Accrues one whole period. Keyed per (plan, period, worker) by the service, so a retry needs no Idempotency-Key. */
+export function runAccrual(planId: string, periodStart: string, periodEnd: string): Promise<AccrualRun> {
+  return command<AccrualRun>("/absence/accrue", { planId, periodStart, periodEnd });
+}
+
+export function closePlanYear(planId: string, planYearStart: string): Promise<CloseRun> {
+  return command<CloseRun>(`/absence/plans/${id(planId)}/year-end`, { planYearStart });
+}
+
+export function expireCarryOver(planId: string, planYearStart: string): Promise<CloseRun> {
+  return command<CloseRun>(`/absence/plans/${id(planId)}/carry-over-expiry`, { planYearStart });
+}
+
+export function getAbsenceBalances(workerId: string, asOf: string, signal?: AbortSignal): Promise<AbsenceBalances> {
+  return send<AbsenceBalances>(`/workers/${id(workerId)}/absence/balances${query({ asOf })}`, {}, signal);
+}
+
+export function listAbsenceRequests(
+  filter: { status?: AbsenceRequestStatus | ""; workerId?: string; cursor?: string } = {},
+  signal?: AbortSignal,
+): Promise<Page<AbsenceRequest>> {
+  return page<AbsenceRequest>(`/absence/requests${query({ status: filter.status, workerId: filter.workerId, cursor: filter.cursor })}`, signal);
+}
+
+export function createAbsenceRequest(input: NewAbsenceRequest, key: string = newKey()): Promise<AbsenceRequestResult> {
+  return post<AbsenceRequestResult>("/absence/requests", input, key);
+}
+
+/** Replaying the decision a request already has is a no-op on the service. */
+export function decideAbsenceRequest(requestId: string, decision: "APPROVE" | "REJECT"): Promise<AbsenceRequest> {
+  return command<AbsenceRequest>(`/absence/requests/${id(requestId)}/decide`, { decision });
+}
+
+export function cancelAbsenceRequest(requestId: string): Promise<AbsenceRequest> {
+  return command<AbsenceRequest>(`/absence/requests/${id(requestId)}/cancel`);
+}

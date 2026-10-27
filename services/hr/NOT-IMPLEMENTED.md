@@ -3,7 +3,12 @@
 Slice 1 builds workers, employments, positions, position assignments, the
 as-of manager query, the PII vault with audit, the outbox events, list and
 detail reads for workers, employments and positions, and the HR web screens
-for all of them. Everything
+for all of them. Slice 2 builds absence: plans, accrual runs keyed per
+(plan, period, worker), year end with carry-over and carry-over expiry,
+balances per plan year, requests with the balance, span and overlap checks,
+approval with the `absence.approved` event, rejection and cancellation of
+submitted requests, and the web screens for plans, the request queue and the
+worker's absence. Everything
 below is either a later slice of PSG-42 or a handoff to another wave or owner.
 Statuses: **later slice of PSG-42** (same wave, next slice) or **handoff** (needs
 another owner).
@@ -23,9 +28,22 @@ another owner).
 | 1 | Position cost dimensions (`dimension_set_id`) | handoff (wave 11 dimensions) | Not stored |
 | 1 | Personnel and position numbers from sequences `WRK` and `POS` | handoff (wave 5 numbering) | Slice 1 takes caller-supplied numbers and enforces uniqueness per tenant |
 | 1 | Chain of command and direct reports (`GET /positions/{id}/reports?asOf=&depth=`, FR-42.4) | later slice of PSG-42 | The as-of manager is built; the reports endpoint and the org chart screen are not |
-| 2 | Absence plans, accrual runs, balances, requests, approvals, calendars | later slice of PSG-42 | Accrual formula, carry-over, expiry and negative floor are implemented in the domain (BR-42.3, BR-42.4) with tests; persistence, scheduler `hr-accrue`, `hr-carryover-expiry`, endpoints and calendars are not |
-| 2 | Time integration (wave 25 absence registrations) | handoff (wave 25) | Needs wave 25's time registration contract |
-| 2 | Accrual balance events to ESS | later slice of PSG-42 | Depends on the balance projection |
+| 2 | Absence plans, accrual runs, year end, carry-over expiry, balances, requests, approve and reject | **built** | See the service README. Accrual and the year-end jobs are endpoints an absence admin runs; see the scheduler row below |
+| 2 | Absence calendars (team calendar in MSS, absence calendar report 8.42.14) | later slice of PSG-42 | Needs a worker × day projection and the department from the wave-6 org read contract |
+| 2 | Schedulers `hr-accrue` (per plan frequency) and `hr-carryover-expiry` | later slice of PSG-42 | The endpoints are idempotent per worker and safe to schedule; the scheduled jobs (CronJob or Temporal) are not built |
+| 2 | Balance adjustments (HcmAbsenceAdmin "adjust") and opening balances from AX/SAP | later slice of PSG-42 | The `adjusted` column exists and enters the balance, but no endpoint writes it |
+| 2 | Cancelling an APPROVED request (reverse the usage if it starts in the future, or within the 30-day window with manager approval) | later slice of PSG-42 | Only SUBMITTED requests can be cancelled (HCM-ABS-STATE otherwise). Reversal needs the carry/current split of the usage stored on the request and a `absence.canceled` event for time and payroll |
+| 2 | DRAFT requests | later slice of PSG-42 | A request is validated and submitted in one call |
+| 2 | Blackout periods (FR-42.7) | later slice of PSG-42 | Needs a blackout calendar per plan or legal entity |
+| 2 | Routing a request to the worker's manager; manager sees only the team | handoff (platform OPA, wave 4 workflow) | `MssApprove` decides any request in the tenant and sees the tenant's queue; only self-approval is blocked. Team scoping by the position hierarchy belongs to the OPA policy, routing to wave-4 workflow |
+| 2 | Plan eligibility (which workers a plan covers) and per-employment plans (BR-42.14) | later slice of PSG-42 | Every plan accrues for every worker with a PRIMARY employment in the period |
+| 2 | `PER_HOUR_WORKED` accrual and the PAYDATE accrual day | handoff (waves 25 and 43) | `PER_HOUR_WORKED` plans can be defined but a run is refused (HCM-ABS-PERIOD) until wave-25 hours exist. PAYDATE is treated as the period's last day until wave-43 pay calendars exist |
+| 2 | Request unit rounding (0.5 day / 0.25 h, 8.42.13) | later slice of PSG-42 | Quantities take up to two decimals and at most one day (or 24 h) per calendar day; no rounding parameter yet |
+| 2 | Negative balance at termination raises a payroll deduction suggestion (BR-42.4) | later slice of PSG-42 and handoff (wave 43) | Needs termination actions (FR-42.5) and the payroll suggestion contract |
+| 2 | Employment status ON_LEAVE from approved absence | later slice of PSG-42 | Comes with leave-of-absence personnel actions |
+| 2 | Time integration (wave 25 absence registrations) and the reconciliation Σ usage = approved = time registrations | handoff (wave 25) | `absence.approved` is published; the reconciliation test needs wave 25's registrations |
+| 2 | `absence.approved` carries hours | handoff (wave 8 work calendars) | The event carries `quantity` and `unit`; a DAYS plan can't be turned into hours without the worker's work calendar |
+| 2 | Accrual balance events to ESS | later slice of PSG-42 | Depends on the ESS portal; balances are read through the API |
 | 3 | Benefit plans, options, eligibility (CEL), open enrollment, life events | later slice of PSG-42 | Not started; eligibility fixture (`hr-benefit-100`) comes with it |
 | 3 | Employee self-service and manager self-service | later slice of PSG-42 (ESS) and handoff (shell) | See `apps/ess/README.md`; MSS needs the approval flows |
 | 4 | Skills, certifications, goals, performance reviews | later slice of PSG-42 | Not started |
@@ -47,8 +65,10 @@ another owner).
 
 Deploy items: **HR workspace** is built as the web module
 `apps/web/src/modules/hr` (workers, positions, worker detail with PII reveal,
-employments and the as-of view; position detail with assignments). The org
-chart, personnel actions, absence admin and the self-service screens are not. The **ESS
+employments, the as-of view and the worker's absence; position detail with
+assignments; absence plans with accrual and year end; the absence request
+queue). The org chart, personnel actions, absence calendars and the
+self-service portal screens are not. The **ESS
 portal** is not built here (apps/ess README). **Demo workforce loaded** is not
 built (needs the `hr-workforce-1200` generator under `testdata/`).
 
@@ -58,8 +78,8 @@ built (needs the `hr-workforce-1200` generator under `testdata/`).
 |---|---|---|
 | AC-42.1 as-of manager, 1,200 workers, 50,000 dates, p95 < 50 ms | partly built | The algorithm is checked against an independent model with 100-plus random hierarchies (`properties_test.go`). The database check at 1,200 workers and 50,000 dates and the p95 measurement are not built |
 | AC-42.2 overlapping assignment rejected unless overfill | **built** (store test) | Overfill check is conservative: it sums every assignment that overlaps the new range, not per instant. The DB test needs `PASSAGE_TEST_DATABASE_URL` |
-| AC-42.3 accrual on US-PTO-15 | partly built | Domain scenario and 11 proration cases match the balances exactly (`accrual_cases_test.go`). Persistence and the 36-case fixture set are not built |
-| AC-42.4 negative balance beyond request | partly built | Domain `Consume` returns HCM-ABS-002 (`accrual_cases_test.go`). No request endpoint yet |
+| AC-42.3 accrual on US-PTO-15 | **built** (domain and store tests) | `TestUSPTO15AccrualYearEndAndCarryOver` runs 0.65, 11.90, 7.90, 5.00 carried, 2.90 expired and 6.25 through the database. The DB test needs `PASSAGE_TEST_DATABASE_URL`. The 36-case fixture set is a separate row below |
+| AC-42.4 negative balance beyond request | **built** (domain and store tests) | A 3.00 request on a 2.00 balance is HCM-ABS-002 at submission and again at approval |
 | AC-42.5 eligibility on 100 fixtures | later slice of PSG-42 | Eligibility (CEL) not started |
 | AC-42.6 future-dated transfer on its date | later slice of PSG-42 | Personnel actions and the Temporal timer not started |
 | AC-42.7 masked national ID and audited read | **built** (store and API tests) | DB test needs `PASSAGE_TEST_DATABASE_URL`; the no-DB API test covers the duty and reason gate |
@@ -78,19 +98,20 @@ built (needs the `hr-workforce-1200` generator under `testdata/`).
 | Item | Status | Reason |
 |---|---|---|
 | Kernel `httpx` idempotency middleware (replay headers, 60 s lease, 24 h expiry) | handoff (platform) and later slice | Slice 1 stores the `Idempotency-Key` on the worker, employment, position and assignment rows (the org pattern): a replay with the same body returns the stored row, another body is `idempotency_key_reuse`, a concurrent duplicate is `idempotency_key_in_flight`. Keys do not expire and there is no replay header |
-| `ETag` on reads and `If-Match` on PUT/PATCH/DELETE | later slice of PSG-42 | Slice 1 has no update endpoints; `ETag` is not set on reads yet, so the OpenAPI does not declare it |
+| `ETag` on reads and `If-Match` on PUT/PATCH/DELETE | later slice of PSG-42 | Slices 1 and 2 have no update endpoints; `ETag` is not set on reads yet, so the OpenAPI does not declare it. Absence decisions are guarded by row locks and the request state instead |
+| `Idempotency-Key` on absence decide, accrue and close | built differently | Accrual, year end and expiry are keyed per (plan, period or year, worker) in the database, so retries are safe without a key. A decision or cancel replayed on a request that already has that outcome returns it unchanged; a different outcome is HCM-ABS-STATE |
 | OPA decision and `legalEntityScopes` | handoff (platform / edge-identity) | Duties are checked locally by `authz.RequireDuty`; legal-entity scoping is not enforced yet |
 | Effective-date granularity TIMESTAMP and tenant-local midnight | later slice of PSG-42 | Slice 1 uses UTC days (DAY granularity) |
 | Future-dated actions (up to 365 days) and workflow approval | later slice of PSG-42 | Depends on personnel actions and wave-4 workflow |
 | `party_person_id` checked against the wave-7 party service | handoff (wave 7 party) | Stored as a uuid; existence is not checked |
-| Outbox events `position.changed`, `employment.changed` for terminations, personnel action events | later slice of PSG-42 | Slice 1 emits `worker.created`, `employment.changed` (action HIRE, with the exclusive end when a termination date is given) and `positionassignment.changed` (with `manager_position_id`). The PRD name `position.assignment.changed` is written as `positionassignment` to fit the kernel event-type rule (see asyncapi) |
+| Outbox events `position.changed`, `employment.changed` for terminations, personnel action events | later slice of PSG-42 | Slice 2 adds `absence.approved`. Slice 1 emits `worker.created`, `employment.changed` (action HIRE, with the exclusive end when a termination date is given) and `positionassignment.changed` (with `manager_position_id`). The PRD name `position.assignment.changed` is written as `positionassignment` to fit the kernel event-type rule (see asyncapi) |
 
 ## Reference fixtures (PRD 8.42.9)
 
 | Fixture | Status | Reason |
 |---|---|---|
 | `hr-workforce-1200` (generated workforce, 3 entities, 5 years) | later slice of PSG-42 | Needs the workforce generator and the actions to replay history |
-| `hr-accrual-cases` (36 hire-date × plan cases) | partly built | 11 proration cases and the US-PTO-15 scenario are inline in `accrual_cases_test.go`. The other cases come with the accrual store |
+| `hr-accrual-cases` (36 hire-date × plan cases) | partly built | 11 proration cases and the US-PTO-15 scenario are inline in `accrual_cases_test.go`, and US-PTO-15 runs end to end in the store test. The full 36-case fixture under `testdata/` is not built |
 | `hr-benefit-100` | later slice of PSG-42 | Benefits not started |
 | `hr-pii-contract` (role × field matrix) | later slice of PSG-42 | The API tests cover the duty gate for `HcmPIIRead` and the reason rule. The full role matrix needs the OPA role model (handoff, platform) |
 
@@ -98,7 +119,8 @@ built (needs the `hr-workforce-1200` generator under `testdata/`).
 
 | Item | Status | Reason |
 |---|---|---|
-| Schedules `hr-apply-actions`, `hr-accrue`, `hr-cert-expiry`, `hr-reminders` | later slice of PSG-42 | Jobs depend on personnel actions, absence and reminders |
+| Schedules `hr-apply-actions`, `hr-accrue`, `hr-carryover-expiry`, `hr-cert-expiry`, `hr-reminders` | later slice of PSG-42 | Accrual, year end and carry-over expiry exist as idempotent endpoints; the schedules themselves, and the jobs for actions and reminders, are not built |
+| Alert "accrual missing for active workers" (8.42.16) | later slice of PSG-42 | Needs the scheduler; `hr_absence_accrual_runs_total` is exported |
 | Temporal workers (actions, SCIM) and the `passage-hr` worker deployments | later slice of PSG-42 | Not started; the chart runs only the API |
 | Image digest pinning and Argo CD app for the chart | handoff (deployment-cicd) | `deploy/` is outside this wave's ownership |
 | Alerts (action failures, PII decrypt errors, SCIM lag) | later slice of PSG-42 | Depends on the jobs above |

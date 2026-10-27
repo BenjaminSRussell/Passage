@@ -11,6 +11,7 @@ func TestEveryTypeFollowsTheKernelNamingRule(t *testing.T) {
 		"dev.passage.hr.worker.created.v1":             true,
 		"dev.passage.hr.employment.changed.v1":         true,
 		"dev.passage.hr.positionassignment.changed.v1": true,
+		"dev.passage.hr.absence.approved.v1":           true,
 	}
 	for _, typ := range All() {
 		if !events.ValidType(typ) {

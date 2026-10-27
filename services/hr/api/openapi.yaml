@@ -3,11 +3,12 @@ info:
   title: Passage HR API
   version: 0.1.0
   description: |
-    Wave 42 slice 1 (PSG-42): workers, employments, positions and position
-    assignments with effective dating, the as-of manager query, and the audited
-    PII vault. Personnel actions, absence, benefits, learning, questionnaires,
-    incidents, recruiting and compensation cycles are later slices (see
-    NOT-IMPLEMENTED.md).
+    Wave 42 slices 1 and 2 (PSG-42): workers, employments, positions and
+    position assignments with effective dating, the as-of manager query, the
+    audited PII vault, and absence plans, accrual, year end and carry-over,
+    balances and requests with approval. Personnel actions, benefits, learning,
+    questionnaires, incidents, recruiting and compensation cycles are later
+    slices (see NOT-IMPLEMENTED.md).
 servers:
   - url: https://api.{env}.passage.dev
     variables:
@@ -299,6 +300,400 @@ paths:
           $ref: "#/components/responses/Problem"
         "422":
           $ref: "#/components/responses/Problem"
+  /v1/hr/absence/plans:
+    get:
+      operationId: listAbsencePlans
+      summary: List absence plans by code
+      x-passage-duty: EssAbsence
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: One page of plans
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AbsencePlanList"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createAbsencePlan
+      summary: Create an absence plan with its accrual rule (FR-42.6, BR-42.3)
+      x-passage-duty: HcmAbsenceAdmin
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAbsencePlanRequest"
+      responses:
+        "201":
+          description: Plan created, or the stored plan on an idempotent replay
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AbsencePlan"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "409":
+          description: HCM-ABS-PLAN-DUPLICATE (code taken) or idempotency_key_in_flight
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/absence/plans/{id}:
+    get:
+      operationId: getAbsencePlan
+      summary: An absence plan with its latest accrual periods, year ends and carry-over expiries
+      x-passage-duty: HcmAbsenceAdmin
+      parameters:
+        - $ref: "#/components/parameters/PlanId"
+      responses:
+        "200":
+          description: The plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AbsencePlanDetail"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/absence/plans/{id}/year-end:
+    post:
+      operationId: closeAbsencePlanYear
+      summary: Year end (BR-42.3) - carry each worker's balance into the next plan year up to carryOverMax, expire the rest
+      description: |
+        Runs once the plan year has ended (HCM-ABS-NOT-DUE before). Keyed per
+        (plan, plan year, worker): a rerun closes only workers not yet closed.
+        Accrual into the next plan year is refused (HCM-ABS-YEAR-OPEN) until
+        the previous year is closed.
+      x-passage-duty: HcmAbsenceAdmin
+      parameters:
+        - $ref: "#/components/parameters/PlanId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlanYearRequest"
+      responses:
+        "201":
+          description: At least one worker closed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloseRun"
+        "200":
+          description: Nobody left to close
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloseRun"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "422":
+          description: HCM-ABS-PERIOD (not a plan-year start) or HCM-ABS-NOT-DUE
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/hr/absence/plans/{id}/carry-over-expiry:
+    post:
+      operationId: expireAbsenceCarryOver
+      summary: Expire unused carry-over of one plan year once carryOverExpiryMonths have passed (BR-42.3)
+      x-passage-duty: HcmAbsenceAdmin
+      parameters:
+        - $ref: "#/components/parameters/PlanId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlanYearRequest"
+      responses:
+        "201":
+          description: At least one worker's carry-over expired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloseRun"
+        "200":
+          description: Nobody left to expire
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloseRun"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "422":
+          description: HCM-ABS-PERIOD, HCM-ABS-NOT-DUE or HCM-ABS-NO-EXPIRY (plan keeps carry-over all year)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/hr/absence/accrue:
+    post:
+      operationId: runAbsenceAccrual
+      summary: Accrue one plan for one whole accrual period (BR-42.3)
+      description: |
+        The period must be one accrual period of the plan (a calendar month for
+        MONTHLY, 14 days for BIWEEKLY, the plan year for ANNUAL; HCM-ABS-PERIOD
+        otherwise) whose accrual day has come (HCM-ABS-NOT-DUE). Each worker
+        with a PRIMARY employment in the period is accrued once per period (the
+        PRD key per plan and period, kept per worker), so a retried call
+        credits nobody twice and needs no Idempotency-Key. Employments are read
+        under the caller's legal-entity scope; a later run with another scope
+        credits the remaining workers.
+      x-passage-duty: HcmAbsenceAdmin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccrualRequest"
+      responses:
+        "201":
+          description: At least one worker credited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccrualRun"
+        "200":
+          description: Nobody left to credit (replayed is true when an earlier call did the work)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccrualRun"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          description: HCM-ABS-RUN-OVERLAP (another period of the plan covers these days), HCM-ABS-YEAR-OPEN or HCM-ABS-YEAR-CLOSED
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: HCM-ABS-PERIOD or HCM-ABS-NOT-DUE
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/hr/absence/requests:
+    get:
+      operationId: listAbsenceRequests
+      summary: Absence requests by start date, oldest first (the approval queue)
+      description: |
+        A caller with only EssAbsence sees their own requests (the worker whose
+        sign-in user they are). MssApprove or HcmAbsenceAdmin see the tenant's;
+        narrowing a manager to their team is the OPA handoff.
+      x-passage-duty: EssAbsence
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [SUBMITTED, APPROVED, REJECTED, CANCELED]
+        - name: workerId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: One page of requests
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AbsenceRequestList"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createAbsenceRequest
+      summary: Submit an absence request (FR-42.7, BR-42.4, BR-42.5)
+      description: |
+        Checked against the plan-year balance plus the negative allowance
+        (HCM-ABS-002), an approved overlap (HCM-ABS-001), the span (at most one
+        day, or 24 hours, per calendar day) and the plan year (HCM-ABS-YEAR-SPAN,
+        and HCM-ABS-YEAR-CLOSED once the year has had its year end).
+        An overlap with a submitted request only warns (HCM-ABS-003). A caller
+        without HcmAbsenceAdmin requests only for their own worker
+        (HCM-ABS-NOT-OWN).
+      x-passage-duty: EssAbsence
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAbsenceRequest"
+      responses:
+        "201":
+          description: Request submitted, with any non-blocking warnings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AbsenceRequestResult"
+        "200":
+          description: The stored request on an idempotent replay
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AbsenceRequestResult"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/absence/requests/{id}/decide:
+    post:
+      operationId: decideAbsenceRequest
+      summary: Approve or reject a submitted request; approval spends the balance and publishes absence.approved
+      description: |
+        Approval rechecks the approved overlap and the balance, spends
+        CARRY_OVER first, and writes dev.passage.hr.absence.approved.v1 in the
+        same transaction. Replaying the decision a request already has returns
+        it unchanged. An approver cannot decide their own request
+        (HCM-ABS-SELF-APPROVAL, 403).
+      x-passage-duty: MssApprove
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AbsenceDecision"
+      responses:
+        "200":
+          description: The request with its decision
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AbsenceRequest"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          description: HCM-ABS-YEAR-CLOSED (the request's plan year has had its year end)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: HCM-ABS-STATE, HCM-ABS-001 or HCM-ABS-002
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/hr/absence/requests/{id}/cancel:
+    post:
+      operationId: cancelAbsenceRequest
+      summary: Withdraw a submitted request (an approved one cannot be cancelled yet)
+      x-passage-duty: EssAbsence
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: The cancelled request (a replay returns it unchanged)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AbsenceRequest"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/workers/{id}/absence/balances:
+    get:
+      operationId: getAbsenceBalances
+      summary: A worker's balances per plan for the plan year containing asOf
+      description: |
+        A caller with only EssAbsence reads their own worker (HCM-ABS-NOT-OWN
+        otherwise); MssApprove or HcmAbsenceAdmin read anyone's.
+      x-passage-duty: EssAbsence
+      parameters:
+        - $ref: "#/components/parameters/WorkerId"
+        - name: asOf
+          in: query
+          required: false
+          description: Defaults to today (UTC).
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: Balances (accrued, used, adjusted, expired, balance per bucket)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AbsenceBalances"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
 components:
   securitySchemes:
     bearerAuth:
@@ -314,6 +709,20 @@ components:
         type: string
         format: uuid
     PositionId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    PlanId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    RequestId:
       name: id
       in: path
       required: true
@@ -718,3 +1127,381 @@ components:
         managerWorkerId:
           type: [string, "null"]
           description: Incumbent of the reports-to position as-of the date, walking up at most the configured depth; null when vacant (BR-42.1).
+    CreateAbsencePlanRequest:
+      type: object
+      additionalProperties: false
+      required: [code, unit, accrualRate, maxBalance]
+      properties:
+        code:
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9-]{0,19}$"
+          description: Stored upper-case; unique per tenant.
+        unit:
+          type: string
+          enum: [HOURS, DAYS]
+        accrualFrequency:
+          type: string
+          enum: [MONTHLY, BIWEEKLY, ANNUAL, PER_HOUR_WORKED]
+          default: MONTHLY
+          description: PER_HOUR_WORKED plans can be defined but not accrued until wave-25 time registrations exist.
+        accrualRate:
+          type: string
+          description: Decimal string, never a float; at most 4 places, below 10000.
+        accrualDay:
+          type: string
+          enum: [LAST_DAY, FIRST_DAY, PAYDATE]
+          default: LAST_DAY
+        proration:
+          type: string
+          enum: [DAYS_IN_PERIOD, NONE]
+          default: DAYS_IN_PERIOD
+        maxBalance:
+          type: string
+          description: Decimal string; accrual above it is discarded (BR-42.3).
+        carryOverMax:
+          type: string
+          default: "0"
+        carryOverExpiryMonths:
+          type: integer
+          minimum: 0
+          maximum: 36
+          default: 3
+          description: 0 keeps carry-over for the whole plan year.
+        planYearStart:
+          type: string
+          pattern: "^(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$"
+          default: "01-01"
+          description: MM-DD of a day every year has (02-29 is refused).
+        negativeBalanceAllowed:
+          type: boolean
+          default: false
+          description: Allows the balance down to -(accrualRate x 2) (BR-42.4).
+        minServiceDays:
+          type: integer
+          minimum: 0
+          maximum: 3650
+          default: 0
+    AbsencePlan:
+      type: object
+      required: [id, code, unit, accrualFrequency, accrualRate, accrualDay, proration, maxBalance, carryOverMax, carryOverExpiryMonths, planYearStart, negativeBalanceAllowed, minServiceDays, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        unit:
+          type: string
+          enum: [HOURS, DAYS]
+        accrualFrequency:
+          type: string
+          enum: [MONTHLY, BIWEEKLY, ANNUAL, PER_HOUR_WORKED]
+        accrualRate:
+          type: string
+        accrualDay:
+          type: string
+          enum: [LAST_DAY, FIRST_DAY, PAYDATE]
+        proration:
+          type: string
+          enum: [DAYS_IN_PERIOD, NONE]
+        maxBalance:
+          type: string
+        carryOverMax:
+          type: string
+        carryOverExpiryMonths:
+          type: integer
+        planYearStart:
+          type: string
+        negativeBalanceAllowed:
+          type: boolean
+        minServiceDays:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+    AbsencePlanList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AbsencePlan"
+        nextCursor:
+          type: string
+    AbsencePlanDetail:
+      allOf:
+        - $ref: "#/components/schemas/AbsencePlan"
+        - type: object
+          required: [periods, closes]
+          properties:
+            periods:
+              type: array
+              description: The latest 24 accrual periods, newest first.
+              items:
+                type: object
+                required: [periodStart, periodEnd, workers, accrued, discarded]
+                properties:
+                  periodStart:
+                    type: string
+                    format: date
+                  periodEnd:
+                    type: string
+                    format: date
+                  workers:
+                    type: integer
+                  accrued:
+                    type: string
+                  discarded:
+                    type: string
+            closes:
+              type: array
+              description: The latest 24 year ends and carry-over expiries, newest first.
+              items:
+                type: object
+                required: [planYearStart, kind, workers, carried, expired]
+                properties:
+                  planYearStart:
+                    type: string
+                    format: date
+                  kind:
+                    type: string
+                    enum: [YEAR_END, CARRY_EXPIRY]
+                  workers:
+                    type: integer
+                  carried:
+                    type: string
+                  expired:
+                    type: string
+    AccrualRequest:
+      type: object
+      additionalProperties: false
+      required: [planId, periodStart, periodEnd]
+      properties:
+        planId:
+          type: string
+          format: uuid
+        periodStart:
+          type: string
+          format: date
+          description: First day of the period, inclusive.
+        periodEnd:
+          type: string
+          format: date
+          description: Last day of the period, inclusive.
+    AccrualRun:
+      type: object
+      required: [planId, periodStart, periodEnd, planYearStart, credited, alreadyAccrued, accrued, discarded, replayed]
+      properties:
+        planId:
+          type: string
+          format: uuid
+        periodStart:
+          type: string
+          format: date
+        periodEnd:
+          type: string
+          format: date
+        planYearStart:
+          type: string
+          format: date
+          description: The plan year the accrual was booked to.
+        credited:
+          type: integer
+          description: Workers this call accrued.
+        alreadyAccrued:
+          type: integer
+          description: Workers an earlier call for the same period had accrued.
+        accrued:
+          type: string
+          description: Total kept by this call.
+        discarded:
+          type: string
+          description: Total discarded at maxBalance by this call (BR-42.3).
+        replayed:
+          type: boolean
+    PlanYearRequest:
+      type: object
+      additionalProperties: false
+      required: [planYearStart]
+      properties:
+        planYearStart:
+          type: string
+          format: date
+          description: First day of the plan year to close or expire.
+    CloseRun:
+      type: object
+      required: [planId, planYearStart, kind, workers, alreadyClosed, carried, expired]
+      properties:
+        planId:
+          type: string
+          format: uuid
+        planYearStart:
+          type: string
+          format: date
+        kind:
+          type: string
+          enum: [YEAR_END, CARRY_EXPIRY]
+        workers:
+          type: integer
+        alreadyClosed:
+          type: integer
+        carried:
+          type: string
+        expired:
+          type: string
+    CreateAbsenceRequest:
+      type: object
+      additionalProperties: false
+      required: [workerId, planId, from, to, quantity]
+      properties:
+        workerId:
+          type: string
+          format: uuid
+        planId:
+          type: string
+          format: uuid
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+          description: Last day, inclusive; at most 366 days after from.
+        quantity:
+          type: string
+          description: Positive decimal with at most 2 places, in the plan's unit.
+        reason:
+          type: string
+          maxLength: 500
+    AbsenceRequest:
+      type: object
+      required: [id, workerId, personnelNumber, workerName, planId, planCode, unit, from, to, quantity, status, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        workerId:
+          type: string
+          format: uuid
+        personnelNumber:
+          type: string
+        workerName:
+          type: string
+          description: Preferred name, else legal name.
+        planId:
+          type: string
+          format: uuid
+        planCode:
+          type: string
+        unit:
+          type: string
+          enum: [HOURS, DAYS]
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+        quantity:
+          type: string
+        status:
+          type: string
+          enum: [SUBMITTED, APPROVED, REJECTED, CANCELED]
+        reason:
+          type: string
+        requestedBy:
+          type: string
+        decidedBy:
+          type: string
+          description: The approver, or the user who cancelled.
+        decidedAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+    AbsenceRequestResult:
+      allOf:
+        - $ref: "#/components/schemas/AbsenceRequest"
+        - type: object
+          required: [warnings]
+          properties:
+            warnings:
+              type: array
+              description: Non-blocking warnings such as HCM-ABS-003.
+              items:
+                type: object
+                required: [code, detail]
+                properties:
+                  code:
+                    type: string
+                  detail:
+                    type: string
+    AbsenceRequestList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AbsenceRequest"
+        nextCursor:
+          type: string
+    AbsenceDecision:
+      type: object
+      additionalProperties: false
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [APPROVE, REJECT]
+    AbsenceBalances:
+      type: object
+      required: [workerId, asOf, balances]
+      properties:
+        workerId:
+          type: string
+          format: uuid
+        asOf:
+          type: string
+          format: date
+        balances:
+          type: array
+          items:
+            type: object
+            required: [planId, planCode, unit, planYearStart, carryOver, current, total]
+            properties:
+              planId:
+                type: string
+                format: uuid
+              planCode:
+                type: string
+              unit:
+                type: string
+                enum: [HOURS, DAYS]
+              planYearStart:
+                type: string
+                format: date
+              carryOver:
+                $ref: "#/components/schemas/BucketBalance"
+              current:
+                $ref: "#/components/schemas/BucketBalance"
+              total:
+                type: string
+                description: Both buckets' balances together.
+    BucketBalance:
+      type: object
+      required: [accrued, used, adjusted, expired, balance]
+      properties:
+        accrued:
+          type: string
+        used:
+          type: string
+        adjusted:
+          type: string
+        expired:
+          type: string
+        balance:
+          type: string
+          description: accrued - used + adjusted - expired

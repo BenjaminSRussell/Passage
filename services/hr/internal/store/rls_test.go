@@ -65,14 +65,35 @@ func TestRowLevelSecurity(t *testing.T) {
 		}
 		return n
 	}
+	// Absence: an accrual under one legal-entity scope credits only the
+	// workers it can see; a later all-entity run credits the rest once.
+	at(s, day(time.March, 1))
+	plan := mustPlan(t, s, one, usPTO15("US-PTO-RLS"))
+	other := mustWorker(t, s, one, "RlsOther")
+	mustEmployment(t, s, one, other.ID, otherLE, "PRIMARY", day(time.January, 1))
+	if run := mustAccrueMonth(t, s, scoped(testkit.TenantID(1), le), plan.ID, 2026, time.January); run.Credited != 1 {
+		t.Fatalf("scoped run credited %d, want only the worker in %s", run.Credited, le)
+	}
+	if run := mustAccrueMonth(t, s, one, plan.ID, 2026, time.January); run.Credited != 1 || run.AlreadyAccrued != 1 {
+		t.Fatalf("all-entity rerun = %+v, want the other worker only", run)
+	}
+	req, _ := request(t, s, one, w.ID, plan.ID, day(time.February, 2), day(time.February, 2), "1.00")
+	if _, _, err := s.DecideAbsenceRequest(one, req.ID, "APPROVE"); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+
 	two := scoped(testkit.TenantID(2), "")
-	for _, table := range []string{"worker", "worker_pii", "employment", "hr_position", "position_hierarchy", "position_assignment", "audit_event", "outbox"} {
+	if _, err := s.Balances(two, w.ID, day(time.January, 31), false); err == nil {
+		t.Error("tenant 2 read tenant 1's balances")
+	}
+	for _, table := range []string{"worker", "worker_pii", "employment", "hr_position", "position_hierarchy", "position_assignment", "audit_event", "outbox",
+		"absence_plan", "absence_balance", "absence_accrual_period", "absence_accrual_line", "absence_close_line", "absence_request"} {
 		if n := count(two, table); n != 0 {
 			t.Errorf("tenant 2 sees %d rows in %s", n, table)
 		}
 	}
-	if n := count(one, "employment"); n != 2 {
-		t.Fatalf("tenant 1 with all entities sees %d employments, want 2", n)
+	if n := count(one, "employment"); n != 3 {
+		t.Fatalf("tenant 1 with all entities sees %d employments, want 3", n)
 	}
 	inEntity := scoped(testkit.TenantID(1), le)
 	if n := count(inEntity, "employment"); n != 1 {

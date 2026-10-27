@@ -106,6 +106,8 @@ describe("hr module", () => {
     expect(hr.nav).toEqual([
       { label: "Workers", to: "/hr/workers", duty: "HcmWorkerInquire" },
       { label: "Positions", to: "/hr/positions", duty: "HcmOrgInquire" },
+      { label: "Absence plans", to: "/hr/absence/plans", duty: "HcmAbsenceAdmin" },
+      { label: "Absence requests", to: "/hr/absence/requests", duty: "EssAbsence" },
     ]);
     expect(loadModules().map((m) => m.id)).toContain("hr");
   });
@@ -257,7 +259,7 @@ describe("worker detail", () => {
     fireEvent.change(within(form).getByLabelText("Legal entity id"), { target: { value: LE2 } });
     fireEvent.change(within(form).getByLabelText("Hire date"), { target: { value: "2026-05-01" } });
     fireEvent.click(within(form).getByRole("button", { name: "Start employment" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Employment from 2026-05-01 started.");
+    await waitFor(() => expect(screen.getAllByRole("status").map((el) => el.textContent)).toContain("Employment from 2026-05-01 started."));
     expect(posts("/employments")[0].body).toEqual({ legalEntityId: LE2, employmentType: "FULL_TIME", assignmentKind: "PRIMARY", hireDate: "2026-05-01" });
     expect(header(posts("/employments")[0], "Idempotency-Key")).toBeTruthy();
     await waitFor(() => expect(calls.filter((c) => c.method === "GET" && c.url.pathname.endsWith("/employments"))).toHaveLength(2));

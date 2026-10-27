@@ -58,6 +58,11 @@ type API struct {
 	piiReveals       atomic.Int64
 	piiMaskedReads   atomic.Int64
 	asOfQueries      atomic.Int64
+	plansCreated     atomic.Int64
+	accrualRuns      atomic.Int64
+	requestsCreated  atomic.Int64
+	decisions        atomic.Int64
+	yearCloses       atomic.Int64
 }
 
 // New builds the API over a store.
@@ -77,6 +82,17 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyWorkerMaintain)).Post("/v1/hr/workers/{id}/employments", workerRoute(a.createEmployment))
 	r.With(authz.RequireDuty(dutyOrgMaintain)).Post("/v1/hr/positions", a.createPosition)
 	r.With(authz.RequireDuty(dutyActionMaintain)).Post("/v1/hr/positions/{id}/assignments", positionRoute(a.createAssignment))
+	r.With(authz.RequireDuty(dutyAbsenceAdmin)).Post("/v1/hr/absence/plans", a.createAbsencePlan)
+	r.With(authz.RequireDuty(dutyEssAbsence)).Get("/v1/hr/absence/plans", a.listAbsencePlans)
+	r.With(authz.RequireDuty(dutyAbsenceAdmin)).Get("/v1/hr/absence/plans/{id}", planRoute(a.getAbsencePlan))
+	r.With(authz.RequireDuty(dutyAbsenceAdmin)).Post("/v1/hr/absence/plans/{id}/year-end", planRoute(a.closePlanYear("close absence plan year", a.store.CloseYear)))
+	r.With(authz.RequireDuty(dutyAbsenceAdmin)).Post("/v1/hr/absence/plans/{id}/carry-over-expiry", planRoute(a.closePlanYear("expire absence carry-over", a.store.ExpireCarryOver)))
+	r.With(authz.RequireDuty(dutyAbsenceAdmin)).Post("/v1/hr/absence/accrue", a.runAccrual)
+	r.With(authz.RequireDuty(dutyEssAbsence)).Post("/v1/hr/absence/requests", a.createAbsenceRequest)
+	r.With(authz.RequireDuty(dutyEssAbsence)).Get("/v1/hr/absence/requests", a.listAbsenceRequests)
+	r.With(authz.RequireDuty(dutyMssApprove)).Post("/v1/hr/absence/requests/{id}/decide", absenceRequestRoute(a.decideAbsenceRequest))
+	r.With(authz.RequireDuty(dutyEssAbsence)).Post("/v1/hr/absence/requests/{id}/cancel", absenceRequestRoute(a.cancelAbsenceRequest))
+	r.With(authz.RequireDuty(dutyEssAbsence)).Get("/v1/hr/workers/{id}/absence/balances", workerRoute(a.absenceBalances))
 }
 
 // ready replaces the kernel's static /readyz: it pings the database within
@@ -105,6 +121,11 @@ func (a *API) Metrics() http.Handler {
 		counter("hr_pii_reveals_total", "Unmasked PII reads that passed the reveal gate.", a.piiReveals.Load())
 		counter("hr_pii_masked_reads_total", "Masked PII reads (audited).", a.piiMaskedReads.Load())
 		counter("hr_as_of_queries_total", "Worker as-of queries answered.", a.asOfQueries.Load())
+		counter("hr_absence_plans_created_total", "Absence plans created; idempotent replays are not counted.", a.plansCreated.Load())
+		counter("hr_absence_accrual_runs_total", "Accrual runs executed; replays of a stored (plan, period) are not counted.", a.accrualRuns.Load())
+		counter("hr_absence_requests_created_total", "Absence requests submitted; idempotent replays are not counted.", a.requestsCreated.Load())
+		counter("hr_absence_decisions_total", "Absence decisions that changed a request's status.", a.decisions.Load())
+		counter("hr_absence_year_closes_total", "Year-end and carry-over expiry calls that closed at least one worker.", a.yearCloses.Load())
 	})
 }
 

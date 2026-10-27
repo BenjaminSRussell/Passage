@@ -49,11 +49,13 @@ type Postgres struct {
 	pool   *pgxpool.Pool
 	sealer *domain.Sealer
 	depth  int
+	// now is the clock for "is this period due" checks; tests replace it.
+	now func() time.Time
 }
 
 // New builds the store. maxDepth is the vacant-manager walk depth (BR-42.1).
 func New(pool *pgxpool.Pool, sealer *domain.Sealer, maxDepth int) *Postgres {
-	return &Postgres{pool: pool, sealer: sealer, depth: maxDepth}
+	return &Postgres{pool: pool, sealer: sealer, depth: maxDepth, now: time.Now}
 }
 
 // Ping checks the database for readiness.
