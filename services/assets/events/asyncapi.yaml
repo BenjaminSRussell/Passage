@@ -1,0 +1,91 @@
+asyncapi: 3.0.0
+info:
+  title: Passage Assets events
+  version: 1.0.0
+  description: |
+    Events published by the assets service through the outbox (same transaction
+    as the state change). CloudEvents 1.0 envelope; type
+    dev.passage.assets.<entity>.<verb>.v1; source /passage/assets/assets.
+defaultContentType: application/cloudevents+json
+channels:
+  assetAcquired:
+    address: passage.assets.asset
+    messages:
+      assetAcquired:
+        $ref: "#/components/messages/AssetAcquired"
+  assetDisposed:
+    address: passage.assets.asset
+    messages:
+      assetDisposed:
+        $ref: "#/components/messages/AssetDisposed"
+  leaseRecognized:
+    address: passage.assets.lease
+    messages:
+      leaseRecognized:
+        $ref: "#/components/messages/LeaseRecognized"
+operations:
+  publishAssetAcquired:
+    action: send
+    channel: { $ref: "#/channels/assetAcquired" }
+  publishAssetDisposed:
+    action: send
+    channel: { $ref: "#/channels/assetDisposed" }
+  publishLeaseRecognized:
+    action: send
+    channel: { $ref: "#/channels/leaseRecognized" }
+components:
+  messages:
+    AssetAcquired:
+      name: dev.passage.assets.asset.acquired.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/AssetAcquiredData"
+    AssetDisposed:
+      name: dev.passage.assets.asset.disposed.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/AssetDisposedData"
+    LeaseRecognized:
+      name: dev.passage.assets.lease.recognized.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/LeaseRecognizedData"
+  schemas:
+    AssetAcquiredData:
+      type: object
+      description: One event per acquisition posted to a book. Aggregate key is the asset id.
+      required: [assetId, bookIds, cost, currency, sourceType]
+      properties:
+        assetId: { type: string, format: uuid }
+        bookIds: { type: array, items: { type: string, format: uuid } }
+        cost: { type: string, description: "Decimal string" }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        sourceType: { type: string, enum: [manual, apInvoice, project, inventory] }
+        sourceId: { type: [string, "null"], format: uuid }
+    AssetDisposedData:
+      type: object
+      description: |
+        One event per book a disposal touched (a disposal applies to every Open
+        book of the asset). nbv is the NBV of the disposed share; gainLoss is
+        proceeds minus that NBV. Aggregate key is the asset id.
+      required: [assetId, bookId, kind, transactionDate, percentage, proceeds, nbv, gainLoss, currency]
+      properties:
+        assetId: { type: string, format: uuid }
+        bookId: { type: string, format: uuid }
+        kind: { type: string, enum: [sale, scrap] }
+        transactionDate: { type: string, format: date }
+        percentage: { type: string, description: "In (0, 100]" }
+        proceeds: { type: string }
+        nbv: { type: string }
+        gainLoss: { type: string }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+    LeaseRecognizedData:
+      type: object
+      required: [leaseId, liability, rouAsset, currency, termMonths, rate]
+      properties:
+        leaseId: { type: string, format: uuid }
+        liability: { type: string }
+        rouAsset: { type: string }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        termMonths: { type: integer }
+        rate: { type: string }

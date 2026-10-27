@@ -1,0 +1,539 @@
+openapi: 3.1.0
+info:
+  title: Passage Assets (fixed assets and leases)
+  version: 1.0.0
+  description: |
+    Wave 37 slice 1. Asset register, depreciation books, the schedule preview,
+    asset transactions, disposals and IFRS 16 lease recognition. Money and
+    rates are decimal strings; calendar dates are YYYY-MM-DD. Errors are
+    RFC 9457 problem details with a stable `code` (see README). Every command
+    takes an Idempotency-Key: a retry with the same key and body replays the
+    first response, the same key with another body is 422
+    `idempotency_key_reuse`. Browser calls use /api/v1/..., which the web BFF
+    rewrites to these /v1/... paths.
+servers:
+  - url: https://api.{env}.passage.dev
+    variables:
+      env:
+        default: dev
+paths:
+  /readyz:
+    get:
+      summary: Readiness (own Postgres reachable)
+      operationId: ready
+      x-passage-duty: none
+      responses:
+        "200":
+          description: Ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [ready] }
+        "503":
+          description: Database unreachable
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [unavailable] }
+  /v1/assets:
+    get:
+      summary: Asset register, ordered by asset number
+      operationId: listAssets
+      x-passage-duty: AssetView
+      parameters:
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/AssetStatus" } }
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
+        - $ref: "#/components/parameters/After"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: One page of assets
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssetPage"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+    post:
+      summary: Create an asset in the register (status NotYetAcquired)
+      operationId: createAsset
+      x-passage-duty: AssetMaintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAssetRequest"
+      responses:
+        "201":
+          description: Asset created
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Asset"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /v1/assets/{id}:
+    get:
+      summary: Read an asset with its books
+      operationId: getAsset
+      x-passage-duty: AssetView
+      parameters:
+        - $ref: "#/components/parameters/AssetId"
+      responses:
+        "200":
+          description: The asset
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssetDetail"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /v1/assets/{id}/books:
+    post:
+      summary: Attach a depreciation book; posts the acquisition transaction
+      description: At most 10 books per asset (AST-0013). The asset moves from NotYetAcquired to Open.
+      operationId: addAssetBook
+      x-passage-duty: AssetMaintain
+      parameters:
+        - $ref: "#/components/parameters/AssetId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddBookRequest"
+      responses:
+        "201":
+          description: Book attached
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Book"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /v1/assets/{id}/schedule:
+    get:
+      summary: Projected depreciation schedule for one book (computed on read)
+      description: A Sold or Scrapped book has no lines.
+      operationId: getAssetSchedule
+      x-passage-duty: AssetView
+      parameters:
+        - $ref: "#/components/parameters/AssetId"
+        - name: book
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Schedule lines, amounts in the book currency's minor unit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Schedule"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /v1/assets/{id}/transactions:
+    get:
+      summary: Every transaction on every book of the asset, oldest first
+      operationId: listAssetTransactions
+      x-passage-duty: AssetView
+      parameters:
+        - $ref: "#/components/parameters/AssetId"
+      responses:
+        "200":
+          description: Transactions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Transaction" }
+        "404":
+          $ref: "#/components/responses/Problem"
+  /v1/assets/{id}/dispose:
+    post:
+      summary: Dispose (sale or scrap) a percentage of the asset on every Open book
+      description: |
+        Each Open book records its own DisposalSale or DisposalScrap transaction
+        with the disposed share of cost and accumulated depreciation (rounded
+        once; residual cents stay on the asset, BR-37.7) and its own gain or loss
+        against the proceeds. 100% closes the asset and its books as Sold or
+        Scrapped (BR-37.2). Requires If-Match with the asset ETag.
+      operationId: disposeAsset
+      x-passage-duty: AssetDispose
+      parameters:
+        - $ref: "#/components/parameters/AssetId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DisposeRequest"
+      responses:
+        "201":
+          description: Disposal recorded
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Disposal"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "428":
+          $ref: "#/components/responses/Problem"
+  /v1/leases:
+    get:
+      summary: Leases ordered by lease number (without schedules)
+      operationId: listLeases
+      x-passage-duty: LeaseMaintain
+      parameters:
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
+        - $ref: "#/components/parameters/After"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: One page of leases
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LeasePage"
+        "400":
+          $ref: "#/components/responses/Problem"
+    post:
+      summary: Recognize an IFRS 16 lease and compute its schedule
+      operationId: createLease
+      x-passage-duty: LeaseMaintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateLeaseRequest"
+      responses:
+        "201":
+          description: Lease recognized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Lease"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /v1/leases/{id}:
+    get:
+      summary: Read a lease with its schedule
+      operationId: getLease
+      x-passage-duty: LeaseMaintain
+      parameters:
+        - $ref: "#/components/parameters/LeaseId"
+      responses:
+        "200":
+          description: The lease
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Lease"
+        "404":
+          $ref: "#/components/responses/Problem"
+components:
+  headers:
+    ETag:
+      description: Strong ETag of the asset version, for example "3"
+      schema: { type: string }
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Required on every command. Max 255 characters.
+      schema: { type: string, maxLength: 255 }
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: The ETag from the last read of the asset. Missing is 428, stale is 412 (AST-0006).
+      schema: { type: string }
+    AssetId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    LeaseId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    After:
+      name: after
+      in: query
+      description: The nextCursor of the previous page
+      schema: { type: string, format: uuid }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+  responses:
+    Problem:
+      description: RFC 9457 problem details
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: { type: string, example: "https://passage.dev/problems/AST-0001" }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string, example: "AST-0001" }
+        traceId: { type: string }
+        errors:
+          type: object
+          additionalProperties: { type: string }
+    AssetStatus:
+      type: string
+      enum: [NotYetAcquired, Open, Sold, Scrapped, Transferred]
+    CreateAssetRequest:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId, assetNumber, name, classCode]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        assetNumber: { type: string, minLength: 1, maxLength: 40 }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        classCode: { type: string, pattern: "^[A-Z0-9][A-Z0-9_-]{0,19}$" }
+        barcode: { type: [string, "null"], minLength: 1, maxLength: 64, description: "Unique per legal entity" }
+        quantity: { type: string, description: "Positive decimal with at most 4 places; default 1" }
+    Asset:
+      type: object
+      required: [id, legalEntityId, assetNumber, name, classCode, barcode, quantity, status, acquiredDate, bookCount, version, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        assetNumber: { type: string }
+        name: { type: string }
+        classCode: { type: string }
+        barcode: { type: [string, "null"] }
+        quantity: { type: string }
+        status: { $ref: "#/components/schemas/AssetStatus" }
+        acquiredDate: { type: [string, "null"], format: date, description: "Earliest in-service date of its books" }
+        bookCount: { type: integer }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+    AssetDetail:
+      allOf:
+        - $ref: "#/components/schemas/Asset"
+        - type: object
+          required: [books]
+          properties:
+            books:
+              type: array
+              items: { $ref: "#/components/schemas/Book" }
+    AssetPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Asset" }
+        nextCursor: { type: string, format: uuid }
+    AddBookRequest:
+      type: object
+      additionalProperties: false
+      required: [bookCode, currency, method, convention, inServiceDate, cost, serviceLifePeriods]
+      properties:
+        bookCode: { type: string, pattern: "^[A-Z0-9][A-Z0-9_-]{0,19}$" }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        method: { type: string, enum: [StraightLine, DecliningBalance] }
+        factor: { type: string, description: "Declining-balance multiplier 1 to 3, 2 = 200%" }
+        switchToStraightLine: { type: boolean }
+        serviceLifePeriods:
+          type: integer
+          minimum: 1
+          maximum: 1200
+          description: Months for StraightLine (1 to 1200); years for DecliningBalance (1 to 100)
+        salvageValue: { type: string }
+        convention:
+          type: string
+          enum: [None, FullMonth, MidMonth15, HalfYear]
+          description: None, FullMonth and MidMonth15 apply to StraightLine; None and HalfYear to DecliningBalance
+        inServiceDate: { type: string, format: date }
+        cost: { type: string }
+    Book:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        assetId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        bookCode: { type: string }
+        currency: { type: string }
+        method: { type: string, enum: [StraightLine, DecliningBalance] }
+        factor: { type: string }
+        switchToStraightLine: { type: boolean }
+        serviceLifePeriods: { type: integer }
+        salvageValue: { type: string }
+        convention: { type: string }
+        inServiceDate: { type: string, format: date }
+        cost: { type: string }
+        accumulatedDepreciation: { type: string }
+        nbv: { type: string }
+        status: { type: string, enum: [Open, Sold, Scrapped] }
+    Schedule:
+      type: object
+      required: [bookId, bookCode, currency, total, lines]
+      properties:
+        bookId: { type: string, format: uuid }
+        bookCode: { type: string }
+        currency: { type: string }
+        total: { type: string }
+        lines:
+          type: array
+          items:
+            type: object
+            properties:
+              index: { type: integer }
+              period: { type: string, description: "YYYY-MM for monthly lines, YYYY for annual" }
+              amount: { type: string }
+              accumulated: { type: string }
+              nbv: { type: string }
+    DisposeRequest:
+      type: object
+      additionalProperties: false
+      required: [kind, percentage]
+      properties:
+        kind: { type: string, enum: [sale, scrap] }
+        percentage: { type: string, description: "In (0, 100]" }
+        proceeds: { type: string, description: "Sale proceeds, zero or more; must be 0 or omitted for a scrap" }
+        transactionDate: { type: string, format: date, description: "Default today (UTC); not before any book's in-service date" }
+    Transaction:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        assetBookId: { type: string, format: uuid }
+        bookCode: { type: string }
+        currency: { type: string }
+        type: { type: string, enum: [Acquisition, DisposalSale, DisposalScrap] }
+        transactionDate: { type: string, format: date }
+        costAmount: { type: string, description: "Signed; disposals are negative" }
+        accumulatedAmount: { type: string, description: "Signed; disposals are negative" }
+        proceedsAmount: { type: [string, "null"] }
+        gainLoss: { type: [string, "null"] }
+        sourceType: { type: string, enum: [manual] }
+        createdAt: { type: string, format: date-time }
+    Disposal:
+      type: object
+      properties:
+        asset: { $ref: "#/components/schemas/Asset" }
+        books:
+          type: array
+          items: { $ref: "#/components/schemas/Book" }
+        transactions:
+          type: array
+          description: One per book, in the order of books
+          items: { $ref: "#/components/schemas/Transaction" }
+    CreateLeaseRequest:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId, leaseNumber, commencementDate, termMonths, paymentsPerYear, paymentAmount, paymentTiming, ibrRate, currency]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        leaseNumber: { type: string, minLength: 1, maxLength: 40 }
+        commencementDate: { type: string, format: date }
+        termMonths: { type: integer, minimum: 1, maximum: 600, description: "A whole number of payment periods" }
+        paymentsPerYear: { type: integer, enum: [1, 2, 4, 12] }
+        paymentAmount: { type: string }
+        paymentTiming: { type: string, enum: [arrears, advance] }
+        ibrRate: { type: string, description: "Annual rate in (0, 0.5]; AST-0515 outside" }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+    LeaseLine:
+      type: object
+      properties:
+        periodNo: { type: integer }
+        opening: { type: string }
+        interest: { type: string }
+        payment: { type: string }
+        closing: { type: string }
+        rouDepreciation: { type: string }
+    Lease:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        leaseNumber: { type: string }
+        commencementDate: { type: string, format: date }
+        termMonths: { type: integer }
+        paymentsPerYear: { type: integer }
+        paymentAmount: { type: string }
+        paymentTiming: { type: string, enum: [arrears, advance] }
+        ibrRate: { type: string }
+        currency: { type: string }
+        liability: { type: string }
+        rouAsset: { type: string }
+        status: { type: string, enum: [Draft, Active, Modified, Terminated] }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+        schedule:
+          type: array
+          description: Present on GET /v1/leases/{id} and on create; omitted from the list
+          items: { $ref: "#/components/schemas/LeaseLine" }
+    LeasePage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Lease" }
+        nextCursor: { type: string, format: uuid }

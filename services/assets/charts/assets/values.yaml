@@ -1,0 +1,44 @@
+image:
+  repository: ghcr.io/benjaminsrussell/passage/assets
+  tag: "0.1.0"
+  # Pin by digest in the deploy repo (cosign-signed images, digest-pinned Argo CD sync).
+  digest: ""
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+service:
+  port: 8080
+  adminPort: 9090
+
+env:
+  assetMaxBooks: "10"
+  migrateOnStart: "false"
+
+database:
+  # Secret holding key DATABASE_URL (passage_app role, no BYPASSRLS).
+  secretName: assets-database
+  secretKey: DATABASE_URL
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+serviceMonitor:
+  enabled: false
+  interval: 30s
+
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]

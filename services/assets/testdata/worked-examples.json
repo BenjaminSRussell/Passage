@@ -1,0 +1,38 @@
+{
+  "straightLineMidMonth15": {
+    "cost": "12000",
+    "salvage": "0",
+    "life": 60,
+    "method": "StraightLine",
+    "factor": "0",
+    "switch": false,
+    "inService": "2026-03-10",
+    "convention": "MidMonth15",
+    "annual": {
+      "2026": "1900.00",
+      "2027": "2400.00",
+      "2028": "2400.00",
+      "2029": "2400.00",
+      "2030": "2400.00",
+      "2031": "500.00"
+    }
+  },
+  "macrs5yrHalfYear": {
+    "cost": "25000",
+    "salvage": "0",
+    "life": 5,
+    "method": "DecliningBalance",
+    "factor": "2",
+    "switch": true,
+    "inService": "2026-01-15",
+    "convention": "HalfYear",
+    "annual": {
+      "2026": "5000.00",
+      "2027": "8000.00",
+      "2028": "4800.00",
+      "2029": "2880.00",
+      "2030": "2880.00",
+      "2031": "1440.00"
+    }
+  }
+}
