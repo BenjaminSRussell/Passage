@@ -6,7 +6,7 @@ describe("sales module", () => {
   it("uses its folder name as id and declares a page for each entity", () => {
     expect(sales.id).toBe("sales");
     const paths = sales.routes.map((r) => r.path);
-    for (const path of ["/sales/orders", "/sales/orders/new", "/sales/orders/:id", "/sales/credit-holds", "/sales/credit-profiles", "/sales/credit-profiles/new", "/sales/atp"]) {
+    for (const path of ["/sales/orders", "/sales/orders/new", "/sales/orders/:id", "/sales/credit-holds", "/sales/credit-profiles", "/sales/credit-profiles/new", "/sales/atp", "/sales/orders/:id/change", "/sales/schedule-releases", "/sales/backorder-runs"]) {
       expect(paths).toContain(path);
     }
     expect(sales.routes.every((r) => r.element !== null)).toBe(true);

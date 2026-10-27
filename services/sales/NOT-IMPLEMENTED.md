@@ -4,9 +4,18 @@ Slice 1 builds the order core: create (UI and channel intake), the order list
 (with the credit release queue as `hold=CREDIT`), confirm with the credit check,
 CREDIT holds and the release that confirms the order, the stateless cumulative
 ATP check, the ATP domain for delivery-date control, credit profiles (list,
-read, create, replace), and the web screens for all of these. Everything below
-from the ticket's deliverables (1–9) and PRD §5.27 acceptance criteria is not
-in this slice. Status is either a later slice of PSG-27 or a handoff to another
+read, create, replace), and the web screens for all of these.
+
+Slice 2 adds change management: `PATCH /orders/{id}` (If-Match, header and
+OPEN/RESERVED line edits, a version per change with a field-level diff in
+`sales_order_version`, re-promise of only the changed lines of a confirmed
+order, a credit re-check when the total rises), `:cancel` (lines cancelled,
+active holds cleared), the change history (`GET /orders/{id}/versions`), the
+`order.changed` and `order.cancelled` events; the stateless scheduling-release
+reconciliation check (BR-27.12); the stateless backorder run preview
+(WIN/GAIN/REDISTRIBUTE/FILL/LOSE, BR-27.11); and web screens for all of these.
+Everything below from the ticket's deliverables (1–9) and PRD §5.27 acceptance
+criteria is not in these slices. Status is either a later slice of PSG-27 or a handoff to another
 wave or team.
 
 ## Ticket deliverables
@@ -19,7 +28,7 @@ wave or team.
 | 2 | Cumulative ATP on stored supply and demand (`atp_bucket` projection, lag < 30 s, planning batch-end marker) | later slice of PSG-27 | Only the pure cumulative/promise computation and a stateless `POST /v1/sales/atp:check` exist. The projection needs supply/demand events from w16/w17/w21/w22. |
 | 2 | Delivery date control per line (NONE / SALES_LEAD_TIME / ATP / CTP; transport days; receiving calendar; past-date warning; fence-end TIME_FENCE) (FR-27.3, BR-27.2) | later slice of PSG-27 | Domain promise logic exists; per-line control, calendar and transport days are not wired into confirm. Calendar comes from w6/w48. |
 | 2 | Schedule lines persisted per line (`order_schedule_line`, partial delivery split, AC-27.8 backorder list) | later slice of PSG-27 | Promise returns schedule lines; they are not stored and there is no backorder list endpoint. |
-| 2 | Backorder handling and backorder list by promised date (FR-27.6) | later slice of PSG-27 | Depends on schedule lines above. |
+| 2 | Backorder handling and backorder list by promised date (FR-27.6) | later slice of PSG-27 | Depends on schedule lines above. The backorder run preview (deliverable 7) takes its lines in the request until this list exists. |
 | 2 | Alternative items (FR-27.13) | later slice of PSG-27 | Needs product configuration (w8) and an ATP fallback. |
 | 2 | CTP via scheduling (FR-27.5, planned order link) | handoff | Needs the w23 finite-capacity CTP API. Not built here. |
 | 3 | Credit limits, CR-1..CR-6, holds, release workflow | implemented in part | CR-1..CR-6 are implemented in the domain and run at confirm. Gaps are listed below. |
@@ -32,11 +41,11 @@ wave or team.
 | 3 | Credit review warnings daily job (06:00), review_date handling | later slice of PSG-27 | Scheduled job not built; CR-4 review-date rule runs at confirm. |
 | 4 | Holds: FRAUD / MANUAL / PRICE_REVIEW apply endpoint (`POST /orders/{id}/holds`) | later slice of PSG-27 | Only CREDIT holds are applied (by confirm). The apply endpoint and its duty (`sales.order.hold`) are not built. |
 | 4 | Temporal release workflow with approvers by duty and 2-business-day SLA timer (FR-27.8, AC E2E "SLA timer fires") | later slice of PSG-27; handoff for the Temporal namespace `sales` (deployment-cicd) | Release is a synchronous API call. No workflow, no SLA timer, no escalation. |
-| 4 | Release validity re-trigger on amount increase > 5% (BR-27.4) | implemented at confirm; re-trigger on change is later | A CREDIT release covers its own order only while it is valid (7 days) and the amount is within the released amount plus 5% (`domain.ReleaseCovers`). A change to the amount needs change management (next row). |
+| 4 | Release validity re-trigger on amount increase > 5% (BR-27.4) | implemented | A CREDIT release covers its own order only while it is valid (7 days) and the amount is within the released amount plus 5% (`domain.ReleaseCovers`). At confirm, and when a PATCH raises a CONFIRMED order's total, a failing credit check that no valid release covers places a CREDIT hold. |
 | 4 | Hold apply endpoint for MANUAL / PRICE_REVIEW / FRAUD, and MANUAL / PRICE_REVIEW blocking warehouse release | later slice of PSG-27; release blocking belongs with w28 | Release of an existing hold of these types is routed to `sales.order.hold`, but nothing places them yet. |
-| 4 | Change management: PATCH with If-Match, version per change, field-level diff, selective re-pricing/ATP/credit, `order.changed` and `order.cancelled` events (FR-27.9, AC-27.7) | later slice of PSG-27 | PATCH, `:cancel`, `:cancel-remainder`, change requests and approval (`change_approval_required`) are not built. The order `version` column exists and is enforced by `If-Match` on confirm and release. |
+| 4 | Change management: PATCH with If-Match, version per change, field-level diff, selective re-pricing/ATP/credit, `order.changed` and `order.cancelled` events (FR-27.9, AC-27.7) | implemented in part | Built: PATCH, `:cancel`, version history and both events. Re-pricing recomputes the changed lines' nets from the entered price (the w26 price resolver is not called; see "Order entry grid" under Web). Re-promise sets a changed line's confirmed date to its requested date, the delivery date control confirm uses until the ATP projection exists. Not built: `/lines/{l}:cancel-remainder` (needs `delivered_qty`/`remaining_qty` from w28), change requests and approval (`change_approval_required`, duty SalesOrderApprove), and adding or removing lines by PATCH. |
 | 4 | Line-level status machine beyond confirm (RESERVED / PICKED / DELIVERED / INVOICED) and order status derivation (BR-27.5) | later slice of PSG-27 | Confirm sets lines to OPEN with confirmed dates. Reservation and later states belong to w16/w28/w29. |
-| 4 | Order status CANCELLED path | later slice of PSG-27 | Depends on the cancel endpoint above. |
+| 4 | Order status CANCELLED path | implemented | `:cancel` from DRAFT, OPEN or CONFIRMED when no line is past RESERVED (BR-27.5); ACTIVE holds move to `CLEARED`. Reservations are not released because none exist yet (BR-27.7, w16). |
 | 5 | Customer portal order entry and status | handoff | Wave 30 (portal UI). The intake API it will use exists. |
 | 5 | Multi-channel intake: `(channel, externalRef)` dedup (BR-27.10) | implemented in part | Same-key replay (200) and different payload (409 SLS-0007) are implemented and tested. The 30-day dedup window (`intake_dedup_window_days`) is not enforced; dedup currently has no expiry. |
 | 5 | Intake rate limit per key (`INTAKE_RATE_LIMIT_PER_KEY=1000/min`, 429 with Retry-After) | later slice of PSG-27; handoff for shared rate-limit store (Valkey addendum, open question) | Needs the kernel rate-limit middleware; no per-pod limiter here. |
@@ -45,8 +54,8 @@ wave or team.
 | 6 | Product listing / exclusion (FR-27.15, BR-27.13, AC-27.11 `PRODUCT_NOT_LISTED`) | later slice of PSG-27 | Needs the `product_listing` entity; not started. |
 | 6 | Cross-selling and product proposals (FR-27.21) | later slice of PSG-27; handoff for w8 related products | Needs the proposal rule entity and w8 relations. |
 | 7 | Product allocation quotas (FR-27.16, BR-27.15, AC for SLS-0013) | later slice of PSG-27 | Not started; `allocation_enabled` default false. |
-| 7 | Backorder processing runs WIN / GAIN / REDISTRIBUTE / FILL / LOSE with preview (FR-27.17, BR-27.11, AC-27.12) | later slice of PSG-27 | Not started. The ordering and cumulative check it needs are in the domain. |
-| 8 | Scheduling-agreement forecast/JIT releases and cumulative reconciliation (FR-27.20, BR-27.12, AC-27.13, `CUM_QTY_MISMATCH`) | later slice of PSG-27; handoff for DELFOR/DELJIT mapping (w35) | Not started. |
+| 7 | Backorder processing runs WIN / GAIN / REDISTRIBUTE / FILL / LOSE with preview (FR-27.17, BR-27.11, AC-27.12) | implemented in part | Built: the stateless preview `POST /backorder-runs:preview` over lines and supply given in the request, with the SLS-0015 deconfirm warning. Not built: reading open lines and supply from the store (needs schedule lines and the ATP projection), the persisted `backorder_run`, commit serialized per (product, dims, site, warehouse), `atp.promised` for changed lines, the 05:00 daily job, and the priority class from the customer (w7). The lose threshold is a request field (default 3), not the legal-entity parameter. |
+| 8 | Scheduling-agreement forecast/JIT releases and cumulative reconciliation (FR-27.20, BR-27.12, AC-27.13, `CUM_QTY_MISMATCH`) | implemented in part; handoff for DELFOR/DELJIT mapping (w35) | Built: the stateless reconciliation `POST /schedule-releases:check` (mismatch beyond tolerance holds the release with no lines; otherwise open lines = cumulative required − shipped). Not built: the agreement aggregate, stored releases that replace the previous release's open lines atomically, cumulative shipped from w28 shipments, the cumulative reset rule (`cum_reset_rule`), and generated order schedule lines. Tolerance is a request field (default 0). |
 | 9 | Customer consignment fill-up / issue / pick-up / return (FR-27.18) | later slice of PSG-27; handoff for the w16 owner dimension (CUSTOMER_LOCATION) | Depends on w16 ownership dimension. |
 | 9 | Sales-order special stock segregation (FR-27.19) | later slice of PSG-27; handoff for w16 reservation segment and w21 production flag | Depends on w16 reservations and w21 production orders. |
 | 9 | One-time customer orders (FR-27.22, AC-27.14, `one_time_order_limit`) | later slice of PSG-27; handoff for the w7 ONE_TIME party role | Needs the party role and the document-level address on the order header. |
@@ -58,7 +67,8 @@ wave or team.
 |---|---|---|
 | FR-27.11 configured products and make-to-order production link (AC-27.4) | handoff (w8 configuration_id, w21 production order) | Needs the w21 production order API to create the linked order on confirm. |
 | FR-27.13 alternative items | later slice of PSG-27 | See deliverable 2. |
-| FR-27.9 change approval per customer (`change_approval_required`) | later slice of PSG-27 | See deliverable 4. |
+| FR-27.9 change approval per customer (`change_approval_required`) | later slice of PSG-27 | See deliverable 4. Changes apply immediately; there is no change request to approve. |
+| PRD §5.27.6 duty for `:cancel` | decision to confirm | The API table maps `:cancel` to SalesOrderConfirm, so `:cancel` requires `sales.order.confirm`. PATCH requires `sales.order.write` (SalesOrderMaintain). The release check uses `sales.agreement.maintain` (SalesAgreementMaintain) and the backorder preview `sales.backorder.run` (BackorderRun); neither duty has a role mapping yet (edge-identity). |
 | BR-27.6 advisory lock per (product, dims, site, warehouse) around ATP consumption | later slice of PSG-27 | ATP is not yet consumed by confirm; the lock belongs with the projection. |
 | BR-27.7 reservation on confirm (`reserve_on_confirm`) | handoff (w16) | Reservation API belongs to inventory. |
 | BR-27.8 quantity rules (`whole_units`, unit conversion via w6, half-even) | later slice of PSG-27 | Decimal quantities are accepted at 6 places; whole-unit product flags and unit conversion (w6) are not applied. |
@@ -71,7 +81,7 @@ wave or team.
 | `dev.passage.sales.order.confirmed.v1` | implemented | Written to the outbox in the confirm transaction, or in the release transaction when the CREDIT release confirms the order. |
 | `dev.passage.sales.orderhold.applied.v1` / `.released.v1` | implemented for CREDIT holds | Applied is emitted when confirm places a CREDIT hold; released is emitted on release. Other hold types wait for the apply endpoint. Type names follow the convention `dev.passage.<ctx>.<entity>.<verb>.v<n>` (`orderhold`), not the PRD's `passage.sales.order-hold.*`; see note below. |
 | `dev.passage.sales.creditcheck.evaluated.v1` | implemented | Emitted on every confirm credit check with each rule's result, value and threshold. |
-| `dev.passage.sales.order.changed.v1` / `cancelled.v1` | later slice of PSG-27 | Change management not built. |
+| `dev.passage.sales.order.changed.v1` / `cancelled.v1` | implemented | Written to the outbox in the PATCH and cancel transactions. `changed` carries the new version, reason, actor, the diff (`line_no` 0 for header fields) and the re-promised line numbers; `cancelled` carries the cancelled line ids. A PATCH that raises a confirmed order's total also writes `creditcheck.evaluated` and, on a hold, `orderhold.applied`. |
 | `dev.passage.sales.atp.promised.v1` | later slice of PSG-27 | Needs the projection and re-promise. |
 | `dev.passage.sales.quotation.converted.v1` | later slice of PSG-27 | Quotations not built. |
 
@@ -90,13 +100,13 @@ consumers depend on it.
 | AC-27.4 configured make-to-order with production linkage | handoff | See FR-27.11. |
 | AC-27.5 intake 500 orders/min for 10 min, p99 < 500 ms, 5,000 exactly once | not run | The intake path and idempotency are implemented. The load test (k6, `orders-5k-intake` fixture) and the p99 measurement need a deployed database and are not part of this slice. |
 | AC-27.6 quotation convert (lines 1 and 3) | later slice of PSG-27 | Quotations not built. |
-| AC-27.7 change line 10 from 5 to 8 (version, diff, only line 10 re-promised) | later slice of PSG-27 | Change management not built. |
+| AC-27.7 change line 10 from 5 to 8 (version, diff, only line 10 re-promised) | met | `TestPostgres_ChangeConfirmedOrder`: the version increments, the diff is stored and listed in the history, only the changed line's confirmed date moves, and `order.changed` names only that line. The re-promise uses delivery date control NONE until the projection exists. |
 | AC-27.8 partial delivery 40/45 → two schedule lines, backorder 5 on 03-04 | partly met | The domain promise returns the two schedule lines and the backorder (tested). Persistence and the backorder list are not built. |
 | AC-27.9 agreement exhausted → 422 `AGREEMENT_EXHAUSTED` | later slice of PSG-27 | Agreements not built. |
 | AC-27.10 supplementary items | later slice of PSG-27 | See deliverable 6. |
 | AC-27.11 listing denial `PRODUCT_NOT_LISTED` | later slice of PSG-27 | See deliverable 6. |
-| AC-27.12 backorder run REDISTRIBUTE | later slice of PSG-27 | See deliverable 7. |
-| AC-27.13 cumulative reconciliation `CUM_QTY_MISMATCH` | later slice of PSG-27 | See deliverable 8. |
+| AC-27.12 backorder run REDISTRIBUTE | partly met | The preview serves priority class 1 first and never allocates more than supply (domain scenario and property tests, API test). Commit and `atp.promised` for changed lines are not built (deliverable 7). |
+| AC-27.13 cumulative reconciliation `CUM_QTY_MISMATCH` | met for the check | Both fixture outcomes are tested on the endpoint: the 1,150 vs 1,200 release is held with no lines, and the 1,200 release with 1,500 required opens 300 units on 2027-04-15. Stored releases are not built (deliverable 8). |
 | AC-27.14 one-time order and invoice address | later slice of PSG-27 / handoff (w29 invoice) | See deliverable 9. |
 | PRD §5.27.9 "credit-40" fixture (40/40 outcomes incl. tolerance edges) | met | `testdata/credit-40.json`, checked by `TestEvaluateCredit_Credit40Fixtures`. |
 | PRD §5.27.9 Playwright E2E + axe a11y; Pact contract tests with pricing/inventory/production | later slice of PSG-27 | The web pages have vitest tests that also run the in-repo WCAG checks (`checkAxeAA`); there is no Playwright in apps/web. Pact contracts need the w26/w16/w21 providers. |
@@ -128,5 +138,6 @@ consumers depend on it.
 | Sales workspace tiles (on hold, backorders, quotes expiring) | later slice of PSG-27 | Needs count endpoints, backorders and quotations. |
 | Order entry grid with inline price and ATP (300 ms) | later slice of PSG-27 | Needs the pricing API (w26) and the projection. The new order form takes ids and prices as entered; customer, product and site pickers need the w7/w8/w6 lookups. |
 | Credit exposure by customer report (PRD §5.27.14) | later slice of PSG-27 | The credit profiles list shows each profile's entered open AR; the computed exposure needs the projection. |
-| Backorders / change requests screens | later slice of PSG-27 | See deliverables 2 and 4. |
+| Order change (header date and line edits with the diff shown before saving), cancel with reason, change history on the order detail, scheduling-release check, backorder run preview | implemented | Routes `/sales/orders/:id/change`, `/sales/schedule-releases` and `/sales/backorder-runs` in `module.ts`; vitest tests in `changes.test.tsx`. |
+| Backorder list and change requests screens | later slice of PSG-27 | See deliverables 2 and 4. |
 | Customer portal order entry and status | handoff (wave 30) | Portal UI is wave 30. |

@@ -61,7 +61,7 @@ export interface Hold {
   id: string;
   holdType: HoldType;
   reasonCode: string;
-  status: "ACTIVE" | "RELEASED";
+  status: "ACTIVE" | "RELEASED" | "CLEARED";
   orderAmount: Decimal;
   appliedBy: string;
   releasedBy?: string;
@@ -191,6 +191,101 @@ export interface AtpCheckResult {
   };
   periods: AtpPeriod[];
   cumulative: Decimal[];
+}
+
+/** Statuses from which an order can still be changed or cancelled (BR-27.5). */
+export const CHANGEABLE_STATUSES: readonly OrderStatus[] = ["DRAFT", "OPEN", "CONFIRMED"];
+
+/** Line statuses that can still change or be cancelled (BR-27.5). */
+export const CHANGEABLE_LINE_STATUSES = ["OPEN", "RESERVED"];
+
+export interface LineChangeInput {
+  lineNo: number;
+  quantity?: Decimal;
+  unitPrice?: Decimal;
+  discPct?: Decimal;
+  requestedShipDate?: string;
+}
+
+/** A PATCH body: send lines, requestedShipDate or both; absent fields keep their value. */
+export interface ChangeOrderInput {
+  reason?: string;
+  requestedShipDate?: string;
+  lines?: LineChangeInput[];
+}
+
+export interface FieldChange {
+  /** 0 for a header field. */
+  lineNo: number;
+  field: string;
+  old: string;
+  new: string;
+}
+
+export interface OrderVersion {
+  version: number;
+  actor: string;
+  reason: string;
+  diff: FieldChange[];
+  changedAt: string;
+}
+
+export interface ReleaseBucket {
+  date: string;
+  cumRequired: Decimal;
+}
+
+export interface ReleaseCheckInput {
+  cumReceived: Decimal;
+  cumShipped: Decimal;
+  tolerance?: Decimal;
+  buckets: ReleaseBucket[];
+}
+
+export interface ReleaseCheckResult {
+  held: boolean;
+  code?: string;
+  serviceCode?: string;
+  difference: Decimal;
+  openQuantity: Decimal;
+  lines: { date: string; quantity: Decimal }[];
+}
+
+export const BACKORDER_STRATEGIES = ["REDISTRIBUTE", "WIN", "GAIN", "FILL", "LOSE"] as const;
+export type BackorderStrategy = (typeof BACKORDER_STRATEGIES)[number];
+
+export interface BackorderLineInput {
+  id: string;
+  priorityClass: number;
+  requestedDate: string;
+  orderValue: Decimal;
+  demand: Decimal;
+  confirmed: Decimal;
+}
+
+export interface BackorderPreviewInput {
+  strategy: BackorderStrategy;
+  available: Decimal;
+  loseThreshold?: number;
+  lines: BackorderLineInput[];
+}
+
+export interface PlannedLine {
+  id: string;
+  before: Decimal;
+  after: Decimal;
+  changed: boolean;
+  deconfirmed: boolean;
+}
+
+export interface BackorderPreviewResult {
+  preview: boolean;
+  strategy: BackorderStrategy;
+  allocated: Decimal;
+  deconfirmedCount: number;
+  warning?: string;
+  warningCode?: string;
+  lines: PlannedLine[];
 }
 
 /** A value read together with the ETag that If-Match must echo back. */
@@ -334,4 +429,30 @@ export function putCreditProfile(legalEntityId: string, customerId: string, inpu
 /** Stateless ATP promise check over entered buckets (BR-27.1). */
 export function atpCheck(input: AtpCheckInput): Promise<AtpCheckResult> {
   return json<AtpCheckResult>("/atp:check", { method: "POST", body: JSON.stringify(input) });
+}
+
+/** Changes an order at the given ETag (FR-27.9); answers with the order at its new version. */
+export function changeOrder(id: string, etag: string, input: ChangeOrderInput): Promise<Versioned<Order>> {
+  return versioned<Order>(`/orders/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(input), headers: { "If-Match": etag } });
+}
+
+/** Cancels an order that has not shipped (BR-27.5). */
+export function cancelOrder(id: string, etag: string, reason: string): Promise<Versioned<Order>> {
+  return versioned<Order>(`/orders/${encodeURIComponent(id)}:cancel`, { method: "POST", body: JSON.stringify({ reason }), headers: { "If-Match": etag } });
+}
+
+/** The order's change history, newest first. */
+export async function listOrderVersions(id: string, signal?: AbortSignal): Promise<OrderVersion[]> {
+  const body = await json<{ items?: OrderVersion[] }>(`/orders/${encodeURIComponent(id)}/versions`, {}, signal);
+  return body.items ?? [];
+}
+
+/** Reconciles a scheduling-agreement release without storing it (BR-27.12). */
+export function checkScheduleRelease(input: ReleaseCheckInput): Promise<ReleaseCheckResult> {
+  return json<ReleaseCheckResult>("/schedule-releases:check", { method: "POST", body: JSON.stringify(input) });
+}
+
+/** Previews a backorder run; nothing is committed (BR-27.11). */
+export function previewBackorderRun(input: BackorderPreviewInput): Promise<BackorderPreviewResult> {
+  return json<BackorderPreviewResult>("/backorder-runs:preview", { method: "POST", body: JSON.stringify(input) });
 }

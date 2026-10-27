@@ -227,7 +227,7 @@ describe("Sales order detail", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Confirm order" }));
     expect(await screen.findByText("Someone else changed this order")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Reload order" }));
-    await waitFor(() => expect(calls.filter((c) => c.method === "GET")).toHaveLength(2));
+    await waitFor(() => expect(calls.filter((c) => c.method === "GET" && c.url.pathname === `/api/v1/sales/orders/${ORDER_ID}`)).toHaveLength(2));
   });
 
   it("shows the error when the order cannot be loaded", async () => {

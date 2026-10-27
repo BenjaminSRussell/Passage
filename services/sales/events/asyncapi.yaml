@@ -32,7 +32,29 @@ channels:
     messages:
       creditCheckEvaluated:
         $ref: "#/components/messages/CreditCheckEvaluated"
+  orderChanged:
+    address: passage.sales.order
+    messages:
+      orderChanged:
+        $ref: "#/components/messages/OrderChanged"
+  orderCancelled:
+    address: passage.sales.order
+    messages:
+      orderCancelled:
+        $ref: "#/components/messages/OrderCancelled"
 operations:
+  publishOrderChanged:
+    action: send
+    channel: {$ref: "#/channels/orderChanged"}
+    summary: An order changed after creation; carries the version and the field-level diff. Consumers: fulfillment, planning (re-promise), portal.
+    messages:
+      - {$ref: "#/channels/orderChanged/messages/orderChanged"}
+  publishOrderCancelled:
+    action: send
+    channel: {$ref: "#/channels/orderCancelled"}
+    summary: An order was cancelled; its open lines are CANCELLED and its active holds CLEARED. Consumers: fulfillment, planning, portal.
+    messages:
+      - {$ref: "#/channels/orderCancelled/messages/orderCancelled"}
   publishOrderConfirmed:
     action: send
     channel: {$ref: "#/channels/orderConfirmed"}
@@ -91,6 +113,20 @@ components:
         $ref: "#/components/schemas/CloudEventHeaders"
       payload:
         $ref: "#/components/schemas/CreditCheckData"
+    OrderChanged:
+      name: dev.passage.sales.order.changed.v1
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/OrderChangedData"
+    OrderCancelled:
+      name: dev.passage.sales.order.cancelled.v1
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/OrderCancelledData"
   schemas:
     CloudEventHeaders:
       type: object
@@ -131,6 +167,41 @@ components:
               confirmed_ship_date: {type: string, format: date}
         net_total: {type: string}
         version: {type: integer}
+    OrderChangedData:
+      type: object
+      required: [order_id, version, reason, actor, diff, repromised_lines]
+      properties:
+        order_id: {type: string, format: uuid}
+        version: {type: integer, description: the version this change produced}
+        reason: {type: string, maxLength: 500}
+        actor: {type: string}
+        diff:
+          type: array
+          description: field-level changes; line_no 0 is a header field
+          items:
+            type: object
+            required: [line_no, field, old, new]
+            properties:
+              line_no: {type: integer}
+              field: {type: string}
+              old: {type: string}
+              new: {type: string}
+        repromised_lines:
+          type: array
+          description: line numbers whose confirmed ship date was re-promised (quantity or date changed on a confirmed order)
+          items: {type: integer}
+    OrderCancelledData:
+      type: object
+      required: [order_id, version, line_ids, reason, actor]
+      properties:
+        order_id: {type: string, format: uuid}
+        version: {type: integer}
+        line_ids:
+          type: array
+          description: the lines this cancellation moved to CANCELLED
+          items: {type: string, format: uuid}
+        reason: {type: string, maxLength: 500}
+        actor: {type: string}
     OrderHoldData:
       type: object
       required: [order_id, hold_id, hold_type, reason_code, actor, version]

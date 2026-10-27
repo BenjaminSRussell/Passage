@@ -331,15 +331,20 @@ func TestPostgres_RowLevelSecurity(t *testing.T) {
 	s := New(pool)
 	leA, leB := ids.New(), ids.New()
 	other := tenant.With(bg, tenant.Principal{TenantID: testkit.TenantID(2), UserID: "x", Duties: map[string]struct{}{}})
-	mk := func(c context.Context, le, hash string) {
+	mk := func(c context.Context, le, hash string) Order {
 		line := Line{LineNo: 1, ProductID: ids.New(), Quantity: d(1), Unit: "EA", SiteID: ids.New(), WarehouseID: ids.New(), UnitPrice: d(1), DiscPct: d(0), LineNet: d(1), RequestedShipDate: "2027-03-04"}
 		c2 := ids.New()
-		if _, _, err := s.CreateOrder(c, NewOrder{LegalEntityID: le, CustomerID: c2, InvoiceAccountID: c2, OrderType: "ORDER", Currency: "USD", RequestedShipDate: "2027-03-04", Channel: "UI", RequestHash: hash, Lines: []Line{line}}); err != nil {
+		o, _, err := s.CreateOrder(c, NewOrder{LegalEntityID: le, CustomerID: c2, InvoiceAccountID: c2, OrderType: "ORDER", Currency: "USD", RequestedShipDate: "2027-03-04", Channel: "UI", RequestHash: hash, Lines: []Line{line}})
+		if err != nil {
 			t.Fatal(err)
 		}
+		return o
 	}
-	mk(ctx, leA, "a")
+	inA := mk(ctx, leA, "a")
 	mk(ctx, leB, "b")
+	if _, err := s.ChangeOrder(ctx, inA.ID, inA.Version, ChangeRequest{RequestedShipDate: func() *string { v := "2027-03-05"; return &v }()}, "sales-rep", time.Now()); err != nil {
+		t.Fatal(err)
+	}
 	mk(other, leA, "c")
 
 	if _, err := pool.Exec(bg, `do $$ begin create role sales_rls_probe nologin; exception when duplicate_object then null; end $$`); err != nil {
@@ -377,6 +382,12 @@ func TestPostgres_RowLevelSecurity(t *testing.T) {
 	}
 	if n := visible(testkit.TenantID(2), "*", "sales_order_line"); n != 1 {
 		t.Fatalf("tenant 2: %d lines", n)
+	}
+	if n := visible(testkit.TenantID(1), leA, "sales_order_version"); n != 1 {
+		t.Fatalf("tenant 1 scoped to the changed order's entity: %d versions", n)
+	}
+	if n := visible(testkit.TenantID(1), leB, "sales_order_version"); n != 0 {
+		t.Fatalf("tenant 1 scoped to another entity: %d versions", n)
 	}
 }
 

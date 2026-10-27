@@ -175,6 +175,9 @@ type Store interface {
 	ListOrders(ctx context.Context, f OrderFilter) (OrderPage, error)
 	ConfirmOrder(ctx context.Context, id string, version int, actor string, now time.Time) (ConfirmResult, error)
 	ReleaseHold(ctx context.Context, orderID, holdID string, version int, actor string, now time.Time) (ConfirmResult, error)
+	ChangeOrder(ctx context.Context, id string, version int, req ChangeRequest, actor string, now time.Time) (Order, error)
+	CancelOrder(ctx context.Context, id string, version int, reason, actor string, now time.Time) (Order, error)
+	ListOrderVersions(ctx context.Context, id string) ([]OrderVersion, error)
 	GetCreditProfile(ctx context.Context, legalEntityID, customerID string) (CreditProfile, error)
 	ListCreditProfiles(ctx context.Context, legalEntityID string, limit int) ([]CreditProfile, error)
 	PutCreditProfile(ctx context.Context, in CreditProfile, version int) (CreditProfile, error)
@@ -421,39 +424,15 @@ func (s *Postgres) ConfirmOrder(ctx context.Context, id string, version int, act
 				return problem(http.StatusUnprocessableEntity, code, "an active "+h.HoldType+" hold blocks confirmation")
 			}
 		}
-		profile, found, err := loadProfile(ctx, tx, p.TenantID, o.LegalEntityID, o.CustomerID)
+		eval, err := evaluateCreditTx(ctx, tx, p.TenantID, o, now)
 		if err != nil {
-			return err
-		}
-		input := domain.CreditInput{Order: o.NetTotal, OrderCurrency: o.Currency, AsOf: now}
-		if found {
-			input.Profile = &profile.CreditProfile
-			input.Exposure = profile.Exposure
-		}
-		eval := domain.EvaluateCredit(input)
-		if err := enqueue(ctx, tx, "order", o.ID, salesevents.CreditCheckEvaluated, p.TenantID, salesevents.CreditCheckData{
-			CustomerID: o.CustomerID, OrderID: o.ID, Rules: eval.Rules, Outcome: eval.Outcome}); err != nil {
-			return err
-		}
-		evalJSON, err := json.Marshal(eval)
-		if err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `update sales_order set credit_check_result = $3::jsonb where tenant_id = $1 and id = $2`, p.TenantID, o.ID, string(evalJSON)); err != nil {
 			return err
 		}
 		if eval.Outcome == domain.RuleFail && !coveredByRelease(o, now) {
-			holdID := ids.New()
-			if _, err := tx.Exec(ctx, `insert into order_hold (tenant_id, id, legal_entity_id, order_id, hold_type, reason_code, order_amount, applied_by)
-				values ($1, $2, $3, $4, 'CREDIT', $5, $6::numeric, $7)`,
-				p.TenantID, holdID, o.LegalEntityID, o.ID, firstFailedRule(eval), o.NetTotal.String(), actor); err != nil {
+			if err := applyCreditHoldTx(ctx, tx, p.TenantID, o, eval, actor, o.Version+1); err != nil {
 				return err
 			}
 			if err := setOrderState(ctx, tx, p.TenantID, o.ID, o.Status); err != nil {
-				return err
-			}
-			if err := enqueue(ctx, tx, "order", o.ID, salesevents.OrderHoldApplied, p.TenantID, salesevents.OrderHoldData{
-				OrderID: o.ID, HoldID: holdID, HoldType: domain.HoldCredit, ReasonCode: firstFailedRule(eval), Actor: actor, Version: o.Version + 1}); err != nil {
 				return err
 			}
 			res = ConfirmResult{Evaluation: eval}
@@ -468,6 +447,46 @@ func (s *Postgres) ConfirmOrder(ctx context.Context, id string, version int, act
 		return nil
 	})
 	return res, err
+}
+
+// evaluateCreditTx runs the BR-27.3 rules for o at its current net total,
+// stores the evaluation on the order and writes creditcheck.evaluated in the
+// caller's transaction.
+func evaluateCreditTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, now time.Time) (domain.CreditEvaluation, error) {
+	profile, found, err := loadProfile(ctx, tx, tenantID, o.LegalEntityID, o.CustomerID)
+	if err != nil {
+		return domain.CreditEvaluation{}, err
+	}
+	input := domain.CreditInput{Order: o.NetTotal, OrderCurrency: o.Currency, AsOf: now}
+	if found {
+		input.Profile = &profile.CreditProfile
+		input.Exposure = profile.Exposure
+	}
+	eval := domain.EvaluateCredit(input)
+	if err := enqueue(ctx, tx, "order", o.ID, salesevents.CreditCheckEvaluated, tenantID, salesevents.CreditCheckData{
+		CustomerID: o.CustomerID, OrderID: o.ID, Rules: eval.Rules, Outcome: eval.Outcome}); err != nil {
+		return domain.CreditEvaluation{}, err
+	}
+	evalJSON, err := json.Marshal(eval)
+	if err != nil {
+		return domain.CreditEvaluation{}, err
+	}
+	_, err = tx.Exec(ctx, `update sales_order set credit_check_result = $3::jsonb where tenant_id = $1 and id = $2`, tenantID, o.ID, string(evalJSON))
+	return eval, err
+}
+
+// applyCreditHoldTx places a CREDIT hold for o's current net total and writes
+// orderhold.applied carrying version, the order version the caller moves to.
+func applyCreditHoldTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, eval domain.CreditEvaluation, actor string, version int) error {
+	holdID := ids.New()
+	reason := firstFailedRule(eval)
+	if _, err := tx.Exec(ctx, `insert into order_hold (tenant_id, id, legal_entity_id, order_id, hold_type, reason_code, order_amount, applied_by)
+		values ($1, $2, $3, $4, 'CREDIT', $5, $6::numeric, $7)`,
+		tenantID, holdID, o.LegalEntityID, o.ID, reason, o.NetTotal.String(), actor); err != nil {
+		return err
+	}
+	return enqueue(ctx, tx, "order", o.ID, salesevents.OrderHoldApplied, tenantID, salesevents.OrderHoldData{
+		OrderID: o.ID, HoldID: holdID, HoldType: domain.HoldCredit, ReasonCode: reason, Actor: actor, Version: version})
 }
 
 // confirmOrderTx confirms every line at its requested ship date (delivery date

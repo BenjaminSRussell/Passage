@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Alert, Badge, Button, buttonClassName, Card, DataTable, EmptyState, PageHeader, Skeleton, StatusPill, type DataTableColumn } from "../../shell/ui";
 import {
+  CHANGEABLE_STATUSES,
   confirmOrder,
   describeProblem,
   getOrder,
@@ -14,6 +15,7 @@ import {
   type Versioned,
 } from "./api/client";
 import { dash, formatDateTime, money, sentence } from "./format";
+import { OrderHistory } from "./OrderHistory";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -163,6 +165,11 @@ export function OrderDetailPage() {
                 Confirm order
               </Button>
             ) : null}
+            {CHANGEABLE_STATUSES.includes(order.status) ? (
+              <Link className={buttonClassName("secondary")} to={`/sales/orders/${order.id}/change`}>
+                Change or cancel
+              </Link>
+            ) : null}
             <Link className={buttonClassName("ghost")} to="/sales/orders">
               Back to orders
             </Link>
@@ -226,6 +233,7 @@ export function OrderDetailPage() {
           <EmptyState compact headingLevel={3} title="Not checked yet" description="The credit check runs when the order is confirmed." />
         )}
       </Card>
+      <OrderHistory orderId={order.id} version={order.version} />
     </div>
   );
 }

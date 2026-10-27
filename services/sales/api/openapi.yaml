@@ -101,6 +101,31 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/Order"}
         "404": {$ref: "#/components/responses/Problem"}
+    patch:
+      summary: Change an order's header or lines; creates a new version with a field-level diff and re-prices changed lines (FR-27.9)
+      operationId: changeOrder
+      x-passage-duty: sales.order.write
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ChangeOrderRequest"}
+      responses:
+        "200":
+          description: the order at its new version; a no-op returns the current version unchanged
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Order"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
   /v1/sales/orders/{id}:confirm:
     post:
       summary: Confirm an order (runs the credit check; a failing check places a CREDIT hold)
@@ -236,6 +261,146 @@ paths:
         "403": {$ref: "#/components/responses/Problem"}
         "412": {$ref: "#/components/responses/Problem"}
         "428": {$ref: "#/components/responses/Problem"}
+  /v1/sales/orders/{id}:cancel:
+    post:
+      summary: >-
+        Cancel an order that has not shipped (BR-27.5). Every OPEN or RESERVED line is cancelled,
+        ACTIVE holds are CLEARED, a new version is written and order.cancelled is emitted. An order
+        with a picked, delivered or invoiced line is refused (SLS-0025).
+      operationId: cancelOrder
+      x-passage-duty: sales.order.confirm
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: {type: string, maxLength: 500}
+      responses:
+        "200":
+          description: the cancelled order at its new version
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Order"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+  /v1/sales/orders/{id}/versions:
+    get:
+      summary: An order's change history, newest first, with the field-level diff of each version (FR-27.9)
+      operationId: listOrderVersions
+      x-passage-duty: sales.order.read
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: up to 200 versions, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/OrderVersion"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/sales/schedule-releases:check:
+    post:
+      summary: Stateless reconciliation of a scheduling-agreement release; a cumulative mismatch holds the release (BR-27.12, FR-27.20)
+      operationId: checkScheduleRelease
+      x-passage-duty: sales.agreement.maintain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cumReceived, cumShipped, buckets]
+              properties:
+                cumReceived: {$ref: "#/components/schemas/Money"}
+                cumShipped: {$ref: "#/components/schemas/Money"}
+                tolerance: {$ref: "#/components/schemas/Money"}
+                buckets:
+                  type: array
+                  minItems: 1
+                  maxItems: 1000
+                  items:
+                    type: object
+                    required: [date, cumRequired]
+                    properties:
+                      date: {type: string, format: date}
+                      cumRequired: {$ref: "#/components/schemas/Money"}
+      responses:
+        "200":
+          description: reconciliation; held=true means CUM_QTY_MISMATCH (SLS-0014) and no schedule lines
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  held: {type: boolean}
+                  code: {type: string, example: CUM_QTY_MISMATCH}
+                  serviceCode: {type: string, example: SLS-0014}
+                  difference: {$ref: "#/components/schemas/Money"}
+                  openQuantity: {$ref: "#/components/schemas/Money"}
+                  lines:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        date: {type: string, format: date}
+                        quantity: {$ref: "#/components/schemas/Money"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/sales/backorder-runs:preview:
+    post:
+      summary: Preview a backorder processing run for one product and site; nothing is committed (BR-27.11, FR-27.17)
+      operationId: previewBackorderRun
+      x-passage-duty: sales.backorder.run
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/BackorderPreviewRequest"}
+      responses:
+        "200":
+          description: allocation per line in processing order; warningCode SLS-0015 when lines would be deconfirmed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  preview: {type: boolean, enum: [true]}
+                  strategy: {type: string}
+                  allocated: {$ref: "#/components/schemas/Money"}
+                  deconfirmedCount: {type: integer}
+                  warning: {type: string}
+                  warningCode: {type: string, example: SLS-0015}
+                  lines:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: {type: string}
+                        before: {$ref: "#/components/schemas/Money"}
+                        after: {$ref: "#/components/schemas/Money"}
+                        changed: {type: boolean}
+                        deconfirmed: {type: boolean}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
 components:
   parameters:
     IdempotencyKey:
@@ -365,7 +530,7 @@ components:
         id: {type: string, format: uuid}
         holdType: {type: string, enum: [CREDIT, FRAUD, MANUAL, PRICE_REVIEW]}
         reasonCode: {type: string}
-        status: {type: string, enum: [ACTIVE, RELEASED]}
+        status: {type: string, enum: [ACTIVE, RELEASED, CLEARED]}
         orderAmount: {$ref: "#/components/schemas/Money"}
         appliedBy: {type: string}
         releasedBy: {type: string}
@@ -506,3 +671,61 @@ components:
           items: {type: string, enum: [CREDIT, FRAUD, MANUAL, PRICE_REVIEW]}
         version: {type: integer}
         createdAt: {type: string, format: date-time}
+    OrderVersion:
+      type: object
+      required: [version, actor, reason, diff, changedAt]
+      properties:
+        version: {type: integer}
+        actor: {type: string}
+        reason: {type: string}
+        changedAt: {type: string, format: date-time}
+        diff:
+          type: array
+          description: field-level changes; lineNo 0 is a header field
+          items:
+            type: object
+            required: [lineNo, field, old, new]
+            properties:
+              lineNo: {type: integer}
+              field: {type: string, example: quantity}
+              old: {type: string}
+              new: {type: string}
+    ChangeOrderRequest:
+      type: object
+      description: At least one of lines or requestedShipDate. Absent line fields keep their value.
+      properties:
+        reason: {type: string, maxLength: 500}
+        requestedShipDate: {type: string, format: date}
+        lines:
+          type: array
+          maxItems: 2000
+          items:
+            type: object
+            required: [lineNo]
+            properties:
+              lineNo: {type: integer, minimum: 1}
+              quantity: {$ref: "#/components/schemas/Money"}
+              unitPrice: {$ref: "#/components/schemas/Money"}
+              discPct: {$ref: "#/components/schemas/Money"}
+              requestedShipDate: {type: string, format: date}
+    BackorderPreviewRequest:
+      type: object
+      required: [strategy, available, lines]
+      properties:
+        strategy: {type: string, enum: [WIN, GAIN, REDISTRIBUTE, FILL, LOSE]}
+        available: {$ref: "#/components/schemas/Money"}
+        loseThreshold: {type: integer, minimum: 1, maximum: 9, default: 3}
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 10000
+          items:
+            type: object
+            required: [id, priorityClass, requestedDate, orderValue, demand, confirmed]
+            properties:
+              id: {type: string}
+              priorityClass: {type: integer, minimum: 1, maximum: 9}
+              requestedDate: {type: string, format: date}
+              orderValue: {$ref: "#/components/schemas/Money"}
+              demand: {$ref: "#/components/schemas/Money"}
+              confirmed: {$ref: "#/components/schemas/Money"}
