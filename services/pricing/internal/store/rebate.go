@@ -36,6 +36,8 @@ type Accrual struct {
 	Accrued       decimal.Decimal
 	Currency      string
 	Status        string
+	// Retroactive marks rows written by a retroactive recompute (FR-26.23).
+	Retroactive bool
 }
 
 // AccrualInput is one posted invoice line presented for accrual.
@@ -56,12 +58,12 @@ type AccrualFilter struct {
 }
 
 const accrualColumns = `select id::text, agreement_id::text, period_key, invoice_line_id, invoice_date,
-	basis_value::text, basis_qty::text, accrued_amount::text, currency::text, status from rebate_accrual`
+	basis_value::text, basis_qty::text, accrued_amount::text, currency::text, status, retroactive from rebate_accrual`
 
 func scanAccrual(row pgx.Row) (Accrual, error) {
 	var a Accrual
 	var bv, bq, acc string
-	err := row.Scan(&a.ID, &a.AgreementID, &a.PeriodKey, &a.InvoiceLineID, &a.InvoiceDate, &bv, &bq, &acc, &a.Currency, &a.Status)
+	err := row.Scan(&a.ID, &a.AgreementID, &a.PeriodKey, &a.InvoiceLineID, &a.InvoiceDate, &bv, &bq, &acc, &a.Currency, &a.Status, &a.Retroactive)
 	if err != nil {
 		return Accrual{}, err
 	}
@@ -208,7 +210,7 @@ func (s *Postgres) AccrueInvoiceLine(ctx context.Context, in AccrualInput) (Accr
 			invoice_line_id, invoice_date, basis_value, basis_qty, accrued_amount, currency)
 			values ($1, $2, $3, $4, $5, $6, $7, $8::numeric, $9::numeric, $10::numeric, $11)
 			returning id::text, agreement_id::text, period_key, invoice_line_id, invoice_date,
-			basis_value::text, basis_qty::text, accrued_amount::text, currency::text, status`,
+			basis_value::text, basis_qty::text, accrued_amount::text, currency::text, status, retroactive`,
 			p.TenantID, ids.New(), a.LegalEntityID, a.ID, key, in.InvoiceLineID, in.InvoiceDate, in.Value.String(), in.Quantity.String(),
 			inc.String(), a.Currency))
 		if err != nil {
@@ -237,7 +239,7 @@ func (s *Postgres) ListAccruals(ctx context.Context, f AccrualFilter) ([]Accrual
 	out := []Accrual{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, accrualColumns+` where ($1::text = '' or agreement_id::text = $1) and ($2::text = '' or period_key = $2)
-			order by invoice_date, id limit $3`, f.AgreementID, f.PeriodKey, f.Limit)
+			order by invoice_date, retroactive, created_at, id limit $3`, f.AgreementID, f.PeriodKey, f.Limit)
 		if err != nil {
 			return err
 		}

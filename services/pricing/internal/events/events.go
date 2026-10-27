@@ -9,6 +9,7 @@ const (
 	ConditionRecordWithdrawn = "dev.passage.pricing.conditionrecord.withdrawn.v1"
 	JournalPosted            = "dev.passage.pricing.journal.posted.v1"
 	RebateAccrualPosted      = "dev.passage.pricing.rebateaccrual.posted.v1"
+	CommissionCalculated     = "dev.passage.pricing.commission.calculated.v1"
 )
 
 // JournalPostedData is the payload of journal.posted (post and reverse, FR-26.9).
@@ -34,6 +35,30 @@ type RebateAccrualPostedData struct {
 	Currency      string `json:"currency"`
 	DebitAccount  string `json:"debit_account"`
 	CreditAccount string `json:"credit_account"`
+	// Retroactive is true for the per-period delta of a retroactive recompute (BR-26.7, FR-26.23).
+	Retroactive bool `json:"retroactive"`
+}
+
+// CommissionCalculatedData is the payload of commission.calculated (FR-26.12, FR-26.18):
+// one rep's commission on one invoice line. The ledger (w11) posts Dr DebitAccount /
+// Cr CreditAccount for Amount (6200 / 2170); Amount is negative on a credit note, which
+// names the line it reverses. It carries the rep id only: rep names never appear in
+// events (PRD §5.26.20).
+type CommissionCalculatedData struct {
+	TransactionID         string `json:"transaction_id"`
+	LegalEntityID         string `json:"legal_entity_id"`
+	InvoiceLineID         string `json:"invoice_line_id"`
+	ReversesInvoiceLineID string `json:"reverses_invoice_line_id,omitempty"`
+	SalesGroupID          string `json:"sales_group_id"`
+	SalesRepID            string `json:"sales_rep_id"`
+	Basis                 string `json:"basis"`
+	BasisAmount           string `json:"basis_amount"`
+	Rate                  string `json:"rate"`
+	Amount                string `json:"amount"`
+	Currency              string `json:"currency"`
+	PeriodID              string `json:"period_id"`
+	DebitAccount          string `json:"debit_account"`
+	CreditAccount         string `json:"credit_account"`
 }
 
 // ConditionRecordData is the payload of conditionrecord.activated. Keys are

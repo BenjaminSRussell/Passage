@@ -28,6 +28,12 @@ channels:
     messages:
       rebateAccrualPosted:
         $ref: "#/components/messages/RebateAccrualPosted"
+  commission:
+    address: passage.pricing.commission
+    description: Commission calculated per rep on a posted invoice line or its credit note (FR-26.12, FR-26.18).
+    messages:
+      commissionCalculated:
+        $ref: "#/components/messages/CommissionCalculated"
 operations:
   publishJournalPosted:
     action: send
@@ -41,6 +47,12 @@ operations:
     summary: A rebate accrual posted; the ledger books Dr 4150 / Cr 2150.
     messages:
       - {$ref: "#/channels/rebateAccrual/messages/rebateAccrualPosted"}
+  publishCommissionCalculated:
+    action: send
+    channel: {$ref: "#/channels/commission"}
+    summary: One rep's commission on an invoice line; the ledger books Dr 6200 / Cr 2170 and Phase 8 settles it.
+    messages:
+      - {$ref: "#/channels/commission/messages/commissionCalculated"}
   publishConditionRecordActivated:
     action: send
     channel: {$ref: "#/channels/conditionRecordActivated"}
@@ -108,7 +120,9 @@ components:
           One invoice line's accrual. The ledger (w11) posts Dr debit_account / Cr credit_account
           (4150 / 2150 by default) for amount. amount is negative when a credit note or a tier
           recompute lowers the period. journal_posting_id (PRD 5.26.5) is assigned by the ledger.
-        required: [accrual_id, legal_entity_id, agreement_id, period_id, invoice_line_id, amount, currency, debit_account, credit_account]
+          A retroactive recompute (FR-26.23) posts one event per changed period with
+          retroactive=true; its invoice_line_id is the synthetic id retro:<run key>:<period>.
+        required: [accrual_id, legal_entity_id, agreement_id, period_id, invoice_line_id, amount, currency, debit_account, credit_account, retroactive]
         properties:
           accrual_id: {type: string, format: uuid}
           legal_entity_id: {type: string, format: uuid}
@@ -119,3 +133,29 @@ components:
           currency: {type: string, pattern: "^[A-Z]{3}$"}
           debit_account: {type: string, description: "Rebate expense account (default 4150)."}
           credit_account: {type: string, description: "Rebate accrual account (default 2150)."}
+          retroactive: {type: boolean, description: "True for the per-period delta of a retroactive recompute (BR-26.7, BR-26.14)."}
+    CommissionCalculated:
+      name: dev.passage.pricing.commission.calculated.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        description: >
+          One rep's commission transaction on one invoice line (BR-26.12). The ledger (w11) posts
+          Dr debit_account / Cr credit_account for amount; amount is negative on a credit note,
+          which names the line it reverses. Rep names never appear (PRD 5.26.20).
+        required: [transaction_id, legal_entity_id, invoice_line_id, sales_group_id, sales_rep_id, basis, basis_amount, rate, amount, currency, period_id, debit_account, credit_account]
+        properties:
+          transaction_id: {type: string, format: uuid}
+          legal_entity_id: {type: string, format: uuid}
+          invoice_line_id: {type: string}
+          reverses_invoice_line_id: {type: string, description: "Set on a credit note: the invoice line whose commission it reverses."}
+          sales_group_id: {type: string, format: uuid}
+          sales_rep_id: {type: string, description: "Worker id (w42); never a name."}
+          basis: {type: string, enum: [REVENUE, MARGIN]}
+          basis_amount: {type: string, description: "Line net (REVENUE) or line net less cost (MARGIN)."}
+          rate: {type: string, description: "Commission rate in percent."}
+          amount: {type: string, description: "The rep's share, in the currency's minor units."}
+          currency: {type: string, pattern: "^[A-Z]{3}$"}
+          period_id: {type: string, description: "Invoice month, such as 2027-03."}
+          debit_account: {type: string, description: "Commission expense (6200)."}
+          credit_account: {type: string, description: "Commission payable (2170)."}

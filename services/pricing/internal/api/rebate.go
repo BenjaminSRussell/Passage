@@ -93,6 +93,8 @@ type accrualView struct {
 	Amount        string `json:"amount"`
 	Currency      string `json:"currency"`
 	Status        string `json:"status"`
+	// Retroactive marks a replayed invoice line or a per-period delta of a retroactive recompute.
+	Retroactive bool `json:"retroactive"`
 }
 
 func (a *API) createAgreement(w http.ResponseWriter, r *http.Request) {
@@ -300,7 +302,7 @@ func agreementResponse(g domain.RebateAgreement) agreementView {
 func accrualResponse(a store.Accrual) accrualView {
 	return accrualView{ID: a.ID, AgreementID: a.AgreementID, PeriodID: a.PeriodKey, InvoiceLineID: a.InvoiceLineID,
 		InvoiceDate: a.InvoiceDate.Format(dateLayout), BasisValue: a.BasisValue.String(), BasisQuantity: a.BasisQty.String(),
-		Amount: a.Accrued.String(), Currency: a.Currency, Status: a.Status}
+		Amount: a.Accrued.String(), Currency: a.Currency, Status: a.Status, Retroactive: a.Retroactive}
 }
 
 func parseTier(t tierDTO) (domain.Tier, bool) {

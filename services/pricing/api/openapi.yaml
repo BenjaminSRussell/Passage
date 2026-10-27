@@ -447,6 +447,200 @@ paths:
         "403": {$ref: "#/components/responses/Problem"}
         "404": {$ref: "#/components/responses/Problem"}
         "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/rebates/agreements/{id}:retro-recompute:
+    post:
+      operationId: retroRecomputeRebateAgreement
+      summary: Re-accrue the invoices posted before a retroactive activation and post the delta per period (FR-26.23).
+      description: >
+        The agreement is activated when it is created; when its validFrom is earlier, the invoices posted
+        between validFrom and the activation day are replayed (SAP VBOF). Until the w29/w30 invoice ledger
+        exists the caller supplies those posted invoice lines. Each line not accrued before joins its
+        period's cumulative basis (recorded as a zero-amount accrual with retroactive=true); each period is
+        then recomputed at its tier and the difference against what it already accrued posts once, with
+        retroactive=true and a rebateaccrual.posted event (BR-26.7, BR-26.14, AC-26.14). Posted invoices are
+        never re-priced. The Idempotency-Key names the run: a repeated key returns the stored deltas with
+        replayed=true. 422 when the agreement is not retroactive or a line is outside validFrom..activation.
+      x-passage-duty: pricing.rebate.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 64}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RetroRecomputeRequest"}
+      responses:
+        "200":
+          description: The deltas posted (none when every period was already at its target).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/RetroRecomputeResult"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/commission/sales-groups:
+    get:
+      operationId: listSalesGroups
+      summary: List sales groups with their reps and shares (FR-26.18).
+      x-passage-duty: pricing.commission.view
+      parameters:
+        - {name: legalEntityId, in: query, required: false, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Sales groups by name (at most 100).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/SalesGroup"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+    post:
+      operationId: createSalesGroup
+      summary: Create a sales group whose rep shares sum to 100 (FR-26.18). The first rep takes the rounding residual.
+      x-passage-duty: pricing.commission.maintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/SalesGroupInput"}
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/SalesGroup"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/commission/sales-groups/{id}:
+    get:
+      operationId: getSalesGroup
+      summary: Read one sales group with its reps.
+      x-passage-duty: pricing.commission.view
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: The sales group.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/SalesGroup"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/commission/rules:
+    get:
+      operationId: listCommissionRules
+      summary: List commission rules, optionally of one sales group, from most specific to most general.
+      x-passage-duty: pricing.commission.view
+      parameters:
+        - {name: salesGroupId, in: query, required: false, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Rules (at most 100).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/CommissionRule"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+    post:
+      operationId: createCommissionRule
+      summary: Create a commission rule for a sales group and customer/item commission group (BR-26.12).
+      description: The rule takes the sales group's legal entity. One rule per (sales group, customer group, item group); a second is 409 PRC-0038.
+      x-passage-duty: pricing.commission.maintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CommissionRuleInput"}
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CommissionRule"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/commission/postings:
+    post:
+      operationId: postCommission
+      summary: Post the commission of one posted invoice line or credit note line (FR-26.18, BR-26.12).
+      description: >
+        Stand-in for the invoice.posted consumer (w29/w30). Resolves the sales group's rule specific to
+        general (PRC-0013 when none matches), applies REVENUE (line net) or MARGIN (line net less
+        costSnapshot, which is then required) basis, splits by rep share (half-even per rep, residual to
+        the first rep) and writes one transaction per rep, Dr 6200 / Cr 2170, each with a
+        dev.passage.pricing.commission.calculated.v1 event in the same transaction. A credit note line
+        (negative lineNet, reversesInvoiceLineId set) reverses with the original line's basis, rate and
+        shares; credits of one line may not exceed its invoiced net (PRC-0037). The invoice line id is the
+        idempotency key: 201 when posted, 200 when the same line was already posted with the same content,
+        422 idempotency_key_reuse when it was posted with different content.
+      x-passage-duty: pricing.commission.maintain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CommissionPostingInput"}
+      responses:
+        "200":
+          description: Already posted (redelivery); the stored transactions.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CommissionTransactionList"}
+        "201":
+          description: Posted; one transaction per rep.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CommissionTransactionList"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/commission/transactions:
+    get:
+      operationId: listCommissionTransactions
+      summary: Commission inquiry by rep, sales group, period, customer and invoice line (§5.26.14).
+      x-passage-duty: pricing.commission.view
+      parameters:
+        - {name: legalEntityId, in: query, required: false, schema: {type: string, format: uuid}}
+        - {name: salesGroupId, in: query, required: false, schema: {type: string, format: uuid}}
+        - {name: repId, in: query, required: false, schema: {type: string}}
+        - {name: customerId, in: query, required: false, schema: {type: string}}
+        - {name: invoiceLineId, in: query, required: false, description: "Matches the line and the credit notes that reverse it.", schema: {type: string}}
+        - {name: period, in: query, required: false, description: "Invoice month such as 2027-03.", schema: {type: string, pattern: "^[0-9]{4}-(0[1-9]|1[0-2])$"}}
+      responses:
+        "200":
+          description: Newest invoice first (at most 100).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CommissionTransactionList"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
 components:
   parameters:
     IdempotencyKey:
@@ -740,3 +934,138 @@ components:
         amount: {type: string, description: "Accrued amount; posts Dr 4150 / Cr 2150."}
         currency: {type: string}
         status: {type: string, enum: [ACCRUED, ADJUSTED, SETTLED, REVERSED]}
+        retroactive: {type: boolean, description: "True for an invoice line replayed by a retroactive recompute (amount 0) and for its per-period delta (invoiceLineId retro:<run key>:<period>)."}
+    RetroLine:
+      type: object
+      required: [invoiceLineId, invoiceDate, currency]
+      properties:
+        invoiceLineId: {type: string, minLength: 1, maxLength: 128}
+        invoiceDate: {type: string, format: date, description: "Between the agreement's validFrom and its activation day."}
+        value: {type: string, description: "Invoice line net value; default 0."}
+        quantity: {type: string, description: "Default 0."}
+        currency: {type: string, pattern: "^[A-Z]{3}$"}
+    RetroRecomputeRequest:
+      type: object
+      required: [lines]
+      properties:
+        lines:
+          type: array
+          maxItems: 5000
+          description: The invoice lines posted in the agreement's scope before its activation.
+          items: {$ref: "#/components/schemas/RetroLine"}
+    RetroDelta:
+      type: object
+      required: [periodId, target, posted, delta]
+      properties:
+        periodId: {type: string}
+        target: {type: string, description: "Accrual the period owes at its cumulative basis."}
+        posted: {type: string, description: "Accrual the period had before the recompute."}
+        delta: {type: string, description: "target - posted; posts Dr expense / Cr accrual (negative reverses)."}
+    RetroRecomputeResult:
+      type: object
+      required: [agreementId, activatedOn, reaccruedLines, replayed, deltas]
+      properties:
+        agreementId: {type: string, format: uuid}
+        activatedOn: {type: string, format: date}
+        reaccruedLines: {type: integer, description: "Replayed invoice lines that were not accrued before."}
+        replayed: {type: boolean, description: "True when the Idempotency-Key was used before and the stored deltas are returned."}
+        deltas:
+          type: array
+          items: {$ref: "#/components/schemas/RetroDelta"}
+        notice:
+          type: object
+          description: PRC-0006 when posted invoices were re-accrued.
+          required: [code, message]
+          properties:
+            code: {type: string, example: PRC-0006}
+            message: {type: string}
+    RepShare:
+      type: object
+      required: [repId, sharePct]
+      properties:
+        repId: {type: string, minLength: 1, maxLength: 64, description: "Worker id (w42)."}
+        sharePct: {type: string, description: "Decimal above 0 and at most 100; the shares of a group sum to 100."}
+    SalesGroupInput:
+      type: object
+      required: [legalEntityId, name, reps]
+      properties:
+        legalEntityId: {type: string, format: uuid}
+        name: {type: string, minLength: 1, maxLength: 120}
+        reps:
+          type: array
+          minItems: 1
+          maxItems: 20
+          description: In order; the first rep takes the rounding residual.
+          items: {$ref: "#/components/schemas/RepShare"}
+    SalesGroup:
+      allOf:
+        - $ref: "#/components/schemas/SalesGroupInput"
+        - type: object
+          required: [id]
+          properties:
+            id: {type: string, format: uuid}
+    CommissionRuleInput:
+      type: object
+      required: [salesGroupId, basis, ratePct]
+      properties:
+        salesGroupId: {type: string, format: uuid}
+        customerGroup: {type: string, maxLength: 64, description: "Customer commission group; empty means all customers."}
+        itemGroup: {type: string, maxLength: 64, description: "Item commission group; empty means all items."}
+        basis: {type: string, enum: [REVENUE, MARGIN]}
+        ratePct: {type: string, description: "Decimal from 0 to 100."}
+    CommissionRule:
+      allOf:
+        - $ref: "#/components/schemas/CommissionRuleInput"
+        - type: object
+          required: [id, legalEntityId]
+          properties:
+            id: {type: string, format: uuid}
+            legalEntityId: {type: string, format: uuid}
+    CommissionPostingInput:
+      type: object
+      required: [legalEntityId, salesGroupId, invoiceLineId, invoiceDate, currency, lineNet]
+      properties:
+        legalEntityId: {type: string, format: uuid, description: "Must be the sales group's legal entity."}
+        salesGroupId: {type: string, format: uuid, description: "From the order header (w27); a credit note names the original line's group."}
+        invoiceLineId: {type: string, minLength: 1, maxLength: 128}
+        reversesInvoiceLineId: {type: string, maxLength: 128, description: "Set on a credit note line; lineNet is then negative."}
+        invoiceDate: {type: string, format: date}
+        customerId: {type: string, maxLength: 128}
+        customerGroup: {type: string, maxLength: 64, description: "Customer commission group."}
+        itemGroup: {type: string, maxLength: 64, description: "Item commission group."}
+        currency: {type: string, pattern: "^[A-Z]{3}$"}
+        lineNet: {type: string, description: "Invoice line net; zero or more on an invoice, negative on a credit note."}
+        costSnapshot: {type: string, description: "Line cost (w20) with the sign of lineNet; required when the rule pays on MARGIN."}
+    CommissionTransaction:
+      type: object
+      required: [id, legalEntityId, invoiceLineId, invoiceDate, periodId, customerGroup, itemGroup, salesGroupId, repId, sharePct, basis, lineNet, basisAmount, ratePct, amount, currency, debitAccount, creditAccount, status]
+      properties:
+        id: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        invoiceLineId: {type: string}
+        reversesInvoiceLineId: {type: string}
+        invoiceDate: {type: string, format: date}
+        periodId: {type: string, description: "Invoice month, such as 2027-03."}
+        customerId: {type: string}
+        customerGroup: {type: string}
+        itemGroup: {type: string}
+        salesGroupId: {type: string, format: uuid}
+        repId: {type: string}
+        sharePct: {type: string}
+        basis: {type: string, enum: [REVENUE, MARGIN]}
+        lineNet: {type: string}
+        costSnapshot: {type: string}
+        basisAmount: {type: string}
+        ratePct: {type: string}
+        amount: {type: string, description: "The rep's share; negative on a credit note."}
+        currency: {type: string}
+        debitAccount: {type: string, example: "6200"}
+        creditAccount: {type: string, example: "2170"}
+        status: {type: string, enum: [POSTED]}
+    CommissionTransactionList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/CommissionTransaction"}

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { RebateAccrual, RebateAgreement } from "./api/client";
 import { sumDecimals } from "./format";
 import { emptyRebate, toAgreementInput, validateRebate } from "./NewRebatePage";
+import { parseRetroLines } from "./RebateDetailPage";
 import { idempotencyKey, json, pageViolations, renderAt, server, useFakeServer } from "./testServer";
 
 useFakeServer();
@@ -177,6 +178,71 @@ describe("Rebate agreement detail", () => {
     renderAt(`/pricing/rebates/${A1}`);
     expect(await screen.findAllByRole("alert")).not.toHaveLength(0);
     expect(screen.getAllByRole("alert")[0]).toHaveTextContent("PRC-0035");
+  });
+});
+
+describe("Retroactive recompute", () => {
+  it("replays pasted invoice lines, shows the delta and the PRC-0006 notice, and marks retroactive accruals", async () => {
+    let retro = false;
+    server.handler = (url, init) => {
+      if (url.pathname.endsWith(`/rebates/agreements/${A1}`)) return json(200, tiered);
+      if (init.method === "POST" && url.pathname.endsWith(`/rebates/agreements/${A1}:retro-recompute`)) {
+        retro = true;
+        return json(200, {
+          agreementId: A1,
+          activatedOn: "2027-03-20",
+          reaccruedLines: 2,
+          replayed: false,
+          deltas: [{ periodId: "2027-Q1", target: "1000", posted: "0", delta: "1000" }],
+          notice: { code: "PRC-0006", message: "Retroactive activation: 2 posted invoices were re-accrued" },
+        });
+      }
+      if (url.pathname.endsWith("/rebates/accruals")) {
+        return json(200, { items: retro ? [accrual({ id: "acc-r", periodId: "2027-Q1", invoiceLineId: "retro:k:2027-Q1", amount: "1000", retroactive: true })] : [] });
+      }
+      return undefined;
+    };
+    const { container } = renderAt(`/pricing/rebates/${A1}`);
+    await screen.findByRole("heading", { name: "Acme quarterly" });
+    fill("Posted invoice lines", "INV-A, 2027-03-05, 20000\nINV-B, 2027-03-18, 30000, 5");
+    fireEvent.click(screen.getByRole("button", { name: "Recompute" }));
+    expect(await screen.findByText("Retroactive activation: 2 posted invoices were re-accrued (PRC-0006)")).toBeInTheDocument();
+    expect(screen.getByText("Posted 1000 USD across 1 period(s); activated 2027-03-20.")).toBeInTheDocument();
+    expect(screen.getByRole("table", { name: "Retroactive deltas" })).toHaveTextContent("2027-Q1");
+    const post = server.calls.find((c) => c.method === "POST");
+    expect(idempotencyKey(post!)).toBeTruthy();
+    expect(post?.body).toEqual({
+      lines: [
+        { invoiceLineId: "INV-A", invoiceDate: "2027-03-05", value: "20000", quantity: "0", currency: "USD" },
+        { invoiceLineId: "INV-B", invoiceDate: "2027-03-18", value: "30000", quantity: "5", currency: "USD" },
+      ],
+    });
+    await waitFor(() => expect(screen.getByRole("table", { name: "Rebate accruals" })).toHaveTextContent("Retroactive"));
+    expect(pageViolations(container)).toEqual([]);
+  });
+
+  it("checks the pasted rows and shows a refusal from the service", async () => {
+    server.handler = (url, init) => {
+      if (url.pathname.endsWith(`/rebates/agreements/${A1}`)) return json(200, tiered);
+      if (init.method === "POST") return json(422, { code: "COM-0001", detail: "agreement is not retroactive" });
+      if (url.pathname.endsWith("/rebates/accruals")) return json(200, { items: [] });
+      return undefined;
+    };
+    renderAt(`/pricing/rebates/${A1}`);
+    await screen.findByRole("heading", { name: "Acme quarterly" });
+    fill("Posted invoice lines", "INV-A, 05/03/2027, 100");
+    fireEvent.click(screen.getByRole("button", { name: "Recompute" }));
+    expect(await screen.findByText("Row 1: enter the invoice date as YYYY-MM-DD.")).toBeInTheDocument();
+    expect(server.calls.some((c) => c.method === "POST")).toBe(false);
+    fill("Posted invoice lines", "INV-A, 2027-03-05, 100");
+    fireEvent.click(screen.getByRole("button", { name: "Recompute" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("agreement is not retroactive (COM-0001)");
+  });
+
+  it("parses pasted rows", () => {
+    expect(parseRetroLines("\n A,2027-01-02,10 \n", "EUR")).toEqual({ lines: [{ invoiceLineId: "A", invoiceDate: "2027-01-02", value: "10", quantity: "0", currency: "EUR" }] });
+    expect(parseRetroLines("A,2027-01-02,ten", "EUR").error).toBe("Row 1: value and quantity must be numbers.");
+    expect(parseRetroLines(",2027-01-02,1", "EUR").error).toBe("Row 1: enter the invoice line id.");
   });
 });
 

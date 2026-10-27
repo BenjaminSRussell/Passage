@@ -75,6 +75,14 @@ type Store interface {
 	ListAgreements(ctx context.Context, legalEntityID string, limit int) ([]domain.RebateAgreement, error)
 	AccrueInvoiceLine(ctx context.Context, in AccrualInput) (Accrual, bool, error)
 	ListAccruals(ctx context.Context, f AccrualFilter) ([]Accrual, error)
+	RecomputeRetro(ctx context.Context, in RetroInput) (RetroResult, error)
+	CreateSalesGroup(ctx context.Context, g SalesGroup, idempotencyKey string) (SalesGroup, error)
+	GetSalesGroup(ctx context.Context, id string) (SalesGroup, error)
+	ListSalesGroups(ctx context.Context, legalEntityID string, limit int) ([]SalesGroup, error)
+	CreateCommissionRule(ctx context.Context, r domain.CommissionRule, idempotencyKey string) (CommissionRuleRow, error)
+	ListCommissionRules(ctx context.Context, salesGroupID string, limit int) ([]CommissionRuleRow, error)
+	PostCommission(ctx context.Context, c CommissionPosting) ([]CommissionTxn, bool, error)
+	ListCommissionTransactions(ctx context.Context, f CommissionFilter) ([]CommissionTxn, error)
 	Ping(ctx context.Context) error
 }
 

@@ -13,7 +13,11 @@ Routes, all on the pricing service API (`services/pricing/api/openapi.yaml`):
 | `/pricing/journals/:id` | Lines with before and after values; validate, post (PRC-0005 shown) and reverse | `GET`, `:validate`, `:post`, `:reverse` |
 | `/pricing/rebates` | Rebate agreements with basis, period and tiers | `GET /rebates/agreements` |
 | `/pricing/rebates/new` | Create a tiered agreement for a customer or customer group | `POST /rebates/agreements` |
-| `/pricing/rebates/:id` | Tiers, posting accounts and accruals by period with an exact total | `GET /rebates/agreements/{id}`, `GET /rebates/accruals` |
+| `/pricing/rebates/:id` | Tiers, posting accounts, accruals by period with an exact total (retroactive rows marked), and the retroactive recompute from pasted posted invoice lines | `GET /rebates/agreements/{id}`, `GET /rebates/accruals`, `POST /rebates/agreements/{id}:retro-recompute` |
+| `/pricing/commission/sales-groups` | Sales groups with their reps and shares | `GET /commission/sales-groups` |
+| `/pricing/commission/sales-groups/new` | Create a sales group; reps with shares that add up to 100 | `POST /commission/sales-groups` |
+| `/pricing/commission/sales-groups/:id` | Reps, commission rules in search order, add a rule (409 PRC-0038 shown) | `GET /commission/sales-groups/{id}`, `GET`/`POST /commission/rules` |
+| `/pricing/commission/transactions` | Commission inquiry by sales group, rep, month, customer and invoice line, with an exact total | `GET /commission/transactions` |
 | `/pricing/simulate` | Simulation / explain: price lines and read the access-by-access trace | `POST /resolve?explain=true` |
 
 - `api/client.ts` calls `/api/v1/pricing/...` (the BFF rewrites to `/v1/pricing/...`). Problem
@@ -22,7 +26,7 @@ Routes, all on the pricing service API (`services/pricing/api/openapi.yaml`):
 - Pages use the shell primitives (`shell/ui`) and `pages.module.css` tokens; every list has
   loading, empty and error states.
 - Tests: `npx vitest --run src/modules/pricing` and `npx tsc --noEmit` from `apps/web`. `testServer.tsx`
-  holds the fetch stub and router used by `journals.test.tsx` and `rebates.test.tsx`.
+  holds the fetch stub and router used by `journals.test.tsx`, `rebates.test.tsx` and `commission.test.tsx`.
 
 Needs: nothing from the shell beyond the existing `shell/ui` components. No npm
 dependencies were added.

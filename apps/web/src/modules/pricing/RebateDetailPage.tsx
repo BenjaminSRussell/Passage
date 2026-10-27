@@ -1,8 +1,36 @@
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Skeleton, StatGroup, StatTile, StatusPill, type DataTableColumn } from "../../shell/ui";
-import { getRebateAgreement, listRebateAccruals, type RebateAccrual, type RebateTier } from "./api/client";
-import { sumDecimals } from "./format";
+import {
+  Alert,
+  Badge,
+  Button,
+  buttonClassName,
+  Card,
+  DataTable,
+  FormField,
+  Input,
+  PageHeader,
+  Skeleton,
+  StatGroup,
+  StatTile,
+  StatusPill,
+  Textarea,
+  type DataTableColumn,
+} from "../../shell/ui";
+import {
+  describeProblem,
+  getRebateAgreement,
+  listRebateAccruals,
+  newKey,
+  retroRecompute,
+  type Problem,
+  type RebateAccrual,
+  type RebateTier,
+  type RetroDelta,
+  type RetroLineInput,
+  type RetroResult,
+} from "./api/client";
+import { DAY, SIGNED_DECIMAL, sumDecimals } from "./format";
 import styles from "./pages.module.css";
 import { BASIS_LABELS, describeRebateCustomer, PERIOD_LABELS } from "./rebateFormat";
 import { useLoad } from "./useLoad";
@@ -26,7 +54,33 @@ const accrualColumns: DataTableColumn<RebateAccrual>[] = [
   { key: "basisQuantity", header: "Quantity", mono: true, align: "end" },
   { key: "amount", header: "Accrued", mono: true, align: "end" },
   { key: "status", header: "Status", render: (row) => <StatusPill status={row.status.toLowerCase()} /> },
+  { key: "retroactive", header: "Source", render: (row) => (row.retroactive ? <Badge tone="info">Retroactive</Badge> : "Invoice feed") },
 ];
+
+const deltaColumns: DataTableColumn<RetroDelta>[] = [
+  { key: "periodId", header: "Period", mono: true },
+  { key: "posted", header: "Accrued before", mono: true, align: "end" },
+  { key: "target", header: "Owed now", mono: true, align: "end" },
+  { key: "delta", header: "Delta posted", mono: true, align: "end" },
+];
+
+/**
+ * Parses pasted invoice lines, one per row: invoice line id, invoice date, net value[, quantity].
+ * Returns the lines or the first row's error.
+ */
+export function parseRetroLines(text: string, currency: string): { lines: RetroLineInput[]; error?: string } {
+  const lines: RetroLineInput[] = [];
+  const rows = text.split("\n").map((r) => r.trim()).filter((r) => r !== "");
+  for (const [i, row] of rows.entries()) {
+    const [id = "", date = "", value = "", quantity = "0"] = row.split(",").map((c) => c.trim());
+    if (id === "" || id.length > 128) return { lines: [], error: `Row ${i + 1}: enter the invoice line id.` };
+    if (!DAY.test(date)) return { lines: [], error: `Row ${i + 1}: enter the invoice date as YYYY-MM-DD.` };
+    if (!SIGNED_DECIMAL.test(value) || !SIGNED_DECIMAL.test(quantity)) return { lines: [], error: `Row ${i + 1}: value and quantity must be numbers.` };
+    lines.push({ invoiceLineId: id, invoiceDate: date, value, quantity, currency });
+  }
+  if (lines.length > 5000) return { lines: [], error: "Paste at most 5,000 invoice lines per run." };
+  return { lines };
+}
 
 /** One rebate agreement: its tiers and the accruals posted invoices produced (Rebate accruals drill-down, §5.26.14). */
 export function RebateDetailPage() {
@@ -36,6 +90,12 @@ export function RebateDetailPage() {
   const [applied, setApplied] = useState("");
   const [periodError, setPeriodError] = useState("");
   const accruals = useLoad((signal) => listRebateAccruals({ agreementId: id, period: applied }, signal), `${id}|${applied}`);
+  const [retroText, setRetroText] = useState("");
+  const [retroError, setRetroError] = useState("");
+  const [retroFailure, setRetroFailure] = useState<Problem | null>(null);
+  const [retroResult, setRetroResult] = useState<RetroResult | null>(null);
+  const [retroBusy, setRetroBusy] = useState(false);
+  const retroKey = useRef(newKey());
 
   if (state.error) {
     return (
@@ -67,6 +127,28 @@ export function RebateDetailPage() {
     }
     setPeriodError("");
     setApplied(value);
+  }
+
+  const currency = agreement.currency;
+  async function recompute(event: FormEvent) {
+    event.preventDefault();
+    setRetroFailure(null);
+    const parsed = parseRetroLines(retroText, currency);
+    if (parsed.error) {
+      setRetroError(parsed.error);
+      return;
+    }
+    setRetroError("");
+    setRetroBusy(true);
+    try {
+      setRetroResult(await retroRecompute(id, parsed.lines, retroKey.current));
+      retroKey.current = newKey();
+      accruals.reload();
+    } catch (error) {
+      setRetroFailure(describeProblem(error));
+    } finally {
+      setRetroBusy(false);
+    }
   }
 
   const tierColumns: DataTableColumn<RebateTier>[] = [
@@ -142,6 +224,45 @@ export function RebateDetailPage() {
             </>
           )}
         </div>
+      </Card>
+      <Card title="Retroactive recompute">
+        <form className={styles.form} onSubmit={recompute} noValidate>
+          <p className={`${styles.note} ${styles.wide}`}>
+            When an agreement starts before the day it was activated, re-accrue the invoices posted in between. Posted invoices are never re-priced: each period posts only the difference, marked retroactive.
+          </p>
+          <div className={styles.wide}>
+            <FormField
+              id="rb-retro-lines"
+              label="Posted invoice lines"
+              hint={`One per row: invoice line id, invoice date, net value in ${currency}, quantity (optional). For example INV-100/1, ${agreement.validFrom}, 20000`}
+              error={retroError || undefined}
+            >
+              {(c) => <Textarea {...c} mono rows={5} value={retroText} onChange={(e) => { setRetroText(e.target.value); retroKey.current = newKey(); }} invalid={Boolean(retroError)} />}
+            </FormField>
+          </div>
+          {retroFailure ? (
+            <div className={styles.formActions}>
+              <Alert tone="danger" title="Could not recompute the agreement" live="alert">
+                {retroFailure.message} ({retroFailure.code})
+              </Alert>
+            </div>
+          ) : null}
+          {retroResult ? (
+            <div className={`${styles.stack} ${styles.wide}`}>
+              <Alert tone={retroResult.deltas.length > 0 ? "success" : "info"} live="status" title={retroResult.notice ? `${retroResult.notice.message} (${retroResult.notice.code})` : undefined}>
+                {retroResult.deltas.length > 0
+                  ? `Posted ${sumDecimals(retroResult.deltas.map((d) => d.delta))} ${currency} across ${retroResult.deltas.length} period(s); activated ${retroResult.activatedOn}.`
+                  : `Every period was already at its target; nothing was posted. Activated ${retroResult.activatedOn}.`}
+              </Alert>
+              {retroResult.deltas.length > 0 ? <DataTable label="Retroactive deltas" columns={deltaColumns} rows={retroResult.deltas} getRowKey={(d) => d.periodId} /> : null}
+            </div>
+          ) : null}
+          <div className={styles.formActions}>
+            <Button type="submit" variant="primary" loading={retroBusy}>
+              Recompute
+            </Button>
+          </div>
+        </form>
       </Card>
     </div>
   );

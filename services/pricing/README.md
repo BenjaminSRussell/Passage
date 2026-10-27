@@ -4,7 +4,32 @@ Deterministic pricing engine for Passage: resolves net prices and discounts for 
 customer / product / date / quantity / currency tuple from condition records, and returns
 the ordered trace of conditions that produced the price. Ticket PSG-26, PRD §5.26.
 
-## Status (slices 1-2)
+## Status (slices 1-3)
+
+Built in slice 3:
+
+- **Commission transactions and posting** (FR-26.12, FR-26.18, BR-26.12, AC-26.12): sales groups
+  with reps and share percentages (summing to 100, kept in entered order so the first rep takes the
+  rounding residual), commission rules per sales group and customer/item commission group (one per
+  combination) resolved specific to general (PRC-0013 when none matches), REVENUE or MARGIN basis
+  (MARGIN needs the line's `costSnapshot`). `POST /commission/postings` stands in for the
+  invoice.posted consumer: one transaction per rep (Dr 6200 / Cr 2170) with
+  `commission.calculated` in the same transaction; a redelivered line returns the stored rows. A
+  credit note line reverses with the original line's basis, rate and shares, so a full credit nets
+  every rep to zero even after the rule changed; credits are capped at the invoiced net (PRC-0037).
+  Commission inquiry by rep, sales group, month, customer and invoice line. Migration
+  `0003_commission_retro.sql` (sales_group, sales_group_rep, commission_rule,
+  commission_transaction; RLS on each).
+- **Retroactive rebate recompute** (FR-26.23, BR-26.7, BR-26.14, AC-26.14): an agreement is active
+  from its creation day; when its `validFrom` is earlier, `POST /rebates/agreements/{id}:retro-recompute`
+  replays the invoices posted between `validFrom` and the activation (the caller supplies them until
+  the w29/w30 invoice ledger exists), adds the lines not accrued before to their period's basis, and
+  posts the delta per period with `retroactive=true` (one accrual row and one `rebateaccrual.posted`
+  event per period). Posted invoices are never re-priced; the `Idempotency-Key` names the run, and a
+  second run over the same invoices posts nothing. The response carries the PRC-0006 notice.
+- **Web**: sales group list, create (reps and shares) and detail (rules and adding a rule), the
+  commission transactions inquiry, and the retroactive recompute form on the rebate agreement detail
+  (the accruals grid marks retroactive rows).
 
 Built in slice 2:
 
@@ -61,7 +86,7 @@ internal/domain/        pure engine: types, resolve, calc, journal validation an
 internal/store/         Postgres repository (pgx, tenant-scoped transactions, outbox)
 internal/api/           HTTP handlers and validation
 internal/events/        event type constants and payloads
-migrations/             0001_init.sql (condition_record, outbox, idempotency_keys), 0002 (journals, rebates); all with RLS
+migrations/             0001_init.sql (condition_record, outbox, idempotency_keys), 0002 (journals, rebates), 0003 (commission, retro flag); all with RLS
 api/openapi.yaml        OpenAPI 3.1 for every endpoint
 events/asyncapi.yaml    AsyncAPI 3 for every published event
 charts/pricing/         Helm chart
@@ -90,6 +115,14 @@ testdata/               fixtures
 | GET | `/v1/pricing/rebates/agreements/{id}` | pricing.rebate.view | |
 | GET | `/v1/pricing/rebates/accruals?agreementId=&period=` | pricing.rebate.view | period such as 2027-03, 2027-Q1 or 2027 |
 | POST | `/v1/pricing/rebates/accruals` | pricing.rebate.maintain | one posted invoice line; 201 new, 200 already accrued (stand-in for the invoice.posted consumer) |
+| POST | `/v1/pricing/rebates/agreements/{id}:retro-recompute` | pricing.rebate.maintain | `Idempotency-Key` required (names the run); body `{lines}` of posted invoices before the activation |
+| GET | `/v1/pricing/commission/sales-groups?legalEntityId=` | pricing.commission.view | |
+| POST | `/v1/pricing/commission/sales-groups` | pricing.commission.maintain | `Idempotency-Key` honoured; reps with shares summing to 100 |
+| GET | `/v1/pricing/commission/sales-groups/{id}` | pricing.commission.view | |
+| GET | `/v1/pricing/commission/rules?salesGroupId=` | pricing.commission.view | most specific first |
+| POST | `/v1/pricing/commission/rules` | pricing.commission.maintain | `Idempotency-Key` honoured; 409 PRC-0038 for a second rule on the same groups |
+| POST | `/v1/pricing/commission/postings` | pricing.commission.maintain | one posted invoice or credit note line; 201 new, 200 already posted (stand-in for the invoice.posted consumer) |
+| GET | `/v1/pricing/commission/transactions?legalEntityId=&salesGroupId=&repId=&customerId=&invoiceLineId=&period=` | pricing.commission.view | commission inquiry; period is a month |
 | GET | `/healthz`, `/readyz`, `/metrics` | none | `/metrics` on the admin port |
 
 ## Error codes
@@ -104,7 +137,12 @@ testdata/               fixtures
 | PRC-0030 | 404 | Condition record not found (store) |
 | PRC-0031 | 409 | Invalid state transition (store) |
 | PRC-0034 | 404 | Price journal not found |
+| PRC-0006 | 200 (notice) | Retroactive recompute re-accrued posted invoices (count in the message) |
+| PRC-0013 | 422 | No commission rule at any level for the sales group |
 | PRC-0035 | 404 | Rebate agreement not found |
+| PRC-0036 | 404 | Sales group not found |
+| PRC-0037 | 422 | Credit note cannot be applied: no commission on the reversed line, another sales group or currency, or credits above the invoiced net |
+| PRC-0038 | 409 | A commission rule already exists for the sales group, customer group and item group |
 | conflict_version | 412 | Body version does not match the stored version |
 | idempotency_key_reuse | 422 | Same `Idempotency-Key` with a different body, or an invoice line accrued again with a different date, value or quantity |
 | COM-0001 | 422 | Validation failure; `errors` maps each field to its message (percentages outside 0–100, a product-keyed TOTAL_DISC, bad dates, ...) |
@@ -118,7 +156,8 @@ Written to `outbox` in the same transaction as the change (see `events/asyncapi.
 - `dev.passage.pricing.conditionrecord.activated.v1` (activation and journal post; `journal_id` set by journals)
 - `dev.passage.pricing.conditionrecord.withdrawn.v1`
 - `dev.passage.pricing.journal.posted.v1` (post and reverse)
-- `dev.passage.pricing.rebateaccrual.posted.v1`
+- `dev.passage.pricing.rebateaccrual.posted.v1` (`retroactive=true` on a retroactive recompute delta)
+- `dev.passage.pricing.commission.calculated.v1` (one per rep per invoice line; rep id only, never a name)
 
 The entity segments are `conditionrecord` and `rebateaccrual` (as in `internal/events`); the PRD
 writes `condition-record` and `rebate-accrual`. Naming is a handoff to the kernel owner (see NOT-IMPLEMENTED.md).

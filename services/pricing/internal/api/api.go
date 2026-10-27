@@ -59,6 +59,9 @@ type API struct {
 	recordsWithdrawn atomic.Int64
 	journalsPosted   atomic.Int64
 	accrualsPosted   atomic.Int64
+	// commissionsPosted counts invoice lines that posted commission; retroRuns counts retroactive recomputes.
+	commissionsPosted atomic.Int64
+	retroRuns         atomic.Int64
 }
 
 // New builds the API; zero config values take the documented defaults.
@@ -84,6 +87,8 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyMaintain)).Post(recordsPath+"/{id}:withdraw", a.withdrawRecord)
 	a.registerJournalRoutes(r)
 	a.registerRebateRoutes(r)
+	a.registerRetroRoutes(r)
+	a.registerCommissionRoutes(r)
 }
 
 // Metrics serves the Prometheus text exposition of the service counters.
@@ -100,6 +105,8 @@ func (a *API) Metrics() http.Handler {
 			{"pricing_records_withdrawn_total", "Condition records withdrawn.", &a.recordsWithdrawn},
 			{"pricing_journals_posted_total", "Price journals posted or reversed.", &a.journalsPosted},
 			{"pricing_rebate_accruals_total", "Invoice lines accrued against a rebate agreement.", &a.accrualsPosted},
+			{"pricing_commission_postings_total", "Invoice lines that posted commission transactions.", &a.commissionsPosted},
+			{"pricing_rebate_retro_recomputes_total", "Retroactive rebate recomputes run.", &a.retroRuns},
 		}
 		for _, c := range counters {
 			fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s counter\n%s %d\n", c.name, c.help, c.name, c.name, c.v.Load())

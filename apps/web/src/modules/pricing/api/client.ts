@@ -366,6 +366,8 @@ export interface RebateAccrual {
   amount: string;
   currency: string;
   status: "ACCRUED" | "ADJUSTED" | "SETTLED" | "REVERSED";
+  /** A replayed invoice line (amount 0) or the per-period delta of a retroactive recompute (FR-26.23). */
+  retroactive?: boolean;
 }
 
 export function listRebateAgreements(legalEntityId = "", signal?: AbortSignal): Promise<RebateAgreement[]> {
@@ -383,4 +385,131 @@ export function createRebateAgreement(body: RebateAgreementInput, key: string = 
 /** GET /rebates/accruals - accrual rows of an agreement, optionally for one period (2027-03, 2027-Q1, 2027). */
 export function listRebateAccruals(filter: { agreementId?: string; period?: string } = {}, signal?: AbortSignal): Promise<RebateAccrual[]> {
   return items<RebateAccrual>(`/rebates/accruals${query(filter)}`, signal);
+}
+
+// ---- Retroactive rebate recompute (FR-26.23, BR-26.14, AC-26.14).
+
+/** One posted invoice line replayed by a retroactive recompute. */
+export interface RetroLineInput {
+  invoiceLineId: string;
+  invoiceDate: string;
+  value: string;
+  quantity?: string;
+  currency: string;
+}
+
+export interface RetroDelta {
+  periodId: string;
+  target: string;
+  posted: string;
+  delta: string;
+}
+
+export interface RetroResult {
+  agreementId: string;
+  activatedOn: string;
+  reaccruedLines: number;
+  replayed: boolean;
+  deltas: RetroDelta[];
+  notice?: { code: string; message: string };
+}
+
+/** POST /rebates/agreements/{id}:retro-recompute - the Idempotency-Key names the run and is required. */
+export function retroRecompute(agreementId: string, lines: RetroLineInput[], key: string = newKey()): Promise<RetroResult> {
+  return post<RetroResult>(`/rebates/agreements/${encodeURIComponent(agreementId)}:retro-recompute`, { lines }, key);
+}
+
+// ---- Commissions (FR-26.12, FR-26.18, BR-26.12).
+
+export type CommissionBasis = "REVENUE" | "MARGIN";
+
+export interface RepShare {
+  repId: string;
+  sharePct: string;
+}
+
+export interface SalesGroupInput {
+  legalEntityId: string;
+  name: string;
+  reps: RepShare[];
+}
+
+export interface SalesGroup extends SalesGroupInput {
+  id: string;
+}
+
+export interface CommissionRuleInput {
+  salesGroupId: string;
+  customerGroup: string;
+  itemGroup: string;
+  basis: CommissionBasis;
+  ratePct: string;
+}
+
+export interface CommissionRule extends CommissionRuleInput {
+  id: string;
+  legalEntityId: string;
+}
+
+export interface CommissionTransaction {
+  id: string;
+  legalEntityId: string;
+  invoiceLineId: string;
+  reversesInvoiceLineId?: string;
+  invoiceDate: string;
+  periodId: string;
+  customerId?: string;
+  customerGroup: string;
+  itemGroup: string;
+  salesGroupId: string;
+  repId: string;
+  sharePct: string;
+  basis: CommissionBasis;
+  lineNet: string;
+  costSnapshot?: string;
+  basisAmount: string;
+  ratePct: string;
+  amount: string;
+  currency: string;
+  debitAccount: string;
+  creditAccount: string;
+  status: "POSTED";
+}
+
+export interface CommissionFilter {
+  legalEntityId?: string;
+  salesGroupId?: string;
+  repId?: string;
+  customerId?: string;
+  invoiceLineId?: string;
+  /** Invoice month such as 2027-03. */
+  period?: string;
+}
+
+export function listSalesGroups(legalEntityId = "", signal?: AbortSignal): Promise<SalesGroup[]> {
+  return items<SalesGroup>(`/commission/sales-groups${query({ legalEntityId })}`, signal);
+}
+
+export function getSalesGroup(id: string, signal?: AbortSignal): Promise<SalesGroup> {
+  return send<SalesGroup>(`/commission/sales-groups/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** POST /commission/sales-groups - shares sum to 100; the first rep takes the rounding residual. */
+export function createSalesGroup(body: SalesGroupInput, key: string = newKey()): Promise<SalesGroup> {
+  return post<SalesGroup>("/commission/sales-groups", body, key);
+}
+
+/** GET /commission/rules - most specific first; one rule per sales group, customer group and item group. */
+export function listCommissionRules(salesGroupId = "", signal?: AbortSignal): Promise<CommissionRule[]> {
+  return items<CommissionRule>(`/commission/rules${query({ salesGroupId })}`, signal);
+}
+
+/** POST /commission/rules - 409 PRC-0038 when the group already has a rule for the same customer and item groups. */
+export function createCommissionRule(body: CommissionRuleInput, key: string = newKey()): Promise<CommissionRule> {
+  return post<CommissionRule>("/commission/rules", body, key);
+}
+
+/** GET /commission/transactions - the commission inquiry, newest invoice first, at most 100 rows. */
+export function listCommissionTransactions(filter: CommissionFilter = {}, signal?: AbortSignal): Promise<CommissionTransaction[]> {
+  return items<CommissionTransaction>(`/commission/transactions${query({ ...filter })}`, signal);
 }

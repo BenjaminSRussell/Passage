@@ -26,6 +26,7 @@ func TestEventsMatchAsyncAPI(t *testing.T) {
 		{events.ConditionRecordWithdrawn, events.ConditionRecordWithdrawnData{}},
 		{events.JournalPosted, events.JournalPostedData{ReversedJournalID: "x"}},
 		{events.RebateAccrualPosted, events.RebateAccrualPostedData{}},
+		{events.CommissionCalculated, events.CommissionCalculatedData{ReversesInvoiceLineID: "x"}},
 	}
 	for _, c := range cases {
 		if !pevents.ValidType(c.typ) {
