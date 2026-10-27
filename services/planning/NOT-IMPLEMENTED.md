@@ -1,6 +1,6 @@
-# NOT-IMPLEMENTED (PSG-22, planning service, slices 1 to 7)
+# NOT-IMPLEMENTED (PSG-22, planning service, slices 1 to 8)
 
-Every ticket deliverable and acceptance criterion that slices 1 to 7 do not
+Every ticket deliverable and acceptance criterion that slices 1 to 8 do not
 build. Slice 2 added the freeze, action and futures fences (BR-22.4),
 planned-order maintenance (FR-22.11) and forecast cells with reduction that a
 run nets as demand (FR-22.8, AC-22.6). Slice 3 added five stateless calculators
@@ -22,7 +22,10 @@ publish, reject) with the segregation of duties of 4.22.17 and
 (BR-22.6, domain only), and the forecast history window in `forecast-py`.
 Slice 7 added coverage groups as persisted setup (FR-22.2), auto-firming inside
 the firming time fence during a run (BR-22.4), and resumable batch generation
-in `forecast-py` (FR-22.9).
+in `forecast-py` (FR-22.9). Slice 8 (net requirements and coverage-group
+screens, vendor change in the planned-order editor) found all three already
+built and reviewed in slices 2, 5 and 7 (`apps/web/src/modules/planning`); it
+only brings the OpenAPI description up to date. Nothing new is unbuilt.
 Status is `later slice of PSG-22` (planned work in this wave), `partly built`
 (the stated part exists and is tested; the rest is named) or `handoff`
 (needs another wave or owner; the handoff is recorded here because this wave may

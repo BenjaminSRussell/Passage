@@ -1,18 +1,21 @@
 openapi: 3.1.0
 info:
   title: Passage Planning API
-  version: 0.3.0
+  version: 0.4.0
   description: |
-    Master planning (wave 22, slices 1 to 6). Covers static plan runs with time
-    fences, forecast demand and a site work calendar, run history and version
-    status, planned orders with their maintenance (change, approve, delete
-    under If-Match) and firming, explain-tree pegging, action/delay messages,
-    the MD04-style net requirements view, forecast cells with reduction and
-    the forecast consensus workflow (submit, publish, reject), and stateless
-    calculators. Every planned order is pegged to the demand it
-    serves. Browser clients call these paths under /api (the web BFF strips the
-    prefix). Not yet exposed (see NOT-IMPLEMENTED.md): coverage groups,
-    statistical forecast generation, simulation plans.
+    Master planning (wave 22, slices 1 to 8). Covers static plan runs with time
+    fences (auto-firming inside the firming fence), forecast demand and a site
+    work calendar, run history and version status, planned orders with their
+    maintenance (change quantity, dates and vendor, approve, delete under
+    If-Match) and firming, explain-tree pegging, action/delay messages, the
+    MD04-style net requirements view, forecast cells with reduction and the
+    forecast consensus workflow (submit, publish, reject), coverage group
+    setup (list, create, read, change under If-Match), and stateless
+    calculators. Every planned order is pegged to the demand it serves.
+    Browser clients call these paths under /api (the web BFF strips the
+    prefix). Not yet exposed (see NOT-IMPLEMENTED.md): item coverage,
+    statistical forecast generation through this service (forecast-py serves
+    it), simulation plans.
 servers:
   - url: https://api.{env}.passage.dev
     variables:
