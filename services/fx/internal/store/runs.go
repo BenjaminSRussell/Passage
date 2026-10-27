@@ -125,12 +125,12 @@ func (s *Postgres) FinishRunSucceeded(ctx context.Context, runID string, importe
 	})
 }
 
-func (s *Postgres) FinishRunFailed(ctx context.Context, runID string, attempts int, cause error) error {
-	return s.finishUnhealthy(ctx, runID, attempts, cause, RunFailed, FallbackNone)
+func (s *Postgres) FinishRunFailed(ctx context.Context, runID string, attempts int, cause error, retryable bool) error {
+	return s.finishUnhealthy(ctx, runID, attempts, cause, RunFailed, FallbackNone, retryable)
 }
 
-func (s *Postgres) FinishRunDegraded(ctx context.Context, runID string, attempts int, cause error) error {
-	return s.finishUnhealthy(ctx, runID, attempts, cause, RunDegraded, FallbackLastKnown)
+func (s *Postgres) FinishRunDegraded(ctx context.Context, runID string, attempts int, cause error, retryable bool) error {
+	return s.finishUnhealthy(ctx, runID, attempts, cause, RunDegraded, FallbackLastKnown, retryable)
 }
 
 func (s *Postgres) FinishRunAborted(ctx context.Context, runID string, attempts int, cause error) error {
@@ -148,7 +148,7 @@ func errorMessage(cause error) string {
 	return cause.Error()
 }
 
-func (s *Postgres) finishUnhealthy(ctx context.Context, runID string, attempts int, cause error, status, fallback string) error {
+func (s *Postgres) finishUnhealthy(ctx context.Context, runID string, attempts int, cause error, status, fallback string, retryable bool) error {
 	p, _ := tenant.FromContext(ctx)
 	message := errorMessage(cause)
 	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
@@ -170,7 +170,7 @@ func (s *Postgres) finishUnhealthy(ctx context.Context, runID string, attempts i
 		}
 		evt, err := events.New(ProviderDegraded, "passage/fx", runID, p.TenantID, map[string]any{
 			"provider": provider, "last_success_at": lastSuccess, "rate_type": code, "error": message,
-			"status": status, "fallback": fallback,
+			"status": status, "fallback": fallback, "retryable": retryable,
 		})
 		if err != nil {
 			return fmt.Errorf("build %s: %w", ProviderDegraded, err)

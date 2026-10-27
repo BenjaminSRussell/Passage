@@ -16,13 +16,24 @@ spec:
             service: fx
           annotations:
             summary: FX rate import from {{ $labels.provider }} failed for {{ $labels.rate_type }}
-            description: The latest import ended in an outage after retries. The dev.passage.fx.provider.degraded.v1 event carries fallback=last_known when earlier rates keep being served, or fallback=none when no earlier import ever succeeded.
+            description: The latest import ended in an outage after retries. The dev.passage.fx.provider.degraded.v1 event carries fallback=last_known when earlier rates keep being served, or fallback=none when no earlier import ever succeeded. retryable=false means a configuration failure (4xx or malformed payload) rather than an outage.
+        # docs/prd/phase-2-financial-core.md:1027: no import in 2 business days -> P2.
+        # ECB publishes on business days only, so it gets 4 calendar days to cover a long weekend.
         - alert: FxRateImportStale
-          expr: time() - min by (provider, rate_type) (fx_provider_last_success_timestamp_seconds) > 2 * 86400
+          expr: time() - max by (provider, rate_type) (fx_provider_last_success_timestamp_seconds{provider="ecb"}) > 4 * 86400
+          for: 1m
+          labels:
+            severity: page
+            service: fx
+          annotations:
+            summary: No successful FX import from {{ $labels.provider }} for {{ $labels.rate_type }} in over 4 days
+            description: The newest last successful import is more than four days old, so served rates are stale.
+        - alert: FxRateImportStaleOpenExchangeRates
+          expr: time() - max by (provider, rate_type) (fx_provider_last_success_timestamp_seconds{provider="openexchangerates"}) > 2 * 86400
           for: 1m
           labels:
             severity: page
             service: fx
           annotations:
             summary: No successful FX import from {{ $labels.provider }} for {{ $labels.rate_type }} in over 2 days
-            description: The oldest last successful import is more than two days old, so served rates are stale.
+            description: The newest last successful import is more than two days old, so served rates are stale.

@@ -35,10 +35,11 @@ func (f *fakeProvider) Fetch(context.Context, string, time.Time) ([]provider.Rat
 }
 
 type finish struct {
-	kind     string
-	runID    string
-	attempts int
-	cause    error
+	kind      string
+	runID     string
+	attempts  int
+	cause     error
+	retryable bool
 }
 
 type fakeStore struct {
@@ -86,18 +87,18 @@ func (s *fakeStore) FinishRunSucceeded(_ context.Context, id string, imported, u
 	return nil
 }
 
-func (s *fakeStore) FinishRunFailed(_ context.Context, id string, attempts int, cause error) error {
-	s.finishes = append(s.finishes, finish{"failed", id, attempts, cause})
+func (s *fakeStore) FinishRunFailed(_ context.Context, id string, attempts int, cause error, retryable bool) error {
+	s.finishes = append(s.finishes, finish{"failed", id, attempts, cause, retryable})
 	return nil
 }
 
-func (s *fakeStore) FinishRunDegraded(_ context.Context, id string, attempts int, cause error) error {
-	s.finishes = append(s.finishes, finish{store.RunDegraded, id, attempts, cause})
+func (s *fakeStore) FinishRunDegraded(_ context.Context, id string, attempts int, cause error, retryable bool) error {
+	s.finishes = append(s.finishes, finish{store.RunDegraded, id, attempts, cause, retryable})
 	return s.degradedErr
 }
 
 func (s *fakeStore) FinishRunAborted(_ context.Context, id string, attempts int, cause error) error {
-	s.finishes = append(s.finishes, finish{"aborted", id, attempts, cause})
+	s.finishes = append(s.finishes, finish{"aborted", id, attempts, cause, false})
 	return nil
 }
 
@@ -243,7 +244,6 @@ func TestRunOutageWithoutLastKnownRateIsAClearError(t *testing.T) {
 
 func TestRunDoesNotRetryPermanentFailures(t *testing.T) {
 	for name, err := range map[string]error{
-		"disabled":  provider.ErrDisabled,
 		"malformed": fmt.Errorf("%w: bad xml", provider.ErrMalformed),
 		"404":       fmt.Errorf("ecb: %w", &provider.StatusError{Code: 404}),
 		"401":       fmt.Errorf("oxr: %w", &provider.StatusError{Code: 401}),
@@ -253,10 +253,36 @@ func TestRunDoesNotRetryPermanentFailures(t *testing.T) {
 			p, s := &fakeProvider{errs: []error{err}}, &fakeStore{last: &last}
 			i, slept := harness(p, s)
 			res, rerr := i.Run(context.Background(), "CLOSING", day)
-			if rerr != nil || !res.Degraded || p.calls != 1 || len(*slept) != 0 {
+			if rerr != nil || !res.Degraded || p.calls != 1 || len(*slept) != 0 || s.finishes[0].retryable {
 				t.Fatalf("res=%+v err=%v calls=%d slept=%v", res, rerr, p.calls, *slept)
 			}
 		})
+	}
+}
+
+func TestRunDisabledProviderAbortsWithoutDegradedOutcome(t *testing.T) {
+	last := day
+	p, s := &fakeProvider{errs: []error{provider.ErrDisabled}}, &fakeStore{last: &last}
+	i, _ := harness(p, s)
+	res, err := i.Run(context.Background(), "CLOSING", day)
+	if !errors.Is(err, provider.ErrDisabled) || res.Degraded || p.calls != 1 || s.outcome() != "aborted" || !strings.HasPrefix(s.finishes[0].cause.Error(), "aborted: ") {
+		t.Fatalf("res=%+v err=%v finishes=%+v", res, err, s.finishes)
+	}
+	if body := scrape(i); strings.Contains(body, "fx_provider_degraded{") {
+		t.Fatalf("metrics = %s", body)
+	}
+}
+
+func TestRunDeadlineExceededIsAnOutageNotAnAbort(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
+	defer cancel()
+	<-ctx.Done()
+	last := day
+	p, s := &fakeProvider{errs: downs(4, context.DeadlineExceeded)}, &fakeStore{last: &last}
+	i, _ := harness(p, s)
+	res, err := i.Run(ctx, "CLOSING", day)
+	if err != nil || !res.Degraded || s.outcome() != store.RunDegraded || !s.finishes[0].retryable {
+		t.Fatalf("res=%+v err=%v finishes=%+v", res, err, s.finishes)
 	}
 }
 
@@ -306,7 +332,7 @@ func TestRunPostRatesErrorAbortsWithoutDegradedOutcome(t *testing.T) {
 	p, s := &fakeProvider{points: points()}, &fakeStore{postErr: boom}
 	i, _ := harness(p, s)
 	res, err := i.Run(context.Background(), "CLOSING", day)
-	if !errors.Is(err, boom) || len(s.finishes) != 1 || s.finishes[0].kind != "aborted" || s.finishes[0].attempts != 1 || res.Degraded {
+	if !errors.Is(err, boom) || len(s.finishes) != 1 || s.finishes[0].kind != "aborted" || s.finishes[0].attempts != 1 || !strings.HasPrefix(s.finishes[0].cause.Error(), "aborted: post ecb rates") || res.Degraded {
 		t.Fatalf("err=%v finishes=%+v", err, s.finishes)
 	}
 	if body := scrape(i); strings.Contains(body, "fx_provider_degraded{") {

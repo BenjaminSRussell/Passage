@@ -16,7 +16,7 @@
 | Temporal schedule for provider imports | PSG-1202 slice 2c | needs provider adapters; CronJob fallback is in slice 2e |
 | ECB SDW market data series adapter | PSG-1202 slice 2d | deferred with the market data series |
 | AC4: provider outage fallback and alert | built, unwired (see #93) | `internal/importer` (retry, last-known fallback, degraded run, outbox event, `fx_provider_degraded` metric), `deploy/prometheusrule.yaml` |
-| AC4: importer wiring (`cmd/fx` scheduler, `/metrics` mount via `importer.Metrics.Handler`), PrometheusRule in the Helm chart | issue #93 | `deploy/prometheusrule.yaml` is a plain manifest; the chart must escape the `$labels` annotations as `{{ "{{ $labels.x }}" }}` when templating it |
+| AC4: importer wiring (`cmd/fx` scheduler, `/metrics` mount via `importer.Metrics.Handler`), PrometheusRule in the Helm chart | issue #93 | `deploy/prometheusrule.yaml` is a plain manifest; the chart must escape the `$labels` annotations as `{{ "{{ $labels.x }}" }}` when templating it. The last-success timestamp gauge must be seeded from `LastSuccess` at startup, or covered by an `absent()` rule, once the scheduler topology is chosen; the stale rules aggregate with `max by` across pods |
 | Demo entity with EUR reporting currency | handoff | needs `services/ledger` and `services/org` waves |
 | OpenAPI, AsyncAPI, route/event contract test, Helm chart `passage-fx`, CronJobs, PrometheusRule, Dockerfile, `cmd/fx` | PSG-1202 slice 2e | no HTTP surface yet |
 | Web workspace `apps/web/src/modules/fx/` | slice 4 of PSG-12 | depends on the API |

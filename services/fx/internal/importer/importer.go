@@ -19,8 +19,8 @@ type RunStore interface {
 	RecordAttempt(ctx context.Context, runID string, attempts int) error
 	PostRates(ctx context.Context, in []store.RateInput) ([]store.Posted, error)
 	FinishRunSucceeded(ctx context.Context, runID string, imported, unchanged int) error
-	FinishRunFailed(ctx context.Context, runID string, attempts int, cause error) error
-	FinishRunDegraded(ctx context.Context, runID string, attempts int, cause error) error
+	FinishRunFailed(ctx context.Context, runID string, attempts int, cause error, retryable bool) error
+	FinishRunDegraded(ctx context.Context, runID string, attempts int, cause error, retryable bool) error
 	FinishRunAborted(ctx context.Context, runID string, attempts int, cause error) error
 	LastSuccess(ctx context.Context, provider, rateType string) (*time.Time, error)
 }
@@ -134,8 +134,11 @@ func (i *Importer) Run(ctx context.Context, rateType string, date time.Time) (Re
 	finishCtx := context.WithoutCancel(ctx)
 	res := Result{RunID: run.ID, Attempts: attempts}
 	if fetchErr != nil {
-		if ctx.Err() != nil {
-			return res, i.abort(finishCtx, res, fmt.Errorf("import aborted: %w", ctx.Err()))
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return res, i.abort(finishCtx, res, fmt.Errorf("import cancelled: %w", ctx.Err()))
+		}
+		if errors.Is(fetchErr, provider.ErrDisabled) {
+			return res, i.abort(finishCtx, res, fmt.Errorf("%s: %w", name, fetchErr))
 		}
 		return i.fallBack(finishCtx, name, rateType, res, fetchErr)
 	}
@@ -166,7 +169,7 @@ func (i *Importer) Run(ctx context.Context, rateType string, date time.Time) (Re
 }
 
 func (i *Importer) abort(ctx context.Context, res Result, cause error) error {
-	if err := i.store.FinishRunAborted(ctx, res.RunID, res.Attempts, cause); err != nil {
+	if err := i.store.FinishRunAborted(ctx, res.RunID, res.Attempts, fmt.Errorf("aborted: %w", cause)); err != nil {
 		slog.Error("fx finish aborted run", "runId", res.RunID, "err", err)
 	}
 	return cause
@@ -179,13 +182,13 @@ func (i *Importer) fallBack(ctx context.Context, name, rateType string, res Resu
 	}
 	if last == nil {
 		err := fmt.Errorf("%w: %s %s: %v", ErrNoLastKnownRate, name, rateType, cause)
-		if ferr := i.store.FinishRunFailed(ctx, res.RunID, res.Attempts, err); ferr != nil {
+		if ferr := i.store.FinishRunFailed(ctx, res.RunID, res.Attempts, err, retryable(cause)); ferr != nil {
 			slog.Error("fx finish failed run", "runId", res.RunID, "err", ferr)
 		}
 		i.metrics.record(ctx, name, rateType, true, nil)
 		return res, err
 	}
-	if err := i.store.FinishRunDegraded(ctx, res.RunID, res.Attempts, cause); err != nil {
+	if err := i.store.FinishRunDegraded(ctx, res.RunID, res.Attempts, cause, retryable(cause)); err != nil {
 		return res, fmt.Errorf("finish degraded run: %w", err)
 	}
 	i.metrics.record(ctx, name, rateType, true, last)
