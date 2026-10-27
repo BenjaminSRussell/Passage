@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"testing"
 	"time"
 
@@ -158,12 +159,16 @@ func TestRunPlan_PersistsVersionAndPegging(t *testing.T) {
 		t.Fatalf("pegged %s, planned %s", sum, res.Orders[0].Qty)
 	}
 
-	// Each new version writes one plan.completed event in the same transaction.
-	rows, err := admin.Query(context.Background(), `select type, payload from outbox order by created_at`)
+	// Each new version writes plan.started then plan.completed in its
+	// transaction (event ids are UUIDv7, so id order is write order). The run
+	// raises no message, so there is no message.raised.
+	rows, err := admin.Query(context.Background(), `select type, payload from outbox order by id`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer rows.Close()
+	var types []string
+	var started []planevents.PlanStartedData
 	var events []planevents.PlanCompletedData
 	for rows.Next() {
 		var typ string
@@ -171,19 +176,34 @@ func TestRunPlan_PersistsVersionAndPegging(t *testing.T) {
 		if err := rows.Scan(&typ, &raw); err != nil {
 			t.Fatal(err)
 		}
-		if typ != planevents.PlanCompleted {
-			t.Fatalf("outbox type %s", typ)
+		types = append(types, typ)
+		switch typ {
+		case planevents.PlanStarted:
+			var envelope struct {
+				Data planevents.PlanStartedData `json:"data"`
+			}
+			if err := json.Unmarshal(raw, &envelope); err != nil {
+				t.Fatal(err)
+			}
+			started = append(started, envelope.Data)
+		case planevents.PlanCompleted:
+			var envelope struct {
+				Data planevents.PlanCompletedData `json:"data"`
+			}
+			if err := json.Unmarshal(raw, &envelope); err != nil {
+				t.Fatal(err)
+			}
+			events = append(events, envelope.Data)
 		}
-		var envelope struct {
-			Data planevents.PlanCompletedData `json:"data"`
-		}
-		if err := json.Unmarshal(raw, &envelope); err != nil {
-			t.Fatal(err)
-		}
-		events = append(events, envelope.Data)
+	}
+	if !slices.Equal(types, []string{planevents.PlanStarted, planevents.PlanCompleted, planevents.PlanStarted, planevents.PlanCompleted}) {
+		t.Fatalf("outbox types = %v; want started, completed per version", types)
 	}
 	if len(events) != 2 || events[1].VersionID != v2.ID || events[1].PlanID == "" || events[1].PlannedOrders.Purchase != 1 || events[1].PlanHash != res.Hash {
 		t.Fatalf("outbox events = %+v; want two plan.completed, the last for version 2", events)
+	}
+	if s := started[1]; s.VersionID != v2.ID || s.VersionNumber != 2 || s.Kind != "static" || s.AsOf != "2026-11-02" || s.PlanID != events[1].PlanID || s.ItemsPlanned != 1 {
+		t.Fatalf("plan.started of version 2 = %+v", s)
 	}
 }
 

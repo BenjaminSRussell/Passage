@@ -39,6 +39,9 @@ const (
 	lockNotAvailable      = "55P03"
 	dateLayout            = "2006-01-02"
 	eventSource           = "planning"
+	// planKindStatic is the only plan kind runs have until the dynamic
+	// net-change plan exists (FR-22.1).
+	planKindStatic = "static"
 )
 
 // Store is the persistence contract the API depends on.
@@ -56,6 +59,7 @@ type Store interface {
 	UpsertForecastLines(ctx context.Context, modelCode string, expectedVersion int, spec *ModelSpec, cells []ForecastCellInput) (ForecastModel, error)
 	ListForecastLines(ctx context.Context, modelCode, itemID, siteID string, limit int) (ForecastModel, []ForecastLine, error)
 	ForecastDemand(ctx context.Context, modelCode, siteID string, from time.Time) ([]ForecastDemandLine, error)
+	ListNetRequirements(ctx context.Context, planCode, itemID string, limit int) ([]NetRequirement, error)
 	Ping(ctx context.Context) error
 }
 
@@ -162,8 +166,10 @@ func dayDate(asOf time.Time, day int) string {
 	return asOf.AddDate(0, 0, day).Format(dateLayout)
 }
 
-func enqueue(ctx context.Context, tx pgx.Tx, planID, tenantID string, versionID string, data planevents.PlanCompletedData) error {
-	evt, err := events.New(planevents.PlanCompleted, eventSource, versionID, tenantID, data)
+// enqueue writes one event of the plan aggregate to the outbox in tx, keyed by
+// the plan so a consumer sees a run's events in order.
+func enqueue(ctx context.Context, tx pgx.Tx, typ, planID, tenantID, subject string, data any) error {
+	evt, err := events.New(typ, eventSource, subject, tenantID, data)
 	if err != nil {
 		return err
 	}
@@ -209,6 +215,15 @@ func (s *Postgres) RunPlan(ctx context.Context, req RunRequest) (Version, bool, 
 		}
 		asOf := req.AsOf.Format(dateLayout)
 		r := req.Result
+		// The run executes inside this request, so the version is written and
+		// started in one transaction; plan.started.v1 precedes the run's other
+		// events in the outbox.
+		if err := enqueue(ctx, tx, planevents.PlanStarted, planID, p.TenantID, versionID, planevents.PlanStartedData{
+			PlanID: planID, PlanCode: req.PlanCode, VersionID: versionID, VersionNumber: number, Kind: planKindStatic,
+			SiteID: req.SiteID, AsOf: asOf, ItemsPlanned: req.ItemsPlanned,
+		}); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `insert into plan_version (tenant_id, id, plan_id, number, site_id, as_of, status, items_planned, planned_orders_count, messages_count, duration_ms, plan_hash, input_hash, idempotency_key)
 			values ($1, $2, $3, $4, $5, $6::date, 'current', $7, $8, $9, $10, $11, $12, $13)`,
 			p.TenantID, versionID, planID, number, req.SiteID, asOf, req.ItemsPlanned, len(r.Orders), len(r.Messages), req.DurationMs, r.Hash, req.InputHash, key); err != nil {
@@ -241,20 +256,39 @@ func (s *Postgres) RunPlan(ctx context.Context, req RunRequest) (Version, bool, 
 				values ($1, $2, $3, $4, $5, $6, $7, $8::date, $9::numeric)`,
 				p.TenantID, ids.New(), versionID, pg.ItemID, pg.SupplyRef, pg.DemandRef, pg.DemandRefType, dayDate(req.AsOf, pg.DemandDate), pg.Qty.String())
 		}
-		for _, m := range r.Messages {
+		messageIDs := make([]string, len(r.Messages))
+		for i, m := range r.Messages {
+			messageIDs[i] = ids.New()
 			batch.Queue(`insert into action_message (tenant_id, id, plan_version_id, item_id, action, supply_ref, demand_ref, suggested_date, delay_days, qty)
 				values ($1, $2, $3, $4, $5, $6, $7, $8::date, $9, $10::numeric)`,
-				p.TenantID, ids.New(), versionID, m.ItemID, m.Action, m.SupplyRef, m.DemandRef, dayDate(req.AsOf, m.SuggestedDate), m.DelayDays, m.Qty.String())
+				p.TenantID, messageIDs[i], versionID, m.ItemID, m.Action, m.SupplyRef, m.DemandRef, dayDate(req.AsOf, m.SuggestedDate), m.DelayDays, m.Qty.String())
+		}
+		for _, n := range r.Net {
+			batch.Queue(`insert into net_requirement (tenant_id, id, plan_version_id, item_id, day, gross_requirements, scheduled_receipts, planned_receipts, pab, net_requirement)
+				values ($1, $2, $3, $4, $5::date, $6::numeric, $7::numeric, $8::numeric, $9::numeric, $10::numeric)`,
+				p.TenantID, ids.New(), versionID, n.ItemID, dayDate(req.AsOf, n.Day), n.Gross.String(), n.ScheduledReceipts.String(),
+				n.PlannedReceipts.String(), n.PAB.String(), n.Net.String())
 		}
 		if err := tx.SendBatch(ctx, batch).Close(); err != nil {
 			return err
+		}
+		// FR-22.7: one message.raised.v1 per action or delay message, so
+		// purchasing, sales and notifications learn of it with the version.
+		for i, m := range r.Messages {
+			if err := enqueue(ctx, tx, planevents.MessageRaised, planID, p.TenantID, messageIDs[i], planevents.MessageRaisedData{
+				MessageID: messageIDs[i], PlanID: planID, PlanCode: req.PlanCode, VersionID: versionID, SiteID: req.SiteID,
+				Action: m.Action, ItemID: m.ItemID, SupplyRef: m.SupplyRef, DemandRef: m.DemandRef,
+				SuggestedDate: dayDate(req.AsOf, m.SuggestedDate), DelayDays: m.DelayDays, Qty: m.Qty.String(),
+			}); err != nil {
+				return err
+			}
 		}
 		if err := purgeVersions(ctx, tx, p.TenantID, planID, number-s.maxVersions); err != nil {
 			return err
 		}
 		v = Version{ID: versionID, PlanCode: req.PlanCode, Number: number, Status: "current", AsOf: asOf, ItemsPlanned: req.ItemsPlanned,
 			PlannedOrders: len(r.Orders), Messages: len(r.Messages), DurationMs: req.DurationMs, PlanHash: r.Hash, inputHash: req.InputHash}
-		return enqueue(ctx, tx, planID, p.TenantID, versionID, planevents.PlanCompletedData{
+		return enqueue(ctx, tx, planevents.PlanCompleted, planID, p.TenantID, versionID, planevents.PlanCompletedData{
 			PlanID: planID, PlanCode: req.PlanCode, VersionID: versionID, VersionNumber: number, ItemsPlanned: req.ItemsPlanned,
 			PlannedOrders: counts, Messages: len(r.Messages), DurationMs: req.DurationMs, PlanHash: r.Hash,
 		})
@@ -267,7 +301,7 @@ func (s *Postgres) RunPlan(ctx context.Context, req RunRequest) (Version, bool, 
 }
 
 // purgeVersions deletes the versions of a plan numbered at or below cut with
-// their planned orders, pegging and messages (FR-22.1: 20 retained versions by
+// their planned orders, pegging, messages and net requirements (FR-22.1: 20 retained versions by
 // default). It runs inside the run transaction that holds the plan lock. A
 // version that holds a firmed planned order is kept: the order records which
 // target order it became, and its batch's replay still names it.
@@ -277,7 +311,7 @@ func purgeVersions(ctx context.Context, tx pgx.Tx, tenantID, planID string, cut 
 	}
 	const doomed = `select v.id from plan_version v where v.tenant_id = $1 and v.plan_id = $2 and v.number <= $3 and v.status <> 'current'
 		and not exists (select 1 from planned_order o where o.tenant_id = v.tenant_id and o.plan_version_id = v.id and o.status = 'firmed')`
-	for _, table := range []string{"pegging", "action_message", "planned_order"} {
+	for _, table := range []string{"net_requirement", "pegging", "action_message", "planned_order"} {
 		if _, err := tx.Exec(ctx, `delete from `+table+` where tenant_id = $1 and plan_version_id in (`+doomed+`)`, tenantID, planID, cut); err != nil {
 			return err
 		}

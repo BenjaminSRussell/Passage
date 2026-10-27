@@ -1,26 +1,46 @@
 asyncapi: 3.0.0
 info:
   title: Passage Planning events
-  version: 0.2.0
+  version: 0.3.0
   description: CloudEvents 1.0 with Passage extensions (tenantid, correlationid, causationid, actor). Published through the outbox in the same transaction as the plan version change or the firming.
 defaultContentType: application/cloudevents+json
 channels:
-  planCompleted:
+  plan:
     address: passage.planning.plan
     messages:
+      planStartedV1:
+        $ref: '#/components/messages/PlanStartedV1'
       planCompletedV1:
         $ref: '#/components/messages/PlanCompletedV1'
+      messageRaisedV1:
+        $ref: '#/components/messages/MessageRaisedV1'
   plannedOrderFirmed:
     address: passage.planning.plannedorder
     messages:
       plannedOrderFirmedV1:
         $ref: '#/components/messages/PlannedOrderFirmedV1'
 operations:
+  publishPlanStarted:
+    action: send
+    channel:
+      $ref: '#/channels/plan'
+    messages:
+      - $ref: '#/channels/plan/messages/planStartedV1'
+    summary: A plan run started its version (FR-22.1). Runs are synchronous, so it is written in the run's transaction ahead of the run's other events.
   publishPlanCompleted:
     action: send
     channel:
-      $ref: '#/channels/planCompleted'
+      $ref: '#/channels/plan'
+    messages:
+      - $ref: '#/channels/plan/messages/planCompletedV1'
     summary: A plan version became the current version of its plan.
+  publishMessageRaised:
+    action: send
+    channel:
+      $ref: '#/channels/plan'
+    messages:
+      - $ref: '#/channels/plan/messages/messageRaisedV1'
+    summary: A run created an action or delay message (FR-22.7). One event per message, in the run's transaction, keyed by the plan.
   publishPlannedOrderFirmed:
     action: send
     channel:
@@ -28,6 +48,16 @@ operations:
     summary: A planned order was firmed (FR-22.10). One event per planned order; the owning context creates the target order with target_id, and orders that share a target_id are the lines of one purchase order.
 components:
   messages:
+    PlanStartedV1:
+      name: dev.passage.planning.plan.started.v1
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/PlanStartedData'
+    MessageRaisedV1:
+      name: dev.passage.planning.message.raised.v1
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/MessageRaisedData'
     PlanCompletedV1:
       name: dev.passage.planning.plan.completed.v1
       contentType: application/json
@@ -39,6 +69,34 @@ components:
       payload:
         $ref: '#/components/schemas/PlannedOrderFirmedData'
   schemas:
+    PlanStartedData:
+      type: object
+      required: [plan_id, plan_code, version_id, version_number, kind, site_id, as_of, items_planned]
+      properties:
+        plan_id: {type: string, format: uuid}
+        plan_code: {type: string}
+        version_id: {type: string, format: uuid}
+        version_number: {type: integer}
+        kind: {type: string, enum: [static], description: 'Plan kind; dynamic net-change runs are not built yet'}
+        site_id: {type: string, format: uuid, description: The run's scope is the whole snapshot of this site}
+        as_of: {type: string, format: date}
+        items_planned: {type: integer}
+    MessageRaisedData:
+      type: object
+      required: [message_id, plan_id, plan_code, version_id, site_id, action, item_id, supply_ref, demand_ref, suggested_date, delay_days, qty]
+      properties:
+        message_id: {type: string, format: uuid}
+        plan_id: {type: string, format: uuid}
+        plan_code: {type: string}
+        version_id: {type: string, format: uuid}
+        site_id: {type: string, format: uuid}
+        action: {type: string, enum: [delay, postpone, advance, shortage, cancel, decrease]}
+        item_id: {type: string, format: uuid}
+        supply_ref: {type: string, description: Planned order number or receipt ref; empty for a shortage}
+        demand_ref: {type: string, description: 'Demand the message is about (sales line, forecast, bom line); empty when none'}
+        suggested_date: {type: string, format: date}
+        delay_days: {type: integer}
+        qty: {type: string, description: Decimal string in the inventory unit}
     PlanCompletedData:
       type: object
       required: [plan_id, plan_code, version_id, version_number, items_planned, planned_orders, messages, duration_ms, plan_hash]

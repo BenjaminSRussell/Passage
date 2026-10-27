@@ -36,6 +36,7 @@ const (
 	idempotencyKey = "Idempotency-Key"
 	dateLayout     = "2006-01-02"
 	maxItems       = 100000
+	maxClosedDates = 1000
 	maxPegDepth    = 20
 	defaultDepth   = 5
 	readyTimeout   = 2 * time.Second
@@ -79,6 +80,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyFirmOrders)).Post("/v1/planning/planned-orders:firm", a.firmPlannedOrders)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/planned-orders/{id}/pegging", a.pegging)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/messages", a.listMessages)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/net-requirements", a.listNetRequirements)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/forecasts/{modelCode}/lines", a.getForecastLines)
 	r.With(authz.RequireDuty(dutyMaintainForecast)).Put("/v1/planning/forecasts/{modelCode}/lines", a.putForecastLines)
 	a.registerCalculators(r)
@@ -124,8 +126,58 @@ type runRequest struct {
 	SiteID string `json:"siteId"`
 	// ForecastModel, when set, adds the model's reduced forecast at the site
 	// as forecast demand of the snapshot's items (FR-22.8).
-	ForecastModel string    `json:"forecastModel,omitempty"`
-	Items         []itemDTO `json:"items"`
+	ForecastModel string `json:"forecastModel,omitempty"`
+	// Calendar is the site work calendar of the run (FR-22.5, BR-22.8); without
+	// it lead times and margins count calendar days.
+	Calendar *calendarDTO `json:"calendar,omitempty"`
+	Items    []itemDTO    `json:"items"`
+}
+
+// calendarDTO names the closed days of the site: whole weekdays (0 Sunday to
+// 6 Saturday) and single dates such as public holidays.
+type calendarDTO struct {
+	ClosedWeekdays []int    `json:"closedWeekdays"`
+	ClosedDates    []string `json:"closedDates"`
+}
+
+// validate returns the field error of the calendar, or "" when it is usable.
+func (c *calendarDTO) validate() string {
+	closed := map[int]bool{}
+	for _, wd := range c.ClosedWeekdays {
+		if wd < 0 || wd > 6 {
+			return "closedWeekdays must be 0 (Sunday) to 6 (Saturday)"
+		}
+		closed[wd] = true
+	}
+	if len(closed) == 7 {
+		return "at least one weekday must be open"
+	}
+	if len(c.ClosedDates) > maxClosedDates {
+		return fmt.Sprintf("closedDates holds at most %d dates", maxClosedDates)
+	}
+	for _, s := range c.ClosedDates {
+		if _, err := time.Parse(dateLayout, s); err != nil {
+			return "closedDates must be dates as YYYY-MM-DD"
+		}
+	}
+	return ""
+}
+
+// toDomain converts a validated calendar into engine form; day 0 is asOf. A
+// nil calendar stays nil (calendar days).
+func (c *calendarDTO) toDomain(asOf time.Time) *domain.Calendar {
+	if c == nil {
+		return nil
+	}
+	cal := &domain.Calendar{Weekday0: int(asOf.Weekday()), ClosedDays: map[int]bool{}}
+	for _, wd := range c.ClosedWeekdays {
+		cal.ClosedWeekdays[wd] = true
+	}
+	for _, s := range c.ClosedDates {
+		d, _ := time.Parse(dateLayout, s)
+		cal.ClosedDays[int(d.Sub(asOf)/(24*time.Hour))] = true
+	}
+	return cal
 }
 
 type itemDTO struct {
@@ -190,6 +242,11 @@ func (req runRequest) validate() map[string]string {
 	}
 	if req.ForecastModel != "" && !planCodePattern.MatchString(req.ForecastModel) {
 		fields["forecastModel"] = codeMessage
+	}
+	if req.Calendar != nil {
+		if msg := req.Calendar.validate(); msg != "" {
+			fields["calendar"] = msg
+		}
 	}
 	if len(req.Items) == 0 || len(req.Items) > maxItems {
 		fields["items"] = fmt.Sprintf("must hold 1 to %d items", maxItems)
@@ -334,7 +391,7 @@ func (a *API) runPlan(w http.ResponseWriter, r *http.Request) {
 		Request  runRequest `json:"request"`
 	}{code, req})
 	started := a.now()
-	result, err := domain.Run(0, items)
+	result, err := domain.RunWithCalendar(0, req.Calendar.toDomain(asOf), items)
 	if err != nil {
 		a.runsRefused.Add(1)
 		httpx.Fail(w, r, runProblem(err))
@@ -391,7 +448,7 @@ func runProblem(err error) error {
 		return httpx.NewProblem(http.StatusUnprocessableEntity, "PLAN-0004", "BOM cycle detected; low-level codes not updated")
 	case errors.Is(err, domain.ErrTooManySplits):
 		return httpx.NewProblem(http.StatusUnprocessableEntity, "PLAN-0005", "a requirement splits into more orders than the limit of 1000")
-	case errors.Is(err, domain.ErrInvalidItem):
+	case errors.Is(err, domain.ErrInvalidItem), errors.Is(err, domain.ErrInvalidCalendar):
 		return httpx.NewProblem(http.StatusUnprocessableEntity, codeInput, err.Error())
 	}
 	return err

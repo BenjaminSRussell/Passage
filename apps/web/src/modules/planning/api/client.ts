@@ -82,14 +82,38 @@ export const PlanVersion = z.object({
 });
 export type PlanVersion = z.infer<typeof PlanVersion>;
 
+/**
+ * Site work calendar of a run (FR-22.5, BR-22.8): lead times and margins then
+ * count working days. Weekdays are 0 (Sunday) to 6 (Saturday); one must stay open.
+ */
+export interface WorkCalendar {
+  closedWeekdays?: number[];
+  closedDates?: string[];
+}
+
 /** The engine snapshot a plan run takes (RunRequest in the OpenAPI). */
 export interface RunPlanRequest {
   asOf: string;
   siteId: string;
   /** Forecast model whose reduced cells at the site are netted as forecast demand. */
   forecastModel?: string;
+  /** Without a calendar the run counts calendar days. */
+  calendar?: WorkCalendar;
   items: unknown[];
 }
+
+/** One day of the MD04-style net requirements view of an item (FR-22.12). Quantities are decimal strings. */
+export const NetRequirement = z.object({
+  itemId: z.string(),
+  date: z.string(),
+  grossRequirements: z.string(),
+  scheduledReceipts: z.string(),
+  plannedReceipts: z.string(),
+  /** PAB(t) = PAB(t-1) + scheduled + planned receipts - gross requirements. */
+  projectedAvailableBalance: z.string(),
+  netRequirement: z.string(),
+});
+export type NetRequirement = z.infer<typeof NetRequirement>;
 
 export const ReductionPrinciple = z.enum(["none", "percent", "transactions", "transactions-dynamic"]);
 export type ReductionPrinciple = z.infer<typeof ReductionPrinciple>;
@@ -186,6 +210,13 @@ export async function listMessages(
   const params = new URLSearchParams({ planCode });
   if (action) params.set("action", action);
   const body = await request(`/messages?${params.toString()}`, z.object({ items: z.array(Message) }), init);
+  return body.items;
+}
+
+/** Net requirements of one item in the current version of a plan, in date order (empty when the plan did not plan it). */
+export async function listNetRequirements(planCode: string, itemId: string, init?: RequestInit): Promise<NetRequirement[]> {
+  const params = new URLSearchParams({ planCode, itemId });
+  const body = await request(`/net-requirements?${params.toString()}`, z.object({ items: z.array(NetRequirement) }), init);
   return body.items;
 }
 

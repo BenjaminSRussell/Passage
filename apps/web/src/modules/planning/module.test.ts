@@ -38,6 +38,7 @@ describe("planning module", () => {
       "/planning/planned-orders",
       "/planning/planned-orders/:id",
       "/planning/messages",
+      "/planning/net-requirements",
       "/planning/runs",
       "/planning/runs/new",
       "/planning/forecast",
@@ -56,6 +57,7 @@ describe("planning module", () => {
     expect(duties["/planning/runs/new"]).toBe("planning.run");
     expect(duties["/planning/forecast"]).toBe("planning.read");
     expect(duties["/planning/calculators"]).toBe("planning.read");
+    expect(duties["/planning/net-requirements"]).toBe("planning.read");
   });
 
   it("is auto-discovered by the registry", () => {

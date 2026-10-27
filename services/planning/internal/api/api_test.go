@@ -45,6 +45,8 @@ type fakeStore struct {
 	firms    map[string]fakeFirm
 	firmed   map[string]bool
 	lastFirm store.FirmRequest
+	// lastLimit is the page size the last list read received.
+	lastLimit int
 }
 
 func (f *fakeStore) RunPlan(_ context.Context, req store.RunRequest) (store.Version, bool, error) {

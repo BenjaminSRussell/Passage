@@ -12,9 +12,51 @@ var PlanCompleted = events.Type(Context, "plan", "completed", 1)
 // admits only lowercase letters and digits in the entity segment.
 var PlannedOrderFirmed = events.Type(Context, "plannedorder", "firmed", 1)
 
+// PlanStarted is published when a run starts its version (FR-22.1). Runs are
+// synchronous, so it is written in the run's transaction ahead of
+// plan.completed.v1.
+var PlanStarted = events.Type(Context, "plan", "started", 1)
+
+// MessageRaised is published once per action or delay message a run creates
+// (FR-22.7), in the run's transaction.
+var MessageRaised = events.Type(Context, "message", "raised", 1)
+
 // All lists the event types this service publishes.
 func All() []string {
-	return []string{PlanCompleted, PlannedOrderFirmed}
+	return []string{PlanStarted, PlanCompleted, PlannedOrderFirmed, MessageRaised}
+}
+
+// PlanStartedData is the data member of plan.started.v1. Kind is static until
+// the dynamic net-change plan exists; the scope is the whole snapshot of the
+// site, so it is carried as site_id.
+type PlanStartedData struct {
+	PlanID        string `json:"plan_id"`
+	PlanCode      string `json:"plan_code"`
+	VersionID     string `json:"version_id"`
+	VersionNumber int    `json:"version_number"`
+	Kind          string `json:"kind"`
+	SiteID        string `json:"site_id"`
+	AsOf          string `json:"as_of"`
+	ItemsPlanned  int    `json:"items_planned"`
+}
+
+// MessageRaisedData is the data member of message.raised.v1. SupplyRef is the
+// planned order number or receipt ref the message is about (empty for a
+// shortage), DemandRef the demand (sales line, forecast, bom line) it affects.
+// Qty is a decimal string in the inventory unit.
+type MessageRaisedData struct {
+	MessageID     string `json:"message_id"`
+	PlanID        string `json:"plan_id"`
+	PlanCode      string `json:"plan_code"`
+	VersionID     string `json:"version_id"`
+	SiteID        string `json:"site_id"`
+	Action        string `json:"action"`
+	ItemID        string `json:"item_id"`
+	SupplyRef     string `json:"supply_ref"`
+	DemandRef     string `json:"demand_ref"`
+	SuggestedDate string `json:"suggested_date"`
+	DelayDays     int    `json:"delay_days"`
+	Qty           string `json:"qty"`
 }
 
 // PlannedOrderFirmedData is the data member of plannedorder.firmed.v1. The

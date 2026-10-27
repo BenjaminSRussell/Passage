@@ -1,6 +1,6 @@
-# NOT-IMPLEMENTED (PSG-22, planning web module, slices 1 to 4)
+# NOT-IMPLEMENTED (PSG-22, planning web module, slices 1 to 5)
 
-Screens of slices 1 to 4, all registered in `module.ts` and built from the
+Screens of slices 1 to 5, all registered in `module.ts` and built from the
 shell primitives (`src/shell/ui`) with CSS Modules:
 
 - `/planning`: master planning workspace with plan picker, summary tiles
@@ -17,10 +17,20 @@ shell primitives (`src/shell/ui`) with CSS Modules:
   shows the order it became.
 - `/planning/messages`: action and delay messages with an action filter
   (slice 4 adds cancel and decrease).
+- `/planning/net-requirements` (slice 5): the MD04-style view of one item
+  (`?plan=` and `?item=`) in the current version: date, gross requirements,
+  scheduled and planned receipts, projected balance (negative shown as a
+  danger badge) and net requirement, with the item's planned orders below; a
+  row opens the planned order and its pegging tree. A planned-order page links
+  to the net requirements of its item. Loading, empty, "choose an item" and
+  error states.
 - `/planning/runs`: plan run history (versions, counts, plan hash).
 - `/planning/runs/new`: run-plan form that posts a snapshot with an
   Idempotency-Key (kept across retries of the same input) and, since slice 2,
-  an optional forecast model whose reduced forecast the run nets.
+  an optional forecast model whose reduced forecast the run nets. Since slice
+  5 the form takes the site work calendar: closed weekdays (checkboxes, one
+  must stay open) and closed dates; with none closed the run counts calendar
+  days.
 - `/planning/forecast` (slice 2): forecast cells of a model (`?model=`, default
   `BASE`) with forecast, open sales and reduced forecast, and a form that adds
   or changes a cell and the model's reduction principle under If-Match.
@@ -41,7 +51,9 @@ Each list has loading, empty and error states; the plan in view is kept in the
 | Planned orders: bulk approve, change and delete; keyboard range selection with `F` to firm | later slice of PSG-22 | Selection is by checkbox (or all open orders) and is used for firming only; maintenance stays one order at a time. |
 | Firming result report (PDF, email) | later slice of PSG-22 | The service renders no document yet; the card lists the orders created. |
 | Hide maintenance and firming controls from users without `planning.order.maintain` or `planning.order.firm` | later slice of PSG-22 | The shell exposes no per-duty check to pages yet; the service refuses the write with 403 and the card shows the problem. |
-| Net requirements (MD04) grid, what-if simulate, virtualized 365 x 20 grid | later slice of PSG-22 | Net-requirements API not built. |
+| Net requirements (MD04) list of one item with drill to pegging | built | `/planning/net-requirements` (`NetRequirementsPage.tsx`); the drill goes through the item's planned orders. |
+| Net requirements: what-if simulate, messages column, virtualized 365 x 20 grid, site or version choice | later slice of PSG-22 | The service has no simulate action, stores no messages per day, and reads the current version only; the list is a plain table of days with movement (at most 500). |
+| Site work calendar read from the site (w6) instead of entered on the run form | handoff (PSG-6) | The service takes the calendar on the run until site calendars are readable. |
 | Action messages: apply action to the source order, dismiss | later slice of PSG-22 | Action endpoints not built. |
 | Forecast: list cells and edit one cell with source badge | built | `/planning/forecast` (`ForecastPage.tsx`); a row opens in the form. |
 | Forecast grid with in-place cell editing (item x period columns) | later slice of PSG-22 | Cells are a row list with a form, not a pivoted grid. |

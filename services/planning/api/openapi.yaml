@@ -3,14 +3,15 @@ info:
   title: Passage Planning API
   version: 0.2.0
   description: |
-    Master planning (wave 22, slices 1 and 2). Covers static plan runs with time
-    fences and forecast demand, run history and version status, planned orders
-    and their maintenance (change, approve, delete under If-Match),
-    explain-tree pegging, action/delay messages, and forecast cells with
-    reduction. Every planned order is pegged to the demand it serves. Browser
-    clients call these paths under /api (the web BFF strips the prefix). Not yet
-    exposed (see NOT-IMPLEMENTED.md): firming, net requirements, coverage
-    groups, statistical forecast generation.
+    Master planning (wave 22, slices 1 to 5). Covers static plan runs with time
+    fences, forecast demand and a site work calendar, run history and version
+    status, planned orders with their maintenance (change, approve, delete
+    under If-Match) and firming, explain-tree pegging, action/delay messages,
+    the MD04-style net requirements view, forecast cells with reduction, and
+    stateless calculators. Every planned order is pegged to the demand it
+    serves. Browser clients call these paths under /api (the web BFF strips the
+    prefix). Not yet exposed (see NOT-IMPLEMENTED.md): coverage groups,
+    statistical forecast generation, simulation plans.
 servers:
   - url: https://api.{env}.passage.dev
     variables:
@@ -303,6 +304,35 @@ paths:
                   items:
                     type: array
                     items: {$ref: '#/components/schemas/Message'}
+        '400': {$ref: '#/components/responses/Problem'}
+  /v1/planning/net-requirements:
+    get:
+      operationId: listNetRequirements
+      summary: MD04-style time-phased net requirements of one item in the current version (FR-22.12)
+      description: One row per day with movement, as the run netted it; quiet days carry the PAB over. Past-due demand and receipts count at the plan's as-of date. Edits to planned orders after the run are not reflected until the next run.
+      x-passage-duty: planning.read
+      parameters:
+        - name: planCode
+          in: query
+          required: true
+          schema: {type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{1,19}$'}
+        - name: itemId
+          in: query
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Days in date order; empty when the plan has no current version or did not plan the item
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/NetRequirement'}
         '400': {$ref: '#/components/responses/Problem'}
   /v1/planning/forecasts/{modelCode}/lines:
     get:
@@ -757,6 +787,19 @@ components:
           type: string
           pattern: '^[A-Z0-9][A-Z0-9_-]{1,19}$'
           description: 'Adds the reduced forecast of this model at the site as forecast demand (ref FC:<model>:<period start>) of the snapshot items; periods that ended before asOf are skipped. 422 PLAN-FORECAST-NOT-FOUND when the model does not exist.'
+        calendar:
+          type: object
+          description: 'Site work calendar (FR-22.5, BR-22.8). Lead times, receipt margins and futures dates then count working days; a demand on a closed day moves forward and a receipt or planned delivery on a closed day moves backward to the nearest open day. Omit to count calendar days. Period, positive and negative days stay calendar days.'
+          properties:
+            closedWeekdays:
+              type: array
+              maxItems: 7
+              description: At least one weekday must stay open.
+              items: {type: integer, minimum: 0, maximum: 6, description: 0 Sunday to 6 Saturday}
+            closedDates:
+              type: array
+              maxItems: 1000
+              items: {type: string, format: date}
         items:
           type: array
           minItems: 1
@@ -954,6 +997,17 @@ components:
         children:
           type: array
           items: {$ref: '#/components/schemas/PegNode'}
+    NetRequirement:
+      type: object
+      required: [itemId, date, grossRequirements, scheduledReceipts, plannedReceipts, projectedAvailableBalance, netRequirement]
+      properties:
+        itemId: {type: string, format: uuid}
+        date: {type: string, format: date}
+        grossRequirements: {type: string, description: 'Decimal string in the inventory unit: demand, dependent demand and safety stock (at the as-of date) due that day'}
+        scheduledReceipts: {type: string, description: Existing supply (open orders) due that day}
+        plannedReceipts: {type: string, description: Planned orders delivered that day}
+        projectedAvailableBalance: {type: string, description: 'PAB(t) = PAB(t-1) + SR + PR - GR, opening at on-hand'}
+        netRequirement: {type: string, description: 'The day''s own shortfall before planned receipts: max(0, GR - max(PAB(t-1), 0) - SR)'}
     Message:
       type: object
       properties:

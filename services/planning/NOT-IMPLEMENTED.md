@@ -1,6 +1,6 @@
-# NOT-IMPLEMENTED (PSG-22, planning service, slices 1 to 4)
+# NOT-IMPLEMENTED (PSG-22, planning service, slices 1 to 5)
 
-Every ticket deliverable and acceptance criterion that slices 1 to 4 do not
+Every ticket deliverable and acceptance criterion that slices 1 to 5 do not
 build. Slice 2 added the freeze, action and futures fences (BR-22.4),
 planned-order maintenance (FR-22.11) and forecast cells with reduction that a
 run nets as demand (FR-22.8, AC-22.6). Slice 3 added five stateless calculators
@@ -12,7 +12,10 @@ arrangements, strategies and batches and their use inside a plan run are the
 open part of deliverables 7 to 9 below. Slice 4 added firming with grouping and
 the `plannedorder.firmed.v1` event (FR-22.10, BR-22.9, AC-22.8), Cancel and
 Decrease messages beyond the coverage time fence (FR-22.7), and the version
-purge (`PLANNING_MAX_VERSIONS`).
+purge (`PLANNING_MAX_VERSIONS`). Slice 5 added the site work calendar on the
+run input (FR-22.5, BR-22.8), the stored net requirements view and
+`GET /net-requirements` (FR-22.12, AC-22.10), and the `plan.started.v1` and
+`message.raised.v1` events.
 Status is `later slice of PSG-22` (planned work in this wave), `partly built`
 (the stated part exists and is tested; the rest is named) or `handoff`
 (needs another wave or owner; the handoff is recorded here because this wave may
@@ -29,7 +32,7 @@ not edit that code).
 | 1 | Safety-stock policy `first-issue` (BR-22.1 step 4, BR-22.5) | later slice of PSG-22 | Only policy `today` is built: safety stock is a demand at today, replenished at today + lead time. |
 | 1 | Issue and reorder margins (FR-22.5) | later slice of PSG-22 | Only the receipt margin (`coverage.marginDays`) is applied. |
 | 1 | Vendor-specific purchase lead time from trade agreements (FR-22.5) and default vendor on planned purchases (`PLAN-0008`) | handoff (PSG-17) | Vendors and trade agreements are not modelled; the item lead time applies. |
-| 1 | Working calendars for lead-time offsets (BR-22.8) | later slice of PSG-22 | Lead times are in calendar days; site calendar from w6 is not read yet. |
+| 1 | Working calendars for lead-time offsets (BR-22.8) | partly built | `calendar` on the run (closed weekdays, up to 1,000 closed dates; one weekday must stay open): receipt margins, lead times, futures dates and delay propagation count working days, demand on a closed day moves forward and supply backward (`domain/calendar.go`, tests in `calendar_test.go` with a property that every planned order is ordered, delivered and expected on a working day). Not built: reading the site calendar from w6 (handoff PSG-6, the calendar travels on the run until then), country holiday packs (w48), and period, positive and negative days in working days (they stay calendar days). |
 | 1 | Low-level-code recompute on BOM change (w9 event) | later slice of PSG-22 | LLCs are computed per run from the snapshot; no BOM event consumer yet. |
 | 1 | Route-based production lead time (Σ operation times, w21) | handoff (PSG-21) | Route data comes from the production context; slice 1 accepts `leadTimeDays`. |
 | 2 | Demand and supply loaded from source contexts: sales orders (w27), on-hand (w16), purchase orders (w17), production orders and transfers (w21) | handoff (PSG-27, PSG-16, PSG-17, PSG-21) | The run API takes its snapshot inline. Source contexts do not publish the events or read APIs the snapshot needs yet. |
@@ -60,7 +63,7 @@ not edit that code).
 | 8 | Planning strategies MTS net/gross, MTO, ATO, PWFA, subassembly (FR-22.19, BR-22.13) | partly built | `POST /strategies:consume-forecast` (`domain/strategy.go`) applies the BR-22.13 consumption windows (backward, forward, backward-then-forward) for `assemble-to-order-final`, AC-22.14 tested. Not built: strategy codes on item coverage, the other five strategies inside the plan run, marking (`is_marking`) for MTO and PWFA, the `PLAN-0015` message, and the T461P migration mapping. Order-specific stock segregation needs w16 (handoff). |
 | 9 | Shelf-life aware pegging (FR-22.20, BR-22.15) | partly built | `POST /shelf-life:allocate` (`domain/shelflife.go`): FEFO over batches with expiry − demand day ≥ required shelf life, the shortfall, and batches expiring unpegged by a horizon day; AC-22.15 tested. Not built: shelf-life pegging inside the plan run, planned supply for the shortfall with expiry = delivery + shelf life, and the `PLAN-0011` message. Batch expiry (w16/w24) and sellable shelf-life days (FR-24.19) are handoffs. |
 | 9 | Supply schedule workbench (FR-22.21) | partly built | `POST /supply-schedule:project` (`domain/projection.go`) buckets demand, receipts and planned supply by day, week or 30-day month with projected on-hand and a below-safety-stock flag; a PAB-identity property test; the calculator card in the web module. Not built: the grid over a stored plan version for a selection of items, inline planned-order creation, quantity edits and firming in a cell, calendar-month buckets, and the printable report. |
-| 9 | Inventory forecast projection with value and days of supply (FR-22.22) | partly built | The same projection returns value (closing on-hand × unit cost as platform `money`, rounded to the currency's minor unit) and days of supply (on-hand over the next 30 days' average daily demand). Not built: the projection read from the current plan version or a scenario (needs requirement persistence, see the MD04 row) and current cost from inventory costing (w20 handoff; the cost is entered). |
+| 9 | Inventory forecast projection with value and days of supply (FR-22.22) | partly built | The same projection returns value (closing on-hand × unit cost as platform `money`, rounded to the currency's minor unit) and days of supply (on-hand over the next 30 days' average daily demand). Not built: the projection read from the current plan version or a scenario (the version's PAB per day is now stored in `net_requirement`, but the projection endpoint does not read it yet) and current cost from inventory costing (w20 handoff; the cost is entered). |
 
 ## Plan execution and operations (PRD 4.22.1, 4.22.10, 4.22.16)
 
@@ -72,12 +75,13 @@ not edit that code).
 | Version purge beyond `PLANNING_MAX_VERSIONS` (20) | partly built | Each run deletes versions beyond the newest `PLANNING_MAX_VERSIONS` (env, 2 to 100, default 20) with their rows, in the run transaction; versions holding a firmed planned order are kept. Not built: the daily 03:00 job, partition drops (no partitions yet) and the per-plan parameter (one setting per deployment). |
 | Firm planned orders API: `POST /planned-orders:firm` | built | Duty `planning.order.firm`. The PRD's segregation-of-duties rule (with *Approve purchase orders* above the w17 approval limit) is a handoff to PSG-17, which owns approval limits. |
 | `:firm` on a simulation version refused with 409 `PLAN-0003` | later slice of PSG-22 | Simulation versions (deliverable 6) do not exist yet, so every version is operational. |
-| Net requirements MD04 view `GET /net-requirements` (FR-22.12, AC-22.10) | later slice of PSG-22 | Requirement (ReqTrans) rows and PAB per period are not persisted yet; only planned orders, pegging and messages are. |
+| Net requirements MD04 view `GET /net-requirements` (FR-22.12, AC-22.10) | partly built | Each run stores, per item and day with movement, gross requirements, scheduled receipts, planned receipts, PAB and the day's net requirement (`net_requirement`, RLS, purged with its version); `GET /net-requirements?planCode&itemId` reads the current version. AC-22.10 is `TestRun_AC2210NetRequirementsOfRM300`. Not built: Requirement (ReqTrans) rows per demand and supply line (the view is aggregated per day), `siteId` and version or scenario selection on the query (a plan is one site; the current version is read), the messages column, the what-if simulate action, and refreshing the view after a planned order is changed or deleted (it shows the run). |
 | Plan scope filters: site, item group, planner, LLC range, `mps` scope (FR-22.13) | later slice of PSG-22 | A run plans the whole snapshot it is given. |
 | Version-to-version diff API (FR-22.14) | later slice of PSG-22 | Each version stores its plan hash and input hash; the diff endpoint is not built. |
 | UoM conversion of forecast lines and inventory UoM (BR-22.10) | later slice of PSG-22 | Quantities are taken as given (decimal, 6 places in the database). |
 | Coverage groups API `GET /coverage-groups` and item coverage setup | later slice of PSG-22 | Setup entities are not persisted; coverage is passed on the run input. |
-| Events `plan.started.v1`, `message.raised.v1`, `forecast.published.v1` | later slice of PSG-22 | `plan.completed.v1` and `plannedorder.firmed.v1` are emitted (outbox, same transaction). The PRD spells the latter `planned-order.firmed.v1`; the kernel's event type rule admits no hyphen in the entity segment. |
+| Events `plan.started.v1` and `message.raised.v1` | partly built | Both are written to the outbox in the run's transaction: `plan.started.v1` (plan, version, kind `static`, site, as-of, items) ahead of the run's other events, and one `message.raised.v1` per stored message (message id, action, item, supply and demand ref, suggested date, delay days, qty). Because runs are synchronous, `plan.started` reaches consumers together with `plan.completed`; it will lead it once the run is a Temporal job. The PRD's `requirementId`/`refType`/`refId` are carried as `supply_ref` and `demand_ref`, since Requirement rows are not stored. |
+| Event `forecast.published.v1` | later slice of PSG-22 | Needs the consensus workflow (deliverable 4). `plan.completed.v1` and `plannedorder.firmed.v1` are emitted (outbox, same transaction); the PRD spells the latter `planned-order.firmed.v1`, but the kernel's event type rule admits no hyphen in the entity segment. |
 | Feature flags `planning.dynamic`, `planning.statistical-forecast`, `planning.mps-scope` | later slice of PSG-22 | Not read yet. |
 | Plan run summary email and firming result report (PDF, email; 4.22.15) | later slice of PSG-22 | The firming response and the web module list the target orders of a batch; no document or email is rendered. |
 | Sanctions screening block on firming (w48) | handoff (PSG-48) | Firming does not consult screening; PSG-48 owns the screening status of vendors. |
@@ -104,24 +108,25 @@ not edit that code).
 | AC-22.14 assemble-to-order gross requirement 100, not 140 | partly built | `TestConsumeForecast_AC2214AssembleToOrder` and the API test; the plan run does not apply strategies yet. |
 | AC-22.15 short shelf-life batch not pegged, planned order covers the demand | partly built | `TestAllocateBatches_AC2215ShortShelfLifeNotPegged` and `TestShelfLife_AC2215` (no allocation, shortfall 30); the planned order for the shortfall needs engine integration. |
 | AC-22.8 three approved purchases of one vendor and date firm into one PO with three lines, each firmed with the target id | built | `TestGroupForFirming_AC228` (domain) and `TestFirmPlannedOrders` (store, database). The PO itself is created by PSG-17 from the events. |
-| AC-22.10, AC-22.11, AC-22.16 | later slice of PSG-22 | Depend on net requirements, scenarios and warehouse scopes above. |
+| AC-22.10 net requirements of RM-300 show PAB 400, 190, 110 for weeks 2 to 4 | built | `TestRun_AC2210NetRequirementsOfRM300` (engine) and `TestRunPlan_NetRequirementsAndMessageEvents` (stored and read back, database). |
+| AC-22.11, AC-22.16 | later slice of PSG-22 | Depend on scenarios and warehouse scopes above. |
 
 ## Verification
 
 | Item | Status | Reason |
 |---|---|---|
-| Database-backed tests and `0001_init.sql`, `0002_forecast_and_maintenance.sql`, `0003_firming.sql` on an empty database | built | Run in review against Postgres 16 with an admin URL and a non-superuser app role (`PASSAGE_TEST_DATABASE_URL`, `PASSAGE_TEST_APP_DATABASE_URL`). CI must set both. |
+| Database-backed tests and `0001_init.sql` to `0004_net_requirements.sql` on an empty database | built | Run in review against Postgres 16 with an admin URL and a non-superuser app role (`PASSAGE_TEST_DATABASE_URL`, `PASSAGE_TEST_APP_DATABASE_URL`). CI must set both. |
 | Pytest run of `services/forecast-py` | built | Run in review with Python 3.12; CI wiring for Python services belongs to the platform owner. |
 
 ## Reconciliation and test plan (PRD 4.22.9)
 
 | Test | Status | Reason |
 |---|---|---|
-| PAB identity property per item and day | partly built | `TestProperty_ProjectionPABIdentity` holds the recurrence per bucket of the supply-schedule projection; the same check over a stored plan version waits for net-requirements persistence. |
+| PAB identity property per item and day | built | `TestRun_PropertyNetRequirementsReconcile` holds the recurrence per item and day of every run's net requirements view, and `TestProperty_ProjectionPABIdentity` per bucket of the supply-schedule projection. |
 | Firming saga contract tests (compensation on injected failure) | handoff (PSG-17, PSG-21) | Planning's half is tested (one event per order in the outbox, all-or-nothing refusal). The consumers that create the target orders and report a failure are not built. |
 | Forecast model unit tests (Python) | built | `services/forecast-py/tests`. |
 | frePPLe comparison | later slice of PSG-22 | Optional. |
-| Reconciliation Σ supply − Σ demand = closing PAB | later slice of PSG-22 | Pending net-requirements persistence. |
+| Reconciliation Σ supply − Σ demand = closing PAB | built | `TestRun_PropertyNetRequirementsReconcile`: every demand, receipt and planned order of the item is in the view and the closing PAB is on-hand + Σ supply − Σ demand. |
 | Projection and events reconciliation | handoff (testing-reconciliation wave) | Test strategy owner. |
 
 ## Handoffs to other waves
@@ -131,7 +136,7 @@ not edit that code).
 - PSG-21 manufacturing: create the production or transfer order from `plannedorder.firmed.v1` (saga as above); route lead times; subcontractor operations.
 - PSG-27 sales: sales-line demand events (ref type `sales-line`).
 - PSG-9 product: BOM versions and low-level code change events.
-- PSG-6 calendars: site working calendar.
+- PSG-6 calendars: site working calendar (closed weekdays and dates) readable by site, so the run need not carry it.
 - PSG-20 supplier portal and PSG-35 EDI: supplier forecast publishing.
 - PSG-24 batch and shelf life: sellable shelf-life days (FR-24.19).
 - PSG-20 inventory costing: current item cost for the inventory forecast value (FR-22.22).

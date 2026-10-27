@@ -20,6 +20,12 @@ func TestEventTypesFollowTheNamingRule(t *testing.T) {
 	if PlannedOrderFirmed != "dev.passage.planning.plannedorder.firmed.v1" {
 		t.Errorf("PlannedOrderFirmed = %s", PlannedOrderFirmed)
 	}
+	if PlanStarted != "dev.passage.planning.plan.started.v1" {
+		t.Errorf("PlanStarted = %s", PlanStarted)
+	}
+	if MessageRaised != "dev.passage.planning.message.raised.v1" {
+		t.Errorf("MessageRaised = %s", MessageRaised)
+	}
 }
 
 // TestAsyncAPIDeclaresEveryEvent keeps events/asyncapi.yaml and All() in step.

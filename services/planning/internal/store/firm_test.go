@@ -231,7 +231,8 @@ func TestRunPlan_PurgesOldVersions(t *testing.T) {
 	var orphans int
 	if err := admin.QueryRow(context.Background(), `select (select count(*) from planned_order where plan_version_id not in (select id from plan_version))
 		+ (select count(*) from pegging where plan_version_id not in (select id from plan_version))
-		+ (select count(*) from action_message where plan_version_id not in (select id from plan_version))`).Scan(&orphans); err != nil || orphans != 0 {
+		+ (select count(*) from action_message where plan_version_id not in (select id from plan_version))
+		+ (select count(*) from net_requirement where plan_version_id not in (select id from plan_version))`).Scan(&orphans); err != nil || orphans != 0 {
 		t.Fatalf("rows left of purged versions = %d, %v", orphans, err)
 	}
 	if o, err := st.GetPlannedOrder(ctx, first[0].ID); err != nil || o.Status != "firmed" {

@@ -128,7 +128,11 @@ type Result struct {
 	Orders   []PlannedOrder
 	Pegging  []Peg
 	Messages []Message
-	Hash     string
+	// Net is the time-phased net requirements view (FR-22.12) of every item,
+	// ordered by item then day. It is derived from the orders and the snapshot,
+	// so it is not part of Hash.
+	Net  []NetRow
+	Hash string
 }
 
 type layer struct {
@@ -140,6 +144,7 @@ type layer struct {
 
 type runState struct {
 	today int
+	cal   *Calendar // nil: every day is a working day
 	index map[string]*Item
 	res   Result
 	seq   int
@@ -155,10 +160,24 @@ type ledger struct {
 	pegs    []Peg
 }
 
-// Run plans every item. Items are processed level by level (low-level code
-// ascending, then ID) so dependent demand from a parent is complete before the
-// child is netted. The input slices are not modified.
+// Run plans every item with lead times and margins in calendar days. Items are
+// processed level by level (low-level code ascending, then ID) so dependent
+// demand from a parent is complete before the child is netted. The input
+// slices are not modified.
 func Run(today int, in []Item) (Result, error) {
+	return RunWithCalendar(today, nil, in)
+}
+
+// RunWithCalendar plans like Run with the site work calendar cal (FR-22.5,
+// BR-22.8): lead times and margins count working days, a demand on a closed
+// day moves forward and a supply date on a closed day moves backward to the
+// nearest open day. A nil calendar counts calendar days.
+func RunWithCalendar(today int, cal *Calendar, in []Item) (Result, error) {
+	if cal != nil {
+		if err := cal.Validate(); err != nil {
+			return Result{}, err
+		}
+	}
 	items := make([]Item, len(in))
 	copy(items, in)
 	index := make(map[string]*Item, len(items))
@@ -189,7 +208,7 @@ func Run(today int, in []Item) (Result, error) {
 		}
 		return order[a].ID < order[b].ID
 	})
-	rs := &runState{today: today, index: index}
+	rs := &runState{today: today, cal: cal, index: index}
 	for _, it := range order {
 		if err := rs.plan(it); err != nil {
 			return Result{}, err
@@ -200,6 +219,7 @@ func Run(today int, in []Item) (Result, error) {
 	sort.Slice(rs.res.Pegging, func(a, b int) bool { return pegLess(rs.res.Pegging[a], rs.res.Pegging[b]) })
 	sort.Slice(rs.res.Messages, func(a, b int) bool { return msgLess(rs.res.Messages[a], rs.res.Messages[b]) })
 	rs.res.Messages = dedupeMessages(rs.res.Messages)
+	rs.res.Net = rs.netView(order)
 	rs.res.Hash = hashResult(rs.res)
 	return rs.res, nil
 }
@@ -292,14 +312,17 @@ func reqLess(a, b Requirement) bool {
 func (rs *runState) plan(item *Item) error {
 	demands := make([]Requirement, 0, len(item.Demand)+1)
 	for _, d := range item.Demand {
-		d.Date = max(d.Date, rs.today)
+		d.Date = rs.demandDate(d.Date)
 		demands = append(demands, d)
 	}
 	if item.SafetyStock.IsPositive() {
-		demands = append(demands, Requirement{Ref: RefSafety + ":" + item.ID, RefType: RefSafety, Date: rs.today, Qty: item.SafetyStock, Priority: PrioritySafety})
+		demands = append(demands, Requirement{Ref: RefSafety + ":" + item.ID, RefType: RefSafety, Date: rs.demandDate(rs.today), Qty: item.SafetyStock, Priority: PrioritySafety})
 	}
 	sort.SliceStable(demands, func(a, b int) bool { return reqLess(demands[a], demands[b]) })
 	receipts := slices.Clone(item.Receipts)
+	for i := range receipts {
+		receipts[i].Date = rs.supplyDate(receipts[i].Date)
+	}
 	sort.SliceStable(receipts, func(a, b int) bool {
 		if receipts[a].Date != receipts[b].Date {
 			return receipts[a].Date < receipts[b].Date
@@ -315,7 +338,7 @@ func (rs *runState) plan(item *Item) error {
 		// BR-22.1 step 5: a min/max item is checked at today even with no events,
 		// so a stock level below minimum always reorders. Orders created here are
 		// counted as supply by the walk below.
-		if err := L.check(rs.today, nil, nil); err != nil {
+		if err := L.check(rs.demandDate(rs.today), nil, nil); err != nil {
 			return err
 		}
 	}
@@ -539,18 +562,19 @@ func (L *ledger) order(t int, need decimal.Decimal) error {
 	for _, q := range lots {
 		L.rs.seq++
 		number := fmt.Sprintf("PLN-%06d", L.rs.seq)
-		delivery := t - it.MarginDays
-		orderDate := delivery - it.LeadTimeDays
+		delivery := L.rs.back(t, it.MarginDays)
+		orderDate := L.rs.back(delivery, it.LeadTimeDays)
 		if safetyOnly {
 			// BR-22.5: the safety-stock order is dated today + lead time.
-			delivery, orderDate = today+it.LeadTimeDays, today
+			orderDate = L.rs.demandDate(today)
+			delivery = L.rs.forward(orderDate, it.LeadTimeDays)
 		}
 		po := PlannedOrder{Number: number, ItemID: it.ID, OrderType: it.OrderType, Qty: q, OrderDate: orderDate, DeliveryDate: delivery, LotRule: rule}
 		if orderDate < today {
 			// BR-22.1 step 7: the order cannot be placed in the past, so it is
 			// expected at today + lead time. The delay message is raised by
 			// propagateFutures once delays from components are known.
-			futures := today + it.LeadTimeDays
+			futures := L.rs.forward(today, it.LeadTimeDays)
 			po.FuturesDate = &futures
 			po.DelayDays = futures - delivery
 		}
@@ -619,7 +643,7 @@ func (L *ledger) finish(receipts []Requirement) {
 		if !found {
 			continue
 		}
-		suggested := earliest - it.MarginDays
+		suggested := L.rs.back(earliest, it.MarginDays)
 		if it.PositiveDays > 0 && earliest-r.Date > it.PositiveDays {
 			L.rs.res.Messages = append(L.rs.res.Messages, Message{Action: ActionPostpone, ItemID: it.ID, SupplyRef: r.Ref, DemandRef: earliestRef, SuggestedDate: suggested, Qty: r.Qty})
 		} else if r.Date > earliest {
@@ -673,7 +697,7 @@ func (rs *runState) propagateFutures(levels []*Item) {
 			if o.FuturesDate == nil {
 				continue
 			}
-			ready := *o.FuturesDate + it.MarginDays
+			ready := rs.forward(*o.FuturesDate, it.MarginDays)
 			for _, p := range pegsOf[o.Number] {
 				if ready <= p.DemandDate {
 					continue
@@ -687,7 +711,7 @@ func (rs *runState) propagateFutures(levels []*Item) {
 						continue
 					}
 					parent := &orders[pi]
-					delivery := ready + rs.index[parent.ItemID].LeadTimeDays
+					delivery := rs.forward(ready, rs.index[parent.ItemID].LeadTimeDays)
 					if parent.FuturesDate == nil || delivery > *parent.FuturesDate {
 						parent.FuturesDate = &delivery
 						parent.DelayDays = delivery - parent.DeliveryDate
@@ -726,6 +750,43 @@ func (rs *runState) propagateFutures(levels []*Item) {
 		rs.res.Messages = append(rs.res.Messages, Message{Action: ActionDelay, ItemID: l.peg.ItemID, SupplyRef: l.peg.SupplyRef, DemandRef: l.peg.DemandRef,
 			SuggestedDate: l.ready, DelayDays: l.ready - l.peg.DemandDate, Qty: l.peg.Qty})
 	}
+}
+
+// demandDate is the day a demand is netted on: never before today and, with a
+// calendar, moved forward off a closed day (BR-22.8).
+func (rs *runState) demandDate(day int) int {
+	day = max(day, rs.today)
+	if rs.cal == nil {
+		return day
+	}
+	return rs.cal.OpenAfter(day)
+}
+
+// supplyDate moves a receipt on a closed day backward to the nearest open day
+// (BR-22.8); without a calendar the day stays.
+func (rs *runState) supplyDate(day int) int {
+	if rs.cal == nil {
+		return day
+	}
+	return rs.cal.OpenBefore(day)
+}
+
+// back offsets a supply-side day n working days earlier (calendar days
+// without a calendar), as for a receipt margin or a lead time (FR-22.5).
+func (rs *runState) back(day, n int) int {
+	if rs.cal == nil {
+		return day - n
+	}
+	return rs.cal.Back(day, n)
+}
+
+// forward offsets a day n working days later (calendar days without a
+// calendar), as for the futures date today + lead time.
+func (rs *runState) forward(day, n int) int {
+	if rs.cal == nil {
+		return day + n
+	}
+	return rs.cal.Forward(day, n)
 }
 
 // frozen reports whether day lies inside a freeze fence of n days from today.

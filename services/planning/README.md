@@ -1,4 +1,4 @@
-# planning (wave 22, PSG-22, slices 1 to 4)
+# planning (wave 22, PSG-22, slices 1 to 5)
 
 Master planning for Passage: nets demand against supply level by level through
 the BOM and writes planned purchase, production and transfer orders, each pegged
@@ -11,21 +11,26 @@ under If-Match, FR-22.11), and forecast cells with reduction (FR-22.8) that a
 run can net as forecast demand. Slice 3 adds stateless planning calculators.
 Slice 4 adds firming into target orders with grouping (FR-22.10), Cancel and
 Decrease messages beyond the coverage time fence (FR-22.7), and the version
-purge (`PLANNING_MAX_VERSIONS`). What is not built yet is listed in
+purge (`PLANNING_MAX_VERSIONS`). Slice 5 adds the site work calendar on a run
+(FR-22.5, BR-22.8), the stored MD04-style net requirements view with
+`GET /net-requirements` (FR-22.12, AC-22.10), and the `plan.started.v1` and
+`message.raised.v1` events. What is not built yet is listed in
 [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
 
 ## Layout
 
 ```
 cmd/planning/          entrypoint: dbx.Connect -> dbx.Migrate (MIGRATE_ON_START=true) -> httpx.NewRouter -> register -> httpx.Serve
-internal/domain/       pure engine: low-level codes, lot sizing, netting, pegging, messages, delay propagation, plan hash;
+internal/domain/       pure engine: low-level codes, lot sizing, netting, pegging, messages, delay propagation, plan hash,
+                       work calendar (calendar.go), net requirements view (netreq.go);
                        calculators: ddmrp.go, quota.go, strategy.go, shelflife.go, projection.go
-internal/store/        Postgres repository (pgx); a plan run is one transaction with its outbox event
+internal/store/        Postgres repository (pgx); a plan run is one transaction with its outbox events
 internal/api/          HTTP handlers under /v1/planning, RFC 9457 problems, /readyz with a database ping
-internal/events/       plan.completed.v1 and plannedorder.firmed.v1 types and payloads
+internal/events/       plan.started.v1, plan.completed.v1, message.raised.v1 and plannedorder.firmed.v1 types and payloads
 migrations/            0001_init.sql (plan, plan_version, planned_order, pegging, action_message, outbox; RLS on all)
                        0002_forecast_and_maintenance.sql (planned_order version/vendor/deleted, forecast_model, forecast_line; RLS)
                        0003_firming.sql (firming_batch with RLS, firmed target on planned_order, cancel/decrease actions)
+                       0004_net_requirements.sql (net_requirement per version, item and day; RLS)
 api/openapi.yaml       OpenAPI 3.1 for every exposed endpoint (kept in step by TestOpenAPI_MatchesRoutes)
 events/asyncapi.yaml   AsyncAPI 3 for every event published
 charts/planning/       Helm chart (deployment, service, servicemonitor toggle)
@@ -45,9 +50,21 @@ Dockerfile             distroless static image, built from the repository root
   order is dated today + lead time and pegged to the safety demand at once.
 - Lot sizing (FR-22.4): minimum, standard, multiple, then maximum (split into
   ⌈qty/max⌉ orders, at most 1,000 splits, `PLAN-0005`).
-- Lead time offsets in calendar days; delivery = requirement date − receipt
-  margin. An order whose order date falls before today gets futures date
-  today + lead time (BR-22.1 step 7).
+- Lead time offsets: delivery = requirement date − receipt margin, order date
+  = delivery − lead time. An order whose order date falls before today gets
+  futures date today + lead time (BR-22.1 step 7). Without a `calendar` on the
+  run these are calendar days. With one (closed weekdays and closed dates of
+  the site, FR-22.5, BR-22.8) margins, lead times, futures dates and the
+  delay propagation count working days; a demand on a closed day moves
+  forward and a receipt or delivery on a closed day moves backward to the
+  nearest open day. Period, positive and negative days stay calendar days.
+- Net requirements view (FR-22.12): per item and day with movement, gross
+  requirements (demand, dependent demand, safety stock at today), scheduled
+  receipts, planned receipts, PAB(t) = PAB(t−1) + SR + PR − GR from on-hand,
+  and the day's net requirement max(0, GR − max(PAB(t−1), 0) − SR); past-due
+  lines count at today. Stored per version (`net_requirement`); property tests
+  reconcile it with the run (closing PAB = on-hand + Σ supply − Σ demand) and
+  check PAB never goes negative where coverage must meet every demand.
 - Delay propagation (BR-22.2): after netting, delays run upward through the
   pegging, from the highest LLC down. A late component pushes the start of the
   planned production order it is pegged to, and a late planned order raises a
@@ -95,7 +112,8 @@ DATABASE_URL=postgres://... MIGRATE_ON_START=true go run ./cmd/planning   # HTTP
 ```
 
 Store tests cover persistence, replay and key reuse, version numbering, the
-outbox event, tenant isolation under RLS, the 409 on a concurrent run,
+outbox events (plan.started before plan.completed, one message.raised per
+stored message), the stored net requirements of the current version, tenant isolation under RLS, the 409 on a concurrent run,
 planned-order maintenance (versions, date and vendor rules, delete, superseded
 versions) and forecast cells (reduction, recompute on a principle change,
 forecast demand for a run), firming (AC-22.8 grouping, target ids, ETag bump,

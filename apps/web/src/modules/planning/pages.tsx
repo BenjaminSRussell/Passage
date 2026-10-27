@@ -414,7 +414,20 @@ export function PlannedOrderPage() {
   };
   return (
     <div className={styles.stack}>
-      <PageHeader title={o ? `Planned order ${o.number}` : "Planned order"} meta={o ? <StatusPill status={o.status} /> : undefined} actions={back} />
+      <PageHeader
+        title={o ? `Planned order ${o.number}` : "Planned order"}
+        meta={o ? <StatusPill status={o.status} /> : undefined}
+        actions={
+          <>
+            {o ? (
+              <Link className={buttonClassName("ghost")} to={`${withPlan("/planning/net-requirements", plan)}&item=${encodeURIComponent(o.itemId)}`}>
+                Net requirements of the item
+              </Link>
+            ) : null}
+            {back}
+          </>
+        }
+      />
       <LoadAlert what="the planned order" error={state.error} />
       <Card title="Order">
         {state.loading ? (

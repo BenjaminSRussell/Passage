@@ -1,7 +1,7 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Textarea } from "../../shell/ui";
-import { runPlan, type PlanVersion } from "./api/client";
+import { runPlan, type PlanVersion, type WorkCalendar } from "./api/client";
 import { describeError, PLAN_CODE, usePlanCode, withPlan, type LoadError } from "./hooks";
 import styles from "./pages.module.css";
 
@@ -36,13 +36,33 @@ interface Draft {
   siteId: string;
   /** Optional forecast model whose reduced forecast the run nets. */
   forecastModel?: string;
+  /** Closed weekdays of the site, 0 Sunday to 6 Saturday (BR-22.8). */
+  closedWeekdays?: number[];
+  /** Closed dates (holidays) separated by commas, spaces or new lines. */
+  closedDates?: string;
   items: string;
 }
 
 type Errors = Partial<Record<keyof Draft, string>>;
 
-/** Checks the form; returns field errors and the parsed items array. */
-export function validateRun(d: Draft): { errors: Errors; items: unknown[] } {
+/** Weekdays in the order a working week reads, with the service's numbers. */
+export const WEEKDAYS: [number, string][] = [
+  [1, "Monday"],
+  [2, "Tuesday"],
+  [3, "Wednesday"],
+  [4, "Thursday"],
+  [5, "Friday"],
+  [6, "Saturday"],
+  [0, "Sunday"],
+];
+
+const MAX_CLOSED_DATES = 1000;
+
+/**
+ * Checks the form; returns field errors, the parsed items array and the work
+ * calendar (undefined when no day is closed, so the run counts calendar days).
+ */
+export function validateRun(d: Draft): { errors: Errors; items: unknown[]; calendar?: WorkCalendar } {
   const errors: Errors = {};
   if (!PLAN_CODE.test(d.plan.trim())) errors.plan = "Use 2 to 20 capital letters, digits, _ or -.";
   if (!DATE.test(d.asOf)) errors.asOf = "Enter the plan date.";
@@ -57,7 +77,16 @@ export function validateRun(d: Draft): { errors: Errors; items: unknown[] } {
   } catch {
     errors.items = "Items are not valid JSON.";
   }
-  return { errors, items };
+  const closedWeekdays = [...new Set(d.closedWeekdays ?? [])].sort();
+  if (closedWeekdays.length === 7) errors.closedWeekdays = "Keep at least one weekday open.";
+  const closedDates = (d.closedDates ?? "").split(/[\s,]+/).filter((x) => x !== "");
+  if (closedDates.some((x) => !DATE.test(x))) errors.closedDates = "Enter dates as YYYY-MM-DD, separated by commas or spaces.";
+  else if (closedDates.length > MAX_CLOSED_DATES) errors.closedDates = `Enter at most ${MAX_CLOSED_DATES} dates.`;
+  const calendar =
+    closedWeekdays.length > 0 || closedDates.length > 0
+      ? { ...(closedWeekdays.length > 0 ? { closedWeekdays } : {}), ...(closedDates.length > 0 ? { closedDates } : {}) }
+      : undefined;
+  return { errors, items, calendar };
 }
 
 /**
@@ -67,7 +96,15 @@ export function validateRun(d: Draft): { errors: Errors; items: unknown[] } {
  */
 export function RunPlanPage({ today = new Date().toISOString().slice(0, 10) }: { today?: string }) {
   const [plan] = usePlanCode();
-  const [draft, setDraft] = useState<Draft>({ plan, asOf: today, siteId: "", forecastModel: "", items: SAMPLE_ITEMS });
+  const [draft, setDraft] = useState<Draft>({
+    plan,
+    asOf: today,
+    siteId: "",
+    forecastModel: "",
+    closedWeekdays: [],
+    closedDates: "",
+    items: SAMPLE_ITEMS,
+  });
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<LoadError | null>(null);
   const [result, setResult] = useState<PlanVersion | null>(null);
@@ -78,11 +115,18 @@ export function RunPlanPage({ today = new Date().toISOString().slice(0, 10) }: {
     key.current = newKey();
     setDraft((d) => ({ ...d, [field]: value }));
   };
+  const toggleWeekday = (day: number, closed: boolean) => {
+    key.current = newKey();
+    setDraft((d) => {
+      const rest = (d.closedWeekdays ?? []).filter((x) => x !== day);
+      return { ...d, closedWeekdays: closed ? [...rest, day] : rest };
+    });
+  };
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (busy) return;
-    const { errors: found, items } = validateRun(draft);
+    const { errors: found, items, calendar } = validateRun(draft);
     setErrors(found);
     if (Object.keys(found).length > 0) return;
     setBusy(true);
@@ -92,7 +136,13 @@ export function RunPlanPage({ today = new Date().toISOString().slice(0, 10) }: {
     try {
       const forecastModel = (draft.forecastModel ?? "").trim();
       setResult(
-        await runPlan(code, key.current, { asOf: draft.asOf, siteId: draft.siteId.trim(), ...(forecastModel ? { forecastModel } : {}), items }),
+        await runPlan(code, key.current, {
+          asOf: draft.asOf,
+          siteId: draft.siteId.trim(),
+          ...(forecastModel ? { forecastModel } : {}),
+          ...(calendar ? { calendar } : {}),
+          items,
+        }),
       );
       key.current = newKey();
     } catch (err) {
@@ -141,6 +191,42 @@ export function RunPlanPage({ today = new Date().toISOString().slice(0, 10) }: {
               <Input {...a11y} value={draft.forecastModel ?? ""} maxLength={20} onChange={(e) => set("forecastModel")(e.target.value.toUpperCase())} />
             )}
           </FormField>
+          <fieldset className={`${styles.fieldset} ${styles.wide}`} aria-describedby="run-weekdays-hint">
+            <legend className={styles.legend}>Closed weekdays</legend>
+            <p id="run-weekdays-hint" className={styles.summary}>
+              With closed days, lead times and margins count working days; demand on a closed day moves to the next open day and
+              supply to the previous one. Leave all open to count calendar days.
+            </p>
+            <div className={styles.checks}>
+              {WEEKDAYS.map(([day, name]) => (
+                <label key={day} className={styles.check} htmlFor={`run-closed-${day}`}>
+                  <Input
+                    id={`run-closed-${day}`}
+                    type="checkbox"
+                    checked={(draft.closedWeekdays ?? []).includes(day)}
+                    onChange={(e) => toggleWeekday(day, e.target.checked)}
+                  />
+                  {name}
+                </label>
+              ))}
+            </div>
+            {errors.closedWeekdays ? (
+              <p className={styles.formError} role="alert">
+                {errors.closedWeekdays}
+              </p>
+            ) : null}
+          </fieldset>
+          <div className={styles.wide}>
+            <FormField
+              id="run-closed-dates"
+              label="Closed dates"
+              optional
+              hint="Holidays and shutdown days of the site, as YYYY-MM-DD separated by commas or spaces."
+              error={errors.closedDates}
+            >
+              {(a11y) => <Input {...a11y} value={draft.closedDates ?? ""} onChange={(e) => set("closedDates")(e.target.value)} />}
+            </FormField>
+          </div>
           <div className={styles.wide}>
             <FormField
               id="run-items"
