@@ -52,4 +52,29 @@ BEGIN
 END
 $$;
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON receiving_vendor_invoice, receiving_vendor_invoice_line TO passage_app;
+CREATE TABLE IF NOT EXISTS receiving_pending_posting (
+  tenant_id uuid NOT NULL,
+  ledger_key text NOT NULL,
+  subject text NOT NULL,
+  request_hash text NOT NULL,
+  journal jsonb NOT NULL,
+  outcome text CHECK (outcome IN ('POSTED', 'REJECTED')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  done_at timestamptz,
+  PRIMARY KEY (tenant_id, ledger_key)
+);
+
+CREATE INDEX IF NOT EXISTS receiving_pending_posting_subject_ix ON receiving_pending_posting (tenant_id, subject) WHERE done_at IS NULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = current_schema() AND tablename = 'receiving_pending_posting' AND policyname = 'receiving_pending_posting_tenant_access') THEN
+    ALTER TABLE receiving_pending_posting ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE receiving_pending_posting FORCE ROW LEVEL SECURITY;
+    CREATE POLICY receiving_pending_posting_tenant_access ON receiving_pending_posting AS PERMISSIVE USING (tenant_id = current_setting('passage.tenant_id', true)::uuid) WITH CHECK (tenant_id = current_setting('passage.tenant_id', true)::uuid);
+  END IF;
+END
+$$;
+
+GRANT SELECT, INSERT ON receiving_vendor_invoice, receiving_vendor_invoice_line TO passage_app;
+GRANT SELECT, INSERT, UPDATE ON receiving_pending_posting TO passage_app;

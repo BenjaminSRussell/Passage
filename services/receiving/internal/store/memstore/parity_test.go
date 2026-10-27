@@ -585,6 +585,41 @@ var cases = []struct {
 			t.Fatalf("other tenant err=%v, want ErrGrirNotFound", err)
 		}
 	}},
+	{"pending postings block other keys and changed bodies until the subject's command completes", func(t *testing.T, b backend) {
+		p := principal(1)
+		r := registered(t, b.st, p, "PS-1", "S1", "S2", "S3")
+		reserve := func(key, hash string) error {
+			return b.st.ReservePosting(ctxOf(p), store.PendingPosting{Key: key, Subject: r.ID, Hash: hash, Journal: []byte(`{"k":1}`)})
+		}
+		if err := reserve("k1", "h1"); err != nil {
+			t.Fatal(err)
+		}
+		if err := reserve("k1", "h1"); err != nil {
+			t.Fatalf("the same key and body must be accepted again: %v", err)
+		}
+		wantCode(t, reserve("k1", "h2"), domain.CodePostingPending)
+		wantCode(t, reserve("k2", "h1"), domain.CodePostingPending)
+		wantCode(t, b.st.EnsureNoPending(ctxOf(p), r.ID), domain.CodePostingPending)
+		if err := b.st.EnsureNoPending(ctxOf(p), "someone-else"); err != nil {
+			t.Fatalf("another subject is unaffected: %v", err)
+		}
+		if err := b.st.ReleasePosting(ctxOf(p), "k1"); err != nil {
+			t.Fatal(err)
+		}
+		if err := reserve("k2", "h9"); err != nil {
+			t.Fatalf("a released posting must not block: %v", err)
+		}
+		if _, err := b.st.Post(ctxOf(p), r.ID, postWith(t, p, "entry-1")); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.st.EnsureNoPending(ctxOf(p), r.ID); err != nil {
+			t.Fatalf("completing the command must mark the posting done: %v", err)
+		}
+		page, _ := b.st.ListGrir(ctxOf(p), store.GrirFilter{})
+		if !page.Items[0].UnitPrice.Equal(decimal.RequireFromString("2.5")) {
+			t.Fatalf("grir unit price %s, want the receipt line price 2.5", page.Items[0].UnitPrice)
+		}
+	}},
 	{"ping succeeds on a healthy store", func(t *testing.T, b backend) {
 		if err := b.st.Ping(context.Background()); err != nil {
 			t.Fatal(err)

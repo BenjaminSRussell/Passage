@@ -20,6 +20,8 @@ var domainStatus = map[string]int{
 	domain.CodePeriodClosed:      http.StatusUnprocessableEntity,
 	domain.CodeOverInvoice:       http.StatusUnprocessableEntity,
 	domain.CodeDuplicateInvoice:  http.StatusConflict,
+	domain.CodeCorrectionBelow:   http.StatusConflict,
+	domain.CodePostingPending:    http.StatusConflict,
 }
 
 func writeError(w http.ResponseWriter, r *http.Request, err error) {

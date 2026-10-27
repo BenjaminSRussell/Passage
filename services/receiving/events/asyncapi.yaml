@@ -134,7 +134,7 @@ components:
           type: array
           items:
             type: object
-            required: [line_no, receipt_id, receipt_line_no, qty, unit_price, amount]
+            required: [line_no, receipt_id, receipt_line_no, qty, unit_price, amount, grir_cleared_amount]
             properties:
               line_no: { type: integer, minimum: 1 }
               receipt_id: { type: string, format: uuid }
@@ -142,3 +142,4 @@ components:
               qty: { type: string }
               unit_price: { type: string }
               amount: { type: string }
+              grir_cleared_amount: { type: string, description: "decimal string; the GR/IR amount this line cleared (pro rata, the exact remainder on the last quantity)" }

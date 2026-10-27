@@ -47,13 +47,23 @@ type tenantData struct {
 	counter  int
 }
 
+type pendingRow struct {
+	subject string
+	hash    string
+	done    bool
+}
+
 type Store struct {
+	pmu     sync.Mutex
+	pending map[string]map[string]*pendingRow
 	mu      sync.Mutex
 	tenants map[string]*tenantData
 	events  []events.Event
 }
 
-func New() *Store { return &Store{tenants: map[string]*tenantData{}} }
+func New() *Store {
+	return &Store{tenants: map[string]*tenantData{}, pending: map[string]map[string]*pendingRow{}}
+}
 
 func (s *Store) Events() []events.Event {
 	s.mu.Lock()
@@ -98,7 +108,13 @@ func (t *tenantData) find(id string) (store.Receipt, error) {
 	if !ok {
 		return store.Receipt{}, store.ErrNotFound
 	}
-	return cloneReceipt(r), nil
+	r = cloneReceipt(r)
+	for i := range r.Lines {
+		if g := t.grirFor(id, r.Lines[i].LineNo); g >= 0 {
+			r.Lines[i].ClearedAmount = t.grir[g].ClearedAmount
+		}
+	}
+	return r, nil
 }
 
 func (t *tenantData) recordedFor(productIDs []string) map[domain.SerialKey]struct{} {
@@ -269,7 +285,7 @@ func (s *Store) Post(ctx context.Context, id string, fn store.PostFunc) (out sto
 			l.Amount, l.AmountAcct = decimal.NullDecimal{Decimal: a.Amount, Valid: true}, decimal.NullDecimal{Decimal: a.AmountAcct, Valid: true}
 			items = append(items, store.GrirItem{
 				ID: ids.New(), ReceiptID: id, ReceiptNumber: current.Number, LineNo: l.LineNo, VendorID: current.VendorID, POLineID: l.POLineID,
-				ReceivedQty: l.Qty, ReceivedAmount: a.Amount, OpenAmount: a.Amount, Currency: l.Currency, Status: "OPEN", CreatedAt: now,
+				ReceivedQty: l.Qty, ReceivedAmount: a.Amount, OpenAmount: a.Amount, Currency: l.Currency, UnitPrice: l.UnitPrice, Status: "OPEN", CreatedAt: now,
 			})
 		}
 		current.State, current.PostingDate, current.PostedAt, current.LedgerEntryID = domain.Posted, &outcome.PostingDate, &now, outcome.LedgerEntryID
@@ -277,6 +293,7 @@ func (s *Store) Post(ctx context.Context, id string, fn store.PostFunc) (out sto
 		t.receipts[id] = current
 		t.grir = append(t.grir, items...)
 		s.events = append(s.events, outcome.Event)
+		s.markDone(ctx, id)
 		out = cloneReceipt(current)
 		return nil
 	})
@@ -408,6 +425,68 @@ func (t *tenantData) grirFor(receiptID string, lineNo int) int {
 	return slices.IndexFunc(t.grir, func(g store.GrirItem) bool { return g.ReceiptID == receiptID && g.LineNo == lineNo })
 }
 
+func (s *Store) markDone(ctx context.Context, subject string) {
+	p, _ := tenant.FromContext(ctx)
+	s.pmu.Lock()
+	defer s.pmu.Unlock()
+	for _, row := range s.pending[p.TenantID] {
+		if row.subject == subject {
+			row.done = true
+		}
+	}
+}
+
+func (s *Store) ReservePosting(ctx context.Context, p store.PendingPosting) error {
+	principal, ok := tenant.FromContext(ctx)
+	if !ok {
+		return errors.New("memstore: no principal in context")
+	}
+	s.pmu.Lock()
+	defer s.pmu.Unlock()
+	rows := s.pending[principal.TenantID]
+	if rows == nil {
+		rows = map[string]*pendingRow{}
+		s.pending[principal.TenantID] = rows
+	}
+	for key, row := range rows {
+		if row.subject == p.Subject && (!row.done || key == p.Key) && (key != p.Key || row.hash != p.Hash) {
+			return store.PendingConflict(p.Subject)
+		}
+	}
+	if rows[p.Key] == nil {
+		rows[p.Key] = &pendingRow{subject: p.Subject, hash: p.Hash}
+	}
+	return nil
+}
+
+func (s *Store) EnsureNoPending(ctx context.Context, subject string) error {
+	principal, ok := tenant.FromContext(ctx)
+	if !ok {
+		return errors.New("memstore: no principal in context")
+	}
+	s.pmu.Lock()
+	defer s.pmu.Unlock()
+	for _, row := range s.pending[principal.TenantID] {
+		if row.subject == subject && !row.done {
+			return store.PendingConflict(subject)
+		}
+	}
+	return nil
+}
+
+func (s *Store) ReleasePosting(ctx context.Context, key string) error {
+	principal, ok := tenant.FromContext(ctx)
+	if !ok {
+		return errors.New("memstore: no principal in context")
+	}
+	s.pmu.Lock()
+	defer s.pmu.Unlock()
+	if row := s.pending[principal.TenantID][key]; row != nil && !row.done {
+		delete(s.pending[principal.TenantID], key)
+	}
+	return nil
+}
+
 func (s *Store) emit(adj store.Adjustment) {
 	if adj.Event != nil {
 		s.events = append(s.events, *adj.Event)
@@ -443,6 +522,7 @@ func (s *Store) Correct(ctx context.Context, id string, fn store.AdjustFunc) (ou
 		current.Version++
 		t.receipts[id] = current
 		s.emit(adj)
+		s.markDone(ctx, id)
 		out = cloneReceipt(current)
 		return nil
 	})
@@ -485,6 +565,7 @@ func (s *Store) Cancel(ctx context.Context, id string, fn store.AdjustFunc) (out
 		current.Version++
 		t.receipts[id] = current
 		s.emit(adj)
+		s.markDone(ctx, id)
 		out = cloneReceipt(current)
 		return nil
 	})
@@ -547,6 +628,7 @@ func (s *Store) PostInvoice(ctx context.Context, in store.Invoice, fn store.Invo
 		}
 		t.invoices[key] = struct{}{}
 		s.events = append(s.events, outcome.Event)
+		s.markDone(ctx, in.ID)
 		in.LedgerEntryID, in.Total, in.CreatedAt = outcome.LedgerEntryID, outcome.Total, time.Now().UTC()
 		out = in
 		return nil

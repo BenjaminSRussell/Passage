@@ -3,9 +3,11 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"sync/atomic"
 	"time"
 
@@ -63,7 +65,7 @@ func New(s store.Store, ports Ports) *API {
 }
 
 func (a *API) PostInvoice(ctx context.Context, in domain.VendorInvoice, profile domain.PostingProfile) (domain.JournalEntry, error) {
-	return domain.PostInvoice(ctx, in, a.ports.Periods, a.ports.Ledger, profile)
+	return domain.PostInvoice(ctx, in, a.ports.Periods, a.ledgerFor(in.ID), profile)
 }
 
 func (a *API) Register(r chi.Router) {
@@ -114,13 +116,20 @@ func (a *API) ready(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, map[string]string{"status": "ready"})
 }
 
+var decimalText = regexp.MustCompile(`^-?\d+(\.\d+)?$`)
+
 type wireDecimal struct{ decimal.Decimal }
 
 func (d *wireDecimal) UnmarshalJSON(b []byte) error {
-	if len(b) == 0 || (b[0] != '-' && (b[0] < '0' || b[0] > '9')) {
-		return fmt.Errorf("must be a JSON number")
+	text := string(b)
+	if len(b) > 1 && b[0] == '"' {
+		if err := json.Unmarshal(b, &text); err != nil || !decimalText.MatchString(text) {
+			return fmt.Errorf("must be a decimal number or a decimal string")
+		}
+	} else if len(b) == 0 || (b[0] != '-' && (b[0] < '0' || b[0] > '9')) {
+		return fmt.Errorf("must be a decimal number or a decimal string")
 	}
-	v, err := decimal.NewFromString(string(b))
+	v, err := decimal.NewFromString(text)
 	if err != nil {
 		return err
 	}

@@ -79,7 +79,7 @@ describe("client-side checks", () => {
       lines: [{ ...emptyArrival.lines[0], poLineId: UUID_C, productId: UUID_D, orderedRemaining: "10", unitPrice: "2.5", unit: "EA" }],
     };
     expect(validateArrival(ok)).toEqual({});
-    expect(toArrivalInput(ok).lines[0]).toMatchObject({ orderedRemaining: 10, overDeliveryPct: 0, unitPrice: 2.5 });
+    expect(toArrivalInput(ok).lines[0]).toMatchObject({ orderedRemaining: "10", overDeliveryPct: "0", unitPrice: "2.5" });
     const bad = validateArrival({ ...ok, vendorId: "x", packingSlip: " ", currency: "usd", lines: [{ ...ok.lines[0], orderedRemaining: "0", overDeliveryPct: "101", unit: "" }] });
     expect(Object.keys(bad).sort()).toEqual(["currency", "lines[0].orderedRemaining", "lines[0].overDeliveryPct", "lines[0].unit", "packingSlip", "vendorId"]);
   });
@@ -184,7 +184,7 @@ describe("record arrival", () => {
     const [call] = commandCalls();
     expect(call.url.pathname).toBe("/api/v1/receiving/arrivals");
     expect(idempotencyKey(call)).toMatch(/^[0-9a-f-]{36}$/);
-    expect(call.body).toMatchObject({ packingSlip: "PS-1", currency: "USD", lines: [{ orderedRemaining: 10, unitPrice: 2.5, unit: "EA" }] });
+    expect(call.body).toMatchObject({ packingSlip: "PS-1", currency: "USD", lines: [{ orderedRemaining: "10", unitPrice: "2.5", unit: "EA" }] });
   });
 
   it("shows the service's field error and keeps what was typed", async () => {
@@ -228,13 +228,16 @@ describe("receipt page", () => {
     expect(call.url.pathname).toBe(`/api/v1/receiving/receipts/${ID}:register`);
     expect(header(call, "If-Match")).toBe('"1"');
     expect(idempotencyKey(call)).toBeTruthy();
-    expect(call.body).toEqual({ lines: [{ lineNo: 1, qty: 8, locationId: UUID_A, inventoryStatus: "AVAILABLE" }] });
+    expect(call.body).toEqual({ lines: [{ lineNo: 1, qty: "8", locationId: UUID_A, inventoryStatus: "AVAILABLE" }] });
   });
 
   it("posts a registered receipt and then offers corrections", async () => {
     serve(receipt({ state: "REGISTERED", version: 2 }), () => json(200, receipt({ state: "POSTED", version: 3, ledgerEntryId: "je-1", postingDate: "2026-10-25", lines: [line({ amount: "25.00" })] })));
     const { container } = renderAt(`/receiving/receipts/${ID}`);
     fireEvent.click(await screen.findByRole("button", { name: "Post receipt" }));
+    expect(commandCalls()).toHaveLength(0);
+    expect(screen.getByRole("button", { name: "Confirm post" })).toHaveFocus();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm post" }));
 
     expect(await screen.findByRole("form", { name: "Correct receipt" })).toBeInTheDocument();
     expect(screen.getByText("je-1")).toBeInTheDocument();
@@ -248,6 +251,7 @@ describe("receipt page", () => {
     serve(receipt({ state: "REGISTERED", version: 2 }), () => json(412, { code: "COM-0412", detail: "receipt is at version 3, If-Match carried 2" }));
     renderAt(`/receiving/receipts/${ID}`);
     fireEvent.click(await screen.findByRole("button", { name: "Post receipt" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm post" }));
 
     expect(await screen.findByText(/receipt is at version 3, If-Match carried 2 \(COM-0412\)/)).toBeInTheDocument();
     const before = server.calls.filter((c) => c.method === "GET").length;
@@ -267,9 +271,14 @@ describe("receipt page", () => {
 
     fireEvent.change(screen.getByLabelText("Line 2 quantity change"), { target: { value: "-4" } });
     fireEvent.click(screen.getByRole("button", { name: "Post correction" }));
+    expect(commandCalls()).toHaveLength(0);
+    expect(screen.getByRole("button", { name: "Confirm correction" })).toHaveFocus();
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
+    fireEvent.click(screen.getByRole("button", { name: "Post correction" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm correction" }));
     await waitFor(() => expect(commandCalls()).toHaveLength(1));
     expect(commandCalls()[0].url.pathname).toBe(`/api/v1/receiving/receipts/${ID}:correct`);
-    expect(commandCalls()[0].body).toEqual({ lines: [{ lineNo: 2, qtyDelta: -4 }] });
+    expect(commandCalls()[0].body).toEqual({ lines: [{ lineNo: 2, qtyDelta: "-4" }] });
   });
 
   it("asks before cancelling and reports a refusal", async () => {
@@ -282,6 +291,7 @@ describe("receipt page", () => {
     expect(screen.queryByRole("button", { name: "Confirm cancel" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel receipt" }));
+    expect(screen.getByRole("button", { name: "Confirm cancel" })).toHaveFocus();
     fireEvent.click(screen.getByRole("button", { name: "Confirm cancel" }));
     expect(await screen.findByText(/invoiced quantity and cannot be cancelled \(RCV-STA-001\)/)).toBeInTheDocument();
     expect(commandCalls()[0].url.pathname).toBe(`/api/v1/receiving/receipts/${ID}:cancel`);

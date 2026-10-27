@@ -64,6 +64,7 @@ type invoicePostedLineData struct {
 	Qty           string `json:"qty"`
 	UnitPrice     string `json:"unit_price"`
 	Amount        string `json:"amount"`
+	GrirCleared   string `json:"grir_cleared_amount"`
 }
 
 type invoicePostedData struct {
@@ -114,7 +115,7 @@ func receiptCorrectedEvent(tenantID, kind string, r store.Receipt, seq int, ledg
 	})
 }
 
-func invoicePostedEvent(tenantID string, in store.Invoice, ledgerEntryID string, total decimal.Decimal) (events.Event, error) {
+func invoicePostedEvent(tenantID string, in store.Invoice, ledgerEntryID string, total decimal.Decimal, cleared []decimal.Decimal) (events.Event, error) {
 	data := invoicePostedData{
 		InvoiceID: in.ID, LegalEntityID: in.LegalEntityID, VendorID: in.VendorID, InvoiceNumber: in.InvoiceNumber,
 		InvoiceDate: in.InvoiceDate.Format(dateLayout), PostingDate: in.PostingDate.Format(dateLayout), Currency: in.Currency,
@@ -122,7 +123,7 @@ func invoicePostedEvent(tenantID string, in store.Invoice, ledgerEntryID string,
 	}
 	for i, l := range in.Lines {
 		data.Lines = append(data.Lines, invoicePostedLineData{
-			LineNo: i + 1, ReceiptID: l.ReceiptID, ReceiptLineNo: l.ReceiptLineNo, Qty: l.Qty.String(), UnitPrice: l.UnitPrice.String(), Amount: l.Amount.String(),
+			LineNo: i + 1, ReceiptID: l.ReceiptID, ReceiptLineNo: l.ReceiptLineNo, Qty: l.Qty.String(), UnitPrice: l.UnitPrice.String(), Amount: l.Amount.String(), GrirCleared: cleared[i].String(),
 		})
 	}
 	return newEvent("payables", "invoice", "posted", in.ID, tenantID, data)

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, Skeleton, Textarea, type DataTableColumn } from "../../shell/ui";
 import {
@@ -13,7 +13,8 @@ import {
   type ReceiptLine,
   type RegisterLineInput,
 } from "./api/client";
-import { Detail, SIGNED_DECIMAL, StateBadge, UUID, DECIMAL, useAction } from "./parts";
+import { DECIMAL, SIGNED_DECIMAL, UUID } from "./api/http";
+import { Detail, StateBadge, useAction } from "./parts";
 import styles from "./pages.module.css";
 
 type Errors = Record<string, string>;
@@ -58,12 +59,29 @@ const splitSerials = (text: string) => text.split("\n").map((s) => s.trim()).fil
 export function toRegisterInput(receipt: Receipt, drafts: RegisterDraft[]): RegisterLineInput[] {
   return receipt.lines.map((line, i) => ({
     lineNo: line.lineNo,
-    qty: Number(drafts[i].qty),
+    qty: drafts[i].qty.trim(),
     ...(drafts[i].batch.trim() ? { batch: drafts[i].batch.trim() } : {}),
     ...(line.serialTracked ? { serials: splitSerials(drafts[i].serials) } : {}),
     locationId: drafts[i].locationId,
     inventoryStatus: drafts[i].inventoryStatus,
   }));
+}
+
+function ConfirmStep({ confirmLabel, keepLabel, variant = "primary", busy, onConfirm, onKeep }: { confirmLabel: string; keepLabel: string; variant?: "primary" | "danger"; busy: boolean; onConfirm: () => void; onKeep: () => void }) {
+  const confirm = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    confirm.current?.focus();
+  }, []);
+  return (
+    <div className={styles.formActions}>
+      <Button ref={confirm} variant={variant} loading={busy} onClick={onConfirm}>
+        {confirmLabel}
+      </Button>
+      <Button variant="ghost" onClick={onKeep}>
+        {keepLabel}
+      </Button>
+    </div>
+  );
 }
 
 function FailureAlert({ title, failure, onReload }: { title: string; failure: { message: string; stale: boolean } | null; onReload: () => void }) {
@@ -145,16 +163,27 @@ function RegisterForm({ receipt, reload }: { receipt: Receipt; reload: () => voi
 
 function PostPanel({ receipt, reload }: { receipt: Receipt; reload: () => void }) {
   const action = useAction(receipt.id);
+  const [confirming, setConfirming] = useState(false);
   return (
     <Card title="Post to the ledger">
       <div className={styles.stack}>
         <p className={styles.note}>Posting debits inventory and credits GR/IR for every line, opens the GR/IR items for invoicing and tells inventory and payables.</p>
         <FailureAlert title="Could not post the receipt" failure={action.failure} onReload={reload} />
-        <div>
-          <Button variant="primary" loading={action.busy} onClick={() => void action.run((key) => postReceipt(receipt.id, receipt.version, key))}>
-            Post receipt
-          </Button>
-        </div>
+        {confirming ? (
+          <ConfirmStep
+            confirmLabel="Confirm post"
+            keepLabel="Not yet"
+            busy={action.busy}
+            onConfirm={() => void action.run((key) => postReceipt(receipt.id, receipt.version, key))}
+            onKeep={() => setConfirming(false)}
+          />
+        ) : (
+          <div>
+            <Button variant="primary" onClick={() => setConfirming(true)}>
+              Post receipt
+            </Button>
+          </div>
+        )}
       </div>
     </Card>
   );
@@ -177,20 +206,24 @@ function CorrectForm({ receipt, reload }: { receipt: Receipt; reload: () => void
   const action = useAction(receipt.id);
   const [deltas, setDeltas] = useState<string[]>(() => receipt.lines.map(() => ""));
   const [errors, setErrors] = useState<Errors>({});
+  const [confirming, setConfirming] = useState(false);
   const shown = { ...errors, ...(action.failure?.fields ?? {}) };
 
-  async function submit(event: FormEvent) {
+  function review(event: FormEvent) {
     event.preventDefault();
     const found = validateCorrection(receipt, deltas);
     setErrors(found);
-    if (Object.keys(found).length > 0) return;
-    const lines = receipt.lines.flatMap((l, i) => (deltas[i].trim() === "" ? [] : [{ lineNo: l.lineNo, qtyDelta: Number(deltas[i]) }]));
+    setConfirming(Object.keys(found).length === 0);
+  }
+
+  async function submit() {
+    const lines = receipt.lines.flatMap((l, i) => (deltas[i].trim() === "" ? [] : [{ lineNo: l.lineNo, qtyDelta: deltas[i].trim() }]));
     await action.run((key) => correctReceipt(receipt.id, receipt.version, lines, key));
   }
 
   return (
     <Card title="Correct quantities">
-      <form className={styles.form} onSubmit={submit} noValidate aria-label="Correct receipt">
+      <form className={styles.form} onSubmit={review} noValidate aria-label="Correct receipt">
         <p className={`${styles.note} ${styles.formActions}`}>A correction posts the difference to the ledger. A line can't drop below what is already invoiced or to zero; cancel the receipt instead.</p>
         {receipt.lines.map((line, i) => (
           <FormField key={line.lineNo} id={`cor-${i}`} label={`Line ${line.lineNo} quantity change`} hint={`Received ${line.qty} ${line.unit}.`} optional error={shown[`lines[${i}].qtyDelta`]}>
@@ -207,11 +240,13 @@ function CorrectForm({ receipt, reload }: { receipt: Receipt; reload: () => void
         <div className={styles.formActions}>
           <FailureAlert title="Could not correct the receipt" failure={action.failure} onReload={reload} />
         </div>
-        <div className={styles.formActions}>
-          <Button type="submit" loading={action.busy}>
-            Post correction
-          </Button>
-        </div>
+        {confirming ? (
+          <ConfirmStep confirmLabel="Confirm correction" keepLabel="Keep editing" busy={action.busy} onConfirm={() => void submit()} onKeep={() => setConfirming(false)} />
+        ) : (
+          <div className={styles.formActions}>
+            <Button type="submit">Post correction</Button>
+          </div>
+        )}
       </form>
     </Card>
   );
@@ -231,14 +266,14 @@ function CancelPanel({ receipt, reload }: { receipt: Receipt; reload: () => void
         </p>
         <FailureAlert title="Could not cancel the receipt" failure={action.failure} onReload={reload} />
         {confirming ? (
-          <div className={styles.formActions}>
-            <Button variant="danger" loading={action.busy} onClick={() => void action.run((key) => cancelReceipt(receipt.id, receipt.version, key))}>
-              Confirm cancel
-            </Button>
-            <Button variant="ghost" onClick={() => setConfirming(false)}>
-              Keep receipt
-            </Button>
-          </div>
+          <ConfirmStep
+            confirmLabel="Confirm cancel"
+            keepLabel="Keep receipt"
+            variant="danger"
+            busy={action.busy}
+            onConfirm={() => void action.run((key) => cancelReceipt(receipt.id, receipt.version, key))}
+            onKeep={() => setConfirming(false)}
+          />
         ) : (
           <div>
             <Button onClick={() => setConfirming(true)}>Cancel receipt</Button>

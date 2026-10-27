@@ -29,6 +29,7 @@ type Line struct {
 	ProductID        string
 	Qty              decimal.Decimal
 	InvoicedQty      decimal.Decimal
+	ClearedAmount    decimal.Decimal
 	OrderedRemaining decimal.Decimal
 	OverDeliveryPct  decimal.Decimal
 	UnitPrice        decimal.Decimal
@@ -77,6 +78,13 @@ type PostOutcome struct {
 	LedgerEntryID string
 	Amounts       []LineAmount
 	Event         events.Event
+}
+
+type PendingPosting struct {
+	Key     string
+	Subject string
+	Hash    string
+	Journal []byte
 }
 
 type LineChange struct {
@@ -154,6 +162,9 @@ type Store interface {
 	GetReceipt(ctx context.Context, id string) (Receipt, error)
 	ListReceipts(ctx context.Context, f ReceiptFilter) ([]Receipt, error)
 	ListGrir(ctx context.Context, f GrirFilter) (GrirPage, error)
+	ReservePosting(ctx context.Context, p PendingPosting) error
+	ReleasePosting(ctx context.Context, key string) error
+	EnsureNoPending(ctx context.Context, subject string) error
 	ClaimKey(ctx context.Context, key, hash string, lockFor time.Duration) (ClaimResult, error)
 	CompleteKey(ctx context.Context, key string, status int, body []byte) error
 	ReleaseKey(ctx context.Context, key string) error

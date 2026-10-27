@@ -151,7 +151,7 @@ func TestArrival_FieldErrors(t *testing.T) {
 		{"negative pallets", header(`"palletCount":-1,`), `"palletCount"`},
 		{"fractional pallets", header(`"palletCount":1.5,`), "COM-0001"},
 		{"long carrier", header(`"carrier":"` + strings.Repeat("c", 129) + `",`), `"carrier"`},
-		{"string unit price", withLine(`"orderedRemaining":1,"unitPrice":"2"`), `"lines[0].unitPrice"`},
+		{"non-numeric unit price", withLine(`"orderedRemaining":1,"unitPrice":"two"`), `"lines[0].unitPrice"`},
 		{"missing unit price", withLine(`"orderedRemaining":1`), `"lines[0].unitPrice"`},
 		{"zero ordered remaining", withLine(`"orderedRemaining":0,"unitPrice":1`), `"lines[0].orderedRemaining"`},
 		{"over-delivery 101", withLine(`"orderedRemaining":1,"unitPrice":1,"overDeliveryPct":101`), `"lines[0].overDeliveryPct"`},

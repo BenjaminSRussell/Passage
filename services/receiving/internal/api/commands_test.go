@@ -243,9 +243,9 @@ func TestPost_LedgerEventAndGrirInOneStep(t *testing.T) {
 		t.Fatalf("events %+v", evts)
 	}
 	page := decode[struct {
-		Items []struct{ OpenAmount, Status string }
+		Items []struct{ OpenAmount, Status, UnitPrice string }
 	}](t, rg.call(http.MethodGet, grirPath, "", duty("APInquire", "")), http.StatusOK)
-	if len(page.Items) != 1 || page.Items[0].OpenAmount != "10.00" || page.Items[0].Status != "OPEN" {
+	if len(page.Items) != 1 || page.Items[0].OpenAmount != "10.00" || page.Items[0].Status != "OPEN" || page.Items[0].UnitPrice != "2.5" {
 		t.Fatalf("grir %+v", page)
 	}
 }
@@ -306,14 +306,23 @@ func TestCorrect_CreditsNeverBelowInvoicedQuantity(t *testing.T) {
 	path := receiptsPath + "/" + r.ID + ":correct"
 	body := func(delta int) string { return fmt.Sprintf(`{"lines":[{"lineNo":1,"qtyDelta":%d}]}`, delta) }
 
-	problemCode(t, rg.call(http.MethodPost, path, body(-70), rg.poster(r.Version)), http.StatusConflict, "RCV-STA-001")
+	problemCode(t, rg.call(http.MethodPost, path, body(-70), rg.poster(r.Version)), http.StatusConflict, "RCV-COR-001")
 	got := decode[receiptJSON](t, rg.call(http.MethodPost, path, body(-60), rg.poster(r.Version)), http.StatusOK)
 	if got.State != "POSTED" || got.Version != r.Version+1 || got.Lines[0].Qty != "40" || *got.Lines[0].Amount != "100" {
-		t.Fatalf("unexpected %+v", got)
+		t.Fatalf("unexpected %+v amount %s", got, *got.Lines[0].Amount)
 	}
 	last := rg.ledger.Entries[len(rg.ledger.Entries)-1]
-	if last.IdempotencyKey != "post:receiving:productreceipt:"+r.ID+":correction:1" || rg.ledger.Balance("2100").String() != "0" && len(last.Lines) != 2 {
-		t.Fatalf("correction entry %+v", last)
+	if last.IdempotencyKey != "post:receiving:productreceipt:"+r.ID+":correction:1" {
+		t.Fatalf("correction key %q", last.IdempotencyKey)
+	}
+	if len(last.Lines) != 2 {
+		t.Fatalf("correction posted %d lines, want 2", len(last.Lines))
+	}
+	if grir := last.Lines[1].Amount.Value.String(); grir != "150" {
+		t.Fatalf("correction moved %s on GR/IR, want 150", grir)
+	}
+	if balance := rg.ledger.Balance("2100").String(); balance != "0" {
+		t.Fatalf("GR/IR balance %s after receipt, invoice and correction, want 0 (everything received is invoiced)", balance)
 	}
 	evts := rg.st.Events()
 	if evts[len(evts)-1].Type != "dev.passage.receiving.receipt.corrected.v1" || !strings.Contains(string(evts[len(evts)-1].Data), `"qty_delta":"-60"`) {
@@ -605,5 +614,18 @@ func TestAsyncAPIDocumentsEveryEmittedEventAndField(t *testing.T) {
 	}
 	if len(seen) != 3 {
 		t.Fatalf("lifecycle emitted %d distinct event types, want 3: %v", len(seen), seen)
+	}
+}
+
+func TestDirectReceipt_AcceptsDecimalStrings(t *testing.T) {
+	rg := newRig(domain.PeriodOpen)
+	body := `{"vendorId":"` + vendorID + `","purchaseOrderId":"` + poID + `","legalEntityId":"` + legalEntityID + `","packingSlip":"PS-D","receiptDate":"2026-10-25","currency":"USD","lines":[{"poLineId":"` + poLineID + `","productId":"` + productID + `","orderedRemaining":"10.5","unitPrice":"2.50","unit":"EA","qty":"4.25","locationId":"` + locationID + `"}]}`
+	got := decode[receiptJSON](t, rg.call(http.MethodPost, receiptsPath, body, rg.maintain()), http.StatusCreated)
+	if got.Lines[0].Qty != "4.25" {
+		t.Fatalf("qty %s, want 4.25", got.Lines[0].Qty)
+	}
+	bad := strings.Replace(body, `"qty":"4.25"`, `"qty":"4,25"`, 1)
+	if rec := rg.call(http.MethodPost, receiptsPath, strings.Replace(bad, "PS-D", "PS-E", 1), rg.maintain()); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"lines[0].qty"`) {
+		t.Fatalf("got %d %s", rec.Code, rec.Body.String())
 	}
 }

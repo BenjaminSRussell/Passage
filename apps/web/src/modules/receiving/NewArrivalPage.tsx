@@ -3,7 +3,7 @@ import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader } from "../../shell/ui";
 import { createArrival, newKey, type ArrivalInput } from "./api/client";
-import { DECIMAL, describeFailure, fieldErrors, UUID } from "./parts";
+import { DECIMAL, describeFailure, fieldErrors, UUID } from "./api/http";
 import styles from "./pages.module.css";
 
 const MAX_LINES = 500;
@@ -93,9 +93,9 @@ export function toArrivalInput(v: ArrivalDraft): ArrivalInput {
     lines: v.lines.map((l) => ({
       poLineId: l.poLineId,
       productId: l.productId,
-      orderedRemaining: Number(l.orderedRemaining),
-      overDeliveryPct: Number(l.overDeliveryPct),
-      unitPrice: Number(l.unitPrice),
+      orderedRemaining: l.orderedRemaining,
+      overDeliveryPct: l.overDeliveryPct,
+      unitPrice: l.unitPrice,
       unit: l.unit.trim(),
       batchTracked: l.batchTracked,
       serialTracked: l.serialTracked,

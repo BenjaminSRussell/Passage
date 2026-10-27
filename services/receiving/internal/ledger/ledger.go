@@ -20,10 +20,11 @@ import (
 )
 
 const (
-	Timeout         = 3 * time.Second
-	periodClosed    = "period_closed"
-	maxResponseSize = 1 << 20
-	dateFormat      = "2006-01-02"
+	Timeout             = 3 * time.Second
+	periodClosed        = "period_closed"
+	idempotencyConflict = "LEDGER_IDEMPOTENCY_CONFLICT"
+	maxResponseSize     = 1 << 20
+	dateFormat          = "2006-01-02"
 )
 
 type Client struct {
@@ -148,6 +149,12 @@ func (c *Client) Post(ctx context.Context, entry domain.JournalEntry) (string, e
 		var problem problemBody
 		if json.Unmarshal(raw, &problem) == nil && problem.Code == periodClosed {
 			return "", fmt.Errorf("ledger post %s: %w", entry.IdempotencyKey, domain.ErrPeriodClosed)
+		}
+	}
+	if resp.StatusCode == http.StatusConflict {
+		var problem problemBody
+		if json.Unmarshal(raw, &problem) == nil && problem.Code == idempotencyConflict {
+			return "", fmt.Errorf("ledger post %s: %w", entry.IdempotencyKey, domain.ErrLedgerConflict)
 		}
 	}
 	err = fmt.Errorf("ledger post %s: unexpected status %d", entry.IdempotencyKey, resp.StatusCode)

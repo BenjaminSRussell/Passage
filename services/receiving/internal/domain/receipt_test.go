@@ -152,6 +152,7 @@ func TestReceiptPost_StoresLedgerEntryID(t *testing.T) {
 func postedReceipt(invoiced string) domain.Receipt {
 	r := receiptWith(domain.ReceiptLine{LineNo: 1, ProductID: "p", Qty: dec("100"), InvoicedQty: dec(invoiced), OrderedRemaining: dec("100"), OverDeliveryPct: dec("5")})
 	r.State = domain.Posted
+	r.Lines[0].ClearedAmount = dec(invoiced).Mul(dec("10"))
 	return r
 }
 
@@ -165,7 +166,7 @@ func TestCorrect_RespectsInvoicedQuantityAndPostsTheDelta(t *testing.T) {
 		wantAmt  string
 	}{
 		{"credit down to the invoiced quantity", "40", "-60", "", "40", "400.00"},
-		{"credit below the invoiced quantity", "40", "-61", domain.CodeInvalidTransition, "", ""},
+		{"credit below the invoiced quantity", "40", "-61", domain.CodeCorrectionBelow, "", ""},
 		{"credit to zero", "0", "-100", domain.CodeInvalidReceipt, "", ""},
 		{"debit inside the allowance", "0", "5", "", "105", "1050.00"},
 		{"debit past the allowance", "0", "6", domain.CodeOverDelivery, "", ""},
@@ -174,7 +175,7 @@ func TestCorrect_RespectsInvoicedQuantityAndPostsTheDelta(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			ledger := &domain.FakeLedger{}
-			id, changes, err := postedReceipt(tc.invoiced).Correct(context.Background(), ledger, testProfile, 3, map[int]decimal.Decimal{1: dec(tc.delta)})
+			id, changes, err := postedReceipt(tc.invoiced).Correct(context.Background(), ledger, testProfile, 3, time.Time{}, map[int]decimal.Decimal{1: dec(tc.delta)})
 			if tc.wantCode != "" {
 				if got := codeOf(t, err); got != tc.wantCode || len(ledger.Entries) != 0 {
 					t.Fatalf("code %s with %d ledger entries, want %s and none", got, len(ledger.Entries), tc.wantCode)
@@ -196,18 +197,18 @@ func TestCorrect_RefusesUnpostedUnknownAndSerialLines(t *testing.T) {
 	ledger := &domain.FakeLedger{}
 	arrived := postedReceipt("0")
 	arrived.State = domain.Registered
-	if _, _, err := arrived.Correct(context.Background(), ledger, testProfile, 1, map[int]decimal.Decimal{1: dec("1")}); codeOf(t, err) != domain.CodeInvalidTransition {
+	if _, _, err := arrived.Correct(context.Background(), ledger, testProfile, 1, time.Time{}, map[int]decimal.Decimal{1: dec("1")}); codeOf(t, err) != domain.CodeInvalidTransition {
 		t.Fatalf("an unposted receipt cannot be corrected: %v", err)
 	}
-	if _, _, err := postedReceipt("0").Correct(context.Background(), ledger, testProfile, 1, map[int]decimal.Decimal{2: dec("1")}); codeOf(t, err) != domain.CodeInvalidReceipt {
+	if _, _, err := postedReceipt("0").Correct(context.Background(), ledger, testProfile, 1, time.Time{}, map[int]decimal.Decimal{2: dec("1")}); codeOf(t, err) != domain.CodeInvalidReceipt {
 		t.Fatalf("an unknown line must be refused: %v", err)
 	}
 	serial := postedReceipt("0")
 	serial.Lines[0].SerialTracked = true
-	if _, _, err := serial.Correct(context.Background(), ledger, testProfile, 1, map[int]decimal.Decimal{1: dec("-1")}); codeOf(t, err) != domain.CodeInvalidReceipt {
+	if _, _, err := serial.Correct(context.Background(), ledger, testProfile, 1, time.Time{}, map[int]decimal.Decimal{1: dec("-1")}); codeOf(t, err) != domain.CodeInvalidReceipt {
 		t.Fatalf("a serial-tracked line cannot be corrected by quantity: %v", err)
 	}
-	if _, _, err := postedReceipt("0").Correct(context.Background(), &domain.FakeLedger{Err: domain.ErrPeriodClosed}, testProfile, 1, map[int]decimal.Decimal{1: dec("1")}); codeOf(t, err) != domain.CodePeriodClosed {
+	if _, _, err := postedReceipt("0").Correct(context.Background(), &domain.FakeLedger{Err: domain.ErrPeriodClosed}, testProfile, 1, time.Time{}, map[int]decimal.Decimal{1: dec("1")}); codeOf(t, err) != domain.CodePeriodClosed {
 		t.Fatalf("a closed ledger period must map to the period code: %v", err)
 	}
 	if len(ledger.Entries) != 0 {
@@ -217,21 +218,54 @@ func TestCorrect_RefusesUnpostedUnknownAndSerialLines(t *testing.T) {
 
 func TestCancel_ReversesOnlyPostedReceiptsWithoutInvoices(t *testing.T) {
 	ledger := &domain.FakeLedger{}
-	id, err := postedReceipt("0").Cancel(context.Background(), ledger, testProfile)
+	id, err := postedReceipt("0").Cancel(context.Background(), ledger, testProfile, time.Time{})
 	if err != nil || id == "" || len(ledger.Entries) != 1 || ledger.Entries[0].Lines[0].Amount.Value.String() != "-1000" || ledger.Balance("2100").String() != "1000" {
 		t.Fatalf("id=%q entries=%+v err=%v", id, ledger.Entries, err)
 	}
-	if _, err := postedReceipt("1").Cancel(context.Background(), ledger, testProfile); codeOf(t, err) != domain.CodeInvalidTransition || len(ledger.Entries) != 1 {
+	if _, err := postedReceipt("1").Cancel(context.Background(), ledger, testProfile, time.Time{}); codeOf(t, err) != domain.CodeInvalidTransition || len(ledger.Entries) != 1 {
 		t.Fatalf("an invoiced receipt must not be cancelled: %v", err)
 	}
 	registered := postedReceipt("0")
 	registered.State = domain.Registered
-	if id, err := registered.Cancel(context.Background(), ledger, testProfile); err != nil || id != "" || len(ledger.Entries) != 1 {
+	if id, err := registered.Cancel(context.Background(), ledger, testProfile, time.Time{}); err != nil || id != "" || len(ledger.Entries) != 1 {
 		t.Fatalf("a registered receipt cancels without a ledger entry: id=%q err=%v", id, err)
 	}
 	cancelled := postedReceipt("0")
 	cancelled.State = domain.Cancelled
-	if _, err := cancelled.Cancel(context.Background(), ledger, testProfile); codeOf(t, err) != domain.CodeInvalidTransition {
+	if _, err := cancelled.Cancel(context.Background(), ledger, testProfile, time.Time{}); codeOf(t, err) != domain.CodeInvalidTransition {
 		t.Fatalf("a cancelled receipt cannot be cancelled again: %v", err)
+	}
+}
+
+func TestCorrect_LeavesNoRoundingResidualWhenQuantityEqualsInvoiced(t *testing.T) {
+	r := receiptWith(domain.ReceiptLine{LineNo: 1, ProductID: "p", Qty: dec("3"), InvoicedQty: dec("1"), ClearedAmount: dec("0.33"), OrderedRemaining: dec("3")})
+	r.State = domain.Posted
+	r.Lines[0].UnitPrice = money.Amount{Value: dec("0.335"), Currency: "USD"}
+	ledger := &domain.FakeLedger{}
+	_, changes, err := r.Correct(context.Background(), ledger, testProfile, 1, time.Time{}, map[int]decimal.Decimal{1: dec("-2")})
+	if err != nil || changes[0].Amount.Value.String() != "0.33" {
+		t.Fatalf("changes=%+v err=%v, want the amount to equal the cleared 0.33, not the rounded 0.34", changes, err)
+	}
+	if got := ledger.Entries[0].Lines[0].Amount.Value.String(); got != "-0.67" {
+		t.Fatalf("inventory delta %s, want -0.67 (1.00 received minus 0.33 kept)", got)
+	}
+}
+
+func TestAdjustments_PostingDateDefaultsToReceiptDateAndNeverPrecedesIt(t *testing.T) {
+	ledger := &domain.FakeLedger{}
+	r := postedReceipt("0")
+	if _, _, err := r.Correct(context.Background(), ledger, testProfile, 1, time.Time{}, map[int]decimal.Decimal{1: dec("1")}); err != nil || !ledger.Entries[0].PostingDate.Equal(r.Date) {
+		t.Fatalf("default posting date: %v %+v", err, ledger.Entries)
+	}
+	later := r.Date.AddDate(0, 0, 5)
+	if _, err := r.Cancel(context.Background(), ledger, testProfile, later); err != nil || !ledger.Entries[1].PostingDate.Equal(later) {
+		t.Fatalf("explicit posting date: %v %+v", err, ledger.Entries)
+	}
+	before := r.Date.AddDate(0, 0, -1)
+	if _, _, err := r.Correct(context.Background(), ledger, testProfile, 2, before, map[int]decimal.Decimal{1: dec("1")}); codeOf(t, err) != domain.CodeInvalidReceipt {
+		t.Fatalf("a posting date before the receipt date must be refused: %v", err)
+	}
+	if _, err := r.Cancel(context.Background(), ledger, testProfile, before); codeOf(t, err) != domain.CodeInvalidReceipt || len(ledger.Entries) != 2 {
+		t.Fatalf("cancel with an early date must be refused without posting: %v", err)
 	}
 }

@@ -159,7 +159,7 @@ func (a *API) postVendorInvoice(w http.ResponseWriter, r *http.Request) {
 			return store.InvoiceOutcome{}, err
 		}
 		total := entry.Lines[len(entry.Lines)-1].Amount.Value.Neg()
-		evt, err := invoicePostedEvent(p.TenantID, in, entry.LedgerEntryID, total)
+		evt, err := invoicePostedEvent(p.TenantID, in, entry.LedgerEntryID, total, entry.GrirCleared)
 		return store.InvoiceOutcome{LedgerEntryID: entry.LedgerEntryID, Total: total, Event: evt}, err
 	})
 	if err != nil {

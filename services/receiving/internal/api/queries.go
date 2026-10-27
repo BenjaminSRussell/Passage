@@ -23,7 +23,7 @@ const (
 )
 
 var (
-	receiptStates = []domain.ReceiptState{domain.Arrived, domain.Registered, domain.Posted, domain.Corrected, domain.Cancelled}
+	receiptStates = []domain.ReceiptState{domain.Arrived, domain.Registered, domain.Posted, domain.Cancelled}
 	grirStatuses  = []string{"OPEN", "PARTIAL", "CLEARED", "WRITTEN_OFF"}
 )
 
@@ -96,7 +96,7 @@ func (a *API) listReceipts(w http.ResponseWriter, r *http.Request) {
 		From: q.date("from"), To: q.date("to"), Limit: q.limit()}
 	f.CursorCreatedAt, f.CursorID = q.cursor()
 	if f.State != "" && !slices.Contains(receiptStates, f.State) {
-		q.fields["state"] = "must be ARRIVED, REGISTERED, POSTED, CORRECTED or CANCELLED"
+		q.fields["state"] = "must be ARRIVED, REGISTERED, POSTED or CANCELLED"
 	}
 	if len(q.fields) > 0 {
 		httpx.Fail(w, r, validationProblem(q.fields))
@@ -125,6 +125,7 @@ type grirItemBody struct {
 	LineNo         int    `json:"lineNo"`
 	VendorID       string `json:"vendorId"`
 	POLineID       string `json:"poLineId"`
+	UnitPrice      string `json:"unitPrice"`
 	ReceivedQty    string `json:"receivedQty"`
 	InvoicedQty    string `json:"invoicedQty"`
 	ReceivedAmount string `json:"receivedAmount"`
@@ -189,7 +190,7 @@ func toGrirBody(g store.GrirItem) grirItemBody {
 	scale := money.MinorUnits(g.Currency)
 	return grirItemBody{
 		ID: g.ID, ReceiptID: g.ReceiptID, ReceiptNumber: g.ReceiptNumber, LineNo: g.LineNo, VendorID: g.VendorID, POLineID: g.POLineID,
-		ReceivedQty: g.ReceivedQty.String(), InvoicedQty: g.InvoicedQty.String(), ReceivedAmount: g.ReceivedAmount.StringFixed(scale),
+		UnitPrice: g.UnitPrice.String(), ReceivedQty: g.ReceivedQty.String(), InvoicedQty: g.InvoicedQty.String(), ReceivedAmount: g.ReceivedAmount.StringFixed(scale),
 		ClearedAmount: g.ClearedAmount.StringFixed(scale), OpenAmount: g.OpenAmount.StringFixed(scale), Currency: g.Currency, Status: g.Status,
 		AgeDays: g.AgeDays, CreatedAt: g.CreatedAt.UTC().Format(time.RFC3339),
 	}

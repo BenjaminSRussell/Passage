@@ -2,7 +2,7 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { GrirItem, Invoice } from "./api/client";
 import { validateFilters } from "./GrirPage";
-import { subtractDecimal, unitPriceOf } from "./parts";
+import { subtractDecimal } from "./parts";
 import { emptyInvoice, toInvoiceInput, validateInvoice } from "./PostInvoicePage";
 import { idempotencyKey, json, pageViolations, renderAt, server, useFakeServer } from "./testServer";
 
@@ -21,6 +21,7 @@ function item(patch: Partial<GrirItem> = {}): GrirItem {
     lineNo: 1,
     vendorId: UUID_A,
     poLineId: UUID_B,
+    unitPrice: "2.5",
     receivedQty: "10",
     invoicedQty: "4",
     receivedAmount: "25.00",
@@ -64,13 +65,6 @@ describe("decimal helpers", () => {
     expect(subtractDecimal("1", "2")).toBe("0");
     expect(subtractDecimal("1.000001", "1")).toBe("0.000001");
   });
-
-  it("derives a unit price rounded half up and empty for zero quantity", () => {
-    expect(unitPriceOf("25.00", "10")).toBe("2.5");
-    expect(unitPriceOf("10.00", "3")).toBe("3.333333");
-    expect(unitPriceOf("20.00", "3")).toBe("6.666667");
-    expect(unitPriceOf("5", "0")).toBe("");
-  });
 });
 
 describe("client-side checks", () => {
@@ -86,9 +80,9 @@ describe("client-side checks", () => {
     lines: [{ receiptId: RECEIPT, receiptLineNo: "1", qty: "6", unitPrice: "2.5", standardCost: true }],
   };
 
-  it("accepts a complete invoice, trims the number and sends numbers", () => {
+  it("accepts a complete invoice, trims the number and sends decimals as strings", () => {
     expect(validateInvoice(ok)).toEqual({});
-    expect(toInvoiceInput(ok)).toMatchObject({ invoiceNumber: "INV-1", lines: [{ receiptLineNo: 1, qty: 6, unitPrice: 2.5, standardCost: true }] });
+    expect(toInvoiceInput(ok)).toMatchObject({ invoiceNumber: "INV-1", lines: [{ receiptLineNo: 1, qty: "6", unitPrice: "2.5", standardCost: true }] });
   });
 
   it("rejects each bad field", () => {
@@ -133,8 +127,8 @@ describe("GR/IR open items", () => {
     expect(server.calls).toHaveLength(calls);
   });
 
-  it("carries the selected items into the invoice form", async () => {
-    server.handler = () => json(200, page([item()]));
+  it("carries the selected items, with the receipt unit price, into the invoice form", async () => {
+    server.handler = () => json(200, page([item({ unitPrice: "2.505" })]));
     renderAt("/ap-invoices/grir");
     expect(screen.queryByRole("button", { name: "Invoice selected items" })).toBeDisabled();
     fireEvent.click(await screen.findByRole("checkbox", { name: "Select RCV-00000001 line 1" }));
@@ -145,7 +139,7 @@ describe("GR/IR open items", () => {
     expect(screen.getByLabelText("Vendor ID")).toHaveValue(UUID_A);
     expect(screen.getByLabelText("Line 1 receipt ID")).toHaveValue(RECEIPT);
     expect(screen.getByLabelText("Line 1 quantity")).toHaveValue("6");
-    expect(screen.getByLabelText("Line 1 unit price")).toHaveValue("2.5");
+    expect(screen.getByLabelText("Line 1 unit price")).toHaveValue("2.505");
   });
 
   it("will not mix vendors on one invoice and cannot select cleared items", async () => {
@@ -211,7 +205,7 @@ describe("post vendor invoice", () => {
     const [call] = server.calls;
     expect(call.url.pathname).toBe("/api/v1/receiving/invoices:post");
     expect(idempotencyKey(call)).toMatch(/^[0-9a-f-]{36}$/);
-    expect(call.body).toMatchObject({ invoiceNumber: "INV-1", currency: "USD", lines: [{ receiptId: RECEIPT, receiptLineNo: 1, qty: 6, unitPrice: 2.5, standardCost: false }] });
+    expect(call.body).toMatchObject({ invoiceNumber: "INV-1", currency: "USD", lines: [{ receiptId: RECEIPT, receiptLineNo: 1, qty: "6", unitPrice: "2.5", standardCost: false }] });
     expect(pageViolations(container)).toEqual([]);
 
     fireEvent.click(screen.getByRole("button", { name: "Post another invoice" }));

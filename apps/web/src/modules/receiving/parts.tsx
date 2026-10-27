@@ -1,18 +1,14 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useRef, useState, type ReactNode } from "react";
 import { Badge, type BadgeTone } from "../../shell/ui";
-import { newKey, ReceivingApiError, type Receipt, type ReceiptState } from "./api/client";
+import { newKey, type Receipt, type ReceiptState } from "./api/client";
+import { ApiError, describeFailure, fieldErrors } from "./api/http";
 import styles from "./pages.module.css";
-
-export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-export const DECIMAL = /^\d+(\.\d{1,6})?$/;
-export const SIGNED_DECIMAL = /^-?\d+(\.\d{1,6})?$/;
 
 const stateTone: Record<ReceiptState, BadgeTone> = {
   ARRIVED: "info",
   REGISTERED: "warning",
   POSTED: "success",
-  CORRECTED: "info",
   CANCELLED: "neutral",
 };
 
@@ -20,20 +16,11 @@ const stateLabel: Record<ReceiptState, string> = {
   ARRIVED: "Arrived",
   REGISTERED: "Registered",
   POSTED: "Posted",
-  CORRECTED: "Corrected",
   CANCELLED: "Cancelled",
 };
 
 export function StateBadge({ state }: { state: ReceiptState }) {
   return <Badge tone={stateTone[state]}>{stateLabel[state]}</Badge>;
-}
-
-export function describeFailure(error: unknown): string {
-  return error instanceof ReceivingApiError ? `${error.message} (${error.code})` : (error as Error).message;
-}
-
-export function fieldErrors(error: unknown): Record<string, string> {
-  return error instanceof ReceivingApiError ? error.fields : {};
 }
 
 export function Detail({ term, children, mono = false }: { term: string; children: ReactNode; mono?: boolean }) {
@@ -65,7 +52,7 @@ export function useAction(receiptId: string) {
       await queryClient.invalidateQueries({ queryKey: ["receiving", "receipts"] });
       return true;
     } catch (error) {
-      setFailure({ message: describeFailure(error), fields: fieldErrors(error), stale: error instanceof ReceivingApiError && error.status === 412 });
+      setFailure({ message: describeFailure(error), fields: fieldErrors(error), stale: error instanceof ApiError && error.status === 412 });
       return false;
     } finally {
       setBusy(false);

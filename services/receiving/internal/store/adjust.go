@@ -12,13 +12,16 @@ import (
 )
 
 func lockedReceipt(ctx context.Context, tx pgx.Tx, tenantID, id string) (Receipt, error) {
-	if _, err := tx.Exec(ctx, `SELECT 1 FROM receiving_grir_open_item WHERE tenant_id = $1 AND receipt_id = $2 FOR UPDATE`, tenantID, id); err != nil {
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM receiving_grir_open_item WHERE tenant_id = $1 AND receipt_id = $2 ORDER BY line_no FOR UPDATE`, tenantID, id); err != nil {
 		return Receipt{}, err
 	}
 	return loadReceipt(ctx, tx, tenantID, id, true)
 }
 
-func enqueueAdjustment(ctx context.Context, tx pgx.Tx, id string, adj Adjustment) error {
+func enqueueAdjustment(ctx context.Context, tx pgx.Tx, tenantID, id string, adj Adjustment) error {
+	if err := markPostingsDone(ctx, tx, tenantID, id); err != nil {
+		return err
+	}
 	if adj.Event == nil {
 		return nil
 	}
@@ -60,7 +63,7 @@ func (s *Postgres) Correct(ctx context.Context, id string, fn AdjustFunc) (Recei
 		if _, err := tx.Exec(ctx, `UPDATE receiving_receipt SET correction_seq = correction_seq + 1, row_version = row_version + 1, updated_at = now() WHERE tenant_id = $1 AND id = $2`, tenantID, id); err != nil {
 			return err
 		}
-		if err := enqueueAdjustment(ctx, tx, id, adj); err != nil {
+		if err := enqueueAdjustment(ctx, tx, tenantID, id, adj); err != nil {
 			return err
 		}
 		out, err = loadReceipt(ctx, tx, tenantID, id, false)
@@ -100,7 +103,7 @@ func (s *Postgres) Cancel(ctx context.Context, id string, fn AdjustFunc) (Receip
 		} else if _, err := tx.Exec(ctx, `DELETE FROM receiving_serial WHERE tenant_id = $1 AND receipt_id = $2`, tenantID, id); err != nil {
 			return err
 		}
-		if err := enqueueAdjustment(ctx, tx, id, adj); err != nil {
+		if err := enqueueAdjustment(ctx, tx, tenantID, id, adj); err != nil {
 			return err
 		}
 		out, err = loadReceipt(ctx, tx, tenantID, id, false)

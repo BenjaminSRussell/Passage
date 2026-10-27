@@ -28,7 +28,9 @@ const (
 	receiptColumns = `id::text, COALESCE(receipt_number, ''), legal_entity_id::text, vendor_id::text, purchase_order_id::text, packing_slip,
 		COALESCE(carrier, ''), pallet_count, state, receipt_date, COALESCE(currency, ''), exchange_rate, posting_date, posted_at,
 		COALESCE(ledger_entry_id, ''), created_at, row_version, correction_seq`
-	lineColumns = `line_no, COALESCE(po_line_id::text, ''), product_id::text, qty, invoiced_qty, COALESCE(ordered_remaining, 0), COALESCE(over_delivery_pct, 0),
+	lineColumns = `line_no, COALESCE(po_line_id::text, ''), product_id::text, qty, invoiced_qty,
+		COALESCE((SELECT g.cleared_amount FROM receiving_grir_open_item g WHERE g.tenant_id = receiving_receipt_line.tenant_id AND g.receipt_id = receiving_receipt_line.receipt_id AND g.line_no = receiving_receipt_line.line_no), 0),
+		COALESCE(ordered_remaining, 0), COALESCE(over_delivery_pct, 0),
 		unit_price, currency, COALESCE(unit, ''), COALESCE(batch, ''), COALESCE(location_id::text, ''), inventory_status,
 		batch_tracked, serial_tracked, amount, amount_acct`
 )
@@ -83,7 +85,7 @@ func scanReceipt(row scanner) (Receipt, error) {
 
 func scanLine(row scanner) (Line, error) {
 	var l Line
-	err := row.Scan(&l.LineNo, &l.POLineID, &l.ProductID, &l.Qty, &l.InvoicedQty, &l.OrderedRemaining, &l.OverDeliveryPct, &l.UnitPrice, &l.Currency,
+	err := row.Scan(&l.LineNo, &l.POLineID, &l.ProductID, &l.Qty, &l.InvoicedQty, &l.ClearedAmount, &l.OrderedRemaining, &l.OverDeliveryPct, &l.UnitPrice, &l.Currency,
 		&l.Unit, &l.Batch, &l.LocationID, &l.InventoryStatus, &l.BatchTracked, &l.SerialTracked, &l.Amount, &l.AmountAcct)
 	return l, err
 }
@@ -383,6 +385,9 @@ func (s *Postgres) Post(ctx context.Context, id string, fn PostFunc) (Receipt, e
 			return err
 		}
 		if err := outbox.Enqueue(ctx, tx, receiptAggregate, id, outcome.Event); err != nil {
+			return err
+		}
+		if err := markPostingsDone(ctx, tx, tenantID, id); err != nil {
 			return err
 		}
 		out, err = loadReceipt(ctx, tx, tenantID, id, false)

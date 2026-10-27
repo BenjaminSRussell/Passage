@@ -13,7 +13,10 @@ import (
 
 const LedgerPostPath = "/v1/ledger/journal-entries:post"
 
-var ErrPeriodClosed = errors.New("ledger period closed")
+var (
+	ErrPeriodClosed   = errors.New("ledger period closed")
+	ErrLedgerConflict = errors.New("ledger idempotency conflict")
+)
 
 type PeriodStatus string
 
@@ -37,14 +40,15 @@ type DocumentSource struct {
 }
 
 type JournalEntry struct {
-	IdempotencyKey string         `json:"-"`
-	LedgerEntryID  string         `json:"-"`
-	LegalEntityID  string         `json:"legalEntityId"`
-	PostingDate    time.Time      `json:"postingDate"`
-	DocumentDate   time.Time      `json:"documentDate"`
-	Source         DocumentSource `json:"source"`
-	RateType       string         `json:"rateType"`
-	Lines          []JournalLine  `json:"lines"`
+	IdempotencyKey string            `json:"-"`
+	LedgerEntryID  string            `json:"-"`
+	GrirCleared    []decimal.Decimal `json:"-"`
+	LegalEntityID  string            `json:"legalEntityId"`
+	PostingDate    time.Time         `json:"postingDate"`
+	DocumentDate   time.Time         `json:"documentDate"`
+	Source         DocumentSource    `json:"source"`
+	RateType       string            `json:"rateType"`
+	Lines          []JournalLine     `json:"lines"`
 }
 
 type PostingProfile struct {

@@ -1,10 +1,8 @@
 import { z } from "zod";
 
-export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
+import { defaultFetch, request, type FetchLike } from "../../receiving/api/http";
 
-const defaultFetch: FetchLike = (input, init) => globalThis.fetch(input, init);
-
-const BASE = "/api/v1/receiving";
+export { ApiError, newKey } from "../../receiving/api/http";
 
 export const GRIR_STATUSES = ["OPEN", "PARTIAL", "CLEARED", "WRITTEN_OFF"] as const;
 export type GrirStatus = (typeof GRIR_STATUSES)[number];
@@ -16,6 +14,7 @@ export const grirItemSchema = z.object({
   lineNo: z.number().int(),
   vendorId: z.string(),
   poLineId: z.string(),
+  unitPrice: z.string(),
   receivedQty: z.string(),
   invoicedQty: z.string(),
   receivedAmount: z.string(),
@@ -65,8 +64,8 @@ export type Invoice = z.infer<typeof invoiceSchema>;
 export interface InvoiceLineInput {
   receiptId: string;
   receiptLineNo: number;
-  qty: number;
-  unitPrice: number;
+  qty: string;
+  unitPrice: string;
   standardCost: boolean;
 }
 
@@ -80,37 +79,6 @@ export interface InvoiceInput {
   ledgerId: string;
   fiscalPeriodId: string;
   lines: InvoiceLineInput[];
-}
-
-export class ApiError extends Error {
-  readonly status: number;
-  readonly code: string;
-  readonly fields: Record<string, string>;
-
-  constructor(status: number, code: string, message: string, fields: Record<string, string> = {}) {
-    super(message);
-    this.name = "ApiError";
-    this.status = status;
-    this.code = code;
-    this.fields = fields;
-  }
-}
-
-async function readProblem(res: Response): Promise<ApiError> {
-  let body: { code?: unknown; detail?: unknown; errors?: unknown } = {};
-  try {
-    body = (await res.json()) as typeof body;
-  } catch {
-    // Non-JSON error bodies fall through to the generic error below.
-  }
-  const code = typeof body.code === "string" ? body.code : "COM-0500";
-  const detail = typeof body.detail === "string" ? body.detail : `request failed with status ${res.status}`;
-  const fields = z.record(z.string()).safeParse(body.errors ?? {});
-  return new ApiError(res.status, code, detail, fields.success ? fields.data : {});
-}
-
-export function newKey(): string {
-  return crypto.randomUUID();
 }
 
 export interface GrirQuery {
@@ -130,18 +98,10 @@ export async function fetchGrir(q: GrirQuery = {}, fetchImpl: FetchLike = defaul
   if (q.cursor) params.set("cursor", q.cursor);
   if (q.limit) params.set("limit", String(q.limit));
   const query = params.size > 0 ? `?${params}` : "";
-  const res = await fetchImpl(`${BASE}/grir${query}`, { headers: { Accept: "application/json" } });
-  if (!res.ok) throw await readProblem(res);
-  return grirPageSchema.parse(await res.json());
+  return request("GET", `/grir${query}`, grirPageSchema, fetchImpl);
 }
 
 /** POST /invoices:post. The caller keeps one Idempotency-Key per intended invoice so a retry replays. */
 export async function postVendorInvoice(input: InvoiceInput, idempotencyKey: string, fetchImpl: FetchLike = defaultFetch): Promise<Invoice> {
-  const res = await fetchImpl(`${BASE}/invoices:post`, {
-    method: "POST",
-    headers: { Accept: "application/json", "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
-    body: JSON.stringify(input),
-  });
-  if (!res.ok) throw await readProblem(res);
-  return invoiceSchema.parse(await res.json());
+  return request("POST", "/invoices:post", invoiceSchema, fetchImpl, { "Idempotency-Key": idempotencyKey }, input);
 }

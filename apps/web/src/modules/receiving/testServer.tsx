@@ -5,6 +5,7 @@ import { render } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
+import type { RouteObject } from "react-router-dom";
 import receiving from "./module";
 
 export type Reply = { status: number; body: unknown };
@@ -47,13 +48,13 @@ function Location() {
   return <output data-testid="location">{location.pathname}</output>;
 }
 
-export function renderAt(path: string) {
+export function renderRoutes(routes: RouteObject[], path: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[path]}>
         <Routes>
-          {receiving.routes.map((route) => (
+          {routes.map((route) => (
             <Route key={route.path} path={route.path} element={route.element} />
           ))}
         </Routes>
@@ -72,3 +73,5 @@ const shellRules = new Set(["page-has-heading-one", "landmark-unique", "region",
 export function pageViolations(container: HTMLElement) {
   return checkAxeAA(container).filter((v) => !shellRules.has(v.id));
 }
+
+export const renderAt = (path: string) => renderRoutes(receiving.routes, path);

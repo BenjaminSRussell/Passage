@@ -1,12 +1,9 @@
 import { z } from "zod";
+import { defaultFetch, request, type FetchLike } from "./http";
 
-export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
+export { ApiError, newKey } from "./http";
 
-const defaultFetch: FetchLike = (input, init) => globalThis.fetch(input, init);
-
-const BASE = "/api/v1/receiving";
-
-export const RECEIPT_STATES = ["ARRIVED", "REGISTERED", "POSTED", "CORRECTED", "CANCELLED"] as const;
+export const RECEIPT_STATES = ["ARRIVED", "REGISTERED", "POSTED", "CANCELLED"] as const;
 export type ReceiptState = (typeof RECEIPT_STATES)[number];
 
 export const INVENTORY_STATUSES = ["AVAILABLE", "QUARANTINE", "BLOCKED"] as const;
@@ -58,9 +55,9 @@ export type ReceiptPage = z.infer<typeof receiptPageSchema>;
 export interface ArrivalLineInput {
   poLineId: string;
   productId: string;
-  orderedRemaining: number;
-  overDeliveryPct: number;
-  unitPrice: number;
+  orderedRemaining: string;
+  overDeliveryPct: string;
+  unitPrice: string;
   unit: string;
   batchTracked: boolean;
   serialTracked: boolean;
@@ -80,7 +77,7 @@ export interface ArrivalInput {
 
 export interface RegisterLineInput {
   lineNo: number;
-  qty: number;
+  qty: string;
   batch?: string;
   serials?: string[];
   locationId: string;
@@ -89,48 +86,7 @@ export interface RegisterLineInput {
 
 export interface CorrectLineInput {
   lineNo: number;
-  qtyDelta: number;
-}
-
-export class ReceivingApiError extends Error {
-  readonly status: number;
-  readonly code: string;
-  readonly fields: Record<string, string>;
-
-  constructor(status: number, code: string, message: string, fields: Record<string, string> = {}) {
-    super(message);
-    this.name = "ReceivingApiError";
-    this.status = status;
-    this.code = code;
-    this.fields = fields;
-  }
-}
-
-async function readProblem(res: Response): Promise<ReceivingApiError> {
-  let body: { code?: unknown; detail?: unknown; errors?: unknown } = {};
-  try {
-    body = (await res.json()) as typeof body;
-  } catch {
-    // Non-JSON error bodies fall through to the generic error below.
-  }
-  const code = typeof body.code === "string" ? body.code : "COM-0500";
-  const detail = typeof body.detail === "string" ? body.detail : `request failed with status ${res.status}`;
-  const fields = z.record(z.string()).safeParse(body.errors ?? {});
-  return new ReceivingApiError(res.status, code, detail, fields.success ? fields.data : {});
-}
-
-export function newKey(): string {
-  return crypto.randomUUID();
-}
-
-async function request<T>(method: string, path: string, schema: z.ZodType<T>, fetchImpl: FetchLike, headers: Record<string, string> = {}, body?: unknown): Promise<T> {
-  const res = await fetchImpl(`${BASE}${path}`, {
-    method,
-    headers: { Accept: "application/json", ...(body === undefined ? {} : { "Content-Type": "application/json" }), ...headers },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  if (!res.ok) throw await readProblem(res);
-  return schema.parse(await res.json());
+  qtyDelta: string;
 }
 
 export interface ReceiptQuery {

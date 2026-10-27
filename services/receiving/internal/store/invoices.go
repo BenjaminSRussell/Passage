@@ -1,9 +1,12 @@
 package store
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
@@ -32,6 +35,9 @@ func (s *Postgres) PostInvoice(ctx context.Context, in Invoice, fn InvoiceFunc) 
 		return Invoice{}, err
 	}
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, tenantID+"|"+in.VendorID+"|"+strings.ToLower(in.InvoiceNumber)); err != nil {
+			return err
+		}
 		var existing int
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM receiving_vendor_invoice WHERE tenant_id = $1 AND vendor_id = $2 AND lower(invoice_number) = lower($3)`,
 			tenantID, in.VendorID, in.InvoiceNumber).Scan(&existing); err != nil {
@@ -43,17 +49,24 @@ func (s *Postgres) PostInvoice(ctx context.Context, in Invoice, fn InvoiceFunc) 
 		byKey := map[ItemKey]*domain.GrirItem{}
 		items := make([]*domain.GrirItem, len(in.Lines))
 		var distinct []ItemKey
-		for i, l := range in.Lines {
-			key := l.ItemKey()
-			if byKey[key] == nil {
-				item, err := lockGrirItem(ctx, tx, tenantID, in, key)
-				if err != nil {
-					return err
-				}
-				byKey[key] = item
-				distinct = append(distinct, key)
+		for _, l := range in.Lines {
+			if _, seen := byKey[l.ItemKey()]; !seen {
+				byKey[l.ItemKey()] = nil
+				distinct = append(distinct, l.ItemKey())
 			}
-			items[i] = byKey[key]
+		}
+		slices.SortFunc(distinct, func(a, b ItemKey) int {
+			return cmp.Or(strings.Compare(a.ReceiptID, b.ReceiptID), cmp.Compare(a.LineNo, b.LineNo))
+		})
+		for _, key := range distinct {
+			item, err := lockGrirItem(ctx, tx, tenantID, in, key)
+			if err != nil {
+				return err
+			}
+			byKey[key] = item
+		}
+		for i, l := range in.Lines {
+			items[i] = byKey[l.ItemKey()]
 		}
 		outcome, err := fn(items)
 		if err != nil {
@@ -79,6 +92,9 @@ func (s *Postgres) PostInvoice(ctx context.Context, in Invoice, fn InvoiceFunc) 
 			lineRows[i] = row[:4]
 		}
 		if err := execBatch(ctx, tx, `UPDATE receiving_receipt_line SET invoiced_qty = $4 WHERE tenant_id = $1 AND receipt_id = $2 AND line_no = $3`, lineRows); err != nil {
+			return err
+		}
+		if err := markPostingsDone(ctx, tx, tenantID, in.ID); err != nil {
 			return err
 		}
 		return outbox.Enqueue(ctx, tx, invoiceAggregate, in.ID, outcome.Event)

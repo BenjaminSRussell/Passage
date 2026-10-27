@@ -3,8 +3,9 @@ import { useRef, useState, type FormEvent } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader } from "../../shell/ui";
 import { newKey, postVendorInvoice, type Invoice, type InvoiceInput } from "./api/client";
-import { DECIMAL, describeFailure, fieldErrors, UUID, type InvoiceNavState } from "./parts";
-import styles from "./pages.module.css";
+import { describeFailure, fieldErrors } from "../receiving/api/http";
+import { DECIMAL, UUID, type InvoiceNavState } from "./parts";
+import styles from "../receiving/pages.module.css";
 
 const MAX_LINES = 500;
 
@@ -76,7 +77,7 @@ export function toInvoiceInput(v: InvoiceDraft): InvoiceInput {
     currency: v.currency,
     ledgerId: v.ledgerId,
     fiscalPeriodId: v.fiscalPeriodId,
-    lines: v.lines.map((l) => ({ receiptId: l.receiptId, receiptLineNo: Number(l.receiptLineNo), qty: Number(l.qty), unitPrice: Number(l.unitPrice), standardCost: l.standardCost })),
+    lines: v.lines.map((l) => ({ receiptId: l.receiptId, receiptLineNo: Number(l.receiptLineNo), qty: l.qty.trim(), unitPrice: l.unitPrice.trim(), standardCost: l.standardCost })),
   };
 }
 

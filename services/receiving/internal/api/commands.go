@@ -1,8 +1,9 @@
 package api
 
 import (
-	"errors"
+	"bytes"
 	"fmt"
+	"io"
 	"net/http"
 	"slices"
 	"strconv"
@@ -66,7 +67,12 @@ type deltaLine struct {
 }
 
 type correctRequest struct {
-	Lines []deltaLine `json:"lines"`
+	PostingDate string      `json:"postingDate"`
+	Lines       []deltaLine `json:"lines"`
+}
+
+type cancelRequest struct {
+	PostingDate string `json:"postingDate"`
 }
 
 type registerInput struct {
@@ -146,7 +152,7 @@ func toDomain(r store.Receipt) domain.Receipt {
 	out := domain.Receipt{ID: r.ID, LegalEntityID: r.LegalEntityID, Date: r.Date, State: r.State, LedgerEntryID: r.LedgerEntryID}
 	for _, l := range r.Lines {
 		out.Lines = append(out.Lines, domain.ReceiptLine{
-			LineNo: l.LineNo, ProductID: l.ProductID, Qty: l.Qty, InvoicedQty: l.InvoicedQty, OrderedRemaining: l.OrderedRemaining,
+			LineNo: l.LineNo, ProductID: l.ProductID, Qty: l.Qty, InvoicedQty: l.InvoicedQty, ClearedAmount: l.ClearedAmount, OrderedRemaining: l.OrderedRemaining,
 			OverDeliveryPct: l.OverDeliveryPct, UnitPrice: money.Amount{Value: l.UnitPrice, Currency: l.Currency},
 			BatchTracked: l.BatchTracked, SerialTracked: l.SerialTracked, Tracking: domain.Tracking{Batch: l.Batch, Serials: l.Serials},
 		})
@@ -296,7 +302,7 @@ func (a *API) postReceipt(w http.ResponseWriter, r *http.Request) {
 		if err := checkVersion(rec.Version, cmd.version); err != nil {
 			return store.PostOutcome{}, err
 		}
-		next, items, err := toDomain(rec).Post(ctx, a.ports.Ledger, a.ports.Profile)
+		next, items, err := toDomain(rec).Post(ctx, a.ledgerFor(cmd.id), a.ports.Profile)
 		if err != nil {
 			return store.PostOutcome{}, err
 		}
@@ -349,13 +355,18 @@ func (a *API) correctReceipt(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, validationProblem(fields))
 		return
 	}
+	postingDate := optionalDate(fields, "postingDate", req.PostingDate)
+	if len(fields) > 0 {
+		httpx.Fail(w, r, validationProblem(fields))
+		return
+	}
 	ctx := r.Context()
 	corrected, err := a.store.Correct(ctx, cmd.id, func(rec store.Receipt) (store.Adjustment, error) {
 		if err := checkVersion(rec.Version, cmd.version); err != nil {
 			return store.Adjustment{}, err
 		}
 		seq := rec.CorrectionSeq + 1
-		entryID, changes, err := toDomain(rec).Correct(ctx, a.ports.Ledger, a.ports.Profile, seq, deltas)
+		entryID, changes, err := toDomain(rec).Correct(ctx, a.ledgerFor(cmd.id), a.ports.Profile, seq, postingDate, deltas)
 		if err != nil {
 			return store.Adjustment{}, err
 		}
@@ -387,12 +398,36 @@ func (a *API) cancelReceipt(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	var req cancelRequest
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		httpx.Fail(w, r, validationProblem(map[string]string{"body": "unreadable"}))
+		return
+	}
+	if len(bytes.TrimSpace(raw)) > 0 {
+		r.Body = io.NopCloser(bytes.NewReader(raw))
+		if err := httpx.Decode(r, &req); err != nil {
+			writeError(w, r, err)
+			return
+		}
+	}
+	fields := map[string]string{}
+	postingDate := optionalDate(fields, "postingDate", req.PostingDate)
+	if len(fields) > 0 {
+		httpx.Fail(w, r, validationProblem(fields))
+		return
+	}
 	ctx := r.Context()
 	cancelled, err := a.store.Cancel(ctx, cmd.id, func(rec store.Receipt) (store.Adjustment, error) {
 		if err := checkVersion(rec.Version, cmd.version); err != nil {
 			return store.Adjustment{}, err
 		}
-		entryID, err := toDomain(rec).Cancel(ctx, a.ports.Ledger, a.ports.Profile)
+		if rec.State != domain.Posted {
+			if err := a.store.EnsureNoPending(ctx, rec.ID); err != nil {
+				return store.Adjustment{}, err
+			}
+		}
+		entryID, err := toDomain(rec).Cancel(ctx, a.ledgerFor(cmd.id), a.ports.Profile, postingDate)
 		if err != nil || rec.State != domain.Posted {
 			return store.Adjustment{}, err
 		}
@@ -427,5 +462,3 @@ func (a *API) getReceipt(w http.ResponseWriter, r *http.Request) {
 	}
 	writeReceipt(w, http.StatusOK, rec)
 }
-
-var errNoTenant = errors.New("no tenant")

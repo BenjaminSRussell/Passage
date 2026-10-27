@@ -45,6 +45,9 @@ Every POST except the tester requires `Idempotency-Key`; replays carry `Idempote
 - GR/IR clearing is pro-rata at the receipt-side amount; the final invoiced quantity clears the exact remainder, so a fully invoiced line leaves 0.00.
 - Receipt numbers are `RCV-%08d`, allocated per tenant; a failed arrival or direct receipt burns no number.
 - Posting idempotency keys: `post:receiving:productreceipt:<id>:receipt`, `post:receiving:productreceipt:<id>:correction:<seq>`, `post:receiving:productreceipt:<id>:cancel`, `post:receiving:vendorinvoice:<id>:invoice`. The invoice id derives from tenant, vendor and invoice number, so a retry after a failed commit reuses the ledger key.
+- Every ledger post is first recorded in `receiving_pending_posting` (key, journal, hash) in its own committed transaction and marked done in the main one. While a posting is unfinished, any other ledger-posting command for the same receipt or invoice, or the same key with a different body, returns RCV-IDM-001; repeating the original request completes it. A definite ledger rejection (closed period) releases the row. `LEDGER_IDEMPOTENCY_CONFLICT` from the ledger also maps to RCV-IDM-001.
+- Money and quantities are accepted as JSON numbers or as decimal strings (`"2.50"`); strings are validated as plain decimals.
+- `:correct` and `:cancel` take an optional `postingDate` (default the receipt date, never earlier). When a correction brings a line to its invoiced quantity the amount becomes the cleared amount, so no rounding residual is left on the closed GR/IR item.
 - A correction changes quantities on a POSTED receipt and leaves it POSTED; it cannot go below the invoiced quantity or to zero, and serial-tracked lines are refused. Cancelling a POSTED receipt reverses the ledger entry and closes its GR/IR items at zero; a cancelled receipt keeps its packing slip.
 - The invoice endpoint lives here until wave 19 owns payables; its event uses the `payables` context the PRD names.
 
@@ -66,6 +69,8 @@ Every POST except the tester requires `Idempotency-Key`; replays carry `Idempote
 | PER-AP-001 | domain | AP period not open for the posting date |
 | AP-QTY-001 | domain | invoice quantity above received uninvoiced quantity |
 | AP-DUP-001 | 409 | invoice number already posted for the vendor (case-insensitive) |
+| RCV-COR-001 | 409 | correction would take a line below its invoiced quantity |
+| RCV-IDM-001 | 409 | an earlier ledger posting for the receipt or invoice is unfinished (the ledger accepted it, the local commit did not) or differs; repeat the original request first |
 | RCV-NF-001 / RCV-NF-002 | 404 | receipt not found / receipt line has no open GR/IR item |
 | COM-0412 | 412 | `If-Match` differs from the receipt version |
 | COM-0428 | 428 | `If-Match` missing |
