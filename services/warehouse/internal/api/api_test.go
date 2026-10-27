@@ -94,6 +94,85 @@ func TestSimulate_BlockedIsAnAnswerNotAnError(t *testing.T) {
 	}
 }
 
+func hazmatBody(t *testing.T, wh, rel string) []byte {
+	t.Helper()
+	oxen := map[string]decimal.Decimal{"OX-51": dec("10")}
+	req := simulateRequest{
+		Line: domain.Line{ItemID: "SOLV-3", WorkType: "PURCHASE_PUTAWAY", Direction: domain.DirectionPut, Warehouse: wh,
+			Qty: dec("10"), Weight: dec("20")},
+		Directives: []domain.Directive{{ID: "DIR-20", Sequence: 20, WorkType: "PURCHASE_PUTAWAY", Direction: domain.DirectionPut, Warehouse: wh,
+			Bands: []domain.Band{{Seq: 1, FromQty: dec("0"), Actions: []domain.Action{{Seq: 1, Strategy: domain.StrategyEmptyLocation}}}}}},
+		Locations: []domain.Location{
+			{ID: "h1", Name: "H-01-01-01", Zone: "HAZ", PickSequence: 1, Status: domain.StatusActive, FireSection: "FCS-02", Stock: oxen, Used: domain.Usage{LPs: 1}},
+			{ID: "h2", Name: "H-01-01-02", Zone: "HAZ", PickSequence: 2, Status: domain.StatusActive, FireSection: "FCS-02"},
+			{ID: "h3", Name: "H-03-01-01", Zone: "HAZ", PickSequence: 30, Status: domain.StatusActive, FireSection: "FCS-01"},
+		},
+		Compliance: &complianceRequest{
+			HazmatProfiles: []domain.HazmatProfile{{ItemID: "SOLV-3", StorageClass: "3"}, {ItemID: "OX-51", StorageClass: "5.1"}},
+			Segregation:    []domain.SegregationPair{{A: "3", B: "5.1", Rel: domain.HazmatRel(rel)}},
+		},
+	}
+	b, err := json.Marshal(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+func TestSimulate_HazmatComplianceExcludesIncompatibleSection(t *testing.T) {
+	// AC-31.14 over HTTP: FCS-02 holds 5.1, so the class 3 line lands in FCS-01.
+	rec := send(t, newRouter(t), hazmatBody(t, ids.New(), "prohibited"), dutySetupView)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	var got simulateResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Blocked || got.Location != "H-03-01-01" {
+		t.Fatalf("want H-03-01-01, got %+v", got)
+	}
+	if !strings.Contains(rec.Body.String(), "hazmat: class 3 vs 5.1 prohibited in FCS-02") {
+		t.Errorf("trace lacks the segregation reason: %s", rec.Body)
+	}
+}
+
+func TestSimulate_InvalidComplianceIsValidationError(t *testing.T) {
+	rec := send(t, newRouter(t), hazmatBody(t, ids.New(), "maybe"), dutySetupView)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"compliance"`) {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+}
+
+func TestSimulate_WithoutComplianceIgnoresSegregation(t *testing.T) {
+	// The compliance block is optional: without it the class 3 line takes the
+	// first empty location, even in the section that holds class 5.1.
+	var req map[string]any
+	if err := json.Unmarshal(hazmatBody(t, ids.New(), "prohibited"), &req); err != nil {
+		t.Fatal(err)
+	}
+	delete(req, "compliance")
+	body, _ := json.Marshal(req)
+	rec := send(t, newRouter(t), body, dutySetupView)
+	var got simulateResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	if got.Location != "H-01-01-02" {
+		t.Errorf("want H-01-01-02 without hazmat data, got %+v", got)
+	}
+}
+
+func TestSimulate_RejectsBlankStorageClassOnLocation(t *testing.T) {
+	wh := ids.New()
+	body := []byte(`{"line":{"itemId":"A","workType":"W","direction":"PUT","warehouseId":"` + wh + `","qty":"1"},"directives":[],
+		"locations":[{"id":"l","name":"A-01","zone":"Z","status":"ACTIVE","fireSection":"FCS-01","allowedStorageClasses":["3",""]}]}`)
+	rec := send(t, newRouter(t), body, dutySetupView)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"locations[0].allowedStorageClasses"`) {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+}
+
 func TestSimulate_RequiresDuty(t *testing.T) {
 	rec := send(t, newRouter(t), bodyFor(t, ids.New(), nil), "WMS_SETUP_VIEW")
 	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "AUTH-0003") {

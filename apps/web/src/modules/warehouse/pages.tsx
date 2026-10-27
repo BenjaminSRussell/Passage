@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Alert, Badge, Button, Card, DataTable, EmptyState, FormField, Input, PageHeader, Select, Textarea, type BadgeTone, type DataTableColumn } from "../../shell/ui";
-import { describeProblem, simulateDirectives, type Direction, type Problem, type SimulateRequest, type SimulateResponse, type TraceStep } from "./api/client";
+import { describeProblem, simulateDirectives, type Compliance, type Direction, type Problem, type SimulateRequest, type SimulateResponse, type TraceStep } from "./api/client";
 import styles from "./pages.module.css";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -22,6 +22,8 @@ export interface SimulatorDraft {
   attributes: string;
   directives: string;
   locations: string;
+  /** Optional hazmat reference data as JSON; blank sends none and disables the hazmat checks. */
+  compliance: string;
 }
 
 type Errors = Partial<Record<keyof SimulatorDraft, string>>;
@@ -95,6 +97,64 @@ export const exampleDraft: SimulatorDraft = {
   attributes: "item_group=FASTENERS",
   directives: JSON.stringify(exampleDirectives, null, 2),
   locations: JSON.stringify(exampleLocations, null, 2),
+  compliance: "",
+};
+
+/**
+ * AC-31.14: section FCS-02 holds class 5.1 oxidizers, so a class 3 solvent put-away
+ * skips FCS-02 and lands in FCS-01; the trace states the segregation reason.
+ */
+const hazmatLocations = [
+  {
+    id: "loc-h1",
+    name: "H-01-01-01",
+    zone: "HAZ",
+    pickSequence: 1,
+    status: "ACTIVE",
+    fireSection: "FCS-02",
+    rackGroup: "RK-1",
+    used: { weight: "50", lps: 1 },
+    stock: { "OX-51": "10" },
+  },
+  { id: "loc-h2", name: "H-01-01-02", zone: "HAZ", pickSequence: 2, status: "ACTIVE", fireSection: "FCS-02", rackGroup: "RK-2" },
+  { id: "loc-h3", name: "H-03-01-01", zone: "HAZ", pickSequence: 30, status: "ACTIVE", fireSection: "FCS-01", rackGroup: "RK-3", allowedStorageClasses: ["3"] },
+];
+
+const hazmatCompliance: Compliance = {
+  hazmatProfiles: [
+    { itemId: "SOLV-3", storageClass: "3", unNumber: "UN1263", shippingName: "PAINT" },
+    { itemId: "OX-51", storageClass: "5.1", unNumber: "UN1479" },
+  ],
+  segregation: [{ a: "3", b: "5.1", rel: "prohibited" }],
+  sectionLimitsKg: { "FCS-01": "1000", "FCS-02": "1000" },
+};
+
+export const hazmatDraft: SimulatorDraft = {
+  itemId: "SOLV-3",
+  workType: "PURCHASE_PUTAWAY",
+  direction: "PUT",
+  warehouseId: exampleWarehouse,
+  qty: "10",
+  weight: "20",
+  volume: "",
+  lps: "1",
+  attributes: "",
+  directives: JSON.stringify(
+    [
+      {
+        id: "DIR-HAZ",
+        sequence: 10,
+        workType: "PURCHASE_PUTAWAY",
+        direction: "PUT",
+        warehouseId: exampleWarehouse,
+        lines: [{ seq: 1, fromQty: "0", actions: [{ seq: 1, strategy: "empty_location", zone: "HAZ" }] }],
+      },
+    ],
+    null,
+    2,
+  ),
+  locations: JSON.stringify(hazmatLocations, null, 2),
+  compliance: JSON.stringify(hazmatCompliance, null, 2),
 };
 
 function parseAttributes(text: string): Record<string, string> | null {
@@ -107,6 +167,15 @@ function parseAttributes(text: string): Record<string, string> | null {
     out[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
   }
   return out;
+}
+
+function parseObject(text: string): Compliance | null {
+  try {
+    const value: unknown = JSON.parse(text);
+    return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Compliance) : null;
+  } catch {
+    return null;
+  }
 }
 
 function parseArray(text: string): unknown[] | null {
@@ -131,6 +200,7 @@ export function validateDraft(d: SimulatorDraft): Errors {
   if (parseAttributes(d.attributes) === null) errors.attributes = "Write one key=value pair per line.";
   if (parseArray(d.directives) === null) errors.directives = "Enter the directives as a JSON array.";
   if (parseArray(d.locations) === null) errors.locations = "Enter the candidate locations as a JSON array.";
+  if (d.compliance.trim() !== "" && parseObject(d.compliance) === null) errors.compliance = "Enter the hazmat data as a JSON object, or leave it blank.";
   return errors;
 }
 
@@ -150,6 +220,7 @@ export function toRequest(d: SimulatorDraft): SimulateRequest {
     },
     directives: parseArray(d.directives) ?? [],
     locations: parseArray(d.locations) ?? [],
+    ...(d.compliance.trim() !== "" ? { compliance: parseObject(d.compliance) ?? {} } : {}),
   };
 }
 
@@ -167,9 +238,14 @@ export function fieldErrors(fields: Record<string, string>): Errors {
     "line.lps": "lps",
   };
   for (const [path, message] of Object.entries(fields).sort(([a], [b]) => a.localeCompare(b))) {
-    const target = lineFields[path] ?? (path.startsWith("directives") ? "directives" : path.startsWith("locations") ? "locations" : undefined);
+    const json = ["directives", "locations", "compliance"].find((f) => path === f || path.startsWith(`${f}[`) || path.startsWith(`${f}.`)) as
+      | "directives"
+      | "locations"
+      | "compliance"
+      | undefined;
+    const target = lineFields[path] ?? json;
     if (!target) continue;
-    const text = target === "directives" || target === "locations" ? `${path} ${message}` : `This ${message}.`;
+    const text = target === "compliance" && path === "compliance" ? message : json ? `${path} ${message}` : `This ${message}.`;
     errors[target] = errors[target] ? `${errors[target]}; ${text}` : text;
   }
   return errors;
@@ -202,7 +278,8 @@ function summary(result: SimulateResponse): string {
 
 /**
  * Location directive simulator (FR-31.3, BR-31.1): evaluates a line against
- * directives and candidate locations and explains every step. Nothing is saved.
+ * directives and candidate locations, optionally with hazmat storage
+ * compatibility (FR-31.19, BR-31.15), and explains every step. Nothing is saved.
  */
 export function DirectiveSimulatorPage({ initial = exampleDraft }: { initial?: SimulatorDraft }) {
   const [draft, setDraft] = useState<SimulatorDraft>(initial);
@@ -232,8 +309,8 @@ export function DirectiveSimulatorPage({ initial = exampleDraft }: { initial?: S
     }
   }
 
-  function loadExample() {
-    setDraft(exampleDraft);
+  function loadExample(example: SimulatorDraft) {
+    setDraft(example);
     setErrors({});
     setFailure(null);
     setResult(null);
@@ -253,9 +330,9 @@ export function DirectiveSimulatorPage({ initial = exampleDraft }: { initial?: S
     </FormField>
   );
 
-  const json = (id: string, name: "directives" | "locations", label: string, hint: string) => (
+  const json = (id: string, name: "directives" | "locations" | "compliance", label: string, hint: string, optional = false) => (
     <div className={styles.wide}>
-      <FormField id={id} label={label} hint={hint} error={errors[name]}>
+      <FormField id={id} label={label} hint={hint} optional={optional} error={errors[name]}>
         {(c) => <Textarea {...c} mono rows={12} spellCheck={false} value={draft[name]} onChange={(e) => set({ [name]: e.target.value })} invalid={Boolean(errors[name])} />}
       </FormField>
     </div>
@@ -265,11 +342,16 @@ export function DirectiveSimulatorPage({ initial = exampleDraft }: { initial?: S
     <div className={styles.stack}>
       <PageHeader
         title="Location directive simulator"
-        description="Enter a work line, the directives and the candidate locations, then read which location the rules choose and why. Nothing is saved."
+        description="Enter a work line, the directives, the candidate locations and any hazmat data, then read which location the rules choose and why. Nothing is saved."
         actions={
-          <Button variant="secondary" onClick={loadExample}>
-            Load worked example
-          </Button>
+          <>
+            <Button variant="secondary" onClick={() => loadExample(exampleDraft)}>
+              Load worked example
+            </Button>
+            <Button variant="secondary" onClick={() => loadExample(hazmatDraft)}>
+              Load hazmat example
+            </Button>
+          </>
         }
       />
       <Card title="Work line">
@@ -295,7 +377,19 @@ export function DirectiveSimulatorPage({ initial = exampleDraft }: { initial?: S
             </FormField>
           </div>
           {json("sim-directives", "directives", "Directives (JSON)", "An array of directives with their lines (quantity bands) and actions, as in the service API.")}
-          {json("sim-locations", "locations", "Candidate locations (JSON)", "An array of locations with zone, status, capacity, current use and stock.")}
+          {json(
+            "sim-locations",
+            "locations",
+            "Candidate locations (JSON)",
+            "An array of locations with zone, status, capacity, current use and stock; hazmat storage adds fireSection, rackGroup and allowedStorageClasses.",
+          )}
+          {json(
+            "sim-compliance",
+            "compliance",
+            "Hazmat compliance (JSON)",
+            "An object with hazmatProfiles, segregation (allowed, separate or prohibited per storage-class pair) and sectionLimitsKg. Leave blank to skip the hazmat checks.",
+            true,
+          )}
           <div className={styles.formActions}>
             <Button type="submit" variant="primary" loading={busy}>
               Simulate

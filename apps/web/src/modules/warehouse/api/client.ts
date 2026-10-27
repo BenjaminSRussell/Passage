@@ -16,11 +16,21 @@ export interface SimulateLine {
   attributes?: Record<string, string>;
 }
 
+export type HazmatRel = "allowed" | "separate" | "prohibited";
+
+/** Hazmat reference data for storage compatibility (FR-31.19, BR-31.15). Limits are decimal strings in kg. */
+export interface Compliance {
+  hazmatProfiles?: { itemId: string; storageClass: string; unNumber?: string; shippingName?: string; class?: string }[];
+  segregation?: { a: string; b: string; rel: HazmatRel }[];
+  sectionLimitsKg?: Record<string, string>;
+}
+
 /** Directives and locations travel as the service's JSON shapes (see services/warehouse/api/openapi.yaml). */
 export interface SimulateRequest {
   line: SimulateLine;
   directives: unknown[];
   locations: unknown[];
+  compliance?: Compliance;
 }
 
 export interface TraceStep {

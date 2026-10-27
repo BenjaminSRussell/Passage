@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
@@ -59,6 +60,15 @@ type simulateRequest struct {
 	Line       domain.Line        `json:"line"`
 	Directives []domain.Directive `json:"directives"`
 	Locations  []domain.Location  `json:"locations"`
+	Compliance *complianceRequest `json:"compliance,omitempty"`
+}
+
+// complianceRequest is the optional hazmat reference data (FR-31.19): profiles
+// by item, the segregation matrix (missing pairs are allowed) and section limits.
+type complianceRequest struct {
+	HazmatProfiles  []domain.HazmatProfile     `json:"hazmatProfiles"`
+	Segregation     []domain.SegregationPair   `json:"segregation"`
+	SectionLimitsKg map[string]decimal.Decimal `json:"sectionLimitsKg"`
 }
 
 // simulateResponse is the outcome of Evaluate with the chosen location named.
@@ -81,7 +91,12 @@ func (a *API) simulate(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
-	res := domain.Evaluate(req.Directives, req.Line, req.Locations)
+	comp, err := buildCompliance(req.Compliance)
+	if err != nil {
+		validationFailed(w, r, map[string]string{"compliance": err.Error()})
+		return
+	}
+	res := domain.EvaluateWithCompliance(req.Directives, req.Line, req.Locations, comp)
 	a.simulations.Add(1)
 	out := simulateResponse{Blocked: res.Blocked, Code: res.Code, Directive: res.Directive, Trace: res.Trace}
 	if out.Trace == nil {
@@ -95,6 +110,15 @@ func (a *API) simulate(w http.ResponseWriter, r *http.Request) {
 	}
 	slog.Info("directive simulated", "blocked", res.Blocked, "correlationId", middleware.GetReqID(r.Context()))
 	httpx.JSON(w, http.StatusOK, out)
+}
+
+// buildCompliance turns the optional request block into domain reference data.
+// An absent block yields the zero Compliance, which disables hazmat checks.
+func buildCompliance(c *complianceRequest) (domain.Compliance, error) {
+	if c == nil {
+		return domain.Compliance{}, nil
+	}
+	return domain.NewCompliance(c.HazmatProfiles, c.Segregation, c.SectionLimitsKg)
 }
 
 func validationFailed(w http.ResponseWriter, r *http.Request, fields map[string]string) {

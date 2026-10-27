@@ -147,6 +147,12 @@ func validateLocation(fields map[string]string, path string, loc domain.Location
 	if loc.Used.Weight.IsNegative() || loc.Used.Volume.IsNegative() || loc.Used.LPs < 0 {
 		fields[path+".used"] = "must not be negative"
 	}
+	for _, c := range loc.AllowedStorageClasses {
+		if strings.TrimSpace(c) == "" {
+			fields[path+".allowedStorageClasses"] = "must not hold a blank storage class"
+			break
+		}
+	}
 	for item, q := range loc.Stock {
 		if item == "" || q.IsNegative() {
 			fields[path+".stock"] = "must map item ids to quantities of zero or more"

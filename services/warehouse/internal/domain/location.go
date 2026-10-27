@@ -97,6 +97,12 @@ type Location struct {
 	Capacity     Capacity                   `json:"capacity"`
 	Used         Usage                      `json:"used"`
 	Stock        map[string]decimal.Decimal `json:"stock,omitempty"`
+	// FireSection is the fire-containment section (FR-31.19); empty means none.
+	FireSection string `json:"fireSection,omitempty"`
+	// RackGroup is the location group used by "separate" segregation.
+	RackGroup string `json:"rackGroup,omitempty"`
+	// AllowedStorageClasses restricts hazmat storage; empty allows any class.
+	AllowedStorageClasses []string `json:"allowedStorageClasses,omitempty"`
 }
 
 // load returns the current usage with Items derived from the stock map.

@@ -1,10 +1,13 @@
 # NOT-IMPLEMENTED — warehouse (PSG-31, wave 31)
 
-Slice 1 builds the pure directive engine, the location and license-plate rules,
+Slice 1 built the pure directive engine, the location and license-plate rules,
 the work state machine, one stateless simulate endpoint, the web simulator page,
-the chart and the contracts. Everything below is missing and is listed with its
-reason. Status is `later slice of PSG-31` (same wave, not yet built) or `handoff`
-(needs another owner).
+the chart and the contracts. Slice 2 adds hazmat storage compatibility (FR-31.19)
+to the engine and simulate endpoint, the cross-dock receipt allocation (FR-31.13
+planning), packaging-specification determination and round-up (FR-31.17), and
+the engineered labor formula, travel metrics and performance calculation
+(FR-31.18). Everything below is missing and is listed with its reason. Status is
+`later slice of PSG-31` (same wave, not yet built) or `handoff` (needs another owner).
 
 ## Deliverables (ticket list 1–10)
 
@@ -15,11 +18,11 @@ reason. Status is `later slice of PSG-31` (same wave, not yet built) or `handoff
 | 3 | Work execution: tasks, priorities, user assignment (`FOR UPDATE SKIP LOCKED`), exceptions, short picks | later slice of PSG-31 | Requires the store. The state machine (`CheckTransition`) exists; assignment and confirmation endpoints do not. |
 | 4 | Load planning, dock appointments, ASN-driven receiving with LPs | later slice of PSG-31 | Requires the store and the wave-28 shipment and wave-18 receipt contracts. |
 | 5 | Slotting analysis and warehouse KPIs | later slice of PSG-31 (KPIs), later slice of PSG-31 (slotting) | Needs historical picks and the Cube semantic layer from wave 5/analytics. |
-| 6 | Cross-docking (planned and opportunistic) and outbound sorting | later slice of PSG-31 | Needs CROSS_DOCK work, the `outbound_staging` strategy in persisted form, and sort positions. The strategy name is accepted by the engine. |
-| 7 | Value-added services and kitting; packaging specifications | later slice of PSG-31 | Needs VAS orders, kit BOMs from wave 9 and the wave-16 posting path. |
+| 6 | Outbound sorting (sort templates, sort positions, sort-station scan); persisted cross-dock templates, links and CROSS_DOCK work | later slice of PSG-31 | Slice 2 has the pure receipt allocation `PlanReceipt` (planned links, then opportunistic demand in window, with quality hold); no endpoint or screen calls it yet, because the PRD API (`POST /cross-dock-templates`) and the receipt registration it runs at need the store. Persisted templates and links, CROSS_DOCK work creation, the re-plan job and sort positions are not built. The `outbound_staging` strategy name is accepted by the engine. |
+| 7 | Value-added services and kitting (VAS orders, kit-to-order, kit-to-stock, disassembly) | later slice of PSG-31 | Needs VAS orders, kit BOMs from wave 9 and the wave-16 posting path. Packaging specifications are built as domain functions (`DetermineSpec`, `RoundUpToLP`) with no endpoint or screen; their persistence and maintenance API, the freeze on work lines (BR-31.13), the `packaging_spec_required` block, the `round_up_to_lp` engine strategy using them, cartonization and material consumption through wave 16 are not. |
 | 8 | Transfer-order warehouse flow with LP identity across sites | later slice of PSG-31 | Needs wave-16 transfer orders and the in-transit ledger. |
-| 9 | Engineered labor standards and performance reporting | later slice of PSG-31 | Needs confirmed work lines with timestamps (store) and wave-32 step telemetry. |
-| 10 | Hazardous-material profiles and storage-class segregation | later slice of PSG-31 | The engine has the hook point (admission per location). HazmatProfile, the segregation matrix and section limits are not modeled. |
+| 9 | Engineered labor standards and performance reporting | later slice of PSG-31 | Slice 2 has the formula (`Formula.Planned`), travel metrics, `Actual` from timestamps and pauses, `LaborLine` with the outlier band and its WMS-0118 text, and `Performances` per group, as domain functions with no endpoint or screen. The formula is a fixed linear shape, not a wave-3 expression. Versioned, effective-dated standards, the `/labor/standards` and `/labor/performance` endpoints, persisted confirmations, shift close and performance documents (LPD-*) are not built. Wave-32 step telemetry is not wired. Indirect activity codes and the GRAPH travel metric are not built. |
+| 10 | Hazardous-material profiles and storage compatibility: persistence and maintenance | later slice of PSG-31 | Slice 2 built the storage check (`EvaluateWithCompliance`, BR-31.15) and the simulate `compliance` block. Not built: persisted `HazmatProfile`, segregation matrix and `FireContainmentSection` with `POST /hazmat-profiles` (duty WMS_HAZMAT_MAINTAIN), the tenant matrix version `hazmat_segregation_matrix`, section limits in litres (only kg), the hazmat-inventory-by-section inquiry (LX06/LX24) and its list, and WMS-0115/WMS-0116 as HTTP errors on work confirmation (they appear as trace reasons only). Section quantity is the used weight of locations holding a profiled item, because stock carries quantities, not per-item weights, until quants are persisted. |
 
 ## Acceptance criteria (ticket and PRD §6.31.8)
 
@@ -37,11 +40,11 @@ reason. Status is `later slice of PSG-31` (same wave, not yet built) or `handoff
 | AC-31.7 ASN receipt discrepancy −5 | later slice of PSG-31 | Receiving is not built. |
 | AC-31.8 `DOOR_SLOT_OVERLAP` | later slice of PSG-31 | Dock appointments are not built. |
 | AC-31.9 property over 10,000 work/confirmation sequences | later slice of PSG-31 | Requires the work and confirmation paths. Capacity-only half is partly built (see AC3). |
-| AC-31.10 cross-dock to outbound staging, ATP counts once | later slice of PSG-31 | Cross-dock allocation is not built. |
+| AC-31.10 cross-dock to outbound staging, ATP counts once | partly built | `PlanReceipt` gives one 40 EA CROSS_DOCK allocation and a 60 EA put-away remainder (`TestPlanReceipt_AC31_10...`). CROSS_DOCK work, the wave-16 reservation move that keeps ATP counting once, and the staging location are later slice of PSG-31 / handoff (wave 16 ledger). |
 | AC-31.11 sort positions | later slice of PSG-31 | Sort templates are not built. |
 | AC-31.12 kit posting atomic, WMS-0114 | later slice of PSG-31 | VAS and kit posting are not built. |
-| AC-31.13 labor standard fixture to 0.1 s | later slice of PSG-31 | Labor standards are not built. |
-| AC-31.14 hazmat segregation FCS-02 | later slice of PSG-31 | Hazmat is not built. |
+| AC-31.13 labor standard fixture to 0.1 s | partly built | The formula fixture (planned seconds to 0.1 s) and the performance sum over non-outlier lines are tested in `labor_test.go`. The 1,000 persisted confirmed lines and the shift-close document are later slice of PSG-31. |
+| AC-31.14 hazmat segregation FCS-02 | built (simulation) | `TestEvaluateWithCompliance_SegregationAndLimits` and `TestSimulate_HazmatComplianceExcludesIncompatibleSection`: FCS-02 is excluded and the trace reads `hazmat: class 3 vs 5.1 prohibited in FCS-02`. The web simulator runs the same scenario ("Load hazmat example"). Hazmat data is supplied per request until profiles are persisted (deliverable 10 row). |
 | AC-31.15 transfer LP integrity WMS-0117 | later slice of PSG-31 | Transfer receipt is not built. |
 | AC6 `go vet`/`go test`, OpenAPI/AsyncAPI match code, chart lints | built (see slice 1 checks) | Web: `npx vitest --run` and `npx tsc --noEmit` in the module. |
 
@@ -50,7 +53,7 @@ reason. Status is `later slice of PSG-31` (same wave, not yet built) or `handoff
 | Item | Status | Reason |
 |---|---|---|
 | `fifo`/`lifo`/`fefo` ordering by quant receipt date or expiry | later slice of PSG-31 | Needs persisted quants with dates. The strategies are accepted and order by pick sequence. |
-| `match_packing_quantity`, `round_up_to_lp` (full-LP quantities first), `outbound_staging` | later slice of PSG-31 | Need packaging specifications (FR-31.17) and staging locations (FR-31.13). Accepted; order by pick sequence. |
+| `match_packing_quantity`, `round_up_to_lp` (full-LP quantities first), `outbound_staging` | later slice of PSG-31 | Need the persisted packaging specification of the line (FR-31.17; slice 2 has `DetermineSpec` and `RoundUpToLP` but the engine does not receive a specification) and staging locations (FR-31.13). Accepted; order by pick sequence. |
 | Split pick of one line across locations | later slice of PSG-31 | A PICK candidate must hold the whole line quantity. |
 | Unit conversion to the line's UoM, `location_query` beyond a zone, items+dims in `consolidate` | later slice of PSG-31 | Needs the wave-6 UoM API and the metadata query model; the query is equality on line attributes and an action filters by zone only. |
 | In-progress PUT lines counted in remaining capacity (BR-31.2) | later slice of PSG-31 | Needs persisted work; the caller passes `used`. |
@@ -75,6 +78,8 @@ reason. Status is `later slice of PSG-31` (same wave, not yet built) or `handoff
 | Warehouse setup workspace (locations grid, profiles, zones, formats) | later slice of PSG-31 | Needs the persisted location API. |
 | Location directive designer with save | later slice of PSG-31 | Needs the directive API. Slice 1 simulates a line entered in a form against directives and locations pasted as JSON. |
 | List and detail pages for locations, profiles, LPs, directives, work | later slice of PSG-31 | Nothing is persisted in slice 1, so there is nothing to list; each page arrives with its API. |
+| Hazmat profile, segregation matrix and section maintenance pages; hazmat inventory by section | later slice of PSG-31 | Slice 2 adds hazmat data to the simulator only (a JSON field and the AC-31.14 example); the maintenance pages arrive with `/hazmat-profiles`. |
+| Cross-dock template, packaging specification and labor standard/performance pages | later slice of PSG-31 | Their domain functions have no endpoint yet; each page arrives with its API. |
 | Wave workbench, work list, load planning, receiving, on-hand inquiry | later slice of PSG-31 | Each needs its API. |
 | Personalization (saved filters) and bulk priority change | handoff (web shell, wave 5) | Shell-owned personalization. |
 | Playwright E2E for wave release | later slice of PSG-31 | No wave release yet. |

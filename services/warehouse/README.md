@@ -1,8 +1,42 @@
-# warehouse (wave 31 — Advanced Warehouse Management, slice 1)
+# warehouse (wave 31 — Advanced Warehouse Management, slices 1–2)
 
 Directed warehouse work: location hierarchy, license plates, and the location
 directive engine that decides where a put-away or pick line goes, with a
 rule-by-rule trace. PRD: §6.31 of `docs/prd/phase-6-logistics.md`; ticket PSG-31.
+
+## What slice 2 adds (pure domain, plus the simulate request)
+
+- `internal/domain/hazmat.go` (FR-31.19, BR-31.15): `HazmatProfile` per item
+  (UN number, storage class, water hazard class, flash point, net explosive mass),
+  a symmetric `SegregationMatrix` (allowed / separate / prohibited, unlisted pairs
+  allowed), section quantity limits in kg, and per-location `FireSection`,
+  `RackGroup` and `AllowedStorageClasses`. `EvaluateWithCompliance` rejects a PUT
+  location that is prohibited for the class in its section, separate within its
+  rack, over the section limit, or outside its allowed classes. Each rejection is
+  a trace reason, for example `hazmat: class 3 vs 5.1 prohibited in FCS-02`.
+- `internal/domain/crossdock.go` (FR-31.13, BR-31.11): `PlanReceipt` allocates a
+  receipt to planned links first, then to released demand in the supply window
+  (ordered by SHIP_DATE, ORDER_PRIORITY or FIFO_RELEASE, then ship date and line
+  id). Supply not `ACCEPTED` is held (`WMS-0113`) and never cross-docked. The
+  window is 0–336 h (`DefaultSupplyWindow` 48 h).
+- `internal/domain/packaging.go` (FR-31.17, BR-31.13 determination): `PackagingSpec`
+  with levels, `DetermineSpec` by most-specific match (item+customer, item,
+  group+customer, group) and `RoundUpToLP`.
+- `internal/domain/labor.go` (FR-31.18, BR-31.14): `Travel` (Manhattan or
+  Euclidean), the `Formula` planned seconds (rounded to 0.1 s), `Actual` from
+  timestamps with long pauses removed as indirect time (pauses must lie inside
+  the line and not overlap), `LaborLine` (planned, actual and the 0.2×–5×
+  outlier flag with its `WMS-0118` text) and `Performances` (Σ planned ÷ Σ actual
+  × 100) per group.
+- `POST /v1/warehouse/location-directives:simulate` accepts an optional
+  `compliance` block (`hazmatProfiles`, `segregation`, `sectionLimitsKg`).
+  Invalid data is a 400 on field `compliance`. The section quantity is the used
+  weight of the section's locations that hold an item with a hazmat profile.
+- Web: the simulator page (`apps/web/src/modules/warehouse`) has a hazmat
+  compliance field and a "Load hazmat example" button that runs the AC-31.14
+  scenario.
+- Cross-dock, packaging and labor are domain functions only in this slice: no
+  endpoint or screen calls them yet (see `NOT-IMPLEMENTED.md`).
 
 ## What slice 1 contains
 
@@ -57,7 +91,8 @@ Rules worth knowing:
   directive can place.
 
 Not yet built: persistence, migrations, waves, work creation, assignment,
-replenishment, loads, receiving, and the rest of the wave. See `NOT-IMPLEMENTED.md`.
+replenishment, loads, receiving, sorting, VAS, labor endpoints, and the rest of the
+wave. See `NOT-IMPLEMENTED.md`.
 
 ## Run and test
 
@@ -89,7 +124,12 @@ the conventions allow) and `github.com/go-chi/chi/v5` (via the platform). The
 | AUTH-0001 | 401 | No tenant on the request. |
 | AUTH-0003 | 403 | Duty `warehouse.setup.view` missing. |
 
+Domain warnings returned by the domain functions (no endpoint serves them yet):
+`WMS-0113` (supply under quality hold, cross-dock deferred, from `PlanReceipt`) and
+`WMS-0118` (labor line excluded as outlier, from `LaborLine`).
+
 Trace reasons name the rejecting rule in plain text, for example
-`capacity: lps 1/1` (AC-31.2) and `mixing: holds NUT-M8`. Later slices add
+`capacity: lps 1/1` (AC-31.2), `mixing: holds NUT-M8` and
+`hazmat: class 3 vs 5.1 prohibited in FCS-02` (AC-31.14). Later slices add
 `WMS-0102` (capacity exceeded on confirmation), `WMS-0103` (mixing) and
 `WMS-0110` (illegal transition) as HTTP responses once work is persisted.

@@ -97,8 +97,15 @@ type Result struct {
 // candidate wins with the top candidate. If no action yields one, the next
 // directive is tried. If none does, the line is blocked.
 func Evaluate(directives []Directive, line Line, locations []Location) Result {
+	return EvaluateWithCompliance(directives, line, locations, Compliance{})
+}
+
+// EvaluateWithCompliance is Evaluate with hazmat reference data (FR-31.19). A PUT
+// of a hazmat item only admits locations that pass BR-31.15.
+func EvaluateWithCompliance(directives []Directive, line Line, locations []Location, comp Compliance) Result {
 	ordered := slices.Clone(directives)
 	slices.SortStableFunc(ordered, func(a, b Directive) int { return cmp.Compare(a.Sequence, b.Sequence) })
+	env := evalEnv{comp: comp, secs: comp.sectionsOf(locations)}
 	var trace []Step
 	for _, d := range ordered {
 		if d.WorkType != line.WorkType || d.Direction != line.Direction || d.Warehouse != line.Warehouse {
@@ -115,15 +122,18 @@ func Evaluate(directives []Directive, line Line, locations []Location) Result {
 			continue
 		}
 		for _, act := range sortedActions(band.Actions) {
-			cands, summary := candidates(act, line, locations)
+			cands, rejected := candidates(act, line, locations, env)
 			if len(cands) == 0 {
 				trace = append(trace, Step{Directive: d.ID, Band: band.Seq, Action: act.Seq, Outcome: "miss",
-					Reason: fmt.Sprintf("action %d %s: %s", act.Seq, act.Strategy, summary)})
+					Reason: fmt.Sprintf("action %d %s: %s", act.Seq, act.Strategy, summarize(rejected))})
 				continue
 			}
 			chosen := cands[0]
-			trace = append(trace, Step{Directive: d.ID, Band: band.Seq, Action: act.Seq, Outcome: "hit",
-				Reason: fmt.Sprintf("action %d %s: %d candidates, chose %s", act.Seq, act.Strategy, len(cands), chosen.Name)})
+			reason := fmt.Sprintf("action %d %s: %d candidates, chose %s", act.Seq, act.Strategy, len(cands), chosen.Name)
+			if len(rejected) > 0 {
+				reason += "; " + summarize(rejected)
+			}
+			trace = append(trace, Step{Directive: d.ID, Band: band.Seq, Action: act.Seq, Outcome: "hit", Reason: reason})
 			return Result{Location: &chosen, Directive: d.ID, Trace: trace}
 		}
 	}
@@ -151,16 +161,16 @@ func sortedActions(actions []Action) []Action {
 	return out
 }
 
-// candidates returns the locations an action admits, best first, and a summary
-// of why the rest were refused. The summary is "rejected capacity: lps 1/1 (2)".
-func candidates(act Action, line Line, locations []Location) ([]Location, string) {
+// candidates returns the locations an action admits, best first, and the count
+// of refusals by reason (rendered by summarize, e.g. "rejected capacity: lps 1/1 (2)").
+func candidates(act Action, line Line, locations []Location, env evalEnv) ([]Location, map[string]int) {
 	var out []Location
 	rejected := map[string]int{}
 	for _, l := range locations {
 		if act.Zone != "" && l.Zone != act.Zone {
 			continue
 		}
-		reason, ok := admit(act, line, l)
+		reason, ok := admit(act, line, l, env)
 		if !ok {
 			rejected[reason]++
 			continue
@@ -168,15 +178,16 @@ func candidates(act Action, line Line, locations []Location) ([]Location, string
 		out = append(out, l)
 	}
 	sortCandidates(out, act.Strategy, line.ItemID)
-	return out, summarize(rejected)
+	return out, rejected
 }
 
 // admit is the per-location test for an action: direction and status first,
 // then for PUT the empty and mixing rules and capacity (BR-31.2), and for PICK
 // that the location holds the whole line quantity. Splitting one pick line
 // across several locations is a later slice, so a location holding less than
-// the line is not a candidate.
-func admit(act Action, line Line, l Location) (string, bool) {
+// the line is not a candidate. A PUT of a hazmat item must also pass the
+// storage-compatibility check (BR-31.15).
+func admit(act Action, line Line, l Location, env evalEnv) (string, bool) {
 	if !l.Status.Allows(line.Direction) {
 		return fmt.Sprintf("status %s blocks %s", l.Status, line.Direction), false
 	}
@@ -192,7 +203,16 @@ func admit(act Action, line Line, l Location) (string, bool) {
 	if act.Strategy == StrategyEmptyLocation && !l.isEmpty() {
 		return "not empty", false
 	}
-	return l.admitPut(line.ItemID, Usage{Weight: line.Weight, Volume: line.Volume, LPs: line.LPs})
+	if reason, ok := l.admitPut(line.ItemID, Usage{Weight: line.Weight, Volume: line.Volume, LPs: line.LPs}); !ok {
+		return reason, false
+	}
+	return env.comp.admitHazmat(line, l, env.secs)
+}
+
+// evalEnv carries the per-evaluation hazmat view so it is built once, not per location.
+type evalEnv struct {
+	comp Compliance
+	secs sections
 }
 
 func summarize(rejected map[string]int) string {

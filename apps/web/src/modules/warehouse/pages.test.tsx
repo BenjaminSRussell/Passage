@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
-import { DirectiveSimulatorPage, exampleDraft, fieldErrors, toRequest, validateDraft } from "./pages";
+import { DirectiveSimulatorPage, exampleDraft, fieldErrors, hazmatDraft, toRequest, validateDraft } from "./pages";
 
 type Reply = { status: number; body: unknown };
 
@@ -127,6 +127,58 @@ describe("DirectiveSimulatorPage", () => {
     expect(screen.queryByRole("table", { name: "Rule trace" })).not.toBeInTheDocument();
   });
 
+  it("runs the AC-31.14 hazmat example and shows the segregation reason", async () => {
+    reply = () => ({
+      status: 200,
+      body: {
+        blocked: false,
+        locationId: "loc-h3",
+        location: "H-03-01-01",
+        directive: "DIR-HAZ",
+        trace: [
+          {
+            directive: "DIR-HAZ",
+            band: 1,
+            action: 1,
+            outcome: "hit",
+            reason: "action 1 empty_location: 1 candidates, chose H-03-01-01; rejected hazmat: class 3 vs 5.1 prohibited in FCS-02 (1), not empty (1)",
+          },
+        ],
+      },
+    });
+    const { container } = render(<DirectiveSimulatorPage />);
+    expect(screen.getByLabelText(/Hazmat compliance/)).toHaveValue("");
+    fireEvent.click(screen.getByRole("button", { name: "Load hazmat example" }));
+    expect(screen.getByLabelText("Item")).toHaveValue("SOLV-3");
+    simulate();
+    expect(await screen.findByRole("status")).toHaveTextContent("Location H-03-01-01 chosen by DIR-HAZ, line 1, action 1.");
+    expect(screen.getByRole("table", { name: "Rule trace" })).toHaveTextContent("hazmat: class 3 vs 5.1 prohibited in FCS-02");
+    const body = calls[0].body as { compliance: { segregation: unknown[]; sectionLimitsKg: Record<string, string> }; locations: { fireSection?: string }[] };
+    expect(body.compliance.segregation).toEqual([{ a: "3", b: "5.1", rel: "prohibited" }]);
+    expect(body.compliance.sectionLimitsKg["FCS-02"]).toBe("1000");
+    expect(body.locations.map((l) => l.fireSection)).toEqual(["FCS-02", "FCS-02", "FCS-01"]);
+    expect(checkAxeAA(container).filter((v) => !shellRules.has(v.id))).toEqual([]);
+  });
+
+  it("refuses hazmat data that is not a JSON object before calling the service", () => {
+    render(<DirectiveSimulatorPage initial={{ ...hazmatDraft, compliance: "[1, 2]" }} />);
+    simulate();
+    expect(screen.getByText("Enter the hazmat data as a JSON object, or leave it blank.")).toBeInTheDocument();
+    expect(screen.getByLabelText(/Hazmat compliance/)).toHaveAttribute("aria-invalid", "true");
+    expect(calls).toHaveLength(0);
+  });
+
+  it("puts a service compliance error on the hazmat field", async () => {
+    reply = () => ({
+      status: 400,
+      body: { code: "COM-0001", detail: "request failed validation", errors: { compliance: 'segregation 3/5.1 has unknown relation "maybe"' } },
+    });
+    render(<DirectiveSimulatorPage initial={hazmatDraft} />);
+    simulate();
+    expect(await screen.findByText('segregation 3/5.1 has unknown relation "maybe"')).toBeInTheDocument();
+    expect(screen.getByLabelText(/Hazmat compliance/)).toHaveAttribute("aria-invalid", "true");
+  });
+
   it("restores the worked example", () => {
     render(<DirectiveSimulatorPage initial={{ ...exampleDraft, itemId: "" }} />);
     fireEvent.click(screen.getByRole("button", { name: "Load worked example" }));
@@ -144,6 +196,15 @@ describe("simulator helpers", () => {
   it("sends decimals as strings and leaves blank optional fields out", () => {
     const req = toRequest({ ...exampleDraft, weight: "", lps: "", attributes: "", warehouseId: exampleDraft.warehouseId.toUpperCase() });
     expect(req.line).toEqual({ itemId: "BOLT-M8", workType: "PURCHASE_PUTAWAY", direction: "PUT", warehouseId: exampleDraft.warehouseId, qty: "1200" });
+    expect(req).not.toHaveProperty("compliance");
+    expect(validateDraft(hazmatDraft)).toEqual({});
+    expect(toRequest(hazmatDraft).compliance?.hazmatProfiles?.map((p) => p.storageClass)).toEqual(["3", "5.1"]);
+  });
+
+  it("places location hazmat field errors on the locations field", () => {
+    expect(fieldErrors({ "locations[2].allowedStorageClasses": "must not hold a blank storage class" })).toEqual({
+      locations: "locations[2].allowedStorageClasses must not hold a blank storage class",
+    });
   });
 
   it("joins several errors on one JSON field and ignores paths it cannot place", () => {

@@ -1,12 +1,13 @@
 openapi: 3.1.0
 info:
-  title: Passage warehouse (wave 31, slice 1)
-  version: 0.1.0
+  title: Passage warehouse (wave 31, slice 2)
+  version: 0.2.0
   description: >
-    Location-directive simulation. Stateless in this slice: the caller sends the
-    line, the directives and the candidate locations, and receives the location
-    the rules choose with a rule-by-rule trace. Persistence, work, waves and the
-    other wave-31 endpoints are later slices (see NOT-IMPLEMENTED.md).
+    Location-directive simulation. Stateless: the caller sends the line, the
+    directives, the candidate locations and optional hazmat compliance data, and
+    receives the location the rules choose with a rule-by-rule trace. Slice 2 adds
+    hazmat storage compatibility (FR-31.19) to the simulation. Persistence, work,
+    waves and the other wave-31 endpoints are later slices (see NOT-IMPLEMENTED.md).
 servers:
   - url: https://api.{env}.passage.dev
     variables:
@@ -21,9 +22,14 @@ paths:
         first directive in scope whose query matches and whose line (quantity
         band, from_qty <= qty < to_qty) covers the quantity runs its actions in
         seq order, and the first action with a candidate wins. A PUT candidate
-        passes status, mixing and capacity (BR-31.2); a PICK candidate holds at
-        least the line quantity of the item (no split picks yet). The body is
-        capped at 4 MiB by the platform decoder.
+        passes status, mixing and capacity (BR-31.2) and, when the request
+        carries compliance data and the item has a hazmat profile, storage
+        compatibility (BR-31.15): allowed storage classes of the location,
+        prohibited pairs in its fire-containment section, separate pairs in its
+        rack group and the section limit in kg. Each refusal is a trace reason,
+        for example "hazmat: class 3 vs 5.1 prohibited in FCS-02". A PICK
+        candidate holds at least the line quantity of the item (no split picks
+        yet). The body is capped at 4 MiB by the platform decoder.
       x-passage-duty: warehouse.setup.view
       requestBody:
         required: true
@@ -41,7 +47,10 @@ paths:
             Validation failed (COM-0001) with field errors: missing or malformed
             line fields, unknown strategy or status, a directive line without
             actions, overlapping quantity bands in one directive, duplicate
-            directive or location ids, negative capacity, usage or stock.
+            directive or location ids, negative capacity, usage or stock, a
+            blank allowed storage class, or invalid compliance data (field
+            compliance: unknown relation, conflicting pair, duplicate or
+            incomplete hazmat profile, negative section limit).
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
@@ -85,6 +94,50 @@ components:
           type: array
           maxItems: 50000
           items: { $ref: "#/components/schemas/Location" }
+        compliance: { $ref: "#/components/schemas/Compliance" }
+    Compliance:
+      type: object
+      description: >
+        Hazmat reference data (BR-31.15). Pairs without an entry are allowed.
+        Invalid data is a 400 on field compliance.
+      additionalProperties: false
+      properties:
+        hazmatProfiles:
+          type: array
+          items: { $ref: "#/components/schemas/HazmatProfile" }
+        segregation:
+          type: array
+          items: { $ref: "#/components/schemas/SegregationPair" }
+        sectionLimitsKg:
+          type: object
+          description: >
+            Section quantity limit in kg per fire-containment section. The
+            section quantity is the used weight of its locations that hold an
+            item with a hazmat profile.
+          additionalProperties: { $ref: "#/components/schemas/Decimal" }
+    HazmatProfile:
+      type: object
+      additionalProperties: false
+      required: [itemId, storageClass]
+      properties:
+        itemId: { type: string }
+        unNumber: { type: string, pattern: "^UN[0-9]{4}$" }
+        shippingName: { type: string }
+        class: { type: string }
+        division: { type: string }
+        packingGroup: { type: string }
+        storageClass: { type: string, examples: ["3", "5.1"] }
+        waterHazardClass: { type: string }
+        flashPointC: { $ref: "#/components/schemas/Decimal" }
+        netExplosiveMassKg: { $ref: "#/components/schemas/Decimal" }
+    SegregationPair:
+      type: object
+      additionalProperties: false
+      required: [a, b, rel]
+      properties:
+        a: { type: string }
+        b: { type: string }
+        rel: { type: string, enum: [allowed, separate, prohibited] }
     Line:
       type: object
       additionalProperties: false
@@ -167,6 +220,12 @@ components:
         stock:
           type: object
           additionalProperties: { $ref: "#/components/schemas/Decimal" }
+        fireSection: { type: string, description: "Fire-containment section (FR-31.19); empty means none." }
+        rackGroup: { type: string, description: "Location group that separate segregation compares." }
+        allowedStorageClasses:
+          type: array
+          description: Storage classes a hazmat item may have here; empty allows any.
+          items: { type: string, minLength: 1 }
     SimulateResponse:
       type: object
       required: [blocked, trace]
