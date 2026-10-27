@@ -1,0 +1,54 @@
+image:
+  repository: ghcr.io/benjaminsrussell/passage-pricing
+  tag: "0.1.0"
+  # Prefer digest pinning from Argo CD; when set it takes precedence over tag.
+  digest: ""
+  pullPolicy: IfNotPresent
+
+replicaCount: 3
+
+service:
+  port: 8080
+  adminPort: 9090
+
+# Apply migrations/ at start-up (dbx.Migrate). Turn off when a migration job owns the schema.
+migrateOnStart: true
+
+# DATABASE_URL is read from this secret (Vault via External Secrets), never from values.
+databaseSecret:
+  name: pricing-db-app
+  key: uri
+
+config:
+  pricingCacheTtl: 60s
+  pricingMaxLines: "500"
+  pricingExplainMaxBytes: "65536"
+  otelEndpoint: ""
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 9
+  targetCPUUtilizationPercentage: 70
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    memory: 512Mi
+
+serviceMonitor:
+  enabled: false
+  interval: 30s
+
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: pricing
+description: Passage pricing service (wave 26) - price resolution, condition records, explain.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

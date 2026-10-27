@@ -1,0 +1,1240 @@
+{
+  "description": "Hand-built resolver scenarios (slice 1 of the pricing-500 fixture set). Expected values are worked by hand from the PRD acceptance criteria (AC-26.1, 26.2, 26.3, 26.5), business rules BR-26.1 (access order, search_next, exclusive), BR-26.3 (half-even rounding to ISO 4217 minor units), BR-26.10 (100% discount) and the no-price rule PRC-0001.",
+  "cases": [
+    {
+      "name": "AC-26.1 access 2 wins without search_next",
+      "header": {
+        "customerId": "C1",
+        "customerGroupId": "PG-A",
+        "currency": "USD",
+        "pricingDate": "2027-03-10"
+      },
+      "lines": [
+        {
+          "productId": "P1",
+          "unit": "EA",
+          "quantity": "1"
+        }
+      ],
+      "records": [
+        {
+          "id": "A2",
+          "type": "PRICE",
+          "customerKind": "customer",
+          "customerKey": "C1",
+          "productKind": "product",
+          "productKey": "P1",
+          "currency": "USD",
+          "unit": "EA",
+          "fromQuantity": "0",
+          "amount": "95.00",
+          "validFrom": "2027-01-01",
+          "validTo": "2027-12-31"
+        },
+        {
+          "id": "A4",
+          "type": "PRICE",
+          "customerKind": "customer_group",
+          "customerKey": "PG-A",
+          "productKind": "product",
+          "productKey": "P1",
+          "currency": "USD",
+          "unit": "EA",
+          "fromQuantity": "0",
+          "amount": "90.00",
+          "validFrom": "2027-01-01",
+          "validTo": "2027-12-31"
+        }
+      ],
+      "expect": {
+        "orderNet": "95",
+        "lines": [
+          {
+            "lineNo": 1,
+            "netUnitPrice": "95",
+            "lineNet": "95",
+            "applied": [
+              "A2@2"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "AC-26.2 search_next continues to access 4 and keeps the lower net",
+      "header": {
+        "customerId": "C1",
+        "customerGroupId": "PG-A",
+        "currency": "USD",
+        "pricingDate": "2027-03-10"
+      },
+      "lines": [
+        {
+          "productId": "P1",
+          "unit": "EA",
+          "quantity": "1"
+        }
+      ],
+      "records": [
+        {
+          "id": "A2",
+          "type": "PRICE",
+          "customerKind": "customer",
+          "customerKey": "C1",
+          "productKind": "product",
+          "productKey": "P1",
+          "currency": "USD",
+          "unit": "EA",
+          "fromQuantity": "0",
+          "amount": "95.00",
+          "validFrom": "2027-01-01",
+          "validTo": "2027-12-31",
+          "searchNext": true
+        },
+        {
+          "id": "A4",
+          "type": "PRICE",
+          "customerKind": "customer_group",
+          "customerKey": "PG-A",
+          "productKind": "product",
+          "productKey": "P1",
+          "currency": "USD",
+          "unit": "EA",
+          "fromQuantity": "0",
+          "amount": "90.00",
+          "validFrom": "2027-01-01",
+          "validTo": "2027-12-31"
+        }
+      ],
+      "expect": {
+        "orderNet": "90",
+        "lines": [
+          {
+            "lineNo": 1,
+            "netUnitPrice": "90",
+            "lineNet": "90",
+            "applied": [
+              "A4@4"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "AC-26.3 quantity break at 500 selects 9.00",
+      "header": {
+        "customerId": "C1",
+        "customerGroupId": "PG-A",
+        "currency": "EUR",
+        "pricingDate": "2027-03-10"
+      },
+      "lines": [
+        {
+          "productId": "P2",
+          "unit": "EA",
+          "quantity": "500"
+        }
+      ],
+      "records": [
+        {
+          "id": "B0",
+          "type": "PRICE",
+          "customerKind": "customer",
+          "customerKey": "C1",
+          "productKind": "product",
+          "productKey": "P2",
+          "currency": "EUR",
+          "unit": "EA",
+          "fromQuantity": "0",
+          "amount": "10.00",
+          "validFrom": "2027-01-01",
+          "validTo": "2027-12-31"
+        },
+        {
+          "id": "B100",
+          "type": "PRICE",
+          "customerKind": "customer",
+          "customerKey": "C1",
+          "productKind": "product",
+          "productKey": "P2",
+          "currency": "EUR",
+          "unit": "EA",
+          "fromQuantity": "100",
+          "amount": "9.50",
+          "validFrom": "2027-01-01",
+          "validTo": "2027-12-31"
+        },
+        {
+          "id": "B500",
+          "type": "PRICE",
+          "customerKind": "customer",
+          "customerKey": "C1",
+          "productKind": "product",
+          "productKey": "P2",
+          "currency": "EUR",
+          "unit": "EA",
+          "fromQuantity": "500",
+          "amount": "9.00",
+          "validFrom": "2027-01-01",
+          "validTo": "2027-12-31"
+        }
+      ],
+      "expect": {
+        "orderNet": "4500",
+        "lines": [
+          {
+            "lineNo": 1,
+            "netUnitPrice": "9",
+            "lineNet": "4500",
+            "applied": [
+              "B500@2"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "AC-26.3 quantity 499 stays on the 9.50 break",
+      "header": {
+        "customerId": "C1",
+        "customerGroupId": "PG-A",
+        "currency": "EUR",
+        "pricingDate": "2027-03-10"
+      },
+      "lines": [
+        {
+          "productId": "P2",
+          "unit": "EA",
+          "quantity": "499"
+        }
+      ],
+      "records": [
+        {
+          "id": "B0",
+          "type": "PRICE",
+          "customerKind": "customer",
+          "customerKey": "C1",
+          "productKind": "product",
+          "productKey": "P2",
+          "currency": "EUR",
+          "unit": "EA",
+          "fromQuantity": "0",
+          "amount": "10.00",
+          "validFrom": "2027-01-01",
+          "validTo": "2027-12-31"
+        },
+        {
+          "id": "B100",
+          "type": "PRICE",
+          "customerKind": "customer",
+          "customerKey": "C1",
+          "productKind": "product",
+          "productKey": "P2",
+          "currency": "EUR",
+          "unit": "EA",
+          "fromQuantity": "100",
+          "amount": "9.50",
+          "validFrom": "2027-01-01",
+          "validTo": "2027-12-31"
+        },
+        {
+          "id": "B500",
+          "type": "PRICE",
+          "customerKind": "customer",
+          "customerKey": "C1",
+          "productKind": "product",
+          "productKey": "P2",
+          "currency": "EUR",
+          "unit": "EA",
+          "fromQuantity": "500",
+          "amount": "9.00",
+          "validFrom": "2027-01-01",
+          "validTo": "2027-12-31"
+        }
+      ],
+      "expect": {
+        "orderNet": "4740.5",
+        "lines": [
+          {
+            "lineNo": 1,
+            "netUnitPrice": "9.5",
+            "lineNet": "4740.5",
+            "applied": [
+              "B100@2"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "AC-26.5 two percentages apply sequentially on a line of three",
+      "header": {
+        "customerId": "C1",
+        "customerGroupId": "PG-A",
+        "currency": "USD",
+        "pricingDate": "2027-03-10"
+      },
+      "lines": [
+        {
+          "productId": "P1",
+          "unit": "EA",
+          "quantity": "3"
+        }
+      ],
+      "records": [
+        {
+          "id": "PR",
+          "type": "PRICE",
+          "customerKind": "customer",
+          "customerKey": "C1",
+          "productKind": "product",
+          "productKey": "P1",
+          "currency": "USD",
+          "unit": "EA",
+          "fromQuantity": "0",
+          "amount": "100.00",
+          "validFrom": "2027-01-01",
+          "validTo": "2027-12-31"
+        },
+        {
+          "id": "LD",
+          "type": "LINE_DISC",
+          "customerKind": "all",
+          "productKind": "all",
+          "currency": "USD",
+          "unit": "EA",
+          "fromQuantity": "0",
+          "amount": "0",
+          "discPct1": "10",
+          "discPct2": "5",
+          "validFrom": "2027-01-01",
+          "validTo": "2027-12-31"
+        }
+      ],
+      "expect": {
+        "orderNet": "256.5",
+        "lines": [
+          {
+            "lineNo": 1,
+            "netUnitPrice": "85.5",
+            "lineNet": "256.5",
+            "applied": [
+              "PR@2",
+              "LD@9"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "PRC-0001 product without any price is reported on its line only",
+      "header": {
+        "customerId": "C1",
+        "customerGroupId": "PG-A",
+        "currency": "USD",
+        "pricingDate": "2027-03-10"
+      },
+      "lines": [
+        {
+          "productId": "P9",
+          "unit": "EA",
+          "quantity": "1"
+        },
+        {
+          "productId": "P1",
+          "unit": "EA",
+          "quantity": "2"
+        }
+      ],
+      "records": [
+        {
+          "id": "PR",
+          "type": "PRICE",
+          "customerKind": "customer",
+          "customerKey": "C1",
+          "productKind": "product",
+          "productKey": "P1",
+          "currency": "USD",
+          "unit": "EA",
+          "fromQuantity": "0",
+          "amount": "100.00",
+          "validFrom": "2027-01-01",
+          "validTo": "2027-12-31"
+        }
+      ],
+      "expect": {
+        "orderNet": "200",
+        "lines": [
+          {
+            "lineNo": 1,
+            "lineNet": "0",
+            "errorCode": "PRC-0001",
+            "applied": []
+          },
+          {
+            "lineNo": 2,
+            "netUnitPrice": "100",
+            "lineNet": "200",
+            "applied": [
+              "PR@2"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "BR-26.1 access 5 customer group x product group beats all x all",
+      "header": {
+        "customerId": "C1",
+        "customerGroupId": "PG-A",
+        "currency": "USD",
+        "pricingDate": "2027-03-10"
+      },
+      "lines": [
+        {
+          "productId": "P3",
+          "unit": "EA",
+          "quantity": "2",
+          "productGroupId": "G1"
+        }
+      ],
+      "records": [
+        {
+          "id": "G5",
+          "type": "PRICE",
+          "customerKind": "customer_group",
+          "productKind": "product_group",
+          "currency": "USD",
+          "unit": "EA",
+          "fromQuantity": "0",
+          "amount": "40.00",
+          "validFrom": "2027-01-01",
+          "validTo": "2027-12-31",
+          "customerKey": "PG-A",
+          "productKey": "G1"
+        },
+        {
+          "id": "A9",
+          "type": "PRICE",
+          "customerKind": "all",
+          "productKind": "all",
+          "currency": "USD",
+          "unit": "EA",
+          "fromQuantity": "0",
+          "amount": "50.00",
+          "validFrom": "2027-01-01",
+          "validTo": "2027-12-31"
+        }
+      ],
+      "expect": {
+        "orderNet": "80",
+        "lines": [
+          {
+            "lineNo": 1,
+            "netUnitPrice": "40",
+            "lineNet": "80",
+            "applied": [
+              "G5@5"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "BR-26.1 access 1 customer x variant beats access 2 only for the matching variant",
+      "header": {
+        "customerId": "C1",
+        "customerGroupId": "PG-A",
+        "currency": "USD",
+        "pricingDate": "2027-03-10"
+      },
+      "lines": [
+        {
+          "productId": "P1",
+          "unit": "EA",
+          "quantity": "1",
+          "variant": "RED"
+        },
+        {
+          "productId": "P1",
+          "unit": "EA",
+          "quantity": "1",
+          "variant": "BLUE"
+        }
+      ],
+      "records": [
+        {
+          "id": "V1",
+          "type": "PRICE",
+          "customerKind": "customer",
+          "productKind": "variant",
+          "currency": "USD",
+          "unit": "EA",
+          "fromQuantity": "0",
+          "amount": "70.00",
+          "validFrom": "2027-01-01",
+          "validTo": "2027-12-31",
+          "customerKey": "C1",
+          "productKey": "P1",
+          "variant": "RED"
+        },
+        {
+          "id": "C2",
+          "type": "PRICE",
+          "customerKind": "customer",
+          "productKind": "product",
+          "currency": "USD",
+          "unit": "EA",
+          "fromQuantity": "0",
+          "amount": "75.00",
+          "validFrom": "2027-01-01",
+          "validTo": "2027-12-31",
+          "customerKey": "C1",
+          "productKey": "P1"
+        }
+      ],
+      "expect": {
+        "orderNet": "145",
+        "lines": [
+          {
+            "lineNo": 1,
+            "netUnitPrice": "70",
+            "lineNet": "70",
+            "applied": [
+              "V1@1"
+            ]
+          },
+          {
+            "lineNo": 2,
+            "netUnitPrice": "75",
+            "lineNet": "75",
+            "applied": [
+              "C2@2"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "FR-26.3 search_next chain continues past a second search_next winner and keeps the minimum",
+      "header": {
+        "customerId": "C1",
+        "customerGroupId": "PG-A",
+        "currency": "USD",
+        "pricingDate": "2027-03-10"
+      },
+      "lines": [
+        {
+          "productId": "P1",
+          "unit": "EA",
+          "quantity": "1"
+        }
+      ],
+      "records": [
+        {
+          "id": "S2",
+          "type": "PRICE",
+          "customerKind": "customer",
+          "productKind": "product",
+          "currency": "USD",
+          "unit": "EA",
+          "fromQuantity": "0",
+          "amount": "95.00",
+          "validFrom": "2027-01-01",
+          "validTo": "2027-12-31",
+          "customerKey": "C1",
+          "productKey": "P1",
+          "searchNext": true
+        },
+        {
+          "id": "S4",
+          "type": "PRICE",
+          "customerKind": "customer_group",
+          "productKind": "product",
+          "currency": "USD",
+          "unit": "EA",
+          "fromQuantity": "0",
+          "amount": "97.00",
+          "validFrom": "2027-01-01",
+          "validTo": "2027-12-31",
+          "customerKey": "PG-A",
+          "productKey": "P1",
+          "searchNext": true
+        },
+        {
+          "id": "S9",
+          "type": "PRICE",
+          "customerKind": "all",
+          "productKind": "all",
+          "currency": "USD",
+          "unit": "EA",
+          "fromQuantity": "0",
+          "amount": "92.00",
+          "validFrom": "2027-01-01",
+          "validTo": "2027-12-31"
+        }
+      ],
+      "expect": {
+        "orderNet": "92",
+        "lines": [
+          {
+            "lineNo": 1,
+            "netUnitPrice": "92",
+            "lineNet": "92",
+            "applied": [
+              "S9@9"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "FR-26.2 validity is inclusive of valid_to; the next record starts the day after",
+      "header": {
+        "customerId": "C1",
+        "customerGroupId": "PG-A",
+        "currency": "USD",
+        "pricingDate": "2027-03-31"
+      },
+      "lines": [
+        {
+          "productId": "P1",
+          "unit": "EA",
+          "quantity": "1"
+        }
+      ],
+      "records": [
+        {
+          "id": "Q1",
+          "type": "PRICE",
+          "customerKind": "customer",
+          "productKind": "product",
+          "currency": "USD",
+          "unit": "EA",
+          "fromQuantity": "0",
+          "amount": "12.00",
+          "validFrom": "2027-01-01",
+          "validTo": "2027-03-31",
+          "customerKey": "C1",
+          "productKey": "P1"
+        },
+        {
+          "id": "Q2",
+          "type": "PRICE",
+          "customerKind": "customer",
+          "productKind": "product",
+          "currency": "USD",
+          "unit": "EA",
+          "fromQuantity": "0",
+          "amount": "11.00",
+          "validFrom": "2027-04-01",
+          "validTo": "2027-12-31",
+          "customerKey": "C1",
+          "productKey": "P1"
+        }
+      ],
+      "expect": {
+        "orderNet": "12",
+        "lines": [
+          {
+            "lineNo": 1,
+            "netUnitPrice": "12",
+            "lineNet": "12",
+            "applied": [
+              "Q1@2"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "BR-26.1 no cross-currency fallback: an EUR record never prices a USD document",
+      "header": {
+        "customerId": "C1",
+        "customerGroupId": "PG-A",
+        "currency": "USD",
+        "pricingDate": "2027-03-10"
+      },
+      "lines": [
+        {
+          "productId": "P1",
+          "unit": "EA",
+          "quantity": "1"
+        }
+      ],
+      "records": [
+        {
+          "id": "E1",
+          "type": "PRICE",
+          "customerKind": "customer",
+          "productKind": "product",
+          "currency": "EUR",
+          "unit": "EA",
+          "fromQuantity": "0",
+          "amount": "10.00",
+          "validFrom": "2027-01-01",
+          "validTo": "2027-12-31",
+          "customerKey": "C1",
+          "productKey": "P1"
+        }
+      ],
+      "expect": {
+        "orderNet": "0",
+        "lines": [
+          {
+            "lineNo": 1,
+            "lineNet": "0",
+            "errorCode": "PRC-0001",
+            "applied": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "BR-26.1 a record in another unit is skipped; a unit-less record applies to any unit",
+      "header": {
+        "customerId": "C1",
+        "customerGroupId": "PG-A",
+        "currency": "USD",
+        "pricingDate": "2027-03-10"
+      },
+      "lines": [
+        {
+          "productId": "P1",
+          "unit": "EA",
+          "quantity": "4"
+        }
+      ],
+      "records": [
+        {
+          "id": "KG",
+          "type": "PRICE",
+          "customerKind": "customer",
+          "productKind": "product",
+          "currency": "USD",
+          "unit": "KG",
+          "fromQuantity": "0",
+          "amount": "5.00",
+          "validFrom": "2027-01-01",
+          "validTo": "2027-12-31",
+          "customerKey": "C1",
+          "productKey": "P1"
+        },
+        {
+          "id": "ANY",
+          "type": "PRICE",
+          "customerKind": "all",
+          "productKind": "product",
+          "currency": "USD",
+          "unit": "",
+          "fromQuantity": "0",
+          "amount": "6.00",
+          "validFrom": "2027-01-01",
+          "validTo": "2027-12-31",
+          "productKey": "P1"
+        }
+      ],
+      "expect": {
+        "orderNet": "24",
+        "lines": [
+          {
+            "lineNo": 1,
+            "netUnitPrice": "6",
+            "lineNet": "24",
+            "applied": [
+              "ANY@7"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "BR-26.1 two records at one access: equal from_quantity, the lower net wins",
+      "header": {
+        "customerId": "C1",
+        "customerGroupId": "PG-A",
+        "currency": "USD",
+        "pricingDate": "2027-03-10"
+      },
+      "lines": [
+        {
+          "productId": "P1",
+          "unit": "EA",
+          "quantity": "1"
+        }
+      ],
+      "records": [
+        {
+          "id": "HI",
+          "type": "PRICE",
+          "customerKind": "customer",
+          "productKind": "product",
+          "currency": "USD",
+          "unit": "EA",
+          "fromQuantity": "0",
+          "amount": "10.00",
+          "validFrom": "2027-01-01",
+          "validTo": "2027-12-31",
+          "customerKey": "C1",
+          "productKey": "P1"
+        },
+        {
+          "id": "LO",
+          "type": "PRICE",
+          "customerKind": "customer",
+          "productKind": "product",
+          "currency": "USD",
+          "unit": "EA",
+          "fromQuantity": "0",
+          "amount": "9.00",
+          "validFrom": "2027-03-01",
+          "validTo": "2027-12-31",
+          "customerKey": "C1",
+          "productKey": "P1"
+        }
+      ],
+      "expect": {
+        "orderNet": "9",
+        "lines": [
+          {
+            "lineNo": 1,
+            "netUnitPrice": "9",
+            "lineNet": "9",
+            "applied": [
+              "LO@2"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "FR-26.5 a discount amount is taken before its percentage",
+      "header": {
+        "customerId": "C1",
+        "customerGroupId": "PG-A",
+        "currency": "USD",
+        "pricingDate": "2027-03-10"
+      },
+      "lines": [
+        {
+          "productId": "P1",
+          "unit": "EA",
+          "quantity": "2"
+        }
+      ],
+      "records": [
+        {
+          "id": "PR",
+          "type": "PRICE",
+          "customerKind": "customer",
+          "productKind": "product",
+          "currency": "USD",
+          "unit": "EA",
+          "fromQuantity": "0",
+          "amount": "100.00",
+          "validFrom": "2027-01-01",
+          "validTo": "2027-12-31",
+          "customerKey": "C1",
+          "productKey": "P1"
+        },
+        {
+          "id": "LD",
+          "type": "LINE_DISC",
+          "customerKind": "customer",
+          "productKind": "all",
+          "currency": "USD",
+          "unit": "EA",
+          "fromQuantity": "0",
+          "amount": "10.00",
+          "validFrom": "2027-01-01",
+          "validTo": "2027-12-31",
+          "customerKey": "C1",
+          "discPct1": "10"
+        }
+      ],
+      "expect": {
+        "orderNet": "162",
+        "lines": [
+          {
+            "lineNo": 1,
+            "netUnitPrice": "81",
+            "lineNet": "162",
+            "applied": [
+              "PR@2",
+              "LD@6"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "BR-26.10 a 100% discount yields 0.00 and keeps the trace",
+      "header": {
+        "customerId": "C1",
+        "customerGroupId": "PG-A",
+        "currency": "USD",
+        "pricingDate": "2027-03-10"
+      },
+      "lines": [
+        {
+          "productId": "P1",
+          "unit": "EA",
+          "quantity": "3"
+        }
+      ],
+      "records": [
+        {
+          "id": "PR",
+          "type": "PRICE",
+          "customerKind": "customer",
+          "productKind": "product",
+          "currency": "USD",
+          "unit": "EA",
+          "fromQuantity": "0",
+          "amount": "50.00",
+          "validFrom": "2027-01-01",
+          "validTo": "2027-12-31",
+          "customerKey": "C1",
+          "productKey": "P1"
+        },
+        {
+          "id": "FREE",
+          "type": "LINE_DISC",
+          "customerKind": "all",
+          "productKind": "product",
+          "currency": "USD",
+          "unit": "EA",
+          "fromQuantity": "0",
+          "amount": "0",
+          "validFrom": "2027-01-01",
+          "validTo": "2027-12-31",
+          "productKey": "P1",
+          "discPct1": "100"
+        }
+      ],
+      "expect": {
+        "orderNet": "0",
+        "lines": [
+          {
+            "lineNo": 1,
+            "netUnitPrice": "0",
+            "lineNet": "0",
+            "applied": [
+              "PR@2",
+              "FREE@7"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "BR-26.3 line nets round half-even to cents and the subtotal sums rounded lines",
+      "header": {
+        "customerId": "C1",
+        "customerGroupId": "PG-A",
+        "currency": "USD",
+        "pricingDate": "2027-03-10"
+      },
+      "lines": [
+        {
+          "productId": "P1",
+          "unit": "EA",
+          "quantity": "1"
+        },
+        {
+          "productId": "P1",
+          "unit": "EA",
+          "quantity": "3"
+        }
+      ],
+      "records": [
+        {
+          "id": "TINY",
+          "type": "PRICE",
+          "customerKind": "customer",
+          "productKind": "product",
+          "currency": "USD",
+          "unit": "EA",
+          "fromQuantity": "0",
+          "amount": "0.125",
+          "validFrom": "2027-01-01",
+          "validTo": "2027-12-31",
+          "customerKey": "C1",
+          "productKey": "P1"
+        }
+      ],
+      "expect": {
+        "orderNet": "0.5",
+        "lines": [
+          {
+            "lineNo": 1,
+            "netUnitPrice": "0.125",
+            "lineNet": "0.12",
+            "applied": [
+              "TINY@2"
+            ]
+          },
+          {
+            "lineNo": 2,
+            "netUnitPrice": "0.125",
+            "lineNet": "0.38",
+            "applied": [
+              "TINY@2"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "BR-26.3 JPY has no minor unit: half-even to whole yen",
+      "header": {
+        "customerId": "C1",
+        "customerGroupId": "PG-A",
+        "currency": "JPY",
+        "pricingDate": "2027-03-10"
+      },
+      "lines": [
+        {
+          "productId": "P1",
+          "unit": "EA",
+          "quantity": "1"
+        },
+        {
+          "productId": "P1",
+          "unit": "EA",
+          "quantity": "3"
+        }
+      ],
+      "records": [
+        {
+          "id": "YEN",
+          "type": "PRICE",
+          "customerKind": "customer",
+          "productKind": "product",
+          "currency": "JPY",
+          "unit": "EA",
+          "fromQuantity": "0",
+          "amount": "333.5",
+          "validFrom": "2027-01-01",
+          "validTo": "2027-12-31",
+          "customerKey": "C1",
+          "productKey": "P1"
+        }
+      ],
+      "expect": {
+        "orderNet": "1334",
+        "lines": [
+          {
+            "lineNo": 1,
+            "netUnitPrice": "333.5",
+            "lineNet": "334",
+            "applied": [
+              "YEN@2"
+            ]
+          },
+          {
+            "lineNo": 2,
+            "netUnitPrice": "333.5",
+            "lineNet": "1000",
+            "applied": [
+              "YEN@2"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "FR-26.5 total discount amount comes off the order net after line discounts",
+      "header": {
+        "customerId": "C1",
+        "customerGroupId": "PG-A",
+        "currency": "USD",
+        "pricingDate": "2027-03-10"
+      },
+      "lines": [
+        {
+          "productId": "P1",
+          "unit": "EA",
+          "quantity": "1"
+        },
+        {
+          "productId": "P2",
+          "unit": "EA",
+          "quantity": "1"
+        }
+      ],
+      "records": [
+        {
+          "id": "P1P",
+          "type": "PRICE",
+          "customerKind": "customer",
+          "productKind": "product",
+          "currency": "USD",
+          "unit": "EA",
+          "fromQuantity": "0",
+          "amount": "30.00",
+          "validFrom": "2027-01-01",
+          "validTo": "2027-12-31",
+          "customerKey": "C1",
+          "productKey": "P1"
+        },
+        {
+          "id": "P2P",
+          "type": "PRICE",
+          "customerKind": "customer",
+          "productKind": "product",
+          "currency": "USD",
+          "unit": "EA",
+          "fromQuantity": "0",
+          "amount": "20.00",
+          "validFrom": "2027-01-01",
+          "validTo": "2027-12-31",
+          "customerKey": "C1",
+          "productKey": "P2"
+        },
+        {
+          "id": "TD",
+          "type": "TOTAL_DISC",
+          "customerKind": "customer",
+          "productKind": "all",
+          "currency": "USD",
+          "unit": "EA",
+          "fromQuantity": "0",
+          "amount": "5.00",
+          "validFrom": "2027-01-01",
+          "validTo": "2027-12-31",
+          "customerKey": "C1"
+        }
+      ],
+      "expect": {
+        "orderNet": "45",
+        "totalDiscount": "5",
+        "applied": [
+          "TD@6"
+        ],
+        "lines": [
+          {
+            "lineNo": 1,
+            "netUnitPrice": "30",
+            "lineNet": "30",
+            "applied": [
+              "P1P@2"
+            ]
+          },
+          {
+            "lineNo": 2,
+            "netUnitPrice": "20",
+            "lineNet": "20",
+            "applied": [
+              "P2P@2"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "BR-26.1 step 8 an exclusive net price suppresses the line and total discounts for its line only",
+      "header": {
+        "customerId": "C1",
+        "customerGroupId": "PG-A",
+        "currency": "USD",
+        "pricingDate": "2027-03-10"
+      },
+      "lines": [
+        {
+          "productId": "P1",
+          "unit": "EA",
+          "quantity": "1"
+        },
+        {
+          "productId": "P2",
+          "unit": "EA",
+          "quantity": "1"
+        }
+      ],
+      "records": [
+        {
+          "id": "NP",
+          "type": "PRICE",
+          "customerKind": "customer",
+          "productKind": "product",
+          "currency": "USD",
+          "unit": "EA",
+          "fromQuantity": "0",
+          "amount": "80.00",
+          "validFrom": "2027-01-01",
+          "validTo": "2027-12-31",
+          "customerKey": "C1",
+          "productKey": "P1",
+          "exclusive": true
+        },
+        {
+          "id": "P2P",
+          "type": "PRICE",
+          "customerKind": "all",
+          "productKind": "product",
+          "currency": "USD",
+          "unit": "EA",
+          "fromQuantity": "0",
+          "amount": "100.00",
+          "validFrom": "2027-01-01",
+          "validTo": "2027-12-31",
+          "productKey": "P2"
+        },
+        {
+          "id": "LD",
+          "type": "LINE_DISC",
+          "customerKind": "all",
+          "productKind": "all",
+          "currency": "USD",
+          "unit": "EA",
+          "fromQuantity": "0",
+          "amount": "0",
+          "validFrom": "2027-01-01",
+          "validTo": "2027-12-31",
+          "discPct1": "5"
+        },
+        {
+          "id": "TD",
+          "type": "TOTAL_DISC",
+          "customerKind": "all",
+          "productKind": "all",
+          "currency": "USD",
+          "unit": "EA",
+          "fromQuantity": "0",
+          "amount": "0",
+          "validFrom": "2027-01-01",
+          "validTo": "2027-12-31",
+          "discPct1": "10"
+        }
+      ],
+      "expect": {
+        "orderNet": "165.5",
+        "totalDiscount": "9.5",
+        "applied": [
+          "TD@9"
+        ],
+        "lines": [
+          {
+            "lineNo": 1,
+            "netUnitPrice": "80",
+            "lineNet": "80",
+            "exclusive": true,
+            "applied": [
+              "NP@2"
+            ]
+          },
+          {
+            "lineNo": 2,
+            "netUnitPrice": "95",
+            "lineNet": "95",
+            "applied": [
+              "P2P@7",
+              "LD@9"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
