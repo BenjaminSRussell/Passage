@@ -1,6 +1,6 @@
 # lean
 
-Lean manufacturing for Passage (wave 24, PSG-24, slices 1, 2, 4, 5 and 6). Production flows with their
+Lean manufacturing for Passage (wave 24, PSG-24, slices 1, 2, 4, 5, 6 and 7). Production flows with their
 activities and activation, kanban rules (fixed, scheduled, event), kanban generation, the
 kanban card state machine and the kanban board (slice 1). Slice 2 adds takt vs cycle on the
 board (FR-24.14) and the lean subcontracting price rule as a preview of the purchase order
@@ -15,7 +15,10 @@ cycles, lead time from planning to completion, late share, active cards against 
 the backflush preview of a period's conversion cost (FR-24.12: cycle time × processed quantity ×
 the activity's hourly rate) and the CSV export of a flow's costing periods. Every card completion
 and job completion is recorded in an append-only history, so a reused fixed card's earlier
-cycles still count.
+cycles still count. Slice 7 makes the shop-floor commands retry-safe end to end: card moves and
+job starts and completions replay their stored first answer for a retried Idempotency-Key, also
+when the retry arrives while the first call still holds the lock, and both boards resend the
+same key after a lost answer.
 
 Flows, activities, rules, cards and jobs are stored in Postgres (RLS on every table, outbox
 events in the same transaction). The subcontracting preview stores nothing. Deriving period

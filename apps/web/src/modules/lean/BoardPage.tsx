@@ -8,11 +8,11 @@ import {
   listFlows,
   listRules,
   moveKanban,
-  newKey,
   type Kanban,
   type KanbanState,
   type Problem,
 } from "./api/client";
+import { useCommandKeys } from "./commandKeys";
 import { formatDateTime, jobDriven, nextState, overdue, shortId, STATE_LABELS } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
@@ -112,6 +112,7 @@ export function BoardPage() {
   const [moving, setMoving] = useState<string | null>(null);
   const [failure, setFailure] = useState<(Problem & { card: string; from: KanbanState }) | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const keys = useCommandKeys();
   const { reload } = board;
 
   useEffect(() => {
@@ -133,7 +134,8 @@ export function BoardPage() {
     setFailure(null);
     setNotice(null);
     try {
-      const moved = await moveKanban(card.id, { to, version: card.version }, newKey());
+      const body = { to, version: card.version };
+      const moved = await keys.send(`move ${card.id} ${JSON.stringify(body)}`, (key) => moveKanban(card.id, body, key));
       setNotice(`${moved.cardNumber} moved to ${STATE_LABELS[moved.state]}.`);
     } catch (error) {
       setFailure({ ...describeProblem(error), card: card.cardNumber, from: card.state });

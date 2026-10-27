@@ -3,11 +3,25 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
 import { loadModules } from "../registry";
-import type { BackflushPreview, Board, CostingPeriod, Flow, JobBoard, JobState, Kanban, KanbanJob, KanbanState, Rule, RuleAnalysis } from "./api/client";
+import {
+  LeanApiError,
+  type BackflushPreview,
+  type Board,
+  type CostingPeriod,
+  type Flow,
+  type JobBoard,
+  type JobState,
+  type Kanban,
+  type KanbanJob,
+  type KanbanState,
+  type Rule,
+  type RuleAnalysis,
+} from "./api/client";
 import { REFRESH_MS } from "./BoardPage";
 import { validatePeriod } from "./CostingPage";
 import { validateFlow } from "./FlowPages";
 import { nextState, overdue, variance } from "./format";
+import { answered } from "./commandKeys";
 import lean from "./module";
 import { shiftDays, validateAnalysisPeriod } from "./RuleAnalysis";
 import { validateRule } from "./RulePages";
@@ -1060,3 +1074,111 @@ function cleanupAndRender(path: string) {
   cleanup();
   return renderAt(path);
 }
+
+describe("slice 7: retrying board commands", () => {
+  function keysOf(path: string): (string | null)[] {
+    return calls.filter((c) => c.method === "POST" && c.url.pathname === path).map((c) => header(c, "Idempotency-Key"));
+  }
+
+  it("keeps a command's key only while its outcome is unknown", () => {
+    expect(answered(new LeanApiError(409, "LEAN-0001", "refused"))).toBe(true);
+    expect(answered(new LeanApiError(422, "idempotency_key_reuse", "reused"))).toBe(true);
+    expect(answered(new LeanApiError(503, "HTTP-503", "unavailable"))).toBe(false);
+    expect(answered(new TypeError("Failed to fetch"))).toBe(false);
+  });
+
+  it("retries a start whose answer was lost with the same key, and the service replays it", async () => {
+    let jobs = [job(J1, "MIX-A-0001", "prepared")];
+    let posts = 0;
+    handler = (url, init) => {
+      if (url.pathname === "/api/v1/lean/flows") return json(200, { items: [] });
+      if (url.pathname === "/api/v1/lean/board") return json(200, jobBoardOf(jobs));
+      if (url.pathname === `/api/v1/lean/kanban-jobs/${J1}:start` && init.method === "POST") {
+        posts += 1;
+        if (posts === 1) throw new TypeError("Failed to fetch");
+        jobs = [{ ...jobs[0], state: "in-progress", cardState: "in-progress", version: 3 }];
+        return json(200, jobs[0]);
+      }
+      return undefined;
+    };
+    renderAt(`/lean/work-cell?workCellId=${CELL}`);
+    fireEvent.click(await screen.findByRole("button", { name: "Start MIX-A-0001 · 1 Mix" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("MIX-A-0001 · 1 Mix stays in Prepared");
+    expect(alert).toHaveTextContent("Failed to fetch");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Start MIX-A-0001 · 1 Mix" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Start MIX-A-0001 · 1 Mix" }));
+    expect(await screen.findByText("MIX-A-0001 · 1 Mix started. MIX-A-0001 is in progress.")).toBeInTheDocument();
+    const [first, second] = keysOf(`/api/v1/lean/kanban-jobs/${J1}:start`);
+    expect(first).toBeTruthy();
+    expect(second).toBe(first);
+  });
+
+  it("sends a new key once the service has refused a start", async () => {
+    handler = (url, init) => {
+      if (url.pathname === "/api/v1/lean/flows") return json(200, { items: [] });
+      if (url.pathname === "/api/v1/lean/board") return json(200, jobBoardOf([job(J2, "MIX-A-0002", "planned", { pickingRequired: true, cardState: "planned" })]));
+      if (init.method === "POST") return json(409, { code: "LEAN-0001", detail: "the activity needs picking" });
+      return undefined;
+    };
+    renderAt(`/lean/work-cell?workCellId=${CELL}`);
+    fireEvent.click(await screen.findByRole("button", { name: "Start MIX-A-0002 · 1 Mix" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("(LEAN-0001)");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Start MIX-A-0002 · 1 Mix" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Start MIX-A-0002 · 1 Mix" }));
+    await waitFor(() => expect(keysOf(`/api/v1/lean/kanban-jobs/${J2}:start`)).toHaveLength(2));
+    const [first, second] = keysOf(`/api/v1/lean/kanban-jobs/${J2}:start`);
+    expect(second).not.toBe(first);
+  });
+
+  it("keeps the completion key for the same report and changes it when the report changes", async () => {
+    handler = (url, init) => {
+      if (url.pathname === "/api/v1/lean/flows") return json(200, { items: [] });
+      if (url.pathname === "/api/v1/lean/board") return json(200, jobBoardOf([job(J1, "MIX-A-0001", "in-progress")]));
+      if (init.method === "POST") throw new TypeError("Failed to fetch");
+      return undefined;
+    };
+    renderAt(`/lean/work-cell?workCellId=${CELL}`);
+    fireEvent.click(await screen.findByRole("button", { name: "Complete MIX-A-0001 · 1 Mix" }));
+    const form = screen.getByRole("form", { name: "Report MIX-A-0001 · 1 Mix" });
+    const submit = within(form).getByRole("button", { name: "Report completion" });
+    fireEvent.click(submit);
+    await waitFor(() => expect(keysOf(`/api/v1/lean/kanban-jobs/${J1}:complete`)).toHaveLength(1));
+    await waitFor(() => expect(submit).toBeEnabled());
+    fireEvent.click(submit);
+    await waitFor(() => expect(keysOf(`/api/v1/lean/kanban-jobs/${J1}:complete`)).toHaveLength(2));
+    await waitFor(() => expect(submit).toBeEnabled());
+    fireEvent.change(within(form).getByLabelText("Scrap"), { target: { value: "1" } });
+    fireEvent.click(submit);
+    await waitFor(() => expect(keysOf(`/api/v1/lean/kanban-jobs/${J1}:complete`)).toHaveLength(3));
+    const [first, retry, changed] = keysOf(`/api/v1/lean/kanban-jobs/${J1}:complete`);
+    expect(retry).toBe(first);
+    expect(changed).not.toBe(first);
+    expect(calls.filter((c) => c.method === "POST").map((c) => (c.body as { scrapQty: string }).scrapQty)).toEqual(["0", "0", "1"]);
+  });
+
+  it("retries a card move after a 503 with the same key", async () => {
+    let cards = [card(K1, "MIX-A-0001", "planned")];
+    let posts = 0;
+    handler = (url, init) => {
+      if (url.pathname === "/api/v1/lean/flows" || url.pathname === "/api/v1/lean/kanban-rules") return json(200, { items: [] });
+      if (url.pathname === "/api/v1/lean/board") return json(200, boardOf(cards));
+      if (url.pathname === `/api/v1/lean/kanbans/${K1}:move` && init.method === "POST") {
+        posts += 1;
+        if (posts === 1) return json(503, { code: "HTTP-503", detail: "upstream unavailable" });
+        cards = [{ ...cards[0], state: "prepared", version: 3 }];
+        return json(200, cards[0]);
+      }
+      return undefined;
+    };
+    renderAt("/lean/board");
+    fireEvent.click(await screen.findByRole("button", { name: "Move MIX-A-0001 to Prepared" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("MIX-A-0001 stays in Planned");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Move MIX-A-0001 to Prepared" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Move MIX-A-0001 to Prepared" }));
+    expect(await screen.findByText("MIX-A-0001 moved to Prepared.")).toBeInTheDocument();
+    const [first, second] = keysOf(`/api/v1/lean/kanbans/${K1}:move`);
+    expect(first).toBeTruthy();
+    expect(second).toBe(first);
+  });
+});

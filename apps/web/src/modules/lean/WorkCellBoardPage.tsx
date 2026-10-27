@@ -7,7 +7,6 @@ import {
   fetchJobBoard,
   getFlow,
   listFlows,
-  newKey,
   startJob,
   type Flow,
   type JobState,
@@ -15,6 +14,7 @@ import {
   type Problem,
 } from "./api/client";
 import { REFRESH_MS } from "./BoardPage";
+import { useCommandKeys } from "./commandKeys";
 import { formatDateTime, overdue, reportQuantity, shortId, STATE_LABELS, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
@@ -190,6 +190,7 @@ export function WorkCellBoardPage() {
   const [working, setWorking] = useState<string | null>(null);
   const [failure, setFailure] = useState<(Problem & { job: string; from: JobState }) | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const keys = useCommandKeys();
   const { reload } = board;
 
   useEffect(() => {
@@ -237,13 +238,19 @@ export function WorkCellBoardPage() {
   const start = (job: KanbanJob) =>
     void run(
       job,
-      () => startJob(job.id, { version: job.version }, newKey()),
+      () => {
+        const body = { version: job.version };
+        return keys.send(`start ${job.id} ${JSON.stringify(body)}`, (key) => startJob(job.id, body, key));
+      },
       (j) => `${jobLabel(j)} started.${j.cardState === "in-progress" && job.cardState !== "in-progress" ? ` ${j.cardNumber} is in progress.` : ""}`,
     );
   const complete = (job: KanbanJob, d: CompletionDraft) =>
     run(
       job,
-      () => completeJob(job.id, { version: job.version, reportedQty: d.reportedQty, scrapQty: d.scrapQty, handlingUnits: Number(d.handlingUnits) }, newKey()),
+      () => {
+        const body = { version: job.version, reportedQty: d.reportedQty, scrapQty: d.scrapQty, handlingUnits: Number(d.handlingUnits) };
+        return keys.send(`complete ${job.id} ${JSON.stringify(body)}`, (key) => completeJob(job.id, body, key));
+      },
       (j) => `${jobLabel(j)} completed.${j.cardState === "completed" ? ` ${j.cardNumber} is completed.` : ""}`,
     );
 

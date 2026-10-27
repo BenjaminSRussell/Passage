@@ -1,4 +1,4 @@
-# Not implemented in PSG-24 slices 1, 2, 4, 5 and 6 (lean)
+# Not implemented in PSG-24 slices 1, 2, 4, 5, 6 and 7 (lean)
 
 Built in slice 1: production flows with activities, connectivity check and activation
 (FR-24.8, LEAN-0004); kanban rules (FR-24.9); kanban generation for fixed rules with the
@@ -43,6 +43,17 @@ activity in the period currency); the CSV export `GET /flows/{id}/costing-period
 flow costing period report; and the screens: the analysis on the kanban rule page, the backflush
 preview on the flow costing page (its total can be carried into the settle form) and the CSV
 download.
+
+Built in slice 7: retry safety of the shop-floor commands. Card moves (`:move`, which also
+empties a card) and job `:start` and `:complete` store their first answer under the
+Idempotency-Key in `idempotency_keys` in the same transaction as the transition (no new table
+or migration: the slices 1 and 4 commands already did); slice 7 adds the database tests that a
+retried completion replays the first answer without a second completion record or event, that the
+same key with another report is `idempotency_key_reuse` (422), that a refused command stores no
+key, and that a retry arriving while the first start still holds the lock replays it (one start,
+one event). Both web boards now keep a command's key until the service answers it, so a retry
+after a lost answer is replayed instead of being refused as a stale version
+(`apps/web/src/modules/lean/commandKeys.ts`).
 
 | Deliverable or AC | Status | Reason |
 |---|---|---|

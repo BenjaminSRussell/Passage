@@ -1,4 +1,4 @@
-# lean web module (PSG-24 slices 1, 2, 4, 5 and 6)
+# lean web module (PSG-24 slices 1, 2, 4, 5, 6 and 7)
 
 Front end for `services/lean`. Discovered by the shell through `module.ts`. Pages use the
 `shell/ui` primitives and `pages.module.css` (tokens only), as in `docs/design-system.md`.
@@ -21,7 +21,12 @@ Front end for `services/lean`. Discovered by the shell through `module.ts`. Page
 | `/lean/subcontracting` | Lean subcontracting preview: mode, purchase agreements and completed service jobs; the PO lines with price, amount and jobs, LEAN-0005 when no agreement covers a job (FR-24.20, BR-24.16) | `POST /api/v1/lean/subcontracting:preview` | `lean.flow.write` |
 
 Every command sends an `Idempotency-Key`; moves send the card version the board read, and job
-commands the job version.
+commands the job version. On both boards (`commandKeys.ts`, slice 7) a move, start or
+completion keeps its key until the service answers it: a retry after a network failure, an
+unreadable answer or a 5xx sends the same key with the same body, so the service replays its
+first answer (`Idempotent-Replayed`) instead of refusing the now stale version. Once the service
+has answered (success or a 4xx refusal), or when the body changes (another report or target
+column), the next attempt gets a new key.
 
 ## Run and test
 
@@ -43,8 +48,10 @@ picker, the period list (settled facts, empty and failed states), opening a peri
 key and settling one with its version through the LEAN-0003 refusal (BR-24.9, AC-24.8), and
 for slice 6 the analysis period checks, the rule analysis with its default and chosen periods,
 its empty and failed states, the backflush preview (rate checks, the refusal for a missing rate,
-no Idempotency-Key, the carried conversion cost) and the CSV export and its failure, plus the
-in-repo WCAG checks.
+no Idempotency-Key, the carried conversion cost) and the CSV export and its failure, and for
+slice 7 which failures keep a command's key, a start retried after a lost answer with the same
+key, a new key after a refusal, a completion retried with the same report (same key) and with
+another report (new key), and a card move retried after a 503, plus the in-repo WCAG checks.
 
 ## Needs (for the shell owner, wave 5)
 

@@ -286,3 +286,105 @@ func TestJobs_TenantIsolation(t *testing.T) {
 		t.Fatalf("unknown job: %v", err)
 	}
 }
+
+// A retried completion (the operator's device lost the answer) returns the
+// first answer and reports nothing twice: one completion in the history, one
+// job event. The same key with another report is idempotency_key_reuse, and a
+// refused command records no key.
+func TestJobs_RetriedCompletionReplaysTheFirstAnswer(t *testing.T) {
+	s, admin := setup(t)
+	ctx := ctxFor(1)
+	f := cellFlow(t, s, ctx, ids.New(), ids.New(), false)
+	rule := eventRule("RETRY-1")
+	rule.FlowID = &f.ID
+	r, _, err := s.CreateRule(ctx, rule, store.Idem{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cards, _, err := s.GenerateKanbans(ctx, store.Generate{RuleID: r.ID, DemandQty: dec("20")}, store.Idem{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, jobs := jobsOf(t, s, ctx, cards[0].ID)
+
+	// A refused command stores nothing: its key is free for the next command.
+	if _, _, err := s.CompleteJob(ctx, jobs[0].ID, jobs[0].Version, done("20", "0", 1), store.Idem{Key: "op-1", Fingerprint: "complete"}); problemCode(err) != domain.CodeMove {
+		t.Fatalf("planned job completed: %v", err)
+	}
+	mix, fresh, err := s.StartJob(ctx, jobs[0].ID, jobs[0].Version, store.Idem{Key: "op-1", Fingerprint: "start"})
+	if err != nil || !fresh {
+		t.Fatalf("start with the key of a refused command fresh=%v %v", fresh, err)
+	}
+
+	first, fresh, err := s.CompleteJob(ctx, mix.ID, mix.Version, done("19", "1", 2), store.Idem{Key: "op-2", Fingerprint: "complete"})
+	if err != nil || !fresh || first.State != domain.Completed {
+		t.Fatalf("complete fresh=%v %+v %v", fresh, first, err)
+	}
+	again, fresh, err := s.CompleteJob(ctx, mix.ID, mix.Version, done("19", "1", 2), store.Idem{Key: "op-2", Fingerprint: "complete"})
+	if err != nil || fresh || again.Version != first.Version || !again.ReportedQty.Equal(dec("19")) || *again.HandlingUnits != 2 {
+		t.Fatalf("replayed completion fresh=%v %+v %v", fresh, again, err)
+	}
+	if _, _, err := s.CompleteJob(ctx, mix.ID, mix.Version, done("18", "2", 2), store.Idem{Key: "op-2", Fingerprint: "other report"}); problemCode(err) != store.CodeIdempotencyReuse {
+		t.Fatalf("key reused with another report: %v", err)
+	}
+
+	var completions int
+	if err := admin.QueryRow(context.Background(), `select count(*) from kanban_job_completion where job_id = $1`, mix.ID).Scan(&completions); err != nil || completions != 1 {
+		t.Fatalf("completion history rows = %d (%v), want 1", completions, err)
+	}
+	n := 0
+	for _, e := range outboxEvents(t, admin, leanevents.JobStateChanged) {
+		var d leanevents.JobStateChangedData
+		if json.Unmarshal(e.Data, &d) == nil && d.JobID == mix.ID && d.To == string(domain.Completed) {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("job completion events = %d, want 1", n)
+	}
+}
+
+// A retry sent while the first start is still running waits for its lock and
+// then replays it: exactly one start runs, the other call gets the same job.
+func TestJobs_ConcurrentRetryOfAStartRunsOnce(t *testing.T) {
+	s, admin := setup(t)
+	ctx := ctxFor(1)
+	f := cellFlow(t, s, ctx, ids.New(), ids.New(), false)
+	rule := eventRule("RETRY-2")
+	rule.FlowID = &f.ID
+	r, _, err := s.CreateRule(ctx, rule, store.Idem{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cards, _, err := s.GenerateKanbans(ctx, store.Generate{RuleID: r.ID, DemandQty: dec("20")}, store.Idem{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, jobs := jobsOf(t, s, ctx, cards[0].ID)
+	type result struct {
+		job   store.Job
+		fresh bool
+		err   error
+	}
+	results := make(chan result, 2)
+	for range 2 {
+		go func() {
+			j, fresh, err := s.StartJob(ctx, jobs[0].ID, jobs[0].Version, store.Idem{Key: "tap-twice", Fingerprint: "start"})
+			results <- result{j, fresh, err}
+		}()
+	}
+	a, b := <-results, <-results
+	if a.err != nil || b.err != nil || a.fresh == b.fresh || a.job.Version != b.job.Version || a.job.State != domain.InProgress {
+		t.Fatalf("concurrent retries: %+v / %+v", a, b)
+	}
+	n := 0
+	for _, e := range outboxEvents(t, admin, leanevents.JobStateChanged) {
+		var d leanevents.JobStateChangedData
+		if json.Unmarshal(e.Data, &d) == nil && d.JobID == jobs[0].ID {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("job start events = %d, want 1", n)
+	}
+}
