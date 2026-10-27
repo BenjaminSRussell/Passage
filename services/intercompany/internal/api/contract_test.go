@@ -34,7 +34,7 @@ func TestOpenAPIMatchesRoutes(t *testing.T) {
 		}
 	}
 	var mounted []string
-	for _, rt := range New().routes() {
+	for _, rt := range New(nil).routes() {
 		mounted = append(mounted, rt.method+" "+rt.path+" "+rt.duty)
 	}
 	sort.Strings(documented)

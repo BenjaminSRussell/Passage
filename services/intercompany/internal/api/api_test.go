@@ -55,7 +55,7 @@ type journalBody struct {
 }
 
 func TestPreviewJournal_AC404Legs(t *testing.T) {
-	rec := do(router(api.New()), journalPath, tenantID, api.DutyPost, validBody)
+	rec := do(router(api.New(nil)), journalPath, tenantID, api.DutyPost, validBody)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body %s", rec.Code, rec.Body.String())
 	}
@@ -81,7 +81,7 @@ func TestPreviewJournal_AC404Legs(t *testing.T) {
 
 func TestPreviewJournal_ConvertsCounterpartyAtTheDocumentRate(t *testing.T) {
 	body := strings.Replace(validBody, `"counterCurrency":"USD"`, `"counterCurrency":"EUR","rate":"0.9237"`, 1)
-	rec := do(router(api.New()), journalPath, tenantID, api.DutyPost, body)
+	rec := do(router(api.New(nil)), journalPath, tenantID, api.DutyPost, body)
 	var got journalBody
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != http.StatusOK {
 		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
@@ -92,7 +92,7 @@ func TestPreviewJournal_ConvertsCounterpartyAtTheDocumentRate(t *testing.T) {
 }
 
 func TestPreviewJournal_Authorization(t *testing.T) {
-	h := router(api.New())
+	h := router(api.New(nil))
 	if rec := do(h, journalPath, tenantID, "", validBody); rec.Code != http.StatusForbidden {
 		t.Fatalf("without duty status = %d; want 403", rec.Code)
 	}
@@ -128,7 +128,7 @@ func TestPreviewJournal_Errors(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			rec := do(router(api.New()), journalPath, tenantID, api.DutyPost, c.body)
+			rec := do(router(api.New(nil)), journalPath, tenantID, api.DutyPost, c.body)
 			var p struct {
 				Code   string            `json:"code"`
 				Errors map[string]string `json:"errors"`
@@ -168,7 +168,7 @@ func TestClassify_StatusesAndSummary(t *testing.T) {
 		item("missing", "250.00", "0", ""),
 		item("wrong-amount", "100.00", "105.00", ""),
 	}, ",") + `]}`
-	a := api.New()
+	a := api.New(nil)
 	rec := do(router(a), classifyPath, tenantID, api.DutyReconcile, body)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body %s", rec.Code, rec.Body.String())
@@ -201,7 +201,7 @@ func TestClassify_StatusesAndSummary(t *testing.T) {
 // TestClassify_TimingDoesNotBlock: only a Mismatch blocks consolidation (FR-40.6).
 func TestClassify_TimingDoesNotBlock(t *testing.T) {
 	body := `{"items":[` + item("matched", "10.00", "10.00", "") + "," + item("timing", "250.00", "0", `,"nextPeriodB":"250.00"`) + `]}`
-	rec := do(router(api.New()), classifyPath, tenantID, api.DutyReconcile, body)
+	rec := do(router(api.New(nil)), classifyPath, tenantID, api.DutyReconcile, body)
 	var got classifyBody
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != http.StatusOK {
 		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
@@ -213,7 +213,7 @@ func TestClassify_TimingDoesNotBlock(t *testing.T) {
 
 func TestClassify_ZeroToleranceTurnsFXDifferenceIntoMismatch(t *testing.T) {
 	body := `{"fxTolerancePct":"0","items":[` + item("fx", "1000.00", "996.00", `,"fxApplies":true`) + `]}`
-	rec := do(router(api.New()), classifyPath, tenantID, api.DutyReconcile, body)
+	rec := do(router(api.New(nil)), classifyPath, tenantID, api.DutyReconcile, body)
 	var got classifyBody
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || len(got.Items) != 1 || got.Items[0].Status != "Mismatch" {
 		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
@@ -236,7 +236,7 @@ func TestClassify_Errors(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			rec := do(router(api.New()), classifyPath, tenantID, c.duties, c.body)
+			rec := do(router(api.New(nil)), classifyPath, tenantID, c.duties, c.body)
 			var p struct {
 				Errors map[string]string `json:"errors"`
 			}

@@ -121,18 +121,32 @@ async function toError(res: Response): Promise<IntercompanyApiError> {
   return new IntercompanyApiError(res.status, code, message, fields);
 }
 
-async function send(path: string, body: unknown, accept: string, signal?: AbortSignal): Promise<Response> {
+export interface RequestOptions {
+  body?: unknown;
+  headers?: Record<string, string>;
+  accept?: string;
+  signal?: AbortSignal;
+}
+
+/** Sends one request to the service and throws an IntercompanyApiError for a problem response. */
+export async function request(method: string, path: string, opts: RequestOptions = {}): Promise<Response> {
+  const headers: Record<string, string> = { Accept: opts.accept ?? "application/json", ...opts.headers };
+  if (opts.body !== undefined) headers["Content-Type"] = "application/json";
   const res = await fetch(`${base}${path}`, {
-    method: "POST",
-    headers: { Accept: accept, "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    method,
+    headers,
+    body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
     credentials: "same-origin",
-    signal,
+    signal: opts.signal,
   });
   if (!res.ok) {
     throw await toError(res);
   }
   return res;
+}
+
+function send(path: string, body: unknown, accept: string, signal?: AbortSignal): Promise<Response> {
+  return request("POST", path, { body, accept, signal });
 }
 
 async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {

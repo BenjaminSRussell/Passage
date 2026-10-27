@@ -1,4 +1,4 @@
-# intercompany (wave 40, PSG-40, slices 1-3)
+# intercompany (wave 40, PSG-40, slices 1-4)
 
 Intercompany trade, transfers and charges between legal entities of one
 tenant: trading-partner rules, the due-to / due-from journal derivation, the
@@ -65,6 +65,25 @@ Still nothing is stored, posted or published.
 | Reconciliation summary `blocking` flag: true while any item is a Mismatch (FR-40.6 gate for CNS-0901) | `internal/api/api.go` | built, tests |
 | Web pages: `/intercompany/chains`, `/intercompany/transfer-pricing`, reversal on `/intercompany/centralized-payments` | `apps/web/src/modules/intercompany` | built, vitest |
 
+## What slice 4 adds
+
+The first stored resource: trading-partner pairings in Postgres with
+row-level security, idempotent create, versioned policy changes and their
+events through the outbox, plus pricing an IC line and checking a linked
+order change against a stored pairing, and the partner screens.
+
+| Area | Code | Status |
+|---|---|---|
+| Migration `0001_partners.sql`: `outbox`, `idempotency_keys`, `intercompany_partner` (tenant_id first, ENABLE + FORCE RLS with the `dbx.RLSPolicy` tenant policy, percentages numeric, one active pairing per direction as a partial unique index) | `migrations/` | built, store tests incl. RLS as the non-bypass role |
+| Pairings, FR-40.1: seller entity's IC customer and buyer entity's IC vendor, active flag, action policy (defaults auto-create on, auto-post off), pricing policy and markup, BR-40.3 tolerance (price %, date days); the direction never changes | `internal/domain/partner_record.go`, `internal/store/partners.go` | built, unit and store tests |
+| `POST /v1/interco/partners` (duty `IntercompanyConfigure`, `Idempotency-Key` required; a retry replays the stored response, a reused key with another body is IC-0841, a second active pairing for the direction IC-0840) | `internal/api/partners.go` | built, tests (incl. concurrent same-key requests) |
+| `GET /v1/interco/partners` (filters `entity`, `active`, keyset paging `after` / `limit`) and `GET /v1/interco/partners/{id}` with `ETag` (duty `IntercompanyView`) | `internal/api/partners.go` | built, tests |
+| `PATCH /v1/interco/partners/{id}` (duty `IntercompanyConfigure`, `If-Match` required: 428 missing, 412 stale, IC-0843): policy change, activate, deactivate; version + 1 and `dev.passage.interco.partner.updated.v1` with the changed fields; a no-op patch keeps the version | `internal/store/partners.go` | built, tests |
+| Events `dev.passage.interco.partner.created.v1` / `updated.v1` written through the outbox in the same transaction (not in the PRD event table; added for the saga worker and the sales and procurement services) | `internal/events`, `events/asyncapi.yaml` | built, contract test |
+| IC line pricing from the stored policy, FR-40.4: PriceList, CostPlus with the pairing's markup, TransferPriceTable by the item row effective on the line date (IC-0821), extended amount rounded once to the minor unit, pricing basis returned as the link will record it; an inactive pairing is IC-0801. `POST /v1/interco/partners/{id}/lines:price` (duty `IntercompanyView`; transfer prices are sent with the request) | `internal/domain/line_pricing.go`, `internal/api/partners.go` | built, unit and API tests |
+| Linked order change decision, BR-40.3 / IC-0804: any quantity change, a price move beyond the tolerance % or a date move beyond the tolerance days sends the mirror PO for re-approval, with every breach listed. `POST /v1/interco/partners/{id}/changes:evaluate` (duty `IntercompanyView`) | `internal/domain/order_change.go`, `internal/api/partners.go` | built, unit, rapid and API tests |
+| Web pages: `/intercompany/partners` (list with filter, paging, loading, empty and error states), `/intercompany/partners/new` (create with an Idempotency-Key kept across retries), `/intercompany/partners/:id` (policy, edit with If-Match and conflict reload, activate / deactivate, price a line, check an order change) | `apps/web/src/modules/intercompany` | built, vitest |
+
 Remaining deliverables and acceptance criteria are listed in
 [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
 
@@ -72,24 +91,27 @@ Remaining deliverables and acceptance criteria are listed in
 
 ```
 cd services/intercompany
-go run ./cmd/intercompany          # HTTP_ADDR defaults to :8080
-go test ./...                      # no database needed
-go vet ./...
+DATABASE_URL=postgres://... MIGRATE_ON_START=true go run ./cmd/intercompany   # HTTP_ADDR defaults to :8080
+go vet ./... && go test ./...                                                  # store tests skip without a database
+PASSAGE_TEST_DATABASE_URL=postgres://... go test ./...                         # store tests
+PASSAGE_TEST_APP_DATABASE_URL=postgres://passage_app@... # also runs the RLS test as a non-bypass role
 ```
 
-The service reads only `HTTP_ADDR` and `ADMIN_ADDR` (default `:9090`,
-serving `/metrics`) in these slices. `DATABASE_URL`,
-`DATABASE_MIGRATOR_URL` and the OPA sidecar are wired when the store slice
-lands.
+The service reads `DATABASE_URL` (required; the chart takes it from the
+`databaseSecret` Kubernetes secret), `MIGRATE_ON_START` (dev only),
+`HTTP_ADDR` and `ADMIN_ADDR` (default `:9090`, serving `/metrics`).
 
 ## Layout
 
 ```
-cmd/intercompany/        entrypoint (JSON slog, router, serve)
+cmd/intercompany/        entrypoint (JSON slog, database, migrations, router, serve)
 internal/domain/         pure rules, no I/O
+internal/store/          Postgres repository (RLS, idempotency keys, outbox)
+internal/events/         event types and payloads
 internal/api/            HTTP handlers and DTOs
+migrations/              NNNN_name.sql, applied in order by dbx.Migrate
 api/openapi.yaml         OpenAPI 3.1 for every exposed endpoint
-events/asyncapi.yaml     AsyncAPI 3 (no events in slices 1 to 3)
+events/asyncapi.yaml     AsyncAPI 3 for every published event
 charts/intercompany/     Helm chart
 ```
 
@@ -97,21 +119,26 @@ charts/intercompany/     Helm chart
 
 Problem details use `type: https://passage.dev/problems/<code>`.
 
-| Code | Meaning |
-|---|---|
-| COM-0001 | Invalid input (currency, amount, side, date, period, quantity, category, method, pair id, or a missing field) |
-| IC-0801 | No active IC partner policy between the two entities |
-| IC-0805 | No IC accounting matrix entry for the entity pair (due-to / due-from missing) |
-| IC-0815 | Supplier plan is stale after its buyer was replanned (warning in the planning sequence response) |
-| IC-0816 | Planning group has a cycle without an explicit sequence |
-| IC-0821 | No transfer price for the category and role on the date |
-| IC-0830 | Derived journal legs do not balance (defect guard; not in the PRD catalog, listed in NOT-IMPLEMENTED.md) |
-| AUTH-0001 / AUTH-0003 | Missing tenant / missing duty |
+| Code | HTTP | Meaning |
+|---|---|---|
+| COM-0001 | 400 | Invalid input (currency, amount, side, date, period, quantity, category, method, pair id, a missing field or header, a malformed `If-Match`) |
+| IC-0801 | 422 | No active IC partner policy between the two entities |
+| IC-0805 | 422 | No IC accounting matrix entry for the entity pair (due-to / due-from missing) |
+| IC-0815 | 200 | Supplier plan is stale after its buyer was replanned (warning in the planning sequence response) |
+| IC-0816 | 422 | Planning group has a cycle without an explicit sequence |
+| IC-0821 | 422 | No transfer price for the category and role on the date |
+| IC-0804 | 200 | Change exceeds the pairing's tolerance; the mirror PO goes for re-approval (in the change decision) |
+| IC-0830 | 422 | Derived journal legs do not balance (defect guard; not in the PRD catalog, listed in NOT-IMPLEMENTED.md) |
+| IC-0840 | 409 | An active pairing already exists for this direction (not in the PRD catalog) |
+| IC-0841 | 422 | The `Idempotency-Key` was used with a different request (not in the PRD catalog) |
+| IC-0842 | 404 | No pairing with this id in the tenant (not in the PRD catalog) |
+| IC-0843 | 412 / 428 | `If-Match` names a version the pairing no longer has, or is missing (not in the PRD catalog) |
+| AUTH-0001 / AUTH-0003 | 401 / 403 | Missing tenant / missing duty |
 
 ## Dependencies
 
-Only the platform module and what it already pulls in (chi, shopspring/decimal,
-pgregory.net/rapid for tests).
+Only the platform module and what it already pulls in (chi, pgx/v5,
+shopspring/decimal, pgregory.net/rapid for tests).
 
 ## Wave reference
 

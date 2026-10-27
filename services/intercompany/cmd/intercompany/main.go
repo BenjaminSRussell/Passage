@@ -2,13 +2,18 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
 
+	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/services/intercompany/internal/api"
+	"github.com/BenjaminSRussell/passage/services/intercompany/internal/store"
+	"github.com/BenjaminSRussell/passage/services/intercompany/migrations"
 )
 
 const (
@@ -35,11 +40,25 @@ func newLogger(w io.Writer) *slog.Logger {
 	return slog.New(handler).With("service", "intercompany")
 }
 
-// run serves the stateless slice-1 API on HTTP_ADDR and /metrics on
-// ADMIN_ADDR. The database, migrations and outbox are wired in the store
-// slice; until then no DATABASE_URL is read.
+// run connects to DATABASE_URL, applies the migrations when MIGRATE_ON_START
+// is true (dev; stage and prod run them before the rollout), and serves the
+// API on HTTP_ADDR and /metrics on ADMIN_ADDR.
 func run(ctx context.Context, getenv func(string) string) error {
-	a := api.New()
+	databaseURL := getenv("DATABASE_URL")
+	if databaseURL == "" {
+		return errors.New("DATABASE_URL is required")
+	}
+	pool, err := dbx.Connect(ctx, databaseURL)
+	if err != nil {
+		return fmt.Errorf("connect database: %w", err)
+	}
+	defer pool.Close()
+	if getenv("MIGRATE_ON_START") == "true" {
+		if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
+			return fmt.Errorf("migrate: %w", err)
+		}
+	}
+	a := api.New(store.New(pool))
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()

@@ -42,7 +42,7 @@ const chargeBody = `{
 }`
 
 func TestPreviewCharge_AC4011(t *testing.T) {
-	a := api.New()
+	a := api.New(nil)
 	rec := do(router(a), chargePath, tenantID, api.DutyPost, chargeBody)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body %s", rec.Code, rec.Body.String())
@@ -107,7 +107,7 @@ func TestPreviewCharge_Errors(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			rec := do(router(api.New()), chargePath, tenantID, c.duties, c.body)
+			rec := do(router(api.New(nil)), chargePath, tenantID, c.duties, c.body)
 			p := problem(t, rec)
 			if rec.Code != c.status || (c.code != "" && p.Code != c.code) || (c.field != "" && p.Errors[c.field] == "") {
 				t.Fatalf("status %d body %s; want %d %s on %q", rec.Code, rec.Body.String(), c.status, c.code, c.field)
@@ -125,7 +125,7 @@ const paymentBody = `{
 }`
 
 func TestPreviewCentralPayment_AC4010(t *testing.T) {
-	rec := do(router(api.New()), paymentPath, tenantID, api.DutyConfigure, paymentBody)
+	rec := do(router(api.New(nil)), paymentPath, tenantID, api.DutyConfigure, paymentBody)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body %s", rec.Code, rec.Body.String())
 	}
@@ -149,7 +149,7 @@ func TestPreviewCentralPayment_AC4010(t *testing.T) {
 	}
 
 	recv := strings.NewReplacer(`"Pay"`, `"Receive"`, `"2000-VENDOR"`, `"1200-CUSTOMER"`).Replace(paymentBody)
-	rec = do(router(api.New()), paymentPath, tenantID, api.DutyConfigure, recv)
+	rec = do(router(api.New(nil)), paymentPath, tenantID, api.DutyConfigure, recv)
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != http.StatusOK {
 		t.Fatalf("receive status %d body %s", rec.Code, rec.Body.String())
 	}
@@ -175,7 +175,7 @@ func TestPreviewCentralPayment_Errors(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			rec := do(router(api.New()), paymentPath, tenantID, c.duties, c.body)
+			rec := do(router(api.New(nil)), paymentPath, tenantID, c.duties, c.body)
 			p := problem(t, rec)
 			if rec.Code != c.status || (c.code != "" && p.Code != c.code) || (c.field != "" && p.Errors[c.field] == "") {
 				t.Fatalf("status %d body %s; want %d %s on %q", rec.Code, rec.Body.String(), c.status, c.code, c.field)
@@ -200,7 +200,7 @@ type planningBodyOut struct {
 }
 
 func TestSequencePlanning_AC4016(t *testing.T) {
-	rec := do(router(api.New()), planningPath, tenantID, api.DutyPlan, planningBody)
+	rec := do(router(api.New(nil)), planningPath, tenantID, api.DutyPlan, planningBody)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body %s", rec.Code, rec.Body.String())
 	}
@@ -219,7 +219,7 @@ func TestSequencePlanning_AC4016(t *testing.T) {
 	}
 
 	replan := strings.Replace(planningBody, `"plannedOrders"`, `"replannedBuyer":"A","plannedOrders"`, 1)
-	rec = do(router(api.New()), planningPath, tenantID, api.DutyPlan, replan)
+	rec = do(router(api.New(nil)), planningPath, tenantID, api.DutyPlan, replan)
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != http.StatusOK {
 		t.Fatalf("replan status %d body %s", rec.Code, rec.Body.String())
 	}
@@ -248,14 +248,14 @@ func TestSequencePlanning_Errors(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			rec := do(router(api.New()), planningPath, tenantID, c.duties, c.body)
+			rec := do(router(api.New(nil)), planningPath, tenantID, c.duties, c.body)
 			p := problem(t, rec)
 			if rec.Code != c.status || (c.code != "" && p.Code != c.code) || (c.field != "" && p.Errors[c.field] == "") {
 				t.Fatalf("status %d body %s; want %d %s on %q", rec.Code, rec.Body.String(), c.status, c.code, c.field)
 			}
 		})
 	}
-	if rec := do(router(api.New()), planningPath, "", api.DutyPlan, planningBody); rec.Code != http.StatusUnauthorized {
+	if rec := do(router(api.New(nil)), planningPath, "", api.DutyPlan, planningBody); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("without tenant status = %d; want 401", rec.Code)
 	}
 }

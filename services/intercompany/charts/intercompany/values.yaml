@@ -1,4 +1,8 @@
 image: { repository: ghcr.io/benjaminsrussell/intercompany, digest: "", tag: "", pullPolicy: IfNotPresent }
+# DATABASE_URL comes from this Kubernetes secret (Vault via External Secrets), never inline.
+databaseSecret: intercompany-db
+# Dev only; stage and prod apply migrations before the rollout.
+migrateOnStart: false
 replicaCount: 2
 resources:
   requests: { cpu: 50m, memory: 64Mi }

@@ -35,18 +35,26 @@ func DefaultTolerance() Tolerance {
 	return Tolerance{PricePct: decimal.New(5, -1), DateDays: 2}
 }
 
-// Partner pairs a seller entity (customer side) with a buyer entity (vendor side).
+// Partner pairs a seller entity (customer side) with a buyer entity (vendor
+// side): CustomerAccount is the IC customer in the seller entity that stands
+// for the buyer, VendorAccount the IC vendor in the buyer entity that stands for
+// the seller (FR-40.1).
 type Partner struct {
-	SellerEntity string
-	BuyerEntity  string
-	Active       bool
-	Actions      ActionPolicy
-	Pricing      PricingPolicy
-	MarkupPct    decimal.Decimal
-	Tolerance    Tolerance
+	SellerEntity    string
+	BuyerEntity     string
+	CustomerAccount string
+	VendorAccount   string
+	Active          bool
+	Actions         ActionPolicy
+	Pricing         PricingPolicy
+	MarkupPct       decimal.Decimal
+	Tolerance       Tolerance
 }
 
-// ValidatePartner checks a pairing before it is stored.
+// maxMarkupPct bounds the cost-plus markup of a pairing.
+var maxMarkupPct = decimal.NewFromInt(1000)
+
+// ValidatePartner checks the pricing and tolerance rules of a pairing.
 func ValidatePartner(p Partner) error {
 	switch {
 	case p.SellerEntity == "" || p.BuyerEntity == "":
@@ -55,8 +63,8 @@ func ValidatePartner(p Partner) error {
 		return invalid("seller and buyer must be different entities")
 	case p.Pricing != PricePriceList && p.Pricing != PriceCostPlus && p.Pricing != PriceTable:
 		return invalid("unknown pricing policy " + string(p.Pricing))
-	case p.MarkupPct.IsNegative():
-		return invalid("markup must not be negative")
+	case p.MarkupPct.IsNegative() || p.MarkupPct.GreaterThan(maxMarkupPct):
+		return invalid("markup must be between 0 and 1000 percent")
 	case p.Tolerance.PricePct.IsNegative() || p.Tolerance.PricePct.GreaterThan(decimal.NewFromInt(100)):
 		return invalid("price tolerance must be between 0 and 100 percent")
 	case p.Tolerance.DateDays < 0 || p.Tolerance.DateDays > 30:
@@ -82,40 +90,4 @@ func ActivePartner(partners []Partner, seller, buyer string) (Partner, error) {
 	default:
 		return Partner{}, invalid(fmt.Sprintf("%d active pairings exist for %s to %s", len(found), seller, buyer))
 	}
-}
-
-// PriceLine prices one intercompany line (FR-40.4): the list price for
-// PriceList, unit cost plus markup for CostPlus. A transfer price table is a
-// later slice and fails with IC-0821.
-func PriceLine(p Partner, listPrice, unitCost decimal.Decimal) (decimal.Decimal, error) {
-	switch p.Pricing {
-	case PricePriceList:
-		return listPrice, nil
-	case PriceCostPlus:
-		return unitCost.Mul(decimal.NewFromInt(1).Add(p.MarkupPct.Div(decimal.NewFromInt(100)))), nil
-	}
-	return decimal.Zero, &Error{Code: CodeTransferPrice, Detail: "no transfer price for this line"}
-}
-
-// WithinTolerance reports whether a change to a linked sales order updates the
-// mirror silently (BR-40.3). Quantity must be unchanged; price may move by the
-// tolerance percentage and the date by the tolerance days.
-func WithinTolerance(t Tolerance, oldQty, newQty, oldPrice, newPrice decimal.Decimal, dateShiftDays int) bool {
-	if !oldQty.Equal(newQty) {
-		return false
-	}
-	if oldPrice.IsZero() {
-		if !newPrice.IsZero() {
-			return false
-		}
-	} else {
-		move := oldPrice.Sub(newPrice).Abs().Div(oldPrice).Mul(decimal.NewFromInt(100))
-		if move.GreaterThan(t.PricePct) {
-			return false
-		}
-	}
-	if dateShiftDays < 0 {
-		dateShiftDays = -dateShiftDays
-	}
-	return dateShiftDays <= t.DateDays
 }

@@ -1,9 +1,16 @@
 openapi: 3.1.0
 info:
   title: Passage Intercompany
-  version: 0.3.0
+  version: 0.4.0
   description: |
-    Wave 40, slices 1 to 3. Stateless intercompany calculations: the caller
+    Wave 40, slices 1 to 4. Trading partners (FR-40.1) are stored: create a
+    pairing with an Idempotency-Key, change its policy with If-Match (each
+    change is a new version), price an IC line from the stored policy (FR-40.4)
+    and check a linked order change against its tolerance (BR-40.3). Pairing
+    changes publish dev.passage.interco.partner.created.v1 / updated.v1 through
+    the outbox (events/asyncapi.yaml).
+
+    The other endpoints are stateless intercompany calculations: the caller
     supplies the accounting matrix, balances, transfer prices, planning group,
     delivery chain or priced lines and the service returns the derived due-to /
     due-from journal (BR-40.4), the reconciliation classification (FR-40.6,
@@ -11,12 +18,11 @@ info:
     BR-40.12), the centralized payment legs (FR-40.12) and their bank-return
     reversal (BR-40.11), the planning group run sequence with IC demand
     (FR-40.15, BR-40.13), the postings of a direct-delivery packing slip
-    (FR-40.3) or the transfer-pricing evidence file (FR-40.4). Nothing is stored and no event is published, so no endpoint
-    takes an Idempotency-Key. Mirror sagas, persisted links, reconciliation
-    runs, stored setups, charge posting and the planning run are later slices
-    of PSG-40 (see NOT-IMPLEMENTED.md). Browser calls go through the web BFF at
-    /api/v1/interco/..., which rewrites to these paths and sets the tenant and
-    duty headers.
+    (FR-40.3) or the transfer-pricing evidence file (FR-40.4). Mirror sagas,
+    persisted links, reconciliation runs, stored setups, charge posting and the
+    planning run are later slices of PSG-40 (see NOT-IMPLEMENTED.md). Browser
+    calls go through the web BFF at /api/v1/interco/..., which rewrites to
+    these paths and sets the tenant and duty headers.
 servers:
   - url: https://api.{env}.passage.dev
     variables:
@@ -283,6 +289,250 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
+  /v1/interco/partners:
+    get:
+      operationId: listIntercompanyPartners
+      summary: List the tenant's trading-partner pairings, ordered by id (FR-40.1)
+      x-passage-duty: IntercompanyView
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - { name: entity, in: query, description: Entity code on either side, schema: { type: string } }
+        - { name: active, in: query, schema: { type: boolean } }
+        - { name: after, in: query, description: nextCursor of the previous page, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: One page of pairings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartnerList'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+    post:
+      operationId: createIntercompanyPartner
+      summary: Pair a customer in the seller entity with a vendor in the buyer entity, with action, pricing and tolerance policies (FR-40.1)
+      description: |
+        One active pairing per entity pair and direction. Omitted policies take
+        the ic.partnerPolicy defaults: active, auto-create on, auto-confirm and
+        auto-post off, PriceList pricing, tolerance price 0.5 % and date 2 days.
+        Publishes dev.passage.interco.partner.created.v1 through the outbox.
+      x-passage-duty: IntercompanyConfigure
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePartnerRequest'
+      responses:
+        '201':
+          description: The stored pairing at version 1, or the stored response of an earlier request with the same Idempotency-Key (Idempotent-Replayed true)
+          headers:
+            ETag: { description: Pairing version, schema: { type: string } }
+            Location: { schema: { type: string } }
+            Idempotent-Replayed: { schema: { type: string, enum: ['true'] } }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Partner'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '409':
+          description: IC-0840 an active pairing already exists for this direction
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          description: IC-0841 the Idempotency-Key was used with a different request
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /v1/interco/partners/{id}:
+    get:
+      operationId: getIntercompanyPartner
+      summary: Read one pairing with its current policy version
+      x-passage-duty: IntercompanyView
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - $ref: '#/components/parameters/PartnerID'
+      responses:
+        '200':
+          description: The pairing
+          headers:
+            ETag: { description: Pairing version, schema: { type: string } }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Partner'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          description: IC-0842 no pairing with this id in the tenant
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+    patch:
+      operationId: updateIntercompanyPartner
+      summary: Change, activate or deactivate a pairing's policy; the version increments (FR-40.1 policies versioned)
+      description: |
+        The direction (seller and buyer entity) never changes. A patch that
+        changes nothing returns the pairing at its current version. Publishes
+        dev.passage.interco.partner.updated.v1 through the outbox.
+      x-passage-duty: IntercompanyConfigure
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - $ref: '#/components/parameters/PartnerID'
+        - { name: If-Match, in: header, required: true, description: 'The ETag of the version being changed, such as "1"', schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePartnerRequest'
+      responses:
+        '200':
+          description: The pairing after the change
+          headers:
+            ETag: { description: Pairing version, schema: { type: string } }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Partner'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          description: IC-0842 no pairing with this id in the tenant
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: IC-0840 activating would make a second active pairing for the direction
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '412':
+          description: IC-0843 If-Match names a version the pairing no longer has
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '428':
+          description: IC-0843 If-Match is missing
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /v1/interco/partners/{id}/lines:price:
+    post:
+      operationId: priceIntercompanyLine
+      summary: Price one IC line from the pairing's pricing policy and return the pricing basis the IC document link records (FR-40.4)
+      description: |
+        PriceList takes listPrice, CostPlus the unitCost with the pairing's
+        markup, TransferPriceTable the row for the item effective on the line
+        date (category Item; rows are sent with the request until transfer
+        prices are stored). The unit price keeps full precision; the extended
+        amount is rounded once to the currency minor unit. Nothing is stored.
+      x-passage-duty: IntercompanyView
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - $ref: '#/components/parameters/PartnerID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PriceLineRequest'
+      responses:
+        '200':
+          description: The priced line and its basis
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PricedLine'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          description: IC-0842 no pairing with this id in the tenant
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          description: IC-0801 the pairing is inactive; IC-0821 no transfer price for the item on the date
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /v1/interco/partners/{id}/changes:evaluate:
+    post:
+      operationId: evaluateIntercompanyOrderChange
+      summary: Decide whether a change to a linked sales order updates the mirror PO silently or sends it for re-approval (BR-40.3, IC-0804)
+      description: |
+        Quantity must not change; the unit price may move by the pairing's
+        price tolerance (percent of the old price) and the date by its date
+        tolerance in days, both inclusive. Nothing is stored; routing the
+        mirror PO to the wave-17 workflow comes with the mirror saga.
+      x-passage-duty: IntercompanyView
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - $ref: '#/components/parameters/PartnerID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EvaluateChangeRequest'
+      responses:
+        '200':
+          description: The decision with every tolerance breach
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeDecision'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          description: IC-0842 no pairing with this id in the tenant
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
   /healthz:
     get:
       operationId: healthz
@@ -296,7 +546,7 @@ paths:
       x-passage-duty: public
       responses:
         '200':
-          description: Readiness (the stateless slice has no dependency to check)
+          description: Readiness
 components:
   parameters:
     TenantHeader:
@@ -314,6 +564,21 @@ components:
       description: Set by the gateway; comma-separated duties of the caller
       schema:
         type: string
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Client key, at most 255 characters; a retry with the same key and body replays the stored response for the tenant
+      schema:
+        type: string
+        maxLength: 255
+    PartnerID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
   responses:
     Problem:
       description: RFC 9457 problem details (COM-0001 validation, AUTH-0001 no tenant, AUTH-0003 missing duty)
@@ -687,6 +952,158 @@ components:
             properties:
               code: { type: string, enum: [IC-0815] }
               message: { type: string }
+    PartnerActions:
+      type: object
+      additionalProperties: false
+      required: [autoCreate, autoConfirm, autoPostPackingSlip, autoPostInvoice]
+      properties:
+        autoCreate: { type: boolean, description: Create the mirror document automatically }
+        autoConfirm: { type: boolean }
+        autoPostPackingSlip: { type: boolean }
+        autoPostInvoice: { type: boolean }
+    PricingPolicy:
+      type: string
+      enum: [PriceList, CostPlus, TransferPriceTable]
+    ToleranceInput:
+      type: object
+      additionalProperties: false
+      properties:
+        pricePct: { $ref: '#/components/schemas/Amount', description: 0 to 100 percent of the old unit price }
+        dateDays: { type: integer, minimum: 0, maximum: 30 }
+    Code:
+      type: string
+      minLength: 1
+      maxLength: 64
+    CreatePartnerRequest:
+      type: object
+      additionalProperties: false
+      required: [sellerEntity, buyerEntity, customerAccount, vendorAccount]
+      properties:
+        sellerEntity: { $ref: '#/components/schemas/Code', description: Selling entity (customer side) }
+        buyerEntity: { $ref: '#/components/schemas/Code', description: Buying entity (vendor side); differs from sellerEntity }
+        customerAccount: { $ref: '#/components/schemas/Code', description: IC customer in the seller entity that stands for the buyer }
+        vendorAccount: { $ref: '#/components/schemas/Code', description: IC vendor in the buyer entity that stands for the seller }
+        active: { type: boolean, default: true }
+        actions: { $ref: '#/components/schemas/PartnerActions' }
+        pricing: { $ref: '#/components/schemas/PricingPolicy' }
+        markupPct: { $ref: '#/components/schemas/Amount', description: Cost-plus markup, 0 to 1000 percent }
+        tolerance: { $ref: '#/components/schemas/ToleranceInput' }
+    UpdatePartnerRequest:
+      type: object
+      additionalProperties: false
+      description: Every field is optional; omitted fields keep their stored value
+      properties:
+        customerAccount: { $ref: '#/components/schemas/Code' }
+        vendorAccount: { $ref: '#/components/schemas/Code' }
+        active: { type: boolean }
+        actions: { $ref: '#/components/schemas/PartnerActions' }
+        pricing: { $ref: '#/components/schemas/PricingPolicy' }
+        markupPct: { $ref: '#/components/schemas/Amount' }
+        tolerance: { $ref: '#/components/schemas/ToleranceInput' }
+    Partner:
+      type: object
+      required: [id, version, sellerEntity, buyerEntity, customerAccount, vendorAccount, active, actions, pricing, markupPct, tolerance, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        version: { type: integer, minimum: 1 }
+        sellerEntity: { type: string }
+        buyerEntity: { type: string }
+        customerAccount: { type: string }
+        vendorAccount: { type: string }
+        active: { type: boolean }
+        actions: { $ref: '#/components/schemas/PartnerActions' }
+        pricing: { $ref: '#/components/schemas/PricingPolicy' }
+        markupPct: { $ref: '#/components/schemas/Amount' }
+        tolerance:
+          type: object
+          required: [pricePct, dateDays]
+          properties:
+            pricePct: { $ref: '#/components/schemas/Amount' }
+            dateDays: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    PartnerList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Partner' }
+        nextCursor: { type: string, format: uuid, description: Absent on the last page }
+    LineTransferPrice:
+      type: object
+      additionalProperties: false
+      required: [item, method, effectiveFrom]
+      properties:
+        item: { $ref: '#/components/schemas/Code' }
+        method: { type: string, enum: [Cost, CostPlus, Table] }
+        markupPct: { $ref: '#/components/schemas/Amount', description: Required for CostPlus }
+        unitPrice: { $ref: '#/components/schemas/Amount', description: Required for Table, in the line currency }
+        effectiveFrom: { $ref: '#/components/schemas/Date' }
+    PriceLineRequest:
+      type: object
+      additionalProperties: false
+      required: [item, date, currency, quantity]
+      properties:
+        item: { $ref: '#/components/schemas/Code' }
+        date: { $ref: '#/components/schemas/Date' }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        quantity: { $ref: '#/components/schemas/Amount', description: Above 0 }
+        listPrice: { $ref: '#/components/schemas/Amount', description: Unit list price; required for a PriceList pairing }
+        unitCost: { $ref: '#/components/schemas/Amount', description: Unit cost; required for CostPlus and TransferPriceTable pairings }
+        transferPrices:
+          type: array
+          maxItems: 1000
+          description: Required for a TransferPriceTable pairing
+          items: { $ref: '#/components/schemas/LineTransferPrice' }
+    PricedLine:
+      type: object
+      required: [partnerId, partnerVersion, item, quantity, currency, unitPrice, extended, basis]
+      properties:
+        partnerId: { type: string, format: uuid }
+        partnerVersion: { type: integer }
+        item: { type: string }
+        quantity: { $ref: '#/components/schemas/Amount' }
+        currency: { type: string }
+        unitPrice: { $ref: '#/components/schemas/Amount', description: Full precision }
+        extended: { $ref: '#/components/schemas/Amount', description: quantity × unitPrice at the currency minor unit }
+        basis:
+          type: object
+          description: The pricing_basis the IC document link records
+          required: [policy, method, source]
+          properties:
+            policy: { $ref: '#/components/schemas/PricingPolicy' }
+            method: { type: string, enum: [PriceList, Cost, CostPlus, Table] }
+            markupPct: { $ref: '#/components/schemas/Amount', description: Present for CostPlus }
+            source: { type: string, enum: [partner-policy, transfer-price-table] }
+            effectiveFrom: { $ref: '#/components/schemas/Date', description: Present when a transfer price row applied }
+    EvaluateChangeRequest:
+      type: object
+      additionalProperties: false
+      required: [oldQuantity, newQuantity, oldPrice, newPrice, oldDate, newDate]
+      properties:
+        oldQuantity: { $ref: '#/components/schemas/Amount' }
+        newQuantity: { $ref: '#/components/schemas/Amount' }
+        oldPrice: { $ref: '#/components/schemas/Amount', description: Unit price before the change }
+        newPrice: { $ref: '#/components/schemas/Amount' }
+        oldDate: { $ref: '#/components/schemas/Date' }
+        newDate: { $ref: '#/components/schemas/Date' }
+    ChangeDecision:
+      type: object
+      required: [partnerId, partnerVersion, action, reasons, dateShiftDays, tolerance]
+      properties:
+        partnerId: { type: string, format: uuid }
+        partnerVersion: { type: integer }
+        action: { type: string, enum: [UpdateSilently, ReApprove] }
+        code: { type: string, enum: [IC-0804], description: Present for ReApprove }
+        reasons: { type: array, items: { type: string } }
+        dateShiftDays: { type: integer }
+        tolerance:
+          type: object
+          required: [pricePct, dateDays]
+          properties:
+            pricePct: { $ref: '#/components/schemas/Amount' }
+            dateDays: { type: integer }
     Problem:
       type: object
       required: [type, title, status]

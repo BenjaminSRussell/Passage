@@ -1,13 +1,67 @@
 asyncapi: 3.0.0
 info:
   title: Passage Intercompany events
-  version: 0.1.0
+  version: 0.4.0
   description: |
-    Wave 40, slice 1 publishes no events: the journal preview and reconciliation classify endpoints change no state.
-    The events in PRD 7.40.5 (mirror created and compensated, journal posted,
-    reconciliation flagged, charge posted, planning completed) are added with
-    the store and saga slices, each with its schema in this file.
-channels: {}
-operations: {}
+    Events published by the intercompany service through the outbox, in the
+    same transaction as the state change. CloudEvents 1.0 envelope from
+    platform/go/events; type dev.passage.interco.<entity>.<verb>.v1; source
+    /passage/intercompany. The payloads below are the data member.
+
+    Slice 4 publishes the trading-partner events. They are not in the PRD
+    7.40.5 event table; they are added so the mirror-saga worker and the sales
+    and procurement services see every pairing and policy version. The PRD
+    events (mirror created and compensated, journal posted, reconciliation
+    flagged, charge posted, planning completed) are added with the saga,
+    posting and run slices (see NOT-IMPLEMENTED.md).
+defaultContentType: application/cloudevents+json
+channels:
+  partnerCreated:
+    address: passage.interco.partner
+    messages:
+      partnerCreated:
+        $ref: "#/components/messages/PartnerCreated"
+  partnerUpdated:
+    address: passage.interco.partner
+    messages:
+      partnerUpdated:
+        $ref: "#/components/messages/PartnerUpdated"
+operations:
+  publishPartnerCreated:
+    action: send
+    channel: { $ref: "#/channels/partnerCreated" }
+  publishPartnerUpdated:
+    action: send
+    channel: { $ref: "#/channels/partnerUpdated" }
 components:
-  messages: {}
+  messages:
+    PartnerCreated:
+      name: dev.passage.interco.partner.created.v1
+      title: Trading-partner pairing created (FR-40.1)
+      payload:
+        type: object
+        required: [id, sellerEntity, buyerEntity, customerAccount, vendorAccount, active, pricing, version]
+        properties:
+          id: { type: string, format: uuid }
+          sellerEntity: { type: string, description: Selling entity (customer side) }
+          buyerEntity: { type: string, description: Buying entity (vendor side) }
+          customerAccount: { type: string, description: IC customer in the seller entity that stands for the buyer }
+          vendorAccount: { type: string, description: IC vendor in the buyer entity that stands for the seller }
+          active: { type: boolean }
+          pricing: { type: string, enum: [PriceList, CostPlus, TransferPriceTable] }
+          version: { type: integer, minimum: 1 }
+    PartnerUpdated:
+      name: dev.passage.interco.partner.updated.v1
+      title: Trading-partner policy changed (FR-40.1, policies versioned)
+      payload:
+        type: object
+        required: [id, sellerEntity, buyerEntity, active, changedFields, version]
+        properties:
+          id: { type: string, format: uuid }
+          sellerEntity: { type: string }
+          buyerEntity: { type: string }
+          active: { type: boolean, description: Active after the change }
+          changedFields:
+            type: array
+            items: { type: string, enum: [customerAccount, vendorAccount, active, actions, pricing, markupPct, tolerance] }
+          version: { type: integer, minimum: 2 }

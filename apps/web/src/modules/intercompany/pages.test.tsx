@@ -54,6 +54,7 @@ describe("intercompany module", () => {
     expect(intercompany.routes.every((r) => r.element != null && r.path?.startsWith("/intercompany"))).toBe(true);
     expect(intercompany.nav.map((n) => n.to)).toEqual([
       "/intercompany",
+      "/intercompany/partners",
       "/intercompany/journal",
       "/intercompany/reconciliation",
       "/intercompany/charges",
@@ -63,6 +64,7 @@ describe("intercompany module", () => {
       "/intercompany/transfer-pricing",
     ]);
     expect(intercompany.nav.map((n) => n.duty)).toEqual([
+      "IntercompanyView",
       "IntercompanyView",
       "IntercompanyPost",
       "IntercompanyReconcile",

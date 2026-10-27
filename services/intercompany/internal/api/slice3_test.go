@@ -31,7 +31,7 @@ type chainOut struct {
 }
 
 func TestPreviewChain_AC403(t *testing.T) {
-	a := api.New()
+	a := api.New(nil)
 	rec := do(router(a), chainPath, tenantID, api.DutyView, chainBody)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body %s", rec.Code, rec.Body.String())
@@ -77,7 +77,7 @@ func TestPreviewChain_Errors(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			rec := do(router(api.New()), chainPath, tenantID, c.duties, c.body)
+			rec := do(router(api.New(nil)), chainPath, tenantID, c.duties, c.body)
 			p := problem(t, rec)
 			if rec.Code != c.status || (c.code != "" && p.Code != c.code) || (c.field != "" && p.Errors[c.field] == "") {
 				t.Fatalf("status %d body %s; want %d %s on %q", rec.Code, rec.Body.String(), c.status, c.code, c.field)
@@ -93,7 +93,7 @@ const evidenceBody = `{
 }`
 
 func TestExportEvidence_CSV(t *testing.T) {
-	rec := do(router(api.New()), evidencePath, tenantID, api.DutyView, evidenceBody)
+	rec := do(router(api.New(nil)), evidencePath, tenantID, api.DutyView, evidenceBody)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body %s", rec.Code, rec.Body.String())
 	}
@@ -113,7 +113,7 @@ func TestExportEvidence_CSV(t *testing.T) {
 
 func TestExportEvidence_FileNameIsSanitised(t *testing.T) {
 	body := strings.Replace(evidenceBody, `"sellerEntity":"P"`, `"sellerEntity":"P\"; x=\r\ny"`, 1)
-	rec := do(router(api.New()), evidencePath, tenantID, api.DutyView, body)
+	rec := do(router(api.New(nil)), evidencePath, tenantID, api.DutyView, body)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body %s", rec.Code, rec.Body.String())
 	}
@@ -140,7 +140,7 @@ func TestExportEvidence_Errors(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			rec := do(router(api.New()), evidencePath, tenantID, c.duties, c.body)
+			rec := do(router(api.New(nil)), evidencePath, tenantID, c.duties, c.body)
 			p := problem(t, rec)
 			if rec.Code != c.status || (c.status == http.StatusBadRequest && p.Code != "COM-0001") || (c.field != "" && p.Errors[c.field] == "") {
 				t.Fatalf("status %d body %s; want %d on %q", rec.Code, rec.Body.String(), c.status, c.field)
@@ -155,7 +155,7 @@ const pairID = "01890a5d-ac96-774b-bcce-b302099a8099"
 // both entities' legs flip side under the original pair id.
 func TestPreviewReversal_BR4011(t *testing.T) {
 	body := strings.Replace(paymentBody, "{", `{"pairId":"`+pairID+`",`, 1)
-	rec := do(router(api.New()), reversalPath, tenantID, api.DutyConfigure, body)
+	rec := do(router(api.New(nil)), reversalPath, tenantID, api.DutyConfigure, body)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body %s", rec.Code, rec.Body.String())
 	}
@@ -194,7 +194,7 @@ func TestPreviewReversal_Errors(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			rec := do(router(api.New()), reversalPath, tenantID, c.duties, c.body)
+			rec := do(router(api.New(nil)), reversalPath, tenantID, c.duties, c.body)
 			p := problem(t, rec)
 			if rec.Code != c.status || (c.code != "" && p.Code != c.code) || (c.field != "" && p.Errors[c.field] == "") {
 				t.Fatalf("status %d body %s; want %d %s on %q", rec.Code, rec.Body.String(), c.status, c.code, c.field)

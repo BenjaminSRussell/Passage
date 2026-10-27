@@ -1,13 +1,14 @@
-// Package api exposes the intercompany HTTP surface. Slices 1 to 3 are
-// stateless: the caller supplies the accounting matrix, balances, transfer
-// prices, planning group, chain or priced lines, and the service returns the
-// derived IC journal (BR-40.4), the reconciliation classification (FR-40.6,
-// BR-40.5), the priced IC charge with its Journal-mode legs (FR-40.13), the
-// centralized payment legs (FR-40.12) and their bank-return reversal
-// (BR-40.11), the planning run sequence with IC demand (FR-40.15), the
-// direct-delivery chain postings (FR-40.3) or the transfer-pricing evidence
-// file (FR-40.4). Nothing is stored and no event is published, so no endpoint
-// takes an Idempotency-Key.
+// Package api exposes the intercompany HTTP surface. Trading partners
+// (FR-40.1) are stored: create with an Idempotency-Key, change with If-Match,
+// and price IC lines (FR-40.4) or check a linked order change (BR-40.3)
+// against a stored pairing. The other routes are stateless: the caller
+// supplies the accounting matrix, balances, transfer prices, planning group,
+// chain or priced lines, and the service returns the derived IC journal
+// (BR-40.4), the reconciliation classification (FR-40.6, BR-40.5), the priced
+// IC charge with its Journal-mode legs (FR-40.13), the centralized payment
+// legs (FR-40.12) and their bank-return reversal (BR-40.11), the planning run
+// sequence with IC demand (FR-40.15), the direct-delivery chain postings
+// (FR-40.3) or the transfer-pricing evidence file (FR-40.4).
 package api
 
 import (
@@ -60,6 +61,8 @@ var (
 
 // API serves the intercompany routes and counts what it computes for /metrics.
 type API struct {
+	partners PartnerStore
+
 	journalPreviews        atomic.Int64
 	reconItems             atomic.Int64
 	reconMismatches        atomic.Int64
@@ -69,10 +72,14 @@ type API struct {
 	chainPreviews          atomic.Int64
 	evidenceExports        atomic.Int64
 	reversalPreviews       atomic.Int64
+	partnerChanges         atomic.Int64
+	linesPriced            atomic.Int64
+	changeEvaluations      atomic.Int64
 }
 
-// New returns the API.
-func New() *API { return &API{} }
+// New returns the API over the partner store. The stateless routes do not
+// touch it.
+func New(partners PartnerStore) *API { return &API{partners: partners} }
 
 // route is one duty-guarded endpoint; api/openapi.yaml lists the same table.
 type route struct {
@@ -90,6 +97,12 @@ func (a *API) routes() []route {
 		{http.MethodPost, "/v1/interco/chains:preview", DutyView, a.previewChain},
 		{http.MethodPost, "/v1/interco/transfer-pricing/evidence:export", DutyView, a.exportEvidence},
 		{http.MethodPost, "/v1/interco/centralized-payments/reversals:preview", DutyConfigure, a.previewReversal},
+		{http.MethodGet, "/v1/interco/partners", DutyView, a.listPartners},
+		{http.MethodPost, "/v1/interco/partners", DutyConfigure, a.createPartner},
+		{http.MethodGet, "/v1/interco/partners/{id}", DutyView, a.getPartner},
+		{http.MethodPatch, "/v1/interco/partners/{id}", DutyConfigure, a.updatePartner},
+		{http.MethodPost, "/v1/interco/partners/{id}/lines:price", DutyView, a.priceLine},
+		{http.MethodPost, "/v1/interco/partners/{id}/changes:evaluate", DutyView, a.evaluateChange},
 	}
 }
 
@@ -116,6 +129,9 @@ func (a *API) Metrics() http.Handler {
 		counter("intercompany_chain_previews_total", "Direct delivery chain postings derived.", a.chainPreviews.Load())
 		counter("intercompany_evidence_exports_total", "Transfer-pricing evidence files exported.", a.evidenceExports.Load())
 		counter("intercompany_reversal_previews_total", "Centralized payment reversals derived.", a.reversalPreviews.Load())
+		counter("intercompany_partner_changes_total", "Trading-partner pairings created or changed.", a.partnerChanges.Load())
+		counter("intercompany_lines_priced_total", "IC lines priced from a stored pairing.", a.linesPriced.Load())
+		counter("intercompany_change_evaluations_total", "Linked order changes checked against a pairing's tolerance.", a.changeEvaluations.Load())
 	})
 }
 
@@ -447,8 +463,15 @@ func problemFrom(err error) error {
 	var de *domain.Error
 	if errors.As(err, &de) {
 		status := http.StatusUnprocessableEntity
-		if de.Code == domain.CodeInvalid {
+		switch de.Code {
+		case domain.CodeInvalid:
 			status = http.StatusBadRequest
+		case domain.CodePartnerNotFound:
+			status = http.StatusNotFound
+		case domain.CodePairingExists:
+			status = http.StatusConflict
+		case domain.CodeVersionConflict:
+			status = http.StatusPreconditionFailed
 		}
 		return httpx.NewProblem(status, de.Code, de.Detail)
 	}

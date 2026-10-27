@@ -4,6 +4,13 @@ import styles from "./pages.module.css";
 
 const tools = [
   {
+    title: "Trading partners",
+    to: "/intercompany/partners",
+    action: "Manage pairings",
+    description:
+      "Pair a customer in one entity with a vendor in another, set the mirror-document actions, the pricing policy and the change tolerance, price a line by the policy and check whether an order change needs re-approval.",
+  },
+  {
     title: "Intercompany journal",
     to: "/intercompany/journal",
     action: "Preview a journal",
@@ -60,7 +67,7 @@ export function IntercompanyHome() {
     <div className={styles.stack}>
       <PageHeader
         title="Intercompany workspace"
-        description="Derive intercompany journals, reconcile due-to and due-from balances, price intercompany charges, preview centralized payments, check direct delivery chains, export transfer-pricing evidence and sequence planning groups. Partner setup, mirror documents, posting and the stored reconciliation workspace arrive with the next slices."
+        description="Set up trading partners, derive intercompany journals, reconcile due-to and due-from balances, price intercompany charges, preview centralized payments, check direct delivery chains, export transfer-pricing evidence and sequence planning groups. Mirror documents, posting and the stored reconciliation workspace arrive with the next slices."
       />
       <CardGrid as="ul" label="Intercompany tools">
         {tools.map((tool) => (
