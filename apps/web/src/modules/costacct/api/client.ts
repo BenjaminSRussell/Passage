@@ -63,11 +63,15 @@ export interface CostEntry {
   settlementId?: string;
   /** Present on entries a template allocation run posted (FR-38.17). */
   templateRunId?: string;
+  /** Present on entries a cost object hierarchy node owns: collections and distributions (FR-38.18). */
+  hierarchyNodeId?: string;
+  /** Present on entries a hierarchy distribution run posted. */
+  hierarchyRunId?: string;
   period: string;
   currency: string;
   amount: string;
   behavior: "Fixed" | "Variable" | "Unclassified";
-  origin: "Journal" | "Allocation" | "Activity" | "Statistical" | "Manual";
+  origin: "Journal" | "Allocation" | "Activity" | "Statistical" | "Manual" | "HierarchyDistribution";
 }
 
 export interface Flow {
@@ -453,4 +457,136 @@ export function listTemplateRuns(filter: { legalEntityId?: string; templateId?: 
 
 export function getTemplateRun(id: string, signal?: AbortSignal): Promise<TemplateRun> {
   return request(`${BASE}/template-allocations/runs/${encodeURIComponent(id)}`, { signal });
+}
+
+export type HierarchyType = "Reporting" | "Collective";
+export type DistributionBasis = "ActualOutput" | "StandardCost" | "FixedPercent";
+
+/** A tree of cost objects (FR-38.18). Only a Collective hierarchy has collecting nodes. */
+export interface Hierarchy {
+  id: string;
+  legalEntityId: string;
+  code: string;
+  name: string;
+  type: HierarchyType;
+  nodeCount: number;
+  createdAt: string;
+  /** Present on a single read, in creation order (parents before their children). */
+  nodes?: HierarchyNode[];
+}
+
+export type NewHierarchy = Pick<Hierarchy, "legalEntityId" | "code" | "name" | "type">;
+
+export interface HierarchyNode {
+  id: string;
+  hierarchyId: string;
+  /** Absent on a root node. */
+  parentNodeId?: string;
+  costObjectId: string;
+  collects: boolean;
+  /** Set on collecting nodes only. */
+  distributionBasis?: DistributionBasis;
+  createdAt: string;
+}
+
+export interface NewHierarchyNode {
+  parentNodeId?: string;
+  costObjectId: string;
+  collects: boolean;
+  distributionBasis?: DistributionBasis;
+}
+
+/** What a node holds in a period for one element and currency. */
+export interface NodeBalance {
+  nodeId: string;
+  costElementId: string;
+  currency: string;
+  amount: string;
+}
+
+export interface CollectInput {
+  period: string;
+  currency: string;
+  costElementId: string;
+  /** Negative to correct an earlier collection (CST-0028 below zero). */
+  amount: string;
+}
+
+export interface Collection extends CollectInput {
+  entryId: string;
+  nodeId: string;
+  costObjectId: string;
+  behavior: "Fixed" | "Variable" | "Unclassified";
+  balance: string;
+}
+
+export interface DistributionInput {
+  nodeId: string;
+  period: string;
+  currency: string;
+  costElementId: string;
+  children: { nodeId: string; basis: string }[];
+}
+
+/** CO-0645: the node keeps an undistributed residual. */
+export interface DistributionWarning {
+  code: "CO-0645";
+  detail: string;
+}
+
+export interface DistributionRun {
+  id: string;
+  legalEntityId: string;
+  hierarchyId: string;
+  nodeId: string;
+  costElementId: string;
+  period: string;
+  currency: string;
+  basis: DistributionBasis;
+  /** What the node held before the run. */
+  amount: string;
+  distributed: string;
+  residual: string;
+  shares: { nodeId: string; costObjectId: string; basis: string; amount: string }[];
+  warnings: DistributionWarning[];
+  status: "Completed";
+  createdAt: string;
+}
+
+export function listHierarchies(legalEntityId?: string, signal?: AbortSignal): Promise<Items<Hierarchy>> {
+  return request(`${BASE}/cost-object-hierarchies${query({ legalEntityId })}`, { signal });
+}
+
+export function getHierarchy(id: string, signal?: AbortSignal): Promise<Hierarchy> {
+  return request(`${BASE}/cost-object-hierarchies/${encodeURIComponent(id)}`, { signal });
+}
+
+export function createHierarchy(input: NewHierarchy, idempotencyKey: string): Promise<Hierarchy> {
+  return post(`${BASE}/cost-object-hierarchies`, input, idempotencyKey);
+}
+
+export function createHierarchyNode(hierarchyId: string, input: NewHierarchyNode, idempotencyKey: string): Promise<HierarchyNode> {
+  return post(`${BASE}/cost-object-hierarchies/${encodeURIComponent(hierarchyId)}/nodes`, input, idempotencyKey);
+}
+
+export function listHierarchyBalances(hierarchyId: string, period: string, signal?: AbortSignal): Promise<Items<NodeBalance>> {
+  return request(`${BASE}/cost-object-hierarchies/${encodeURIComponent(hierarchyId)}/balances${query({ period })}`, { signal });
+}
+
+/** Collects a cost on a collecting node that no lower object can carry (FR-38.18). */
+export function collectAtNode(nodeId: string, input: CollectInput, idempotencyKey: string): Promise<Collection> {
+  return post(`${BASE}/hierarchy-nodes/${encodeURIComponent(nodeId)}:collect`, input, idempotencyKey);
+}
+
+/** Distributes what a collecting node holds to its children at period end (FR-38.18). */
+export function runHierarchyDistribution(input: DistributionInput, idempotencyKey: string): Promise<DistributionRun> {
+  return post(`${BASE}/hierarchy-distributions`, input, idempotencyKey);
+}
+
+export function listDistributionRuns(filter: { legalEntityId?: string; hierarchyId?: string } = {}, signal?: AbortSignal): Promise<Items<DistributionRun>> {
+  return request(`${BASE}/hierarchy-distributions${query(filter)}`, { signal });
+}
+
+export function getDistributionRun(id: string, signal?: AbortSignal): Promise<DistributionRun> {
+  return request(`${BASE}/hierarchy-distributions/${encodeURIComponent(id)}`, { signal });
 }

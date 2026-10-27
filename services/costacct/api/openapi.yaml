@@ -3,10 +3,11 @@ info:
   title: costacct
   version: 0.1.0
   description: >-
-    Cost accounting (wave 38, slices 1 to 3). Cost objects and cost elements, mirroring of journal lines into primary
+    Cost accounting (wave 38, slices 1 to 5). Cost objects and cost elements, mirroring of journal lines into primary
     cost entries, reciprocal allocation runs that solve and conserve cost (FR-38.7), cost object line items,
     top-down distribution (FR-38.19), internal order settlement (FR-38.9), statistical measures and template
-    (driver-formula) allocation (FR-38.17). Template formulas use a restricted grammar: numbers, + - * / (× ÷ − too),
+    (driver-formula) allocation (FR-38.17), cost behavior rules (FR-38.16), the cost ledger reconciliation (FR-38.11)
+    and cost object hierarchies with collection and distribution at a node (FR-38.18). Template formulas use a restricted grammar: numbers, + - * / (× ÷ − too),
     min(a, b), max(a, b), if(cond, a, b) with < <= > >= = !=, m.<measure code> (the receiver's measure value in the
     period) and b.<cost element code> (the receiver's Journal and Manual cost on that element in the period and the
     template currency).
@@ -19,7 +20,10 @@ info:
     CO-0618 (settlement exceeds collected cost, BR-38.9), CO-0621 (formula error in a template line),
     CST-0015 (a template line is negative and the template does not allow it, BR-38.12), CST-0016 (statistical measure
     not found), CST-0017 (allocation template not found), CST-0018 (template version conflict), CST-0019 (template run
-    not found), COM-0001 (validation, 400),
+    not found), CST-0020 (behavior rule exists), CST-0021 (hierarchy not found), CST-0022 (hierarchy node not found),
+    CST-0023 (node does not collect, or a collecting node in a Reporting hierarchy), CST-0024 (nothing to distribute),
+    CST-0025 (cost object already in the hierarchy), CST-0026 (invalid distribution), CST-0027 (distribution run not
+    found), CST-0028 (a correction would take the node below zero), COM-0001 (validation, 400),
     idempotency_key_reuse, idempotency_in_progress, AUTH-0001, AUTH-0003.
     Reads need controlling.view and return {"items": [...]} for lists (at most 500 rows).
 servers:
@@ -466,6 +470,137 @@ paths:
           description: One template run with its lines.
           content: { application/json: { schema: { $ref: '#/components/schemas/TemplateRun' } } }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/controlling/cost-object-hierarchies:
+    get:
+      operationId: listHierarchies
+      x-passage-duty: controlling.view
+      parameters:
+        - { $ref: '#/components/parameters/LegalEntity' }
+      responses:
+        '200':
+          description: Cost object hierarchies by code, each with its node count.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/Hierarchy' } } } } } }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: createHierarchy
+      x-passage-duty: controlling.maintain
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/NewHierarchy' } } }
+      responses:
+        '201':
+          description: >-
+            The hierarchy (FR-38.18). Codes are unique per legal entity (CST-0003). Only a Collective hierarchy may have
+            collecting nodes; a Reporting hierarchy only groups cost objects.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Hierarchy' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/controlling/cost-object-hierarchies/{id}:
+    get:
+      operationId: getHierarchy
+      x-passage-duty: controlling.view
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: One hierarchy with its nodes in creation order, so a parent precedes its children (CST-0021 when missing).
+          content: { application/json: { schema: { $ref: '#/components/schemas/Hierarchy' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/controlling/cost-object-hierarchies/{id}/nodes:
+    post:
+      operationId: createHierarchyNode
+      x-passage-duty: controlling.maintain
+      parameters:
+        - { name: id, in: path, required: true, description: Hierarchy id., schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/NewHierarchyNode' } } }
+      responses:
+        '201':
+          description: >-
+            The node. The cost object belongs to the hierarchy's legal entity (CST-0001) and appears once per hierarchy
+            (CST-0025); the parent is a node of the same hierarchy (CST-0022), so no cycle can form. A collecting node in a
+            Reporting hierarchy is CST-0023.
+          content: { application/json: { schema: { $ref: '#/components/schemas/HierarchyNode' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/controlling/cost-object-hierarchies/{id}/balances:
+    get:
+      operationId: listHierarchyBalances
+      x-passage-duty: controlling.view
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: period, in: query, required: true, schema: { type: string, pattern: '^\d{4}-(0[1-9]|1[0-2])$' } }
+      responses:
+        '200':
+          description: >-
+            The non-zero balance each node holds in the period per cost element and currency: its collections plus what
+            its parent distributed to it, less what it distributed itself.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/NodeBalance' } } } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/controlling/hierarchy-nodes/{id}:collect:
+    post:
+      operationId: collectAtHierarchyNode
+      x-passage-duty: controlling.run
+      parameters:
+        - { name: id, in: path, required: true, description: Hierarchy node id., schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CollectRequest' } } }
+      responses:
+        '201':
+          description: >-
+            A cost collected on a collecting node (FR-38.18; SAP KKP4): a Manual cost entry on the node's cost object,
+            classified Fixed or Variable by the FR-38.16 rules. Only a collecting node collects (CST-0023). A negative
+            amount corrects an earlier collection and may not take the node's balance below zero (CST-0028).
+          content: { application/json: { schema: { $ref: '#/components/schemas/Collection' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/controlling/hierarchy-distributions:
+    get:
+      operationId: listHierarchyDistributions
+      x-passage-duty: controlling.view
+      parameters:
+        - { $ref: '#/components/parameters/LegalEntity' }
+        - { name: hierarchyId, in: query, required: false, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Distribution runs, newest period first.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/DistributionRun' } } } } } }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: runHierarchyDistribution
+      x-passage-duty: controlling.run
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/DistributionRequest' } } }
+      responses:
+        '201':
+          description: >-
+            The completed run (FR-38.18). Everything the node holds for the element, period and currency is split by the
+            node's basis among the named children, which must be its direct children (CST-0026). ActualOutput and
+            StandardCost split in proportion with the rounding residue to the largest basis; FixedPercent gives each
+            child its percentage (Σ at most 100), truncated to the minor unit, with the residue to the largest
+            percentage when they total 100. The node is credited and each child debited on the same element (origin
+            HierarchyDistribution), so the run nets to zero. What is not distributed stays on the node and the run
+            carries warning CO-0645; a later run may distribute it. A node that holds nothing is CST-0024.
+            Publishes dev.passage.controlling.hierarchy.distributed.v1.
+          content: { application/json: { schema: { $ref: '#/components/schemas/DistributionRun' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/controlling/hierarchy-distributions/{id}:
+    get:
+      operationId: getHierarchyDistribution
+      x-passage-duty: controlling.view
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: One distribution run with its shares (CST-0027 when missing).
+          content: { application/json: { schema: { $ref: '#/components/schemas/DistributionRun' } } }
+        default: { $ref: '#/components/responses/Problem' }
 components:
   parameters:
     LegalEntity:
@@ -511,7 +646,7 @@ components:
       type: object
       required: [code, detail]
       properties:
-        code: { type: string, enum: [CO-0613, CO-0615] }
+        code: { type: string, enum: [CO-0613, CO-0615, CO-0645] }
         detail: { type: string }
     MirrorRequest:
       type: object
@@ -734,16 +869,18 @@ components:
             properties:
               id: { type: string, format: uuid }
               costElementId: { type: string, format: uuid }
-              sourceId: { type: string, format: uuid, description: Journal line, allocation run, top-down run, settlement or template run. }
+              sourceId: { type: string, format: uuid, description: 'Journal line, allocation run, top-down run, settlement, template run or hierarchy distribution run; the entry itself for a collection.' }
               allocationRunId: { type: string, format: uuid }
               topDownRunId: { type: string, format: uuid }
               settlementId: { type: string, format: uuid }
               templateRunId: { type: string, format: uuid }
+              hierarchyNodeId: { type: string, format: uuid, description: The hierarchy node that owns a collected or distributed entry. }
+              hierarchyRunId: { type: string, format: uuid }
               period: { type: string }
               currency: { type: string }
               amount: { type: string }
               behavior: { type: string, enum: [Fixed, Variable, Unclassified] }
-              origin: { type: string, enum: [Journal, Allocation, Activity, Statistical, Manual] }
+              origin: { type: string, enum: [Journal, Allocation, Activity, Statistical, Manual, HierarchyDistribution] }
     StatisticalMeasure:
       type: object
       required: [legalEntityId, code, name, unit]
@@ -827,6 +964,125 @@ components:
         total: { type: string, description: Σ line amounts; the sender is credited the same total. }
         lines: { type: array, items: { $ref: '#/components/schemas/TemplateLineResult' } }
         warnings: { type: array, items: { type: string } }
+        status: { type: string, enum: [Completed] }
+        createdAt: { type: string, format: date-time }
+    NewHierarchy:
+      type: object
+      required: [legalEntityId, code, name, type]
+      additionalProperties: false
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        code: { type: string, pattern: '^[A-Z0-9_-]{2,40}$' }
+        name: { type: string, maxLength: 200 }
+        type: { type: string, enum: [Reporting, Collective] }
+    Hierarchy:
+      type: object
+      required: [id, legalEntityId, code, name, type, nodeCount, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        type: { type: string, enum: [Reporting, Collective] }
+        nodeCount: { type: integer }
+        createdAt: { type: string, format: date-time }
+        nodes: { type: array, items: { $ref: '#/components/schemas/HierarchyNode' }, description: Present on a single read. }
+    NewHierarchyNode:
+      type: object
+      required: [costObjectId]
+      additionalProperties: false
+      properties:
+        parentNodeId: { type: string, format: uuid, description: Absent for a root node. }
+        costObjectId: { type: string, format: uuid }
+        collects: { type: boolean, default: false }
+        distributionBasis: { type: string, enum: [ActualOutput, StandardCost, FixedPercent], description: Required when collects is true; absent otherwise. }
+    HierarchyNode:
+      type: object
+      required: [id, hierarchyId, costObjectId, collects, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        hierarchyId: { type: string, format: uuid }
+        parentNodeId: { type: string, format: uuid }
+        costObjectId: { type: string, format: uuid }
+        collects: { type: boolean }
+        distributionBasis: { type: string, enum: [ActualOutput, StandardCost, FixedPercent] }
+        createdAt: { type: string, format: date-time }
+    NodeBalance:
+      type: object
+      required: [nodeId, costElementId, currency, amount]
+      properties:
+        nodeId: { type: string, format: uuid }
+        costElementId: { type: string, format: uuid }
+        currency: { type: string }
+        amount: { type: string }
+    CollectRequest:
+      type: object
+      required: [period, currency, costElementId, amount]
+      additionalProperties: false
+      properties:
+        period: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$' }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        costElementId: { type: string, format: uuid, description: A cost element of the node's legal entity. }
+        amount: { type: string, description: Non-zero decimal with no more decimals than the currency's minor unit; negative to correct. }
+    Collection:
+      type: object
+      required: [entryId, nodeId, costObjectId, costElementId, period, currency, amount, behavior, balance]
+      properties:
+        entryId: { type: string, format: uuid }
+        nodeId: { type: string, format: uuid }
+        costObjectId: { type: string, format: uuid }
+        costElementId: { type: string, format: uuid }
+        period: { type: string }
+        currency: { type: string }
+        amount: { type: string }
+        behavior: { type: string, enum: [Fixed, Variable, Unclassified] }
+        balance: { type: string, description: What the node holds for the element, period and currency after this collection. }
+    DistributionRequest:
+      type: object
+      required: [nodeId, period, currency, costElementId, children]
+      additionalProperties: false
+      properties:
+        nodeId: { type: string, format: uuid, description: The collecting node. }
+        period: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$' }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        costElementId: { type: string, format: uuid }
+        children:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            type: object
+            required: [nodeId, basis]
+            additionalProperties: false
+            properties:
+              nodeId: { type: string, format: uuid, description: A direct child of the node. }
+              basis: { type: string, description: 'Non-negative: actual output quantity, output valued at standard cost, or a percentage 0-100 for FixedPercent.' }
+    DistributionRun:
+      type: object
+      required: [id, legalEntityId, hierarchyId, nodeId, costElementId, period, currency, basis, amount, distributed, residual, shares, warnings, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        hierarchyId: { type: string, format: uuid }
+        nodeId: { type: string, format: uuid }
+        costElementId: { type: string, format: uuid }
+        period: { type: string }
+        currency: { type: string }
+        basis: { type: string, enum: [ActualOutput, StandardCost, FixedPercent] }
+        amount: { type: string, description: What the node held before the run. }
+        distributed: { type: string }
+        residual: { type: string, description: amount - distributed; stays on the node. }
+        shares:
+          type: array
+          items:
+            type: object
+            required: [nodeId, costObjectId, basis, amount]
+            properties:
+              nodeId: { type: string, format: uuid }
+              costObjectId: { type: string, format: uuid }
+              basis: { type: string }
+              amount: { type: string }
+        warnings: { type: array, items: { $ref: '#/components/schemas/Warning' }, description: CO-0645 when residual is positive. }
         status: { type: string, enum: [Completed] }
         createdAt: { type: string, format: date-time }
   responses:

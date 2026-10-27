@@ -2,7 +2,7 @@ asyncapi: 3.0.0
 info:
   title: costacct events
   version: 0.1.0
-  description: Events published by the costacct service (wave 38, slices 1 to 3). CloudEvents 1.0, source /passage/controlling/costacct.
+  description: Events published by the costacct service (wave 38, slices 1 to 5). CloudEvents 1.0, source /passage/controlling/costacct.
 defaultContentType: application/cloudevents+json
 channels:
   costEntryCreated:
@@ -15,6 +15,11 @@ channels:
     messages:
       allocationCompleted:
         $ref: '#/components/messages/AllocationCompleted'
+  hierarchyDistributed:
+    address: passage.controlling.hierarchy
+    messages:
+      hierarchyDistributed:
+        $ref: '#/components/messages/HierarchyDistributed'
 operations:
   publishCostEntryCreated:
     action: send
@@ -24,6 +29,10 @@ operations:
     action: send
     channel:
       $ref: '#/channels/allocationCompleted'
+  publishHierarchyDistributed:
+    action: send
+    channel:
+      $ref: '#/channels/hierarchyDistributed'
 components:
   messages:
     CostEntryCreated:
@@ -34,6 +43,10 @@ components:
       name: dev.passage.controlling.allocation.completed.v1
       payload:
         $ref: '#/components/schemas/AllocationCompletedData'
+    HierarchyDistributed:
+      name: dev.passage.controlling.hierarchy.distributed.v1
+      payload:
+        $ref: '#/components/schemas/HierarchyDistributedData'
   schemas:
     CostEntryCreatedData:
       type: object
@@ -44,7 +57,7 @@ components:
         element_id: { type: string, format: uuid }
         period: { type: string }
         amount: { type: string, description: 'Decimal string. Negative on the reversal of a rerun (BR-38.7).' }
-        origin: { type: string, enum: [Journal, Allocation, Activity, Statistical, Manual] }
+        origin: { type: string, enum: [Journal, Allocation, Activity, Statistical, Manual, HierarchyDistribution], description: Manual marks a cost collected on a hierarchy node and HierarchyDistribution an entry of a node distribution (FR-38.18). }
     AllocationCompletedData:
       type: object
       required: [run_id, legal_entity_id, period, method, iterations, converged, total_in, total_out, residual, swept]
@@ -66,3 +79,31 @@ components:
           description: >-
             Present on a rerun (BR-38.7): the completed run of the period that this run reversed. The reversal's
             negated entries are published as costentry.created with origin Allocation in the same transaction.
+    HierarchyDistributedData:
+      type: object
+      description: >-
+        A collecting node's cost for one element, period and currency was distributed to its child nodes (FR-38.18).
+        The node's credit and each child's debit are published as costentry.created with origin HierarchyDistribution
+        in the same transaction. Costing (wave 39) counts the distributed cost as actual input of category Distributed.
+      required: [run_id, legal_entity_id, hierarchy_id, node_id, cost_element_id, period, currency, basis, amount, distributed, residual, shares]
+      properties:
+        run_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
+        hierarchy_id: { type: string, format: uuid }
+        node_id: { type: string, format: uuid }
+        cost_element_id: { type: string, format: uuid }
+        period: { type: string }
+        currency: { type: string }
+        basis: { type: string, enum: [ActualOutput, StandardCost, FixedPercent] }
+        amount: { type: string, description: Decimal string. What the node held before the run. }
+        distributed: { type: string, description: Decimal string. Sum of the child shares. }
+        residual: { type: string, description: Decimal string. Kept on the node; CO-0645 when positive. }
+        shares:
+          type: array
+          items:
+            type: object
+            required: [node_id, cost_object_id, amount]
+            properties:
+              node_id: { type: string, format: uuid }
+              cost_object_id: { type: string, format: uuid }
+              amount: { type: string, description: Decimal string. }

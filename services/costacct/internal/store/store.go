@@ -112,13 +112,16 @@ type RunResponse struct {
 
 // Entry is one cost entry as listed for a cost object.
 type Entry struct {
-	ID        string          `json:"id"`
-	ElementID string          `json:"costElementId"`
-	SourceID  string          `json:"sourceId"`
-	RunID     string          `json:"allocationRunId,omitempty"`
-	TopDownID string          `json:"topDownRunId,omitempty"`
-	SettleID  string          `json:"settlementId,omitempty"`
-	TplRunID  string          `json:"templateRunId,omitempty"`
+	ID        string `json:"id"`
+	ElementID string `json:"costElementId"`
+	SourceID  string `json:"sourceId"`
+	RunID     string `json:"allocationRunId,omitempty"`
+	TopDownID string `json:"topDownRunId,omitempty"`
+	SettleID  string `json:"settlementId,omitempty"`
+	TplRunID  string `json:"templateRunId,omitempty"`
+	// NodeID and HierRunID are set on entries a hierarchy node owns (FR-38.18).
+	NodeID    string          `json:"hierarchyNodeId,omitempty"`
+	HierRunID string          `json:"hierarchyRunId,omitempty"`
 	Period    string          `json:"period"`
 	Currency  string          `json:"currency"`
 	Amount    decimal.Decimal `json:"amount"`
@@ -182,6 +185,10 @@ func (s *Postgres) run(ctx context.Context, key, hash string, fn command) (int, 
 			return 0, nil, problem(http.StatusConflict, CodePeriodAllocated, "this source and element already have a completed top-down run for the period")
 		case oneTemplateRun:
 			return 0, nil, problem(http.StatusConflict, CodePeriodAllocated, "this template already has a completed run for the period")
+		case hierarchyCodeOnce:
+			return 0, nil, problem(http.StatusConflict, CodeDuplicateCode, "a hierarchy with this code already exists")
+		case nodeObjectOnce:
+			return 0, nil, problem(http.StatusConflict, CodeNodeExists, "this cost object already has a node in the hierarchy")
 		case oneBehaviorRule:
 			return 0, nil, problem(http.StatusConflict, CodeBehaviorRuleExists, "a behavior rule already exists for this element, object kind and date")
 		default:
@@ -556,7 +563,8 @@ func (s *Postgres) EntriesFor(ctx context.Context, costObjectID, period string) 
 			return problem(http.StatusNotFound, CodeObjectNotFound, "cost object not found")
 		}
 		rows, err := tx.Query(ctx, `select id::text, cost_element_id::text, source_id::text, coalesce(allocation_run_id::text, ''), coalesce(top_down_run_id::text, ''),
-				coalesce(settlement_id::text, ''), coalesce(template_run_id::text, ''), period_key, currency, amount::text, behavior, origin
+				coalesce(settlement_id::text, ''), coalesce(template_run_id::text, ''), coalesce(hierarchy_node_id::text, ''), coalesce(hierarchy_run_id::text, ''),
+				period_key, currency, amount::text, behavior, origin
 			from cost_entry where tenant_id = $1 and cost_object_id = $2 and period_key = $3 order by created_at, id`, p.TenantID, costObjectID, period)
 		if err != nil {
 			return err
@@ -565,7 +573,7 @@ func (s *Postgres) EntriesFor(ctx context.Context, costObjectID, period string) 
 		for rows.Next() {
 			var e Entry
 			var amount string
-			if err := rows.Scan(&e.ID, &e.ElementID, &e.SourceID, &e.RunID, &e.TopDownID, &e.SettleID, &e.TplRunID, &e.Period, &e.Currency, &amount, &e.Behavior, &e.Origin); err != nil {
+			if err := rows.Scan(&e.ID, &e.ElementID, &e.SourceID, &e.RunID, &e.TopDownID, &e.SettleID, &e.TplRunID, &e.NodeID, &e.HierRunID, &e.Period, &e.Currency, &amount, &e.Behavior, &e.Origin); err != nil {
 				return err
 			}
 			e.Amount = parseDec(amount)

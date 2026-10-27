@@ -72,6 +72,15 @@ type Store interface {
 	GetTemplateRun(ctx context.Context, id string) (store.TemplateRun, error)
 	CreateBehaviorRule(ctx context.Context, key, hash string, in store.BehaviorRule) (int, []byte, error)
 	ListBehaviorRules(ctx context.Context, legalEntityID, elementID string) ([]store.BehaviorRule, error)
+	CreateHierarchy(ctx context.Context, key, hash string, in store.Hierarchy) (int, []byte, error)
+	CreateHierarchyNode(ctx context.Context, key, hash string, in store.HierarchyNode) (int, []byte, error)
+	CollectAtNode(ctx context.Context, key, hash string, in store.CollectRequest) (int, []byte, error)
+	RunHierarchyDistribution(ctx context.Context, key, hash string, in store.DistributionRequest) (int, []byte, error)
+	ListHierarchies(ctx context.Context, legalEntityID string) ([]store.Hierarchy, error)
+	GetHierarchy(ctx context.Context, id string) (store.Hierarchy, error)
+	HierarchyBalances(ctx context.Context, hierarchyID, period string) ([]store.NodeBalance, error)
+	ListDistributionRuns(ctx context.Context, legalEntityID, hierarchyID string) ([]store.DistributionRun, error)
+	GetDistributionRun(ctx context.Context, id string) (store.DistributionRun, error)
 	Ping(ctx context.Context) error
 }
 
@@ -102,6 +111,7 @@ func (a *API) Register(r chi.Router) {
 	view.Get("/v1/controlling/internal-orders/{id}/settlements", a.listSettlements)
 	a.registerTemplates(r)
 	a.registerBehavior(r)
+	a.registerHierarchies(r)
 }
 
 // prepare checks the Idempotency-Key, decodes the body into v and returns the

@@ -278,3 +278,102 @@ export function validateMeasureValues(period: string, rows: { costObjectId: stri
   }
   return errors;
 }
+
+/** One node of a cost object hierarchy with its depth below the root (0 for a root). */
+export interface TreeRow<T> {
+  node: T;
+  depth: number;
+}
+
+/**
+ * Orders hierarchy nodes depth first, each parent before its children and siblings in the
+ * order given. A node whose parent is not in the list is shown as a root.
+ */
+export function nodeTree<T extends { id: string; parentNodeId?: string }>(nodes: T[]): TreeRow<T>[] {
+  const ids = new Set(nodes.map((n) => n.id));
+  const children = new Map<string, T[]>();
+  const roots: T[] = [];
+  for (const n of nodes) {
+    if (n.parentNodeId && ids.has(n.parentNodeId) && n.parentNodeId !== n.id) {
+      children.set(n.parentNodeId, [...(children.get(n.parentNodeId) ?? []), n]);
+    } else {
+      roots.push(n);
+    }
+  }
+  const out: TreeRow<T>[] = [];
+  const seen = new Set<string>();
+  const walk = (n: T, depth: number) => {
+    if (seen.has(n.id)) return;
+    seen.add(n.id);
+    out.push({ node: n, depth });
+    for (const c of children.get(n.id) ?? []) walk(c, depth + 1);
+  };
+  roots.forEach((r) => walk(r, 0));
+  return out;
+}
+
+/** A collection is non-zero with at most 2 decimal places; a negative amount corrects one. */
+export function collectError(amount: string): string | null {
+  const t = toTicks(amount);
+  if (t === null || t === 0n || t % 100n !== 0n) return "Enter a non-zero amount with at most 2 decimal places; a negative amount corrects a collection.";
+  return null;
+}
+
+export interface HierarchyPreview {
+  shares: string[];
+  residual: string;
+}
+
+/**
+ * Previews a hierarchy distribution the way the service computes it (FR-38.18). ActualOutput and
+ * StandardCost follow the top-down rule (rounding residue to the largest basis; nothing moves when
+ * every basis is zero). FixedPercent truncates each share to the cent and gives the residue to the
+ * largest percentage only when the percentages total 100; otherwise the rest stays on the node.
+ * Returns null for invalid inputs or percentages over 100.
+ */
+export function previewHierarchy(amount: string, basis: string, children: { id: string; basis: string }[]): HierarchyPreview | null {
+  const total = toTicks(amount);
+  if (total === null || total <= 0n || children.length === 0) return null;
+  const cents = ticksToCents(total);
+  const bases = children.map((c) => toTicks(c.basis));
+  if (bases.some((b) => b === null || b < 0n)) return null;
+  const b = bases as bigint[];
+  const money = (c: bigint) => formatAmount(formatTicks(c * 100n));
+  let shares: bigint[];
+  if (basis === "FixedPercent") {
+    const hundred = 100n * 10000n;
+    const sum = b.reduce((a, v) => a + v, 0n);
+    if (b.some((v) => v > hundred) || sum > hundred) return null;
+    shares = b.map((v) => (cents * v) / hundred);
+    if (sum === hundred) {
+      let largest = 0;
+      b.forEach((v, i) => {
+        if (v > b[largest]) largest = i;
+      });
+      shares[largest] += cents - shares.reduce((a, v) => a + v, 0n);
+    }
+  } else {
+    const proportional = previewTopDown(formatTicks(cents * 100n), children);
+    shares = proportional ? proportional.map((s) => ticksToCents(toTicks(s.amount) ?? 0n)) : b.map(() => 0n);
+  }
+  const given = shares.reduce((a, v) => a + v, 0n);
+  return { shares: shares.map(money), residual: money(cents - given) };
+}
+
+/** Validates a distribution run form before it is sent (FR-38.18). */
+export function validateDistribution(f: { period: string; currency: string; costElementId: string; basis: string }, children: { id: string; basis: string }[]): string[] {
+  const errors: string[] = [];
+  if (!isPeriod(f.period)) errors.push("Enter the period as YYYY-MM.");
+  if (!CURRENCY.test(f.currency)) errors.push("Use a three-letter currency code.");
+  if (!UUID.test(f.costElementId)) errors.push("Choose the cost element to distribute.");
+  if (children.length === 0) errors.push("Choose at least one child node to receive the cost.");
+  children.forEach((c, i) => {
+    const t = toTicks(c.basis);
+    if (t === null || t < 0n) errors.push(`Child ${i + 1}: the basis must be a non-negative decimal with at most 4 places.`);
+  });
+  if (f.basis === "FixedPercent") {
+    const sum = sumTicks(children.map((c) => c.basis));
+    if (sum !== null && sum > 100n * 10000n) errors.push("The percentages total more than 100.");
+  }
+  return errors;
+}

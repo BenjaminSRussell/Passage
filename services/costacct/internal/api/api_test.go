@@ -30,6 +30,10 @@ type fakeStore struct {
 	expected      int
 	templateRun   store.TemplateRunRequest
 	behavior      store.BehaviorRule
+	hierarchy     store.Hierarchy
+	node          store.HierarchyNode
+	collect       store.CollectRequest
+	distribution  store.DistributionRequest
 }
 
 func (f *fakeStore) CreateCostObject(context.Context, string, string, store.CostObject) (int, []byte, error) {

@@ -153,3 +153,9 @@
   padding: 0;
   list-style: none;
 }
+
+/* A hierarchy node indented by its depth (set as --depth on the cell). */
+.treeCell {
+  display: inline-block;
+  padding-inline-start: calc(var(--depth, 0) * var(--space-5));
+}

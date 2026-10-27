@@ -1,10 +1,10 @@
 # costacct
 
-Cost accounting for Passage (PRD 7.38, ticket PSG-38, wave 38, slices 1 to 4). The service keeps cost objects and cost
+Cost accounting for Passage (PRD 7.38, ticket PSG-38, wave 38, slices 1 to 5). The service keeps cost objects and cost
 elements, mirrors primary costs from journal lines into cost entries, runs reciprocal assessment allocations
 that conserve cost to the cent, distributes aggregated amounts top-down, settles internal orders, runs template
-(driver-formula) allocations over statistical measures, reruns allocations by reversal and classifies cost as fixed
-or variable.
+(driver-formula) allocations over statistical measures, reruns allocations by reversal, classifies cost as fixed
+or variable, and collects and distributes cost through cost object hierarchies.
 
 ## What slice 1 does
 
@@ -81,10 +81,37 @@ or variable.
   one kind (one rule per element, kind and date, `CST-0020`). Journal lines are classified when they are mirrored: a
   rule for the object's kind beats a rule for any kind, the latest rule effective on or before the first day of the
   period wins within a tier, then the element default, else `Unclassified`. Entries already in the ledger keep their
-  class; allocation, top-down, settlement and template entries stay `Unclassified`.
+  class; allocation, top-down, settlement, template and hierarchy distribution entries stay `Unclassified`.
+
+## What slice 5 adds
+
+- **Cost object hierarchies (FR-38.18)**: `POST /v1/controlling/cost-object-hierarchies` defines a hierarchy per legal
+  entity (code unique, `CST-0003`) of type `Reporting` (grouping only) or `Collective` (nodes may collect cost, as in
+  SAP KKPHIE). Nodes (`POST /cost-object-hierarchies/{id}/nodes`) place a cost object of the hierarchy's legal entity
+  under a parent of the same hierarchy (for example product group → product → production order); a cost object
+  appears once per hierarchy (`CST-0025`) but may sit in several hierarchies. A collecting node names its
+  distribution basis: `ActualOutput`, `StandardCost` (output valued at standard cost) or `FixedPercent`. A collecting
+  node in a Reporting hierarchy is `CST-0023`.
+- **Collection (SAP KKP4)**: `POST /v1/controlling/hierarchy-nodes/{id}:collect` posts cost that cannot be assigned to
+  a lower object as a `Manual` cost entry on the node's cost object, classified Fixed or Variable by the FR-38.16
+  rules. A negative amount corrects an earlier collection and may not take the node below zero (`CST-0028`).
+- **Distribution at period end (SAP KKPX)**: `POST /v1/controlling/hierarchy-distributions` takes everything the node
+  holds for an element, period and currency and splits it among the named direct children (`CST-0026` otherwise) by
+  the node's basis, with the basis value per child supplied on the request. ActualOutput and StandardCost split in
+  proportion with the rounding residue to the largest basis (the top-down rule); FixedPercent gives each child its
+  percentage (Σ ≤ 100) truncated to the minor unit, with the residue to the largest percentage when they total 100.
+  The node is credited and each child debited on the same element (origin `HierarchyDistribution`, linked by
+  `hierarchy_run_id`), so the run nets to zero and the GL reconciliation is unchanged. What is not distributed stays
+  on the node with warning `CO-0645` and a later run may take it. A collecting child passes what it received further
+  down with its own run. Every collected or distributed entry carries the node that owns it, so a node's balance is
+  its own entries even if its cost object is in another hierarchy too; `GET /cost-object-hierarchies/{id}/balances`
+  lists them per period. The node row is locked during a collection or a run, so two runs cannot both distribute
+  the same balance. The run emits `dev.passage.controlling.hierarchy.distributed.v1` plus `costentry.created` per
+  entry.
 
 Costs are `numeric(19,4)` with a currency. Commands require `Idempotency-Key` and write outbox events
-(`dev.passage.controlling.costentry.created.v1`, `dev.passage.controlling.allocation.completed.v1`; a top-down run
+(`dev.passage.controlling.costentry.created.v1`, `dev.passage.controlling.allocation.completed.v1`,
+`dev.passage.controlling.hierarchy.distributed.v1`; a top-down run
 emits `allocation.completed` with method `TopDown`, a template run with method `Template`).
 
 ## Algorithm note
@@ -132,6 +159,10 @@ Health: `GET /healthz`, `GET /readyz` (provided by `httpx.NewRouter`).
 | GET | `/v1/controlling/allocation-templates?legalEntityId=`, `/v1/controlling/allocation-templates/{id}` | `controlling.view` |
 | POST | `/v1/controlling/template-allocations/runs` | `controlling.run` |
 | GET | `/v1/controlling/template-allocations/runs?legalEntityId=&templateId=`, `/v1/controlling/template-allocations/runs/{id}` | `controlling.view` |
+| POST | `/v1/controlling/cost-object-hierarchies`, `/v1/controlling/cost-object-hierarchies/{id}/nodes` | `controlling.maintain` |
+| GET | `/v1/controlling/cost-object-hierarchies?legalEntityId=`, `/v1/controlling/cost-object-hierarchies/{id}`, `/v1/controlling/cost-object-hierarchies/{id}/balances?period=` | `controlling.view` |
+| POST | `/v1/controlling/hierarchy-nodes/{id}:collect`, `/v1/controlling/hierarchy-distributions` | `controlling.run` |
+| GET | `/v1/controlling/hierarchy-distributions?legalEntityId=&hierarchyId=`, `/v1/controlling/hierarchy-distributions/{id}` | `controlling.view` |
 
 The PRD's `CostAccountingView`, `CostAccountingMaintain` and `CostAccountingRun` duties are named in the repository's
 dotted style. Lists return `{"items": [...]}`, at most 500 rows.
@@ -144,7 +175,7 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 |---|---|
 | `CST-0001` | Cost object not found |
 | `CST-0002` | A concurrent rerun of the period won the race, the source and element already have a completed top-down run, or the template a completed run |
-| `CST-0003` | Duplicate cost object or element code |
+| `CST-0003` | Duplicate cost object, element or hierarchy code |
 | `CST-0004` | No primary element maps a journal line's main account |
 | `CST-0005` | The cycle is closed: a sender reaches no final receiver (CO-0611) |
 | `CST-0006` | Allocation totals differ; the run rolled back (CO-0612) |
@@ -161,6 +192,15 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | `CST-0018` | Template version conflict: the code is at another version than the one sent (409) |
 | `CST-0019` | Template run not found |
 | `CST-0020` | A cost behavior rule already exists for the element, object kind and date (409) |
+| `CST-0021` | Cost object hierarchy not found |
+| `CST-0022` | Hierarchy node not found, or the parent is not a node of the hierarchy |
+| `CST-0023` | The node does not collect, or a collecting node was placed in a Reporting hierarchy |
+| `CST-0024` | The node holds no cost for the element, period and currency |
+| `CST-0025` | The cost object already has a node in the hierarchy (409) |
+| `CST-0026` | Invalid distribution: a receiver is not a direct child, or fixed percentages exceed 100 |
+| `CST-0027` | Hierarchy distribution run not found |
+| `CST-0028` | A negative collection would take the node below zero |
+| `CO-0645` | Warning on a distribution run: the node keeps an undistributed residual |
 | `CO-0618` | Settlement exceeds collected cost (BR-38.9) |
 | `CO-0621` | Formula error in a template line: syntax, or a reference to an unknown measure or element |
 | `CO-0622` | Warning on a dry run or run: a divisor is zero for a receiver; that division evaluates to 0 |
