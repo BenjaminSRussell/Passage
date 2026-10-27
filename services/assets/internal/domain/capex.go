@@ -1,6 +1,18 @@
 package domain
 
-import "github.com/shopspring/decimal"
+import (
+	"fmt"
+
+	"github.com/shopspring/decimal"
+)
+
+// TransitionCapex returns a CodeCapexState error unless from → to is allowed (BR-37.12).
+func TransitionCapex(from, to CapexStatus) error {
+	if !CanTransitionCapex(from, to) {
+		return fail(CodeCapexState, fmt.Sprintf("capex request in status %s cannot move to %s", from, to))
+	}
+	return nil
+}
 
 // CapexStatus is the lifecycle of a capital appropriation request (BR-37.12).
 type CapexStatus string

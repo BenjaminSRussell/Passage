@@ -1,5 +1,6 @@
 // Package store persists the asset register, books, append-only asset
-// transactions and leases. Every write runs in a tenant transaction, records
+// transactions, depreciation runs, additions, insurance policies, capex
+// requests and leases. Every write runs in a tenant transaction, records
 // its Idempotency-Key in idempotency_keys and writes its event to the outbox in
 // that same transaction.
 package store
@@ -17,11 +18,13 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/events"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/money"
 	"github.com/BenjaminSRussell/passage/platform/outbox"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/assets/internal/domain"
@@ -55,6 +58,24 @@ type Store interface {
 	CreateLease(ctx context.Context, in Lease, idempotencyKey string) (Lease, error)
 	ListLeases(ctx context.Context, f LeaseFilter) (LeasePage, error)
 	GetLease(ctx context.Context, id string) (Lease, error)
+
+	Adjust(ctx context.Context, assetID string, in AdjustmentInput, idempotencyKey string) (AdjustResult, error)
+	AddAddition(ctx context.Context, assetID string, in AdditionInput, idempotencyKey string) (Addition, error)
+	ListAdditions(ctx context.Context, assetID string) ([]Addition, error)
+	ProposeRun(ctx context.Context, in RunInput, idempotencyKey string) (DepreciationRun, error)
+	PostRun(ctx context.Context, runID string, version int) (DepreciationRun, error)
+	GetRun(ctx context.Context, runID string) (DepreciationRun, error)
+	ListRuns(ctx context.Context, f RunFilter) (RunPage, error)
+
+	UpsertIndexSeries(ctx context.Context, in IndexSeries) (IndexSeries, error)
+	ListIndexSeries(ctx context.Context) ([]IndexSeries, error)
+	AddInsurancePolicy(ctx context.Context, assetID string, in InsurancePolicy, idempotencyKey string) (InsurancePolicy, error)
+	ListInsurancePolicies(ctx context.Context, assetID string) ([]InsurancePolicy, error)
+	CreateCapexRequest(ctx context.Context, in CapexRequest, idempotencyKey string) (CapexRequest, error)
+	ListCapexRequests(ctx context.Context, f CapexFilter) (CapexPage, error)
+	GetCapexRequest(ctx context.Context, id string) (CapexRequest, error)
+	SubmitCapexRequest(ctx context.Context, id string, in SubmitInput) (CapexRequest, error)
+
 	Ping(ctx context.Context) error
 }
 
@@ -83,9 +104,10 @@ func (s *Postgres) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 const (
 	assetColumns = `a.id, a.legal_entity_id, a.asset_number, a.name, a.class_code, a.status, a.barcode, a.quantity, a.acquired_date,
 		(select count(*) from asset_book b where b.tenant_id = a.tenant_id and b.asset_id = a.id), a.version, a.created_at`
-	bookColumns = "id, asset_id, legal_entity_id, book_code, currency, method, factor, switch_to_straight_line, service_life_periods, salvage_value, convention, in_service_date, cost, accumulated_depreciation, nbv, status"
-	txColumns   = `t.id, t.asset_book_id, b.book_code, b.currency, t.type, t.transaction_date, t.cost_amount, t.accumulated_amount, t.proceeds_amount, t.gain_loss,
-		t.source_type, t.created_at`
+	bookColumns = `id, asset_id, legal_entity_id, book_code, currency, method, factor, switch_to_straight_line, service_life_periods, salvage_value, convention,
+		in_service_date, cost, accumulated_depreciation, nbv, status, last_depreciated_period, coalesce(acquisition_cost, cost)`
+	txColumns = `t.id, t.asset_book_id, b.book_code, b.currency, t.type, t.transaction_date, t.cost_amount, t.accumulated_amount, t.proceeds_amount, t.gain_loss,
+		t.impairment_amount, t.source_type, t.source_id, t.run_id, t.created_at`
 	leaseColumns = "id, legal_entity_id, lease_number, commencement_date, term_months, payments_per_year, payment_amount, payment_timing, ibr_rate, currency, liability, rou_asset, status, version, created_at"
 )
 
@@ -110,6 +132,13 @@ func uniqueConstraint(err error) string {
 		return pgErr.ConstraintName
 	}
 	return ""
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 func notFound(code, detail string) error {
@@ -170,14 +199,15 @@ func scanAsset(row pgx.Row) (Asset, error) {
 func scanBook(row pgx.Row) (Book, error) {
 	var b Book
 	err := row.Scan(&b.ID, &b.AssetID, &b.LegalEntityID, &b.BookCode, &b.Currency, &b.Method, &b.Factor, &b.SwitchToStraightLine,
-		&b.ServiceLifePeriods, &b.SalvageValue, &b.Convention, &b.InServiceDate, &b.Cost, &b.AccumulatedDepreciation, &b.NBV, &b.Status)
+		&b.ServiceLifePeriods, &b.SalvageValue, &b.Convention, &b.InServiceDate, &b.Cost, &b.AccumulatedDepreciation, &b.NBV, &b.Status,
+		&b.LastDepreciatedPeriod, &b.AcquisitionCost)
 	return b, err
 }
 
 func scanTx(row pgx.Row) (Transaction, error) {
 	var t Transaction
 	err := row.Scan(&t.ID, &t.AssetBookID, &t.BookCode, &t.Currency, &t.Type, &t.TransactionDate, &t.CostAmount, &t.AccumulatedAmount,
-		&t.ProceedsAmount, &t.GainLoss, &t.SourceType, &t.CreatedAt)
+		&t.ProceedsAmount, &t.GainLoss, &t.ImpairmentAmount, &t.SourceType, &t.SourceID, &t.RunID, &t.CreatedAt)
 	return t, err
 }
 
@@ -340,10 +370,27 @@ func (s *Postgres) ListTransactions(ctx context.Context, assetID string) ([]Tran
 }
 
 func insertTransaction(ctx context.Context, tx pgx.Tx, tenantID string, book Book, typ string, date Date, cost, accumulated any, proceeds, gainLoss any) (Transaction, error) {
+	return postTransaction(ctx, tx, tenantID, book, txRow{Type: typ, Date: date, Cost: cost, Accumulated: accumulated, Impairment: 0,
+		Proceeds: proceeds, GainLoss: gainLoss, SourceType: "manual"})
+}
+
+// txRow is one asset_transaction insert. Amount fields take a decimal or 0.
+type txRow struct {
+	Type                          string
+	Date                          Date
+	Cost, Accumulated, Impairment any
+	Proceeds, GainLoss            any
+	SourceType                    string
+	SourceID, RunID               *string
+}
+
+func postTransaction(ctx context.Context, tx pgx.Tx, tenantID string, book Book, row txRow) (Transaction, error) {
 	id := ids.New()
-	if _, err := tx.Exec(ctx, `insert into asset_transaction (tenant_id, id, asset_book_id, legal_entity_id, type, transaction_date, cost_amount, accumulated_amount, proceeds_amount, gain_loss)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-		tenantID, id, book.ID, book.LegalEntityID, typ, date, cost, accumulated, proceeds, gainLoss); err != nil {
+	if _, err := tx.Exec(ctx, `insert into asset_transaction (tenant_id, id, asset_book_id, legal_entity_id, type, transaction_date, cost_amount, accumulated_amount,
+		impairment_amount, proceeds_amount, gain_loss, source_type, source_id, run_id)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+		tenantID, id, book.ID, book.LegalEntityID, row.Type, row.Date, row.Cost, row.Accumulated, row.Impairment, row.Proceeds, row.GainLoss,
+		row.SourceType, row.SourceID, row.RunID); err != nil {
 		return Transaction{}, err
 	}
 	return scanTx(tx.QueryRow(ctx, `select `+txColumns+` from asset_transaction t
@@ -382,8 +429,8 @@ func (s *Postgres) AddBook(ctx context.Context, assetID string, in Book, idempot
 				return Book{}, &domain.Error{Code: domain.CodeTooManyBooks, Detail: "an asset has at most " + strconv.Itoa(s.maxBooks) + " books"}
 			}
 			book, err := scanBook(tx.QueryRow(ctx, `insert into asset_book (tenant_id, id, asset_id, legal_entity_id, book_code, currency, method, factor, switch_to_straight_line,
-				service_life_periods, salvage_value, convention, in_service_date, cost, accumulated_depreciation, nbv, status)
-				values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 0, $14, 'Open') returning `+bookColumns,
+				service_life_periods, salvage_value, convention, in_service_date, cost, acquisition_cost, accumulated_depreciation, nbv, status)
+				values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $14, 0, $14, 'Open') returning `+bookColumns,
 				p.TenantID, ids.New(), assetID, legalEntityID, in.BookCode, in.Currency, in.Method, in.Factor, in.SwitchToStraightLine,
 				in.ServiceLifePeriods, in.SalvageValue, in.Convention, in.InServiceDate, in.Cost))
 			if uniqueConstraint(err) != "" {
@@ -457,6 +504,9 @@ func (s *Postgres) Dispose(ctx context.Context, assetID string, in DisposalInput
 				if in.Date.Before(book.InServiceDate.Time) {
 					return Disposal{}, &domain.Error{Code: domain.CodeInvalidDisposal, Detail: "the disposal date is before the in-service date of book " + book.BookCode}
 				}
+				if err := domain.CheckDisposalDate(in.Date.Time, deref(book.LastDepreciatedPeriod)); err != nil {
+					return Disposal{}, err
+				}
 				d, err := domain.Dispose(book.Cost, book.AccumulatedDepreciation, in.Proceeds, in.Percentage, book.Currency)
 				if err != nil {
 					return Disposal{}, err
@@ -465,9 +515,12 @@ func (s *Postgres) Dispose(ctx context.Context, assetID string, in DisposalInput
 				if err != nil {
 					return Disposal{}, err
 				}
-				updated, err := scanBook(tx.QueryRow(ctx, `update asset_book set cost = $3, accumulated_depreciation = $4, nbv = $5, status = $6
+				// The salvage value leaves with the disposed share, so a later run
+				// depreciates the remaining asset down to its own salvage.
+				salvage := book.SalvageValue.Sub(book.SalvageValue.Mul(in.Percentage).Div(decimal.NewFromInt(100)).Round(money.MinorUnits(book.Currency)))
+				updated, err := scanBook(tx.QueryRow(ctx, `update asset_book set cost = $3, accumulated_depreciation = $4, nbv = $5, status = $6, salvage_value = $7
 					where tenant_id = $1 and id = $2 returning `+bookColumns,
-					p.TenantID, book.ID, d.RemainingCost, d.RemainingAccumulated, d.RemainingCost.Sub(d.RemainingAccumulated), nextBook))
+					p.TenantID, book.ID, d.RemainingCost, d.RemainingAccumulated, d.RemainingCost.Sub(d.RemainingAccumulated), nextBook, salvage))
 				if err != nil {
 					return Disposal{}, err
 				}

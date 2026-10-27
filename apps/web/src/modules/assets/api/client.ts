@@ -52,6 +52,8 @@ export interface Book {
   accumulatedDepreciation: Decimal;
   nbv: Decimal;
   status: "Open" | "Sold" | "Scrapped";
+  /** Last period a posted depreciation run charged ("2026-03" or "2026"). */
+  lastDepreciatedPeriod?: string | null;
 }
 
 export interface AssetDetail extends Asset {
@@ -84,14 +86,199 @@ export interface Transaction {
   assetBookId: string;
   bookCode: string;
   currency: string;
-  type: "Acquisition" | "DisposalSale" | "DisposalScrap";
+  type: TransactionType;
   transactionDate: string;
   costAmount: Decimal;
   accumulatedAmount: Decimal;
   proceedsAmount: Decimal | null;
   gainLoss: Decimal | null;
+  impairmentAmount?: Decimal;
   sourceType: string;
+  sourceId?: string | null;
+  runId?: string | null;
   createdAt: string;
+}
+
+export type TransactionType = "Acquisition" | "AcquisitionAdj" | "Depreciation" | "DepreciationAdj" | "Revaluation" | "Impairment" | "DisposalSale" | "DisposalScrap";
+
+export const ADJUSTMENT_TYPES = ["AcquisitionAdj", "DepreciationAdj", "Revaluation", "Impairment"] as const;
+export type AdjustmentType = (typeof ADJUSTMENT_TYPES)[number];
+
+export interface AdjustInput {
+  bookId: string;
+  type: AdjustmentType;
+  transactionDate: string;
+  /** Signed: a negative Impairment is a reversal. */
+  amount: Decimal;
+}
+
+export interface AdjustResult {
+  book: Book;
+  transaction: Transaction;
+  /** An impairment reversal was capped (AST-0512). */
+  limited: boolean;
+  requested: Decimal;
+  warnings: string[];
+}
+
+export const ADDITION_TYPES = ["Improvement", "Component", "Accessory"] as const;
+export type AdditionType = (typeof ADDITION_TYPES)[number];
+
+export interface NewAddition {
+  type: AdditionType;
+  description: string;
+  quantity?: Decimal;
+  serialNumber?: string;
+  addedDate: string;
+  financial: boolean;
+  cost?: Decimal;
+  currency?: string;
+  bookIds?: string[];
+}
+
+export interface Addition {
+  id: string;
+  assetId: string;
+  type: AdditionType;
+  description: string;
+  quantity: Decimal;
+  serialNumber: string | null;
+  addedDate: string;
+  financial: boolean;
+  cost: Decimal;
+  currency: string | null;
+  createdAt: string;
+  transactions: Transaction[];
+}
+
+export interface RunInput {
+  legalEntityId: string;
+  bookCode: string;
+  /** "2026-03" for monthly (straight-line) books, "2026" for yearly ones. */
+  period: string;
+}
+
+export interface RunLine {
+  assetBookId: string;
+  assetId: string;
+  assetNumber: string;
+  status: "Due" | "Posted" | "Exception";
+  amount: Decimal;
+  scheduledAmount: Decimal;
+  exceptionCode: string | null;
+  detail: string | null;
+}
+
+export interface DepreciationRun {
+  id: string;
+  legalEntityId: string;
+  bookCode: string;
+  period: string;
+  currency: string | null;
+  status: "Proposed" | "Posted";
+  assetCount: number;
+  exceptionCount: number;
+  totalAmount: Decimal;
+  journalEntryId: string | null;
+  version: number;
+  createdAt: string;
+  postedAt: string | null;
+  lines?: RunLine[];
+}
+
+export interface IndexPoint {
+  year: number;
+  value: Decimal;
+}
+
+export interface IndexSeries {
+  code: string;
+  country: string;
+  classCode: string;
+  values: IndexPoint[];
+  updatedAt: string;
+}
+
+export interface IndexSeriesInput {
+  country: string;
+  classCode: string;
+  values: IndexPoint[];
+}
+
+export const INSURANCE_TYPES = ["Property", "MachineryBreakdown", "Transit", "Fleet"] as const;
+export const INSURANCE_BASES = ["Replacement", "NBV", "Agreed"] as const;
+
+export interface NewPolicy {
+  insurerPartyId: string;
+  policyNumber: string;
+  insuranceType: (typeof INSURANCE_TYPES)[number];
+  coverageFrom: string;
+  coverageTo: string;
+  premium?: Decimal;
+  currency: string;
+  basis: (typeof INSURANCE_BASES)[number];
+  baseValue: Decimal;
+  sumInsured: Decimal;
+  indexSeriesCode?: string;
+  indexBaseYear?: number;
+  valuationYear?: number;
+}
+
+export interface InsurancePolicy extends Required<Omit<NewPolicy, "indexSeriesCode" | "indexBaseYear" | "valuationYear">> {
+  id: string;
+  assetId: string;
+  legalEntityId: string;
+  indexSeriesCode: string | null;
+  indexBaseYear: number | null;
+  valuationYear: number | null;
+  indexYearUsed: number | null;
+  indexedValue: Decimal | null;
+  /** Sum insured below 90% of the indexed value (AST-0532). */
+  underInsured: boolean;
+  warnings: string[];
+  createdAt: string;
+}
+
+export const CAPEX_STATUSES = ["Draft", "Submitted", "InApproval", "Approved", "Released", "Closed", "Rejected", "Postponed"] as const;
+export type CapexStatus = (typeof CAPEX_STATUSES)[number];
+
+export interface NewCapexVariant {
+  description: string;
+  amountsByYear: Record<string, Decimal>;
+  inServiceDate: string;
+  profileAssumption: string;
+}
+
+export interface CapexVariant extends NewCapexVariant {
+  id: string;
+  position: number;
+  totalAmount: Decimal;
+}
+
+export interface NewCapexRequest {
+  legalEntityId: string;
+  number: string;
+  title: string;
+  requesterId: string;
+  currency: string;
+  variants: NewCapexVariant[];
+}
+
+export interface CapexRequest {
+  id: string;
+  legalEntityId: string;
+  number: string;
+  title: string;
+  requesterId: string;
+  status: CapexStatus;
+  currency: string;
+  selectedVariantId: string | null;
+  approvalLevel: "PlantManager" | "CFO" | "Board" | null;
+  requestedAmount: Decimal | null;
+  approvedAmount: Decimal | null;
+  version: number;
+  createdAt: string;
+  variants?: CapexVariant[];
 }
 
 export interface Disposal {
@@ -241,6 +428,10 @@ function post<T>(path: string, body: unknown, key: string, extra: Record<string,
   return json<T>(path, { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": key, ...extra } });
 }
 
+async function versioned<T>(res: Response): Promise<Versioned<T>> {
+  return { value: (await res.json()) as T, etag: res.headers.get("ETag") ?? "" };
+}
+
 const id = encodeURIComponent;
 
 export interface AssetFilter {
@@ -291,4 +482,71 @@ export function getLease(leaseId: string, signal?: AbortSignal): Promise<Lease> 
 
 export function createLease(input: NewLease, key: string = newKey()): Promise<Lease> {
   return post(`/leases`, input, key);
+}
+
+export function adjustBook(assetId: string, input: AdjustInput, key: string = newKey()): Promise<AdjustResult> {
+  return post(`/assets/${id(assetId)}/transactions`, input, key);
+}
+
+export async function listAdditions(assetId: string, signal?: AbortSignal): Promise<Addition[]> {
+  return (await json<{ items?: Addition[] }>(`/assets/${id(assetId)}/additions`, {}, signal)).items ?? [];
+}
+
+export function addAddition(assetId: string, input: NewAddition, key: string = newKey()): Promise<Addition> {
+  return post(`/assets/${id(assetId)}/additions`, input, key);
+}
+
+export function listRuns(after?: string, signal?: AbortSignal): Promise<Page<DepreciationRun>> {
+  return json(`/assets/depreciation-runs${query({ after })}`, {}, signal);
+}
+
+export async function getRun(runId: string, signal?: AbortSignal): Promise<Versioned<DepreciationRun>> {
+  return versioned(await send(`/assets/depreciation-runs/${id(runId)}`, {}, signal));
+}
+
+export function proposeRun(input: RunInput, key: string = newKey()): Promise<DepreciationRun> {
+  return post(`/assets/depreciation-runs`, input, key);
+}
+
+export async function postRun(runId: string, etag: string): Promise<Versioned<DepreciationRun>> {
+  return versioned(await send(`/assets/depreciation-runs/${id(runId)}/post`, { method: "POST", headers: { "If-Match": etag } }));
+}
+
+export async function listIndexSeries(signal?: AbortSignal): Promise<IndexSeries[]> {
+  return (await json<{ items?: IndexSeries[] }>(`/assets/index-series`, {}, signal)).items ?? [];
+}
+
+export function putIndexSeries(code: string, input: IndexSeriesInput): Promise<IndexSeries> {
+  return json(`/assets/index-series/${id(code)}`, { method: "PUT", body: JSON.stringify(input) });
+}
+
+export async function listPolicies(assetId: string, signal?: AbortSignal): Promise<InsurancePolicy[]> {
+  return (await json<{ items?: InsurancePolicy[] }>(`/assets/${id(assetId)}/insurance-policies`, {}, signal)).items ?? [];
+}
+
+export function addPolicy(assetId: string, input: NewPolicy, key: string = newKey()): Promise<InsurancePolicy> {
+  return post(`/assets/${id(assetId)}/insurance-policies`, input, key);
+}
+
+export interface CapexFilter {
+  status?: CapexStatus | "";
+  after?: string;
+}
+
+export function listCapex(filter: CapexFilter = {}, signal?: AbortSignal): Promise<Page<CapexRequest>> {
+  return json(`/assets/capex-requests${query({ status: filter.status, after: filter.after })}`, {}, signal);
+}
+
+export async function getCapex(requestId: string, signal?: AbortSignal): Promise<Versioned<CapexRequest>> {
+  return versioned(await send(`/assets/capex-requests/${id(requestId)}`, {}, signal));
+}
+
+export function createCapex(input: NewCapexRequest, key: string = newKey()): Promise<CapexRequest> {
+  return post(`/assets/capex-requests`, input, key);
+}
+
+export async function submitCapex(requestId: string, etag: string, variantId: string): Promise<Versioned<CapexRequest>> {
+  return versioned(
+    await send(`/assets/capex-requests/${id(requestId)}/submit`, { method: "POST", body: JSON.stringify({ variantId }), headers: { "If-Match": etag } }),
+  );
 }

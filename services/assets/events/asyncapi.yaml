@@ -23,6 +23,16 @@ channels:
     messages:
       leaseRecognized:
         $ref: "#/components/messages/LeaseRecognized"
+  assetAdjusted:
+    address: passage.assets.asset
+    messages:
+      assetAdjusted:
+        $ref: "#/components/messages/AssetAdjusted"
+  depreciationPosted:
+    address: passage.assets.depreciation
+    messages:
+      depreciationPosted:
+        $ref: "#/components/messages/DepreciationPosted"
 operations:
   publishAssetAcquired:
     action: send
@@ -33,8 +43,24 @@ operations:
   publishLeaseRecognized:
     action: send
     channel: { $ref: "#/channels/leaseRecognized" }
+  publishAssetAdjusted:
+    action: send
+    channel: { $ref: "#/channels/assetAdjusted" }
+  publishDepreciationPosted:
+    action: send
+    channel: { $ref: "#/channels/depreciationPosted" }
 components:
   messages:
+    AssetAdjusted:
+      name: dev.passage.assets.asset.adjusted.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/AssetAdjustedData"
+    DepreciationPosted:
+      name: dev.passage.assets.depreciation.posted.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/DepreciationPostedData"
     AssetAcquired:
       name: dev.passage.assets.asset.acquired.v1
       contentType: application/cloudevents+json
@@ -89,3 +115,39 @@ components:
         currency: { type: string, pattern: "^[A-Z]{3}$" }
         termMonths: { type: integer }
         rate: { type: string }
+    AssetAdjustedData:
+      type: object
+      description: |
+        One event per AcquisitionAdj, DepreciationAdj, Revaluation or Impairment
+        posted on a book (POST /v1/assets/{id}/transactions, or a financial
+        addition with sourceType addition). Not in the PRD event table; added so
+        consumers see every change of a book's balances. Aggregate key is the
+        asset id.
+      required: [assetId, bookId, transactionId, type, transactionDate, costDelta, accumulatedDelta, impairmentDelta, currency, sourceType]
+      properties:
+        assetId: { type: string, format: uuid }
+        bookId: { type: string, format: uuid }
+        transactionId: { type: string, format: uuid }
+        type: { type: string, enum: [AcquisitionAdj, DepreciationAdj, Revaluation, Impairment] }
+        transactionDate: { type: string, format: date }
+        costDelta: { type: string, description: "Signed decimal string" }
+        accumulatedDelta: { type: string, description: "Signed decimal string" }
+        impairmentDelta: { type: string, description: "Signed decimal string; negative for a reversal" }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        sourceType: { type: string, enum: [manual, addition] }
+        sourceId: { type: [string, "null"], format: uuid, description: "The addition id when sourceType is addition" }
+    DepreciationPostedData:
+      type: object
+      description: |
+        One event per posted depreciation run. bookCode stands in for the PRD's
+        bookDefinitionId until book definitions exist. Aggregate key is the run id.
+      required: [runId, legalEntityId, bookCode, period, assetCount, totalAmount, currency, journalEntryId]
+      properties:
+        runId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        bookCode: { type: string }
+        period: { type: string, description: "YYYY or YYYY-MM" }
+        assetCount: { type: integer, description: "Books that posted" }
+        totalAmount: { type: string, description: "Decimal string" }
+        currency: { type: [string, "null"], pattern: "^[A-Z]{3}$", description: "Null when the run had no book" }
+        journalEntryId: { type: [string, "null"], format: uuid, description: "Null until the journal integration links the run." }

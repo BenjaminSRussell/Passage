@@ -3,8 +3,12 @@ info:
   title: Passage Assets (fixed assets and leases)
   version: 1.0.0
   description: |
-    Wave 37 slice 1. Asset register, depreciation books, the schedule preview,
-    asset transactions, disposals and IFRS 16 lease recognition. Money and
+    Wave 37 slices 1 and 2. Asset register, depreciation books, the schedule
+    preview, asset transactions and adjustments (acquisition and depreciation
+    adjustments, revaluation, impairment), additions and components,
+    depreciation runs (propose and post), disposals, insurance policies with
+    insured-value index series, capital appropriation (capex) requests and
+    IFRS 16 lease recognition. Money and
     rates are decimal strings; calendar dates are YYYY-MM-DD. Errors are
     RFC 9457 problem details with a stable `code` (see README). Every command
     takes an Idempotency-Key: a retry with the same key and body replays the
@@ -183,6 +187,434 @@ paths:
                     items: { $ref: "#/components/schemas/Transaction" }
         "404":
           $ref: "#/components/responses/Problem"
+    post:
+      summary: Post an adjustment, revaluation or impairment on one Open book
+      description: |
+        AcquisitionAdj and Revaluation change cost; DepreciationAdj changes
+        accumulated depreciation; Impairment is a write-down when positive and a
+        reversal when negative. Every kind keeps 0 <= accumulated <= cost. A
+        reversal is capped at the impairment still recorded and at the carrying
+        amount the book would have had without impairment (FR-37.9); a capped
+        reversal answers with limited = true and an AST-0512 warning. Sold or
+        Scrapped assets and books are refused (AST-0509). Later depreciation
+        runs spread the new depreciable basis over the remaining periods
+        (BR-37.4). Emits dev.passage.assets.asset.adjusted.v1.
+      operationId: adjustAssetBook
+      x-passage-duty: AssetPostJournal
+      parameters:
+        - $ref: "#/components/parameters/AssetId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdjustRequest"
+      responses:
+        "201":
+          description: Adjustment posted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdjustResult"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /v1/assets/{id}/additions:
+    get:
+      summary: Additions and components of the asset, oldest first
+      operationId: listAssetAdditions
+      x-passage-duty: AssetView
+      parameters:
+        - $ref: "#/components/parameters/AssetId"
+      responses:
+        "200":
+          description: Additions with the transactions each posted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Addition" }
+        "404":
+          $ref: "#/components/responses/Problem"
+    post:
+      summary: Record an improvement, component or accessory (FR-37.14)
+      description: |
+        A financial addition posts an AcquisitionAdj of its cost on the
+        selected Open books (bookIds), or on every Open book when bookIds is
+        omitted, in the same transaction (AC-37.12); the books must be in the
+        addition's currency. A non-financial addition is descriptive only and
+        may be recorded before the asset is acquired. At most 500 additions per
+        asset (AST-0020).
+      operationId: addAssetAddition
+      x-passage-duty: AssetMaintain
+      parameters:
+        - $ref: "#/components/parameters/AssetId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdditionRequest"
+      responses:
+        "201":
+          description: Addition recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Addition"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /v1/assets/{id}/insurance-policies:
+    get:
+      summary: Insurance policies of the asset, ordered by coverage start
+      operationId: listInsurancePolicies
+      x-passage-duty: AssetView or AssetInsuranceMaintain
+      parameters:
+        - $ref: "#/components/parameters/AssetId"
+      responses:
+        "200":
+          description: Policies with indexed value and under-insured flag
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/InsurancePolicy" }
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+    post:
+      summary: Record an insurance policy on an asset (FR-37.15)
+      description: |
+        With an index series, indexedValue = baseValue x index(valuationYear) /
+        index(indexBaseYear), rounded half-up to the currency minor unit
+        (BR-37.10, AC-37.9). valuationYear defaults to the coverage start
+        year; when the series has no value for it the latest loaded year is
+        used with an AST-0531 warning. sumInsured below 90% of indexedValue
+        sets underInsured with an AST-0532 warning. The base year must have an
+        index value (AST-0015). Sold or Scrapped assets are refused (AST-0509).
+      operationId: addInsurancePolicy
+      x-passage-duty: AssetInsuranceMaintain
+      parameters:
+        - $ref: "#/components/parameters/AssetId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InsurancePolicyRequest"
+      responses:
+        "201":
+          description: Policy recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InsurancePolicy"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /v1/assets/depreciation-runs:
+    get:
+      summary: Depreciation runs, newest first (without lines)
+      operationId: listDepreciationRuns
+      x-passage-duty: AssetView or AssetDepreciate
+      parameters:
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
+        - $ref: "#/components/parameters/After"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: One page of runs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunPage"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+    post:
+      summary: Propose depreciation for one book code of a legal entity and one period (FR-37.5)
+      description: |
+        Decides every Open book with the book code: Due when the period is the
+        book's next unposted schedule line, Exception when an earlier period
+        is not depreciated (AST-0503, BR-37.3) or the period is already
+        depreciated (AST-0502); exceptions stay out of the run and the other
+        books still post. Monthly (straight-line) books take YYYY-MM periods,
+        yearly (declining-balance) books YYYY. Proposing again refreshes a run
+        that is still Proposed (new version); a Posted run for the same book
+        and period is 409 AST-0502; a concurrent request for the same book and
+        period is 409 AST-0504 (advisory lock, BR-37.9).
+      operationId: proposeDepreciationRun
+      x-passage-duty: AssetDepreciate
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunRequest"
+      responses:
+        "201":
+          description: Proposal stored
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DepreciationRun"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /v1/assets/depreciation-runs/{id}:
+    get:
+      summary: Read a run with its per-book lines
+      operationId: getDepreciationRun
+      x-passage-duty: AssetView or AssetDepreciate
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: The run
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DepreciationRun"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /v1/assets/depreciation-runs/{id}/post:
+    post:
+      summary: Post the reviewed proposal
+      description: |
+        Requires If-Match with the run ETag of the proposal the caller reviewed.
+        Each Due book is decided again under a row lock; a book that changed
+        since the proposal becomes an exception (AST-0018) and the others still
+        post a Depreciation transaction dated the period end. Posting twice is
+        409 AST-0502. Emits dev.passage.assets.depreciation.posted.v1.
+      operationId: postDepreciationRun
+      x-passage-duty: AssetPostJournal
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: Run posted
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DepreciationRun"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "428":
+          $ref: "#/components/responses/Problem"
+  /v1/assets/index-series:
+    get:
+      summary: Insured-value index series of the tenant with their yearly values
+      operationId: listIndexSeries
+      x-passage-duty: AssetView or AssetInsuranceMaintain
+      responses:
+        "200":
+          description: Series ordered by code
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/IndexSeries" }
+        "403":
+          $ref: "#/components/responses/Problem"
+  /v1/assets/index-series/{code}:
+    put:
+      summary: Create or replace an index series and upsert its yearly values
+      description: Years not in the request keep their value. PUT is idempotent, so no Idempotency-Key is taken.
+      operationId: putIndexSeries
+      x-passage-duty: AssetInsuranceMaintain
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema: { type: string, pattern: "^[A-Z0-9][A-Z0-9_-]{0,31}$" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IndexSeriesRequest"
+      responses:
+        "200":
+          description: The series with every loaded year
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IndexSeries"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /v1/assets/capex-requests:
+    get:
+      summary: Capital appropriation requests ordered by number (without variants)
+      operationId: listCapexRequests
+      x-passage-duty: AssetView or CapexRequestCreate
+      parameters:
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/CapexStatus" } }
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
+        - $ref: "#/components/parameters/After"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: One page of requests
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapexPage"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+    post:
+      summary: Create a capex request in Draft with one to ten variants (FR-37.17)
+      description: Numbers are unique per legal entity (409 AST-0023). Each variant's totalAmount is the sum of its amountsByYear.
+      operationId: createCapexRequest
+      x-passage-duty: CapexRequestCreate
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CapexRequestCreate"
+      responses:
+        "201":
+          description: Request created
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapexRequest"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+  /v1/assets/capex-requests/{id}:
+    get:
+      summary: Read a capex request with its variants
+      operationId: getCapexRequest
+      x-passage-duty: AssetView or CapexRequestCreate
+      parameters:
+        - $ref: "#/components/parameters/CapexId"
+      responses:
+        "200":
+          description: The request
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapexRequest"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /v1/assets/capex-requests/{id}/submit:
+    post:
+      summary: Submit a Draft request for approval with the selected variant
+      description: |
+        Moves Draft through Submitted to InApproval (BR-37.12) and routes the
+        request by the selected variant's total: up to 50,000 PlantManager, up
+        to 500,000 CFO, above that Board (capex.approvalLevels defaults,
+        AC-37.11). The approval itself runs in the wave-4 workflow (not yet
+        wired). Any other status is 422 AST-0016. Requires If-Match.
+      operationId: submitCapexRequest
+      x-passage-duty: CapexRequestCreate
+      parameters:
+        - $ref: "#/components/parameters/CapexId"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [variantId]
+              properties:
+                variantId: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Request in approval
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapexRequest"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "428":
+          $ref: "#/components/responses/Problem"
   /v1/assets/{id}/dispose:
     post:
       summary: Dispose (sale or scrap) a percentage of the asset on every Open book
@@ -287,7 +719,7 @@ paths:
 components:
   headers:
     ETag:
-      description: Strong ETag of the asset version, for example "3"
+      description: Strong ETag of the resource version (asset, run or capex request), for example "3"
       schema: { type: string }
   parameters:
     IdempotencyKey:
@@ -300,9 +732,19 @@ components:
       name: If-Match
       in: header
       required: true
-      description: The ETag from the last read of the asset. Missing is 428, stale is 412 (AST-0006).
+      description: The ETag from the last read of the resource. Missing is 428, stale is 412 (AST-0006).
       schema: { type: string }
     AssetId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    RunId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    CapexId:
       name: id
       in: path
       required: true
@@ -431,6 +873,7 @@ components:
         accumulatedDepreciation: { type: string }
         nbv: { type: string }
         status: { type: string, enum: [Open, Sold, Scrapped] }
+        lastDepreciatedPeriod: { type: [string, "null"], description: "Last period a posted run charged (YYYY-MM or YYYY)" }
     Schedule:
       type: object
       required: [bookId, bookCode, currency, total, lines]
@@ -465,13 +908,16 @@ components:
         assetBookId: { type: string, format: uuid }
         bookCode: { type: string }
         currency: { type: string }
-        type: { type: string, enum: [Acquisition, DisposalSale, DisposalScrap] }
+        type: { type: string, enum: [Acquisition, AcquisitionAdj, Depreciation, DepreciationAdj, Revaluation, Impairment, DisposalSale, DisposalScrap] }
         transactionDate: { type: string, format: date }
         costAmount: { type: string, description: "Signed; disposals are negative" }
         accumulatedAmount: { type: string, description: "Signed; disposals are negative" }
         proceedsAmount: { type: [string, "null"] }
         gainLoss: { type: [string, "null"] }
-        sourceType: { type: string, enum: [manual] }
+        impairmentAmount: { type: string, description: "Impairment share of accumulatedAmount (negative for a reversal)" }
+        sourceType: { type: string, enum: [manual, addition, depreciation_run] }
+        sourceId: { type: [string, "null"], format: uuid }
+        runId: { type: [string, "null"], format: uuid }
         createdAt: { type: string, format: date-time }
     Disposal:
       type: object
@@ -536,4 +982,242 @@ components:
         items:
           type: array
           items: { $ref: "#/components/schemas/Lease" }
+        nextCursor: { type: string, format: uuid }
+    AdjustRequest:
+      type: object
+      additionalProperties: false
+      required: [bookId, type, transactionDate, amount]
+      properties:
+        bookId: { type: string, format: uuid }
+        type: { type: string, enum: [AcquisitionAdj, DepreciationAdj, Revaluation, Impairment] }
+        transactionDate: { type: string, format: date, description: "Not before the book's in-service date" }
+        amount: { type: string, description: "Signed, non-zero, at most the currency minor unit; negative Impairment is a reversal" }
+    AdjustResult:
+      type: object
+      required: [book, transaction, limited, requested, warnings]
+      properties:
+        book: { $ref: "#/components/schemas/Book" }
+        transaction: { $ref: "#/components/schemas/Transaction" }
+        limited: { type: boolean, description: "An impairment reversal was capped (AST-0512)" }
+        requested: { type: string }
+        warnings: { type: array, items: { type: string } }
+    AdditionRequest:
+      type: object
+      additionalProperties: false
+      required: [type, description, addedDate]
+      properties:
+        type: { type: string, enum: [Improvement, Component, Accessory] }
+        description: { type: string, minLength: 1, maxLength: 200 }
+        quantity: { type: string, description: "Positive, at most 4 places; default 1" }
+        serialNumber: { type: [string, "null"], minLength: 1, maxLength: 64 }
+        addedDate: { type: string, format: date }
+        financial: { type: boolean, default: false }
+        cost: { type: string, description: "Required and positive when financial" }
+        currency: { type: string, pattern: "^[A-Z]{3}$", description: "Required when financial" }
+        bookIds: { type: array, items: { type: string, format: uuid }, description: "Default: every Open book" }
+    Addition:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        assetId: { type: string, format: uuid }
+        type: { type: string, enum: [Improvement, Component, Accessory] }
+        description: { type: string }
+        quantity: { type: string }
+        serialNumber: { type: [string, "null"] }
+        addedDate: { type: string, format: date }
+        financial: { type: boolean }
+        cost: { type: string }
+        currency: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+        transactions:
+          type: array
+          description: The AcquisitionAdj transactions a financial addition posted, one per book
+          items: { $ref: "#/components/schemas/Transaction" }
+    RunRequest:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId, bookCode, period]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        bookCode: { type: string, pattern: "^[A-Z0-9][A-Z0-9_-]{0,19}$" }
+        period: { type: string, description: "YYYY-MM for monthly books, YYYY for yearly books" }
+    RunLine:
+      type: object
+      properties:
+        assetBookId: { type: string, format: uuid }
+        assetId: { type: string, format: uuid }
+        assetNumber: { type: string }
+        status: { type: string, enum: [Due, Posted, Exception] }
+        amount: { type: string, description: "Charge from the book's current balances" }
+        scheduledAmount: { type: string, description: "The original schedule line" }
+        exceptionCode: { type: [string, "null"] }
+        detail: { type: [string, "null"] }
+    DepreciationRun:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        bookCode: { type: string }
+        period: { type: string }
+        currency: { type: [string, "null"] }
+        status: { type: string, enum: [Proposed, Posted] }
+        assetCount: { type: integer, description: "Due books on a proposal; posted books on a posted run" }
+        exceptionCount: { type: integer }
+        totalAmount: { type: string }
+        journalEntryId: { type: [string, "null"], format: uuid, description: "Null until the ledger integration posts the journal" }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+        postedAt: { type: [string, "null"], format: date-time }
+        lines:
+          type: array
+          description: Present on create, read and post; omitted from the list
+          items: { $ref: "#/components/schemas/RunLine" }
+    RunPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/DepreciationRun" }
+        nextCursor: { type: string, format: uuid }
+    IndexSeriesRequest:
+      type: object
+      additionalProperties: false
+      required: [country, classCode, values]
+      properties:
+        country: { type: string, pattern: "^[A-Z]{2}$" }
+        classCode: { type: string, pattern: "^[A-Z0-9][A-Z0-9_-]{0,19}$" }
+        values:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items:
+            type: object
+            required: [year, value]
+            properties:
+              year: { type: integer, minimum: 1900, maximum: 2999 }
+              value: { type: string, description: "Positive, at most 4 places" }
+    IndexSeries:
+      type: object
+      properties:
+        code: { type: string }
+        country: { type: string }
+        classCode: { type: string }
+        values:
+          type: array
+          items:
+            type: object
+            properties:
+              year: { type: integer }
+              value: { type: string }
+        updatedAt: { type: string, format: date-time }
+    InsurancePolicyRequest:
+      type: object
+      additionalProperties: false
+      required: [insurerPartyId, policyNumber, insuranceType, coverageFrom, coverageTo, currency, basis, baseValue, sumInsured]
+      properties:
+        insurerPartyId: { type: string, format: uuid }
+        policyNumber: { type: string, minLength: 1, maxLength: 60, description: "Unique per asset (409 AST-0025)" }
+        insuranceType: { type: string, enum: [Property, MachineryBreakdown, Transit, Fleet] }
+        coverageFrom: { type: string, format: date }
+        coverageTo: { type: string, format: date, description: "After coverageFrom" }
+        premium: { type: string, description: "Default 0" }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        basis: { type: string, enum: [Replacement, NBV, Agreed] }
+        baseValue: { type: string, description: "Replacement value at the index base year" }
+        sumInsured: { type: string, description: "The policy's cover" }
+        indexSeriesCode: { type: [string, "null"] }
+        indexBaseYear: { type: [integer, "null"], description: "Required with indexSeriesCode" }
+        valuationYear: { type: [integer, "null"], description: "Default the coverage start year" }
+    InsurancePolicy:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        assetId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        insurerPartyId: { type: string, format: uuid }
+        policyNumber: { type: string }
+        insuranceType: { type: string }
+        coverageFrom: { type: string, format: date }
+        coverageTo: { type: string, format: date }
+        premium: { type: string }
+        currency: { type: string }
+        basis: { type: string }
+        baseValue: { type: string }
+        sumInsured: { type: string }
+        indexSeriesCode: { type: [string, "null"] }
+        indexBaseYear: { type: [integer, "null"] }
+        valuationYear: { type: [integer, "null"] }
+        indexYearUsed: { type: [integer, "null"], description: "Differs from valuationYear when it fell back (AST-0531)" }
+        indexedValue: { type: [string, "null"] }
+        underInsured: { type: boolean, description: "sumInsured below 90% of indexedValue (AST-0532)" }
+        warnings: { type: array, items: { type: string } }
+        createdAt: { type: string, format: date-time }
+    CapexStatus:
+      type: string
+      enum: [Draft, Submitted, InApproval, Approved, Released, Closed, Rejected, Postponed]
+    CapexVariantRequest:
+      type: object
+      additionalProperties: false
+      required: [description, amountsByYear, inServiceDate, profileAssumption]
+      properties:
+        description: { type: string, minLength: 1, maxLength: 200 }
+        amountsByYear:
+          type: object
+          description: Four-digit year to positive decimal amount; 1 to 30 years
+          additionalProperties: { type: string }
+        inServiceDate: { type: string, format: date }
+        profileAssumption: { type: string, minLength: 1, maxLength: 60 }
+    CapexRequestCreate:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId, number, title, requesterId, currency, variants]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        number: { type: string, minLength: 1, maxLength: 40 }
+        title: { type: string, minLength: 1, maxLength: 200 }
+        requesterId: { type: string, minLength: 1, maxLength: 200 }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        variants:
+          type: array
+          minItems: 1
+          maxItems: 10
+          items: { $ref: "#/components/schemas/CapexVariantRequest" }
+    CapexVariant:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        position: { type: integer }
+        description: { type: string }
+        amountsByYear: { type: object, additionalProperties: { type: string } }
+        totalAmount: { type: string }
+        inServiceDate: { type: string, format: date }
+        profileAssumption: { type: string }
+    CapexRequest:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        number: { type: string }
+        title: { type: string }
+        requesterId: { type: string }
+        status: { $ref: "#/components/schemas/CapexStatus" }
+        currency: { type: string }
+        selectedVariantId: { type: [string, "null"], format: uuid }
+        approvalLevel: { type: [string, "null"], enum: [PlantManager, CFO, Board, null] }
+        requestedAmount: { type: [string, "null"] }
+        approvedAmount: { type: [string, "null"] }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+        variants:
+          type: array
+          description: Present on create, read and submit; omitted from the list
+          items: { $ref: "#/components/schemas/CapexVariant" }
+    CapexPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/CapexRequest" }
         nextCursor: { type: string, format: uuid }

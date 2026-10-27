@@ -26,10 +26,22 @@ type fakeStore struct {
 	leases       map[string]store.Lease
 	lastDisposal store.DisposalInput
 	lastFilter   store.AssetFilter
+
+	// Slice 2 (ops_test.go, insurance_capex_test.go).
+	runs         map[string]store.DepreciationRun
+	capex        map[string]store.CapexRequest
+	series       map[string]store.IndexSeries
+	impairment   map[string]decimal.Decimal
+	lastAdjust   store.AdjustmentInput
+	lastAddition store.AdditionInput
+	lastRun      store.RunInput
+	lastPolicy   store.InsurancePolicy
+	lastSubmit   store.SubmitInput
 }
 
 func newFake() *fakeStore {
-	return &fakeStore{assets: map[string]store.Asset{}, books: map[string]store.Book{}, leases: map[string]store.Lease{}}
+	return &fakeStore{assets: map[string]store.Asset{}, books: map[string]store.Book{}, leases: map[string]store.Lease{},
+		runs: map[string]store.DepreciationRun{}, capex: map[string]store.CapexRequest{}, series: map[string]store.IndexSeries{}, impairment: map[string]decimal.Decimal{}}
 }
 
 func (f *fakeStore) CreateAsset(_ context.Context, in store.Asset, _ string) (store.Asset, error) {

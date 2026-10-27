@@ -122,6 +122,12 @@ type Book struct {
 	AccumulatedDepreciation decimal.Decimal `json:"accumulatedDepreciation"`
 	NBV                     decimal.Decimal `json:"nbv"`
 	Status                  string          `json:"status"`
+	// LastDepreciatedPeriod is the last period a posted run charged ("2026-03"
+	// or "2026"), nil before the first run.
+	LastDepreciatedPeriod *string `json:"lastDepreciatedPeriod"`
+	// AcquisitionCost is the schedule basis a depreciation run spreads its
+	// charges by (the cost at acquisition); adjustments change Cost only.
+	AcquisitionCost decimal.Decimal `json:"-"`
 }
 
 // Profile maps the book onto the domain depreciation input.
@@ -132,8 +138,20 @@ func (b Book) Profile() domain.Input {
 	}
 }
 
+// RunProfile is the book's profile on its acquisition cost: the schedule whose
+// proportions a depreciation run follows (domain.RunAmount).
+func (b Book) RunProfile() domain.Input {
+	in := b.Profile()
+	in.Cost = b.AcquisitionCost
+	if in.Salvage.GreaterThan(in.Cost) {
+		in.Salvage = in.Cost
+	}
+	return in
+}
+
 // Transaction is one row of the append-only AssetTransaction log. Amounts are
 // signed: disposals carry negative cost and accumulated amounts.
+// ImpairmentAmount is the impairment share of AccumulatedAmount.
 type Transaction struct {
 	ID                string           `json:"id"`
 	AssetBookID       string           `json:"assetBookId"`
@@ -145,7 +163,10 @@ type Transaction struct {
 	AccumulatedAmount decimal.Decimal  `json:"accumulatedAmount"`
 	ProceedsAmount    *decimal.Decimal `json:"proceedsAmount"`
 	GainLoss          *decimal.Decimal `json:"gainLoss"`
+	ImpairmentAmount  decimal.Decimal  `json:"impairmentAmount"`
 	SourceType        string           `json:"sourceType"`
+	SourceID          *string          `json:"sourceId"`
+	RunID             *string          `json:"runId"`
 	CreatedAt         time.Time        `json:"createdAt"`
 }
 

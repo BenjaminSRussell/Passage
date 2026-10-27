@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Alert, Button, buttonClassName, Card, DataTable, PageHeader, Skeleton, type DataTableColumn } from "../../shell/ui";
-import { getAsset, getSchedule, listTransactions, type Book, type ScheduleLine, type Transaction } from "./api/client";
+import { Alert, Badge, Button, buttonClassName, Card, DataTable, PageHeader, Skeleton, type DataTableColumn } from "../../shell/ui";
+import { getAsset, getSchedule, listAdditions, listPolicies, listTransactions, type Addition, type Book, type InsurancePolicy, type ScheduleLine, type Transaction } from "./api/client";
 import { StatusBadge } from "./badges";
 import { dash, money, sentence } from "./format";
 import styles from "./pages.module.css";
@@ -22,6 +22,7 @@ const bookColumns: DataTableColumn<Book>[] = [
   { key: "serviceLifePeriods", header: "Life", render: (b) => `${b.serviceLifePeriods} ${b.method === "StraightLine" ? "months" : "years"}` },
   { key: "convention", header: "Convention", render: (b) => sentence(b.convention) },
   { key: "inServiceDate", header: "In service", mono: true },
+  { key: "lastDepreciatedPeriod", header: "Depreciated to", mono: true, render: (b) => b.lastDepreciatedPeriod ?? dash },
   { key: "cost", header: "Cost", align: "end", render: (b) => money(b.cost, b.currency) },
   { key: "accumulatedDepreciation", header: "Accumulated", align: "end", render: (b) => money(b.accumulatedDepreciation, b.currency) },
   { key: "nbv", header: "NBV", align: "end", render: (b) => money(b.nbv, b.currency) },
@@ -44,6 +45,46 @@ const transactionColumns: DataTableColumn<Transaction>[] = [
   { key: "proceedsAmount", header: "Proceeds", align: "end", render: (t) => money(t.proceedsAmount, t.currency) },
   { key: "gainLoss", header: "Gain or loss", align: "end", render: (t) => money(t.gainLoss, t.currency) },
 ];
+
+const additionColumns: DataTableColumn<Addition>[] = [
+  { key: "addedDate", header: "Date", mono: true },
+  { key: "type", header: "Type" },
+  { key: "description", header: "Description" },
+  { key: "quantity", header: "Quantity", align: "end" },
+  { key: "serialNumber", header: "Serial number", mono: true, render: (a) => a.serialNumber ?? dash },
+  { key: "cost", header: "Cost posted", align: "end", render: (a) => (a.financial && a.currency ? `${money(a.cost, a.currency)} on ${a.transactions.length} ${a.transactions.length === 1 ? "book" : "books"}` : "Descriptive") },
+];
+
+const policyColumns: DataTableColumn<InsurancePolicy>[] = [
+  { key: "policyNumber", header: "Policy", mono: true },
+  { key: "insuranceType", header: "Type", render: (p) => sentence(p.insuranceType) },
+  { key: "coverageTo", header: "Coverage", mono: true, render: (p) => `${p.coverageFrom} to ${p.coverageTo}` },
+  { key: "sumInsured", header: "Sum insured", align: "end", render: (p) => money(p.sumInsured, p.currency) },
+  { key: "indexedValue", header: "Indexed value", align: "end", render: (p) => (p.indexedValue ? money(p.indexedValue, p.currency) : dash) },
+  { key: "underInsured", header: "Cover", render: (p) => (p.indexedValue ? <Badge tone={p.underInsured ? "warning" : "success"}>{p.underInsured ? "Under-insured" : "Covered"}</Badge> : dash) },
+];
+
+/** A list card with its own loading, error and empty states. */
+function ListCard<T>({ title, label, state, columns, rowKey, empty }: {
+  title: string;
+  label: string;
+  state: { data: T[] | null; loading: boolean; error: { message: string; code: string } | null; reload(): void };
+  columns: DataTableColumn<T>[];
+  rowKey(row: T): string;
+  empty: { title: string; description: string };
+}) {
+  return (
+    <Card title={title}>
+      {state.error ? (
+        <Alert tone="danger" title={`Could not load ${label.toLowerCase()}`} live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
+          {state.error.message} ({state.error.code})
+        </Alert>
+      ) : (
+        <DataTable label={label} columns={columns} rows={state.data ?? []} getRowKey={rowKey} loading={state.loading} empty={empty} />
+      )}
+    </Card>
+  );
+}
 
 /** Projected depreciation of one book, computed by the service on read (FR-37.3, FR-37.4). */
 function ScheduleCard({ assetId, book }: { assetId: string; book: Book }) {
@@ -81,6 +122,8 @@ export function AssetDetailPage() {
   const navigate = useNavigate();
   const state = useLoad((signal) => getAsset(id, signal), id);
   const transactions = useLoad((signal) => listTransactions(id, signal), id);
+  const additions = useLoad((signal) => listAdditions(id, signal), id);
+  const policies = useLoad((signal) => listPolicies(id, signal), id);
   const [selected, setSelected] = useState<string | null>(null);
 
   if (state.error) {
@@ -120,6 +163,21 @@ export function AssetDetailPage() {
               <Link className={buttonClassName("primary")} to={`/assets/${asset.id}/books/new`}>
                 Add book
               </Link>
+            ) : null}
+            {asset.status === "Open" ? (
+              <Link className={buttonClassName("secondary")} to={`/assets/${asset.id}/adjust`}>
+                Adjust
+              </Link>
+            ) : null}
+            {asset.status === "NotYetAcquired" || asset.status === "Open" ? (
+              <>
+                <Link className={buttonClassName("secondary")} to={`/assets/${asset.id}/additions/new`}>
+                  Add addition
+                </Link>
+                <Link className={buttonClassName("secondary")} to={`/assets/${asset.id}/insurance/new`}>
+                  Add policy
+                </Link>
+              </>
             ) : null}
             {asset.status === "Open" ? (
               <Link className={buttonClassName("secondary")} to={`/assets/${asset.id}/dispose`}>
@@ -170,10 +228,26 @@ export function AssetDetailPage() {
             rows={transactions.data ?? []}
             getRowKey={(t) => t.id}
             loading={transactions.loading}
-            empty={{ title: "No transactions yet", description: "Acquisitions and disposals appear here, one row per book." }}
+            empty={{ title: "No transactions yet", description: "Acquisitions, adjustments, depreciation and disposals appear here, one row per book." }}
           />
         )}
       </Card>
+      <ListCard
+        title="Additions and components"
+        label="Additions"
+        state={additions}
+        columns={additionColumns}
+        rowKey={(a) => a.id}
+        empty={{ title: "No additions yet", description: "Improvements, components and accessories recorded under the asset appear here." }}
+      />
+      <ListCard
+        title="Insurance policies"
+        label="Insurance policies"
+        state={policies}
+        columns={policyColumns}
+        rowKey={(p) => p.id}
+        empty={{ title: "No insurance policies", description: "Record a policy to track the insured value against the indexed replacement value." }}
+      />
       <div>
         <Button variant="ghost" onClick={() => navigate("/assets")}>
           Back to the register

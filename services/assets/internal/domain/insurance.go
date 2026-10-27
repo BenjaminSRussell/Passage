@@ -2,11 +2,28 @@ package domain
 
 import (
 	"sort"
+	"time"
 
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/money"
 )
+
+// Insurance codes from the PRD message catalog (7.37.18): AST-0531 warns that
+// the valuation year has no index value and the latest year was used; AST-0532
+// warns that an asset is under-insured.
+const (
+	CodeIndexMissing = "AST-0531"
+	CodeUnderInsured = "AST-0532"
+)
+
+// CheckCoverage validates a policy period: coverage must end after it starts.
+func CheckCoverage(from, to time.Time) error {
+	if !to.After(from) {
+		return fail(CodeInvalidInsurance, "coverage end must be after coverage start")
+	}
+	return nil
+}
 
 // UnderInsuredRatio is the share of indexed replacement value below which an
 // asset is listed as under-insured (FR-37.15).
@@ -16,7 +33,7 @@ var UnderInsuredRatio = decimal.RequireFromString("0.9")
 // currency minor unit (BR-37.10).
 func IndexedValue(base, indexNow, indexBase decimal.Decimal, currency string) (decimal.Decimal, error) {
 	if indexBase.LessThanOrEqual(decimal.Zero) || indexNow.LessThanOrEqual(decimal.Zero) {
-		return decimal.Zero, fail(CodeInvalidDepreciation, "index values must be positive")
+		return decimal.Zero, fail(CodeInvalidInsurance, "index values must be positive")
 	}
 	return base.Mul(indexNow).Div(indexBase).Round(money.MinorUnits(currency)), nil
 }

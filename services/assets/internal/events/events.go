@@ -11,7 +11,42 @@ var (
 	AssetAcquired   = events.Type(Context, "asset", "acquired", 1)
 	AssetDisposed   = events.Type(Context, "asset", "disposed", 1)
 	LeaseRecognized = events.Type(Context, "lease", "recognized", 1)
+	// AssetAdjusted is published for every AcquisitionAdj, DepreciationAdj,
+	// Revaluation and Impairment (FR-37.9, FR-37.14); it is not in the PRD event
+	// table and is added so consumers see every change of a book's balances.
+	AssetAdjusted      = events.Type(Context, "asset", "adjusted", 1)
+	DepreciationPosted = events.Type(Context, "depreciation", "posted", 1)
 )
+
+// AssetAdjustedData is the payload of AssetAdjusted: one adjustment on one
+// book. Deltas are signed decimal strings.
+type AssetAdjustedData struct {
+	AssetID          string  `json:"assetId"`
+	BookID           string  `json:"bookId"`
+	TransactionID    string  `json:"transactionId"`
+	Type             string  `json:"type"`
+	TransactionDate  string  `json:"transactionDate"`
+	CostDelta        string  `json:"costDelta"`
+	AccumulatedDelta string  `json:"accumulatedDelta"`
+	ImpairmentDelta  string  `json:"impairmentDelta"`
+	Currency         string  `json:"currency"`
+	SourceType       string  `json:"sourceType"`
+	SourceID         *string `json:"sourceId"`
+}
+
+// DepreciationPostedData is the payload of DepreciationPosted. BookCode stands
+// in for the PRD's bookDefinitionId until book definitions exist;
+// JournalEntryID stays null until the ledger integration posts the journal.
+type DepreciationPostedData struct {
+	RunID          string  `json:"runId"`
+	LegalEntityID  string  `json:"legalEntityId"`
+	BookCode       string  `json:"bookCode"`
+	Period         string  `json:"period"`
+	AssetCount     int     `json:"assetCount"`
+	TotalAmount    string  `json:"totalAmount"`
+	Currency       *string `json:"currency"`
+	JournalEntryID *string `json:"journalEntryId"`
+}
 
 // AssetAcquiredData is the payload of AssetAcquired. Amounts are decimal strings.
 type AssetAcquiredData struct {

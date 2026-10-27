@@ -11,9 +11,20 @@ const tones: Record<string, BadgeTone> = {
   Scrapped: "warning",
   Terminated: "neutral",
   Draft: "neutral",
+  Proposed: "info",
+  Posted: "success",
+  Due: "info",
+  Exception: "warning",
+  Submitted: "info",
+  InApproval: "info",
+  Approved: "success",
+  Released: "success",
+  Closed: "neutral",
+  Rejected: "danger",
+  Postponed: "warning",
 };
 
-/** Asset, book or lease status as a toned badge with its text (never a live region). */
+/** Asset, book, lease, run, run line or capex request status as a toned badge with its text (never a live region). */
 export function StatusBadge({ status }: { status: string }) {
   return <Badge tone={tones[status] ?? "neutral"}>{sentence(status)}</Badge>;
 }

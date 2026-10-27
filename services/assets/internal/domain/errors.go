@@ -12,6 +12,10 @@ const (
 	CodeIBRRange            = "AST-0515"
 	CodeTooManyBooks        = "AST-0013"
 	CodeAssetState          = "AST-0509"
+	CodeInvalidAdjustment   = "AST-0014"
+	CodeInvalidInsurance    = "AST-0015"
+	CodeCapexState          = "AST-0016"
+	CodeRunStale            = "AST-0018"
 )
 
 // MaxBooksPerAsset is the default of assets.maxBooks (FR-37.2, ASSET_MAX_BOOKS);

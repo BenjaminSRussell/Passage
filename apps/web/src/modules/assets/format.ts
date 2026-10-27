@@ -35,3 +35,36 @@ export function percent(rate: string): string {
 export function today(now: Date = new Date()): string {
   return now.toISOString().slice(0, 10);
 }
+
+/** Signed decimal with up to 6 places, such as -500.00 for an impairment reversal. */
+export const SIGNED_DECIMAL = /^-?\d+(\.\d{1,6})?$/;
+
+/** A run period: "2026-03" for monthly books, "2026" for yearly ones. */
+export const PERIOD = /^\d{4}(-(0[1-9]|1[0-2]))?$/;
+
+/** A decimal string that is zero ("0", "0.00", "-0"). */
+export function isZero(value: string): boolean {
+  return /^-?0+(\.0+)?$/.test(value);
+}
+
+/** "amount currency", or the amount alone when the currency is unknown. */
+export function amount(value: string | null | undefined, currency: string | null | undefined): string {
+  return currency ? money(value, currency) : (value ?? dash);
+}
+
+/**
+ * Parses "2026=200000.00" lines (also "2026: 200000.00") into a year → amount
+ * map. Returns an error message for the first line that does not parse.
+ */
+export function parseYearLines(text: string): { values: Record<string, string>; error?: string } {
+  const values: Record<string, string> = {};
+  for (const raw of text.split(/\n/)) {
+    const line = raw.trim();
+    if (line === "") continue;
+    const m = /^(\d{4})\s*[=:]\s*(\d+(?:\.\d{1,6})?)$/.exec(line);
+    if (!m) return { values, error: `"${line}" is not a year and an amount, such as 2026=1000.00.` };
+    if (values[m[1]] !== undefined) return { values, error: `${m[1]} is listed twice.` };
+    values[m[1]] = m[2];
+  }
+  return { values };
+}

@@ -361,7 +361,9 @@ func TestStore_RowLevelSecurity(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, table := range []string{"asset", "asset_book", "asset_transaction", "lease", "lease_schedule_line", "outbox", "idempotency_keys"} {
+	for _, table := range []string{"asset", "asset_book", "asset_transaction", "lease", "lease_schedule_line", "outbox", "idempotency_keys",
+		"depreciation_run", "depreciation_run_line", "asset_addition", "asset_index_series", "asset_index_value", "asset_insurance_policy",
+		"capex_request", "capex_request_variant"} {
 		var enabled, forced bool
 		if err := admin.QueryRow(ctx, `select relrowsecurity, relforcerowsecurity from pg_class where relname = $1 and relnamespace = $2::regnamespace`, table, schema).Scan(&enabled, &forced); err != nil {
 			t.Fatal(table, err)
@@ -385,5 +387,27 @@ func TestStore_RowLevelSecurity(t *testing.T) {
 	}
 	if _, err := s.CreateAsset(scoped(1, leA), store.Asset{LegalEntityID: leB, AssetNumber: "FA-X", Name: "Out of scope", ClassCode: "VEH", Quantity: d("1")}, "x"); err == nil {
 		t.Fatal("insert outside the legal-entity scope was accepted")
+	}
+	// Slice 2: a run, its lines and a capex request stay inside their entity.
+	if _, err := s.AddBook(scoped(1, leA), a.ID, book("IFRS", "1200"), "rls-book"); err != nil {
+		t.Fatal(err)
+	}
+	run, err := s.ProposeRun(scoped(1, leA), store.RunInput{LegalEntityID: leA, BookCode: "IFRS", Period: "2026-03"}, "rls-run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if posted, err := s.PostRun(scoped(1, leA), run.ID, run.Version); err != nil || posted.AssetCount != 1 {
+		t.Fatalf("post as the app role = %+v, %v", posted, err)
+	}
+	if _, err := s.GetRun(scoped(1, leB), run.ID); problemCode(err) != store.CodeRunNotFound {
+		t.Fatalf("scope B reads A's run: err = %v", err)
+	}
+	cr, err := s.CreateCapexRequest(scoped(1, leB), store.CapexRequest{LegalEntityID: leB, Number: "CR-B", Title: "B", RequesterID: "r", Currency: "USD",
+		Variants: []store.CapexVariant{{Description: "v", AmountsByYear: map[string]decimal.Decimal{"2026": d("1")}, InServiceDate: day("2026-06-01"), ProfileAssumption: "SL"}}}, "rls-cr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetCapexRequest(scoped(1, leA), cr.ID); problemCode(err) != store.CodeCapexNotFound {
+		t.Fatalf("scope A reads B's capex request: err = %v", err)
 	}
 }

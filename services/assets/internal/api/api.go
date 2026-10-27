@@ -1,5 +1,7 @@
 // Package api exposes the assets HTTP surface: asset register, books, the
-// projected depreciation schedule, transactions, disposal and IFRS 16 leases.
+// projected depreciation schedule, transactions and adjustments, additions,
+// depreciation runs, disposal, insurance policies and index series, capex
+// requests and IFRS 16 leases.
 package api
 
 import (
@@ -32,6 +34,12 @@ const (
 	DutyMaintain      = "AssetMaintain"
 	DutyDispose       = "AssetDispose"
 	DutyLeaseMaintain = "LeaseMaintain"
+	DutyDepreciate    = "AssetDepreciate"
+	DutyPostJournal   = "AssetPostJournal"
+	// DutyInsuranceMaintain covers insurance policies and index series (FR-37.15).
+	DutyInsuranceMaintain = "AssetInsuranceMaintain"
+	// DutyCapexCreate covers capital appropriation requests and their submission (FR-37.17).
+	DutyCapexCreate = "CapexRequestCreate"
 )
 
 const (
@@ -60,6 +68,10 @@ type API struct {
 	booked   atomic.Int64
 	disposed atomic.Int64
 	leased   atomic.Int64
+	adjusted atomic.Int64
+	added    atomic.Int64
+	runs     atomic.Int64
+	capex    atomic.Int64
 }
 
 // New returns an API over s.
@@ -80,6 +92,24 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(DutyLeaseMaintain)).Post("/v1/leases", a.createLease)
 		r.With(authz.RequireDuty(DutyLeaseMaintain)).Get("/v1/leases", a.listLeases)
 		r.With(authz.RequireDuty(DutyLeaseMaintain)).Get("/v1/leases/{id}", a.getLease)
+
+		r.With(authz.RequireDuty(DutyPostJournal)).Post("/v1/assets/{id}/transactions", a.adjust)
+		r.With(authz.RequireDuty(DutyMaintain)).Post("/v1/assets/{id}/additions", a.addAddition)
+		r.With(authz.RequireDuty(DutyView)).Get("/v1/assets/{id}/additions", a.listAdditions)
+		r.With(authz.RequireDuty(DutyDepreciate)).Post("/v1/assets/depreciation-runs", a.proposeRun)
+		r.With(requireAny(DutyView, DutyDepreciate)).Get("/v1/assets/depreciation-runs", a.listRuns)
+		r.With(requireAny(DutyView, DutyDepreciate)).Get("/v1/assets/depreciation-runs/{id}", a.getRun)
+		r.With(authz.RequireDuty(DutyPostJournal)).Post("/v1/assets/depreciation-runs/{id}/post", a.postRun)
+
+		r.With(authz.RequireDuty(DutyInsuranceMaintain)).Put("/v1/assets/index-series/{code}", a.putIndexSeries)
+		r.With(requireAny(DutyView, DutyInsuranceMaintain)).Get("/v1/assets/index-series", a.listIndexSeries)
+		r.With(authz.RequireDuty(DutyInsuranceMaintain)).Post("/v1/assets/{id}/insurance-policies", a.addInsurancePolicy)
+		r.With(requireAny(DutyView, DutyInsuranceMaintain)).Get("/v1/assets/{id}/insurance-policies", a.listInsurancePolicies)
+
+		r.With(authz.RequireDuty(DutyCapexCreate)).Post("/v1/assets/capex-requests", a.createCapexRequest)
+		r.With(requireAny(DutyView, DutyCapexCreate)).Get("/v1/assets/capex-requests", a.listCapexRequests)
+		r.With(requireAny(DutyView, DutyCapexCreate)).Get("/v1/assets/capex-requests/{id}", a.getCapexRequest)
+		r.With(authz.RequireDuty(DutyCapexCreate)).Post("/v1/assets/capex-requests/{id}/submit", a.submitCapexRequest)
 	})
 }
 
@@ -102,6 +132,10 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# TYPE assets_books_added_total counter\nassets_books_added_total %d\n", a.booked.Load())
 		fmt.Fprintf(w, "# TYPE assets_disposals_total counter\nassets_disposals_total %d\n", a.disposed.Load())
 		fmt.Fprintf(w, "# TYPE assets_leases_recognized_total counter\nassets_leases_recognized_total %d\n", a.leased.Load())
+		fmt.Fprintf(w, "# TYPE assets_adjustments_total counter\nassets_adjustments_total %d\n", a.adjusted.Load())
+		fmt.Fprintf(w, "# TYPE assets_additions_total counter\nassets_additions_total %d\n", a.added.Load())
+		fmt.Fprintf(w, "# TYPE assets_depreciation_runs_posted_total counter\nassets_depreciation_runs_posted_total %d\n", a.runs.Load())
+		fmt.Fprintf(w, "# TYPE assets_capex_requests_total counter\nassets_capex_requests_total %d\n", a.capex.Load())
 	})
 }
 
@@ -610,7 +644,7 @@ func setETag(w http.ResponseWriter, version int) {
 func ifMatch(w http.ResponseWriter, r *http.Request) (int, bool) {
 	raw := r.Header.Get("If-Match")
 	if raw == "" {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusPreconditionRequired, store.CodeVersionConflict, "If-Match with the asset's current ETag is required"))
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusPreconditionRequired, store.CodeVersionConflict, "If-Match with the resource's current ETag is required"))
 		return 0, false
 	}
 	v, err := strconv.Atoi(strings.Trim(strings.TrimPrefix(raw, "W/"), `"`))
