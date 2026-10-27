@@ -26,6 +26,22 @@ jobs:
   go:
     if: inputs.go
     runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:17-alpine@sha256:eee6c6e1b0894fa4fe0075eb054af9fd1cf39a35321c2d4110626cfe506411fb
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGPASSWORD: postgres
+      PASSAGE_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
+      PASSAGE_TEST_APP_DATABASE_URL: postgres://passage_app:passage_app@localhost:5432/postgres?sslmode=disable
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
@@ -37,6 +53,7 @@ jobs:
         with:
           version: 1.21.4
       - run: opa test policies/authz
+      - run: psql -h localhost -U postgres -v ON_ERROR_STOP=1 -f .github/postgres-test-setup.sql
       - run: make vet
       - run: make test-go
 
@@ -109,7 +126,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310
-      - run: helm lint services/platform-health/charts/hello-ledger services/receiving/charts/receiving
+      - run: helm lint services/platform-health/charts/hello-ledger services/receiving/charts/receiving services/org/charts/org
 
   deploy-release:
     runs-on: ubuntu-24.04

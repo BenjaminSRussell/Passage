@@ -27,16 +27,18 @@ import (
 )
 
 const (
-	readyTimeout     = 500 * time.Millisecond
-	idempotencyKey   = "Idempotency-Key"
-	dutyRead         = "org.read"
-	dutyLegalEntity  = "org.legal-entity.write"
-	dutyReference    = "org.reference.write"
-	maxNameLength    = 120
-	maxRegistration  = 40
-	maxQuantityExp   = 18
-	minQuantityExp   = -24
-	validationDetail = "request failed validation"
+	readyTimeout   = 500 * time.Millisecond
+	idempotencyKey = "Idempotency-Key"
+
+	maxIdempotencyKeyLength = 200
+	dutyRead                = "org.read"
+	dutyLegalEntity         = "org.legal-entity.write"
+	dutyReference           = "org.reference.write"
+	maxNameLength           = 120
+	maxRegistration         = 40
+	maxQuantityExp          = 18
+	minQuantityExp          = -24
+	validationDetail        = "request failed validation"
 )
 
 var (
@@ -148,7 +150,18 @@ func New(s store.Store) *API {
 	return &API{store: s, geocoder: domain.NullGeocoder{}, postings: noPostings{}, now: time.Now}
 }
 
+func boundIdempotencyKey(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if len(r.Header.Get(idempotencyKey)) > maxIdempotencyKeyLength {
+			httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "idempotency_key_too_long", "Idempotency-Key must be at most 200 characters"))
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func (a *API) Register(r chi.Router) {
+	r = r.With(boundIdempotencyKey)
 	r.Get("/readyz", a.ready)
 	r.With(authz.RequireDuty(dutyLegalEntity)).Post("/v1/org/legal-entities", a.createLegalEntity)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/org/legal-entities", a.listLegalEntities)
