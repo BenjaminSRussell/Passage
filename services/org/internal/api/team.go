@@ -91,6 +91,10 @@ func validMemberKinds(kinds []string) bool {
 }
 
 func (a *API) createTeamType(w http.ResponseWriter, r *http.Request) {
+	idemKey, keyOK := idempotencyKeyOf(w, r)
+	if !keyOK {
+		return
+	}
 	if !validTenant(w, r) || refuseScopedCaller(w, r, "create team types") {
 		return
 	}
@@ -112,10 +116,6 @@ func (a *API) createTeamType(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
-		return
-	}
-	idemKey, keyOK := idempotencyKeyOf(w, r)
-	if !keyOK {
 		return
 	}
 	created, inserted, err := a.store.CreateTeamType(r.Context(), in, idemKey)
@@ -190,6 +190,10 @@ func parseDate(value string) (time.Time, bool) {
 }
 
 func (a *API) createTeam(w http.ResponseWriter, r *http.Request) {
+	idemKey, keyOK := idempotencyKeyOf(w, r)
+	if !keyOK {
+		return
+	}
 	if !validTenant(w, r) || refuseScopedCaller(w, r, "create teams") {
 		return
 	}
@@ -234,10 +238,6 @@ func (a *API) createTeam(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
-		return
-	}
-	idemKey, keyOK := idempotencyKeyOf(w, r)
-	if !keyOK {
 		return
 	}
 	created, inserted, err := a.store.CreateTeam(r.Context(), in, idemKey)
@@ -442,6 +442,10 @@ func (a *API) removeTeamMember(w http.ResponseWriter, r *http.Request, teamID st
 }
 
 func (a *API) addTeamMember(w http.ResponseWriter, r *http.Request, teamID string) {
+	idemKey, keyOK := idempotencyKeyOf(w, r)
+	if !keyOK {
+		return
+	}
 	if refuseScopedCaller(w, r, "add team members") {
 		return
 	}
@@ -478,10 +482,6 @@ func (a *API) addTeamMember(w http.ResponseWriter, r *http.Request, teamID strin
 	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
-		return
-	}
-	idemKey, keyOK := idempotencyKeyOf(w, r)
-	if !keyOK {
 		return
 	}
 	created, inserted, err := a.store.AddTeamMember(r.Context(), teamID, in, a.now(), idemKey)

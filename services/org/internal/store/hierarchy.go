@@ -132,6 +132,9 @@ func (s *Postgres) CreateHierarchyType(ctx context.Context, in HierarchyType, id
 	var t HierarchyType
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		if key != nil {
+			if err := lockIdempotencyKey(ctx, tx, "hierarchy_type", p.TenantID, *key); err != nil {
+				return err
+			}
 			replay, err := scanHierarchyType(tx.QueryRow(ctx, `select `+hierarchyTypeColumns+` from hierarchy_type where tenant_id = $1 and idempotency_key = $2`, p.TenantID, *key))
 			if err == nil {
 				t = replay

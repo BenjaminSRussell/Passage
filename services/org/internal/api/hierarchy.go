@@ -99,6 +99,10 @@ func validatePurposes(purposes []string) string {
 }
 
 func (a *API) createHierarchyType(w http.ResponseWriter, r *http.Request) {
+	idemKey, keyOK := idempotencyKeyOf(w, r)
+	if !keyOK {
+		return
+	}
 	if !validTenant(w, r) || rejectScopedCaller(w, r, "create hierarchy types") {
 		return
 	}
@@ -122,10 +126,6 @@ func (a *API) createHierarchyType(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
-	idemKey, keyOK := idempotencyKeyOf(w, r)
-	if !keyOK {
-		return
-	}
 	created, err := a.store.CreateHierarchyType(r.Context(), in, idemKey)
 	if err != nil {
 		slog.Error("create hierarchy type failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
@@ -137,14 +137,14 @@ func (a *API) createHierarchyType(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) createHierarchyDraft(w http.ResponseWriter, r *http.Request, id string) {
-	if rejectScopedCaller(w, r, "create hierarchy versions") {
-		return
-	}
-	principal, _ := tenant.FromContext(r.Context())
 	idemKey, keyOK := idempotencyKeyOf(w, r)
 	if !keyOK {
 		return
 	}
+	if rejectScopedCaller(w, r, "create hierarchy versions") {
+		return
+	}
+	principal, _ := tenant.FromContext(r.Context())
 	draft, err := a.store.CreateHierarchyDraft(r.Context(), id, idemKey, principal.UserID)
 	if err != nil {
 		slog.Error("create hierarchy draft failed", "err", err, "typeId", id, "correlationId", middleware.GetReqID(r.Context()))
@@ -213,6 +213,10 @@ func (a *API) replaceHierarchyNodes(w http.ResponseWriter, r *http.Request, id s
 }
 
 func (a *API) publishHierarchyVersion(w http.ResponseWriter, r *http.Request, id string) {
+	idemKey, keyOK := idempotencyKeyOf(w, r)
+	if !keyOK {
+		return
+	}
 	if rejectScopedCaller(w, r, "publish hierarchy versions") {
 		return
 	}
@@ -242,10 +246,6 @@ func (a *API) publishHierarchyVersion(w http.ResponseWriter, r *http.Request, id
 	principal, _ := tenant.FromContext(r.Context())
 	if backdated && !principal.HasDuty(dutyBackdate) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, store.CodeHierarchyBackdateDuty, "Backdated publish requires the Backdate duty and a reason."))
-		return
-	}
-	idemKey, keyOK := idempotencyKeyOf(w, r)
-	if !keyOK {
 		return
 	}
 	published, err := a.store.PublishHierarchyVersion(r.Context(), id, *req.Version, effectiveFrom, reason, idemKey, principal.UserID, backdated)

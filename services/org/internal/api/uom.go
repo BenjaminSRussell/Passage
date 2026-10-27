@@ -131,6 +131,10 @@ func (a *API) getUnit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) createUnit(w http.ResponseWriter, r *http.Request) {
+	idemKey, keyOK := idempotencyKeyOf(w, r)
+	if !keyOK {
+		return
+	}
 	if !validTenant(w, r) || refuseScopedCaller(w, r, "create units") {
 		return
 	}
@@ -157,10 +161,6 @@ func (a *API) createUnit(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
-		return
-	}
-	idemKey, keyOK := idempotencyKeyOf(w, r)
-	if !keyOK {
 		return
 	}
 	unit, err := a.store.CreateUnit(r.Context(), in, idemKey)
@@ -224,6 +224,10 @@ func (a *API) listConversions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) createConversion(w http.ResponseWriter, r *http.Request) {
+	idemKey, keyOK := idempotencyKeyOf(w, r)
+	if !keyOK {
+		return
+	}
 	if !validTenant(w, r) || refuseScopedCaller(w, r, "create conversions") {
 		return
 	}
@@ -253,10 +257,6 @@ func (a *API) createConversion(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
-		return
-	}
-	idemKey, keyOK := idempotencyKeyOf(w, r)
-	if !keyOK {
 		return
 	}
 	conv, created, err := a.store.CreateConversion(r.Context(), store.Conversion{FromCode: req.FromCode, ToCode: req.ToCode, Factor: factor, Offset: offset}, idemKey)

@@ -440,7 +440,7 @@ func TestSeedReference_PlatformRowsAreSeededOnceAndReadOnlyForTenants(t *testing
 		t.Fatalf("unit insert under the sys tenant = %v, want SQLSTATE 42501", err)
 	}
 	for _, pair := range [][2]string{{"kg", "g"}, {"g", "kg"}} {
-		err = inTx(sys, func(tx pgx.Tx) error {
+		err = dbx.WithTenantTx(sys, admin, func(tx pgx.Tx) error {
 			_, err := tx.Exec(sys, "insert into uom_conversion (tenant_id, from_code, to_code, factor) values ($1, $2, $3, 1)", store.SysTenantID, pair[0], pair[1])
 			return err
 		})
@@ -466,5 +466,39 @@ func TestSeedReference_PlatformRowsAreSeededOnceAndReadOnlyForTenants(t *testing
 	}
 	if got := count(principalContext(2), "select count(*) from reference_status"); got != 0 {
 		t.Errorf("tenant 2 reference_status rows = %d, want 0", got)
+	}
+}
+
+func TestSeedReference_AppRoleCannotWriteSysTenantRows(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	sys := tenant.With(context.Background(), tenant.Principal{TenantID: store.SysTenantID})
+	if err := dbx.Migrate(sys, admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SeedReference(sys, admin, migrations.Reference); err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{
+		"update currency set name = 'x' where code = 'USD'",
+		"delete from country where code = 'US'",
+		"update unit_of_measure set name = 'x' where code = 'kg'",
+		"delete from uom_conversion where from_code = 'kg'",
+	} {
+		var affected int64
+		if err := dbx.WithTenantTx(sys, app, func(tx pgx.Tx) error {
+			tag, err := tx.Exec(sys, statement)
+			affected = tag.RowsAffected()
+			return err
+		}); err != nil || affected != 0 {
+			t.Errorf("%q as the sys tenant affected %d rows, err %v; want 0, nil", statement, affected, err)
+		}
+	}
+	var pgErr *pgconn.PgError
+	err := dbx.WithTenantTx(sys, app, func(tx pgx.Tx) error {
+		_, err := tx.Exec(sys, "insert into currency (tenant_id, code, numeric_code, name, minor_units) values ($1, 'ZZZ', '999', 'x', 2)", store.SysTenantID)
+		return err
+	})
+	if !errors.As(err, &pgErr) || pgErr.Code != "42501" {
+		t.Fatalf("sys-tenant insert = %v, want SQLSTATE 42501", err)
 	}
 }

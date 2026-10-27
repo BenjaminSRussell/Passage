@@ -247,6 +247,10 @@ func (a *API) createLegalEntity(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
 	}
+	idemKey, keyOK := idempotencyKeyOf(w, r)
+	if !keyOK {
+		return
+	}
 	if p, _ := tenant.FromContext(r.Context()); p.LegalEntityID != "" {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "a legal-entity-scoped caller cannot create legal entities"))
 		return
@@ -271,10 +275,6 @@ func (a *API) createLegalEntity(w http.ResponseWriter, r *http.Request) {
 		p := httpx.NewProblem(http.StatusBadRequest, "COM-0001", validationDetail)
 		p.Errors = fields
 		httpx.Fail(w, r, p)
-		return
-	}
-	idemKey, keyOK := idempotencyKeyOf(w, r)
-	if !keyOK {
 		return
 	}
 	entity, err := a.store.CreateLegalEntity(r.Context(), in, idemKey)
@@ -560,7 +560,7 @@ func validateLegalEntity(in store.LegalEntity) map[string]string {
 
 func validTenant(w http.ResponseWriter, r *http.Request) bool {
 	p, ok := tenant.FromContext(r.Context())
-	if !ok || !ids.Valid(p.TenantID) {
+	if !ok || !ids.Valid(p.TenantID) || p.TenantID == ids.Nil {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnauthorized, "AUTH-0001", "missing or malformed tenant"))
 		return false
 	}

@@ -134,6 +134,9 @@ func (s *Postgres) CreateWarehouse(ctx context.Context, in Warehouse, idempotenc
 	var warehouse Warehouse
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		if key != nil {
+			if err := lockIdempotencyKey(ctx, tx, "warehouse", p.TenantID, *key); err != nil {
+				return err
+			}
 			replay, err := scanWarehouse(tx.QueryRow(ctx, `select `+warehouseColumns+` from warehouse where tenant_id = $1 and idempotency_key = $2`, p.TenantID, *key))
 			if err == nil {
 				warehouse = replay

@@ -97,6 +97,9 @@ func (s *Postgres) CreateOperatingUnit(ctx context.Context, in OperatingUnit, id
 	var u OperatingUnit
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		if key != nil {
+			if err := lockIdempotencyKey(ctx, tx, "operating_unit", p.TenantID, *key); err != nil {
+				return err
+			}
 			replay, err := scanOperatingUnit(tx.QueryRow(ctx, `select `+operatingUnitColumns+` from operating_unit where tenant_id = $1 and idempotency_key = $2`, p.TenantID, *key))
 			if err == nil {
 				u = replay
