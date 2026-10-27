@@ -1,57 +1,58 @@
 import { useState, type FormEvent } from "react";
-import {
-  CostingApiError,
-  previewSettlements,
-  type CostMethod,
-  type Fallback,
-  type SettlePreviewRequest,
-  type SettlePreviewResponse,
-  type SettleTransaction,
-} from "./api/client";
+import { Alert, Button, Card, DataTable, EmptyState, FormField, Input, PageHeader, StatGroup, StatTile, type DataTableColumn } from "../../shell/ui";
+import { describeError, previewSettlements, type CostMethod, type Fallback, type SettlePreviewRequest, type SettlePreviewResponse, type SettlementRow } from "./api/client";
+import styles from "./pages.module.css";
+import { FallbackField, MethodField, parseTransactions, SAMPLE_TRANSACTIONS, TransactionsField } from "./shared";
 
-export const COST_METHODS: CostMethod[] = [
-  "FIFO",
-  "LIFO",
-  "LIFO_DATE",
-  "WEIGHTED_AVG_RUNNING",
-  "WEIGHTED_AVG_PERIODIC",
-  "MOVING_AVG",
-  "STANDARD",
-];
+export { COST_METHODS, FALLBACKS, parseTransactions } from "./shared";
 
-export const FALLBACKS: Fallback[] = ["RUNNING_AVG", "STANDARD", "LAST_RECEIPT"];
-
-const SAMPLE = JSON.stringify(
-  [
-    { id: "rcpt-1", kind: "RECEIPT", qty: "100", value: "1000.00", financialDate: "2026-01-05" },
-    { id: "rcpt-2", kind: "RECEIPT", qty: "100", value: "1200.00", financialDate: "2026-01-20" },
-    { id: "iss-1", kind: "ISSUE", qty: "150", financialDate: "2026-01-25" },
-  ],
-  null,
-  2,
-);
-
-/** Parses the transactions textarea; returns a message instead of throwing. */
-export function parseTransactions(text: string): { ok: true; value: SettleTransaction[] } | { ok: false; error: string } {
-  try {
-    const parsed: unknown = JSON.parse(text);
-    if (!Array.isArray(parsed) || parsed.length === 0) {
-      return { ok: false, error: "Transactions must be a non-empty JSON array." };
-    }
-    return { ok: true, value: parsed as SettleTransaction[] };
-  } catch {
-    return { ok: false, error: "Transactions are not valid JSON." };
-  }
+interface Row {
+  key: string;
+  value: string;
 }
 
-/** Settlement preview: values issues under a costing method without posting. */
+type Exception = SettlePreviewResponse["exceptions"][number];
+
+const issueColumns = (currency: string): DataTableColumn<Row>[] => [
+  { key: "key", header: "Issue", mono: true },
+  { key: "value", header: `Cost (${currency})`, align: "end", mono: true },
+];
+
+const settlementColumns: DataTableColumn<SettlementRow>[] = [
+  { key: "seq", header: "Seq", align: "end" },
+  { key: "issueId", header: "Issue", mono: true },
+  { key: "receiptId", header: "Receipt or pool", mono: true, render: (s) => s.receiptId || s.pool || "" },
+  { key: "qty", header: "Qty", align: "end", mono: true },
+  { key: "value", header: "Value", align: "end", mono: true },
+];
+
+const exceptionColumns: DataTableColumn<Exception>[] = [
+  { key: "issueId", header: "Issue", mono: true },
+  { key: "qty", header: "Qty", align: "end", mono: true },
+  { key: "value", header: "Value", align: "end", mono: true },
+  { key: "fallback", header: "Fallback" },
+];
+
+const typeColumns = (currency: string): DataTableColumn<Row>[] => [
+  { key: "key", header: "Valuation type", mono: true },
+  { key: "value", header: `Remaining value (${currency})`, align: "end", mono: true },
+];
+
+const toRows = (m: Record<string, string> = {}): Row[] =>
+  Object.entries(m)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, value]) => ({ key, value }));
+
+/** Settlement preview: values issues under a costing method without posting (FR-20.1 to FR-20.3, FR-20.8, FR-20.16). */
 export function SettlementPreview() {
   const [method, setMethod] = useState<CostMethod>("FIFO");
   const [currency, setCurrency] = useState("EUR");
   const [fallback, setFallback] = useState<Fallback>("RUNNING_AVG");
   const [standardUnitCost, setStandardUnitCost] = useState("");
-  const [text, setText] = useState(SAMPLE);
+  const [defaultType, setDefaultType] = useState("");
+  const [text, setText] = useState(SAMPLE_TRANSACTIONS);
   const [result, setResult] = useState<SettlePreviewResponse | null>(null);
+  const [jsonError, setJsonError] = useState<string | undefined>();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -60,146 +61,108 @@ export function SettlementPreview() {
     setError(null);
     const parsed = parseTransactions(text);
     if (!parsed.ok) {
-      setError(parsed.error);
+      setJsonError(parsed.error);
+      setResult(null);
       return;
     }
+    setJsonError(undefined);
     const body: SettlePreviewRequest = { method, currency, fallback, transactions: parsed.value };
     if (standardUnitCost.trim() !== "") {
       body.standardUnitCost = standardUnitCost.trim();
+    }
+    if (defaultType.trim() !== "") {
+      body.defaultValuationType = defaultType.trim();
     }
     setBusy(true);
     try {
       setResult(await previewSettlements(body));
     } catch (err) {
       setResult(null);
-      setError(err instanceof CostingApiError ? `${err.problem.code}: ${err.message}` : "The preview failed.");
+      setError(describeError(err, "The preview failed."));
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <section aria-labelledby="costing-preview-heading">
-      <h1 id="costing-preview-heading">Settlement preview</h1>
-      <form onSubmit={onSubmit}>
-        <label>
-          Costing method
-          <select value={method} onChange={(e) => setMethod(e.target.value as CostMethod)}>
-            {COST_METHODS.map((m) => (
-              <option key={m} value={m}>
-                {m}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Currency
-          <input value={currency} maxLength={3} onChange={(e) => setCurrency(e.target.value.toUpperCase())} />
-        </label>
-        <label>
-          Unsettled issue fallback
-          <select value={fallback} onChange={(e) => setFallback(e.target.value as Fallback)}>
-            {FALLBACKS.map((f) => (
-              <option key={f} value={f}>
-                {f}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Standard unit cost
-          <input
-            value={standardUnitCost}
-            inputMode="decimal"
-            placeholder="Required for STANDARD"
-            onChange={(e) => setStandardUnitCost(e.target.value)}
-          />
-        </label>
-        <label>
-          Transactions (JSON)
-          <textarea rows={12} value={text} onChange={(e) => setText(e.target.value)} />
-        </label>
-        <button type="submit" disabled={busy}>
-          Preview settlement
-        </button>
-      </form>
-      {error && <p role="alert">{error}</p>}
-      {result && (
-        <div>
-          <h2>Issue costs</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>Issue</th>
-                <th>Cost ({result.currency})</th>
-              </tr>
-            </thead>
-            <tbody>
-              {Object.entries(result.issueCosts)
-                .sort(([a], [b]) => a.localeCompare(b))
-                .map(([issueId, cost]) => (
-                  <tr key={issueId}>
-                    <td>{issueId}</td>
-                    <td>{cost}</td>
-                  </tr>
-                ))}
-            </tbody>
-          </table>
-          <h2>Settlements</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>Seq</th>
-                <th>Issue</th>
-                <th>Receipt</th>
-                <th>Qty</th>
-                <th>Value</th>
-              </tr>
-            </thead>
-            <tbody>
-              {result.settlements.map((s) => (
-                <tr key={`${s.seq}-${s.issueId}-${s.receiptId ?? ""}`}>
-                  <td>{s.seq}</td>
-                  <td>{s.issueId}</td>
-                  <td>{s.receiptId ?? s.pool ?? ""}</td>
-                  <td>{s.qty}</td>
-                  <td>{s.value}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <p>
-            Remaining quantity {result.remainingQty}, remaining value {result.remainingValue} {result.currency}.
-          </p>
-          {result.exceptions.length > 0 && (
-            <>
-              <h2>Exceptions</h2>
-              <p>Quantity no receipt covered, valued at the fallback until a later receipt settles it.</p>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Issue</th>
-                    <th>Qty</th>
-                    <th>Value</th>
-                    <th>Fallback</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {result.exceptions.map((x) => (
-                    <tr key={x.issueId}>
-                      <td>{x.issueId}</td>
-                      <td>{x.qty}</td>
-                      <td>{x.value}</td>
-                      <td>{x.fallback}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </>
-          )}
-        </div>
+    <div className={styles.stack}>
+      <PageHeader
+        title="Settlement preview"
+        description="Value issues against receipts under a costing method, with marking and split valuation types, without posting anything."
+      />
+      <Card>
+        <form className={styles.form} onSubmit={onSubmit} noValidate>
+          <MethodField id="settle-method" value={method} onChange={setMethod} />
+          <FormField id="settle-currency" label="Currency">
+            {(c) => <Input {...c} value={currency} maxLength={3} onChange={(e) => setCurrency(e.target.value.toUpperCase())} />}
+          </FormField>
+          <FallbackField id="settle-fallback" value={fallback} onChange={setFallback} />
+          <FormField id="settle-standard" label="Standard unit cost" optional hint="Required for STANDARD and the STANDARD fallback.">
+            {(c) => <Input {...c} value={standardUnitCost} inputMode="decimal" onChange={(e) => setStandardUnitCost(e.target.value)} />}
+          </FormField>
+          <FormField id="settle-default-type" label="Default valuation type" optional hint="Used for untyped receipts and issues of a split-valued product.">
+            {(c) => <Input {...c} value={defaultType} maxLength={64} onChange={(e) => setDefaultType(e.target.value)} />}
+          </FormField>
+          <div className={styles.wide}>
+            <TransactionsField id="settle-transactions" value={text} error={jsonError} onChange={setText} />
+          </div>
+          <div className={styles.formActions}>
+            <Button type="submit" variant="primary" loading={busy}>
+              Preview settlement
+            </Button>
+          </div>
+        </form>
+      </Card>
+      {error ? (
+        <Alert tone="danger" title="The preview failed" live="alert">
+          {error}
+        </Alert>
+      ) : null}
+      {result ? (
+        <>
+          <StatGroup label="Settlement totals">
+            <StatTile label="Remaining quantity" value={result.remainingQty} />
+            <StatTile label="Remaining value" value={`${result.remainingValue} ${result.currency}`} />
+            <StatTile label="Exceptions" value={result.exceptions.length} tone="warning" />
+          </StatGroup>
+          <Card title="Issue costs">
+            <DataTable
+              label="Issue costs"
+              columns={issueColumns(result.currency)}
+              rows={toRows(result.issueCosts)}
+              getRowKey={(r) => r.key}
+              empty={{ title: "No issues to cost", description: "Add an ISSUE transaction to see its cost." }}
+            />
+          </Card>
+          <Card title="Settlements">
+            <DataTable
+              label="Settlements"
+              columns={settlementColumns}
+              rows={result.settlements}
+              getRowKey={(s) => `${s.seq}-${s.issueId}`}
+              empty={{ title: "No settlements", description: "No receipt or pool settled an issue in this run." }}
+            />
+          </Card>
+          {result.remainingByValuationType ? (
+            <Card title="Remaining value by valuation type">
+              <DataTable label="Remaining value by valuation type" columns={typeColumns(result.currency)} rows={toRows(result.remainingByValuationType)} getRowKey={(r) => r.key} />
+            </Card>
+          ) : null}
+          {result.exceptions.length > 0 ? (
+            <Card title="Exceptions">
+              <div className={styles.stack}>
+                <p className={styles.note}>Quantity no receipt covered, valued at the fallback until a later receipt settles it.</p>
+                <DataTable label="Exceptions" columns={exceptionColumns} rows={result.exceptions} getRowKey={(x) => x.issueId} />
+              </div>
+            </Card>
+          ) : null}
+        </>
+      ) : (
+        <Card>
+          <EmptyState icon="box" title="No preview run yet" description="Run a preview to see what each issue costs and which receipts it settled against." />
+        </Card>
       )}
-    </section>
+    </div>
   );
 }
 

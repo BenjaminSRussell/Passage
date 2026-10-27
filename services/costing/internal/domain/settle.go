@@ -34,6 +34,12 @@ type Txn struct {
 	Value         decimal.Decimal
 	FinancialDate time.Time
 	PhysicalDate  time.Time
+	// ValuationType is the split/batch valuation type (FR-20.16); empty when the
+	// product is not split valued.
+	ValuationType string
+	// MarkedReceiptID, set on an issue, names the receipt the issue settles
+	// against first (FR-20.8), under every method except STANDARD.
+	MarkedReceiptID string
 }
 
 // Options configures one settlement run.
@@ -117,7 +123,13 @@ func Settle(txns []Txn, opt Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	if err := validateMarks(seq); err != nil {
+		return Result{}, err
+	}
 	e := &engine{opt: opt, res: Result{IssueCosts: map[string]decimal.Decimal{}}}
+	if opt.Method != Standard {
+		e.planMarks(seq)
+	}
 	switch opt.Method {
 	case FIFO, LIFO, LIFODate:
 		e.layered(seq)
@@ -127,6 +139,33 @@ func Settle(txns []Txn, opt Options) (Result, error) {
 		e.running(seq)
 	}
 	return e.res, nil
+}
+
+// validateMarks checks that every mark is on an issue and names a receipt of
+// the same run that is not dated after the issue.
+func validateMarks(seq []Txn) error {
+	receipts := map[string]Txn{}
+	for _, t := range seq {
+		if t.Kind == Receipt {
+			receipts[t.ID] = t
+		}
+	}
+	for _, t := range seq {
+		if t.MarkedReceiptID == "" {
+			continue
+		}
+		if t.Kind != Issue {
+			return &Error{CodeInvalidTxn, "receipt " + t.ID + " cannot mark another receipt; only an issue carries a mark"}
+		}
+		r, ok := receipts[t.MarkedReceiptID]
+		if !ok {
+			return &Error{CodeInvalidTxn, "issue " + t.ID + " marks " + t.MarkedReceiptID + ", which is not a receipt of this run"}
+		}
+		if r.FinancialDate.After(t.FinancialDate) {
+			return &Error{CodeInvalidTxn, "issue " + t.ID + " marks receipt " + r.ID + " dated after the issue"}
+		}
+	}
+	return nil
 }
 
 func orderTxns(txns []Txn) ([]Txn, error) {
@@ -175,6 +214,101 @@ type engine struct {
 	// settles them first (BR-20.3); what is left at the end is an exception.
 	backlog  []*shortage
 	lastUnit decimal.Decimal
+	// Marking (FR-20.8): marks maps a marked issue to the quantity it reserves
+	// on its receipt, reserveQty is the total reserved per receipt, reserved
+	// holds the part carved from a receipt once it enters the engine, and
+	// waiting holds marked issues sequenced before their (same-day) receipt.
+	marks      map[string]mark
+	reserveQty map[string]decimal.Decimal
+	reserved   map[string]*reservation
+	waiting    map[string][]Txn
+}
+
+// mark is the part of a marked issue that its receipt covers.
+type mark struct {
+	receiptID string
+	qty       decimal.Decimal
+}
+
+// reservation is the part of a receipt held for the issues that mark it.
+type reservation struct {
+	qty, value, unit decimal.Decimal
+}
+
+// planMarks reserves, in settlement order, each marked issue's quantity on its
+// receipt, up to what the receipt holds. Marked pairs settle before any
+// unmarked issue or earlier shortage can consume the receipt, whatever the
+// method (FR-20.8); the part of a marked issue the receipt cannot cover is
+// costed by the method like any other issue.
+func (e *engine) planMarks(seq []Txn) {
+	receiptQty := map[string]decimal.Decimal{}
+	for _, t := range seq {
+		if t.Kind == Receipt {
+			receiptQty[t.ID] = t.Qty
+		}
+	}
+	e.marks, e.reserveQty = map[string]mark{}, map[string]decimal.Decimal{}
+	e.reserved, e.waiting = map[string]*reservation{}, map[string][]Txn{}
+	for _, t := range seq {
+		if t.Kind != Issue || t.MarkedReceiptID == "" {
+			continue
+		}
+		free := receiptQty[t.MarkedReceiptID].Sub(e.reserveQty[t.MarkedReceiptID])
+		if take := decimal.Min(t.Qty, free); take.IsPositive() {
+			e.marks[t.ID] = mark{receiptID: t.MarkedReceiptID, qty: take}
+			e.reserveQty[t.MarkedReceiptID] = e.reserveQty[t.MarkedReceiptID].Add(take)
+		}
+	}
+}
+
+// carve holds back the reserved part of a receipt as it enters the engine,
+// settles any marked issue already waiting for it, and returns the free
+// quantity and value left for the method.
+func (e *engine) carve(t Txn) (decimal.Decimal, decimal.Decimal) {
+	rq := e.reserveQty[t.ID]
+	if !rq.IsPositive() {
+		return t.Qty, t.Value
+	}
+	unit := t.Value.Div(t.Qty)
+	rv := t.Value
+	if !rq.Equal(t.Qty) {
+		rv = e.round(rq.Mul(unit))
+	}
+	e.reserved[t.ID] = &reservation{qty: rq, value: rv, unit: unit}
+	for _, issue := range e.waiting[t.ID] {
+		e.takeReserved(issue, e.marks[issue.ID])
+	}
+	delete(e.waiting, t.ID)
+	return t.Qty.Sub(rq), t.Value.Sub(rv)
+}
+
+// marked settles the marked part of an issue against its receipt's
+// reservation, or queues it when the receipt has not entered the engine yet,
+// and returns the quantity the method still has to cost.
+func (e *engine) marked(t Txn) decimal.Decimal {
+	m, ok := e.marks[t.ID]
+	if !ok {
+		return t.Qty
+	}
+	if _, in := e.reserved[m.receiptID]; in {
+		e.takeReserved(t, m)
+	} else {
+		e.waiting[m.receiptID] = append(e.waiting[m.receiptID], t)
+	}
+	return t.Qty.Sub(m.qty)
+}
+
+// takeReserved settles one marked issue against its receipt's reservation. The
+// last issue to take from a reservation carries its remaining value, so the
+// settlements of a receipt still sum to its value (BR-20.4).
+func (e *engine) takeReserved(issue Txn, m mark) {
+	r := e.reserved[m.receiptID]
+	value := r.value
+	if !m.qty.Equal(r.qty) {
+		value = e.round(m.qty.Mul(r.unit))
+	}
+	r.qty, r.value = r.qty.Sub(m.qty), r.value.Sub(value)
+	e.settle(issue, m.receiptID, "", m.qty, value)
 }
 
 func (e *engine) round(d decimal.Decimal) decimal.Decimal { return d.RoundBank(e.opt.Scale) }
@@ -263,8 +397,9 @@ func (e *engine) layered(seq []Txn) {
 	var all, open []*layer
 	stockQty, stockVal := decimal.Zero, decimal.Zero
 	push := func(t Txn) {
-		l := &layer{txn: t, qty: t.Qty, value: t.Value, unit: t.Value.Div(t.Qty)}
+		l := &layer{txn: t, unit: t.Value.Div(t.Qty)}
 		all = append(all, l)
+		l.qty, l.value = e.carve(t)
 		l.qty, l.value = e.absorb(t.ID, "", l.qty, l.value)
 		if l.qty.IsPositive() {
 			open = append(open, l)
@@ -293,7 +428,7 @@ func (e *engine) layered(seq []Txn) {
 			continue
 		}
 		unit := e.fallbackUnit(stockQty, stockVal)
-		need := t.Qty
+		need := e.marked(t)
 		for need.IsPositive() && len(open) > 0 {
 			idx := len(open) - 1
 			if e.opt.Method == FIFO {
@@ -310,11 +445,7 @@ func (e *engine) layered(seq []Txn) {
 			e.settle(t, l.txn.ID, "", take, value)
 			need = need.Sub(take)
 			if !l.qty.IsPositive() {
-				if idx == 0 {
-					open = open[1:]
-				} else {
-					open = open[:idx]
-				}
+				open = slices.Delete(open, idx, idx+1)
 			}
 		}
 		e.short(t, need, unit)
@@ -340,17 +471,21 @@ func (e *engine) running(seq []Txn) {
 	onQty, onVal := decimal.Zero, decimal.Zero
 	for _, t := range seq {
 		if t.Kind == Receipt {
-			value := t.Value
+			qty, value := t.Qty, t.Value
 			if fixed {
 				value = e.round(t.Qty.Mul(e.opt.Standard))
 			}
 			e.lastUnit = value.Div(t.Qty)
-			q, v := e.absorb(t.ID, pool, t.Qty, value)
+			if !fixed {
+				qty, value = e.carve(t)
+			}
+			q, v := e.absorb(t.ID, pool, qty, value)
 			onQty, onVal = onQty.Add(q), onVal.Add(v)
 			continue
 		}
 		unit := e.fallbackUnit(onQty, onVal)
-		take := decimal.Min(t.Qty, onQty)
+		need := e.marked(t)
+		take := decimal.Min(need, onQty)
 		if take.IsPositive() {
 			var value decimal.Decimal
 			switch {
@@ -364,7 +499,7 @@ func (e *engine) running(seq []Txn) {
 			onQty, onVal = onQty.Sub(take), onVal.Sub(value)
 			e.settle(t, "", pool, take, value)
 		}
-		e.short(t, t.Qty.Sub(take), unit)
+		e.short(t, need.Sub(take), unit)
 	}
 	e.finish()
 	e.res.RemainingQty, e.res.RemainingValue = onQty, onVal
@@ -376,26 +511,30 @@ func (e *engine) running(seq []Txn) {
 // earlier month settle first at the new month's average; issues in the month
 // settle at that average wherever they fall in the month.
 func (e *engine) periodic(seq []Txn) {
-	recQty, recVal := map[string]decimal.Decimal{}, map[string]decimal.Decimal{}
-	for _, t := range seq {
-		if t.Kind == Receipt {
-			k := periodKey(t)
-			recQty[k], recVal[k] = recQty[k].Add(t.Qty), recVal[k].Add(t.Value)
-		}
-	}
 	curKey := ""
 	availQty, availVal := decimal.Zero, decimal.Zero
-	for _, t := range seq {
+	for i, t := range seq {
 		if k := periodKey(t); k != curKey {
 			curKey = k
-			availQty, availVal = e.absorb("", "AVG:"+k, availQty.Add(recQty[k]), availVal.Add(recVal[k]))
+			recQty, recVal := decimal.Zero, decimal.Zero
+			for _, r := range seq[i:] {
+				if periodKey(r) != k {
+					break
+				}
+				if r.Kind == Receipt {
+					q, v := e.carve(r)
+					recQty, recVal = recQty.Add(q), recVal.Add(v)
+				}
+			}
+			availQty, availVal = e.absorb("", "AVG:"+k, availQty.Add(recQty), availVal.Add(recVal))
 		}
 		if t.Kind == Receipt {
 			e.lastUnit = t.Value.Div(t.Qty)
 			continue
 		}
 		unit := e.fallbackUnit(availQty, availVal)
-		take := decimal.Min(t.Qty, availQty)
+		need := e.marked(t)
+		take := decimal.Min(need, availQty)
 		if take.IsPositive() {
 			value := availVal
 			if !take.Equal(availQty) {
@@ -404,7 +543,7 @@ func (e *engine) periodic(seq []Txn) {
 			availQty, availVal = availQty.Sub(take), availVal.Sub(value)
 			e.settle(t, "", "AVG:"+curKey, take, value)
 		}
-		e.short(t, t.Qty.Sub(take), unit)
+		e.short(t, need.Sub(take), unit)
 	}
 	e.finish()
 	e.res.RemainingQty, e.res.RemainingValue = availQty, availVal

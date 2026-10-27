@@ -1,10 +1,40 @@
 # costing
 
-Passage inventory costing service: wave 20 (ticket PSG-20, "Inventory Costing & Supplier Collaboration"), **slice 1**.
+Passage inventory costing service: wave 20 (ticket PSG-20, "Inventory Costing & Supplier Collaboration"), **slices 1 and 2**.
 
 The service owns its tables and applies its own migrations (`migrations/0001_costing.sql`) through
 `dbx.Migrate`. The PRD places them in schema `costing` of `inventory-db` (`inventory/v20.*`); that
 placement is a deploy decision recorded as a handoff in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
+
+## What slice 2 adds
+
+- **Marking** (FR-20.8): an issue names the receipt it settles against first (`markedReceiptId`).
+  The marked quantity is reserved on the receipt when it enters the engine, so no unmarked issue or
+  earlier shortage consumes it, and the marked part settles at that receipt's own cost under every
+  method except STANDARD (where every unit costs the standard). Under the average methods the
+  reserved part leaves the pool. A marked issue sequenced before its same-day receipt waits for it.
+  A mark on a receipt, an unknown receipt or a receipt dated after the issue is refused with `CST-TXN-001`.
+- **Split valuation** (FR-20.16, `internal/domain/valuation.go`): stock is kept per valuation type
+  (`valuationType` on each transaction, optional `defaultValuationType` on the request). Each type
+  is its own cost pool. In a split product every receipt needs a type (its own or the default). An
+  untyped issue takes the type of the receipt it marks, else the default, else the only type holding
+  stock; it is refused with `CST-VAL-001` when several hold stock. `CanChangeCategory` refuses a category change while stock
+  exists (`CST-VAL-002`). The settlement preview returns `remainingByValuationType` when types are used.
+- **Parallel valuation ledgers** (FR-20.15, BR-20.13, `internal/domain/ledger.go`):
+  `POST /v1/costing/valuation-ledgers:preview` settles one transaction sequence under several
+  ledgers, each with its own method, currency and rate. Exactly one ledger is primary with rate 1.
+  Receipt values convert at the ledger rate and round to its scale. Nothing is posted.
+- **Inventory aging** (FR-20.17, BR-20.15, `internal/domain/aging.go`):
+  `POST /v1/costing/aging:preview` buckets remaining cost by calendar days since receipt. Default
+  buckets are 0–30, 31–90, 91–180, 181–365 and > 365; `bucketBounds` overrides them. For the average
+  methods the ages come from FIFO layers, repriced to the average, so `tiesToRemaining` is true.
+  A split product is aged per valuation type (each at its own average) and the response adds
+  `valuationTypes`. Transactions dated after `asOf` are refused.
+
+- **Web screens** (`apps/web/src/modules/costing`): the settlement preview now takes a default
+  valuation type and shows remaining value by type; new pages at `/costing/valuation-ledgers`
+  (ledger editor, per-ledger results and issue costs side by side) and `/costing/aging` (buckets,
+  tie-out to the remaining value, and aging per valuation type).
 
 ## What slice 1 does
 
@@ -26,7 +56,7 @@ placement is a deploy decision recorded as a handoff in [NOT-IMPLEMENTED.md](NOT
   tenant RLS and the legal-entity scope policy (`migrations/0001_costing.sql`).
 - **PPV hook** `POST /internal/v1/costing/ppv` (calculation only; persisting `CostTransaction` is
   a later slice).
-- Web module `apps/web/src/modules/costing`: settlement preview page.
+- Web module `apps/web/src/modules/costing`: settlement preview page (slice 2 adds the valuation ledger and aging screens).
 
 Everything else in the ticket is listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
 
@@ -72,6 +102,9 @@ PASSAGE_TEST_DATABASE_URL=postgres://admin@... PASSAGE_TEST_APP_DATABASE_URL=pos
 | `CST-TXN-001` | 422 | Invalid settlement input (a non-positive quantity, or `STANDARD` without a positive standard unit cost) |
 | `CST-TXN-002` | 422 | Duplicate transaction id in one preview |
 | `CST-PPV-001` | 422 | PPV inputs invalid (quantity not positive or a negative unit price) |
+| `CST-VAL-001` | 422 | An untyped issue must name a valuation type because several types hold stock |
+| `CST-VAL-002` | 422 | A valuation category cannot change while the product holds stock (domain guard; no endpoint changes a category yet) |
+| `CST-VLG-001` | 422 | Valuation ledger set invalid (no or two primaries, duplicate id, non-positive rate, primary rate not 1) |
 | `CST-VER-CODE-DUPLICATE` | 409 | A costing version with this code already exists for the legal entity |
 | `CST-VER-NOT-FOUND` | 404 | Costing version not found in this tenant |
 | `CST-VER-NOT-DRAFT` | 409 | Item costs can only be imported into a DRAFT version |
@@ -83,7 +116,7 @@ PASSAGE_TEST_DATABASE_URL=postgres://admin@... PASSAGE_TEST_APP_DATABASE_URL=pos
 
 | Duty | Routes | PRD duty (§3.20.17) |
 |---|---|---|
-| `costing.read` | `POST /v1/costing/settlements:preview` | CostingInquire |
+| `costing.read` | `POST /v1/costing/settlements:preview`, `POST /v1/costing/valuation-ledgers:preview`, `POST /v1/costing/aging:preview` | CostingInquire |
 | `costing.version.write` | `POST /v1/costing/versions`, `POST /v1/costing/versions/{id}/item-costs:import` | CostingVersionMaintain |
 | `costing.ppv.post` | `POST /internal/v1/costing/ppv` | service account of receiving and payables |
 

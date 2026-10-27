@@ -14,6 +14,15 @@ describe("costing module", () => {
     expect(costing.nav.every((n) => n.to.startsWith("/costing"))).toBe(true);
   });
 
+  it("routes every nav entry, each behind costing.read", () => {
+    const paths = costing.routes.map((r) => r.path);
+    expect(costing.nav.map((n) => n.to)).toEqual(["/costing", "/costing/valuation-ledgers", "/costing/aging"]);
+    for (const n of costing.nav) {
+      expect(paths).toContain(n.to);
+      expect(n.duty).toBe("costing.read");
+    }
+  });
+
   it("is auto-discovered by the registry", () => {
     expect(loadModules().map((m) => m.id)).toContain("costing");
   });

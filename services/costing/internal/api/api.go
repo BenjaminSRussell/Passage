@@ -36,6 +36,7 @@ const (
 	maxImportItems    = 50000
 	maxTxns           = 20000
 	maxIdempotencyKey = 255
+	maxValuationType  = 64
 )
 
 var (
@@ -66,6 +67,8 @@ func New(s store.Store) *API { return &API{store: s} }
 func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
 	r.With(authz.RequireDuty(dutyRead)).Post("/v1/costing/settlements:preview", a.previewSettlements)
+	r.With(authz.RequireDuty(dutyRead)).Post("/v1/costing/valuation-ledgers:preview", a.previewValuationLedgers)
+	r.With(authz.RequireDuty(dutyRead)).Post("/v1/costing/aging:preview", a.previewAging)
 	r.With(authz.RequireDuty(dutyVersionWrite)).Post("/v1/costing/versions", a.createVersion)
 	r.With(authz.RequireDuty(dutyVersionWrite)).Post("/v1/costing/versions/{id}/item-costs:import", a.importItemCosts)
 	r.With(authz.RequireDuty(dutyPPVPost)).Post("/internal/v1/costing/ppv", a.postPPV)
@@ -123,21 +126,26 @@ func (a *API) fail(w http.ResponseWriter, r *http.Request, op string, err error)
 
 // ---- settlement preview ----
 
+// transactionDTO: valuationType names the split valuation type (FR-20.16);
+// markedReceiptId, on an ISSUE, names the receipt to settle against first (FR-20.8).
 type transactionDTO struct {
-	ID            string  `json:"id"`
-	Kind          string  `json:"kind"`
-	Qty           string  `json:"qty"`
-	Value         *string `json:"value"`
-	FinancialDate string  `json:"financialDate"`
-	PhysicalDate  *string `json:"physicalDate"`
+	ID              string  `json:"id"`
+	Kind            string  `json:"kind"`
+	Qty             string  `json:"qty"`
+	Value           *string `json:"value"`
+	FinancialDate   string  `json:"financialDate"`
+	PhysicalDate    *string `json:"physicalDate"`
+	ValuationType   string  `json:"valuationType,omitempty"`
+	MarkedReceiptID string  `json:"markedReceiptId,omitempty"`
 }
 
 type settlePreviewRequest struct {
-	Method           string           `json:"method"`
-	Currency         string           `json:"currency"`
-	Fallback         string           `json:"fallback"`
-	StandardUnitCost *string          `json:"standardUnitCost"`
-	Transactions     []transactionDTO `json:"transactions"`
+	Method               string           `json:"method"`
+	Currency             string           `json:"currency"`
+	Fallback             string           `json:"fallback"`
+	StandardUnitCost     *string          `json:"standardUnitCost"`
+	DefaultValuationType string           `json:"defaultValuationType,omitempty"`
+	Transactions         []transactionDTO `json:"transactions"`
 }
 
 type settlementDTO struct {
@@ -156,14 +164,16 @@ type exceptionDTO struct {
 	Fallback string `json:"fallback"`
 }
 
+// settlePreviewResponse: remainingByValuationType is set when stock is split by valuation type (FR-20.16).
 type settlePreviewResponse struct {
-	Method         string            `json:"method"`
-	Currency       string            `json:"currency"`
-	IssueCosts     map[string]string `json:"issueCosts"`
-	Settlements    []settlementDTO   `json:"settlements"`
-	Exceptions     []exceptionDTO    `json:"exceptions"`
-	RemainingQty   string            `json:"remainingQty"`
-	RemainingValue string            `json:"remainingValue"`
+	Method          string            `json:"method"`
+	Currency        string            `json:"currency"`
+	IssueCosts      map[string]string `json:"issueCosts"`
+	Settlements     []settlementDTO   `json:"settlements"`
+	Exceptions      []exceptionDTO    `json:"exceptions"`
+	RemainingQty    string            `json:"remainingQty"`
+	RemainingValue  string            `json:"remainingValue"`
+	RemainingByType map[string]string `json:"remainingByValuationType,omitempty"`
 }
 
 // parseDecimal reads a decimal string, recording a field error when it is not
@@ -211,20 +221,64 @@ func (a *API) previewSettlements(w http.ResponseWriter, r *http.Request) {
 	if !fallbacks[req.Fallback] {
 		fields["fallback"] = "must be RUNNING_AVG, STANDARD or LAST_RECEIPT"
 	}
+	if len(req.DefaultValuationType) > maxValuationType {
+		fields["defaultValuationType"] = fmt.Sprintf("must be at most %d characters", maxValuationType)
+	}
 	opt := domain.Options{Method: domain.Method(req.Method), Scale: money.MinorUnits(req.Currency), Fallback: domain.Fallback(req.Fallback)}
 	if req.StandardUnitCost != nil {
 		opt.Standard = parseDecimal(fields, "standardUnitCost", *req.StandardUnitCost, true)
 	}
-	txns := make([]domain.Txn, 0, len(req.Transactions))
-	for i, t := range req.Transactions {
+	txns := parseTransactions(fields, req.Transactions)
+	if len(fields) > 0 {
+		validationFailed(w, r, fields)
+		return
+	}
+	res, perType, err := domain.SettleByValuationType(txns, opt, req.DefaultValuationType)
+	if err != nil {
+		a.fail(w, r, "settle", err)
+		return
+	}
+	a.previews.Add(1)
+	out := settlePreview(res, req.Method, req.Currency, int(opt.Scale))
+	if namedTypes(perType) {
+		out.RemainingByType = map[string]string{}
+		for vt, pr := range perType {
+			out.RemainingByType[vt] = pr.RemainingValue.StringFixed(opt.Scale)
+		}
+	}
+	httpx.JSON(w, http.StatusOK, out)
+}
+
+// namedTypes reports whether any partition is a real valuation type rather than
+// the unsplit product.
+func namedTypes(perType map[string]domain.Result) bool {
+	for vt := range perType {
+		if vt != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// parseTransactions validates the transaction DTOs into domain transactions,
+// recording field errors in fields.
+func parseTransactions(fields map[string]string, dtos []transactionDTO) []domain.Txn {
+	txns := make([]domain.Txn, 0, len(dtos))
+	for i, t := range dtos {
 		key := fmt.Sprintf("transactions[%d]", i)
 		kind, ok := txnKinds[t.Kind]
 		if !ok {
 			fields[key+".kind"] = "must be RECEIPT or ISSUE"
 		}
-		txn := domain.Txn{ID: t.ID, Kind: kind}
+		txn := domain.Txn{ID: t.ID, Kind: kind, ValuationType: t.ValuationType, MarkedReceiptID: t.MarkedReceiptID}
 		if t.ID == "" {
 			fields[key+".id"] = "is required"
+		}
+		if t.MarkedReceiptID != "" && kind != domain.Issue {
+			fields[key+".markedReceiptId"] = "is only allowed on an ISSUE"
+		}
+		if len(t.ValuationType) > maxValuationType {
+			fields[key+".valuationType"] = fmt.Sprintf("must be at most %d characters", maxValuationType)
 		}
 		txn.Qty = parseDecimal(fields, key+".qty", t.Qty, false)
 		txn.FinancialDate = parseDate(fields, key+".financialDate", t.FinancialDate)
@@ -241,17 +295,7 @@ func (a *API) previewSettlements(w http.ResponseWriter, r *http.Request) {
 		}
 		txns = append(txns, txn)
 	}
-	if len(fields) > 0 {
-		validationFailed(w, r, fields)
-		return
-	}
-	res, err := domain.Settle(txns, opt)
-	if err != nil {
-		a.fail(w, r, "settle", err)
-		return
-	}
-	a.previews.Add(1)
-	httpx.JSON(w, http.StatusOK, settlePreview(res, req.Method, req.Currency, int(opt.Scale)))
+	return txns
 }
 
 func settlePreview(res domain.Result, method, currency string, scale int) settlePreviewResponse {
