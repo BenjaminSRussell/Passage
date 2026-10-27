@@ -1,0 +1,34 @@
+export const dash = "—";
+
+export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Decimal with up to 6 places, as the service accepts (never parsed to float). */
+export const DECIMAL = /^\d+(\.\d{1,6})?$/;
+
+/** The first block of an id, enough to tell rows apart on screen. */
+export function shortId(id: string): string {
+  return id.split("-")[0] ?? id;
+}
+
+/** "BALANCE_PACKING_SLIP" → "Balance packing slip". */
+export function sentence(value: string): string {
+  const words = value.replace(/[_-]+/g, " ").toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/** "1234.5" + "USD" → "1234.5 USD"; amounts stay decimal strings. */
+export function money(amount: string | undefined, currency: string): string {
+  return amount === undefined || amount === "" ? dash : `${amount} ${currency}`;
+}
+
+/** "2026-10-26 08:00 UTC". */
+export function formatDateTime(iso?: string | null): string {
+  if (!iso) return dash;
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? iso : `${date.toISOString().slice(0, 16).replace("T", " ")} UTC`;
+}
+
+/** Today's UTC date as YYYY-MM-DD. */
+export function today(now: Date = new Date()): string {
+  return now.toISOString().slice(0, 10);
+}

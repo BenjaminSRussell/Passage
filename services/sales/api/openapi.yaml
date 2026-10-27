@@ -1,0 +1,508 @@
+openapi: 3.1.0
+info:
+  title: Passage Sales
+  version: 1.0.0
+  description: >-
+    Sales orders, ATP promise checks, credit profiles and order holds (wave 27,
+    slice 1). Every operation carries x-passage-duty. Errors are RFC 9457
+    application/problem+json with a stable code listed in the service README.
+servers:
+  - url: https://api.{env}.passage.dev
+    variables:
+      env:
+        default: dev
+paths:
+  /readyz:
+    get:
+      summary: Readiness (Postgres reachable within 500 ms)
+      operationId: ready
+      x-passage-duty: none
+      responses:
+        "200":
+          description: ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: {type: string, enum: [ready]}
+        "503":
+          $ref: "#/components/responses/Problem"
+  /v1/sales/orders:
+    get:
+      summary: List orders, newest first (Sales orders list; hold=CREDIT is the credit release queue)
+      operationId: listOrders
+      x-passage-duty: sales.order.read
+      parameters:
+        - {name: status, in: query, schema: {type: string, enum: [DRAFT, OPEN, CONFIRMED, PARTIALLY_SHIPPED, SHIPPED, INVOICED, CLOSED, CANCELLED]}}
+        - {name: customerId, in: query, schema: {type: string, format: uuid}}
+        - {name: hold, in: query, description: only orders with an ACTIVE hold of this type, schema: {type: string, enum: [CREDIT, FRAUD, MANUAL, PRICE_REVIEW]}}
+        - {name: cursor, in: query, description: nextCursor of the previous page, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      responses:
+        "200":
+          description: one page of orders
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/OrderSummary"}
+                  nextCursor: {type: string, format: uuid}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+    post:
+      summary: Create an order (UI or channel intake)
+      operationId: createOrder
+      x-passage-duty: sales.order.write | sales.channel.intake
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateOrderRequest"
+      responses:
+        "201":
+          description: created; ETag carries the version
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Order"}
+        "200":
+          description: idempotent replay or (channel, externalRef) duplicate with the same body; returns the original order
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Order"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/sales/orders/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      summary: Read an order with lines and holds
+      operationId: getOrder
+      x-passage-duty: sales.order.read
+      responses:
+        "200":
+          description: the order
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Order"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/sales/orders/{id}:confirm:
+    post:
+      summary: Confirm an order (runs the credit check; a failing check places a CREDIT hold)
+      operationId: confirmOrder
+      x-passage-duty: sales.order.confirm
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: outcome; confirmed=false means the credit check failed and a CREDIT hold is now ACTIVE (creditCheck lists every rule)
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ConfirmResult"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422":
+          description: SLS-0019 the order is not DRAFT or OPEN; SLS-0005 an ACTIVE CREDIT hold blocks confirmation; SLS-0021 an ACTIVE FRAUD hold blocks it
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+  /v1/sales/orders/{id}/holds/{holdId}:release:
+    post:
+      summary: >-
+        Release an ACTIVE hold. CREDIT holds need sales.credit.release, other types
+        sales.order.hold; the user who applied the hold may not release it. Releasing
+        the CREDIT hold of an unconfirmed order confirms it when no other hold blocks
+        confirmation (confirmed=true).
+      operationId: releaseHold
+      x-passage-duty: sales.credit.release | sales.order.hold
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: holdId, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: the order after release, and whether the release confirmed it
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ConfirmResult"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422":
+          description: SLS-0022 the hold is not ACTIVE
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+  /v1/sales/atp:check:
+    post:
+      summary: Stateless ATP promise check over caller-supplied buckets (BR-27.1)
+      operationId: atpCheck
+      x-passage-duty: sales.order.read
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/AtpCheckRequest"}
+      responses:
+        "200":
+          description: promise, echoed buckets and cumulative ATP
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AtpCheckResponse"}
+        "400": {$ref: "#/components/responses/Problem"}
+  /v1/sales/credit-profiles:
+    get:
+      summary: List credit profiles of one legal entity, or of every legal entity in the caller's scope
+      operationId: listCreditProfiles
+      x-passage-duty: sales.order.read
+      parameters:
+        - {name: legalEntityId, in: query, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      responses:
+        "200":
+          description: profiles ordered by legal entity and customer
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/CreditProfile"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+  /v1/sales/credit-profiles/{customerId}:
+    parameters:
+      - {name: customerId, in: path, required: true, schema: {type: string, format: uuid}}
+      - $ref: "#/components/parameters/LegalEntityQuery"
+    get:
+      summary: Read the customer's credit profile in one legal entity
+      operationId: getCreditProfile
+      x-passage-duty: sales.order.read
+      responses:
+        "200":
+          description: the profile
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CreditProfile"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+    put:
+      summary: Replace the credit profile (If-Match carries the current ETag; a new profile uses "0")
+      operationId: putCreditProfile
+      x-passage-duty: sales.credit.maintain
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CreditProfileRequest"}
+      responses:
+        "200":
+          description: saved profile
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CreditProfile"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+components:
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: {type: string, maxLength: 255}
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: The ETag of the version being changed, for example "3".
+      schema: {type: string}
+    LegalEntityQuery:
+      name: legalEntityId
+      in: query
+      required: false
+      description: >-
+        The legal entity the profile belongs to. Defaults to the caller's legal entity
+        (gateway header X-Passage-Legal-Entity); a caller scoped to one legal entity
+        may not name another (403). Required when the caller has no legal entity.
+      schema: {type: string, format: uuid}
+  headers:
+    ETag:
+      description: Strong ETag of the versioned resource.
+      schema: {type: string}
+  responses:
+    Problem:
+      description: RFC 9457 problem details
+      content:
+        application/problem+json:
+          schema: {$ref: "#/components/schemas/Problem"}
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties:
+        type: {type: string, format: uri, example: "https://passage.dev/problems/SLS-0005"}
+        title: {type: string}
+        status: {type: integer}
+        detail: {type: string}
+        instance: {type: string}
+        code: {type: string}
+        serviceCode: {type: string, example: SLS-0005}
+        traceId: {type: string}
+        errors:
+          type: object
+          additionalProperties: {type: string}
+    Money:
+      type: string
+      description: Decimal string at 6 places (never float).
+      pattern: "^-?[0-9]+(\\.[0-9]+)?$"
+    CreateOrderRequest:
+      type: object
+      required: [legalEntityId, customerId, invoiceAccountId, currency, requestedShipDate, lines]
+      properties:
+        legalEntityId: {type: string, format: uuid}
+        customerId: {type: string, format: uuid}
+        invoiceAccountId: {type: string, format: uuid}
+        orderType: {type: string, enum: [JOURNAL, ORDER, SUBSCRIPTION, RETURNED], default: ORDER}
+        currency: {type: string, pattern: "^[A-Z]{3}$"}
+        requestedShipDate: {type: string, format: date}
+        channel: {type: string, pattern: "^[A-Za-z0-9_-]{1,40}$", default: UI}
+        externalRef: {type: string, minLength: 1, maxLength: 100}
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 2000
+          items: {$ref: "#/components/schemas/OrderLineRequest"}
+    OrderLineRequest:
+      type: object
+      required: [productId, quantity, unit, siteId, warehouseId, unitPrice, requestedShipDate]
+      properties:
+        productId: {type: string, format: uuid}
+        quantity: {$ref: "#/components/schemas/Money"}
+        unit: {type: string, minLength: 1, maxLength: 10}
+        siteId: {type: string, format: uuid}
+        warehouseId: {type: string, format: uuid}
+        unitPrice: {$ref: "#/components/schemas/Money"}
+        discPct: {$ref: "#/components/schemas/Money"}
+        requestedShipDate: {type: string, format: date}
+    Order:
+      type: object
+      required: [id, legalEntityId, orderNumber, customerId, invoiceAccountId, orderType, status, currency, version, lines, holds]
+      properties:
+        id: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        orderNumber: {type: string, example: "SO-0000001", description: unique per legal entity}
+        customerId: {type: string, format: uuid}
+        invoiceAccountId: {type: string, format: uuid}
+        orderType: {type: string, enum: [JOURNAL, ORDER, SUBSCRIPTION, RETURNED]}
+        status: {type: string, enum: [DRAFT, OPEN, CONFIRMED, PARTIALLY_SHIPPED, SHIPPED, INVOICED, CLOSED, CANCELLED]}
+        currency: {type: string}
+        requestedShipDate: {type: string, format: date}
+        channel: {type: string}
+        externalRef: {type: string}
+        netTotal: {$ref: "#/components/schemas/Money"}
+        version: {type: integer, minimum: 0}
+        creditCheck: {$ref: "#/components/schemas/CreditEvaluation"}
+        lines:
+          type: array
+          items: {$ref: "#/components/schemas/OrderLine"}
+        holds:
+          type: array
+          items: {$ref: "#/components/schemas/Hold"}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    OrderLine:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        lineNo: {type: integer}
+        productId: {type: string, format: uuid}
+        quantity: {$ref: "#/components/schemas/Money"}
+        unit: {type: string}
+        siteId: {type: string, format: uuid}
+        warehouseId: {type: string, format: uuid}
+        unitPrice: {$ref: "#/components/schemas/Money"}
+        discPct: {$ref: "#/components/schemas/Money"}
+        lineNet: {$ref: "#/components/schemas/Money"}
+        requestedShipDate: {type: string, format: date}
+        confirmedShipDate: {type: string, format: date}
+        lineStatus: {type: string, enum: [OPEN, RESERVED, PICKED, DELIVERED, INVOICED, CANCELLED]}
+    Hold:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        holdType: {type: string, enum: [CREDIT, FRAUD, MANUAL, PRICE_REVIEW]}
+        reasonCode: {type: string}
+        status: {type: string, enum: [ACTIVE, RELEASED]}
+        orderAmount: {$ref: "#/components/schemas/Money"}
+        appliedBy: {type: string}
+        releasedBy: {type: string}
+        releasedUntil: {type: string, format: date-time}
+        appliedAt: {type: string, format: date-time}
+    AtpPeriod:
+      type: object
+      required: [date, supply, demand]
+      properties:
+        date: {type: string, format: date}
+        supply: {$ref: "#/components/schemas/Money"}
+        demand: {$ref: "#/components/schemas/Money"}
+    AtpCheckRequest:
+      type: object
+      required: [requested, quantity, periods]
+      properties:
+        requested: {type: string, format: date}
+        quantity: {$ref: "#/components/schemas/Money"}
+        completeOnly: {type: boolean, default: false}
+        periods:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items: {$ref: "#/components/schemas/AtpPeriod"}
+    AtpCheckResponse:
+      type: object
+      properties:
+        promise:
+          type: object
+          properties:
+            promisedDate: {type: string, format: date, description: absent when nothing could be placed; never before the requested date}
+            complete: {type: boolean}
+            backorder: {$ref: "#/components/schemas/Money"}
+            source: {type: string, enum: [ATP]}
+            schedule:
+              type: array
+              items:
+                type: object
+                properties:
+                  date: {type: string, format: date}
+                  quantity: {$ref: "#/components/schemas/Money"}
+                  period: {type: integer}
+        periods:
+          type: array
+          items: {$ref: "#/components/schemas/AtpPeriod"}
+        cumulative:
+          type: array
+          items: {$ref: "#/components/schemas/Money"}
+    CreditProfile:
+      type: object
+      required: [legalEntityId, customerId, limit, currency, limitType, version]
+      properties:
+        legalEntityId: {type: string, format: uuid}
+        customerId: {type: string, format: uuid}
+        limit: {$ref: "#/components/schemas/Money"}
+        currency: {type: string}
+        limitType: {type: string, enum: [NONE, BALANCE, BALANCE_PACKING_SLIP, BALANCE_ALL]}
+        tolerancePct: {$ref: "#/components/schemas/Money"}
+        toleranceAmount: {$ref: "#/components/schemas/Money"}
+        oldestItemDaysMax: {type: integer}
+        maxDunningLevel: {type: integer, minimum: 0, maximum: 9}
+        reviewDate: {type: string, format: date}
+        customerSince: {type: string, format: date}
+        mandatoryCheck: {type: boolean}
+        exposure: {$ref: "#/components/schemas/Exposure"}
+        version: {type: integer}
+        updatedAt: {type: string, format: date-time}
+    CreditProfileRequest:
+      type: object
+      required: [limit, currency, limitType]
+      properties:
+        limit: {$ref: "#/components/schemas/Money"}
+        currency: {type: string, pattern: "^[A-Z]{3}$"}
+        limitType: {type: string, enum: [NONE, BALANCE, BALANCE_PACKING_SLIP, BALANCE_ALL]}
+        tolerancePct: {$ref: "#/components/schemas/Money"}
+        toleranceAmount: {$ref: "#/components/schemas/Money"}
+        oldestItemDaysMax: {type: integer, minimum: 0}
+        maxDunningLevel: {type: integer, minimum: 0, maximum: 9}
+        reviewDate: {type: string, format: date}
+        customerSince: {type: string, format: date}
+        mandatoryCheck: {type: boolean}
+        exposure: {$ref: "#/components/schemas/Exposure"}
+    Exposure:
+      type: object
+      description: >-
+        The customer's open position in the profile currency, supplied with the profile
+        until the receivables projection exists (waves 29/30). Amounts are non-negative;
+        unapplied cash lowers the balance.
+      properties:
+        openAr: {$ref: "#/components/schemas/Money"}
+        unapplied: {$ref: "#/components/schemas/Money"}
+        deliveredNotInvoiced: {$ref: "#/components/schemas/Money"}
+        openOrders: {$ref: "#/components/schemas/Money"}
+        overdueAr: {$ref: "#/components/schemas/Money"}
+        oldestItemDays: {type: integer, minimum: 0}
+        dunningLevel: {type: integer, minimum: 0}
+    CreditEvaluation:
+      type: object
+      description: Every BR-27.3 rule evaluated at the last confirm, with value and threshold.
+      properties:
+        outcome: {type: string, enum: [PASS, WARN, FAIL]}
+        rules:
+          type: array
+          items:
+            type: object
+            required: [id, result]
+            properties:
+              id: {type: string, enum: [CR-1, CR-2, CR-3, CR-4, CR-5, CR-6]}
+              result: {type: string, enum: [PASS, WARN, FAIL]}
+              value: {type: string}
+              threshold: {type: string}
+              note: {type: string}
+    ConfirmResult:
+      allOf:
+        - {$ref: "#/components/schemas/Order"}
+        - type: object
+          required: [confirmed]
+          properties:
+            confirmed: {type: boolean}
+    OrderSummary:
+      type: object
+      required: [id, legalEntityId, orderNumber, customerId, orderType, status, currency, netTotal, lineCount, activeHolds, version]
+      properties:
+        id: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        orderNumber: {type: string}
+        customerId: {type: string, format: uuid}
+        orderType: {type: string, enum: [JOURNAL, ORDER, SUBSCRIPTION, RETURNED]}
+        status: {type: string}
+        currency: {type: string}
+        requestedShipDate: {type: string, format: date}
+        channel: {type: string}
+        externalRef: {type: string}
+        netTotal: {$ref: "#/components/schemas/Money"}
+        lineCount: {type: integer}
+        activeHolds:
+          type: array
+          items: {type: string, enum: [CREDIT, FRAUD, MANUAL, PRICE_REVIEW]}
+        version: {type: integer}
+        createdAt: {type: string, format: date-time}

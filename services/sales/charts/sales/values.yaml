@@ -1,0 +1,44 @@
+image:
+  repository: ghcr.io/benjaminsrussell/passage-sales
+  # Stage and prod pin the digest (cosign-signed) through Argo CD; the tag is for dev.
+  tag: "0.1.0"
+  digest: ""
+  pullPolicy: IfNotPresent
+
+replicaCount: 3
+
+serviceName: sales
+
+config:
+  passageEnv: dev
+  httpAddr: ":8080"
+  adminAddr: ":9090"
+  migrateOnStart: "false"
+
+# DATABASE_URL is read from this secret (Vault via External Secrets), never inline.
+databaseSecret:
+  name: passage-sales-db
+  key: url
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+serviceMonitor:
+  enabled: false
+  interval: 30s
+
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]

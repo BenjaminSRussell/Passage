@@ -1,0 +1,191 @@
+package domain
+
+import (
+	"time"
+
+	"github.com/shopspring/decimal"
+)
+
+// Credit limit types (credit_profile.limit_type).
+const (
+	LimitNone               = "NONE"
+	LimitBalance            = "BALANCE"
+	LimitBalancePackingSlip = "BALANCE_PACKING_SLIP"
+	LimitBalanceAll         = "BALANCE_ALL"
+)
+
+// Rule outcomes. FAIL places a CREDIT hold; WARN is shown only (BR-27.3).
+const (
+	RulePass = "PASS"
+	RuleWarn = "WARN"
+	RuleFail = "FAIL"
+)
+
+const youngCustomerDays = 90
+
+// youngCustomerThreshold is the CR-6 order amount limit per currency. Currencies
+// without an entry do not apply CR-6 until FX rules are wired in (wave 12).
+var youngCustomerThreshold = map[string]decimal.Decimal{
+	"USD": decimal.NewFromInt(50000),
+	"EUR": decimal.NewFromInt(45000),
+}
+
+// CreditProfile is the per-customer, per-entity credit configuration (FR-27.7).
+type CreditProfile struct {
+	Limit             decimal.Decimal `json:"limit"`
+	Currency          string          `json:"currency"`
+	LimitType         string          `json:"limitType"`
+	TolerancePct      decimal.Decimal `json:"tolerancePct"`
+	ToleranceAmount   decimal.Decimal `json:"toleranceAmount"`
+	OldestItemDaysMax int             `json:"oldestItemDaysMax"`
+	MaxDunningLevel   int             `json:"maxDunningLevel"`
+	ReviewDate        *time.Time      `json:"reviewDate,omitempty"`
+	CustomerSince     *time.Time      `json:"customerSince,omitempty"`
+	MandatoryCheck    bool            `json:"mandatoryCheck"`
+}
+
+// Exposure is the customer's open position in the profile currency. Until the
+// receivables projection exists (waves 29/30) it is supplied with the profile.
+// Every amount is non-negative; Unapplied is cash received but not yet applied.
+type Exposure struct {
+	OpenAR               decimal.Decimal `json:"openAr"`
+	Unapplied            decimal.Decimal `json:"unapplied"`
+	DeliveredNotInvoiced decimal.Decimal `json:"deliveredNotInvoiced"`
+	OpenOrders           decimal.Decimal `json:"openOrders"`
+	OverdueAR            decimal.Decimal `json:"overdueAr"`
+	OldestItemDays       int             `json:"oldestItemDays"`
+	DunningLevel         int             `json:"dunningLevel"`
+}
+
+// CreditInput is everything one credit check needs. Profile is nil when the
+// customer has no profile for the entity. Order is the order amount in
+// OrderCurrency.
+type CreditInput struct {
+	Profile         *CreditProfile
+	EntityMandatory bool
+	Exposure        Exposure
+	Order           decimal.Decimal
+	OrderCurrency   string
+	AsOf            time.Time
+}
+
+// RuleResult is one evaluated rule with the value compared and its threshold.
+// Note explains a result that is not a plain comparison.
+type RuleResult struct {
+	ID        string `json:"id"`
+	Result    string `json:"result"`
+	Value     string `json:"value"`
+	Threshold string `json:"threshold"`
+	Note      string `json:"note,omitempty"`
+}
+
+// CreditEvaluation lists every rule that applied and the overall outcome.
+type CreditEvaluation struct {
+	Rules   []RuleResult `json:"rules"`
+	Outcome string       `json:"outcome"`
+}
+
+// dateOf truncates an instant to its UTC date.
+func dateOf(t time.Time) time.Time {
+	y, m, d := t.UTC().Date()
+	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+}
+
+// EvaluateCredit applies rules CR-1..CR-6 of BR-27.3 and records every rule it
+// evaluated. Any FAIL makes the outcome FAIL, otherwise any WARN makes it WARN.
+//
+// BR-27.3 converts the order amount to the profile currency at the wave 12
+// spot rate. Until that rate source is wired, an order in another currency
+// than the profile fails CR-1 with a note instead of being compared across
+// currencies, so a credit manager reviews it.
+func EvaluateCredit(in CreditInput) CreditEvaluation {
+	rules := []RuleResult{}
+	add := func(id, result string, value, threshold decimal.Decimal) {
+		rules = append(rules, RuleResult{ID: id, Result: result, Value: value.String(), Threshold: threshold.String()})
+	}
+	p := in.Profile
+	mandatory := in.EntityMandatory
+	if p != nil {
+		mandatory = p.MandatoryCheck
+	}
+	reviewPassed := p != nil && p.ReviewDate != nil && dateOf(*p.ReviewDate).Before(dateOf(in.AsOf))
+	if mandatory && (p == nil || reviewPassed) {
+		add("CR-4", RuleFail, decimal.Zero, decimal.Zero)
+	} else {
+		add("CR-4", RulePass, decimal.Zero, decimal.Zero)
+	}
+	if p == nil {
+		return finish(rules)
+	}
+	e := in.Exposure
+	foreign := in.OrderCurrency != "" && in.OrderCurrency != p.Currency
+	if p.LimitType != LimitNone && foreign {
+		rules = append(rules, RuleResult{ID: "CR-1", Result: RuleFail, Value: in.Order.String() + " " + in.OrderCurrency,
+			Threshold: p.Limit.String() + " " + p.Currency, Note: "order currency differs from the credit profile currency; no FX rate is available to convert it"})
+	} else if p.LimitType != LimitNone {
+		// Unapplied cash is a credit the customer already paid, so it lowers the
+		// balance (BR-27.3 "open AR + unapplied" with unapplied as a credit).
+		base := e.OpenAR.Sub(e.Unapplied)
+		if p.LimitType == LimitBalancePackingSlip || p.LimitType == LimitBalanceAll {
+			base = base.Add(e.DeliveredNotInvoiced)
+		}
+		if p.LimitType == LimitBalanceAll {
+			base = base.Add(e.OpenOrders)
+		}
+		exposure := base.Add(in.Order)
+		byPct := p.Limit.Mul(decimal.NewFromInt(100).Add(p.TolerancePct)).Div(decimal.NewFromInt(100))
+		byAmount := p.Limit.Add(p.ToleranceAmount)
+		threshold := decimal.Max(byPct, byAmount)
+		result := RulePass
+		switch {
+		case exposure.GreaterThan(threshold):
+			result = RuleFail
+		case exposure.GreaterThan(p.Limit):
+			result = RuleWarn
+		}
+		add("CR-1", result, exposure, threshold)
+	}
+	if e.OldestItemDays > p.OldestItemDaysMax {
+		add("CR-2", RuleFail, decimal.NewFromInt(int64(e.OldestItemDays)), decimal.NewFromInt(int64(p.OldestItemDaysMax)))
+	} else {
+		add("CR-2", RulePass, decimal.NewFromInt(int64(e.OldestItemDays)), decimal.NewFromInt(int64(p.OldestItemDaysMax)))
+	}
+	if e.DunningLevel >= p.MaxDunningLevel {
+		add("CR-3", RuleFail, decimal.NewFromInt(int64(e.DunningLevel)), decimal.NewFromInt(int64(p.MaxDunningLevel)))
+	} else {
+		add("CR-3", RulePass, decimal.NewFromInt(int64(e.DunningLevel)), decimal.NewFromInt(int64(p.MaxDunningLevel)))
+	}
+	quarter := e.OpenAR.Mul(decimal.New(25, -2))
+	if e.OverdueAR.IsPositive() && e.OverdueAR.GreaterThan(quarter) {
+		add("CR-5", RuleWarn, e.OverdueAR, quarter)
+	} else {
+		add("CR-5", RulePass, e.OverdueAR, quarter)
+	}
+	orderCurrency := in.OrderCurrency
+	if orderCurrency == "" {
+		orderCurrency = p.Currency
+	}
+	if p.CustomerSince != nil && in.AsOf.Sub(*p.CustomerSince) < youngCustomerDays*24*time.Hour {
+		if limit, ok := youngCustomerThreshold[orderCurrency]; ok {
+			result := RulePass
+			if in.Order.GreaterThan(limit) {
+				result = RuleFail
+			}
+			add("CR-6", result, in.Order, limit)
+		}
+	}
+	return finish(rules)
+}
+
+func finish(rules []RuleResult) CreditEvaluation {
+	outcome := RulePass
+	for _, r := range rules {
+		if r.Result == RuleFail {
+			return CreditEvaluation{Rules: rules, Outcome: RuleFail}
+		}
+		if r.Result == RuleWarn {
+			outcome = RuleWarn
+		}
+	}
+	return CreditEvaluation{Rules: rules, Outcome: outcome}
+}

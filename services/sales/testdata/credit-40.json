@@ -1,0 +1,976 @@
+[
+ {
+  "id": "credit-01",
+  "note": "AC-27.3: 8,500 AR + 2,000 = 10,500 is over the limit but inside both tolerances",
+  "profile": {
+   "limit": "10000",
+   "currency": "USD",
+   "limitType": "BALANCE",
+   "tolerancePct": "5",
+   "toleranceAmount": "1000",
+   "oldestItemDaysMax": 30,
+   "maxDunningLevel": 3,
+   "mandatoryCheck": false
+  },
+  "entityMandatory": false,
+  "exposure": {
+   "openAr": "8500"
+  },
+  "order": "2000",
+  "orderCurrency": "USD",
+  "asOf": "2027-03-01",
+  "expectOutcome": "WARN",
+  "expectRules": {
+   "CR-1": "WARN"
+  }
+ },
+ {
+  "id": "credit-02",
+  "note": "AC-27.3: 8,500 AR + 3,000 = 11,500 exceeds 10,500 and 11,000",
+  "profile": {
+   "limit": "10000",
+   "currency": "USD",
+   "limitType": "BALANCE",
+   "tolerancePct": "5",
+   "toleranceAmount": "1000",
+   "oldestItemDaysMax": 30,
+   "maxDunningLevel": 3,
+   "mandatoryCheck": false
+  },
+  "entityMandatory": false,
+  "exposure": {
+   "openAr": "8500"
+  },
+  "order": "3000",
+  "orderCurrency": "USD",
+  "asOf": "2027-03-01",
+  "expectOutcome": "FAIL",
+  "expectRules": {
+   "CR-1": "FAIL"
+  }
+ },
+ {
+  "id": "credit-03",
+  "note": "exposure equal to the higher threshold (11,000) only warns",
+  "profile": {
+   "limit": "10000",
+   "currency": "USD",
+   "limitType": "BALANCE",
+   "tolerancePct": "5",
+   "toleranceAmount": "1000",
+   "oldestItemDaysMax": 30,
+   "maxDunningLevel": 3,
+   "mandatoryCheck": false
+  },
+  "entityMandatory": false,
+  "exposure": {
+   "openAr": "8500"
+  },
+  "order": "2500",
+  "orderCurrency": "USD",
+  "asOf": "2027-03-01",
+  "expectOutcome": "WARN",
+  "expectRules": {
+   "CR-1": "WARN"
+  }
+ },
+ {
+  "id": "credit-04",
+  "note": "one cent over the higher threshold fails",
+  "profile": {
+   "limit": "10000",
+   "currency": "USD",
+   "limitType": "BALANCE",
+   "tolerancePct": "5",
+   "toleranceAmount": "1000",
+   "oldestItemDaysMax": 30,
+   "maxDunningLevel": 3,
+   "mandatoryCheck": false
+  },
+  "entityMandatory": false,
+  "exposure": {
+   "openAr": "8500"
+  },
+  "order": "2500.01",
+  "orderCurrency": "USD",
+  "asOf": "2027-03-01",
+  "expectOutcome": "FAIL",
+  "expectRules": {
+   "CR-1": "FAIL"
+  }
+ },
+ {
+  "id": "credit-05",
+  "note": "exposure equal to the limit passes",
+  "profile": {
+   "limit": "10000",
+   "currency": "USD",
+   "limitType": "BALANCE",
+   "tolerancePct": "5",
+   "toleranceAmount": "1000",
+   "oldestItemDaysMax": 30,
+   "maxDunningLevel": 3,
+   "mandatoryCheck": false
+  },
+  "entityMandatory": false,
+  "exposure": {
+   "openAr": "8000"
+  },
+  "order": "2000",
+  "orderCurrency": "USD",
+  "asOf": "2027-03-01",
+  "expectOutcome": "PASS",
+  "expectRules": {
+   "CR-1": "PASS"
+  }
+ },
+ {
+  "id": "credit-06",
+  "note": "just over the limit warns",
+  "profile": {
+   "limit": "10000",
+   "currency": "USD",
+   "limitType": "BALANCE",
+   "tolerancePct": "5",
+   "toleranceAmount": "1000",
+   "oldestItemDaysMax": 30,
+   "maxDunningLevel": 3,
+   "mandatoryCheck": false
+  },
+  "entityMandatory": false,
+  "exposure": {
+   "openAr": "8000"
+  },
+  "order": "2000.0001",
+  "orderCurrency": "USD",
+  "asOf": "2027-03-01",
+  "expectOutcome": "WARN",
+  "expectRules": {
+   "CR-1": "WARN"
+  }
+ },
+ {
+  "id": "credit-07",
+  "note": "20% tolerance: 11,500 exceeds the amount tolerance but not the percentage one",
+  "profile": {
+   "limit": "10000",
+   "currency": "USD",
+   "limitType": "BALANCE",
+   "tolerancePct": "20",
+   "toleranceAmount": "1000",
+   "oldestItemDaysMax": 30,
+   "maxDunningLevel": 3,
+   "mandatoryCheck": false
+  },
+  "entityMandatory": false,
+  "exposure": {
+   "openAr": "8500"
+  },
+  "order": "3000",
+  "orderCurrency": "USD",
+  "asOf": "2027-03-01",
+  "expectOutcome": "WARN",
+  "expectRules": {
+   "CR-1": "WARN"
+  }
+ },
+ {
+  "id": "credit-08",
+  "note": "20% tolerance: 12,100 exceeds both",
+  "profile": {
+   "limit": "10000",
+   "currency": "USD",
+   "limitType": "BALANCE",
+   "tolerancePct": "20",
+   "toleranceAmount": "1000",
+   "oldestItemDaysMax": 30,
+   "maxDunningLevel": 3,
+   "mandatoryCheck": false
+  },
+  "entityMandatory": false,
+  "exposure": {
+   "openAr": "8500"
+  },
+  "order": "3600",
+  "orderCurrency": "USD",
+  "asOf": "2027-03-01",
+  "expectOutcome": "FAIL",
+  "expectRules": {
+   "CR-1": "FAIL"
+  }
+ },
+ {
+  "id": "credit-09",
+  "note": "zero tolerances: exactly the limit passes",
+  "profile": {
+   "limit": "10000",
+   "currency": "USD",
+   "limitType": "BALANCE",
+   "tolerancePct": "0",
+   "toleranceAmount": "0",
+   "oldestItemDaysMax": 30,
+   "maxDunningLevel": 3,
+   "mandatoryCheck": false
+  },
+  "entityMandatory": false,
+  "exposure": {},
+  "order": "10000",
+  "orderCurrency": "USD",
+  "asOf": "2027-03-01",
+  "expectOutcome": "PASS",
+  "expectRules": {
+   "CR-1": "PASS"
+  }
+ },
+ {
+  "id": "credit-10",
+  "note": "zero tolerances: a cent over the limit fails",
+  "profile": {
+   "limit": "10000",
+   "currency": "USD",
+   "limitType": "BALANCE",
+   "tolerancePct": "0",
+   "toleranceAmount": "0",
+   "oldestItemDaysMax": 30,
+   "maxDunningLevel": 3,
+   "mandatoryCheck": false
+  },
+  "entityMandatory": false,
+  "exposure": {},
+  "order": "10000.01",
+  "orderCurrency": "USD",
+  "asOf": "2027-03-01",
+  "expectOutcome": "FAIL",
+  "expectRules": {
+   "CR-1": "FAIL"
+  }
+ },
+ {
+  "id": "credit-11",
+  "note": "unapplied cash reduces exposure: 9,000 - 500 + 2,400 = 10,900",
+  "profile": {
+   "limit": "10000",
+   "currency": "USD",
+   "limitType": "BALANCE",
+   "tolerancePct": "5",
+   "toleranceAmount": "1000",
+   "oldestItemDaysMax": 30,
+   "maxDunningLevel": 3,
+   "mandatoryCheck": false
+  },
+  "entityMandatory": false,
+  "exposure": {
+   "openAr": "9000",
+   "unapplied": "500"
+  },
+  "order": "2400",
+  "orderCurrency": "USD",
+  "asOf": "2027-03-01",
+  "expectOutcome": "WARN",
+  "expectRules": {
+   "CR-1": "WARN"
+  }
+ },
+ {
+  "id": "credit-12",
+  "note": "BALANCE_PACKING_SLIP adds delivered-not-invoiced: 8,500 + 2,000 + 1,000",
+  "profile": {
+   "limit": "10000",
+   "currency": "USD",
+   "limitType": "BALANCE_PACKING_SLIP",
+   "tolerancePct": "5",
+   "toleranceAmount": "1000",
+   "oldestItemDaysMax": 30,
+   "maxDunningLevel": 3,
+   "mandatoryCheck": false
+  },
+  "entityMandatory": false,
+  "exposure": {
+   "openAr": "8500",
+   "deliveredNotInvoiced": "2000"
+  },
+  "order": "1000",
+  "orderCurrency": "USD",
+  "asOf": "2027-03-01",
+  "expectOutcome": "FAIL",
+  "expectRules": {
+   "CR-1": "FAIL"
+  }
+ },
+ {
+  "id": "credit-13",
+  "note": "BALANCE_ALL adds open orders: 8,000 + 2,000 + 1,500",
+  "profile": {
+   "limit": "10000",
+   "currency": "USD",
+   "limitType": "BALANCE_ALL",
+   "tolerancePct": "5",
+   "toleranceAmount": "1000",
+   "oldestItemDaysMax": 30,
+   "maxDunningLevel": 3,
+   "mandatoryCheck": false
+  },
+  "entityMandatory": false,
+  "exposure": {
+   "openAr": "8000",
+   "openOrders": "2000"
+  },
+  "order": "1500",
+  "orderCurrency": "USD",
+  "asOf": "2027-03-01",
+  "expectOutcome": "FAIL",
+  "expectRules": {
+   "CR-1": "FAIL"
+  }
+ },
+ {
+  "id": "credit-14",
+  "note": "BALANCE ignores delivered-not-invoiced and open orders",
+  "profile": {
+   "limit": "10000",
+   "currency": "USD",
+   "limitType": "BALANCE",
+   "tolerancePct": "5",
+   "toleranceAmount": "1000",
+   "oldestItemDaysMax": 30,
+   "maxDunningLevel": 3,
+   "mandatoryCheck": false
+  },
+  "entityMandatory": false,
+  "exposure": {
+   "openAr": "5000",
+   "deliveredNotInvoiced": "9000",
+   "openOrders": "9000"
+  },
+  "order": "1000",
+  "orderCurrency": "USD",
+  "asOf": "2027-03-01",
+  "expectOutcome": "PASS",
+  "expectRules": {
+   "CR-1": "PASS"
+  }
+ },
+ {
+  "id": "credit-15",
+  "note": "limit type NONE skips CR-1",
+  "profile": {
+   "limit": "10000",
+   "currency": "USD",
+   "limitType": "NONE",
+   "tolerancePct": "5",
+   "toleranceAmount": "1000",
+   "oldestItemDaysMax": 30,
+   "maxDunningLevel": 3,
+   "mandatoryCheck": false
+  },
+  "entityMandatory": false,
+  "exposure": {
+   "openAr": "8500"
+  },
+  "order": "90000",
+  "orderCurrency": "USD",
+  "asOf": "2027-03-01",
+  "expectOutcome": "PASS",
+  "expectRules": {
+   "CR-1": null
+  }
+ },
+ {
+  "id": "credit-16",
+  "note": "CR-2 oldest item 31 days over a 30-day maximum fails",
+  "profile": {
+   "limit": "10000",
+   "currency": "USD",
+   "limitType": "BALANCE",
+   "tolerancePct": "5",
+   "toleranceAmount": "1000",
+   "oldestItemDaysMax": 30,
+   "maxDunningLevel": 3,
+   "mandatoryCheck": false
+  },
+  "entityMandatory": false,
+  "exposure": {
+   "oldestItemDays": 31
+  },
+  "order": "0",
+  "orderCurrency": "USD",
+  "asOf": "2027-03-01",
+  "expectOutcome": "FAIL",
+  "expectRules": {
+   "CR-2": "FAIL"
+  }
+ },
+ {
+  "id": "credit-17",
+  "note": "CR-2 oldest item at the maximum passes",
+  "profile": {
+   "limit": "10000",
+   "currency": "USD",
+   "limitType": "BALANCE",
+   "tolerancePct": "5",
+   "toleranceAmount": "1000",
+   "oldestItemDaysMax": 30,
+   "maxDunningLevel": 3,
+   "mandatoryCheck": false
+  },
+  "entityMandatory": false,
+  "exposure": {
+   "oldestItemDays": 30
+  },
+  "order": "0",
+  "orderCurrency": "USD",
+  "asOf": "2027-03-01",
+  "expectOutcome": "PASS",
+  "expectRules": {
+   "CR-2": "PASS"
+  }
+ },
+ {
+  "id": "credit-18",
+  "note": "CR-3 dunning level at the maximum fails",
+  "profile": {
+   "limit": "10000",
+   "currency": "USD",
+   "limitType": "BALANCE",
+   "tolerancePct": "5",
+   "toleranceAmount": "1000",
+   "oldestItemDaysMax": 30,
+   "maxDunningLevel": 3,
+   "mandatoryCheck": false
+  },
+  "entityMandatory": false,
+  "exposure": {
+   "dunningLevel": 3
+  },
+  "order": "0",
+  "orderCurrency": "USD",
+  "asOf": "2027-03-01",
+  "expectOutcome": "FAIL",
+  "expectRules": {
+   "CR-3": "FAIL"
+  }
+ },
+ {
+  "id": "credit-19",
+  "note": "CR-3 dunning level below the maximum passes",
+  "profile": {
+   "limit": "10000",
+   "currency": "USD",
+   "limitType": "BALANCE",
+   "tolerancePct": "5",
+   "toleranceAmount": "1000",
+   "oldestItemDaysMax": 30,
+   "maxDunningLevel": 3,
+   "mandatoryCheck": false
+  },
+  "entityMandatory": false,
+  "exposure": {
+   "dunningLevel": 2
+  },
+  "order": "0",
+  "orderCurrency": "USD",
+  "asOf": "2027-03-01",
+  "expectOutcome": "PASS",
+  "expectRules": {
+   "CR-3": "PASS"
+  }
+ },
+ {
+  "id": "credit-20",
+  "note": "CR-3 maximum 0 fails even at level 0",
+  "profile": {
+   "limit": "10000",
+   "currency": "USD",
+   "limitType": "BALANCE",
+   "tolerancePct": "5",
+   "toleranceAmount": "1000",
+   "oldestItemDaysMax": 30,
+   "maxDunningLevel": 0,
+   "mandatoryCheck": false
+  },
+  "entityMandatory": false,
+  "exposure": {},
+  "order": "0",
+  "orderCurrency": "USD",
+  "asOf": "2027-03-01",
+  "expectOutcome": "FAIL",
+  "expectRules": {
+   "CR-3": "FAIL"
+  }
+ },
+ {
+  "id": "credit-21",
+  "note": "CR-4 mandatory profile with a review date yesterday fails",
+  "profile": {
+   "limit": "10000",
+   "currency": "USD",
+   "limitType": "BALANCE",
+   "tolerancePct": "5",
+   "toleranceAmount": "1000",
+   "oldestItemDaysMax": 30,
+   "maxDunningLevel": 3,
+   "mandatoryCheck": true,
+   "reviewDate": "2027-02-28"
+  },
+  "entityMandatory": false,
+  "exposure": {},
+  "order": "0",
+  "orderCurrency": "USD",
+  "asOf": "2027-03-01",
+  "expectOutcome": "FAIL",
+  "expectRules": {
+   "CR-4": "FAIL"
+  }
+ },
+ {
+  "id": "credit-22",
+  "note": "CR-4 review date today has not passed",
+  "profile": {
+   "limit": "10000",
+   "currency": "USD",
+   "limitType": "BALANCE",
+   "tolerancePct": "5",
+   "toleranceAmount": "1000",
+   "oldestItemDaysMax": 30,
+   "maxDunningLevel": 3,
+   "mandatoryCheck": true,
+   "reviewDate": "2027-03-01"
+  },
+  "entityMandatory": false,
+  "exposure": {},
+  "order": "0",
+  "orderCurrency": "USD",
+  "asOf": "2027-03-01T18:30:00Z",
+  "expectOutcome": "PASS",
+  "expectRules": {
+   "CR-4": "PASS"
+  }
+ },
+ {
+  "id": "credit-23",
+  "note": "CR-4 missing profile with the entity's mandatory check fails",
+  "profile": null,
+  "entityMandatory": true,
+  "exposure": {},
+  "order": "10",
+  "orderCurrency": "USD",
+  "asOf": "2027-03-01",
+  "expectOutcome": "FAIL",
+  "expectRules": {
+   "CR-4": "FAIL"
+  }
+ },
+ {
+  "id": "credit-24",
+  "note": "CR-4 missing profile without a mandatory check passes and nothing else runs",
+  "profile": null,
+  "entityMandatory": false,
+  "exposure": {},
+  "order": "10",
+  "orderCurrency": "USD",
+  "asOf": "2027-03-01",
+  "expectOutcome": "PASS",
+  "expectRules": {
+   "CR-4": "PASS",
+   "CR-1": null,
+   "CR-2": null
+  }
+ },
+ {
+  "id": "credit-25",
+  "note": "CR-4 passed review date without a mandatory check passes",
+  "profile": {
+   "limit": "10000",
+   "currency": "USD",
+   "limitType": "BALANCE",
+   "tolerancePct": "5",
+   "toleranceAmount": "1000",
+   "oldestItemDaysMax": 30,
+   "maxDunningLevel": 3,
+   "mandatoryCheck": false,
+   "reviewDate": "2027-01-01"
+  },
+  "entityMandatory": false,
+  "exposure": {},
+  "order": "0",
+  "orderCurrency": "USD",
+  "asOf": "2027-03-01",
+  "expectOutcome": "PASS",
+  "expectRules": {
+   "CR-4": "PASS"
+  }
+ },
+ {
+  "id": "credit-26",
+  "note": "CR-5 overdue 300 of 1,000 open AR warns",
+  "profile": {
+   "limit": "10000",
+   "currency": "USD",
+   "limitType": "BALANCE",
+   "tolerancePct": "5",
+   "toleranceAmount": "1000",
+   "oldestItemDaysMax": 30,
+   "maxDunningLevel": 3,
+   "mandatoryCheck": false
+  },
+  "entityMandatory": false,
+  "exposure": {
+   "openAr": "1000",
+   "overdueAr": "300"
+  },
+  "order": "0",
+  "orderCurrency": "USD",
+  "asOf": "2027-03-01",
+  "expectOutcome": "WARN",
+  "expectRules": {
+   "CR-5": "WARN"
+  }
+ },
+ {
+  "id": "credit-27",
+  "note": "CR-5 overdue exactly 25% passes",
+  "profile": {
+   "limit": "10000",
+   "currency": "USD",
+   "limitType": "BALANCE",
+   "tolerancePct": "5",
+   "toleranceAmount": "1000",
+   "oldestItemDaysMax": 30,
+   "maxDunningLevel": 3,
+   "mandatoryCheck": false
+  },
+  "entityMandatory": false,
+  "exposure": {
+   "openAr": "1000",
+   "overdueAr": "250"
+  },
+  "order": "0",
+  "orderCurrency": "USD",
+  "asOf": "2027-03-01",
+  "expectOutcome": "PASS",
+  "expectRules": {
+   "CR-5": "PASS"
+  }
+ },
+ {
+  "id": "credit-28",
+  "note": "CR-5 nothing open passes",
+  "profile": {
+   "limit": "10000",
+   "currency": "USD",
+   "limitType": "BALANCE",
+   "tolerancePct": "5",
+   "toleranceAmount": "1000",
+   "oldestItemDaysMax": 30,
+   "maxDunningLevel": 3,
+   "mandatoryCheck": false
+  },
+  "entityMandatory": false,
+  "exposure": {},
+  "order": "0",
+  "orderCurrency": "USD",
+  "asOf": "2027-03-01",
+  "expectOutcome": "PASS",
+  "expectRules": {
+   "CR-5": "PASS"
+  }
+ },
+ {
+  "id": "credit-29",
+  "note": "CR-6 customer of 30 days ordering 50,001 USD fails",
+  "profile": {
+   "limit": "1000000",
+   "currency": "USD",
+   "limitType": "BALANCE",
+   "tolerancePct": "5",
+   "toleranceAmount": "1000",
+   "oldestItemDaysMax": 30,
+   "maxDunningLevel": 3,
+   "mandatoryCheck": false,
+   "customerSince": "2027-01-30"
+  },
+  "entityMandatory": false,
+  "exposure": {},
+  "order": "50001",
+  "orderCurrency": "USD",
+  "asOf": "2027-03-01",
+  "expectOutcome": "FAIL",
+  "expectRules": {
+   "CR-6": "FAIL"
+  }
+ },
+ {
+  "id": "credit-30",
+  "note": "CR-6 customer of 30 days ordering exactly 50,000 USD passes",
+  "profile": {
+   "limit": "1000000",
+   "currency": "USD",
+   "limitType": "BALANCE",
+   "tolerancePct": "5",
+   "toleranceAmount": "1000",
+   "oldestItemDaysMax": 30,
+   "maxDunningLevel": 3,
+   "mandatoryCheck": false,
+   "customerSince": "2027-01-30"
+  },
+  "entityMandatory": false,
+  "exposure": {},
+  "order": "50000",
+  "orderCurrency": "USD",
+  "asOf": "2027-03-01",
+  "expectOutcome": "PASS",
+  "expectRules": {
+   "CR-6": "PASS"
+  }
+ },
+ {
+  "id": "credit-31",
+  "note": "CR-6 EUR customer of 30 days ordering 45,001 EUR fails",
+  "profile": {
+   "limit": "1000000",
+   "currency": "EUR",
+   "limitType": "BALANCE",
+   "tolerancePct": "5",
+   "toleranceAmount": "1000",
+   "oldestItemDaysMax": 30,
+   "maxDunningLevel": 3,
+   "mandatoryCheck": false,
+   "customerSince": "2027-01-30"
+  },
+  "entityMandatory": false,
+  "exposure": {},
+  "order": "45001",
+  "orderCurrency": "EUR",
+  "asOf": "2027-03-01",
+  "expectOutcome": "FAIL",
+  "expectRules": {
+   "CR-6": "FAIL"
+  }
+ },
+ {
+  "id": "credit-32",
+  "note": "CR-6 does not apply at exactly 90 days",
+  "profile": {
+   "limit": "1000000",
+   "currency": "USD",
+   "limitType": "BALANCE",
+   "tolerancePct": "5",
+   "toleranceAmount": "1000",
+   "oldestItemDaysMax": 30,
+   "maxDunningLevel": 3,
+   "mandatoryCheck": false,
+   "customerSince": "2026-12-01"
+  },
+  "entityMandatory": false,
+  "exposure": {},
+  "order": "60000",
+  "orderCurrency": "USD",
+  "asOf": "2027-03-01",
+  "expectOutcome": "PASS",
+  "expectRules": {
+   "CR-6": null
+  }
+ },
+ {
+  "id": "credit-33",
+  "note": "CR-6 applies at 89 days",
+  "profile": {
+   "limit": "1000000",
+   "currency": "USD",
+   "limitType": "BALANCE",
+   "tolerancePct": "5",
+   "toleranceAmount": "1000",
+   "oldestItemDaysMax": 30,
+   "maxDunningLevel": 3,
+   "mandatoryCheck": false,
+   "customerSince": "2026-12-02"
+  },
+  "entityMandatory": false,
+  "exposure": {},
+  "order": "60000",
+  "orderCurrency": "USD",
+  "asOf": "2027-03-01",
+  "expectOutcome": "FAIL",
+  "expectRules": {
+   "CR-6": "FAIL"
+  }
+ },
+ {
+  "id": "credit-34",
+  "note": "CR-6 has no GBP threshold until FX is wired",
+  "profile": {
+   "limit": "1000000",
+   "currency": "GBP",
+   "limitType": "BALANCE",
+   "tolerancePct": "5",
+   "toleranceAmount": "1000",
+   "oldestItemDaysMax": 30,
+   "maxDunningLevel": 3,
+   "mandatoryCheck": false,
+   "customerSince": "2027-02-20"
+  },
+  "entityMandatory": false,
+  "exposure": {},
+  "order": "90000",
+  "orderCurrency": "GBP",
+  "asOf": "2027-03-01",
+  "expectOutcome": "PASS",
+  "expectRules": {
+   "CR-6": null
+  }
+ },
+ {
+  "id": "credit-35",
+  "note": "an order in another currency than the profile fails CR-1 for review",
+  "profile": {
+   "limit": "10000",
+   "currency": "USD",
+   "limitType": "BALANCE",
+   "tolerancePct": "5",
+   "toleranceAmount": "1000",
+   "oldestItemDaysMax": 30,
+   "maxDunningLevel": 3,
+   "mandatoryCheck": false
+  },
+  "entityMandatory": false,
+  "exposure": {},
+  "order": "100",
+  "orderCurrency": "EUR",
+  "asOf": "2027-03-01",
+  "expectOutcome": "FAIL",
+  "expectRules": {
+   "CR-1": "FAIL"
+  }
+ },
+ {
+  "id": "credit-36",
+  "note": "another currency with limit type NONE is not compared",
+  "profile": {
+   "limit": "10000",
+   "currency": "USD",
+   "limitType": "NONE",
+   "tolerancePct": "5",
+   "toleranceAmount": "1000",
+   "oldestItemDaysMax": 30,
+   "maxDunningLevel": 3,
+   "mandatoryCheck": false
+  },
+  "entityMandatory": false,
+  "exposure": {},
+  "order": "100",
+  "orderCurrency": "EUR",
+  "asOf": "2027-03-01",
+  "expectOutcome": "PASS",
+  "expectRules": {
+   "CR-1": null
+  }
+ },
+ {
+  "id": "credit-37",
+  "note": "CR-1 and CR-5 warnings combine to WARN",
+  "profile": {
+   "limit": "10000",
+   "currency": "USD",
+   "limitType": "BALANCE",
+   "tolerancePct": "5",
+   "toleranceAmount": "1000",
+   "oldestItemDaysMax": 30,
+   "maxDunningLevel": 3,
+   "mandatoryCheck": false
+  },
+  "entityMandatory": false,
+  "exposure": {
+   "openAr": "8500",
+   "overdueAr": "3000"
+  },
+  "order": "2000",
+  "orderCurrency": "USD",
+  "asOf": "2027-03-01",
+  "expectOutcome": "WARN",
+  "expectRules": {
+   "CR-1": "WARN",
+   "CR-5": "WARN"
+  }
+ },
+ {
+  "id": "credit-38",
+  "note": "a warning and a failure combine to FAIL",
+  "profile": {
+   "limit": "10000",
+   "currency": "USD",
+   "limitType": "BALANCE",
+   "tolerancePct": "5",
+   "toleranceAmount": "1000",
+   "oldestItemDaysMax": 30,
+   "maxDunningLevel": 3,
+   "mandatoryCheck": false
+  },
+  "entityMandatory": false,
+  "exposure": {
+   "openAr": "8500",
+   "oldestItemDays": 45
+  },
+  "order": "2000",
+  "orderCurrency": "USD",
+  "asOf": "2027-03-01",
+  "expectOutcome": "FAIL",
+  "expectRules": {
+   "CR-1": "WARN",
+   "CR-2": "FAIL"
+  }
+ },
+ {
+  "id": "credit-39",
+  "note": "decimal exposure on the threshold: 8,500.50 + 2,499.50 = 11,000",
+  "profile": {
+   "limit": "10000",
+   "currency": "USD",
+   "limitType": "BALANCE",
+   "tolerancePct": "5",
+   "toleranceAmount": "1000",
+   "oldestItemDaysMax": 30,
+   "maxDunningLevel": 3,
+   "mandatoryCheck": false
+  },
+  "entityMandatory": false,
+  "exposure": {
+   "openAr": "8500.50"
+  },
+  "order": "2499.50",
+  "orderCurrency": "USD",
+  "asOf": "2027-03-01",
+  "expectOutcome": "WARN",
+  "expectRules": {
+   "CR-1": "WARN"
+  }
+ },
+ {
+  "id": "credit-40",
+  "note": "a clean customer passes every rule",
+  "profile": {
+   "limit": "10000",
+   "currency": "USD",
+   "limitType": "BALANCE",
+   "tolerancePct": "5",
+   "toleranceAmount": "1000",
+   "oldestItemDaysMax": 30,
+   "maxDunningLevel": 3,
+   "mandatoryCheck": false
+  },
+  "entityMandatory": false,
+  "exposure": {
+   "openAr": "1000"
+  },
+  "order": "500",
+  "orderCurrency": "USD",
+  "asOf": "2027-03-01",
+  "expectOutcome": "PASS",
+  "expectRules": {
+   "CR-1": "PASS",
+   "CR-2": "PASS",
+   "CR-3": "PASS",
+   "CR-4": "PASS",
+   "CR-5": "PASS"
+  }
+ }
+]
