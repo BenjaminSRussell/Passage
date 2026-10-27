@@ -32,11 +32,17 @@ type fakeStore struct {
 	decisions   map[string]domain.Decision
 	batches     map[string]bool
 	recordCalls int
+	lists       []domain.ComplianceList
+	comps       map[string]domain.Composition
+	evals       map[string][]domain.ComplianceResult
+	studies     map[string]domain.Study
+	obs         map[string][]domain.Observation
 }
 
 func newFake() *fakeStore {
 	return &fakeStore{groups: map[string]domain.TestGroup{}, instruments: map[string]domain.Instrument{},
-		orders: map[string]domain.Order{}, results: map[string][]domain.Result{}, decisions: map[string]domain.Decision{}, batches: map[string]bool{}}
+		orders: map[string]domain.Order{}, results: map[string][]domain.Result{}, decisions: map[string]domain.Decision{}, batches: map[string]bool{},
+		comps: map[string]domain.Composition{}, evals: map[string][]domain.ComplianceResult{}, studies: map[string]domain.Study{}, obs: map[string][]domain.Observation{}}
 }
 
 func (f *fakeStore) Ping(context.Context) error { return nil }

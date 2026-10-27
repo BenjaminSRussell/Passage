@@ -1,5 +1,5 @@
 import type { BadgeTone } from "../../shell/ui";
-import type { CalibrationStatus, DecisionKind, OrderStatus, SamplingPlan, Trigger } from "./api/client";
+import type { CalibrationStatus, DecisionKind, OrderStatus, PullStatus, SamplingPlan, StudyStatus, Trigger } from "./api/client";
 
 export const dash = "—";
 
@@ -11,8 +11,24 @@ export const DECIMAL = /^\d{1,12}(\.\d{1,6})?$/;
 /** A signed decimal string for variable results and limits. */
 export const SIGNED_DECIMAL = /^-?\d{1,12}(\.\d{1,6})?$/;
 
-/** Instrument and test group codes (service pattern). */
+/** Instrument, test group and compliance list codes (service pattern). */
 export const CODE = /^[A-Z0-9][A-Z0-9_-]{1,31}$/;
+
+/** Region codes: a country (DE), a subdivision (US-CA) or a region group (EU). */
+export const REGION = /^[A-Z][A-Z0-9-]{1,9}$/;
+
+/**
+ * A CAS registry number whose check digit is right: the digits before it, weighted
+ * 1, 2, 3, ... from the right, sum to the check digit modulo 10 (7439-92-1 is lead).
+ */
+export function validCAS(cas: string): boolean {
+  const m = /^(\d{2,7})-(\d{2})-(\d)$/.exec(cas);
+  if (!m) return false;
+  const body = m[1] + m[2];
+  let sum = 0;
+  for (let i = 0; i < body.length; i++) sum += Number(body[body.length - 1 - i]) * (i + 1);
+  return sum % 10 === Number(m[3]);
+}
 
 /** "2026-10-26 08:00 UTC". */
 export function formatDateTime(iso?: string | null): string {
@@ -96,3 +112,19 @@ export function pickFields<K extends string>(fields: Record<string, string>, nam
   }
   return out;
 }
+
+export const STUDY_STATUS_LABELS: Record<StudyStatus, { label: string; tone: BadgeTone }> = {
+  PLANNED: { label: "Planned", tone: "neutral" },
+  ACTIVE: { label: "Active", tone: "info" },
+  COMPLETED: { label: "Completed", tone: "success" },
+  TERMINATED: { label: "Terminated", tone: "warning" },
+};
+
+export const STUDY_STATUSES = Object.keys(STUDY_STATUS_LABELS) as StudyStatus[];
+
+export const PULL_STATUS_LABELS: Record<PullStatus, { label: string; tone: BadgeTone }> = {
+  PLANNED: { label: "Planned", tone: "neutral" },
+  ORDERED: { label: "Order created", tone: "info" },
+  PULLED: { label: "Pulled", tone: "success" },
+  MISSED: { label: "Missed", tone: "danger" },
+};

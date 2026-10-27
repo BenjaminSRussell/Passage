@@ -48,6 +48,8 @@ type API struct {
 	resultsRecorded  atomic.Int64
 	decisionsPosted  atomic.Int64
 	instrumentRefuse atomic.Int64
+	evaluations      atomic.Int64
+	studiesCreated   atomic.Int64
 }
 
 // New returns the API over s.
@@ -70,6 +72,15 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/quality/quality-orders/{id}", a.getOrder)
 	r.With(authz.RequireDuty(dutyResults)).Post("/v1/quality/quality-orders/{id}/results", a.recordResults)
 	r.With(authz.RequireDuty(dutyDecision)).Post("/v1/quality/quality-orders/{id}:usage-decision", a.postDecision)
+	r.With(authz.RequireDuty(dutyCompliance)).Post("/v1/quality/compliance-lists", a.createComplianceList)
+	r.With(authz.RequireDuty(dutyView)).Get("/v1/quality/compliance-lists", a.listComplianceLists)
+	r.With(authz.RequireDuty(dutyCompliance)).Post("/v1/quality/items/{id}/composition", a.saveComposition)
+	r.With(authz.RequireDuty(dutyView)).Get("/v1/quality/items/{id}/composition", a.getComposition)
+	r.With(authz.RequireDuty(dutyView)).Post("/v1/quality/items/{id}:evaluate-compliance", a.evaluateCompliance)
+	r.With(authz.RequireDuty(dutyStability)).Post("/v1/quality/stability-studies", a.createStudy)
+	r.With(authz.RequireDuty(dutyView)).Get("/v1/quality/stability-studies", a.listStudies)
+	r.With(authz.RequireDuty(dutyView)).Get("/v1/quality/stability-studies/{id}", a.getStudy)
+	r.With(authz.RequireDuty(dutyView)).Get("/v1/quality/spc", a.spcChart)
 }
 
 // Metrics serves the admin port's Prometheus text output.
@@ -80,6 +91,8 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP quality_result_batches_total Result batches recorded.\n# TYPE quality_result_batches_total counter\nquality_result_batches_total %d\n", a.resultsRecorded.Load())
 		fmt.Fprintf(w, "# HELP quality_usage_decisions_total Usage decisions posted.\n# TYPE quality_usage_decisions_total counter\nquality_usage_decisions_total %d\n", a.decisionsPosted.Load())
 		fmt.Fprintf(w, "# HELP quality_instrument_refusals_total Result batches refused for an unknown or overdue instrument.\n# TYPE quality_instrument_refusals_total counter\nquality_instrument_refusals_total %d\n", a.instrumentRefuse.Load())
+		fmt.Fprintf(w, "# HELP quality_compliance_evaluations_total Item compliance evaluations run.\n# TYPE quality_compliance_evaluations_total counter\nquality_compliance_evaluations_total %d\n", a.evaluations.Load())
+		fmt.Fprintf(w, "# HELP quality_stability_studies_created_total Stability studies created; idempotent replays are not counted.\n# TYPE quality_stability_studies_created_total counter\nquality_stability_studies_created_total %d\n", a.studiesCreated.Load())
 	})
 }
 
@@ -888,9 +901,10 @@ func httpStatus(code string) int {
 	switch code {
 	case domain.CodeValidation:
 		return http.StatusBadRequest
-	case domain.CodeTestGroupMissing, domain.CodeOrderMissing, domain.CodeInstrumentMissing:
+	case domain.CodeTestGroupMissing, domain.CodeOrderMissing, domain.CodeInstrumentMissing, domain.CodeStudyMissing, domain.CodeCompositionMissing:
 		return http.StatusNotFound
-	case domain.CodeClosed, domain.CodeResultDuplicate, domain.CodeInstrumentDupe, domain.CodeStatus, domain.CodeSourceLineDupe:
+	case domain.CodeClosed, domain.CodeResultDuplicate, domain.CodeInstrumentDupe, domain.CodeStatus, domain.CodeSourceLineDupe,
+		domain.CodeListRace, domain.CodeCompositionRace, domain.CodeStudyRace:
 		return http.StatusConflict
 	}
 	return http.StatusUnprocessableEntity

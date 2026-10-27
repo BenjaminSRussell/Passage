@@ -116,3 +116,45 @@
   padding: 0;
   list-style: none;
 }
+
+.chart {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.chartSvg {
+  inline-size: 100%;
+  block-size: auto;
+  max-block-size: 16rem;
+}
+
+.chartSeries {
+  fill: none;
+  stroke: var(--color-accent);
+  stroke-width: 2;
+}
+
+.chartCentre {
+  fill: none;
+  stroke: var(--color-text-muted);
+  stroke-width: 1;
+}
+
+.chartLimit {
+  fill: none;
+  stroke: var(--color-danger);
+  stroke-width: 1;
+  stroke-dasharray: 6 4;
+}
+
+.chartPoint {
+  fill: var(--color-accent);
+}
+
+.chartFlag {
+  fill: var(--color-danger);
+  stroke: var(--color-bg-surface);
+  stroke-width: 2;
+}

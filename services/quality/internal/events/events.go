@@ -10,10 +10,16 @@ var (
 	OrderCreated        = events.Type(Context, "order", "created", 1)
 	ResultRecorded      = events.Type(Context, "result", "recorded", 1)
 	UsageDecisionPosted = events.Type(Context, "usagedecision", "posted", 1)
+	// Slice 2.
+	ComplianceListCreated    = events.Type(Context, "compliancelist", "created", 1)
+	ComplianceResultRecorded = events.Type(Context, "complianceresult", "recorded", 1)
+	StabilityStudyCreated    = events.Type(Context, "stabilitystudy", "created", 1)
 )
 
 // All lists every event type this service publishes.
-func All() []string { return []string{OrderCreated, ResultRecorded, UsageDecisionPosted} }
+func All() []string {
+	return []string{OrderCreated, ResultRecorded, UsageDecisionPosted, ComplianceListCreated, ComplianceResultRecorded, StabilityStudyCreated}
+}
 
 // OrderCreatedData is the data member of dev.passage.quality.order.created.v1.
 type OrderCreatedData struct {
@@ -48,4 +54,58 @@ type UsageDecisionPostedData struct {
 	RejectQty      string   `json:"reject_qty"`
 	DeviationQty   string   `json:"deviation_qty"`
 	User           string   `json:"user"`
+}
+
+// ComplianceListCreatedData is the data member of dev.passage.quality.compliancelist.created.v1.
+// A new version supersedes the previous one; consumers re-evaluate items against it.
+type ComplianceListCreatedData struct {
+	ListID    string   `json:"list_id"`
+	Code      string   `json:"code"`
+	Version   int      `json:"version"`
+	Kind      string   `json:"kind"`
+	BlockMode string   `json:"block_mode"`
+	Regions   []string `json:"regions"`
+	CASCount  int      `json:"cas_count"`
+}
+
+// ComplianceHit is one substance over its threshold inside a result event.
+type ComplianceHit struct {
+	CAS          string `json:"cas"`
+	PercentWW    string `json:"percent_ww"`
+	ThresholdPct string `json:"threshold_pct"`
+}
+
+// ComplianceResultRecordedData is the data member of
+// dev.passage.quality.complianceresult.recorded.v1: a new result version for an
+// item, list version and region. Sales, shipping and purchasing block or warn on it.
+type ComplianceResultRecordedData struct {
+	ItemID             string          `json:"item_id"`
+	ListCode           string          `json:"list_code"`
+	ListVersion        int             `json:"list_version"`
+	Region             string          `json:"region"`
+	Version            int             `json:"version"`
+	CompositionVersion int             `json:"composition_version"`
+	Restricted         bool            `json:"restricted"`
+	Code               string          `json:"code"`
+	Severity           string          `json:"severity"`
+	Hits               []ComplianceHit `json:"hits"`
+}
+
+// StabilityPull is one scheduled pull inside a study event.
+type StabilityPull struct {
+	Months      int    `json:"months"`
+	PullDate    string `json:"pull_date"`
+	OrderDate   string `json:"order_date"`
+	TestGroupID string `json:"test_group_id"`
+}
+
+// StabilityStudyCreatedData is the data member of dev.passage.quality.stabilitystudy.created.v1.
+// The stability scheduling workflow starts from it (BR-33.14).
+type StabilityStudyCreatedData struct {
+	StudyID   string          `json:"study_id"`
+	ItemID    string          `json:"item_id"`
+	BatchID   string          `json:"batch_id"`
+	Condition string          `json:"condition"`
+	StartDate string          `json:"start_date"`
+	Pulls     []StabilityPull `json:"pulls"`
 }

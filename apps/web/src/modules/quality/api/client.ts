@@ -328,3 +328,188 @@ export function postDecision(
 ): Promise<{ order: OrderView; decision: Decision }> {
   return post(`/quality-orders/${encodeURIComponent(orderId)}:usage-decision`, { lines }, { "Idempotency-Key": key, "If-Match": `"${version}"` });
 }
+
+
+// ---- Slice 2: product compliance (FR-33.13), stability studies (FR-33.16), SPC (FR-33.11) ----
+
+export type ListKind = "RESTRICTED" | "REPORTING";
+export type BlockMode = "BLOCK" | "WARN";
+
+export interface LimitLine {
+  cas: string;
+  name?: string;
+  thresholdPct: string;
+}
+
+export interface NewComplianceList {
+  code: string;
+  name: string;
+  kind: ListKind;
+  blockMode: BlockMode;
+  regions: string[];
+  limits: LimitLine[];
+}
+
+export interface ComplianceList extends NewComplianceList {
+  id: string;
+  version: number;
+}
+
+export interface MassPart {
+  itemId: string;
+  massFraction: string;
+}
+
+export interface NewComposition {
+  direct: Record<string, string>;
+  parts: MassPart[];
+}
+
+export interface Composition extends NewComposition {
+  itemId: string;
+  version: number;
+}
+
+export interface ComplianceHit {
+  cas: string;
+  name?: string;
+  percentWw: string;
+  thresholdPct: string;
+}
+
+export interface ComplianceResult {
+  listCode: string;
+  listVersion: number;
+  listKind: ListKind;
+  region: string;
+  applies: boolean;
+  restricted: boolean;
+  hits: ComplianceHit[];
+  code?: "QM-0121" | "QM-0122";
+  severity?: "warning" | "error";
+  version?: number;
+}
+
+export interface ComplianceEvaluation {
+  itemId: string;
+  region: string;
+  compositionVersion: number;
+  blocked: boolean;
+  results: ComplianceResult[];
+  undeclaredItems: string[];
+}
+
+export function listComplianceLists(signal?: AbortSignal): Promise<ComplianceList[]> {
+  return items<ComplianceList>("/compliance-lists", signal);
+}
+
+/** Creates the next version of a list code (QM_COMPLIANCE_MAINTAIN). */
+export function createComplianceList(input: NewComplianceList, key: string = newKey()): Promise<ComplianceList> {
+  return post<ComplianceList>("/compliance-lists", input, { "Idempotency-Key": key });
+}
+
+export function getComposition(itemId: string, signal?: AbortSignal): Promise<Composition> {
+  return send<Composition>(`/items/${encodeURIComponent(itemId)}/composition`, {}, signal);
+}
+
+/** Saves the next version of an item's composition (QM_COMPLIANCE_MAINTAIN). */
+export function saveComposition(itemId: string, input: NewComposition, key: string = newKey()): Promise<Composition> {
+  return post<Composition>(`/items/${encodeURIComponent(itemId)}/composition`, input, { "Idempotency-Key": key });
+}
+
+/** Rolls the composition up and evaluates it for a region (BR-33.11); idempotent by value. */
+export function evaluateCompliance(itemId: string, region: string): Promise<ComplianceEvaluation> {
+  return post<ComplianceEvaluation>(`/items/${encodeURIComponent(itemId)}:evaluate-compliance`, { region });
+}
+
+export type StudyStatus = "PLANNED" | "ACTIVE" | "COMPLETED" | "TERMINATED";
+export type PullStatus = "PLANNED" | "ORDERED" | "PULLED" | "MISSED";
+
+export interface Pull {
+  months: number;
+  pullDate: string;
+  orderDate: string;
+  testGroupId: string;
+  status: PullStatus;
+}
+
+export interface NewStudy {
+  itemId: string;
+  batchId: string;
+  protocol: string;
+  condition: string;
+  startDate: string;
+  testGroupId: string;
+  pullMonths: number[];
+  pullTestGroups?: Record<string, string>;
+  leadDays?: number;
+  windowDays?: number;
+}
+
+export interface Study extends Omit<NewStudy, "leadDays" | "windowDays"> {
+  id: string;
+  status: StudyStatus;
+  version: number;
+  createdAt: string;
+  leadDays: number;
+  windowDays: number;
+  pulls: Pull[];
+}
+
+export function listStudies(filter: { status?: StudyStatus | ""; itemId?: string }, signal?: AbortSignal): Promise<Study[]> {
+  return items<Study>(`/stability-studies${query({ status: filter.status, itemId: filter.itemId })}`, signal);
+}
+
+export function getStudy(id: string, signal?: AbortSignal): Promise<Study> {
+  return send<Study>(`/stability-studies/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** Plans a study and generates its pull schedule (QM_STABILITY_MAINTAIN). */
+export function createStudy(input: NewStudy, key: string = newKey()): Promise<Study> {
+  return post<Study>("/stability-studies", input, { "Idempotency-Key": key });
+}
+
+export interface SpcLimits {
+  cl: number;
+  ucl: number;
+  lcl: number;
+}
+
+export interface Violation {
+  chart: "XBAR" | "R" | "P";
+  index: number;
+  rule: number;
+}
+
+export interface XBarR {
+  subgroupSize: number;
+  xbar: number[];
+  range: number[];
+  xbarLimits: SpcLimits;
+  rLimits: SpcLimits;
+  sigma: number;
+  violations: Violation[];
+}
+
+export interface PChart {
+  pBar: number;
+  sizes: number[];
+  points: number[];
+  limits: SpcLimits[];
+  violations: Violation[];
+  np?: { subgroupSize: number; points: number[]; limits: SpcLimits };
+}
+
+export interface SpcResult {
+  chart: "XBAR_R" | "P" | "NONE";
+  observations: number;
+  orderIds: string[];
+  skippedSubgroups: number;
+  xbarR?: XBarR;
+  pChart?: PChart;
+}
+
+/** The SPC chart of one item and test (QM_VIEW); chart NONE when no results exist yet. */
+export function getSpc(itemId: string, testId: string, signal?: AbortSignal): Promise<SpcResult> {
+  return send<SpcResult>(`/spc${query({ itemId, testId })}`, {}, signal);
+}

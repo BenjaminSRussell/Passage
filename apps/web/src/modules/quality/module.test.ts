@@ -16,7 +16,7 @@ describe("quality module", () => {
     expect(quality.id).toBe("quality");
     expect(quality.nav.every((n) => n.to.startsWith("/quality"))).toBe(true);
     const paths = quality.routes.map((r) => r.path);
-    for (const path of ["/quality/orders", "/quality/orders/new", "/quality/orders/:id", "/quality/test-groups", "/quality/test-groups/new", "/quality/instruments", "/quality/instruments/new", "/quality/associations", "/quality/associations/new", "/quality/sampling"]) {
+    for (const path of ["/quality/orders", "/quality/orders/new", "/quality/orders/:id", "/quality/test-groups", "/quality/test-groups/new", "/quality/instruments", "/quality/instruments/new", "/quality/associations", "/quality/associations/new", "/quality/sampling", "/quality/compliance/lists", "/quality/compliance/lists/new", "/quality/compliance/items", "/quality/compliance/items/:id", "/quality/stability", "/quality/stability/new", "/quality/stability/:id", "/quality/spc"]) {
       expect(paths).toContain(path);
     }
     expect(quality.routes.every((r) => r.element !== null && r.element !== undefined)).toBe(true);

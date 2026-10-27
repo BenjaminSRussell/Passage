@@ -1,4 +1,4 @@
-# Quality web module (wave 33, PSG-33 slice 1)
+# Quality web module (wave 33, PSG-33 slices 1 and 2)
 
 Auto-discovered by the shell through `module.ts`. Pages use the shell primitives from
 `src/shell/ui` and `pages.module.css`; every list has loading, empty and error states.
@@ -12,6 +12,10 @@ Auto-discovered by the shell through `module.ts`. Pages use the shell primitives
 | `/quality/instruments`, `/new` | Instruments with calibration state, "Calibrated today"; register | `GET`/`POST /instruments`, `POST /instruments/{id}:calibrate` | QM_VIEW, QM_SETUP_MAINTAIN |
 | `/quality/associations`, `/new` | Quality associations with scope, test group and sampling | `GET`/`POST /associations` | QM_VIEW, QM_SETUP_MAINTAIN |
 | `/quality/sampling` | Sampling calculator (Z1.4 level II, fixed, percent) | `POST /sampling-plans:size` | QM_VIEW |
+| `/quality/compliance/lists`, `/new` | Compliance list versions (restricted and reporting); create the next version with CAS numbers and thresholds (CAS check digit validated) | `GET`/`POST /compliance-lists` | QM_VIEW, QM_COMPLIANCE_MAINTAIN |
+| `/quality/compliance/items`, `/:id` | Item lookup; an item's current composition (substances and components), a form for its next version, and evaluation for a region with hits, block state and undeclared components | `GET`/`POST /items/{id}/composition`, `POST /items/{id}:evaluate-compliance` | QM_VIEW, QM_COMPLIANCE_MAINTAIN |
+| `/quality/stability`, `/new`, `/:id` | Stability studies by status with the next pull; plan a study (ICH condition, test group, pull months, lead and window days); the study with its pull schedule | `GET`/`POST /stability-studies`, `GET /stability-studies/{id}`, `GET /test-groups` | QM_VIEW, QM_STABILITY_MAINTAIN |
+| `/quality/spc` | SPC dashboard: X-bar/R or p (and np) charts as inline SVG with limits and flagged points, and a table of points with Western Electric rule hits | `GET /spc`, `GET /test-groups` | QM_VIEW |
 
 `api/client.ts` is the typed `fetch` client for `services/quality/api/openapi.yaml`.
 Decimals are strings, never numbers; decision totals are summed exactly. Failures throw
@@ -31,5 +35,6 @@ cd apps/web && npx vitest --run src/modules/quality && npx tsc --noEmit
 
 ## Not yet in this module
 
-Nonconformance and CAPA, certificate receipt, CoA preview, SPC and scorecard views.
+Nonconformance and CAPA, certificate receipt, CoA preview, supplier scorecard, SDS,
+stability study status changes and pull recording, and the compliance reporting extract.
 See `services/quality/NOT-IMPLEMENTED.md`.

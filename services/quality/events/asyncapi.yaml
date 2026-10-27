@@ -23,6 +23,21 @@ channels:
     messages:
       usageDecisionPosted:
         $ref: "#/components/messages/UsageDecisionPosted"
+  qualityComplianceList:
+    address: passage.quality.compliancelist
+    messages:
+      complianceListCreated:
+        $ref: "#/components/messages/ComplianceListCreated"
+  qualityComplianceResult:
+    address: passage.quality.complianceresult
+    messages:
+      complianceResultRecorded:
+        $ref: "#/components/messages/ComplianceResultRecorded"
+  qualityStabilityStudy:
+    address: passage.quality.stabilitystudy
+    messages:
+      stabilityStudyCreated:
+        $ref: "#/components/messages/StabilityStudyCreated"
 operations:
   publishOrderCreated:
     action: send
@@ -39,6 +54,21 @@ operations:
     channel: { $ref: "#/channels/qualityUsageDecision" }
     messages:
       - $ref: "#/channels/qualityUsageDecision/messages/usageDecisionPosted"
+  publishComplianceListCreated:
+    action: send
+    channel: { $ref: "#/channels/qualityComplianceList" }
+    messages:
+      - $ref: "#/channels/qualityComplianceList/messages/complianceListCreated"
+  publishComplianceResultRecorded:
+    action: send
+    channel: { $ref: "#/channels/qualityComplianceResult" }
+    messages:
+      - $ref: "#/channels/qualityComplianceResult/messages/complianceResultRecorded"
+  publishStabilityStudyCreated:
+    action: send
+    channel: { $ref: "#/channels/qualityStabilityStudy" }
+    messages:
+      - $ref: "#/channels/qualityStabilityStudy/messages/stabilityStudyCreated"
 components:
   messages:
     OrderCreated:
@@ -56,6 +86,24 @@ components:
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/UsageDecisionPostedData"
+    ComplianceListCreated:
+      name: dev.passage.quality.compliancelist.created.v1
+      contentType: application/cloudevents+json
+      summary: A new version of a compliance list; it supersedes the previous version (FR-33.13).
+      payload:
+        $ref: "#/components/schemas/ComplianceListCreatedData"
+    ComplianceResultRecorded:
+      name: dev.passage.quality.complianceresult.recorded.v1
+      contentType: application/cloudevents+json
+      summary: A new result version for an item, list version and region (BR-33.11); sales, shipping and purchasing block or warn on it.
+      payload:
+        $ref: "#/components/schemas/ComplianceResultRecordedData"
+    StabilityStudyCreated:
+      name: dev.passage.quality.stabilitystudy.created.v1
+      contentType: application/cloudevents+json
+      summary: A planned stability study with its pull schedule; the scheduling workflow starts from it (BR-33.14).
+      payload:
+        $ref: "#/components/schemas/StabilityStudyCreatedData"
   schemas:
     OrderCreatedData:
       type: object
@@ -100,3 +148,55 @@ components:
         reject_qty: { type: string }
         deviation_qty: { type: string }
         user: { type: string }
+    ComplianceListCreatedData:
+      type: object
+      required: [list_id, code, version, kind, block_mode, regions, cas_count]
+      properties:
+        list_id: { type: string, format: uuid }
+        code: { type: string }
+        version: { type: integer }
+        kind: { type: string, enum: [RESTRICTED, REPORTING] }
+        block_mode: { type: string, enum: [BLOCK, WARN] }
+        regions: { type: array, items: { type: string } }
+        cas_count: { type: integer }
+    ComplianceResultRecordedData:
+      type: object
+      required: [item_id, list_code, list_version, region, version, composition_version, restricted, code, severity, hits]
+      properties:
+        item_id: { type: string, format: uuid }
+        list_code: { type: string }
+        list_version: { type: integer }
+        region: { type: string }
+        version: { type: integer }
+        composition_version: { type: integer }
+        restricted: { type: boolean }
+        code: { type: string, description: "QM-0121, QM-0122 or empty when nothing is over its threshold" }
+        severity: { type: string, description: "error, warning or empty" }
+        hits:
+          type: array
+          items:
+            type: object
+            required: [cas, percent_ww, threshold_pct]
+            properties:
+              cas: { type: string }
+              percent_ww: { type: string, description: Decimal string }
+              threshold_pct: { type: string, description: Decimal string }
+    StabilityStudyCreatedData:
+      type: object
+      required: [study_id, item_id, batch_id, condition, start_date, pulls]
+      properties:
+        study_id: { type: string, format: uuid }
+        item_id: { type: string, format: uuid }
+        batch_id: { type: string }
+        condition: { type: string }
+        start_date: { type: string, format: date }
+        pulls:
+          type: array
+          items:
+            type: object
+            required: [months, pull_date, order_date, test_group_id]
+            properties:
+              months: { type: integer }
+              pull_date: { type: string, format: date }
+              order_date: { type: string, format: date }
+              test_group_id: { type: string, format: uuid }

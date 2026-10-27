@@ -3,9 +3,11 @@ info:
   title: Passage Quality API
   version: 0.1.0
   description: |
-    Quality management slice 1 (PSG-33): test groups, instruments, quality
+    Quality management (PSG-33). Slice 1: test groups, instruments, quality
     associations, sampling (ANSI/ASQ Z1.4 Table I and II-A excerpt), quality
-    orders, result recording and usage decisions. Errors are RFC 9457 problem
+    orders, result recording and usage decisions. Slice 2: product compliance
+    lists, item compositions and their evaluation, stability studies and SPC
+    charts. Errors are RFC 9457 problem
     details (application/problem+json) with a stable `code`; see README.md.
 servers:
   - url: https://api.{env}.passage.dev
@@ -17,6 +19,9 @@ tags:
   - name: setup
   - name: orders
   - name: system
+  - name: compliance
+  - name: stability
+  - name: spc
 paths:
   /readyz:
     get:
@@ -411,6 +416,235 @@ paths:
         "412": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
         "428": { $ref: "#/components/responses/Problem" }
+  /v1/quality/compliance-lists:
+    get:
+      tags: [compliance]
+      operationId: listComplianceLists
+      x-passage-duty: QM_VIEW
+      summary: Compliance list versions by code, newest version first (FR-33.13)
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: List
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/ComplianceList" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    post:
+      tags: [compliance]
+      operationId: createComplianceList
+      x-passage-duty: QM_COMPLIANCE_MAINTAIN
+      summary: Create the next version of a regulated, restricted or reporting list (FR-33.13)
+      description: The service numbers versions per code; the highest version is the one evaluated. Writes dev.passage.quality.compliancelist.created.v1.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ComplianceListRequest" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ComplianceList" }
+        "200":
+          description: Idempotent replay
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ComplianceList" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+  /v1/quality/items/{id}/composition:
+    get:
+      tags: [compliance]
+      operationId: getComposition
+      x-passage-duty: QM_VIEW
+      summary: The item's current declared composition
+      parameters:
+        - $ref: "#/components/parameters/ItemId"
+      responses:
+        "200":
+          description: Current version
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Composition" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+    post:
+      tags: [compliance]
+      operationId: saveComposition
+      x-passage-duty: QM_COMPLIANCE_MAINTAIN
+      summary: Save a new version of the item's composition (substances by CAS number and BOM parts by mass fraction)
+      parameters:
+        - $ref: "#/components/parameters/ItemId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CompositionRequest" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Composition" }
+        "200":
+          description: Idempotent replay
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Composition" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+  /v1/quality/items/{id}:evaluate-compliance:
+    post:
+      tags: [compliance]
+      operationId: evaluateCompliance
+      x-passage-duty: QM_VIEW
+      summary: Roll the composition up through its parts and evaluate it against every current list for a region (BR-33.11)
+      description: |
+        Idempotent by value, so no Idempotency-Key is needed. A result version is stored, and
+        dev.passage.quality.complianceresult.recorded.v1 written, only when the outcome of an
+        (item, list version, region) changes. Lists that do not name the region are left out.
+      parameters:
+        - $ref: "#/components/parameters/ItemId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [region]
+              properties:
+                region: { type: string, pattern: "^[A-Z][A-Z0-9-]{1,9}$", example: EU }
+      responses:
+        "200":
+          description: Evaluation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ComplianceEvaluation" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/quality/stability-studies:
+    get:
+      tags: [stability]
+      operationId: listStudies
+      x-passage-duty: QM_VIEW
+      summary: Stability studies, newest first
+      parameters:
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/StudyStatus" } }
+        - { name: itemId, in: query, schema: { type: string, format: uuid } }
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: List
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Study" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    post:
+      tags: [stability]
+      operationId: createStudy
+      x-passage-duty: QM_STABILITY_MAINTAIN
+      summary: Plan a stability study and generate its pull schedule (FR-33.16, BR-33.14)
+      description: Writes dev.passage.quality.stabilitystudy.created.v1, from which the scheduling workflow starts.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StudyRequest" }
+      responses:
+        "201":
+          description: Created
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Study" }
+        "200":
+          description: Idempotent replay
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Study" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+  /v1/quality/stability-studies/{id}:
+    get:
+      tags: [stability]
+      operationId: getStudy
+      x-passage-duty: QM_VIEW
+      summary: One stability study with its pull points
+      parameters:
+        - $ref: "#/components/parameters/StudyId"
+      responses:
+        "200":
+          description: Study
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Study" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/quality/spc:
+    get:
+      tags: [spc]
+      operationId: getSpcChart
+      x-passage-duty: QM_VIEW
+      summary: SPC chart for one item and test from first-attempt results (FR-33.11)
+      description: |
+        Each quality order is one subgroup (variable test, X-bar/R) or one sample (attribute
+        test, p chart, plus np when sample sizes are constant). Control limits come from the
+        last 25 subgroups; Western Electric rules 1 to 4 are flagged. No results yet answers
+        chart NONE.
+      parameters:
+        - { name: itemId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: testId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: orders, in: query, description: Newest quality orders to chart., schema: { type: integer, minimum: 2, maximum: 200, default: 50 } }
+      responses:
+        "200":
+          description: Chart
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SPCResult" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
 components:
   securitySchemes:
     bearerAuth:
@@ -434,6 +668,17 @@ components:
       in: query
       schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
     OrderId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ItemId:
+      name: id
+      in: path
+      required: true
+      description: Item (product) id.
+      schema: { type: string, format: uuid }
+    StudyId:
       name: id
       in: path
       required: true
@@ -722,3 +967,196 @@ components:
       properties:
         order: { $ref: "#/components/schemas/OrderView" }
         decision: { $ref: "#/components/schemas/Decision" }
+    LimitLine:
+      type: object
+      required: [cas, thresholdPct]
+      properties:
+        cas: { type: string, pattern: "^\\d{2,7}-\\d{2}-\\d$", description: CAS number with a valid check digit., example: "117-81-7" }
+        name: { type: string, maxLength: 120 }
+        thresholdPct: { $ref: "#/components/schemas/Decimal", description: Percent w/w above 0 and at most 100; a concentration strictly above it is a hit. }
+    ComplianceListRequest:
+      type: object
+      required: [code, kind, blockMode, regions, limits]
+      properties:
+        code: { type: string, pattern: "^[A-Z0-9][A-Z0-9_-]{1,31}$", example: REACH-SVHC }
+        name: { type: string, maxLength: 120 }
+        kind: { type: string, enum: [RESTRICTED, REPORTING] }
+        blockMode: { type: string, enum: [BLOCK, WARN], description: Line behaviour on a restricted hit (compliance_block_mode). }
+        regions:
+          type: array
+          minItems: 1
+          maxItems: 60
+          items: { type: string, pattern: "^[A-Z][A-Z0-9-]{1,9}$", example: EU }
+        limits:
+          type: array
+          minItems: 1
+          maxItems: 2000
+          items: { $ref: "#/components/schemas/LimitLine" }
+    ComplianceList:
+      allOf:
+        - $ref: "#/components/schemas/ComplianceListRequest"
+        - type: object
+          required: [id, version]
+          properties:
+            id: { type: string, format: uuid }
+            version: { type: integer, minimum: 1 }
+    MassPart:
+      type: object
+      required: [itemId, massFraction]
+      properties:
+        itemId: { type: string, format: uuid }
+        massFraction: { $ref: "#/components/schemas/Decimal", description: Above 0 and at most 1; the parts of an item sum to at most 1. }
+    CompositionRequest:
+      type: object
+      description: At least one substance or part; at most 500 together.
+      properties:
+        direct:
+          type: object
+          description: Mass fraction w/w (0 to 1) per CAS number, declared on the item; the fractions sum to at most 1.
+          additionalProperties: { $ref: "#/components/schemas/Decimal" }
+        parts:
+          type: array
+          items: { $ref: "#/components/schemas/MassPart" }
+    Composition:
+      allOf:
+        - $ref: "#/components/schemas/CompositionRequest"
+        - type: object
+          required: [itemId, version]
+          properties:
+            itemId: { type: string, format: uuid }
+            version: { type: integer, minimum: 1 }
+    Hit:
+      type: object
+      properties:
+        cas: { type: string }
+        name: { type: string }
+        percentWw: { $ref: "#/components/schemas/Decimal" }
+        thresholdPct: { $ref: "#/components/schemas/Decimal" }
+    ComplianceResult:
+      type: object
+      properties:
+        listCode: { type: string }
+        listVersion: { type: integer }
+        listKind: { type: string, enum: [RESTRICTED, REPORTING] }
+        region: { type: string }
+        applies: { type: boolean }
+        restricted: { type: boolean }
+        hits:
+          type: array
+          items: { $ref: "#/components/schemas/Hit" }
+        code: { type: string, enum: [QM-0121, QM-0122], description: "QM-0121 reporting hit (warning) or QM-0122 restricted hit; absent when nothing is over its threshold." }
+        severity: { type: string, enum: [warning, error] }
+        version: { type: integer, description: Stored result version of this item, list version and region. }
+    ComplianceEvaluation:
+      type: object
+      required: [itemId, region, compositionVersion, blocked, results, undeclaredItems]
+      properties:
+        itemId: { type: string, format: uuid }
+        region: { type: string }
+        compositionVersion: { type: integer }
+        blocked: { type: boolean, description: True when a restricted list in BLOCK mode is hit. }
+        results:
+          type: array
+          items: { $ref: "#/components/schemas/ComplianceResult" }
+        undeclaredItems:
+          type: array
+          description: Parts in the BOM with no composition; they count as containing nothing.
+          items: { type: string, format: uuid }
+    StudyStatus:
+      type: string
+      enum: [PLANNED, ACTIVE, COMPLETED, TERMINATED]
+    StudyRequest:
+      type: object
+      required: [itemId, batchId, protocol, condition, startDate, testGroupId, pullMonths]
+      properties:
+        itemId: { type: string, format: uuid }
+        batchId: { type: string, minLength: 1, maxLength: 60 }
+        protocol: { type: string, minLength: 1, maxLength: 120, example: "ICH Q1A(R2)" }
+        condition: { type: string, minLength: 1, maxLength: 60, example: "25C/60RH" }
+        startDate: { type: string, format: date, example: "2026-01-31" }
+        testGroupId: { type: string, format: uuid, description: Test group of every pull point without its own. }
+        pullMonths:
+          type: array
+          minItems: 1
+          maxItems: 40
+          description: Strictly ascending months from the start date.
+          items: { type: integer, minimum: 0, maximum: 120 }
+        pullTestGroups:
+          type: object
+          description: Test group per pull point, keyed by its month, overriding testGroupId.
+          additionalProperties: { type: string, format: uuid }
+        leadDays: { type: integer, minimum: 0, maximum: 30, default: 7, description: stability_lead_days }
+        windowDays: { type: integer, minimum: 0, maximum: 14, default: 3, description: stability_pull_window_days }
+    Pull:
+      type: object
+      properties:
+        months: { type: integer }
+        pullDate: { type: string, format: date-time, description: Start date plus the months, clamped to month end (BR-33.14). }
+        orderDate: { type: string, format: date-time, description: The pull's quality order is due leadDays before the pull. }
+        testGroupId: { type: string, format: uuid }
+        status: { type: string, enum: [PLANNED, ORDERED, PULLED, MISSED] }
+    Study:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        status: { $ref: "#/components/schemas/StudyStatus" }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+        itemId: { type: string, format: uuid }
+        batchId: { type: string }
+        protocol: { type: string }
+        condition: { type: string }
+        startDate: { type: string, format: date-time }
+        testGroupId: { type: string, format: uuid }
+        pullMonths: { type: array, items: { type: integer } }
+        pullTestGroups: { type: object, additionalProperties: { type: string, format: uuid } }
+        leadDays: { type: integer }
+        windowDays: { type: integer }
+        pulls:
+          type: array
+          items: { $ref: "#/components/schemas/Pull" }
+    SpcLimits:
+      type: object
+      properties:
+        cl: { type: number }
+        ucl: { type: number }
+        lcl: { type: number }
+    Violation:
+      type: object
+      properties:
+        chart: { type: string, enum: [XBAR, R, P] }
+        index: { type: integer, description: Zero-based point index. }
+        rule: { type: integer, minimum: 1, maximum: 4, description: Western Electric rule. }
+    SPCResult:
+      type: object
+      description: Chart statistics are numbers (not money); inputs are the stored decimal results.
+      required: [chart, observations, orderIds, skippedSubgroups]
+      properties:
+        chart: { type: string, enum: [XBAR_R, P, NONE] }
+        observations: { type: integer }
+        orderIds: { type: array, description: Quality order behind each point., items: { type: string, format: uuid } }
+        skippedSubgroups: { type: integer, description: Orders whose sample size differed from the modal size. }
+        xbarR:
+          type: object
+          properties:
+            subgroupSize: { type: integer, minimum: 2, maximum: 25 }
+            xbar: { type: array, items: { type: number } }
+            range: { type: array, items: { type: number } }
+            xbarLimits: { $ref: "#/components/schemas/SpcLimits" }
+            rLimits: { $ref: "#/components/schemas/SpcLimits" }
+            sigma: { type: number }
+            violations: { type: array, items: { $ref: "#/components/schemas/Violation" } }
+        pChart:
+          type: object
+          properties:
+            pBar: { type: number }
+            sizes: { type: array, items: { type: integer } }
+            points: { type: array, items: { type: number } }
+            limits: { type: array, items: { $ref: "#/components/schemas/SpcLimits" } }
+            violations: { type: array, items: { $ref: "#/components/schemas/Violation" } }
+            np:
+              type: object
+              properties:
+                subgroupSize: { type: integer }
+                points: { type: array, items: { type: integer } }
+                limits: { $ref: "#/components/schemas/SpcLimits" }

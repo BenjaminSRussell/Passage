@@ -55,6 +55,17 @@ type Store interface {
 	FindDecisionByKey(ctx context.Context, key string) (domain.Decision, bool, error)
 	GetDecision(ctx context.Context, orderID string) (domain.Decision, bool, error)
 	PostUsageDecision(ctx context.Context, orderID string, expectedVersion int, d domain.Decision, key string) (domain.Order, domain.Decision, error)
+	CreateComplianceList(ctx context.Context, l domain.ComplianceList, key string) (domain.ComplianceList, bool, error)
+	ListComplianceLists(ctx context.Context, limit int) ([]domain.ComplianceList, error)
+	CurrentComplianceLists(ctx context.Context) ([]domain.ComplianceList, error)
+	SaveComposition(ctx context.Context, c domain.Constituent, key string) (domain.Composition, bool, error)
+	GetComposition(ctx context.Context, itemID string) (domain.Composition, error)
+	LoadCompositionTree(ctx context.Context, root string) (CompositionTree, error)
+	RecordComplianceResults(ctx context.Context, itemID string, compositionVersion int, results []domain.ComplianceResult) ([]domain.ComplianceResult, error)
+	CreateStudy(ctx context.Context, st domain.Study, key string) (domain.Study, bool, error)
+	GetStudy(ctx context.Context, id string) (domain.Study, error)
+	ListStudies(ctx context.Context, f StudyFilter) ([]domain.Study, error)
+	ListSPCObservations(ctx context.Context, itemID, testID string, maxOrders int) ([]domain.Observation, error)
 	Ping(ctx context.Context) error
 }
 
