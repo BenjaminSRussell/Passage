@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -91,13 +92,12 @@ type Store interface {
 	ListRuns(ctx context.Context, provider string) ([]Run, error)
 	LastSuccess(ctx context.Context, provider, rateType string) (*time.Time, error)
 	PublishIdempotent(ctx context.Context, key, requestHash string, in []RateInput, render func([]Posted) (json.RawMessage, error)) (rec IdempotencyRecord, replayed bool, err error)
-	GetIdempotency(ctx context.Context, key string) (IdempotencyRecord, bool, error)
-	PutIdempotency(ctx context.Context, rec IdempotencyRecord) error
 }
 
 type Postgres struct {
-	pool *pgxpool.Pool
-	now  func() time.Time
+	pool   *pgxpool.Pool
+	now    func() time.Time
+	owners sync.Map
 }
 
 func New(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool, now: time.Now} }

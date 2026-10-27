@@ -32,10 +32,14 @@ const (
 
 func idempotencyRace(err error) error {
 	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && (pgErr.Code == lockNotAvailable || (pgErr.Code == uniqueViolation && strings.Contains(pgErr.ConstraintName, "idempotency"))) {
-		return httpx.NewProblem(http.StatusConflict, CodeIdempotencyInProgress, "a request with this Idempotency-Key is still in progress; retry shortly")
+	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation && strings.Contains(pgErr.ConstraintName, "idempotency") {
+		return inProgress()
 	}
 	return err
+}
+
+func inProgress() error {
+	return httpx.NewProblem(http.StatusConflict, CodeIdempotencyInProgress, "a request with this Idempotency-Key is still in progress; retry shortly")
 }
 
 func (s *Postgres) PublishIdempotent(ctx context.Context, key, requestHash string, in []RateInput, render func([]Posted) (json.RawMessage, error)) (IdempotencyRecord, bool, error) {
@@ -53,6 +57,13 @@ func (s *Postgres) PublishIdempotent(ctx context.Context, key, requestHash strin
 			return err
 		}
 		if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended($1, 0))`, p.TenantID+"/"+key); err != nil {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == lockNotAvailable {
+				return inProgress()
+			}
+			return err
+		}
+		if _, err := tx.Exec(ctx, `set local lock_timeout = default`); err != nil {
 			return err
 		}
 		var storedHash string

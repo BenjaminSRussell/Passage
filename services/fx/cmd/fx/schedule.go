@@ -22,6 +22,7 @@ const (
 	defaultECBURL          = "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml"
 	defaultOXRURL          = "https://openexchangerates.org/api"
 	importUser             = "system:fx-import"
+	importTimeout          = 5 * time.Minute
 )
 
 type importSchedule struct {
@@ -120,7 +121,9 @@ func newImportSchedule(ctx context.Context, getenv func(string) string, st store
 	metrics.Seed(scope(ctx), p.Name(), rateType, last)
 	imp := importer.New(p, st, importer.DefaultConfig, metrics)
 	return &importSchedule{interval: interval, once: func(ctx context.Context) {
-		res, err := imp.Run(scope(ctx), rateType, time.Now().UTC())
+		runCtx, cancel := context.WithTimeout(scope(ctx), importTimeout)
+		defer cancel()
+		res, err := imp.Run(runCtx, rateType, time.Now().UTC())
 		if err != nil {
 			slog.Error("fx import failed", "provider", p.Name(), "rateType", rateType, "runId", res.RunID, "err", err)
 			return

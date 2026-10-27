@@ -711,3 +711,37 @@ func TestStartRunSkipsAFreshRunningRunAndRestartsAStaleOne(t *testing.T) {
 		t.Fatalf("a stale running run must restart: %+v done=%v err=%v", third, done, err)
 	}
 }
+
+func TestTakenOverRunIgnoresTheOldOwnersFinish(t *testing.T) {
+	a, pool, ctx := migrated(t)
+	b := store.New(pool)
+	run, _, err := a.StartRun(ctx, "ecb", "CLOSING", valid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `update provider_import_run set started_at = now() - interval '11 minutes'`); err != nil {
+		t.Fatal(err)
+	}
+	taken, done, err := b.StartRun(ctx, "ecb", "CLOSING", valid)
+	if err != nil || done || taken.ID != run.ID {
+		t.Fatalf("takeover: %+v done=%v err=%v", taken, done, err)
+	}
+	if err := b.FinishRunSucceeded(ctx, run.ID, 3, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.FinishRunDegraded(ctx, run.ID, 4, errors.New("late failure"), true); !errors.Is(err, store.ErrLostOwnership) {
+		t.Fatalf("old owner FinishRunDegraded: %v", err)
+	}
+	if err := a.RecordAttempt(ctx, run.ID, 4); !errors.Is(err, store.ErrRunNotFound) {
+		t.Fatalf("a lost run is forgotten: %v", err)
+	}
+	if err := a.FinishRunFailed(ctx, run.ID, 4, errors.New("late failure"), true); !errors.Is(err, store.ErrRunNotFound) {
+		t.Fatalf("a lost run is forgotten: %v", err)
+	}
+	if got := count(t, ctx, pool, `select count(*) from provider_import_run where status = 'succeeded' and pairs_imported = 3`); got != 1 {
+		t.Fatalf("run must stay succeeded, matching rows = %d", got)
+	}
+	if got := count(t, ctx, pool, `select count(*) from outbox where type = '`+store.ProviderDegraded+`'`); got != 0 {
+		t.Fatalf("degraded events = %d, want 0", got)
+	}
+}
