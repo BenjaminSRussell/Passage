@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -125,7 +126,7 @@ describe("Journals on the order detail", () => {
       ],
     });
     const { container } = renderAt(`/production/${orderId}`);
-    const table = await screen.findByRole("table", { name: "Production journals" });
+    const table = await findTable({ name: "Production journals" });
     await waitFor(() => expect(within(table).getByText("PJ-000003")).toBeInTheDocument());
     expect(within(table).getByText("Reversed")).toBeInTheDocument();
     expect(within(table).getByText("Reversal")).toBeInTheDocument();
@@ -160,7 +161,7 @@ describe("Journals on the order detail", () => {
     expect(createUrl).toBe(`/api/v1/production/orders/${orderId}/journals`);
     expect(JSON.parse(String(createInit?.body))).toEqual({ type: "picking-list", proposal: "remaining" });
     expect((createInit?.headers as Record<string, string>)["Idempotency-Key"]).toMatch(/.+/);
-    const lines = await screen.findByRole("table", { name: "Lines of PJ-000001" });
+    const lines = await findTable({ name: "Lines of PJ-000001" });
     expect(within(lines).getByText("Issue 10")).toBeInTheDocument();
 
     const ordersBefore = fetchMock.mock.calls.filter(([url]) => url === `/api/v1/production/orders/${orderId}`).length;
@@ -172,7 +173,7 @@ describe("Journals on the order detail", () => {
     await waitFor(() =>
       expect(fetchMock.mock.calls.filter(([url]) => url === `/api/v1/production/orders/${orderId}`).length).toBeGreaterThan(ordersBefore),
     );
-    expect(await screen.findByRole("table", { name: "Postings of PJ-000001" })).toBeInTheDocument();
+    expect(await findTable({ name: "Postings of PJ-000001" })).toBeInTheDocument();
   });
 
   it("enters route-card hours by hand and validates them first", async () => {
@@ -259,7 +260,7 @@ describe("Journals on the order detail", () => {
       },
     });
     renderAt(`/production/${orderId}`);
-    const table = await screen.findByRole("table", { name: "Variances posted at End" });
+    const table = await findTable({ name: "Variances posted at End" });
     expect(within(table).getByText("-120.00")).toBeInTheDocument();
     expect(within(table).getAllByText("Quantity")).toHaveLength(2);
   });
@@ -313,7 +314,7 @@ describe("Posting profiles page", () => {
   it("lists profiles", async () => {
     const fetchMock = stubFetch(() => json({ items: [profile(), profile({ itemGroup: "FG", wipAccount: "1460" })] }));
     const { container } = renderAt("/production/posting-profiles");
-    const table = await screen.findByRole("table", { name: "Posting profiles" });
+    const table = await findTable({ name: "Posting profiles" });
     await waitFor(() => expect(within(table).getByText("1460")).toBeInTheDocument());
     expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/production/posting-profiles");
     expect(checkAxeAA(container)).toEqual([]);

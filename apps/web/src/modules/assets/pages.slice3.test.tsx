@@ -1,3 +1,4 @@
+import { findAlert, findStatus, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -146,7 +147,7 @@ describe("lease remeasurement", () => {
   it("offers Modify on an active lease and shows remeasurements on a modified one", async () => {
     handler = () => ({ status: 200, body: modified, etag: '"2"' });
     const { container } = renderAt(`/assets/leases/${LEASE}`);
-    const history = await screen.findByRole("table", { name: "Remeasurements" });
+    const history = await findTable({ name: "Remeasurements" });
     expect(within(history).getByText("32678.98 USD")).toBeInTheDocument();
     expect(within(screen.getByRole("table", { name: "Lease schedule" })).getByText("5446.49")).toBeInTheDocument();
     expect(screen.getByRole("list", { name: "Lease balances" })).toHaveTextContent("Liability after last remeasurement 32678.98 USD");
@@ -170,7 +171,7 @@ describe("lease remeasurement", () => {
     fireEvent.change(screen.getByLabelText("New payment amount"), { target: { value: "12000" } });
     expect(screen.queryByLabelText("Revised borrowing rate")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Remeasure lease" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("AST-0516: lease remeasured; ROU adjusted by 5446.49 USD");
+    expect(await findStatus()).toHaveTextContent("AST-0516: lease remeasured; ROU adjusted by 5446.49 USD");
     const post = posts()[0];
     expect(post.url.pathname).toBe(`/api/v1/leases/${LEASE}/modify`);
     expect(post.headers.get("If-Match")).toBe('"1"');
@@ -191,7 +192,7 @@ describe("lease remeasurement", () => {
     fireEvent.change(screen.getByLabelText("Revised term (months)"), { target: { value: "84" } });
     fireEvent.change(screen.getByLabelText("Revised borrowing rate"), { target: { value: "0.06" } });
     fireEvent.click(screen.getByRole("button", { name: "Remeasure lease" }));
-    await screen.findByRole("status");
+    await findStatus();
     expect(posts()[0].body).toEqual({ effectivePeriod: 3, paymentAmount: "10000", scopeChange: true, ibrRate: "0.06", termMonths: 84 });
   });
 
@@ -202,7 +203,7 @@ describe("lease remeasurement", () => {
     fireEvent.change(screen.getByLabelText("Effective period"), { target: { value: "2" } });
     fireEvent.change(screen.getByLabelText("New payment amount"), { target: { value: "9000" } });
     fireEvent.click(screen.getByRole("button", { name: "Remeasure lease" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("The lease changed since you opened it");
     expect(within(alert).getByRole("button", { name: "Reload" })).toBeInTheDocument();
   });
@@ -215,7 +216,7 @@ describe("lease remeasurement", () => {
     first.unmount();
     handler = () => ({ status: 404, body: { code: "AST-0005", detail: "no lease" } });
     renderAt(`/assets/leases/${LEASE}/modify`);
-    expect(await screen.findByRole("alert")).toHaveTextContent("AST-0005");
+    expect(await findAlert()).toHaveTextContent("AST-0005");
   });
 });
 
@@ -255,12 +256,12 @@ describe("count sessions", () => {
   it("lists sessions and opens one", async () => {
     handler = (url) => (url.pathname === "/api/v1/assets/count-sessions" ? { status: 200, body: { items: [session] } } : { status: 200, body: sessionDetail });
     const { container } = renderAt("/assets/count-sessions");
-    const table = await screen.findByRole("table", { name: "Count sessions" });
+    const table = await findTable({ name: "Count sessions" });
     await waitFor(() => expect(within(table).getByText("Warehouse 1")).toBeInTheDocument());
     expect(pageViolations(container)).toEqual([]);
     expect(screen.getByRole("link", { name: "New count" })).toHaveAttribute("href", "/assets/count-sessions/new");
     fireEvent.click(within(table).getByRole("button", { name: "2026-04-10" }));
-    const lines = await screen.findByRole("table", { name: "Count lines" });
+    const lines = await findTable({ name: "Count lines" });
     expect(within(lines).getByText("Not in the register")).toBeInTheDocument();
     expect(within(lines).getByText("Missing")).toBeInTheDocument();
     expect(screen.getByRole("list", { name: "Count result" })).toHaveTextContent("Missing 1");
@@ -275,7 +276,7 @@ describe("count sessions", () => {
     first.unmount();
     handler = () => ({ status: 403, body: { code: "AUTH-0003", detail: "missing duty AssetView or AssetCount" } });
     renderAt("/assets/count-sessions");
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("AUTH-0003");
     expect(within(alert).getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
@@ -306,13 +307,13 @@ describe("count sessions", () => {
     fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(screen.getByLabelText("Location"), { target: { value: "Site" } });
     fireEvent.click(screen.getByRole("button", { name: "Reconcile count" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("outside the caller's scope");
+    expect(await findAlert()).toHaveTextContent("outside the caller's scope");
   });
 
   it("reports an unknown session", async () => {
     handler = () => ({ status: 404, body: { code: "AST-0026", detail: "no count session" } });
     renderAt(`/assets/count-sessions/${SESSION}`);
-    expect(await screen.findByRole("alert")).toHaveTextContent("AST-0026");
+    expect(await findAlert()).toHaveTextContent("AST-0026");
   });
 });
 
@@ -367,7 +368,7 @@ describe("insurance report", () => {
     fireEvent.change(screen.getByLabelText("Insurance type"), { target: { value: "MachineryBreakdown" } });
     fireEvent.change(screen.getByLabelText("Expiring within (days)"), { target: { value: "30" } });
     fireEvent.click(screen.getByRole("button", { name: "Run report" }));
-    const table = await screen.findByRole("table", { name: "Insurance report" });
+    const table = await findTable({ name: "Insurance report" });
     await waitFor(() => expect(within(table).getByText("Under-insured")).toBeInTheDocument());
     expect(within(table).getByText("105803.57 USD")).toBeInTheDocument();
     expect(within(table).getByText("IFRS 90000 USD; TAX 80000 USD")).toBeInTheDocument();
@@ -390,7 +391,7 @@ describe("insurance report", () => {
     renderAt("/assets/insurance-report");
     fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.click(screen.getByRole("button", { name: "Run report" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("AUTH-0003");
     expect(within(alert).getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });

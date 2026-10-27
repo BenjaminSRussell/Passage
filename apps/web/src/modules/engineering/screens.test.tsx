@@ -1,3 +1,4 @@
+import { findAlert, findStatus, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RouteVersionPage, RouteVersionsPage } from "./screens";
@@ -33,7 +34,7 @@ describe("RouteVersionsPage", () => {
     const opened: string[] = [];
     render(<RouteVersionsPage onOpen={(id) => opened.push(id)} />);
     expect(screen.getByRole("table", { name: "Route versions" })).toHaveAttribute("aria-busy", "true");
-    const table = await screen.findByRole("table", { name: "Route versions" });
+    const table = await findTable({ name: "Route versions" });
     await waitFor(() => expect(table).not.toHaveAttribute("aria-busy"));
     expect(table).toHaveTextContent("RT-a");
     expect(table).toHaveTextContent("Active");
@@ -90,7 +91,7 @@ describe("RouteVersionsPage", () => {
     let calls = 0;
     stubRoutes(() => (++calls === 1 ? problem(400, "COM-0001", "Bad filter") : ok({ items: [header("a")] })));
     render(<RouteVersionsPage />);
-    expect(await screen.findByRole("alert")).toHaveTextContent("Bad filter");
+    expect(await findAlert()).toHaveTextContent("Bad filter");
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await screen.findByText("RT-a");
     expect(screen.getByRole("alert")).toBeEmptyDOMElement();
@@ -134,7 +135,7 @@ describe("RouteVersionPage activation", () => {
     for (const status of ["active", "expired"]) {
       stubRoutes(() => ok({ ...detail, status }));
       const view = render(<RouteVersionPage id="a" />);
-      await screen.findByRole("table", { name: "Operations" });
+      await findTable({ name: "Operations" });
       expect(activateButton()).toBeNull();
       view.unmount();
     }
@@ -174,7 +175,7 @@ describe("RouteVersionPage activation", () => {
     stubActivation(() => problem(403, "AUTH-0003", "Forbidden"));
     render(<RouteVersionPage id="a" />);
     fireEvent.click(await screen.findByRole("button", { name: "Activate" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("You do not have permission to activate routes");
+    expect(await findAlert()).toHaveTextContent("You do not have permission to activate routes");
     expect(screen.getByRole("button", { name: "Activate" })).toBeEnabled();
   });
 
@@ -193,7 +194,7 @@ describe("RouteVersionPage", () => {
     stubRoutes(() => ok(detail));
     const back = vi.fn();
     render(<RouteVersionPage id="a" onBack={back} />);
-    const table = await screen.findByRole("table", { name: "Operations" });
+    const table = await findTable({ name: "Operations" });
     fireEvent.click(screen.getByRole("button", { name: "Back to routings" }));
     expect(back).toHaveBeenCalled();
     const rows = within(table).getAllByRole("row").slice(1);
@@ -207,11 +208,11 @@ describe("RouteVersionPage", () => {
   it("posts the mapped operations and shows hours and calendar days", async () => {
     const fetchMock = stubRoutes((url) => (url.endsWith("lead-time") || url.endsWith(":lead-time") ? ok({ hours: "12.5", calendarDays: 2 }) : ok(detail)));
     render(<RouteVersionPage id="a" />);
-    await screen.findByRole("table", { name: "Operations" });
+    await findTable({ name: "Operations" });
     fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "5" } });
     fireEvent.change(screen.getByLabelText("Hours per day"), { target: { value: "8" } });
     fireEvent.click(screen.getByRole("button", { name: "Calculate" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("12.5 hours, 2 calendar days");
+    expect(await findStatus()).toHaveTextContent("12.5 hours, 2 calendar days");
     const [, init] = fetchMock.mock.calls.find(([url]) => url.endsWith(":lead-time"))!;
     const body = JSON.parse((init as RequestInit).body as string);
     expect(body.quantity).toBe("5");
@@ -222,18 +223,18 @@ describe("RouteVersionPage", () => {
   it("keeps the inputs and shows the problem title when lead time fails", async () => {
     stubRoutes((url) => (url.endsWith(":lead-time") ? problem(422, "COM-0002", "Hours per day must be positive") : ok(detail)));
     render(<RouteVersionPage id="a" />);
-    await screen.findByRole("table", { name: "Operations" });
+    await findTable({ name: "Operations" });
     fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "5" } });
     fireEvent.change(screen.getByLabelText("Hours per day"), { target: { value: "0" } });
     fireEvent.click(screen.getByRole("button", { name: "Calculate" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Hours per day must be positive");
+    expect(await findAlert()).toHaveTextContent("Hours per day must be positive");
     expect(screen.getByLabelText("Quantity")).toHaveValue(5);
   });
 
   it("shows not-found copy for ENG-ROUTE-NOTFOUND", async () => {
     stubRoutes(() => problem(404, "ENG-ROUTE-NOTFOUND", "Route version not found"));
     render(<RouteVersionPage id="missing" />);
-    expect(await screen.findByRole("alert")).toHaveTextContent("This route version does not exist");
+    expect(await findAlert()).toHaveTextContent("This route version does not exist");
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
   });
 
@@ -241,8 +242,8 @@ describe("RouteVersionPage", () => {
     let calls = 0;
     stubRoutes(() => (++calls === 1 ? { ok: false, status: 500, json: async () => { throw new Error("x"); } } : ok(detail)));
     render(<RouteVersionPage id="a" onBack={() => undefined} />);
-    expect(await screen.findByRole("alert")).toHaveTextContent("Request failed");
+    expect(await findAlert()).toHaveTextContent("Request failed");
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-    expect(await screen.findByRole("table", { name: "Operations" })).toBeInTheDocument();
+    expect(await findTable({ name: "Operations" })).toBeInTheDocument();
   });
 });

@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { JournalBatch, JournalName } from "./api/client";
@@ -110,7 +111,7 @@ describe("journal names", () => {
       return undefined;
     };
     const { container } = renderAt("/ledger/journal-names");
-    const table = await screen.findByRole("table", { name: "Journal names" });
+    const table = await findTable({ name: "Journal names" });
     const appr = (await within(table).findByRole("button", { name: "APPR" })).closest("tr") as HTMLElement;
     expect(appr.textContent).toContain("Required");
     expect(appr.textContent).toContain("Inactive");
@@ -179,7 +180,7 @@ describe("journal batch list", () => {
       return undefined;
     };
     const { container } = renderAt("/ledger/journal-batches");
-    const table = await screen.findByRole("table", { name: "Journal batches" });
+    const table = await findTable({ name: "Journal batches" });
     const row = (await within(table).findByRole("button", { name: "GJ" })).closest("tr") as HTMLElement;
     expect(row.textContent).toContain("In approval");
     expect(row.textContent).toContain("125.00 USD");

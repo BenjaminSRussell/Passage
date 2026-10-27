@@ -183,6 +183,9 @@ export function InvoicingPlanPage() {
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   useEffect(() => {
+    setRowVersion(null);
+  }, [id, lineNo]);
+  useEffect(() => {
     if (loaded.data !== null && loaded.data !== undefined) {
       setPlan(loaded.data);
       setRowVersion(loaded.data.poRowVersion);

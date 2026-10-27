@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -129,7 +130,7 @@ describe("trading partners list", () => {
     const { container } = renderAt("/intercompany/partners");
     expect(screen.getByRole("heading", { level: 2, name: "Trading partners" })).toBeInTheDocument();
     expect(screen.getByRole("table", { name: "Trading partners" })).toHaveAttribute("aria-busy", "true");
-    const table = await screen.findByRole("table", { name: "Trading partners" });
+    const table = await findTable({ name: "Trading partners" });
     await waitFor(() => expect(bodyRows(table)).toHaveLength(2));
     expect(cells(bodyRows(table)[0])).toEqual(["P → S", "IC-S / IC-P", "Cost plus markup 10 %", "±0.5 % price, ±2 days", "Active", "1"]);
     expect(cells(bodyRows(table)[1])).toContain("Inactive");
@@ -164,7 +165,7 @@ describe("trading partners list", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("internal error (COM-0500)");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-    const table = await screen.findByRole("table", { name: "Trading partners" });
+    const table = await findTable({ name: "Trading partners" });
     await waitFor(() => expect(bodyRows(table)).toHaveLength(1));
     fireEvent.click(screen.getByRole("button", { name: "Show more pairings" }));
     await waitFor(() => expect(bodyRows(table)).toHaveLength(2));

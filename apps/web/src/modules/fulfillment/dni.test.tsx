@@ -1,5 +1,6 @@
 // Delivered-not-invoiced report (FR-28.12, AC-28.8): the GL 1405 balance of a
 // legal entity as of a date and the packing slips that make it up.
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { DniReport } from "./api/client";
@@ -43,7 +44,7 @@ describe("delivered not invoiced", () => {
     expect(calls()).toHaveLength(0);
 
     ask(LE, "2026-10-21", CUSTOMER);
-    const table = await screen.findByRole("table", { name: "Delivered not invoiced as of 2026-10-21" });
+    const table = await findTable({ name: "Delivered not invoiced as of 2026-10-21" });
     const row = (await within(table).findByText("PS-0000003")).closest("tr");
     const cells = Array.from(row?.querySelectorAll("td, th") ?? []).map((cell) => cell.textContent);
     expect(cells).toEqual(["PS-0000003", "2026-10-18", "3", "0195f0a0", "0195f0a0", "125.00 USD"]);
@@ -95,7 +96,7 @@ describe("delivered not invoiced", () => {
     server.handler = (url) => (url.pathname !== PATH ? undefined : fail ? json(400, { code: "FUL-0050", detail: "request failed validation" }) : json(200, report));
     renderAt("/fulfillment/delivered-not-invoiced");
     ask(LE);
-    expect((await screen.findByRole("alert")).textContent).toContain("FUL-0050");
+    expect((await findAlert()).textContent).toContain("FUL-0050");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("PS-0000003")).toBeInTheDocument();

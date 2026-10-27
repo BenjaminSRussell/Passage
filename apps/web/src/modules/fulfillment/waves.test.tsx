@@ -1,3 +1,4 @@
+import { findAlert, findStatus, findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { Shipment, TrackingEvent, Wave, WavePlan, WaveSummary } from "./api/client";
@@ -76,7 +77,7 @@ describe("picking workbench (FR-28.13, AC-28.10)", () => {
     fireEvent.change(screen.getByLabelText("Max lines per wave"), { target: { value: "20" } });
     fireEvent.click(screen.getByRole("button", { name: "Preview waves" }));
 
-    expect((await screen.findByRole("status")).textContent).toBe("2 waves from 24 lines, grouped by carrier.");
+    expect((await findStatus()).textContent).toBe("2 waves from 24 lines, grouped by carrier.");
     const table = screen.getByRole("table", { name: "Planned waves" });
     expect(within(table).getByText("SH-0000001, SH-0000002")).toBeInTheDocument();
     expect(within(table).getByText("Unassigned")).toBeInTheDocument();
@@ -112,7 +113,7 @@ describe("picking workbench (FR-28.13, AC-28.10)", () => {
     fireEvent.change(screen.getByLabelText("Warehouse id"), { target: { value: WH } });
     fireEvent.click(screen.getByRole("button", { name: "Preview waves" }));
     fireEvent.click(await screen.findByRole("button", { name: "Create 1 wave" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert.textContent).toContain("FUL-0053");
     expect(alert.textContent).toContain("Preview again");
     expect(screen.queryByRole("table", { name: "Planned waves" })).toBeNull();
@@ -134,7 +135,7 @@ describe("pick waves", () => {
       return undefined;
     };
     const { container } = renderAt("/fulfillment/waves");
-    const table = await screen.findByRole("table", { name: "Pick waves" });
+    const table = await findTable({ name: "Pick waves" });
     expect((await within(table).findByText("WV-0000001")).closest("tr")?.textContent).toContain("Carrier");
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(within(table).getByRole("button", { name: "WV-0000001" }));
@@ -147,7 +148,7 @@ describe("pick waves", () => {
     let fail = true;
     server.handler = () => (fail ? json(503, { code: "COM-0500", detail: "down" }) : json(200, { items: [] }));
     renderAt("/fulfillment/waves");
-    expect((await screen.findByRole("alert")).textContent).toContain("COM-0500");
+    expect((await findAlert()).textContent).toContain("COM-0500");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No waves yet")).toBeInTheDocument();
@@ -156,7 +157,7 @@ describe("pick waves", () => {
   it("reports an unknown wave", async () => {
     server.handler = () => json(404, { code: "FUL-0052", detail: "wave not found" });
     renderAt(`/fulfillment/waves/${WAVE}`);
-    expect((await screen.findByRole("alert")).textContent).toContain("FUL-0052");
+    expect((await findAlert()).textContent).toContain("FUL-0052");
   });
 });
 
@@ -248,7 +249,7 @@ describe("shipment detail, slice 3", () => {
     packed.containers = [{ id: CONTAINER, containerType: "PALLET", sscc: "106141411234567897", status: "CLOSED", tareKg: "25", grossKg: "25", returnable: true, packagingMaterial: null, packingSlipId: null, lines: [{ shipmentLineId: LINE, qty: "100" }] }];
     serveShipment(() => packed);
     renderAt(`/fulfillment/shipments/${SH}`);
-    await screen.findByRole("table", { name: "Containers" });
+    await findTable({ name: "Containers" });
     expect(screen.queryByRole("button", { name: "Cancel shipment" })).toBeNull();
   });
 

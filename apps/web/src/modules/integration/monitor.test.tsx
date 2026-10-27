@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -111,7 +112,7 @@ describe("message monitor", () => {
       return undefined;
     };
     const { container } = renderAt("/integration/messages?status=FAILED");
-    const table = await screen.findByRole("table", { name: "Messages" });
+    const table = await findTable({ name: "Messages" });
     await waitFor(() => expect(within(table).getByText("EDI-0103: CTT01 2 does not match PO1 count 1")).toBeInTheDocument());
     expect(within(table).getByText("Outbound")).toBeInTheDocument();
     expect(within(table).getByText("Acknowledged")).toBeInTheDocument();
@@ -163,11 +164,11 @@ describe("message monitor", () => {
       return undefined;
     };
     renderAt("/integration/messages");
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("duty EDI_OPERATE required (COM-0403)");
     fail = false;
     fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
-    expect(await screen.findByRole("table", { name: "Messages" })).toBeInTheDocument();
+    expect(await findTable({ name: "Messages" })).toBeInTheDocument();
   });
 
   it("shows one message with its failing rule and links to its interchange to reprocess", async () => {
@@ -188,7 +189,7 @@ describe("message monitor", () => {
   it("reports a missing message", async () => {
     handler = () => json(404, { code: "EDI-0005", detail: "message not found" });
     renderAt(`/integration/messages/${FAILED_ID}`);
-    expect(await screen.findByRole("alert")).toHaveTextContent("message not found (EDI-0005)");
+    expect(await findAlert()).toHaveTextContent("message not found (EDI-0005)");
   });
 });
 
@@ -265,7 +266,7 @@ describe("reprocess", () => {
     };
     renderAt(`/integration/interchanges/${INTERCHANGE_ID}`);
     fireEvent.click(await screen.findByRole("button", { name: "Reprocess" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("database unavailable (COM-0503)");
+    expect(await findAlert()).toHaveTextContent("database unavailable (COM-0503)");
     fireEvent.click(screen.getByRole("button", { name: "Reprocess" }));
     expect(await screen.findByText("1 of 1 changed.")).toBeInTheDocument();
     const keys = calls.filter((c) => c.url.pathname.endsWith(":reprocess")).map((c) => header(c, "Idempotency-Key"));
@@ -308,7 +309,7 @@ describe("partner SLA", () => {
   it("shows volume, failure rate, 997 latency and breaches per partner, and changes the period", async () => {
     handler = (url) => (url.pathname === "/api/v1/edi/partners/sla" ? json(200, { ...report, days: Number(url.searchParams.get("days")) }) : undefined);
     const { container } = renderAt("/integration/partner-sla");
-    const table = await screen.findByRole("table", { name: "Partner SLA" });
+    const table = await findTable({ name: "Partner SLA" });
     await waitFor(() => expect(within(table).getByText("Demo distributor (TEST)")).toBeInTheDocument());
     expect(within(table).getByText("33.33 %")).toBeInTheDocument();
     expect(within(table).getByText("1 of 2")).toBeInTheDocument();
@@ -331,6 +332,6 @@ describe("partner SLA", () => {
   it("shows the problem when the dashboard cannot load", async () => {
     handler = () => json(500, { code: "COM-0500", detail: "internal error" });
     renderAt("/integration/partner-sla");
-    expect(await screen.findByRole("alert")).toHaveTextContent("internal error (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("internal error (COM-0500)");
   });
 });

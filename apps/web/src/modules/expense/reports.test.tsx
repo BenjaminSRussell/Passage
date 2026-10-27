@@ -1,3 +1,4 @@
+import { findAlert } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -135,7 +136,7 @@ describe("expense report list", () => {
   it("shows a failure with a retry", async () => {
     const fetchMock = stubFetch([503, { code: "COM-0503", detail: "report persistence is not configured" }], [200, { items: [report()], nextCursor: "" }]);
     renderAt("/expense/reports");
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("report persistence is not configured (COM-0503)");
     fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("Client visit Boston")).toBeInTheDocument();
@@ -170,7 +171,7 @@ describe("new expense report", () => {
     fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(screen.getByLabelText("Worker"), { target: { value: WORKER } });
     fireEvent.click(screen.getByRole("button", { name: "Create report" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("legal entity is outside the caller's scope (AUTH-0004)");
+    expect(await findAlert()).toHaveTextContent("legal entity is outside the caller's scope (AUTH-0004)");
     expect(screen.getByTestId("where")).toHaveTextContent("/expense/reports/new");
     const firstKey = call(fetchMock, 0).headers["Idempotency-Key"];
     fireEvent.click(screen.getByRole("button", { name: "Create report" }));
@@ -245,7 +246,7 @@ describe("expense report detail", () => {
     );
     renderAt(`/expense/reports/${REPORT_ID}`);
     fireEvent.click(await screen.findByRole("button", { name: "Submit report" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("The report was not submitted");
     expect(within(alert).getByText("Line 1: Receipt required for lines of 25.00 or more (EXP-RCPT-025)")).toBeInTheDocument();
     const sent = call(fetchMock, 1);
@@ -285,7 +286,7 @@ describe("expense report detail", () => {
   it("shows a retry when the report cannot be loaded", async () => {
     stubFetch([500, { code: "COM-0500", detail: "internal error" }], [200, flagged]);
     renderAt(`/expense/reports/${REPORT_ID}`);
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("internal error (COM-0500)");
     fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
     expect(await screen.findByRole("heading", { name: "Client visit Boston" })).toBeInTheDocument();

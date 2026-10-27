@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -118,7 +119,7 @@ describe("gate log", () => {
   it("lists trucks in the yard with arrival and filters by status, site and carrier", async () => {
     handler = (url) => (url.pathname === "/api/v1/transport/gate/visits" ? json(200, { items: [visit(), visit({ id: "v2", trailerNo: "T9", arrival: undefined, walkIn: true, sealNo: undefined })] }) : undefined);
     const { container } = renderAt("/transport/gate");
-    const table = await screen.findByRole("table", { name: "Gate visits" });
+    const table = await findTable({ name: "Gate visits" });
     expect(within(table).getByText("TR-1001")).toBeInTheDocument();
     expect(within(table).getByText("Late")).toBeInTheDocument();
     expect(within(table).getByText("Walk-in")).toBeInTheDocument();
@@ -144,7 +145,7 @@ describe("gate log", () => {
     expect(await screen.findByText(/transport is down/)).toBeInTheDocument();
     handler = () => json(200, { items: [visit()] });
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-    expect(await screen.findByRole("table", { name: "Gate visits" })).toBeInTheDocument();
+    expect(await findTable({ name: "Gate visits" })).toBeInTheDocument();
   });
 });
 
@@ -302,7 +303,7 @@ describe("goods in transit", () => {
   it("lists orders for a voyage with their estimated landed cost", async () => {
     handler = (url) => (url.pathname === "/api/v1/transport/goods-in-transit" ? json(200, { items: [order()] }) : undefined);
     const { container } = renderAt(`/transport/goods-in-transit?voyageId=${VOYAGE}`);
-    const table = await screen.findByRole("table", { name: "Goods-in-transit orders" });
+    const table = await findTable({ name: "Goods-in-transit orders" });
     expect(within(table).getByText("754.17 USD")).toBeInTheDocument();
     expect(within(table).getByText("Pending")).toBeInTheDocument();
     expect(calls[0].url.searchParams.get("voyageId")).toBe(VOYAGE);
@@ -364,7 +365,7 @@ describe("goods in transit", () => {
       return json(200, order());
     };
     const { container } = renderAt(`/transport/goods-in-transit/${GIT}`);
-    const lines = await screen.findByRole("table", { name: "Receipt lines in transit" });
+    const lines = await findTable({ name: "Receipt lines in transit" });
     expect(within(lines).getByText("DUTY")).toBeInTheDocument();
     expect(within(lines).getByText("62.50")).toBeInTheDocument();
     expect(violations(container)).toEqual([]);

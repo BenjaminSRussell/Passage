@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
@@ -69,7 +70,7 @@ describe("Bulk status update on the order list (FR-21.12)", () => {
         : json({ items: [first, second, third] }),
     );
     const { container, location } = renderAt("/production");
-    const table = await screen.findByRole("table", { name: "Production orders" });
+    const table = await findTable({ name: "Production orders" });
     await waitFor(() => expect(within(table).getByText("PO-000003")).toBeInTheDocument());
     expect(screen.getByRole("button", { name: "Apply to selected" })).toBeDisabled();
 
@@ -81,7 +82,7 @@ describe("Bulk status update on the order list (FR-21.12)", () => {
     expect(screen.getByLabelText("Bulk command")).toHaveValue("release");
     await userEvent.click(screen.getByRole("button", { name: "Apply to selected" }));
 
-    const results = await screen.findByRole("table", { name: "Bulk update results" });
+    const results = await findTable({ name: "Bulk update results" });
     expect(screen.getByText("Release: 1 succeeded, 1 failed")).toBeInTheDocument();
     expect(within(results).getByText("PO-000001")).toBeInTheDocument();
     expect(within(results).getByText("Done")).toBeInTheDocument();
@@ -122,7 +123,7 @@ describe("Bulk status update on the order list (FR-21.12)", () => {
     renderAt("/production");
     await userEvent.click(await screen.findByRole("checkbox", { name: "Select PO-000001" }));
     await userEvent.click(screen.getByRole("button", { name: "Apply to selected" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("missing duty production.order.release (AUTH-0003)");
     expect(screen.getByRole("checkbox", { name: "Select PO-000001" })).toBeChecked();
     await userEvent.click(screen.getByRole("button", { name: "Apply to selected" }));
@@ -177,7 +178,7 @@ describe("Merge on the order list (FR-21.15)", () => {
     await userEvent.click(screen.getByRole("checkbox", { name: "Select PO-000002" }));
     await userEvent.click(screen.getByRole("button", { name: "Merge selected" }));
     await userEvent.click(screen.getByRole("button", { name: "Yes, merge them" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("merge refused: order PO-000001 has posted journals (PRODUCTION_MERGE_REFUSED)");
+    expect(await findAlert()).toHaveTextContent("merge refused: order PO-000001 has posted journals (PRODUCTION_MERGE_REFUSED)");
   });
 });
 

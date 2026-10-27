@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -155,7 +156,7 @@ describe("Sales quotations list", () => {
   it("lists quotations with open lines and passes the status filter", async () => {
     handler = () => ({ status: 200, body: { items: [quotation({ lines: [], openLines: 1 })] } });
     const { container } = renderAt("/sales/quotations");
-    const table = await screen.findByRole("table", { name: "Sales quotations" });
+    const table = await findTable({ name: "Sales quotations" });
     await waitFor(() => expect(within(table).getByText("SQ-0000012")).toBeInTheDocument());
     expect(within(table).getByText("1 of 3")).toBeInTheDocument();
     expect(within(table).getByText("60%")).toBeInTheDocument();
@@ -325,7 +326,7 @@ describe("Credit release queue", () => {
   it("asks for CREDIT holds and shows the failed rule against its threshold and the limit", async () => {
     handler = () => ({ status: 200, body: { items: [creditHold] } });
     const { container } = renderAt("/sales/credit-holds");
-    const table = await screen.findByRole("table", { name: "Holds waiting for release" });
+    const table = await findTable({ name: "Holds waiting for release" });
     await waitFor(() => expect(within(table).getByRole("link", { name: "SO-0000042" })).toBeInTheDocument());
     expect(calls[0].url.pathname).toBe("/api/v1/sales/holds");
     expect(calls[0].url.searchParams.get("holdType")).toBe("CREDIT");
@@ -406,7 +407,7 @@ describe("Supplementary items", () => {
   it("lists rules and removes one after confirmation", async () => {
     handler = (_url, init) => (init.method === "DELETE" ? { status: 204, body: null } : { status: 200, body: { items: [rule] } });
     const { container } = renderAt("/sales/supplementary-items");
-    const table = await screen.findByRole("table", { name: "Supplementary item rules" });
+    const table = await findTable({ name: "Supplementary item rules" });
     await waitFor(() => expect(within(table).getByText("1 EA per 10")).toBeInTheDocument());
     expect(within(table).getByText("Free")).toBeInTheDocument();
     expect(within(table).getByText("Every customer")).toBeInTheDocument();
@@ -430,7 +431,7 @@ describe("Supplementary items", () => {
     fireEvent.change(within(form).getByLabelText("Ordered product"), { target: { value: PRODUCT } });
     fireEvent.change(within(form).getByLabelText("Ordered quantity"), { target: { value: "25" } });
     fireEvent.click(within(form).getByRole("button", { name: "Check line" }));
-    const result = await screen.findByRole("table", { name: "Supplementary items for the line" });
+    const result = await findTable({ name: "Supplementary items for the line" });
     expect(within(result).getByText("2 EA")).toBeInTheDocument();
     expect(within(result).getByText("Mandatory")).toBeInTheDocument();
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({ legalEntityId: LE, productId: PRODUCT, quantity: "25" });

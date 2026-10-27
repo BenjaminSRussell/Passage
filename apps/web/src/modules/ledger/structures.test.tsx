@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { DimensionValue, Structure } from "./api/client";
@@ -107,7 +108,7 @@ describe("account structures list", () => {
   it("lists versions with status, accounts and segments and opens one", async () => {
     structureServer();
     const { container } = renderAt(`/ledger/structures?ledger=${LEDGER}`);
-    const table = await screen.findByRole("table", { name: "Account structures" });
+    const table = await findTable({ name: "Account structures" });
     await within(table).findByRole("button", { name: "PL" });
     const pl = within(table).getByRole("button", { name: "PL" }).closest("tr") as HTMLElement;
     expect(pl.textContent).toContain("Active");
@@ -276,7 +277,7 @@ describe("dimension values", () => {
   it("lists the register and saves a value", async () => {
     valueServer();
     const { container } = renderAt(`/ledger/dimension-values?ledger=${LEDGER}`);
-    const table = await screen.findByRole("table", { name: "Dimension values" });
+    const table = await findTable({ name: "Dimension values" });
     await within(table).findByText("Old sales");
     expect(within(table).getByText("Old sales").closest("tr")?.textContent).toContain("Suspended");
     expect(within(table).getByText("Closed").closest("tr")?.textContent).toContain("Expired");
@@ -296,7 +297,7 @@ describe("dimension values", () => {
   it("opens a row into the form to change it", async () => {
     valueServer();
     renderAt(`/ledger/dimension-values?ledger=${LEDGER}`);
-    const table = await screen.findByRole("table", { name: "Dimension values" });
+    const table = await findTable({ name: "Dimension values" });
     const row = (await within(table).findByText("Old sales")).closest("tr") as HTMLElement;
     fireEvent.click(within(row).getByRole("button", { name: "DEPT" }));
     expect(screen.getByLabelText("Value")).toHaveValue("D200");

@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -142,7 +143,7 @@ describe("Transaction detail", () => {
     renderAt(`/inventory/transactions/${TXN_ID}`);
     const unpick = await screen.findByRole("button", { name: "Unpick to reserved physical" });
     fireEvent.click(unpick);
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("The status was not changed");
     expect(alert).toHaveTextContent("(INV-NEG-001)");
     fireEvent.click(screen.getByRole("button", { name: "Unpick to reserved physical" }));
@@ -168,7 +169,7 @@ describe("Transaction detail", () => {
   it("reports a load failure with a retry", async () => {
     handler = () => json(500, { code: "COM-0500", detail: "unexpected error" });
     renderAt(`/inventory/transactions/${TXN_ID}`);
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("Could not load the transaction");
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
@@ -182,7 +183,7 @@ describe("Status changes inquiry", () => {
         nextCursor: url.searchParams.get("cursor") ? undefined : CHANGE_ID,
       });
     const { container } = renderAt("/inventory/status-changes");
-    const table = await screen.findByRole("table", { name: "Status changes" });
+    const table = await findTable({ name: "Status changes" });
     expect(table).toHaveTextContent("Unpick");
     expect(table).toHaveTextContent("Reserved physical");
     expect(screen.getByRole("link", { name: "0190a0b0" })).toHaveAttribute("href", `/inventory/transactions/${TXN_ID}`);
@@ -210,7 +211,7 @@ describe("Status changes inquiry", () => {
   it("reports a failed load", async () => {
     handler = () => json(403, { code: "AUTH-0003", detail: "missing duty inventory.read" });
     renderAt("/inventory/status-changes");
-    expect(await screen.findByRole("alert")).toHaveTextContent("Could not load status changes");
+    expect(await findAlert()).toHaveTextContent("Could not load status changes");
   });
 });
 

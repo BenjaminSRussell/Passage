@@ -1,3 +1,4 @@
+import { findAlert, findStatus, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -106,7 +107,7 @@ describe("capex decisions", () => {
     expect(screen.queryByRole("button", { name: "Submit request" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Approve" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Approved 320000 USD.");
+    expect(await findStatus()).toHaveTextContent("Approved 320000 USD.");
     const post = posts()[0];
     expect(post.url.pathname).toBe(`/api/v1/assets/capex-requests/${CAPEX}/approve`);
     expect(post.headers.get("If-Match")).toBe('"2"');
@@ -146,7 +147,7 @@ describe("capex decisions", () => {
     expect(posts()).toHaveLength(0);
     fireEvent.change(screen.getByLabelText("Comment"), { target: { value: "Next budget year" } });
     fireEvent.click(screen.getByRole("button", { name: "Postpone" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("The request is now postponed.");
+    expect(await findStatus()).toHaveTextContent("The request is now postponed.");
     expect(posts()[0].body).toEqual({ comment: "Next budget year" });
     expect(within(screen.getByRole("table", { name: "Decision trail" })).getByText("Next budget year")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Return to draft" })).toBeInTheDocument();
@@ -159,7 +160,7 @@ describe("capex decisions", () => {
         : { status: 200, body: inApproval, etag: '"2"' };
     renderAt(`/assets/capex/${CAPEX}`);
     fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("You cannot decide your own request");
     expect(alert).toHaveTextContent("(AST-0028)");
     expect(screen.getByRole("button", { name: "Approve" })).toBeInTheDocument();
@@ -170,7 +171,7 @@ describe("capex decisions", () => {
       init.method === "POST" ? { status: 412, body: { code: "AST-0006", detail: "the request changed since you read it" } } : { status: 200, body: inApproval, etag: '"2"' };
     renderAt(`/assets/capex/${CAPEX}`);
     fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("The request changed since you opened it");
     fireEvent.click(within(alert).getByRole("button", { name: "Reload" }));
     await waitFor(() => expect(calls.filter((c) => c.method === "GET")).toHaveLength(2));
@@ -179,7 +180,7 @@ describe("capex decisions", () => {
   it("shows no decision for a closed request", async () => {
     handler = () => ({ status: 200, body: { ...inApproval, status: "Closed", approvedAmount: "320000", decisions: [approval] }, etag: '"5"' });
     renderAt(`/assets/capex/${CAPEX}`);
-    expect(await screen.findByRole("table", { name: "Decision trail" })).toBeInTheDocument();
+    expect(await findTable({ name: "Decision trail" })).toBeInTheDocument();
     expect(screen.queryByRole("form", { name: "Decide the request" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
   });
@@ -187,7 +188,7 @@ describe("capex decisions", () => {
   it("opens the approvals list on requests in approval", async () => {
     handler = () => ({ status: 200, body: { items: [{ ...inApproval, variants: undefined }] } });
     renderAt("/assets/capex/approvals");
-    const table = await screen.findByRole("table", { name: "Capex requests" });
+    const table = await findTable({ name: "Capex requests" });
     await waitFor(() => expect(within(table).getByText("CR-1")).toBeInTheDocument());
     expect(calls[0].url.search).toBe("?status=InApproval");
     expect(screen.getByLabelText("Status")).toHaveValue("InApproval");
@@ -226,7 +227,7 @@ describe("mid-quarter test", () => {
     fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(screen.getByLabelText("Tax year"), { target: { value: "2026" } });
     fireEvent.click(screen.getByRole("button", { name: "Run test" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Q4 placed-in-service share 63.64% exceeds 40%");
+    expect(await findStatus()).toHaveTextContent("Q4 placed-in-service share 63.64% exceeds 40%");
     expect(calls[0].url.search).toBe(`?legalEntityId=${LE}&bookCode=TAX&year=2026`);
     const tiles = screen.getByRole("list", { name: "Basis by quarter" });
     expect(within(tiles).getByText("70000 USD")).toBeInTheDocument();
@@ -246,7 +247,7 @@ describe("mid-quarter test", () => {
     fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(screen.getByLabelText("Tax year"), { target: { value: "2026" } });
     fireEvent.click(screen.getByRole("button", { name: "Run test" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Q4 placed-in-service share 40% is 40% or less");
+    expect(await findStatus()).toHaveTextContent("Q4 placed-in-service share 40% is 40% or less");
     expect(within(screen.getByRole("table", { name: "Books to review" })).getByText("Every convention follows the test")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Tax year"), { target: { value: "2024" } });
     fireEvent.click(screen.getByRole("button", { name: "Run test" }));
@@ -258,6 +259,6 @@ describe("mid-quarter test", () => {
     renderAt("/assets/mid-quarter-test");
     fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.click(screen.getByRole("button", { name: "Run test" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("more than one currency (AST-0029)");
+    expect(await findAlert()).toHaveTextContent("more than one currency (AST-0029)");
   });
 });

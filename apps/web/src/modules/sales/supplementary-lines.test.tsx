@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -122,7 +123,7 @@ describe("Mandatory supplementary lines on a new order (FR-27.14, AC-27.10)", ()
   it("marks supplementary lines on the order without the creation notice when opened directly", async () => {
     handler = (url) => (url.pathname.endsWith("/versions") ? { status: 200, body: { items: [] } } : { status: 200, body: order(), etag: '"1"' });
     const { container } = renderAt(`/sales/orders/${ORDER_ID}`);
-    const lines = await screen.findByRole("table", { name: "Order lines" });
+    const lines = await findTable({ name: "Order lines" });
     expect(within(lines).getByText("For line 1")).toBeInTheDocument();
     expect(screen.queryByText("Supplementary items added")).not.toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);

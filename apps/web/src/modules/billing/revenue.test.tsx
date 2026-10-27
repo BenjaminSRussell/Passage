@@ -1,3 +1,4 @@
+import { findAlert, findStatus, findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { periodEndOf, type RecognitionRun, type RevenueContract, type RollForward } from "./api/client";
@@ -117,7 +118,7 @@ describe("Revenue contracts list", () => {
       return undefined;
     };
     const { container } = renderAt("/billing/revenue-contracts");
-    const table = await screen.findByRole("table", { name: "Revenue contracts" });
+    const table = await findTable({ name: "Revenue contracts" });
     await waitFor(() => expect(table).toHaveTextContent("10800.00 USD"));
     expect(table).toHaveTextContent("7200.00 USD");
     expect(table).toHaveTextContent("3600.00 USD");
@@ -148,7 +149,7 @@ describe("Revenue contracts list", () => {
     server.handler = (url) =>
       url.searchParams.get("cursor") === "next" ? json(200, { items: [older] }) : json(200, { items: [contract], nextCursor: "next" });
     const { container } = renderAt("/billing/revenue-contracts");
-    const table = await screen.findByRole("table", { name: "Revenue contracts" });
+    const table = await findTable({ name: "Revenue contracts" });
     await waitFor(() => expect(table).toHaveTextContent("10800.00 USD"));
     fireEvent.change(screen.getByLabelText("Obligation method"), { target: { value: "RATABLE" } });
     await waitFor(() => expect(server.calls.at(-1)?.url.searchParams.get("method")).toBe("RATABLE"));
@@ -164,10 +165,10 @@ describe("Revenue contracts list", () => {
   it("shows the error state with a retry", async () => {
     server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty revrec.view" });
     renderAt("/billing/revenue-contracts");
-    expect(await screen.findByRole("alert")).toHaveTextContent("missing duty revrec.view (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty revrec.view (AUTH-0003)");
     server.handler = () => json(200, { items: [contract] });
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-    expect(await screen.findByRole("table", { name: "Revenue contracts" })).toHaveTextContent("10800.00 USD");
+    expect(await findTable({ name: "Revenue contracts" })).toHaveTextContent("10800.00 USD");
   });
 });
 
@@ -186,7 +187,7 @@ describe("Revenue contract detail", () => {
       return undefined;
     };
     const { container } = renderAt(`/billing/revenue-contracts/${CONTRACT}`);
-    const obligations = await screen.findByRole("table", { name: "Performance obligations" });
+    const obligations = await findTable({ name: "Performance obligations" });
     expect(obligations).toHaveTextContent("7200.00 USD");
     expect(obligations).toHaveTextContent("1350.00 USD");
     expect(obligations).toHaveTextContent("Awaiting milestone");
@@ -196,7 +197,7 @@ describe("Revenue contract detail", () => {
 
     fill("Satisfied on", "2027-03-25");
     fireEvent.click(screen.getByRole("button", { name: "Satisfy milestone (1350.00 USD)" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Line 2 satisfied on 2027-03-25: 1350.00 USD");
+    expect(await findStatus()).toHaveTextContent("Line 2 satisfied on 2027-03-25: 1350.00 USD");
     const post = server.calls.find((c) => c.method === "POST");
     expect(new Headers(post?.init.headers).get("If-Match")).toBe('"1"');
     expect(post?.body).toEqual({ satisfiedOn: "2027-03-25" });
@@ -213,7 +214,7 @@ describe("Revenue contract detail", () => {
     };
     renderAt(`/billing/revenue-contracts/${CONTRACT}`);
     fireEvent.click(await screen.findByRole("button", { name: "Satisfy milestone (1350.00 USD)" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("The contract changed since you opened it");
     expect(alert).toHaveTextContent("(REV-0103)");
     await waitFor(() => expect(server.calls.filter((c) => c.method === "GET" && c.url.pathname === `/api/v1/revrec/contracts/${CONTRACT}`).length).toBe(2));
@@ -233,7 +234,7 @@ describe("Revenue contract detail", () => {
     expect(server.calls.some((c) => c.method === "POST")).toBe(false);
     fill("Satisfied on", "2027-03-01");
     fireEvent.click(screen.getByRole("button", { name: "Satisfy milestone (1350.00 USD)" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("The date is before the contract date");
+    expect(await findAlert()).toHaveTextContent("The date is before the contract date");
   });
 
   it("warns about a residual SSP and shows a load failure with a retry", async () => {
@@ -282,7 +283,7 @@ describe("Revenue contract roll-forward", () => {
       return json(200, contract);
     };
     renderAt(`/billing/revenue-contracts/${CONTRACT}`);
-    expect(await screen.findByRole("alert")).toHaveTextContent("revrec unavailable (HTTP-503)");
+    expect(await findAlert()).toHaveTextContent("revrec unavailable (HTTP-503)");
     expect(screen.getByRole("table", { name: "Performance obligations" })).toHaveTextContent("7200.00 USD");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
@@ -385,7 +386,7 @@ describe("New revenue contract", () => {
     expect(await screen.findByText("must be a UUID")).toBeInTheDocument();
     const firstKey = idempotencyKey(server.calls[0]);
     fireEvent.click(screen.getByRole("button", { name: "Create contract" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("(REV-0003)");
+    expect(await findAlert()).toHaveTextContent("(REV-0003)");
     expect(idempotencyKey(server.calls[1])).not.toBe(firstKey);
   });
 
@@ -449,7 +450,7 @@ describe("Deferred revenue", () => {
     expect(pageViolations(container)).toEqual([]);
 
     fireEvent.click(screen.getByRole("button", { name: "Run recognition through 2027-03-31" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Recognition run through 2027-03-31: 1 ratable line recognized.");
+    expect(await findStatus()).toHaveTextContent("Recognition run through 2027-03-31: 1 ratable line recognized.");
     expect(server.calls.find((c) => c.method === "POST")?.body).toEqual({ legalEntityId: LE, periodEnd: "2027-03-31" });
     await waitFor(() => expect(screen.getByRole("table", { name: "Recognition runs" })).toHaveTextContent("2027-04-01 01:00:00 UTC"));
   });
@@ -464,7 +465,7 @@ describe("Deferred revenue", () => {
     fill("Legal entity id", LE);
     fill("Month", "2099-01");
     fireEvent.click(screen.getByRole("button", { name: "Show roll-forward" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("the caller is scoped to another legal entity (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("the caller is scoped to another legal entity (AUTH-0003)");
     fireEvent.click(screen.getByRole("button", { name: "Run recognition through 2099-01-31" }));
     expect(await screen.findByText("That month has not ended yet")).toBeInTheDocument();
   });

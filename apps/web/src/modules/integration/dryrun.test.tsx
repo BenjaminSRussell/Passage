@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -90,7 +91,7 @@ describe("punchout cart check", () => {
     const { container } = renderAt("/integration/punchout");
     fill("Price tolerance (%)", "5");
     submit("Check cart");
-    const table = await screen.findByRole("table", { name: "Requisition lines" });
+    const table = await findTable({ name: "Requisition lines" });
     expect(within(table).getByText("OCI-200")).toBeInTheDocument();
     expect(within(table).getByText("Above catalog price")).toBeInTheDocument();
     expect(screen.getByText("1 requisition line would be created")).toBeInTheDocument();
@@ -125,7 +126,7 @@ describe("punchout cart check", () => {
     handler = () => json(400, { code: "EDI-0001", detail: "request failed validation", errors: { "supplier.tolerancePct": "must be a number between 0 and 20" } });
     renderAt("/integration/punchout");
     submit("Check cart");
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("request failed validation (EDI-0001)");
     expect(within(alert).getByText("supplier.tolerancePct")).toBeInTheDocument();
   });
@@ -169,7 +170,7 @@ describe("self-billing match", () => {
     const { container } = renderAt("/integration/self-billing");
     fill("Price tolerance per unit", "0.02");
     submit("Run match");
-    const table = await screen.findByRole("table", { name: "Self-billed lines" });
+    const table = await findTable({ name: "Self-billed lines" });
     expect(within(table).getByText("Difference")).toBeInTheDocument();
     expect(within(table).getByText("Unit price 10.05 vs 10")).toBeInTheDocument();
     expect(within(screen.getByRole("list", { name: "Unbilled shipments" })).getByText("SHP-3")).toBeInTheDocument();
@@ -185,7 +186,7 @@ describe("self-billing match", () => {
     handler = () => json(400, { code: "EDI-0001", detail: "request failed validation", errors: { "shipments[0].shippedOn": "must be a date in YYYY-MM-DD" } });
     renderAt("/integration/self-billing");
     submit("Run match");
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(within(alert).getByText("shipments[0].shippedOn")).toBeInTheDocument();
   });
 
@@ -232,7 +233,7 @@ describe("peppol invoice", () => {
     handler = () => json(400, { code: "EDI-0001", detail: "request failed validation", errors: { "lines[0].quantity": "must be a decimal number" } });
     renderAt("/integration/peppol");
     submit("Build UBL");
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("The invoice could not be read");
     expect(within(alert).getByText("lines[0].quantity")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("button", { name: "Build UBL" })).toBeEnabled());

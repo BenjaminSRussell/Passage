@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -126,7 +127,7 @@ describe("Kiosk", () => {
     fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
     expect(await screen.findByText("Clocked in since 2026-10-21 07:00 UTC.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Clock out" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Service unavailable (COM-0503)");
+    expect(await findAlert()).toHaveTextContent("Service unavailable (COM-0503)");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Clock out" }));
     expect(await screen.findByText("You are clocked out.")).toBeInTheDocument();
@@ -142,6 +143,7 @@ describe("Kiosk", () => {
     fill("Badge", "B-42");
     fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
     expect(await screen.findByRole("heading", { name: "Ana Silva" })).toBeInTheDocument();
+    // flushes the passive effect that arms the idle timer before fake time advances
     await act(async () => {});
     act(() => {
       vi.advanceTimersByTime(50_000);
@@ -186,7 +188,7 @@ describe("Who is clocked in", () => {
         ? json(200, { items: [clocked(), clocked({ workerId: "0195f0a0-0000-7000-8000-000000000009", name: "Ben Ode", badgeId: null, active: false, jobs: [] })] })
         : undefined;
     const { container } = renderAt("/shopfloor/clocked-in");
-    const table = await screen.findByRole("table", { name: "Clocked-in workers" });
+    const table = await findTable({ name: "Clocked-in workers" });
     await waitFor(() => expect(table).toHaveTextContent("Ana Silva"));
     expect(table).toHaveTextContent(`${JOB} (bundle)`);
     expect(table).toHaveTextContent("2026-10-21 07:00 UTC");

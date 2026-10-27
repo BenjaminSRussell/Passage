@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { Invoice, InvoiceTrace } from "./api/client";
@@ -163,7 +164,7 @@ describe("Invoice shipments", () => {
     const { container } = renderAt("/billing/proposals/new");
     fillForm();
     fireEvent.click(screen.getByRole("button", { name: "Create proposals" }));
-    const table = await screen.findByRole("table", { name: "Created invoice proposals" });
+    const table = await findTable({ name: "Created invoice proposals" });
     expect(table).toHaveTextContent("131.50 EUR");
     expect(table).toHaveTextContent("238.00 EUR");
     expect(screen.getByText("Created 2 invoice proposals.")).toBeInTheDocument();
@@ -175,7 +176,7 @@ describe("Invoice shipments", () => {
     renderAt("/billing/proposals/new");
     fillForm();
     fireEvent.click(screen.getByRole("button", { name: "Create proposals" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("A packing slip line is already invoiced");
     expect(alert).toHaveTextContent("BIL-0104");
     expect(screen.getByLabelText("Packing slip id")).toHaveValue(SLIP);
@@ -257,11 +258,11 @@ describe("Invoice trace", () => {
     let fail = true;
     server.handler = () => (fail ? json(404, { code: "BIL-0100", detail: "invoice not found" }) : json(200, trace));
     renderAt(`/billing/invoices/${INV}/trace`);
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("BIL-0100");
     fail = false;
     fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
-    expect(await screen.findByRole("table", { name: "Trace lines" })).toBeInTheDocument();
+    expect(await findTable({ name: "Trace lines" })).toBeInTheDocument();
   });
 });
 

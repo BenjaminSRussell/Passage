@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -158,7 +159,7 @@ describe("AdjustmentsPage", () => {
       [`GET /api/v1/costing/adjustments/${ADJ}`]: () => json(200, posted),
     });
     const { container } = at(`/costing/adjustments?legalEntityId=${LE}`);
-    const table = await screen.findByRole("table", { name: "Cost adjustments" });
+    const table = await findTable({ name: "Cost adjustments" });
     expect(within(table).getByText("-50.00 EUR")).toBeInTheDocument();
     expect(within(table).getByText("NRV write-down")).toBeInTheDocument();
     expect(calls(fetchMock, "GET", "/adjustments?")[0][0]).toContain(`legalEntityId=${LE}`);
@@ -182,7 +183,7 @@ describe("AdjustmentsPage", () => {
     at("/costing/adjustments");
     expect(await screen.findByText("Could not load the cost adjustments")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-    expect(await screen.findByRole("table", { name: "Cost adjustments" })).toBeInTheDocument();
+    expect(await findTable({ name: "Cost adjustments" })).toBeInTheDocument();
   });
 });
 
@@ -279,7 +280,7 @@ describe("Reconciliation pages", () => {
   it("lists runs and shows the empty state", async () => {
     stubRoutes({ "GET /api/v1/costing/reconciliations": () => json(200, { items: [{ ...run, rows: undefined }] }) });
     const { container } = at("/costing/reconciliations");
-    const table = await screen.findByRole("table", { name: "Reconciliations" });
+    const table = await findTable({ name: "Reconciliations" });
     expect(within(table).getByText("Differs")).toBeInTheDocument();
     expect(within(table).getByText("5.00 EUR")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);

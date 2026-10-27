@@ -1,5 +1,6 @@
 // Short picks and backorders (FR-28.2) and returnable packaging aging (FR-28.16):
 // list on open, filter, page, empty and error states.
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { AgedReturnableBalance, BackorderRow, ReturnableAging } from "./api/client";
@@ -46,7 +47,7 @@ describe("Short picks and backorders", () => {
     const { container } = renderAt("/fulfillment/backorders");
     expect(screen.getByRole("table", { name: "Short picks and backorders" })).toHaveAttribute("aria-busy", "true");
 
-    const table = await screen.findByRole("table", { name: "Short picks and backorders" });
+    const table = await findTable({ name: "Short picks and backorders" });
     const row = (await within(table).findByText("SH-0000007")).closest("tr") as HTMLElement;
     const cells = Array.from(row.querySelectorAll("td, th")).map((cell) => cell.textContent);
     expect(cells).toEqual(["SH-0000007", "Partially shipped", "0195f0a1", "0195f0a0", "100 EA", "90 EA", "10 EA", "Open", "2026-10-21 14:05 UTC"]);
@@ -131,7 +132,7 @@ describe("Short picks and backorders", () => {
     server.handler = (url) =>
       url.pathname !== BACKORDERS ? undefined : fail ? json(403, { code: "COM-0403", detail: "missing duty WarehouseView" }) : json(200, { items: [backorder("0195f0a0-0000-7000-8000-0000000000c1")] });
     renderAt("/fulfillment/backorders");
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert.textContent).toContain("Could not load the backorders");
     expect(alert.textContent).toContain("COM-0403");
     fail = false;
@@ -164,7 +165,7 @@ describe("Returnable packaging aging", () => {
       url.pathname === AGING ? json(200, aging([aged("PALLET"), aged("CRATE", { balance: "4", oldestOutstandingDate: "2026-10-11", daysOutstanding: 10, chargeDue: false })])) : undefined;
     const { container } = renderAt("/fulfillment/returnable-aging");
 
-    const table = await screen.findByRole("table", { name: "Returnable packaging aging" });
+    const table = await findTable({ name: "Returnable packaging aging" });
     const pallet = (await within(table).findByText("PALLET")).closest("tr") as HTMLElement;
     const cells = Array.from(pallet.querySelectorAll("td, th")).map((cell) => cell.textContent);
     expect(cells).toEqual(["0195f0a0", "PALLET", "6", "2026-07-13", "100", "Charge due", "2026-10-11 08:00 UTC", "2026-10-15 09:30 UTC"]);
@@ -226,7 +227,7 @@ describe("Returnable packaging aging", () => {
     server.handler = (url) =>
       url.pathname !== AGING ? undefined : fail ? json(400, { code: "FUL-0050", detail: "chargeDays must be an integer from 30 to 365" }) : json(200, aging([aged("PALLET")]));
     renderAt("/fulfillment/returnable-aging");
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert.textContent).toContain("Could not load the aging");
     expect(alert.textContent).toContain("FUL-0050");
     fail = false;

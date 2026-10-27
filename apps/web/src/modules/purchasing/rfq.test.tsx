@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { defaultDeadline, formatInstant, parseVendorIds, rfqActions, validateRFQ } from "./RfqPages";
@@ -129,7 +130,7 @@ describe("RFQ list", () => {
         ],
       }),
     );
-    const table = await screen.findByRole("table", { name: "Requests for quotation" });
+    const table = await findTable({ name: "Requests for quotation" });
     await waitFor(() => expect(within(table).getByText("RFQ-00000007")).toBeInTheDocument());
     expect(within(table).getByText("Replies open")).toBeInTheDocument();
     expect(within(table).getByText("2026-11-01 17:00 UTC")).toBeInTheDocument();

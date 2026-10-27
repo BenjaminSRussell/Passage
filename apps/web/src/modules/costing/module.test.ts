@@ -1,3 +1,4 @@
+import { findAlert } from "../../test-utils";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { createElement } from "react";
 import { MemoryRouter } from "react-router-dom";
@@ -77,7 +78,7 @@ describe("SettlementPreview page", () => {
     render(createElement(MemoryRouter, null, createElement(SettlementPreview)));
     fireEvent.change(screen.getByLabelText("Transactions (JSON)"), { target: { value: "{" } });
     fireEvent.click(screen.getByRole("button", { name: "Preview settlement" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("not valid JSON");
+    expect(await findAlert()).toHaveTextContent("not valid JSON");
     await waitFor(() => expect(screen.queryByText("Settlements")).toBeNull());
   });
 });
@@ -122,7 +123,7 @@ describe("SettlementPreview results", () => {
     try {
       render(createElement(MemoryRouter, null, createElement(SettlementPreview)));
       fireEvent.click(screen.getByRole("button", { name: "Preview settlement" }));
-      expect(await screen.findByRole("alert")).toHaveTextContent("CST-TXN-001");
+      expect(await findAlert()).toHaveTextContent("CST-TXN-001");
       const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
       expect(JSON.parse(init.body as string)).not.toHaveProperty("standardUnitCost");
     } finally {

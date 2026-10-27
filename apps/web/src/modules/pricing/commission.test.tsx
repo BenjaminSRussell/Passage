@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { CommissionRule, CommissionTransaction, SalesGroup } from "./api/client";
@@ -62,7 +63,7 @@ describe("Sales groups", () => {
       return undefined;
     };
     const { container } = renderAt("/pricing/commission/sales-groups");
-    const table = await screen.findByRole("table", { name: "Sales groups" });
+    const table = await findTable({ name: "Sales groups" });
     await waitFor(() => expect(table).toHaveTextContent("SG-East"));
     expect(table).toHaveTextContent("R1 60% · R2 40%");
     expect(pageViolations(container)).toEqual([]);
@@ -77,7 +78,7 @@ describe("Sales groups", () => {
     first.unmount();
     server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty pricing.commission.view" });
     renderAt("/pricing/commission/sales-groups");
-    expect(await screen.findByRole("alert")).toHaveTextContent("missing duty pricing.commission.view (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty pricing.commission.view (AUTH-0003)");
   });
 });
 
@@ -143,7 +144,7 @@ describe("Sales group detail", () => {
     expect(await screen.findByRole("heading", { name: "SG-East" })).toBeInTheDocument();
     const reps = screen.getByRole("table", { name: "Reps and shares" });
     expect(within(reps).getAllByRole("row").map((r) => r.textContent)).toEqual(["RepShare", "R160%", "R240%"]);
-    const ruleTable = await screen.findByRole("table", { name: "Commission rules" });
+    const ruleTable = await findTable({ name: "Commission rules" });
     await waitFor(() => expect(ruleTable).toHaveTextContent("All customers"));
     expect(server.calls.find((c) => c.url.pathname.endsWith("/commission/rules"))?.url.searchParams.get("salesGroupId")).toBe(SG);
     expect(pageViolations(container)).toEqual([]);
@@ -170,7 +171,7 @@ describe("Sales group detail", () => {
     await screen.findByRole("heading", { name: "SG-East" });
     fill("Rate %", "3");
     fireEvent.click(screen.getByRole("button", { name: "Add rule" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("(PRC-0038)");
+    expect(await findAlert()).toHaveTextContent("(PRC-0038)");
   });
 
   it("shows a load error with a retry", async () => {
@@ -198,7 +199,7 @@ describe("Commission transactions", () => {
       return undefined;
     };
     const { container } = renderAt("/pricing/commission/transactions");
-    const table = await screen.findByRole("table", { name: "Commission transactions" });
+    const table = await findTable({ name: "Commission transactions" });
     await waitFor(() => expect(table).toHaveTextContent("SG-East"));
     expect(table).toHaveTextContent("CN-1/1 (credits INV-1/1)");
     expect(table).toHaveTextContent("Dr 6200 / Cr 2170");
@@ -225,7 +226,7 @@ describe("Commission transactions", () => {
       return json(503, { code: "COM-0500", detail: "database unavailable" });
     };
     renderAt(`/pricing/commission/transactions?salesGroupId=${SG}`);
-    expect(await screen.findByRole("alert")).toHaveTextContent("database unavailable (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("database unavailable (COM-0500)");
     expect(server.calls.find((c) => c.url.pathname.endsWith("/commission/transactions"))?.url.searchParams.get("salesGroupId")).toBe(SG);
   });
 });

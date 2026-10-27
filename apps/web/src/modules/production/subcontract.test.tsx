@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
@@ -126,7 +127,7 @@ describe("subcontract operations page (4.21.14, FR-21.10)", () => {
           : json(order({ id: uuid(9), orderNumber: "PO-000002", status: "Estimated" })),
     );
     const { container, location } = renderAt(page);
-    const table = await screen.findByRole("table", { name: "Subcontract operations" });
+    const table = await findTable({ name: "Subcontract operations" });
     await waitFor(() => expect(within(table).getByText("PO-000002")).toBeInTheDocument());
     expect(within(table).getByText("125.00 USD")).toBeInTheDocument();
     expect(within(table).getByText("0.333 EUR")).toBeInTheDocument();
@@ -150,7 +151,7 @@ describe("subcontract operations page (4.21.14, FR-21.10)", () => {
         : json({ items: [subRow()], totals: [], nextCursor: `${orderId}:20` }),
     );
     renderAt(page);
-    await screen.findByRole("table", { name: "Subcontract operations" });
+    await findTable({ name: "Subcontract operations" });
     const form = screen.getByRole("form", { name: "Filter the subcontract operations" });
     await userEvent.selectOptions(within(form).getByLabelText("Operation status"), "started");
     await userEvent.selectOptions(within(form).getByLabelText("Order status"), "Started");
@@ -170,7 +171,7 @@ describe("subcontract operations page (4.21.14, FR-21.10)", () => {
   it("refuses a malformed vendor or a reversed due range without calling the service", async () => {
     const fetchMock = stubFetch(() => json({ items: [], totals: [] }));
     renderAt(page);
-    await screen.findByRole("table", { name: "Subcontract operations" });
+    await findTable({ name: "Subcontract operations" });
     const form = screen.getByRole("form", { name: "Filter the subcontract operations" });
     await userEvent.type(within(form).getByLabelText(/Vendor resource/), "ACME");
     fireEvent.change(within(form).getByLabelText(/Due from/), { target: { value: "2026-12-01" } });

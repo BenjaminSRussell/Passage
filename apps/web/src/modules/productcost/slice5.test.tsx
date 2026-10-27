@@ -1,3 +1,4 @@
+import { findAlert, findStatus, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -122,7 +123,7 @@ describe("cost components page", () => {
     const { container } = renderAt("/productcost/cost-components");
     expect(screen.getByRole("table", { name: "Cost components" })).toHaveAttribute("aria-busy", "true");
     release({ status: 200, body: { items: [dl, dm] } });
-    const table = await screen.findByRole("table", { name: "Cost components" });
+    const table = await findTable({ name: "Cost components" });
     await waitFor(() => expect(within(table).getByRole("row", { name: /DM/ })).toHaveTextContent("Direct material"));
     expect(within(table).getByRole("row", { name: /DL/ })).toHaveTextContent("Direct manufacturing");
     expect(screen.getByText("2 of 20")).toBeInTheDocument();
@@ -145,7 +146,7 @@ describe("cost components page", () => {
     fireEvent.change(screen.getByLabelText("Code"), { target: { value: "dm" } });
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: " Direct material " } });
     fireEvent.click(screen.getByRole("button", { name: "Add component" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Component DM added");
+    expect(await findStatus()).toHaveTextContent("Component DM added");
     expect(posts()).toHaveLength(1);
     expect(posts()[0].body).toEqual({ code: "DM", name: "Direct material", costGroupType: "DirectMaterial", behaviour: "Variable" });
     expect(posts()[0].key).toMatch(/.{8,}/);
@@ -178,9 +179,9 @@ describe("cost components page", () => {
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Direct labor" } });
     fireEvent.change(screen.getByLabelText("Cost group type"), { target: { value: "DirectManufacturing" } });
     fireEvent.click(screen.getByRole("button", { name: "Add component" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("a cost component with code DL already exists (CST-0791)");
+    expect(await findAlert()).toHaveTextContent("a cost component with code DL already exists (CST-0791)");
     fireEvent.click(screen.getByRole("button", { name: "Add component" }));
-    await screen.findByRole("status");
+    await findStatus();
     expect(posts()).toHaveLength(2);
     expect(posts()[1].key).toBe(posts()[0].key);
   });
@@ -188,7 +189,7 @@ describe("cost components page", () => {
   it("explains a failed load", async () => {
     handler = () => ({ status: 403, body: { code: "AUTH-0003", detail: "missing duty CostingView" } });
     renderAt("/productcost/cost-components");
-    expect(await screen.findByRole("alert")).toHaveTextContent("Could not load cost components");
+    expect(await findAlert()).toHaveTextContent("Could not load cost components");
     expect(screen.getByRole("alert")).toHaveTextContent("missing duty CostingView (AUTH-0003)");
   });
 });
@@ -256,7 +257,7 @@ describe("costing versions page", () => {
     fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: le } });
     fireEvent.change(screen.getByLabelText("Version code"), { target: { value: "STD-2027" } });
     fireEvent.click(screen.getByRole("button", { name: "Create version" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Version STD-2027 created, status Open.");
+    expect(await findStatus()).toHaveTextContent("Version STD-2027 created, status Open.");
     const create = posts()[0];
     expect(create.url.pathname).toBe("/api/v1/costing/versions");
     expect(create.body).toEqual({ legalEntityId: le, code: "STD-2027", type: "Standard", fallback: "Active" });
@@ -288,7 +289,7 @@ describe("costing versions page", () => {
     };
     renderAt("/productcost/versions");
     fireEvent.click(await screen.findByRole("button", { name: "Activate STD-2027" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("current version is 2 (CST-0714)");
+    expect(await findAlert()).toHaveTextContent("current version is 2 (CST-0714)");
     await waitFor(() => expect(screen.getByRole("row", { name: /STD-2027/ })).toHaveTextContent("Blocked"));
     expect(reads).toBe(2);
   });
@@ -329,7 +330,7 @@ describe("costing versions page", () => {
   it("explains a failed load", async () => {
     handler = () => ({ status: 503, body: { code: "CST-0799", detail: "the costing store is not configured" } });
     renderAt("/productcost/versions");
-    expect(await screen.findByRole("alert")).toHaveTextContent("Could not load costing versions");
+    expect(await findAlert()).toHaveTextContent("Could not load costing versions");
     expect(screen.getByRole("alert")).toHaveTextContent("(CST-0799)");
   });
 });

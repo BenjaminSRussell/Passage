@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -74,7 +75,7 @@ describe("BehaviorRulesPage (FR-38.16)", () => {
       "GET /api/v1/controlling/cost-elements": () => json(200, { items: elements }),
     });
     const { container } = at("/costacct/behavior-rules");
-    const table = await screen.findByRole("table", { name: "Cost behavior rules" });
+    const table = await findTable({ name: "Cost behavior rules" });
     expect(await within(table).findAllByText("PR-700 Rent")).toHaveLength(2);
     expect(within(table).getByText("Cost center")).toBeInTheDocument();
     expect(within(table).getByText("Every kind")).toBeInTheDocument();
@@ -106,7 +107,7 @@ describe("BehaviorRulesPage (FR-38.16)", () => {
     expect(await screen.findByText("Could not load behavior rules")).toBeInTheDocument();
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-    expect(await screen.findByRole("table", { name: "Cost behavior rules" })).toBeInTheDocument();
+    expect(await findTable({ name: "Cost behavior rules" })).toBeInTheDocument();
   });
 });
 
@@ -134,7 +135,7 @@ describe("CreateBehaviorRulePage (FR-38.16)", () => {
     expect(await screen.findByText("Enter the first day the rule applies, as YYYY-MM-DD.")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Effective from"), { target: { value: "2026-09-01" } });
     fireEvent.click(screen.getByRole("button", { name: "Save behavior rule" }));
-    expect(await screen.findByRole("table", { name: "Cost behavior rules" })).toBeInTheDocument();
+    expect(await findTable({ name: "Cost behavior rules" })).toBeInTheDocument();
     const [, init] = posts(fetchMock)[0];
     expect(JSON.parse(init.body as string)).toEqual({ legalEntityId: LE, costElementId: PRI, objectKind: "CostCenter", behavior: "Fixed", effectiveFrom: "2026-09-01" });
     expect((init.headers as Record<string, string>)["Idempotency-Key"]).toBeTruthy();

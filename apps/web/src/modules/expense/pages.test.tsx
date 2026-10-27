@@ -1,3 +1,4 @@
+import { findAlert } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
@@ -178,7 +179,7 @@ describe("cash advance aging page", () => {
     type("Paid", "100");
     type("Returned", "200");
     fireEvent.click(screen.getByRole("button", { name: "Check aging" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("must not exceed paid");
+    expect(await findAlert()).toHaveTextContent("must not exceed paid");
     expect(screen.getByLabelText("Paid")).toHaveAttribute("aria-invalid", "true");
   });
 });
@@ -226,7 +227,7 @@ describe("travel requisition check page", () => {
     type("Approved from", "2026-03-10");
     type("Approved to", "2026-03-14");
     fireEvent.click(screen.getByRole("button", { name: "Check requisition" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Check your connection and try again. (NETWORK)");
+    expect(await findAlert()).toHaveTextContent("Check your connection and try again. (NETWORK)");
   });
 });
 
@@ -279,13 +280,13 @@ describe("card feed preview page", () => {
     const { unmount } = render(<CardFeedPage />);
     type("Statement content", "plain text");
     fireEvent.click(screen.getByRole("button", { name: "Preview import" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("is not an OFX statement");
+    expect(await findAlert()).toHaveTextContent("is not an OFX statement");
     unmount();
 
     stubFetch(403, { code: "AUTH-0003", detail: "missing duty expense.card.import" });
     render(<CardFeedPage />);
     type("Statement content", "x");
     fireEvent.click(screen.getByRole("button", { name: "Preview import" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("missing duty expense.card.import (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty expense.card.import (AUTH-0003)");
   });
 });

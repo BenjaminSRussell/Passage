@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -105,7 +106,7 @@ describe("Route operations on the order page", () => {
       return json(current);
     });
     const { container } = renderAt(`/production/${orderId}`);
-    const route = await screen.findByRole("table", { name: "Order operations" });
+    const route = await findTable({ name: "Order operations" });
 
     await userEvent.click(within(route).getByRole("button", { name: "Finish operation 20" }));
     expect(await screen.findByText("Operation 20 finished.")).toBeInTheDocument();
@@ -128,7 +129,7 @@ describe("Route operations on the order page", () => {
   it("offers no action on a subcontracted operation", async () => {
     detailFetch(started());
     renderAt(`/production/${orderId}`);
-    const route = await screen.findByRole("table", { name: "Order operations" });
+    const route = await findTable({ name: "Order operations" });
     expect(within(route).queryByRole("button", { name: /operation 30/ })).not.toBeInTheDocument();
     expect(within(route).getAllByRole("button")).toHaveLength(2);
   });
@@ -138,9 +139,9 @@ describe("Route operations on the order page", () => {
       init?.method === "POST" && url.includes("/operations/") ? problem(412, "conflict_version", "order was changed by another user; current version is 7") : undefined,
     );
     renderAt(`/production/${orderId}`);
-    const route = await screen.findByRole("table", { name: "Order operations" });
+    const route = await findTable({ name: "Order operations" });
     await userEvent.click(within(route).getByRole("button", { name: "Finish operation 20" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("The command was refused");
     expect(alert).toHaveTextContent("conflict_version");
     expect(within(screen.getByRole("table", { name: "Order operations" })).getByRole("button", { name: "Finish operation 20" })).toBeInTheDocument();
@@ -149,7 +150,7 @@ describe("Route operations on the order page", () => {
   it("has no operation actions before the order is started", async () => {
     detailFetch(order({ status: "Released" }));
     renderAt(`/production/${orderId}`);
-    const route = await screen.findByRole("table", { name: "Order operations" });
+    const route = await findTable({ name: "Order operations" });
     expect(within(route).queryByRole("button")).not.toBeInTheDocument();
     expect(within(route).queryByText("Feedback action")).not.toBeInTheDocument();
   });

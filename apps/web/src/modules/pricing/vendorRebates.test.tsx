@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { RebateAgreement, VendorClaim, VendorClaimPreview } from "./api/client";
@@ -100,7 +101,7 @@ describe("Vendor rebate agreements", () => {
     renderAt("/pricing/rebates");
     expect(await screen.findByText("No rebate agreements")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Type"), { target: { value: "VENDOR" } });
-    const table = await screen.findByRole("table", { name: "Rebate agreements" });
+    const table = await findTable({ name: "Rebate agreements" });
     await waitFor(() => expect(table).toHaveTextContent("Supplier bill-back"));
     expect(table).toHaveTextContent("Vendor rebate");
     expect(table).toHaveTextContent(`Vendor ${V1}`);
@@ -169,7 +170,7 @@ describe("Vendor claims on the agreement", () => {
     expect(await screen.findByText("The period was over-claimed: this claim creates a vendor invoice for the difference.")).toBeInTheDocument();
     expect(screen.queryByLabelText("Settle by")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Create claim for -150 USD" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("vendor rebate claim already processed (PRC-0015)");
+    expect(await findAlert()).toHaveTextContent("vendor rebate claim already processed (PRC-0015)");
   });
 
   it("does not offer claims on a customer agreement", async () => {
@@ -194,7 +195,7 @@ describe("Vendor rebate claims inquiry", () => {
       return undefined;
     };
     const { container } = renderAt("/pricing/rebates/claims");
-    const table = await screen.findByRole("table", { name: "Vendor rebate claims" });
+    const table = await findTable({ name: "Vendor rebate claims" });
     await waitFor(() => expect(table).toHaveTextContent("RC-000003"));
     expect(table).toHaveTextContent("Vendor invoice (over-accrued)");
     const totals = screen.getByRole("list", { name: "Claim totals" });
@@ -224,7 +225,7 @@ describe("Vendor rebate claims inquiry", () => {
     first.unmount();
     server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty pricing.rebate.view" });
     renderAt("/pricing/rebates/claims");
-    expect(await screen.findByRole("alert")).toHaveTextContent("missing duty pricing.rebate.view (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty pricing.rebate.view (AUTH-0003)");
   });
 
   it("checks filters and sums per currency", () => {
@@ -264,10 +265,10 @@ describe("Vendor rebate claim detail", () => {
     };
     const first = renderAt(`/pricing/rebates/claims/${RC1}`);
     fireEvent.click(await screen.findByRole("button", { name: "Approve claim" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("cannot approve it (PRC-0046)");
+    expect(await findAlert()).toHaveTextContent("cannot approve it (PRC-0046)");
     first.unmount();
     server.handler = () => json(404, { code: "PRC-0044", detail: `no vendor rebate claim ${RC1}` });
     renderAt(`/pricing/rebates/claims/${RC1}`);
-    expect(await screen.findByRole("alert")).toHaveTextContent("PRC-0044");
+    expect(await findAlert()).toHaveTextContent("PRC-0044");
   });
 });

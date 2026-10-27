@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { AllocationPreview, Invoice } from "./api/client";
@@ -45,7 +46,7 @@ describe("Invoices", () => {
       return undefined;
     };
     const { container } = renderAt("/billing");
-    const table = await screen.findByRole("table", { name: "Invoices" });
+    const table = await findTable({ name: "Invoices" });
     await waitFor(() => expect(table).toHaveTextContent("INV-2027-0000001"));
     expect(table).toHaveTextContent("119.00 EUR");
     expect(table).toHaveTextContent("Free text");
@@ -72,7 +73,7 @@ describe("Invoices", () => {
       return url.searchParams.get("cursor") === "c1" ? json(200, { items: [second] }) : json(200, { items: [proposal], nextCursor: "c1" });
     };
     const { container } = renderAt("/billing");
-    const table = await screen.findByRole("table", { name: "Invoices" });
+    const table = await findTable({ name: "Invoices" });
     await waitFor(() => expect(table).toHaveTextContent("Proposal"));
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(await screen.findByRole("button", { name: "Load more invoices" }));
@@ -87,7 +88,7 @@ describe("Invoices", () => {
       url.searchParams.get("cursor") ? json(503, { code: "HTTP-503", detail: "billing unavailable" }) : json(200, { items: [proposal], nextCursor: "c1" });
     renderAt("/billing");
     fireEvent.click(await screen.findByRole("button", { name: "Load more invoices" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("billing unavailable (HTTP-503)");
+    expect(await findAlert()).toHaveTextContent("billing unavailable (HTTP-503)");
     expect(screen.getByRole("table", { name: "Invoices" })).toHaveTextContent("Proposal");
     server.handler = () => json(200, { items: [{ ...posted, id: "inv-3" }] });
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
@@ -98,10 +99,10 @@ describe("Invoices", () => {
   it("shows the error state with a retry", async () => {
     server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty billing.invoice.view" });
     renderAt("/billing");
-    expect(await screen.findByRole("alert")).toHaveTextContent("missing duty billing.invoice.view (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty billing.invoice.view (AUTH-0003)");
     server.handler = () => json(200, { items: [proposal] });
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-    expect(await screen.findByRole("table", { name: "Invoices" })).toHaveTextContent("Proposal");
+    expect(await findTable({ name: "Invoices" })).toHaveTextContent("Proposal");
   });
 });
 
@@ -113,7 +114,7 @@ describe("Invoice detail", () => {
       return undefined;
     };
     const { container } = renderAt(`/billing/invoices/${INV}`);
-    const lines = await screen.findByRole("table", { name: "Invoice lines" });
+    const lines = await findTable({ name: "Invoice lines" });
     expect(lines).toHaveTextContent("Consulting March");
     expect(lines).toHaveTextContent("DE19");
     expect(screen.getByText("Assigned at posting")).toBeInTheDocument();
@@ -135,7 +136,7 @@ describe("Invoice detail", () => {
     };
     renderAt(`/billing/invoices/${INV}`);
     fireEvent.click(await screen.findByRole("button", { name: "Post invoice" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("The tax engine is unavailable; nothing was posted");
     expect(alert).toHaveTextContent("(BIL-0001)");
     expect(screen.getByRole("button", { name: "Post invoice" })).toBeInTheDocument();
@@ -153,14 +154,14 @@ describe("Invoice detail", () => {
     };
     renderAt(`/billing/invoices/${INV}`);
     fireEvent.click(await screen.findByRole("button", { name: "Post invoice" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("The invoice changed since you opened it");
+    expect(await findAlert()).toHaveTextContent("The invoice changed since you opened it");
     expect(await screen.findByRole("heading", { name: "INV-2027-0000001" })).toBeInTheDocument();
   });
 
   it("shows a load failure with a retry", async () => {
     server.handler = () => json(404, { code: "BIL-0100", detail: "invoice not found" });
     renderAt(`/billing/invoices/${INV}`);
-    expect(await screen.findByRole("alert")).toHaveTextContent("invoice not found (BIL-0100)");
+    expect(await findAlert()).toHaveTextContent("invoice not found (BIL-0100)");
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });
@@ -238,7 +239,7 @@ describe("New free-text invoice", () => {
 
     server.handler = () => json(503, { code: "BIL-0001", detail: "Tax engine unavailable; invoice not posted" });
     fireEvent.click(screen.getByRole("button", { name: "Save proposal" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("The tax engine is unavailable; nothing was saved");
+    expect(await findAlert()).toHaveTextContent("The tax engine is unavailable; nothing was saved");
   });
 });
 
@@ -288,7 +289,7 @@ describe("Revenue allocation", () => {
     fill("Term start", "2027-03-10");
     fill("Term end", "2028-03-09");
     fireEvent.click(screen.getByRole("button", { name: "Allocate" }));
-    const allocation = await screen.findByRole("table", { name: "Allocation" });
+    const allocation = await findTable({ name: "Allocation" });
     expect(allocation).toHaveTextContent("7200.00 USD");
     expect(allocation).toHaveTextContent("Milestone");
     expect(screen.getByRole("table", { name: "Schedule for support" })).toHaveTextContent("133.06");
@@ -318,7 +319,7 @@ describe("Revenue allocation", () => {
     fill("Term end", "2028-03-09");
     fireEvent.change(screen.getByLabelText("Ratable basis"), { target: { value: "MONTHLY" } });
     fireEvent.click(screen.getByRole("button", { name: "Allocate" }));
-    expect(await screen.findByRole("table", { name: "Schedule for support" })).toHaveTextContent("173.08");
+    expect(await findTable({ name: "Schedule for support" })).toHaveTextContent("173.08");
     expect(screen.getByText(/ratable schedules use the monthly basis/)).toBeInTheDocument();
     expect(server.calls[0].body).toMatchObject({ ratableBasis: "MONTHLY" });
   });
@@ -330,6 +331,6 @@ describe("Revenue allocation", () => {
     fill("Name", "a");
     fill("Standalone selling price", "1");
     fireEvent.click(screen.getByRole("button", { name: "Allocate" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("missing duty revrec.view (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty revrec.view (AUTH-0003)");
   });
 });

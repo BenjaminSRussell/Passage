@@ -1,3 +1,4 @@
+import { findAlert, findStatus, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -123,13 +124,13 @@ describe("Kiosk job actions", () => {
         : json(200, { items: items.map((it) => accepted(String(it.id))) }),
     );
     expect(await screen.findByText("No job is running. Select one below to start it.")).toBeInTheDocument();
-    const table = await screen.findByRole("table", { name: "Dispatch list" });
+    const table = await findTable({ name: "Dispatch list" });
     expect(within(table).getAllByRole("row")).toHaveLength(3);
     expect(pageViolations(container)).toEqual([]);
 
     fireEvent.click(screen.getByRole("checkbox", { name: "Select MO-1 OP-20" }));
     fireEvent.click(screen.getByRole("button", { name: "Start job" }));
-    const status = await screen.findByRole("status");
+    const status = await findStatus();
     expect(status).toHaveTextContent("Job started");
     expect(status).toHaveTextContent("MO-1 OP-10 was stopped automatically after 1.50 h (SF-0002).");
     const [start] = postedItems(0);
@@ -153,12 +154,12 @@ describe("Kiosk job actions", () => {
 
   it("starts two jobs as one bundle and refuses a selection that does not fit the button", async () => {
     await signIn(session(), [job(J1, "OP-10"), job(J2, "OP-20"), job(J3, "OP-30")], (items) => json(200, { items: items.map((it) => accepted(String(it.id))) }));
-    await screen.findByRole("table", { name: "Dispatch list" });
+    await findTable({ name: "Dispatch list" });
     fireEvent.click(screen.getByRole("button", { name: "Start job" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Select one job to start, or use Start as bundle.");
+    expect(await findAlert()).toHaveTextContent("Select one job to start, or use Start as bundle.");
     fireEvent.click(screen.getByRole("checkbox", { name: "Select MO-1 OP-10" }));
     fireEvent.click(screen.getByRole("button", { name: "Start as bundle" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Select two or more jobs to start them as a bundle.");
+    expect(await findAlert()).toHaveTextContent("Select two or more jobs to start them as a bundle.");
     expect(registrationPosts()).toHaveLength(0);
 
     fireEvent.click(screen.getByRole("checkbox", { name: "Select MO-1 OP-30" }));
@@ -195,10 +196,10 @@ describe("Kiosk job actions", () => {
     await signIn(session(), [job(J1, "OP-10")], (items) =>
       fail ? json(503, { code: "COM-0503", detail: "Service unavailable" }) : json(200, { items: items.map((it) => accepted(String(it.id))) }),
     );
-    await screen.findByRole("table", { name: "Dispatch list" });
+    await findTable({ name: "Dispatch list" });
     fireEvent.click(screen.getByRole("checkbox", { name: "Select MO-1 OP-10" }));
     fireEvent.click(screen.getByRole("button", { name: "Start job" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Service unavailable (COM-0503)");
+    expect(await findAlert()).toHaveTextContent("Service unavailable (COM-0503)");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Start job" }));
     expect(await screen.findByRole("heading", { name: "Current job" })).toBeInTheDocument();

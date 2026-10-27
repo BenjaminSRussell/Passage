@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { Schedule } from "./api/client";
@@ -65,7 +66,7 @@ describe("SchedulesPage", () => {
       return undefined;
     };
     const { container } = renderAt("/finreport/schedules");
-    const table = await screen.findByRole("table", { name: "Distribution schedules" });
+    const table = await findTable({ name: "Distribution schedules" });
     expect(await within(table).findByText("0 23 * * * (UTC)")).toBeInTheDocument();
     expect(within(table).getByText("2026-04-01T23:00:00Z")).toBeInTheDocument();
     expect(within(table).getByText("Paused")).toBeInTheDocument();
@@ -88,7 +89,7 @@ describe("SchedulesPage", () => {
       return fail ? problem(403, "AUTH-0003", "You need the schedule duty.") : json(200, { items: [nightly] });
     };
     renderAt("/finreport/schedules");
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("You need the schedule duty. (AUTH-0003)");
     fail = false;
     fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
@@ -163,7 +164,7 @@ describe("ScheduleEditorPage", () => {
     expect(screen.getByLabelText("Currency type")).toHaveValue("rpt");
     fireEvent.change(name, { target: { value: "Nightly statement pack" } });
     fireEvent.click(screen.getByRole("button", { name: "Save schedule" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("Someone else changed this schedule");
     const put = server.calls.find((c) => c.method === "PUT");
     expect(put && header(put, "If-Match")).toBe('"4"');
@@ -184,7 +185,7 @@ describe("ScheduleEditorPage", () => {
     await waitFor(() => expect(screen.getByLabelText("Definition").tagName).toBe("INPUT"));
     expect(screen.getByLabelText("Definition")).toHaveValue("OLD-DEF");
     fireEvent.click(screen.getByRole("button", { name: "Save schedule" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("That definition has no published version");
+    expect(await findAlert()).toHaveTextContent("That definition has no published version");
   });
 
   it("reports a schedule that does not exist", async () => {
@@ -194,7 +195,7 @@ describe("ScheduleEditorPage", () => {
       return undefined;
     };
     renderAt("/finreport/schedules/GONE");
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("This schedule does not exist");
     expect(within(alert).queryByRole("button")).toBeNull();
   });

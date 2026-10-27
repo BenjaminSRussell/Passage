@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -102,7 +103,7 @@ describe("standard cost conversion page", () => {
     expect(pageViolations(container)).toEqual([]);
 
     fireEvent.click(screen.getByRole("button", { name: "Validate and preview" }));
-    const journal = await screen.findByRole("table", { name: "Conversion journal" });
+    const journal = await findTable({ name: "Conversion journal" });
     expect(calls[0].body).toEqual(validateInput(ac3910).input);
     expect(screen.getByText("Ready to convert")).toBeInTheDocument();
     expect(within(journal).getByRole("row", { name: /Inventory/ })).toHaveTextContent("75.00");
@@ -139,7 +140,7 @@ describe("standard cost conversion page", () => {
         : undefined;
     renderAt("/productcost/conversion");
     fireEvent.click(screen.getByRole("button", { name: "Run step: Select items and sites" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("(CST-0736)");
+    expect(await findAlert()).toHaveTextContent("(CST-0736)");
     expect(screen.getByRole("button", { name: "Run step: Select items and sites" })).toBeInTheDocument();
   });
 
@@ -181,7 +182,7 @@ describe("cost roll-up page valuation view", () => {
     renderAt("/productcost/roll");
     fireEvent.change(screen.getByLabelText("Valuation view"), { target: { value: "Group" } });
     fireEvent.click(screen.getByRole("button", { name: "Roll item" }));
-    const table = await screen.findByRole("table", { name: "Costing sheet subtotals of FG-100" });
+    const table = await findTable({ name: "Costing sheet subtotals of FG-100" });
     expect((calls[0].body as { options: { view: string } }).options.view).toBe("Group");
     expect(within(table).getByRole("row", { name: /^T/ })).toHaveTextContent("120.00");
   });

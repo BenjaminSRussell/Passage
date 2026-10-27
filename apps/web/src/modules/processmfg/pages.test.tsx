@@ -1,3 +1,4 @@
+import { findAlert, findStatus, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -138,7 +139,7 @@ describe("formulas", () => {
       return undefined;
     };
     const { container } = renderAt("/processmfg/formulas");
-    const table = await screen.findByRole("table", { name: "Formulas" });
+    const table = await findTable({ name: "Formulas" });
     expect(within(table).getByText("1000 kg")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(within(table).getByRole("button", { name: "DOUGH-1" }));
@@ -152,7 +153,7 @@ describe("formulas", () => {
       return fail ? json(503, { code: "COM-0500", detail: "service unavailable" }) : json(200, { items: [] });
     };
     renderAt("/processmfg/formulas");
-    expect(await screen.findByRole("alert")).toHaveTextContent("service unavailable (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("service unavailable (COM-0500)");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No formulas yet")).toBeInTheDocument();
@@ -220,10 +221,10 @@ describe("formulas", () => {
       return undefined;
     };
     const { container } = renderAt(`/processmfg/formulas/${FORMULA}`);
-    expect(await screen.findByRole("table", { name: "Formula lines" })).toHaveTextContent("Fixed");
+    expect(await findTable({ name: "Formula lines" })).toHaveTextContent("Fixed");
     fireEvent.change(screen.getByLabelText("Batch size (kg)"), { target: { value: "2500" } });
     fireEvent.click(screen.getByRole("button", { name: "Preview scaling" }));
-    const scaled = await screen.findByRole("table", { name: "Scaled lines" });
+    const scaled = await findTable({ name: "Scaled lines" });
     expect(within(scaled).getByText("1500")).toBeInTheDocument();
     expect(within(scaled).getAllByText("50")).toHaveLength(2);
     expect(screen.getByRole("status")).toHaveTextContent("Scale factor 2.5 for 2500 kg.");
@@ -239,7 +240,7 @@ describe("batch orders", () => {
       return url.searchParams.get("status") === "released" ? json(200, { items: [] }) : json(200, { items: [{ ...order, lines: undefined }] });
     };
     const { container } = renderAt("/processmfg/batch-orders");
-    const table = await screen.findByRole("table", { name: "Batch orders" });
+    const table = await findTable({ name: "Batch orders" });
     expect(within(table).getByText("2500 kg")).toBeInTheDocument();
     expect(within(table).getByText("DOUGH-1 v1")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
@@ -277,7 +278,7 @@ describe("batch orders", () => {
       return undefined;
     };
     const { container } = renderAt(`/processmfg/batch-orders/${ORDER}`);
-    expect(await screen.findByRole("table", { name: "Batch order lines" })).toHaveTextContent("875");
+    expect(await findTable({ name: "Batch order lines" })).toHaveTextContent("875");
     expect(screen.getByRole("list", { name: "Batch order facts" })).toHaveTextContent("Scale factor 2.5");
     expect(pageViolations(container)).toEqual([]);
     fireEvent.change(screen.getByLabelText("New batch size (kg)"), { target: { value: "3000" } });
@@ -312,7 +313,7 @@ describe("batch orders", () => {
   it("shows a not-found order as an error", async () => {
     handler = () => json(404, { code: "PMF-0102", detail: "batch order not found" });
     renderAt(`/processmfg/batch-orders/${ORDER}`);
-    expect(await screen.findByRole("alert")).toHaveTextContent("batch order not found (PMF-0102)");
+    expect(await findAlert()).toHaveTextContent("batch order not found (PMF-0102)");
   });
 });
 
@@ -332,7 +333,7 @@ describe("calculators", () => {
     handler = () => json(422, { code: "PMF-0002", detail: "compensating line would become negative (-25.000000)" });
     renderAt("/processmfg/potency");
     fireEvent.click(screen.getByRole("button", { name: "Calculate consumption" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("compensating line would become negative (-25.000000) (PMF-0002)");
+    expect(await findAlert()).toHaveTextContent("compensating line would become negative (-25.000000) (PMF-0002)");
     expect(screen.queryByRole("list", { name: "Consumption" })).toBeNull();
   });
 
@@ -349,7 +350,7 @@ describe("calculators", () => {
         : undefined;
     const { container } = renderAt("/processmfg/allocation");
     fireEvent.click(screen.getByRole("button", { name: "Preview allocation" }));
-    const table = await screen.findByRole("table", { name: "Allocated cost" });
+    const table = await findTable({ name: "Allocated cost" });
     expect(within(table).getByText("7940.0000")).toBeInTheDocument();
     expect(within(table).getByText("By-product burden")).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("Total 10000.0000 USD");
@@ -404,7 +405,7 @@ describe("batch rules (slice 2)", () => {
         : undefined;
     const { container } = renderAt("/processmfg/merge");
     fireEvent.click(screen.getByRole("button", { name: "Preview merge" }));
-    const table = await screen.findByRole("table", { name: "Target attributes" });
+    const table = await findTable({ name: "Target attributes" });
     expect(within(table).getByText("2027-02-01")).toBeInTheDocument();
     expect(screen.getByRole("list", { name: "Target batch" })).toHaveTextContent("Quantity 150");
     expect(screen.getByRole("status")).toHaveTextContent("Genealogy parents: B-201, B-202");
@@ -416,7 +417,7 @@ describe("batch rules (slice 2)", () => {
     handler = () => json(422, { code: "PMF-0006", detail: "merge refused: attribute grade differs (A vs B)" });
     fireEvent.click(screen.getByLabelText("Grade may differ (merge override)"));
     fireEvent.click(screen.getByRole("button", { name: "Preview merge" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("merge refused: attribute grade differs (A vs B) (PMF-0006)");
+    expect(await findAlert()).toHaveTextContent("merge refused: attribute grade differs (A vs B) (PMF-0006)");
     expect((calls[1].body as { mergeOverride: string[] }).mergeOverride).toEqual(["grade"]);
   });
 
@@ -433,7 +434,7 @@ describe("batch rules (slice 2)", () => {
         : undefined;
     const { container } = renderAt("/processmfg/batch-requirements");
     fireEvent.click(screen.getByRole("button", { name: "Check batches" }));
-    const excluded = await screen.findByRole("table", { name: "Excluded batches" });
+    const excluded = await findTable({ name: "Excluded batches" });
     expect(within(excluded).getByText("45 days of shelf life left at shipment, 60 required")).toBeInTheDocument();
     expect(within(screen.getByRole("table", { name: "Qualifying batches" })).getByText("B-302")).toBeInTheDocument();
     expect(screen.getByRole("list", { name: "Requirement check" })).toHaveTextContent("Same batch Not required");
@@ -446,7 +447,7 @@ describe("batch rules (slice 2)", () => {
     renderAt("/processmfg/batch-requirements");
     fireEvent.click(screen.getByLabelText("Same batch"));
     fireEvent.click(screen.getByRole("button", { name: "Check batches" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("no single batch can supply 500 (largest 100) (PMF-0008)");
+    expect(await findAlert()).toHaveTextContent("no single batch can supply 500 (largest 100) (PMF-0008)");
     expect(calls[0].body).toMatchObject({ requirements: [{ level: 3, sellableDays: 60, sameBatch: true }] });
   });
 
@@ -467,7 +468,7 @@ describe("batch rules (slice 2)", () => {
         : undefined;
     const { container } = renderAt("/processmfg/consolidation");
     fireEvent.click(screen.getByRole("button", { name: "Preview consolidation" }));
-    const table = await screen.findByRole("table", { name: "Pegged packing orders" });
+    const table = await findTable({ name: "Pegged packing orders" });
     expect(within(table).getAllByText("Bulk 1 (500)")).toHaveLength(2);
     expect(screen.getByRole("list", { name: "Consolidation" })).toHaveTextContent("Bulk orders 1");
     expect(calls[0].body).toEqual({
@@ -484,12 +485,12 @@ describe("batch rules (slice 2)", () => {
     handler = () => json(422, { code: "PMF-0014", detail: "batch record cannot be approved: 1 exceptions without disposition and signature" });
     const { container } = renderAt("/processmfg/batch-record-check");
     fireEvent.click(screen.getByRole("button", { name: "Check approval" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("(PMF-0014)");
+    expect(await findAlert()).toHaveTextContent("(PMF-0014)");
     handler = () => json(200, { approvable: true, exceptions: 1 });
     fireEvent.change(screen.getByLabelText("Disposition"), { target: { value: "accepted" } });
     fireEvent.change(screen.getByLabelText("Signature"), { target: { value: "SIG-1" } });
     fireEvent.click(screen.getByRole("button", { name: "Check approval" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("All 1 exceptions are dispositioned and signed.");
+    expect(await findStatus()).toHaveTextContent("All 1 exceptions are dispositioned and signed.");
     expect(calls[1].body).toEqual({ exceptions: [{ id: "EXC-expired-batch", disposition: "accepted", signatureId: "SIG-1" }] });
     await waitFor(() => expect(pageViolations(container)).toEqual([]));
   });
@@ -509,7 +510,7 @@ describe("batch attributes, picking and rework (slice 3)", () => {
         : undefined;
     const { container } = renderAt("/processmfg/batch-attributes");
     fireEvent.click(screen.getByRole("button", { name: "Check values" }));
-    const table = await screen.findByRole("table", { name: "Attribute results" });
+    const table = await findTable({ name: "Attribute results" });
     expect(within(table).getByText("potency 38.5 is below the minimum 40")).toBeInTheDocument();
     expect(within(table).getByText("Outside limits")).toBeInTheDocument();
     expect(screen.getByRole("list", { name: "Attribute check" })).toHaveTextContent("Exceptions 1");
@@ -536,7 +537,7 @@ describe("batch attributes, picking and rework (slice 3)", () => {
     fireEvent.change(screen.getByLabelText("Name", { selector: "#attr-1-name" }), { target: { value: "grade" } });
     fireEvent.change(screen.getByLabelText("Recorded value", { selector: "#attr-1-value" }), { target: { value: "Z" } });
     fireEvent.click(screen.getByRole("button", { name: "Check values" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent('attribute "grade" value "Z" is not one of its options (COM-0001)');
+    expect(await findAlert()).toHaveTextContent('attribute "grade" value "Z" is not one of its options (COM-0001)');
   });
 
   it("proposes batches and lists the expired and on-hold ones with their codes (AC-24.4, AC-24.10)", async () => {
@@ -554,7 +555,7 @@ describe("batch attributes, picking and rework (slice 3)", () => {
         : undefined;
     const { container } = renderAt("/processmfg/picking");
     fireEvent.click(screen.getByRole("button", { name: "Propose batches" }));
-    const excluded = await screen.findByRole("table", { name: "Excluded batches" });
+    const excluded = await findTable({ name: "Excluded batches" });
     expect(within(excluded).getByText("batch B-401 expired on 2027-01-10")).toBeInTheDocument();
     expect(within(excluded).getByText("Blocked by disposition")).toBeInTheDocument();
     expect(within(screen.getByRole("table", { name: "Picked batches" })).getByText("B-403")).toBeInTheDocument();
@@ -639,7 +640,7 @@ describe("batch attributes, picking and rework (slice 3)", () => {
     fireEvent.click(screen.getByLabelText("Require a quality order"));
     fireEvent.change(screen.getByLabelText("Quantity to rework"), { target: { value: "600" } });
     fireEvent.click(screen.getByRole("button", { name: "Plan rework" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("rework quantity must be positive and at most the batch quantity 500 (COM-0001)");
+    expect(await findAlert()).toHaveTextContent("rework quantity must be positive and at most the batch quantity 500 (COM-0001)");
     expect(calls[0].body).toMatchObject({ reworkQty: "600", params: { requireQualityOrder: false, outputDisposition: "available" } });
   });
 });

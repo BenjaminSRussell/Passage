@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { json, pageViolations, problem, renderAt, stubFetch } from "./testHarness";
@@ -36,7 +37,7 @@ describe("consolidation board", () => {
   it("lists approved lines waiting to be ordered and filters the needs-sourcing queue", async () => {
     const fetchMock = stubFetch(() => json(queue));
     const { container } = renderAt("/purchasing/consolidation");
-    const table = await screen.findByRole("table", { name: "Lines to order" });
+    const table = await findTable({ name: "Lines to order" });
     await waitFor(() => expect(within(table).getAllByRole("link", { name: "PR-00000007" })).toHaveLength(2));
     expect(within(table).getByLabelText("Vendor for PR-00000007 line 2")).toHaveAttribute("placeholder", "Needs a vendor");
     expect(within(table).getByLabelText("Vendor for PR-00000007 line 1")).toHaveAttribute("placeholder", VENDOR.slice(0, 8));

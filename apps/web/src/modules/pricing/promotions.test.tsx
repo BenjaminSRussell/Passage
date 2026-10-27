@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { Promotion } from "./api/client";
@@ -43,7 +44,7 @@ describe("Promotions", () => {
       return undefined;
     };
     const { container } = renderAt("/pricing/promotions");
-    const table = await screen.findByRole("table", { name: "Promotions" });
+    const table = await findTable({ name: "Promotions" });
     await waitFor(() => expect(table).toHaveTextContent("Spring push"));
     expect(table).toHaveTextContent("FEATURE / TPR");
     expect(table).toHaveTextContent("+25%");
@@ -61,7 +62,7 @@ describe("Promotions", () => {
     first.unmount();
     server.handler = () => json(500, { code: "COM-0500", detail: "database unavailable" });
     renderAt("/pricing/promotions");
-    expect(await screen.findByRole("alert")).toHaveTextContent("database unavailable (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("database unavailable (COM-0500)");
   });
 });
 
@@ -125,7 +126,7 @@ describe("New promotion", () => {
     fill("Last day", "2027-03-01");
     fill("Baseline weekly units", WEEKS.join(","));
     fireEvent.click(screen.getByRole("button", { name: "Save promotion" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("The fund is closed");
     expect(alert).toHaveTextContent("(PRC-0011)");
   });
@@ -161,7 +162,7 @@ describe("Promotion detail", () => {
   it("shows a load error with a retry", async () => {
     server.handler = () => json(404, { code: "PRC-0040", detail: `no promotion plan ${PROMO}` });
     renderAt(`/pricing/promotions/${PROMO}`);
-    expect(await screen.findByRole("alert")).toHaveTextContent("(PRC-0040)");
+    expect(await findAlert()).toHaveTextContent("(PRC-0040)");
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });

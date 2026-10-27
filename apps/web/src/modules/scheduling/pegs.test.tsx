@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -105,14 +106,14 @@ describe("Moves that propagate to pegged orders (FR-23.8)", () => {
   it("previews the pegged orders that move, warns about truncation and commits with propagate", async () => {
     handler = workspace();
     const { container } = renderAt("/scheduling");
-    const table = await screen.findByRole("table", { name: "Jobs in window" });
+    const table = await findTable({ name: "Jobs in window" });
     fireEvent.click(screen.getByLabelText("Move pegged orders too"));
     await waitFor(() => within(table).getByRole("button", { name: "Move order b1000000 operation 10" }));
     fireEvent.click(within(table).getByRole("button", { name: "Move order b1000000 operation 10" }));
     fireEvent.change(screen.getByLabelText("New start (UTC)"), { target: { value: at(12).slice(0, 16) } });
     fireEvent.click(screen.getByRole("button", { name: "Preview move" }));
 
-    const pegged = await screen.findByRole("table", { name: "Pegged orders that move" });
+    const pegged = await findTable({ name: "Pegged orders that move" });
     expect(within(pegged).getAllByRole("row")).toHaveLength(2);
     expect(pegged).toHaveTextContent("b2000000");
     expect(pegged).toHaveTextContent("4 h");
@@ -128,11 +129,11 @@ describe("Moves that propagate to pegged orders (FR-23.8)", () => {
   it("leaves propagate out and shows no pegged table when the box is clear", async () => {
     handler = workspace();
     renderAt("/scheduling");
-    const table = await screen.findByRole("table", { name: "Jobs in window" });
+    const table = await findTable({ name: "Jobs in window" });
     await waitFor(() => within(table).getByRole("button", { name: "Move order b1000000 operation 10" }));
     fireEvent.click(within(table).getByRole("button", { name: "Move order b1000000 operation 10" }));
     fireEvent.click(screen.getByRole("button", { name: "Preview move" }));
-    await screen.findByRole("table", { name: "Affected operations" });
+    await findTable({ name: "Affected operations" });
     expect(screen.queryByRole("table", { name: "Pegged orders that move" })).toBeNull();
     expect(lastCall("POST", ":move")?.body).not.toHaveProperty("propagate");
   });
@@ -177,7 +178,7 @@ describe("Order pegs", () => {
       return undefined;
     };
     const { container } = renderAt("/scheduling/order-pegs");
-    const table = await screen.findByRole("table", { name: "Order pegs" });
+    const table = await findTable({ name: "Order pegs" });
     await waitFor(() => expect(table).toHaveTextContent("b2000000"));
     expect(pageViolations(container)).toEqual([]);
 
@@ -215,7 +216,7 @@ describe("Order pegs", () => {
     fireEvent.change(screen.getByLabelText("Dependent order"), { target: { value: DEPENDENT } });
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Create peg" }));
-    await screen.findByRole("table", { name: "Order pegs" });
+    await findTable({ name: "Order pegs" });
     const post = lastCall("POST", "/order-pegs")!;
     expect(post.body).toEqual({ parentOrderId: PARENT, dependentOrderId: DEPENDENT });
     expect(new Headers(post.init.headers).get("Idempotency-Key")).toMatch(/^[0-9a-f-]{36}$/);
@@ -316,7 +317,7 @@ describe("Recurring capacity blocks (FR-23.17)", () => {
     expect(screen.queryByText("Weekdays")).toBeNull();
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Create block" }));
-    const table = await screen.findByRole("table", { name: "Capacity blocks" });
+    const table = await findTable({ name: "Capacity blocks" });
     await waitFor(() => expect(table).toHaveTextContent("Repeats FREQ=WEEKLY;INTERVAL=2;BYDAY=MO from 2027-01-04, 06:00–14:00"));
     expect(lastCall("POST", "/capacity-blocks")?.body).toMatchObject({
       code: "ALT-MON",

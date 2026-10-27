@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -124,7 +125,7 @@ describe("Rate cards", () => {
   it("lists rate cards from the service", async () => {
     handler = (url) => (url.pathname === "/api/v1/transport/rate-cards" ? json(200, { items: [card] }) : undefined);
     const { container } = renderAt("/transport/rate-cards");
-    const table = await screen.findByRole("table", { name: "Rate cards" });
+    const table = await findTable({ name: "Rate cards" });
     await waitFor(() => expect(table).toHaveTextContent("WEIGHT_BREAK"));
     expect(table).toHaveTextContent("2026-01-01");
     expect(table).toHaveTextContent("Open");
@@ -267,7 +268,7 @@ describe("Freight bills", () => {
   it("lists bills, filters by match status and opens one", async () => {
     handler = (url) => (url.pathname === "/api/v1/transport/freight-bills" ? json(200, { items: [bill({ matchStatus: "VARIANCE", varianceTotal: "5.5" })] }) : undefined);
     const { container } = renderAt("/transport/freight-bills");
-    const table = await screen.findByRole("table", { name: "Freight bills" });
+    const table = await findTable({ name: "Freight bills" });
     await waitFor(() => expect(table).toHaveTextContent("412.50 USD"));
     expect(table).toHaveTextContent("5.50 USD");
     expect(table).toHaveTextContent("Variance");
@@ -334,7 +335,7 @@ describe("Freight bill detail", () => {
     };
     handler = (url) => (url.pathname === `/api/v1/transport/freight-bills/${BILL}` ? json(200, detail) : undefined);
     const { container } = renderAt(`/transport/freight-bills/${BILL}`);
-    const grid = await screen.findByRole("table", { name: "Expected and invoiced charges" });
+    const grid = await findTable({ name: "Expected and invoiced charges" });
     expect(grid).toHaveTextContent("412.50");
     expect(grid).toHaveTextContent("418.00");
     expect(grid).toHaveTextContent("Outside");
@@ -362,7 +363,7 @@ describe("Carrier invoices", () => {
   it("lists invoices with their bill link and filters the exception queue", async () => {
     handler = () => json(200, { items: [invoice(), invoice({ id: "x", invoiceNo: "INV-2", freightBillId: undefined, matchStatus: "UNEXPECTED_INVOICE", varianceTotal: undefined })] });
     const { container } = renderAt("/transport/carrier-invoices");
-    const table = await screen.findByRole("table", { name: "Carrier invoices" });
+    const table = await findTable({ name: "Carrier invoices" });
     await waitFor(() => expect(table).toHaveTextContent("INV-2"));
     expect(table).toHaveTextContent("Unexpected invoice");
     expect(within(table).getByRole("link", { name: BILL.slice(0, 8) + "…" })).toHaveAttribute("href", `/transport/freight-bills/${BILL}`);

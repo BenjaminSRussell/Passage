@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -134,7 +135,7 @@ describe("Transaction inquiry", () => {
     handler = () => json(200, { items: [txn(), txn({ id: "22222222-0000-4000-8000-000000000002", journalId: undefined, sourceType: "BLOCKING", reference: BLK_ID, issueStatus: undefined, receiptStatus: "PURCHASED", qty: "4" })] });
     const { container } = renderAt("/inventory/transactions");
     expect(screen.getByRole("table", { name: "Transactions" })).toHaveAttribute("aria-busy", "true");
-    const table = await screen.findByRole("table", { name: "Transactions" });
+    const table = await findTable({ name: "Transactions" });
     await waitFor(() => expect(table).toHaveTextContent("Issue · Sold"));
     expect(table).toHaveTextContent("-10.00 USD");
     expect(table).toHaveTextContent("Receipt · Purchased");
@@ -169,7 +170,7 @@ describe("Transaction inquiry", () => {
     first.unmount();
     handler = () => json(403, { code: "AUTH-0003", detail: "missing duty inventory.read" });
     renderAt("/inventory/transactions");
-    expect(await screen.findByRole("alert")).toHaveTextContent("missing duty inventory.read (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty inventory.read (AUTH-0003)");
   });
 });
 
@@ -184,7 +185,7 @@ describe("Reservations", () => {
       return json(200, { items: released ? [] : [reservation()] });
     };
     const { container } = renderAt("/inventory/reservations");
-    const table = await screen.findByRole("table", { name: "Reservations" });
+    const table = await findTable({ name: "Reservations" });
     await waitFor(() => expect(table).toHaveTextContent("Sales order SO-1"));
     expect(calls[0].url.searchParams.get("status")).toBe("ACTIVE");
     expect(table).toHaveTextContent("Site S1 · Batch B3");
@@ -199,7 +200,7 @@ describe("Reservations", () => {
     handler = (_url, init) => (init.method === "DELETE" ? json(404, { code: "INV-RES-003", detail: "reservation not found" }) : json(200, { items: [reservation()] }));
     renderAt("/inventory/reservations");
     fireEvent.click(await screen.findByRole("button", { name: "Release reservation 7a7a7a7a" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("reservation not found (INV-RES-003)");
+    expect(await findAlert()).toHaveTextContent("reservation not found (INV-RES-003)");
   });
 });
 
@@ -243,7 +244,7 @@ describe("New reservation", () => {
     fireEvent.change(screen.getByLabelText("Site"), { target: { value: "S1" } });
     fireEvent.click(screen.getByLabelText("Reserve what is available if not all of it is"));
     fireEvent.click(screen.getByRole("button", { name: "Reserve" }));
-    const allocations = await screen.findByRole("table", { name: "Allocations" });
+    const allocations = await findTable({ name: "Allocations" });
     expect(allocations).toHaveTextContent("Batch B5");
     expect(screen.getByRole("status")).toHaveTextContent("2 could not be reserved");
     const post = sent("POST")[0];
@@ -260,7 +261,7 @@ describe("New reservation", () => {
     fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "10" } });
     fireEvent.change(screen.getByLabelText("Demand reference"), { target: { value: "SO-1" } });
     fireEvent.click(screen.getByRole("button", { name: "Reserve" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("only 3 available to reserve, 10 requested (INV-RES-001)");
+    expect(await findAlert()).toHaveTextContent("only 3 available to reserve, 10 requested (INV-RES-001)");
     handler = () => json(400, { code: "COM-0001", detail: "one or more fields are invalid", errors: { demandId: "is required (1 to 60 characters)" } });
     fireEvent.click(screen.getByRole("button", { name: "Reserve" }));
     expect(await screen.findByText("is required (1 to 60 characters)")).toBeInTheDocument();
@@ -278,7 +279,7 @@ describe("Blocking", () => {
       return json(200, { items: released ? [] : [blocking()] });
     };
     const { container } = renderAt("/inventory/blockings");
-    const table = await screen.findByRole("table", { name: "Blockings" });
+    const table = await findTable({ name: "Blockings" });
     await waitFor(() => expect(table).toHaveTextContent("Quarantine"));
     expect(table).toHaveTextContent("Recall: lot recall");
     expect(table).toHaveTextContent("4 EA");
@@ -294,7 +295,7 @@ describe("Blocking", () => {
   it("shows load failures", async () => {
     handler = () => json(500, { code: "COM-0500", detail: "internal error" });
     renderAt("/inventory/blockings");
-    expect(await screen.findByRole("alert")).toHaveTextContent("internal error (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("internal error (COM-0500)");
   });
 
   it("validates a blocking before sending it", () => {
@@ -330,7 +331,7 @@ describe("Blocking", () => {
     fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "9" } });
     fireEvent.change(screen.getByLabelText("Site"), { target: { value: "S1" } });
     fireEvent.click(screen.getByRole("button", { name: "Block stock" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("exceeds available 4 (INV-BLK-003)");
+    expect(await findAlert()).toHaveTextContent("exceeds available 4 (INV-BLK-003)");
   });
 });
 
@@ -344,7 +345,7 @@ describe("Cycle counting", () => {
       return json(200, { items: [plan] });
     };
     const { container } = renderAt("/inventory/count-plans");
-    const table = await screen.findByRole("table", { name: "Count plans" });
+    const table = await findTable({ name: "Count plans" });
     await waitFor(() => expect(table).toHaveTextContent("5 % or 100 USD"));
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(within(table).getByRole("button", { name: "Generate sheet for Weekly W1" }));
@@ -384,7 +385,7 @@ describe("Cycle counting", () => {
   it("lists open sheets and opens one", async () => {
     handler = (url) => (url.pathname.endsWith(`/count-sheets/${SHEET_ID}`) ? json(200, sheet()) : json(200, { items: [sheet({ lines: undefined })] }));
     renderAt("/inventory/count-sheets");
-    const table = await screen.findByRole("table", { name: "Count sheets" });
+    const table = await findTable({ name: "Count sheets" });
     await waitFor(() => expect(table).toHaveTextContent("0 of 1"));
     expect(calls[0].url.searchParams.get("status")).toBe("OPEN");
     fireEvent.click(within(table).getByRole("button", { name: "CNT-ABCD1234" }));
@@ -401,7 +402,7 @@ describe("Cycle counting", () => {
     };
     const { container } = renderAt(`/inventory/count-sheets/${SHEET_ID}`);
     expect(screen.getByText("Loading count sheet…")).toBeInTheDocument();
-    const table = await screen.findByRole("table", { name: "Count lines" });
+    const table = await findTable({ name: "Count lines" });
     expect(table).toHaveTextContent("Hidden");
     expect(screen.getByText("Blind count")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Post count" })).toBeDisabled();
@@ -427,13 +428,13 @@ describe("Cycle counting", () => {
     const counted = sheet({ version: 3, countedCount: 1, lines: [{ ...sheet().lines[0], countedQty: "46" }] });
     handler = (_url, init) => (init.method === "POST" ? json(403, { code: "INV-CNT-001", detail: "line 1 variance -4 against book 50 exceeds the tolerance" }) : json(200, counted));
     renderAt(`/inventory/count-sheets/${SHEET_ID}`);
-    const table = await screen.findByRole("table", { name: "Count lines" });
+    const table = await findTable({ name: "Count lines" });
     fireEvent.change(within(table).getByLabelText("Counted quantity, line 1"), { target: { value: "-2" } });
     fireEvent.click(within(table).getByRole("button", { name: "Save count, line 1" }));
     await waitFor(() => expect(within(table).getByLabelText("Counted quantity, line 1")).toHaveAttribute("aria-invalid", "true"));
     expect(sent("PUT")).toHaveLength(0);
     fireEvent.click(screen.getByRole("button", { name: "Post count" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("Supervisor approval required");
     expect(alert).toHaveTextContent("(INV-CNT-001)");
   });

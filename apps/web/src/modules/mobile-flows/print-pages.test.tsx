@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -85,7 +86,7 @@ describe("printers", () => {
   it("lists printers with their queue and failover rank", async () => {
     handler = (url) => (url.pathname === "/api/v1/print/printers" ? json(200, { items: [printer] }) : undefined);
     const { container } = renderAt("/mobile-flows/printers");
-    const table = await screen.findByRole("table", { name: "Printers" });
+    const table = await findTable({ name: "Printers" });
     await waitFor(() => expect(within(table).getByText("DOCK-1")).toBeInTheDocument());
     expect(within(table).getByText("10.0.4.20:9100")).toBeInTheDocument();
     expect(within(table).getByText("ZPL II")).toBeInTheDocument();
@@ -100,7 +101,7 @@ describe("printers", () => {
     const office: Printer = { ...printer, id: "0195f0a0-0000-7000-8000-000000000003", code: "OFFICE-1", deviceType: "PDF_IPP", mediaSize: "A4", port: 631 };
     handler = (url) => (url.pathname === "/api/v1/print/printers" ? json(200, { items: [small, office] }) : undefined);
     renderAt("/mobile-flows/printers");
-    const table = await screen.findByRole("table", { name: "Printers" });
+    const table = await findTable({ name: "Printers" });
     const smallRow = (await within(table).findByText("PACK-1")).closest("tr") as HTMLElement;
     expect(smallRow).toHaveTextContent("LP, location and item labels in the 1 in layout; carton labels go to the next printer");
     expect(within(table).getByText("OFFICE-1").closest("tr")).toHaveTextContent("PDF documents");
@@ -114,7 +115,7 @@ describe("printers", () => {
 
     handler = () => json(503, { code: "COM-0500", detail: "internal error" });
     renderAt("/mobile-flows/printers");
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("Could not load printers");
     expect(alert).toHaveTextContent("COM-0500");
     handler = () => json(200, { items: [printer] });
@@ -202,7 +203,7 @@ describe("printers", () => {
     fireEvent.change(screen.getByLabelText("Host"), { target: { value: "10.0.4.20" } });
     fireEvent.change(screen.getByLabelText("Queue"), { target: { value: "DOCK" } });
     fireEvent.click(screen.getByRole("button", { name: "Register printer" }));
-    expect(await screen.findByRole("table", { name: "Printers" })).toBeInTheDocument();
+    expect(await findTable({ name: "Printers" })).toBeInTheDocument();
   });
 });
 
@@ -215,7 +216,7 @@ describe("routing rules", () => {
   it("lists rules with the scope they apply to", async () => {
     handler = () => json(200, { items: rules });
     const { container } = renderAt("/mobile-flows/routing-rules");
-    const table = await screen.findByRole("table", { name: "Routing rules" });
+    const table = await findTable({ name: "Routing rules" });
     await waitFor(() => expect(within(table).getByText("Zone COLD")).toBeInTheDocument());
     expect(within(table).getByText("Default for the document type")).toBeInTheDocument();
     expect(within(table).getByText("Pick list")).toBeInTheDocument();
@@ -241,7 +242,7 @@ describe("routing rules", () => {
     fireEvent.change(screen.getByLabelText("Warehouse"), { target: { value: "WH1" } });
     fireEvent.change(screen.getByLabelText("Queue"), { target: { value: "WH" } });
     fireEvent.click(screen.getByRole("button", { name: "Add rule" }));
-    expect(await screen.findByRole("table", { name: "Routing rules" })).toBeInTheDocument();
+    expect(await findTable({ name: "Routing rules" })).toBeInTheDocument();
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({ documentType: "LP_LABEL", warehouseId: "WH1", queueCode: "WH", sequence: 1 });
   });
 });
@@ -254,7 +255,7 @@ describe("print jobs", () => {
       return undefined;
     };
     const { container } = renderAt("/mobile-flows/print-jobs");
-    const table = await screen.findByRole("table", { name: "Print jobs" });
+    const table = await findTable({ name: "Print jobs" });
     await waitFor(() => expect(within(table).getByText("Printed")).toBeInTheDocument());
     expect(pageViolations(container)).toEqual([]);
 
@@ -303,7 +304,7 @@ describe("print jobs", () => {
   it("shows a load error on the detail page", async () => {
     handler = () => json(404, { code: "PRN-0005", detail: "print job not found" });
     renderAt(`/mobile-flows/print-jobs/${JOB}`);
-    expect(await screen.findByRole("alert")).toHaveTextContent("print job not found (PRN-0005)");
+    expect(await findAlert()).toHaveTextContent("print job not found (PRN-0005)");
   });
 
   it("validates label data like the template renderer", () => {
@@ -383,7 +384,7 @@ describe("print jobs", () => {
     fireEvent.change(screen.getByLabelText("SSCC"), { target: { value: "340123456789012340" } });
     fireEvent.change(screen.getByLabelText("Ship-to name"), { target: { value: "ACME DC" } });
     fireEvent.click(screen.getByRole("button", { name: "Print label" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("AI 01: check digit invalid (PRN-0001)");
+    expect(await findAlert()).toHaveTextContent("AI 01: check digit invalid (PRN-0001)");
   });
 
   it("prints a location label and opens the recorded job", async () => {
@@ -409,7 +410,7 @@ describe("print jobs", () => {
     fireEvent.change(screen.getByLabelText("Printer selection"), { target: { value: "rule" } });
     fireEvent.change(screen.getByLabelText("Location"), { target: { value: "A-01-02" } });
     fireEvent.click(screen.getByRole("button", { name: "Print label" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("no printer is routed for LOCATION_LABEL (MOB-0112)");
+    expect(await findAlert()).toHaveTextContent("no printer is routed for LOCATION_LABEL (MOB-0112)");
   });
 });
 
@@ -471,7 +472,7 @@ describe("print document (FR-32.13)", () => {
     const file = pdfFile("%PDF-1.4 coa", "coa.pdf");
     fireEvent.change(screen.getByLabelText("PDF file"), { target: { files: [file] } });
     fireEvent.click(screen.getByRole("button", { name: "Print document" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("no printer is routed for COA (MOB-0112)");
     fireEvent.click(within(alert).getByRole("button", { name: "Print from the browser" }));
     expect(createObjectURL).toHaveBeenCalledWith(file);

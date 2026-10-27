@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -128,7 +129,7 @@ describe("change order log", () => {
   it("lists change orders with totals and filters by status", async () => {
     handler = (url) => ({ status: 200, body: { items: url.searchParams.get("status") === "REJECTED" ? [] : [changeOrder({ status: "APPLIED", appliedBaselineVersionId: "p-base" })] } });
     const { container } = renderAt("/projects/ES-1001/change-orders");
-    const table = await screen.findByRole("table", { name: "Change orders" });
+    const table = await findTable({ name: "Change orders" });
     await waitFor(() => expect(table).toHaveTextContent("CO-0001"));
     expect(table).toHaveTextContent("50000.00");
     expect(table).toHaveTextContent("Applied");
@@ -150,7 +151,7 @@ describe("change order log", () => {
     handler = (url) =>
       fail ? problem(500, "COM-0500", "boom") : url.pathname.endsWith(CO_ID) ? { status: 200, body: changeOrder() } : { status: 200, body: { items: [changeOrder()] } };
     renderAt("/projects/ES-1001/change-orders");
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("Could not load the change orders");
     fail = false;
     fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
@@ -234,7 +235,7 @@ describe("change order detail", () => {
   it("submits with If-Match and the approval reference, then shows the next step", async () => {
     handler = (_url, init) => (init.method === "POST" ? { status: 200, body: changeOrder({ status: "SUBMITTED", version: 2, customerApprovalRef: "Letter 7" }) } : { status: 200, body: changeOrder() });
     const { container } = renderAt(`/projects/ES-1001/change-orders/${CO_ID}`);
-    const lines = await screen.findByRole("table", { name: "Impact lines" });
+    const lines = await findTable({ name: "Impact lines" });
     expect(lines).toHaveTextContent("1.3");
     expect(pageViolations(container)).toEqual([]);
     fireEvent.change(screen.getByLabelText(/Customer approval reference/), { target: { value: "Letter 7" } });
@@ -316,7 +317,7 @@ describe("risks and issues", () => {
     fireEvent.change(within(form).getByLabelText("Impact"), { target: { value: "4" } });
     fireEvent.click(within(form).getByRole("button", { name: "Add to register" }));
     await screen.findByText('Issue "Crane" is added to the register.');
-    const table = await screen.findByRole("table", { name: "Risks and issues" });
+    const table = await findTable({ name: "Risks and issues" });
     await waitFor(() => expect(table).toHaveTextContent("20"));
     const [post] = writes();
     expect(post.url.pathname).toBe("/api/v1/projects/ES-1001/risks");
@@ -350,6 +351,6 @@ describe("risks and issues", () => {
     const alert = await screen.findByText("Could not load the register");
     fail = false;
     fireEvent.click(within(alert.closest("[role=alert]") as HTMLElement).getByRole("button", { name: "Try again" }));
-    await screen.findByRole("table", { name: "Risks and issues" });
+    await findTable({ name: "Risks and issues" });
   });
 });

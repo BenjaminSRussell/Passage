@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { createElement } from "react";
 import { MemoryRouter } from "react-router-dom";
@@ -51,7 +52,7 @@ describe("SettlementPreview", () => {
     page(SettlementPreview);
     fireEvent.change(screen.getByLabelText("Default valuation type"), { target: { value: " DOMESTIC " } });
     fireEvent.click(screen.getByRole("button", { name: "Preview settlement" }));
-    const table = await screen.findByRole("table", { name: "Remaining value by valuation type" });
+    const table = await findTable({ name: "Remaining value by valuation type" });
     const rows = within(table).getAllByRole("row");
     expect(rows[1]).toHaveTextContent("DOMESTIC");
     expect(rows[1]).toHaveTextContent("1000.00");
@@ -65,7 +66,7 @@ describe("SettlementPreview", () => {
     stubFetch(200, { method: "FIFO", currency: "EUR", issueCosts: {}, settlements: [], exceptions: [], remainingQty: "0", remainingValue: "0.00" });
     page(SettlementPreview);
     fireEvent.click(screen.getByRole("button", { name: "Preview settlement" }));
-    expect(await screen.findByRole("table", { name: "Issue costs" })).toHaveTextContent("No issues to cost");
+    expect(await findTable({ name: "Issue costs" })).toHaveTextContent("No issues to cost");
     expect(screen.queryByRole("table", { name: "Remaining value by valuation type" })).toBeNull();
   });
 });
@@ -101,7 +102,7 @@ describe("ValuationLedgersPage", () => {
     const { container } = page(ValuationLedgersPage);
     expect(screen.getByRole("heading", { name: "No ledger preview yet" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Preview ledgers" }));
-    const costs = await screen.findByRole("table", { name: "Issue cost by ledger" });
+    const costs = await findTable({ name: "Issue cost by ledger" });
     expect(within(costs).getByRole("columnheader", { name: "GROUP (USD)" })).toBeInTheDocument();
     expect(within(costs).getAllByRole("row")[1]).toHaveTextContent(/iss-1.*1650\.00.*1760\.00/);
     expect(screen.getByRole("table", { name: "Ledger results" })).toHaveTextContent("Primary");
@@ -138,7 +139,7 @@ describe("ValuationLedgersPage", () => {
     stubFetch(422, { title: "Unprocessable Entity", code: "CST-VLG-001", detail: "exactly one primary valuation ledger is required, got 0" });
     page(ValuationLedgersPage);
     fireEvent.click(screen.getByRole("button", { name: "Preview ledgers" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("CST-VLG-001: exactly one primary valuation ledger is required");
+    expect(await findAlert()).toHaveTextContent("CST-VLG-001: exactly one primary valuation ledger is required");
     expect(screen.queryByRole("table", { name: "Ledger results" })).toBeNull();
   });
 });
@@ -179,7 +180,7 @@ describe("AgingPage", () => {
     expect(screen.getByRole("heading", { name: "No aging run yet" })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Bucket bounds"), { target: { value: "30" } });
     fireEvent.click(screen.getByRole("button", { name: "Run aging" }));
-    const buckets = await screen.findByRole("table", { name: "Aging buckets" });
+    const buckets = await findTable({ name: "Aging buckets" });
     expect(within(buckets).getAllByRole("row")[1]).toHaveTextContent(/0-30.*150.*1700\.00/);
     expect(screen.getByText("The buckets tie to the remaining value of 1700.00 EUR.")).toBeInTheDocument();
     expect(screen.getByRole("table", { name: "Aging buckets for IMPORT" })).toHaveTextContent("700.00");
@@ -194,7 +195,7 @@ describe("AgingPage", () => {
     page(AgingPage);
     fireEvent.change(screen.getByLabelText("Bucket bounds"), { target: { value: "" } });
     fireEvent.click(screen.getByRole("button", { name: "Run aging" }));
-    await screen.findByRole("table", { name: "Aging buckets" });
+    await findTable({ name: "Aging buckets" });
     expect(sentBody(fetchMock)).not.toHaveProperty("bucketBounds");
     expect(screen.queryByRole("table", { name: "Aging buckets for IMPORT" })).toBeNull();
   });
@@ -216,12 +217,12 @@ describe("AgingPage", () => {
     page(AgingPage);
     fireEvent.change(screen.getByLabelText("Bucket bounds"), { target: { value: "90, 30" } });
     fireEvent.click(screen.getByRole("button", { name: "Run aging" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Each bound must be larger than the one before it.");
+    expect(await findAlert()).toHaveTextContent("Each bound must be larger than the one before it.");
     expect(fetchMock).not.toHaveBeenCalled();
 
     fireEvent.change(screen.getByLabelText("Bucket bounds"), { target: { value: "" } });
     fireEvent.click(screen.getByRole("button", { name: "Run aging" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("COM-0001: request failed validation; transactions[2].financialDate is after asOf");
+    expect(await findAlert()).toHaveTextContent("COM-0001: request failed validation; transactions[2].financialDate is after asOf");
     expect(screen.queryByRole("table", { name: "Aging buckets" })).toBeNull();
   });
 });

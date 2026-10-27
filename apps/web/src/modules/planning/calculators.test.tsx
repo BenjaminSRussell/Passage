@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -177,7 +178,7 @@ describe("Planning calculators page", () => {
     render(<CalculatorsPage />);
     const form = formNamed("Quota arrangement");
     fireEvent.click(within(form).getByRole("button", { name: "Allocate" }));
-    const table = await screen.findByRole("table", { name: "Quota assignments" });
+    const table = await findTable({ name: "Quota assignments" });
     expect(within(table).getByText("B")).toBeTruthy();
     expect(sentBody(fetchMock)).toMatchObject({ qty: "100", split: false, sources: [{ id: "A", quota: "60" }, { id: "B", quota: "40" }] });
 
@@ -213,7 +214,7 @@ describe("Planning calculators page", () => {
     const fetchMock = stubCalc("/supply-schedule:project", () => new Promise<Response>((resolve) => (release = resolve)));
     render(<CalculatorsPage />);
     fireEvent.click(within(formNamed("Supply schedule")).getByRole("button", { name: "Project" }));
-    const loading = await screen.findByRole("table", { name: "Supply schedule" });
+    const loading = await findTable({ name: "Supply schedule" });
     expect(loading.getAttribute("aria-busy")).toBe("true");
     release(
       json({

@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -73,7 +74,7 @@ describe("Net requirements page", () => {
     const fetchMock = stubApi(["/net-requirements", () => json({ items: rows })], ["/planned-orders", () => json({ items: [order] })]);
     renderAt(`/planning/net-requirements?plan=MAIN&item=${item}`);
     expect(screen.getByRole("heading", { level: 2, name: "Net requirements" })).toBeInTheDocument();
-    const table = await screen.findByRole("table", { name: "Net requirements" });
+    const table = await findTable({ name: "Net requirements" });
     await waitFor(() => expect(within(table).getByText("2026-11-30")).toBeInTheDocument());
     const body = within(table).getAllByRole("row").slice(1);
     expect(body.map((r) => within(r).getAllByRole("cell")[4].textContent)).toEqual(["400", "190", "-15.5"]);
@@ -82,7 +83,7 @@ describe("Net requirements page", () => {
     expect(fetchMock.mock.calls.some(([url]) => url === `/api/v1/planning/net-requirements?planCode=MAIN&itemId=${item}`)).toBe(true);
     expect(fetchMock.mock.calls.some(([url]) => url.includes(`/planned-orders?planCode=MAIN&itemId=${item}`))).toBe(true);
 
-    const orders = await screen.findByRole("table", { name: "Planned orders of the item" });
+    const orders = await findTable({ name: "Planned orders of the item" });
     fireEvent.click(await within(orders).findByRole("button", { name: "PLN-000005" }));
     await waitFor(() => expect(screen.getByTestId("location").textContent).toBe(`/planning/planned-orders/${order.id}?plan=MAIN`));
   });

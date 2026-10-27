@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { ConditionRecord, Journal } from "./api/client";
@@ -69,7 +70,7 @@ describe("Price journals", () => {
       return undefined;
     };
     const { container } = renderAt("/pricing/journals");
-    const table = await screen.findByRole("table", { name: "Price journals" });
+    const table = await findTable({ name: "Price journals" });
     await waitFor(() => expect(table).toHaveTextContent("Autumn prices"));
     expect(table).toHaveTextContent("2027-03-01");
     expect(pageViolations(container)).toEqual([]);
@@ -86,7 +87,7 @@ describe("Price journals", () => {
     first.unmount();
     server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty pricing.view" });
     renderAt("/pricing/journals");
-    expect(await screen.findByRole("alert")).toHaveTextContent("missing duty pricing.view (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty pricing.view (AUTH-0003)");
   });
 });
 
@@ -150,7 +151,7 @@ describe("Price journal detail", () => {
       return undefined;
     };
     const { container } = renderAt(`/pricing/journals/${J1}`);
-    const lines = await screen.findByRole("table", { name: "Journal lines" });
+    const lines = await findTable({ name: "Journal lines" });
     expect(lines).toHaveTextContent("Update +5%");
     expect(lines).toHaveTextContent("7.41 USD");
     expect(lines).toHaveTextContent("7.99 USD");
@@ -207,7 +208,7 @@ describe("Price journal detail", () => {
     };
     renderAt(`/pricing/journals/${J1}`);
     fireEvent.click(await screen.findByRole("button", { name: "Post journal" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("Nothing was posted");
     expect(alert).toHaveTextContent("line 2");
   });
@@ -215,7 +216,7 @@ describe("Price journal detail", () => {
   it("shows a load error with a retry", async () => {
     server.handler = () => json(404, { code: "PRC-0034", detail: `no price journal ${J1}` });
     renderAt(`/pricing/journals/${J1}`);
-    expect(await screen.findByRole("alert")).toHaveTextContent("PRC-0034");
+    expect(await findAlert()).toHaveTextContent("PRC-0034");
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });

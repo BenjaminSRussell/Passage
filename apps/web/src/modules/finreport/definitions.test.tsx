@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { Definition, DefinitionSummary, StandardDefinition } from "./api/client";
@@ -46,7 +47,7 @@ describe("DefinitionsPage", () => {
       return undefined;
     };
     const { container } = renderAt("/finreport/definitions");
-    const table = await screen.findByRole("table", { name: "Report definitions" });
+    const table = await findTable({ name: "Report definitions" });
     expect(await within(table).findByRole("button", { name: "BS-STD" })).toBeInTheDocument();
     expect(within(table).getByText("v3")).toBeInTheDocument();
     expect(within(table).getByText("Open draft")).toBeInTheDocument();

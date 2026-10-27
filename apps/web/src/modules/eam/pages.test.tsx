@@ -1,3 +1,4 @@
+import { findAlert, findStatus, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -127,7 +128,7 @@ describe("workspace", () => {
     handler = (url, init) =>
       get("/workspace")(url, init) ? (fail ? json(503, { code: "COM-0500", detail: "EAM is down" }) : json(200, { requestsToTriage: 0, dueIn7Days: 0, overdue: 0, openWorkOrders: 0 })) : undefined;
     renderAt("/eam");
-    expect(await screen.findByRole("alert")).toHaveTextContent("EAM is down (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("EAM is down (COM-0500)");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByRole("list", { name: "Asset management tiles" })).toHaveTextContent("Overdue 0");
@@ -142,14 +143,14 @@ describe("assets", () => {
       return json(200, { items: [pump], nextCursor: "next" });
     };
     const { container } = renderAt("/eam/assets");
-    const table = await screen.findByRole("table", { name: "Assets" });
+    const table = await findTable({ name: "Assets" });
     expect(within(table).getByText("Feed pump")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Load more assets" }));
     expect(await screen.findByText("Old fan")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "ACTIVE" } });
     await waitFor(() => expect(calls.at(-1)?.url.searchParams.get("status")).toBe("ACTIVE"));
-    fireEvent.click(within(await screen.findByRole("table", { name: "Assets" })).getByRole("button", { name: "AST-1" }));
+    fireEvent.click(within(await findTable({ name: "Assets" })).getByRole("button", { name: "AST-1" }));
     expect(screen.getByTestId("where")).toHaveTextContent(`/eam/assets/${PUMP}`);
     expect(await screen.findByText("Could not load the asset")).toBeInTheDocument();
   });
@@ -183,7 +184,7 @@ describe("assets", () => {
     fireEvent.change(screen.getByLabelText("Asset type"), { target: { value: "pump" } });
     fireEvent.change(screen.getByLabelText("Site"), { target: { value: SITE } });
     fireEvent.click(screen.getByRole("button", { name: "Create asset" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("busy (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("busy (COM-0500)");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Create asset" }));
     await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent(`/eam/assets/${PUMP}`));
@@ -232,7 +233,7 @@ describe("asset detail", () => {
     });
     renderAt(`/eam/assets/${PUMP}`);
     fireEvent.click(await screen.findByRole("button", { name: "Activate asset" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Asset activated.");
+    expect(await findStatus()).toHaveTextContent("Asset activated.");
     expect(header(posts("/activate")[0], "If-Match")).toBe('"1"');
     expect(await screen.findByRole("link", { name: "New work order" })).toHaveAttribute("href", `/eam/work-orders/new?asset=${PUMP}`);
   });
@@ -255,7 +256,7 @@ describe("asset detail", () => {
     fireEvent.change(await screen.findByLabelText("Rule name"), { target: { value: "Bearing hot" } });
     fireEvent.change(screen.getByLabelText("Threshold"), { target: { value: "85" } });
     fireEvent.click(screen.getByRole("button", { name: "Add rule" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Rule Bearing hot added.");
+    expect(await findStatus()).toHaveTextContent("Rule Bearing hot added.");
     expect(posts("/rules")[0].body).toEqual({ name: "Bearing hot", operator: ">", threshold: 85, severity: 3, cooldownMinutes: 60 });
   });
 
@@ -270,7 +271,7 @@ describe("work orders", () => {
   it("lists work orders with their cost and filters by status", async () => {
     handler = (url, init) => (get("/work-orders")(url, init) ? json(200, { items: [order] }) : undefined);
     const { container } = renderAt("/eam/work-orders");
-    const table = await screen.findByRole("table", { name: "Work orders" });
+    const table = await findTable({ name: "Work orders" });
     expect(within(table).getByText("360.00 USD")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "RELEASED" } });
@@ -332,7 +333,7 @@ describe("work order detail", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Complete" }));
     fireEvent.change(screen.getByLabelText("Downtime in minutes"), { target: { value: "90" } });
     fireEvent.click(screen.getByRole("button", { name: "Complete work order" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Work order moved to completed.");
+    expect(await findStatus()).toHaveTextContent("Work order moved to completed.");
     const [call] = posts("/status");
     expect(call.body).toEqual({ to: "COMPLETED", downtimeMinutes: 90 });
     expect(header(call, "If-Match")).toBe('"5"');
@@ -358,7 +359,7 @@ describe("work order detail", () => {
     expect(posts("/labor")).toHaveLength(0);
     fireEvent.change(screen.getByLabelText("Hours"), { target: { value: "2.5" } });
     fireEvent.click(screen.getByRole("button", { name: "Book labor" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("2.5 h booked.");
+    expect(await findStatus()).toHaveTextContent("2.5 h booked.");
     expect(posts("/labor")[0].body).toEqual({ hours: "2.5", rate: "45.00" });
   });
 
@@ -380,7 +381,7 @@ describe("requests", () => {
       return undefined;
     };
     const { container } = renderAt("/eam/requests");
-    const table = await screen.findByRole("table", { name: "Maintenance requests" });
+    const table = await findTable({ name: "Maintenance requests" });
     expect(calls[0].url.searchParams.get("status")).toBe("NEW");
     expect(within(table).getByText("IoT rule")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
@@ -444,7 +445,7 @@ describe("plans", () => {
   it("lists plans and shows the next due point of each line", async () => {
     handler = (url, init) => (get("/plans")(url, init) ? json(200, { items: [plan] }) : undefined);
     const { container } = renderAt("/eam/plans");
-    const table = await screen.findByRole("table", { name: "Maintenance plans" });
+    const table = await findTable({ name: "Maintenance plans" });
     expect(within(table).getByText("2026-10-30")).toBeInTheDocument();
     fireEvent.click(within(table).getByRole("button", { name: "PM-PUMP" }));
     const lines = screen.getByRole("table", { name: "Lines of PM-PUMP" });

@@ -1,5 +1,6 @@
 // SSCC register (section 5.28.14, BR-28.5): every issued SSCC with its container,
 // shipment and no-reuse date, filtered and paged by cursor.
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { SsccPage, SsccRow } from "./api/client";
@@ -36,7 +37,7 @@ describe("SSCC register", () => {
     const { container } = renderAt("/fulfillment/sscc-register");
     expect(screen.getByRole("table", { name: "SSCC register" })).toHaveAttribute("aria-busy", "true");
 
-    const table = await screen.findByRole("table", { name: "SSCC register" });
+    const table = await findTable({ name: "SSCC register" });
     const first = (await within(table).findByText("006141410123456789")).closest("tr");
     const cells = Array.from(first?.querySelectorAll("td, th") ?? []).map((cell) => cell.textContent);
     expect(cells).toEqual(["006141410123456789", "Shipped", "CARTON-C12", "SH-0000007", "0195f0a0", "2026-10-21 14:05 UTC", "2027-10-21"]);
@@ -115,7 +116,7 @@ describe("SSCC register", () => {
     server.handler = (url) =>
       url.pathname !== PATH ? undefined : fail ? json(403, { code: "COM-0403", detail: "missing duty WarehouseView" }) : json(200, { items: [row("006141410123456789")] });
     renderAt("/fulfillment/sscc-register");
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert.textContent).toContain("Could not load the SSCC register");
     expect(alert.textContent).toContain("COM-0403");
     fail = false;

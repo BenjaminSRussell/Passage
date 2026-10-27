@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -71,7 +72,7 @@ async function renderOrders() {
       </Routes>
     </MemoryRouter>,
   );
-  const table = await screen.findByRole("table", { name: "Planned orders" });
+  const table = await findTable({ name: "Planned orders" });
   await waitFor(() => expect(within(table).getByText("PLN-000004")).toBeInTheDocument());
   return (o: PlannedOrder) => within(table).getByRole("checkbox", { name: `Select ${o.number} for firming` }) as HTMLInputElement;
 }

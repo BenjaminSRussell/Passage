@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { reduces, toScheduleInput, validateSchedule, type RowDraft } from "./SchedulingPages";
@@ -102,7 +103,7 @@ describe("scheduling agreement monitor", () => {
         ],
       }),
     );
-    const table = await screen.findByRole("table", { name: "Scheduling agreements" });
+    const table = await findTable({ name: "Scheduling agreements" });
     await waitFor(() => expect(within(table).getByText("SA-00000003")).toBeInTheDocument());
     const row = within(table).getAllByRole("row")[1];
     expect(row).toHaveTextContent("260 EA");
@@ -215,7 +216,7 @@ describe("scheduling agreement detail", () => {
     expect(rows[1]).toHaveTextContent("60 EA");
     expect(within(rows[2]).getByText("Trade-off")).toBeInTheDocument();
     expect(rows[3]).toHaveTextContent("VENDOR_CAPACITY");
-    const releases = await screen.findByRole("table", { name: "Releases" });
+    const releases = await findTable({ name: "Releases" });
     await waitFor(() => expect(within(releases).getByRole("link", { name: "REL-SA-00000003-1" })).toHaveAttribute("href", `/purchasing/scheduling-agreements/${SA_ID}/releases/1`));
     expect(pageViolations(container)).toEqual([]);
   });

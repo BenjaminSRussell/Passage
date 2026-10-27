@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -136,7 +137,7 @@ describe("top-down logic", () => {
 describe("Top-down runs", () => {
   it("lists runs and shows a run's shares summing to the amount", async () => {
     const { container } = (lists(), at("/costacct/top-down-runs"));
-    const table = await screen.findByRole("table", { name: "Top-down runs" });
+    const table = await findTable({ name: "Top-down runs" });
     expect(await within(table).findByText("12000.00")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(within(table).getByRole("button", { name: "2026-09" }));
@@ -151,7 +152,7 @@ describe("Top-down runs", () => {
     let fail = true;
     stubRoutes({ "GET /api/v1/controlling/top-down-runs": () => (fail ? json(503, { title: "down", code: "COM-0500" }) : json(200, { items: [] })) });
     at("/costacct/top-down-runs");
-    expect(await screen.findByRole("alert")).toHaveTextContent("COM-0500");
+    expect(await findAlert()).toHaveTextContent("COM-0500");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No top-down runs yet")).toBeInTheDocument();
@@ -264,7 +265,7 @@ describe("Internal order settlement", () => {
       secondaryElementId: SET,
       amount: "200",
     });
-    const history = await screen.findByRole("table", { name: "Settlements" });
+    const history = await findTable({ name: "Settlements" });
     expect(await within(history).findByText("300.00")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText(/Collected in 2026-09: 300.00 USD/)).toBeInTheDocument());
   });

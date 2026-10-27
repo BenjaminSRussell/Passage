@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { DescriptionTemplate } from "./api/client";
@@ -38,7 +39,7 @@ describe("description template list", () => {
       return undefined;
     };
     const { container } = renderAt("/ledger/description-templates");
-    const table = await screen.findByRole("table", { name: "Description templates" });
+    const table = await findTable({ name: "Description templates" });
     await within(table).findByRole("button", { name: "manual_journal" });
     const tenantRow = within(table).getByRole("button", { name: "manual_journal" }).closest("tr") as HTMLElement;
     expect(tenantRow.textContent).toContain("All legal entities");

@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -105,7 +106,7 @@ describe(`legal-entity re-scoping (seed ${SEED})`, () => {
     renderPage(page.element, page.path);
     await waitFor(() => expect(switcher()).not.toBeDisabled());
     const targets = [...entities.map((e) => e.id), "ALL"];
-    const table = await screen.findByRole("table", { name: page.name });
+    const table = await findTable({ name: page.name });
     const ownerOf = new Map(page.rows.map((r) => [r.code, page.owner(r as never)]));
 
     for (const index of eulerWalk(targets.length)) {
@@ -144,7 +145,7 @@ describe(`legal-entity re-scoping (seed ${SEED})`, () => {
     for (const index of [1, 2, 0]) {
       await act(async () => queue[index].release());
     }
-    const table = await screen.findByRole("table", { name: "Sites" });
+    const table = await findTable({ name: "Sites" });
     await waitFor(() => expect(table).not.toHaveAttribute("aria-busy"));
     const expected = sites.filter((s) => s.legalEntityId === "le-2").map((s) => s.code);
     expect(bodyRows(table).sort()).toEqual(expected.sort());

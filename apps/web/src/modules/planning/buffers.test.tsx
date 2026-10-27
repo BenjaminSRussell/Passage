@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -157,7 +158,7 @@ describe("Buffer profiles", () => {
     stubApi([`/buffer-profiles/${profile.id}`, () => json(profile)], ["/buffer-profiles", () => json({ items: [profile] })]);
     renderAt("/planning/buffer-profiles");
     expect(screen.getByRole("heading", { level: 2, name: "Buffer profiles" })).toBeInTheDocument();
-    const table = await screen.findByRole("table", { name: "Buffer profiles" });
+    const table = await findTable({ name: "Buffer profiles" });
     await waitFor(() => expect(within(table).getByText("Manufactured")).toBeInTheDocument());
     expect(within(table).getByText("50%")).toBeInTheDocument();
     expect(within(table).getByText("90 past / 0 future days")).toBeInTheDocument();
@@ -234,7 +235,7 @@ describe("DDMRP buffer status", () => {
   it("lists buffers most urgent first with zone, priority and order, and filters", async () => {
     const fetchMock = stubApi(["/buffer-profiles", () => json({ items: [profile] })], ["/ddmrp/buffers", () => json({ items: [red, yellow] })]);
     renderAt("/planning/ddmrp-buffers");
-    const table = await screen.findByRole("table", { name: "DDMRP buffers" });
+    const table = await findTable({ name: "DDMRP buffers" });
     await waitFor(() => expect(within(table).getByText("53.06%")).toBeInTheDocument());
     expect(within(table).getByText("Yellow")).toBeInTheDocument();
     expect(within(table).getByText("Red")).toBeInTheDocument();
@@ -303,7 +304,7 @@ describe("DDMRP buffer status", () => {
       openSupply: "60",
       demand: [{ day: 0, qty: "20" }],
     });
-    const table = await screen.findByRole("table", { name: "DDMRP buffers" });
+    const table = await findTable({ name: "DDMRP buffers" });
     await waitFor(() => expect(within(table).getByText("53.06%")).toBeInTheDocument());
   });
 

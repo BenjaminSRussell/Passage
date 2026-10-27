@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { agreementActions } from "./AgreementPages";
@@ -87,7 +88,7 @@ describe("purchase agreement list", () => {
         ],
       }),
     );
-    const table = await screen.findByRole("table", { name: "Purchase agreements" });
+    const table = await findTable({ name: "Purchase agreements" });
     await waitFor(() => expect(within(table).getByText("PA-00000004")).toBeInTheDocument());
     expect(within(table).getByText("Effective")).toBeInTheDocument();
     expect(within(table).getByText("95 %")).toBeInTheDocument();

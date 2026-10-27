@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -128,7 +129,7 @@ describe("absence plans list", () => {
   it("lists plans with their rate and unit, opens one, and passes the page checks", async () => {
     handler = (url) => (url.pathname === "/api/v1/hr/absence/plans" ? json(200, { items: [pto] }) : undefined);
     const { container } = renderAt("/hr/absence/plans");
-    const table = await screen.findByRole("table", { name: "Absence plans" });
+    const table = await findTable({ name: "Absence plans" });
     expect(within(table).getByText("US-PTO-15")).toBeInTheDocument();
     expect(within(table).getByText("1.2500 days")).toBeInTheDocument();
     expect(within(table).getByText("Not allowed")).toBeInTheDocument();
@@ -288,7 +289,7 @@ describe("absence requests queue", () => {
       return undefined;
     };
     const { container } = renderAt("/hr/absence/requests");
-    const table = await screen.findByRole("table", { name: "Absence requests" });
+    const table = await findTable({ name: "Absence requests" });
     expect(within(table).getByRole("link", { name: "Ada Lovelace (WRK-1001)" })).toHaveAttribute("href", `/hr/workers/${ADA}`);
     expect(within(table).getByText("4.00 days")).toBeInTheDocument();
     expect(gets("/api/v1/hr/absence/requests")[0].url.searchParams.get("status")).toBe("SUBMITTED");
@@ -311,13 +312,13 @@ describe("absence requests queue", () => {
       return undefined;
     };
     renderAt("/hr/absence/requests");
-    const table = await screen.findByRole("table", { name: "Absence requests" });
+    const table = await findTable({ name: "Absence requests" });
     fireEvent.click(within(table).getByRole("button", { name: "Approve Ada Lovelace's request from 2026-06-01" }));
     await waitFor(() => expect(alertTexts().join(" ")).toContain("an approver cannot decide their own absence request (HCM-ABS-SELF-APPROVAL)"));
 
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "APPROVED" } });
     await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/hr/absence/requests?status=APPROVED"));
-    const approved = await screen.findByRole("table", { name: "Absence requests" });
+    const approved = await findTable({ name: "Absence requests" });
     await waitFor(() => expect(within(approved).getByText("Approved")).toBeInTheDocument());
     expect(within(approved).queryByRole("button", { name: /Approve/ })).toBeNull();
   });
@@ -357,7 +358,7 @@ describe("worker absence", () => {
   it("shows the plan-year balance with carry-over and the worker's requests", async () => {
     fakeWorker();
     const { container } = renderAt(`/hr/workers/${ADA}`);
-    const balances = await screen.findByRole("table", { name: "Absence balances" });
+    const balances = await findTable({ name: "Absence balances" });
     expect(within(balances).getByText("4.50 days")).toBeInTheDocument();
     expect(within(balances).getByText("1.75")).toBeInTheDocument();
     expect(within(balances).getByText("3.50")).toBeInTheDocument();

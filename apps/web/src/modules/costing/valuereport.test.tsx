@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -137,7 +138,7 @@ describe("ValueReportPage", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Product" }));
     fireEvent.click(screen.getByRole("button", { name: "Run report" }));
 
-    const table = await screen.findByRole("table", { name: "Inventory value by group" });
+    const table = await findTable({ name: "Inventory value by group" });
     expect(await within(table).findByText("DOMESTIC")).toBeInTheDocument();
     expect(within(table).getAllByText("700.00")).toHaveLength(2); // financial and total value of IMPORT
     expect(within(table).getByRole("columnheader", { name: "Value (USD)" })).toBeInTheDocument();
@@ -155,7 +156,7 @@ describe("ValueReportPage", () => {
       "GET /api/v1/costing/cost-transactions": () => json(200, { items: [txn] }),
     });
     at(`/costing/value-report?legalEntityId=${LE}&asOf=2026-03-31&groupBy=product,valuationType&siteId=${S1}`);
-    const table = await screen.findByRole("table", { name: "Inventory value by group" });
+    const table = await findTable({ name: "Inventory value by group" });
     fireEvent.click(await within(table).findByText("IMPORT"));
     expect(await screen.findByRole("heading", { name: "Cost transactions" })).toBeInTheDocument();
     await waitFor(() => expect(urls(fetchMock, "GET", "cost-transactions")).toHaveLength(1));
@@ -172,7 +173,7 @@ describe("ValueReportPage", () => {
         fail ? json(422, { title: "Unprocessable", code: "CST-RPT-004", detail: "the valuation ledger values in USD but holds cost transactions in EUR" }) : json(200, { ...report, rows: [], total: { qty: "0", physicalValue: "0.00", financialValue: "0.00", value: "0.00" } }),
     });
     at(`/costing/value-report?legalEntityId=${LE}&asOf=2026-03-31`);
-    expect(await screen.findByRole("alert")).toHaveTextContent("CST-RPT-004");
+    expect(await findAlert()).toHaveTextContent("CST-RPT-004");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No stock is valued at this date")).toBeInTheDocument();
@@ -231,7 +232,7 @@ describe("CostTransactionsPage", () => {
     fireEvent.change(screen.getByLabelText("Product"), { target: { value: "" } });
     fireEvent.change(screen.getByLabelText("Kind"), { target: { value: "FINANCIAL" } });
     fireEvent.click(screen.getByRole("button", { name: "Show cost transactions" }));
-    const table = await screen.findByRole("table", { name: "Cost transactions" });
+    const table = await findTable({ name: "Cost transactions" });
     expect(await within(table).findByText("1400.00 EUR")).toBeInTheDocument();
     expect(within(table).getByText(txn.ledgerEntryId!)).toBeInTheDocument();
     const q = new URL(urls(fetchMock, "GET", "cost-transactions")[0], "http://x").searchParams;
@@ -249,7 +250,7 @@ describe("CostTransactionsPage", () => {
       "GET /api/v1/costing/cost-transactions": () => (fail ? json(404, { title: "Not Found", code: "CST-VLG-005", detail: "the legal entity has no such valuation ledger" }) : json(200, { items: [] })),
     });
     at(`/costing/cost-transactions?legalEntityId=${LE}`);
-    expect(await screen.findByRole("alert")).toHaveTextContent("CST-VLG-005");
+    expect(await findAlert()).toHaveTextContent("CST-VLG-005");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No cost transactions match")).toBeInTheDocument();
