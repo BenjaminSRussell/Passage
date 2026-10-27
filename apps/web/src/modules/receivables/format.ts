@@ -2,7 +2,19 @@
 // strings; sums use scaled BigInt so no value ever passes through a float.
 
 import type { BadgeTone } from "../../shell/ui";
-import type { DisputeStatus, ExclusionReason, PaymentMode, PaymentStatus, Resolution, RunStatus } from "./api/client";
+import type {
+  CaseCategory,
+  CasePriority,
+  DisputeStatus,
+  DownPaymentKind,
+  DownPaymentStatus,
+  ExclusionReason,
+  PaymentMode,
+  PaymentStatus,
+  ReplyStatus,
+  Resolution,
+  RunStatus,
+} from "./api/client";
 
 const SCALE = 6;
 const FACTOR = 10n ** BigInt(SCALE);
@@ -154,3 +166,35 @@ export function dateTime(iso: string | null | undefined): string {
   const utc = at.toISOString();
   return `${utc.slice(0, 10)} ${utc.slice(11, 16)} UTC`;
 }
+
+export const CASE_CATEGORY_LABELS: Record<CaseCategory, string> = {
+  COLLECTION: "Collection",
+  DISPUTE: "Dispute",
+  DEDUCTION: "Deduction",
+};
+
+export const CASE_PRIORITY_LABELS: Record<CasePriority, string> = { LOW: "Low", NORMAL: "Normal", HIGH: "High" };
+
+export const PRIORITY_TONES: Record<CasePriority, BadgeTone> = { LOW: "neutral", NORMAL: "info", HIGH: "warning" };
+
+export const REPLY_LABELS: Record<ReplyStatus, string> = { NO_REPLY: "No reply", AGREED: "Agreed", DISAGREED: "Disagreed" };
+
+export const REPLY_TONES: Record<ReplyStatus, BadgeTone> = { NO_REPLY: "neutral", AGREED: "success", DISAGREED: "danger" };
+
+export const KIND_LABELS: Record<DownPaymentKind, string> = { DOWN_PAYMENT: "Down payment", SECURITY_DEPOSIT: "Security deposit" };
+
+export const DOWN_PAYMENT_LABELS: Record<DownPaymentStatus, string> = {
+  REQUESTED: "Requested",
+  RECEIVED: "Received",
+  CLEARED: "Cleared",
+  RELEASED: "Released",
+  CANCELLED: "Cancelled",
+};
+
+export const DOWN_PAYMENT_TONES: Record<DownPaymentStatus, BadgeTone> = {
+  REQUESTED: "info",
+  RECEIVED: "warning",
+  CLEARED: "success",
+  RELEASED: "success",
+  CANCELLED: "neutral",
+};

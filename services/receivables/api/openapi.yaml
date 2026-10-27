@@ -580,6 +580,382 @@ paths:
         "409": { $ref: "#/components/responses/Problem" }
         "412": { $ref: "#/components/responses/Problem" }
         "428": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/cases:
+    get:
+      operationId: listCases
+      summary: Collection cases, open first and nearest SLA first (FR-30.18)
+      x-passage-duty: ARView
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [OPEN, CLOSED] } }
+        - { name: category, in: query, schema: { type: string, enum: [COLLECTION, DISPUTE, DEDUCTION] } }
+        - { name: customer, in: query, schema: { type: string, format: uuid } }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: Cases
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/CollectionCase" } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createCase
+      summary: Open a minimal collection case; the SLA comes from the category (COLLECTION 72 h, DISPUTE 120 h, DEDUCTION 240 h)
+      x-passage-duty: CollectionsMaintain
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateCaseRequest" }
+      responses:
+        "201":
+          description: Case opened; case.opened.v1 is published
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CollectionCase" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/cases/{id}:
+    get:
+      operationId: getCase
+      summary: Read one collection case
+      x-passage-duty: ARView
+      parameters:
+        - { $ref: "#/components/parameters/CaseId" }
+      responses:
+        "200":
+          description: Case
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CollectionCase" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/cases/{id}:assign:
+    post:
+      operationId: assignCase
+      summary: Hand an open case to another owner; requires If-Match
+      x-passage-duty: CollectionsMaintain
+      parameters:
+        - { $ref: "#/components/parameters/CaseId" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [owner]
+              properties:
+                owner: { type: string, minLength: 1, maxLength: 120 }
+      responses:
+        "200":
+          description: Case assigned
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CollectionCase" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/cases/{id}:close:
+    post:
+      operationId: closeCase
+      summary: Close an open case with an optional note; requires If-Match. Publishes case.closed.v1.
+      x-passage-duty: CollectionsMaintain
+      parameters:
+        - { $ref: "#/components/parameters/CaseId" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                note: { type: [string, "null"], maxLength: 2000 }
+      responses:
+        "200":
+          description: Case closed
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CollectionCase" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/balance-confirmations:
+    get:
+      operationId: listConfirmationRuns
+      summary: Balance confirmation runs with their reply counts, newest first (FR-30.20)
+      x-passage-duty: ARView
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: Runs (without their confirmations)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/ConfirmationRun" } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createConfirmationRun
+      summary: >-
+        Select customers by their balance as of the key date (|balance| at least the threshold; zero balances
+        only with includeZeroBalances; optionally a sample of n seeded by the Idempotency-Key) and record one
+        NO_REPLY confirmation per customer and currency (BR-30.13)
+      x-passage-duty: BalanceConfirmationRun
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateConfirmationRunRequest" }
+      responses:
+        "201":
+          description: Run created with its confirmations
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConfirmationRun" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/balance-confirmations/{id}:
+    get:
+      operationId: getConfirmationRun
+      summary: Read a run with its confirmations
+      x-passage-duty: ARView
+      parameters:
+        - { $ref: "#/components/parameters/ConfirmationRunId" }
+      responses:
+        "200":
+          description: Run
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConfirmationRun" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/balance-confirmations/{id}/differences:
+    get:
+      operationId: confirmationDifferences
+      summary: The difference list for audit; every DISAGREED reply with both balances and its DISPUTE case
+      x-passage-duty: ARView
+      parameters:
+        - { $ref: "#/components/parameters/ConfirmationRunId" }
+      responses:
+        "200":
+          description: Differences
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/Confirmation" } }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/balance-confirmations/{id}:reply:
+    post:
+      operationId: recordConfirmationReply
+      summary: >-
+        Record a customer's reply. Replies are immutable: repeating the recorded reply returns it, any other
+        reply is 409 AR-CONFIRMATION-REPLIED. DISAGREED opens a DISPUTE case carrying the customer's balance.
+      x-passage-duty: BalanceConfirmationRun
+      parameters:
+        - { $ref: "#/components/parameters/ConfirmationRunId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ConfirmationReplyRequest" }
+      responses:
+        "200":
+          description: Reply recorded; confirmation.replied.v1 is published
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Confirmation" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/down-payments:
+    get:
+      operationId: listDownPayments
+      summary: Down payments and security deposits, newest first (FR-30.21)
+      x-passage-duty: ARView
+      parameters:
+        - { name: customer, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [REQUESTED, RECEIVED, CLEARED, RELEASED, CANCELLED] } }
+        - { name: kind, in: query, schema: { type: string, enum: [DOWN_PAYMENT, SECURITY_DEPOSIT] } }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: Down payments
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/DownPayment" } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createDownPayment
+      summary: Record a down payment or security deposit request (a noted item; nothing posts)
+      x-passage-duty: ARPaymentPost
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateDownPaymentRequest" }
+      responses:
+        "201":
+          description: Request recorded
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DownPayment" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/down-payments/{id}:
+    get:
+      operationId: getDownPayment
+      summary: Read one down payment or deposit with its clearings
+      x-passage-duty: ARView
+      parameters:
+        - { $ref: "#/components/parameters/DownPaymentId" }
+      responses:
+        "200":
+          description: Down payment
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DownPayment" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/down-payments/{id}:receive:
+    post:
+      operationId: receiveDownPayment
+      summary: Record the money as received (Dr bank / Cr 2190 or 2195 on downpayment.received.v1); requires If-Match
+      x-passage-duty: ARPaymentPost
+      parameters:
+        - { $ref: "#/components/parameters/DownPaymentId" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                receivedDate: { type: string, format: date, description: Defaults to today. }
+      responses:
+        "200": { $ref: "#/components/responses/DownPayment" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/down-payments/{id}:cancel:
+    post:
+      operationId: cancelDownPayment
+      summary: Withdraw a request that was never paid; requires If-Match
+      x-passage-duty: ARPaymentPost
+      parameters:
+        - { $ref: "#/components/parameters/DownPaymentId" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      responses:
+        "200": { $ref: "#/components/responses/DownPayment" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/down-payments/{id}:clear:
+    post:
+      operationId: clearDownPayment
+      summary: >-
+        Clear a received down payment against its final invoice, or offset a deposit against an invoice, fee or
+        interest item (BR-30.14). The amount defaults to min(remaining, item open); more is 422 AR-0017.
+        Publishes downpayment.cleared.v1 with Dr 2190 or 2195 / Cr 1200. Requires If-Match.
+      x-passage-duty: ARSettle
+      parameters:
+        - { $ref: "#/components/parameters/DownPaymentId" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [openItemId]
+              properties:
+                openItemId: { type: string, format: uuid }
+                amount: { $ref: "#/components/schemas/Money" }
+      responses:
+        "200": { $ref: "#/components/responses/DownPayment" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/down-payments/{id}:release:
+    post:
+      operationId: releaseDownPayment
+      summary: Refund what remains of a received security deposit (Dr 2195 / Cr bank on downpayment.released.v1); requires If-Match
+      x-passage-duty: ARRefund
+      parameters:
+        - { $ref: "#/components/parameters/DownPaymentId" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      responses:
+        "200": { $ref: "#/components/responses/DownPayment" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
 components:
   securitySchemes:
     bearerAuth:
@@ -624,17 +1000,179 @@ components:
       required: true
       description: Dispute id.
       schema: { type: string, format: uuid }
+    CaseId:
+      name: id
+      in: path
+      required: true
+      description: Collection case id.
+      schema: { type: string, format: uuid }
+    ConfirmationRunId:
+      name: id
+      in: path
+      required: true
+      description: Balance confirmation run id.
+      schema: { type: string, format: uuid }
+    DownPaymentId:
+      name: id
+      in: path
+      required: true
+      description: Down payment or security deposit id.
+      schema: { type: string, format: uuid }
   headers:
     ETag:
       description: Resource version, quoted.
       schema: { type: string }
   responses:
+    DownPayment:
+      description: The down payment after the command, with its clearings
+      headers:
+        ETag: { $ref: "#/components/headers/ETag" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/DownPayment" }
     Problem:
       description: RFC 9457 problem details
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
   schemas:
+    CreateCaseRequest:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId, customerId, category, owner, reason]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        customerId: { type: string, format: uuid }
+        category: { type: string, enum: [COLLECTION, DISPUTE, DEDUCTION] }
+        owner: { type: string, minLength: 1, maxLength: 120 }
+        priority: { type: string, enum: [LOW, NORMAL, HIGH], default: NORMAL }
+        reason: { type: string, minLength: 1, maxLength: 500 }
+        currency: { type: string, pattern: "^[A-Z]{3}$", description: Required unless openItemId is given; the case then takes the item's currency. }
+        openItemId: { type: [string, "null"], format: uuid, description: An open item of the same customer and legal entity. }
+        attachedAmount: { $ref: "#/components/schemas/Money" }
+    CollectionCase:
+      type: object
+      required: [id, legalEntityId, customerId, category, owner, priority, status, reason, currency, slaHours, slaDue, slaBreached, createdAt, version]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        customerId: { type: string, format: uuid }
+        category: { type: string, enum: [COLLECTION, DISPUTE, DEDUCTION] }
+        owner: { type: string }
+        priority: { type: string, enum: [LOW, NORMAL, HIGH] }
+        status: { type: string, enum: [OPEN, CLOSED] }
+        reason: { type: string, description: "BALANCE_DIFFERENCE for a case a balance confirmation disagreement opened." }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        openItemId: { type: string, format: uuid }
+        documentNumber: { type: string }
+        attachedAmount: { $ref: "#/components/schemas/Money" }
+        slaHours: { type: integer }
+        slaDue: { type: string, format: date-time }
+        slaBreached: { type: boolean, description: "Computed at read time: OPEN and past slaDue (AR-0018)." }
+        closeNote: { type: string }
+        closedAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        version: { type: integer }
+    CreateConfirmationRunRequest:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId, asOfDate]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        asOfDate: { type: string, format: date }
+        threshold: { allOf: [{ $ref: "#/components/schemas/Money" }], description: "Defaults to 10000.00 (confirmation_threshold)." }
+        sampleSize: { type: [integer, "null"], minimum: 1, maximum: 500 }
+        includeZeroBalances: { type: boolean, default: false }
+        reminderDays: { type: integer, minimum: 1, maximum: 60, default: 14 }
+    ConfirmationRun:
+      type: object
+      required: [id, legalEntityId, asOfDate, threshold, includeZeroBalances, reminderDays, createdAt, counts]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        asOfDate: { type: string, format: date }
+        threshold: { $ref: "#/components/schemas/Money" }
+        sampleSize: { type: integer }
+        includeZeroBalances: { type: boolean }
+        reminderDays: { type: integer }
+        createdAt: { type: string, format: date-time }
+        counts:
+          type: object
+          required: [selected, agreed, disagreed, noReply]
+          properties:
+            selected: { type: integer }
+            agreed: { type: integer }
+            disagreed: { type: integer }
+            noReply: { type: integer }
+        confirmations:
+          type: array
+          description: Present on a single read and on create; left out of the list.
+          items: { $ref: "#/components/schemas/Confirmation" }
+    Confirmation:
+      type: object
+      required: [id, runId, legalEntityId, customerId, currency, ourBalance, status]
+      properties:
+        id: { type: string, format: uuid }
+        runId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        customerId: { type: string, format: uuid }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        ourBalance: { $ref: "#/components/schemas/Money" }
+        status: { type: string, enum: [NO_REPLY, AGREED, DISAGREED] }
+        customerBalance: { $ref: "#/components/schemas/Money" }
+        difference: { allOf: [{ $ref: "#/components/schemas/Money" }], description: customerBalance minus ourBalance. }
+        comment: { type: string }
+        repliedAt: { type: string, format: date-time }
+        caseId: { type: string, format: uuid, description: The DISPUTE case a disagreement opened. }
+    ConfirmationReplyRequest:
+      type: object
+      additionalProperties: false
+      required: [confirmationId, reply]
+      properties:
+        confirmationId: { type: string, format: uuid }
+        reply: { type: string, enum: [AGREED, DISAGREED] }
+        customerBalance: { allOf: [{ $ref: "#/components/schemas/Money" }], description: "Required for DISAGREED; for AGREED it may only repeat our balance." }
+        comment: { type: [string, "null"], maxLength: 500 }
+    CreateDownPaymentRequest:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId, customerId, kind, currency, amount]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        customerId: { type: string, format: uuid }
+        salesOrderId: { type: [string, "null"], format: uuid }
+        kind: { type: string, enum: [DOWN_PAYMENT, SECURITY_DEPOSIT] }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        amount: { $ref: "#/components/schemas/Money" }
+    DownPayment:
+      type: object
+      required: [id, legalEntityId, customerId, kind, currency, amount, clearedAmount, remaining, status, createdAt, version]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        customerId: { type: string, format: uuid }
+        salesOrderId: { type: string, format: uuid }
+        kind: { type: string, enum: [DOWN_PAYMENT, SECURITY_DEPOSIT] }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        amount: { $ref: "#/components/schemas/Money" }
+        clearedAmount: { $ref: "#/components/schemas/Money" }
+        remaining: { allOf: [{ $ref: "#/components/schemas/Money" }], description: "Left to clear or release; the amount asked for on a request; zero once cleared, released or cancelled." }
+        status: { type: string, enum: [REQUESTED, RECEIVED, CLEARED, RELEASED, CANCELLED] }
+        receivedDate: { type: string, format: date }
+        createdAt: { type: string, format: date-time }
+        version: { type: integer }
+        clearings:
+          type: array
+          description: Present on a single read and after a command.
+          items:
+            type: object
+            required: [id, openItemId, documentNumber, amount, clearedAt]
+            properties:
+              id: { type: string, format: uuid }
+              openItemId: { type: string, format: uuid }
+              documentNumber: { type: string }
+              amount: { $ref: "#/components/schemas/Money" }
+              clearedAt: { type: string, format: date-time }
     Problem:
       type: object
       required: [type, title, status]

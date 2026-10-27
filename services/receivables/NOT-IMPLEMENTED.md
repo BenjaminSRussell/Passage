@@ -6,7 +6,11 @@ aging, manual payments, the scored matcher (BR-30.1), settlement validation
 chart, and the web module (AR workspace, open items, payments, record payment,
 payment page with match and apply). Slice 2 adds BAI2 lockbox import, the
 risk-ranked collections worklist, disputes, promises to pay, dunning runs with
-letters and fees, interest notes, their events, and web pages for each.
+letters and fees, interest notes, their events, and web pages for each. Slice 3
+adds minimal collection cases (FR-30.18), customer balance confirmations with
+immutable replies and the difference list (FR-30.20, BR-30.13), down payments
+and security deposits with receipt, clearing, offset and release (FR-30.21,
+BR-30.14), their events, and web pages for each.
 Everything below is absent, with the reason and where it goes. Status is either "later slice of PSG-30" (inside
 this service or the web module, in a later increment) or "handoff" (needs another
 owner or a kernel change).
@@ -34,9 +38,9 @@ owner or a kernel change).
 | 7 | Deductions workbench (BR-30.12) | later slice of PSG-30 | Not built. Needs wave 26 claims. |
 | 7 | Distributor chargeback claim validation (BR-30.15) | later slice of PSG-30 | Not built. Needs wave 26 agreements; EDI 844/849 is wave 35. |
 | 8 | Correspondence framework and email templates | later slice of PSG-30 | Templates and request log not built. Delivery depends on the FR-29.19 routing and SMTP transport (wave 4/5, handoff). |
-| 8 | Customer balance confirmations | later slice of PSG-30 | Not built. |
-| 9 | Minimal collection cases (`collection_case`) | later slice of PSG-30 | Not built. The generic case framework is wave 45. |
-| 9 | Down payments and security deposits (accounts 2190 / 2195) | later slice of PSG-30 | Not built. |
+| 8 | Customer balance confirmations: letters, portal reply link, reminders | handoff | Built in slice 3: runs as of a key date (threshold, optional seeded sample, zero balances on request), one confirmation per customer and currency, immutable AGREED / DISAGREED replies recorded by the clerk, a DISPUTE case per disagreement, the difference list and reply counts. Not built: the confirmation letter with the open-item list (`BCF-` document, docgen wave 5), the portal reply form with a one-time token (customer portal, below) and email replies (FR-29.19 routing), and the daily 08:00 reminder job after `reminder_days` (stored on the run, never sent). Vendor (F.98) and GL (F.97) confirmations are wave 19. |
+| 9 | Minimal collection cases: SLA timers, links, activities | handoff | Built in slice 3: `collection_case` with category, owner, priority, reason, one optional linked open item, an attached amount, the category SLA (72 / 120 / 240 h), assign and close with a note, `slaBreached` on read, and `case.opened.v1` / `case.closed.v1`. Not built: the Temporal timer per SLA and escalation to a manager (`collections-workflows`, the same handoff as disputes), the AR-0018 breach count metric, links to several items, disputes and promises, activities and notes, per-tenant `case_sla_hours`, and the wave 45 migration into generic cases (owned by wave 45). A `dispute` row does not open a DISPUTE case; only a disagreed balance confirmation does. |
+| 9 | Down payments and security deposits: postings, tax, exposure | handoff | Built in slice 3: requests (no posting), receipt, cancel, clearing a down payment against an invoice and offsetting a deposit against an invoice, fee or interest item (min(remaining, item open), AR-0017 above it, one `down_payment_clearing` row each), and release of a deposit's remainder; the ledger lines (Dr 1000 / Cr 2190 or 2195; Dr 2190 or 2195 / Cr 1200; Dr 2195 / Cr 1000) travel on the `downpayment.*` events. Not built: posting them through the ledger client (see Ledger posting), the bank account from the ledger's bank setup (1000 is fixed), tax on down payments for `tax_on_down_payment` country packs (tax engine, wave 13), `special_gl_type` on open items and the down payment's effect on credit exposure (`down_payment_reduces_exposure`, sales credit wave 27), the automatic clearing proposal on the order's final invoice (needs the wave 29 invoice consumer and an order link on `open_item`), and linking a receipt to the bank payment or statement line it came from. |
 | 9 | Vendor dunning over AP debit items | handoff | Reads AP open items from wave 19. Not built. |
 | 9 | GL and intercompany interest | later slice of PSG-30 | Not built. Intercompany pairing is wave 40. |
 | 10 | Portal guided configuration (w8 configurator) | later slice of PSG-30 | Portal work, not built. |
@@ -48,11 +52,13 @@ owner or a kernel change).
 | AC | Status | Reason |
 |---|---|---|
 | AC1 cash-application fixtures: 500 payments, ≥ 90% auto-match, zero false matches | later slice of PSG-30 | The `testdata/cash-app-500` fixture and the answer key are not created. The rules and the subset-sum bound are unit-tested, but the fixture-level accuracy is not measured. |
+| AC-30.14 balance confirmation: 20 customers, 15 agree, 2 disagree, 3 silent | met | `store/cases_downpayments_test.go` runs it against Postgres: the difference list has 2 rows with both balances and 2 DISPUTE cases exist. |
+| AC-30.15 down payment clearing: 2,000.00 against a 5,000.00 invoice | met, except the ledger posting | Tested against Postgres: the item shows 3,000.00 open and `downpayment.cleared.v1` carries Dr 2190 2,000.00 / Cr 1200 2,000.00; the ledger does not post it yet. |
 | AC2 dunning run respects levels, grace and blocks | partly met | Levels, grace, minimum, interval, blocks, disputes and promises are unit-tested (`domain/dunning_test.go`) and tested end to end against Postgres (`store/collections_test.go`, including AC-30.4's 10-day interval and AC-30.9's dispute exclusion). The `dunning-60` fixture of AC-30.3 (60 customers, 31 expected letters) is not created. |
 | AC3 RMA E2E: return, inspection, credit note posts to inventory and AR | handoff | Depends on sales, inventory and ledger. |
 | AC4 Phase 5 exit: one-month simulation, reconciliation pack signed | handoff | `sim/phase5-month` spans waves 3-5 and needs the accountant sign-off. Owned by testing-reconciliation. |
 | AC5 every deliverable has code or a reason in this file | met | This file lists every item not built. |
-| AC6 `go vet` and `go test` clean; web vitest and tsc; OpenAPI/AsyncAPI match code; chart lints | met for slices 1 and 2 | Go vet and tests pass, including the store tests against Postgres (non-superuser role, so RLS applies); the web module tests and tsc pass; the chart is unchanged in slice 2. The OpenAPI and AsyncAPI cover the routes and events in code. |
+| AC6 `go vet` and `go test` clean; web vitest and tsc; OpenAPI/AsyncAPI match code; chart lints | met for slices 1 to 3 | Go vet and tests pass, including the store tests against Postgres (non-superuser role, so RLS applies); the web module tests and tsc pass; the chart is unchanged since slice 1. `internal/api/contract_test.go` checks every served route against `api/openapi.yaml` (and each operation's duty) in both directions; `internal/events/asyncapi_test.go` checks every published event type against `events/asyncapi.yaml`. |
 
 ## Functional requirements not in this slice
 
@@ -78,12 +84,14 @@ owner or a kernel change).
 ## Events not in this slice
 
 - Published and in `events/asyncapi.yaml`: `payment.received.v1` (manual and lockbox), `payment.applied.v1`, `dispute.opened.v1`, `dispute.resolved.v1`, and `dunningletter.issued.v1` (one per issued letter; the PRD names it `dunning-letter.issued.v1`, but the kernel event-type rule `[a-z][a-z0-9]*` allows no hyphen).
+- Published since slice 3: `case.opened.v1`, `case.closed.v1`, `confirmation.replied.v1`, `downpayment.received.v1`, `downpayment.cleared.v1`, `downpayment.released.v1` (the PRD names no events for these; one `downpayment` entity carries both kinds).
 - Not built: `customer-balance.changed.v1`, `return-order.*` (sales), `pricing.rebate.settled.v1` (consumed from wave 26).
 - Consumers of `invoice.*` and `credit-note.*` from wave 29 are not built.
 
 ## Ledger posting
 
 - Settlement and payment postings (Dr 1000/1010, Cr 1200; Dr 4100 for cash discount; Dr 6100 for write-off; FX 7100/7200) are not posted through `ledger.Post`. `journal_posting_id` is never set.
+- Down payment and deposit receipts, clearings and releases carry their lines on the `downpayment.*` events only.
 - Dunning fees (Cr 4300) and interest (Cr 4310) are open items only; their journal postings wait for the same ledger client. Reconciliation of fees and interest to GL is therefore not yet checked.
 - The `ledgerclient` package is a kernel item (new, not yet present). Handoff to the platform kernel and to the ledger wave (w11/w12). Reconciliation Σ open_amount = GL 1200 is therefore not yet checked.
 
@@ -96,7 +104,7 @@ owner or a kernel change).
 
 ## Schema and data
 
-- Tables: `open_item`, `payment`, `settlement` (0001); `outbox` (0002); `idempotency_keys` (0003); `dispute`, `promise_to_pay`, `dunning_run`, `dunning_letter`, `interest_note` (0004); `lockbox_batch` (0005). Every table has `tenant_id`, ENABLE and FORCE row-level security, a tenant policy and (except outbox and idempotency_keys) a restrictive legal-entity policy. Not built: `bank_statement`, `collection_case`, `dd_mandate`, `direct_debit_run`, `deduction`, `chargeback_claim`, `balance_confirmation`, `correspondence_*`, `rebate_accrual`, `credit_profile`, `return_order`. Each goes into its later slice's migration.
+- Tables: `open_item`, `payment`, `settlement` (0001); `outbox` (0002); `idempotency_keys` (0003); `dispute`, `promise_to_pay`, `dunning_run`, `dunning_letter`, `interest_note` (0004); `lockbox_batch` (0005); `collection_case`, `balance_confirmation_run`, `balance_confirmation` (0006); `down_payment`, `down_payment_clearing` (0007). Every table has `tenant_id`, ENABLE and FORCE row-level security, a tenant policy and (except outbox and idempotency_keys) a restrictive legal-entity policy. Not built: `bank_statement`, `dd_mandate`, `direct_debit_run`, `deduction`, `chargeback_claim`, `correspondence_*`, `rebate_accrual`, `credit_profile`, `return_order`. Each goes into its later slice's migration.
 - `open_item` misses fields from §5.30.4: `invoice_account_id`, `amount_entity_currency`, `special_gl_type`. `dunning_run.parameters` is reduced to `grace_days`.
 - Migrations were applied to an empty Postgres 16 database by the store tests in the review run.
 
@@ -108,5 +116,6 @@ owner or a kernel change).
 
 - Built: the AR workspace (aging by currency and bucket with an as-of date, tiles for payments to apply and on account), the open items list, the payments list, the record-payment form with remittance lines, and the payment page (match candidates with score and rules, the apply plan with amount, cash discount and write-off per item, on-account residual, If-Match and Idempotency-Key). Vitest tests cover loading, empty and error states and axe AA.
 - Built in slice 2: lockbox imports (list, import a file by upload or paste, the payments it created); collections worklist; disputes (list with status filter, open from an open item, detail with review and resolve or reject, If-Match); promises to pay (list, record); dunning runs (list, propose, detail with the letter preview, exclusions and their reasons, review, issue, cancel); interest notes (list, calculate preview, post with Idempotency-Key); "Dispute" and "Promise" actions on open items; an active-disputes tile on the workspace. Vitest tests cover loading, empty and error states, the commands' headers and bodies, and axe AA for every new page.
+- Built in slice 3: collection cases (list with status and category filters, open with an optional linked item, detail with assign, close with a note and the SLA-breach warning); balance confirmations (runs with reply counts, new run, run detail with the reply form, count tiles, the difference list linking each DISAGREED row to its case, and every confirmation); down payments and deposits (list with kind and status filters, request, detail with receive or cancel, clear or offset with the AR-0017 bound checked client-side, release, and the clearings). Vitest tests cover loading, empty and error states, the commands' If-Match, Idempotency-Key and bodies, and axe AA for every new page.
 - Not built: the cash application keyboard flow (J/K, Enter, A) and bulk accept of every candidate ≥ 85, settlements between credits and debits, the rendered dunning letter (needs docgen), worklist saved filters and contact log, RMA screen, the unapplied-cash tile, and the Playwright E2E tests.
 - Needs for the shell owner (wave 5): none for this slice. The module uses only React and the registry type.

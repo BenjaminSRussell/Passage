@@ -1,6 +1,9 @@
 import { createElement } from "react";
 import type { PassageModule } from "../registry";
+import { CaseDetailPage, CasesPage, NewCasePage } from "./Cases";
+import { ConfirmationRunDetailPage, ConfirmationRunsPage, NewConfirmationRunPage } from "./Confirmations";
 import { DisputeDetailPage, DisputesPage, NewDisputePage } from "./Disputes";
+import { DownPaymentDetailPage, DownPaymentsPage, NewDownPaymentPage } from "./DownPayments";
 import { DunningRunDetailPage, DunningRunsPage, NewDunningRunPage } from "./Dunning";
 import { InterestNotesPage, InterestRunPage } from "./Interest";
 import { LockboxImportPage, LockboxPage } from "./Lockbox";
@@ -16,7 +19,7 @@ const receivables: PassageModule = {
   id: "receivables",
   title: "Accounts receivable",
   description:
-    "Open items, aging and cash application (manual and lockbox), and collections: worklist, disputes, promises to pay, dunning and interest.",
+    "Open items, aging and cash application (manual and lockbox), collections (worklist, cases, disputes, promises to pay, dunning and interest), balance confirmations, and down payments and security deposits.",
   routes: [
     { path: "/receivables", element: createElement(WorkspacePage), handle: { title: "AR workspace" } },
     { path: "/receivables/open-items", element: createElement(OpenItemsPage), handle: { title: "Open items" } },
@@ -36,6 +39,15 @@ const receivables: PassageModule = {
     { path: "/receivables/dunning-runs/:id", element: createElement(DunningRunDetailPage), handle: { title: "Dunning run" } },
     { path: "/receivables/interest-notes", element: createElement(InterestNotesPage), handle: { title: "Interest notes" } },
     { path: "/receivables/interest-notes/new", element: createElement(InterestRunPage), handle: { title: "Calculate interest" } },
+    { path: "/receivables/cases", element: createElement(CasesPage), handle: { title: "Collection cases" } },
+    { path: "/receivables/cases/new", element: createElement(NewCasePage), handle: { title: "Open collection case" } },
+    { path: "/receivables/cases/:id", element: createElement(CaseDetailPage), handle: { title: "Collection case" } },
+    { path: "/receivables/balance-confirmations", element: createElement(ConfirmationRunsPage), handle: { title: "Balance confirmations" } },
+    { path: "/receivables/balance-confirmations/new", element: createElement(NewConfirmationRunPage), handle: { title: "New balance confirmation run" } },
+    { path: "/receivables/balance-confirmations/:id", element: createElement(ConfirmationRunDetailPage), handle: { title: "Balance confirmation run" } },
+    { path: "/receivables/down-payments", element: createElement(DownPaymentsPage), handle: { title: "Down payments and deposits" } },
+    { path: "/receivables/down-payments/new", element: createElement(NewDownPaymentPage), handle: { title: "Request down payment" } },
+    { path: "/receivables/down-payments/:id", element: createElement(DownPaymentDetailPage), handle: { title: "Down payment" } },
   ],
   nav: [
     { label: "AR workspace", to: "/receivables", duty: "ARView" },
@@ -48,6 +60,9 @@ const receivables: PassageModule = {
     { label: "Promises to pay", to: "/receivables/promises", duty: "ARView" },
     { label: "Dunning runs", to: "/receivables/dunning-runs", duty: "ARView" },
     { label: "Interest notes", to: "/receivables/interest-notes", duty: "ARView" },
+    { label: "Collection cases", to: "/receivables/cases", duty: "ARView" },
+    { label: "Balance confirmations", to: "/receivables/balance-confirmations", duty: "ARView" },
+    { label: "Down payments", to: "/receivables/down-payments", duty: "ARView" },
   ],
 };
 

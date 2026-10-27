@@ -27,6 +27,27 @@ channels:
     messages:
       dunningLetterIssued:
         $ref: "#/components/messages/DunningLetterIssued"
+  caseEvents:
+    address: passage.receivables.case
+    messages:
+      caseOpened:
+        $ref: "#/components/messages/CaseOpened"
+      caseClosed:
+        $ref: "#/components/messages/CaseClosed"
+  confirmationEvents:
+    address: passage.receivables.confirmation
+    messages:
+      confirmationReplied:
+        $ref: "#/components/messages/ConfirmationReplied"
+  downPaymentEvents:
+    address: passage.receivables.downpayment
+    messages:
+      downPaymentReceived:
+        $ref: "#/components/messages/DownPaymentReceived"
+      downPaymentCleared:
+        $ref: "#/components/messages/DownPaymentCleared"
+      downPaymentReleased:
+        $ref: "#/components/messages/DownPaymentReleased"
 operations:
   publishDisputeOpened:
     action: send
@@ -53,6 +74,36 @@ operations:
     channel: { $ref: "#/channels/paymentEvents" }
     messages:
       - { $ref: "#/channels/paymentEvents/messages/paymentApplied" }
+  publishCaseOpened:
+    action: send
+    channel: { $ref: "#/channels/caseEvents" }
+    messages:
+      - { $ref: "#/channels/caseEvents/messages/caseOpened" }
+  publishCaseClosed:
+    action: send
+    channel: { $ref: "#/channels/caseEvents" }
+    messages:
+      - { $ref: "#/channels/caseEvents/messages/caseClosed" }
+  publishConfirmationReplied:
+    action: send
+    channel: { $ref: "#/channels/confirmationEvents" }
+    messages:
+      - { $ref: "#/channels/confirmationEvents/messages/confirmationReplied" }
+  publishDownPaymentReceived:
+    action: send
+    channel: { $ref: "#/channels/downPaymentEvents" }
+    messages:
+      - { $ref: "#/channels/downPaymentEvents/messages/downPaymentReceived" }
+  publishDownPaymentCleared:
+    action: send
+    channel: { $ref: "#/channels/downPaymentEvents" }
+    messages:
+      - { $ref: "#/channels/downPaymentEvents/messages/downPaymentCleared" }
+  publishDownPaymentReleased:
+    action: send
+    channel: { $ref: "#/channels/downPaymentEvents" }
+    messages:
+      - { $ref: "#/channels/downPaymentEvents/messages/downPaymentReleased" }
 components:
   messages:
     PaymentReceived:
@@ -81,7 +132,104 @@ components:
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/DunningLetterIssuedData"
+    CaseOpened:
+      name: dev.passage.receivables.case.opened.v1
+      summary: A collection case was opened, by a collector or by a disagreed balance confirmation (FR-30.18, BR-30.13).
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/CaseOpenedData"
+    CaseClosed:
+      name: dev.passage.receivables.case.closed.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/CaseClosedData"
+    ConfirmationReplied:
+      name: dev.passage.receivables.confirmation.replied.v1
+      summary: A customer replied to a balance confirmation (FR-30.20). Repeating a recorded reply publishes nothing.
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/ConfirmationRepliedData"
+    DownPaymentReceived:
+      name: dev.passage.receivables.downpayment.received.v1
+      summary: A down payment or deposit was received; postings Dr bank / Cr 2190 or 2195 (FR-30.21).
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/DownPaymentData"
+    DownPaymentCleared:
+      name: dev.passage.receivables.downpayment.cleared.v1
+      summary: A down payment cleared an invoice, or a deposit offset an item; postings Dr 2190 or 2195 / Cr 1200 (BR-30.14).
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/DownPaymentData"
+    DownPaymentReleased:
+      name: dev.passage.receivables.downpayment.released.v1
+      summary: A security deposit's remainder was refunded; postings Dr 2195 / Cr bank.
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/DownPaymentData"
   schemas:
+    CaseOpenedData:
+      type: object
+      required: [case_id, legal_entity_id, customer_id, category, priority, owner, reason, currency, open_item_id, attached_amount, sla_due]
+      properties:
+        case_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
+        customer_id: { type: string, format: uuid }
+        category: { type: string, enum: [COLLECTION, DISPUTE, DEDUCTION] }
+        priority: { type: string, enum: [LOW, NORMAL, HIGH] }
+        owner: { type: string }
+        reason: { type: string, description: "BALANCE_DIFFERENCE when a balance confirmation disagreement opened the case" }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        open_item_id: { type: [string, "null"], format: uuid }
+        attached_amount: { type: [string, "null"], description: "decimal string; the customer's balance on a BALANCE_DIFFERENCE case" }
+        sla_due: { type: string, format: date-time }
+    CaseClosedData:
+      type: object
+      required: [case_id, legal_entity_id, customer_id, category, sla_breached, note]
+      properties:
+        case_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
+        customer_id: { type: string, format: uuid }
+        category: { type: string, enum: [COLLECTION, DISPUTE, DEDUCTION] }
+        sla_breached: { type: boolean, description: closed after its SLA was due }
+        note: { type: [string, "null"] }
+    ConfirmationRepliedData:
+      type: object
+      required: [confirmation_id, run_id, legal_entity_id, customer_id, currency, reply, our_balance, customer_balance, difference, case_id]
+      properties:
+        confirmation_id: { type: string, format: uuid }
+        run_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
+        customer_id: { type: string, format: uuid }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        reply: { type: string, enum: [AGREED, DISAGREED] }
+        our_balance: { type: string, description: "decimal string" }
+        customer_balance: { type: string, description: "decimal string; our balance when AGREED" }
+        difference: { type: string, description: "customer_balance minus our_balance, decimal string" }
+        case_id: { type: [string, "null"], format: uuid, description: "the DISPUTE case a disagreement opened" }
+    DownPaymentData:
+      type: object
+      required: [downpayment_id, legal_entity_id, customer_id, sales_order_id, kind, amount, currency, remaining, open_item_id, postings]
+      properties:
+        downpayment_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
+        customer_id: { type: string, format: uuid }
+        sales_order_id: { type: [string, "null"], format: uuid }
+        kind: { type: string, enum: [DOWN_PAYMENT, SECURITY_DEPOSIT] }
+        amount: { type: string, description: "decimal string; the amount of this movement" }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        remaining: { type: string, description: "decimal string; what is left to clear or release after this movement" }
+        open_item_id: { type: [string, "null"], format: uuid, description: "the item cleared (cleared events only)" }
+        postings:
+          type: array
+          description: Ledger lines for this movement; the ledger client posts them once it exists (NOT-IMPLEMENTED.md).
+          items:
+            type: object
+            required: [account, debit, credit]
+            properties:
+              account: { type: string, description: "1000 bank, 1200 receivables, 2190 down payments, 2195 security deposits" }
+              debit: { type: string, description: "decimal string" }
+              credit: { type: string, description: "decimal string" }
     DisputeOpenedData:
       type: object
       required: [dispute_id, legal_entity_id, customer_id, open_item_id, amount, currency, reason_code]

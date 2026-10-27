@@ -2,9 +2,12 @@
 package events
 
 import (
+	"time"
+
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/events"
+	"github.com/BenjaminSRussell/passage/services/receivables/internal/domain"
 )
 
 // Context is the bounded context segment of every event type.
@@ -102,4 +105,73 @@ type PaymentAppliedData struct {
 	// JournalPostingID stays null until settlements post through the ledger
 	// (NOT-IMPLEMENTED.md, Ledger posting).
 	JournalPostingID *string `json:"journal_posting_id"`
+}
+
+// Collection cases (FR-30.18), balance confirmations (FR-30.20) and down payments
+// and security deposits (FR-30.21). Entity segments are lower-case letters only,
+// as the kernel event type rule requires; one "downpayment" entity carries both
+// kinds, told apart by the kind field.
+var (
+	CaseOpened          = events.Type(Context, "case", "opened", 1)
+	CaseClosed          = events.Type(Context, "case", "closed", 1)
+	ConfirmationReplied = events.Type(Context, "confirmation", "replied", 1)
+	DownPaymentReceived = events.Type(Context, "downpayment", "received", 1)
+	DownPaymentCleared  = events.Type(Context, "downpayment", "cleared", 1)
+	DownPaymentReleased = events.Type(Context, "downpayment", "released", 1)
+)
+
+// CaseOpenedData is the payload of dev.passage.receivables.case.opened.v1.
+type CaseOpenedData struct {
+	CaseID         string           `json:"case_id"`
+	LegalEntityID  string           `json:"legal_entity_id"`
+	CustomerID     string           `json:"customer_id"`
+	Category       string           `json:"category"`
+	Priority       string           `json:"priority"`
+	Owner          string           `json:"owner"`
+	Reason         string           `json:"reason"`
+	Currency       string           `json:"currency"`
+	OpenItemID     *string          `json:"open_item_id"`
+	AttachedAmount *decimal.Decimal `json:"attached_amount"`
+	SLADue         time.Time        `json:"sla_due"`
+}
+
+// CaseClosedData is the payload of dev.passage.receivables.case.closed.v1.
+type CaseClosedData struct {
+	CaseID        string  `json:"case_id"`
+	LegalEntityID string  `json:"legal_entity_id"`
+	CustomerID    string  `json:"customer_id"`
+	Category      string  `json:"category"`
+	SLABreached   bool    `json:"sla_breached"`
+	Note          *string `json:"note"`
+}
+
+// ConfirmationRepliedData is the payload of dev.passage.receivables.confirmation.replied.v1.
+// CaseID names the DISPUTE case a disagreement opened (BR-30.13).
+type ConfirmationRepliedData struct {
+	ConfirmationID  string          `json:"confirmation_id"`
+	RunID           string          `json:"run_id"`
+	LegalEntityID   string          `json:"legal_entity_id"`
+	CustomerID      string          `json:"customer_id"`
+	Currency        string          `json:"currency"`
+	Reply           string          `json:"reply"`
+	OurBalance      decimal.Decimal `json:"our_balance"`
+	CustomerBalance decimal.Decimal `json:"customer_balance"`
+	Difference      decimal.Decimal `json:"difference"`
+	CaseID          *string         `json:"case_id"`
+}
+
+// DownPaymentData is the payload of the downpayment.received, .cleared and
+// .released events. Amount is the amount of this movement; Postings are the
+// ledger lines for it, until the ledger client posts them (NOT-IMPLEMENTED.md).
+type DownPaymentData struct {
+	DownPaymentID string           `json:"downpayment_id"`
+	LegalEntityID string           `json:"legal_entity_id"`
+	CustomerID    string           `json:"customer_id"`
+	SalesOrderID  *string          `json:"sales_order_id"`
+	Kind          string           `json:"kind"`
+	Amount        decimal.Decimal  `json:"amount"`
+	Currency      string           `json:"currency"`
+	Remaining     decimal.Decimal  `json:"remaining"`
+	OpenItemID    *string          `json:"open_item_id"`
+	Postings      []domain.Posting `json:"postings"`
 }

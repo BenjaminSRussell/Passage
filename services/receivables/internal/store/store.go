@@ -154,6 +154,23 @@ type Store interface {
 	ImportLockbox(ctx context.Context, in LockboxImport) (LockboxBatch, error)
 	ListLockboxBatches(ctx context.Context, limit int) ([]LockboxBatch, error)
 	Worklist(ctx context.Context, legalEntityID string, asOf time.Time) ([]domain.CustomerRisk, error)
+	CreateCase(ctx context.Context, in Case, idempotencyKey string) (Case, error)
+	ListCases(ctx context.Context, f CaseFilter, limit int) ([]Case, error)
+	GetCase(ctx context.Context, id string) (Case, error)
+	AssignCase(ctx context.Context, id string, version int, owner string) (Case, error)
+	CloseCase(ctx context.Context, id string, version int, note *string) (Case, error)
+	CreateConfirmationRun(ctx context.Context, in ConfirmationRun, idempotencyKey string) (ConfirmationRun, error)
+	ListConfirmationRuns(ctx context.Context, limit int) ([]ConfirmationRun, error)
+	GetConfirmationRun(ctx context.Context, id string) (ConfirmationRun, error)
+	RecordConfirmationReply(ctx context.Context, runID string, in ConfirmationReply) (Confirmation, error)
+	ConfirmationDifferences(ctx context.Context, runID string) ([]Confirmation, error)
+	CreateDownPayment(ctx context.Context, in DownPayment, idempotencyKey string) (DownPayment, error)
+	ListDownPayments(ctx context.Context, f DownPaymentFilter, limit int) ([]DownPayment, error)
+	GetDownPayment(ctx context.Context, id string) (DownPayment, error)
+	ReceiveDownPayment(ctx context.Context, id string, version int, receivedDate string) (DownPayment, error)
+	CancelDownPayment(ctx context.Context, id string, version int) (DownPayment, error)
+	ClearDownPayment(ctx context.Context, id string, version int, openItemID string, amount *decimal.Decimal) (DownPayment, error)
+	ReleaseDownPayment(ctx context.Context, id string, version int) (DownPayment, error)
 	Ping(ctx context.Context) error
 }
 

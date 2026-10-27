@@ -547,3 +547,241 @@ export function listLockboxBatches(signal?: AbortSignal): Promise<LockboxBatch[]
 export function importLockbox(input: LockboxImportInput): Promise<LockboxBatch> {
   return send<LockboxBatch>("/lockbox/imports", { method: "POST", body: JSON.stringify(input) });
 }
+
+// ---- Collection cases (FR-30.18), balance confirmations (FR-30.20), down payments and deposits (FR-30.21) ----
+
+export const CASE_CATEGORIES = ["COLLECTION", "DISPUTE", "DEDUCTION"] as const;
+export type CaseCategory = (typeof CASE_CATEGORIES)[number];
+export const CASE_PRIORITIES = ["LOW", "NORMAL", "HIGH"] as const;
+export type CasePriority = (typeof CASE_PRIORITIES)[number];
+export type CaseStatus = "OPEN" | "CLOSED";
+
+export interface CollectionCase {
+  id: string;
+  legalEntityId: string;
+  customerId: string;
+  category: CaseCategory;
+  owner: string;
+  priority: CasePriority;
+  status: CaseStatus;
+  reason: string;
+  currency: string;
+  openItemId?: string | null;
+  documentNumber?: string | null;
+  attachedAmount?: string | null;
+  slaHours: number;
+  slaDue: string;
+  slaBreached: boolean;
+  closeNote?: string | null;
+  closedAt?: string | null;
+  createdAt: string;
+  version: number;
+}
+
+export interface CaseInput {
+  legalEntityId: string;
+  customerId: string;
+  category: CaseCategory;
+  owner: string;
+  priority: CasePriority;
+  reason: string;
+  currency?: string;
+  openItemId?: string | null;
+  attachedAmount?: string | null;
+}
+
+export interface CaseFilter {
+  status?: CaseStatus | "";
+  category?: CaseCategory | "";
+  customer?: string;
+  limit?: number;
+}
+
+/** GET /cases - open cases first, nearest SLA first. */
+export function listCases(filter: CaseFilter = {}, signal?: AbortSignal): Promise<CollectionCase[]> {
+  return items<CollectionCase>(
+    `/cases${query({ status: filter.status, category: filter.category, customer: filter.customer, limit: filter.limit })}`,
+    signal,
+  );
+}
+
+export function getCase(id: string, signal?: AbortSignal): Promise<CollectionCase> {
+  return send<CollectionCase>(`/cases/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** POST /cases - the SLA comes from the category. */
+export function createCase(input: CaseInput, key: string = newKey()): Promise<CollectionCase> {
+  return send<CollectionCase>("/cases", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(input) });
+}
+
+/** POST /cases/{id}:assign with If-Match. */
+export function assignCase(id: string, version: number, owner: string): Promise<CollectionCase> {
+  return send<CollectionCase>(`/cases/${encodeURIComponent(id)}:assign`, {
+    method: "POST",
+    headers: { "If-Match": `"${version}"` },
+    body: JSON.stringify({ owner }),
+  });
+}
+
+/** POST /cases/{id}:close with If-Match and an optional note. */
+export function closeCase(id: string, version: number, note: string | null): Promise<CollectionCase> {
+  return send<CollectionCase>(`/cases/${encodeURIComponent(id)}:close`, {
+    method: "POST",
+    headers: { "If-Match": `"${version}"` },
+    body: JSON.stringify({ note }),
+  });
+}
+
+export type ReplyStatus = "NO_REPLY" | "AGREED" | "DISAGREED";
+
+export interface ConfirmationCounts {
+  selected: number;
+  agreed: number;
+  disagreed: number;
+  noReply: number;
+}
+
+export interface Confirmation {
+  id: string;
+  runId: string;
+  legalEntityId: string;
+  customerId: string;
+  currency: string;
+  ourBalance: string;
+  status: ReplyStatus;
+  customerBalance?: string | null;
+  difference?: string | null;
+  comment?: string | null;
+  repliedAt?: string | null;
+  caseId?: string | null;
+}
+
+export interface ConfirmationRun {
+  id: string;
+  legalEntityId: string;
+  asOfDate: string;
+  threshold: string;
+  sampleSize?: number | null;
+  includeZeroBalances: boolean;
+  reminderDays: number;
+  createdAt: string;
+  counts: ConfirmationCounts;
+  confirmations?: Confirmation[];
+}
+
+export interface ConfirmationRunInput {
+  legalEntityId: string;
+  asOfDate: string;
+  threshold: string;
+  sampleSize: number | null;
+  includeZeroBalances: boolean;
+  reminderDays: number;
+}
+
+export interface ReplyInput {
+  confirmationId: string;
+  reply: "AGREED" | "DISAGREED";
+  customerBalance: string | null;
+  comment: string | null;
+}
+
+export function listConfirmationRuns(signal?: AbortSignal): Promise<ConfirmationRun[]> {
+  return items<ConfirmationRun>("/balance-confirmations", signal);
+}
+
+export function getConfirmationRun(id: string, signal?: AbortSignal): Promise<ConfirmationRun> {
+  return send<ConfirmationRun>(`/balance-confirmations/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** GET /balance-confirmations/{id}/differences - the DISAGREED replies with both balances. */
+export function listConfirmationDifferences(id: string, signal?: AbortSignal): Promise<Confirmation[]> {
+  return items<Confirmation>(`/balance-confirmations/${encodeURIComponent(id)}/differences`, signal);
+}
+
+/** POST /balance-confirmations - the key also seeds the sample, so a retry selects the same customers. */
+export function createConfirmationRun(input: ConfirmationRunInput, key: string = newKey()): Promise<ConfirmationRun> {
+  return send<ConfirmationRun>("/balance-confirmations", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(input) });
+}
+
+/** POST /balance-confirmations/{id}:reply - replies are immutable; DISAGREED opens a DISPUTE case. */
+export function recordReply(runId: string, input: ReplyInput): Promise<Confirmation> {
+  return send<Confirmation>(`/balance-confirmations/${encodeURIComponent(runId)}:reply`, { method: "POST", body: JSON.stringify(input) });
+}
+
+export const DOWN_PAYMENT_KINDS = ["DOWN_PAYMENT", "SECURITY_DEPOSIT"] as const;
+export type DownPaymentKind = (typeof DOWN_PAYMENT_KINDS)[number];
+export const DOWN_PAYMENT_STATUSES = ["REQUESTED", "RECEIVED", "CLEARED", "RELEASED", "CANCELLED"] as const;
+export type DownPaymentStatus = (typeof DOWN_PAYMENT_STATUSES)[number];
+
+export interface DownPaymentClearing {
+  id: string;
+  openItemId: string;
+  documentNumber: string;
+  amount: string;
+  clearedAt: string;
+}
+
+export interface DownPayment {
+  id: string;
+  legalEntityId: string;
+  customerId: string;
+  salesOrderId?: string | null;
+  kind: DownPaymentKind;
+  currency: string;
+  amount: string;
+  clearedAmount: string;
+  remaining: string;
+  status: DownPaymentStatus;
+  receivedDate?: string | null;
+  createdAt: string;
+  version: number;
+  clearings?: DownPaymentClearing[];
+}
+
+export interface DownPaymentInput {
+  legalEntityId: string;
+  customerId: string;
+  salesOrderId: string | null;
+  kind: DownPaymentKind;
+  currency: string;
+  amount: string;
+}
+
+export interface DownPaymentFilter {
+  kind?: DownPaymentKind | "";
+  status?: DownPaymentStatus | "";
+  customer?: string;
+  limit?: number;
+}
+
+export function listDownPayments(filter: DownPaymentFilter = {}, signal?: AbortSignal): Promise<DownPayment[]> {
+  return items<DownPayment>(
+    `/down-payments${query({ kind: filter.kind, status: filter.status, customer: filter.customer, limit: filter.limit })}`,
+    signal,
+  );
+}
+
+export function getDownPayment(id: string, signal?: AbortSignal): Promise<DownPayment> {
+  return send<DownPayment>(`/down-payments/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** POST /down-payments - a request; nothing posts until it is received. */
+export function createDownPayment(input: DownPaymentInput, key: string = newKey()): Promise<DownPayment> {
+  return send<DownPayment>("/down-payments", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(input) });
+}
+
+export type DownPaymentAction =
+  | { action: "receive"; receivedDate?: string }
+  | { action: "cancel" }
+  | { action: "clear"; openItemId: string; amount?: string }
+  | { action: "release" };
+
+/** POST /down-payments/{id}:receive|:cancel|:clear|:release with If-Match. */
+export function moveDownPayment(id: string, version: number, command: DownPaymentAction): Promise<DownPayment> {
+  const { action, ...body } = command;
+  return send<DownPayment>(`/down-payments/${encodeURIComponent(id)}:${action}`, {
+    method: "POST",
+    headers: { "If-Match": `"${version}"` },
+    body: JSON.stringify(body),
+  });
+}

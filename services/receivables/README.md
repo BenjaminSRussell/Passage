@@ -1,11 +1,13 @@
 # passage-receivables
 
-Accounts receivable for Passage, wave 30 (PSG-30), slices 1 and 2. Slice 1 is
+Accounts receivable for Passage, wave 30 (PSG-30), slices 1 to 3. Slice 1 is
 the cash-application core: open items, aging, manual payments, the scored
 matcher (BR-30.1) and settlement validation (BR-30.4). Slice 2 adds BAI2 lockbox
 import (FR-30.3) and collections: the risk-ranked worklist (FR-30.6, FR-30.10),
 disputes and promises to pay (FR-30.9), dunning runs (FR-30.7, BR-30.2) and
-interest notes (FR-30.8, BR-30.5). Everything else in the wave is listed in
+interest notes (FR-30.8, BR-30.5). Slice 3 adds minimal collection cases
+(FR-30.18), customer balance confirmations (FR-30.20, BR-30.13) and down
+payments and security deposits (FR-30.21, BR-30.14). Everything else in the wave is listed in
 [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
 
 ## What it does now
@@ -20,7 +22,10 @@ interest notes (FR-30.8, BR-30.5). Everything else in the wave is listed in
 - **Promises to pay** (`POST /promises`, `GET /promises`): amount at most the open amount, date today or later; one holding promise per item. A promise holds until its date plus 2 days (BR-30.2); after that it counts as broken on the worklist and the item is dunnable again.
 - **Dunning** (`POST /dunning-runs`, `GET /dunning-runs`, `GET /dunning-runs/{id}`, `POST /dunning-runs/{id}:review`, `:issue`, `:cancel`; duty DunningRun): a run proposes letters as DRAFT per customer and currency. Level 1 once the grace days (default 5) pass, 2 at 15 days, 3 at 30 (fee 25.00 USD / 20.00 EUR), 4 at 45 (fee 50.00 / 40.00); an item rises one level per run and never falls; letter level is the highest item level; items under 1.00 are ignored; blocked, disputed and promised items, letters under 50.00 USD / 45.00 EUR, and customers dunned fewer than 10 days ago are left out with a reason. Issue needs REVIEWED (AR-0007), re-checks every letter under row locks (a letter whose items were paid, disputed, promised or raised since the proposal is SKIPPED), raises item levels, posts the fee as a FEE open item and publishes one `dunningletter.issued.v1` per letter.
 - **Interest** (`POST /interest-notes:calculate` preview, `:post`, `GET /interest-notes`; duty InterestPost): open amount × annual rate × days ÷ 365 (or 360), from due date + grace or from the item's last note, so no day is charged twice; disputed and promised items, INTEREST and FEE items, and amounts under 5.00 are left out. Post writes one INTEREST open item and one note per item and calendar month, serialised per legal entity by an advisory lock; `Idempotency-Key` replays the stored response.
-- **Events** via the transactional outbox: `dev.passage.receivables.payment.received.v1`, `payment.applied.v1`, `dispute.opened.v1`, `dispute.resolved.v1` and `dunningletter.issued.v1` (the PRD's `dunning-letter.issued.v1`; the kernel type rule allows no hyphen). See `events/asyncapi.yaml`.
+- **Collection cases** (`POST /cases`, `GET /cases?status=&category=&customer=`, `GET /cases/{id}`, `POST /cases/{id}:assign`, `:close`; duty CollectionsMaintain to change, ARView to read): category COLLECTION, DISPUTE or DEDUCTION with its SLA (72, 120, 240 hours), owner, priority, reason, an optional linked open item (same customer and legal entity; the case takes its currency) and an attached amount. `slaBreached` is computed on read (AR-0018). Assign and close need `If-Match`; a closed case cannot change.
+- **Balance confirmations** (`POST /balance-confirmations`, `GET /balance-confirmations`, `GET /balance-confirmations/{id}`, `GET /balance-confirmations/{id}/differences`, `POST /balance-confirmations/{id}:reply`; duty BalanceConfirmationRun to run and record, ARView to read): a run selects each customer and currency whose balance on the key date reaches the threshold (default 10,000.00, debit or credit), zero balances only with `includeZeroBalances`, optionally a sample of n ranked by a hash seeded with the `Idempotency-Key`. The balance on the key date is every item documented by then less the settlements and down payment clearings made by then, so later payments are added back. A reply is AGREED or DISAGREED (with the customer's balance); it is immutable, a repeat of the recorded reply returns it, and a DISAGREED reply opens a 120-hour DISPUTE case with reason BALANCE_DIFFERENCE and the customer's balance attached, in the same transaction (BR-30.13). The difference list holds every DISAGREED row with both balances, the difference and the case.
+- **Down payments and security deposits** (`POST /down-payments`, `GET /down-payments?customer=&status=&kind=`, `GET /down-payments/{id}`, `POST /down-payments/{id}:receive`, `:cancel` (ARPaymentPost), `:clear` (ARSettle), `:release` (ARRefund); all moves need `If-Match`): a request posts nothing; receipt records the received date and publishes Dr bank / Cr 2190 (down payment) or 2195 (deposit). `:clear` locks the item (NOWAIT), clears min(remaining, item open) or a smaller given amount (more is 422 AR-0017), lowers the item's open amount, records a clearing row and publishes Dr 2190 or 2195 / Cr 1200 (AC-30.15). A down payment clears invoices only; a deposit may offset invoice, fee and interest items. `:release` refunds what remains of a deposit (Dr 2195 / Cr bank). An unpaid request can be cancelled.
+- **Events** via the transactional outbox: `dev.passage.receivables.payment.received.v1`, `payment.applied.v1`, `dispute.opened.v1`, `dispute.resolved.v1`, `dunningletter.issued.v1` (the PRD's `dunning-letter.issued.v1`; the kernel type rule allows no hyphen), `case.opened.v1`, `case.closed.v1`, `confirmation.replied.v1` and `downpayment.received.v1`, `.cleared.v1`, `.released.v1` (one `downpayment` entity for both kinds; the postings ride on the event until the ledger client exists). See `events/asyncapi.yaml`.
 
 The API contract is `api/openapi.yaml`. Every operation names its duty in
 `x-passage-duty`.
@@ -31,13 +36,16 @@ The API contract is `api/openapi.yaml`. Every operation names its duty in
 cmd/receivables/       entrypoint: dbx.Connect -> (dbx.Migrate) -> httpx router -> Serve
 internal/domain/       pure rules: match.go (BR-30.1), settle.go (BR-30.4), aging.go (FR-30.6),
                        bai2.go (FR-30.3), dunning.go (BR-30.2), interest.go (BR-30.5),
-                       collections.go (FR-30.9, BR-30.6), risk.go and worklist.go (FR-30.10)
+                       collections.go (FR-30.9, BR-30.6), risk.go and worklist.go (FR-30.10),
+                       cases.go (FR-30.18), confirmations.go (FR-30.20, BR-30.13),
+                       down_payments.go (FR-30.21, BR-30.14)
 internal/store/        pgx repositories, RLS via dbx.WithTenantTx, outbox writes
 internal/api/          HTTP handlers, DTOs, validation
 internal/events/       event types and payloads
 migrations/            0001 tables and RLS, 0002 outbox, 0003 idempotency_keys,
                        0004 dispute, promise_to_pay, dunning_run, dunning_letter, interest_note,
-                       0005 lockbox_batch
+                       0005 lockbox_batch, 0006 collection_case, balance_confirmation_run,
+                       balance_confirmation, 0007 down_payment, down_payment_clearing
 api/openapi.yaml       REST contract
 events/asyncapi.yaml   event contract
 charts/receivables/    Helm chart (passage-receivables)
@@ -81,7 +89,7 @@ The `type` is `https://passage.dev/problems/<code>`.
 | `AUTH-0001` | 401 | No principal, or tenant missing or malformed |
 | `AUTH-0003` | 403 | Missing duty, or legal entity outside the caller's scope |
 | `COM-0001` | 400 | Request failed validation (`errors` lists fields) |
-| `COM-0428` | 428 | `If-Match` required on apply and on dispute and dunning-run moves |
+| `COM-0428` | 428 | `If-Match` required on apply and on dispute, dunning-run, case and down payment moves |
 | `conflict_version` | 412 | `If-Match` does not match the resource version |
 | `idempotency_key_reuse` | 422 | Same `Idempotency-Key` on a create, apply or interest post with a different body |
 | `idempotency_in_progress` | 409 | Two creates with the same `Idempotency-Key` raced; retry to replay |
@@ -103,6 +111,16 @@ The `type` is `https://passage.dev/problems/<code>`.
 | `AR-PROMISE-EXISTS` | 409 | The item already has a promise that has not broken |
 | `AR-PROMISE-STATE` | 409 | The item is no longer open |
 | `AR-AMOUNT-RANGE` | 400 / 422 | Disputed or promised amount is not positive, or exceeds the open amount |
+| `AR-CASE-NOT-FOUND` | 404 | Case id unknown or unknown action |
+| `AR-CASE-STATE` | 409 | The case is closed |
+| `AR-CASE-MISMATCH` | 400 | The linked open item belongs to another customer or legal entity, or is in another currency |
+| `AR-CONFIRMATION-NOT-FOUND` | 404 | Run id unknown, or the confirmation is not in this run |
+| `AR-CONFIRMATION-REPLIED` | 409 | A different reply is already recorded; replies are immutable |
+| `AR-CONFIRMATION-REPLY` | 400 / 422 | DISAGREED without the customer's balance, or AGREED with a different balance |
+| `AR-DOWN-PAYMENT-NOT-FOUND` | 404 | Down payment id unknown or unknown action |
+| `AR-DOWN-PAYMENT-STATE` | 409 | The status does not allow the move, or the item is no longer open |
+| `AR-DOWN-PAYMENT-MISMATCH` | 400 | The item is another customer's, legal entity's or currency's, or of a type the kind cannot clear |
+| `AR-0017` | 422 | Clearing exceeds the remaining down payment or the item's open amount |
 
 `Idempotency-Key` is enforced on create by storing the key on the payment row
 (unique per tenant). On apply the key and the response are stored in
@@ -117,7 +135,11 @@ actions), payments, record payment, the payment page with match candidates and
 the apply plan; lockbox imports and the import form; the collections worklist;
 disputes (list, open, detail with review and resolve); promises to pay (list,
 record); dunning runs (list, propose, detail with the letter preview, exclusions
-and review, issue, cancel); interest notes (list, calculate and post).
+and review, issue, cancel); interest notes (list, calculate and post);
+collection cases (list, open, detail with assign and close); balance
+confirmations (runs, new run, run detail with reply recording, counts and the
+difference list); down payments and deposits (list, request, detail with
+receive, cancel, clear or offset, release, and the clearings).
 
 ## Dependencies
 
