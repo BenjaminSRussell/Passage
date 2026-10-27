@@ -201,9 +201,13 @@ func supplementaryWarnings(o Order) []Notice {
 // followParents applies BR-27.14 after a change: each open supplementary line
 // takes its parent's requested date and, on a confirmed order, its confirmed
 // date; its quantity is recomputed from the parent's quantity, and it is
-// cancelled when the parent drops below one base quantity or is cancelled.
+// cancelled when the parent drops below one base quantity or is cancelled. A
+// supplementary line that was cancelled for being below the base quantity is
+// reopened when its open parent reaches the base quantity again, as the
+// MANDATORY rule would add it at commit (FR-27.14); a cancelled parent never
+// reopens, so lines cancelled with it stay cancelled.
 // It returns the diff of the lines it moved and the numbers of those whose
-// quantity or dates changed (they are re-promised with their parent).
+// quantity, status or dates changed (they are re-promised with their parent).
 func followParents(o *Order) ([]domain.FieldChange, []int, error) {
 	byID := make(map[string]int, len(o.Lines))
 	for i, l := range o.Lines {
@@ -213,7 +217,8 @@ func followParents(o *Order) ([]domain.FieldChange, []int, error) {
 	var moved []int
 	for i := range o.Lines {
 		l := &o.Lines[i]
-		if l.SupplementaryOf == nil || !domain.LineChangeable(l.LineStatus) {
+		reopen := l.LineStatus == domain.LineCancelled
+		if l.SupplementaryOf == nil || !reopen && !domain.LineChangeable(l.LineStatus) {
 			continue
 		}
 		pi, ok := byID[*l.SupplementaryOf]
@@ -222,6 +227,9 @@ func followParents(o *Order) ([]domain.FieldChange, []int, error) {
 		}
 		parent := o.Lines[pi]
 		qty := domain.SupplementaryQuantity(parent.Quantity, l.suppBase, l.suppPerBase)
+		if reopen && (!domain.LineChangeable(parent.LineStatus) || !qty.IsPositive()) {
+			continue
+		}
 		if parent.LineStatus == domain.LineCancelled || !qty.IsPositive() {
 			diff = append(diff, domain.FieldChange{LineNo: l.LineNo, Field: "lineStatus", Old: l.LineStatus, New: domain.LineCancelled})
 			l.LineStatus = domain.LineCancelled
@@ -231,6 +239,10 @@ func followParents(o *Order) ([]domain.FieldChange, []int, error) {
 		after := before
 		after.Quantity, after.RequestedShipDate = qty, parent.RequestedShipDate
 		lineDiff := domain.DiffLine(l.LineNo, before, after)
+		if reopen {
+			lineDiff = append([]domain.FieldChange{{LineNo: l.LineNo, Field: "lineStatus", Old: domain.LineCancelled, New: domain.LineOpen}}, lineDiff...)
+			l.LineStatus = domain.LineOpen
+		}
 		if o.Status == domain.OrderConfirmed && !sameDay(l.ConfirmedShipDate, parent.ConfirmedShipDate) {
 			lineDiff = append(lineDiff, domain.FieldChange{LineNo: l.LineNo, Field: "confirmedShipDate", Old: dayOrEmpty(l.ConfirmedShipDate),
 				New: dayOrEmpty(parent.ConfirmedShipDate)})

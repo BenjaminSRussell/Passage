@@ -1,10 +1,11 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select } from "../../shell/ui";
-import { createOrder, describeProblem, newKey, ORDER_TYPES, type NewOrder, type OrderType, type Problem } from "./api/client";
+import { createOrder, describeProblem, newKey, ORDER_TYPES, type NewOrder, type OrderType, type Problem, type Proposal } from "./api/client";
 import { sentence, today, UUID } from "./format";
 import { emptyLine, validateLines, type LineValues } from "./lines";
 import { LinesEditor } from "./LinesEditor";
+import { OrderProposals } from "./OrderProposals";
 import styles from "./pages.module.css";
 
 export { emptyLine, type LineValues } from "./lines";
@@ -83,6 +84,13 @@ export function NewOrderPage() {
 
   function update(patch: Partial<OrderValues>) {
     setValues((v) => ({ ...v, ...patch }));
+    key.current = newKey();
+  }
+
+  /** An accepted proposal becomes a line for the proposed product, shipped with the line that ordered it; its price is entered by hand. */
+  function acceptProposal(proposal: Proposal, ordered: LineValues) {
+    const line: LineValues = { ...emptyLine(ordered.requestedShipDate), productId: proposal.proposedProductId, unit: ordered.unit, siteId: ordered.siteId, warehouseId: ordered.warehouseId };
+    setValues((v) => ({ ...v, lines: [...v.lines, line] }));
     key.current = newKey();
   }
 
@@ -166,6 +174,7 @@ export function NewOrderPage() {
           </div>
         </form>
       </Card>
+      <OrderProposals legalEntityId={values.legalEntityId} customerId={values.customerId} lines={values.lines} onAccept={acceptProposal} />
     </div>
   );
 }

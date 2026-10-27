@@ -241,6 +241,10 @@ type Store interface {
 	CreateSupplementaryRule(ctx context.Context, in domain.SupplementaryRule, actor string) (domain.SupplementaryRule, error)
 	ListSupplementaryRules(ctx context.Context, f SupplementaryRuleFilter) ([]domain.SupplementaryRule, error)
 	DeleteSupplementaryRule(ctx context.Context, id string) error
+	CreateProposalRule(ctx context.Context, in domain.ProposalRule, actor string) (domain.ProposalRule, error)
+	ListProposalRules(ctx context.Context, f ProposalRuleFilter) ([]domain.ProposalRule, error)
+	DeleteProposalRule(ctx context.Context, id string) error
+	RecordProposalResponse(ctx context.Context, in NewProposalResponse) (ProposalResponse, bool, error)
 	Ping(ctx context.Context) error
 }
 

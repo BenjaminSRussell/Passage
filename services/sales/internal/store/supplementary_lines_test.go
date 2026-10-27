@@ -83,12 +83,54 @@ func TestApplyChange_SupplementaryRemovedBelowBase(t *testing.T) {
 	if !o.NetTotal.Equal(decimal.RequireFromString("96.5")) {
 		t.Fatalf("net total %s, want 90 + 6.5", o.NetTotal)
 	}
-	// A cancelled supplementary line stays cancelled when the parent rises again.
-	if _, _, err := ApplyChange(o, ChangeRequest{Lines: []LineChange{{LineNo: 1, Quantity: dp("30")}}}); err != nil {
+}
+
+// TestApplyChange_SupplementaryReopensAboveBase: a free line cancelled because
+// the parent fell below the base quantity reopens, recomputed and re-dated,
+// when the parent reaches the base again (FR-27.14); while the parent stays
+// below the base it stays cancelled.
+func TestApplyChange_SupplementaryReopensAboveBase(t *testing.T) {
+	o := supplementaryFixture()
+	if _, _, err := ApplyChange(o, ChangeRequest{Lines: []LineChange{{LineNo: 1, Quantity: dp("9")}}}); err != nil {
 		t.Fatal(err)
 	}
-	if o.Lines[1].LineStatus != domain.LineCancelled || !o.Lines[2].Quantity.Equal(d(12)) {
-		t.Fatalf("after raising the parent: %+v / %+v", o.Lines[1], o.Lines[2])
+	diff, _, err := ApplyChange(o, ChangeRequest{Lines: []LineChange{{LineNo: 1, Quantity: dp("8")}}})
+	if err != nil || o.Lines[1].LineStatus != domain.LineCancelled || hasChange(diff, 2, "lineStatus", "CANCELLED", "OPEN") {
+		t.Fatalf("below the base the line stays cancelled: %v %+v diff %+v", err, o.Lines[1], diff)
+	}
+	diff, repromised, err := ApplyChange(o, ChangeRequest{Lines: []LineChange{{LineNo: 1, Quantity: dp("30"), RequestedShipDate: sp("2027-03-12")}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	free := o.Lines[1]
+	if free.LineStatus != domain.LineOpen || !free.Quantity.Equal(d(3)) || free.RequestedShipDate != "2027-03-12" ||
+		free.ConfirmedShipDate == nil || *free.ConfirmedShipDate != "2027-03-12" {
+		t.Fatalf("free line must reopen at 3 on the parent's dates: %+v", free)
+	}
+	if !hasChange(diff, 2, "lineStatus", "CANCELLED", "OPEN") || !hasChange(diff, 2, "quantity", "2", "3") {
+		t.Fatalf("diff must record the reopening: %+v", diff)
+	}
+	if !o.Lines[2].Quantity.Equal(d(12)) || len(repromised) != 3 {
+		t.Fatalf("cable line %+v, repromised %v", o.Lines[2], repromised)
+	}
+	if !o.NetTotal.Equal(decimal.RequireFromString("339")) {
+		t.Fatalf("net total %s, want 300 + 0 + 39", o.NetTotal)
+	}
+}
+
+// TestApplyChange_SupplementaryOfCancelledParentStaysCancelled: lines
+// cancelled with their parent never reopen.
+func TestApplyChange_SupplementaryOfCancelledParentStaysCancelled(t *testing.T) {
+	o := supplementaryFixture()
+	o.Lines[0].LineStatus = domain.LineCancelled
+	o.Lines[1].LineStatus = domain.LineCancelled
+	o.Lines[0].Quantity = d(30)
+	diff, _, err := ApplyChange(o, ChangeRequest{Lines: []LineChange{{LineNo: 3, UnitPrice: dp("4")}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o.Lines[1].LineStatus != domain.LineCancelled || hasChange(diff, 2, "lineStatus", "CANCELLED", "OPEN") {
+		t.Fatalf("a line of a cancelled parent must stay cancelled: %+v diff %+v", o.Lines[1], diff)
 	}
 }
 
@@ -138,8 +180,8 @@ func TestApplyChange_SupplementaryCannotChangeAlone(t *testing.T) {
 // line give a zero-priced line of 2 MANUAL-EN that names its parent, inherits
 // its site, warehouse and date, and is reported as SLS-0012; an OPTIONAL rule
 // and a rule for another customer add nothing. Lowering the parent below 10
-// cancels the line in the same version, and cancelling the order cancels the
-// remaining supplementary line with its parent.
+// cancels the line in the same version, raising it to 20 reopens it, and
+// cancelling the order cancels the supplementary lines with their parent.
 func TestPostgres_MandatorySupplementaryLines(t *testing.T) {
 	s, pool, ctx := migrated(t)
 	le, customer, fg100, manual, poster, bag, cable := ids.New(), ids.New(), ids.New(), ids.New(), ids.New(), ids.New(), ids.New()
@@ -217,7 +259,19 @@ func TestPostgres_MandatorySupplementaryLines(t *testing.T) {
 		t.Fatalf("order.changed must carry the follow-on changes: %+v", data.Diff)
 	}
 
-	cancelled, err := s.CancelOrder(ctx, order.ID, changed.Version, "customer withdrew", "sales-rep", time.Now())
+	reopened, err := s.ChangeOrder(ctx, order.ID, changed.Version, ChangeRequest{Reason: "customer back", Lines: []LineChange{{LineNo: 1, Quantity: dp("20")}}}, "sales-rep", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reopened.Lines[1].LineStatus != domain.LineOpen || !reopened.Lines[1].Quantity.Equal(d(2)) || !reopened.NetTotal.Equal(decimal.RequireFromString("226")) {
+		t.Fatalf("raising the parent to 20 reopens the free line at 2: %+v total %s", reopened.Lines, reopened.NetTotal)
+	}
+	history, err := s.ListOrderVersions(ctx, order.ID)
+	if err != nil || len(history) == 0 || !hasChange(history[0].Diff, 2, "lineStatus", "CANCELLED", "OPEN") {
+		t.Fatalf("the reopening is in the version diff: %v %+v", err, history)
+	}
+
+	cancelled, err := s.CancelOrder(ctx, order.ID, reopened.Version, "customer withdrew", "sales-rep", time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -5,7 +5,7 @@ info:
   description: >-
     Sales orders, ATP promise checks, credit profiles and order holds, change
     management, listings, agreements, quotations, the hold release queue and
-    supplementary item rules (wave 27, slices 1 to 4). Every operation carries x-passage-duty. Errors are RFC 9457
+    supplementary item rules and product proposals (wave 27, slices 1 to 6). Every operation carries x-passage-duty. Errors are RFC 9457
     application/problem+json with a stable code listed in the service README.
 servers:
   - url: https://api.{env}.passage.dev
@@ -894,6 +894,144 @@ paths:
                     items: {$ref: "#/components/schemas/SupplementaryLine"}
         "400": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
+  /v1/sales/product-proposal-rules:
+    get:
+      summary: Product proposal rules in the caller's scope with their recorded accept and decline counts (FR-27.21)
+      operationId: listProposalRules
+      x-passage-duty: sales.order.read
+      parameters:
+        - $ref: "#/components/parameters/LegalEntityQuery"
+        - name: orderedProductId
+          in: query
+          description: repeatable; at most 50 values; absent means every ordered product
+          schema: {type: array, maxItems: 50, items: {type: string, format: uuid}}
+          style: form
+          explode: true
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      responses:
+        "200":
+          description: rules in creation order
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/ProposalRule"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+    post:
+      summary: Create a product proposal rule (FR-27.21, SAP VB41 cross-selling)
+      operationId: createProposalRule
+      x-passage-duty: sales.listing.maintain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ProposalRuleRequest"}
+      responses:
+        "201":
+          description: the stored rule
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ProposalRule"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "409":
+          description: SLS-0034 a rule for this ordered product, customer (or all customers) and proposed product exists
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+  /v1/sales/product-proposal-rules/{id}:
+    delete:
+      summary: Remove a product proposal rule; its recorded responses are kept
+      operationId: deleteProposalRule
+      x-passage-duty: sales.listing.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "204": {description: removed}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/sales/product-proposals:evaluate:
+    post:
+      summary: >-
+        Stateless - the products to propose when products are committed on an order (FR-27.21); a product
+        already on the order or being committed is never proposed, and a customer's own rule wins over the
+        rule for every customer. Nothing is created unless the user accepts a proposal.
+      operationId: evaluateProposals
+      x-passage-duty: sales.order.read
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [legalEntityId, productIds]
+              properties:
+                legalEntityId: {type: string, format: uuid}
+                customerId: {type: string, format: uuid}
+                productIds: {type: array, minItems: 1, maxItems: 50, items: {type: string, format: uuid}, description: products being committed}
+                currentProductIds: {type: array, maxItems: 50, items: {type: string, format: uuid}, description: products already on the order}
+      responses:
+        "200":
+          description: proposals, empty when none apply
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/Proposal"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+  /v1/sales/product-proposals:respond:
+    post:
+      summary: Record a user's accept or decline of a proposal, the input of the acceptance rate (FR-27.21)
+      operationId: respondToProposal
+      x-passage-duty: sales.order.write | sales.channel.intake
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [legalEntityId, ruleId, accepted]
+              properties:
+                legalEntityId: {type: string, format: uuid}
+                ruleId: {type: string, format: uuid}
+                customerId: {type: string, format: uuid}
+                orderId: {type: string, format: uuid, description: absent while the order is still being entered}
+                accepted: {type: boolean}
+      responses:
+        "201":
+          description: recorded
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ProposalResponse"}
+        "200":
+          description: a replay of the same Idempotency-Key and body; the stored response
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ProposalResponse"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404":
+          description: SLS-0107 the rule does not exist in the legal entity
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "422":
+          description: idempotency_key_reuse the key was used with another body
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
 components:
   parameters:
     IdempotencyKey:
@@ -1471,6 +1609,47 @@ components:
           required: [id, unitPrice]
           properties:
             id: {type: string, format: uuid}
+    ProposalRuleRequest:
+      type: object
+      required: [legalEntityId, orderedProductId, proposedProductId, reason]
+      properties:
+        legalEntityId: {type: string, format: uuid}
+        orderedProductId: {type: string, format: uuid}
+        proposedProductId: {type: string, format: uuid, description: must differ from the ordered product}
+        customerId: {type: string, format: uuid, description: absent means every customer of the legal entity}
+        reason: {type: string, enum: [CROSS_SELL, UP_SELL, ACCESSORY]}
+    ProposalRule:
+      allOf:
+        - $ref: "#/components/schemas/ProposalRuleRequest"
+        - type: object
+          required: [id, acceptedCount, declinedCount]
+          properties:
+            id: {type: string, format: uuid}
+            acceptedCount: {type: integer, minimum: 0, description: accepted responses recorded against the rule}
+            declinedCount: {type: integer, minimum: 0, description: declined responses recorded against the rule}
+    Proposal:
+      type: object
+      required: [ruleId, orderedProductId, proposedProductId, reason]
+      properties:
+        ruleId: {type: string, format: uuid}
+        orderedProductId: {type: string, format: uuid}
+        proposedProductId: {type: string, format: uuid}
+        reason: {type: string, enum: [CROSS_SELL, UP_SELL, ACCESSORY]}
+    ProposalResponse:
+      type: object
+      required: [id, legalEntityId, ruleId, orderedProductId, proposedProductId, reason, accepted, respondedBy, respondedAt]
+      properties:
+        id: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        ruleId: {type: string, format: uuid}
+        orderedProductId: {type: string, format: uuid}
+        proposedProductId: {type: string, format: uuid}
+        reason: {type: string, enum: [CROSS_SELL, UP_SELL, ACCESSORY]}
+        customerId: {type: string, format: uuid}
+        orderId: {type: string, format: uuid}
+        accepted: {type: boolean}
+        respondedBy: {type: string}
+        respondedAt: {type: string, format: date-time}
     SupplementaryLine:
       type: object
       required: [ruleId, productId, unit, requirement, quantity, unitPrice, supplementaryOf]

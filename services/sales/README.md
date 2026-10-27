@@ -8,14 +8,16 @@ product listings and exclusions checked at order entry, sales agreements whose
 releases create orders, quotations converted whole or by line into orders, the
 hold release queue, supplementary item rules with a stateless evaluation, and
 MANDATORY supplementary lines added to orders at commit that follow their
-parent line. Wave 27, slices 1 to 5 of PSG-27. Reference:
+parent line, and product proposal rules (cross-sell, up-sell, accessory) with
+a stateless evaluation at line commit and recorded acceptance. Wave 27, slices
+1 to 6 of PSG-27. Reference:
 `docs/prd/phase-5-order-to-cash.md` §5.27.
 
 Out of these slices (see `NOT-IMPLEMENTED.md`): amount-based agreements and
 scheduling-agreement release storage, the ATP projection and reservations,
 change approval and `:cancel-remainder`, the committed backorder run,
 allocation, consignment, OPTIONAL supplementary items prompted in an order-entry
-grid, cross-selling, quotation expiry job and PDF, the intake dedup window beyond the
+grid, w8 related products as a proposal source, quotation expiry job and PDF, the intake dedup window beyond the
 order's own key, and the Temporal release workflow.
 
 ## Run
@@ -111,6 +113,10 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | GET / POST | `/v1/sales/supplementary-item-rules` | `sales.order.read` / `sales.listing.maintain` | List (`legalEntityId`, `parentProductId`, `limit`); create a rule (one per parent, customer or all customers, and item) |
 | DELETE | `/v1/sales/supplementary-item-rules/{id}` | `sales.listing.maintain` | Remove a rule |
 | POST | `/v1/sales/supplementary-items:evaluate` | `sales.order.read` | Stateless: the MANDATORY and OPTIONAL supplementary lines a parent product and quantity trigger for a customer |
+| GET / POST | `/v1/sales/product-proposal-rules` | `sales.order.read` / `sales.listing.maintain` | List (`legalEntityId`, repeated `orderedProductId`, `limit`) with each rule's accepted and declined counts; create a rule (one per ordered product, customer or all customers, and proposed product) |
+| DELETE | `/v1/sales/product-proposal-rules/{id}` | `sales.listing.maintain` | Remove a rule; recorded responses stay |
+| POST | `/v1/sales/product-proposals:evaluate` | `sales.order.read` | Stateless: the products to propose for the products being committed, excluding those already on the order |
+| POST | `/v1/sales/product-proposals:respond` | `sales.order.write` or `sales.channel.intake` | `Idempotency-Key`; records an accept or decline of one proposal |
 | GET | `/readyz` | none | Postgres `SELECT` within 500 ms |
 
 ## Rules implemented
@@ -195,7 +201,18 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
   evaluation. **BR-27.14**: a supplementary line inherits its parent's site,
   warehouse and dates, cannot be changed on its own (`SLS-0024`), is
   recomputed when the parent's quantity changes, is cancelled when the parent
-  drops below the rule's base quantity, and is cancelled with the order.
+  drops below the rule's base quantity (and reopened when the open parent
+  reaches it again), and is cancelled with the order.
+- **FR-27.21** product proposals: a rule proposes a product (CROSS_SELL,
+  UP_SELL or ACCESSORY) when another is ordered, for one customer or every
+  customer of the legal entity (`sales.listing.maintain`; a second rule for
+  the same ordered product, customer and proposed product is `SLS-0034`).
+  `POST /product-proposals:evaluate` is stateless: it returns the proposals for
+  the products being committed, never one already on the order or being
+  committed, with a customer's own rule winning over the rule for every
+  customer; nothing is added to the order. `POST /product-proposals:respond`
+  (`Idempotency-Key`) records the user's accept or decline, and the rule list
+  returns each rule's accepted and declined counts, the acceptance rate.
 - **BR-27.10** intake: a repeat of `(channel, externalRef)` with the same body
   returns the original order with 200; a different body is a conflict.
 - **BR-27.6** optimistic concurrency with `If-Match` and the version column.
@@ -230,6 +247,7 @@ Problem details are `application/problem+json` with `type` =
 | `SLS-0031` | 422 | Quotation validity has passed |
 | `SLS-0032` | 422 | Selected quotation lines are not open (already converted, unknown or repeated) or none remain |
 | `SLS-0033` | 409 | A supplementary item rule for the parent, customer (or all customers) and item exists |
+| `SLS-0034` | 409 | A product proposal rule for the ordered product, customer (or all customers) and proposed product exists |
 | `SLS-0100` | 404 | Order not found |
 | `SLS-0101` | 404 | Hold not found |
 | `SLS-0102` | 404 | Credit profile not found |
@@ -237,6 +255,7 @@ Problem details are `application/problem+json` with `type` =
 | `SLS-0104` | 404 | Product listing not found |
 | `SLS-0105` | 404 | Quotation not found |
 | `SLS-0106` | 404 | Supplementary item rule not found |
+| `SLS-0107` | 404 | Product proposal rule not found (also on `:respond` for a rule outside the legal entity) |
 | `idempotency_key_reuse` | 422 | Same `Idempotency-Key` with a different body (kernel) |
 | `COM-0001` | 400 | Request failed validation; field errors in `errors` |
 | `AUTH-0001` | 401 | Missing or malformed tenant |

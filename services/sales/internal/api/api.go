@@ -55,6 +55,9 @@ const (
 	holdQueue       = "/v1/sales/holds"
 	suppRules       = "/v1/sales/supplementary-item-rules"
 	suppEvaluate    = "/v1/sales/supplementary-items:evaluate"
+	proposalRules   = "/v1/sales/product-proposal-rules"
+	proposalEval    = "/v1/sales/product-proposals:evaluate"
+	proposalRespond = "/v1/sales/product-proposals:respond"
 )
 
 var (
@@ -134,6 +137,11 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRead)).Get(suppRules, a.listSupplementaryRules)
 	r.With(authz.RequireDuty(dutyListing)).Delete(suppRules+"/{id}", a.deleteSupplementaryRule)
 	r.With(authz.RequireDuty(dutyRead)).Post(suppEvaluate, a.evaluateSupplementary)
+	r.With(authz.RequireDuty(dutyListing)).Post(proposalRules, a.createProposalRule)
+	r.With(authz.RequireDuty(dutyRead)).Get(proposalRules, a.listProposalRules)
+	r.With(authz.RequireDuty(dutyListing)).Delete(proposalRules+"/{id}", a.deleteProposalRule)
+	r.With(authz.RequireDuty(dutyRead)).Post(proposalEval, a.evaluateProposals)
+	r.With(requireAny(dutyWrite, dutyIntake)).Post(proposalRespond, a.respondToProposal)
 }
 
 // Metrics serves the admin port's Prometheus text.

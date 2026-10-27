@@ -12,6 +12,7 @@ import { OrderDetailPage } from "./OrderDetailPage";
 import { HoldQueuePage } from "./HoldQueuePage";
 import { OrdersPage } from "./OrdersPage";
 import { NewProductListingPage, ProductListingsPage } from "./ProductListingsPage";
+import { NewProposalRulePage, ProposalRulesPage } from "./ProposalRulesPage";
 import { QuotationDetailPage } from "./QuotationDetailPage";
 import { NewQuotationPage, QuotationsPage } from "./QuotationsPage";
 import { ScheduleReleasePage } from "./ScheduleReleasePage";
@@ -21,7 +22,7 @@ const sales: PassageModule = {
   id: "sales",
   title: "Sales",
   description:
-    "Quote and convert to orders, enter, confirm, change and cancel sales orders, apply holds and work the release queue, maintain credit profiles, product listings, supplementary items and sales agreements, check available-to-promise, reconcile scheduling releases and preview backorder runs.",
+    "Quote and convert to orders, enter, confirm, change and cancel sales orders, apply holds and work the release queue, maintain credit profiles, product listings, supplementary items, product proposals and sales agreements, check available-to-promise, reconcile scheduling releases and preview backorder runs.",
   routes: [
     { path: "/sales", element: createElement(OrdersPage), handle: { title: "Sales orders" } },
     { path: "/sales/orders", element: createElement(OrdersPage) },
@@ -45,6 +46,8 @@ const sales: PassageModule = {
     { path: "/sales/quotations/:id", element: createElement(QuotationDetailPage), handle: { title: "Sales quotation" } },
     { path: "/sales/supplementary-items", element: createElement(SupplementaryRulesPage) },
     { path: "/sales/supplementary-items/new", element: createElement(NewSupplementaryRulePage), handle: { title: "New supplementary item rule" } },
+    { path: "/sales/product-proposals", element: createElement(ProposalRulesPage) },
+    { path: "/sales/product-proposals/new", element: createElement(NewProposalRulePage), handle: { title: "New product proposal rule" } },
   ],
   nav: [
     { label: "Sales orders", to: "/sales/orders", duty: "sales.order.read" },
@@ -58,6 +61,7 @@ const sales: PassageModule = {
     { label: "Product listings", to: "/sales/product-listings", duty: "sales.order.read" },
     { label: "Sales agreements", to: "/sales/agreements", duty: "sales.order.read" },
     { label: "Supplementary items", to: "/sales/supplementary-items", duty: "sales.order.read" },
+    { label: "Product proposals", to: "/sales/product-proposals", duty: "sales.order.read" },
   ],
 };
 

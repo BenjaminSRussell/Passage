@@ -831,3 +831,89 @@ export async function evaluateSupplementary(input: SupplementaryEvaluationInput)
   const body = await json<{ items?: SupplementaryLine[] }>("/supplementary-items:evaluate", { method: "POST", body: JSON.stringify(input) });
   return body.items ?? [];
 }
+
+export const PROPOSAL_REASONS = ["CROSS_SELL", "UP_SELL", "ACCESSORY"] as const;
+export type ProposalReason = (typeof PROPOSAL_REASONS)[number];
+
+export interface ProposalRuleInput {
+  legalEntityId: string;
+  orderedProductId: string;
+  proposedProductId: string;
+  /** Absent for every customer of the legal entity. */
+  customerId?: string;
+  reason: ProposalReason;
+}
+
+/** A product proposal rule (FR-27.21) with the responses recorded against it. */
+export interface ProposalRule extends ProposalRuleInput {
+  id: string;
+  acceptedCount: number;
+  declinedCount: number;
+}
+
+/** One product offered at line commit; it creates no line unless accepted. */
+export interface Proposal {
+  ruleId: string;
+  orderedProductId: string;
+  proposedProductId: string;
+  reason: ProposalReason;
+}
+
+export interface ProposalEvaluationInput {
+  legalEntityId: string;
+  customerId?: string;
+  /** The products being committed. */
+  productIds: string[];
+  /** The products already on the order. */
+  currentProductIds?: string[];
+}
+
+export interface ProposalResponseInput {
+  legalEntityId: string;
+  ruleId: string;
+  customerId?: string;
+  orderId?: string;
+  accepted: boolean;
+}
+
+export interface ProposalResponse extends ProposalResponseInput {
+  id: string;
+  orderedProductId: string;
+  proposedProductId: string;
+  reason: ProposalReason;
+  respondedBy: string;
+  respondedAt: string;
+}
+
+export interface ProposalRuleFilter {
+  legalEntityId?: string;
+  orderedProductId?: string;
+}
+
+export async function listProposalRules(filter: ProposalRuleFilter = {}, signal?: AbortSignal): Promise<ProposalRule[]> {
+  const body = await json<{ items?: ProposalRule[] }>(
+    `/product-proposal-rules${query({ legalEntityId: filter.legalEntityId, orderedProductId: filter.orderedProductId, limit: 200 })}`,
+    {},
+    signal,
+  );
+  return body.items ?? [];
+}
+
+export function createProposalRule(input: ProposalRuleInput): Promise<ProposalRule> {
+  return json<ProposalRule>("/product-proposal-rules", { method: "POST", body: JSON.stringify(input) });
+}
+
+export async function deleteProposalRule(id: string): Promise<void> {
+  await send(`/product-proposal-rules/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+/** The products to propose for the products being committed (FR-27.21); nothing is stored. */
+export async function evaluateProposals(input: ProposalEvaluationInput, signal?: AbortSignal): Promise<Proposal[]> {
+  const body = await json<{ items?: Proposal[] }>("/product-proposals:evaluate", { method: "POST", body: JSON.stringify(input) }, signal);
+  return body.items ?? [];
+}
+
+/** Records the user's accept or decline of one proposal; a retry with the same key is counted once. */
+export function respondToProposal(input: ProposalResponseInput, key: string = newKey()): Promise<ProposalResponse> {
+  return json<ProposalResponse>("/product-proposals:respond", { method: "POST", body: JSON.stringify(input), headers: { "Idempotency-Key": key } });
+}
