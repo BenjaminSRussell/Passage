@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -29,6 +30,8 @@ type fakeStore struct {
 	history []store.HistoryEntry
 	idem    map[string]store.IdempotencyRecord
 	pingErr error
+	mu      sync.Mutex
+	locks   map[string]*sync.Mutex
 }
 
 func (f *fakeStore) PutRateType(_ context.Context, in store.RateType) (store.RateType, error) {

@@ -85,7 +85,7 @@ describe("lookup page", () => {
     await fill("To currency", "GBP");
     await fill("Reference currency", "EUR");
     fireEvent.click(screen.getByRole("button", { name: "Look up rate" }));
-    expect(await screen.findByText("1 USD = 0.64 GBP")).toBeInTheDocument();
+    expect(await screen.findByText("1 USD = 0.640000 GBP")).toHaveAttribute("title", "0.64");
     expect(screen.getByText(/Triangulated/)).toBeInTheDocument();
     expect(within(screen.getByRole("table", { name: "Rates used" })).getAllByRole("row")).toHaveLength(3);
     expect(server.calls.find((c) => c.url.pathname === "/api/v1/fx/rates")?.url.search).toBe("?type=CLOSING&from=USD&to=GBP&via=EUR");
@@ -100,7 +100,18 @@ describe("lookup page", () => {
     await fill("To currency", "JPY");
     fireEvent.click(screen.getByRole("button", { name: "Look up rate" }));
     const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("No rate found");
     expect(alert.textContent).toContain("LEDGER_RATE_MISSING");
+  });
+
+  it("uses a generic title for other failures", async () => {
+    answer((url) => (url.pathname === "/api/v1/fx/rates" ? json(500, { code: "COM-0500", detail: "internal error" }) : undefined));
+    renderAt("/fx/lookup");
+    await chooseType();
+    await fill("From currency", "USD");
+    await fill("To currency", "JPY");
+    fireEvent.click(screen.getByRole("button", { name: "Look up rate" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Could not look up the rate");
   });
 
   it("rejects a malformed reference currency locally", async () => {
@@ -133,7 +144,7 @@ describe("convert page", () => {
     await fill("To currency", "USD");
     fireEvent.click(screen.getByRole("button", { name: "Convert" }));
     expect(await screen.findByText("108.55 USD")).toBeInTheDocument();
-    expect(screen.getByText("1.0855 (direct) on 2026-01-02")).toBeInTheDocument();
+    expect(screen.getByText("1.085500 (direct) on 2026-01-02")).toHaveAttribute("title", "1.0855");
     expect(server.calls.find((c) => c.method === "POST")?.body).toEqual({ rateType: "CLOSING", to: "USD", amounts: [{ value: "100", currency: "EUR" }] });
     expect(pageViolations(container)).toEqual([]);
   });
@@ -154,11 +165,12 @@ describe("convert page", () => {
     answer((url) => (url.pathname === "/api/v1/fx/convert" ? json(400, { code: "COM-0001", detail: "request failed validation", errors: { "amounts[0].value": "must be a decimal number in a string" } }) : undefined));
     renderAt("/fx/convert");
     await chooseType();
-    await fill("Amount", "1e3");
+    await fill("Amount", "1.12345678901");
     await fill("From currency", "EUR");
     await fill("To currency", "USD");
     fireEvent.click(screen.getByRole("button", { name: "Convert" }));
-    expect(await screen.findByText("Enter a number such as 1250.50.")).toBeInTheDocument();
+    expect(await screen.findByText("must be a decimal number in a string")).toBeInTheDocument();
+    expect(server.calls.some((c) => c.method === "POST")).toBe(true);
   });
 
   it("shows a server rejection that no field owns", async () => {

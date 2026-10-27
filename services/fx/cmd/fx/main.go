@@ -71,10 +71,19 @@ func run(ctx context.Context, getenv func(string) string) error {
 	errs := make(chan error, 2)
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), router) }()
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "ADMIN_ADDR", defaultAdminAddr), adminHandler(metrics)) }()
+	importsDone := make(chan struct{})
 	if imports != nil {
-		go imports.loop(ctx)
+		go func() {
+			defer close(importsDone)
+			imports.loop(ctx)
+		}()
+	} else {
+		close(importsDone)
 	}
-	return <-errs
+	err = <-errs
+	cancel()
+	<-importsDone
+	return err
 }
 
 func adminHandler(metrics *importer.Metrics) http.Handler {

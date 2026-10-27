@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"regexp"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -101,6 +102,19 @@ type convertResponse struct {
 	Results  []convertedBody `json:"results"`
 }
 
+var currencyCode = regexp.MustCompile(`^[A-Z]{3}$`)
+
+const currencyMessage = "must be a 3-letter upper-case ISO 4217 code"
+
+func checkCurrency(fields map[string]string, name, value string, required bool) {
+	if value == "" && !required {
+		return
+	}
+	if !currencyCode.MatchString(value) {
+		fields[name] = currencyMessage
+	}
+}
+
 func badRequest(fields map[string]string) *httpx.Problem {
 	p := httpx.NewProblem(http.StatusBadRequest, "COM-0001", "request failed validation")
 	p.Errors = fields
@@ -150,6 +164,8 @@ func (a *API) publishRates(w http.ResponseWriter, r *http.Request) {
 		} else {
 			validFrom = parseDate(fields, key("validFrom"), item.ValidFrom)
 		}
+		checkCurrency(fields, key("from"), item.From, true)
+		checkCurrency(fields, key("to"), item.To, true)
 		inputs = append(inputs, store.RateInput{
 			RateType: item.RateType, From: item.From, To: item.To, ValidFrom: validFrom,
 			Rate: parseRate(fields, key("rate"), item.Rate), Source: sourceManual,
@@ -205,6 +221,9 @@ func (a *API) lookupRate(w http.ResponseWriter, r *http.Request) {
 			fields[name] = "is required"
 		}
 	}
+	checkCurrency(fields, "from", q.Get("from"), false)
+	checkCurrency(fields, "to", q.Get("to"), false)
+	checkCurrency(fields, "via", q.Get("via"), false)
 	date := parseDate(fields, "date", q.Get("date"))
 	if len(fields) > 0 {
 		httpx.Fail(w, r, badRequest(fields))
@@ -241,6 +260,8 @@ func (a *API) rateHistory(w http.ResponseWriter, r *http.Request) {
 			fields[name] = "is required"
 		}
 	}
+	checkCurrency(fields, "from", q.Get("from"), false)
+	checkCurrency(fields, "to", q.Get("to"), false)
 	if len(fields) > 0 {
 		httpx.Fail(w, r, badRequest(fields))
 		return
@@ -268,9 +289,7 @@ func parseAmount(fields map[string]string, i int, in amountBody) money.Amount {
 	if err != nil || v.Exponent() < -maxAmountScale || v.Abs().GreaterThan(decimal.NewFromFloat(maxAmountMagnitude)) {
 		fields[key("value")] = "must be a decimal number in a string, at most 10 decimals and 1e15 in magnitude"
 	}
-	if len(in.Currency) != 3 {
-		fields[key("currency")] = "must be a 3-letter upper-case ISO 4217 code"
-	}
+	checkCurrency(fields, key("currency"), in.Currency, true)
 	return money.Amount{Value: v, Currency: in.Currency}
 }
 
@@ -287,9 +306,8 @@ func (a *API) convert(w http.ResponseWriter, r *http.Request) {
 	if req.RateType == "" {
 		fields["rateType"] = "is required"
 	}
-	if len(req.To) != 3 {
-		fields["to"] = "must be a 3-letter upper-case ISO 4217 code"
-	}
+	checkCurrency(fields, "to", req.To, true)
+	checkCurrency(fields, "via", req.Via, false)
 	if len(req.Amounts) == 0 || len(req.Amounts) > maxConvertAmounts {
 		fields["amounts"] = fmt.Sprintf("must hold 1 to %d amounts", maxConvertAmounts)
 	}

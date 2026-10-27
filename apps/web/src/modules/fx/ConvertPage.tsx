@@ -5,7 +5,7 @@ import { convertAmounts, FxApiError, type ConvertInput } from "./api/client";
 import { Detail } from "./Detail";
 import { RateTypeField } from "./RateTypeField";
 import styles from "./pages.module.css";
-import { emptyFilter, normalizeCurrency, amountError, validateFilter, type Errors, type RateFilter } from "./validate";
+import { emptyFilter, normalizeCurrency, amountError, formatRate, validateFilter, type Errors, type RateFilter } from "./validate";
 
 const SERVER_FIELD: Record<string, string> = { rateType: "rateType", to: "to", date: "date", "amounts[0].value": "amount", "amounts[0].currency": "from" };
 
@@ -82,7 +82,7 @@ export function ConvertPage() {
           <dl className={styles.details}>
             <Detail term="Converted">{`${result.converted.value} ${result.converted.currency}`}</Detail>
             <Detail term="Original">{`${result.amount.value} ${result.amount.currency}`}</Detail>
-            <Detail term="Rate">{`${result.rate} (${result.path}) on ${convert.data.date}`}</Detail>
+            <Detail term="Rate" title={result.rate}>{`${formatRate(result.rate)} (${result.path}) on ${convert.data.date}`}</Detail>
           </dl>
         </Card>
       ) : null}

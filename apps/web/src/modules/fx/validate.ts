@@ -41,3 +41,8 @@ export function validateFilter(v: RateFilter, opts: { pair: boolean; dated: bool
 export function amountError(raw: string): string | undefined {
   return DECIMAL.test(raw.trim()) ? undefined : "Enter a number such as 1250.50.";
 }
+
+export function formatRate(rate: string): string {
+  const n = Number(rate);
+  return Number.isFinite(n) ? n.toFixed(6) : rate;
+}

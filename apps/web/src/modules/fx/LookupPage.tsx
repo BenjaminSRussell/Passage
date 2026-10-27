@@ -1,18 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
-import { lookupRate, type LookupQuery, type Resolution } from "./api/client";
+import { FxApiError, lookupRate, type LookupQuery, type Resolution } from "./api/client";
 import { Detail } from "./Detail";
 import { RateTypeField } from "./RateTypeField";
 import styles from "./pages.module.css";
-import { emptyFilter, normalizeCurrency, validateFilter, type Errors, type RateFilter } from "./validate";
+import { emptyFilter, formatRate, normalizeCurrency, validateFilter, type Errors, type RateFilter } from "./validate";
 
 type Hop = Resolution["hops"][number];
 
 const hopColumns: DataTableColumn<Hop>[] = [
   { key: "from", header: "From", mono: true },
   { key: "to", header: "To", mono: true },
-  { key: "rate", header: "Rate", align: "end", mono: true },
+  { key: "rate", header: "Rate", align: "end", mono: true, render: (h) => <span title={h.rate}>{formatRate(h.rate)}</span> },
   { key: "validFrom", header: "Valid from", mono: true },
 ];
 
@@ -63,14 +63,14 @@ export function LookupPage() {
         </div>
       </form>
       {result.isError ? (
-        <Alert tone="danger" title="No rate found" live="alert">
+        <Alert tone="danger" title={result.error instanceof FxApiError && result.error.code === "LEDGER_RATE_MISSING" ? "No rate found" : "Could not look up the rate"} live="alert">
           {(result.error as Error).message}
         </Alert>
       ) : null}
       {result.data ? (
         <Card title="Result">
           <dl className={styles.details}>
-            <Detail term="Rate">{`1 ${result.data.from} = ${result.data.rate} ${result.data.to}`}</Detail>
+            <Detail term="Rate" title={result.data.rate}>{`1 ${result.data.from} = ${formatRate(result.data.rate)} ${result.data.to}`}</Detail>
             <Detail term="Date">{result.data.date}</Detail>
             <Detail term="Resolution">{PATH_LABEL[result.data.path]}</Detail>
           </dl>

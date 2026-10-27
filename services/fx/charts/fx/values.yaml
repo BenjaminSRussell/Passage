@@ -19,7 +19,8 @@ resources:
 networkPolicy:
   enabled: true
   ingressFrom: []
-  metricsNamespace: monitoring
+  ingressNamespaces: []
+  metricsFrom: [observability]
 serviceMonitor:
   enabled: true
   interval: 30s

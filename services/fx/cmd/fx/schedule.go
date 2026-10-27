@@ -100,12 +100,18 @@ func newImportSchedule(ctx context.Context, getenv func(string) string, st store
 	if err != nil {
 		return nil, err
 	}
+	if oxr, ok := p.(*provider.OXR); ok && !oxr.Enabled() {
+		return nil, errors.New("FX_OXR_APP_ID is required when FX_IMPORT_PROVIDER is openexchangerates")
+	}
 	interval, err := parseInterval(getenv)
 	if err != nil {
 		return nil, err
 	}
 	scope := func(parent context.Context) context.Context {
 		return tenant.With(parent, tenant.Principal{TenantID: tenantID, UserID: importUser})
+	}
+	if _, err := st.GetRateType(scope(ctx), rateType); err != nil {
+		return nil, fmt.Errorf("FX_IMPORT_RATE_TYPE %q: %w", rateType, err)
 	}
 	last, err := st.LastSuccess(scope(ctx), p.Name(), rateType)
 	if err != nil {

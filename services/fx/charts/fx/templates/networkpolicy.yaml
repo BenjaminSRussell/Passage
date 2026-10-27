@@ -15,12 +15,19 @@ spec:
         {{- else }}
         - podSelector: {}
         {{- end }}
+        {{- range .Values.networkPolicy.ingressNamespaces }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . }}
+        {{- end }}
       ports:
         - { protocol: TCP, port: 8080 }
     - from:
+        {{- range .Values.networkPolicy.metricsFrom }}
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: {{ .Values.networkPolicy.metricsNamespace }}
+              kubernetes.io/metadata.name: {{ . }}
+        {{- end }}
       ports:
         - { protocol: TCP, port: 9090 }
 {{- end }}

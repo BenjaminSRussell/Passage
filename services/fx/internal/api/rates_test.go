@@ -6,11 +6,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/shopspring/decimal"
 
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/fx/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/fx/internal/store"
@@ -20,7 +22,9 @@ func (f *fakeStore) PostRates(_ context.Context, in []store.RateInput) ([]store.
 	if f.err != nil {
 		return nil, f.err
 	}
+	f.mu.Lock()
 	f.posts = append(f.posts, in)
+	f.mu.Unlock()
 	out := make([]store.Posted, len(in))
 	for i := range in {
 		out[i] = store.Posted{ID: "rate-" + in[i].To, Version: 1}
@@ -41,16 +45,40 @@ func (f *fakeStore) History(context.Context, string, string, string) ([]store.Hi
 
 func (f *fakeStore) Ping(context.Context) error { return f.pingErr }
 
-func (f *fakeStore) GetIdempotency(_ context.Context, key string) (store.IdempotencyRecord, bool, error) {
-	rec, ok := f.idem[key]
+func idemKey(ctx context.Context, key string) string {
+	p, _ := tenant.FromContext(ctx)
+	return p.TenantID + "/" + key
+}
+
+func (f *fakeStore) LockKey(ctx context.Context, key string) (func(), error) {
+	f.mu.Lock()
+	if f.locks == nil {
+		f.locks = map[string]*sync.Mutex{}
+	}
+	l, ok := f.locks[idemKey(ctx, key)]
+	if !ok {
+		l = &sync.Mutex{}
+		f.locks[idemKey(ctx, key)] = l
+	}
+	f.mu.Unlock()
+	l.Lock()
+	return l.Unlock, nil
+}
+
+func (f *fakeStore) GetIdempotency(ctx context.Context, key string) (store.IdempotencyRecord, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	rec, ok := f.idem[idemKey(ctx, key)]
 	return rec, ok, nil
 }
 
-func (f *fakeStore) PutIdempotency(_ context.Context, rec store.IdempotencyRecord) error {
+func (f *fakeStore) PutIdempotency(ctx context.Context, rec store.IdempotencyRecord) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.idem == nil {
 		f.idem = map[string]store.IdempotencyRecord{}
 	}
-	f.idem[rec.Key] = rec
+	f.idem[idemKey(ctx, rec.Key)] = rec
 	return nil
 }
 
@@ -73,8 +101,12 @@ func rate(from, to, value string) domain.Rate {
 }
 
 func doKeyed(r http.Handler, method, path, body, key string) *httptest.ResponseRecorder {
+	return doKeyedAs(r, 1, method, path, body, key)
+}
+
+func doKeyedAs(r http.Handler, tenantN int, method, path, body, key string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
-	req.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
+	req.Header.Set("X-Passage-Tenant", testkit.TenantID(tenantN))
 	req.Header.Set("X-Passage-Duties", allDuties)
 	if key != "" {
 		req.Header.Set("Idempotency-Key", key)
@@ -241,5 +273,75 @@ func TestReadiness(t *testing.T) {
 	down := do(newRouter(&fakeStore{pingErr: context.DeadlineExceeded}), http.MethodGet, "/readyz", "", "", "")
 	if ok.Code != 200 || down.Code != 503 {
 		t.Fatalf("ready %d down %d", ok.Code, down.Code)
+	}
+}
+
+func TestIdempotencyKeyLengthBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		n    int
+		want int
+	}{{"255 accepted", 255, 201}, {"256 rejected", 256, 400}} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeStore{}
+			rec := doKeyed(newRouter(f), http.MethodPost, "/v1/fx/rates", publishBody, strings.Repeat("k", tc.n))
+			if rec.Code != tc.want {
+				t.Fatalf("got %d %s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestIdempotencyIsScopedPerTenant(t *testing.T) {
+	f := &fakeStore{}
+	r := newRouter(f)
+	doKeyedAs(r, 1, http.MethodPost, "/v1/fx/rates", publishBody, "shared")
+	other := doKeyedAs(r, 2, http.MethodPost, "/v1/fx/rates", strings.Replace(publishBody, "1.0850000000", "9", 1), "shared")
+	if other.Code != 201 || other.Header().Get("Idempotent-Replayed") != "" || len(f.posts) != 2 {
+		t.Fatalf("tenant 2 got %d replayed=%q posts=%d", other.Code, other.Header().Get("Idempotent-Replayed"), len(f.posts))
+	}
+}
+
+func TestConcurrentSameKeyPublishesOnce(t *testing.T) {
+	f := &fakeStore{}
+	r := newRouter(f)
+	var wg sync.WaitGroup
+	codes := make([]int, 8)
+	for i := range codes {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			codes[i] = doKeyed(r, http.MethodPost, "/v1/fx/rates", publishBody, "race").Code
+		}()
+	}
+	wg.Wait()
+	for _, c := range codes {
+		if c != 201 {
+			t.Fatalf("codes = %v", codes)
+		}
+	}
+	if len(f.posts) != 1 {
+		t.Fatalf("posts = %d, want 1", len(f.posts))
+	}
+}
+
+func TestCurrencyCodesAreValidatedAsFieldErrors(t *testing.T) {
+	book := bookWith(t, rate("EUR", "USD", "1.25"))
+	f := &fakeStore{book: book}
+	for _, tc := range []struct{ name, method, path, body, field string }{
+		{"lookup from", "GET", "/v1/fx/rates?type=CLOSING&from=eur&to=USD", "", `"from"`},
+		{"lookup to", "GET", "/v1/fx/rates?type=CLOSING&from=EUR&to=USDX", "", `"to"`},
+		{"lookup via", "GET", "/v1/fx/rates?type=CLOSING&from=EUR&to=USD&via=e", "", `"via"`},
+		{"history from", "GET", "/v1/fx/rates/history?type=CLOSING&from=E&to=USD", "", `"from"`},
+		{"convert to", "POST", "/v1/fx/convert", `{"rateType":"CLOSING","to":"usd","amounts":[{"value":"1","currency":"EUR"}]}`, `"to"`},
+		{"convert via", "POST", "/v1/fx/convert", `{"rateType":"CLOSING","to":"USD","via":"x","amounts":[{"value":"1","currency":"EUR"}]}`, `"via"`},
+		{"convert currency", "POST", "/v1/fx/convert", `{"rateType":"CLOSING","to":"USD","amounts":[{"value":"1","currency":"eur"}]}`, "amounts[0].currency"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := do(newRouter(f), tc.method, tc.path, tc.body, allDuties, testkit.TenantID(1))
+			if rec.Code != 400 || !strings.Contains(rec.Body.String(), tc.field) || !strings.Contains(rec.Body.String(), "COM-0001") {
+				t.Fatalf("got %d %s", rec.Code, rec.Body.String())
+			}
+		})
 	}
 }

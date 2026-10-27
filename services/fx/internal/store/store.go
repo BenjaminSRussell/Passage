@@ -89,6 +89,7 @@ type Store interface {
 	FinishRunAborted(ctx context.Context, runID string, attempts int, cause error) error
 	ListRuns(ctx context.Context, provider string) ([]Run, error)
 	LastSuccess(ctx context.Context, provider, rateType string) (*time.Time, error)
+	LockKey(ctx context.Context, key string) (unlock func(), err error)
 	GetIdempotency(ctx context.Context, key string) (IdempotencyRecord, bool, error)
 	PutIdempotency(ctx context.Context, rec IdempotencyRecord) error
 }

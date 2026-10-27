@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -16,6 +18,35 @@ type IdempotencyRecord struct {
 	RequestHash    string
 	ResponseStatus int
 	ResponseBody   json.RawMessage
+}
+
+const lockSQL = `select pg_advisory_lock(hashtextextended($1, 0))`
+const unlockSQL = `select pg_advisory_unlock(hashtextextended($1, 0))`
+
+func (s *Postgres) LockKey(ctx context.Context, key string) (func(), error) {
+	if key == "" {
+		return nil, invalid("idempotency key required")
+	}
+	p, _ := tenant.FromContext(ctx)
+	name := p.TenantID + "/" + key
+	conn, err := s.pool.Acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := conn.Exec(ctx, lockSQL, name); err != nil {
+		conn.Release()
+		return nil, err
+	}
+	return func() {
+		unlockCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if _, err := conn.Exec(unlockCtx, unlockSQL, name); err != nil {
+			slog.Error("idempotency unlock failed; closing connection", "err", err)
+			_ = conn.Hijack().Close(unlockCtx)
+			return
+		}
+		conn.Release()
+	}, nil
 }
 
 func (s *Postgres) GetIdempotency(ctx context.Context, key string) (IdempotencyRecord, bool, error) {

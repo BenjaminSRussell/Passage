@@ -66,6 +66,12 @@ func (a *API) idempotent(next http.HandlerFunc) http.HandlerFunc {
 		}
 		r.Body = io.NopCloser(bytes.NewReader(raw))
 		hash := requestHash(r.Method, r.URL.Path, raw)
+		unlock, err := a.store.LockKey(r.Context(), key)
+		if err != nil {
+			a.fail(w, r, "idempotency lock failed", err)
+			return
+		}
+		defer unlock()
 		rec, found, err := a.store.GetIdempotency(r.Context(), key)
 		if err != nil {
 			a.fail(w, r, "idempotency lookup failed", err)

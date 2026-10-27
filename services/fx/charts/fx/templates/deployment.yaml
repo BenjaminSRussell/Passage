@@ -5,7 +5,7 @@ metadata:
   labels:
     app.kubernetes.io/name: fx
 spec:
-  replicas: {{ .Values.replicaCount }}
+  replicas: {{ if and .Values.import.tenantId (gt (int .Values.replicaCount) 1) }}{{ fail "replicaCount must be 1 while import.tenantId is set: the import ticker has no cross-replica lock" }}{{ else }}{{ .Values.replicaCount }}{{ end }}
   selector:
     matchLabels:
       app.kubernetes.io/name: fx
@@ -46,6 +46,9 @@ spec:
               value: {{ .Values.import.interval | quote }}
             - name: FX_PROVIDER_TIMEOUT_S
               value: {{ .Values.import.providerTimeoutSeconds | quote }}
+            {{- end }}
+            {{- if and .Values.import.tenantId (eq .Values.import.provider "openexchangerates") }}
+            {{- $_ := required "import.oxrSecret is required when import.provider is openexchangerates" .Values.import.oxrSecret }}
             {{- end }}
             {{- if .Values.import.oxrSecret }}
             - name: FX_OXR_APP_ID

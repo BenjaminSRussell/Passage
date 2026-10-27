@@ -631,3 +631,37 @@ func TestMigrationGrantsKeepRatesAppendOnlyForAppRole(t *testing.T) {
 		}
 	}
 }
+
+func TestLockKeySerialisesSameKeyPerTenantOnly(t *testing.T) {
+	s, _, ctx := migrated(t)
+	unlock, err := s.LockKey(ctx, "k")
+	if err != nil {
+		t.Fatal(err)
+	}
+	acquired := make(chan func(), 1)
+	go func() {
+		u, err := s.LockKey(ctx, "k")
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		acquired <- u
+	}()
+	select {
+	case <-acquired:
+		t.Fatal("second lock on the same tenant and key must wait")
+	case <-time.After(300 * time.Millisecond):
+	}
+	otherTenant, err := s.LockKey(ctxFor(2), "k")
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherTenant()
+	unlock()
+	select {
+	case u := <-acquired:
+		u()
+	case <-time.After(5 * time.Second):
+		t.Fatal("second lock never acquired after unlock")
+	}
+}

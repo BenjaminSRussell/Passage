@@ -22,8 +22,13 @@ func env(values map[string]string) func(string) string {
 
 type lastSuccessStore struct {
 	store.Store
-	at  *time.Time
-	err error
+	at      *time.Time
+	err     error
+	typeErr error
+}
+
+func (s lastSuccessStore) GetRateType(context.Context, string) (store.RateType, error) {
+	return store.RateType{}, s.typeErr
 }
 
 func (s lastSuccessStore) LastSuccess(context.Context, string, string) (*time.Time, error) {
@@ -64,7 +69,8 @@ func TestImportScheduleConfig(t *testing.T) {
 		{"short interval", map[string]string{"FX_IMPORT_TENANT_ID": tenantID, "FX_IMPORT_RATE_TYPE": "CLOSING", "FX_IMPORT_INTERVAL": "1s"}, false, "FX_IMPORT_INTERVAL"},
 		{"bad timeout", map[string]string{"FX_IMPORT_TENANT_ID": tenantID, "FX_IMPORT_RATE_TYPE": "CLOSING", "FX_PROVIDER_TIMEOUT_S": "0"}, false, "FX_PROVIDER_TIMEOUT_S"},
 		{"ecb defaults", map[string]string{"FX_IMPORT_TENANT_ID": tenantID, "FX_IMPORT_RATE_TYPE": "CLOSING"}, false, ""},
-		{"oxr", map[string]string{"FX_IMPORT_TENANT_ID": tenantID, "FX_IMPORT_RATE_TYPE": "CLOSING", "FX_IMPORT_PROVIDER": "openexchangerates", "FX_IMPORT_INTERVAL": "30m"}, false, ""},
+		{"oxr without app id", map[string]string{"FX_IMPORT_TENANT_ID": tenantID, "FX_IMPORT_RATE_TYPE": "CLOSING", "FX_IMPORT_PROVIDER": "openexchangerates"}, false, "FX_OXR_APP_ID"},
+		{"oxr", map[string]string{"FX_IMPORT_TENANT_ID": tenantID, "FX_IMPORT_RATE_TYPE": "CLOSING", "FX_IMPORT_PROVIDER": "openexchangerates", "FX_OXR_APP_ID": "app", "FX_IMPORT_INTERVAL": "30m"}, false, ""},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -128,5 +134,13 @@ func TestLoopRunsImmediatelyThenOnEveryTickUntilCancelled(t *testing.T) {
 	}
 	if runs.Load() < 3 {
 		t.Fatalf("runs = %d", runs.Load())
+	}
+}
+
+func TestImportScheduleRejectsUnknownRateType(t *testing.T) {
+	cfg := env(map[string]string{"FX_IMPORT_TENANT_ID": testkit.TenantID(1), "FX_IMPORT_RATE_TYPE": "NOPE"})
+	_, err := newImportSchedule(context.Background(), cfg, lastSuccessStore{typeErr: context.DeadlineExceeded}, importer.NewMetrics())
+	if err == nil || !strings.Contains(err.Error(), "FX_IMPORT_RATE_TYPE") {
+		t.Fatalf("err = %v", err)
 	}
 }
