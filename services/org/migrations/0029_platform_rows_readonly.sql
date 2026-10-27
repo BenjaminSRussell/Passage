@@ -4,12 +4,13 @@
 DO $$
 DECLARE
   t text;
+  sys constant uuid := '00000000-0000-0000-0000-000000000000';
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'passage_app') THEN
     FOREACH t IN ARRAY ARRAY['country', 'currency', 'region', 'language', 'unit_of_measure', 'uom_conversion'] LOOP
-      EXECUTE format('CREATE POLICY %I ON %I AS RESTRICTIVE FOR INSERT TO passage_app WITH CHECK (tenant_id <> %L::uuid)', t || '_no_sys_insert', t, '00000000-0000-0000-0000-000000000000');
-      EXECUTE format('CREATE POLICY %I ON %I AS RESTRICTIVE FOR UPDATE TO passage_app USING (tenant_id <> %L::uuid) WITH CHECK (tenant_id <> %L::uuid)', t || '_no_sys_update', t, '00000000-0000-0000-0000-000000000000', '00000000-0000-0000-0000-000000000000');
-      EXECUTE format('CREATE POLICY %I ON %I AS RESTRICTIVE FOR DELETE TO passage_app USING (tenant_id <> %L::uuid)', t || '_no_sys_delete', t, '00000000-0000-0000-0000-000000000000');
+      EXECUTE format('CREATE POLICY %I ON %I AS RESTRICTIVE FOR INSERT TO passage_app WITH CHECK (tenant_id <> %L::uuid)', t || '_no_sys_insert', t, sys);
+      EXECUTE format('CREATE POLICY %I ON %I AS RESTRICTIVE FOR UPDATE TO passage_app USING (tenant_id <> %L::uuid) WITH CHECK (tenant_id <> %L::uuid)', t || '_no_sys_update', t, sys, sys);
+      EXECUTE format('CREATE POLICY %I ON %I AS RESTRICTIVE FOR DELETE TO passage_app USING (tenant_id <> %L::uuid)', t || '_no_sys_delete', t, sys);
     END LOOP;
   END IF;
 END

@@ -131,11 +131,11 @@ func (a *API) getUnit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) createUnit(w http.ResponseWriter, r *http.Request) {
-	idemKey, keyOK := idempotencyKeyOf(w, r)
-	if !keyOK {
+	if !validTenant(w, r) || refuseScopedCaller(w, r, "create units") {
 		return
 	}
-	if !validTenant(w, r) || refuseScopedCaller(w, r, "create units") {
+	idemKey, keyOK := idempotencyKeyOf(w, r)
+	if !keyOK {
 		return
 	}
 	var req createUnitRequest
@@ -224,11 +224,11 @@ func (a *API) listConversions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) createConversion(w http.ResponseWriter, r *http.Request) {
-	idemKey, keyOK := idempotencyKeyOf(w, r)
-	if !keyOK {
+	if !validTenant(w, r) || refuseScopedCaller(w, r, "create conversions") {
 		return
 	}
-	if !validTenant(w, r) || refuseScopedCaller(w, r, "create conversions") {
+	idemKey, keyOK := idempotencyKeyOf(w, r)
+	if !keyOK {
 		return
 	}
 	var req createConversionRequest

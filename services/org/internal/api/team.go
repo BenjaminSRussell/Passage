@@ -91,11 +91,11 @@ func validMemberKinds(kinds []string) bool {
 }
 
 func (a *API) createTeamType(w http.ResponseWriter, r *http.Request) {
-	idemKey, keyOK := idempotencyKeyOf(w, r)
-	if !keyOK {
+	if !validTenant(w, r) || refuseScopedCaller(w, r, "create team types") {
 		return
 	}
-	if !validTenant(w, r) || refuseScopedCaller(w, r, "create team types") {
+	idemKey, keyOK := idempotencyKeyOf(w, r)
+	if !keyOK {
 		return
 	}
 	var req createTeamTypeRequest
@@ -190,11 +190,11 @@ func parseDate(value string) (time.Time, bool) {
 }
 
 func (a *API) createTeam(w http.ResponseWriter, r *http.Request) {
-	idemKey, keyOK := idempotencyKeyOf(w, r)
-	if !keyOK {
+	if !validTenant(w, r) || refuseScopedCaller(w, r, "create teams") {
 		return
 	}
-	if !validTenant(w, r) || refuseScopedCaller(w, r, "create teams") {
+	idemKey, keyOK := idempotencyKeyOf(w, r)
+	if !keyOK {
 		return
 	}
 	var req createTeamRequest
@@ -442,11 +442,11 @@ func (a *API) removeTeamMember(w http.ResponseWriter, r *http.Request, teamID st
 }
 
 func (a *API) addTeamMember(w http.ResponseWriter, r *http.Request, teamID string) {
-	idemKey, keyOK := idempotencyKeyOf(w, r)
-	if !keyOK {
+	if refuseScopedCaller(w, r, "add team members") {
 		return
 	}
-	if refuseScopedCaller(w, r, "add team members") {
+	idemKey, keyOK := idempotencyKeyOf(w, r)
+	if !keyOK {
 		return
 	}
 	var req addTeamMemberRequest

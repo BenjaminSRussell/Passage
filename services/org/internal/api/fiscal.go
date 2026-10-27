@@ -144,11 +144,11 @@ func rejectScopedCaller(w http.ResponseWriter, r *http.Request, action string) b
 }
 
 func (a *API) createFiscalCalendar(w http.ResponseWriter, r *http.Request) {
-	idemKey, keyOK := idempotencyKeyOf(w, r)
-	if !keyOK {
+	if !validTenant(w, r) || rejectScopedCaller(w, r, "create fiscal calendars") {
 		return
 	}
-	if !validTenant(w, r) || rejectScopedCaller(w, r, "create fiscal calendars") {
+	idemKey, keyOK := idempotencyKeyOf(w, r)
+	if !keyOK {
 		return
 	}
 	var req createFiscalCalendarRequest

@@ -99,11 +99,11 @@ func validatePurposes(purposes []string) string {
 }
 
 func (a *API) createHierarchyType(w http.ResponseWriter, r *http.Request) {
-	idemKey, keyOK := idempotencyKeyOf(w, r)
-	if !keyOK {
+	if !validTenant(w, r) || rejectScopedCaller(w, r, "create hierarchy types") {
 		return
 	}
-	if !validTenant(w, r) || rejectScopedCaller(w, r, "create hierarchy types") {
+	idemKey, keyOK := idempotencyKeyOf(w, r)
+	if !keyOK {
 		return
 	}
 	var req createHierarchyTypeRequest
@@ -137,11 +137,11 @@ func (a *API) createHierarchyType(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) createHierarchyDraft(w http.ResponseWriter, r *http.Request, id string) {
-	idemKey, keyOK := idempotencyKeyOf(w, r)
-	if !keyOK {
+	if rejectScopedCaller(w, r, "create hierarchy versions") {
 		return
 	}
-	if rejectScopedCaller(w, r, "create hierarchy versions") {
+	idemKey, keyOK := idempotencyKeyOf(w, r)
+	if !keyOK {
 		return
 	}
 	principal, _ := tenant.FromContext(r.Context())
@@ -213,11 +213,11 @@ func (a *API) replaceHierarchyNodes(w http.ResponseWriter, r *http.Request, id s
 }
 
 func (a *API) publishHierarchyVersion(w http.ResponseWriter, r *http.Request, id string) {
-	idemKey, keyOK := idempotencyKeyOf(w, r)
-	if !keyOK {
+	if rejectScopedCaller(w, r, "publish hierarchy versions") {
 		return
 	}
-	if rejectScopedCaller(w, r, "publish hierarchy versions") {
+	idemKey, keyOK := idempotencyKeyOf(w, r)
+	if !keyOK {
 		return
 	}
 	var req publishHierarchyVersionRequest

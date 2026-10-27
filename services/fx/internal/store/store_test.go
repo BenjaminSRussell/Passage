@@ -19,7 +19,7 @@ import (
 	"github.com/BenjaminSRussell/passage/services/fx/migrations"
 )
 
-var valid = time.Now().UTC().AddDate(0, 0, -3)
+var valid = time.Now().UTC().Truncate(24*time.Hour).AddDate(0, 0, -3)
 
 func in(source, rate string) store.RateInput {
 	return store.RateInput{RateType: "CLOSING", From: "EUR", To: "USD", ValidFrom: valid, Rate: decimal.RequireFromString(rate), Source: source}

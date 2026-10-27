@@ -110,6 +110,11 @@ func (s *Postgres) CreateUnit(ctx context.Context, in Unit, idempotencyKey strin
 	duplicate := httpx.NewProblem(http.StatusConflict, CodeUnitCodeDuplicate, "a unit with code "+in.Code+" already exists")
 	var unit Unit
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		if key != nil {
+			if err := lockIdempotencyKey(ctx, tx, "unit_of_measure", p.TenantID, *key); err != nil {
+				return err
+			}
+		}
 		var taken bool
 		if err := tx.QueryRow(ctx, `select exists (select 1 from unit_of_measure where tenant_id = $1 and code = $2)`, SysTenantID, in.Code).Scan(&taken); err != nil {
 			return err

@@ -338,6 +338,11 @@ func (s *Postgres) CreateHierarchyDraft(ctx context.Context, typeID, idempotency
 	p, _ := tenant.FromContext(ctx)
 	var v HierarchyVersion
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		if idempotencyKey != "" {
+			if err := lockIdempotencyKey(ctx, tx, "hierarchy_version", p.TenantID, idempotencyKey); err != nil {
+				return err
+			}
+		}
 		var locked string
 		err := tx.QueryRow(ctx, `select id from hierarchy_type where tenant_id = $1 and id = $2 for update`, p.TenantID, typeID).Scan(&locked)
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -503,6 +508,11 @@ func (s *Postgres) PublishHierarchyVersion(ctx context.Context, id string, versi
 	reason = strings.TrimSpace(reason)
 	var v HierarchyVersion
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		if idempotencyKey != "" {
+			if err := lockIdempotencyKey(ctx, tx, "hierarchy_publish", p.TenantID, idempotencyKey); err != nil {
+				return err
+			}
+		}
 		var typeID string
 		err := tx.QueryRow(ctx, `select hierarchy_type_id from hierarchy_version where tenant_id = $1 and id = $2`, p.TenantID, id).Scan(&typeID)
 		if errors.Is(err, pgx.ErrNoRows) {

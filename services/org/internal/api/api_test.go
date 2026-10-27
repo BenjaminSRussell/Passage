@@ -18,6 +18,7 @@ import (
 
 	pevents "github.com/BenjaminSRussell/passage/platform/events"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/org/internal/api"
 	"github.com/BenjaminSRussell/passage/services/org/internal/domain"
@@ -1731,4 +1732,12 @@ func (f *fakeStore) ResolveOrgUnitName(_ context.Context, ownerType, ownerID, ta
 	}
 	name, language, source := domain.ResolveName("Base name", byLanguage, tag)
 	return store.NameResolution{OwnerType: ownerType, OwnerID: ownerID, Language: language, Name: name, Source: source}, nil
+}
+
+func TestNilTenantIsUnauthorized(t *testing.T) {
+	r, _ := newRouter(&fakeStore{})
+	rec := do(r, http.MethodPost, legalEntities, validBody, allDuties, true, "X-Passage-Tenant", ids.Nil)
+	if rec.Code != http.StatusUnauthorized || !strings.Contains(rec.Body.String(), "AUTH-0001") {
+		t.Fatalf("nil tenant = %d %s", rec.Code, rec.Body)
+	}
 }
