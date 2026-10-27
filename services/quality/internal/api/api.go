@@ -38,19 +38,21 @@ const (
 	maxRefLength       = 200
 	defaultListLimit   = 100
 	maxListLimit       = 500
-	codeKeyReuse       = "idempotency_key_reuse"
+	codeKeyReuse       = store.CodeKeyReuse
 )
 
 // API wires the handlers to a store.
 type API struct {
-	store            store.Store
-	ordersCreated    atomic.Int64
-	resultsRecorded  atomic.Int64
-	decisionsPosted  atomic.Int64
-	instrumentRefuse atomic.Int64
-	evaluations      atomic.Int64
-	studiesCreated   atomic.Int64
-	ncrsCreated      atomic.Int64
+	store                store.Store
+	ordersCreated        atomic.Int64
+	resultsRecorded      atomic.Int64
+	decisionsPosted      atomic.Int64
+	instrumentRefuse     atomic.Int64
+	evaluations          atomic.Int64
+	studiesCreated       atomic.Int64
+	ncrsCreated          atomic.Int64
+	certificatesRecorded atomic.Int64
+	samplesRegistered    atomic.Int64
 }
 
 // New returns the API over s.
@@ -73,6 +75,11 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/quality/quality-orders/{id}", a.getOrder)
 	r.With(authz.RequireDuty(dutyResults)).Post("/v1/quality/quality-orders/{id}/results", a.recordResults)
 	r.With(authz.RequireDuty(dutyDecision)).Post("/v1/quality/quality-orders/{id}:usage-decision", a.postDecision)
+	r.With(authz.RequireDuty(dutyResults)).Post("/v1/quality/quality-orders/{id}/certificates", a.recordCertificate)
+	r.With(authz.RequireDuty(dutyView)).Get("/v1/quality/quality-orders/{id}/certificates", a.listCertificates)
+	r.With(authz.RequireDuty(dutyDecision)).Post("/v1/quality/quality-orders/{id}/certificates:waive", a.waiveCertificate)
+	r.With(authz.RequireDuty(dutyResults)).Post("/v1/quality/samples", a.registerSample)
+	r.With(authz.RequireDuty(dutyView)).Get("/v1/quality/samples", a.listSamples)
 	r.With(authz.RequireDuty(dutyCompliance)).Post("/v1/quality/compliance-lists", a.createComplianceList)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/quality/compliance-lists", a.listComplianceLists)
 	r.With(authz.RequireDuty(dutyCompliance)).Post("/v1/quality/items/{id}/composition", a.saveComposition)
@@ -102,6 +109,8 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP quality_instrument_refusals_total Result batches refused for an unknown or overdue instrument.\n# TYPE quality_instrument_refusals_total counter\nquality_instrument_refusals_total %d\n", a.instrumentRefuse.Load())
 		fmt.Fprintf(w, "# HELP quality_compliance_evaluations_total Item compliance evaluations run.\n# TYPE quality_compliance_evaluations_total counter\nquality_compliance_evaluations_total %d\n", a.evaluations.Load())
 		fmt.Fprintf(w, "# HELP quality_stability_studies_created_total Stability studies created; idempotent replays are not counted.\n# TYPE quality_stability_studies_created_total counter\nquality_stability_studies_created_total %d\n", a.studiesCreated.Load())
+		fmt.Fprintf(w, "# HELP quality_certificates_recorded_total Incoming certificate receipts and waivers recorded; idempotent replays are not counted.\n# TYPE quality_certificates_recorded_total counter\nquality_certificates_recorded_total %d\n", a.certificatesRecorded.Load())
+		fmt.Fprintf(w, "# HELP quality_samples_registered_total Physical samples registered; idempotent replays are not counted.\n# TYPE quality_samples_registered_total counter\nquality_samples_registered_total %d\n", a.samplesRegistered.Load())
 		fmt.Fprintf(w, "# HELP quality_nonconformances_created_total Nonconformances raised through the API; idempotent replays and NCRs raised by decisions are not counted.\n# TYPE quality_nonconformances_created_total counter\nquality_nonconformances_created_total %d\n", a.ncrsCreated.Load())
 	})
 }
@@ -344,6 +353,9 @@ func (a *API) createAssociation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Plan = req.Plan.Normalized()
+	if req.CertificateRequired == "" {
+		req.CertificateRequired = domain.CertNone
+	}
 	if _, err := a.store.GetTestGroup(r.Context(), req.TestGroupID); err != nil {
 		httpx.Fail(w, r, err)
 		return
@@ -358,7 +370,8 @@ func (a *API) createAssociation(w http.ResponseWriter, r *http.Request) {
 
 // orderRequest is the body of POST /v1/quality/quality-orders. itemGroupId and
 // partyId only feed association matching (BR-33.3); testGroupId and samplingPlan
-// are used, and required, for a MANUAL order only.
+// are used, and required, for a MANUAL order only. certificateRequired is used
+// for a MANUAL order only; a triggered order takes its association's (FR-33.15).
 type orderRequest struct {
 	Trigger      string               `json:"trigger"`
 	SourceRef    domain.SourceRef     `json:"sourceRef"`
@@ -372,6 +385,8 @@ type orderRequest struct {
 	UOM          string               `json:"uom"`
 	TestGroupID  string               `json:"testGroupId"`
 	SamplingPlan *domain.SamplingPlan `json:"samplingPlan"`
+
+	CertificateRequired string `json:"certificateRequired"`
 }
 
 // validateOrder returns field errors for an order request.
@@ -395,6 +410,9 @@ func validateOrder(req orderRequest) map[string]string {
 	}
 	if !req.LotQty.IsPositive() {
 		fields["lotQty"] = "must be positive"
+	}
+	if req.CertificateRequired != "" && !domain.ValidCertRequirement(req.CertificateRequired) {
+		fields["certificateRequired"] = "must be NONE, COA, COC or EN10204_31"
 	}
 	if req.UOM == "" || len(req.UOM) > 10 {
 		fields["uom"] = "must be 1 to 10 characters"
@@ -432,7 +450,7 @@ func (a *API) createOrder(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, validation(fields))
 		return
 	}
-	groupID, plan, err := a.resolvePlan(r, req)
+	groupID, plan, certReq, err := a.resolvePlan(r, req)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
@@ -453,7 +471,7 @@ func (a *API) createOrder(w http.ResponseWriter, r *http.Request) {
 	order := domain.Order{ID: ids.New(), Trigger: req.Trigger, SourceRef: req.SourceRef, ItemID: req.ItemID, SiteID: req.SiteID,
 		WarehouseID: req.WarehouseID, Dims: req.Dims, LotQty: req.LotQty, SampleQty: draw.SampleQty, UOM: req.UOM,
 		TestGroupID: group.ID, TestGroupVersion: group.Version, SamplingMethod: plan.Method, Severity: draw.Severity,
-		CodeLetter: draw.CodeLetter, AcceptNo: draw.AcceptNo, RejectNo: draw.RejectNo}
+		CodeLetter: draw.CodeLetter, AcceptNo: draw.AcceptNo, RejectNo: draw.RejectNo, CertificateRequired: certReq}
 	created, inserted, err := a.store.CreateOrder(r.Context(), order, key)
 	if err != nil {
 		httpx.Fail(w, r, err)
@@ -466,32 +484,43 @@ func (a *API) createOrder(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, statusFor(inserted), created)
 }
 
-// resolvePlan picks the test group and sampling plan: the request's own for a
-// MANUAL order, otherwise the best matching association (BR-33.3).
-func (a *API) resolvePlan(r *http.Request, req orderRequest) (string, domain.SamplingPlan, error) {
+// resolvePlan picks the test group, sampling plan and certificate requirement
+// (FR-33.15): the request's own for a MANUAL order, otherwise the best matching
+// association's (BR-33.3).
+func (a *API) resolvePlan(r *http.Request, req orderRequest) (string, domain.SamplingPlan, string, error) {
 	if req.Trigger == domain.TriggerManual {
-		return req.TestGroupID, req.SamplingPlan.Normalized(), nil
+		return req.TestGroupID, req.SamplingPlan.Normalized(), certRequirement(req.CertificateRequired), nil
 	}
 	assocs, err := a.store.ListAssociations(r.Context())
 	if err != nil {
-		return "", domain.SamplingPlan{}, err
+		return "", domain.SamplingPlan{}, "", err
 	}
 	best, ok := domain.BestAssociation(assocs, domain.TriggerContext{Trigger: req.Trigger, ItemID: req.ItemID,
 		ItemGroupID: req.ItemGroupID, PartyID: req.PartyID, SiteID: req.SiteID})
 	if !ok {
-		return "", domain.SamplingPlan{}, httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeNoAssociation, "no quality association matches this trigger")
+		return "", domain.SamplingPlan{}, "", httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeNoAssociation, "no quality association matches this trigger")
 	}
-	return best.TestGroupID, best.Plan, nil
+	return best.TestGroupID, best.Plan, certRequirement(best.CertificateRequired), nil
+}
+
+// certRequirement maps an empty certificate requirement to NONE.
+func certRequirement(t string) string {
+	if t == "" {
+		return domain.CertNone
+	}
+	return t
 }
 
 // orderView is a quality order with its test group version, recorded results,
-// computed evaluation (FR-33.4) and, once closed, its usage decision.
+// computed evaluation (FR-33.4), its certificate gate status (BR-33.13) and,
+// once closed, its usage decision.
 type orderView struct {
 	domain.Order
-	TestGroup  domain.TestGroup  `json:"testGroup"`
-	Results    []domain.Result   `json:"results"`
-	Evaluation domain.Evaluation `json:"evaluation"`
-	Decision   *domain.Decision  `json:"decision,omitempty"`
+	TestGroup         domain.TestGroup  `json:"testGroup"`
+	Results           []domain.Result   `json:"results"`
+	Evaluation        domain.Evaluation `json:"evaluation"`
+	CertificateStatus string            `json:"certificateStatus"`
+	Decision          *domain.Decision  `json:"decision,omitempty"`
 }
 
 func (a *API) loadView(r *http.Request, id string) (orderView, error) {
@@ -507,7 +536,15 @@ func (a *API) loadView(r *http.Request, id string) (orderView, error) {
 	if err != nil {
 		return orderView{}, err
 	}
-	view := orderView{Order: order, TestGroup: group, Results: results, Evaluation: domain.Evaluate(group, order, results)}
+	view := orderView{Order: order, TestGroup: group, Results: results, Evaluation: domain.Evaluate(group, order, results),
+		CertificateStatus: domain.CertNotRequired}
+	if order.CertificateRequired != domain.CertNone {
+		recs, err := a.store.ListCertificates(r.Context(), id)
+		if err != nil {
+			return orderView{}, err
+		}
+		view.CertificateStatus = domain.CertificateStatusOf(order.CertificateRequired, recs)
+	}
 	if order.Status == domain.StatusClosed {
 		d, found, err := a.store.GetDecision(r.Context(), id)
 		if err != nil {
@@ -823,11 +860,22 @@ func (a *API) postDecision(w http.ResponseWriter, r *http.Request) {
 			Detail: "Required test " + missing[0] + " has no result for every sample."}))
 		return
 	}
+	if order.CertificateRequired != domain.CertNone {
+		recs, err := a.store.ListCertificates(r.Context(), id)
+		if err != nil {
+			httpx.Fail(w, r, err)
+			return
+		}
+		if err := domain.CertificateGate(order, split, recs); err != nil {
+			httpx.Fail(w, r, problemFrom(err))
+			return
+		}
+	}
 	p, _ := tenant.FromContext(r.Context())
 	decision := domain.Decision{Lines: req.Lines, Split: split, DecidedBy: p.UserID}
 	posted, stored, err := a.store.PostUsageDecision(r.Context(), id, version, decision, key)
 	if err != nil {
-		httpx.Fail(w, r, err)
+		httpx.Fail(w, r, problemFrom(err))
 		return
 	}
 	a.decisionsPosted.Add(1)
@@ -915,7 +963,8 @@ func httpStatus(code string) int {
 		domain.CodeNCRMissing:
 		return http.StatusNotFound
 	case domain.CodeClosed, domain.CodeResultDuplicate, domain.CodeInstrumentDupe, domain.CodeStatus, domain.CodeSourceLineDupe,
-		domain.CodeListRace, domain.CodeCompositionRace, domain.CodeStudyRace, domain.CodeNCRStatus, domain.CodeNCRRace, domain.CodeCAPAStep:
+		domain.CodeListRace, domain.CodeCompositionRace, domain.CodeStudyRace, domain.CodeNCRStatus, domain.CodeNCRRace, domain.CodeCAPAStep,
+		domain.CodeCertNotRequired, domain.CodeCertSampleRace:
 		return http.StatusConflict
 	}
 	return http.StatusUnprocessableEntity

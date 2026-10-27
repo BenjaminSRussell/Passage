@@ -141,9 +141,9 @@ func TestPostgres_InstrumentAndAssociationRoundTrip(t *testing.T) {
 	}
 	assoc, _, err := s.CreateAssociation(ctx, domain.Association{Trigger: domain.TriggerPurchaseReceipt, ItemScope: domain.ScopeAll,
 		PartyScope: domain.ScopeAll, SiteScope: domain.ScopeAll, Sequence: 1, TestGroupID: group.ID,
-		Plan: domain.SamplingPlan{Method: domain.MethodPercent, Percent: decimal.NewFromInt(10)}.Normalized()}, "a-1")
-	if err != nil {
-		t.Fatal(err)
+		Plan: domain.SamplingPlan{Method: domain.MethodPercent, Percent: decimal.NewFromInt(10)}.Normalized(), CertificateRequired: domain.CertEN10204_31}, "a-1")
+	if err != nil || assoc.CertificateRequired != domain.CertEN10204_31 {
+		t.Fatalf("create association with a certificate requirement: %+v %v", assoc, err)
 	}
 	inst, err := domain.NewInstrument("PH-01", "pH meter", 30, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
 	if err != nil {
@@ -181,7 +181,7 @@ func TestPostgres_InstrumentAndAssociationRoundTrip(t *testing.T) {
 		t.Fatalf("test group versions, newest first: %+v %v", groups, err)
 	}
 	list, err := s.ListAssociations(ctx)
-	if err != nil || len(list) != 1 || list[0].ID != assoc.ID || !list[0].Plan.Percent.Equal(decimal.NewFromInt(10)) {
+	if err != nil || len(list) != 1 || list[0].ID != assoc.ID || !list[0].Plan.Percent.Equal(decimal.NewFromInt(10)) || list[0].CertificateRequired != domain.CertEN10204_31 {
 		t.Fatalf("list associations: %+v %v", list, err)
 	}
 	if _, _, err := s.CreateAssociation(ctx, domain.Association{Trigger: domain.TriggerSalesPick, ItemScope: domain.ScopeAll,

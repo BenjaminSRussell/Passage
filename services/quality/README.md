@@ -1,6 +1,6 @@
 # quality
 
-Passage quality management service. Wave 33 (ticket PSG-33), slices 1 to 3.
+Passage quality management service. Wave 33 (ticket PSG-33), slices 1 to 4.
 
 ## What it does (slice 1)
 
@@ -77,10 +77,32 @@ Passage quality management service. Wave 33 (ticket PSG-33), slices 1 to 3.
   (ETag) covers its correction. The Temporal timers and escalations are a handoff
   (NOT-IMPLEMENTED.md).
 
+## What it does (slice 4)
+
+- **Incoming vendor certificates (FR-33.15, BR-33.13):** a quality association demands
+  NONE, COA, COC or EN10204_31 (`certificateRequired`); a triggered order copies it, a
+  MANUAL order takes it from the request. A receipt carries a document reference and
+  values per test of the order's test group; a required test without a value, or any
+  value outside its limits, is a deviation (a COC without values is a conformance
+  statement). An out-of-specification receipt is RECEIVED_NOK and raises a MAJOR VENDOR
+  NCR for the lot (`CERTIFICATE_NOK`) in the same transaction. A waiver needs
+  QM_USAGE_DECISION and a reason. The latest receipt of the required type, or a waiver,
+  sets `certificateStatus` (MISSING, RECEIVED_OK, RECEIVED_NOK, WAIVED, NOT_REQUIRED) on
+  the order view. A decision that releases quantity (accept or accept with deviation)
+  fails with QM-0125 unless the status is RECEIVED_OK or WAIVED; the store repeats the
+  check under the order's row lock, and certificates lock the order too, so a concurrent
+  receipt and decision serialise.
+- **Physical samples (FR-33.20):** PRIMARY, POOLED (from PRIMARY samples of the same
+  order) and RESERVE (retention) samples with quantity in the order's unit, container,
+  storage location and condition. A retention sample expires `retentionYears` (default
+  1, 0 to 10) after its batch expiry (21 CFR 211.170); the status is derived on read and
+  is DUE_FOR_DISPOSAL from the expiry day (AC-33.18). Drawn samples (PRIMARY and
+  RESERVE) may not exceed the lot.
+
 Code layout: `internal/domain` (pure rules and unit/property tests),
 `internal/store` (pgx, RLS-scoped transactions, outbox), `internal/api` (HTTP),
 `internal/events` (event names and payloads), `migrations/` (`0001_init.sql`,
-`0002_compliance_stability.sql`, `0003_nonconformance_capa.sql`).
+`0002_compliance_stability.sql`, `0003_nonconformance_capa.sql`, `0004_certificates_samples.sql`).
 
 ## Run
 
@@ -122,6 +144,11 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | GET | `/v1/quality/quality-orders/{id}` | QM_VIEW |
 | POST | `/v1/quality/quality-orders/{id}/results` | QM_RESULTS_RECORD |
 | POST | `/v1/quality/quality-orders/{id}:usage-decision` | QM_USAGE_DECISION |
+| GET | `/v1/quality/quality-orders/{id}/certificates` | QM_VIEW |
+| POST | `/v1/quality/quality-orders/{id}/certificates` | QM_RESULTS_RECORD |
+| POST | `/v1/quality/quality-orders/{id}/certificates:waive` | QM_USAGE_DECISION |
+| GET | `/v1/quality/samples?qualityOrderId=&status=&limit=` | QM_VIEW |
+| POST | `/v1/quality/samples` | QM_RESULTS_RECORD |
 | GET | `/v1/quality/compliance-lists?limit=` | QM_VIEW |
 | POST | `/v1/quality/compliance-lists` | QM_COMPLIANCE_MAINTAIN |
 | GET | `/v1/quality/items/{id}/composition` | QM_VIEW |
@@ -189,6 +216,12 @@ Problems are RFC 9457 (`application/problem+json`) with `code` set to the stable
 | QM-0173 | 409 | Not the current 8D step, or the correction is not open |
 | QM-0174 | 422 | The effectiveness check is not due yet |
 | QM-0175 | 422 | The effectiveness check must be made by another user than the one who completed D7 |
+| QM-0125 | 422 | A required incoming certificate is missing, out of specification or not waived (BR-33.13) |
+| QM-0180 | 409 | Waiver on an order that requires no certificate |
+| QM-0181 | 422 | A pooled sample names a sample that is not a PRIMARY sample of the same order |
+| QM-0182 | 422 | Drawn samples (PRIMARY and RESERVE) would exceed the lot quantity |
+| QM-0183 | 409 | The same `Idempotency-Key` is recording a certificate or sample concurrently; retry |
+| idempotency_key_reuse | 422 | The `Idempotency-Key` was used for a decision, certificate or sample on another order |
 | conflict_version | 412 | Stale `If-Match` |
 | idempotency_key_reuse | 422 | Decision or correction `Idempotency-Key` already used on another order or NCR |
 | AUTH-0003 | 403 | Missing duty |

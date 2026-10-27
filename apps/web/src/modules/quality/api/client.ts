@@ -17,6 +17,11 @@ export type Trigger =
 export type OrderStatus = "CREATED" | "OPEN" | "RESULTS_IN_PROGRESS" | "PENDING_DECISION" | "CLOSED" | "CANCELLED";
 export type DecisionKind = "ACCEPT" | "REJECT" | "ACCEPT_WITH_DEVIATION" | "REWORK" | "RETURN_TO_VENDOR" | "SCRAP";
 export type CalibrationStatus = "IN_CALIBRATION" | "DUE_SOON" | "OVERDUE";
+/** The vendor certificate an order demands before acceptance (FR-33.15). */
+export type CertRequirement = "NONE" | "COA" | "COC" | "EN10204_31";
+export type CertType = Exclude<CertRequirement, "NONE">;
+/** The gate of an accepting usage decision (BR-33.13). */
+export type CertificateStatus = "NOT_REQUIRED" | "MISSING" | "RECEIVED_OK" | "RECEIVED_NOK" | "WAIVED";
 
 /** The AQL columns of Z1.4 Table II-A loaded in this slice (BR-33.1). */
 export const AQL_VALUES = ["1.0", "2.5", "4.0"] as const;
@@ -95,6 +100,7 @@ export interface Association {
   sequence: number;
   testGroupId: string;
   samplingPlan: SamplingPlan;
+  certificateRequired?: CertRequirement;
 }
 
 export type NewAssociation = Omit<Association, "id">;
@@ -127,6 +133,7 @@ export interface Order {
   version: number;
   createdAt: string;
   closedAt?: string;
+  certificateRequired: CertRequirement;
 }
 
 export interface NewOrder {
@@ -141,6 +148,8 @@ export interface NewOrder {
   uom: string;
   testGroupId?: string;
   samplingPlan?: SamplingPlan;
+  /** MANUAL only; other triggers take the association's. */
+  certificateRequired?: CertRequirement;
 }
 
 export interface Result {
@@ -191,6 +200,7 @@ export interface OrderView extends Order {
   testGroup: TestGroup;
   results: Result[];
   evaluation: Evaluation;
+  certificateStatus: CertificateStatus;
   decision?: Decision;
 }
 
@@ -629,4 +639,101 @@ export function completeCorrectionStep(id: string, version: number, step: number
 
 export function checkEffectiveness(id: string, version: number, result: EffectivenessResult, note: string): Promise<Nonconformance> {
   return post<Nonconformance>(`/nonconformances/${encodeURIComponent(id)}:check-effectiveness`, { result, note }, ifMatch(version));
+}
+
+// ---- Slice 4: incoming vendor certificates (FR-33.15, BR-33.13) and physical samples (FR-33.20) ----
+
+/** A certificate's value for one test: a number for a variable test, an outcome id for an attribute test. */
+export interface CertificateValue {
+  value?: string;
+  outcome?: string;
+}
+
+export interface NewCertificate {
+  type: CertType;
+  documentRef?: string;
+  values: Record<string, CertificateValue>;
+}
+
+export interface CertificateRecord {
+  id: string;
+  qualityOrderId: string;
+  type: CertType;
+  documentRef?: string;
+  values: Record<string, CertificateValue>;
+  inSpec: boolean;
+  deviations: string[];
+  waiver: boolean;
+  reason?: string;
+  /** The VENDOR NCR an out-of-specification receipt raised. */
+  nonconformanceId?: string;
+  recordedBy: string;
+  recordedAt: string;
+}
+
+export interface CertificateList {
+  required: CertRequirement;
+  certificateStatus: CertificateStatus;
+  items: CertificateRecord[];
+}
+
+/** An order's certificate receipts and waivers, oldest first, with its gate status (QM_VIEW). */
+export function listCertificates(orderId: string, signal?: AbortSignal): Promise<CertificateList> {
+  return send<CertificateList>(`/quality-orders/${encodeURIComponent(orderId)}/certificates`, {}, signal);
+}
+
+/** Records a certificate receipt, checked against the order's test group (QM_RESULTS_RECORD). */
+export function recordCertificate(
+  orderId: string,
+  input: NewCertificate,
+  key: string = newKey(),
+): Promise<CertificateRecord & { certificateStatus: CertificateStatus }> {
+  return post(`/quality-orders/${encodeURIComponent(orderId)}/certificates`, input, { "Idempotency-Key": key });
+}
+
+/** Waives the order's required certificate with a reason (QM_USAGE_DECISION). */
+export function waiveCertificate(orderId: string, reason: string, key: string = newKey()): Promise<CertificateRecord & { certificateStatus: CertificateStatus }> {
+  return post(`/quality-orders/${encodeURIComponent(orderId)}/certificates:waive`, { reason }, { "Idempotency-Key": key });
+}
+
+export type SampleKind = "PRIMARY" | "POOLED" | "RESERVE";
+export type SampleStatus = "ACTIVE" | "DUE_FOR_DISPOSAL";
+
+export interface NewSample {
+  qualityOrderId: string;
+  kind: SampleKind;
+  primaryIds?: string[];
+  quantity: string;
+  container?: string;
+  storageLocation?: string;
+  condition?: string;
+  batchExpiresOn?: string;
+  retentionYears?: number;
+}
+
+export interface Sample {
+  id: string;
+  qualityOrderId: string;
+  kind: SampleKind;
+  primaryIds: string[];
+  quantity: string;
+  uom: string;
+  container: string;
+  storageLocation: string;
+  condition: string;
+  batchExpiresOn?: string;
+  retentionYears: number;
+  retentionExpiresOn?: string;
+  status: SampleStatus;
+  recordedBy: string;
+  createdAt: string;
+}
+
+export function listSamples(filter: { qualityOrderId?: string; status?: SampleStatus | "" }, signal?: AbortSignal): Promise<Sample[]> {
+  return items<Sample>(`/samples${query({ qualityOrderId: filter.qualityOrderId, status: filter.status })}`, signal);
+}
+
+/** Registers a physical sample of a quality order (QM_RESULTS_RECORD). */
+export function registerSample(input: NewSample, key: string = newKey()): Promise<Sample> {
+  return post<Sample>("/samples", input, { "Idempotency-Key": key });
 }

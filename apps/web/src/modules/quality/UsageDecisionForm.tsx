@@ -1,7 +1,7 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Alert, Button, Card, FormField, Input, Select } from "../../shell/ui";
 import { describeProblem, newKey, postDecision, type DecisionKind, type DecisionLine, type OrderView, type Problem } from "./api/client";
-import { DECIMAL, DECISION_LABELS, qty } from "./format";
+import { CERT_LABELS, certificateGateOpen, DECIMAL, DECISION_LABELS, qty } from "./format";
 import styles from "./pages.module.css";
 
 interface LineValues {
@@ -23,8 +23,11 @@ export function sumQuantities(values: string[]): string {
   return frac ? `${whole}.${frac}` : `${whole}`;
 }
 
-/** Checks that mirror the service's SplitDecision (FR-33.6, QM-0104). */
-export function validateDecision(lines: LineValues[], lotQty: string): { errors: Record<string, string>; input?: DecisionLine[] } {
+/**
+ * Checks that mirror the service's SplitDecision (FR-33.6, QM-0104) and, when the
+ * order's certificate gate is closed, its refusal to release quantity (BR-33.13, QM-0125).
+ */
+export function validateDecision(lines: LineValues[], lotQty: string, certificateOpen = true): { errors: Record<string, string>; input?: DecisionLine[] } {
   const errors: Record<string, string> = {};
   lines.forEach((l, i) => {
     const q = l.quantity.trim();
@@ -33,6 +36,9 @@ export function validateDecision(lines: LineValues[], lotQty: string): { errors:
     if (l.reason.length > 500) errors[`${i}.reason`] = "Keep the reason to 500 characters.";
   });
   if (Object.keys(errors).length > 0) return { errors };
+  if (!certificateOpen && lines.some((l) => l.decision === "ACCEPT" || l.decision === "ACCEPT_WITH_DEVIATION")) {
+    return { errors: { total: "The required vendor certificate is missing or out of specification, so no quantity can be accepted. Record or waive it first, or reject." } };
+  }
   const total = sumQuantities(lines.map((l) => l.quantity));
   if (total !== qty(lotQty)) {
     return { errors: { total: `The lines add up to ${total}; they must equal the lot quantity ${qty(lotQty)}.` } };
@@ -51,6 +57,7 @@ export function UsageDecisionForm({ order, onPosted }: { order: OrderView; onPos
   const [busy, setBusy] = useState(false);
   const key = useRef(newKey());
   const missing = order.evaluation.missingRequired.length > 0;
+  const certificateOpen = certificateGateOpen(order.certificateStatus);
 
   function update(i: number, patch: Partial<LineValues>) {
     setLines(lines.map((l, j) => (j === i ? { ...l, ...patch } : l)));
@@ -60,7 +67,7 @@ export function UsageDecisionForm({ order, onPosted }: { order: OrderView; onPos
   async function submit(event: FormEvent) {
     event.preventDefault();
     setFailure(null);
-    const checked = validateDecision(lines, order.lotQty);
+    const checked = validateDecision(lines, order.lotQty, certificateOpen);
     setErrors(checked.errors);
     if (!checked.input) return;
     setBusy(true);
@@ -111,8 +118,11 @@ export function UsageDecisionForm({ order, onPosted }: { order: OrderView; onPos
             ) : null}
           </fieldset>
         ))}
-        {errors.total || failure || missing ? (
+        {errors.total || failure || missing || !certificateOpen ? (
           <div className={styles.formActions}>
+            {!certificateOpen ? (
+              <Alert tone="info">{`Accepting needs the ${CERT_LABELS[order.certificateRequired ?? "NONE"].toLowerCase()} in specification, or a waiver (see Incoming certificates).`}</Alert>
+            ) : null}
             {missing ? (
               <Alert tone="info">Record a result for every required test on every sample before deciding.</Alert>
             ) : null}

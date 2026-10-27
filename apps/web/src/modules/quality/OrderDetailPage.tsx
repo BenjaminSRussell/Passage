@@ -1,10 +1,12 @@
 import { Link, useParams } from "react-router-dom";
 import { Alert, Badge, Button, buttonClassName, Card, DataTable, PageHeader, Skeleton, StatGroup, StatTile, type DataTableColumn } from "../../shell/ui";
 import { getOrder, listInstruments, type Instrument, type OrderView, type Result } from "./api/client";
-import { DECISION_LABELS, dash, formatDateTime, qty, shortId, TRIGGER_LABELS } from "./format";
+import { CertificatesPanel } from "./CertificatesPanel";
+import { CERT_LABELS, DECISION_LABELS, dash, formatDateTime, qty, shortId, TRIGGER_LABELS } from "./format";
 import { OrderStatusBadge } from "./OrdersPage";
 import styles from "./pages.module.css";
 import { ResultsEntry } from "./ResultsEntry";
+import { SamplesPanel } from "./SamplesPage";
 import { UsageDecisionForm } from "./UsageDecisionForm";
 import { useLoad } from "./useLoad";
 
@@ -117,6 +119,10 @@ export function OrderDetailPage() {
             <dd className={styles.value}>{formatDateTime(order.createdAt)}</dd>
           </div>
           <div className={styles.entry}>
+            <dt className={styles.term}>Vendor certificate</dt>
+            <dd className={styles.value}>{CERT_LABELS[order.certificateRequired ?? "NONE"]}</dd>
+          </div>
+          <div className={styles.entry}>
             <dt className={styles.term}>Inventory hold</dt>
             <dd className={styles.value}>
               <Badge tone="neutral">Placed by the inventory ledger (handoff)</Badge>
@@ -134,6 +140,8 @@ export function OrderDetailPage() {
         />
       </Card>
       {order.status !== "CLOSED" && order.status !== "CANCELLED" ? <ResultsEntry order={order} instruments={instruments} onRecorded={state.reload} /> : null}
+      <CertificatesPanel order={order} onChanged={state.reload} />
+      <SamplesPanel order={order} />
       {order.decision ? (
         <Card title="Usage decision">
           <dl className={styles.details}>

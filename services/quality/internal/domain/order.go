@@ -60,6 +60,9 @@ type Order struct {
 	Version          int               `json:"version"`
 	CreatedAt        time.Time         `json:"createdAt"`
 	ClosedAt         *time.Time        `json:"closedAt,omitempty"`
+
+	// CertificateRequired is copied from the association (FR-33.15); NONE when not demanded.
+	CertificateRequired string `json:"certificateRequired"`
 }
 
 // AfterResults returns the status once a batch of results is recorded. complete

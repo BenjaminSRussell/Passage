@@ -1,8 +1,20 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
-import { createAssociation, describeProblem, listAssociations, listTestGroups, newKey, type Association, type NewAssociation, type Problem, type TestGroup, type Trigger } from "./api/client";
-import { describePlan, pickFields, shortId, TRIGGER_LABELS, UUID } from "./format";
+import {
+  createAssociation,
+  describeProblem,
+  listAssociations,
+  listTestGroups,
+  newKey,
+  type Association,
+  type CertRequirement,
+  type NewAssociation,
+  type Problem,
+  type TestGroup,
+  type Trigger,
+} from "./api/client";
+import { CERT_LABELS, CERT_REQUIREMENTS, describePlan, pickFields, shortId, TRIGGER_LABELS, UUID } from "./format";
 import styles from "./pages.module.css";
 import { emptyPlan, planFieldErrors, PlanFields, validatePlan, type PlanErrors, type PlanValues } from "./PlanFields";
 import { useLoad } from "./useLoad";
@@ -24,6 +36,7 @@ function columns(groups: TestGroup[]): DataTableColumn<Association>[] {
     { key: "site", header: "Site", mono: true, render: (row) => scope(row.siteScope, row.siteRef) },
     { key: "testGroupId", header: "Test group", render: (row) => names.get(row.testGroupId) ?? shortId(row.testGroupId) },
     { key: "samplingPlan", header: "Sampling", render: (row) => describePlan(row.samplingPlan) },
+    { key: "certificateRequired", header: "Vendor certificate", render: (row) => CERT_LABELS[row.certificateRequired ?? "NONE"] },
   ];
 }
 
@@ -72,6 +85,7 @@ interface Values {
   siteRef: string;
   sequence: string;
   testGroupId: string;
+  certificateRequired: CertRequirement;
 }
 
 type Errors = Partial<Record<keyof Values, string>>;
@@ -99,6 +113,7 @@ export function validateAssociation(values: Values, plan: PlanValues): { errors:
     sequence: Number(values.sequence),
     testGroupId: values.testGroupId,
     samplingPlan: checked.plan,
+    certificateRequired: values.certificateRequired,
   };
   for (const [s, r] of refs) {
     if (values[s] !== "ALL") input[r] = values[r].trim();
@@ -120,6 +135,7 @@ export function NewAssociationPage() {
     siteRef: "",
     sequence: "10",
     testGroupId: "",
+    certificateRequired: "NONE",
   });
   const [plan, setPlan] = useState<PlanValues>(emptyPlan);
   const [errors, setErrors] = useState<Errors>({});
@@ -146,7 +162,7 @@ export function NewAssociationPage() {
       navigate("/quality/associations");
     } catch (error) {
       const problem = describeProblem(error);
-      const fieldErrors: Errors = pickFields(problem.fields, ["trigger", "sequence", "testGroupId"] as const);
+      const fieldErrors: Errors = pickFields(problem.fields, ["trigger", "sequence", "testGroupId", "certificateRequired"] as const);
       if (problem.fields.itemScope) fieldErrors.itemRef = problem.fields.itemScope;
       if (problem.fields.partyScope) fieldErrors.partyRef = problem.fields.partyScope;
       if (problem.fields.siteScope) fieldErrors.siteRef = problem.fields.siteScope;
@@ -227,6 +243,17 @@ export function NewAssociationPage() {
                 <option value="">{groups.loading ? "Loading test groups…" : "Choose a test group"}</option>
                 {(groups.data ?? []).map((g) => (
                   <option key={g.id} value={g.id}>{`${g.code} v${g.version}`}</option>
+                ))}
+              </Select>
+            )}
+          </FormField>
+          <FormField id="assoc-certificateRequired" label="Vendor certificate" hint="Orders from this association cannot be accepted until it is received in specification or waived." error={errors.certificateRequired}>
+            {(control) => (
+              <Select {...control} value={values.certificateRequired} onChange={(event) => update({ certificateRequired: event.target.value as CertRequirement })}>
+                {CERT_REQUIREMENTS.map((c) => (
+                  <option key={c} value={c}>
+                    {CERT_LABELS[c]}
+                  </option>
                 ))}
               </Select>
             )}

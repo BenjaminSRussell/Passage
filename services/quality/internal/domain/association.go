@@ -46,6 +46,10 @@ type Association struct {
 	Sequence    int          `json:"sequence"`
 	TestGroupID string       `json:"testGroupId"`
 	Plan        SamplingPlan `json:"samplingPlan"`
+
+	// CertificateRequired is the vendor certificate the order demands before ACCEPT
+	// (FR-33.15, certificate_required_default). Empty means NONE.
+	CertificateRequired string `json:"certificateRequired"`
 }
 
 // TriggerContext describes one trigger event to match against associations.
@@ -126,6 +130,9 @@ func ValidateAssociation(a Association) map[string]string {
 	}
 	if a.Sequence < 0 {
 		fields["sequence"] = "must not be negative"
+	}
+	if a.CertificateRequired != "" && !ValidCertRequirement(a.CertificateRequired) {
+		fields["certificateRequired"] = "must be NONE, COA, COC or EN10204_31"
 	}
 	return fields
 }

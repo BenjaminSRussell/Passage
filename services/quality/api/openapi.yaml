@@ -22,6 +22,9 @@ tags:
   - name: compliance
   - name: stability
   - name: spc
+  - name: nonconformance
+  - name: certificates
+  - name: samples
 paths:
   /readyz:
     get:
@@ -416,6 +419,152 @@ paths:
         "412": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
         "428": { $ref: "#/components/responses/Problem" }
+  /v1/quality/quality-orders/{id}/certificates:
+    get:
+      tags: [certificates]
+      operationId: listCertificates
+      x-passage-duty: QM_VIEW
+      summary: List an order's certificate receipts and waivers with its gate status
+      parameters:
+        - { $ref: "#/components/parameters/OrderId" }
+      responses:
+        "200":
+          description: Certificate records, oldest first
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CertificateList" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+    post:
+      tags: [certificates]
+      operationId: recordCertificate
+      x-passage-duty: QM_RESULTS_RECORD
+      summary: Record an incoming vendor certificate (FR-33.15)
+      description: |
+        Values are checked against the order's test group (BR-33.13): a required test
+        without a value, or any value outside its limits, makes the receipt
+        RECEIVED_NOK and raises a MAJOR VENDOR nonconformance for the lot in the same
+        transaction (problem type CERTIFICATE_NOK, nonconformance.created). A COC
+        without values is a conformance statement and is in specification. A closed
+        order answers 409 QM-0109, a cancelled one 409 QM-0115. A replayed
+        Idempotency-Key answers 200 with the stored record; the key used on another
+        order answers 422 idempotency_key_reuse.
+      parameters:
+        - { $ref: "#/components/parameters/OrderId" }
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CertificateRequest" }
+      responses:
+        "201":
+          description: Certificate recorded
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CertificateRecordView" }
+        "200":
+          description: Idempotent replay
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CertificateRecordView" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/quality/quality-orders/{id}/certificates:waive:
+    post:
+      tags: [certificates]
+      operationId: waiveCertificate
+      x-passage-duty: QM_USAGE_DECISION
+      summary: Waive the order's required certificate with a reason
+      description: |
+        The certificate status becomes WAIVED and an accepting decision is no longer
+        gated (BR-33.13). An order that requires no certificate answers 409 QM-0180.
+      parameters:
+        - { $ref: "#/components/parameters/OrderId" }
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReasonRequest" }
+      responses:
+        "201":
+          description: Waiver recorded
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CertificateRecordView" }
+        "200":
+          description: Idempotent replay
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CertificateRecordView" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/quality/samples:
+    get:
+      tags: [samples]
+      operationId: listSamples
+      x-passage-duty: QM_VIEW
+      summary: List physical samples, newest first
+      parameters:
+        - { name: qualityOrderId, in: query, schema: { type: string, format: uuid } }
+        - name: status
+          in: query
+          description: DUE_FOR_DISPOSAL lists samples whose retention expiry is today (UTC) or earlier (AC-33.18).
+          schema: { $ref: "#/components/schemas/SampleStatus" }
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Samples
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/Sample" } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    post:
+      tags: [samples]
+      operationId: registerSample
+      x-passage-duty: QM_RESULTS_RECORD
+      summary: Register a physical sample of a quality order (FR-33.20)
+      description: |
+        The sample takes the order's unit. A RESERVE (retention) sample needs the batch
+        expiry; its retention expiry is that date plus retentionYears (default 1,
+        21 CFR 211.170). A POOLED sample names PRIMARY samples of the same order
+        (422 QM-0181). PRIMARY and RESERVE quantities together may not exceed the lot
+        (422 QM-0182). A cancelled order answers 409 QM-0115.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SampleRequest" }
+      responses:
+        "201":
+          description: Sample registered
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Sample" }
+        "200":
+          description: Idempotent replay
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Sample" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
   /v1/quality/compliance-lists:
     get:
       tags: [compliance]
@@ -1068,6 +1217,12 @@ components:
         sequence: { type: integer, description: Lowest wins on equal specificity (BR-33.3). }
         testGroupId: { type: string, format: uuid }
         samplingPlan: { $ref: "#/components/schemas/SamplingPlan" }
+        certificateRequired: { $ref: "#/components/schemas/CertificateRequirement" }
+    CertificateRequirement:
+      type: string
+      enum: [NONE, COA, COC, EN10204_31]
+      default: NONE
+      description: The vendor certificate an order demands before acceptance (FR-33.15, certificate_required_default).
     SourceRef:
       type: object
       required: [type, id]
@@ -1096,6 +1251,10 @@ components:
           allOf:
             - $ref: "#/components/schemas/SamplingPlan"
           description: Required for MANUAL; other triggers take the plan of the best matching association.
+        certificateRequired:
+          allOf:
+            - $ref: "#/components/schemas/CertificateRequirement"
+          description: MANUAL only; other triggers take the requirement of the best matching association.
     Order:
       type: object
       properties:
@@ -1120,6 +1279,7 @@ components:
         version: { type: integer }
         createdAt: { type: string, format: date-time }
         closedAt: { type: string, format: date-time }
+        certificateRequired: { $ref: "#/components/schemas/CertificateRequirement" }
     Result:
       type: object
       properties:
@@ -1155,6 +1315,7 @@ components:
               type: array
               items: { $ref: "#/components/schemas/Result" }
             evaluation: { $ref: "#/components/schemas/Evaluation" }
+            certificateStatus: { $ref: "#/components/schemas/CertificateStatus" }
             decision: { $ref: "#/components/schemas/Decision" }
     ResultInput:
       type: object
@@ -1486,6 +1647,90 @@ components:
         closedAt: { type: string, format: date-time }
         overdueSteps: { type: array, description: Steps past their due date (computed on read)., items: { type: integer } }
         effectivenessCheckDue: { type: boolean, description: D7 is complete and the effectiveness period has elapsed (computed on read). }
+    CertificateStatus:
+      type: string
+      enum: [NOT_REQUIRED, MISSING, RECEIVED_OK, RECEIVED_NOK, WAIVED]
+      description: The gate of an accepting decision (BR-33.13); only RECEIVED_OK, WAIVED and NOT_REQUIRED let it pass.
+    CertificateValue:
+      type: object
+      properties:
+        value: { $ref: "#/components/schemas/Decimal" }
+        outcome: { type: string, format: uuid }
+    CertificateRequest:
+      type: object
+      required: [type]
+      properties:
+        type: { type: string, enum: [COA, COC, EN10204_31] }
+        documentRef: { type: string, maxLength: 200, description: Upload id, EDI attachment or supplier-portal document. }
+        values:
+          type: object
+          description: Keyed by test id of the order's test group; value for a variable test, outcome for an attribute test.
+          additionalProperties: { $ref: "#/components/schemas/CertificateValue" }
+    CertificateRecord:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        qualityOrderId: { type: string, format: uuid }
+        type: { type: string, enum: [COA, COC, EN10204_31] }
+        documentRef: { type: string }
+        values: { type: object, additionalProperties: { $ref: "#/components/schemas/CertificateValue" } }
+        inSpec: { type: boolean }
+        deviations: { type: array, description: Tests the certificate does not meet., items: { type: string } }
+        waiver: { type: boolean }
+        reason: { type: string, description: Waiver reason. }
+        nonconformanceId: { type: string, format: uuid, description: The VENDOR NCR an out-of-specification receipt raised. }
+        recordedBy: { type: string }
+        recordedAt: { type: string, format: date-time }
+    CertificateRecordView:
+      allOf:
+        - $ref: "#/components/schemas/CertificateRecord"
+        - type: object
+          properties:
+            certificateStatus: { $ref: "#/components/schemas/CertificateStatus" }
+    CertificateList:
+      type: object
+      required: [required, certificateStatus, items]
+      properties:
+        required: { $ref: "#/components/schemas/CertificateRequirement" }
+        certificateStatus: { $ref: "#/components/schemas/CertificateStatus" }
+        items: { type: array, items: { $ref: "#/components/schemas/CertificateRecord" } }
+    SampleKind:
+      type: string
+      enum: [PRIMARY, POOLED, RESERVE]
+    SampleStatus:
+      type: string
+      enum: [ACTIVE, DUE_FOR_DISPOSAL]
+    SampleRequest:
+      type: object
+      required: [qualityOrderId, kind, quantity]
+      properties:
+        qualityOrderId: { type: string, format: uuid }
+        kind: { $ref: "#/components/schemas/SampleKind" }
+        primaryIds: { type: array, maxItems: 50, items: { type: string, format: uuid }, description: POOLED only. }
+        quantity: { $ref: "#/components/schemas/Decimal" }
+        container: { type: string, maxLength: 60 }
+        storageLocation: { type: string, maxLength: 60 }
+        condition: { type: string, maxLength: 120 }
+        batchExpiresOn: { type: string, format: date, description: Required for RESERVE. }
+        retentionYears: { type: integer, minimum: 0, maximum: 10, default: 1 }
+    Sample:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        qualityOrderId: { type: string, format: uuid }
+        kind: { $ref: "#/components/schemas/SampleKind" }
+        primaryIds: { type: array, items: { type: string, format: uuid } }
+        quantity: { $ref: "#/components/schemas/Decimal" }
+        uom: { type: string }
+        container: { type: string }
+        storageLocation: { type: string }
+        condition: { type: string }
+        batchExpiresOn: { type: string, format: date }
+        retentionYears: { type: integer }
+        retentionExpiresOn: { type: string, format: date }
+        status: { $ref: "#/components/schemas/SampleStatus" }
+        recordedBy: { type: string }
+        createdAt: { type: string, format: date-time }
     Nonconformance:
       type: object
       properties:

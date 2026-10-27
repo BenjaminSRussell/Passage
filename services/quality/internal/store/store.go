@@ -33,6 +33,8 @@ const (
 	// CodeVersionConflict is the stable code for a stale If-Match or version.
 	CodeVersionConflict = "conflict_version"
 	CodeGroupRace       = "QM-0152"
+	// CodeKeyReuse is the stable code for an Idempotency-Key already used on another order.
+	CodeKeyReuse = "idempotency_key_reuse"
 )
 
 // Store is the persistence port the API depends on.
@@ -70,6 +72,10 @@ type Store interface {
 	GetNonconformance(ctx context.Context, id string) (domain.Nonconformance, error)
 	ListNonconformances(ctx context.Context, f NCRFilter) ([]domain.Nonconformance, error)
 	UpdateNonconformance(ctx context.Context, id string, expectedVersion int, key string, change func(domain.Nonconformance) (domain.Nonconformance, error)) (domain.Nonconformance, bool, error)
+	RecordCertificate(ctx context.Context, rec domain.CertRecord, ncr *domain.Nonconformance, key string) (domain.CertRecord, bool, error)
+	ListCertificates(ctx context.Context, orderID string) ([]domain.CertRecord, error)
+	RegisterSample(ctx context.Context, in domain.Sample, key string) (domain.Sample, bool, error)
+	ListSamples(ctx context.Context, f SampleFilter) ([]domain.Sample, error)
 	Ping(ctx context.Context) error
 }
 
@@ -98,6 +104,14 @@ func keyArg(key string) any {
 		return nil
 	}
 	return key
+}
+
+// certRequirement maps an empty certificate requirement to NONE.
+func certRequirement(t string) string {
+	if t == "" {
+		return domain.CertNone
+	}
+	return t
 }
 
 func nullable(s string) any {
@@ -333,13 +347,14 @@ func (s *Postgres) ListInstruments(ctx context.Context, limit int) ([]domain.Ins
 // --- associations ----------------------------------------------------------
 
 const assocColumns = "id, trigger, item_scope, coalesce(item_ref::text, ''), party_scope, coalesce(party_ref::text, ''), " +
-	"site_scope, coalesce(site_ref::text, ''), sequence, test_group_id, sampling_method, fixed_qty::text, percent::text, aql::text, severity, inspection_level"
+	"site_scope, coalesce(site_ref::text, ''), sequence, test_group_id, sampling_method, fixed_qty::text, percent::text, aql::text, severity, inspection_level, " +
+	"certificate_required"
 
 func scanAssociation(row pgx.Row) (domain.Association, error) {
 	var a domain.Association
 	var method, fixed, pct, aql, sev, level string
 	err := row.Scan(&a.ID, &a.Trigger, &a.ItemScope, &a.ItemRef, &a.PartyScope, &a.PartyRef, &a.SiteScope, &a.SiteRef,
-		&a.Sequence, &a.TestGroupID, &method, &fixed, &pct, &aql, &sev, &level)
+		&a.Sequence, &a.TestGroupID, &method, &fixed, &pct, &aql, &sev, &level, &a.CertificateRequired)
 	if err != nil {
 		return a, err
 	}
@@ -365,12 +380,13 @@ func (s *Postgres) CreateAssociation(ctx context.Context, in domain.Association,
 			}
 		}
 		a, err := scanAssociation(tx.QueryRow(ctx, `insert into quality_association (tenant_id, id, trigger, item_scope, item_ref, party_scope, party_ref,
-			site_scope, site_ref, sequence, test_group_id, sampling_method, fixed_qty, percent, aql, severity, inspection_level, idempotency_key)
+			site_scope, site_ref, sequence, test_group_id, sampling_method, fixed_qty, percent, aql, severity, inspection_level, idempotency_key,
+			certificate_required)
 			values ($1, $2, $3, $4, nullif($5, '')::uuid, $6, nullif($7, '')::uuid, $8, nullif($9, '')::uuid, $10, $11, $12,
-			$13::numeric, $14::numeric, $15::numeric, $16, $17, $18) returning `+assocColumns,
+			$13::numeric, $14::numeric, $15::numeric, $16, $17, $18, $19) returning `+assocColumns,
 			p.TenantID, ids.New(), in.Trigger, in.ItemScope, in.ItemRef, in.PartyScope, in.PartyRef, in.SiteScope, in.SiteRef,
 			in.Sequence, in.TestGroupID, string(in.Plan.Method), in.Plan.FixedQty.String(), in.Plan.Percent.String(), in.Plan.AQL.String(),
-			string(in.Plan.Severity), in.Plan.InspectionLevel, keyArg(key)))
+			string(in.Plan.Severity), in.Plan.InspectionLevel, keyArg(key), certRequirement(in.CertificateRequired)))
 		if pgCode(err) == fkViolation {
 			return notFound(domain.CodeTestGroupMissing, "test group not found")
 		}
@@ -408,14 +424,16 @@ func (s *Postgres) ListAssociations(ctx context.Context) ([]domain.Association, 
 // --- quality orders --------------------------------------------------------
 
 const orderColumns = "id, trigger, source_ref, item_id, site_id, warehouse_id, dims, lot_qty::text, sample_qty::text, uom, " +
-	"test_group_id, test_group_version, sampling_method, inspection_severity, code_letter, accept_no, reject_no, status, version, created_at, closed_at"
+	"test_group_id, test_group_version, sampling_method, inspection_severity, code_letter, accept_no, reject_no, status, version, created_at, closed_at, " +
+	"certificate_required"
 
 func scanOrder(row pgx.Row) (domain.Order, error) {
 	var o domain.Order
 	var sourceRef, dims []byte
 	var lot, sample, method, sev string
 	err := row.Scan(&o.ID, &o.Trigger, &sourceRef, &o.ItemID, &o.SiteID, &o.WarehouseID, &dims, &lot, &sample, &o.UOM,
-		&o.TestGroupID, &o.TestGroupVersion, &method, &sev, &o.CodeLetter, &o.AcceptNo, &o.RejectNo, &o.Status, &o.Version, &o.CreatedAt, &o.ClosedAt)
+		&o.TestGroupID, &o.TestGroupVersion, &method, &sev, &o.CodeLetter, &o.AcceptNo, &o.RejectNo, &o.Status, &o.Version, &o.CreatedAt, &o.ClosedAt,
+		&o.CertificateRequired)
 	if err != nil {
 		return o, err
 	}
@@ -456,12 +474,12 @@ func (s *Postgres) CreateOrder(ctx context.Context, in domain.Order, key string)
 		}
 		o, err := scanOrder(tx.QueryRow(ctx, `insert into quality_order (tenant_id, id, trigger, source_ref, item_id, site_id, warehouse_id, dims,
 			lot_qty, sample_qty, uom, test_group_id, test_group_version, sampling_method, inspection_severity, code_letter, accept_no, reject_no,
-			status, version, idempotency_key)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9::numeric, $10::numeric, $11, $12, $13, $14, $15, $16, $17, $18, $19, 1, $20)
+			status, version, idempotency_key, certificate_required)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9::numeric, $10::numeric, $11, $12, $13, $14, $15, $16, $17, $18, $19, 1, $20, $21)
 			returning `+orderColumns,
 			p.TenantID, in.ID, in.Trigger, string(sourceRef), in.ItemID, in.SiteID, in.WarehouseID, string(dims),
 			in.LotQty.String(), in.SampleQty.String(), in.UOM, in.TestGroupID, in.TestGroupVersion, string(in.SamplingMethod),
-			string(in.Severity), in.CodeLetter, in.AcceptNo, in.RejectNo, domain.StatusCreated, keyArg(key)))
+			string(in.Severity), in.CodeLetter, in.AcceptNo, in.RejectNo, domain.StatusCreated, keyArg(key), certRequirement(in.CertificateRequired)))
 		if isUnique(err) && uniqueOn(err, "quality_order_source_line") {
 			return httpx.NewProblem(http.StatusConflict, domain.CodeSourceLineDupe, "a quality order already exists for this source line and trigger")
 		}
@@ -481,7 +499,17 @@ func (s *Postgres) CreateOrder(ctx context.Context, in domain.Order, key string)
 }
 
 func orderTx(ctx context.Context, tx pgx.Tx, id string) (domain.Order, error) {
-	o, err := scanOrder(tx.QueryRow(ctx, `select `+orderColumns+` from quality_order where `+ownTenant+` and id = $1`, id))
+	return readOrder(ctx, tx, id, false)
+}
+
+// readOrder reads one order; lock takes a row lock, which serialises the
+// certificate and sample writes of an order with its usage decision.
+func readOrder(ctx context.Context, tx pgx.Tx, id string, lock bool) (domain.Order, error) {
+	q := `select ` + orderColumns + ` from quality_order where ` + ownTenant + ` and id = $1`
+	if lock {
+		q += ` for update`
+	}
+	o, err := scanOrder(tx.QueryRow(ctx, q, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return o, notFound(domain.CodeOrderMissing, "quality order not found")
 	}
@@ -709,6 +737,17 @@ func (s *Postgres) PostUsageDecision(ctx context.Context, orderID string, expect
 		}
 		if err != nil {
 			return err
+		}
+		// BR-33.13 under the order's row lock: a certificate recorded or waived
+		// concurrently is either seen here or refused because the order closed.
+		if o.CertificateRequired != domain.CertNone {
+			recs, err := certificatesTx(ctx, tx, orderID)
+			if err != nil {
+				return err
+			}
+			if err := domain.CertificateGate(o, d.Split, recs); err != nil {
+				return err
+			}
 		}
 		lines, err := json.Marshal(d.Lines)
 		if err != nil {

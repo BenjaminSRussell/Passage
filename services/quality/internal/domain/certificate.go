@@ -49,34 +49,43 @@ type CertValue struct {
 	Outcome string           `json:"outcome,omitempty"`
 }
 
-// CertInSpec checks certificate values against the required tests of a test group.
-// A required test without a value, or with a value outside its tolerance, fails.
+// CertInSpec checks certificate values against a test group (CertDeviations).
 func CertInSpec(lines []TestLine, values map[string]CertValue) bool {
+	return len(CertDeviations(lines, values)) == 0
+}
+
+// CertDeviations returns the names (or ids) of the tests a certificate does not
+// meet: a required test without a value, and any test whose value is outside its
+// tolerance or whose outcome is not a passing one. An optional test without a value
+// is not a deviation. The order follows the test group.
+func CertDeviations(lines []TestLine, values map[string]CertValue) []string {
+	var out []string
 	for _, l := range lines {
-		if !l.Required {
-			continue
-		}
 		v, ok := values[l.TestID]
-		if !ok {
-			return false
+		name := l.Name
+		if name == "" {
+			name = l.TestID
 		}
-		switch l.Kind {
-		case KindVariable:
+		switch {
+		case !ok || (v.Value == nil && v.Outcome == ""):
+			if l.Required {
+				out = append(out, name)
+			}
+		case l.Kind == KindVariable:
 			if v.Value == nil {
-				return false
+				out = append(out, name)
+			} else if _, pass := EvaluateVariable(l, *v.Value); !pass {
+				out = append(out, name)
 			}
-			if _, pass := EvaluateVariable(l, *v.Value); !pass {
-				return false
-			}
-		case KindAttribute:
+		case l.Kind == KindAttribute:
 			if !EvaluateAttribute(l, v.Outcome) {
-				return false
+				out = append(out, name)
 			}
 		default:
-			return false
+			out = append(out, name)
 		}
 	}
-	return true
+	return out
 }
 
 // CertificateStatus returns the gate status for a required certificate type (BR-33.13).

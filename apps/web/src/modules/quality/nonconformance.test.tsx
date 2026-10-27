@@ -312,6 +312,8 @@ describe("quality order with a reject decision", () => {
       status: "CLOSED",
       version: 4,
       createdAt: "2026-10-26T08:00:00Z",
+      certificateRequired: "NONE",
+      certificateStatus: "NOT_REQUIRED",
       testGroup: { id: ITEM, code: "GRP", version: 1, tests: [] },
       results: [],
       evaluation: { defectiveSamples: 1, passed: false, missingRequired: [] },

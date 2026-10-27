@@ -1,8 +1,8 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select } from "../../shell/ui";
-import { createOrder, describeProblem, listTestGroups, newKey, type NewOrder, type Problem, type Trigger } from "./api/client";
-import { DECIMAL, pickFields, TRIGGER_LABELS, UUID } from "./format";
+import { createOrder, describeProblem, listTestGroups, newKey, type CertRequirement, type NewOrder, type Problem, type Trigger } from "./api/client";
+import { CERT_LABELS, CERT_REQUIREMENTS, DECIMAL, pickFields, TRIGGER_LABELS, UUID } from "./format";
 import styles from "./pages.module.css";
 import { emptyPlan, planFieldErrors, PlanFields, validatePlan, type PlanErrors, type PlanValues } from "./PlanFields";
 import { useLoad } from "./useLoad";
@@ -19,9 +19,10 @@ interface Values {
   lotQty: string;
   uom: string;
   testGroupId: string;
+  certificateRequired: CertRequirement;
 }
 
-type Field = keyof Values;
+type Field = Exclude<keyof Values, "certificateRequired">;
 type Errors = Partial<Record<Field | "sourceRef", string>>;
 
 const FIELDS = ["trigger", "itemId", "itemGroupId", "partyId", "siteId", "warehouseId", "lotQty", "uom", "testGroupId", "sourceRef"] as const;
@@ -60,6 +61,7 @@ export function validateOrder(values: Values, plan: PlanValues): { errors: Error
   if (manual && "plan" in checked) {
     input.testGroupId = values.testGroupId;
     input.samplingPlan = checked.plan;
+    if (values.certificateRequired !== "NONE") input.certificateRequired = values.certificateRequired;
   }
   return { errors, planErrors: {}, input };
 }
@@ -76,6 +78,7 @@ const initial: Values = {
   lotQty: "",
   uom: "EA",
   testGroupId: "",
+  certificateRequired: "NONE",
 };
 
 /**
@@ -168,6 +171,17 @@ export function NewOrderPage() {
                     {(groups.data ?? []).map((g) => (
                       <option key={g.id} value={g.id}>
                         {`${g.code} v${g.version} (${g.tests.length} ${g.tests.length === 1 ? "test" : "tests"})`}
+                      </option>
+                    ))}
+                  </Select>
+                )}
+              </FormField>
+              <FormField id="order-certificateRequired" label="Vendor certificate" hint="Acceptance waits for it to be received in specification or waived.">
+                {(control) => (
+                  <Select {...control} value={values.certificateRequired} onChange={(event) => update({ certificateRequired: event.target.value as CertRequirement })}>
+                    {CERT_REQUIREMENTS.map((c) => (
+                      <option key={c} value={c}>
+                        {CERT_LABELS[c]}
                       </option>
                     ))}
                   </Select>

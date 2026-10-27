@@ -94,10 +94,18 @@ const order: Order = {
   status: "RESULTS_IN_PROGRESS",
   version: 3,
   createdAt: "2026-10-26T08:00:00Z",
+  certificateRequired: "NONE",
 };
 
 function view(patch: Partial<OrderView> = {}): OrderView {
-  return { ...order, testGroup: group, results: [], evaluation: { defectiveSamples: 0, passed: true, missingRequired: [LENGTH, LOOK] }, ...patch };
+  return {
+    ...order,
+    testGroup: group,
+    results: [],
+    evaluation: { defectiveSamples: 0, passed: true, missingRequired: [LENGTH, LOOK] },
+    certificateStatus: "NOT_REQUIRED",
+    ...patch,
+  };
 }
 
 const instrument: Instrument = { id: INST, code: "CAL-01", name: "Caliper", calibrationIntervalDays: 365, lastCalibratedAt: "2026-01-01T00:00:00Z", dueAt: "2027-01-01T00:00:00Z", calibrationStatus: "IN_CALIBRATION" };
@@ -407,6 +415,7 @@ describe("setup pages", () => {
       sequence: 10,
       testGroupId: GROUP,
       samplingPlan: { method: "PERCENT", percent: "10" },
+      certificateRequired: "NONE",
     });
   });
 
@@ -454,7 +463,7 @@ describe("form rules", () => {
 
   it("needs an id for a scoped association", () => {
     const out = validateAssociation(
-      { trigger: "PURCHASE_RECEIPT", itemScope: "ITEM", itemRef: "", partyScope: "ALL", partyRef: "", siteScope: "ALL", siteRef: "", sequence: "1", testGroupId: GROUP },
+      { trigger: "PURCHASE_RECEIPT", itemScope: "ITEM", itemRef: "", partyScope: "ALL", partyRef: "", siteScope: "ALL", siteRef: "", sequence: "1", testGroupId: GROUP, certificateRequired: "NONE" },
       emptyPlan,
     );
     expect(out.errors.itemRef).toBeTruthy();

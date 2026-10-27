@@ -41,6 +41,11 @@ type fakeStore struct {
 	ncrKeys     map[string]string
 	capaKeys    map[string]string
 	ncrFilter   store.NCRFilter
+	certs       []domain.CertRecord
+	certKeys    map[string]domain.CertRecord
+	certNCRs    []domain.Nonconformance
+	samples     []domain.Sample
+	sampleKeys  map[string]domain.Sample
 }
 
 func newFake() *fakeStore {

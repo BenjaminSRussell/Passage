@@ -1,5 +1,5 @@
 import type { BadgeTone } from "../../shell/ui";
-import type { CalibrationStatus, CorrectionStatus, DecisionKind, NcrSeverity, NcrSource, NcrStatus, OrderStatus, PullStatus, SamplingPlan, StudyStatus, Trigger } from "./api/client";
+import type { CalibrationStatus, CertificateStatus, CertRequirement, CorrectionStatus, DecisionKind, NcrSeverity, NcrSource, NcrStatus, OrderStatus, PullStatus, SampleKind, SampleStatus, SamplingPlan, StudyStatus, Trigger } from "./api/client";
 
 export const dash = "—";
 
@@ -161,4 +161,39 @@ export const CORRECTION_STATUS_LABELS: Record<CorrectionStatus, { label: string;
   OPEN: { label: "8D open", tone: "info" },
   EFFECTIVENESS_PENDING: { label: "Effectiveness check pending", tone: "warning" },
   CLOSED: { label: "8D closed", tone: "success" },
+};
+
+export const CERT_LABELS: Record<CertRequirement, string> = {
+  NONE: "No certificate",
+  COA: "Certificate of analysis",
+  COC: "Certificate of conformance",
+  EN10204_31: "EN 10204 3.1 inspection certificate",
+};
+
+export const CERT_REQUIREMENTS = Object.keys(CERT_LABELS) as CertRequirement[];
+
+export const CERT_STATUS_LABELS: Record<CertificateStatus, { label: string; tone: BadgeTone }> = {
+  NOT_REQUIRED: { label: "Not required", tone: "neutral" },
+  MISSING: { label: "Missing", tone: "warning" },
+  RECEIVED_OK: { label: "Received, in specification", tone: "success" },
+  RECEIVED_NOK: { label: "Received, out of specification", tone: "danger" },
+  WAIVED: { label: "Waived", tone: "info" },
+};
+
+/** Statuses that let an accepting usage decision through (BR-33.13). */
+export function certificateGateOpen(status: CertificateStatus | undefined): boolean {
+  return status === undefined || status === "NOT_REQUIRED" || status === "RECEIVED_OK" || status === "WAIVED";
+}
+
+export const SAMPLE_KIND_LABELS: Record<SampleKind, string> = {
+  PRIMARY: "Primary",
+  POOLED: "Pooled",
+  RESERVE: "Reserve (retention)",
+};
+
+export const SAMPLE_KINDS = Object.keys(SAMPLE_KIND_LABELS) as SampleKind[];
+
+export const SAMPLE_STATUS_LABELS: Record<SampleStatus, { label: string; tone: BadgeTone }> = {
+  ACTIVE: { label: "Active", tone: "neutral" },
+  DUE_FOR_DISPOSAL: { label: "Due for disposal", tone: "warning" },
 };

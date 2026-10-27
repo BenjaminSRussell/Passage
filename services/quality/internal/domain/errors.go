@@ -46,6 +46,12 @@ const (
 	CodeCAPAStep            = "QM-0173" // not the current 8D step, or the correction is not open
 	CodeEffectivenessNotDue = "QM-0174" // the effectiveness period has not elapsed
 	CodeEffectivenessSoD    = "QM-0175" // the effectiveness checker completed D7
+
+	// Slice 4: incoming certificates (FR-33.15, BR-33.13) and physical samples (FR-33.20).
+	CodeCertNotRequired = "QM-0180" // a waiver on an order that requires no certificate
+	CodeSamplePrimary   = "QM-0181" // a pooled sample names a sample that is not a PRIMARY sample of the order
+	CodeSampleOverLot   = "QM-0182" // drawn samples would exceed the lot quantity
+	CodeCertSampleRace  = "QM-0183" // the same Idempotency-Key is recording a certificate or sample concurrently
 )
 
 // Error is a rule violation with a stable code. Reason is an optional machine
