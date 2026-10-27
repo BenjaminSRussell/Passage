@@ -1,0 +1,15 @@
+asyncapi: 3.0.0
+info:
+  title: Passage product costing events (wave 39, slice 1)
+  version: 0.1.0
+  description: >
+    Slice 1 computes statelessly and writes no state, so it publishes no events.
+    The events in PSG-39 section 7.39.5 (calculation.completed, rollrun.completed,
+    standardcost.activated, variance.posted, conversion.activated,
+    salesorderestimate.completed) arrive with the persistence slice and are
+    listed as not implemented in NOT-IMPLEMENTED.md.
+defaultContentType: application/cloudevents+json
+channels: {}
+operations: {}
+components:
+  messages: {}

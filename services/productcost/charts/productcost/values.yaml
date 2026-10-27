@@ -1,0 +1,15 @@
+image:
+  repository: ghcr.io/benjaminsrussell/productcost
+  digest: ""
+  tag: ""
+  pullPolicy: IfNotPresent
+databaseSecret: productcost-db
+migrateOnStart: false
+replicaCount: 2
+costing:
+  maxLevels: 20
+  rollWorkers: 4
+resources:
+  requests: { cpu: 100m, memory: 128Mi }
+  limits: { cpu: 1000m, memory: 2Gi }
+serviceMonitor: { enabled: false }

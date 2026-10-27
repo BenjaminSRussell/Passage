@@ -1,0 +1,301 @@
+openapi: 3.1.0
+info:
+  title: Passage product costing (wave 39, slice 1)
+  version: 0.1.0
+  description: >
+    Stateless costing computations. The caller supplies items, prices and
+    actuals; the service returns rolled standards, mass-roll runs, variance
+    decompositions and activation previews. Nothing is persisted in slice 1.
+servers:
+  - url: https://api.{env}.passage.dev
+    variables:
+      env: { default: dev }
+paths:
+  /readyz:
+    get:
+      summary: Readiness (database ping when configured)
+      operationId: ready
+      x-passage-duty: none
+      responses:
+        "200": { description: Ready }
+        "503": { description: Not ready }
+  /v1/costing/calculations:
+    post:
+      summary: Roll one item and return its standard with the component split
+      operationId: rollOne
+      x-passage-duty: CostingCalculate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RollOneRequest" }
+      responses:
+        "200":
+          description: Rolled item. A failed item returns status Error with diagnostics, not a 4xx.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CalculationResponse" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/costing/rolls:
+    post:
+      summary: Mass roll a set of items by topological level
+      operationId: massRoll
+      x-passage-duty: CostingCalculate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MassRollRequest" }
+      responses:
+        "200":
+          description: Roll run with per-item diagnostics
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RollRun" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/costing/variances/compute:
+    post:
+      summary: Decompose the variance of an ended production order
+      operationId: computeVariance
+      x-passage-duty: CostingSystem
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Order" }
+      responses:
+        "200":
+          description: Decomposition; total equals the sum of the four types
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Decomposition" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/costing/activations:preview:
+    post:
+      summary: Preview the on-hand revaluation of a standard cost activation
+      operationId: previewActivation
+      x-passage-duty: CostingActivate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ActivationPreviewRequest" }
+      responses:
+        "200":
+          description: Revaluation preview with total
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ActivationPreview" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+components:
+  responses:
+    Problem:
+      description: RFC 9457 problem details
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        code: { type: string }
+        traceId: { type: string }
+        errors:
+          type: object
+          description: Validation message by request field path (for example items[0].bom[1].qty).
+          additionalProperties: { type: string }
+    Money:
+      type: string
+      description: Decimal string, never a float.
+      pattern: "^-?[0-9]+(\\.[0-9]+)?$"
+    Split:
+      type: object
+      description: Amount by cost component code (DM, DL, IND-MAT, IND-LAB, SUB).
+      additionalProperties: { $ref: "#/components/schemas/Money" }
+    Diagnostic:
+      type: object
+      required: [code, severity, message]
+      properties:
+        code: { type: string, pattern: "^CST-07[0-9]{2}$" }
+        severity: { type: string, enum: [error, warning] }
+        message: { type: string }
+        ref: { type: string }
+    BOMLine:
+      type: object
+      required: [childId, qty]
+      properties:
+        childId: { type: string }
+        qty: { $ref: "#/components/schemas/Money" }
+        scrapPct: { $ref: "#/components/schemas/Money", description: "Percent, 0 to below 100; multiplies the quantity (BR-39.6)" }
+    Operation:
+      type: object
+      properties:
+        setupHours: { $ref: "#/components/schemas/Money" }
+        runHours: { $ref: "#/components/schemas/Money" }
+        rate: { $ref: "#/components/schemas/Money" }
+        lotSize: { $ref: "#/components/schemas/Money", description: "Overrides costingLot for this operation (BR-39.5)" }
+        component: { type: string, description: "Cost component the operation charges; default DL" }
+    SheetNode:
+      type: object
+      required: [id, type, component]
+      properties:
+        id: { type: string }
+        type: { type: string, enum: [Surcharge, Rate], description: "Basis and Total nodes arrive with the persisted costing sheet and are refused with 400" }
+        component: { type: string }
+        basis: { type: array, items: { type: string } }
+        percentage: { $ref: "#/components/schemas/Money" }
+        rate: { $ref: "#/components/schemas/Money" }
+        rateUnit: { type: string, enum: [Hour, Unit], description: "Rate driver: routing hours per unit (run plus setup over the lot) or units; default Unit" }
+        includeRolled: { type: boolean }
+    Item:
+      type: object
+      required: [id, kind]
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [Purchased, Manufactured] }
+        price: { $ref: "#/components/schemas/Money" }
+        activePrice: { $ref: "#/components/schemas/Money" }
+        activeSplit: { $ref: "#/components/schemas/Split" }
+        costingLot: { $ref: "#/components/schemas/Money", description: "Costing lot size; required when an operation has setup hours and no lotSize (BR-39.5)" }
+        bom: { type: array, items: { $ref: "#/components/schemas/BOMLine" } }
+        operations: { type: array, items: { $ref: "#/components/schemas/Operation" } }
+        sheet: { type: array, items: { $ref: "#/components/schemas/SheetNode" } }
+    RollOptions:
+      type: object
+      properties:
+        maxLevels: { type: integer, minimum: 1, maximum: 40, description: "Default 20 (COSTING_MAX_LEVELS)" }
+        workers: { type: integer, minimum: 1, maximum: 32, description: "Default 4 (COSTING_ROLL_WORKERS)" }
+        mode: { type: string, enum: [Multilevel, SingleLevel], description: "MakeToOrder and ByLineType are later slices" }
+        fallbackToActive: { type: boolean }
+    RollOneRequest:
+      type: object
+      required: [items, itemId]
+      properties:
+        items: { type: array, minItems: 1, maxItems: 50000, items: { $ref: "#/components/schemas/Item" } }
+        itemId: { type: string }
+        options: { $ref: "#/components/schemas/RollOptions" }
+    MassRollRequest:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, minItems: 1, maxItems: 50000, items: { $ref: "#/components/schemas/Item" } }
+        options: { $ref: "#/components/schemas/RollOptions" }
+    Result:
+      type: object
+      properties:
+        itemId: { type: string }
+        status: { type: string, enum: [Pending, Error] }
+        level: { type: integer }
+        unitCost: { $ref: "#/components/schemas/Money" }
+        own: { $ref: "#/components/schemas/Split" }
+        rolled: { $ref: "#/components/schemas/Split" }
+        diagnostics: { type: array, items: { $ref: "#/components/schemas/Diagnostic" } }
+    CalculationResponse:
+      type: object
+      properties:
+        result: { $ref: "#/components/schemas/Result" }
+        split: { $ref: "#/components/schemas/Split" }
+    RollRun:
+      type: object
+      properties:
+        itemCount: { type: integer }
+        errorCount: { type: integer }
+        durationMs: { type: integer }
+        results: { type: array, items: { $ref: "#/components/schemas/Result" } }
+    OrderLine:
+      type: object
+      required: [component]
+      properties:
+        component: { type: string }
+        planned: { type: boolean }
+        fixed: { type: boolean }
+        plannedQty: { $ref: "#/components/schemas/Money" }
+        stdUnitCost: { $ref: "#/components/schemas/Money" }
+        estPerLot: { $ref: "#/components/schemas/Money" }
+        actualQty: { $ref: "#/components/schemas/Money" }
+        actualUnitCost: { $ref: "#/components/schemas/Money" }
+    Order:
+      type: object
+      required: [plannedQty, rafQty, lines]
+      properties:
+        currency: { type: string, pattern: "^[A-Z]{3}$", description: "Posting precision is its ISO 4217 minor unit; default two decimals" }
+        plannedQty: { $ref: "#/components/schemas/Money" }
+        rafQty: { $ref: "#/components/schemas/Money" }
+        lines: { type: array, minItems: 1, items: { $ref: "#/components/schemas/OrderLine" } }
+    Types:
+      type: object
+      properties:
+        lotSize: { $ref: "#/components/schemas/Money" }
+        quantity: { $ref: "#/components/schemas/Money" }
+        price: { $ref: "#/components/schemas/Money" }
+        substitution: { $ref: "#/components/schemas/Money" }
+    Decomposition:
+      type: object
+      properties:
+        total: { $ref: "#/components/schemas/Money" }
+        types: { $ref: "#/components/schemas/Types" }
+        byComponent:
+          type: array
+          items:
+            type: object
+            properties:
+              component: { type: string }
+              total: { $ref: "#/components/schemas/Money" }
+              types: { $ref: "#/components/schemas/Types" }
+        residual: { $ref: "#/components/schemas/Money" }
+    ActivationPreviewRequest:
+      type: object
+      required: [lines]
+      properties:
+        currency: { type: string, pattern: "^[A-Z]{3}$", description: "Posting precision is its ISO 4217 minor unit; default two decimals" }
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 50000
+          items:
+            type: object
+            required: [itemId, siteId, qty, oldStd, newStd]
+            properties:
+              itemId: { type: string }
+              siteId: { type: string }
+              qty: { $ref: "#/components/schemas/Money" }
+              oldStd: { $ref: "#/components/schemas/Money" }
+              newStd: { $ref: "#/components/schemas/Money" }
+    ActivationPreview:
+      type: object
+      properties:
+        currency: { type: string }
+        total: { $ref: "#/components/schemas/Money" }
+        lines:
+          type: array
+          items:
+            type: object
+            properties:
+              itemId: { type: string }
+              siteId: { type: string }
+              qty: { $ref: "#/components/schemas/Money" }
+              oldStd: { $ref: "#/components/schemas/Money" }
+              newStd: { $ref: "#/components/schemas/Money" }
+              amount: { $ref: "#/components/schemas/Money" }
+        journal:
+          type: array
+          items:
+            type: object
+            properties:
+              account: { type: string }
+              debit: { $ref: "#/components/schemas/Money" }
+              credit: { $ref: "#/components/schemas/Money" }
