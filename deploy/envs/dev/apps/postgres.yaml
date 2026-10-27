@@ -25,6 +25,13 @@ data:
     \c passage_receiving
     GRANT ALL ON SCHEMA public TO passage_app;
     SQL
+  30-fx-db.sh: |
+    psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" <<SQL
+    SELECT 'CREATE DATABASE passage_fx' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'passage_fx')\gexec
+    GRANT CONNECT, CREATE ON DATABASE passage_fx TO passage_app;
+    \c passage_fx
+    GRANT ALL ON SCHEMA public TO passage_app;
+    SQL
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -44,7 +51,7 @@ spec:
         app.kubernetes.io/name: postgres
       annotations:
         # initdb scripts run only on an empty PGDATA; bump this whenever postgres-init changes so the pod restarts
-        passage.dev/init-rev: "2"
+        passage.dev/init-rev: "3"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -117,5 +124,8 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: receiving
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: fx
       ports:
         - { protocol: TCP, port: 5432 }
