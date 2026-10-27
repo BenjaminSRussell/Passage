@@ -18,6 +18,10 @@ data:
     CREATE ROLE passage_app LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD '$APP_PASSWORD';
     GRANT ALL ON SCHEMA public TO passage_app;
     SQL
+  20-receiving-db.sh: |
+    psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" <<SQL
+    CREATE DATABASE passage_receiving OWNER passage_app;
+    SQL
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -104,5 +108,8 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: hello-ledger
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: receiving
       ports:
         - { protocol: TCP, port: 5432 }
