@@ -29,7 +29,7 @@ internal: none (everything depends on it). external: Postgres (CNPG), OPA sideca
 - Pool role `passage_app` has no BYPASSRLS; missing tenant GUC yields zero rows. SET LOCAL only (PgBouncer transaction mode); no session state or session advisory locks in request paths.
 - Config: 12-factor env vars validated at startup (exit non-zero): PASSAGE_ENV, SERVICE_NAME, SERVICE_VERSION, HTTP_ADDR, ADMIN_ADDR, DATABASE_URL|DATABASE_URL_FILE, DATABASE_MIGRATOR_URL, MIGRATE_ON_START (dev only), KAFKA_*, SCHEMA_REGISTRY_URL, OPA_URL (127.0.0.1:8181), OIDC_ISSUER_REGISTRY_URL, OIDC_AUDIENCE=passage-api, TEMPORAL_*, OTEL_*, LEDGER_URL, VALKEY_URL (optional). Rotating creds/certs projected as files and re-read (file watch).
 - Logging: JSON lines; required timestamp, level, message, service, correlationId; never log P2/P3 values or bodies; no console.log/fmt.Println (lint bans). Go `log/slog`, TS `pino`, Python structlog.
-- Go stack: chi, pgx/v5, shopspring/decimal, oklog/ulid, otelhttp, rapid; floor Go 1.23. TS: Node 24 LTS, Fastify 5 + zod, pino, Kysely, @confluentinc/kafka-javascript (not kafkajs). Python 3.12+, FastAPI, Pydantic v2.
+- Go stack: chi, pgx/v5, shopspring/decimal, oklog/ulid, otelhttp, rapid; floor Go 1.25. TS: Node 24 LTS, Fastify 5 + zod, pino, Kysely, @confluentinc/kafka-javascript (not kafkajs). Python 3.12+, FastAPI, Pydantic v2.
 - Money `{amount: decimal string, currency}`; never float. Optimistic concurrency `UPDATE ... WHERE id=$1 AND version=$2`.
 - Atlas versioned migrations, expand/contract only; advisory lock serializes starters; stage/prod migrations run as Argo PreSync Job with owner role.
 - Rate-limit headers `RateLimit-Limit/Remaining/Reset`, `Retry-After`, `X-Passage-Api-Build` on responses.

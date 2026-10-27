@@ -435,7 +435,7 @@ roadmap/ownership.json  wave → directories it owns. A wave edits ONLY its own 
 
 ## Go services
 
-- Go 1.23+, module path `github.com/BenjaminSRussell/passage/services/<name>`; `replace github.com/BenjaminSRussell/passage/platform => ../../platform/go`.
+- Go 1.25+, module path `github.com/BenjaminSRussell/passage/services/<name>`; `replace github.com/BenjaminSRussell/passage/platform => ../../platform/go`.
 - Allowed dependencies: the platform module and what it already pulls in (chi, pgx/v5, shopspring/decimal, oklog/ulid). Anything else needs a one-line justification in the service README.
 - Every HTTP handler: decode → validate → `tenant.FromContext` → store/domain → `httpx.JSON` or `httpx.Problem`. Errors are RFC 9457 problem details with a stable `code` (e.g. `LED-0001`) listed in the service README.
 - Every state change that other contexts care about is written to the outbox in the same transaction (`outbox.Enqueue(ctx, tx, evt)`). Event types are `dev.passage.<context>.<entity>.<verb>.v1`.
