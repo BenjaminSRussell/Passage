@@ -2,26 +2,69 @@ import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select, Textarea } from "../../shell/ui";
 import { createCapacityBlock, describeProblem, newKey, PREDICATE_OPS, type NewCapacityBlock, type Predicate, type PredicateOp, type Problem } from "./api/client";
-import { fromUtcInput, parseClock, WEEK_ORDER, WEEKDAYS } from "./format";
-import { CODE, mapFields, optionalWhole } from "./forms";
+import { clock, fromUtcInput, parseClock, WEEK_ORDER, WEEKDAYS } from "./format";
+import { CODE, DATE, mapFields, optionalWhole } from "./forms";
 import styles from "./pages.module.css";
 import { ResourceGate } from "./ResourceGate";
 
 export interface BlockValues {
   resourceId: string;
   code: string;
-  kind: "weekly" | "dated";
+  kind: "weekly" | "dated" | "recurring";
   days: number[];
   start: string;
   end: string;
   startAt: string;
   endAt: string;
+  /** Recurring blocks: the RRULE subset and the first local date. */
+  rule: string;
+  startDate: string;
   condition: string;
   priority: string;
   active: boolean;
 }
 
-type Errors = Partial<Record<"resourceId" | "code" | "days" | "start" | "end" | "startAt" | "endAt" | "condition" | "priority", string>>;
+type Errors = Partial<Record<"resourceId" | "code" | "days" | "start" | "end" | "startAt" | "endAt" | "rule" | "startDate" | "condition" | "priority", string>>;
+
+const RULE_PARTS = new Set(["FREQ", "INTERVAL", "BYDAY", "COUNT", "UNTIL"]);
+const WEEKDAY_CODES = new Set(["MO", "TU", "WE", "TH", "FR", "SA", "SU"]);
+
+/**
+ * Checks the RRULE subset the scheduler expands (FREQ=DAILY|WEEKLY, INTERVAL,
+ * BYDAY, COUNT or UNTIL); returns an error message or null. The service
+ * re-checks it.
+ */
+export function ruleError(rule: string): string | null {
+  const text = rule.trim().replace(/^RRULE:/, "");
+  if (text === "") return "Enter a rule, such as FREQ=WEEKLY;BYDAY=MO.";
+  const parts = new Map<string, string>();
+  for (const part of text.split(";")) {
+    const [name, value] = part.split("=");
+    if (!name || !value || !RULE_PARTS.has(name)) return `"${part}" is not supported; use FREQ, INTERVAL, BYDAY, COUNT or UNTIL.`;
+    if (parts.has(name)) return `${name} is given twice.`;
+    parts.set(name, value);
+  }
+  const freq = parts.get("FREQ");
+  if (freq !== "DAILY" && freq !== "WEEKLY") return "FREQ must be DAILY or WEEKLY.";
+  const byDay = parts.get("BYDAY");
+  if (byDay !== undefined) {
+    if (freq !== "WEEKLY") return "BYDAY needs FREQ=WEEKLY.";
+    if (!byDay.split(",").every((d) => WEEKDAY_CODES.has(d))) return "BYDAY takes weekday codes such as MO,WE,FR.";
+  }
+  if (parts.has("COUNT") && parts.has("UNTIL")) return "Give COUNT or UNTIL, not both.";
+  for (const name of ["INTERVAL", "COUNT"]) {
+    const v = parts.get(name);
+    if (v !== undefined && !/^[1-9]\d*$/.test(v)) return `${name} must be a positive whole number.`;
+  }
+  const until = parts.get("UNTIL");
+  if (until !== undefined && !/^\d{8}/.test(until)) return "UNTIL must start with a date such as 20271231.";
+  return null;
+}
+
+/** "Every week on MO from 2027-01-04, 06:00–14:00" style summary. */
+export function describeRecurrence(r: { rule: string; startDate: string; startMinute: number; endMinute: number }): string {
+  return `${r.rule} from ${r.startDate}, ${clock(r.startMinute)}–${clock(r.endMinute)}`;
+}
 
 const NUMERIC = /^-?\d+(\.\d+)?$/;
 // Longest operators first so ">=" is not read as ">".
@@ -54,14 +97,22 @@ export function validateBlock(values: BlockValues): { errors: Errors; input?: Ne
   if (values.resourceId === "") errors.resourceId = "Choose the resource.";
   if (!CODE.test(values.code)) errors.code = "Use 1 to 32 capital letters, digits, _ or -.";
   const input: NewCapacityBlock = { resourceId: values.resourceId, code: values.code, condition: [], priority: 0, active: values.active };
-  if (values.kind === "weekly") {
-    if (values.days.length === 0) errors.days = "Choose at least one weekday.";
+  if (values.kind === "weekly" || values.kind === "recurring") {
     const start = parseClock(values.start);
     const end = values.end === "00:00" ? 1440 : parseClock(values.end);
     if (start === null) errors.start = "Enter a start time.";
     if (end === null) errors.end = "Enter an end time.";
     else if (start !== null && end <= start) errors.end = "The window must end after it starts.";
-    if (start !== null && end !== null) input.windows = values.days.map((weekday) => ({ weekday, startMinute: start, endMinute: end }));
+    if (values.kind === "weekly") {
+      if (values.days.length === 0) errors.days = "Choose at least one weekday.";
+      if (start !== null && end !== null) input.windows = values.days.map((weekday) => ({ weekday, startMinute: start, endMinute: end }));
+    } else {
+      const rule = values.rule.trim().toUpperCase();
+      const problem = ruleError(rule);
+      if (problem) errors.rule = problem;
+      if (!DATE.test(values.startDate)) errors.startDate = "Enter the first date.";
+      if (start !== null && end !== null) input.recurrence = { rule, startDate: values.startDate, startMinute: start, endMinute: end };
+    }
   } else {
     const startAt = fromUtcInput(values.startAt);
     const endAt = fromUtcInput(values.endAt);
@@ -83,7 +134,7 @@ export function validateBlock(values: BlockValues): { errors: Errors; input?: Ne
   return { errors, input };
 }
 
-const fieldNames: Record<string, keyof Errors> = { resourceId: "resourceId", code: "code", windows: "days", condition: "condition", priority: "priority" };
+const fieldNames: Record<string, keyof Errors> = { resourceId: "resourceId", code: "code", windows: "days", recurrence: "rule", condition: "condition", priority: "priority" };
 
 /** Reserve weekly or dated time on a resource for matching jobs. */
 export function NewCapacityBlockPage() {
@@ -97,6 +148,8 @@ export function NewCapacityBlockPage() {
     end: "14:00",
     startAt: "",
     endAt: "",
+    rule: "FREQ=WEEKLY;BYDAY=MO",
+    startDate: "",
     condition: "",
     priority: "",
     active: true,
@@ -164,6 +217,7 @@ export function NewCapacityBlockPage() {
                 {(control) => (
                   <Select {...control} value={values.kind} onChange={(event) => update({ kind: event.target.value as BlockValues["kind"] })}>
                     <option value="weekly">Every week</option>
+                    <option value="recurring">By a recurrence rule</option>
                     <option value="dated">Once, on dates</option>
                   </Select>
                 )}
@@ -171,7 +225,22 @@ export function NewCapacityBlockPage() {
               <FormField id="block-priority" label="Priority" optional hint="0 to 1000; higher wins where blocks overlap." error={errors.priority}>
                 {(control) => <Input {...control} inputMode="numeric" value={values.priority} onChange={(event) => update({ priority: event.target.value })} invalid={Boolean(errors.priority)} />}
               </FormField>
-              {values.kind === "weekly" ? (
+              {values.kind === "recurring" ? (
+                <>
+                  <FormField
+                    id="block-rule"
+                    label="Rule"
+                    hint="FREQ=DAILY or WEEKLY, with INTERVAL, BYDAY and COUNT or UNTIL. For example FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE."
+                    error={errors.rule}
+                  >
+                    {(control) => <Input {...control} spellCheck={false} value={values.rule} onChange={(event) => update({ rule: event.target.value.toUpperCase() })} invalid={Boolean(errors.rule)} />}
+                  </FormField>
+                  <FormField id="block-start-date" label="First date" hint="Site-local date the rule starts counting from." error={errors.startDate}>
+                    {(control) => <Input {...control} type="date" value={values.startDate} onChange={(event) => update({ startDate: event.target.value })} invalid={Boolean(errors.startDate)} />}
+                  </FormField>
+                </>
+              ) : null}
+              {values.kind !== "dated" ? (
                 <>
                   <FormField id="block-start" label="Window start" hint="Site-local time of the resource." error={errors.start}>
                     {(control) => <Input {...control} type="time" value={values.start} onChange={(event) => update({ start: event.target.value })} invalid={Boolean(errors.start)} />}
@@ -179,6 +248,10 @@ export function NewCapacityBlockPage() {
                   <FormField id="block-end" label="Window end" hint="00:00 means midnight at the end of the day." error={errors.end}>
                     {(control) => <Input {...control} type="time" value={values.end} onChange={(event) => update({ end: event.target.value })} invalid={Boolean(errors.end)} />}
                   </FormField>
+                </>
+              ) : null}
+              {values.kind === "weekly" ? (
+                <>
                   <fieldset className={styles.groups} aria-describedby={errors.days ? "block-days-error" : undefined}>
                     <legend className={styles.groupsLegend}>Weekdays</legend>
                     {WEEK_ORDER.map((day) => (

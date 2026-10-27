@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Alert, Badge, Button, buttonClassName, DataTable, FormField, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
 import { listCapacityBlocks, listResources, type CapacityBlock, type Predicate, type Resource } from "./api/client";
 import { describeShifts, formatDateTime, shortId } from "./format";
+import { describeRecurrence } from "./NewCapacityBlockPage";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -13,6 +14,7 @@ export function describeCondition(condition: Predicate[]): string {
 
 export function describeWindow(b: CapacityBlock): string {
   if (b.windows && b.windows.length > 0) return `Weekly: ${describeShifts(b.windows)}`;
+  if (b.recurrence) return `Repeats ${describeRecurrence(b.recurrence)}`;
   return `${formatDateTime(b.startAt)} to ${formatDateTime(b.endAt)}`;
 }
 
@@ -43,7 +45,7 @@ export function CapacityBlocksPage() {
     <div className={styles.stack}>
       <PageHeader
         title="Capacity blocks"
-        description="Time on a resource reserved for jobs that match a condition, such as Monday mornings for white variants. Higher priority wins where blocks overlap."
+        description="Time on a resource reserved for jobs that match a condition, such as Monday mornings for white variants, every week, by a recurrence rule or on dates. Higher priority wins where blocks overlap."
         actions={
           <Link className={buttonClassName("primary")} to="/scheduling/capacity-blocks/new">
             New block

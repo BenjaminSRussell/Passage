@@ -445,8 +445,9 @@ func placementsOfOrders(ctx context.Context, tx pgx.Tx, orderIDs []string) (map[
 	return out, rows.Err()
 }
 
-func firmedJobs(ctx context.Context, tx pgx.Tx, orderID string) (map[string]bool, error) {
-	rows, err := tx.Query(ctx, `select distinct job_id::text from scheduled_job where order_id = $1::uuid and firmed`, orderID)
+// firmedJobs returns the firmed operations of the given orders.
+func firmedJobs(ctx context.Context, tx pgx.Tx, orderIDs []string) (map[string]bool, error) {
+	rows, err := tx.Query(ctx, `select distinct job_id::text from scheduled_job where order_id = any($1::uuid[]) and firmed`, orderIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -489,6 +490,22 @@ func orderDates(ctx context.Context, tx pgx.Tx, orderIDs []string) (map[string]O
 		out[id] = d
 	}
 	return out, rows.Err()
+}
+
+// spans is the start and end of each order over the given placements.
+func spans(ps map[string]domain.Placement) map[string]OrderDates {
+	out := map[string]OrderDates{}
+	for _, pl := range ps {
+		d, ok := out[pl.OrderID]
+		if !ok || pl.Start.Before(d.Start) {
+			d.Start = pl.Start
+		}
+		if pl.End.After(d.End) {
+			d.End = pl.End
+		}
+		out[pl.OrderID] = d
+	}
+	return out
 }
 
 func uniqueStrings(in []string) map[string]bool {

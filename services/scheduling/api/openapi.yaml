@@ -254,7 +254,13 @@ paths:
         the job does not match (SCHED-0002), changeovers are repriced and a
         later job on a touched resource left too short a changeover is a
         SCHED-0001 violation, and a changed network step needs an edge
-        (SCHED-0009) within its maximum wait (SCHED-0010).
+        (SCHED-0009) within its maximum wait (SCHED-0010). A changeover is
+        never split across closed time (BR-23.3): a start that would split it
+        is SCHED-0002. With propagate, the orders pegged to the moved order
+        (order-pegs) that would start before a parent ends are pushed forward
+        with their successors, parents first, up to 500 orders or 5 pegging
+        levels (BR-23.10); truncated reports a walk cut at a limit
+        (SCHED-0007), and a conflict in any dependent refuses the whole move.
       x-passage-duty: scheduling.schedule.write
       parameters:
         - $ref: '#/components/parameters/Id'
@@ -304,6 +310,65 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/order-pegs:
+    post:
+      operationId: createOrderPeg
+      summary: Peg a dependent order to the parent order whose output it consumes (FR-23.8)
+      description: >
+        Both orders need operations in scheduling (SCHED-0120), and a peg that
+        would make an order depend on itself is refused (SCHED-0121). Pegging a
+        pair that is already pegged returns the existing peg with 200. Pegs are
+        entered here until wave 22 pegging publishes them.
+      x-passage-duty: scheduling.schedule.write
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PegRequest' }
+      responses:
+        '201':
+          description: 'Created. A replay or an existing pair returns 200 with Idempotent-Replayed: true.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Peg' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listOrderPegs
+      summary: Order pegs, optionally those where an order is the parent or the dependent
+      x-passage-duty: scheduling.read
+      parameters:
+        - name: orderId
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Pegs by parent then dependent (at most 1,000)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Peg' }
+        '400': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/order-pegs/{id}:
+    delete:
+      operationId: deleteOrderPeg
+      summary: Remove a peg; later moves no longer push its dependent
+      x-passage-duty: scheduling.schedule.write
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '204': { description: Removed }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
   /v1/scheduling/capacity-load:
     get:
       operationId: listCapacityLoad
@@ -897,9 +962,13 @@ components:
         resourceId: { type: string, format: uuid, description: Reassign within the capability set. }
         start: { type: string, format: date-time }
         dryRun: { type: boolean, default: false }
+        propagate:
+          type: boolean
+          default: false
+          description: Also push the orders pegged to the moved order forward behind their parents (FR-23.8, BR-23.10).
     MoveResponse:
       type: object
-      required: [dryRun, feasible, violations, changes]
+      required: [dryRun, feasible, violations, changes, dependents, truncated]
       properties:
         dryRun: { type: boolean }
         feasible: { type: boolean }
@@ -928,7 +997,34 @@ components:
         orderId: { type: string, format: uuid }
         orderStart: { type: string, format: date-time }
         orderEnd: { type: string, format: date-time }
+        dependents:
+          type: array
+          description: Pegged orders whose dates move with this move (propagate only), parents first.
+          items:
+            type: object
+            required: [orderId, oldStart, oldEnd, newStart, newEnd]
+            properties:
+              orderId: { type: string, format: uuid }
+              oldStart: { type: string, format: date-time }
+              oldEnd: { type: string, format: date-time }
+              newStart: { type: string, format: date-time }
+              newEnd: { type: string, format: date-time }
+        truncated: { type: boolean, description: The dependent walk stopped at 500 orders or 5 levels (SCHED-0007). }
         run: { $ref: '#/components/schemas/Run' }
+    PegRequest:
+      type: object
+      required: [parentOrderId, dependentOrderId]
+      properties:
+        parentOrderId: { type: string, format: uuid, description: Order whose output is consumed. }
+        dependentOrderId: { type: string, format: uuid, description: Order that consumes it; must differ from the parent. }
+    Peg:
+      allOf:
+        - $ref: '#/components/schemas/PegRequest'
+        - type: object
+          required: [id, createdAt]
+          properties:
+            id: { type: string, format: uuid }
+            createdAt: { type: string, format: date-time }
     Firm:
       type: object
       properties:
@@ -1041,7 +1137,9 @@ components:
     CapacityBlockRequest:
       type: object
       required: [resourceId, code]
-      description: Either weekly windows (site-local, in the resource's time zone) or startAt and endAt.
+      description: >
+        Exactly one of: weekly windows (site-local, in the resource's time
+        zone), startAt and endAt, or a recurrence.
       properties:
         resourceId: { type: string, format: uuid }
         code: { type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{0,31}$' }
@@ -1052,12 +1150,32 @@ components:
           items: { $ref: '#/components/schemas/Shift' }
         startAt: { type: string, format: date-time }
         endAt: { type: string, format: date-time }
+        recurrence: { $ref: '#/components/schemas/BlockRecurrence' }
         condition:
           type: array
           maxItems: 20
           items: { $ref: '#/components/schemas/Predicate' }
         priority: { type: integer, minimum: 0, maximum: 1000, default: 0 }
         active: { type: boolean, default: true }
+    BlockRecurrence:
+      type: object
+      required: [rule, startDate, startMinute, endMinute]
+      description: >
+        A recurring window, for example every Monday 06:00-14:00. Runs and
+        moves expand it over their horizon in the resource's time zone, so a
+        DST day keeps its true length.
+      properties:
+        rule:
+          type: string
+          maxLength: 200
+          description: >
+            RRULE subset (RFC 5545): FREQ=DAILY or WEEKLY (required),
+            INTERVAL, BYDAY (weekly only, plain weekday codes), and COUNT or
+            UNTIL=YYYYMMDD. Anything else is refused.
+          examples: ['FREQ=WEEKLY;BYDAY=MO,WE', 'FREQ=DAILY;INTERVAL=2;COUNT=10']
+        startDate: { type: string, format: date, description: First local date (DTSTART). }
+        startMinute: { type: integer, minimum: 0, maximum: 1439, description: Site-local minutes after midnight. }
+        endMinute: { type: integer, minimum: 1, maximum: 1440, description: After startMinute, within the same day. }
     CapacityBlock:
       allOf:
         - $ref: '#/components/schemas/CapacityBlockRequest'

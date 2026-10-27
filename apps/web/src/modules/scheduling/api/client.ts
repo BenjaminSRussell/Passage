@@ -128,6 +128,8 @@ export interface MoveRequest {
   resourceId?: string;
   start: string;
   dryRun: boolean;
+  /** Also push the orders pegged to the moved order forward behind their parents (FR-23.8). */
+  propagate?: boolean;
 }
 
 export interface MoveViolation {
@@ -147,6 +149,15 @@ export interface MoveChange {
   lateMinutes: number;
 }
 
+/** A pegged order whose dates move with a propagated move. */
+export interface DependentChange {
+  orderId: string;
+  oldStart: string;
+  oldEnd: string;
+  newStart: string;
+  newEnd: string;
+}
+
 export interface MoveResponse {
   dryRun: boolean;
   feasible: boolean;
@@ -155,6 +166,10 @@ export interface MoveResponse {
   orderId?: string;
   orderStart?: string;
   orderEnd?: string;
+  /** Pegged orders that move too, parents first (propagate only). */
+  dependents?: DependentChange[];
+  /** The dependent walk stopped at 500 orders or 5 levels (SCHED-0007, BR-23.10). */
+  truncated?: boolean;
   run?: Run;
 }
 
@@ -397,6 +412,16 @@ export interface Predicate {
   value: string;
 }
 
+/** A recurring block window: an RRULE subset from a local start date (FR-23.17). */
+export interface BlockRecurrence {
+  /** FREQ=DAILY or WEEKLY, with INTERVAL, BYDAY (weekly) and COUNT or UNTIL=YYYYMMDD. */
+  rule: string;
+  /** First local date, YYYY-MM-DD. */
+  startDate: string;
+  startMinute: number;
+  endMinute: number;
+}
+
 export interface CapacityBlock {
   id: string;
   resourceId: string;
@@ -404,6 +429,7 @@ export interface CapacityBlock {
   windows?: Shift[];
   startAt?: string;
   endAt?: string;
+  recurrence?: BlockRecurrence;
   condition: Predicate[];
   priority: number;
   active: boolean;
@@ -417,6 +443,7 @@ export interface NewCapacityBlock {
   windows?: Shift[];
   startAt?: string;
   endAt?: string;
+  recurrence?: BlockRecurrence;
   condition: Predicate[];
   priority: number;
   active: boolean;
@@ -606,4 +633,40 @@ export function startCampaign(id: string, version: number, key: string = newKey(
 /** Computes the split of a campaign's setup and cleanout cost; nothing is posted. */
 export function allocateCampaignCost(id: string, input: AllocationRequest): Promise<Allocation> {
   return post<Allocation>(`/campaigns/${encodeURIComponent(id)}:allocate-cost`, input);
+}
+
+// Slice 4: order pegs that moves propagate along (FR-23.8).
+
+/** The dependent order consumes the parent order's output, so it cannot start before the parent ends. */
+export interface OrderPeg {
+  id: string;
+  parentOrderId: string;
+  dependentOrderId: string;
+  createdAt: string;
+}
+
+export interface NewOrderPeg {
+  parentOrderId: string;
+  dependentOrderId: string;
+}
+
+/** Pegs, or those where orderId is the parent or the dependent. */
+export function listPegs(orderId = "", signal?: AbortSignal): Promise<OrderPeg[]> {
+  return items<OrderPeg>(`/order-pegs${query({ orderId })}`, signal);
+}
+
+export function createPeg(input: NewOrderPeg, key: string = newKey()): Promise<OrderPeg> {
+  return post<OrderPeg>("/order-pegs", input, key);
+}
+
+/** Removes a peg; the service answers 204 with no body. */
+export async function deletePeg(id: string): Promise<void> {
+  const res = await fetch(`${base}/order-pegs/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: { Accept: "application/json" },
+    credentials: "same-origin",
+  });
+  if (!res.ok) {
+    throw await toError(res);
+  }
 }

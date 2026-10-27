@@ -339,14 +339,15 @@ func (a *API) listCleanoutRules(w http.ResponseWriter, r *http.Request) {
 }
 
 type capacityBlockRequest struct {
-	ResourceID string             `json:"resourceId"`
-	Code       string             `json:"code"`
-	Windows    []domain.Shift     `json:"windows"`
-	StartAt    *time.Time         `json:"startAt"`
-	EndAt      *time.Time         `json:"endAt"`
-	Condition  []domain.Predicate `json:"condition"`
-	Priority   *int               `json:"priority"`
-	Active     *bool              `json:"active"`
+	ResourceID string                 `json:"resourceId"`
+	Code       string                 `json:"code"`
+	Windows    []domain.Shift         `json:"windows"`
+	StartAt    *time.Time             `json:"startAt"`
+	EndAt      *time.Time             `json:"endAt"`
+	Recurrence *store.BlockRecurrence `json:"recurrence"`
+	Condition  []domain.Predicate     `json:"condition"`
+	Priority   *int                   `json:"priority"`
+	Active     *bool                  `json:"active"`
 }
 
 func (a *API) createCapacityBlock(w http.ResponseWriter, r *http.Request) {
@@ -371,15 +372,27 @@ func (a *API) createCapacityBlock(w http.ResponseWriter, r *http.Request) {
 		fields["code"] = "must be 1 to 32 characters of A-Z, 0-9, _ or -"
 	}
 	dated := req.StartAt != nil || req.EndAt != nil
+	shapes := 0
+	for _, given := range []bool{len(req.Windows) > 0, dated, req.Recurrence != nil} {
+		if given {
+			shapes++
+		}
+	}
 	switch {
-	case len(req.Windows) > 0 && dated:
-		fields["windows"] = "give weekly windows or startAt and endAt, not both"
+	case shapes > 1:
+		fields["windows"] = "give weekly windows, startAt and endAt, or a recurrence, only one of them"
+	case req.Recurrence != nil:
+		// RRULE names and values are case-insensitive (RFC 5545); store them upper case.
+		req.Recurrence.Rule = strings.ToUpper(strings.TrimSpace(req.Recurrence.Rule))
+		if msg := validRecurrence(*req.Recurrence); msg != "" {
+			fields["recurrence"] = msg
+		}
 	case len(req.Windows) > 0:
 		if msg := validShifts(req.Windows); msg != "" {
 			fields["windows"] = msg
 		}
 	case req.StartAt == nil || req.EndAt == nil || !req.EndAt.After(*req.StartAt):
-		fields["windows"] = "give weekly windows, or startAt and endAt with endAt after startAt"
+		fields["windows"] = "give weekly windows, startAt and endAt with endAt after startAt, or a recurrence"
 	}
 	if len(req.Condition) > maxPredicates {
 		fields["condition"] = fmt.Sprintf("must hold at most %d predicates", maxPredicates)
@@ -409,7 +422,8 @@ func (a *API) createCapacityBlock(w http.ResponseWriter, r *http.Request) {
 	if req.Condition == nil {
 		req.Condition = []domain.Predicate{}
 	}
-	in := store.CapacityBlock{ResourceID: req.ResourceID, Code: req.Code, Windows: req.Windows, Condition: req.Condition, Priority: priority, Active: active}
+	in := store.CapacityBlock{ResourceID: req.ResourceID, Code: req.Code, Windows: req.Windows, Recurrence: req.Recurrence,
+		Condition: req.Condition, Priority: priority, Active: active}
 	if dated {
 		start, end := req.StartAt.UTC(), req.EndAt.UTC()
 		in.StartAt, in.EndAt = &start, &end
@@ -421,6 +435,22 @@ func (a *API) createCapacityBlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	created(w, b, isNew)
+}
+
+// validRecurrence checks a recurring block window: the RRULE subset the
+// scheduler expands, a YYYY-MM-DD start date and a window within one day.
+func validRecurrence(rc store.BlockRecurrence) string {
+	if !validDate(rc.StartDate) {
+		return "startDate must be a date (YYYY-MM-DD)"
+	}
+	d, err := rc.Domain()
+	if err == nil {
+		err = d.Validate()
+	}
+	if err != nil {
+		return err.Error()
+	}
+	return ""
 }
 
 func (a *API) listCapacityBlocks(w http.ResponseWriter, r *http.Request) {

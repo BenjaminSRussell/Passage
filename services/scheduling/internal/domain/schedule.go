@@ -408,18 +408,28 @@ type MoveInput struct {
 	ResourceID  string
 	At          time.Time
 	// Firmed lists operations whose placement is frozen (FR-23.4): the moved
-	// operation must not be firmed, and a firmed successor cannot be pushed.
+	// operation must not be firmed, and a firmed successor or dependent
+	// cannot be pushed.
 	Firmed map[string]bool
-	// Networks are the resource networks the order's operations name (FR-23.13).
+	// Networks are the resource networks the operations name (FR-23.13).
 	Networks []ResourceNetwork
+	// Dependents are the operations of the orders pegged to the moved order,
+	// directly or through other pegged orders (FR-23.8), and Pegs links them.
+	// Current must hold their placements. Empty means the move does not
+	// propagate beyond the moved order.
+	Dependents []Operation
+	Pegs       []Peg
 }
 
 // MovePlan is the proposed change set. Conflict is set when the move is
 // infeasible; Changes lists every operation whose placement changes, the moved
-// operation first.
+// operation first, then its successors, then the dependents' operations.
+// Dependents names the pegged orders that moved, in the order they were
+// re-planned.
 type MovePlan struct {
-	Changes  []Placement
-	Conflict *Conflict
+	Changes    []Placement
+	Dependents []string
+	Conflict   *Conflict
 }
 
 // PlanMove plans a move (FR-23.8). The moved operation starts no earlier than
@@ -430,6 +440,12 @@ type MovePlan struct {
 // still carry the changeover its new predecessor needs; and each network step
 // the move changes must use an edge within its transfer time and maximum wait
 // (SCHED-0009, SCHED-0010).
+//
+// With dependents, each pegged order whose first operation starts before one
+// of its parents now ends is pushed forward to that end, with its own
+// successors, on the same resources. Parents are re-planned before their
+// dependents, so a dependent pegged to two orders waits for both. Dependents
+// never move earlier, and any conflict refuses the whole move.
 func PlanMove(in MoveInput) MovePlan {
 	caps := capacities(in.Resources, in.Start, in.HorizonDays)
 	busy := groupBusy(in.Booked)
@@ -486,48 +502,107 @@ func PlanMove(in MoveInput) MovePlan {
 		busy[in.ResourceID] = insertBusy(busy[in.ResourceID], busyOf(*mv, moved)...)
 	}
 	touch(in.ResourceID, moved.Start)
-	changes := []Placement{moved}
-	pred := moved.End
-	for _, op := range in.Order {
-		if op.OperNumber <= mv.OperNumber {
-			continue
-		}
-		cur, ok := in.Current[op.ID]
-		if !ok {
-			continue
-		}
-		ready := cur.Start
-		if pred.After(ready) {
-			ready = pred
-		}
-		if in.Firmed[op.ID] {
-			if ready.After(cur.Start) {
-				return MovePlan{Conflict: &Conflict{Code: CodeFirmed, Detail: "move would push a firmed successor; unfirm it first", JobID: op.ID}}
+
+	// push re-places the placed operations of chain (sorted by operation
+	// number) on their resources so the first starts no earlier than pred and
+	// each later one no earlier than the one before it ends. Operations that
+	// already start late enough and keep their changeover stay as they are.
+	push := func(chain []Operation, pred time.Time, firmedDetail string) ([]Placement, *Conflict) {
+		var out []Placement
+		for _, op := range chain {
+			cur, ok := in.Current[op.ID]
+			if !ok {
+				continue
 			}
-			pred = cur.End
-			continue
+			ready := cur.Start
+			if pred.After(ready) {
+				ready = pred
+			}
+			if in.Firmed[op.ID] {
+				if ready.After(cur.Start) {
+					return nil, &Conflict{Code: CodeFirmed, Detail: firmedDetail, JobID: op.ID}
+				}
+				pred = cur.End
+				continue
+			}
+			cc := caps[cur.ResourceID]
+			busy[cur.ResourceID] = removeJob(busy[cur.ResourceID], op.ID)
+			var sbs []Busy
+			if cc.res.Finite {
+				sbs = busy[cur.ResourceID]
+			}
+			ns, conf := placeOn(cc, op, sbs, ready, sequenced(cc, op, false))
+			if conf != nil {
+				return nil, conf
+			}
+			next := newPlacement(op, cur.ResourceID, ns.segs)
+			next.ChangeoverMinutes = ns.changeover
+			if cc.res.Finite {
+				busy[cur.ResourceID] = insertBusy(busy[cur.ResourceID], busyOf(op, next)...)
+			}
+			if !next.Start.Equal(cur.Start) || !next.End.Equal(cur.End) || next.ChangeoverMinutes != cur.ChangeoverMinutes {
+				out = append(out, next)
+				touch(cur.ResourceID, cur.Start)
+			}
+			pred = next.End
 		}
-		cc := caps[cur.ResourceID]
-		busy[cur.ResourceID] = removeJob(busy[cur.ResourceID], op.ID)
-		var sbs []Busy
-		if cc.res.Finite {
-			sbs = busy[cur.ResourceID]
-		}
-		ns, conf := placeOn(cc, op, sbs, ready, sequenced(cc, op, false))
-		if conf != nil {
-			return MovePlan{Conflict: conf}
-		}
-		next := newPlacement(op, cur.ResourceID, ns.segs)
-		next.ChangeoverMinutes = ns.changeover
-		if cc.res.Finite {
-			busy[cur.ResourceID] = insertBusy(busy[cur.ResourceID], busyOf(op, next)...)
-		}
-		if !next.Start.Equal(cur.Start) || !next.End.Equal(cur.End) || next.ChangeoverMinutes != cur.ChangeoverMinutes {
-			changes = append(changes, next)
-			touch(cur.ResourceID, cur.Start)
-		}
-		pred = next.End
+		return out, nil
 	}
+
+	successors := byOperNumber(slices.DeleteFunc(slices.Clone(in.Order), func(op Operation) bool { return op.OperNumber <= mv.OperNumber }))
+	pushed, conf := push(successors, moved.End, "move would push a firmed successor; unfirm it first")
+	if conf != nil {
+		return MovePlan{Conflict: conf}
+	}
+	changes := append([]Placement{moved}, pushed...)
+	if conf := checkNetworks(in.Networks, in.Order, in.Current, caps, changes); conf != nil {
+		return MovePlan{Conflict: conf}
+	}
+
+	var dependents []string
+	if len(in.Dependents) > 0 {
+		ends := orderEnds(in.Current, changes)
+		chains := map[string][]Operation{}
+		for _, op := range in.Dependents {
+			chains[op.OrderID] = append(chains[op.OrderID], op)
+		}
+		parents := map[string][]string{}
+		for _, p := range in.Pegs {
+			parents[p.DependentOrderID] = append(parents[p.DependentOrderID], p.ParentOrderID)
+		}
+		for _, oid := range PropagationOrder(mv.OrderID, in.Pegs) {
+			chain := byOperNumber(chains[oid])
+			if len(chain) == 0 {
+				continue
+			}
+			var ready time.Time
+			for _, p := range parents[oid] {
+				if e, ok := ends[p]; ok && e.After(ready) {
+					ready = e
+				}
+			}
+			dep, conf := push(chain, ready, "a firmed job would have to move; unfirm it first")
+			if conf != nil {
+				conf.Detail = fmt.Sprintf("pegged order %s: %s", oid, conf.Detail)
+				return MovePlan{Conflict: conf}
+			}
+			if len(dep) == 0 {
+				continue
+			}
+			if conf := checkNetworks(in.Networks, chain, in.Current, caps, dep); conf != nil {
+				conf.Detail = fmt.Sprintf("pegged order %s: %s", oid, conf.Detail)
+				return MovePlan{Conflict: conf}
+			}
+			for _, pl := range dep {
+				if pl.End.After(ends[oid]) {
+					ends[oid] = pl.End
+				}
+			}
+			changes = append(changes, dep...)
+			dependents = append(dependents, oid)
+		}
+	}
+
 	rids := make([]string, 0, len(touched))
 	for rid := range touched {
 		rids = append(rids, rid)
@@ -540,10 +615,31 @@ func PlanMove(in MoveInput) MovePlan {
 			}
 		}
 	}
-	if conf := checkNetworks(in, caps, changes); conf != nil {
-		return MovePlan{Conflict: conf}
+	return MovePlan{Changes: changes, Dependents: dependents}
+}
+
+// byOperNumber sorts operations by operation number in place and returns them.
+func byOperNumber(ops []Operation) []Operation {
+	slices.SortFunc(ops, func(a, b Operation) int { return a.OperNumber - b.OperNumber })
+	return ops
+}
+
+// orderEnds is the latest end of each order's placements once changes apply.
+func orderEnds(current map[string]Placement, changes []Placement) map[string]time.Time {
+	merged := make(map[string]Placement, len(current))
+	for id, pl := range current {
+		merged[id] = pl
 	}
-	return MovePlan{Changes: changes}
+	for _, c := range changes {
+		merged[c.OperationID] = c
+	}
+	out := map[string]time.Time{}
+	for _, pl := range merged {
+		if pl.End.After(out[pl.OrderID]) {
+			out[pl.OrderID] = pl.End
+		}
+	}
+	return out
 }
 
 // insideAny reports whether t falls inside one of the sorted intervals.
@@ -552,16 +648,16 @@ func insideAny(iv []Interval, t time.Time) bool {
 	return i < len(iv) && !iv[i].Start.After(t)
 }
 
-// checkNetworks verifies every network step of the order that the move
+// checkNetworks verifies every network step of one order that the move
 // changes: the step must use an edge of the operation's network and start
 // within the edge's transfer time and maximum wait (BR-23.11).
-func checkNetworks(in MoveInput, caps map[string]capacity, changes []Placement) *Conflict {
+func checkNetworks(networks []ResourceNetwork, order []Operation, current map[string]Placement, caps map[string]capacity, changes []Placement) *Conflict {
 	nets := map[string]ResourceNetwork{}
-	for _, n := range in.Networks {
+	for _, n := range networks {
 		nets[n.Code] = n
 	}
-	merged := make(map[string]Placement, len(in.Current)+len(changes))
-	for id, pl := range in.Current {
+	merged := make(map[string]Placement, len(current)+len(changes))
+	for id, pl := range current {
 		merged[id] = pl
 	}
 	changed := map[string]bool{}
@@ -569,8 +665,7 @@ func checkNetworks(in MoveInput, caps map[string]capacity, changes []Placement) 
 		merged[c.OperationID] = c
 		changed[c.OperationID] = true
 	}
-	ops := slices.Clone(in.Order)
-	slices.SortFunc(ops, func(a, b Operation) int { return a.OperNumber - b.OperNumber })
+	ops := byOperNumber(slices.Clone(order))
 	var prev *Operation
 	for i := range ops {
 		op := &ops[i]

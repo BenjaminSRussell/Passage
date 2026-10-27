@@ -37,11 +37,20 @@ func loadConstraints(ctx context.Context, tx pgx.Tx, resources []domain.Resource
 		r.Blocks = nil
 		for _, b := range blocks[r.ID] {
 			db := domain.CapacityBlock{ID: b.ID, ResourceID: b.ResourceID, Priority: b.Priority, Condition: b.Condition}
-			if b.StartAt != nil && b.EndAt != nil {
+			// Expand from the day before so a window that started before from
+			// in the site's time zone still covers its tail.
+			switch {
+			case b.StartAt != nil && b.EndAt != nil:
 				db.Windows = []domain.Interval{{Start: b.StartAt.UTC(), End: b.EndAt.UTC()}}
-			} else {
-				// Expand from the day before so a window that started before
-				// from in the site's time zone still covers its tail.
+			case b.Recurrence != nil:
+				rc, err := b.Recurrence.Domain()
+				if err == nil {
+					db.Windows, err = rc.Windows(r.Location, from.Add(-24*time.Hour), from.AddDate(0, 0, days+1))
+				}
+				if err != nil {
+					return nil, fmt.Errorf("capacity block %s: %w", b.Code, err)
+				}
+			default:
 				db.Windows = domain.OpenIntervals(r.Location, b.Windows, from.Add(-24*time.Hour), days+2)
 			}
 			r.Blocks = append(r.Blocks, db)

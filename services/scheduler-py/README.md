@@ -11,10 +11,28 @@ that is, weighted lateness plus lambda x makespan with lambda = lambdaTenths / 1
 (default 0.1). Jobs without `due` add no lateness. Windows are limited to
 2,000 operations; larger sets are split by the caller.
 
-- `POST /v1/optimize/job-shop` with `{machines, jobs: [{operations: [{machine, minutes}], due?, weight?}], timeLimitSeconds?, lambdaTenths?}`
-  returns `{status, starts, makespan, totalLateness, objective}`. `status` is the
-  CP-SAT status name (OPTIMAL, FEASIBLE, UNKNOWN, INFEASIBLE); `starts` is empty
-  unless OPTIMAL or FEASIBLE.
+- `POST /v1/optimize/job-shop` with `{machines, jobs: [{operations: [{machine, minutes, candidates?, network?}], due?, weight?}], timeLimitSeconds?, lambdaTenths?}`
+  returns `{status, starts, machines, makespan, totalLateness, objective}`. `status` is the
+  CP-SAT status name (OPTIMAL, FEASIBLE, UNKNOWN, INFEASIBLE); `starts` and
+  `machines` are empty unless OPTIMAL or FEASIBLE.
+  - `candidates` lists the machines an operation may run on, its `machine`
+    first; `machines` in the answer gives the one chosen.
+  - `network` is the resource network step from the job's previous operation
+    into this one (FR-23.13, BR-23.11): a list of edges
+    `{fromMachine, toMachine, transferMinutes?, maxWaitMinutes?}`. The two
+    operations must run on the machines of one edge (`AddAllowedAssignments` on
+    the machine-choice variables), and the next one starts between the edge's
+    transfer time and maximum wait after the previous one ends. A job whose
+    steps leave no chain of machines is refused with 422.
+- `POST /v1/optimize/campaign-sequence` with `{changeover, timeLimitSeconds?}`
+  orders a campaign's orders to minimise changeover minutes with `AddCircuit`
+  (FR-23.14, at most 50 orders, 30 s by default). `changeover` is an n+1 square
+  matrix of whole minutes: index 0 is the resource's current setup state, index
+  i is order i-1, and the arc back to index 0 is free. It returns
+  `{status, sequence, changeoverMinutes}` with `sequence` the zero-based order
+  indices in run order (empty unless OPTIMAL or FEASIBLE; the caller keeps its
+  nearest-neighbour sequence then). `changeover_matrix` builds the matrix from
+  setup groups and a (from, to) table.
 - `GET /healthz`, `GET /readyz`.
 
 Run: `uvicorn scheduler_opt.app:create_app --factory --port 8080`.

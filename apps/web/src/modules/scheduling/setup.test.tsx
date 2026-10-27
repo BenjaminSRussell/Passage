@@ -565,6 +565,8 @@ describe("Capacity blocks", () => {
     end: "14:00",
     startAt: "",
     endAt: "",
+    rule: "",
+    startDate: "",
     condition: "color = white",
     priority: "",
     active: true,

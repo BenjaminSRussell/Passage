@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -77,7 +78,8 @@ func (r CleanoutRule) Domain() domain.CleanoutRule {
 }
 
 // CapacityBlock reserves weekly windows (site-local shifts in the resource's
-// time zone) or one dated window for jobs matching Condition (FR-23.17).
+// time zone), one dated window, or a recurring window for jobs matching
+// Condition (FR-23.17).
 type CapacityBlock struct {
 	ID         string             `json:"id"`
 	ResourceID string             `json:"resourceId"`
@@ -85,11 +87,30 @@ type CapacityBlock struct {
 	Windows    []domain.Shift     `json:"windows,omitempty"`
 	StartAt    *time.Time         `json:"startAt,omitempty"`
 	EndAt      *time.Time         `json:"endAt,omitempty"`
+	Recurrence *BlockRecurrence   `json:"recurrence,omitempty"`
 	Condition  []domain.Predicate `json:"condition"`
 	Priority   int                `json:"priority"`
 	Active     bool               `json:"active"`
 	Version    int                `json:"version"`
 	CreatedAt  time.Time          `json:"createdAt"`
+}
+
+// BlockRecurrence is a recurring block window: an RRULE subset from a local
+// start date, open from StartMinute to EndMinute site-local on each occurrence.
+type BlockRecurrence struct {
+	Rule        string `json:"rule"`
+	StartDate   string `json:"startDate"`
+	StartMinute int    `json:"startMinute"`
+	EndMinute   int    `json:"endMinute"`
+}
+
+// Domain converts the stored recurrence for expansion.
+func (r BlockRecurrence) Domain() (domain.Recurrence, error) {
+	d, err := time.Parse(time.DateOnly, r.StartDate)
+	if err != nil {
+		return domain.Recurrence{}, fmt.Errorf("recurrence start date %q: %w", r.StartDate, err)
+	}
+	return domain.Recurrence{Rule: r.Rule, StartDate: d, StartMinute: r.StartMinute, EndMinute: r.EndMinute}, nil
 }
 
 // SetupStore is the slice 2 setup part of the Store.
@@ -488,13 +509,20 @@ func cleanoutRules(ctx context.Context, tx pgx.Tx, groups []string) ([]CleanoutR
 	return out, rows.Err()
 }
 
-const blockCols = "id::text, resource_id::text, code, windows, start_at, end_at, condition, priority, active, version, created_at"
+const blockCols = `id::text, resource_id::text, code, windows, start_at, end_at, recurrence_rule, recurrence_start::text,
+	recurrence_start_minute, recurrence_end_minute, condition, priority, active, version, created_at`
 
 func scanBlock(row pgx.Row) (CapacityBlock, error) {
 	var b CapacityBlock
 	var windows, condition []byte
-	if err := row.Scan(&b.ID, &b.ResourceID, &b.Code, &windows, &b.StartAt, &b.EndAt, &condition, &b.Priority, &b.Active, &b.Version, &b.CreatedAt); err != nil {
+	var rule, startDate *string
+	var startMinute, endMinute *int
+	if err := row.Scan(&b.ID, &b.ResourceID, &b.Code, &windows, &b.StartAt, &b.EndAt, &rule, &startDate, &startMinute, &endMinute,
+		&condition, &b.Priority, &b.Active, &b.Version, &b.CreatedAt); err != nil {
 		return CapacityBlock{}, err
+	}
+	if rule != nil && startDate != nil && startMinute != nil && endMinute != nil {
+		b.Recurrence = &BlockRecurrence{Rule: *rule, StartDate: *startDate, StartMinute: *startMinute, EndMinute: *endMinute}
 	}
 	if windows != nil {
 		if err := json.Unmarshal(windows, &b.Windows); err != nil {
@@ -518,6 +546,11 @@ func (s *Postgres) CreateCapacityBlock(ctx context.Context, in CapacityBlock, id
 	if err != nil {
 		return CapacityBlock{}, false, err
 	}
+	var rule, startDate *string
+	var startMinute, endMinute *int
+	if rc := in.Recurrence; rc != nil {
+		rule, startDate, startMinute, endMinute = &rc.Rule, &rc.StartDate, &rc.StartMinute, &rc.EndMinute
+	}
 	var out CapacityBlock
 	created := false
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
@@ -530,9 +563,10 @@ func (s *Postgres) CreateCapacityBlock(ctx context.Context, in CapacityBlock, id
 				return err
 			}
 			id = ids.New()
-			if _, err := tx.Exec(ctx, `insert into scheduling_capacity_block (tenant_id, id, resource_id, code, windows, start_at, end_at, condition, priority, active, idempotency_key, idempotency_fingerprint)
-				values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`, tenantOf(ctx), id, in.ResourceID, in.Code, windows, in.StartAt, in.EndAt,
-				condition, in.Priority, in.Active, nullable(idem.Key), nullable(idem.Fingerprint)); err != nil {
+			if _, err := tx.Exec(ctx, `insert into scheduling_capacity_block (tenant_id, id, resource_id, code, windows, start_at, end_at,
+					recurrence_rule, recurrence_start, recurrence_start_minute, recurrence_end_minute, condition, priority, active, idempotency_key, idempotency_fingerprint)
+				values ($1, $2, $3, $4, $5, $6, $7, $8, $9::date, $10, $11, $12, $13, $14, $15, $16)`, tenantOf(ctx), id, in.ResourceID, in.Code, windows, in.StartAt, in.EndAt,
+				rule, startDate, startMinute, endMinute, condition, in.Priority, in.Active, nullable(idem.Key), nullable(idem.Fingerprint)); err != nil {
 				return err
 			}
 			created = true

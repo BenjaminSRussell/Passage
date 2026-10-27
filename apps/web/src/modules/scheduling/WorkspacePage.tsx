@@ -28,6 +28,8 @@ interface Proposal {
   job: GanttBar;
   resourceId: string;
   start: string;
+  /** Also push the orders pegged to this one (FR-23.8). */
+  propagate: boolean;
 }
 
 interface Preview {
@@ -58,6 +60,7 @@ export function WorkspacePage() {
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState<"preview" | "commit" | null>(null);
   const [firming, setFirming] = useState<string | null>(null);
+  const [propagate, setPropagate] = useState(false);
   const formRef = useRef<HTMLDivElement>(null);
 
   const resources = board.data?.resources ?? [];
@@ -67,7 +70,7 @@ export function WorkspacePage() {
 
   function select(job: GanttBar, start = job.start) {
     const whole = jobs.find((j) => j.jobId === job.jobId) ?? job;
-    setProposal({ job: whole, resourceId: whole.resourceId, start });
+    setProposal({ job: whole, resourceId: whole.resourceId, start, propagate });
     setPreview(null);
     setViolations({});
     setFailure(null);
@@ -80,7 +83,7 @@ export function WorkspacePage() {
     setFailure(null);
     setNotice("");
     try {
-      const response = await moveJob(next.job.jobId, { start: next.start, resourceId: next.resourceId, dryRun: true });
+      const response = await moveJob(next.job.jobId, { start: next.start, resourceId: next.resourceId, dryRun: true, ...(next.propagate ? { propagate: true } : {}) });
       setPreview({ proposal: next, response, key: newKey() });
       setViolations(response.feasible ? {} : Object.fromEntries(response.violations.map((v) => [v.jobId ?? next.job.jobId, `${v.detail} (${v.code})`])));
     } catch (error) {
@@ -95,7 +98,7 @@ export function WorkspacePage() {
     const whole = jobs.find((j) => j.jobId === bar.jobId) ?? bar;
     // A drag moves the job's first segment by the dragged distance.
     const offset = Date.parse(start) - Date.parse(bar.start);
-    const next = { job: whole, resourceId: whole.resourceId, start: new Date(Date.parse(whole.start) + offset).toISOString().replace(".000Z", "Z") };
+    const next = { job: whole, resourceId: whole.resourceId, start: new Date(Date.parse(whole.start) + offset).toISOString().replace(".000Z", "Z"), propagate };
     setProposal(next);
     void runPreview(next);
   }
@@ -106,10 +109,13 @@ export function WorkspacePage() {
     setFailure(null);
     try {
       const { proposal: p } = preview;
-      const done = await moveJob(p.job.jobId, { start: p.start, resourceId: p.resourceId, dryRun: false }, preview.key);
+      const done = await moveJob(p.job.jobId, { start: p.start, resourceId: p.resourceId, dryRun: false, ...(p.propagate ? { propagate: true } : {}) }, preview.key);
       setPreview(null);
       setProposal(null);
-      setNotice(`Move saved. ${done.changes.length} operation(s) rescheduled${done.orderEnd ? `; the order now ends ${formatDateTime(done.orderEnd)}` : ""}.`);
+      const pegged = done.dependents?.length ? ` ${done.dependents.length} pegged order(s) moved with it.` : "";
+      setNotice(
+        `Move saved. ${done.changes.length} operation(s) rescheduled${done.orderEnd ? `; the order now ends ${formatDateTime(done.orderEnd)}` : ""}.${pegged}`,
+      );
       board.reload();
     } catch (error) {
       setFailure(describeProblem(error));
@@ -198,6 +204,23 @@ export function WorkspacePage() {
           )}
         </FormField>
         <Button onClick={board.reload}>Refresh</Button>
+        <span className={styles.check}>
+          <Input
+            id="gantt-propagate"
+            type="checkbox"
+            checked={propagate}
+            aria-describedby="gantt-propagate-hint"
+            onChange={(event) => {
+              setPropagate(event.target.checked);
+              if (proposal) setProposal({ ...proposal, propagate: event.target.checked });
+              setPreview(null);
+            }}
+          />
+          <label htmlFor="gantt-propagate">Move pegged orders too</label>
+        </span>
+        <span id="gantt-propagate-hint" className={styles.note}>
+          Orders pegged to the moved order are pushed behind it, up to 500 orders or 5 levels.
+        </span>
       </div>
       <Alert tone="success" live="status">
         {notice}
@@ -321,6 +344,26 @@ export function WorkspacePage() {
                     <p className={styles.note}>
                       {`${preview.response.changes.length} operation(s) move. The order runs ${formatDateTime(preview.response.orderStart)} to ${formatDateTime(preview.response.orderEnd)}.`}
                     </p>
+                    {preview.response.truncated ? (
+                      <Alert tone="warning" title="Not every pegged order was re-planned">
+                        Propagation stopped at 500 orders or 5 pegging levels (SCHED-0007). Run the site schedule to re-plan the rest.
+                      </Alert>
+                    ) : null}
+                    {preview.proposal.propagate ? (
+                      <DataTable
+                        label="Pegged orders that move"
+                        columns={[
+                          { key: "orderId", header: "Order", mono: true, render: (d) => shortId(d.orderId) },
+                          { key: "oldEnd", header: "Ended", render: (d) => formatDateTime(d.oldEnd) },
+                          { key: "newStart", header: "Starts", render: (d) => formatDateTime(d.newStart) },
+                          { key: "newEnd", header: "Ends", render: (d) => formatDateTime(d.newEnd) },
+                          { key: "delay", header: "Delay", align: "end", render: (d) => formatMinutes(Math.round((Date.parse(d.newEnd) - Date.parse(d.oldEnd)) / 60_000)) },
+                        ]}
+                        rows={preview.response.dependents ?? []}
+                        getRowKey={(d) => d.orderId}
+                        empty={{ title: "No pegged order moves", description: "No order pegged to this one would start before it ends." }}
+                      />
+                    ) : null}
                     <DataTable
                       label="Affected operations"
                       columns={[

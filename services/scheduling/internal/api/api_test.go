@@ -47,6 +47,9 @@ type fakeStore struct {
 	lastRule     store.CleanoutRule
 	lastBlock    store.CapacityBlock
 	lastFilter   store.CampaignFilter
+
+	// slice 4
+	lastPeg store.Peg
 }
 
 func (f *fakeStore) CreateResource(_ context.Context, in store.Resource, _ store.Idem) (store.Resource, bool, error) {

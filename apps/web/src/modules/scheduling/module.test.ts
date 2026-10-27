@@ -22,6 +22,8 @@ describe("scheduling module", () => {
         "/scheduling/resources/:id",
         "/scheduling/operations",
         "/scheduling/operations/new",
+        "/scheduling/order-pegs",
+        "/scheduling/order-pegs/new",
         "/scheduling/campaigns",
         "/scheduling/campaigns/new",
         "/scheduling/campaigns/:id",

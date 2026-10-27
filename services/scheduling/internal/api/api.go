@@ -115,6 +115,8 @@ type moveRequest struct {
 	ResourceID string    `json:"resourceId"`
 	Start      time.Time `json:"start"`
 	DryRun     bool      `json:"dryRun"`
+	// Propagate also re-plans the orders pegged to the moved order (FR-23.8).
+	Propagate bool `json:"propagate"`
 }
 
 type violation struct {
@@ -131,7 +133,11 @@ type moveResponse struct {
 	OrderID    string         `json:"orderId,omitempty"`
 	OrderStart time.Time      `json:"orderStart,omitempty"`
 	OrderEnd   time.Time      `json:"orderEnd,omitempty"`
-	Run        *store.Run     `json:"run,omitempty"`
+	// Dependents are the pegged orders that move too, and Truncated reports
+	// that the walk stopped at a BR-23.10 limit (SCHED-0007).
+	Dependents []store.DependentChange `json:"dependents"`
+	Truncated  bool                    `json:"truncated"`
+	Run        *store.Run              `json:"run,omitempty"`
 }
 
 type loadItem struct {
@@ -159,6 +165,11 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutySchedule)).Post("/v1/scheduling/jobs/{id}:move", a.moveJob)
 	r.With(authz.RequireDuty(dutySchedule)).Post("/v1/scheduling/jobs/{id}:firm", a.firmJob)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/capacity-load", a.capacityLoad)
+
+	// Slice 4: order pegs that moves propagate along (FR-23.8).
+	r.With(authz.RequireDuty(dutySchedule)).Post("/v1/scheduling/order-pegs", a.createPeg)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/order-pegs", a.listPegs)
+	r.With(authz.RequireDuty(dutySchedule)).Delete("/v1/scheduling/order-pegs/{id}", a.deletePeg)
 
 	// Slice 2: resource networks, setup matrices, cleanout rules, capacity
 	// blocks and campaigns (FR-23.13 to FR-23.17).
@@ -627,7 +638,7 @@ func (a *API) moveJob(w http.ResponseWriter, r *http.Request) {
 	}
 	a.moves.Add(1)
 	out, replayed, err := a.store.MoveJob(r.Context(), store.MoveRequest{JobID: jobID, ResourceID: strings.ToLower(req.ResourceID),
-		Start: req.Start.UTC(), HorizonDays: a.cfg.HorizonDays, DryRun: req.DryRun}, idem)
+		Start: req.Start.UTC(), HorizonDays: a.cfg.HorizonDays, DryRun: req.DryRun, Propagate: req.Propagate}, idem)
 	if err != nil {
 		slog.Error("move job failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)
@@ -637,7 +648,8 @@ func (a *API) moveJob(w http.ResponseWriter, r *http.Request) {
 		a.conflict.Add(1)
 		if req.DryRun {
 			httpx.JSON(w, http.StatusOK, moveResponse{DryRun: true, Feasible: false,
-				Violations: []violation{{Code: out.Conflict.Code, Detail: out.Conflict.Detail, JobID: out.Conflict.JobID}}, Changes: []store.Change{}})
+				Violations: []violation{{Code: out.Conflict.Code, Detail: out.Conflict.Detail, JobID: out.Conflict.JobID}}, Changes: []store.Change{},
+				Dependents: []store.DependentChange{}, Truncated: out.Truncated})
 			return
 		}
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, out.Conflict.Code, out.Conflict.Detail))
@@ -646,8 +658,12 @@ func (a *API) moveJob(w http.ResponseWriter, r *http.Request) {
 	if replayed {
 		w.Header().Set("Idempotent-Replayed", "true")
 	}
+	deps := out.Dependents
+	if deps == nil {
+		deps = []store.DependentChange{}
+	}
 	httpx.JSON(w, http.StatusOK, moveResponse{DryRun: req.DryRun, Feasible: true, Violations: []violation{}, Changes: out.Changes,
-		OrderID: out.OrderID, OrderStart: out.OrderStart, OrderEnd: out.OrderEnd, Run: out.Run})
+		OrderID: out.OrderID, OrderStart: out.OrderStart, OrderEnd: out.OrderEnd, Dependents: deps, Truncated: out.Truncated, Run: out.Run})
 }
 
 func (a *API) capacityLoad(w http.ResponseWriter, r *http.Request) {

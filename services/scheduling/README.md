@@ -11,8 +11,12 @@ Slice 2 adds resource networks (FR-23.13), setup matrices and cleanout rules
 (FR-23.15), campaigns sequenced by the setup matrix with cleanouts (FR-23.14),
 the campaign cost split (FR-23.16) and capacity blocks (FR-23.17). Slice 3
 makes schedule runs and moves apply networks, setup matrix changeovers and
-capacity blocks (see the rules below). Runs do not place campaigns yet. What
-is not built is listed in `NOT-IMPLEMENTED.md`.
+capacity blocks (see the rules below). Slice 4 adds order pegs and moves that
+push pegged orders behind their parents (FR-23.8, BR-23.10), keeps changeovers
+in one piece (BR-23.3), adds recurring capacity blocks (FR-23.17), and gives
+the optimizer in `services/scheduler-py` network steps and campaign
+sequencing. Runs do not place campaigns yet. What is not built is listed in
+`NOT-IMPLEMENTED.md`.
 
 ## Model
 
@@ -50,8 +54,15 @@ is not built is listed in `NOT-IMPLEMENTED.md`.
   `started` (frozen), the stored plan (changeovers, cleanouts, SCHED-0012
   warnings) and `version` for If-Match. An order belongs to one campaign.
 - **CapacityBlock** (`scheduling_capacity_block`): weekly windows in the
-  resource's time zone or one dated window, an attribute condition (`=`, `!=`,
-  `>=`, `<=`, `>`, `<`), priority and `active`.
+  resource's time zone, one dated window, or a recurrence (an RRULE subset,
+  `FREQ=DAILY|WEEKLY` with `INTERVAL`, `BYDAY`, and `COUNT` or `UNTIL`, from a
+  first local date, with a site-local window), an attribute condition (`=`,
+  `!=`, `>=`, `<=`, `>`, `<`), priority and `active`. Exactly one window shape
+  is set (a table check).
+- **OrderPeg** (`scheduling_order_peg`): the dependent order consumes the
+  parent order's output (FR-23.8). Both orders need operations in scheduling,
+  a pair is pegged once, and a peg that would close a loop is refused. Pegs
+  are entered through the API until wave 22 pegging publishes them.
 
 Rules the heuristic applies: orders sorted by (earliest due date, priority,
 order id), operations in number order; each operation starts after its
@@ -90,6 +101,26 @@ Constraints (slice 3):
   short of changeover is SCHED-0001, and a changed network step needs an edge
   (SCHED-0009) within its wait (SCHED-0010).
 
+Slice 4:
+
+- **Changeovers are never split** (BR-23.3): a changeover that does not fit
+  before its open interval closes moves the job to the next open interval; a
+  move whose start would split it is SCHED-0002. Process minutes still split
+  across closed time.
+- **Recurring blocks** are expanded over the run or move horizon in the
+  resource's time zone, so a DST day keeps its true length; `COUNT` counts
+  from the first date, not from the horizon.
+- **Propagation** (FR-23.8, BR-23.10): a move with `propagate` walks the pegs
+  from the moved order breadth-first, at most 500 orders and 5 levels; an
+  order cut off by a limit sets `truncated` and the move run records
+  SCHED-0007. Each reached order whose first operation would start before one
+  of its parents ends is pushed forward to the latest parent end, with its
+  own later operations, on the same resources and under the same constraints;
+  parents are re-planned before their dependents. Dependents never move
+  earlier. A firmed job that would have to move (SCHED-0008) or any other
+  conflict in a dependent refuses the whole move. The commit announces
+  `orderdates.changed` for the moved order and each dependent that moved.
+
 ## API
 
 All routes need the tenant headers set by the gateway; duties in brackets.
@@ -107,6 +138,9 @@ All routes need the tenant headers set by the gateway; duties in brackets.
 | POST | `/v1/scheduling/jobs/{id}:move` (Idempotency-Key unless `dryRun`) | `scheduling.schedule.write` |
 | POST | `/v1/scheduling/jobs/{id}:firm` (Idempotency-Key) | `scheduling.schedule.write` |
 | GET | `/v1/scheduling/capacity-load?from&weeks&resourceIds` | `scheduling.read` |
+| POST | `/v1/scheduling/order-pegs` (Idempotency-Key) | `scheduling.schedule.write` |
+| GET | `/v1/scheduling/order-pegs?orderId` | `scheduling.read` |
+| DELETE | `/v1/scheduling/order-pegs/{id}` | `scheduling.schedule.write` |
 | POST | `/v1/scheduling/networks`, `/setup-matrices`, `/cleanout-rules` (Idempotency-Key) | `scheduling.setup.write` |
 | GET | `/v1/scheduling/networks[/{id}]`, `/setup-matrices[/{id}]?resourceId`, `/cleanout-rules` | `scheduling.read` |
 | POST | `/v1/scheduling/capacity-blocks` (Idempotency-Key) | `scheduling.capacity.write` |
@@ -143,9 +177,10 @@ platform naming rule allows no hyphen in the verb, so the entity is
 | `AUTH-0001` / `AUTH-0003` | 401 / 403 | No tenant / missing duty |
 | `idempotency_key_reuse` | 422 | The Idempotency-Key was used with a different body or job |
 | `SCHED-0001` | 409 / 422 | Overlaps a booked job on a finite resource (a move conflict, or a concurrent booking caught by the exclusion constraint) |
-| `SCHED-0002` | 422 | Move start is outside open capacity, or no capacity is left in the horizon |
+| `SCHED-0002` | 422 | Move start is outside open capacity, would split a changeover across closed time (BR-23.3), or no capacity is left in the horizon |
 | `SCHED-0004` | 422 | Target resource is not a candidate of the operation |
-| `SCHED-0008` | 422 | A firmed job cannot be moved, or the move would push a firmed successor |
+| `SCHED-0007` | move run message / `truncated` | Propagation stopped at 500 orders or 5 pegging levels; run the site schedule |
+| `SCHED-0008` | 422 | A firmed job cannot be moved, or the move would push a firmed successor or a firmed job of a pegged order |
 | `SCHED-0009` | 422 / run message | A move puts a network step on resources without an edge; in a run, the order is unplaced as `NETWORK_INFEASIBLE` |
 | `SCHED-0010` | 422 / run warning | A move breaks a network step's transfer or maximum wait; in a run, a frozen predecessor left the successor waiting too long |
 | `SCHED-0011` | 422 | The campaign has started (or is completed or cancelled); orders cannot join, leave or be resequenced |
@@ -170,6 +205,9 @@ platform naming rule allows no hyphen in the verb, so the entity is
 | `SCHED-0117` | 422 | Start needs a sequenced (planned) campaign |
 | `SCHED-0118` | 404 | The order is not in this campaign |
 | `SCHED-0119` | 409 | A concurrent request created a matrix version for the resource; retry |
+| `SCHED-0120` | 422 | An order to peg has no operations in scheduling |
+| `SCHED-0121` | 422 | The peg would make the parent order depend on its own dependent |
+| `SCHED-0122` | 404 | Order peg not found |
 | `precondition_required` | 428 | A campaign command was sent without If-Match |
 
 A dry-run move never fails for a constraint: it returns `feasible: false` and
@@ -200,8 +238,9 @@ idempotent replays, firmed jobs, moves with propagation, the exclusion
 constraint, infinite runs, tenant isolation, networks, matrix versions,
 cleanout rules, blocks, campaign sequencing (AC-23.11), join, leave, start,
 stale If-Match and replays, runs that apply networks (AC-23.10), changeovers
-and blocks (AC-23.13), moves that keep changeovers, and that every table
-forces RLS.
+and blocks (AC-23.13), moves that keep changeovers, pegs (loops, replays,
+tenants), propagated moves (AC-23.3 and the 5-level limit), recurring blocks,
+and that every table forces RLS.
 Domain tests include the ft06 heuristic run, a 10,000-job no-double-booking
 check (AC-23.2), a 5,000-operation timing check (AC-23.4) and rapid property
 tests.

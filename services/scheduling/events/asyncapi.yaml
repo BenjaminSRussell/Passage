@@ -42,7 +42,7 @@ operations:
   publishOrderDatesChanged:
     action: send
     channel: { $ref: '#/channels/orderDatesChanged' }
-    summary: An order start or end changed (production, planning, sales consume it)
+    summary: An order start or end changed, including pegged orders a propagated move pushed (production, planning, sales consume it)
   publishCampaignSequenced:
     action: send
     channel: { $ref: '#/channels/campaign' }

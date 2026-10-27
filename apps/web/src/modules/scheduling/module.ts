@@ -12,9 +12,11 @@ import { NewCapacityBlockPage } from "./NewCapacityBlockPage";
 import { NewCleanoutRulePage } from "./NewCleanoutRulePage";
 import { NewNetworkPage } from "./NewNetworkPage";
 import { NewOperationPage } from "./NewOperationPage";
+import { NewOrderPegPage } from "./NewOrderPegPage";
 import { NewResourcePage } from "./NewResourcePage";
 import { NewRunPage } from "./NewRunPage";
 import { OperationsPage } from "./OperationsPage";
+import { OrderPegsPage } from "./OrderPegsPage";
 import { ResourceDetailPage } from "./ResourceDetailPage";
 import { ResourcesPage } from "./ResourcesPage";
 import { RunDetailPage } from "./RunDetailPage";
@@ -28,7 +30,7 @@ const scheduling: PassageModule = {
   id: "scheduling",
   title: "Scheduling",
   description:
-    "Finite capacity scheduling: the Gantt workspace, schedule runs, capacity load, resources, operations, campaigns, setup matrices, cleanout rules, resource networks and capacity blocks.",
+    "Finite capacity scheduling: the Gantt workspace, schedule runs, capacity load, resources, operations, order pegs, campaigns, setup matrices, cleanout rules, resource networks and capacity blocks.",
   routes: [
     { path: "/scheduling", element: createElement(WorkspacePage), handle: { title: "Scheduling workspace" } },
     { path: "/scheduling/load", element: createElement(CapacityLoadPage), handle: { title: "Capacity load" } },
@@ -40,6 +42,8 @@ const scheduling: PassageModule = {
     { path: "/scheduling/resources/:id", element: createElement(ResourceDetailPage), handle: { title: "Resource" } },
     { path: "/scheduling/operations", element: createElement(OperationsPage), handle: { title: "Operations" } },
     { path: "/scheduling/operations/new", element: createElement(NewOperationPage), handle: { title: "New operation" } },
+    { path: "/scheduling/order-pegs", element: createElement(OrderPegsPage), handle: { title: "Order pegs" } },
+    { path: "/scheduling/order-pegs/new", element: createElement(NewOrderPegPage), handle: { title: "New order peg" } },
     { path: "/scheduling/campaigns", element: createElement(CampaignsPage), handle: { title: "Campaigns" } },
     { path: "/scheduling/campaigns/new", element: createElement(NewCampaignPage), handle: { title: "New campaign" } },
     { path: "/scheduling/campaigns/:id", element: createElement(CampaignDetailPage), handle: { title: "Campaign" } },
@@ -60,6 +64,7 @@ const scheduling: PassageModule = {
     { label: "Schedule runs", to: "/scheduling/runs", duty: "scheduling.read" },
     { label: "Resources", to: "/scheduling/resources", duty: "scheduling.read" },
     { label: "Operations", to: "/scheduling/operations", duty: "scheduling.read" },
+    { label: "Order pegs", to: "/scheduling/order-pegs", duty: "scheduling.read" },
     { label: "Campaigns", to: "/scheduling/campaigns", duty: "scheduling.read" },
     { label: "Setup matrices", to: "/scheduling/setup-matrices", duty: "scheduling.read" },
     { label: "Cleanout rules", to: "/scheduling/cleanout-rules", duty: "scheduling.read" },

@@ -7,6 +7,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"maps"
 	"net/http"
 	"time"
 
@@ -139,6 +141,9 @@ type MoveRequest struct {
 	Start       time.Time
 	HorizonDays int
 	DryRun      bool
+	// Propagate also re-plans the orders pegged to the moved order (FR-23.8),
+	// up to the BR-23.10 limits.
+	Propagate bool
 }
 
 // Change is one operation whose placement moves.
@@ -153,15 +158,28 @@ type Change struct {
 	LateMinutes int       `json:"lateMinutes"`
 }
 
+// DependentChange is a pegged order whose dates move with a propagated move.
+type DependentChange struct {
+	OrderID  string    `json:"orderId"`
+	OldStart time.Time `json:"oldStart"`
+	OldEnd   time.Time `json:"oldEnd"`
+	NewStart time.Time `json:"newStart"`
+	NewEnd   time.Time `json:"newEnd"`
+}
+
 // MoveOutcome is the preview or the committed result of a move. Conflict is
 // set when the move is infeasible; nothing was written in that case.
+// Dependents lists the pegged orders that move with it, and Truncated says
+// the dependent walk stopped at a BR-23.10 limit (SCHED-0007).
 type MoveOutcome struct {
-	Changes    []Change         `json:"changes"`
-	OrderID    string           `json:"orderId"`
-	OrderStart time.Time        `json:"orderStart"`
-	OrderEnd   time.Time        `json:"orderEnd"`
-	Run        *Run             `json:"run,omitempty"`
-	Conflict   *domain.Conflict `json:"-"`
+	Changes    []Change          `json:"changes"`
+	OrderID    string            `json:"orderId"`
+	OrderStart time.Time         `json:"orderStart"`
+	OrderEnd   time.Time         `json:"orderEnd"`
+	Dependents []DependentChange `json:"dependents"`
+	Truncated  bool              `json:"truncated"`
+	Run        *Run              `json:"run,omitempty"`
+	Conflict   *domain.Conflict  `json:"-"`
 }
 
 // Firm is the result of firming or unfirming an operation's placement.
@@ -206,6 +224,7 @@ type Store interface {
 	FirmJob(ctx context.Context, jobID string, firmed bool, idem Idem) (Firm, bool, error)
 	CapacityLoad(ctx context.Context, f LoadFilter) ([]domain.WeekLoad, error)
 	SetupStore
+	PegStore
 	CampaignStore
 	Ping(ctx context.Context) error
 }
@@ -404,15 +423,32 @@ func (s *Postgres) MoveJob(ctx context.Context, req MoveRequest, idem Idem) (Mov
 		if err != nil {
 			return err
 		}
+		var walk []string
+		var pegs []domain.Peg
+		var dependents []domain.Operation
+		if req.Propagate {
+			all, err := loadPegs(ctx, tx)
+			if err != nil {
+				return err
+			}
+			walk, out.Truncated = domain.DependentsOf(orderID, all, domain.PropagationLimit{})
+			pegs = pegsAmong(all, append([]string{orderID}, walk...))
+			if len(walk) > 0 {
+				if dependents, err = loadOperations(ctx, tx, "o.order_id = any($1::uuid[])", true, walk); err != nil {
+					return err
+				}
+			}
+		}
+		orders := append([]string{orderID}, walk...)
 		resources, finite, err := loadResources(ctx, tx)
 		if err != nil {
 			return err
 		}
-		placements, err := placementsOfOrders(ctx, tx, []string{orderID})
+		placements, err := placementsOfOrders(ctx, tx, orders)
 		if err != nil {
 			return err
 		}
-		firmed, err := firmedJobs(ctx, tx, orderID)
+		firmed, err := firmedJobs(ctx, tx, orders)
 		if err != nil {
 			return err
 		}
@@ -436,41 +472,43 @@ func (s *Postgres) MoveJob(ctx context.Context, req MoveRequest, idem Idem) (Mov
 			rid = placements[req.JobID].ResourceID
 		}
 		plan := domain.PlanMove(domain.MoveInput{Resources: resources, Start: horizonStart, HorizonDays: req.HorizonDays,
-			Booked: booked, Order: ops, Current: placements, Moved: req.JobID, ResourceID: rid, At: req.Start, Firmed: firmed, Networks: networks})
+			Booked: booked, Order: ops, Current: placements, Moved: req.JobID, ResourceID: rid, At: req.Start, Firmed: firmed, Networks: networks,
+			Dependents: dependents, Pegs: pegs})
 		if plan.Conflict != nil {
 			out.Conflict = plan.Conflict
 			return nil
 		}
 		out.OrderID = orderID
 		out.Changes = make([]Change, 0, len(plan.Changes))
-		merged := map[string]domain.Placement{}
-		for id, pl := range placements {
-			merged[id] = pl
-		}
+		merged := maps.Clone(placements)
 		for _, c := range plan.Changes {
 			merged[c.OperationID] = c
 			old := placements[c.OperationID]
 			out.Changes = append(out.Changes, Change{OperationID: c.OperationID, OrderID: c.OrderID, ResourceID: c.ResourceID,
 				OldStart: old.Start, OldEnd: old.End, NewStart: c.Start, NewEnd: c.End, LateMinutes: c.LateMinutes})
 		}
-		for _, pl := range merged {
-			if out.OrderStart.IsZero() || pl.Start.Before(out.OrderStart) {
-				out.OrderStart = pl.Start
-			}
-			if pl.End.After(out.OrderEnd) {
-				out.OrderEnd = pl.End
-			}
+		before, after := spans(placements), spans(merged)
+		out.OrderStart, out.OrderEnd = after[orderID].Start, after[orderID].End
+		out.Dependents = make([]DependentChange, 0, len(plan.Dependents))
+		for _, oid := range plan.Dependents {
+			out.Dependents = append(out.Dependents, DependentChange{OrderID: oid, OldStart: before[oid].Start, OldEnd: before[oid].End,
+				NewStart: after[oid].Start, NewEnd: after[oid].End})
 		}
 		if req.DryRun {
 			return nil
 		}
-		prior, err := orderDates(ctx, tx, []string{orderID})
+		affected := append([]string{orderID}, plan.Dependents...)
+		prior, err := orderDates(ctx, tx, affected)
 		if err != nil {
 			return err
 		}
 		run := Run{ID: ids.New(), Scope: scopeMove, Mode: "jobs", Direction: "forward", Finite: true, Algorithm: "heuristic",
 			Status: "completed", OperationsCount: len(plan.Changes), MakespanMinutes: domain.Makespan(plan.Changes),
 			TotalLatenessMinutes: domain.TotalLateness(plan.Changes), Messages: []string{}}
+		if out.Truncated {
+			run.Messages = append(run.Messages, fmt.Sprintf("%s: propagation truncated after %d orders / %d levels; run the site schedule",
+				domain.CodePropagationTruncated, len(walk), domain.DefaultPropagationLevels))
+		}
 		if err := insertRun(ctx, tx, &run, Idem{}); err != nil {
 			return err
 		}
@@ -487,7 +525,7 @@ func (s *Postgres) MoveJob(ctx context.Context, req MoveRequest, idem Idem) (Mov
 		if err := enqueuePlacements(ctx, tx, run.ID, plan.Changes, false); err != nil {
 			return err
 		}
-		if err := enqueueOrderDates(ctx, tx, []string{orderID}, prior); err != nil {
+		if err := enqueueOrderDates(ctx, tx, affected, prior); err != nil {
 			return err
 		}
 		out.Run = &run

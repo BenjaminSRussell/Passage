@@ -78,30 +78,48 @@ type slot struct {
 }
 
 // fillSlot lays op from t on a resource, with the changeover from the group
-// the resource is in laid in front of the process minutes when seq is set. A
-// slot is refused when the booked job after it would be left too short a
-// changeover (its stored changeover no longer covers the step from op's group).
+// the resource is in laid in front of the process minutes when seq is set. The
+// changeover is never split across closed time (BR-23.3): when it does not fit
+// before the open interval closes, the job moves to the next open interval
+// (an exact slot is refused instead). A slot is also refused when the booked
+// job after it would be left too short a changeover (its stored changeover no
+// longer covers the step from op's group).
 func fillSlot(c capacity, iv []Interval, op Operation, bs []Busy, t time.Time, exact, seq bool) (slot, *Conflict) {
 	if !seq {
 		segs, conf := fill(iv, bs, t, op.Minutes, exact)
 		return slot{segs: segs}, conf
 	}
-	from := groupBefore(c, bs, ceilMinute(t))
-	co, missing := changeoverNeed(c.res.Matrix, from, op.SetupGroup, op.SetupMinutes)
-	segs, conf := fill(iv, bs, t, op.Minutes+co, exact)
-	if conf != nil {
-		return slot{}, conf
-	}
-	if s := segs[0].Start; s.After(ceilMinute(t)) {
-		// The job begins later than t (closed or blocked time in between), so
-		// another booked job may now come before it.
-		if f := groupBefore(c, bs, s); f != from {
-			from = f
-			co, missing = changeoverNeed(c.res.Matrix, from, op.SetupGroup, op.SetupMinutes)
-			if segs, conf = fill(iv, bs, s, op.Minutes+co, exact); conf != nil {
-				return slot{}, conf
-			}
+	var segs []Segment
+	var from string
+	var co int
+	var missing bool
+	start := ceilMinute(t)
+	for {
+		from = groupBefore(c, bs, start)
+		co, missing = changeoverNeed(c.res.Matrix, from, op.SetupGroup, op.SetupMinutes)
+		var conf *Conflict
+		if segs, conf = fill(iv, bs, start, op.Minutes+co, exact); conf != nil {
+			return slot{}, conf
 		}
+		if s := segs[0].Start; s.After(start) && groupBefore(c, bs, s) != from {
+			// The job begins later than start (closed or blocked time in
+			// between), so another booked job now comes before it: reprice.
+			start = s
+			continue
+		}
+		if co > 0 && minutesBetween(segs[0].Start, segs[0].End) < co {
+			if exact {
+				return slot{}, &Conflict{Code: CodeOutsideCapacity,
+					Detail: fmt.Sprintf("the %d min changeover does not fit before the open interval closes and is never split (BR-23.3)", co)}
+			}
+			next, ok := nextOpen(iv, segs[0].End)
+			if !ok {
+				return slot{}, &Conflict{Code: CodeOutsideCapacity, Detail: "no open interval left in the planning horizon holds the changeover"}
+			}
+			start = next
+			continue
+		}
+		break
 	}
 	if next, ok := follower(bs, segs[len(segs)-1].End); ok && op.SetupGroup != "" {
 		if need, _ := changeoverNeed(c.res.Matrix, op.SetupGroup, next.Group, next.Setup); need > next.Changeover {
@@ -110,6 +128,15 @@ func fillSlot(c capacity, iv []Interval, op Operation, bs []Busy, t time.Time, e
 		}
 	}
 	return slot{segs: segs, changeover: co, from: from, missing: missing}, nil
+}
+
+// nextOpen is the start of the first open interval that begins at or after t.
+func nextOpen(iv []Interval, t time.Time) (time.Time, bool) {
+	i := sort.Search(len(iv), func(k int) bool { return !iv[k].Start.Before(t) })
+	if i == len(iv) {
+		return time.Time{}, false
+	}
+	return iv[i].Start, true
 }
 
 // placeOn finds the earliest slot for op on one resource at or after ready.
