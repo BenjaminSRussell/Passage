@@ -38,6 +38,7 @@ type fakeStore struct {
 	picks          []store.PickInput
 	lastPost       store.PostInput
 	packing        packingCalls
+	workbench      workbenchCalls
 }
 
 func (f *fakeStore) RunRelease(_ context.Context, warehouseID string, groups []domain.ReleaseGroup, idem store.Idem) (store.ReleaseResult, error) {

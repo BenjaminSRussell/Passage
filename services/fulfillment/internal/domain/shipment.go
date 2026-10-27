@@ -12,14 +12,17 @@ type ShipmentStatus string
 
 // Shipment states.
 const (
-	StatusOpen      ShipmentStatus = "OPEN"
-	StatusReleased  ShipmentStatus = "RELEASED"
-	StatusPicking   ShipmentStatus = "PICKING"
-	StatusPicked    ShipmentStatus = "PICKED"
-	StatusPacked    ShipmentStatus = "PACKED"
-	StatusShipped   ShipmentStatus = "SHIPPED"
-	StatusDelivered ShipmentStatus = "DELIVERED"
-	StatusCancelled ShipmentStatus = "CANCELLED"
+	StatusOpen     ShipmentStatus = "OPEN"
+	StatusReleased ShipmentStatus = "RELEASED"
+	StatusPicking  ShipmentStatus = "PICKING"
+	StatusPicked   ShipmentStatus = "PICKED"
+	StatusPacked   ShipmentStatus = "PACKED"
+	// StatusPartiallyShipped: a packing slip posted but schedule quantity
+	// remains to pick and ship (FR-28.8).
+	StatusPartiallyShipped ShipmentStatus = "PARTIALLY_SHIPPED"
+	StatusShipped          ShipmentStatus = "SHIPPED"
+	StatusDelivered        ShipmentStatus = "DELIVERED"
+	StatusCancelled        ShipmentStatus = "CANCELLED"
 )
 
 // Errors returned by the pick and pack rules. Codes are the FUL catalog entries.
@@ -29,17 +32,23 @@ var (
 	ErrNegativeQty     = errors.New("FUL-0030: quantity must not be negative")
 	ErrInvalidMove     = errors.New("FUL-0021: shipment transition is not allowed")
 	ErrStatusNotPacked = errors.New("FUL-0001: shipment must be PACKED with no active hold to post")
+	// ErrPickBelowPacked rejects a re-pick below what is already packed or
+	// shipped: those units have left the pick face (partial shipments, FR-28.8).
+	ErrPickBelowPacked = errors.New("FUL-0031: picked quantity is below the quantity already packed")
 )
 
 var transitions = map[ShipmentStatus][]ShipmentStatus{
-	StatusOpen:      {StatusReleased, StatusCancelled},
-	StatusReleased:  {StatusPicking, StatusCancelled},
-	StatusPicking:   {StatusPicked, StatusCancelled},
-	StatusPicked:    {StatusPacked, StatusCancelled},
-	StatusPacked:    {StatusShipped, StatusCancelled},
-	StatusShipped:   {StatusDelivered, StatusPacked},
-	StatusDelivered: nil,
-	StatusCancelled: nil,
+	StatusOpen:     {StatusReleased, StatusCancelled},
+	StatusReleased: {StatusPicking, StatusCancelled},
+	StatusPicking:  {StatusPicked, StatusCancelled},
+	StatusPicked:   {StatusPacked, StatusCancelled},
+	StatusPacked:   {StatusShipped, StatusPartiallyShipped, StatusCancelled},
+	// A partial shipment re-enters picking for the remaining schedule
+	// quantity (FR-28.8), or returns to PACKED when its slip is cancelled.
+	StatusPartiallyShipped: {StatusPicking, StatusPacked},
+	StatusShipped:          {StatusDelivered, StatusPacked},
+	StatusDelivered:        nil,
+	StatusCancelled:        nil,
 }
 
 // CanTransition reports whether BR-28.6 allows from -> to.
@@ -82,9 +91,42 @@ func ConfirmPick(l LineQty, picked decimal.Decimal) (LineQty, decimal.Decimal, e
 	if picked.GreaterThan(l.Planned) {
 		return l, decimal.Zero, fmt.Errorf("%w: %s exceeds planned %s", ErrOverPick, picked, l.Planned)
 	}
+	if picked.LessThan(l.Packed) {
+		return l, decimal.Zero, fmt.Errorf("%w: %s is below packed %s", ErrPickBelowPacked, picked, l.Packed)
+	}
 	l.Picked = picked
 	l.Confirmed = true
 	return l, l.Planned.Sub(picked), nil
+}
+
+// PostTarget is the shipment status once a packing slip has posted: SHIPPED when
+// every line has shipped its planned quantity, PARTIALLY_SHIPPED while any
+// remainder is left (FR-28.8); a short-picked remainder is re-picked from there.
+func PostTarget(lines []LineQty) ShipmentStatus {
+	for _, l := range lines {
+		if !l.Shipped.Equal(l.Planned) {
+			return StatusPartiallyShipped
+		}
+	}
+	return StatusShipped
+}
+
+// CancelShipment applies BR-28.6: a shipment cancels only before anything ships
+// and only while it holds no container (unpack first is not built, so a packed
+// shipment cannot cancel). It returns the status after cancelling.
+func CancelShipment(from ShipmentStatus, lines []LineQty, containers int) (ShipmentStatus, error) {
+	if from == StatusCancelled {
+		return from, fmt.Errorf("%w: shipment is already cancelled", ErrInvalidMove)
+	}
+	for _, l := range lines {
+		if l.Shipped.IsPositive() {
+			return from, fmt.Errorf("%w: shipment has shipped quantity", ErrInvalidMove)
+		}
+	}
+	if containers > 0 {
+		return from, fmt.Errorf("%w: shipment has %d packed containers", ErrInvalidMove, containers)
+	}
+	return Advance(from, StatusCancelled)
 }
 
 // CanPack checks that packing qty more keeps packed <= picked (BR-28.1 invariant).

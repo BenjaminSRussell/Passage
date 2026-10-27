@@ -29,9 +29,10 @@ function shipment(status: Shipment["status"], qty: Partial<Shipment["lines"][num
     status,
     plannedShipDate: "2026-10-26T00:00:00Z",
     actualShipDate: null,
+    carrierCode: null,
     version,
     lines: [
-      { id: LINE, orderLineId: ORDER_LINE, productId: ID, unit: "EA", qtyPlanned: "100", qtyPicked: "0", qtyPacked: "0", qtyShipped: "0", pickConfirmed: false, ...qty },
+      { id: LINE, orderLineId: ORDER_LINE, productId: ID, unit: "EA", qtyPlanned: "100", qtyPicked: "0", qtyPacked: "0", qtyShipped: "0", pickConfirmed: false, zone: null, ...qty },
     ],
     containers: [],
   };
@@ -47,6 +48,7 @@ const summary = (status: ShipmentSummary["status"], number: string): ShipmentSum
   status,
   plannedShipDate: "2026-10-26T00:00:00Z",
   actualShipDate: null,
+  carrierCode: null,
   version: 1,
   lineCount: 2,
 });
@@ -177,6 +179,7 @@ describe("shipment detail", () => {
     server.handler = (url, init) => {
       if (init.method === "POST") return undefined;
       if (url.pathname === `/api/v1/fulfillment/shipments/${SH}`) return json(200, current());
+      if (url.pathname === `/api/v1/fulfillment/shipments/${SH}/tracking`) return json(200, { items: [] });
       if (url.pathname === "/api/v1/fulfillment/packing-slips") return json(200, { items: slips });
       return undefined;
     };
@@ -219,7 +222,7 @@ describe("shipment detail", () => {
     server.handler = (url, init) => {
       if (init.method === "POST" && url.pathname.endsWith("/containers")) {
         current = { ...shipment("PACKED", { qtyPicked: "30", qtyPacked: "30", pickConfirmed: true }, 5) };
-        current.containers = [{ id: ID, containerType: "C12", sscc: "006141410000000011", status: "CLOSED", tareKg: "0.5", grossKg: "0.5", returnable: false, packagingMaterial: null, lines: [{ shipmentLineId: LINE, qty: "30" }] }];
+        current.containers = [{ id: ID, containerType: "C12", sscc: "006141410000000011", status: "CLOSED", tareKg: "0.5", grossKg: "0.5", returnable: false, packagingMaterial: null, packingSlipId: null, lines: [{ shipmentLineId: LINE, qty: "30" }] }];
         return json(201, { container: current.containers[0], shipment: current });
       }
       return base(url, init);

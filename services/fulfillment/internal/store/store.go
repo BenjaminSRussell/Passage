@@ -45,6 +45,14 @@ const (
 	CodeRateMissing        = "FUL-0014"
 	CodeRTPNegative        = "FUL-0015"
 	CodeValidation         = "FUL-0050"
+	CodeSSCCInvalid        = "FUL-0007"
+	CodePickBelowPacked    = "FUL-0031"
+	CodeWaveLimits         = "FUL-0032"
+	CodeGroupBy            = "FUL-0033"
+	CodeWaveTooLarge       = "FUL-0034"
+	CodeWaveNotFound       = "FUL-0052"
+	CodeWaveConflict       = "FUL-0053"
+	CodeContainerNotFound  = "FUL-0054"
 	CodeVersion            = "conflict_version"
 	CodeIdempotencyReuse   = "idempotency_key_reuse"
 	eventSource            = "fulfillment"
@@ -61,6 +69,7 @@ type Shipment struct {
 	Status          domain.ShipmentStatus `json:"status"`
 	PlannedShipDate time.Time             `json:"plannedShipDate"`
 	ActualShipDate  *time.Time            `json:"actualShipDate"`
+	CarrierCode     *string               `json:"carrierCode"`
 	Version         int                   `json:"version"`
 	Lines           []ShipmentLine        `json:"lines"`
 	Containers      []Container           `json:"containers"`
@@ -77,6 +86,7 @@ type ShipmentSummary struct {
 	Status          domain.ShipmentStatus `json:"status"`
 	PlannedShipDate time.Time             `json:"plannedShipDate"`
 	ActualShipDate  *time.Time            `json:"actualShipDate"`
+	CarrierCode     *string               `json:"carrierCode"`
 	Version         int                   `json:"version"`
 	LineCount       int                   `json:"lineCount"`
 }
@@ -108,6 +118,7 @@ type ShipmentLine struct {
 	Packed        decimal.Decimal `json:"qtyPacked"`
 	Shipped       decimal.Decimal `json:"qtyShipped"`
 	PickConfirmed bool            `json:"pickConfirmed"`
+	Zone          *string         `json:"zone"`
 }
 
 // Container is a closed package with its SSCC (BR-28.5). Tare, returnable and
@@ -122,7 +133,9 @@ type Container struct {
 	GrossKg           decimal.Decimal `json:"grossKg"`
 	Returnable        bool            `json:"returnable"`
 	PackagingMaterial *string         `json:"packagingMaterial"`
-	Lines             []ContainerLine `json:"lines"`
+	// PackingSlipID is the slip the container shipped with; null until then.
+	PackingSlipID *string         `json:"packingSlipId"`
+	Lines         []ContainerLine `json:"lines"`
 }
 
 // ContainerLine is a quantity of one shipment line packed into a container.
@@ -220,6 +233,9 @@ type PostInput struct {
 	// CountryCode is the ship-to country whose packaging fee rates apply
 	// (FR-28.14). Empty posts no packaging fee.
 	CountryCode string
+	// EmitASN publishes the advance ship notice of the containers that ship
+	// with this slip (FR-28.9).
+	EmitASN bool
 }
 
 // Idem is the Idempotency-Key and the hash of the request body.
@@ -240,6 +256,7 @@ type Store interface {
 	PostPackingSlip(ctx context.Context, id string, version int, in PostInput, idem Idem) (PackingSlip, error)
 	CancelPackingSlip(ctx context.Context, slipID string, idem Idem) (PackingSlip, error)
 	PackingStore
+	WorkbenchStore
 	Ping(ctx context.Context) error
 }
 
@@ -309,11 +326,16 @@ func nextNumber(ctx context.Context, tx pgx.Tx, tenantID, sequenceID string) (in
 }
 
 func enqueue(ctx context.Context, tx pgx.Tx, aggregateID, eventType, tenantID string, data any) error {
+	return enqueueFor(ctx, tx, "shipment", aggregateID, eventType, tenantID, data)
+}
+
+// enqueueFor writes an event of an aggregate other than the shipment (a wave).
+func enqueueFor(ctx context.Context, tx pgx.Tx, aggregateType, aggregateID, eventType, tenantID string, data any) error {
 	evt, err := events.New(eventType, eventSource, aggregateID, tenantID, data)
 	if err != nil {
 		return err
 	}
-	return outbox.Enqueue(ctx, tx, "shipment", aggregateID, evt)
+	return outbox.Enqueue(ctx, tx, aggregateType, aggregateID, evt)
 }
 
 func dec(s string) decimal.Decimal {
@@ -330,6 +352,14 @@ func mapDomain(err error) error {
 		return httpx.NewProblem(http.StatusUnprocessableEntity, CodeOverPack, err.Error())
 	case errors.Is(err, domain.ErrNegativeQty):
 		return httpx.NewProblem(http.StatusUnprocessableEntity, CodeNegativeQty, err.Error())
+	case errors.Is(err, domain.ErrPickBelowPacked):
+		return httpx.NewProblem(http.StatusUnprocessableEntity, CodePickBelowPacked, err.Error())
+	case errors.Is(err, domain.ErrWaveLimits):
+		return httpx.NewProblem(http.StatusBadRequest, CodeWaveLimits, err.Error())
+	case errors.Is(err, domain.ErrGroupBy):
+		return httpx.NewProblem(http.StatusBadRequest, CodeGroupBy, err.Error())
+	case errors.Is(err, domain.ErrWaveTooLarge):
+		return httpx.NewProblem(http.StatusUnprocessableEntity, CodeWaveTooLarge, err.Error())
 	case errors.Is(err, domain.ErrInvalidMove):
 		return httpx.NewProblem(http.StatusConflict, CodeInvalidMove, err.Error())
 	case errors.Is(err, domain.ErrContainerWeight):
@@ -373,10 +403,16 @@ func lineQtys(sh Shipment) []domain.LineQty {
 }
 
 // bumpShipment moves the shipment to next if its version still matches, which
-// makes concurrent commands fail with 412 rather than overwrite each other.
+// makes concurrent commands fail with 412 rather than overwrite each other. The
+// actual ship date is the first shipment of the shipment; it stays while any
+// quantity is shipped (a partial shipment re-picking its remainder) and clears
+// when the last slip is cancelled.
 func bumpShipment(ctx context.Context, tx pgx.Tx, tenantID string, sh *Shipment, next domain.ShipmentStatus) error {
 	tag, err := tx.Exec(ctx, `update shipment set status = $4::text, version = version + 1, updated_at = now(),
-		actual_ship_date = case when $4::text in ('SHIPPED', 'DELIVERED') then coalesce(actual_ship_date, now()) else null end
+		actual_ship_date = case
+			when $4::text in ('SHIPPED', 'PARTIALLY_SHIPPED', 'DELIVERED') then coalesce(actual_ship_date, now())
+			when exists (select 1 from shipment_line sl where sl.tenant_id = $1 and sl.shipment_id = $2 and sl.qty_shipped > 0) then actual_ship_date
+			else null end
 		where tenant_id = $1 and id = $2 and version = $3`, tenantID, sh.ID, sh.Version, string(next))
 	if err != nil {
 		return err
@@ -467,7 +503,7 @@ func (s *Postgres) ListShipments(ctx context.Context, f ShipmentFilter) ([]Shipm
 	out := []ShipmentSummary{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select s.id, s.shipment_number, s.legal_entity_id, s.warehouse_id, s.order_id, s.customer_id, s.status,
-				s.planned_ship_date, s.actual_ship_date, s.version,
+				s.planned_ship_date, s.actual_ship_date, s.carrier_code, s.version,
 				(select count(*) from shipment_line sl where sl.tenant_id = s.tenant_id and sl.shipment_id = s.id)
 			from shipment s
 			where ($1 = '' or s.status = $1)
@@ -483,7 +519,7 @@ func (s *Postgres) ListShipments(ctx context.Context, f ShipmentFilter) ([]Shipm
 			var r ShipmentSummary
 			var status string
 			if err := rows.Scan(&r.ID, &r.ShipmentNumber, &r.LegalEntityID, &r.WarehouseID, &r.OrderID, &r.CustomerID, &status,
-				&r.PlannedShipDate, &r.ActualShipDate, &r.Version, &r.LineCount); err != nil {
+				&r.PlannedShipDate, &r.ActualShipDate, &r.CarrierCode, &r.Version, &r.LineCount); err != nil {
 				return err
 			}
 			r.Status = domain.ShipmentStatus(status)
@@ -546,16 +582,24 @@ func insertReleased(ctx context.Context, tx pgx.Tx, tenantID string, g domain.Re
 		Status: domain.StatusReleased, PlannedShipDate: g.ShipDate, Version: 1,
 		Lines: []ShipmentLine{}, Containers: []Container{},
 	}
-	if _, err := tx.Exec(ctx, `insert into shipment (tenant_id, id, shipment_number, legal_entity_id, warehouse_id, order_id, customer_id, status, planned_ship_date)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`, tenantID, sh.ID, sh.ShipmentNumber, sh.LegalEntityID, sh.WarehouseID, sh.OrderID, sh.CustomerID, string(sh.Status), sh.PlannedShipDate); err != nil {
+	// The API refuses lines of one order with different carriers, so any line names it.
+	for _, l := range g.Lines {
+		if l.CarrierCode != "" {
+			sh.CarrierCode = optional(l.CarrierCode)
+			break
+		}
+	}
+	if _, err := tx.Exec(ctx, `insert into shipment (tenant_id, id, shipment_number, legal_entity_id, warehouse_id, order_id, customer_id, status, planned_ship_date, carrier_code)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`, tenantID, sh.ID, sh.ShipmentNumber, sh.LegalEntityID, sh.WarehouseID, sh.OrderID, sh.CustomerID,
+		string(sh.Status), sh.PlannedShipDate, sh.CarrierCode); err != nil {
 		return Shipment{}, err
 	}
 	refs := []fulevents.LineRef{}
 	for _, l := range g.Lines {
 		line := ShipmentLine{ID: ids.New(), OrderLineID: l.OrderLineID, ProductID: l.ProductID, Unit: l.Unit, Planned: l.Qty,
-			Picked: decimal.Zero, Packed: decimal.Zero, Shipped: decimal.Zero}
-		if _, err := tx.Exec(ctx, `insert into shipment_line (tenant_id, id, shipment_id, order_line_id, product_id, unit, qty_planned)
-			values ($1, $2, $3, $4, $5, $6, $7)`, tenantID, line.ID, sh.ID, line.OrderLineID, line.ProductID, line.Unit, line.Planned); err != nil {
+			Picked: decimal.Zero, Packed: decimal.Zero, Shipped: decimal.Zero, Zone: optional(l.Zone)}
+		if _, err := tx.Exec(ctx, `insert into shipment_line (tenant_id, id, shipment_id, order_line_id, product_id, unit, qty_planned, zone_code)
+			values ($1, $2, $3, $4, $5, $6, $7, $8)`, tenantID, line.ID, sh.ID, line.OrderLineID, line.ProductID, line.Unit, line.Planned, line.Zone); err != nil {
 			return Shipment{}, err
 		}
 		sh.Lines = append(sh.Lines, line)
@@ -582,8 +626,9 @@ func (s *Postgres) GetShipment(ctx context.Context, id string) (Shipment, error)
 func loadShipment(ctx context.Context, tx pgx.Tx, id string) (Shipment, error) {
 	var sh Shipment
 	var status string
-	err := tx.QueryRow(ctx, `select id, shipment_number, legal_entity_id, warehouse_id, order_id, customer_id, status, planned_ship_date, actual_ship_date, version
-		from shipment where id = $1`, id).Scan(&sh.ID, &sh.ShipmentNumber, &sh.LegalEntityID, &sh.WarehouseID, &sh.OrderID, &sh.CustomerID, &status, &sh.PlannedShipDate, &sh.ActualShipDate, &sh.Version)
+	err := tx.QueryRow(ctx, `select id, shipment_number, legal_entity_id, warehouse_id, order_id, customer_id, status, planned_ship_date, actual_ship_date, carrier_code, version
+		from shipment where id = $1`, id).Scan(&sh.ID, &sh.ShipmentNumber, &sh.LegalEntityID, &sh.WarehouseID, &sh.OrderID, &sh.CustomerID, &status, &sh.PlannedShipDate,
+		&sh.ActualShipDate, &sh.CarrierCode, &sh.Version)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return sh, httpx.NewProblem(http.StatusNotFound, CodeShipmentNotFound, "shipment not found")
 	}
@@ -592,7 +637,7 @@ func loadShipment(ctx context.Context, tx pgx.Tx, id string) (Shipment, error) {
 	}
 	sh.Status = domain.ShipmentStatus(status)
 	sh.Lines = []ShipmentLine{}
-	rows, err := tx.Query(ctx, `select id, order_line_id, product_id, unit, qty_planned::text, qty_picked::text, qty_packed::text, qty_shipped::text, pick_confirmed
+	rows, err := tx.Query(ctx, `select id, order_line_id, product_id, unit, qty_planned::text, qty_picked::text, qty_packed::text, qty_shipped::text, pick_confirmed, zone_code
 		from shipment_line where shipment_id = $1 order by id`, id)
 	if err != nil {
 		return sh, err
@@ -600,7 +645,7 @@ func loadShipment(ctx context.Context, tx pgx.Tx, id string) (Shipment, error) {
 	for rows.Next() {
 		var l ShipmentLine
 		var planned, picked, packed, shipped string
-		if err := rows.Scan(&l.ID, &l.OrderLineID, &l.ProductID, &l.Unit, &planned, &picked, &packed, &shipped, &l.PickConfirmed); err != nil {
+		if err := rows.Scan(&l.ID, &l.OrderLineID, &l.ProductID, &l.Unit, &planned, &picked, &packed, &shipped, &l.PickConfirmed, &l.Zone); err != nil {
 			rows.Close()
 			return sh, err
 		}
@@ -616,7 +661,7 @@ func loadShipment(ctx context.Context, tx pgx.Tx, id string) (Shipment, error) {
 }
 
 func loadContainers(ctx context.Context, tx pgx.Tx, shipmentID string) ([]Container, error) {
-	rows, err := tx.Query(ctx, `select id, container_type, sscc, status, tare_weight_kg::text, gross_weight_kg::text, returnable, packaging_material_code
+	rows, err := tx.Query(ctx, `select id, container_type, sscc, status, tare_weight_kg::text, gross_weight_kg::text, returnable, packaging_material_code, packing_slip_id
 		from container where shipment_id = $1 order by sscc`, shipmentID)
 	if err != nil {
 		return nil, err
@@ -625,7 +670,7 @@ func loadContainers(ctx context.Context, tx pgx.Tx, shipmentID string) ([]Contai
 	for rows.Next() {
 		var c Container
 		var tare, gross string
-		if err := rows.Scan(&c.ID, &c.ContainerType, &c.SSCC, &c.Status, &tare, &gross, &c.Returnable, &c.PackagingMaterial); err != nil {
+		if err := rows.Scan(&c.ID, &c.ContainerType, &c.SSCC, &c.Status, &tare, &gross, &c.Returnable, &c.PackagingMaterial, &c.PackingSlipID); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -669,7 +714,8 @@ func (s *Postgres) ConfirmPick(ctx context.Context, id string, version int, pick
 			if err := checkVersion(sh, version); err != nil {
 				return sh, err
 			}
-			if sh.Status != domain.StatusReleased && sh.Status != domain.StatusPicking {
+			// A partially shipped shipment re-picks its remainder (FR-28.8).
+			if sh.Status != domain.StatusReleased && sh.Status != domain.StatusPicking && sh.Status != domain.StatusPartiallyShipped {
 				return sh, statusProblem("pick", sh.Status)
 			}
 			refs := []fulevents.PickLine{}
@@ -768,8 +814,10 @@ func (s *Postgres) PackContainer(ctx context.Context, id string, version int, co
 
 // PostPackingSlip posts the packed, not yet shipped quantities of a PACKED
 // shipment: it numbers the slip (PS- per legal entity), journals each stocked
-// line per BR-28.1, marks the containers SHIPPED, moves the shipment to
-// SHIPPED and writes packingslip.posted, all in one transaction (FR-28.4).
+// line per BR-28.1, marks the closed containers SHIPPED with this slip, moves
+// the shipment to SHIPPED (or PARTIALLY_SHIPPED while a planned remainder is
+// left, FR-28.8) and writes packingslip.posted (and asn.issued when asked), all
+// in one transaction (FR-28.4).
 func (s *Postgres) PostPackingSlip(ctx context.Context, id string, version int, in PostInput, idem Idem) (PackingSlip, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out PackingSlip
@@ -839,16 +887,30 @@ func (s *Postgres) PostPackingSlip(ctx context.Context, id string, version int, 
 					p.TenantID, pl.ShipmentLineID, pl.Qty); err != nil {
 					return PackingSlip{}, err
 				}
+				idx := lineIndex(sh, pl.ShipmentLineID)
+				sh.Lines[idx].Shipped = sh.Lines[idx].Shipped.Add(pl.Qty)
 			}
-			if _, err := tx.Exec(ctx, `update container set status = 'SHIPPED' where tenant_id = $1 and shipment_id = $2 and status = 'CLOSED'`,
-				p.TenantID, sh.ID); err != nil {
+			// The ASN lists the containers leaving now: the CLOSED ones, read
+			// before they become SHIPPED.
+			asn := asnData(sh, slip)
+			if _, err := tx.Exec(ctx, `update container set status = 'SHIPPED', packing_slip_id = $3 where tenant_id = $1 and shipment_id = $2 and status = 'CLOSED'`,
+				p.TenantID, sh.ID, slip.ID); err != nil {
 				return PackingSlip{}, err
 			}
-			if err := bumpShipment(ctx, tx, p.TenantID, &sh, domain.StatusShipped); err != nil {
+			target, err := domain.Advance(sh.Status, domain.PostTarget(lineQtys(sh)))
+			if err != nil {
+				return PackingSlip{}, mapDomain(err)
+			}
+			if err := bumpShipment(ctx, tx, p.TenantID, &sh, target); err != nil {
 				return PackingSlip{}, err
 			}
 			if err := enqueue(ctx, tx, sh.ID, fulevents.PackingSlipPosted, p.TenantID, slipPostedData(slip, sh, returnables)); err != nil {
 				return PackingSlip{}, err
+			}
+			if in.EmitASN {
+				if err := enqueue(ctx, tx, sh.ID, fulevents.ASNIssued, p.TenantID, asn); err != nil {
+					return PackingSlip{}, err
+				}
 			}
 			return slip, nil
 		})
@@ -860,8 +922,9 @@ func (s *Postgres) PostPackingSlip(ctx context.Context, id string, version int, 
 
 // CancelPackingSlip reverses a posted, uninvoiced slip: the original becomes
 // CANCELLED, a reversing slip carries the mirror journal, shipped quantities
-// come back, containers return to CLOSED and the shipment returns to PACKED
-// (FR-28.5, BR-28.6). An invoiced slip is refused with FUL-0010.
+// come back, the containers that shipped with this slip return to CLOSED and
+// the shipment returns to PACKED (FR-28.5, BR-28.6). Other slips of a partially
+// shipped shipment are untouched. An invoiced slip is refused with FUL-0010.
 func (s *Postgres) CancelPackingSlip(ctx context.Context, slipID string, idem Idem) (PackingSlip, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out PackingSlip
@@ -882,7 +945,14 @@ func (s *Postgres) CancelPackingSlip(ctx context.Context, slipID string, idem Id
 			if err != nil {
 				return PackingSlip{}, err
 			}
-			if _, err := domain.Advance(sh.Status, domain.StatusPacked); err != nil {
+			// The shipment returns to PACKED with the slip's quantity packed and
+			// unshipped again. A partially shipped shipment whose remainder is
+			// already picked stays PICKED: packing the remainder makes it PACKED.
+			target := domain.StatusPacked
+			if sh.Status == domain.StatusPicked {
+				target = domain.StatusPicked
+			}
+			if _, err := domain.Advance(sh.Status, target); err != nil {
 				return PackingSlip{}, mapDomain(err)
 			}
 			rev := PackingSlip{ID: ids.New(), ShipmentID: orig.ShipmentID, OrderID: orig.OrderID, Status: "POSTED",
@@ -909,7 +979,7 @@ func (s *Postgres) CancelPackingSlip(ctx context.Context, slipID string, idem Id
 			}
 			// The returnable containers come back from the customer's balance; a
 			// customer who already returned them blocks the cancel (FUL-0015).
-			returnables, err := countReturnables(ctx, tx, sh.ID, "SHIPPED")
+			returnables, err := countSlipReturnables(ctx, tx, orig.ID)
 			if err != nil {
 				return PackingSlip{}, err
 			}
@@ -919,11 +989,11 @@ func (s *Postgres) CancelPackingSlip(ctx context.Context, slipID string, idem Id
 			if _, err := tx.Exec(ctx, `update packing_slip set status = 'CANCELLED' where tenant_id = $1 and id = $2`, p.TenantID, orig.ID); err != nil {
 				return PackingSlip{}, err
 			}
-			if _, err := tx.Exec(ctx, `update container set status = 'CLOSED' where tenant_id = $1 and shipment_id = $2 and status = 'SHIPPED'`,
-				p.TenantID, sh.ID); err != nil {
+			if _, err := tx.Exec(ctx, `update container set status = 'CLOSED', packing_slip_id = null where tenant_id = $1 and packing_slip_id = $2`,
+				p.TenantID, orig.ID); err != nil {
 				return PackingSlip{}, err
 			}
-			if err := bumpShipment(ctx, tx, p.TenantID, &sh, domain.StatusPacked); err != nil {
+			if err := bumpShipment(ctx, tx, p.TenantID, &sh, target); err != nil {
 				return PackingSlip{}, err
 			}
 			if err := enqueue(ctx, tx, sh.ID, fulevents.PackingSlipCancelled, p.TenantID, fulevents.PackingSlipCancelledData{

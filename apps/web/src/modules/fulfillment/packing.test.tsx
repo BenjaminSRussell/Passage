@@ -253,7 +253,7 @@ describe("returnable packaging", () => {
 });
 
 function picked(version = 4): Shipment {
-  const line = { orderLineId: ID, productId: PRODUCT, unit: "EA", qtyPacked: "0", qtyShipped: "0", pickConfirmed: true };
+  const line = { orderLineId: ID, productId: PRODUCT, unit: "EA", qtyPacked: "0", qtyShipped: "0", pickConfirmed: true, zone: null };
   return {
     id: SH,
     shipmentNumber: "SH-0000042",
@@ -264,6 +264,7 @@ function picked(version = 4): Shipment {
     status: "PICKED",
     plannedShipDate: "2026-10-26T00:00:00Z",
     actualShipDate: null,
+    carrierCode: null,
     version,
     lines: [
       { ...line, id: LINE, qtyPlanned: "30", qtyPicked: "30" },
@@ -289,6 +290,7 @@ describe("auto-pack on the shipment page (FR-28.15)", () => {
           grossKg: gross[qty],
           returnable: false,
           packagingMaterial: "CARDBOARD",
+          packingSlipId: null,
           lines: [{ shipmentLineId: LINE, qty }],
         }));
         current = { ...picked(5), containers, lines: [{ ...picked().lines[0], qtyPacked: "30" }, picked().lines[1]] };
@@ -302,6 +304,7 @@ describe("auto-pack on the shipment page (FR-28.15)", () => {
       }
       if (url.pathname === `/api/v1/fulfillment/shipments/${SH}`) return json(200, current);
       if (url.pathname === "/api/v1/fulfillment/packing-slips") return json(200, { items: [] });
+      if (url.pathname.endsWith("/tracking")) return json(200, { items: [] });
       return undefined;
     };
     const { container } = renderAt(`/fulfillment/shipments/${SH}`);

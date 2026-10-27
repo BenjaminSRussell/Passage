@@ -24,9 +24,14 @@ function lineLabel(line: ShipmentLine): string {
   return `Line ${shortId(line.orderLineId)} (${line.unit})`;
 }
 
-/** Confirm picked quantities for the lines not yet confirmed. A short pick leaves the rest on backorder. */
+/**
+ * Confirm picked quantities for the lines not yet confirmed. A short pick leaves the rest on
+ * backorder. On a partially shipped shipment it re-picks the lines with a remainder: the
+ * picked quantity is the line's new total, at least what is already packed (FR-28.8).
+ */
 export function PickForm({ shipment, onDone }: { shipment: Shipment; onDone(next: Shipment): void }) {
-  const open = shipment.lines.filter((l) => !l.pickConfirmed);
+  const remainder = shipment.status === "PARTIALLY_SHIPPED";
+  const open = shipment.lines.filter((l) => (remainder ? compareDecimal(l.qtyPicked, l.qtyPlanned) < 0 : !l.pickConfirmed));
   const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(open.map((l) => [l.id, l.qtyPlanned])));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [failure, setFailure] = useState<Problem | null>(null);
@@ -40,6 +45,7 @@ export function PickForm({ shipment, onDone }: { shipment: Shipment; onDone(next
       const v = (values[l.id] ?? "").trim();
       if (!DECIMAL.test(v)) found[l.id] = "Enter the picked quantity, 0 or more, with at most 6 decimals.";
       else if (compareDecimal(v, l.qtyPlanned) > 0) found[l.id] = `Over-pick: at most ${l.qtyPlanned} is planned (FUL-0004).`;
+      else if (compareDecimal(v, l.qtyPacked) < 0) found[l.id] = `${l.qtyPacked} is already packed or shipped; enter the line's total picked, at least that (FUL-0031).`;
     }
     setErrors(found);
     setFailure(null);
@@ -60,11 +66,21 @@ export function PickForm({ shipment, onDone }: { shipment: Shipment; onDone(next
 
   if (open.length === 0) return null;
   return (
-    <Card title="Confirm pick">
+    <Card title={remainder ? "Pick the remainder" : "Confirm pick"}>
       <form className={styles.form} onSubmit={submit} noValidate>
-        <p className={styles.note}>Enter what was picked. Less than planned is a short pick; the remainder goes to backorder and its reservation is released.</p>
+        <p className={styles.note}>
+          {remainder
+            ? "Enter each line's total picked so far, including what already shipped. The new quantity is packed and posted on another packing slip."
+            : "Enter what was picked. Less than planned is a short pick; the remainder goes to backorder and its reservation is released."}
+        </p>
         {open.map((l) => (
-          <FormField key={l.id} id={`pick-${l.id}`} label={`${lineLabel(l)} picked`} hint={`Planned ${l.qtyPlanned}`} error={errors[l.id]}>
+          <FormField
+            key={l.id}
+            id={`pick-${l.id}`}
+            label={`${lineLabel(l)} picked`}
+            hint={remainder ? `Planned ${l.qtyPlanned}, shipped ${l.qtyShipped}` : `Planned ${l.qtyPlanned}`}
+            error={errors[l.id]}
+          >
             {(control) => (
               <Input
                 {...control}
@@ -285,6 +301,7 @@ export function PostForm({ shipment, onPosted }: { shipment: Shipment; onPosted(
   const [currency, setCurrency] = useState("USD");
   const [cogsAtShipment, setCogsAtShipment] = useState(false);
   const [countryCode, setCountryCode] = useState("");
+  const [asnEnabled, setAsnEnabled] = useState(false);
   const [costs, setCosts] = useState<Record<string, CostValues>>(() => Object.fromEntries(open.map((l) => [l.id, { unitCost: "", costSnapshotId: "" }])));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [failure, setFailure] = useState<Problem | null>(null);
@@ -331,6 +348,7 @@ export function PostForm({ shipment, onPosted }: { shipment: Shipment; onPosted(
           currency: currency.trim(),
           cogsAtShipment,
           ...(countryCode.trim() ? { countryCode: countryCode.trim() } : {}),
+          ...(asnEnabled ? { asnEnabled: true } : {}),
           costs: open.map((l) => ({ shipmentLineId: l.id, unitCost: costs[l.id].unitCost.trim(), costSnapshotId: costs[l.id].costSnapshotId.trim() })),
         },
         key.current(),
@@ -361,6 +379,9 @@ export function PostForm({ shipment, onPosted }: { shipment: Shipment; onPosted(
         </FormField>
         <FormField id="post-cogs" label="Post cost of goods sold at shipment" hint="Off: Dr 1405 delivered-not-invoiced (default). On: Dr 5000 COGS.">
           {(control) => <Input {...control} type="checkbox" checked={cogsAtShipment} onChange={(event) => { setCogsAtShipment(event.target.checked); key.renew(); }} />}
+        </FormField>
+        <FormField id="post-asn" label="Send an advance ship notice (ASN)" hint="Publishes the containers, SSCCs and quantities of this slip for EDI (FR-28.9).">
+          {(control) => <Input {...control} type="checkbox" checked={asnEnabled} onChange={(event) => { setAsnEnabled(event.target.checked); key.renew(); }} />}
         </FormField>
         {open.map((l) => (
           <fieldset key={l.id} className={styles.valueGroup}>

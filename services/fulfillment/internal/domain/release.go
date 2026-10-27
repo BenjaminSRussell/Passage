@@ -20,6 +20,10 @@ type ReleaseLine struct {
 	ConfirmedShipDate time.Time
 	ATPOK             bool
 	Held              bool
+	// CarrierCode (one per order) and Zone (the line's pick zone) are what the
+	// picking workbench filters and groups on (FR-28.13). Both are optional.
+	CarrierCode string
+	Zone        string
 }
 
 // ReleaseRule carries the warehouse release parameters.

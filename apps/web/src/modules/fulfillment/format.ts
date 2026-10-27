@@ -1,4 +1,4 @@
-import type { ReleaseSkip, ShipmentStatus } from "./api/client";
+import type { ReleaseSkip, ShipmentStatus, TrackingStatus, WaveGroupBy } from "./api/client";
 
 export const dash = "—";
 
@@ -118,6 +118,7 @@ export const SHIPMENT_STATUS_LABELS: Record<ShipmentStatus, string> = {
   PICKING: "Picking",
   PICKED: "Picked",
   PACKED: "Packed",
+  PARTIALLY_SHIPPED: "Partially shipped",
   SHIPPED: "Shipped",
   DELIVERED: "Delivered",
   CANCELLED: "Cancelled",
@@ -135,3 +136,22 @@ export const SKIP_LABELS: Record<ReleaseSkip["reason"], string> = {
 export function shortId(id: string): string {
   return id.length > 8 ? id.slice(0, 8) : id;
 }
+
+export const GROUP_LABELS: Record<WaveGroupBy, string> = {
+  CUSTOMER: "Customer",
+  CARRIER: "Carrier",
+  ZONE: "Pick zone",
+  PRODUCT: "Product",
+};
+
+export const TRACKING_LABELS: Record<TrackingStatus, string> = {
+  QUOTED: "Quoted",
+  LABELLED: "Labelled",
+  MANIFESTED: "Manifested",
+  IN_TRANSIT: "In transit",
+  DELIVERED: "Delivered",
+  EXCEPTION: "Exception",
+};
+
+/** Carrier or pick zone code, as the service accepts it. */
+export const LOGISTICS_CODE = /^[A-Za-z0-9_.-]{1,32}$/;

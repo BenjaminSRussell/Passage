@@ -8,6 +8,7 @@ const shipmentTones: Record<ShipmentStatus, BadgeTone> = {
   PICKING: "info",
   PICKED: "info",
   PACKED: "warning",
+  PARTIALLY_SHIPPED: "warning",
   SHIPPED: "success",
   DELIVERED: "success",
   CANCELLED: "danger",

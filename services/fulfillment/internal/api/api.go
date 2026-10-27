@@ -41,6 +41,8 @@ const (
 var (
 	currencyCode = regexp.MustCompile(`^[A-Z]{3}$`)
 	unitCode     = regexp.MustCompile(`^[A-Za-z0-9]{1,8}$`)
+	// logisticsCode is a carrier or pick zone code (FR-28.13).
+	logisticsCode = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,32}$`)
 )
 
 // Options are the release parameters read from configuration (RELEASE_HORIZON_DAYS, FR-28.1).
@@ -74,6 +76,7 @@ func (a *API) Routes(r chi.Router) {
 	r.With(authz.RequireDuty("PackingSlipPost")).Post("/api/v1/fulfillment/shipments/{id}:post-packing-slip", a.postPackingSlip)
 	r.With(authz.RequireDuty("PackingSlipPost")).Post("/api/v1/fulfillment/packing-slips/{id}:cancel", a.cancelPackingSlip)
 	a.routesPacking(r)
+	a.routesWorkbench(r)
 }
 
 // ---- request and response DTOs -------------------------------------------
@@ -96,6 +99,10 @@ type releaseLine struct {
 	ConfirmedShipDate string `json:"confirmedShipDate"`
 	ATPOK             bool   `json:"atpOk"`
 	Held              bool   `json:"held"`
+	// CarrierCode is the order's carrier and Zone the line's pick zone; the
+	// picking workbench filters and groups by them (FR-28.13). Both optional.
+	CarrierCode string `json:"carrierCode"`
+	Zone        string `json:"zone"`
 }
 
 type releaseResponse struct {
@@ -109,7 +116,7 @@ type listResponse[T any] struct {
 
 var (
 	shipmentStatuses = map[string]bool{"OPEN": true, "RELEASED": true, "PICKING": true, "PICKED": true, "PACKED": true,
-		"SHIPPED": true, "DELIVERED": true, "CANCELLED": true}
+		"PARTIALLY_SHIPPED": true, "SHIPPED": true, "DELIVERED": true, "CANCELLED": true}
 	slipStatuses = map[string]bool{"PENDING": true, "POSTED": true, "CANCELLED": true, "INVOICED": true}
 )
 
@@ -133,11 +140,13 @@ type packDTO struct {
 }
 
 type postRequest struct {
-	PostingDate    string    `json:"postingDate"`
-	Currency       string    `json:"currency"`
-	CogsAtShipment bool      `json:"cogsAtShipment"`
-	CountryCode    string    `json:"countryCode"`
-	Costs          []costDTO `json:"costs"`
+	PostingDate    string `json:"postingDate"`
+	Currency       string `json:"currency"`
+	CogsAtShipment bool   `json:"cogsAtShipment"`
+	CountryCode    string `json:"countryCode"`
+	// AsnEnabled publishes the advance ship notice with this posting (FR-28.9).
+	AsnEnabled bool      `json:"asnEnabled"`
+	Costs      []costDTO `json:"costs"`
 }
 
 type costDTO struct {
@@ -409,7 +418,7 @@ func (a *API) postPackingSlip(w http.ResponseWriter, r *http.Request) {
 		costs[c.ShipmentLineID] = store.Cost{UnitCost: unit, CostSnapshotID: c.CostSnapshotID}
 	}
 	in := store.PostInput{PostingDate: postingDate, Currency: req.Currency, CogsAtShipment: req.CogsAtShipment,
-		CountryCode: req.CountryCode, Costs: costs}
+		CountryCode: req.CountryCode, Costs: costs, EmitASN: req.AsnEnabled}
 	slip, err := a.store.PostPackingSlip(r.Context(), id, version, in, idem)
 	if err != nil {
 		httpx.Fail(w, r, err)
@@ -501,7 +510,7 @@ func toReleaseLines(req releaseRequest) ([]domain.ReleaseLine, error) {
 	}
 	out := make([]domain.ReleaseLine, 0, len(req.Lines))
 	seen := map[string]bool{}
-	type orderParties struct{ customer, legalEntity string }
+	type orderParties struct{ customer, legalEntity, carrier string }
 	orders := map[string]orderParties{}
 	for i, l := range req.Lines {
 		field := func(name string) string { return fmt.Sprintf("lines[%d].%s", i, name) }
@@ -522,12 +531,18 @@ func toReleaseLines(req releaseRequest) ([]domain.ReleaseLine, error) {
 		if err != nil {
 			return nil, invalid(field("confirmedShipDate"), "must be a date as YYYY-MM-DD")
 		}
+		if l.CarrierCode != "" && !logisticsCode.MatchString(l.CarrierCode) {
+			return nil, invalid(field("carrierCode"), "must be 1 to 32 letters, digits, '.', '_' or '-' when given")
+		}
+		if l.Zone != "" && !logisticsCode.MatchString(l.Zone) {
+			return nil, invalid(field("zone"), "must be 1 to 32 letters, digits, '.', '_' or '-' when given")
+		}
 		if seen[l.OrderLineID] {
 			return nil, invalid(field("orderLineId"), "appears more than once")
 		}
 		seen[l.OrderLineID] = true
-		// A shipment belongs to one customer and one legal entity, so every
-		// line of one order must name the same ones.
+		// A shipment belongs to one customer, one legal entity and one
+		// carrier, so every line of one order must name the same ones.
 		if prev, ok := orders[l.OrderID]; ok {
 			if prev.customer != l.CustomerID {
 				return nil, invalid(field("customerId"), "differs from another line of the same order")
@@ -535,12 +550,15 @@ func toReleaseLines(req releaseRequest) ([]domain.ReleaseLine, error) {
 			if prev.legalEntity != l.LegalEntityID {
 				return nil, invalid(field("legalEntityId"), "differs from another line of the same order")
 			}
+			if prev.carrier != l.CarrierCode {
+				return nil, invalid(field("carrierCode"), "differs from another line of the same order")
+			}
 		} else {
-			orders[l.OrderID] = orderParties{customer: l.CustomerID, legalEntity: l.LegalEntityID}
+			orders[l.OrderID] = orderParties{customer: l.CustomerID, legalEntity: l.LegalEntityID, carrier: l.CarrierCode}
 		}
 		out = append(out, domain.ReleaseLine{OrderID: l.OrderID, OrderLineID: l.OrderLineID, CustomerID: l.CustomerID,
 			LegalEntityID: l.LegalEntityID, WarehouseID: req.WarehouseID, ProductID: l.ProductID, Unit: l.Unit, Qty: qty,
-			ConfirmedShipDate: ship, ATPOK: l.ATPOK, Held: l.Held})
+			ConfirmedShipDate: ship, ATPOK: l.ATPOK, Held: l.Held, CarrierCode: l.CarrierCode, Zone: l.Zone})
 	}
 	return out, nil
 }

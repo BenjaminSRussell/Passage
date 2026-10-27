@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { describeProblem, newKey, runRelease, type Problem, type ReleaseInput, type ReleaseResult, type ReleaseSkip, type Shipment } from "./api/client";
 import { ShipmentStatusBadge } from "./badges";
-import { DECIMAL, formatDate, SKIP_LABELS, today, UUID } from "./format";
+import { DECIMAL, formatDate, LOGISTICS_CODE, SKIP_LABELS, today, UUID } from "./format";
 import styles from "./pages.module.css";
 
 interface LineValues {
@@ -17,6 +17,8 @@ interface LineValues {
   confirmedShipDate: string;
   atpOk: boolean;
   held: boolean;
+  carrierCode: string;
+  zone: string;
 }
 
 interface Values {
@@ -39,7 +41,7 @@ const ID_FIELDS = [
 ] as const;
 
 export function emptyLine(): LineValues {
-  return { orderId: "", orderLineId: "", customerId: "", legalEntityId: "", productId: "", unit: "EA", qty: "", confirmedShipDate: today(), atpOk: true, held: false };
+  return { orderId: "", orderLineId: "", customerId: "", legalEntityId: "", productId: "", unit: "EA", qty: "", confirmedShipDate: today(), atpOk: true, held: false, carrierCode: "", zone: "" };
 }
 
 /** Checks that mirror the service (FUL-0050), keyed like its field names, and the request to send. */
@@ -56,6 +58,8 @@ export function validateRelease(values: Values): { errors: Errors; input?: Relea
     if (!UNIT.test(l.unit.trim())) errors[`lines[${i}].unit`] = "Enter 1 to 8 letters or digits, such as EA.";
     if (!DECIMAL.test(l.qty.trim()) || /^0+(\.0+)?$/.test(l.qty.trim())) errors[`lines[${i}].qty`] = "Enter a quantity above 0 with at most 6 decimals.";
     if (!DATE.test(l.confirmedShipDate)) errors[`lines[${i}].confirmedShipDate`] = "Enter the confirmed ship date.";
+    if (l.carrierCode.trim() !== "" && !LOGISTICS_CODE.test(l.carrierCode.trim())) errors[`lines[${i}].carrierCode`] = "Use 1 to 32 letters, digits, '.', '_' or '-'.";
+    if (l.zone.trim() !== "" && !LOGISTICS_CODE.test(l.zone.trim())) errors[`lines[${i}].zone`] = "Use 1 to 32 letters, digits, '.', '_' or '-'.";
     const lineId = l.orderLineId.trim().toLowerCase();
     if (lineId && seen.has(lineId)) errors[`lines[${i}].orderLineId`] = "This order line is already listed.";
     seen.add(lineId);
@@ -78,6 +82,8 @@ export function validateRelease(values: Values): { errors: Errors; input?: Relea
         confirmedShipDate: l.confirmedShipDate,
         atpOk: l.atpOk,
         held: l.held,
+        ...(l.carrierCode.trim() ? { carrierCode: l.carrierCode.trim() } : {}),
+        ...(l.zone.trim() ? { zone: l.zone.trim() } : {}),
       })),
     },
   };
@@ -133,8 +139,8 @@ export function ReleasePage() {
     }
   }
 
-  const text = (id: string, label: string, value: string, onChange: (v: string) => void, hint?: string, extra?: Record<string, unknown>) => (
-    <FormField key={id} id={`release-${id.replace(/[^\w-]/g, "-")}`} label={label} hint={hint} error={errors[id]}>
+  const text = (id: string, label: string, value: string, onChange: (v: string) => void, hint?: string, extra?: Record<string, unknown>, optional?: boolean) => (
+    <FormField key={id} id={`release-${id.replace(/[^\w-]/g, "-")}`} label={label} hint={hint} error={errors[id]} optional={optional}>
       {(control) => <Input {...control} {...extra} value={value} onChange={(event) => onChange(event.target.value)} invalid={Boolean(errors[id])} />}
     </FormField>
   );
@@ -164,6 +170,8 @@ export function ReleasePage() {
               {text(`lines[${i}].unit`, "Unit", line.unit, (v) => updateLine(i, { unit: v }), undefined, { maxLength: 8 })}
               {text(`lines[${i}].qty`, "Quantity", line.qty, (v) => updateLine(i, { qty: v }), undefined, { inputMode: "decimal" })}
               {text(`lines[${i}].confirmedShipDate`, "Confirmed ship date", line.confirmedShipDate, (v) => updateLine(i, { confirmedShipDate: v }), undefined, { type: "date" })}
+              {text(`lines[${i}].carrierCode`, "Carrier", line.carrierCode, (v) => updateLine(i, { carrierCode: v }), "Same for every line of an order; the workbench groups by it.", { maxLength: 32 }, true)}
+              {text(`lines[${i}].zone`, "Pick zone", line.zone, (v) => updateLine(i, { zone: v }), undefined, { maxLength: 32 }, true)}
               <FormField id={`release-lines-${i}-atpOk`} label="Available (ATP)">
                 {(control) => <Input {...control} type="checkbox" checked={line.atpOk} onChange={(event) => updateLine(i, { atpOk: event.target.checked })} />}
               </FormField>

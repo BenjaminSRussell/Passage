@@ -1,7 +1,8 @@
 // Package events holds the fulfillment event types and payloads. Event types
 // follow the kernel rule dev.passage.<context>.<entity>.<verb>.v<n>; the
-// packing-slip entity collapses to "packingslip" because the kernel allows one
-// segment per name part.
+// packing-slip entity collapses to "packingslip" and the PRD's
+// shipment.tracking-updated becomes tracking.updated, because the kernel
+// allows one lowercase segment per name part.
 package events
 
 import "github.com/BenjaminSRussell/passage/platform/events"
@@ -13,11 +14,82 @@ var (
 	PickConfirmed        = events.Type(Context, "pick", "confirmed", 1)
 	PackingSlipPosted    = events.Type(Context, "packingslip", "posted", 1)
 	PackingSlipCancelled = events.Type(Context, "packingslip", "cancelled", 1)
+	ShipmentCancelled    = events.Type(Context, "shipment", "cancelled", 1)
+	WaveCreated          = events.Type(Context, "wave", "created", 1)
+	ASNIssued            = events.Type(Context, "asn", "issued", 1)
+	TrackingUpdated      = events.Type(Context, "tracking", "updated", 1)
 )
 
 // All lists every event type this service publishes, for the registry check.
 func All() []string {
-	return []string{ShipmentReleased, PickConfirmed, PackingSlipPosted, PackingSlipCancelled}
+	return []string{
+		ShipmentReleased, PickConfirmed, PackingSlipPosted, PackingSlipCancelled,
+		ShipmentCancelled, WaveCreated, ASNIssued, TrackingUpdated,
+	}
+}
+
+// ShipmentCancelledData is published when a shipment is cancelled before it
+// ships (BR-28.6). Inventory releases the lines' reservations from it; sales
+// may release the order lines again.
+type ShipmentCancelledData struct {
+	ShipmentID     string    `json:"shipment_id"`
+	ShipmentNumber string    `json:"shipment_number"`
+	OrderID        string    `json:"order_id"`
+	WarehouseID    string    `json:"warehouse"`
+	Lines          []LineRef `json:"lines"`
+}
+
+// WaveCreatedData is published for each wave the picking workbench creates
+// (FR-28.13); its shipments move to PICKING in the same transaction.
+type WaveCreatedData struct {
+	WaveID        string   `json:"wave_id"`
+	WaveNumber    string   `json:"wave_number"`
+	LegalEntityID string   `json:"legal_entity_id"`
+	WarehouseID   string   `json:"warehouse"`
+	GroupBy       string   `json:"group_by"`
+	GroupKey      string   `json:"group_key"`
+	ShipmentIDs   []string `json:"shipment_ids"`
+	LineCount     int      `json:"line_count"`
+	OrderCount    int      `json:"order_count"`
+}
+
+// ASNLine is one shipment line quantity inside an ASN container.
+type ASNLine struct {
+	OrderLineID string `json:"order_line_id"`
+	Qty         string `json:"qty"`
+}
+
+// ASNContainer is one container with its SSCC (FR-28.9).
+type ASNContainer struct {
+	SSCC          string    `json:"sscc"`
+	ContainerType string    `json:"container_type"`
+	Lines         []ASNLine `json:"lines"`
+}
+
+// ASNIssuedData is the advance ship notice emitted when a slip posts with ASN
+// enabled (FR-28.9): the containers that left with that slip. The carrier
+// tracking number is not known at post (carrier labels are not built).
+type ASNIssuedData struct {
+	ShipmentID        string         `json:"shipment_id"`
+	ShipmentNumber    string         `json:"shipment_number"`
+	OrderID           string         `json:"order_id"`
+	PackingSlipID     string         `json:"packing_slip_id"`
+	PackingSlipNumber string         `json:"packing_slip_number"`
+	Carrier           string         `json:"carrier"`
+	Containers        []ASNContainer `json:"containers"`
+}
+
+// TrackingUpdatedData is published when a carrier reports a new tracking event
+// (FR-28.10); the portal and sales read it.
+type TrackingUpdatedData struct {
+	ShipmentID     string `json:"shipment_id"`
+	OrderID        string `json:"order_id"`
+	Provider       string `json:"provider"`
+	TrackingNumber string `json:"tracking_number"`
+	EventKey       string `json:"event_key"`
+	Status         string `json:"status"`
+	Description    string `json:"description"`
+	EventTime      string `json:"event_time"`
 }
 
 type LineRef struct {

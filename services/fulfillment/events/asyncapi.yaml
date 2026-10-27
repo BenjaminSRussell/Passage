@@ -6,7 +6,8 @@ info:
     Events published by the fulfillment service through the transactional outbox
     (Debezium outbox event router to Kafka). Types follow
     dev.passage.<context>.<entity>.<verb>.v<n>; the packing-slip entity is
-    "packingslip" because the kernel allows one segment per name part.
+    "packingslip" and the PRD's shipment.tracking-updated is tracking.updated,
+    because the kernel allows one lowercase segment per name part.
     Source /passage/fulfillment/fulfillment. Schema evolution is additive only.
 defaultContentType: application/cloudevents+json
 channels:
@@ -30,6 +31,26 @@ channels:
     messages:
       packingSlipCancelled:
         $ref: "#/components/messages/PackingSlipCancelled"
+  shipmentCancelled:
+    address: passage.fulfillment.shipment
+    messages:
+      shipmentCancelled:
+        $ref: "#/components/messages/ShipmentCancelled"
+  waveCreated:
+    address: passage.fulfillment.wave
+    messages:
+      waveCreated:
+        $ref: "#/components/messages/WaveCreated"
+  asnIssued:
+    address: passage.fulfillment.asn
+    messages:
+      asnIssued:
+        $ref: "#/components/messages/ASNIssued"
+  trackingUpdated:
+    address: passage.fulfillment.tracking
+    messages:
+      trackingUpdated:
+        $ref: "#/components/messages/TrackingUpdated"
 operations:
   publishShipmentReleased:
     action: send
@@ -51,6 +72,26 @@ operations:
     channel: { $ref: "#/channels/packingSlipCancelled" }
     messages:
       - $ref: "#/channels/packingSlipCancelled/messages/packingSlipCancelled"
+  publishShipmentCancelled:
+    action: send
+    channel: { $ref: "#/channels/shipmentCancelled" }
+    messages:
+      - $ref: "#/channels/shipmentCancelled/messages/shipmentCancelled"
+  publishWaveCreated:
+    action: send
+    channel: { $ref: "#/channels/waveCreated" }
+    messages:
+      - $ref: "#/channels/waveCreated/messages/waveCreated"
+  publishASNIssued:
+    action: send
+    channel: { $ref: "#/channels/asnIssued" }
+    messages:
+      - $ref: "#/channels/asnIssued/messages/asnIssued"
+  publishTrackingUpdated:
+    action: send
+    channel: { $ref: "#/channels/trackingUpdated" }
+    messages:
+      - $ref: "#/channels/trackingUpdated/messages/trackingUpdated"
 components:
   messages:
     ShipmentReleased:
@@ -151,6 +192,101 @@ components:
             type: array
             description: Returnable containers taken back off the customer's balance (negative qty).
             items: { $ref: "#/components/schemas/ReturnableMove" }
+    ShipmentCancelled:
+      name: dev.passage.fulfillment.shipment.cancelled.v1
+      summary: >
+        A shipment was cancelled before anything shipped and while it held no
+        container (BR-28.6). Inventory releases the lines' reservations; the
+        order lines can be released again.
+      contentType: application/json
+      payload:
+        type: object
+        required: [shipment_id, shipment_number, order_id, warehouse, lines]
+        properties:
+          shipment_id: { type: string, format: uuid }
+          shipment_number: { type: string }
+          order_id: { type: string, format: uuid }
+          warehouse: { type: string, format: uuid }
+          lines:
+            type: array
+            items:
+              type: object
+              properties:
+                order_line_id: { type: string, format: uuid }
+                qty: { type: string, description: The planned quantity that no longer ships. }
+    WaveCreated:
+      name: dev.passage.fulfillment.wave.created.v1
+      summary: >
+        The picking workbench created a pick wave (FR-28.13); its shipments moved
+        to PICKING in the same transaction. Lines of one shipment are in one wave
+        (BR-28.14).
+      contentType: application/json
+      payload:
+        type: object
+        required: [wave_id, wave_number, legal_entity_id, warehouse, group_by, group_key, shipment_ids, line_count, order_count]
+        properties:
+          wave_id: { type: string, format: uuid }
+          wave_number: { type: string, example: "WV-0000001" }
+          legal_entity_id: { type: string, format: uuid }
+          warehouse: { type: string, format: uuid }
+          group_by: { type: string, enum: [CUSTOMER, CARRIER, ZONE, PRODUCT] }
+          group_key: { type: string, description: The group value; UNASSIGNED when the shipments have none. }
+          shipment_ids:
+            type: array
+            items: { type: string, format: uuid }
+          line_count: { type: integer }
+          order_count: { type: integer }
+    ASNIssued:
+      name: dev.passage.fulfillment.asn.issued.v1
+      summary: >
+        Advance ship notice of a posted packing slip (FR-28.9), published when the
+        post asks for it (asnEnabled). It lists the containers that left with that
+        slip, with their SSCCs and order-line quantities, for the wave 35 EDI mapper.
+      contentType: application/json
+      payload:
+        type: object
+        required: [shipment_id, shipment_number, order_id, packing_slip_id, packing_slip_number, carrier, containers]
+        properties:
+          shipment_id: { type: string, format: uuid }
+          shipment_number: { type: string }
+          order_id: { type: string, format: uuid }
+          packing_slip_id: { type: string, format: uuid }
+          packing_slip_number: { type: string }
+          carrier: { type: string, description: The shipment's carrier code; empty when none was given. }
+          containers:
+            type: array
+            items:
+              type: object
+              required: [sscc, container_type, lines]
+              properties:
+                sscc: { type: string, pattern: "^[0-9]{18}$" }
+                container_type: { type: string }
+                lines:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      order_line_id: { type: string, format: uuid }
+                      qty: { type: string }
+    TrackingUpdated:
+      name: dev.passage.fulfillment.tracking.updated.v1
+      summary: >
+        A new carrier tracking event for a shipment (FR-28.10), from carrier-gateway
+        or entered by hand. A redelivered provider event publishes nothing. The
+        portal and sales show it.
+      contentType: application/json
+      payload:
+        type: object
+        required: [shipment_id, order_id, provider, tracking_number, event_key, status, description, event_time]
+        properties:
+          shipment_id: { type: string, format: uuid }
+          order_id: { type: string, format: uuid }
+          provider: { type: string, example: easypost }
+          tracking_number: { type: string }
+          event_key: { type: string, description: The provider's event id. }
+          status: { type: string, enum: [QUOTED, LABELLED, MANIFESTED, IN_TRANSIT, DELIVERED, EXCEPTION] }
+          description: { type: string }
+          event_time: { type: string, format: date-time }
   schemas:
     SlipLine:
       type: object

@@ -5,10 +5,10 @@
 
 export const base = "/api/v1/fulfillment";
 
-export type ShipmentStatus = "OPEN" | "RELEASED" | "PICKING" | "PICKED" | "PACKED" | "SHIPPED" | "DELIVERED" | "CANCELLED";
+export type ShipmentStatus = "OPEN" | "RELEASED" | "PICKING" | "PICKED" | "PACKED" | "PARTIALLY_SHIPPED" | "SHIPPED" | "DELIVERED" | "CANCELLED";
 export type PackingSlipStatus = "PENDING" | "POSTED" | "CANCELLED" | "INVOICED";
 
-export const SHIPMENT_STATUSES: ShipmentStatus[] = ["RELEASED", "PICKING", "PICKED", "PACKED", "SHIPPED", "DELIVERED", "CANCELLED"];
+export const SHIPMENT_STATUSES: ShipmentStatus[] = ["RELEASED", "PICKING", "PICKED", "PACKED", "PARTIALLY_SHIPPED", "SHIPPED", "DELIVERED", "CANCELLED"];
 
 export interface ShipmentLine {
   id: string;
@@ -21,6 +21,8 @@ export interface ShipmentLine {
   qtyPacked: string;
   qtyShipped: string;
   pickConfirmed: boolean;
+  /** Pick zone given at release; null when none. */
+  zone: string | null;
 }
 
 export interface Container {
@@ -33,6 +35,8 @@ export interface Container {
   grossKg: string;
   returnable: boolean;
   packagingMaterial: string | null;
+  /** The packing slip the container shipped with; null while CLOSED. */
+  packingSlipId: string | null;
   lines: { shipmentLineId: string; qty: string }[];
 }
 
@@ -46,6 +50,7 @@ export interface ShipmentSummary {
   status: ShipmentStatus;
   plannedShipDate: string;
   actualShipDate: string | null;
+  carrierCode: string | null;
   version: number;
   lineCount: number;
 }
@@ -156,6 +161,10 @@ export interface ReleaseLineInput {
   confirmedShipDate: string;
   atpOk: boolean;
   held: boolean;
+  /** The order's carrier; every line of one order names the same one. */
+  carrierCode?: string;
+  /** The line's pick zone. */
+  zone?: string;
 }
 
 export interface ReleaseInput {
@@ -181,7 +190,82 @@ export interface PostInput {
   cogsAtShipment: boolean;
   /** Ship-to country whose packaging fee rates apply; omit for no packaging fee. */
   countryCode?: string;
+  /** Publish the advance ship notice of this slip's containers (FR-28.9). */
+  asnEnabled?: boolean;
   costs: { shipmentLineId: string; unitCost: string; costSnapshotId: string }[];
+}
+
+export type WaveGroupBy = "CUSTOMER" | "CARRIER" | "ZONE" | "PRODUCT";
+export const WAVE_GROUP_KEYS: WaveGroupBy[] = ["CUSTOMER", "CARRIER", "ZONE", "PRODUCT"];
+
+/** Picking workbench filter, group key and limits (FR-28.13). Empty filters match all. */
+export interface WorkbenchInput {
+  warehouseId: string;
+  customerId?: string;
+  carrier?: string;
+  zone?: string;
+  shipFrom?: string;
+  shipTo?: string;
+  groupBy: WaveGroupBy;
+  maxLines?: number;
+  maxOrders?: number;
+}
+
+export interface WaveShipment {
+  id: string;
+  shipmentNumber: string;
+  orderId: string;
+  customerId: string;
+  status: ShipmentStatus;
+  carrierCode: string | null;
+  plannedShipDate: string;
+  lineCount: number;
+}
+
+export interface WavePlan {
+  groupKey: string;
+  legalEntityId: string;
+  lineCount: number;
+  orderCount: number;
+  shipments: WaveShipment[];
+}
+
+export interface WaveSummary {
+  id: string;
+  waveNumber: string;
+  legalEntityId: string;
+  warehouseId: string;
+  groupBy: WaveGroupBy;
+  groupKey: string;
+  status: "OPEN";
+  lineCount: number;
+  orderCount: number;
+  createdAt: string;
+}
+
+export interface Wave extends WaveSummary {
+  shipments: WaveShipment[];
+}
+
+export interface WavesResult<T> {
+  warehouseId: string;
+  groupBy: WaveGroupBy;
+  waveCount: number;
+  lineCount: number;
+  message: string;
+  waves: T[];
+}
+
+export type TrackingStatus = "QUOTED" | "LABELLED" | "MANIFESTED" | "IN_TRANSIT" | "DELIVERED" | "EXCEPTION";
+export const TRACKING_STATUSES: TrackingStatus[] = ["QUOTED", "LABELLED", "MANIFESTED", "IN_TRANSIT", "DELIVERED", "EXCEPTION"];
+
+export interface TrackingEvent {
+  provider: string;
+  eventKey: string;
+  trackingNumber: string;
+  status: TrackingStatus;
+  description: string;
+  eventTime: string;
 }
 
 export class FulfillmentApiError extends Error {
@@ -308,6 +392,48 @@ export function getPackingSlip(id: string, signal?: AbortSignal): Promise<Packin
 /** Reverses a posted, uninvoiced slip; the response is the reversing slip (FR-28.5). */
 export function cancelPackingSlip(id: string, key: string): Promise<PackingSlip> {
   return command<PackingSlip>(`${slipPath(id)}:cancel`, undefined, key);
+}
+
+/** Cancels a shipment that shipped nothing and holds no container (BR-28.6). */
+export function cancelShipment(id: string, version: number, key: string): Promise<Shipment> {
+  return command<Shipment>(`${shipmentPath(id)}:cancel`, undefined, key, version);
+}
+
+/** Read-only workbench preview: the waves the create would make now (FR-28.13). */
+export function previewWaves(input: WorkbenchInput): Promise<WavesResult<WavePlan>> {
+  return send<WavesResult<WavePlan>>("/waves:preview", { method: "POST", body: JSON.stringify(input) });
+}
+
+/** Creates the waves in one action; reuse one key per preview so a retry cannot create them twice. */
+export function createWaves(input: WorkbenchInput, key: string): Promise<WavesResult<Wave>> {
+  return command<WavesResult<Wave>>("/waves", input, key);
+}
+
+export function listWaves(filter: { warehouseId?: string; limit?: number } = {}, signal?: AbortSignal): Promise<WaveSummary[]> {
+  return items<WaveSummary>(`/waves${query(filter)}`, signal);
+}
+
+export function getWave(id: string, signal?: AbortSignal): Promise<Wave> {
+  return send<Wave>(`/waves/${encodeURIComponent(id)}`, {}, signal);
+}
+
+export function listTracking(id: string, signal?: AbortSignal): Promise<TrackingEvent[]> {
+  return items<TrackingEvent>(`${shipmentPath(id)}/tracking`, signal);
+}
+
+/** Records a tracking event by hand (BR-28.9 manual tracking); the event key makes a resend harmless. */
+export function recordTracking(id: string, event: Omit<TrackingEvent, "description"> & { description?: string }): Promise<TrackingEvent & { created: boolean }> {
+  return send(`${shipmentPath(id)}/tracking`, { method: "POST", body: JSON.stringify(event) });
+}
+
+/** The container's GS1-128 SSCC label as a ZPL program (text). */
+export async function containerLabel(shipmentId: string, containerId: string): Promise<string> {
+  const res = await fetch(`${base}${shipmentPath(shipmentId)}/containers/${encodeURIComponent(containerId)}/label`, {
+    headers: { Accept: "application/zpl" },
+    credentials: "same-origin",
+  });
+  if (!res.ok) throw await toError(res);
+  return res.text();
 }
 
 /** Auto-packs picked lines by packing rule (FR-28.15); unitWeights maps a shipment line id to kg per unit. */

@@ -11,15 +11,21 @@ import { ReturnablePackagingPage } from "./ReturnablePackagingPage";
 import { ScanPage } from "./ScanPage";
 import { ShipmentDetailPage } from "./ShipmentDetailPage";
 import { ShipmentsPage } from "./ShipmentsPage";
+import { WaveDetailPage } from "./WaveDetailPage";
+import { WavesPage } from "./WavesPage";
+import { WorkbenchPage } from "./WorkbenchPage";
 import { WorkspacePage } from "./WorkspacePage";
 
 const fulfillment: PassageModule = {
   id: "fulfillment",
   title: "Fulfillment",
-  description: "Release orders to the warehouse, pick, pack into SSCC-labelled containers by packing rule, post packing slips with packaging fees and track returnable packaging.",
+  description: "Release orders to the warehouse, group them into pick waves, pick, pack into SSCC-labelled containers by packing rule, post full or partial packing slips with packaging fees, track carriers and returnable packaging.",
   routes: [
     { path: "/fulfillment", element: createElement(WorkspacePage), handle: { title: "Fulfillment" } },
     { path: "/fulfillment/release", element: createElement(ReleasePage), handle: { title: "Release lines" } },
+    { path: "/fulfillment/workbench", element: createElement(WorkbenchPage), handle: { title: "Picking workbench" } },
+    { path: "/fulfillment/waves", element: createElement(WavesPage), handle: { title: "Pick waves" } },
+    { path: "/fulfillment/waves/:id", element: createElement(WaveDetailPage), handle: { title: "Pick wave" } },
     { path: "/fulfillment/shipments", element: createElement(ShipmentsPage), handle: { title: "Shipments" } },
     { path: "/fulfillment/shipments/:id", element: createElement(ShipmentDetailPage), handle: { title: "Shipment" } },
     { path: "/fulfillment/packing-slips", element: createElement(PackingSlipsPage), handle: { title: "Packing slips" } },
@@ -34,6 +40,8 @@ const fulfillment: PassageModule = {
   nav: [
     { label: "Overview", to: "/fulfillment", duty: "WarehouseView" },
     { label: "Release lines", to: "/fulfillment/release", duty: "WarehouseRelease" },
+    { label: "Picking workbench", to: "/fulfillment/workbench", duty: "WarehouseRelease" },
+    { label: "Pick waves", to: "/fulfillment/waves", duty: "WarehouseView" },
     { label: "Shipments", to: "/fulfillment/shipments", duty: "WarehouseView" },
     { label: "Packing slips", to: "/fulfillment/packing-slips", duty: "WarehouseView" },
     { label: "Scan a label", to: "/fulfillment/scan", duty: "WarehousePick" },

@@ -1,11 +1,12 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, DataTable, PageHeader, Skeleton, type DataTableColumn } from "../../shell/ui";
-import { getShipment, listPackingSlips, type AutoPackResult, type Container, type PackingSlipSummary, type Shipment, type ShipmentLine } from "./api/client";
+import { getShipment, listPackingSlips, type AutoPackResult, type Container, type PackingSlipSummary, type Problem, type Shipment, type ShipmentLine } from "./api/client";
 import { ShipmentStatusBadge, SlipStatusBadge } from "./badges";
-import { dash, formatDate, formatDateTime, formatMoney, shortId } from "./format";
+import { dash, formatDate, formatDateTime, formatMoney, shortId, subtractDecimal } from "./format";
 import styles from "./pages.module.css";
 import { AutoPackForm, PackForm, PickForm, PostForm } from "./ShipmentActions";
+import { canCancelShipment, CancelShipmentPanel, LabelButton, LabelPanel, TrackingCard } from "./ShipmentTracking";
 import { useLoad } from "./useLoad";
 
 interface Detail {
@@ -21,9 +22,11 @@ const lineColumns: DataTableColumn<ShipmentLine>[] = [
   { key: "qtyPicked", header: "Picked", align: "end", render: (row) => (row.pickConfirmed ? row.qtyPicked : "Not confirmed") },
   { key: "qtyPacked", header: "Packed", align: "end" },
   { key: "qtyShipped", header: "Shipped", align: "end" },
+  { key: "remaining", header: "To ship", align: "end", render: (row) => subtractDecimal(row.qtyPlanned, row.qtyShipped) },
+  { key: "zone", header: "Zone", render: (row) => row.zone ?? dash },
 ];
 
-function containerColumns(lines: ShipmentLine[]): DataTableColumn<Container>[] {
+function containerColumns(lines: ShipmentLine[], label: (row: Container) => ReactNode): DataTableColumn<Container>[] {
   const orderLine = (id: string) => shortId(lines.find((l) => l.id === id)?.orderLineId ?? id);
   return [
     { key: "sscc", header: "SSCC", mono: true },
@@ -33,6 +36,7 @@ function containerColumns(lines: ShipmentLine[]): DataTableColumn<Container>[] {
     { key: "returnable", header: "Returnable", render: (row) => (row.returnable ? "Yes" : "No") },
     { key: "packagingMaterial", header: "Material", render: (row) => row.packagingMaterial ?? dash },
     { key: "lines", header: "Contents", render: (row) => row.lines.map((l) => `${orderLine(l.shipmentLineId)} × ${l.qty}`).join(", ") },
+    { key: "label", header: "Label", render: label },
   ];
 }
 
@@ -48,6 +52,7 @@ export function ShipmentDetailPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
   const [autoPacked, setAutoPacked] = useState<AutoPackResult | null>(null);
+  const [label, setLabel] = useState<{ sscc: string; label: string | Problem } | null>(null);
   const state = useLoad<Detail>(async (signal) => {
     const [shipment, slips] = await Promise.all([getShipment(id, signal), listPackingSlips({ shipmentId: id }, signal)]);
     return { shipment, slips };
@@ -73,7 +78,8 @@ export function ShipmentDetailPage() {
     );
   }
   const { shipment, slips } = state.data;
-  const canPick = shipment.status === "RELEASED" || shipment.status === "PICKING";
+  // A partially shipped shipment re-picks its remainder (FR-28.8).
+  const canPick = shipment.status === "RELEASED" || shipment.status === "PICKING" || shipment.status === "PARTIALLY_SHIPPED";
   const canPack = shipment.status === "PICKED";
   const canPost = shipment.status === "PACKED";
 
@@ -96,6 +102,7 @@ export function ShipmentDetailPage() {
             ["Customer", shipment.customerId],
             ["Warehouse", shipment.warehouseId],
             ["Legal entity", shipment.legalEntityId],
+            ["Carrier", shipment.carrierCode ?? dash],
             ["Shipped", formatDateTime(shipment.actualShipDate)],
             ["Version", String(shipment.version)],
           ].map(([term, value]) => (
@@ -106,6 +113,12 @@ export function ShipmentDetailPage() {
           ))}
         </dl>
       </Card>
+      {canCancelShipment(shipment) ? <CancelShipmentPanel key={`cancel-${shipment.version}`} shipment={shipment} onDone={state.reload} /> : null}
+      {shipment.status === "PARTIALLY_SHIPPED" ? (
+        <Alert tone="info" title="Partially shipped">
+          A packing slip has shipped part of this shipment. Pick the remainder below; the shipment is Shipped once every line has shipped its planned quantity.
+        </Alert>
+      ) : null}
       <DataTable label="Shipment lines" columns={lineColumns} rows={shipment.lines} getRowKey={(row) => row.id} />
       {canPick ? <PickForm key={`pick-${shipment.version}`} shipment={shipment} onDone={state.reload} /> : null}
       {autoPacked ? (
@@ -138,12 +151,16 @@ export function ShipmentDetailPage() {
       <Card title="Containers">
         <DataTable
           label="Containers"
-          columns={containerColumns(shipment.lines)}
+          columns={containerColumns(shipment.lines, (row) => (
+            <LabelButton shipmentId={shipment.id} container={row} onLoaded={(sscc, loaded) => setLabel({ sscc, label: loaded })} />
+          ))}
           rows={shipment.containers}
           getRowKey={(row) => row.id}
           empty={{ title: "No containers yet", description: "Pack picked lines into a container to issue its SSCC label." }}
         />
       </Card>
+      {label ? <LabelPanel sscc={label.sscc} label={label.label} onClose={() => setLabel(null)} /> : null}
+      <TrackingCard shipment={shipment} onRecorded={state.reload} />
       <Card title="Packing slips">
         <DataTable
           label="Packing slips"
