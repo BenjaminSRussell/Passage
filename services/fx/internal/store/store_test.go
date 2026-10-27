@@ -4,9 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 
@@ -19,10 +23,16 @@ import (
 	"github.com/BenjaminSRussell/passage/services/fx/migrations"
 )
 
-var valid = time.Now().UTC().AddDate(0, 0, -3)
+var valid = time.Now().UTC().Truncate(24*time.Hour).AddDate(0, 0, -3)
 
 func in(source, rate string) store.RateInput {
 	return store.RateInput{RateType: "CLOSING", From: "EUR", To: "USD", ValidFrom: valid, Rate: decimal.RequireFromString(rate), Source: source}
+}
+
+func pair(source, to string) store.RateInput {
+	r := in(source, "1.5")
+	r.To = to
+	return r
 }
 
 func ctxFor(n int) context.Context {
@@ -591,5 +601,147 @@ func TestRLSHidesOtherTenantRunsAndIdempotencyKeys(t *testing.T) {
 	}
 	if rec, ok, err := s.GetIdempotency(ctx, "k1"); err != nil || !ok || rec.RequestHash != "h1" {
 		t.Fatalf("tenant 1 key was overwritten: %+v ok=%v err=%v", rec, ok, err)
+	}
+}
+
+func TestMigrationGrantsKeepRatesAppendOnlyForAppRole(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	ctx := ctxFor(1)
+	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	s := store.New(app)
+	if _, err := s.PutRateType(ctx, store.RateType{Code: "CLOSING", Name: "Closing", AllowInverse: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.PostRates(ctx, []store.RateInput{in("ecb", "1.1")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.PostRates(ctx, []store.RateInput{in("manual", "1.2")}); err != nil {
+		t.Fatalf("correction must be able to set superseded_by: %v", err)
+	}
+	if err := s.PutIdempotency(ctx, store.IdempotencyRecord{Key: "k", RequestHash: "h", ResponseStatus: 201, ResponseBody: json.RawMessage(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{
+		"delete from exchange_rate",
+		"update exchange_rate set rate = 2",
+		"delete from idempotency_keys",
+		"update idempotency_keys set response_status = 200",
+	} {
+		err := dbx.WithTenantTx(ctx, app, func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, statement)
+			return err
+		})
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != "42501" {
+			t.Fatalf("%q must be denied for passage_app, got %v", statement, err)
+		}
+	}
+}
+
+func TestPublishIdempotentSurvivesASmallPoolUnderConcurrency(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	ctx, cancel := context.WithTimeout(ctxFor(1), 30*time.Second)
+	defer cancel()
+	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.New(app).PutRateType(ctx, store.RateType{Code: "CLOSING", Name: "Closing", AllowInverse: true}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := app.Config().Copy()
+	cfg.MaxConns = 2
+	small, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer small.Close()
+	s := store.New(small)
+	render := func(p []store.Posted) (json.RawMessage, error) { return json.Marshal(p) }
+
+	const workers, keys = 6, 3
+	type outcome struct {
+		replayed bool
+		err      error
+	}
+	results := make(chan outcome, workers)
+	for i := 0; i < workers; i++ {
+		go func() {
+			rec, replayed, err := s.PublishIdempotent(ctx, "key-"+strconv.Itoa(i%keys), "hash-"+strconv.Itoa(i%keys), []store.RateInput{pair("manual", []string{"USD", "GBP", "JPY"}[i%keys])}, render)
+			if err == nil && rec.ResponseStatus != 201 {
+				err = errors.New("status " + strconv.Itoa(rec.ResponseStatus))
+			}
+			results <- outcome{replayed, err}
+		}()
+	}
+	fresh := 0
+	for i := 0; i < workers; i++ {
+		got := <-results
+		if got.err != nil {
+			t.Fatalf("publish: %v", got.err)
+		}
+		if !got.replayed {
+			fresh++
+		}
+	}
+	if fresh != keys {
+		t.Fatalf("fresh publishes = %d, want one per key (%d)", fresh, keys)
+	}
+	if _, _, err := s.PublishIdempotent(ctx, "key-0", "other-hash", []store.RateInput{in("manual", "1.1")}, render); err == nil || !strings.Contains(err.Error(), "COM-0409") {
+		t.Fatalf("changed body under a used key: %v", err)
+	}
+}
+
+func TestStartRunSkipsAFreshRunningRunAndRestartsAStaleOne(t *testing.T) {
+	s, pool, ctx := migrated(t)
+	first, done, err := s.StartRun(ctx, "ecb", "CLOSING", valid)
+	if err != nil || done {
+		t.Fatalf("first start: done=%v err=%v", done, err)
+	}
+	second, done, err := s.StartRun(ctx, "ecb", "CLOSING", valid)
+	if err != nil || !done || second.ID != first.ID || second.Status != store.RunRunning {
+		t.Fatalf("a replica must skip a fresh running run: %+v done=%v err=%v", second, done, err)
+	}
+	if _, err := pool.Exec(ctx, `update provider_import_run set started_at = now() - interval '11 minutes'`); err != nil {
+		t.Fatal(err)
+	}
+	third, done, err := s.StartRun(ctx, "ecb", "CLOSING", valid)
+	if err != nil || done || third.ID != first.ID {
+		t.Fatalf("a stale running run must restart: %+v done=%v err=%v", third, done, err)
+	}
+}
+
+func TestTakenOverRunIgnoresTheOldOwnersFinish(t *testing.T) {
+	a, pool, ctx := migrated(t)
+	b := store.New(pool)
+	run, _, err := a.StartRun(ctx, "ecb", "CLOSING", valid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `update provider_import_run set started_at = now() - interval '11 minutes'`); err != nil {
+		t.Fatal(err)
+	}
+	taken, done, err := b.StartRun(ctx, "ecb", "CLOSING", valid)
+	if err != nil || done || taken.ID != run.ID {
+		t.Fatalf("takeover: %+v done=%v err=%v", taken, done, err)
+	}
+	if err := b.FinishRunSucceeded(ctx, run.ID, 3, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.FinishRunDegraded(ctx, run.ID, 4, errors.New("late failure"), true); !errors.Is(err, store.ErrLostOwnership) {
+		t.Fatalf("old owner FinishRunDegraded: %v", err)
+	}
+	if err := a.RecordAttempt(ctx, run.ID, 4); !errors.Is(err, store.ErrRunNotFound) {
+		t.Fatalf("a lost run is forgotten: %v", err)
+	}
+	if err := a.FinishRunFailed(ctx, run.ID, 4, errors.New("late failure"), true); !errors.Is(err, store.ErrRunNotFound) {
+		t.Fatalf("a lost run is forgotten: %v", err)
+	}
+	if got := count(t, ctx, pool, `select count(*) from provider_import_run where status = 'succeeded' and pairs_imported = 3`); got != 1 {
+		t.Fatalf("run must stay succeeded, matching rows = %d", got)
+	}
+	if got := count(t, ctx, pool, `select count(*) from outbox where type = '`+store.ProviderDegraded+`'`); got != 0 {
+		t.Fatalf("degraded events = %d, want 0", got)
 	}
 }

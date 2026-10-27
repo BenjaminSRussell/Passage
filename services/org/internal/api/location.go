@@ -59,6 +59,10 @@ func (a *API) createLocation(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
 	}
+	idemKey, keyOK := idempotencyKeyOf(w, r)
+	if !keyOK {
+		return
+	}
 	var req createLocationRequest
 	if err := httpx.Decode(r, &req); err != nil {
 		httpx.Fail(w, r, err)
@@ -82,7 +86,7 @@ func (a *API) createLocation(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
-	location, err := a.store.CreateLocation(r.Context(), in, r.Header.Get(idempotencyKey))
+	location, err := a.store.CreateLocation(r.Context(), in, idemKey)
 	if err != nil {
 		slog.Error("create location failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)

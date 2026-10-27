@@ -3,7 +3,7 @@ package authz
 import rego.v1
 
 test_all_seeded_duties_allow_their_declared_permissions if {
-	count(data.duties) == 37
+	count(data.duties) == 39
 	every duty, spec in data.duties {
 		count(spec.permissions) > 0
 		every permission in spec.permissions {
@@ -267,4 +267,24 @@ test_maintain_batch_jobs_can_start_run_and_replay if {
 	}
 		with data.assignments as {"tenant-a": {"user-a": ["Maintain batch jobs"]}}
 	replay.allow
+}
+
+test_view_exchange_rates_cannot_post_rates if {
+	result := decision with input as {
+		"subject": {"tenant_id": "tenant-a", "user_id": "user-a"},
+		"action": "POST",
+		"resource": "/v1/fx/rates",
+	}
+		with data.assignments as {"tenant-a": {"user-a": ["View exchange rates"]}}
+	result == {"allow": false, "duty_missing": "Maintain exchange rates"}
+}
+
+test_view_exchange_rates_can_convert if {
+	result := decision with input as {
+		"subject": {"tenant_id": "tenant-a", "user_id": "user-a"},
+		"action": "POST",
+		"resource": "/v1/fx/convert",
+	}
+		with data.assignments as {"tenant-a": {"user-a": ["View exchange rates"]}}
+	result.allow
 }

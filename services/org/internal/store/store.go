@@ -176,6 +176,9 @@ func (s *Postgres) CreateLegalEntity(ctx context.Context, in LegalEntity, idempo
 	var e LegalEntity
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		if key != nil {
+			if err := lockIdempotencyKey(ctx, tx, "legal_entity", p.TenantID, *key); err != nil {
+				return err
+			}
 			replay, err := scanLegalEntity(tx.QueryRow(ctx, `select `+legalEntityColumns+` from legal_entity where tenant_id = $1 and idempotency_key = $2`, p.TenantID, *key))
 			if err == nil {
 				e = replay
@@ -243,4 +246,9 @@ func (s *Postgres) ListLegalEntities(ctx context.Context, f LegalEntityFilter, a
 		page.NextCode = page.Items[limit-1].Code
 	}
 	return page, err
+}
+
+func lockIdempotencyKey(ctx context.Context, tx pgx.Tx, scope, tenantID, key string) error {
+	_, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended('org-idempotency-key:' || $1::text || ':' || $2::text || ':' || $3::text, 0))`, scope, tenantID, key)
+	return err
 }

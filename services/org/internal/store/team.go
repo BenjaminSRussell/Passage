@@ -84,6 +84,9 @@ func (s *Postgres) CreateTeamType(ctx context.Context, in TeamType, idempotencyK
 	var inserted bool
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) (err error) {
 		if key != nil {
+			if err := lockIdempotencyKey(ctx, tx, "team_type", p.TenantID, *key); err != nil {
+				return err
+			}
 			replay, err := scanTeamType(tx.QueryRow(ctx, `select `+teamTypeColumns+` from team_type where tenant_id = $1 and idempotency_key = $2`, p.TenantID, *key))
 			if err == nil {
 				t = replay
@@ -232,6 +235,9 @@ func (s *Postgres) CreateTeam(ctx context.Context, in Team, idempotencyKey strin
 	var inserted bool
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) (err error) {
 		if key != nil {
+			if err := lockIdempotencyKey(ctx, tx, "team", p.TenantID, *key); err != nil {
+				return err
+			}
 			replay, err := scanTeam(tx.QueryRow(ctx, `select `+teamColumns+` from team where tenant_id = $1 and idempotency_key = $2`, p.TenantID, *key))
 			if err == nil {
 				t = replay
@@ -394,6 +400,9 @@ func (s *Postgres) AddTeamMember(ctx context.Context, teamID string, in TeamMemb
 	var inserted bool
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) (err error) {
 		if key != nil {
+			if err := lockIdempotencyKey(ctx, tx, "team_member", p.TenantID, *key); err != nil {
+				return err
+			}
 			replay, err := scanTeamMember(tx.QueryRow(ctx, `select `+teamMemberColumns+` from team_member where tenant_id = $1 and idempotency_key = $2`, p.TenantID, *key))
 			if err == nil {
 				m = replay

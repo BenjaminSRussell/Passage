@@ -27,16 +27,18 @@ import (
 )
 
 const (
-	readyTimeout     = 500 * time.Millisecond
-	idempotencyKey   = "Idempotency-Key"
-	dutyRead         = "org.read"
-	dutyLegalEntity  = "org.legal-entity.write"
-	dutyReference    = "org.reference.write"
-	maxNameLength    = 120
-	maxRegistration  = 40
-	maxQuantityExp   = 18
-	minQuantityExp   = -24
-	validationDetail = "request failed validation"
+	readyTimeout   = 500 * time.Millisecond
+	idempotencyKey = "Idempotency-Key"
+
+	maxIdempotencyKeyLength = 200
+	dutyRead                = "org.read"
+	dutyLegalEntity         = "org.legal-entity.write"
+	dutyReference           = "org.reference.write"
+	maxNameLength           = 120
+	maxRegistration         = 40
+	maxQuantityExp          = 18
+	minQuantityExp          = -24
+	validationDetail        = "request failed validation"
 )
 
 var (
@@ -148,6 +150,15 @@ func New(s store.Store) *API {
 	return &API{store: s, geocoder: domain.NullGeocoder{}, postings: noPostings{}, now: time.Now}
 }
 
+func idempotencyKeyOf(w http.ResponseWriter, r *http.Request) (string, bool) {
+	key := r.Header.Get(idempotencyKey)
+	if len(key) > maxIdempotencyKeyLength {
+		badQuery(w, r, idempotencyKey, "at most 200 bytes")
+		return "", false
+	}
+	return key, true
+}
+
 func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
 	r.With(authz.RequireDuty(dutyLegalEntity)).Post("/v1/org/legal-entities", a.createLegalEntity)
@@ -236,6 +247,10 @@ func (a *API) createLegalEntity(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
 	}
+	idemKey, keyOK := idempotencyKeyOf(w, r)
+	if !keyOK {
+		return
+	}
 	if p, _ := tenant.FromContext(r.Context()); p.LegalEntityID != "" {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "a legal-entity-scoped caller cannot create legal entities"))
 		return
@@ -262,7 +277,7 @@ func (a *API) createLegalEntity(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, p)
 		return
 	}
-	entity, err := a.store.CreateLegalEntity(r.Context(), in, r.Header.Get(idempotencyKey))
+	entity, err := a.store.CreateLegalEntity(r.Context(), in, idemKey)
 	if err != nil {
 		a.failed.Add(1)
 		slog.Error("create legal entity failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
@@ -545,7 +560,7 @@ func validateLegalEntity(in store.LegalEntity) map[string]string {
 
 func validTenant(w http.ResponseWriter, r *http.Request) bool {
 	p, ok := tenant.FromContext(r.Context())
-	if !ok || !ids.Valid(p.TenantID) {
+	if !ok || !ids.Valid(p.TenantID) || p.TenantID == ids.Nil {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnauthorized, "AUTH-0001", "missing or malformed tenant"))
 		return false
 	}

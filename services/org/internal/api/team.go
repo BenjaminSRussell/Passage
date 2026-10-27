@@ -94,6 +94,10 @@ func (a *API) createTeamType(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) || refuseScopedCaller(w, r, "create team types") {
 		return
 	}
+	idemKey, keyOK := idempotencyKeyOf(w, r)
+	if !keyOK {
+		return
+	}
 	var req createTeamTypeRequest
 	if err := httpx.Decode(r, &req); err != nil {
 		httpx.Fail(w, r, err)
@@ -114,7 +118,7 @@ func (a *API) createTeamType(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
-	created, inserted, err := a.store.CreateTeamType(r.Context(), in, r.Header.Get(idempotencyKey))
+	created, inserted, err := a.store.CreateTeamType(r.Context(), in, idemKey)
 	if err != nil {
 		slog.Error("create team type failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)
@@ -189,6 +193,10 @@ func (a *API) createTeam(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) || refuseScopedCaller(w, r, "create teams") {
 		return
 	}
+	idemKey, keyOK := idempotencyKeyOf(w, r)
+	if !keyOK {
+		return
+	}
 	var req createTeamRequest
 	if err := httpx.Decode(r, &req); err != nil {
 		httpx.Fail(w, r, err)
@@ -232,7 +240,7 @@ func (a *API) createTeam(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
-	created, inserted, err := a.store.CreateTeam(r.Context(), in, r.Header.Get(idempotencyKey))
+	created, inserted, err := a.store.CreateTeam(r.Context(), in, idemKey)
 	if err != nil {
 		slog.Error("create team failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)
@@ -437,6 +445,10 @@ func (a *API) addTeamMember(w http.ResponseWriter, r *http.Request, teamID strin
 	if refuseScopedCaller(w, r, "add team members") {
 		return
 	}
+	idemKey, keyOK := idempotencyKeyOf(w, r)
+	if !keyOK {
+		return
+	}
 	var req addTeamMemberRequest
 	if err := httpx.Decode(r, &req); err != nil {
 		httpx.Fail(w, r, err)
@@ -472,7 +484,7 @@ func (a *API) addTeamMember(w http.ResponseWriter, r *http.Request, teamID strin
 		validationFailed(w, r, fields)
 		return
 	}
-	created, inserted, err := a.store.AddTeamMember(r.Context(), teamID, in, a.now(), r.Header.Get(idempotencyKey))
+	created, inserted, err := a.store.AddTeamMember(r.Context(), teamID, in, a.now(), idemKey)
 	if err != nil {
 		slog.Error("add team member failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)

@@ -56,6 +56,10 @@ func (a *API) createWarehouse(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
 	}
+	idemKey, keyOK := idempotencyKeyOf(w, r)
+	if !keyOK {
+		return
+	}
 	var req createWarehouseRequest
 	if err := httpx.Decode(r, &req); err != nil {
 		httpx.Fail(w, r, err)
@@ -82,7 +86,7 @@ func (a *API) createWarehouse(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
-	warehouse, err := a.store.CreateWarehouse(r.Context(), in, r.Header.Get(idempotencyKey))
+	warehouse, err := a.store.CreateWarehouse(r.Context(), in, idemKey)
 	if err != nil {
 		slog.Error("create warehouse failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)

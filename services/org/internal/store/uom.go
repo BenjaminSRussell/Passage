@@ -53,7 +53,7 @@ func unitNotFound(code string) error {
 
 func queryUnits(ctx context.Context, q querier, tenantID, code string, f UnitFilter) ([]Unit, error) {
 	rows, err := q.Query(ctx, `select v.code, v.name, v.class, v.decimal_precision, v.system_flag, v.status from (`+visibleUnits+`) v
-		where ($3::text = '' or v.code = $3) and ($4::text = '' or v.class = $4) and ($5::text = '' or v.status = $5) order by v.code`,
+		where ($3::text = '' or v.code = $3) and ($4::text = '' or v.class = $4) and ($5::text = '' or v.status = $5) order by v.code collate "C"`,
 		tenantID, SysTenantID, code, f.Class, f.Status)
 	if err != nil {
 		return nil, err
@@ -110,6 +110,11 @@ func (s *Postgres) CreateUnit(ctx context.Context, in Unit, idempotencyKey strin
 	duplicate := httpx.NewProblem(http.StatusConflict, CodeUnitCodeDuplicate, "a unit with code "+in.Code+" already exists")
 	var unit Unit
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		if key != nil {
+			if err := lockIdempotencyKey(ctx, tx, "unit_of_measure", p.TenantID, *key); err != nil {
+				return err
+			}
+		}
 		var taken bool
 		if err := tx.QueryRow(ctx, `select exists (select 1 from unit_of_measure where tenant_id = $1 and code = $2)`, SysTenantID, in.Code).Scan(&taken); err != nil {
 			return err
@@ -165,7 +170,7 @@ func (s *Postgres) ConversionGraph(ctx context.Context) ([]domain.Conversion, ma
 			select c.from_code, c.to_code, f.class, c.factor, c.offset_value from uom_conversion c
 			join vu f on f.code = c.from_code and f.status = 'active'
 			join vu t on t.code = c.to_code and t.status = 'active'
-			where c.tenant_id in ($1, $2) and c.product_id is null order by c.from_code, c.to_code`, p.TenantID, SysTenantID)
+			where c.tenant_id in ($1, $2) and c.product_id is null order by c.from_code collate "C", c.to_code collate "C"`, p.TenantID, SysTenantID)
 		if err != nil {
 			return err
 		}
@@ -215,7 +220,7 @@ func queryConversions(ctx context.Context, q querier, tenantID string, f Convers
 			join vu t on t.code = c.to_code
 			where c.tenant_id in ($1, $2) and c.product_id is null
 				and ($3::text = '' or f.class = $3) and ($4::text = '' or c.from_code = $4 or c.to_code = $4) and ($6::text = '' or c.id::text = $6)
-		) x where $5::text = '' or x.status = $5 order by x.from_code, x.to_code`,
+		) x where $5::text = '' or x.status = $5 order by x.from_code collate "C", x.to_code collate "C"`,
 		tenantID, SysTenantID, f.Class, f.Unit, f.Status, f.ID)
 	if err != nil {
 		return nil, err
@@ -276,6 +281,9 @@ func (s *Postgres) CreateConversion(ctx context.Context, in Conversion, idempote
 		}
 		if key != nil {
 			var id string
+			if err := lockIdempotencyKey(ctx, tx, "uom_conversion", p.TenantID, *key); err != nil {
+				return err
+			}
 			err := tx.QueryRow(ctx, `select id::text from uom_conversion where tenant_id = $1 and idempotency_key = $2`, p.TenantID, *key).Scan(&id)
 			if err == nil {
 				return replay(id)

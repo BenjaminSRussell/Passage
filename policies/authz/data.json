@@ -51,6 +51,15 @@
     "Maintain product categories": {"permissions": [{"resource": "/v1/product/categories", "methods": ["GET", "POST", "PATCH", "PUT", "DELETE"]}]},
     "Maintain documents": {"permissions": [{"resource": "/v1/product/documents", "methods": ["GET", "POST", "PATCH", "PUT"]}]},
     "Allocate GTINs": {"permissions": [{"resource": "/v1/product/gtins", "methods": ["GET", "POST"]}]},
-    "Run product group conversions": {"permissions": [{"resource": "/v1/product/jobs", "methods": ["POST"]}]}
+    "Run product group conversions": {"permissions": [{"resource": "/v1/product/jobs", "methods": ["POST"]}]},
+    "View exchange rates": {"permissions": [
+      {"resource": "/v1/fx/rate-types", "methods": ["GET"]},
+      {"resource": "/v1/fx/rates", "methods": ["GET"]},
+      {"resource": "/v1/fx/convert", "methods": ["POST"]}
+    ]},
+    "Maintain exchange rates": {"permissions": [
+      {"resource": "/v1/fx/rate-types", "methods": ["GET", "PUT"]},
+      {"resource": "/v1/fx/rates", "methods": ["GET", "POST"]}
+    ]}
   }
 }

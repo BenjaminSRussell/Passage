@@ -232,6 +232,9 @@ func (s *Postgres) CreateFiscalCalendar(ctx context.Context, in FiscalCalendar, 
 	var c FiscalCalendar
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		if key != nil {
+			if err := lockIdempotencyKey(ctx, tx, "fiscal_calendar", p.TenantID, *key); err != nil {
+				return err
+			}
 			replay, err := scanFiscalCalendar(tx.QueryRow(ctx, `select `+fiscalCalendarColumns+` from fiscal_calendar where tenant_id = $1 and idempotency_key = $2`, p.TenantID, *key))
 			if err == nil {
 				c = replay

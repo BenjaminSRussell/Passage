@@ -184,6 +184,9 @@ func (i *Importer) fallBack(ctx context.Context, name, rateType string, res Resu
 		err := fmt.Errorf("%w: %s %s: %v", ErrNoLastKnownRate, name, rateType, cause)
 		if ferr := i.store.FinishRunFailed(ctx, res.RunID, res.Attempts, err, retryable(cause)); ferr != nil {
 			slog.Error("fx finish failed run", "runId", res.RunID, "err", ferr)
+			if errors.Is(ferr, store.ErrLostOwnership) {
+				return res, ferr
+			}
 		}
 		i.metrics.record(ctx, name, rateType, true, nil)
 		return res, err
