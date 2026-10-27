@@ -1,0 +1,75 @@
+package api
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"testing"
+
+	"github.com/shopspring/decimal"
+
+	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/testkit"
+	"github.com/BenjaminSRussell/passage/services/production/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/production/internal/store"
+	"github.com/BenjaminSRussell/passage/services/production/migrations"
+)
+
+// The HTTP surface over a real database: create, the AC-21.2 refusal, estimate,
+// the AC-21.3 cost read, and the order list. Skipped without PASSAGE_TEST_DATABASE_URL.
+func TestHTTP_OrderThroughTheDatabase(t *testing.T) {
+	pool := testkit.DB(t)
+	if err := dbx.Migrate(context.Background(), pool, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	r := httpx.NewRouter()
+	New(store.New(pool), Config{RAFTolerancePct: decimal.Zero}).Register(r)
+	all := []string{DutyRead, DutyWrite, DutyRelease, DutyJournalPost, DutyEnd, DutyCostRead}
+
+	rec := do(r, call{method: http.MethodPost, path: "/v1/production/orders", body: createBody(nil), duties: all,
+		headers: map[string]string{idempotencyName: "http-create"}})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
+	}
+	var order store.Order
+	if err := json.Unmarshal(rec.Body.Bytes(), &order); err != nil {
+		t.Fatal(err)
+	}
+	if order.LegalEntityID != entityID || len(order.Lines) != 2 || order.Lines[1].LineNo != "30.1" {
+		t.Fatalf("created order: %+v", order)
+	}
+
+	// AC-21.2: :start on a Created order is 409 PRODUCTION_ILLEGAL_TRANSITION.
+	start := commandCall(order.ID, "start", "", all...)
+	start.headers["If-Match"] = `"1"`
+	expectProblem(t, do(r, start), http.StatusConflict, domain.CodeIllegalTransition)
+
+	est := commandCall(order.ID, "estimate", "", all...)
+	est.headers["If-Match"] = `"1"`
+	est.headers[idempotencyName] = "http-estimate"
+	if rec := do(r, est); rec.Code != http.StatusOK || rec.Header().Get("ETag") != `"2"` {
+		t.Fatalf("estimate: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// AC-21.3: planned material = Σ line qty × unit cost: 315 × 10 + 200 × 4 = 3,950.00.
+	rec = do(r, call{method: http.MethodGet, path: "/v1/production/orders/" + order.ID + "/costs", duties: all})
+	var costs costView
+	if err := json.Unmarshal(rec.Body.Bytes(), &costs); err != nil || costs.Totals[domain.GroupMaterial] != "3950.00" {
+		t.Fatalf("costs: %d %s", rec.Code, rec.Body.String())
+	}
+
+	rec = do(r, call{method: http.MethodGet, path: "/v1/production/orders?status=Estimated", duties: all})
+	var page store.OrderPage
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil || len(page.Items) != 1 || page.Items[0].ID != order.ID {
+		t.Fatalf("list: %d %s", rec.Code, rec.Body.String())
+	}
+
+	rec = do(r, call{method: http.MethodGet, path: "/v1/production/orders/" + order.ID + "/status-log", duties: all})
+	var log struct {
+		Items []store.StatusLogEntry `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &log); err != nil || len(log.Items) != 1 || log.Items[0].TraceID == "" {
+		t.Fatalf("status log: %d %s", rec.Code, rec.Body.String())
+	}
+}

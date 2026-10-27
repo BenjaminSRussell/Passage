@@ -1,0 +1,91 @@
+asyncapi: 3.0.0
+info:
+  title: production
+  version: 0.21.1
+  description: |
+    CloudEvents 1.0 envelope from platform/go/events; payloads below are the data member.
+    Every event is written to the outbox in the same transaction as the change it reports and
+    relayed by Debezium (wave 4); an idempotent replay emits nothing. The envelope's `actor`
+    is the caller. Event types follow dev.passage.<context>.<entity>.<verb>.v<n>; the kernel
+    rule allows no hyphen, so the PRD's passage.production.order.status-changed.v1 is
+    order.statuschanged (see NOT-IMPLEMENTED.md). journal.posted, order.settled and
+    subcontract.po-requested arrive with the later slices that post journals, settle and
+    create subcontract purchase orders.
+channels:
+  passage.production.order:
+    address: passage.production.order
+    description: Keyed by order id, so the events of one order stay ordered.
+    messages:
+      created:
+        $ref: '#/components/messages/orderCreated'
+      updated:
+        $ref: '#/components/messages/orderUpdated'
+      statuschanged:
+        $ref: '#/components/messages/orderStatusChanged'
+operations:
+  onOrderCreated:
+    action: send
+    channel: { $ref: '#/channels/passage.production.order' }
+    messages: [{ $ref: '#/channels/passage.production.order/messages/created' }]
+  onOrderUpdated:
+    action: send
+    channel: { $ref: '#/channels/passage.production.order' }
+    messages: [{ $ref: '#/channels/passage.production.order/messages/updated' }]
+  onOrderStatusChanged:
+    action: send
+    channel: { $ref: '#/channels/passage.production.order' }
+    messages: [{ $ref: '#/channels/passage.production.order/messages/statuschanged' }]
+components:
+  messages:
+    orderCreated:
+      name: created
+      title: Production order created
+      description: Emitted when an order is committed (consumers: planning, analytics).
+      payload:
+        type: object
+        required: [orderId, orderNumber, productId, quantity, siteId, deliveryDate, originType, originId]
+        properties:
+          orderId: { type: string, format: uuid }
+          orderNumber: { type: string }
+          productId: { type: string, format: uuid }
+          quantity: { type: string }
+          siteId: { type: string, format: uuid }
+          deliveryDate: { type: [string, 'null'], format: date }
+          originType: { type: string }
+          originId: { type: [string, 'null'], format: uuid }
+      x-passage-type: dev.passage.production.order.created.v1
+    orderUpdated:
+      name: updated
+      title: Production order header edited
+      description: Emitted by PATCH (quantity or delivery date) with the header after the edit (consumers: planning).
+      payload:
+        type: object
+        required: [orderId, quantity, deliveryDate, status, version, actor]
+        properties:
+          orderId: { type: string, format: uuid }
+          quantity: { type: string }
+          deliveryDate: { type: [string, 'null'], format: date }
+          status: { type: string }
+          version: { type: integer }
+          actor: { type: string }
+      x-passage-type: dev.passage.production.order.updated.v1
+    orderStatusChanged:
+      name: statuschanged
+      title: Production order status changed
+      description: |
+        Emitted by every command that changes the status, and by every report as finished
+        (which changes the reported quantities). A re-estimate that keeps the status emits
+        nothing (consumers: planning, scheduling, shop floor, lean).
+      payload:
+        type: object
+        required: [orderId, from, to, quantity, qtyRaf, qtyError, actor, occurredAt]
+        properties:
+          orderId: { type: string, format: uuid }
+          from: { type: string }
+          to: { type: string }
+          quantity: { type: string }
+          qtyRaf: { type: string }
+          qtyError: { type: string }
+          actor: { type: string }
+          occurredAt: { type: string, format: date-time }
+      x-passage-type: dev.passage.production.order.statuschanged.v1

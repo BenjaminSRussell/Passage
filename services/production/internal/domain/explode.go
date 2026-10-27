@@ -1,0 +1,136 @@
+package domain
+
+import (
+	"fmt"
+	"strconv"
+
+	"github.com/shopspring/decimal"
+)
+
+// BOMComponent is one line of the BOM version snapshot taken at order creation.
+// Phantom lines have no stock of their own: they are flattened into their children.
+type BOMComponent struct {
+	LineNo     string          `json:"lineNo"`
+	ItemID     string          `json:"itemId"`
+	QtyPer     decimal.Decimal `json:"qtyPer"`
+	SeriesSize decimal.Decimal `json:"seriesSize"`
+	ScrapPct   decimal.Decimal `json:"scrapPct"`
+	RoundUp    bool            `json:"roundUp"`
+	UnitCost   decimal.Decimal `json:"unitCost"`
+	Phantom    bool            `json:"phantom"`
+	Children   []BOMComponent  `json:"children,omitempty"`
+}
+
+// OrderLine is an exploded component line of a production order (FR-21.1).
+// QtyPer is the effective quantity per unit of the order's product.
+type OrderLine struct {
+	LineNo      string          `json:"lineNo"`
+	ItemID      string          `json:"itemId"`
+	QtyPer      decimal.Decimal `json:"qtyPer"`
+	SeriesSize  decimal.Decimal `json:"seriesSize"`
+	ScrapPct    decimal.Decimal `json:"scrapPct"`
+	RoundUp     bool            `json:"roundUp"`
+	QtyRequired decimal.Decimal `json:"qtyRequired"`
+	UnitCost    decimal.Decimal `json:"unitCost"`
+}
+
+// Explode flattens a BOM snapshot for orderQty units (FR-21.1). Phantom lines
+// are exploded in place; their children keep the parent's line number with a
+// dotted suffix (30 → 30.1, 30.2).
+func Explode(bom []BOMComponent, orderQty decimal.Decimal) ([]OrderLine, error) {
+	if !orderQty.IsPositive() {
+		return nil, &Error{Code: CodeInvalidInput, Detail: "order quantity must be positive"}
+	}
+	out := []OrderLine{}
+	if err := explode(&out, bom, "", decimal.NewFromInt(1), orderQty); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func explode(out *[]OrderLine, comps []BOMComponent, prefix string, mult, orderQty decimal.Decimal) error {
+	for i, c := range comps {
+		no := c.LineNo
+		if prefix != "" {
+			no = prefix + "." + strconv.Itoa(i+1)
+		}
+		if c.QtyPer.IsNegative() || c.ScrapPct.IsNegative() || !c.ScrapPct.LessThan(hundred) {
+			return &Error{Code: CodeInvalidInput, Detail: fmt.Sprintf("line %s: quantity must not be negative and scrap must be below 100", no)}
+		}
+		qtyPer := mult.Mul(c.QtyPer)
+		if c.Phantom {
+			// A phantom's series size is ignored: its quantity scales the children directly.
+			if err := explode(out, c.Children, no, qtyPer, orderQty); err != nil {
+				return err
+			}
+			continue
+		}
+		series := c.SeriesSize
+		if series.IsZero() {
+			series = one
+		}
+		req, err := RequiredQty(qtyPer, orderQty, series, c.ScrapPct, c.RoundUp)
+		if err != nil {
+			return err
+		}
+		*out = append(*out, OrderLine{LineNo: no, ItemID: c.ItemID, QtyPer: qtyPer, SeriesSize: series, ScrapPct: c.ScrapPct,
+			RoundUp: c.RoundUp, QtyRequired: req, UnitCost: c.UnitCost})
+	}
+	return nil
+}
+
+// Requantify recomputes the required quantity of already exploded lines for a
+// new order quantity (a quantity change before Estimated is reported). The
+// effective quantity per unit, series, scrap and round-up flag of each line are kept.
+func Requantify(lines []OrderLine, orderQty decimal.Decimal) ([]OrderLine, error) {
+	if !orderQty.IsPositive() {
+		return nil, &Error{Code: CodeInvalidInput, Detail: "order quantity must be positive"}
+	}
+	out := make([]OrderLine, len(lines))
+	for i, l := range lines {
+		req, err := RequiredQty(l.QtyPer, orderQty, l.SeriesSize, l.ScrapPct, l.RoundUp)
+		if err != nil {
+			return nil, err
+		}
+		l.QtyRequired = req
+		out[i] = l
+	}
+	return out, nil
+}
+
+// Operation is a route operation of the order, planned on infinite capacity (wave 21).
+// SubcontractPrice is the vendor price per unit of the operation's process quantity.
+type Operation struct {
+	OperNumber       int             `json:"operNumber"`
+	ResourceID       string          `json:"resourceId"`
+	SetupH           decimal.Decimal `json:"setupTimeH"`
+	RunHPer          decimal.Decimal `json:"runTimeHPer"`
+	ScrapPct         decimal.Decimal `json:"scrapPct"`
+	LaborRate        decimal.Decimal `json:"laborRate"`
+	OverheadRate     decimal.Decimal `json:"overheadRate"`
+	Subcontract      bool            `json:"subcontract"`
+	SubcontractPrice decimal.Decimal `json:"subcontractPrice"`
+	ProcessQty       decimal.Decimal `json:"processQty"`
+}
+
+// PlanOperations sets each operation's process quantity by BR-21.8 and returns
+// the operations in route order. Operation numbers must strictly increase.
+func PlanOperations(ops []Operation, orderQty decimal.Decimal) ([]Operation, error) {
+	scraps := make([]decimal.Decimal, len(ops))
+	for i, op := range ops {
+		if i > 0 && op.OperNumber <= ops[i-1].OperNumber {
+			return nil, &Error{Code: CodeInvalidInput, Detail: "operation numbers must strictly increase"}
+		}
+		scraps[i] = op.ScrapPct
+	}
+	qtys, err := StartQuantities(orderQty, scraps)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Operation, len(ops))
+	copy(out, ops)
+	for i := range out {
+		out[i].ProcessQty = qtys[i]
+	}
+	return out, nil
+}

@@ -1,0 +1,4324 @@
+{
+ "fixture": "prod-orders-50",
+ "orders": [
+  {
+   "name": "BR-21.7 FG-100",
+   "orderQty": "100",
+   "rafQty": "100",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-1",
+     "qty": "300.000000",
+     "amount": "3000.0000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-1@10",
+     "qty": "50.000000",
+     "amount": "1500.0000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-1@10",
+     "qty": "50.000000",
+     "amount": "500.0000",
+     "fixed": "0.0000"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-1",
+     "qty": "305.000000",
+     "amount": "3111.0000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-1@10",
+     "qty": "46.000000",
+     "amount": "1380.0000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-1@10",
+     "qty": "46.000000",
+     "amount": "460.0000",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "-49.00",
+    "wipExact": "-49.000000",
+    "variancesExact": {
+     "production-price/material": "61.000000",
+     "production-quantity/labor": "-120.000000",
+     "production-quantity/material": "50.000000",
+     "production-quantity/overhead": "-40.000000"
+    }
+   }
+  },
+  {
+   "name": "generated order 2",
+   "orderQty": "25",
+   "rafQty": "25",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-2-0",
+     "qty": "54.750000",
+     "amount": "1288.8150",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-2-1",
+     "qty": "62.000000",
+     "amount": "2633.7600",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-2-2",
+     "qty": "1.500000",
+     "amount": "2.4750",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-2@10",
+     "qty": "13.150000",
+     "amount": "388.0565",
+     "fixed": "26.5590"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-2@10",
+     "qty": "13.150000",
+     "amount": "128.3440",
+     "fixed": "8.7840"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-2-0",
+     "qty": "52.560000",
+     "amount": "1323.8700",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-2-1",
+     "qty": "65.720000",
+     "amount": "2735.9500",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-2-2",
+     "qty": "1.620000",
+     "amount": "2.7000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-2@10",
+     "qty": "11.440000",
+     "amount": "347.7200",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-2@10",
+     "qty": "14.600000",
+     "amount": "148.2000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "SUB-2",
+     "qty": "22.000000",
+     "amount": "143.6600",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "260.65",
+    "wipExact": "260.649500",
+    "variancesExact": {
+     "production-price/labor": "10.125600",
+     "production-price/material": "30.799000",
+     "production-price/overhead": "5.704000",
+     "production-quantity/labor": "-50.462100",
+     "production-quantity/material": "106.671000",
+     "production-quantity/overhead": "14.152000",
+     "production-substitution/material": "143.660000"
+    }
+   }
+  },
+  {
+   "name": "generated order 3",
+   "orderQty": "100",
+   "rafQty": "0",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-3-0",
+     "qty": "193.000000",
+     "amount": "463.2000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-3-1",
+     "qty": "15.000000",
+     "amount": "564.3000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-3-2",
+     "qty": "210.000000",
+     "amount": "8442.0000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-3@10",
+     "qty": "6.500000",
+     "amount": "337.6750",
+     "fixed": "77.9250"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-3@10",
+     "qty": "6.500000",
+     "amount": "58.7600",
+     "fixed": "13.5600"
+    },
+    {
+     "group": "labor",
+     "key": "WC-3@20",
+     "qty": "28.500000",
+     "amount": "804.5550",
+     "fixed": "98.8050"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-3@20",
+     "qty": "28.500000",
+     "amount": "341.4300",
+     "fixed": "41.9300"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-3-0",
+     "qty": "0.000000",
+     "amount": "0.0000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-3-1",
+     "qty": "0.000000",
+     "amount": "0.0000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-3-2",
+     "qty": "0.000000",
+     "amount": "0.0000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-3@10",
+     "qty": "1.340000",
+     "amount": "68.2200",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "68.22",
+    "wipExact": "68.220000",
+    "variancesExact": {
+     "lot-size/labor": "77.925000",
+     "production-price/labor": "-1.393000",
+     "production-quantity/labor": "-8.312000"
+    }
+   }
+  },
+  {
+   "name": "generated order 4",
+   "orderQty": "40",
+   "rafQty": "40",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-4-0",
+     "qty": "80.800000",
+     "amount": "2144.4320",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-4-1",
+     "qty": "80.800000",
+     "amount": "1798.6080",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-4-2",
+     "qty": "148.800000",
+     "amount": "6120.1440",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-4@10",
+     "qty": "19.200000",
+     "amount": "634.5600",
+     "fixed": "118.9800"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-4@10",
+     "qty": "19.200000",
+     "amount": "314.6880",
+     "fixed": "59.0040"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-4-1",
+     "qty": "74.340000",
+     "amount": "1605.1600",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-4-2",
+     "qty": "136.900000",
+     "amount": "5799.6200",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-4@10",
+     "qty": "17.660000",
+     "amount": "577.8300",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-4@10",
+     "qty": "18.240000",
+     "amount": "304.9300",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "-2724.89",
+    "wipExact": "-2724.892000",
+    "variancesExact": {
+     "production-price/labor": "-5.833000",
+     "production-price/material": "119.274600",
+     "production-price/overhead": "5.976400",
+     "production-quantity/labor": "-50.897000",
+     "production-quantity/material": "-633.246600",
+     "production-quantity/overhead": "-15.734400",
+     "production-substitution/material": "-2144.432000"
+    }
+   }
+  },
+  {
+   "name": "generated order 5",
+   "orderQty": "40",
+   "rafQty": "24",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-5-0",
+     "qty": "64.400000",
+     "amount": "1328.5720",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-5-1",
+     "qty": "37.600000",
+     "amount": "1339.3120",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-5-2",
+     "qty": "140.400000",
+     "amount": "6047.0280",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-5@10",
+     "qty": "7.000000",
+     "amount": "415.6600",
+     "fixed": "154.3880"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-5@10",
+     "qty": "7.000000",
+     "amount": "119.6300",
+     "fixed": "44.4340"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-5-0",
+     "qty": "35.550000",
+     "amount": "792.0700",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-5-1",
+     "qty": "25.040000",
+     "amount": "847.3300",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-5@10",
+     "qty": "4.450000",
+     "amount": "269.5300",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-5@10",
+     "qty": "6.080000",
+     "amount": "107.0200",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "-3534.17",
+    "wipExact": "-3534.171200",
+    "variancesExact": {
+     "lot-size/labor": "61.755200",
+     "lot-size/overhead": "17.773600",
+     "production-price/labor": "5.289000",
+     "production-price/material": "14.078700",
+     "production-price/overhead": "3.112800",
+     "production-quantity/labor": "-46.910200",
+     "production-quantity/material": "24.590900",
+     "production-quantity/overhead": "14.355600",
+     "production-substitution/material": "-3628.216800"
+    }
+   }
+  },
+  {
+   "name": "generated order 6",
+   "orderQty": "25",
+   "rafQty": "12",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-6-0",
+     "qty": "10.000000",
+     "amount": "364.8000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-6-1",
+     "qty": "63.000000",
+     "amount": "327.6000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-6-2",
+     "qty": "34.250000",
+     "amount": "830.2200",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-6@10",
+     "qty": "5.900000",
+     "amount": "273.9370",
+     "fixed": "18.5720"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-6@10",
+     "qty": "5.900000",
+     "amount": "47.1410",
+     "fixed": "3.1960"
+    },
+    {
+     "group": "labor",
+     "key": "WC-6@20",
+     "qty": "11.300000",
+     "amount": "469.1760",
+     "fixed": "33.2160"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-6@20",
+     "qty": "11.300000",
+     "amount": "225.0960",
+     "fixed": "15.9360"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-6-0",
+     "qty": "5.470000",
+     "amount": "211.5200",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-6-1",
+     "qty": "27.520000",
+     "amount": "154.5500",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-6-2",
+     "qty": "15.950000",
+     "amount": "375.0300",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-6@10",
+     "qty": "2.860000",
+     "amount": "138.1000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-6@10",
+     "qty": "2.680000",
+     "amount": "21.6300",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-6@20",
+     "qty": "6.720000",
+     "amount": "270.6400",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-6@20",
+     "qty": "5.720000",
+     "amount": "116.2200",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "69.46",
+    "wipExact": "69.464400",
+    "variancesExact": {
+     "lot-size/labor": "26.929760",
+     "lot-size/overhead": "9.948640",
+     "production-price/labor": "-3.064200",
+     "production-price/material": "11.822400",
+     "production-price/overhead": "2.494400",
+     "production-quantity/labor": "28.180200",
+     "production-quantity/material": "-1.580000",
+     "production-quantity/overhead": "-5.266800"
+    }
+   }
+  },
+  {
+   "name": "generated order 7",
+   "orderQty": "40",
+   "rafQty": "40",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-7-0",
+     "qty": "101.200000",
+     "amount": "4867.7200",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-7-1",
+     "qty": "99.600000",
+     "amount": "2561.7120",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-7@10",
+     "qty": "10.000000",
+     "amount": "480.6000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-7@10",
+     "qty": "10.000000",
+     "amount": "75.7000",
+     "fixed": "0.0000"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-7-1",
+     "qty": "107.570000",
+     "amount": "2739.0300",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-7@10",
+     "qty": "8.600000",
+     "amount": "417.4500",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-7@10",
+     "qty": "10.500000",
+     "amount": "79.4900",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "-4749.76",
+    "wipExact": "-4749.762000",
+    "variancesExact": {
+     "production-price/labor": "4.134000",
+     "production-price/material": "-27.670400",
+     "production-price/overhead": "0.005000",
+     "production-quantity/labor": "-67.284000",
+     "production-quantity/material": "204.988400",
+     "production-quantity/overhead": "3.785000",
+     "production-substitution/material": "-4867.720000"
+    }
+   }
+  },
+  {
+   "name": "generated order 8",
+   "orderQty": "120",
+   "rafQty": "120",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-8-0",
+     "qty": "424.800000",
+     "amount": "14324.2560",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-8-1",
+     "qty": "87.600000",
+     "amount": "1061.7120",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-8@10",
+     "qty": "14.800000",
+     "amount": "339.5120",
+     "fixed": "64.2320"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-8@10",
+     "qty": "14.800000",
+     "amount": "109.9640",
+     "fixed": "20.8040"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-8-0",
+     "qty": "488.520000",
+     "amount": "15978.7100",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-8-1",
+     "qty": "81.470000",
+     "amount": "957.7900",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-8@10",
+     "qty": "15.240000",
+     "amount": "346.1100",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-8@10",
+     "qty": "15.390000",
+     "amount": "116.6300",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "1563.80",
+    "wipExact": "1563.796000",
+    "variancesExact": {
+     "production-price/labor": "-3.495600",
+     "production-price/material": "-523.810800",
+     "production-price/overhead": "2.282300",
+     "production-quantity/labor": "10.093600",
+     "production-quantity/material": "2074.342800",
+     "production-quantity/overhead": "4.383700"
+    }
+   }
+  },
+  {
+   "name": "generated order 9",
+   "orderQty": "25",
+   "rafQty": "25",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-9-0",
+     "qty": "24.250000",
+     "amount": "377.3300",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-9@10",
+     "qty": "15.750000",
+     "amount": "344.7675",
+     "fixed": "76.6150"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-9@10",
+     "qty": "15.750000",
+     "amount": "273.4200",
+     "fixed": "60.7600"
+    }
+   ],
+   "actual": [
+    {
+     "group": "labor",
+     "key": "WC-9@10",
+     "qty": "18.430000",
+     "amount": "391.3300",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-9@10",
+     "qty": "13.390000",
+     "amount": "239.4200",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "-364.77",
+    "wipExact": "-364.767500",
+    "variancesExact": {
+     "production-price/labor": "-12.102700",
+     "production-price/overhead": "6.969600",
+     "production-quantity/labor": "58.665200",
+     "production-quantity/overhead": "-40.969600",
+     "production-substitution/material": "-377.330000"
+    }
+   }
+  },
+  {
+   "name": "generated order 10",
+   "orderQty": "10",
+   "rafQty": "10",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-10-0",
+     "qty": "9.400000",
+     "amount": "184.3340",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-10-1",
+     "qty": "16.500000",
+     "amount": "64.8450",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-10-2",
+     "qty": "37.600000",
+     "amount": "927.2160",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-10@10",
+     "qty": "4.300000",
+     "amount": "182.0620",
+     "fixed": "152.4240"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-10@10",
+     "qty": "4.300000",
+     "amount": "74.4330",
+     "fixed": "62.3160"
+    },
+    {
+     "group": "labor",
+     "key": "WC-10@20",
+     "qty": "6.300000",
+     "amount": "287.1540",
+     "fixed": "82.0440"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-10@20",
+     "qty": "6.300000",
+     "amount": "99.2880",
+     "fixed": "28.3680"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-10-0",
+     "qty": "10.530000",
+     "amount": "214.7500",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-10-1",
+     "qty": "15.510000",
+     "amount": "60.3400",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-10-2",
+     "qty": "43.240000",
+     "amount": "1098.2900",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-10@10",
+     "qty": "3.780000",
+     "amount": "163.2500",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-10@10",
+     "qty": "5.070000",
+     "amount": "88.6400",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-10@20",
+     "qty": "7.560000",
+     "amount": "344.5800",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-10@20",
+     "qty": "5.610000",
+     "amount": "90.1800",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "240.70",
+    "wipExact": "240.698000",
+    "variancesExact": {
+     "production-price/labor": "3.200000",
+     "production-price/material": "39.634000",
+     "production-price/overhead": "2.644700",
+     "production-quantity/labor": "35.414000",
+     "production-quantity/material": "157.351000",
+     "production-quantity/overhead": "2.454300"
+    }
+   }
+  },
+  {
+   "name": "generated order 11",
+   "orderQty": "40",
+   "rafQty": "0",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-11-0",
+     "qty": "136.400000",
+     "amount": "4763.0880",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-11-1",
+     "qty": "16.800000",
+     "amount": "624.9600",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-11@10",
+     "qty": "16.600000",
+     "amount": "680.7660",
+     "fixed": "123.0300"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-11@10",
+     "qty": "16.600000",
+     "amount": "215.3020",
+     "fixed": "38.9100"
+    },
+    {
+     "group": "labor",
+     "key": "WC-11@20",
+     "qty": "3.900000",
+     "amount": "117.4290",
+     "fixed": "81.2970"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-11@20",
+     "qty": "3.900000",
+     "amount": "41.4960",
+     "fixed": "28.7280"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-11-0",
+     "qty": "0.000000",
+     "amount": "0.0000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-11-1",
+     "qty": "0.000000",
+     "amount": "0.0000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-11@10",
+     "qty": "2.580000",
+     "amount": "32.4600",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "32.46",
+    "wipExact": "32.460000",
+    "variancesExact": {
+     "lot-size/overhead": "38.910000",
+     "production-price/overhead": "-1.002600",
+     "production-quantity/overhead": "-5.447400"
+    }
+   }
+  },
+  {
+   "name": "generated order 12",
+   "orderQty": "100",
+   "rafQty": "50",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-12-0",
+     "qty": "202.000000",
+     "amount": "5518.6400",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-12-1",
+     "qty": "48.000000",
+     "amount": "170.8800",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-12@10",
+     "qty": "43.800000",
+     "amount": "2010.8580",
+     "fixed": "128.5480"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-12@10",
+     "qty": "43.800000",
+     "amount": "774.3840",
+     "fixed": "49.5040"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-12-0",
+     "qty": "111.100000",
+     "amount": "3187.0100",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-12-1",
+     "qty": "25.200000",
+     "amount": "89.7100",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-12@10",
+     "qty": "23.530000",
+     "amount": "1080.2600",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-12@10",
+     "qty": "26.800000",
+     "amount": "492.7800",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "612.38",
+    "wipExact": "612.379000",
+    "variancesExact": {
+     "lot-size/labor": "64.274000",
+     "lot-size/overhead": "24.752000",
+     "production-price/labor": "-0.002300",
+     "production-price/material": "151.756000",
+     "production-price/overhead": "18.956000",
+     "production-quantity/labor": "10.559300",
+     "production-quantity/material": "280.204000",
+     "production-quantity/overhead": "61.880000"
+    }
+   }
+  },
+  {
+   "name": "generated order 13",
+   "orderQty": "120",
+   "rafQty": "120",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-13-0",
+     "qty": "442.800000",
+     "amount": "451.6560",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-13-1",
+     "qty": "246.000000",
+     "amount": "3052.8600",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-13-2",
+     "qty": "326.400000",
+     "amount": "8251.3920",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-13@10",
+     "qty": "13.800000",
+     "amount": "673.8540",
+     "fixed": "29.2980"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-13@10",
+     "qty": "13.800000",
+     "amount": "191.4060",
+     "fixed": "8.3220"
+    },
+    {
+     "group": "labor",
+     "key": "WC-13@20",
+     "qty": "8.800000",
+     "amount": "518.8480",
+     "fixed": "94.3360"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-13@20",
+     "qty": "8.800000",
+     "amount": "49.1040",
+     "fixed": "8.9280"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-13-0",
+     "qty": "425.090000",
+     "amount": "429.2600",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-13-1",
+     "qty": "233.700000",
+     "amount": "2784.2100",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-13-2",
+     "qty": "332.930000",
+     "amount": "8921.4600",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-13@10",
+     "qty": "13.520000",
+     "amount": "673.3900",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-13@10",
+     "qty": "14.900000",
+     "amount": "206.6600",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-13@20",
+     "qty": "9.240000",
+     "amount": "550.2400",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-13@20",
+     "qty": "8.270000",
+     "amount": "46.1500",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "422.25",
+    "wipExact": "422.250000",
+    "variancesExact": {
+     "production-price/labor": "18.658000",
+     "production-price/material": "384.650800",
+     "production-price/overhead": "0.000400",
+     "production-quantity/labor": "12.270000",
+     "production-quantity/material": "-5.628800",
+     "production-quantity/overhead": "12.299600"
+    }
+   }
+  },
+  {
+   "name": "generated order 14",
+   "orderQty": "250",
+   "rafQty": "150",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-14-0",
+     "qty": "497.500000",
+     "amount": "6651.5750",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-14-1",
+     "qty": "610.000000",
+     "amount": "20374.0000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-14-2",
+     "qty": "370.000000",
+     "amount": "5468.6000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-14@10",
+     "qty": "36.200000",
+     "amount": "774.6800",
+     "fixed": "25.6800"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-14@10",
+     "qty": "36.200000",
+     "amount": "440.9160",
+     "fixed": "14.6160"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-14-1",
+     "qty": "398.940000",
+     "amount": "13990.8300",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-14-2",
+     "qty": "241.980000",
+     "amount": "3540.7000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-14@10",
+     "qty": "23.980000",
+     "amount": "497.7800",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-14@10",
+     "qty": "19.760000",
+     "amount": "233.4600",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "-1963.09",
+    "wipExact": "-1963.092600",
+    "variancesExact": {
+     "lot-size/labor": "10.272000",
+     "lot-size/overhead": "5.846400",
+     "production-price/labor": "-15.392000",
+     "production-price/material": "630.469600",
+     "production-price/overhead": "-7.216800",
+     "production-quantity/labor": "38.092000",
+     "production-quantity/material": "1395.500400",
+     "production-quantity/overhead": "-29.719200",
+     "production-substitution/material": "-3990.945000"
+    }
+   }
+  },
+  {
+   "name": "generated order 15",
+   "orderQty": "100",
+   "rafQty": "100",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-15-0",
+     "qty": "8.000000",
+     "amount": "360.7200",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-15@10",
+     "qty": "3.300000",
+     "amount": "115.9950",
+     "fixed": "80.8450"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-15@10",
+     "qty": "3.300000",
+     "amount": "27.7200",
+     "fixed": "19.3200"
+    },
+    {
+     "group": "labor",
+     "key": "WC-15@20",
+     "qty": "14.900000",
+     "amount": "552.4920",
+     "fixed": "70.4520"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-15@20",
+     "qty": "14.900000",
+     "amount": "197.4250",
+     "fixed": "25.1750"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-15-0",
+     "qty": "7.920000",
+     "amount": "349.9700",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-15@10",
+     "qty": "3.070000",
+     "amount": "111.1500",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-15@10",
+     "qty": "3.890000",
+     "amount": "31.7000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-15@20",
+     "qty": "17.880000",
+     "amount": "662.9900",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-15@20",
+     "qty": "14.750000",
+     "amount": "203.2600",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "104.72",
+    "wipExact": "104.718000",
+    "variancesExact": {
+     "production-price/labor": "3.239100",
+     "production-price/material": "-7.142800",
+     "production-price/overhead": "6.846500",
+     "production-quantity/labor": "102.413900",
+     "production-quantity/material": "-3.607200",
+     "production-quantity/overhead": "2.968500"
+    }
+   }
+  },
+  {
+   "name": "generated order 16",
+   "orderQty": "10",
+   "rafQty": "10",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-16-0",
+     "qty": "4.600000",
+     "amount": "166.4740",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-16@10",
+     "qty": "1.300000",
+     "amount": "52.4810",
+     "fixed": "36.3330"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-16@10",
+     "qty": "1.300000",
+     "amount": "20.5140",
+     "fixed": "14.2020"
+    }
+   ],
+   "actual": [
+    {
+     "group": "labor",
+     "key": "WC-16@10",
+     "qty": "1.550000",
+     "amount": "65.0800",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-16@10",
+     "qty": "1.500000",
+     "amount": "24.1400",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "SUB-16",
+     "qty": "10.000000",
+     "amount": "46.1000",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "-104.15",
+    "wipExact": "-104.149000",
+    "variancesExact": {
+     "production-price/labor": "2.506500",
+     "production-price/overhead": "0.470000",
+     "production-quantity/labor": "10.092500",
+     "production-quantity/overhead": "3.156000",
+     "production-substitution/material": "-120.374000"
+    }
+   }
+  },
+  {
+   "name": "generated order 17",
+   "orderQty": "40",
+   "rafQty": "24",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-17-0",
+     "qty": "130.400000",
+     "amount": "163.0000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-17-1",
+     "qty": "16.400000",
+     "amount": "99.0560",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-17-2",
+     "qty": "40.800000",
+     "amount": "1224.0000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-17@10",
+     "qty": "16.500000",
+     "amount": "515.9550",
+     "fixed": "115.6990"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-17@10",
+     "qty": "16.500000",
+     "amount": "312.5100",
+     "fixed": "70.0780"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-17-1",
+     "qty": "9.150000",
+     "amount": "58.0300",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-17-2",
+     "qty": "22.280000",
+     "amount": "648.3500",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-17@10",
+     "qty": "12.520000",
+     "amount": "387.5900",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-17@10",
+     "qty": "9.900000",
+     "amount": "183.7600",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "-110.98",
+    "wipExact": "-110.982600",
+    "variancesExact": {
+     "lot-size/labor": "46.279600",
+     "lot-size/overhead": "28.031200",
+     "production-price/labor": "-3.910400",
+     "production-price/material": "-17.286000",
+     "production-price/overhead": "-3.746000",
+     "production-quantity/labor": "35.647800",
+     "production-quantity/material": "-70.167600",
+     "production-quantity/overhead": "-28.031200",
+     "production-substitution/material": "-97.800000"
+    }
+   }
+  },
+  {
+   "name": "generated order 18",
+   "orderQty": "40",
+   "rafQty": "40",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-18-0",
+     "qty": "85.600000",
+     "amount": "1437.2240",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-18-1",
+     "qty": "88.400000",
+     "amount": "610.8440",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-18@10",
+     "qty": "17.800000",
+     "amount": "744.2180",
+     "fixed": "91.9820"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-18@10",
+     "qty": "17.800000",
+     "amount": "319.6880",
+     "fixed": "39.5120"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-18-0",
+     "qty": "96.730000",
+     "amount": "1672.8200",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-18-1",
+     "qty": "85.750000",
+     "amount": "580.6800",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-18@10",
+     "qty": "17.090000",
+     "amount": "693.1000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-18@10",
+     "qty": "19.220000",
+     "amount": "359.0000",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "193.63",
+    "wipExact": "193.626000",
+    "variancesExact": {
+     "production-price/labor": "-21.432900",
+     "production-price/material": "36.870800",
+     "production-price/overhead": "13.808800",
+     "production-quantity/labor": "-29.685100",
+     "production-quantity/material": "168.561200",
+     "production-quantity/overhead": "25.503200"
+    }
+   }
+  },
+  {
+   "name": "generated order 19",
+   "orderQty": "500",
+   "rafQty": "500",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-19-0",
+     "qty": "740.000000",
+     "amount": "3737.0000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-19@10",
+     "qty": "126.900000",
+     "amount": "3629.3400",
+     "fixed": "54.3400"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-19@10",
+     "qty": "126.900000",
+     "amount": "1840.0500",
+     "fixed": "27.5500"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-19-0",
+     "qty": "843.600000",
+     "amount": "4473.1900",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-19@10",
+     "qty": "137.050000",
+     "amount": "3802.0400",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-19@10",
+     "qty": "135.780000",
+     "amount": "1949.1200",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "1017.96",
+    "wipExact": "1017.960000",
+    "variancesExact": {
+     "production-price/labor": "-117.590000",
+     "production-price/material": "213.010000",
+     "production-price/overhead": "-19.690000",
+     "production-quantity/labor": "290.290000",
+     "production-quantity/material": "523.180000",
+     "production-quantity/overhead": "128.760000"
+    }
+   }
+  },
+  {
+   "name": "generated order 20",
+   "orderQty": "120",
+   "rafQty": "0",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-20-0",
+     "qty": "403.200000",
+     "amount": "5531.9040",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-20-1",
+     "qty": "259.200000",
+     "amount": "4520.4480",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-20@10",
+     "qty": "60.400000",
+     "amount": "3105.7680",
+     "fixed": "143.9760"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-20@10",
+     "qty": "60.400000",
+     "amount": "750.1680",
+     "fixed": "34.7760"
+    },
+    {
+     "group": "labor",
+     "key": "WC-20@20",
+     "qty": "55.000000",
+     "amount": "2935.9000",
+     "fixed": "181.4920"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-20@20",
+     "qty": "55.000000",
+     "amount": "682.5500",
+     "fixed": "42.1940"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-20-0",
+     "qty": "0.000000",
+     "amount": "0.0000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-20-1",
+     "qty": "0.000000",
+     "amount": "0.0000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-20@10",
+     "qty": "2.690000",
+     "amount": "34.0800",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "34.08",
+    "wipExact": "34.080000",
+    "variancesExact": {
+     "lot-size/overhead": "34.776000",
+     "production-price/overhead": "0.670200",
+     "production-quantity/overhead": "-1.366200"
+    }
+   }
+  },
+  {
+   "name": "generated order 21",
+   "orderQty": "120",
+   "rafQty": "0",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-21-0",
+     "qty": "459.600000",
+     "amount": "8167.0920",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-21-1",
+     "qty": "326.400000",
+     "amount": "10066.1760",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-21-2",
+     "qty": "321.600000",
+     "amount": "7959.6000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-21@10",
+     "qty": "54.300000",
+     "amount": "2118.7860",
+     "fixed": "152.1780"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-21@10",
+     "qty": "54.300000",
+     "amount": "821.5590",
+     "fixed": "59.0070"
+    },
+    {
+     "group": "labor",
+     "key": "WC-21@20",
+     "qty": "16.000000",
+     "amount": "601.7600",
+     "fixed": "60.1760"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-21@20",
+     "qty": "16.000000",
+     "amount": "203.8400",
+     "fixed": "20.3840"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-21-0",
+     "qty": "0.000000",
+     "amount": "0.0000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-21-2",
+     "qty": "0.000000",
+     "amount": "0.0000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-21@20",
+     "qty": "1.840000",
+     "amount": "69.8900",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-21@20",
+     "qty": "1.820000",
+     "amount": "23.1900",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "SUB-21",
+     "qty": "22.000000",
+     "amount": "154.0000",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "247.08",
+    "wipExact": "247.080000",
+    "variancesExact": {
+     "lot-size/labor": "60.176000",
+     "lot-size/overhead": "20.384000",
+     "production-price/labor": "0.687600",
+     "production-price/overhead": "0.003200",
+     "production-quantity/labor": "9.026400",
+     "production-quantity/overhead": "2.802800",
+     "production-substitution/material": "154.000000"
+    }
+   }
+  },
+  {
+   "name": "generated order 22",
+   "orderQty": "100",
+   "rafQty": "60",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-22-0",
+     "qty": "76.000000",
+     "amount": "1400.6800",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-22-1",
+     "qty": "197.000000",
+     "amount": "2393.5500",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-22-2",
+     "qty": "345.000000",
+     "amount": "16604.8500",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-22@10",
+     "qty": "48.400000",
+     "amount": "2064.7440",
+     "fixed": "59.7240"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-22@10",
+     "qty": "48.400000",
+     "amount": "720.1920",
+     "fixed": "20.8320"
+    },
+    {
+     "group": "labor",
+     "key": "WC-22@20",
+     "qty": "25.100000",
+     "amount": "976.3900",
+     "fixed": "120.5900"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-22@20",
+     "qty": "25.100000",
+     "amount": "307.4750",
+     "fixed": "37.9750"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-22-1",
+     "qty": "106.380000",
+     "amount": "1382.9900",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-22-2",
+     "qty": "215.280000",
+     "amount": "10154.2000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-22@10",
+     "qty": "26.050000",
+     "amount": "1077.9500",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-22@10",
+     "qty": "31.970000",
+     "amount": "470.9600",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-22@20",
+     "qty": "17.770000",
+     "amount": "718.9000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-22@20",
+     "qty": "14.510000",
+     "amount": "179.5200",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "-696.21",
+    "wipExact": "-696.208600",
+    "variancesExact": {
+     "lot-size/labor": "72.125600",
+     "lot-size/overhead": "23.522800",
+     "production-price/labor": "-5.696000",
+     "production-price/material": "-116.753400",
+     "production-price/overhead": "-2.981100",
+     "production-quantity/labor": "-94.260000",
+     "production-quantity/material": "254.903400",
+     "production-quantity/overhead": "13.338100",
+     "production-substitution/material": "-840.408000"
+    }
+   }
+  },
+  {
+   "name": "generated order 23",
+   "orderQty": "40",
+   "rafQty": "24",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-23-0",
+     "qty": "95.600000",
+     "amount": "1025.7880",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-23-1",
+     "qty": "42.400000",
+     "amount": "2089.0480",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-23-2",
+     "qty": "64.800000",
+     "amount": "1352.3760",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-23@10",
+     "qty": "18.200000",
+     "amount": "823.9140",
+     "fixed": "27.1620"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-23@10",
+     "qty": "18.200000",
+     "amount": "201.1100",
+     "fixed": "6.6300"
+    },
+    {
+     "group": "labor",
+     "key": "WC-23@20",
+     "qty": "8.700000",
+     "amount": "185.3970",
+     "fixed": "66.0610"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-23@20",
+     "qty": "8.700000",
+     "amount": "165.7350",
+     "fixed": "59.0550"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-23-1",
+     "qty": "23.400000",
+     "amount": "1222.0900",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-23-2",
+     "qty": "36.550000",
+     "amount": "816.1900",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-23@10",
+     "qty": "10.940000",
+     "amount": "495.2500",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-23@10",
+     "qty": "10.380000",
+     "amount": "119.2900",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-23@20",
+     "qty": "6.850000",
+     "amount": "148.8900",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-23@20",
+     "qty": "5.490000",
+     "amount": "104.5800",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "-599.73",
+    "wipExact": "-599.730800",
+    "variancesExact": {
+     "lot-size/labor": "37.289200",
+     "lot-size/overhead": "26.274000",
+     "production-price/labor": "2.912700",
+     "production-price/material": "122.563500",
+     "production-price/overhead": "4.586500",
+     "production-quantity/labor": "-1.648500",
+     "production-quantity/material": "-149.137900",
+     "production-quantity/overhead": "-27.097500",
+     "production-substitution/material": "-615.472800"
+    }
+   }
+  },
+  {
+   "name": "generated order 24",
+   "orderQty": "40",
+   "rafQty": "0",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-24-0",
+     "qty": "144.400000",
+     "amount": "4964.4720",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-24-1",
+     "qty": "136.000000",
+     "amount": "5759.6000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-24@10",
+     "qty": "16.300000",
+     "amount": "684.7630",
+     "fixed": "130.2310"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-24@10",
+     "qty": "16.300000",
+     "amount": "264.5490",
+     "fixed": "50.3130"
+    },
+    {
+     "group": "labor",
+     "key": "WC-24@20",
+     "qty": "20.800000",
+     "amount": "805.1680",
+     "fixed": "154.8400"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-24@20",
+     "qty": "20.800000",
+     "amount": "410.1760",
+     "fixed": "78.8800"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-24-0",
+     "qty": "0.000000",
+     "amount": "0.0000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-24-1",
+     "qty": "0.000000",
+     "amount": "0.0000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-24@10",
+     "qty": "2.670000",
+     "amount": "114.4100",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-24@10",
+     "qty": "3.410000",
+     "amount": "57.5600",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-24@20",
+     "qty": "3.960000",
+     "amount": "75.7500",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "247.72",
+    "wipExact": "247.720000",
+    "variancesExact": {
+     "lot-size/labor": "130.231000",
+     "lot-size/overhead": "129.193000",
+     "production-price/labor": "2.243300",
+     "production-price/overhead": "-0.125500",
+     "production-quantity/labor": "-18.064300",
+     "production-quantity/overhead": "4.242500"
+    }
+   }
+  },
+  {
+   "name": "generated order 25",
+   "orderQty": "100",
+   "rafQty": "50",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-25-0",
+     "qty": "303.000000",
+     "amount": "2302.8000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-25-1",
+     "qty": "11.000000",
+     "amount": "249.7000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-25-2",
+     "qty": "115.000000",
+     "amount": "510.6000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-25@10",
+     "qty": "14.900000",
+     "amount": "815.0300",
+     "fixed": "213.3300"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-25@10",
+     "qty": "14.900000",
+     "amount": "121.1370",
+     "fixed": "31.7070"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-25-0",
+     "qty": "142.410000",
+     "amount": "1049.8500",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-25-1",
+     "qty": "5.500000",
+     "amount": "123.6000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-25-2",
+     "qty": "55.200000",
+     "amount": "237.7400",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-25@10",
+     "qty": "9.310000",
+     "amount": "499.0700",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-25@10",
+     "qty": "8.930000",
+     "amount": "71.1500",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "-18.22",
+    "wipExact": "-18.223500",
+    "variancesExact": {
+     "lot-size/labor": "106.665000",
+     "lot-size/overhead": "15.853500",
+     "production-price/labor": "-10.187000",
+     "production-price/material": "-41.064000",
+     "production-price/overhead": "-1.450900",
+     "production-quantity/labor": "-4.923000",
+     "production-quantity/material": "-79.296000",
+     "production-quantity/overhead": "-3.821100"
+    }
+   }
+  },
+  {
+   "name": "generated order 26",
+   "orderQty": "10",
+   "rafQty": "0",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-26-0",
+     "qty": "36.300000",
+     "amount": "637.0650",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-26@10",
+     "qty": "5.300000",
+     "amount": "229.2780",
+     "fixed": "60.5640"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-26@10",
+     "qty": "5.300000",
+     "amount": "36.9410",
+     "fixed": "9.7580"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-26-0",
+     "qty": "0.000000",
+     "amount": "0.0000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-26@10",
+     "qty": "1.570000",
+     "amount": "65.8800",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-26@10",
+     "qty": "1.470000",
+     "amount": "10.4500",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "76.33",
+    "wipExact": "76.330000",
+    "variancesExact": {
+     "lot-size/labor": "60.564000",
+     "lot-size/overhead": "9.758000",
+     "production-price/labor": "-2.038200",
+     "production-price/overhead": "0.204100",
+     "production-quantity/labor": "7.354200",
+     "production-quantity/overhead": "0.487900"
+    }
+   }
+  },
+  {
+   "name": "generated order 27",
+   "orderQty": "100",
+   "rafQty": "0",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-27-0",
+     "qty": "260.000000",
+     "amount": "1118.0000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-27-1",
+     "qty": "399.000000",
+     "amount": "19144.0200",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-27-2",
+     "qty": "45.000000",
+     "amount": "969.3000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-27@10",
+     "qty": "23.800000",
+     "amount": "837.5220",
+     "fixed": "63.3420"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-27@10",
+     "qty": "23.800000",
+     "amount": "442.4420",
+     "fixed": "33.4620"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-27-1",
+     "qty": "0.000000",
+     "amount": "0.0000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-27-2",
+     "qty": "0.000000",
+     "amount": "0.0000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-27@10",
+     "qty": "1.820000",
+     "amount": "65.9700",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "65.97",
+    "wipExact": "65.970000",
+    "variancesExact": {
+     "lot-size/labor": "63.342000",
+     "production-price/labor": "1.924200",
+     "production-quantity/labor": "0.703800"
+    }
+   }
+  },
+  {
+   "name": "generated order 28",
+   "orderQty": "10",
+   "rafQty": "6",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-28-0",
+     "qty": "5.100000",
+     "amount": "205.8870",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-28-1",
+     "qty": "39.000000",
+     "amount": "496.4700",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-28-2",
+     "qty": "14.300000",
+     "amount": "525.5250",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-28@10",
+     "qty": "7.100000",
+     "amount": "393.5530",
+     "fixed": "127.4890"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-28@10",
+     "qty": "7.100000",
+     "amount": "97.2700",
+     "fixed": "31.5100"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-28-0",
+     "qty": "3.520000",
+     "amount": "137.8400",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-28-1",
+     "qty": "23.870000",
+     "amount": "291.7100",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-28@10",
+     "qty": "6.060000",
+     "amount": "329.1900",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-28@10",
+     "qty": "5.960000",
+     "amount": "81.6500",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "-190.83",
+    "wipExact": "-190.833000",
+    "variancesExact": {
+     "lot-size/labor": "50.995600",
+     "lot-size/overhead": "12.604000",
+     "production-price/labor": "-6.715800",
+     "production-price/material": "-16.417500",
+     "production-price/overhead": "-0.002000",
+     "production-quantity/labor": "48.778400",
+     "production-quantity/material": "24.553300",
+     "production-quantity/overhead": "10.686000",
+     "production-substitution/material": "-315.315000"
+    }
+   }
+  },
+  {
+   "name": "generated order 29",
+   "orderQty": "40",
+   "rafQty": "20",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-29-0",
+     "qty": "103.200000",
+     "amount": "2625.4080",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-29@10",
+     "qty": "15.900000",
+     "amount": "448.3800",
+     "fixed": "76.1400"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-29@10",
+     "qty": "15.900000",
+     "amount": "132.4470",
+     "fixed": "22.4910"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-29-0",
+     "qty": "53.150000",
+     "amount": "1311.5700",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-29@10",
+     "qty": "8.090000",
+     "amount": "228.1400",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-29@10",
+     "qty": "9.110000",
+     "amount": "75.1300",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "11.72",
+    "wipExact": "11.722500",
+    "variancesExact": {
+     "lot-size/labor": "38.070000",
+     "lot-size/overhead": "11.245500",
+     "production-price/labor": "0.002000",
+     "production-price/material": "-40.566000",
+     "production-price/overhead": "-0.756300",
+     "production-quantity/labor": "-34.122000",
+     "production-quantity/material": "39.432000",
+     "production-quantity/overhead": "-1.582700"
+    }
+   }
+  },
+  {
+   "name": "generated order 30",
+   "orderQty": "40",
+   "rafQty": "0",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-30-0",
+     "qty": "49.200000",
+     "amount": "1839.0960",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-30-1",
+     "qty": "78.800000",
+     "amount": "1263.9520",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-30-2",
+     "qty": "38.800000",
+     "amount": "1191.1600",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-30@10",
+     "qty": "19.400000",
+     "amount": "983.9680",
+     "fixed": "91.2960"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-30@10",
+     "qty": "19.400000",
+     "amount": "373.6440",
+     "fixed": "34.6680"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-30-0",
+     "qty": "0.000000",
+     "amount": "0.0000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-30-1",
+     "qty": "0.000000",
+     "amount": "0.0000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-30-2",
+     "qty": "0.000000",
+     "amount": "0.0000",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "0.00",
+    "wipExact": "0.000000",
+    "variancesExact": {}
+   }
+  },
+  {
+   "name": "generated order 31",
+   "orderQty": "25",
+   "rafQty": "15",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-31-0",
+     "qty": "72.750000",
+     "amount": "2299.6275",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-31-1",
+     "qty": "93.500000",
+     "amount": "3075.2150",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-31@10",
+     "qty": "11.300000",
+     "amount": "580.8200",
+     "fixed": "66.8200"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-31@10",
+     "qty": "11.300000",
+     "amount": "109.8360",
+     "fixed": "12.6360"
+    },
+    {
+     "group": "labor",
+     "key": "WC-31@20",
+     "qty": "9.200000",
+     "amount": "429.2720",
+     "fixed": "55.9920"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-31@20",
+     "qty": "9.200000",
+     "amount": "178.1120",
+     "fixed": "23.2320"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-31-0",
+     "qty": "50.200000",
+     "amount": "1539.2200",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-31-1",
+     "qty": "60.590000",
+     "amount": "1972.8800",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-31@10",
+     "qty": "6.720000",
+     "amount": "335.0500",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-31@10",
+     "qty": "7.150000",
+     "amount": "71.5800",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-31@20",
+     "qty": "7.020000",
+     "amount": "327.5500",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-31@20",
+     "qty": "5.700000",
+     "amount": "113.6600",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "356.21",
+    "wipExact": "356.210500",
+    "variancesExact": {
+     "lot-size/labor": "49.124800",
+     "lot-size/overhead": "14.347200",
+     "production-price/labor": "-10.361200",
+     "production-price/material": "-67.527100",
+     "production-price/overhead": "5.390000",
+     "production-quantity/labor": "17.781200",
+     "production-quantity/material": "354.721600",
+     "production-quantity/overhead": "-7.266000"
+    }
+   }
+  },
+  {
+   "name": "generated order 32",
+   "orderQty": "40",
+   "rafQty": "20",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-32-0",
+     "qty": "80.800000",
+     "amount": "360.3680",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-32-1",
+     "qty": "20.800000",
+     "amount": "293.0720",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-32-2",
+     "qty": "11.600000",
+     "amount": "76.5600",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-32@10",
+     "qty": "21.200000",
+     "amount": "676.9160",
+     "fixed": "89.4040"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-32@10",
+     "qty": "21.200000",
+     "amount": "285.3520",
+     "fixed": "37.6880"
+    },
+    {
+     "group": "labor",
+     "key": "WC-32@20",
+     "qty": "18.000000",
+     "amount": "661.6800",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-32@20",
+     "qty": "18.000000",
+     "amount": "184.6800",
+     "fixed": "0.0000"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-32-0",
+     "qty": "36.360000",
+     "amount": "173.5200",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-32-1",
+     "qty": "11.860000",
+     "amount": "170.4500",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-32-2",
+     "qty": "5.390000",
+     "amount": "34.5100",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-32@10",
+     "qty": "13.200000",
+     "amount": "413.0500",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-32@10",
+     "qty": "12.240000",
+     "amount": "168.0500",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-32@20",
+     "qty": "10.260000",
+     "amount": "384.7000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-32@20",
+     "qty": "9.090000",
+     "amount": "95.1300",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "SUB-32",
+     "qty": "23.000000",
+     "amount": "176.4100",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "346.51",
+    "wipExact": "346.506000",
+    "variancesExact": {
+     "lot-size/labor": "44.702000",
+     "lot-size/overhead": "18.844000",
+     "production-price/labor": "-0.883600",
+     "production-price/material": "13.633000",
+     "production-price/overhead": "5.166200",
+     "production-quantity/labor": "84.633600",
+     "production-quantity/material": "-0.153000",
+     "production-quantity/overhead": "4.153800",
+     "production-substitution/material": "176.410000"
+    }
+   }
+  },
+  {
+   "name": "generated order 33",
+   "orderQty": "250",
+   "rafQty": "150",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-33-0",
+     "qty": "820.000000",
+     "amount": "11217.6000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-33@10",
+     "qty": "55.000000",
+     "amount": "1197.3500",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-33@10",
+     "qty": "55.000000",
+     "amount": "462.5500",
+     "fixed": "0.0000"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-33-0",
+     "qty": "482.160000",
+     "amount": "7057.6700",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-33@10",
+     "qty": "35.310000",
+     "amount": "768.7000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-33@10",
+     "qty": "38.610000",
+     "amount": "314.9700",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "SUB-33",
+     "qty": "2.000000",
+     "amount": "5.5400",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "420.38",
+    "wipExact": "420.380000",
+    "variancesExact": {
+     "production-price/labor": "0.001300",
+     "production-price/material": "461.721200",
+     "production-price/overhead": "-9.740100",
+     "production-quantity/labor": "50.288700",
+     "production-quantity/material": "-134.611200",
+     "production-quantity/overhead": "47.180100",
+     "production-substitution/material": "5.540000"
+    }
+   }
+  },
+  {
+   "name": "generated order 34",
+   "orderQty": "40",
+   "rafQty": "40",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-34-0",
+     "qty": "115.200000",
+     "amount": "2245.2480",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-34-1",
+     "qty": "148.800000",
+     "amount": "2132.3040",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-34-2",
+     "qty": "37.200000",
+     "amount": "958.2720",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-34@10",
+     "qty": "10.000000",
+     "amount": "505.5000",
+     "fixed": "121.3200"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-34@10",
+     "qty": "10.000000",
+     "amount": "199.3000",
+     "fixed": "47.8320"
+    },
+    {
+     "group": "labor",
+     "key": "WC-34@20",
+     "qty": "9.400000",
+     "amount": "504.2160",
+     "fixed": "75.0960"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-34@20",
+     "qty": "9.400000",
+     "amount": "130.3780",
+     "fixed": "19.4180"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-34-0",
+     "qty": "115.200000",
+     "amount": "2335.0600",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-34-1",
+     "qty": "142.850000",
+     "amount": "1965.1600",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-34-2",
+     "qty": "37.200000",
+     "amount": "939.1100",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-34@10",
+     "qty": "8.700000",
+     "amount": "439.7900",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-34@10",
+     "qty": "10.400000",
+     "amount": "211.4200",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-34@20",
+     "qty": "9.120000",
+     "amount": "479.4100",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-34@20",
+     "qty": "10.720000",
+     "amount": "154.6300",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "-150.64",
+    "wipExact": "-150.638000",
+    "variancesExact": {
+     "production-price/labor": "-9.781800",
+     "production-price/material": "-11.230500",
+     "production-price/overhead": "10.091600",
+     "production-quantity/labor": "-80.734200",
+     "production-quantity/material": "-85.263500",
+     "production-quantity/overhead": "26.280400"
+    }
+   }
+  },
+  {
+   "name": "generated order 35",
+   "orderQty": "500",
+   "rafQty": "250",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-35-0",
+     "qty": "1865.000000",
+     "amount": "67886.0000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-35@10",
+     "qty": "33.100000",
+     "amount": "1884.0520",
+     "fixed": "176.4520"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-35@10",
+     "qty": "33.100000",
+     "amount": "649.7530",
+     "fixed": "60.8530"
+    },
+    {
+     "group": "labor",
+     "key": "WC-35@20",
+     "qty": "8.900000",
+     "amount": "441.3510",
+     "fixed": "193.4010"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-35@20",
+     "qty": "8.900000",
+     "amount": "50.1070",
+     "fixed": "21.9570"
+    }
+   ],
+   "actual": [
+    {
+     "group": "labor",
+     "key": "WC-35@10",
+     "qty": "21.720000",
+     "amount": "1285.7500",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-35@10",
+     "qty": "17.200000",
+     "amount": "330.8800",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-35@20",
+     "qty": "6.660000",
+     "amount": "326.9700",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-35@20",
+     "qty": "5.440000",
+     "amount": "30.0100",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "-33482.02",
+    "wipExact": "-33482.021500",
+    "variancesExact": {
+     "lot-size/labor": "184.926500",
+     "lot-size/overhead": "41.405000",
+     "production-price/labor": "46.148200",
+     "production-price/overhead": "-7.373200",
+     "production-quantity/labor": "218.943800",
+     "production-quantity/overhead": "-23.071800",
+     "production-substitution/material": "-33943.000000"
+    }
+   }
+  },
+  {
+   "name": "generated order 36",
+   "orderQty": "100",
+   "rafQty": "0",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-36-0",
+     "qty": "213.000000",
+     "amount": "6447.5100",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-36-1",
+     "qty": "208.000000",
+     "amount": "7612.8000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-36-2",
+     "qty": "294.000000",
+     "amount": "7329.4200",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-36@10",
+     "qty": "11.900000",
+     "amount": "685.5590",
+     "fixed": "51.8490"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-36@10",
+     "qty": "11.900000",
+     "amount": "159.5790",
+     "fixed": "12.0690"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-36-1",
+     "qty": "0.000000",
+     "amount": "0.0000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-36-2",
+     "qty": "0.000000",
+     "amount": "0.0000",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "0.00",
+    "wipExact": "0.000000",
+    "variancesExact": {}
+   }
+  },
+  {
+   "name": "generated order 37",
+   "orderQty": "100",
+   "rafQty": "100",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-37-0",
+     "qty": "64.000000",
+     "amount": "1962.2400",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-37-1",
+     "qty": "333.000000",
+     "amount": "5680.9800",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-37-2",
+     "qty": "240.000000",
+     "amount": "6832.8000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-37@10",
+     "qty": "34.500000",
+     "amount": "1085.0250",
+     "fixed": "110.0750"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-37@10",
+     "qty": "34.500000",
+     "amount": "310.1550",
+     "fixed": "31.4650"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-37-0",
+     "qty": "58.240000",
+     "amount": "1714.2100",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-37-2",
+     "qty": "254.400000",
+     "amount": "7822.1900",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-37@10",
+     "qty": "36.230000",
+     "amount": "1162.2200",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-37@10",
+     "qty": "39.680000",
+     "amount": "367.4200",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "-4805.16",
+    "wipExact": "-4805.160000",
+    "variancesExact": {
+     "production-price/labor": "22.786500",
+     "production-price/material": "507.993600",
+     "production-price/overhead": "10.696800",
+     "production-quantity/labor": "54.408500",
+     "production-quantity/material": "233.366400",
+     "production-quantity/overhead": "46.568200",
+     "production-substitution/material": "-5680.980000"
+    }
+   }
+  },
+  {
+   "name": "generated order 38",
+   "orderQty": "250",
+   "rafQty": "150",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-38-0",
+     "qty": "870.000000",
+     "amount": "13232.7000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-38@10",
+     "qty": "118.100000",
+     "amount": "3258.3790",
+     "fixed": "16.5540"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-38@10",
+     "qty": "118.100000",
+     "amount": "1231.7830",
+     "fixed": "6.2580"
+    }
+   ],
+   "actual": [
+    {
+     "group": "labor",
+     "key": "WC-38@10",
+     "qty": "81.770000",
+     "amount": "2323.7200",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-38@10",
+     "qty": "84.610000",
+     "amount": "891.3100",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "-7418.69",
+    "wipExact": "-7418.687200",
+    "variancesExact": {
+     "lot-size/labor": "6.621600",
+     "lot-size/overhead": "2.503200",
+     "production-price/labor": "67.685700",
+     "production-price/overhead": "8.827700",
+     "production-quantity/labor": "294.385300",
+     "production-quantity/overhead": "140.909300",
+     "production-substitution/material": "-7939.620000"
+    }
+   }
+  },
+  {
+   "name": "generated order 39",
+   "orderQty": "40",
+   "rafQty": "0",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-39-0",
+     "qty": "133.600000",
+     "amount": "1333.3280",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-39-1",
+     "qty": "43.600000",
+     "amount": "1942.3800",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-39-2",
+     "qty": "159.600000",
+     "amount": "7325.6400",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-39@10",
+     "qty": "15.200000",
+     "amount": "738.8720",
+     "fixed": "194.4400"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-39@10",
+     "qty": "15.200000",
+     "amount": "206.5680",
+     "fixed": "54.3600"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-39-0",
+     "qty": "0.000000",
+     "amount": "0.0000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-39-1",
+     "qty": "0.000000",
+     "amount": "0.0000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-39-2",
+     "qty": "0.000000",
+     "amount": "0.0000",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "0.00",
+    "wipExact": "0.000000",
+    "variancesExact": {}
+   }
+  },
+  {
+   "name": "generated order 40",
+   "orderQty": "120",
+   "rafQty": "60",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-40-0",
+     "qty": "123.600000",
+     "amount": "216.3000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-40-1",
+     "qty": "126.000000",
+     "amount": "2753.1000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-40@10",
+     "qty": "25.900000",
+     "amount": "1140.1180",
+     "fixed": "136.4620"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-40@10",
+     "qty": "25.900000",
+     "amount": "518.0000",
+     "fixed": "62.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-40@20",
+     "qty": "28.700000",
+     "amount": "1196.5030",
+     "fixed": "95.8870"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-40@20",
+     "qty": "28.700000",
+     "amount": "394.9120",
+     "fixed": "31.6480"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-40-0",
+     "qty": "63.040000",
+     "amount": "111.4200",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-40@10",
+     "qty": "14.360000",
+     "amount": "613.1600",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-40@10",
+     "qty": "15.660000",
+     "amount": "316.3300",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-40@20",
+     "qty": "18.140000",
+     "amount": "733.5700",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-40@20",
+     "qty": "15.660000",
+     "amount": "213.3300",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "-1121.66",
+    "wipExact": "-1121.656500",
+    "variancesExact": {
+     "lot-size/labor": "116.174500",
+     "lot-size/overhead": "46.824000",
+     "production-price/labor": "-41.653800",
+     "production-price/material": "1.100000",
+     "production-price/overhead": "0.978400",
+     "production-quantity/labor": "103.898800",
+     "production-quantity/material": "2.170000",
+     "production-quantity/overhead": "25.401600",
+     "production-substitution/material": "-1376.550000"
+    }
+   }
+  },
+  {
+   "name": "generated order 41",
+   "orderQty": "25",
+   "rafQty": "12",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-41-0",
+     "qty": "44.000000",
+     "amount": "838.2000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-41@10",
+     "qty": "12.300000",
+     "amount": "609.2190",
+     "fixed": "188.2140"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-41@10",
+     "qty": "12.300000",
+     "amount": "231.2400",
+     "fixed": "71.4400"
+    },
+    {
+     "group": "labor",
+     "key": "WC-41@20",
+     "qty": "13.350000",
+     "amount": "366.5910",
+     "fixed": "98.8560"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-41@20",
+     "qty": "13.350000",
+     "amount": "112.8075",
+     "fixed": "30.4200"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-41-0",
+     "qty": "22.810000",
+     "amount": "421.4900",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-41@10",
+     "qty": "7.090000",
+     "amount": "340.6300",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-41@10",
+     "qty": "6.930000",
+     "amount": "135.5000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-41@20",
+     "qty": "9.110000",
+     "amount": "257.6700",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-41@20",
+     "qty": "8.610000",
+     "amount": "75.6600",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "195.08",
+    "wipExact": "195.082400",
+    "variancesExact": {
+     "lot-size/labor": "149.276400",
+     "lot-size/overhead": "52.967200",
+     "production-price/labor": "-3.028300",
+     "production-price/material": "-13.040500",
+     "production-price/overhead": "8.121500",
+     "production-quantity/labor": "-16.336900",
+     "production-quantity/material": "32.194500",
+     "production-quantity/overhead": "-15.071500"
+    }
+   }
+  },
+  {
+   "name": "generated order 42",
+   "orderQty": "25",
+   "rafQty": "12",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-42-0",
+     "qty": "76.250000",
+     "amount": "2411.7875",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-42@10",
+     "qty": "7.900000",
+     "amount": "196.2360",
+     "fixed": "59.6160"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-42@10",
+     "qty": "7.900000",
+     "amount": "148.2040",
+     "fixed": "45.0240"
+    },
+    {
+     "group": "labor",
+     "key": "WC-42@20",
+     "qty": "2.850000",
+     "amount": "70.4235",
+     "fixed": "51.8910"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-42@20",
+     "qty": "2.850000",
+     "amount": "36.4800",
+     "fixed": "26.8800"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-42-0",
+     "qty": "38.060000",
+     "amount": "1167.7200",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-42@10",
+     "qty": "4.940000",
+     "amount": "121.4800",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-42@10",
+     "qty": "4.590000",
+     "amount": "84.3900",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-42@20",
+     "qty": "2.610000",
+     "amount": "66.4300",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-42@20",
+     "qty": "2.830000",
+     "amount": "36.5900",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "SUB-42",
+     "qty": "47.000000",
+     "amount": "240.1700",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "342.48",
+    "wipExact": "342.477120",
+    "variancesExact": {
+     "lot-size/labor": "57.983640",
+     "lot-size/overhead": "37.390080",
+     "production-price/labor": "0.707300",
+     "production-price/material": "-36.117800",
+     "production-price/overhead": "-1.352400",
+     "production-quantity/labor": "1.222500",
+     "production-quantity/material": "46.179800",
+     "production-quantity/overhead": "-3.706000",
+     "production-substitution/material": "240.170000"
+    }
+   }
+  },
+  {
+   "name": "generated order 43",
+   "orderQty": "10",
+   "rafQty": "10",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-43-0",
+     "qty": "13.300000",
+     "amount": "166.7820",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-43-1",
+     "qty": "16.800000",
+     "amount": "147.8400",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-43-2",
+     "qty": "23.600000",
+     "amount": "937.8640",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-43@10",
+     "qty": "4.200000",
+     "amount": "194.8380",
+     "fixed": "120.6140"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-43@10",
+     "qty": "4.200000",
+     "amount": "25.6200",
+     "fixed": "15.8600"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-43-0",
+     "qty": "13.970000",
+     "amount": "168.1800",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-43-1",
+     "qty": "17.300000",
+     "amount": "159.8500",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-43-2",
+     "qty": "25.720000",
+     "amount": "1093.6600",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-43@10",
+     "qty": "4.240000",
+     "amount": "196.6900",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-43@10",
+     "qty": "4.830000",
+     "amount": "29.7600",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "175.20",
+    "wipExact": "175.196000",
+    "variancesExact": {
+     "production-price/labor": "-0.003600",
+     "production-price/material": "72.153400",
+     "production-price/overhead": "0.297000",
+     "production-quantity/labor": "1.855600",
+     "production-quantity/material": "97.050600",
+     "production-quantity/overhead": "3.843000"
+    }
+   }
+  },
+  {
+   "name": "generated order 44",
+   "orderQty": "500",
+   "rafQty": "500",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-44-0",
+     "qty": "620.000000",
+     "amount": "22388.2000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-44-1",
+     "qty": "510.000000",
+     "amount": "13331.4000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-44@10",
+     "qty": "12.800000",
+     "amount": "760.0640",
+     "fixed": "166.2640"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-44@10",
+     "qty": "12.800000",
+     "amount": "229.2480",
+     "fixed": "50.1480"
+    },
+    {
+     "group": "labor",
+     "key": "WC-44@20",
+     "qty": "213.100000",
+     "amount": "8357.7820",
+     "fixed": "121.5820"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-44@20",
+     "qty": "213.100000",
+     "amount": "2459.1740",
+     "fixed": "35.7740"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-44-0",
+     "qty": "620.000000",
+     "amount": "23955.3700",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-44-1",
+     "qty": "586.500000",
+     "amount": "15177.8000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-44@10",
+     "qty": "11.520000",
+     "amount": "690.9000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-44@10",
+     "qty": "11.390000",
+     "amount": "199.9200",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-44@20",
+     "qty": "238.670000",
+     "amount": "9547.8500",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-44@20",
+     "qty": "232.280000",
+     "amount": "2680.5100",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "4726.48",
+    "wipExact": "4726.482000",
+    "variancesExact": {
+     "production-price/labor": "194.055000",
+     "production-price/material": "1413.860000",
+     "production-price/overhead": "-4.076100",
+     "production-quantity/labor": "926.849000",
+     "production-quantity/material": "1999.710000",
+     "production-quantity/overhead": "196.084100"
+    }
+   }
+  },
+  {
+   "name": "generated order 45",
+   "orderQty": "10",
+   "rafQty": "5",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-45-0",
+     "qty": "28.400000",
+     "amount": "193.6880",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-45@10",
+     "qty": "3.800000",
+     "amount": "216.6000",
+     "fixed": "176.7000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-45@10",
+     "qty": "3.800000",
+     "amount": "59.1660",
+     "fixed": "48.2670"
+    },
+    {
+     "group": "labor",
+     "key": "WC-45@20",
+     "qty": "3.900000",
+     "amount": "205.2180",
+     "fixed": "63.1440"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-45@20",
+     "qty": "3.900000",
+     "amount": "37.5960",
+     "fixed": "11.5680"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-45-0",
+     "qty": "15.620000",
+     "amount": "107.5900",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-45@10",
+     "qty": "3.240000",
+     "amount": "180.9900",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-45@10",
+     "qty": "3.800000",
+     "amount": "61.5300",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-45@20",
+     "qty": "2.520000",
+     "amount": "133.9300",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-45@20",
+     "qty": "2.500000",
+     "amount": "23.3800",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "SUB-45",
+     "qty": "47.000000",
+     "amount": "144.2900",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "295.58",
+    "wipExact": "295.576000",
+    "variancesExact": {
+     "lot-size/labor": "119.922000",
+     "lot-size/overhead": "29.917500",
+     "production-price/labor": "-2.362400",
+     "production-price/material": "1.061600",
+     "production-price/overhead": "1.644000",
+     "production-quantity/labor": "-13.548600",
+     "production-quantity/material": "9.684400",
+     "production-quantity/overhead": "4.967500",
+     "production-substitution/material": "144.290000"
+    }
+   }
+  },
+  {
+   "name": "generated order 46",
+   "orderQty": "10",
+   "rafQty": "6",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-46-0",
+     "qty": "20.800000",
+     "amount": "1028.9760",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-46-1",
+     "qty": "6.100000",
+     "amount": "203.8010",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-46-2",
+     "qty": "30.300000",
+     "amount": "683.5680",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-46@10",
+     "qty": "4.700000",
+     "amount": "247.4550",
+     "fixed": "78.9750"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-46@10",
+     "qty": "4.700000",
+     "amount": "60.3480",
+     "fixed": "19.2600"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-46-0",
+     "qty": "11.980000",
+     "amount": "616.3600",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-46-1",
+     "qty": "3.370000",
+     "amount": "121.6000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-46@10",
+     "qty": "3.830000",
+     "amount": "205.6800",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-46@10",
+     "qty": "3.010000",
+     "amount": "39.4200",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "-351.43",
+    "wipExact": "-351.428800",
+    "variancesExact": {
+     "lot-size/labor": "31.590000",
+     "lot-size/overhead": "7.704000",
+     "production-price/labor": "4.030500",
+     "production-price/material": "32.717700",
+     "production-price/overhead": "0.771600",
+     "production-quantity/labor": "21.586500",
+     "production-quantity/material": "-34.423900",
+     "production-quantity/overhead": "-5.264400",
+     "production-substitution/material": "-410.140800"
+    }
+   }
+  },
+  {
+   "name": "generated order 47",
+   "orderQty": "250",
+   "rafQty": "150",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-47-0",
+     "qty": "37.500000",
+     "amount": "1675.5000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-47@10",
+     "qty": "93.100000",
+     "amount": "5490.1070",
+     "fixed": "182.8070"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-47@10",
+     "qty": "93.100000",
+     "amount": "1588.2860",
+     "fixed": "52.8860"
+    }
+   ],
+   "actual": [
+    {
+     "group": "labor",
+     "key": "WC-47@10",
+     "qty": "62.240000",
+     "amount": "3743.7000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-47@10",
+     "qty": "65.090000",
+     "amount": "1088.2300",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "-420.41",
+    "wipExact": "-420.405800",
+    "variancesExact": {
+     "lot-size/labor": "73.122800",
+     "lot-size/overhead": "21.154400",
+     "production-price/labor": "73.407200",
+     "production-price/overhead": "-22.205400",
+     "production-quantity/labor": "303.105800",
+     "production-quantity/overhead": "136.309400",
+     "production-substitution/material": "-1005.300000"
+    }
+   }
+  },
+  {
+   "name": "generated order 48",
+   "orderQty": "40",
+   "rafQty": "0",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-48-0",
+     "qty": "154.000000",
+     "amount": "4081.0000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-48-1",
+     "qty": "28.800000",
+     "amount": "1423.8720",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-48@10",
+     "qty": "14.800000",
+     "amount": "810.3000",
+     "fixed": "87.6000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-48@10",
+     "qty": "14.800000",
+     "amount": "122.9880",
+     "fixed": "13.2960"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-48-0",
+     "qty": "0.000000",
+     "amount": "0.0000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-48@10",
+     "qty": "1.890000",
+     "amount": "103.4800",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "103.48",
+    "wipExact": "103.480000",
+    "variancesExact": {
+     "lot-size/labor": "87.600000",
+     "production-price/labor": "0.002500",
+     "production-quantity/labor": "15.877500"
+    }
+   }
+  },
+  {
+   "name": "generated order 49",
+   "orderQty": "40",
+   "rafQty": "40",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-49-0",
+     "qty": "132.400000",
+     "amount": "1011.5360",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-49-1",
+     "qty": "98.800000",
+     "amount": "3894.6960",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-49-2",
+     "qty": "101.200000",
+     "amount": "2870.0320",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-49@10",
+     "qty": "4.400000",
+     "amount": "231.7480",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-49@10",
+     "qty": "4.400000",
+     "amount": "64.9440",
+     "fixed": "0.0000"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-49-0",
+     "qty": "133.720000",
+     "amount": "1031.8400",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-49-1",
+     "qty": "96.820000",
+     "amount": "3663.9800",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "material",
+     "key": "RM-49-2",
+     "qty": "112.330000",
+     "amount": "3185.6800",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-49@10",
+     "qty": "4.840000",
+     "amount": "252.3700",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-49@10",
+     "qty": "3.740000",
+     "amount": "53.5500",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "114.46",
+    "wipExact": "114.464000",
+    "variancesExact": {
+     "production-price/labor": "-2.552800",
+     "production-price/material": "-142.444000",
+     "production-price/overhead": "-1.652400",
+     "production-quantity/labor": "23.174800",
+     "production-quantity/material": "247.680000",
+     "production-quantity/overhead": "-9.741600"
+    }
+   }
+  },
+  {
+   "name": "generated order 50",
+   "orderQty": "40",
+   "rafQty": "0",
+   "planned": [
+    {
+     "group": "material",
+     "key": "RM-50-0",
+     "qty": "38.800000",
+     "amount": "847.3920",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-50@10",
+     "qty": "19.400000",
+     "amount": "892.4000",
+     "fixed": "138.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-50@10",
+     "qty": "19.400000",
+     "amount": "176.9280",
+     "fixed": "27.3600"
+    }
+   ],
+   "actual": [
+    {
+     "group": "material",
+     "key": "RM-50-0",
+     "qty": "0.000000",
+     "amount": "0.0000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "labor",
+     "key": "WC-50@10",
+     "qty": "3.240000",
+     "amount": "155.0000",
+     "fixed": "0.0000"
+    },
+    {
+     "group": "overhead",
+     "key": "WC-50@10",
+     "qty": "2.820000",
+     "amount": "25.4600",
+     "fixed": "0.0000"
+    }
+   ],
+   "expected": {
+    "wipBefore": "180.46",
+    "wipExact": "180.460000",
+    "variancesExact": {
+     "lot-size/labor": "138.000000",
+     "lot-size/overhead": "27.360000",
+     "production-price/labor": "5.960000",
+     "production-price/overhead": "-0.258400",
+     "production-quantity/labor": "11.040000",
+     "production-quantity/overhead": "-1.641600"
+    }
+   }
+  }
+ ]
+}

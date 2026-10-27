@@ -1,0 +1,13 @@
+image: { repository: ghcr.io/benjaminsrussell/production, digest: "", tag: "", pullPolicy: IfNotPresent }
+databaseSecret: production-db
+migrateOnStart: false
+replicaCount: 3
+# PRD 4.21.10: HPA on CPU 70%, never below the 3 replicas.
+autoscaling: { enabled: true, minReplicas: 3, maxReplicas: 10, targetCPUUtilizationPercentage: 70 }
+# PRD 4.21.13 parameters read by the service.
+config:
+  rafTolerancePct: "0"
+resources:
+  requests: { cpu: 100m, memory: 128Mi }
+  limits: { cpu: 500m, memory: 256Mi }
+serviceMonitor: { enabled: false }
