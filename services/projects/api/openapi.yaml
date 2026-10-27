@@ -1,11 +1,13 @@
 openapi: 3.1.0
 info:
   title: Passage Projects API
-  version: 0.1.0
+  version: 0.2.0
   description: |
-    Wave 41 (PSG-41), slice 1: project master and hierarchy (FR-41.1) with stage
-    transitions. WBS, journals, billing, estimates, timesheets and the rest of
-    wave 41 are later slices (see NOT-IMPLEMENTED.md).
+    Wave 41 (PSG-41). Slice 1: project master and hierarchy (FR-41.1) with stage
+    transitions. Slice 2: project groups (FR-41.1), posting profiles and fallback
+    resolution (FR-41.5), plan versions, WBS replace/read and the CPM scheduler (FR-41.2).
+    Journals, billing, estimates, timesheets and the rest of wave 41 are later
+    slices (see NOT-IMPLEMENTED.md).
     Browser calls use `/api/v1/projects/...`; the BFF rewrites them to `/v1/projects/...`.
 servers:
   - url: https://api.{env}.passage.dev
@@ -165,8 +167,357 @@ paths:
           $ref: '#/components/responses/Problem'
         '428':
           $ref: '#/components/responses/Problem'
+  /v1/projects/groups:
+    get:
+      operationId: listProjectGroups
+      summary: List project groups
+      x-passage-duty: ProjInquire
+      responses:
+        '200':
+          description: All project groups of the tenant
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ProjectGroup'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+  /v1/projects/groups/{groupId}:
+    put:
+      operationId: putProjectGroup
+      summary: Create a project group (no If-Match) or replace it (If-Match with its version)
+      x-passage-duty: ProjSetupAdmin
+      parameters:
+        - name: groupId
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^[A-Z0-9][A-Z0-9-]{0,9}$'
+        - $ref: '#/components/parameters/OptionalIfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectGroupRequest'
+      responses:
+        '201':
+          description: Group created
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectGroup'
+        '200':
+          description: Group replaced
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectGroup'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        '428':
+          $ref: '#/components/responses/Problem'
+  /v1/projects/posting-profiles:
+    get:
+      operationId: listPostingProfiles
+      summary: List posting profiles (FR-41.5)
+      x-passage-duty: ProjInquire
+      responses:
+        '200':
+          description: All posting profiles of the tenant
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PostingProfile'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+    put:
+      operationId: putPostingProfile
+      summary: >-
+        Create (no If-Match) or replace (If-Match) the posting profile of one key. The key is concrete
+        (group, category, property), the group fallback (group, *, *) or the catch-all (*, *, *).
+      x-passage-duty: ProjSetupAdmin
+      parameters:
+        - $ref: '#/components/parameters/OptionalIfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PostingProfileRequest'
+      responses:
+        '201':
+          description: Profile created
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PostingProfile'
+        '200':
+          description: Profile replaced
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PostingProfile'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        '428':
+          $ref: '#/components/responses/Problem'
+  /v1/projects/posting-profiles/resolve:
+    post:
+      operationId: resolvePostingProfile
+      summary: Resolve the profile for a concrete key with the fallback order (group,category,property) → (group,*,*) → (*,*,*)
+      x-passage-duty: ProjInquire
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveRequest'
+      responses:
+        '200':
+          description: The profile that applies
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PostingProfile'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '422':
+          description: No profile at any fallback level (PROJ-POST-001)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /v1/projects/{id}/plans:
+    get:
+      operationId: listPlanVersions
+      summary: List the plan versions of a project in sequence order
+      x-passage-duty: ProjInquire
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Plan versions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PlanVersion'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+    post:
+      operationId: createPlanVersion
+      summary: >-
+        Add a plan version: an empty or copied WORKING plan (one per project), a BASELINE copied from
+        WORKING (one per project, locked), or a SIMULATION copied from WORKING or BASELINE. A wrong
+        kind or source is PROJ-PLAN-001.
+      x-passage-duty: ProjPlan
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlanVersionRequest'
+      responses:
+        '201':
+          description: Plan version created
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanVersion'
+        '200':
+          description: Idempotent replay with the same key and body
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Idempotent-Replayed:
+              schema:
+                type: string
+                enum: ['true']
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanVersion'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+  /v1/projects/{id}/plans/{ver}/wbs:
+    get:
+      operationId: getWbs
+      summary: Read a plan version with its WBS nodes and dependencies
+      x-passage-duty: ProjInquire
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/PlanVersionId'
+      responses:
+        '200':
+          description: The plan version with its WBS
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WbsView'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+    put:
+      operationId: replaceWbs
+      summary: >-
+        Replace every node and dependency of a plan version (bulk). Malformed nodes are 400,
+        a duplicate code PROJ-WBS-002, a cycle PROJ-WBS-001, a locked plan PROJ-PLAN-002.
+        Scheduled dates are cleared.
+      x-passage-duty: ProjPlan
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/PlanVersionId'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WbsRequest'
+      responses:
+        '200':
+          description: WBS replaced; the plan version is bumped
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WbsView'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '428':
+          $ref: '#/components/responses/Problem'
+  /v1/projects/{id}/plans/{ver}/schedule:
+    post:
+      operationId: schedulePlanVersion
+      summary: >-
+        Run the CPM scheduler (forward and backward pass, standard Monday-to-Friday calendar) and
+        store early and late dates, slack and the critical flag per node; emits wbs.scheduled.
+        A locked plan is PROJ-PLAN-002. Rerunning on an unchanged WBS gives the same result.
+      x-passage-duty: ProjPlan
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/PlanVersionId'
+      responses:
+        '200':
+          description: The scheduled WBS
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleView'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
 components:
   parameters:
+    PlanVersionId:
+      name: ver
+      in: path
+      required: true
+      description: Plan version id (UUID).
+      schema:
+        type: string
+        format: uuid
+    OptionalIfMatch:
+      name: If-Match
+      in: header
+      required: false
+      description: Optional version precondition, for example `"3"`. Absent means no precondition.
+      schema:
+        type: string
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -178,7 +529,7 @@ components:
       name: If-Match
       in: header
       required: true
-      description: The project version as an ETag, for example `"3"`.
+      description: The version (of the project or plan version) as an ETag, for example `"3"`.
       schema:
         type: string
     ProjectId:
@@ -190,7 +541,7 @@ components:
         maxLength: 20
   headers:
     ETag:
-      description: Project version, quoted.
+      description: Row version (project, group, posting profile or plan version), quoted.
       schema:
         type: string
   responses:
@@ -299,6 +650,336 @@ components:
         updatedAt:
           type: string
           format: date-time
+    ProjectGroup:
+      type: object
+      required: [id, name, version, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          pattern: '^[A-Z0-9][A-Z0-9-]{0,9}$'
+        name:
+          type: string
+          maxLength: 120
+        defaultProjectType:
+          $ref: '#/components/schemas/ProjectType'
+        version:
+          type: integer
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    ProjectGroupRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        id:
+          type: string
+          description: Optional; when present it must equal the path id.
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        defaultProjectType:
+          $ref: '#/components/schemas/ProjectType'
+    PostingProfile:
+      type: object
+      description: Accounts a project posting uses for one key (FR-41.5).
+      required: [projectGroup, category, lineProperty, costAccount, wipAccount, accruedRevenueAccount, invoicedRevenueAccount, onAccountAccount, version]
+      properties:
+        projectGroup:
+          type: string
+          description: Project group id, or "*" for the catch-all row.
+        category:
+          type: string
+          description: Category id, or "*" for a group fallback or the catch-all.
+        lineProperty:
+          type: string
+          enum: [CHARGEABLE, NON_CHARGEABLE, '*']
+        costAccount:
+          type: string
+          maxLength: 40
+        wipAccount:
+          type: string
+          maxLength: 40
+        accruedRevenueAccount:
+          type: string
+          maxLength: 40
+        invoicedRevenueAccount:
+          type: string
+          maxLength: 40
+        onAccountAccount:
+          type: string
+          maxLength: 40
+        version:
+          type: integer
+          minimum: 1
+    PostingProfileRequest:
+      type: object
+      additionalProperties: false
+      description: >-
+        Category and line property are both "*" or both concrete; a "*" project group needs "*" for both.
+      required: [projectGroup, category, lineProperty, costAccount, wipAccount, accruedRevenueAccount, invoicedRevenueAccount, onAccountAccount]
+      properties:
+        projectGroup:
+          type: string
+          pattern: '^(\*|[A-Z0-9][A-Z0-9-]{0,9})$'
+        category:
+          type: string
+          minLength: 1
+          maxLength: 20
+        lineProperty:
+          type: string
+          enum: [CHARGEABLE, NON_CHARGEABLE, '*']
+        costAccount:
+          type: string
+          minLength: 1
+          maxLength: 40
+        wipAccount:
+          type: string
+          minLength: 1
+          maxLength: 40
+        accruedRevenueAccount:
+          type: string
+          minLength: 1
+          maxLength: 40
+        invoicedRevenueAccount:
+          type: string
+          minLength: 1
+          maxLength: 40
+        onAccountAccount:
+          type: string
+          minLength: 1
+          maxLength: 40
+    ResolveRequest:
+      type: object
+      additionalProperties: false
+      required: [projectGroup, category, lineProperty]
+      properties:
+        projectGroup:
+          type: string
+          pattern: '^[A-Z0-9][A-Z0-9-]{0,9}$'
+        category:
+          type: string
+          minLength: 1
+          maxLength: 20
+          description: Concrete category id (no wildcard).
+        lineProperty:
+          type: string
+          enum: [CHARGEABLE, NON_CHARGEABLE]
+    PlanKind:
+      type: string
+      enum: [BASELINE, WORKING, SIMULATION]
+    PlanVersion:
+      type: object
+      required: [id, projectId, kind, sequence, locked, version, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+        kind:
+          $ref: '#/components/schemas/PlanKind'
+        sequence:
+          type: integer
+          minimum: 1
+        copiedFromVersionId:
+          type: string
+          format: uuid
+        locked:
+          type: boolean
+          description: True for a BASELINE; a locked plan's WBS cannot be replaced or rescheduled.
+        version:
+          type: integer
+          minimum: 1
+          description: Optimistic concurrency token of the WBS; the ETag of this plan version.
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    PlanVersionRequest:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      properties:
+        kind:
+          $ref: '#/components/schemas/PlanKind'
+        copyFromVersionId:
+          type: string
+          format: uuid
+          description: Plan version of the same project whose WBS is copied. Required for BASELINE (from WORKING) and SIMULATION.
+    WbsNodeRequest:
+      type: object
+      additionalProperties: false
+      required: [wbsCode, name]
+      properties:
+        wbsCode:
+          type: string
+          pattern: '^[0-9]{1,4}(\.[0-9]{1,4}){0,7}$'
+        parentWbsCode:
+          type: string
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        effortHours:
+          type: string
+          pattern: '^[0-9]{1,10}(\.[0-9]{1,2})?$'
+          description: Decimal string, at most two places, >= 0.
+        durationDays:
+          type: integer
+          minimum: 0
+          maximum: 100000
+          description: Working days; 0 is a milestone. Ignored on a summary node (one with children).
+        constraintType:
+          type: string
+          enum: [ASAP, SNET]
+          default: ASAP
+          description: FNLT and MSO are not scheduled yet and are refused.
+        constraintDate:
+          type: string
+          format: date
+          description: Required for SNET, absent for ASAP.
+        roleId:
+          type: string
+          format: uuid
+        isBillableMilestone:
+          type: boolean
+    WbsDependencyRequest:
+      type: object
+      additionalProperties: false
+      description: Links two tasks (nodes without children); each pair at most once.
+      required: [predecessorWbsCode, successorWbsCode, type]
+      properties:
+        predecessorWbsCode:
+          type: string
+        successorWbsCode:
+          type: string
+        type:
+          type: string
+          enum: [FS, SS, FF, SF]
+        lagDays:
+          type: integer
+          minimum: -3650
+          maximum: 3650
+          description: Calendar days.
+    WbsRequest:
+      type: object
+      additionalProperties: false
+      required: [nodes]
+      properties:
+        nodes:
+          type: array
+          maxItems: 5000
+          items:
+            $ref: '#/components/schemas/WbsNodeRequest'
+        dependencies:
+          type: array
+          maxItems: 10000
+          items:
+            $ref: '#/components/schemas/WbsDependencyRequest'
+    WbsNode:
+      type: object
+      required: [id, planVersionId, wbsCode, name, durationDays, constraintType, isBillableMilestone]
+      properties:
+        id:
+          type: string
+          format: uuid
+        planVersionId:
+          type: string
+          format: uuid
+        wbsCode:
+          type: string
+        parentId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        effortHours:
+          type: string
+        durationDays:
+          type: integer
+        constraintType:
+          type: string
+          enum: [ASAP, SNET]
+        constraintDate:
+          type: string
+          format: date
+        roleId:
+          type: string
+          format: uuid
+        isBillableMilestone:
+          type: boolean
+        earlyStart:
+          type: string
+          format: date
+          description: Scheduler output; absent until the plan is scheduled (and after a WBS replace).
+        earlyFinish:
+          type: string
+          format: date
+        lateStart:
+          type: string
+          format: date
+        lateFinish:
+          type: string
+          format: date
+        slackDays:
+          type: integer
+          description: Total float in working days.
+        critical:
+          type: boolean
+    WbsDependency:
+      type: object
+      required: [predecessorId, successorId, type, lagDays]
+      properties:
+        predecessorId:
+          type: string
+          format: uuid
+        successorId:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [FS, SS, FF, SF]
+        lagDays:
+          type: integer
+    WbsView:
+      type: object
+      required: [planVersion, nodes, dependencies]
+      properties:
+        planVersion:
+          $ref: '#/components/schemas/PlanVersion'
+        nodes:
+          type: array
+          description: In WBS-code order (1, 1.2, 1.10).
+          items:
+            $ref: '#/components/schemas/WbsNode'
+        dependencies:
+          type: array
+          items:
+            $ref: '#/components/schemas/WbsDependency'
+    ScheduleView:
+      allOf:
+        - $ref: '#/components/schemas/WbsView'
+        - type: object
+          required: [criticalPath]
+          properties:
+            finishDate:
+              type: string
+              format: date
+              description: Project finish; absent for an empty plan.
+            criticalPath:
+              type: array
+              description: Critical task ids in dependency order.
+              items:
+                type: string
+                format: uuid
     Problem:
       type: object
       description: RFC 9457 with Passage extensions (code, traceId, errors).

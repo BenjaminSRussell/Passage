@@ -36,11 +36,13 @@ const (
 	ifMatchHeader     = "If-Match"
 )
 
-// Duties (PRD §8.41.17) guarding the routes of this slice.
+// Duties (PRD §8.41.17) guarding the routes.
 const (
 	DutyMaintain = "ProjMaintain"
 	DutyManage   = "ProjManage"
 	DutyInquire  = "ProjInquire"
+	DutyPlan     = "ProjPlan"
+	DutySetup    = "ProjSetupAdmin"
 )
 
 // API holds the HTTP handlers and their store.
@@ -60,6 +62,21 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(DutyInquire)).Get("/", a.list)
 		r.With(authz.RequireDuty(DutyInquire)).Get("/{id}", a.get)
 		r.With(authz.RequireDuty(DutyManage)).Post("/{id}/transitions", a.transition)
+
+		// Setup: project groups and posting profiles (FR-41.1, FR-41.5). These
+		// static paths win over /{id}; project ids are capitals, so they never clash.
+		r.With(authz.RequireDuty(DutyInquire)).Get("/groups", a.listGroups)
+		r.With(authz.RequireDuty(DutySetup)).Put("/groups/{groupId}", a.putGroup)
+		r.With(authz.RequireDuty(DutyInquire)).Get("/posting-profiles", a.listProfiles)
+		r.With(authz.RequireDuty(DutySetup)).Put("/posting-profiles", a.putProfile)
+		r.With(authz.RequireDuty(DutyInquire)).Post("/posting-profiles/resolve", a.resolveProfile)
+
+		// Plan versions and WBS (FR-41.2).
+		r.With(authz.RequireDuty(DutyInquire)).Get("/{id}/plans", a.listPlans)
+		r.With(authz.RequireDuty(DutyPlan)).Post("/{id}/plans", a.createPlan)
+		r.With(authz.RequireDuty(DutyInquire)).Get("/{id}/plans/{ver}/wbs", a.getWBS)
+		r.With(authz.RequireDuty(DutyPlan)).Put("/{id}/plans/{ver}/wbs", a.putWBS)
+		r.With(authz.RequireDuty(DutyPlan)).Post("/{id}/plans/{ver}/schedule", a.scheduleWBS)
 	})
 }
 
@@ -254,19 +271,28 @@ func problemFrom(err error) error {
 	return err
 }
 
-// ifMatchVersion reads the project version from If-Match (PRD §8.41.5: custom
+// optionalIfMatch reads If-Match on PUT routes where it is optional: absent
+// returns 0 (no precondition), present is parsed like ifMatchVersion.
+func optionalIfMatch(w http.ResponseWriter, r *http.Request) (int, bool) {
+	if strings.TrimSpace(r.Header.Get(ifMatchHeader)) == "" {
+		return 0, true
+	}
+	return ifMatchVersion(w, r)
+}
+
+// ifMatchVersion reads the row version from If-Match (PRD §8.41.5: custom
 // methods require it; 428 when absent, 400 when malformed).
 func ifMatchVersion(w http.ResponseWriter, r *http.Request) (int, bool) {
 	raw := strings.TrimSpace(r.Header.Get(ifMatchHeader))
 	if raw == "" {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusPreconditionRequired, codePreconditionRq, "If-Match header with the project version is required"))
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusPreconditionRequired, codePreconditionRq, "If-Match header with the current version is required"))
 		return 0, false
 	}
 	raw = strings.TrimPrefix(raw, "W/")
 	raw = strings.Trim(raw, `"`)
 	n, err := strconv.Atoi(raw)
 	if err != nil || n < 1 {
-		httpx.Fail(w, r, validation(map[string]string{ifMatchHeader: "must be the project version as an ETag, for example \"3\""}))
+		httpx.Fail(w, r, validation(map[string]string{ifMatchHeader: "must be the version as an ETag, for example \"3\""}))
 		return 0, false
 	}
 	return n, true

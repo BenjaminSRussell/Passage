@@ -1,4 +1,5 @@
-// Package store persists projects in Postgres. Every call runs in a transaction
+// Package store persists projects, project groups, posting profiles, plan
+// versions and WBS nodes in Postgres. Every call runs in a transaction
 // scoped to the caller's tenant (RLS), and every state change writes its event
 // to the outbox in that same transaction.
 package store
@@ -32,8 +33,12 @@ const (
 	CodeVersionConflict  = "conflict_version"
 	CodeIdempotencyReuse = "idempotency_key_reuse"
 	CodeValidation       = "COM-0001"
+	CodeGroupUnknown     = "PROJ-GROUP-001"
+	CodePrecondition     = "COM-0428"
 
 	foreignKeyViolation = "23503"
+	uniqueViolation     = "23505"
+	projectGroupFK      = "project_project_group_fk"
 	eventSource         = "projects"
 )
 
@@ -55,6 +60,21 @@ type Store interface {
 	GetProject(ctx context.Context, id string) (domain.Project, error)
 	ListProjects(ctx context.Context, f Filter, afterID string, limit int) (Page, error)
 	TransitionProject(ctx context.Context, id string, version int, to domain.Stage) (domain.Project, error)
+
+	// Setup (FR-41.1, FR-41.5). expected is the If-Match version, 0 when absent;
+	// created reports an insert.
+	UpsertProjectGroup(ctx context.Context, g domain.ProjectGroup, expected int) (out domain.ProjectGroup, created bool, err error)
+	ListProjectGroups(ctx context.Context) ([]domain.ProjectGroup, error)
+	UpsertPostingProfile(ctx context.Context, pr domain.PostingProfile, expected int) (out domain.PostingProfile, created bool, err error)
+	ListPostingProfiles(ctx context.Context) ([]domain.PostingProfile, error)
+
+	// Plans and WBS (FR-41.2).
+	CreatePlanVersion(ctx context.Context, projectID string, in NewPlan, idempotencyKey string) (domain.PlanVersion, bool, error)
+	ListPlanVersions(ctx context.Context, projectID string) ([]domain.PlanVersion, error)
+	LoadWBS(ctx context.Context, projectID, planID string) (WBS, error)
+	ReplaceWBS(ctx context.Context, projectID, planID string, expected int, nodes []domain.WBSNodeInput, deps []domain.WBSDependencyInput) (WBS, error)
+	SchedulePlan(ctx context.Context, projectID, planID string) (ScheduleResult, error)
+
 	Ping(ctx context.Context) error
 }
 
@@ -100,12 +120,17 @@ func idempotencyReuse() error {
 }
 
 func enqueue(ctx context.Context, tx pgx.Tx, p tenant.Principal, aggregateID, eventType string, data any) error {
+	return enqueueFor(ctx, tx, p, "project", aggregateID, eventType, data)
+}
+
+// enqueueFor writes one CloudEvent for an aggregate of the given type to the outbox.
+func enqueueFor(ctx context.Context, tx pgx.Tx, p tenant.Principal, aggregateType, aggregateID, eventType string, data any) error {
 	evt, err := events.New(eventType, eventSource, aggregateID, p.TenantID, data)
 	if err != nil {
 		return err
 	}
 	evt.Actor = p.UserID
-	return outbox.Enqueue(ctx, tx, "project", aggregateID, evt)
+	return outbox.Enqueue(ctx, tx, aggregateType, aggregateID, evt)
 }
 
 // applyParent loads the parent through RLS (so a parent outside the caller's
@@ -206,6 +231,9 @@ func (s *Postgres) CreateProject(ctx context.Context, in domain.Project, idempot
 	})
 	var pgErr *pgconn.PgError
 	switch {
+	case errors.As(err, &pgErr) && pgErr.Code == foreignKeyViolation && pgErr.ConstraintName == projectGroupFK:
+		return domain.Project{}, false, httpx.NewProblem(http.StatusUnprocessableEntity, CodeGroupUnknown,
+			"project group "+in.ProjectGroupID+" does not exist")
 	case errors.As(err, &pgErr) && pgErr.Code == foreignKeyViolation:
 		return domain.Project{}, false, parentUnknown()
 	case err != nil:

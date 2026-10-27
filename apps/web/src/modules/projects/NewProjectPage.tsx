@@ -79,6 +79,7 @@ const failureTitle: Record<string, string> = {
   "PROJ-CREATE-001": "A project with this id already exists",
   "PROJ-PARENT-001": "The parent project was not found",
   "PROJ-PARENT-002": "The sub-project conflicts with its parent",
+  "PROJ-GROUP-001": "The project group does not exist",
   "AUTH-0003": "You can't create projects here",
 };
 
@@ -167,7 +168,7 @@ export function NewProjectPage() {
               </Select>
             )}
           </FormField>
-          {text("projectGroupId", "Project group", sub ? "Leave empty to use the parent's group." : "Up to 10 characters, for example ENG.", { mono: true, optional: sub })}
+          {text("projectGroupId", "Project group", sub ? "Leave empty to use the parent's group." : "An existing project group, for example ENG. Groups are set up under Project groups.", { mono: true, optional: sub })}
           {text(
             "customerPartyId",
             "Customer",

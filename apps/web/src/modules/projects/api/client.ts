@@ -147,3 +147,175 @@ export function transitionProject(id: string, to: Stage, version: number): Promi
     body: JSON.stringify({ to }),
   });
 }
+
+// ---- Setup: project groups and posting profiles (FR-41.1, FR-41.5) ----
+
+export interface ProjectGroup {
+  id: string;
+  name: string;
+  defaultProjectType?: ProjectType;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Body of PUT /v1/projects/groups/{groupId}. */
+export interface ProjectGroupInput {
+  name: string;
+  defaultProjectType?: ProjectType;
+}
+
+export const LINE_PROPERTIES = ["CHARGEABLE", "NON_CHARGEABLE"] as const;
+export type LineProperty = (typeof LINE_PROPERTIES)[number];
+
+/** The posting-profile wildcard: a group fallback is (group, *, *), the catch-all (*, *, *). */
+export const WILDCARD = "*";
+
+export interface PostingProfileInput {
+  projectGroup: string;
+  category: string;
+  lineProperty: LineProperty | typeof WILDCARD;
+  costAccount: string;
+  wipAccount: string;
+  accruedRevenueAccount: string;
+  invoicedRevenueAccount: string;
+  onAccountAccount: string;
+}
+
+export interface PostingProfile extends PostingProfileInput {
+  version: number;
+}
+
+export interface Items<T> {
+  items: T[];
+}
+
+/** Sends the version as If-Match when replacing; without it the row is created (201). */
+function versionHeader(version?: number): Record<string, string> {
+  return version ? { "If-Match": `"${version}"` } : {};
+}
+
+export function listGroups(signal?: AbortSignal): Promise<Items<ProjectGroup>> {
+  return call<Items<ProjectGroup>>("/groups", {}, signal);
+}
+
+export function saveGroup(id: string, input: ProjectGroupInput, version?: number): Promise<ProjectGroup> {
+  return call<ProjectGroup>(`/groups/${encodeURIComponent(id)}`, { method: "PUT", headers: versionHeader(version), body: JSON.stringify(input) });
+}
+
+export function listProfiles(signal?: AbortSignal): Promise<Items<PostingProfile>> {
+  return call<Items<PostingProfile>>("/posting-profiles", {}, signal);
+}
+
+export function saveProfile(input: PostingProfileInput, version?: number): Promise<PostingProfile> {
+  return call<PostingProfile>("/posting-profiles", { method: "PUT", headers: versionHeader(version), body: JSON.stringify(input) });
+}
+
+/** Resolves the accounts for a concrete key with the FR-41.5 fallbacks; PROJ-POST-001 when nothing matches. */
+export function resolveProfile(key: { projectGroup: string; category: string; lineProperty: LineProperty }): Promise<PostingProfile> {
+  return call<PostingProfile>("/posting-profiles/resolve", { method: "POST", body: JSON.stringify(key) });
+}
+
+// ---- Plan versions and WBS (FR-41.2) ----
+
+export const PLAN_KINDS = ["WORKING", "BASELINE", "SIMULATION"] as const;
+export type PlanKind = (typeof PLAN_KINDS)[number];
+
+export interface PlanVersion {
+  id: string;
+  projectId: string;
+  kind: PlanKind;
+  sequence: number;
+  copiedFromVersionId?: string;
+  locked: boolean;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const DEPENDENCY_TYPES = ["FS", "SS", "FF", "SF"] as const;
+export type DependencyType = (typeof DEPENDENCY_TYPES)[number];
+
+export interface WbsNode {
+  id: string;
+  planVersionId: string;
+  wbsCode: string;
+  parentId?: string;
+  name: string;
+  effortHours?: string;
+  durationDays: number;
+  constraintType: "ASAP" | "SNET";
+  constraintDate?: string;
+  roleId?: string;
+  isBillableMilestone: boolean;
+  earlyStart?: string;
+  earlyFinish?: string;
+  lateStart?: string;
+  lateFinish?: string;
+  slackDays?: number;
+  critical?: boolean;
+}
+
+export interface WbsDependency {
+  predecessorId: string;
+  successorId: string;
+  type: DependencyType;
+  lagDays: number;
+}
+
+export interface WbsView {
+  planVersion: PlanVersion;
+  nodes: WbsNode[];
+  dependencies: WbsDependency[];
+}
+
+export interface ScheduleView extends WbsView {
+  finishDate?: string;
+  criticalPath: string[];
+}
+
+export interface WbsNodeInput {
+  wbsCode: string;
+  parentWbsCode?: string;
+  name: string;
+  effortHours?: string;
+  durationDays: number;
+  constraintType?: "ASAP" | "SNET";
+  constraintDate?: string;
+  isBillableMilestone: boolean;
+}
+
+export interface WbsDependencyInput {
+  predecessorWbsCode: string;
+  successorWbsCode: string;
+  type: DependencyType;
+  lagDays: number;
+}
+
+const plansPath = (projectId: string) => `/${encodeURIComponent(projectId)}/plans`;
+
+export function listPlans(projectId: string, signal?: AbortSignal): Promise<Items<PlanVersion>> {
+  return call<Items<PlanVersion>>(plansPath(projectId), {}, signal);
+}
+
+/** Adds a plan version; BASELINE and SIMULATION copy another version. Reuse the key when retrying. */
+export function createPlan(projectId: string, input: { kind: PlanKind; copyFromVersionId?: string }, idempotencyKey: string): Promise<PlanVersion> {
+  return call<PlanVersion>(plansPath(projectId), { method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body: JSON.stringify(input) });
+}
+
+export function getWbs(projectId: string, planId: string, signal?: AbortSignal): Promise<WbsView> {
+  return call<WbsView>(`${plansPath(projectId)}/${encodeURIComponent(planId)}/wbs`, {}, signal);
+}
+
+/** Replaces the whole WBS; the plan version the user saw goes as If-Match (412 conflict_version when stale). */
+export function replaceWbs(projectId: string, planId: string, body: { nodes: WbsNodeInput[]; dependencies: WbsDependencyInput[] }, version: number): Promise<WbsView> {
+  return call<WbsView>(`${plansPath(projectId)}/${encodeURIComponent(planId)}/wbs`, {
+    method: "PUT",
+    headers: { "If-Match": `"${version}"` },
+    body: JSON.stringify(body),
+  });
+}
+
+export function schedulePlan(projectId: string, planId: string): Promise<ScheduleView> {
+  return call<ScheduleView>(`${plansPath(projectId)}/${encodeURIComponent(planId)}/schedule`, { method: "POST" });
+}

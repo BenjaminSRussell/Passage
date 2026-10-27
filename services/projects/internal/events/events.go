@@ -6,7 +6,18 @@ package events
 const (
 	ProjectCreated = "dev.passage.projects.project.created.v1"
 	ProjectUpdated = "dev.passage.projects.project.updated.v1"
+	WBSScheduled   = "dev.passage.projects.wbs.scheduled.v1"
 )
+
+// WBSScheduledData is the data of WBSScheduled (PRD §8.41.5), written by each
+// scheduler run over a non-empty plan. CriticalPath lists the critical WBS node
+// ids in dependency order; FinishDate is the project finish (YYYY-MM-DD).
+type WBSScheduledData struct {
+	ProjectID     string   `json:"projectId"`
+	PlanVersionID string   `json:"planVersionId"`
+	CriticalPath  []string `json:"criticalPath"`
+	FinishDate    string   `json:"finishDate"`
+}
 
 // ProjectCreatedData is the data of ProjectCreated.
 type ProjectCreatedData struct {

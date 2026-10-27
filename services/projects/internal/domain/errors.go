@@ -1,9 +1,9 @@
-// Package domain holds the project-operations rules of wave 41 that slice 1
-// implements: project validation, hierarchy inheritance and stage transitions,
-// cost-to-cost percentage of completion, earned value, posting profile
-// resolution, invoice proposal selection, retention and interest arithmetic,
-// and the CPM work-breakdown scheduler. Persistence and APIs for everything but
-// the project master are later slices. Everything here is pure: no I/O, no clock reads, no globals
+// Package domain holds the project-operations rules of wave 41: project
+// validation, hierarchy inheritance and stage transitions, project groups,
+// posting-profile keys and resolution, plan-version rules, WBS validation and
+// the CPM work-breakdown scheduler, cost-to-cost percentage of completion,
+// earned value, invoice proposal selection, and retention and interest
+// arithmetic. Everything here is pure: no I/O, no clock reads, no globals
 // besides constants.
 package domain
 

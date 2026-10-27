@@ -5,19 +5,20 @@ const Wildcard = "*"
 
 // ProfileKey addresses a posting profile (FR-41.5).
 type ProfileKey struct {
-	ProjectGroup string
-	Category     string
-	LineProperty string
+	ProjectGroup string `json:"projectGroup"`
+	Category     string `json:"category"`
+	LineProperty string `json:"lineProperty"`
 }
 
 // PostingProfile maps a key to the GL accounts a project posting uses.
 type PostingProfile struct {
-	Key                    ProfileKey
-	CostAccount            string
-	WIPAccount             string
-	AccruedRevenueAccount  string
-	InvoicedRevenueAccount string
-	OnAccountAccount       string
+	Key                    ProfileKey `json:"key"`
+	CostAccount            string     `json:"costAccount"`
+	WIPAccount             string     `json:"wipAccount"`
+	AccruedRevenueAccount  string     `json:"accruedRevenueAccount"`
+	InvoicedRevenueAccount string     `json:"invoicedRevenueAccount"`
+	OnAccountAccount       string     `json:"onAccountAccount"`
+	Version                int        `json:"version"`
 }
 
 // Resolve finds the profile for key with the PRD fallback order: the exact

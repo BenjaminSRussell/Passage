@@ -28,6 +28,14 @@ type fakeStore struct {
 	projects map[string]domain.Project
 	keys     map[string]string
 	pingErr  error
+
+	// Setup and plan state (see setup_fake_test.go).
+	groups   map[string]domain.ProjectGroup
+	profiles map[domain.ProfileKey]domain.PostingProfile
+	plans    map[string]domain.PlanVersion
+	planKeys map[string]string
+	nodes    map[string][]domain.WBSNode
+	links    map[string][]domain.WBSLink
 }
 
 // sampleProject is a valid CREATED internal project with the given id.
@@ -36,7 +44,12 @@ func sampleProject(id string) domain.Project {
 }
 
 func newFake() *fakeStore {
-	return &fakeStore{projects: map[string]domain.Project{}, keys: map[string]string{}}
+	return &fakeStore{
+		projects: map[string]domain.Project{}, keys: map[string]string{},
+		groups: map[string]domain.ProjectGroup{}, profiles: map[domain.ProfileKey]domain.PostingProfile{},
+		plans: map[string]domain.PlanVersion{}, planKeys: map[string]string{},
+		nodes: map[string][]domain.WBSNode{}, links: map[string][]domain.WBSLink{},
+	}
 }
 
 func (f *fakeStore) Ping(context.Context) error { return f.pingErr }

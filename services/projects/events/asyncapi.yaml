@@ -1,12 +1,12 @@
 asyncapi: 3.0.0
 info:
   title: Passage Projects events
-  version: 0.1.0
+  version: 0.2.0
   description: |
     CloudEvents 1.0 published through the outbox in the same transaction as the
     state change (Debezium outbox router relays to Kafka). Consumers: analytics,
     budget control (wave 38), resource planning. Slice 1 publishes project master
-    events only.
+    events; slice 2 adds the CPM scheduler run (wbs.scheduled).
 defaultContentType: application/cloudevents+json
 channels:
   projectCreated:
@@ -19,6 +19,11 @@ channels:
     messages:
       projectUpdated:
         $ref: '#/components/messages/ProjectUpdated'
+  wbsScheduled:
+    address: passage.projects.wbs
+    messages:
+      wbsScheduled:
+        $ref: '#/components/messages/WbsScheduled'
 operations:
   publishProjectCreated:
     action: send
@@ -28,6 +33,10 @@ operations:
     action: send
     channel:
       $ref: '#/channels/projectUpdated'
+  publishWbsScheduled:
+    action: send
+    channel:
+      $ref: '#/channels/wbsScheduled'
 components:
   messages:
     ProjectCreated:
@@ -40,7 +49,38 @@ components:
       contentType: application/cloudevents+json
       payload:
         $ref: '#/components/schemas/ProjectUpdatedEvent'
+    WbsScheduled:
+      name: dev.passage.projects.wbs.scheduled.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: '#/components/schemas/WbsScheduledEvent'
   schemas:
+    WbsScheduledEvent:
+      allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: object
+              description: Written by each scheduler run over a non-empty plan version (PRD §8.41.5).
+              required: [projectId, planVersionId, criticalPath, finishDate]
+              properties:
+                projectId:
+                  type: string
+                planVersionId:
+                  type: string
+                  format: uuid
+                criticalPath:
+                  type: array
+                  description: Critical WBS task ids in dependency order.
+                  items:
+                    type: string
+                    format: uuid
+                finishDate:
+                  type: string
+                  format: date
+                  description: Project finish (latest early finish of the plan's tasks).
     CloudEventEnvelope:
       type: object
       description: The platform envelope (platform/go/events.Event), structured mode.
@@ -59,7 +99,7 @@ components:
           type: string
         subject:
           type: string
-          description: The project id.
+          description: The aggregate id; the project id for project events, the plan version id for wbs events.
         time:
           type: string
           format: date-time

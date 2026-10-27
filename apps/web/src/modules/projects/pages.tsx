@@ -72,7 +72,7 @@ export function ProjectsHome() {
     <div className={styles.stack}>
       <PageHeader
         title="Projects"
-        description="Project master and stages for your legal entities. Billing, estimates and timesheets arrive in later releases of this workspace."
+        description="Project master, stages, plans and WBS for your legal entities. Billing, estimates and timesheets arrive in later releases of this workspace."
         actions={actions}
       />
       {state.error ? (
@@ -330,12 +330,17 @@ export function ProjectDetailPage() {
         title={`Project ${current.id}`}
         meta={<StageBadge stage={current.stage} />}
         actions={
-          <Link
-            className={buttonClassName("secondary")}
-            to={`/projects/new?parent=${encodeURIComponent(current.id)}&legalEntity=${encodeURIComponent(current.legalEntityId)}`}
-          >
-            New sub-project
-          </Link>
+          <>
+            <Link className={buttonClassName("secondary")} to={`/projects/${encodeURIComponent(current.id)}/plans`}>
+              Plans and WBS
+            </Link>
+            <Link
+              className={buttonClassName("secondary")}
+              to={`/projects/new?parent=${encodeURIComponent(current.id)}&legalEntity=${encodeURIComponent(current.legalEntityId)}`}
+            >
+              New sub-project
+            </Link>
+          </>
         }
       />
       <Alert tone="success" live="status">

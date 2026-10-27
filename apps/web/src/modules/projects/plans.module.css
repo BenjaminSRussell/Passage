@@ -1,0 +1,87 @@
+.scroll {
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+}
+
+.scroll:focus-visible {
+  outline: 2px solid transparent;
+  box-shadow: var(--focus-ring);
+}
+
+.grid {
+  inline-size: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--text-sm-size);
+  line-height: var(--text-sm-leading);
+}
+
+.head {
+  padding-block: var(--space-2);
+  padding-inline: var(--cell-padding-inline);
+  border-block-end: 1px solid var(--color-border);
+  background: var(--color-bg-muted);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs-size);
+  line-height: var(--text-xs-leading);
+  font-weight: var(--weight-semibold);
+  text-align: start;
+  white-space: nowrap;
+}
+
+.cell {
+  padding-block: var(--space-2);
+  padding-inline: var(--space-2);
+  border-block-end: 1px solid var(--color-border);
+  vertical-align: top;
+}
+
+.code {
+  inline-size: 7rem;
+}
+
+.number {
+  inline-size: 6rem;
+}
+
+.date {
+  inline-size: 10rem;
+}
+
+.rowError {
+  margin: 0;
+  margin-block-start: var(--space-1);
+  color: var(--color-danger);
+  font-size: var(--text-xs-size);
+  line-height: var(--text-xs-leading);
+}
+
+.indent1 {
+  padding-inline-start: var(--space-4);
+}
+
+.indent2 {
+  padding-inline-start: var(--space-8);
+}
+
+.indent3 {
+  padding-inline-start: var(--space-12);
+}
+
+.summary {
+  font-weight: var(--weight-semibold);
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.errorList {
+  margin: 0;
+  padding-inline-start: var(--space-5);
+}

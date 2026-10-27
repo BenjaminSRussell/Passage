@@ -1,5 +1,5 @@
 import type { BadgeTone } from "../../shell/ui";
-import type { ProjectType, Stage } from "./api/client";
+import type { PlanKind, ProjectType, Stage } from "./api/client";
 
 export const dash = "—";
 
@@ -26,3 +26,21 @@ export const typeLabel: Record<ProjectType, string> = {
   TIME: "Time",
 };
 
+
+export const planKindLabel: Record<PlanKind, string> = {
+  WORKING: "Working",
+  BASELINE: "Baseline",
+  SIMULATION: "Simulation",
+};
+
+export const planKindTone: Record<PlanKind, BadgeTone> = {
+  WORKING: "info",
+  BASELINE: "success",
+  SIMULATION: "neutral",
+};
+
+export const linePropertyLabel: Record<string, string> = {
+  CHARGEABLE: "Chargeable",
+  NON_CHARGEABLE: "Non-chargeable",
+  "*": "Any",
+};

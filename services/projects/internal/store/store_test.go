@@ -29,6 +29,9 @@ func tenantCtx(n int, duties ...string) context.Context {
 	return tenant.With(context.Background(), p)
 }
 
+// maxTestTenant is the highest tenant number the store tests use.
+const maxTestTenant = 20
+
 // setup migrates a fresh schema with the owner pool and returns a store on the
 // app pool (no BYPASSRLS), plus a counter of outbox rows read via the owner pool.
 func setup(t *testing.T) (*Postgres, func(int, string) int) {
@@ -36,6 +39,16 @@ func setup(t *testing.T) (*Postgres, func(int, string) int) {
 	owner, app := testkit.DBWithApp(t)
 	if err := dbx.Migrate(context.Background(), owner, migrations.FS); err != nil {
 		t.Fatalf("migrate: %v", err)
+	}
+	// project.project_group_id is a foreign key: every test tenant gets group ENG.
+	for n := 1; n <= maxTestTenant; n++ {
+		err := dbx.WithTenantTx(tenantCtx(n), owner, func(tx pgx.Tx) error {
+			_, err := tx.Exec(context.Background(), `insert into project_group (tenant_id, id, name) values ($1, 'ENG', 'Engineering')`, testkit.TenantID(n))
+			return err
+		})
+		if err != nil {
+			t.Fatalf("seed group: %v", err)
+		}
 	}
 	countOutbox := func(tenantN int, aggregateID string) int {
 		var n int
