@@ -208,3 +208,42 @@ func TestMapsTest_UnsupportedSetIsReportedAsAnIssue(t *testing.T) {
 		t.Fatalf("unsupported 810 = %+v", tx)
 	}
 }
+
+const outboundPath = "/edi/v1/partners/0195f0a0-0000-7000-8000-000000000001/outbound"
+
+// The outbound route validates the key, the set and the document before it
+// touches the store: a nil store proves every one of these fails first.
+func TestOutbound_ValidatesBeforeStore(t *testing.T) {
+	key := map[string]string{"Idempotency-Key": "k"}
+	cases := []struct {
+		name, path, body string
+		headers          map[string]string
+		status           int
+		code             string
+	}{
+		{"no key", outboundPath, `{"transactionSet":"856","document":{}}`, nil, http.StatusBadRequest, CodeIdempotencyKey},
+		{"bad partner id", "/edi/v1/partners/nope/outbound", `{"transactionSet":"856","document":{}}`, key, http.StatusNotFound, CodeNotFound},
+		{"inbound-only set", outboundPath, `{"transactionSet":"850","document":{}}`, key, http.StatusBadRequest, CodeValidation},
+		{"unknown request field", outboundPath, `{"transactionSet":"856","document":{},"x":1}`, key, http.StatusBadRequest, "COM-0001"},
+		{"document fails the 856 rules", outboundPath, `{"transactionSet":"856","document":{"shipmentId":"L1"}}`, key, http.StatusUnprocessableEntity, CodeOutbound},
+		{"unknown document field", outboundPath, `{"transactionSet":"810","document":{"number":"1","colour":"red"}}`, key, http.StatusUnprocessableEntity, CodeOutbound},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rec := call(t, http.MethodPost, c.path, c.body, "EDI_OPERATE", c.headers)
+			if rec.Code != c.status || problemCode(t, rec) != c.code {
+				t.Fatalf("status %d body %s, want %d %s", rec.Code, rec.Body.String(), c.status, c.code)
+			}
+		})
+	}
+	if rec := call(t, http.MethodPost, outboundPath, `{}`, "EDI_ADMIN", key); rec.Code != http.StatusForbidden {
+		t.Fatalf("EDI_ADMIN alone must not send documents: %d", rec.Code)
+	}
+}
+
+func TestInterchanges_RejectsUnknownDirection(t *testing.T) {
+	rec := call(t, http.MethodGet, "/edi/v1/interchanges?direction=SIDEWAYS", "", "EDI_OPERATE", nil)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"direction"`) {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+}

@@ -31,19 +31,43 @@ Built in this slice:
 - **UBL arithmetic checks** (BR-35.4 rules before schematron) as pure domain code
   (`internal/domain/ubl.go`). No HTTP route yet.
 
+## Slice 2 scope
+
+- **Outbound builders** (`internal/domain/outbound*.go`, all pure):
+  - 856 ship notice in structure S/O/P/I (BR-35.2): BSN, TD1 with lading quantity and
+    gross weight, TD5 with the SCAC under qualifier 2, REF*BM/CN, DTM*011, N1*ST/SF with
+    GLN, PRF per order, MAN*GM SSCC-18 per pack (GS1 mod-10 check digit, unique in the
+    notice, `sscc.go`), LIN item references and SN1 per item, CTT01 = HL count.
+  - 810 invoice (BR-35.3) in 004010 segment order: BIG (DI or CR), REF*BM, N1*RE/BT/ST,
+    ITD, DTM*011, IT1 with item references, then TDS, TXI, SAC charges and allowances, CTT.
+    The total must equal the line extensions (each rounded to the minor unit) plus taxes
+    plus charges minus allowances; TDS01 and SAC05 are N2.
+  - 855 acknowledgment: BAK02 AD (no change, all lines IA), AC (with change), RD (all IR),
+    AK and RJ (no lines); the acknowledgment date is BAK09; PO1/ACK per line.
+- **Outbound generation**: `POST /edi/v1/partners/{id}/outbound` builds one of the above
+  from its canonical JSON, envelopes it from our identity to the partner with the next
+  number of the same gap-free counter the 997s use (ISA13 and GS06, BR-35.5) and records
+  an OUT interchange (ack status PENDING, message MAPPED). `Idempotency-Key` is required.
+- **997 matching**: a 997 group (GS01 FA) received on `/inbound/x12` is read
+  (`Parse997`), matched by AK102 to the outbound interchange with that control number,
+  and the answered messages become ACKED or FAILED with one
+  `dev.passage.edi.message.acked.v1` per message in the outbox. A 997 is never itself
+  acknowledged.
+- **Interchange list** filters by direction (IN/OUT).
+
 Not built yet: see `NOT-IMPLEMENTED.md`.
 
 ## Layout
 
 ```
 cmd/edi/            entrypoint (dbx.Connect, optional dbx.Migrate, httpx.Serve)
-internal/domain/    X12 codec, 997, 850 mapping, partner rules, UBL arithmetic (pure)
+internal/domain/    X12 codec, 997 out and in, 850 mapping, 855/856/810 builders, SSCC, partner rules, UBL arithmetic (pure)
 internal/store/     Postgres repositories (RLS via dbx.WithTenantTx, outbox in the same tx)
 internal/api/       HTTP handlers, DTOs, duty checks
 internal/events/    event type constants and payloads
 migrations/         0001_init.sql (trading_partner, control_number_counter, interchange, message, outbox, idempotency_keys)
 api/openapi.yaml    OpenAPI 3.1 for the routes above
-events/asyncapi.yaml AsyncAPI 3 for dev.passage.edi.message.received.v1
+events/asyncapi.yaml AsyncAPI 3 for dev.passage.edi.message.received.v1 and message.acked.v1
 charts/edi/         Helm chart (api deployment, service, optional ServiceMonitor)
 ```
 
@@ -54,13 +78,14 @@ charts/edi/         Helm chart (api deployment, service, optional ServiceMonitor
 | POST | /edi/v1/partners | EDI_ADMIN | Requires `Idempotency-Key`; replay returns 200 with the stored partner, another body under the key is 422 |
 | GET | /edi/v1/partners?environment= | EDI_ADMIN | `{items}` by name |
 | GET | /edi/v1/partners/{id} | EDI_ADMIN | `ETag` carries the version |
+| POST | /edi/v1/partners/{id}/outbound | EDI_OPERATE | Body `{"transactionSet":"856"\|"810"\|"855","document":{...}}`; requires `Idempotency-Key`; 201 with the X12, replay 200 |
 | POST | /edi/v1/maps:test | EDI_ADMIN | Body `{"raw": "<X12>"}`; nothing is stored |
-| POST | /edi/v1/inbound/x12?environment=TEST\|PROD | EDI_OPERATE | `text/plain` interchange; returns 201 with 997 text |
-| GET | /edi/v1/interchanges?partnerId=&ackStatus=&limit= | EDI_OPERATE | `{items}` newest first, limit 1 to 200 (default 50) |
+| POST | /edi/v1/inbound/x12?environment=TEST\|PROD | EDI_OPERATE | `text/plain` interchange; returns 201 with 997 text (none for an interchange of 997s) |
+| GET | /edi/v1/interchanges?partnerId=&ackStatus=&direction=&limit= | EDI_OPERATE | `{items}` newest first, limit 1 to 200 (default 50) |
 | GET | /edi/v1/interchanges/{id} | EDI_OPERATE | Messages with canonical documents and the 997 |
 
 The web screens live in `apps/web/src/modules/integration` (partners, interchanges,
-receive, map tester).
+receive, send EDI document, map tester).
 
 ## Run and test
 
@@ -73,12 +98,13 @@ DATABASE_URL=postgres://... MIGRATE_ON_START=true go run ./cmd/edi
 ```
 
 Configuration: `DATABASE_URL` (required), `HTTP_ADDR` (default `:8080`),
-`MIGRATE_ON_START` (dev only), `EDI_DUP_WINDOW_DAYS` (default 30).
+`MIGRATE_ON_START` (dev only), `EDI_DUP_WINDOW_DAYS` (default 30), `EDI_ISA_QUALIFIER`
+and `EDI_ISA_ID` (our ISA06/GS02 identity on outbound documents, default ZZ/PASSAGE).
 
 ## Dependencies
 
 Allowed set only: platform kernel, chi, pgx/v5, shopspring/decimal, rapid (tests).
-No new third-party dependencies in slice 1.
+No new third-party dependencies in slices 1 and 2.
 
 ## Error codes
 
@@ -90,7 +116,10 @@ No new third-party dependencies in slice 1.
 | EDI-0004 | 409 | Partner with this ISA identity already exists in the environment |
 | EDI-0005 | 404 | Partner or interchange not found |
 | EDI-0006 | (in 200 map result) | Transaction set not supported yet; the transaction is rejected (AK5 R) |
+| EDI-0007 | 422 | Outbound document breaks a mapping rule (invalid SSCC, totals that do not add up, unknown field, a value holding a delimiter) |
+| EDI-0008 | 409 | The partner is inactive; nothing can be sent to it |
 | EDI-0160 | (in 200 map result) | A required 850 segment or element is missing or invalid; rejected |
+| EDI-0161 | (message error) | A received 997 answers no outbound interchange of the partner, or its AK101 does not match |
 | idempotency_key_reuse | 422 | `Idempotency-Key` already used with a different request body |
 | EDI-0101 | 422 | Interchange sender is not configured for any partner in the environment |
 | EDI-0102 | 409 | Duplicate ISA13 inside the duplicate window (TA1 025 semantics; no TA1 interchange is sent yet) |

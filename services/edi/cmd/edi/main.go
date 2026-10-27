@@ -1,5 +1,6 @@
 // Command edi runs the EDI engine HTTP API: partner profiles, the map tester,
-// inbound X12 receipt with 997 generation and the interchange list.
+// inbound X12 receipt with 997 generation and 997 matching, outbound
+// 855/856/810 generation and the interchange list.
 package main
 
 import (
@@ -13,6 +14,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 
 	"github.com/BenjaminSRussell/passage/services/edi/internal/api"
+	"github.com/BenjaminSRussell/passage/services/edi/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/store"
 	"github.com/BenjaminSRussell/passage/services/edi/migrations"
 )
@@ -38,6 +40,15 @@ func run() error {
 		// dup_window_days allowed values (PRD §6.35.13).
 		return errors.New("EDI_DUP_WINDOW_DAYS must be 7 to 365")
 	}
+	sender := api.DefaultSender
+	if q, id := os.Getenv("EDI_ISA_QUALIFIER"), os.Getenv("EDI_ISA_ID"); q != "" || id != "" {
+		sender = domain.Party{Qualifier: q, ID: id}
+	}
+	// Our identity follows the same ISA05/ISA06 rules as a partner profile.
+	probe := domain.PartnerProfile{Name: "self", ISA: sender, Environment: "PROD"}
+	if fields := probe.Validate(); len(fields) > 0 {
+		return errors.New("EDI_ISA_QUALIFIER must be two upper-case letters or digits and EDI_ISA_ID 1 to 15 letters or digits")
+	}
 	pool, err := dbx.Connect(ctx, url)
 	if err != nil {
 		return err
@@ -52,7 +63,9 @@ func run() error {
 	if addr == "" {
 		addr = ":8080"
 	}
-	return httpx.Serve(ctx, addr, api.New(store.New(pool, dupDays)).Routes())
+	a := api.New(store.New(pool, dupDays))
+	a.Sender = sender
+	return httpx.Serve(ctx, addr, a.Routes())
 }
 
 func envInt(name string, def int) (int, error) {

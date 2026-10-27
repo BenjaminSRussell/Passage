@@ -3,11 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Integration hub: webhook delivery policy (signing, retry schedule, ordering). Dependency-free slice 1.",
+  "description": "Integration hub: webhook delivery policy (signing, retry schedule, ordering), dispatch state machine and replay planning. Dependency-free.",
   "engines": {
     "node": ">=24"
   },
   "scripts": {
-    "test": "node --test test/webhook.test.ts"
+    "test": "node --test test/webhook.test.ts test/dispatch.test.ts"
   }
 }

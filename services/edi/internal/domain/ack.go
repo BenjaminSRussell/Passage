@@ -117,3 +117,111 @@ func ak9Code(outcomes []TxOutcome) string {
 		return AckAccepted
 	}
 }
+
+// AckedSet is one AK2/AK5 pair of a received 997: the transaction set and ST02
+// it answers and the normalized AK5 code (A, E or R).
+type AckedSet struct {
+	SetID   string `json:"setId"`
+	Control string `json:"control"`
+	Code    string `json:"code"`
+}
+
+// FunctionalAck is a partner's 997 answering one of our functional groups.
+// GroupControl is AK102, our GS06; Code is the AK9 group result (A, E, P or R).
+type FunctionalAck struct {
+	FunctionalID string     `json:"functionalId"`
+	GroupControl string     `json:"groupControl"`
+	Code         string     `json:"code"`
+	Sets         []AckedSet `json:"sets"`
+}
+
+// normalizeAckCode folds the X12 rejection variants M, W and X (authentication,
+// assurance and decryption failures) into R; allowGroup admits AK9 P.
+func normalizeAckCode(code string, allowGroup bool) (string, bool) {
+	switch code {
+	case AckAccepted, AckAcceptedWithError, AckRejected:
+		return code, true
+	case "M", "W", "X":
+		return AckRejected, true
+	case AckPartial:
+		return code, allowGroup
+	}
+	return "", false
+}
+
+// Parse997 reads a received 997. AK3/AK4 error detail is skipped; AK2 loops are
+// optional (a partner may acknowledge a whole group with AK1 and AK9 alone).
+// A 997 is never itself acknowledged.
+func Parse997(t Transaction) (FunctionalAck, error) {
+	if t.SetID != "997" {
+		return FunctionalAck{}, syntaxf("transaction set %s is not a 997", t.SetID)
+	}
+	var (
+		ack     FunctionalAck
+		sawAK1  bool
+		sawAK9  bool
+		pending *AckedSet
+	)
+	ack.Sets = []AckedSet{}
+	for _, s := range t.Body {
+		switch s.ID {
+		case "AK1":
+			if sawAK1 {
+				return FunctionalAck{}, syntaxf("997 carries more than one AK1")
+			}
+			sawAK1 = true
+			ack.FunctionalID, ack.GroupControl = element(s, 0), element(s, 1)
+			if ack.FunctionalID == "" || ack.GroupControl == "" || len(ack.GroupControl) > 9 || !isDigits(ack.GroupControl, len(ack.GroupControl)) {
+				return FunctionalAck{}, syntaxf("AK1 needs a functional id and a numeric group control number of 1 to 9 digits")
+			}
+		case "AK2":
+			if pending != nil {
+				return FunctionalAck{}, syntaxf("AK2 %s %s has no AK5", pending.SetID, pending.Control)
+			}
+			pending = &AckedSet{SetID: element(s, 0), Control: element(s, 1)}
+			if pending.SetID == "" || pending.Control == "" {
+				return FunctionalAck{}, syntaxf("AK2 needs a transaction set id and control number")
+			}
+		case "AK5":
+			if pending == nil {
+				return FunctionalAck{}, syntaxf("AK5 without AK2")
+			}
+			code, ok := normalizeAckCode(element(s, 0), false)
+			if !ok {
+				return FunctionalAck{}, syntaxf("AK5 code %q is not A, E, R, M, W or X", element(s, 0))
+			}
+			pending.Code = code
+			ack.Sets = append(ack.Sets, *pending)
+			pending = nil
+		case "AK9":
+			code, ok := normalizeAckCode(element(s, 0), true)
+			if !ok {
+				return FunctionalAck{}, syntaxf("AK9 code %q is not A, E, P, R, M, W or X", element(s, 0))
+			}
+			sawAK9 = true
+			ack.Code = code
+		}
+	}
+	switch {
+	case !sawAK1:
+		return FunctionalAck{}, syntaxf("997 has no AK1")
+	case pending != nil:
+		return FunctionalAck{}, syntaxf("AK2 %s %s has no AK5", pending.SetID, pending.Control)
+	case !sawAK9:
+		return FunctionalAck{}, syntaxf("997 has no AK9")
+	}
+	return ack, nil
+}
+
+// InterchangeAckStatus maps an AK9 group code to the interchange ack_status of
+// the outbound interchange it answers.
+func InterchangeAckStatus(ak9 string) AckStatus {
+	switch ak9 {
+	case AckAccepted:
+		return StatusAccepted
+	case AckRejected:
+		return StatusRejected
+	default:
+		return StatusAcceptedWithErrors
+	}
+}

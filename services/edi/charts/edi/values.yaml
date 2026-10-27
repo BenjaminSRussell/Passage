@@ -3,6 +3,8 @@ databaseSecret: edi-db
 migrateOnStart: false
 replicaCount: 2
 dupWindowDays: 30
+# Our ISA06/GS02 identity on outbound 855/856/810 interchanges.
+isaSender: { qualifier: ZZ, id: PASSAGE }
 resources:
   requests: { cpu: 50m, memory: 64Mi }
   limits: { cpu: 500m, memory: 256Mi }

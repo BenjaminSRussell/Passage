@@ -1,6 +1,7 @@
 // Package api exposes the edi HTTP surface: partner profiles, the dry-run map
-// tester and inbound X12 receipt. Handlers decode, validate, check duties, then
-// call the domain and store.
+// tester, inbound X12 receipt (850s mapped, 997s matched to outbound
+// documents) and outbound 855/856/810 generation. Handlers decode, validate,
+// check duties, then call the domain and store.
 package api
 
 import (
@@ -36,6 +37,8 @@ const (
 	CodeDuplicateControl = "EDI-0102"
 	CodeNotFound         = "EDI-0005"
 	CodeUnsupportedSet   = "EDI-0006"
+	CodeOutbound         = "EDI-0007"
+	CodePartnerInactive  = "EDI-0008"
 	CodeIdempotencyReuse = "idempotency_key_reuse"
 )
 
@@ -48,16 +51,22 @@ const (
 // maxInbound caps one inbound interchange at 4 MiB, matching the JSON body cap.
 const maxInbound = 4 << 20
 
-// API holds the store used by the handlers that persist state.
+// DefaultSender is our ISA/GS identity on outbound interchanges when
+// EDI_ISA_QUALIFIER and EDI_ISA_ID are not set.
+var DefaultSender = domain.Party{Qualifier: "ZZ", ID: "PASSAGE"}
+
+// API holds the store used by the handlers that persist state. Sender is our
+// ISA06/GS02 identity on outbound documents.
 type API struct {
-	store *store.Store
-	now   func() time.Time
+	store  *store.Store
+	now    func() time.Time
+	Sender domain.Party
 }
 
 // New returns the API. The store may be nil for routes that do not persist
 // (maps:test), which lets those routes be tested without a database.
 func New(s *store.Store) *API {
-	return &API{store: s, now: time.Now}
+	return &API{store: s, now: time.Now, Sender: DefaultSender}
 }
 
 // Routes returns the HTTP handler with kernel middleware and every edi route.
@@ -67,6 +76,7 @@ func (a *API) Routes() http.Handler {
 		r.With(authz.RequireDuty("EDI_ADMIN")).Post("/partners", a.createPartner)
 		r.With(authz.RequireDuty("EDI_ADMIN")).Get("/partners", a.listPartners)
 		r.With(authz.RequireDuty("EDI_ADMIN")).Get("/partners/{id}", a.getPartner)
+		r.With(authz.RequireDuty("EDI_OPERATE")).Post("/partners/{id}/outbound", a.createOutbound)
 		r.With(authz.RequireDuty("EDI_ADMIN")).Post("/maps:test", a.mapsTest)
 		r.With(authz.RequireDuty("EDI_OPERATE")).Post("/inbound/x12", a.receiveX12)
 		r.With(authz.RequireDuty("EDI_OPERATE")).Get("/interchanges", a.listInterchanges)
@@ -182,10 +192,13 @@ func (a *API) getPartner(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) listInterchanges(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	f := store.InterchangeFilter{PartnerID: q.Get("partnerId"), AckStatus: q.Get("ackStatus"), Limit: defaultListLimit}
+	f := store.InterchangeFilter{PartnerID: q.Get("partnerId"), AckStatus: q.Get("ackStatus"), Direction: q.Get("direction"), Limit: defaultListLimit}
 	fields := map[string]string{}
 	if f.PartnerID != "" && !validID(f.PartnerID) {
 		fields["partnerId"] = "must be a UUID"
+	}
+	if f.Direction != "" && f.Direction != "IN" && f.Direction != "OUT" {
+		fields["direction"] = "must be IN or OUT"
 	}
 	switch f.AckStatus {
 	case "", "PENDING", "ACCEPTED", "ACCEPTED_WITH_ERRORS", "REJECTED", "TIMEOUT":
@@ -333,7 +346,7 @@ type receiveResponse struct {
 	InterchangeID string        `json:"interchangeId"`
 	AckStatus     string        `json:"ackStatus"`
 	Messages      []messageView `json:"messages"`
-	Ack997        string        `json:"ack997"`
+	Ack997        string        `json:"ack997,omitempty"`
 }
 
 type groupOutcomes struct {
@@ -383,9 +396,21 @@ func (a *API) receiveX12(w http.ResponseWriter, r *http.Request) {
 		groups   []groupOutcomes
 		all      []domain.TxOutcome
 		messages []store.Message
-		views    []messageView
 	)
 	for _, g := range ic.Groups {
+		// A 997 group is matched to the outbound document it answers and is
+		// never acknowledged itself.
+		if g.FunctionalID == "FA" {
+			for _, t := range g.Transactions {
+				m, err := ackMessage(t)
+				if err != nil {
+					httpx.Fail(w, r, err)
+					return
+				}
+				messages = append(messages, m)
+			}
+			continue
+		}
 		var gOut []domain.TxOutcome
 		for _, t := range g.Transactions {
 			res, err := mapTransaction(t)
@@ -397,19 +422,22 @@ func (a *API) receiveX12(w http.ResponseWriter, r *http.Request) {
 			m := store.Message{ID: ids.New(), TransactionSet: t.SetID, STControl: t.Control,
 				Status: res.status, Canonical: res.canonical, Error: res.errText}
 			messages = append(messages, m)
-			views = append(views, messageView{MessageID: m.ID, TransactionSet: m.TransactionSet,
-				STControl: m.STControl, Status: m.Status, Error: m.Error})
 		}
 		if len(gOut) > 0 {
 			groups = append(groups, groupOutcomes{group: g, outcomes: gOut})
 			all = append(all, gOut...)
 		}
 	}
-	if len(all) == 0 {
+	if len(messages) == 0 {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, CodeSyntax, "interchange carries no transactions"))
 		return
 	}
-	status := domain.SummarizeOutcomes(all)
+	// An interchange of 997s only is accepted; the store downgrades it when a
+	// 997 cannot be read or matched.
+	status := domain.StatusAccepted
+	if len(all) > 0 {
+		status = domain.SummarizeOutcomes(all)
+	}
 
 	at := a.now().UTC()
 	buildAck := func(next func() (int64, error)) (string, error) {
@@ -450,10 +478,123 @@ func (a *API) receiveX12(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
+	views := make([]messageView, 0, len(res.Messages))
+	for _, m := range res.Messages {
+		views = append(views, messageView{MessageID: m.ID, TransactionSet: m.TransactionSet,
+			STControl: m.STControl, Status: m.Status, Error: m.Error})
+	}
 	httpx.JSON(w, http.StatusCreated, receiveResponse{
 		InterchangeID: res.InterchangeID,
-		AckStatus:     string(status),
+		AckStatus:     res.AckStatus,
 		Messages:      views,
 		Ack997:        res.AckPayload,
 	})
+}
+
+// ackMessage reads one received 997. A 997 that cannot be read is recorded as
+// FAILED with the syntax error; a readable one carries its report for the
+// store to match.
+func ackMessage(t domain.Transaction) (store.Message, error) {
+	m := store.Message{ID: ids.New(), TransactionSet: t.SetID, STControl: t.Control, Status: "RECEIVED"}
+	ack, err := domain.Parse997(t)
+	if err != nil {
+		m.Status, m.Error = "FAILED", err.Error()
+		return m, nil
+	}
+	canonical, err := json.Marshal(ack)
+	if err != nil {
+		return store.Message{}, err
+	}
+	m.Ack, m.Canonical = &ack, canonical
+	return m, nil
+}
+
+type outboundRequest struct {
+	TransactionSet string          `json:"transactionSet"`
+	Document       json.RawMessage `json:"document"`
+}
+
+// createOutbound builds an 855, 856 or 810 from its canonical document, wraps
+// it in an interchange to the partner with the next gap-free control number
+// and records it with ack_status PENDING until the partner's 997 is matched.
+// Transmission (AS2/SFTP) is not built; the message stays MAPPED.
+func (a *API) createOutbound(w http.ResponseWriter, r *http.Request) {
+	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if key == "" || len(key) > 255 {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, CodeIdempotencyKey, "Idempotency-Key header is required (max 255 characters)"))
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if !validID(id) {
+		httpx.Fail(w, r, notFound("partner"))
+		return
+	}
+	var req outboundRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if domain.FunctionalIDOf(req.TransactionSet) == "" {
+		httpx.Fail(w, r, validation(map[string]string{"transactionSet": "must be " + strings.Join(domain.OutboundSets, ", ")}))
+		return
+	}
+	tr, canonical, err := domain.BuildOutbound(req.TransactionSet, req.Document)
+	if errors.Is(err, domain.ErrOutbound) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodeOutbound, err.Error()))
+		return
+	}
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	partner, err := a.store.GetPartner(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) {
+		httpx.Fail(w, r, notFound("partner"))
+		return
+	}
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if partner.Status != "active" {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, CodePartnerInactive, "partner is inactive; no documents can be sent to it"))
+		return
+	}
+	usage := "P"
+	if partner.Environment == "TEST" {
+		usage = "T"
+	}
+	to := domain.Party{Qualifier: partner.ISAQualifier, ID: partner.ISAID}
+	at := a.now()
+	sum := sha256.Sum256(append([]byte("outbound\x00"+partner.ID+"\x00"+req.TransactionSet+"\x00"), canonical...))
+	res, created, err := a.store.CreateOutbound(r.Context(), key, hex.EncodeToString(sum[:]), store.Outbound{
+		PartnerID:      partner.ID,
+		TransactionSet: req.TransactionSet,
+		Canonical:      canonical,
+		Build: func(control int64) (string, error) {
+			ic, err := domain.OutboundEnvelope(tr, a.Sender, to, usage, control, at)
+			if err != nil {
+				return "", err
+			}
+			return domain.Serialize(ic)
+		},
+	})
+	if errors.Is(err, store.ErrIdempotencyReuse) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodeIdempotencyReuse, "Idempotency-Key was already used with a different request body"))
+		return
+	}
+	if errors.Is(err, domain.ErrSyntax) {
+		// A value carries an envelope delimiter; Serialize refuses it.
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodeOutbound, err.Error()))
+		return
+	}
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	status := http.StatusOK
+	if created {
+		status = http.StatusCreated
+	}
+	httpx.JSON(w, status, res)
 }

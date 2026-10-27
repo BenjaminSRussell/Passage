@@ -63,7 +63,9 @@ type Partner struct {
 	CreatedAt     time.Time `json:"createdAt"`
 }
 
-// Message is one transaction set inside a received interchange.
+// Message is one transaction set inside a received interchange. Ack is set
+// for a parsed 997: ReceiveInterchange matches it to the outbound interchange
+// it answers and sets Status to POSTED (matched) or FAILED (no match).
 type Message struct {
 	ID             string
 	TransactionSet string
@@ -71,6 +73,7 @@ type Message struct {
 	Status         string
 	Canonical      []byte
 	Error          string
+	Ack            *domain.FunctionalAck
 }
 
 // Inbound is one received X12 interchange ready to be recorded.
@@ -81,16 +84,22 @@ type Inbound struct {
 	Raw        string
 	AckStatus  string
 	Messages   []Message
-	// BuildAck returns the serialized 997 text. It calls next to allocate each
-	// outbound control number inside the recording transaction, so a rolled-back
-	// receipt never consumes a number (gap-free, BR-35.5).
+	// BuildAck returns the serialized 997 text, or "" when nothing needs one
+	// (an interchange of 997s is never acknowledged). It calls next to allocate
+	// each outbound control number inside the recording transaction, so a
+	// rolled-back receipt never consumes a number (gap-free, BR-35.5).
 	BuildAck func(next func() (int64, error)) (string, error)
 }
 
-// Received is the result of recording an inbound interchange.
+// Received is the result of recording an inbound interchange. Messages carry
+// their final status (a 997 is POSTED or FAILED after matching), and AckStatus
+// is the stored status: a 997 that failed to read or match turns ACCEPTED
+// into ACCEPTED_WITH_ERRORS.
 type Received struct {
 	InterchangeID string
 	AckPayload    string
+	AckStatus     string
+	Messages      []Message
 }
 
 // InterchangeSummary is one row of the interchange list.
@@ -127,10 +136,12 @@ type InterchangeDetail struct {
 	Messages   []MessageDetail `json:"messages"`
 }
 
-// InterchangeFilter narrows the interchange list. Limit is 1..200.
+// InterchangeFilter narrows the interchange list. Direction is IN, OUT or
+// empty for both. Limit is 1..200.
 type InterchangeFilter struct {
 	PartnerID string
 	AckStatus string
+	Direction string
 	Limit     int
 }
 
@@ -171,23 +182,8 @@ func (s *Store) CreatePartner(ctx context.Context, key, requestHash string, prof
 		if err != nil {
 			return err
 		}
-		// Claim the key first: a concurrent request with the same key waits on
-		// the primary key and then sees this one's stored response.
-		claim, err := tx.Exec(ctx, `insert into idempotency_keys (tenant_id, key, request_hash, response_status)
-			values ($1, $2, $3, 201) on conflict (tenant_id, key) do nothing`, tid, key, requestHash)
-		if err != nil {
+		if replayed, err := claimKey(ctx, tx, tid, key, requestHash, &out); err != nil || replayed {
 			return err
-		}
-		if claim.RowsAffected() == 0 {
-			var storedHash string
-			var body []byte
-			if err := tx.QueryRow(ctx, `select request_hash, response_body from idempotency_keys where key = $1`, key).Scan(&storedHash, &body); err != nil {
-				return err
-			}
-			if storedHash != requestHash {
-				return ErrIdempotencyReuse
-			}
-			return json.Unmarshal(body, &out)
 		}
 		out = Partner{ID: ids.New(), Name: prof.Name, ISAQualifier: prof.ISA.Qualifier, ISAID: prof.ISA.ID,
 			Environment: prof.Environment, AckSLAMinutes: prof.AckSLAMinutes}
@@ -200,17 +196,48 @@ func (s *Store) CreatePartner(ctx context.Context, key, requestHash string, prof
 		if err != nil {
 			return err
 		}
-		body, err := json.Marshal(out)
-		if err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `update idempotency_keys set response_body = $2 where key = $1`, key, body); err != nil {
+		if err := storeResponse(ctx, tx, key, out); err != nil {
 			return err
 		}
 		created = true
 		return nil
 	})
 	return out, created, err
+}
+
+// claimKey claims an Idempotency-Key inside tx. When the key was already used
+// with the same request hash it decodes the stored response into replay and
+// reports true; another hash under the key is ErrIdempotencyReuse. A concurrent
+// request with the same key waits on the primary key and then sees the stored
+// response of the one that committed.
+func claimKey(ctx context.Context, tx pgx.Tx, tid, key, requestHash string, replay any) (bool, error) {
+	claim, err := tx.Exec(ctx, `insert into idempotency_keys (tenant_id, key, request_hash, response_status)
+		values ($1, $2, $3, 201) on conflict (tenant_id, key) do nothing`, tid, key, requestHash)
+	if err != nil {
+		return false, err
+	}
+	if claim.RowsAffected() == 1 {
+		return false, nil
+	}
+	var storedHash string
+	var body []byte
+	if err := tx.QueryRow(ctx, `select request_hash, response_body from idempotency_keys where key = $1`, key).Scan(&storedHash, &body); err != nil {
+		return false, err
+	}
+	if storedHash != requestHash {
+		return false, ErrIdempotencyReuse
+	}
+	return true, json.Unmarshal(body, replay)
+}
+
+// storeResponse records the response a replay of key returns.
+func storeResponse(ctx context.Context, tx pgx.Tx, key string, response any) error {
+	body, err := json.Marshal(response)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `update idempotency_keys set response_body = $2 where key = $1`, key, body)
+	return err
 }
 
 // ListPartners returns the tenant's partners by name, optionally in one environment.
@@ -298,14 +325,28 @@ func (s *Store) ReceiveInterchange(ctx context.Context, in Inbound) (Received, e
 		if err != nil {
 			return err
 		}
+		// Match received 997s first: their outcome decides the interchange status.
+		messages := make([]Message, 0, len(in.Messages))
+		status := in.AckStatus
+		for _, m := range in.Messages {
+			if m.Ack != nil {
+				if err := matchAck(ctx, tx, tid, in.PartnerID, &m); err != nil {
+					return err
+				}
+			}
+			if m.TransactionSet == "997" && m.Status == "FAILED" && status == string(domain.StatusAccepted) {
+				status = string(domain.StatusAcceptedWithErrors)
+			}
+			messages = append(messages, m)
+		}
 		interchangeID := ids.New()
 		if _, err := tx.Exec(ctx, `insert into interchange (tenant_id, id, partner_id, direction, standard, version,
 			control_number, raw_payload, ack_status, ack_payload)
 			values ($1,$2,$3,'IN','X12',$4,$5,$6,$7,$8)`,
-			tid, interchangeID, in.PartnerID, in.Version, in.ISAControl, in.Raw, in.AckStatus, ack); err != nil {
+			tid, interchangeID, in.PartnerID, in.Version, in.ISAControl, in.Raw, status, nullString(ack)); err != nil {
 			return err
 		}
-		for _, m := range in.Messages {
+		for _, m := range messages {
 			if _, err := tx.Exec(ctx, `insert into message (tenant_id, id, interchange_id, transaction_set, st_control, status, canonical, error)
 				values ($1,$2,$3,$4,$5,$6,$7,$8)`,
 				tid, m.ID, interchangeID, m.TransactionSet, m.STControl, m.Status, nullBytes(m.Canonical), nullString(m.Error)); err != nil {
@@ -323,7 +364,7 @@ func (s *Store) ReceiveInterchange(ctx context.Context, in Inbound) (Received, e
 				return fmt.Errorf("edi: outbox: %w", err)
 			}
 		}
-		out = Received{InterchangeID: interchangeID, AckPayload: ack}
+		out = Received{InterchangeID: interchangeID, AckPayload: ack, AckStatus: status, Messages: messages}
 		return nil
 	})
 	return out, err
@@ -349,8 +390,8 @@ func (s *Store) ListInterchanges(ctx context.Context, f InterchangeFilter) ([]In
 	out := []InterchangeSummary{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, interchangeColumns+`
-			where ($1 = '' or i.partner_id::text = $1) and ($2 = '' or i.ack_status = $2)
-			order by i.received_at desc, i.id desc limit $3`, f.PartnerID, f.AckStatus, f.Limit)
+			where ($1 = '' or i.partner_id::text = $1) and ($2 = '' or i.ack_status = $2) and ($4 = '' or i.direction = $4)
+			order by i.received_at desc, i.id desc limit $3`, f.PartnerID, f.AckStatus, f.Limit, f.Direction)
 		if err != nil {
 			return err
 		}

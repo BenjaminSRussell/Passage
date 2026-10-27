@@ -7,12 +7,16 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 
 	"github.com/BenjaminSRussell/passage/services/edi/internal/domain"
+	ediev "github.com/BenjaminSRussell/passage/services/edi/internal/events"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/store"
 	"github.com/BenjaminSRussell/passage/services/edi/migrations"
 )
@@ -20,11 +24,18 @@ import (
 // dbHandler returns the routes over a migrated throwaway schema.
 func dbHandler(t *testing.T) http.Handler {
 	t.Helper()
+	h, _ := dbHandlerPool(t)
+	return h
+}
+
+// dbHandlerPool also returns the pool so a test can read the outbox.
+func dbHandlerPool(t *testing.T) (http.Handler, *pgxpool.Pool) {
+	t.Helper()
 	pool := testkit.DB(t)
 	if err := dbx.Migrate(context.Background(), pool, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
-	return New(store.New(pool, 30)).Routes()
+	return New(store.New(pool, 30)).Routes(), pool
 }
 
 func do(t *testing.T, h http.Handler, method, path, body, duties string, headers map[string]string) *httptest.ResponseRecorder {
@@ -174,5 +185,120 @@ func TestInterchangeAPI_ValidatesFiltersAndDuty(t *testing.T) {
 	}
 	if rec := do(t, h, http.MethodGet, "/edi/v1/interchanges/0195f0a0-0000-7000-8000-0000000000aa", "", "EDI_OPERATE", nil); rec.Code != http.StatusNotFound {
 		t.Fatalf("unknown interchange: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+const asnDocument = `{"shipmentId":"LOAD42-SHIP7","shipDate":"20261021","shipTime":"0930","scac":"FDEG",
+"grossWeight":"812.5","weightUnit":"KG","shipFrom":{"name":"Plant","gln":"0614141000012"},"shipTo":{"name":"Dock","gln":"0614141000029"},
+"orders":[{"poNumber":"PO1234","poDate":"20261021","packs":[{"sscc":"376104250021234569","items":[
+{"lineNo":"1","quantity":"10","uom":"EA","itemRefs":[{"qualifier":"BP","value":"ABC-1"}]}]}]}]}`
+
+// AC-35.1 (one leg): an 850 comes in, an 856 goes out on the same gap-free
+// control sequence as the 997, and the partner's 997 for it marks the 856
+// ACKED with a message.acked event in the outbox.
+func TestOutboundAPI_GenerateReplayAndMatchPartner997(t *testing.T) {
+	h, pool := dbHandlerPool(t)
+	rec := do(t, h, http.MethodPost, "/edi/v1/partners", distributor, "EDI_ADMIN", map[string]string{"Idempotency-Key": "p"})
+	var partner store.Partner
+	if err := json.Unmarshal(rec.Body.Bytes(), &partner); err != nil || rec.Code != http.StatusCreated {
+		t.Fatalf("create partner: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := do(t, h, http.MethodPost, "/edi/v1/inbound/x12?environment=TEST", sample850(t, "1"), "EDI_OPERATE", nil); rec.Code != http.StatusCreated {
+		t.Fatalf("receive 850: %d %s", rec.Code, rec.Body.String())
+	}
+
+	path := "/edi/v1/partners/" + partner.ID + "/outbound"
+	body := `{"transactionSet":"856","document":` + asnDocument + `}`
+	key := map[string]string{"Idempotency-Key": "asn-1"}
+	rec = do(t, h, http.MethodPost, path, body, "EDI_OPERATE", key)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("outbound: %d %s", rec.Code, rec.Body.String())
+	}
+	var out store.OutboundResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	// The 997 for the 850 took 1; the 856 takes 2 (BR-35.5, gap-free per partner).
+	if out.ControlNumber != "000000002" || out.TransactionSet != "856" {
+		t.Fatalf("outbound result: %+v", out)
+	}
+	sent, err := domain.Parse(out.X12)
+	if err != nil {
+		t.Fatalf("outbound X12 does not parse: %v\n%s", err, out.X12)
+	}
+	if sent.Sender != DefaultSender || sent.Receiver.ID != "DISTRIBUTOR" || sent.Usage != "T" || sent.Groups[0].FunctionalID != "SH" || sent.Groups[0].Control != "2" {
+		t.Fatalf("outbound envelope: %+v", sent)
+	}
+
+	// Replay returns the same interchange; another document under the key is refused.
+	rec = do(t, h, http.MethodPost, path, strings.ReplaceAll(body, ",", ", "), "EDI_OPERATE", key)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), out.InterchangeID) {
+		t.Fatalf("replay: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = do(t, h, http.MethodPost, path, strings.Replace(body, "LOAD42-SHIP7", "LOAD43", 1), "EDI_OPERATE", key)
+	if rec.Code != http.StatusUnprocessableEntity || problemCode(t, rec) != CodeIdempotencyReuse {
+		t.Fatalf("reuse: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := do(t, h, http.MethodPost, "/edi/v1/partners/0195f0a0-0000-7000-8000-0000000000aa/outbound", body, "EDI_OPERATE",
+		map[string]string{"Idempotency-Key": "asn-2"}); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown partner: %d %s", rec.Code, rec.Body.String())
+	}
+
+	rec = do(t, h, http.MethodGet, "/edi/v1/interchanges?direction=OUT", "", "EDI_OPERATE", nil)
+	var list struct {
+		Items []store.InterchangeSummary `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil || len(list.Items) != 1 || list.Items[0].AckStatus != "PENDING" || list.Items[0].Direction != "OUT" {
+		t.Fatalf("outbound list: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// The partner answers group 2 with a 997 accepting the 856.
+	partner997, err := domain.Ack997(sent, sent.Groups[0], []domain.TxOutcome{{SetID: "856", Control: "0001", Code: domain.AckAccepted}},
+		"000000077", "77", time.Date(2026, 10, 21, 13, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw997, err := domain.Serialize(partner997)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec = do(t, h, http.MethodPost, "/edi/v1/inbound/x12?environment=TEST", raw997, "EDI_OPERATE", nil)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("receive 997: %d %s", rec.Code, rec.Body.String())
+	}
+	var got receiveResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.AckStatus != "ACCEPTED" || got.Ack997 != "" || len(got.Messages) != 1 || got.Messages[0].Status != "POSTED" {
+		t.Fatalf("a 997 is matched and never acknowledged: %+v", got)
+	}
+
+	rec = do(t, h, http.MethodGet, "/edi/v1/interchanges/"+out.InterchangeID, "", "EDI_OPERATE", nil)
+	var detail store.InterchangeDetail
+	if err := json.Unmarshal(rec.Body.Bytes(), &detail); err != nil {
+		t.Fatal(err)
+	}
+	if detail.AckStatus != "ACCEPTED" || len(detail.Messages) != 1 || detail.Messages[0].Status != "ACKED" || !strings.Contains(string(detail.Messages[0].Canonical), "376104250021234569") {
+		t.Fatalf("outbound detail after 997: %+v", detail)
+	}
+	var payload string
+	if err := pool.QueryRow(context.Background(), `select payload::text from outbox where type = $1`, ediev.MessageAcked).Scan(&payload); err != nil {
+		t.Fatalf("message.acked event: %v", err)
+	}
+	if !strings.Contains(payload, out.MessageID) || !strings.Contains(payload, `"ack_status": "ACCEPTED"`) && !strings.Contains(payload, `"ack_status":"ACCEPTED"`) {
+		t.Fatalf("message.acked payload: %s", payload)
+	}
+
+	// A 997 for a group we never sent is recorded as FAILED with EDI-0161.
+	stray, _ := domain.Ack997(sent, domain.Group{FunctionalID: "SH", Control: "99", Version: "004010"},
+		[]domain.TxOutcome{{SetID: "856", Control: "0001", Code: domain.AckAccepted}}, "000000078", "78", time.Now())
+	rawStray, _ := domain.Serialize(stray)
+	rec = do(t, h, http.MethodPost, "/edi/v1/inbound/x12?environment=TEST", rawStray, "EDI_OPERATE", nil)
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != http.StatusCreated {
+		t.Fatalf("stray 997: %d %s", rec.Code, rec.Body.String())
+	}
+	if got.AckStatus != "ACCEPTED_WITH_ERRORS" || got.Messages[0].Status != "FAILED" || !strings.Contains(got.Messages[0].Error, domain.CodeUnmatchedAck) {
+		t.Fatalf("stray 997: %+v", got)
 	}
 }

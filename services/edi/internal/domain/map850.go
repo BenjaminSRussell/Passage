@@ -12,6 +12,7 @@ const (
 	CodeCountMismatch = "EDI-0103" // CTT01 differs from the PO1 count
 	CodeNoItemRef     = "EDI-0105" // no item cross-reference for any qualifier on a PO1
 	CodeMalformed     = "EDI-0160" // a required 850 segment or element is missing or invalid (not in catalog)
+	CodeUnmatchedAck  = "EDI-0161" // a received 997 answers no outbound group of the partner (not in catalog)
 )
 
 // Issue is one finding on a transaction. Reject true makes the 997 AK5 code R;

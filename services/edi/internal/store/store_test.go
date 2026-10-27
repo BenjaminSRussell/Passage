@@ -264,6 +264,12 @@ func TestRowLevelSecurity(t *testing.T) {
 		AckStatus: "ACCEPTED", BuildAck: counting997}); err != nil {
 		t.Fatal(err)
 	}
+	if _, _, err := st.CreateOutbound(one, "out", "h", outbound(p.ID, "856")); err != nil {
+		t.Fatal(err)
+	}
+	if list, err := st.ListInterchanges(two, InterchangeFilter{Direction: "OUT", Limit: 10}); err != nil || len(list) != 0 {
+		t.Fatalf("tenant 2 sees tenant 1 outbound interchanges: %+v %v", list, err)
+	}
 	if list, err := st.ListPartners(two, ""); err != nil || len(list) != 0 {
 		t.Fatalf("tenant 2 sees tenant 1 partners: %+v %v", list, err)
 	}

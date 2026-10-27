@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: Passage EDI engine API
   version: 0.1.0
-  description: Trading partner profiles, the map test harness, inbound X12 receipt and the interchange list (PSG-35 slice 1).
+  description: Trading partner profiles, the map test harness, inbound X12 receipt with 997 matching, outbound 855/856/810 generation and the interchange list (PSG-35 slices 1 and 2).
 servers:
   - url: https://api.{env}.passage.dev/v1
     variables:
@@ -79,6 +79,50 @@ paths:
               schema: { $ref: '#/components/schemas/Partner' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+  /edi/v1/partners/{id}/outbound:
+    post:
+      operationId: createOutbound
+      summary: Generate an outbound 855, 856 or 810 for the partner
+      description: >
+        Builds the transaction from its canonical document (BR-35.2 856 S/O/P/I with SSCC-18,
+        BR-35.3 810, 855 acknowledgment), wraps it in an X12 00401 interchange from our identity
+        (EDI_ISA_QUALIFIER/EDI_ISA_ID) to the partner with the next gap-free control number
+        (ISA13 and GS06, BR-35.5) and records it with ackStatus PENDING until the partner's 997 is
+        matched. The message stays MAPPED: AS2/SFTP transmission is not built yet. A document that
+        breaks a mapping rule is 422 EDI-0007.
+      x-passage-duty: EDI_OPERATE
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OutboundRequest' }
+      responses:
+        '200':
+          description: Replay of an earlier request with the same Idempotency-Key
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OutboundResult' }
+        '201':
+          description: Outbound interchange recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OutboundResult' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: EDI-0008 — the partner is inactive
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422':
+          description: EDI-0007 — the document breaks a mapping rule; or idempotency_key_reuse
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
   /edi/v1/interchanges:
     get:
       operationId: listInterchanges
@@ -93,6 +137,10 @@ paths:
           in: query
           required: false
           schema: { $ref: '#/components/schemas/AckStatus' }
+        - name: direction
+          in: query
+          required: false
+          schema: { type: string, enum: [IN, OUT] }
         - name: limit
           in: query
           required: false
@@ -115,7 +163,7 @@ paths:
     get:
       operationId: getInterchange
       summary: Read one interchange with its messages and the 997 sent back
-      description: The raw inbound payload is not returned; it carries N1/N3/N4 party data (BR-35.12).
+      description: The raw payload is not returned; it carries N1/N3/N4 party data (BR-35.12).
       x-passage-duty: EDI_OPERATE
       parameters:
         - $ref: '#/components/parameters/Id'
@@ -161,7 +209,12 @@ paths:
       description: >
         Identifies the partner by ISA sender, rejects duplicate ISA13 values inside the
         duplicate window (EDI-0102), records every transaction and returns the 997 generated in the
-        same transaction. Unknown senders are EDI-0101.
+        same transaction. Unknown senders are EDI-0101. A 997 group (GS01 FA) from the partner is
+        matched by AK102 to the outbound interchange with that control number: answered messages
+        become ACKED (AK5 A/E) or FAILED (AK5 R), the outbound interchange takes the AK9 status and
+        dev.passage.edi.message.acked.v1 is published per answered message. The 997 itself is
+        POSTED, or FAILED with EDI-0161 when it answers nothing; 997s are never acknowledged, so
+        ack997 is absent for an interchange of 997s only.
       x-passage-duty: EDI_OPERATE
       parameters:
         - name: environment
@@ -259,7 +312,7 @@ components:
                   transactionSet: { type: string }
                   stControl: { type: string }
                   status: { type: string, enum: [RECEIVED, MAPPED, POSTED, FAILED, SENT, ACKED] }
-                  canonical: { type: object, description: Canonical document (850 → Order) }
+                  canonical: { type: object, description: 'Canonical document: 850 Order, 997 FunctionalAck, outbound 855 Ack855, 856 ASN or 810 Invoice' }
                   error: { type: string }
     PartnerRequest:
       type: object
@@ -297,7 +350,7 @@ components:
           items: { $ref: '#/components/schemas/Issue' }
     ReceiveResponse:
       type: object
-      required: [interchangeId, ackStatus, messages, ack997]
+      required: [interchangeId, ackStatus, messages]
       properties:
         interchangeId: { type: string, format: uuid }
         ackStatus:
@@ -312,6 +365,175 @@ components:
               messageId: { type: string, format: uuid }
               transactionSet: { type: string }
               stControl: { type: string }
-              status: { type: string, enum: [MAPPED, FAILED] }
+              status: { type: string, enum: [MAPPED, FAILED, POSTED] }
               error: { type: string }
-        ack997: { type: string, description: Serialized X12 997 functional acknowledgment }
+        ack997: { type: string, description: Serialized X12 997 functional acknowledgment; absent when only 997s were received }
+    OutboundRequest:
+      type: object
+      additionalProperties: false
+      required: [transactionSet, document]
+      properties:
+        transactionSet: { type: string, enum: ['855', '856', '810'] }
+        document:
+          description: The canonical document for the set; unknown fields are refused. Decimals are strings.
+          oneOf:
+            - $ref: '#/components/schemas/Ack855'
+            - $ref: '#/components/schemas/ASN'
+            - $ref: '#/components/schemas/Invoice'
+    OutboundResult:
+      type: object
+      required: [interchangeId, messageId, transactionSet, controlNumber, x12]
+      properties:
+        interchangeId: { type: string, format: uuid }
+        messageId: { type: string, format: uuid }
+        transactionSet: { type: string, enum: ['855', '856', '810'] }
+        controlNumber: { type: string, description: ISA13, nine digits }
+        x12: { type: string, description: The serialized interchange }
+    Decimal:
+      type: string
+      pattern: '^-?[0-9]+(\.[0-9]+)?$'
+    ItemRef:
+      type: object
+      additionalProperties: false
+      required: [qualifier, value]
+      properties:
+        qualifier: { type: string, enum: [BP, VP, UP, EN] }
+        value: { type: string, minLength: 1 }
+    Location:
+      type: object
+      additionalProperties: false
+      required: [name, gln]
+      properties:
+        name: { type: string }
+        gln: { type: string, pattern: '^[0-9]{13}$' }
+    Ack855:
+      type: object
+      additionalProperties: false
+      required: [poNumber, poDate, ackDate, ackType]
+      properties:
+        poNumber: { type: string, description: BAK03 }
+        poDate: { type: string, pattern: '^[0-9]{8}$', description: BAK04 CCYYMMDD }
+        ackDate: { type: string, pattern: '^[0-9]{8}$', description: BAK09 CCYYMMDD }
+        ackType: { type: string, enum: [AD, AC, RD, AK, RJ], description: 'BAK02; AD all lines IA, AC at least one IQ/IR, RD all IR, AK/RJ no lines' }
+        lines:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [lineNo, orderedQty, uom, status, ackQty]
+            properties:
+              lineNo: { type: string }
+              orderedQty: { $ref: '#/components/schemas/Decimal' }
+              uom: { type: string }
+              status: { type: string, enum: [IA, IQ, IR] }
+              ackQty: { $ref: '#/components/schemas/Decimal' }
+    ASN:
+      type: object
+      additionalProperties: false
+      required: [shipmentId, shipDate, shipTime, scac, grossWeight, weightUnit, shipFrom, shipTo, orders]
+      properties:
+        shipmentId: { type: string, minLength: 1, maxLength: 30, description: BSN02 }
+        shipDate: { type: string, pattern: '^[0-9]{8}$' }
+        shipTime: { type: string, pattern: '^[0-9]{4}$' }
+        bol: { type: string, description: REF*BM }
+        proNumber: { type: string, description: REF*CN }
+        scac: { type: string, minLength: 2, maxLength: 4, description: TD503 }
+        grossWeight: { $ref: '#/components/schemas/Decimal' }
+        weightUnit: { type: string, enum: [LB, KG] }
+        shipFrom: { $ref: '#/components/schemas/Location' }
+        shipTo: { $ref: '#/components/schemas/Location' }
+        orders:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            additionalProperties: false
+            required: [poNumber, poDate, packs]
+            properties:
+              poNumber: { type: string }
+              poDate: { type: string, pattern: '^[0-9]{8}$' }
+              packs:
+                type: array
+                minItems: 1
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [sscc, items]
+                  properties:
+                    sscc: { type: string, pattern: '^[0-9]{18}$', description: SSCC-18 with a valid GS1 check digit, unique in the notice }
+                    items:
+                      type: array
+                      minItems: 1
+                      items:
+                        type: object
+                        additionalProperties: false
+                        required: [lineNo, quantity, uom, itemRefs]
+                        properties:
+                          lineNo: { type: string }
+                          quantity: { $ref: '#/components/schemas/Decimal' }
+                          uom: { type: string }
+                          itemRefs:
+                            type: array
+                            minItems: 1
+                            items: { $ref: '#/components/schemas/ItemRef' }
+    Invoice:
+      type: object
+      additionalProperties: false
+      required: [number, date, poNumber, poDate, terms, remitTo, billTo, shipTo, lines, total]
+      description: total must equal the line extensions (each rounded to 2 decimals) plus taxes plus charges minus allowances.
+      properties:
+        number: { type: string, minLength: 1, maxLength: 22 }
+        date: { type: string, pattern: '^[0-9]{8}$' }
+        poNumber: { type: string }
+        poDate: { type: string, pattern: '^[0-9]{8}$' }
+        creditNote: { type: boolean, description: BIG07 CR instead of DI }
+        shipDate: { type: string, pattern: '^[0-9]{8}$' }
+        bol: { type: string }
+        terms:
+          type: object
+          additionalProperties: false
+          properties:
+            code: { type: string, description: ITD01; empty omits ITD }
+            discountPct: { $ref: '#/components/schemas/Decimal' }
+            discountDays: { type: string }
+            netDays: { type: string }
+        remitTo: { $ref: '#/components/schemas/Location' }
+        billTo: { $ref: '#/components/schemas/Location' }
+        shipTo: { $ref: '#/components/schemas/Location' }
+        lines:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            additionalProperties: false
+            required: [lineNo, quantity, uom, unitPrice, itemRefs]
+            properties:
+              lineNo: { type: string }
+              quantity: { $ref: '#/components/schemas/Decimal' }
+              uom: { type: string }
+              unitPrice: { $ref: '#/components/schemas/Decimal' }
+              itemRefs:
+                type: array
+                minItems: 1
+                items: { $ref: '#/components/schemas/ItemRef' }
+        taxes:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [type, amount, percent]
+            properties:
+              type: { type: string, enum: [ST, VA, GS] }
+              amount: { $ref: '#/components/schemas/Decimal' }
+              percent: { $ref: '#/components/schemas/Decimal' }
+        charges:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [indicator, code, amount]
+            properties:
+              indicator: { type: string, enum: [C, A], description: C charge, A allowance }
+              code: { type: string, minLength: 1, maxLength: 4, description: 'SAC02, e.g. D240 freight' }
+              amount: { $ref: '#/components/schemas/Decimal' }
+        total: { $ref: '#/components/schemas/Decimal' }

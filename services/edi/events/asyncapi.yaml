@@ -10,11 +10,20 @@ channels:
     messages:
       messageReceived:
         $ref: '#/components/messages/MessageReceived'
+  messageAcked:
+    address: passage.edi.message
+    messages:
+      messageAcked:
+        $ref: '#/components/messages/MessageAcked'
 operations:
   publishMessageReceived:
     action: send
     channel: { $ref: '#/channels/messageReceived' }
     summary: One inbound transaction set has been recorded (FR-35.4)
+  publishMessageAcked:
+    action: send
+    channel: { $ref: '#/channels/messageAcked' }
+    summary: The partner's 997 answering one outbound transaction was matched (BR-35.5)
 components:
   messages:
     MessageReceived:
@@ -42,3 +51,27 @@ components:
               st_control: { type: string }
               status: { type: string, enum: [RECEIVED, MAPPED, POSTED, FAILED, SENT, ACKED] }
               canonical_ref: { type: string }
+    MessageAcked:
+      name: dev.passage.edi.message.acked.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [type, source, id, tenantid, data]
+        properties:
+          type: { const: dev.passage.edi.message.acked.v1 }
+          source: { const: edi }
+          id: { type: string, format: uuid }
+          tenantid: { type: string, format: uuid }
+          subject: { type: string, description: outbound message id }
+          data:
+            type: object
+            required: [message_id, interchange_id, partner_id, transaction_set, control_number, st_control, ack_status, ack_message_id]
+            properties:
+              message_id: { type: string, format: uuid, description: the outbound message acknowledged }
+              interchange_id: { type: string, format: uuid, description: the outbound interchange }
+              partner_id: { type: string, format: uuid }
+              transaction_set: { type: string, enum: ['855', '856', '810'] }
+              control_number: { type: string, description: ISA13 of the outbound interchange }
+              st_control: { type: string }
+              ack_status: { type: string, enum: [ACCEPTED, ACCEPTED_WITH_ERRORS, REJECTED] }
+              ack_message_id: { type: string, format: uuid, description: the received 997 message }

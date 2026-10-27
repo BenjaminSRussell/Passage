@@ -11,6 +11,12 @@ export const ACK_STATUSES: readonly AckStatus[] = ["PENDING", "ACCEPTED", "ACCEP
 
 export type MessageStatus = "RECEIVED" | "MAPPED" | "POSTED" | "FAILED" | "SENT" | "ACKED";
 
+export type Direction = "IN" | "OUT";
+
+/** Transaction sets the service generates outbound (POST /partners/{id}/outbound). */
+export type OutboundSet = "856" | "810" | "855";
+export const OUTBOUND_SETS: readonly OutboundSet[] = ["856", "810", "855"];
+
 /** Bounds the service enforces on the partner's 997 expectation (BR-35.5). */
 export const ACK_SLA = { min: 5, max: 1440, default: 60 } as const;
 
@@ -107,12 +113,81 @@ export interface InterchangeSummary {
   failedCount: number;
 }
 
+export interface ItemRefDoc {
+  qualifier: "BP" | "VP" | "UP" | "EN";
+  value: string;
+}
+
+export interface LocationDoc {
+  name: string;
+  /** 13-digit GS1 GLN. */
+  gln: string;
+}
+
+/** Canonical advance ship notice for an outbound 856 (BR-35.2). Decimals are strings. */
+export interface AsnDocument {
+  shipmentId: string;
+  shipDate: string;
+  shipTime: string;
+  bol?: string;
+  proNumber?: string;
+  scac: string;
+  grossWeight: string;
+  weightUnit: "LB" | "KG";
+  shipFrom: LocationDoc;
+  shipTo: LocationDoc;
+  orders: {
+    poNumber: string;
+    poDate: string;
+    packs: { sscc: string; items: { lineNo: string; quantity: string; uom: string; itemRefs: ItemRefDoc[] }[] }[];
+  }[];
+}
+
+/** Canonical customer invoice for an outbound 810 (BR-35.3). Decimals are strings. */
+export interface InvoiceDocument {
+  number: string;
+  date: string;
+  poNumber: string;
+  poDate: string;
+  creditNote?: boolean;
+  shipDate?: string;
+  bol?: string;
+  terms: { code?: string; discountPct: string; discountDays?: string; netDays?: string };
+  remitTo: LocationDoc;
+  billTo: LocationDoc;
+  shipTo: LocationDoc;
+  lines: { lineNo: string; quantity: string; uom: string; unitPrice: string; itemRefs: ItemRefDoc[] }[];
+  taxes?: { type: "ST" | "VA" | "GS"; amount: string; percent: string }[];
+  charges?: { indicator: "C" | "A"; code: string; amount: string }[];
+  total: string;
+}
+
+/** Canonical purchase order acknowledgment for an outbound 855. */
+export interface AckDocument {
+  poNumber: string;
+  poDate: string;
+  ackDate: string;
+  ackType: "AD" | "AC" | "RD" | "AK" | "RJ";
+  lines?: { lineNo: string; orderedQty: string; uom: string; status: "IA" | "IQ" | "IR"; ackQty: string }[];
+}
+
+/** A partner's 997 as read by the service. Codes are A, E, P (group only) or R. */
+export interface FunctionalAck {
+  functionalId: string;
+  groupControl: string;
+  code: string;
+  sets: { setId: string; control: string; code: string }[];
+}
+
+export type CanonicalDocument = CanonicalOrder | FunctionalAck | AsnDocument | InvoiceDocument | AckDocument;
+
 export interface InterchangeMessage {
   id: string;
   transactionSet: string;
   stControl: string;
   status: MessageStatus;
-  canonical?: CanonicalOrder;
+  /** Shape follows transactionSet: 850 order, 997 acknowledgment, 856/810/855 outbound document. */
+  canonical?: CanonicalDocument;
   error?: string;
 }
 
@@ -125,7 +200,18 @@ export interface ReceiveResult {
   interchangeId: string;
   ackStatus: AckStatus;
   messages: { messageId: string; transactionSet: string; stControl: string; status: MessageStatus; error?: string }[];
-  ack997: string;
+  /** Absent when only 997s were received: a 997 is never acknowledged. */
+  ack997?: string;
+}
+
+export interface OutboundResult {
+  interchangeId: string;
+  messageId: string;
+  transactionSet: OutboundSet;
+  /** ISA13, nine digits. */
+  controlNumber: string;
+  /** The serialized interchange. */
+  x12: string;
 }
 
 export class EdiApiError extends Error {
@@ -211,7 +297,7 @@ export function createPartner(input: NewPartner, key: string = newKey()): Promis
 }
 
 export function listInterchanges(
-  filter: { partnerId?: string; ackStatus?: AckStatus | ""; limit?: number } = {},
+  filter: { partnerId?: string; ackStatus?: AckStatus | ""; direction?: Direction | ""; limit?: number } = {},
   signal?: AbortSignal,
 ): Promise<InterchangeSummary[]> {
   return items<InterchangeSummary>(`/interchanges${query(filter)}`, signal);
@@ -236,5 +322,17 @@ export function testMaps(raw: string): Promise<MapTestResponse> {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ raw }),
+  });
+}
+
+/**
+ * Generates an outbound 855, 856 or 810 for the partner from its canonical
+ * document. Reuse one key per attempt so a retried submit cannot send twice.
+ */
+export function createOutbound(partnerId: string, transactionSet: OutboundSet, document: unknown, key: string = newKey()): Promise<OutboundResult> {
+  return send<OutboundResult>(`/partners/${encodeURIComponent(partnerId)}/outbound`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Idempotency-Key": key },
+    body: JSON.stringify({ transactionSet, document }),
   });
 }

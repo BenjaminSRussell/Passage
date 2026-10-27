@@ -8,7 +8,8 @@ import { useLoad } from "./useLoad";
 
 const columns: DataTableColumn<InterchangeSummary>[] = [
   { key: "controlNumber", header: "ISA13", mono: true },
-  { key: "receivedAt", header: "Received", render: (row) => formatDateTime(row.receivedAt) },
+  { key: "direction", header: "Direction", render: (row) => (row.direction === "IN" ? "Inbound" : "Outbound") },
+  { key: "receivedAt", header: "Recorded", render: (row) => formatDateTime(row.receivedAt) },
   { key: "messageCount", header: "Transactions", align: "end", render: (row) => String(row.messageCount) },
   { key: "ackStatus", header: "997", render: (row) => <AckPill status={row.ackStatus} /> },
 ];
@@ -47,9 +48,16 @@ export function PartnerDetailPage() {
         description={`ISA ${p.isaQualifier}/${p.isaId} in ${p.environment}`}
         meta={<StatusPill status={p.status} />}
         actions={
-          <Link className={buttonClassName("secondary")} to="/integration/partners">
-            All partners
-          </Link>
+          <>
+            {p.status === "active" ? (
+              <Link className={buttonClassName("primary")} to={`/integration/interchanges/outbound?partnerId=${encodeURIComponent(p.id)}`}>
+                Send document
+              </Link>
+            ) : null}
+            <Link className={buttonClassName("secondary")} to="/integration/partners">
+              All partners
+            </Link>
+          </>
         }
       />
       <Card title="Profile">
@@ -89,7 +97,7 @@ export function PartnerDetailPage() {
             getRowKey={(row) => row.id}
             loading={recent.loading}
             onRowOpen={(row) => navigate(`/integration/interchanges/${row.id}`)}
-            empty={{ title: "No interchanges yet", description: "Interchanges this partner sends appear here." }}
+            empty={{ title: "No interchanges yet", description: "Interchanges this partner sends, and documents sent to it, appear here." }}
           />
         )}
       </Card>

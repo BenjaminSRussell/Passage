@@ -37,6 +37,10 @@ spec:
               value: {{ .Values.migrateOnStart | quote }}
             - name: EDI_DUP_WINDOW_DAYS
               value: {{ .Values.dupWindowDays | quote }}
+            - name: EDI_ISA_QUALIFIER
+              value: {{ .Values.isaSender.qualifier | quote }}
+            - name: EDI_ISA_ID
+              value: {{ .Values.isaSender.id | quote }}
           ports:
             - { name: http, containerPort: 8080 }
             - { name: admin, containerPort: 9090 }

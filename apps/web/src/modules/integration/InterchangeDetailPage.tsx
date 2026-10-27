@@ -2,11 +2,11 @@ import { Link, useParams } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, PageHeader, Skeleton } from "../../shell/ui";
 import { getInterchange, type InterchangeDetail } from "./api/client";
 import { formatDateTime } from "./format";
-import { AckPill, MessagePill, OrderView } from "./parts";
+import { AckPill, CanonicalView, MessagePill } from "./parts";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
-/** One interchange: envelope, each transaction with its canonical document, and the 997. */
+/** One interchange: envelope, each transaction with its canonical document, and the 997 either way. */
 export function InterchangeDetailPage() {
   const { id = "" } = useParams();
   const state = useLoad<InterchangeDetail>((signal) => getInterchange(id, signal), `interchange:${id}`);
@@ -70,12 +70,12 @@ export function InterchangeDetailPage() {
             <Card title={`${m.transactionSet} · ST02 ${m.stControl}`} headingLevel={3} actions={<MessagePill status={m.status} />}>
               <div className={styles.stack}>
                 {m.error ? (
-                  <Alert tone={m.status === "FAILED" ? "danger" : "warning"} title="Mapping findings">
+                  <Alert tone={m.status === "FAILED" ? "danger" : "warning"} title={ic.direction === "OUT" ? "Partner acknowledgment" : "Findings"}>
                     {m.error}
                   </Alert>
                 ) : null}
                 {m.canonical ? (
-                  <OrderView order={m.canonical} label={`Lines of ${m.transactionSet} ${m.stControl}`} />
+                  <CanonicalView transactionSet={m.transactionSet} document={m.canonical} label={`Lines of ${m.transactionSet} ${m.stControl}`} />
                 ) : (
                   <p className={styles.note}>No canonical document: this transaction set is not mapped yet.</p>
                 )}
@@ -84,15 +84,25 @@ export function InterchangeDetailPage() {
           </li>
         ))}
       </ul>
-      <Card title="997 sent to the partner">
-        {ic.ack997 ? (
-          <pre className={styles.payload} aria-label="997 functional acknowledgment">
-            {ic.ack997}
-          </pre>
-        ) : (
-          <p className={styles.note}>No 997 was recorded for this interchange.</p>
-        )}
-      </Card>
+      {ic.direction === "OUT" ? (
+        <Card title="Partner 997">
+          <p className={styles.note}>
+            {ic.ackStatus === "PENDING"
+              ? "Waiting for the partner's 997. It is matched to this interchange by its control number when it is received."
+              : "The partner's 997 has been matched; each transaction above shows its result. The 997 itself is listed as an inbound interchange."}
+          </p>
+        </Card>
+      ) : (
+        <Card title="997 sent to the partner">
+          {ic.ack997 ? (
+            <pre className={styles.payload} aria-label="997 functional acknowledgment">
+              {ic.ack997}
+            </pre>
+          ) : (
+            <p className={styles.note}>No 997 was sent for this interchange. A 997 received from the partner is never acknowledged.</p>
+          )}
+        </Card>
+      )}
       <p className={styles.note}>The raw interchange is not shown here: it carries partner address data that only the message monitor shows, masked.</p>
     </div>
   );

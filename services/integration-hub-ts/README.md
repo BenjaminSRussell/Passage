@@ -17,6 +17,19 @@ dependencies (`src/webhook.ts`):
 - `deliverableHeads`: per-aggregate ordering; a failing event blocks only later events of
   the same aggregate.
 
+## Slice 2 scope
+
+`src/dispatch.ts`, also pure:
+
+- `nextStep`: the state machine the dispatcher asks after each attempt. 2xx is
+  delivered, 410 pauses the subscription, no response or any other status retries at
+  `now + delay`, and a failure after the 8th retry dead-letters the event (HUB-0115).
+- `deliveryOrder`: replay order by time, with each aggregate's events in sequence order
+  even when a producer clock stamped a later sequence earlier (BR-35.7, AC-35.4).
+- `planReplay`: one page of a replay from a timestamp, capped (default 1,000,000, allowed
+  1 to 10,000,000, BR-35.9), with a `{fromSeconds, skip}` cursor for the next page.
+- `replayHeaders`: `ce-passagereplay: true` on replayed deliveries.
+
 Everything that touches the network, the database or Kafka is later work. See
 `NOT-IMPLEMENTED.md`.
 
@@ -24,7 +37,7 @@ Everything that touches the network, the database or Kafka is later work. See
 
 ```sh
 cd services/integration-hub-ts
-npm test        # node --test test/webhook.test.ts (Node 24+, native TypeScript type stripping)
+npm test        # node --test on test/webhook.test.ts and test/dispatch.test.ts (Node 24+, native type stripping)
 ```
 
 There are no runtime dependencies. Strict typechecking needs `@types/node` and
