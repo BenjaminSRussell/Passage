@@ -61,6 +61,8 @@ type PurchaseOrderLine struct {
 	PriceSource       string          `json:"priceSource"`
 	RequisitionLineID string          `json:"requisitionLineId,omitempty"`
 	AgreementLineID   string          `json:"agreementLineId,omitempty"`
+	ReceivedQty       decimal.Decimal `json:"receivedQty"`
+	InvoicedQty       decimal.Decimal `json:"invoicedQty"`
 	Status            string          `json:"status"`
 }
 
@@ -170,7 +172,7 @@ func loadPurchaseOrder(ctx context.Context, tx pgx.Tx, id string) (PurchaseOrder
 	}
 	lines, err := tx.Query(ctx, `select line_no, coalesce(product_id::text, ''), description, qty, unit, unit_price, price_unit,
 		discount_pct, gross_amount, discount_amount, line_amount, tax_amount, delivery_date, price_source,
-		coalesce(requisition_line_id::text, ''), coalesce(agreement_line_id::text, ''), status
+		coalesce(requisition_line_id::text, ''), coalesce(agreement_line_id::text, ''), received_qty, invoiced_qty, status
 		from purchase_order_line where tenant_id = $1 and purchase_order_id = $2 order by line_no`, p.TenantID, id)
 	if err != nil {
 		return PurchaseOrder{}, err
@@ -182,7 +184,7 @@ func loadPurchaseOrder(ctx context.Context, tx pgx.Tx, id string) (PurchaseOrder
 		var due time.Time
 		if err := lines.Scan(&l.LineNo, &l.ProductID, &l.Description, &l.Qty, &l.Unit, &l.UnitPrice, &l.PriceUnit, &l.DiscountPct,
 			&l.GrossAmount, &l.DiscountAmount, &l.LineAmount, &l.TaxAmount, &due, &l.PriceSource, &l.RequisitionLineID,
-			&l.AgreementLineID, &l.Status); err != nil {
+			&l.AgreementLineID, &l.ReceivedQty, &l.InvoicedQty, &l.Status); err != nil {
 			return PurchaseOrder{}, err
 		}
 		l.DeliveryDate = day(due)

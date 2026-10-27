@@ -449,6 +449,7 @@ describe("workspace", () => {
       if (url.includes("status=IN_REVIEW")) return json({ items: [{}, {}], nextCursor: undefined });
       if (url.includes("status=APPROVED")) return json({ items: new Array(200).fill({}), nextCursor: "x" });
       if (url.includes("approvalStatus=DRAFT")) return json({ items: [{}] });
+      if (url.includes("approvalStatus=IN_REVIEW")) return json({ items: [{}, {}, {}, {}] });
       if (url.includes("sourcing=NEEDS_SOURCING")) return json({ items: [{}, {}, {}] });
       if (url.includes("status=EFFECTIVE")) return json({ items: [{}] });
       return json({ items: [] });
@@ -458,6 +459,8 @@ describe("workspace", () => {
     expect(tiles).toHaveTextContent("Requisitions in review 2");
     expect(tiles).toHaveTextContent("Approved requisitions to source 200+");
     expect(tiles).toHaveTextContent("Draft purchase orders 1");
+    expect(tiles).toHaveTextContent("Purchase orders in review 4");
+    expect(tiles).toHaveTextContent("Purchase orders to confirm 0");
     expect(tiles).toHaveTextContent("Active price rows 0");
     expect(tiles).toHaveTextContent("Lines needing a vendor 3");
     expect(tiles).toHaveTextContent("Effective purchase agreements 1");

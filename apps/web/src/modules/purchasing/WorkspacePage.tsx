@@ -29,7 +29,7 @@ const sections = [
   },
   {
     title: "Purchase orders",
-    description: "Orders to vendors, priced from agreements and trade agreements, with totals that balance to the cent.",
+    description: "Orders to vendors, priced from agreements and trade agreements, approved and confirmed, with every change kept as a version.",
     links: [
       { label: "Consolidate approved lines", to: "/purchasing/consolidation" },
       { label: "All purchase orders", to: "/purchasing/purchase-orders" },
@@ -58,6 +58,8 @@ export function WorkspacePage() {
         listTradeAgreements({ status: "ACTIVE" }, { limit: COUNT_LIMIT, signal }),
         listOpenRequisitionLines({ sourcing: "NEEDS_SOURCING" }, { limit: COUNT_LIMIT, signal }),
         listPurchaseAgreements({ status: "EFFECTIVE" }, { limit: COUNT_LIMIT, signal }),
+        listPurchaseOrders({ approvalStatus: "IN_REVIEW" }, { limit: COUNT_LIMIT, signal }),
+        listPurchaseOrders({ approvalStatus: "APPROVED" }, { limit: COUNT_LIMIT, signal }),
       ]),
     [],
   );
@@ -77,6 +79,8 @@ export function WorkspacePage() {
           <StatTile label="Approved requisitions to source" value={countLabel(counts.data[1])} />
           <StatTile label="Lines needing a vendor" value={countLabel(counts.data[4])} />
           <StatTile label="Draft purchase orders" value={countLabel(counts.data[2])} />
+          <StatTile label="Purchase orders in review" value={countLabel(counts.data[6])} />
+          <StatTile label="Purchase orders to confirm" value={countLabel(counts.data[7])} />
           <StatTile label="Effective purchase agreements" value={countLabel(counts.data[5])} />
           <StatTile label="Active price rows" value={countLabel(counts.data[3])} />
         </StatGroup>

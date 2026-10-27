@@ -43,10 +43,25 @@ type fakeStore struct {
 	lastSourcing       store.SourcingFilter
 	lastConsolidated   []string
 	lastIdem           store.Idem
+
+	// PO lifecycle: stored orders by id, and what edits and actions received.
+	poByID   map[string]store.PurchaseOrder
+	versions map[string][]store.PurchaseOrderVersion
+	lastEdit struct {
+		id      string
+		ifMatch int
+		next    store.PurchaseOrder
+	}
+	lastAction struct {
+		id, action string
+		ifMatch    int
+		idem       store.Idem
+	}
 }
 
 func newFake() *fakeStore {
-	return &fakeStore{requisitions: map[string]store.Requisition{}, purchaseAgreements: map[string]store.AgreementDetail{}}
+	return &fakeStore{requisitions: map[string]store.Requisition{}, purchaseAgreements: map[string]store.AgreementDetail{},
+		poByID: map[string]store.PurchaseOrder{}, versions: map[string][]store.PurchaseOrderVersion{}}
 }
 
 func (f *fakeStore) CreateTradeAgreement(_ context.Context, row domain.TradeAgreement, _ store.Idem) (domain.TradeAgreement, error) {
@@ -109,8 +124,12 @@ func (f *fakeStore) CreatePurchaseOrder(_ context.Context, in store.PurchaseOrde
 	return in, nil
 }
 
-func (f *fakeStore) GetPurchaseOrder(context.Context, string) (store.PurchaseOrder, error) {
-	return store.PurchaseOrder{}, httpx.NewProblem(http.StatusNotFound, store.CodePurchaseOrderNotFound, "purchase order not found")
+func (f *fakeStore) GetPurchaseOrder(_ context.Context, id string) (store.PurchaseOrder, error) {
+	po, ok := f.poByID[id]
+	if !ok {
+		return store.PurchaseOrder{}, httpx.NewProblem(http.StatusNotFound, store.CodePurchaseOrderNotFound, "purchase order not found")
+	}
+	return po, nil
 }
 
 func (f *fakeStore) ListPurchaseOrders(_ context.Context, of store.PurchaseOrderFilter, after string, limit int) (store.Page[store.PurchaseOrderSummary], error) {

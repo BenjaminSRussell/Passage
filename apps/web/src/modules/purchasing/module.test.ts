@@ -25,6 +25,10 @@ describe("purchasing module", () => {
     }
   });
 
+  it("routes the purchase order edit page", () => {
+    expect(purchasing.routes.map((r) => r.path)).toContain("/purchasing/purchase-orders/:id/edit");
+  });
+
   it("routes the consolidation board", () => {
     expect(purchasing.routes.map((r) => r.path)).toContain("/purchasing/consolidation");
   });

@@ -1,10 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ProcurementApiError,
+  actOnPurchaseOrder,
   changePurchaseAgreement,
   consolidateRequisitions,
   describeProblem,
+  editPurchaseOrder,
   listOpenRequisitionLines,
+  listPurchaseOrderVersions,
   listPurchaseOrders,
   lookupPrice,
   submitRequisition,
@@ -120,5 +123,38 @@ describe("purchasing API client", () => {
     expect(JSON.parse(String(init.body))).toEqual({ windowDays: 7, lines: [{ requisitionLineId: "l1" }] });
     expect((init.headers as Record<string, string>)["Idempotency-Key"]).toBe("key-c");
     expect((fetchMock.mock.calls[1] as unknown as [string])[0]).toBe("/api/v1/procurement/requisition-lines?limit=50");
+  });
+  it("runs a purchase order action with If-Match and an Idempotency-Key", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ id: "po1", rowVersion: 8 }, 200, { ETag: '"8"' }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await actOnPurchaseOrder("po1", "confirm", 7, "key-c");
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/v1/procurement/purchase-orders/po1:confirm");
+    expect(init.method).toBe("POST");
+    expect(init.headers).toMatchObject({ "If-Match": '"7"', "Idempotency-Key": "key-c" });
+  });
+
+  it("edits a purchase order with PATCH and If-Match and no Idempotency-Key", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ id: "po1", rowVersion: 3 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const input = { legalEntityId: "le", vendorId: "v", currency: "USD", lines: [{ lineNo: 1, qty: "5", unit: "EA", deliveryDate: "2026-12-01" }] };
+    await editPurchaseOrder("po1", input, 2);
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/v1/procurement/purchase-orders/po1");
+    expect(init.method).toBe("PATCH");
+    const headers = init.headers as Record<string, string>;
+    expect(headers["If-Match"]).toBe('"2"');
+    expect(headers["Idempotency-Key"]).toBeUndefined();
+    expect(JSON.parse(String(init.body)).lines[0].lineNo).toBe(1);
+  });
+
+  it("unwraps the version list", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ items: [{ versionNo: 1, patch: [] }] })));
+    const versions = await listPurchaseOrderVersions("po1");
+    expect(versions.map((v) => v.versionNo)).toEqual([1]);
   });
 });

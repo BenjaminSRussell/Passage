@@ -141,6 +141,9 @@ export interface PurchaseOrderLine {
   priceSource: string;
   requisitionLineId?: string;
   agreementLineId?: string;
+  /** Written by receiving and payables (wave 18); a quantity cannot drop below them (PRC-PO-007). */
+  receivedQty?: string;
+  invoicedQty?: string;
   status: string;
 }
 
@@ -194,6 +197,8 @@ export interface PurchaseOrderSummary {
 export type ChargeCalc = "FIXED" | "PER_UNIT" | "PERCENT";
 
 export interface PurchaseOrderLineInput {
+  /** On an edit, the existing line this entry changes; omitted for a new line. */
+  lineNo?: number;
   productId?: string;
   description?: string;
   qty: string;
@@ -216,6 +221,27 @@ export interface PurchaseOrderInput {
   changeManagement?: boolean;
   lines: PurchaseOrderLineInput[];
   charges?: { calc: ChargeCalc; value: string }[];
+}
+
+/** PO custom methods (FR-17.7). Approve and reject stand in for the wave 4 approval task. */
+export type PurchaseOrderAction = "submit" | "approve" | "reject" | "confirm" | "cancel";
+
+/** One RFC 6902 operation of a version's change (FR-17.8). */
+export interface PatchOp {
+  op: "add" | "remove" | "replace";
+  path: string;
+  value?: unknown;
+}
+
+export interface PurchaseOrderVersion {
+  versionNo: number;
+  /** Absent while the version waits for re-approval. */
+  confirmedAt?: string;
+  confirmedBy?: string;
+  reapprovalRequired: boolean;
+  createdAt: string;
+  patch: PatchOp[];
+  snapshot: { currency: string; total: string; lines: { lineNo: number; status: string }[] };
 }
 
 export type AccountCode = "VENDOR" | "GROUP" | "ALL";
@@ -397,7 +423,7 @@ export function newIdempotencyKey(): string {
 }
 
 async function send<T>(
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "PATCH",
   path: string,
   options: { body?: unknown; headers?: Record<string, string>; signal?: AbortSignal } = {},
 ): Promise<{ body: T; etag: string | null }> {
@@ -483,6 +509,31 @@ export function createPurchaseOrder(input: PurchaseOrderInput, idempotencyKey = 
     body: input,
     headers: { "Idempotency-Key": idempotencyKey },
   });
+}
+
+/**
+ * Replaces the lines and charges of a PO (FR-17.8). Lines with lineNo change
+ * that line, others are new, and live lines left out are cancelled. rowVersion
+ * is the ETag read when the PO was loaded; a stale one is 412 PRC-PO-009.
+ */
+export function editPurchaseOrder(id: string, input: PurchaseOrderInput, rowVersion: number) {
+  return send<PurchaseOrder>("PATCH", `/purchase-orders/${encodeURIComponent(id)}`, {
+    body: input,
+    headers: { "If-Match": `"${rowVersion}"` },
+  });
+}
+
+/** Runs a PO custom method; rowVersion is the ETag read when the PO was loaded. */
+export function actOnPurchaseOrder(id: string, action: PurchaseOrderAction, rowVersion: number, idempotencyKey = newIdempotencyKey()) {
+  return send<PurchaseOrder>("POST", `/purchase-orders/${encodeURIComponent(id)}:${action}`, {
+    headers: { "Idempotency-Key": idempotencyKey, "If-Match": `"${rowVersion}"` },
+  });
+}
+
+/** Every stored version of a PO, oldest first, a pending change included. */
+export async function listPurchaseOrderVersions(id: string, signal?: AbortSignal) {
+  const { body } = await send<{ items: PurchaseOrderVersion[] }>("GET", `/purchase-orders/${encodeURIComponent(id)}/versions`, { signal });
+  return body.items;
 }
 
 export function listTradeAgreements(filters: { accountId?: string; itemId?: string; status?: string } = {}, options: ListOptions = {}) {

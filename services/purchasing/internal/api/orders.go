@@ -27,6 +27,9 @@ type orderBody struct {
 }
 
 type orderLineBody struct {
+	// LineNo names the existing line a PATCH changes; omitted for a new line
+	// and ignored on create, where lines are numbered in request order.
+	LineNo            int        `json:"lineNo,omitempty"`
 	ProductID         string     `json:"productId,omitempty"`
 	Description       string     `json:"description,omitempty"`
 	Qty               string     `json:"qty"`
@@ -43,6 +46,9 @@ type orderLineBody struct {
 	// consolidation: it prices the line when neither an agreement nor a trade
 	// agreement does (source REQUISITION_ESTIMATE).
 	estimate *decimal.Decimal
+	// keep is the stored line a PATCH changes: when unitPrice is omitted and
+	// the product and unit are unchanged, the line keeps its price and source.
+	keep *store.PurchaseOrderLine
 }
 
 type chargeBody struct {
@@ -265,7 +271,8 @@ type lineSource struct {
 	discountPct *decimal.Decimal
 }
 
-// linePrice returns, in order: the explicit price (MANUAL); the price of the
+// linePrice returns, in order: the explicit price (MANUAL); on an edit, the
+// stored price of an unchanged line with its source; the price of the
 // referenced agreement line when it overrides trade agreements (FR-17.5,
 // AGREEMENT:<line id>, with its discount unless the line gives one); the trade
 // agreement winner (TRADE_AGREEMENT:<id>); or, for consolidated lines, the
@@ -280,6 +287,10 @@ func (a *API) linePrice(ctx context.Context, l orderLineBody, vendor, cur string
 			return decimal.Zero, lineSource{}, invalid(field("unitPrice"), "must not be negative")
 		}
 		return p, lineSource{label: "MANUAL"}, nil
+	}
+	if k := l.keep; k != nil && k.ProductID == l.ProductID && k.Unit == strings.TrimSpace(l.Unit) {
+		price, unit, disc := k.UnitPrice, k.PriceUnit, k.DiscountPct
+		return price, lineSource{label: k.PriceSource, unitPrice: &price, priceUnit: &unit, discountPct: &disc}, nil
 	}
 	if l.AgreementLineID != "" {
 		agr, err := a.store.GetAgreementLine(ctx, l.AgreementLineID)

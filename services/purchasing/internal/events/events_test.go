@@ -14,6 +14,9 @@ var allTypes = map[string]string{
 	events.RequisitionSubmitted: "requisition",
 	events.RequisitionApproved:  "requisition",
 	events.AgreementThreshold:   "agreement",
+	events.POConfirmed:          "po",
+	events.POVersionCreated:     "poversion",
+	events.POCancelled:          "po",
 }
 
 func TestEventTypesFollowTheNamingRule(t *testing.T) {
@@ -54,6 +57,15 @@ func TestPayloadFieldsAreInTheAsyncAPI(t *testing.T) {
 	for k := range threshold {
 		keys = append(keys, k)
 	}
+	// Purchase order payloads with every optional member set, so omitempty
+	// fields are checked too.
+	for _, v := range []any{
+		events.POConfirmedData{SiteID: "s", WarehouseID: "w", Lines: []events.POLineData{{ProductID: "p", Description: "d"}}},
+		events.POVersionCreatedData{Patch: []any{}},
+		events.POCancelledData{Lines: []events.POCancelledLine{{ProductID: "p"}}},
+	} {
+		keys = append(keys, jsonKeys(t, v)...)
+	}
 	for _, k := range keys {
 		if !strings.Contains(string(spec), "\n        "+k+":") && !strings.Contains(string(spec), "\n              "+k+":") {
 			t.Errorf("payload field %q is not declared in asyncapi.yaml", k)
@@ -64,4 +76,29 @@ func TestPayloadFieldsAreInTheAsyncAPI(t *testing.T) {
 			t.Errorf("event type %s is not in asyncapi.yaml", typ)
 		}
 	}
+}
+
+// jsonKeys returns the JSON member names of v and of the first element of any
+// array member.
+func jsonKeys(t *testing.T, v any) []string {
+	t.Helper()
+	raw, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &top); err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for k, member := range top {
+		out = append(out, k)
+		var items []map[string]any
+		if json.Unmarshal(member, &items) == nil && len(items) > 0 {
+			for ik := range items[0] {
+				out = append(out, ik)
+			}
+		}
+	}
+	return out
 }

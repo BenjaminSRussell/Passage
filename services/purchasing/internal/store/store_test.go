@@ -388,6 +388,33 @@ func TestRowLevelSecurity_AppRoleSeesOnlyItsTenant(t *testing.T) {
 	if _, err := s.GetAgreement(scoped, pa.Agreement.ID); problemCode(err) != store.CodeAgreementNotFound {
 		t.Fatalf("out-of-scope agreement read = %v", err)
 	}
+	// PO versions (0003) carry no legal entity; they are read through the PO.
+	po, err := s.CreatePurchaseOrder(a, lifecyclePO(t, ids.New(), "1", "2027-01-05"), store.Idem{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, action := range []string{domain.POActionSubmit, domain.POActionApprove, domain.POActionConfirm} {
+		if po, err = s.ActOnPurchaseOrder(a, po.ID, po.RowVersion, action, store.Idem{}); err != nil {
+			t.Fatalf("%s: %v", action, err)
+		}
+	}
+	if v, err := s.GetPurchaseOrderVersion(a, po.ID, 1); err != nil || v.ConfirmedAt == nil {
+		t.Fatalf("tenant A version 1 = %+v, %v", v, err)
+	}
+	for name, ctx := range map[string]context.Context{"tenant B": b, "out of scope": scoped} {
+		if _, err := s.GetPurchaseOrderVersion(ctx, po.ID, 1); problemCode(err) != store.CodePurchaseOrderNotFound {
+			t.Fatalf("%s read of a PO version = %v", name, err)
+		}
+		if _, err := s.ListPurchaseOrderVersions(ctx, po.ID); problemCode(err) != store.CodePurchaseOrderNotFound {
+			t.Fatalf("%s list of PO versions = %v", name, err)
+		}
+	}
+	// Without a tenant the policy refuses: no rows, or an error when the
+	// pooled connection's tenant setting is reset to an empty string.
+	var leaked int
+	if err := app.QueryRow(ctx, `select count(*) from purchase_order_version`).Scan(&leaked); err == nil && leaked != 0 {
+		t.Fatalf("app role without a tenant sees %d versions", leaked)
+	}
 	// Writes are checked too: the app role cannot insert a row for another tenant.
 	_, err = app.Exec(ctx, `insert into trade_agreement (tenant_id, id, relation, account_code, item_code, currency, unit, price, valid_from)
 		values ($1, $2, 'PRICE', 'ALL', 'ALL', 'USD', 'EA', 1, '2026-01-01')`, testkit.TenantID(12), ids.New())

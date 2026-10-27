@@ -92,6 +92,10 @@ type API struct {
 	priceLookups          atomic.Int64
 
 	purchaseAgreementsCreated atomic.Int64
+
+	orderEdits      atomic.Int64
+	ordersConfirmed atomic.Int64
+	ordersCancelled atomic.Int64
 }
 
 // New returns the API over s using the default approval policy (FR-17.2) and
@@ -123,7 +127,16 @@ func (a *API) Register(r chi.Router) {
 		maintain.Get("/requisition-lines", a.listOpenRequisitionLines)
 		maintain.Post("/requisitions:consolidate", a.consolidateRequisitions)
 		r.With(authz.RequireDuty(dutyPurchaseOrderInquire)).Get("/purchase-orders", a.listOrders)
-		r.With(authz.RequireDuty(dutyPurchaseOrderInquire)).Get("/purchase-orders/{id}", a.getOrder)
+		inquire := r.With(authz.RequireDuty(dutyPurchaseOrderInquire))
+		inquire.Get("/purchase-orders/{id}", a.getOrder)
+		// PO lifecycle (FR-17.7, FR-17.8): PATCH edits or creates a change
+		// version; custom methods (":submit", ":approve", ":reject", ":confirm",
+		// ":cancel") arrive as one path segment and check their own duty in
+		// orderAction, since approve, reject and confirm need PurchaseOrderConfirm.
+		maintain.Patch("/purchase-orders/{id}", a.editOrder)
+		r.Post("/purchase-orders/{id}", a.orderAction)
+		inquire.Get("/purchase-orders/{id}/versions", a.orderVersions)
+		inquire.Get("/purchase-orders/{id}/versions/{n}/diff", a.orderVersionDiff)
 		r.With(authz.RequireDuty(dutyPurchaseOrderMaintain)).Get("/pricing/lookup", a.lookupPrice)
 		ta := r.With(authz.RequireDuty(dutyTradeAgreementMaintain))
 		ta.Post("/trade-agreements", a.createAgreement)
@@ -153,6 +166,9 @@ func (a *API) Metrics() http.Handler {
 			{"purchasing_trade_agreements_created_total", "Trade agreement rows created.", a.agreementsCreated.Load()},
 			{"purchasing_price_lookups_total", "Trade agreement price lookups answered.", a.priceLookups.Load()},
 			{"purchasing_purchase_agreements_created_total", "Purchase agreements created.", a.purchaseAgreementsCreated.Load()},
+			{"purchasing_purchase_order_edits_total", "Purchase order edits accepted.", a.orderEdits.Load()},
+			{"purchasing_purchase_orders_confirmed_total", "Purchase order versions confirmed.", a.ordersConfirmed.Load()},
+			{"purchasing_purchase_orders_cancelled_total", "Purchase orders cancelled.", a.ordersCancelled.Load()},
 		} {
 			fmt.Fprintf(w, "# HELP %[1]s %[2]s\n# TYPE %[1]s counter\n%[1]s %[3]d\n", c.name, c.help, c.value)
 		}

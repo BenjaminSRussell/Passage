@@ -1,9 +1,10 @@
 # purchasing
 
-Passage purchasing service. Wave 17 (PSG-17), slices 1 and 2 of the procurement
+Passage purchasing service. Wave 17 (PSG-17), slices 1 to 3 of the procurement
 context: purchase requisitions with amount/category approval routing,
 consolidation of approved requisition lines into purchase orders, purchase orders
-with persisted totals, purchase agreements with release tracking, trade agreement
+with persisted totals, the PO approval lifecycle with versioned change
+management, purchase agreements with release tracking, trade agreement
 price lookup with explain, and the web workspace module at
 `apps/web/src/modules/purchasing`.
 
@@ -15,12 +16,13 @@ Full ticket scope and the list of what is not yet built are in
 ```
 cmd/purchasing/        entrypoint: dbx.Connect -> dbx.Migrate -> api.Register -> httpx.Serve
 internal/domain/       pure rules: approval bands, trade agreement lookup, PO totals, reapproval,
-                       agreement releases (limits, validity, threshold), consolidation grouping
+                       PO state machine, version snapshots and RFC 6902 diffs, agreement releases (limits, validity, threshold), consolidation grouping
 internal/store/        Postgres repositories (pgx), every transaction via dbx.WithTenantTx
 internal/api/          HTTP handlers under /v1/procurement, duties via authz.RequireDuty
 internal/events/       event types and payloads (dev.passage.procurement.*)
 migrations/            0001_init.sql (tables, sequences, RLS, outbox, idempotency, total trigger)
                        0002_agreements_consolidation.sql (purchase agreements, PO line and requisition line links)
+                       0003_po_lifecycle.sql (PO versions, received/invoiced quantities on PO lines)
 api/openapi.yaml       OpenAPI 3.1 for every route
 events/asyncapi.yaml   AsyncAPI 3 for every event emitted
 charts/purchasing/     Helm chart (probes on /healthz and /readyz, DATABASE_URL from a secret)
@@ -62,6 +64,11 @@ row-level-security test also needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-owner
 | POST `/purchase-orders` | PurchaseOrderMaintain | Idempotency-Key required; missing unit prices come from trade agreements |
 | GET `/purchase-orders` | PurchaseOrderInquire | Newest first; `approvalStatus`, `vendorId`, `limit`, `cursor` |
 | GET `/purchase-orders/{id}` | PurchaseOrderInquire | ETag = row version |
+| PATCH `/purchase-orders/{id}` | PurchaseOrderMaintain | If-Match (row version) required; whole order as on create, `lineNo` names an existing line; see the change rules below |
+| POST `/purchase-orders/{id}:submit` / `:cancel` | PurchaseOrderMaintain | Idempotency-Key and If-Match required |
+| POST `/purchase-orders/{id}:approve` / `:reject` / `:confirm` | PurchaseOrderConfirm | Idempotency-Key and If-Match required; approve and reject stand in for the wave 4 approval task |
+| GET `/purchase-orders/{id}/versions` | PurchaseOrderInquire | Every stored version oldest first, a pending change included |
+| GET `/purchase-orders/{id}/versions/{n}/diff` | PurchaseOrderInquire | RFC 6902 patch from version n−1 to n |
 | GET `/requisition-lines` | PurchaseOrderMaintain | Consolidation queue: OPEN lines of APPROVED requisitions; `sourcing` = NEEDS_SOURCING (no preferred vendor) or HAS_VENDOR, `vendorId`, `limit`, `cursor` |
 | POST `/requisitions:consolidate` | PurchaseOrderMaintain | Idempotency-Key required; one DRAFT PO per legal entity × vendor × currency × site × delivery window (`windowDays`, default 7, 1–60); `vendorId` per line overrides the preferred vendor |
 | POST `/agreements` | AgreementMaintain | Idempotency-Key required; purchase agreement, EFFECTIVE unless `status` = DRAFT; max 500 lines |
@@ -127,7 +134,34 @@ down). Metrics: `GET :9090/metrics` (Prometheus text counters).
   `agreement.threshold.v1` and returns a PRC-AGR-004 warning on the PO. With
   `priceOverride`, the agreement line's unit price and discount price the PO line
   ahead of trade agreements.
-- **Idempotency.** Creates and `:submit` store the key with a hash of the operation
+- **PO approval lifecycle (FR-17.7, BR-17.2).** `DRAFT|REJECTED →:submit→ IN_REVIEW
+  →:approve→ APPROVED →:confirm→ CONFIRMED`, `IN_REVIEW →:reject→ REJECTED`. Confirming
+  anything but APPROVED is PRC-PO-008. `:cancel` is allowed from any status but
+  FINALIZED and CANCELLED when no line has received or invoiced quantity; it cancels
+  every line, gives agreement releases back, re-opens the requisition lines the PO
+  ordered (and their CLOSED requisition) and writes `po.cancelled.v1`. Every action
+  takes the row lock and checks If-Match (stale: 412 PRC-PO-009, BR-17.8).
+- **Versions and change management (FR-17.8).** `:confirm` stores a snapshot of the
+  commercial content (lines in line-number order with cancelled lines kept, charges,
+  total) as version 1 and writes `po.confirmed.v1`. A PATCH before the first
+  confirmation is a plain edit that returns the PO to DRAFT. After it, the edit is
+  diffed against the confirmed snapshot as RFC 6902: no difference is a no-op; with
+  change management on and a reapproval rule firing (default: quantity or price up
+  more than 5 %, or a new line) the change is stored as the next version, unconfirmed,
+  and the PO goes to IN_REVIEW; otherwise the version is confirmed at once and
+  `po.confirmed.v1` plus `poversion.created.v1` are written. Re-approving and
+  confirming a pending change writes the same two events. Editing a pending change
+  back to the confirmed content drops it and returns the PO to CONFIRMED.
+- **Change limits (BR-17.7, BR-17.9, BR-17.10).** A line left out of the PATCH is
+  cancelled (it stays in later versions as CANCELLED) and returns what it held. No
+  line may drop below its received quantity, nor below invoiced (PRC-PO-007).
+  Vendor, currency and legal entity never change; site and warehouse not after the
+  first confirmation. A line's requisition and agreement links cannot change and a
+  new line cannot have them (PRC-PO-010); a line drawn on an agreement keeps its
+  product, unit, quantity and amount, and a new delivery date must stay within the
+  agreement validity (PRC-AGR-005). An existing line that omits `unitPrice` keeps its
+  price and price source while its product and unit are unchanged.
+- **Idempotency.** Creates and custom methods store the key with a hash of the operation
   and body; a replay returns the original resource, a different body (or endpoint)
   with the same key is `idempotency_key_reuse`.
 
@@ -141,7 +175,7 @@ store codes are returned as the `code` field.
 | COM-0001 | 400/422 | Malformed body or invalid field (`errors` names the field) |
 | AUTH-0001 | 401 | Missing tenant or user in the caller context |
 | PRC-IDEM-001 | 400 | Idempotency-Key header missing |
-| PRC-IFMATCH-001 | 428 | If-Match header missing on a custom method |
+| PRC-IFMATCH-001 | 428 | If-Match header missing on a custom method or PATCH |
 | PRC-IFMATCH-002 | 400 | If-Match is not a version number |
 | AUTH-0003 | 403 | Caller lacks the route's duty, or the legal entity is outside the caller's scope |
 | PRC-REQ-002 | 422 | Requisition has more than 500 lines |
@@ -150,13 +184,19 @@ store codes are returned as the `code` field.
 | PRC-REQ-NOT-FOUND | 404 | Requisition not found |
 | PRC-REQ-STATE | 409 | Requisition is not in a state that allows the action |
 | PRC-PO-NOT-FOUND | 404 | Purchase order not found |
+| PRC-PO-STATE | 422 | The PO's approval status does not allow the edit or action, or the line is cancelled |
+| PRC-PO-007 | 422 | A line quantity would drop below received or invoiced |
+| PRC-PO-008 | 422 | Only an APPROVED PO (with a pending change, after the first confirmation) can be confirmed |
+| PRC-PO-009 | 412 | If-Match is not the PO's current row version |
+| PRC-PO-010 | 422 | An edit changes a line's requisition or agreement link, adds a linked line, or changes an agreement line's product, unit, quantity or amount |
+| PRC-PO-VERSION-NOT-FOUND | 404 | The PO has no such version |
 | PRC-TA-NOT-FOUND | 404 | Trade agreement not found |
 | PRC-TA-002 | 409 | Overlapping ACTIVE trade agreement row with equal specificity and valid_from |
 | PRC-VERSION-CONFLICT | 409 | Requisition or agreement is at another version than If-Match |
 | PRC-PRICE-001 | 422 | No trade agreement price for the line; enter a unit price |
 | PRC-PRICE-002 | 422 | Unknown tie rule |
 | PRC-PO-TOTAL | 500 (COM-0500) | Database total identity violated; the trigger refuses the write and the client sees COM-0500. Should not occur because totals come from `domain.Price` |
-| PRC-ACTION-001 | 404 | Unknown custom action on a requisition or agreement |
+| PRC-ACTION-001 | 404 | Unknown custom action on a requisition, purchase order or agreement |
 | PRC-REQ-005 | 422 | A PO line names a requisition line of another legal entity |
 | PRC-REQ-LINE-NOT-FOUND | 404 | Requisition line not found |
 | PRC-CONS-001 | 422 | Consolidation window outside 1–60 days |

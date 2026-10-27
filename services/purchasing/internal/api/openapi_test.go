@@ -12,7 +12,8 @@ import (
 )
 
 // openAPIOperations reads "METHOD path" pairs from api/openapi.yaml by
-// indentation: two spaces for a path under paths:, four for its methods.
+// indentation: two spaces for a path under paths:, four for its methods. It
+// fails the test when a path key repeats.
 func openAPIOperations(t *testing.T) map[string]bool {
 	t.Helper()
 	f, err := os.Open("../../api/openapi.yaml")
@@ -21,6 +22,7 @@ func openAPIOperations(t *testing.T) map[string]bool {
 	}
 	defer f.Close()
 	ops := map[string]bool{}
+	seen := map[string]bool{}
 	inPaths, path := false, ""
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
@@ -31,6 +33,11 @@ func openAPIOperations(t *testing.T) map[string]bool {
 		case !inPaths:
 		case strings.HasPrefix(line, "  /"):
 			path = strings.TrimSuffix(strings.TrimSpace(line), ":")
+			// A repeated path key is invalid YAML that lenient parsers merge silently.
+			if seen[path] {
+				t.Errorf("path %s appears twice in openapi.yaml; put all its methods under one key", path)
+			}
+			seen[path] = true
 		case strings.HasPrefix(line, "    ") && !strings.HasPrefix(line, "     "):
 			method := strings.TrimSuffix(strings.TrimSpace(line), ":")
 			switch method {
@@ -44,8 +51,9 @@ func openAPIOperations(t *testing.T) map[string]bool {
 
 // customMethods lists the ":action" suffixes served by one POST route.
 var customMethods = map[string][]string{
-	"/v1/procurement/requisitions/{id}": {"submit"},
-	"/v1/procurement/agreements/{id}":   {"activate", "hold", "close"},
+	"/v1/procurement/requisitions/{id}":    {"submit"},
+	"/v1/procurement/agreements/{id}":      {"activate", "hold", "close"},
+	"/v1/procurement/purchase-orders/{id}": {"submit", "approve", "reject", "confirm", "cancel"},
 }
 
 func TestOpenAPI_MatchesRegisteredRoutes(t *testing.T) {

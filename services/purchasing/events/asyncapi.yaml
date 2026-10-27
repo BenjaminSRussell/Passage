@@ -1,9 +1,9 @@
 asyncapi: 3.0.0
 info:
   title: Passage Purchasing events
-  version: 0.3.0
+  version: 0.4.0
   description: |
-    Events published by the purchasing service in wave 17 slices 1 and 2. Each is written to the
+    Events published by the purchasing service in wave 17 slices 1 to 3. Each is written to the
     outbox in the same transaction as the state change and relayed by Debezium to the topic
     passage.<context>.<entity>. Payload structs live in internal/events. Schema evolution is
     additive only (BACKWARD_TRANSITIVE).
@@ -23,6 +23,20 @@ channels:
     messages:
       agreementThreshold:
         $ref: '#/components/messages/AgreementThreshold'
+  po:
+    address: passage.procurement.po
+    description: Purchase order confirmation and cancellation; the Kafka key is the PO id so events stay ordered.
+    messages:
+      poConfirmed:
+        $ref: '#/components/messages/POConfirmed'
+      poCancelled:
+        $ref: '#/components/messages/POCancelled'
+  poversion:
+    address: passage.procurement.poversion
+    description: Confirmed purchase order versions above 1 (change orders); the Kafka key is the PO id.
+    messages:
+      poVersionCreated:
+        $ref: '#/components/messages/POVersionCreated'
 operations:
   publishRequisitionSubmitted:
     action: send
@@ -42,6 +56,24 @@ operations:
       $ref: '#/channels/agreement'
     messages:
       - $ref: '#/channels/agreement/messages/agreementThreshold'
+  publishPOConfirmed:
+    action: send
+    channel:
+      $ref: '#/channels/po'
+    messages:
+      - $ref: '#/channels/po/messages/poConfirmed'
+  publishPOCancelled:
+    action: send
+    channel:
+      $ref: '#/channels/po'
+    messages:
+      - $ref: '#/channels/po/messages/poCancelled'
+  publishPOVersionCreated:
+    action: send
+    channel:
+      $ref: '#/channels/poversion'
+    messages:
+      - $ref: '#/channels/poversion/messages/poVersionCreated'
 components:
   messages:
     RequisitionSubmitted:
@@ -81,6 +113,45 @@ components:
               type: { type: string, const: dev.passage.procurement.agreement.threshold.v1 }
               subject: { type: string, format: uuid, description: agreement id }
               data: { $ref: '#/components/schemas/AgreementThresholdData' }
+    POConfirmed:
+      name: POConfirmed
+      title: po.confirmed.v1
+      summary: A version of a purchase order was confirmed, by :confirm or by a post-confirmation change that needed no re-approval (FR-17.7, FR-17.8). Carries the whole order at that version.
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.po.confirmed.v1 }
+              subject: { type: string, format: uuid, description: purchase order id }
+              data: { $ref: '#/components/schemas/POConfirmedData' }
+    POVersionCreated:
+      name: POVersionCreated
+      title: poversion.created.v1
+      summary: A confirmed purchase order version above 1 (change order, FR-17.8), written right after po.confirmed in the same transaction. The PRD calls it po.version.created; the platform type grammar allows one entity segment.
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.poversion.created.v1 }
+              subject: { type: string, format: uuid, description: purchase order id }
+              data: { $ref: '#/components/schemas/POVersionCreatedData' }
+    POCancelled:
+      name: POCancelled
+      title: po.cancelled.v1
+      summary: A purchase order with nothing received or invoiced was cancelled (BR-17.2); its open lines are CANCELLED and their remaining quantity is released.
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.po.cancelled.v1 }
+              subject: { type: string, format: uuid, description: purchase order id }
+              data: { $ref: '#/components/schemas/POCancelledData' }
   schemas:
     Envelope:
       type: object
@@ -91,7 +162,7 @@ components:
         id: { type: string, format: uuid }
         source: { type: string, const: /passage/procurement/purchasing }
         type: { type: string }
-        subject: { type: string, format: uuid, description: id of the aggregate (requisition or agreement) }
+        subject: { type: string, format: uuid, description: id of the aggregate (requisition, agreement or purchase order) }
         time: { type: string, format: date-time }
         datacontenttype: { type: string, const: application/json }
         tenantid: { type: string, format: uuid }
@@ -138,3 +209,78 @@ components:
         pct: { type: string, description: decimal string, released percentage of the commitment after the release }
         overrun: { type: boolean, description: true when a SOFT limit was exceeded }
         expiry: { type: string, format: date, description: the agreement valid_to; absent when open-ended }
+    POConfirmedData:
+      type: object
+      required: [po_id, number, version_no, legal_entity_id, vendor_id, currency, subtotal, discount_total, charges_total, tax_total, total, lines]
+      additionalProperties: false
+      properties:
+        po_id: { type: string, format: uuid }
+        number: { type: string, example: PO-00000001 }
+        version_no: { type: integer, minimum: 1 }
+        legal_entity_id: { type: string, format: uuid }
+        vendor_id: { type: string, format: uuid }
+        site_id: { type: string, format: uuid }
+        warehouse_id: { type: string, format: uuid }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        subtotal: { type: string, description: decimal string }
+        discount_total: { type: string, description: decimal string }
+        charges_total: { type: string, description: decimal string }
+        tax_total: { type: string, description: decimal string }
+        total: { type: string, description: decimal string; subtotal − discount_total + charges_total + tax_total }
+        lines:
+          type: array
+          description: Every line, cancelled ones included with status CANCELLED so consumers can close what they hold.
+          items:
+            type: object
+            required: [line_no, qty, unit, unit_price, price_unit, line_amount, delivery_date, status]
+            additionalProperties: false
+            properties:
+              line_no: { type: integer }
+              product_id: { type: string, format: uuid }
+              description: { type: string }
+              qty: { type: string, description: decimal string }
+              unit: { type: string }
+              unit_price: { type: string, description: decimal string }
+              price_unit: { type: string, description: decimal string }
+              line_amount: { type: string, description: decimal string }
+              delivery_date: { type: string, format: date }
+              status: { type: string, enum: [OPEN, RECEIVED, INVOICED, CANCELLED] }
+    POVersionCreatedData:
+      type: object
+      required: [po_id, number, version_no, patch, reapproval_required]
+      additionalProperties: false
+      properties:
+        po_id: { type: string, format: uuid }
+        number: { type: string, example: PO-00000001 }
+        version_no: { type: integer, minimum: 2 }
+        patch:
+          type: array
+          description: RFC 6902 operations turning the previous version's snapshot into this one; paths such as /lines/0/qty index lines by line number order.
+          items:
+            type: object
+            required: [op, path]
+            properties:
+              op: { type: string, enum: [add, remove, replace] }
+              path: { type: string }
+              value: {}
+        reapproval_required: { type: boolean, description: true when the change went back through approval before this confirmation }
+    POCancelledData:
+      type: object
+      required: [po_id, number, version_no, prior_status, lines]
+      additionalProperties: false
+      properties:
+        po_id: { type: string, format: uuid }
+        number: { type: string, example: PO-00000001 }
+        version_no: { type: integer, description: confirmed version at cancellation; 0 when never confirmed }
+        prior_status: { type: string, enum: [DRAFT, IN_REVIEW, APPROVED, REJECTED, CONFIRMED] }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [line_no, unit, remaining_qty]
+            additionalProperties: false
+            properties:
+              line_no: { type: integer }
+              product_id: { type: string, format: uuid }
+              unit: { type: string }
+              remaining_qty: { type: string, description: decimal string still to be received when cancelled }
