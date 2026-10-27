@@ -71,6 +71,12 @@ type Store interface {
 	ActOnRFQ(ctx context.Context, id string, ifMatch int, action string, idem Idem) (domain.RFQ, error)
 	RecordRFQReplies(ctx context.Context, rfqID, vendorID string, replies []domain.RFQReply, idem Idem) (domain.RFQ, error)
 	AwardRFQ(ctx context.Context, id string, ifMatch int, awards []domain.Award, orders []AwardedOrder, today domain.Day, idem Idem) (domain.RFQ, []PurchaseOrder, error)
+	SetRFQScores(ctx context.Context, id string, ifMatch int, vendorID string, scores []domain.VendorScore, now time.Time) (domain.RFQ, error)
+	OpenSealedRFQ(ctx context.Context, id, userID string, at time.Time) (domain.RFQ, error)
+	PutInvoicingPlan(ctx context.Context, poID string, lineNo, ifMatch int, in InvoicingPlanInput) (PlanResult, error)
+	GetInvoicingPlan(ctx context.Context, poID string, lineNo int) (PlanResult, error)
+	ListInvoicingPlans(ctx context.Context, poID string) ([]domain.InvoicingPlan, error)
+	DeleteInvoicingPlan(ctx context.Context, poID string, lineNo, ifMatch int) (int, error)
 	Ping(ctx context.Context) error
 }
 

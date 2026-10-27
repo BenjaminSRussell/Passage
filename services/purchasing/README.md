@@ -1,13 +1,13 @@
 # purchasing
 
-Passage purchasing service. Wave 17 (PSG-17), slices 1 to 4 of the procurement
+Passage purchasing service. Wave 17 (PSG-17), slices 1 to 5 of the procurement
 context: purchase requisitions with amount/category approval routing,
 consolidation of approved requisition lines into purchase orders, purchase orders
 with persisted totals, the PO approval lifecycle with versioned change
 management, purchase agreements with release tracking, trade agreement
 price lookup with explain, the RFQ cycle (send, replies, compare, award to
-purchase orders), and the web workspace module at
-`apps/web/src/modules/purchasing`.
+purchase orders) with sealed bids and weighted scoring, invoicing plans on PO
+lines, and the web workspace module at `apps/web/src/modules/purchasing`.
 
 Full ticket scope and the list of what is not yet built are in
 [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
@@ -18,7 +18,8 @@ Full ticket scope and the list of what is not yet built are in
 cmd/purchasing/        entrypoint: dbx.Connect -> dbx.Migrate -> api.Register -> httpx.Serve
 internal/domain/       pure rules: approval bands, trade agreement lookup, PO totals, reapproval,
                        PO state machine, version snapshots and RFC 6902 diffs, agreement releases (limits, validity, threshold), consolidation grouping,
-                       RFQ state machine, reply ranking and award checks
+                       RFQ state machine, reply ranking and award checks, sealed bids and weighted scoring,
+                       invoicing plan generation and reproportioning
 internal/store/        Postgres repositories (pgx), every transaction via dbx.WithTenantTx
 internal/api/          HTTP handlers under /v1/procurement, duties via authz.RequireDuty
 internal/events/       event types and payloads (dev.passage.procurement.*)
@@ -26,6 +27,8 @@ migrations/            0001_init.sql (tables, sequences, RLS, outbox, idempotenc
                        0002_agreements_consolidation.sql (purchase agreements, PO line and requisition line links)
                        0003_po_lifecycle.sql (PO versions, received/invoiced quantities on PO lines)
                        0004_rfq.sql (RFQs, lines, invitations, replies; PO line link to the awarded reply)
+                       0005_rfq_sealed_scoring.sql (sealed flag and opening log, scoring criteria, vendor scores)
+                       0006_invoicing_plan.sql (invoicing plans and their rows per PO line)
 api/openapi.yaml       OpenAPI 3.1 for every route
 events/asyncapi.yaml   AsyncAPI 3 for every event emitted
 charts/purchasing/     Helm chart (probes on /healthz and /readyz, DATABASE_URL from a secret)
@@ -72,6 +75,10 @@ row-level-security test also needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-owner
 | POST `/purchase-orders/{id}:approve` / `:reject` / `:confirm` | PurchaseOrderConfirm | Idempotency-Key and If-Match required; approve and reject stand in for the wave 4 approval task |
 | GET `/purchase-orders/{id}/versions` | PurchaseOrderInquire | Every stored version oldest first, a pending change included |
 | GET `/purchase-orders/{id}/versions/{n}/diff` | PurchaseOrderInquire | RFC 6902 patch from version n−1 to n |
+| GET `/purchase-orders/{id}/invoicing-plans` | PurchaseOrderInquire | Every invoicing plan of the PO in line order |
+| GET `/purchase-orders/{id}/lines/{lineNo}/invoicing-plan` | PurchaseOrderInquire | One line's plan; ETag = PO row version |
+| PUT `/purchase-orders/{id}/lines/{lineNo}/invoicing-plan` | PurchaseOrderMaintain | If-Match (PO row version) required; replaces the plan, bumps the row version (new ETag) |
+| DELETE `/purchase-orders/{id}/lines/{lineNo}/invoicing-plan` | PurchaseOrderMaintain | If-Match required; 204 with the new row version as ETag |
 | GET `/requisition-lines` | PurchaseOrderMaintain | Consolidation queue: OPEN lines of APPROVED requisitions; `sourcing` = NEEDS_SOURCING (no preferred vendor) or HAS_VENDOR, `vendorId`, `limit`, `cursor` |
 | POST `/requisitions:consolidate` | PurchaseOrderMaintain | Idempotency-Key required; one DRAFT PO per legal entity × vendor × currency × site × delivery window (`windowDays`, default 7, 1–60); `vendorId` per line overrides the preferred vendor |
 | POST `/agreements` | AgreementMaintain | Idempotency-Key required; purchase agreement, EFFECTIVE unless `status` = DRAFT; max 500 lines |
@@ -82,12 +89,13 @@ row-level-security test also needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-owner
 | POST `/trade-agreements` | TradeAgreementMaintain | PRICE relation only in this slice; PRC-TA-002 on an overlapping row |
 | GET `/trade-agreements` | TradeAgreementMaintain | Newest first; `accountId`, `itemId`, `status`, `limit`, `cursor` |
 | GET `/trade-agreements/{id}` | TradeAgreementMaintain | |
-| POST `/rfqs` | RFQMaintain | Idempotency-Key required; DRAFT RFQ with lines (max 500), a future `replyDeadline` and `rankingRule` LOWEST_PRICE (default) or LEAD_TIME |
+| POST `/rfqs` | RFQMaintain | Idempotency-Key required; DRAFT RFQ with lines (max 500), a future `replyDeadline`, `rankingRule` LOWEST_PRICE (default), LEAD_TIME or WEIGHTED_SCORE, `sealed`, and scoring `criteria` (name, weight; max 20; required for WEIGHTED_SCORE) |
 | GET `/rfqs` | RFQMaintain or RFQAward | Newest first; `status` (comma list), `limit`, `cursor`; rows carry line, vendor and reply counts |
-| GET `/rfqs/{id}` | RFQMaintain or RFQAward | Lines, invitations and replies; ETag = version |
+| GET `/rfqs/{id}` | RFQMaintain or RFQAward | Lines, invitations, replies, criteria and scores (replies and scores hidden while sealed); ETag = version |
 | POST `/rfqs/{id}:send` / `:close` / `:cancel` | RFQMaintain | Idempotency-Key and If-Match (version) required; `:send` takes `vendorIds` |
 | POST `/rfqs/{id}/replies` | RFQMaintain | Idempotency-Key required; one invited vendor's prices for some lines, in one currency; late lines come back with PRC-RFQ-003 warnings |
-| GET `/rfqs/{id}/compare` | RFQMaintain or RFQAward | Ranking per line by the RFQ rule or `rule`; late replies listed as excluded |
+| GET `/rfqs/{id}/compare` | RFQMaintain or RFQAward | Ranking per line by the RFQ rule or `rule`, with each scored vendor's weighted score; late replies listed as excluded; 403 PRC-RFQ-004 for a sealed RFQ before its deadline |
+| PUT `/rfqs/{id}/scores/{vendorId}` | RFQAward | If-Match (version) required; `scores` (criterion, 1–10) of an invited vendor; bumps the version |
 | POST `/rfqs/{id}:award` | RFQAward | Idempotency-Key and If-Match required; `awards` (line, reply, override reason); answers the RFQ and the DRAFT POs created |
 
 Writes for a legal entity outside the caller's `X-Passage-Legal-Entity` scope are
@@ -189,6 +197,34 @@ down). Metrics: `GET :9090/metrics` (Prometheus text counters).
   plus the reply lead time, or on the line's required date when that is later. The
   POs, the awarded replies, the AWARDED status and `rfq.awarded.v1` are written in
   one transaction; `:send` writes `rfq.sent.v1`.
+- **Sealed bids and scoring (FR-17.19, BR-17.16).** An RFQ created with `sealed`
+  hides its replies and scores until `replyDeadline`: reads answer
+  `repliesSealed=true` with no replies (the `replyCount` still counts them), and
+  compare, scoring and award are 403 PRC-RFQ-004. At the deadline they open; the
+  first read or comparison after it stamps `openedAt`/`openedBy` (AC-17.14). A late
+  reply to a sealed RFQ is refused (PRC-RFQ-007) instead of flagged. An RFQ may carry
+  up to 20 scoring criteria (unique name, positive weight); holders of RFQAward score
+  each invited vendor 1–10 per criterion while the RFQ is SENT, REPLIES_OPEN or
+  CLOSED. A vendor's weighted score is Σ(weight × score) ÷ Σ weight to 4 decimals,
+  an unscored criterion counting 0. WEIGHTED_SCORE ranks by it, highest first, an
+  unscored vendor after every scored one, then by price and lead time; the other
+  rules show it alongside.
+- **Invoicing plans (FR-17.21, BR-17.17).** A PO line that is not cancelled, on a PO
+  that is not cancelled or finalized (PRC-IP-003), may carry one plan. PERIODIC:
+  `periods` rows of `amountPerPeriod` from `start`'s month, monthly or quarterly, on
+  `billingDay` (default the start day; a day past a month's end falls on its last
+  day); periods × amount must equal the line amount (PRC-IP-001). PARTIAL:
+  milestones with non-decreasing dates, all by percent (Σ = 100; amounts shared to
+  the currency's minor unit by largest remainder, so they sum to the line amount
+  exactly; a milestone that rounds to nothing is PRC-IP-001) or all by amount (Σ =
+  line amount). `settleWithoutReceipt` (default true) tells wave 18 to invoice due
+  rows without a receipt. A PO edit that changes a line amount reproportions the
+  plan in the same transaction: invoiced rows keep their amount, open rows share the
+  rest in proportion to their amounts (rows that come to zero are dropped); a line
+  amount below what is invoiced, or an increase with no open row, refuses the edit
+  (PRC-IP-001). Cancelling the line or the PO removes its plan, unless a row is
+  invoiced (PRC-IP-002), which also blocks replacing or deleting the plan. Plan
+  writes take If-Match on the PO row version and bump it.
 - **Idempotency.** Creates and custom methods store the key with a hash of the operation
   and body; a replay returns the original resource, a different body (or endpoint)
   with the same key is `idempotency_key_reuse`.
@@ -244,6 +280,13 @@ store codes are returned as the `code` field.
 | PRC-RFQ-003 | warning / 422 | Warning on a reply after the deadline; 422 when such a reply is awarded without an override reason |
 | PRC-RFQ-005 | 422 | Award rule: line not on the RFQ, line awarded twice, reply of another line, reply expired, or no awards |
 | PRC-RFQ-006 | 422 | A late reply cannot replace the vendor's on-time reply to the line |
+| PRC-RFQ-004 | 403 | A sealed RFQ's replies cannot be compared, scored or awarded before its reply deadline |
+| PRC-RFQ-007 | 422 | A reply after the deadline to a sealed RFQ is rejected |
+| PRC-IP-001 | 422 | Invoicing plan total ≠ line amount, percents not 100, a milestone rounding to nothing, or a line amount change the plan cannot absorb |
+| PRC-IP-002 | 422 | The plan has invoiced rows: it cannot be replaced or removed, nor its line cancelled |
+| PRC-IP-003 | 422 | The PO is cancelled or finalized, or the line is cancelled |
+| PRC-IP-NOT-FOUND | 404 | The PO line has no invoicing plan |
+| PRC-PO-LINE-NOT-FOUND | 404 | The PO has no line with that number |
 | idempotency_key_reuse | 422 | Idempotency key reused with a different body or on another endpoint |
 
 ## Dependencies
@@ -255,6 +298,7 @@ platform go.mod).
 ## Web module
 
 `apps/web/src/modules/purchasing` gives the procurement workspace: requisition,
-purchase order, purchase agreement and trade agreement lists with create forms and
-detail pages, the consolidation board, and the price lookup with explain. See its
+RFQ, purchase order, purchase agreement and trade agreement lists with create forms
+and detail pages, the consolidation board, the price lookup with explain, sealed-bid
+and scoring screens on the RFQ, and the invoicing plan page per PO line. See its
 README.

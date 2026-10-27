@@ -20,11 +20,13 @@ import {
   describeProblem,
   editPurchaseOrder,
   getPurchaseOrder,
+  listInvoicingPlans,
   listPurchaseOrderVersions,
   listPurchaseOrders,
   newIdempotencyKey,
   type ApprovalStatus,
   type ChargeCalc,
+  type InvoicingPlan,
   type PatchOp,
   type PurchaseOrder,
   type PurchaseOrderAction,
@@ -626,7 +628,28 @@ function PriceSource({ source }: { source: string }) {
   return <Badge tone="neutral">{statusLabel(source)}</Badge>;
 }
 
-const lineColumns = (currency: string): DataTableColumn<PurchaseOrderLine>[] => [
+/** The invoicing plan cell of a line: its plan, or a link to add one (FR-17.21). */
+function PlanCell({ poId, line, plan, closed }: { poId: string; line: PurchaseOrderLine; plan?: InvoicingPlan; closed: boolean }) {
+  const to = `/purchasing/purchase-orders/${poId}/lines/${line.lineNo}/invoicing-plan`;
+  if (plan) {
+    return (
+      <Link className={styles.link} to={to} aria-label={`Invoicing plan of line ${line.lineNo}`}>
+        {plan.kind === "PERIODIC" ? "Periodic" : "Milestones"}, {plan.rows.length} row{plan.rows.length === 1 ? "" : "s"}
+      </Link>
+    );
+  }
+  if (closed || line.status === "CANCELLED") return <>—</>;
+  return (
+    <Link className={styles.link} to={to} aria-label={`Add an invoicing plan to line ${line.lineNo}`}>
+      Add plan
+    </Link>
+  );
+}
+
+const lineColumns = (
+  currency: string,
+  plan?: { poId: string; byLine: Map<number, InvoicingPlan>; closed: boolean },
+): DataTableColumn<PurchaseOrderLine>[] => [
   { key: "lineNo", header: "Line", align: "end" },
   { key: "item", header: "Item", render: (l) => l.description || <ShortId id={l.productId} /> },
   { key: "qty", header: "Quantity", align: "end", render: (l) => `${l.qty} ${l.unit}` },
@@ -638,6 +661,15 @@ const lineColumns = (currency: string): DataTableColumn<PurchaseOrderLine>[] => 
   { key: "taxAmount", header: "Tax", align: "end", render: (l) => money(l.taxAmount, currency) },
   { key: "deliveryDate", header: "Delivery", mono: true },
   { key: "status", header: "Status", render: (l) => <StatusBadge status={l.status} /> },
+  ...(plan
+    ? [
+        {
+          key: "invoicingPlan",
+          header: "Invoicing plan",
+          render: (l: PurchaseOrderLine) => <PlanCell poId={plan.poId} line={l} plan={plan.byLine.get(l.lineNo)} closed={plan.closed} />,
+        },
+      ]
+    : []),
 ];
 
 interface ActionChoice {
@@ -758,6 +790,7 @@ export function PurchaseOrderDetailPage() {
   const po = changed ?? resource.data?.body ?? null;
   const actionKey = useMemo(() => newIdempotencyKey(), [po?.rowVersion]);
   const versions = useResource((signal) => listPurchaseOrderVersions(id, signal), [id, po?.rowVersion]);
+  const plans = useResource((signal) => listInvoicingPlans(id, signal), [id, po?.rowVersion]);
 
   async function run(action: PurchaseOrderAction) {
     if (!po) return;
@@ -905,7 +938,17 @@ export function PurchaseOrderDetailPage() {
           <dd className={styles.grandTotal}>{money(po.total, po.currency)}</dd>
         </dl>
       </Card>
-      <DataTable label="Purchase order lines" columns={lineColumns(po.currency)} rows={po.lines} getRowKey={(l) => String(l.lineNo)} />
+      {plans.error ? <LoadError what="the invoicing plans" error={plans.error} onRetry={plans.reload} /> : null}
+      <DataTable
+        label="Purchase order lines"
+        columns={lineColumns(po.currency, {
+          poId: po.id,
+          byLine: new Map((plans.data ?? []).map((p) => [p.lineNo, p])),
+          closed: po.approvalStatus === "CANCELLED" || po.approvalStatus === "FINALIZED",
+        })}
+        rows={po.lines}
+        getRowKey={(l) => String(l.lineNo)}
+      />
       <DataTable
         label="Charges"
         columns={[

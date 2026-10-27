@@ -335,6 +335,9 @@ func cancelOrder(ctx context.Context, tx pgx.Tx, cur PurchaseOrder) error {
 	if err := releaseLines(ctx, tx, cur.ID, open); err != nil {
 		return err
 	}
+	if err := syncInvoicingPlans(ctx, tx, cur.ID); err != nil {
+		return err
+	}
 	return enqueue(ctx, tx, "purchase_order", cur.ID, purchasingevents.POCancelled, data)
 }
 
@@ -522,8 +525,8 @@ func lockPurchaseOrder(ctx context.Context, tx pgx.Tx, id string) error {
 }
 
 // applyLines writes next's lines (updating existing line numbers, inserting
-// new ones), cancels the removed lines and returns what they held, and
-// replaces the header charges.
+// new ones), cancels the removed lines and returns what they held, replaces
+// the header charges, and brings the lines' invoicing plans in step (BR-17.17).
 func applyLines(ctx context.Context, tx pgx.Tx, next PurchaseOrder, removed []PurchaseOrderLine) error {
 	p, _ := tenant.FromContext(ctx)
 	for _, l := range removed {
@@ -566,7 +569,7 @@ func applyLines(ctx context.Context, tx pgx.Tx, next PurchaseOrder, removed []Pu
 			return err
 		}
 	}
-	return nil
+	return syncInvoicingPlans(ctx, tx, next.ID)
 }
 
 // updateHeader writes approval status, confirmed version number, site,

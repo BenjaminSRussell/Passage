@@ -61,6 +61,9 @@ type fakeStore struct {
 	// RFQ cycle: the one stored RFQ and what the RFQ methods received.
 	rfq    *domain.RFQ
 	rfqLog rfqLog
+
+	// Invoicing plans: what the plan methods received and what they answer.
+	planLog planLog
 }
 
 func newFake() *fakeStore {

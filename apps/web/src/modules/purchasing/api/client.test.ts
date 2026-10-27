@@ -7,6 +7,7 @@ import {
   compareRFQ,
   changePurchaseAgreement,
   consolidateRequisitions,
+  deleteInvoicingPlan,
   describeProblem,
   editPurchaseOrder,
   listOpenRequisitionLines,
@@ -14,6 +15,8 @@ import {
   listPurchaseOrders,
   listRFQs,
   lookupPrice,
+  putInvoicingPlan,
+  scoreRFQVendor,
   submitRequisition,
 } from "./client";
 
@@ -191,5 +194,24 @@ describe("purchasing API client", () => {
     expect(closeUrl).toBe("/api/v1/procurement/rfqs/q1:close");
     expect(closeInit.body).toBeUndefined();
     expect(closeInit.headers).toMatchObject({ "If-Match": '"5"', "Idempotency-Key": "key-c" });
+  });
+
+  it("puts plans and scores with If-Match and reads the new row version from a 204 delete", async () => {
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) =>
+      init.method === "DELETE" ? new Response(null, { status: 204, headers: { ETag: '"9"' } }) : jsonResponse({ poRowVersion: 8 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const input = { kind: "PARTIAL" as const, milestones: [{ date: "2027-02-01", percent: "100" }], settleWithoutReceipt: true };
+    expect((await putInvoicingPlan("p1", 2, 7, input)).body.poRowVersion).toBe(8);
+    expect(await deleteInvoicingPlan("p1", 2, 8)).toBe(9);
+    await scoreRFQVendor("q1", "v1", 4, [{ criterionId: "c1", score: 7 }]);
+    const calls = fetchMock.mock.calls as unknown as [string, RequestInit][];
+    expect(calls.map(([url, init]) => `${init.method} ${url} ${(init.headers as Record<string, string>)["If-Match"]}`)).toEqual([
+      'PUT /api/v1/procurement/purchase-orders/p1/lines/2/invoicing-plan "7"',
+      'DELETE /api/v1/procurement/purchase-orders/p1/lines/2/invoicing-plan "8"',
+      'PUT /api/v1/procurement/rfqs/q1/scores/v1 "4"',
+    ]);
+    expect(JSON.parse(String(calls[0][1].body))).toEqual(input);
+    expect(JSON.parse(String(calls[2][1].body))).toEqual({ scores: [{ criterionId: "c1", score: 7 }] });
   });
 });

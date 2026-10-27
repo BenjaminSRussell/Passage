@@ -423,7 +423,7 @@ export function newIdempotencyKey(): string {
 }
 
 async function send<T>(
-  method: "GET" | "POST" | "PATCH",
+  method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE",
   path: string,
   options: { body?: unknown; headers?: Record<string, string>; signal?: AbortSignal } = {},
 ): Promise<{ body: T; etag: string | null }> {
@@ -447,7 +447,9 @@ async function send<T>(
     }
     throw new ProcurementApiError({ ...problem, status: problem.status ?? res.status });
   }
-  return { body: (await res.json()) as T, etag: res.headers.get("ETag") };
+  // 204 No Content (DELETE) has no body to parse.
+  const body = res.status === 204 ? (undefined as T) : ((await res.json()) as T);
+  return { body, etag: res.headers.get("ETag") };
 }
 
 /** Builds a query string from defined, non-blank values. */
@@ -592,7 +594,7 @@ export function consolidateRequisitions(input: ConsolidationInput, idempotencyKe
 // --- Requests for quotation (FR-17.4, BR-17.11) ---
 
 export type RFQStatus = "DRAFT" | "SENT" | "REPLIES_OPEN" | "CLOSED" | "AWARDED" | "CANCELLED";
-export type RankingRule = "LOWEST_PRICE" | "LEAD_TIME";
+export type RankingRule = "LOWEST_PRICE" | "LEAD_TIME" | "WEIGHTED_SCORE";
 export type RFQAction = "send" | "close" | "cancel";
 
 export interface RFQLine {
@@ -627,6 +629,21 @@ export interface RFQReply {
   overrideReason?: string;
 }
 
+/** One weighted criterion of an RFQ's scoring group (FR-17.19). */
+export interface ScoringCriterion {
+  id: string;
+  seq: number;
+  name: string;
+  weight: string;
+}
+
+/** The buyer's 1–10 score of one invited vendor on one criterion. */
+export interface VendorScore {
+  vendorId: string;
+  criterionId: string;
+  score: number;
+}
+
 export interface RFQ {
   id: string;
   number: string;
@@ -634,10 +651,21 @@ export interface RFQ {
   status: RFQStatus;
   replyDeadline: string;
   rankingRule: RankingRule;
+  /** Replies stay unreadable until the deadline (BR-17.16). */
+  sealed?: boolean;
+  /** True while a sealed RFQ is before its deadline: replies and scores are then empty. */
+  repliesSealed?: boolean;
+  /** Reply lines recorded, counted even while sealed. */
+  replyCount?: number;
+  /** When and by whom the sealed replies were first shown after the deadline (AC-17.14). */
+  openedAt?: string;
+  openedBy?: string;
   version: number;
   lines: RFQLine[];
   invitations: RFQInvitation[];
   replies: RFQReply[];
+  criteria?: ScoringCriterion[];
+  scores?: VendorScore[];
   createdAt: string;
   updatedAt: string;
   /** Returned when replies are recorded: PRC-RFQ-003 for each late line. */
@@ -651,6 +679,7 @@ export interface RFQSummary {
   status: RFQStatus;
   replyDeadline: string;
   rankingRule: RankingRule;
+  sealed?: boolean;
   lineCount: number;
   vendorCount: number;
   replyCount: number;
@@ -663,6 +692,9 @@ export interface RFQInput {
   /** RFC 3339 instant, in the future. */
   replyDeadline: string;
   rankingRule?: RankingRule;
+  sealed?: boolean;
+  /** The scoring group; WEIGHTED_SCORE needs at least one. */
+  criteria?: { name: string; weight: string }[];
   lines: { productId?: string; description?: string; qty: string; unit: string; requiredDate?: string }[];
 }
 
@@ -687,6 +719,8 @@ export interface RankedReply {
   leadTimeDays: number;
   validUntil?: string;
   total: string;
+  /** Σ(weight × score) ÷ Σ weight, when the vendor is scored. */
+  weightedScore?: string;
 }
 
 export interface RFQComparisonLine {
@@ -746,10 +780,92 @@ export function compareRFQ(id: string, rule?: RankingRule, signal?: AbortSignal)
   return send<RFQComparison>("GET", `/rfqs/${encodeURIComponent(id)}/compare${query({ rule })}`, { signal });
 }
 
+/** Records the buyer's 1–10 scores of one invited vendor (duty RFQAward); version is the RFQ ETag. */
+export function scoreRFQVendor(id: string, vendorId: string, version: number, scores: { criterionId: string; score: number }[]) {
+  return send<RFQ>("PUT", `/rfqs/${encodeURIComponent(id)}/scores/${encodeURIComponent(vendorId)}`, {
+    body: { scores },
+    headers: { "If-Match": `"${version}"` },
+  });
+}
+
 /** Awards lines to replies (duty RFQAward) and creates one DRAFT PO per vendor and currency. */
 export function awardRFQ(id: string, version: number, awards: RFQAward[], idempotencyKey = newIdempotencyKey()) {
   return send<{ rfq: RFQ; purchaseOrders: PurchaseOrder[] }>("POST", `/rfqs/${encodeURIComponent(id)}:award`, {
     body: { awards },
     headers: { "Idempotency-Key": idempotencyKey, "If-Match": `"${version}"` },
   });
+}
+
+// --- Invoicing plans on PO lines (FR-17.21, BR-17.17) ---
+
+export type PlanKind = "PERIODIC" | "PARTIAL";
+export type PlanFrequency = "MONTHLY" | "QUARTERLY";
+
+export interface InvoicingPlanRow {
+  seq: number;
+  dueDate: string;
+  amount: string;
+  percent?: string;
+  status: "OPEN" | "INVOICED";
+}
+
+export interface InvoicingPlan {
+  purchaseOrderId: string;
+  lineNo: number;
+  kind: PlanKind;
+  frequency?: PlanFrequency;
+  billingDay?: number;
+  settleWithoutReceipt: boolean;
+  /** The line amount the rows sum to. */
+  lineAmount: string;
+  currency: string;
+  rows: InvoicingPlanRow[];
+  updatedAt: string;
+}
+
+/** A plan with the PO row version after the call: plan writes bump it. */
+export interface InvoicingPlanResult extends InvoicingPlan {
+  poRowVersion: number;
+}
+
+export type InvoicingPlanInput =
+  | {
+      kind: "PERIODIC";
+      start: string;
+      frequency: PlanFrequency;
+      periods: number;
+      billingDay?: number;
+      amountPerPeriod: string;
+      settleWithoutReceipt: boolean;
+    }
+  | {
+      kind: "PARTIAL";
+      milestones: { date: string; percent?: string; amount?: string }[];
+      settleWithoutReceipt: boolean;
+    };
+
+function planPath(poId: string, lineNo: number) {
+  return `/purchase-orders/${encodeURIComponent(poId)}/lines/${lineNo}/invoicing-plan`;
+}
+
+/** Every invoicing plan of a PO, in line order. */
+export async function listInvoicingPlans(poId: string, signal?: AbortSignal) {
+  const { body } = await send<{ items: InvoicingPlan[] }>("GET", `/purchase-orders/${encodeURIComponent(poId)}/invoicing-plans`, { signal });
+  return body.items;
+}
+
+/** One line's plan; 404 PRC-IP-NOT-FOUND when the line has none. */
+export function getInvoicingPlan(poId: string, lineNo: number, signal?: AbortSignal) {
+  return send<InvoicingPlanResult>("GET", planPath(poId, lineNo), { signal });
+}
+
+/** Replaces the line's plan; rowVersion is the PO ETag (412 PRC-PO-009 when stale). */
+export function putInvoicingPlan(poId: string, lineNo: number, rowVersion: number, input: InvoicingPlanInput) {
+  return send<InvoicingPlanResult>("PUT", planPath(poId, lineNo), { body: input, headers: { "If-Match": `"${rowVersion}"` } });
+}
+
+/** Removes the line's plan; resolves to the new PO row version. */
+export async function deleteInvoicingPlan(poId: string, lineNo: number, rowVersion: number) {
+  const { etag } = await send<undefined>("DELETE", planPath(poId, lineNo), { headers: { "If-Match": `"${rowVersion}"` } });
+  return etag === null ? rowVersion + 1 : Number(etag.replace(/"/g, ""));
 }

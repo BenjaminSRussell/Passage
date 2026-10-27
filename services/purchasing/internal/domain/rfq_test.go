@@ -157,7 +157,7 @@ func TestRankLine_PriceUnitNormalises(t *testing.T) {
 }
 
 func TestRankLine_RejectsUnknownRule(t *testing.T) {
-	if _, _, err := RankLine(decimal.NewFromInt(1), nil, "WEIGHTED_SCORE"); rfqCode(err) != CodeValidation {
+	if _, _, err := RankLine(decimal.NewFromInt(1), nil, "BOGUS"); rfqCode(err) != CodeValidation {
 		t.Errorf("unknown rule must be a validation error, got %v", err)
 	}
 }

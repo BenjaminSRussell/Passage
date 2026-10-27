@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -61,12 +62,30 @@ func isRFQAction(action string) bool {
 	return false
 }
 
-// rfqBody is the body of POST /rfqs.
+// rfqBody is the body of POST /rfqs. A sealed RFQ hides its replies until the
+// deadline (BR-17.16); criteria are its scoring group (FR-17.19).
 type rfqBody struct {
-	LegalEntityID string        `json:"legalEntityId"`
-	ReplyDeadline time.Time     `json:"replyDeadline"`
-	RankingRule   string        `json:"rankingRule,omitempty"`
-	Lines         []rfqLineBody `json:"lines"`
+	LegalEntityID string             `json:"legalEntityId"`
+	ReplyDeadline time.Time          `json:"replyDeadline"`
+	RankingRule   string             `json:"rankingRule,omitempty"`
+	Sealed        bool               `json:"sealed,omitempty"`
+	Criteria      []rfqCriterionBody `json:"criteria,omitempty"`
+	Lines         []rfqLineBody      `json:"lines"`
+}
+
+type rfqCriterionBody struct {
+	Name   string `json:"name"`
+	Weight string `json:"weight"`
+}
+
+// rfqScoresBody is the body of PUT /rfqs/{id}/scores/{vendorId}.
+type rfqScoresBody struct {
+	Scores []rfqScoreBody `json:"scores"`
+}
+
+type rfqScoreBody struct {
+	CriterionID string `json:"criterionId"`
+	Score       int    `json:"score"`
 }
 
 type rfqLineBody struct {
@@ -164,8 +183,36 @@ func (a *API) createRFQ(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.rfqsCreated.Add(1)
+	a.writeRFQ(w, r, http.StatusCreated, out)
+}
+
+// present is the RFQ as the caller may see it now (BR-17.16): a sealed RFQ's
+// replies and scores are hidden before the deadline, and the first response
+// after the deadline that shows them logs the opening (AC-17.14).
+func (a *API) present(ctx context.Context, rfq domain.RFQ) (domain.RFQ, error) {
+	now := a.now().UTC()
+	if rfq.Sealed && rfq.OpenedAt == nil && !domain.SealedAt(rfq, now) {
+		p, _ := tenant.FromContext(ctx)
+		opened, err := a.store.OpenSealedRFQ(ctx, rfq.ID, p.UserID, now)
+		if err != nil {
+			return domain.RFQ{}, err
+		}
+		a.sealedRFQsOpened.Add(1)
+		slog.InfoContext(ctx, "sealed RFQ opened", "rfq", rfq.Number, "user", p.UserID, "at", now.Format(time.RFC3339))
+		rfq.OpenedAt, rfq.OpenedBy = opened.OpenedAt, opened.OpenedBy
+	}
+	return domain.Redact(rfq, now), nil
+}
+
+// writeRFQ answers with the presented RFQ and its version as the ETag.
+func (a *API) writeRFQ(w http.ResponseWriter, r *http.Request, status int, rfq domain.RFQ) {
+	out, err := a.present(r.Context(), rfq)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
 	w.Header().Set("ETag", etag(out.Version))
-	httpx.JSON(w, http.StatusCreated, out)
+	httpx.JSON(w, status, out)
 }
 
 // buildRFQ validates a create request. The deadline must lie after now.
@@ -184,7 +231,18 @@ func buildRFQ(body rfqBody, now time.Time) (domain.RFQ, error) {
 		rule = domain.RankLowestPrice
 	}
 	if domain.ValidRankingRule(rule) != nil {
-		return domain.RFQ{}, invalid("rankingRule", "must be LOWEST_PRICE or LEAD_TIME")
+		return domain.RFQ{}, invalid("rankingRule", "must be LOWEST_PRICE, LEAD_TIME or WEIGHTED_SCORE")
+	}
+	criteria := make([]domain.ScoringCriterion, 0, len(body.Criteria))
+	for i, c := range body.Criteria {
+		weight, err := decimalField("criteria["+strconv.Itoa(i)+"].weight", c.Weight, "")
+		if err != nil {
+			return domain.RFQ{}, err
+		}
+		criteria = append(criteria, domain.ScoringCriterion{Name: strings.TrimSpace(c.Name), Weight: weight})
+	}
+	if err := domain.ValidateCriteria(rule, criteria); err != nil {
+		return domain.RFQ{}, invalid("criteria", err.(*domain.Error).Detail)
 	}
 	if len(body.Lines) == 0 {
 		return domain.RFQ{}, invalid("lines", "needs at least one line")
@@ -193,7 +251,7 @@ func buildRFQ(body rfqBody, now time.Time) (domain.RFQ, error) {
 		return domain.RFQ{}, invalid("lines", "may have at most "+strconv.Itoa(maxRFQLines)+" lines")
 	}
 	in := domain.RFQ{LegalEntityID: body.LegalEntityID, ReplyDeadline: body.ReplyDeadline.UTC(), RankingRule: rule,
-		Lines: make([]domain.RFQLine, 0, len(body.Lines))}
+		Sealed: body.Sealed, Criteria: criteria, Lines: make([]domain.RFQLine, 0, len(body.Lines))}
 	for i, l := range body.Lines {
 		field := func(n string) string { return "lines[" + strconv.Itoa(i) + "]." + n }
 		if err := uuidField(field("productId"), l.ProductID, false); err != nil {
@@ -260,8 +318,7 @@ func (a *API) getRFQ(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, err)
 		return
 	}
-	w.Header().Set("ETag", etag(out.Version))
-	httpx.JSON(w, http.StatusOK, out)
+	a.writeRFQ(w, r, http.StatusOK, out)
 }
 
 // rfqAction handles POST /rfqs/{id}:send|close|cancel|award. Each needs
@@ -321,8 +378,7 @@ func (a *API) rfqAction(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, err)
 		return
 	}
-	w.Header().Set("ETag", etag(out.Version))
-	httpx.JSON(w, http.StatusOK, out)
+	a.writeRFQ(w, r, http.StatusOK, out)
 }
 
 // awardRFQ checks the awards against the RFQ, builds one priced DRAFT PO per
@@ -350,6 +406,12 @@ func (a *API) awardRFQ(w http.ResponseWriter, r *http.Request, id string, want i
 	today := a.today()
 	var orders []store.AwardedOrder
 	if cur.Version == want {
+		// The deadline of an RFQ never changes, so a sealed RFQ that is open
+		// here is still open when the store writes the award.
+		if err := domain.CheckSealedView(cur, a.now()); err != nil {
+			fail(w, r, err)
+			return
+		}
 		if err := domain.CheckAward(cur, awards, today); err != nil {
 			fail(w, r, rfqStateConflict(err))
 			return
@@ -366,6 +428,10 @@ func (a *API) awardRFQ(w http.ResponseWriter, r *http.Request, id string, want i
 	}
 	a.rfqsAwarded.Add(1)
 	a.ordersCreated.Add(int64(len(orders)))
+	if out, err = a.present(r.Context(), out); err != nil {
+		fail(w, r, err)
+		return
+	}
 	w.Header().Set("ETag", etag(out.Version))
 	httpx.JSON(w, http.StatusOK, rfqAwardResult{RFQ: out, PurchaseOrders: pos})
 }
@@ -463,8 +529,13 @@ func (a *API) recordRFQReplies(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.rfqRepliesRecorded.Add(int64(len(items)))
+	warnings := lateWarnings(out, body.VendorID, items)
+	if out, err = a.present(r.Context(), out); err != nil {
+		fail(w, r, err)
+		return
+	}
 	w.Header().Set("ETag", etag(out.Version))
-	httpx.JSON(w, http.StatusCreated, rfqReplyResult{RFQ: out, Warnings: lateWarnings(out, body.VendorID, items)})
+	httpx.JSON(w, http.StatusCreated, rfqReplyResult{RFQ: out, Warnings: warnings})
 }
 
 // lateWarnings returns PRC-RFQ-003 for each line of the request whose stored
@@ -542,7 +613,9 @@ func buildReplies(body rfqReplyBody, now time.Time) ([]domain.RFQReply, error) {
 }
 
 // compareRFQ handles GET /rfqs/{id}/compare?rule=: the ranking per line
-// (FR-17.4), late replies listed as excluded (BR-17.11).
+// (FR-17.4), late replies listed as excluded (BR-17.11), with each scored
+// vendor's weighted score (FR-17.19). A sealed RFQ is 403 PRC-RFQ-004 before
+// its deadline; the first comparison after it logs the opening (AC-17.14).
 func (a *API) compareRFQ(w http.ResponseWriter, r *http.Request) {
 	id, err := pathID(r)
 	if err != nil {
@@ -551,7 +624,7 @@ func (a *API) compareRFQ(w http.ResponseWriter, r *http.Request) {
 	}
 	rule := r.URL.Query().Get("rule")
 	if rule != "" && domain.ValidRankingRule(rule) != nil {
-		fail(w, r, invalid("rule", "must be LOWEST_PRICE or LEAD_TIME"))
+		fail(w, r, invalid("rule", "must be LOWEST_PRICE, LEAD_TIME or WEIGHTED_SCORE"))
 		return
 	}
 	rfq, err := a.store.GetRFQ(r.Context(), id)
@@ -559,16 +632,29 @@ func (a *API) compareRFQ(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, err)
 		return
 	}
+	if err := domain.CheckSealedView(rfq, a.now()); err != nil {
+		fail(w, r, err)
+		return
+	}
 	if rule == "" {
 		rule = rfq.RankingRule
 	}
+	if rule == domain.RankWeightedScore && len(rfq.Criteria) == 0 {
+		fail(w, r, invalid("rule", "WEIGHTED_SCORE needs scoring criteria, and this RFQ has none"))
+		return
+	}
+	if rfq, err = a.present(r.Context(), rfq); err != nil {
+		fail(w, r, err)
+		return
+	}
+	scores := domain.WeightedScores(rfq.Criteria, rfq.Scores)
 	byLine := make(map[string][]domain.RFQReply, len(rfq.Lines))
 	for _, rp := range rfq.Replies {
 		byLine[rp.LineID] = append(byLine[rp.LineID], rp)
 	}
 	cmp := rfqComparison{RFQID: rfq.ID, RankingRule: rule, Lines: make([]rfqComparedLine, 0, len(rfq.Lines))}
 	for _, l := range rfq.Lines {
-		ranked, excluded, err := domain.RankLine(l.Qty, byLine[l.ID], rule)
+		ranked, excluded, err := domain.RankLineScored(l.Qty, byLine[l.ID], rule, scores)
 		if err != nil {
 			fail(w, r, err)
 			return
@@ -577,6 +663,57 @@ func (a *API) compareRFQ(w http.ResponseWriter, r *http.Request) {
 			Description: l.Description, Qty: l.Qty, Unit: l.Unit, Ranked: ranked, Excluded: excluded})
 	}
 	httpx.JSON(w, http.StatusOK, cmp)
+}
+
+// scoreRFQVendor handles PUT /rfqs/{id}/scores/{vendorId} (duty RFQAward):
+// the buyer's 1–10 scores of an invited vendor on the RFQ's criteria, which
+// the WEIGHTED_SCORE ranking uses (FR-17.19). If-Match is the RFQ version; a
+// sealed RFQ is scored only after its deadline (403 PRC-RFQ-004).
+func (a *API) scoreRFQVendor(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	vendorID := chi.URLParam(r, "vendorId")
+	if err := uuidField("vendorId", vendorID, true); err != nil {
+		fail(w, r, err)
+		return
+	}
+	want, err := ifMatch(r)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	var body rfqScoresBody
+	if err := httpx.Decode(r, &body); err != nil {
+		fail(w, r, err)
+		return
+	}
+	if len(body.Scores) == 0 || len(body.Scores) > domain.MaxScoringCriteria {
+		fail(w, r, invalid("scores", "needs from 1 to "+strconv.Itoa(domain.MaxScoringCriteria)+" scores"))
+		return
+	}
+	scores := make([]domain.VendorScore, 0, len(body.Scores))
+	for i, sc := range body.Scores {
+		field := func(n string) string { return "scores[" + strconv.Itoa(i) + "]." + n }
+		if err := uuidField(field("criterionId"), sc.CriterionID, true); err != nil {
+			fail(w, r, err)
+			return
+		}
+		if sc.Score < domain.MinScore || sc.Score > domain.MaxScore {
+			fail(w, r, invalid(field("score"), "must be a whole number from 1 to 10"))
+			return
+		}
+		scores = append(scores, domain.VendorScore{VendorID: vendorID, CriterionID: sc.CriterionID, Score: sc.Score})
+	}
+	out, err := a.store.SetRFQScores(r.Context(), id, want, vendorID, scores, a.now())
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	a.rfqVendorsScored.Add(1)
+	a.writeRFQ(w, r, http.StatusOK, out)
 }
 
 // uniqueIDs validates a list of UUIDs and drops repeats, keeping the first.

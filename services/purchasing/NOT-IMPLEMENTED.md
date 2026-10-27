@@ -22,7 +22,16 @@ RFQs with lines and a reply deadline, `:send` to invited vendors with
 `:close`/`:cancel`, and `:award` creating one DRAFT PO per winning vendor and
 currency with `rfq.awarded.v1`, plus the RFQ list, create and detail (send, reply,
 compare and award) screens and the "RFQs awaiting replies" workspace tile.
-Everything below is absent or partial.
+Slice 5 adds sealed-bid RFQs and weighted scoring (FR-17.19, BR-17.16, AC-17.14):
+the `sealed` flag with replies hidden until the deadline, 403 PRC-RFQ-004 on
+compare, scoring and award before it, late replies refused (PRC-RFQ-007), the
+opening log (`openedAt`/`openedBy`), scoring criteria with weights, buyer scores
+1–10 per invited vendor and the WEIGHTED_SCORE ranking; and invoicing plans on PO
+lines (FR-17.21, BR-17.17, AC-17.15): PERIODIC and PARTIAL plans generated from
+the line amount, reproportioned inside the PO edit when the line amount changes
+and removed with a cancelled line, with the sealed-bid and scoring parts of the
+RFQ screens and an invoicing plan page per PO line. Everything below is absent or
+partial.
 
 Status values: **later slice of PSG-17** (this wave, next slices) or **handoff**
 (needs another wave or the platform owner).
@@ -39,8 +48,8 @@ Status values: **later slice of PSG-17** (this wave, next slices) or **handoff**
 | 6 | Scheduling agreements with FRC/JIT releases | **Later slice of PSG-17**. |
 | 7 | Policy framework by org hierarchy; signing limits, requests, recertification | **Later slice of PSG-17**. Hierarchy resolution needs wave 6 purposes; approver skipping by signing limit (FR-17.17) is not done. |
 | 8 | Procurement catalogs, vendor catalog import, category managers/assignments/questionnaires | **Later slice of PSG-17**. `external_catalog_ref` is not yet on the requisition line. |
-| 9 | RFQ types, sealed bids, weighted scoring, amendments | **Later slice of PSG-17** (builds on the slice 4 RFQ cycle; WEIGHTED_SCORE ranking waits for it). |
-| 10 | Service PO lines, outlines, invoicing plans, reprice, consignment price agreements | Partial. Built: the consignment flag on a trade agreement row, stored and excluded from PO pricing. **Later slice of PSG-17**: service lines, outlines and model service specifications (FR-17.23), invoicing plans (FR-17.21), `:reprice` (FR-17.22). |
+| 9 | RFQ types, sealed bids, weighted scoring, amendments | Partial. Built (slice 5): `sealed` per RFQ (replies and scores hidden until `replyDeadline`, compare/score/award 403 PRC-RFQ-004 before it, a late reply refused with PRC-RFQ-007, the first opening after the deadline logged as `openedAt`/`openedBy` on the RFQ), up to 20 weighted scoring criteria per RFQ, buyer scores 1–10 per invited vendor and criterion (duty RFQAward, PUT `/rfqs/{id}/scores/{vendorId}`), the weighted score in the compare view and the WEIGHTED_SCORE ranking rule; RFQ screens for all of it. **Later slice of PSG-17**: the `RfqType` setup (`rfq_types`: STANDARD/SEALED with amendments allowed, default scoring group and reply template; the flag and criteria are set per RFQ meanwhile), reusable scoring groups, amendments/addenda (new RFQ version re-sent with acknowledgement), reply templates, the two-person early opening by RFQAward holders logged as a sealed-bid exception, and the RFQMaintain/RFQAward segregation on a sealed RFQ (3.17.17; one user may hold both). **Handoff**: encrypting sealed replies at rest with a per-RFQ key needs a platform key service (none in `platform/go`); until then they are hidden by the API only. Reply templates render in the wave 20 portal. |
+| 10 | Service PO lines, outlines, invoicing plans, reprice, consignment price agreements | Partial. Built: the consignment flag on a trade agreement row, stored and excluded from PO pricing; invoicing plans (slice 5, FR-17.21, BR-17.17): one PERIODIC (start, MONTHLY/QUARTERLY, periods, billing day, amount per period) or PARTIAL (milestones by percent or amount) plan per PO line with `settleWithoutReceipt`, rows generated to sum to the line amount exactly, reproportioned over open rows when a PO edit changes the line amount, removed with a cancelled line, guarded by invoiced rows (PRC-IP-001/002/003); list, read, replace and delete endpoints and the plan page. **Later slice of PSG-17**: service lines, outlines and model service specifications (FR-17.23) — until they exist any PO line may carry a plan, not only service and category lines; `:reprice` (FR-17.22; when it lands it must call the same plan sync as the PO edit); the `invoicing_plan_types` setup (3.17.13); the PRD's `end` date on a PERIODIC plan (the API takes the number of periods instead); the "Invoicing plan schedule" inquiry across POs (3.17.14). **Handoff** to wave 18 (FR-18.17): the settlement run, and an endpoint or event through which it marks rows INVOICED (rows only become INVOICED by direct update today; the PRD names no plan event). |
 
 ## Acceptance criteria
 
@@ -52,6 +61,8 @@ Status values: **later slice of PSG-17** (this wave, next slices) or **handoff**
 | AC-17.9 10 lines, 2 vendors, 2 sites → 4 POs (PRD) | Built | `domain/consolidation_test.go`, `api/consolidate_test.go` (each PO line keeps its requisition line), `store/consolidation_test.go` (links, CLOSED, replay, no double ordering). |
 | AC3 most specific trade agreement wins (property test) | Built | `pricing_test.go` rapid property also checks the tie order (latest valid_from, then lowest price); `store_test.go` checks the vendor > group > all example against Postgres. Group memberships come from the `api.Memberships` interface, whose default returns none until waves 7 (vendor groups) and 8 (product groups) expose them (**handoff**); the lookup accepts `vendorGroup`/`productGroup` meanwhile. |
 | AC-17.8 RFQ: late reply excluded, award to the lowest creates a PO with the reply price and lead time (PRD) | Built | `api/rfq_test.go` (two on-time replies and one late: compare excludes the late one; awarding the lowest builds a PO at 9.50 due today + 12 days), `store/rfq_test.go` (Postgres: late flag, award writes the linked PO, the awarded replies and `rfq.awarded.v1` in one transaction; replay returns the same POs), `domain/rfq_test.go` (ranking table and rapid property, award rules). |
+| AC-17.14 sealed RFQ: compare refused before the deadline, visible after, opening logged (PRD) | Built | `api/rfq_sealed_test.go` (16:59Z compare is 403 PRC-RFQ-004 and the read shows no replies; at 17:00:01Z all replies rank and one opening is logged with the user), `domain/rfq_sealed_test.go` (deadline boundary, redaction), `store/rfq_sealed_test.go` (Postgres: late sealed reply refused, scores only after the deadline, opening stamped once). |
+| AC-17.15 invoicing plan 12 × 1,000.00, line to 13,200.00 reproportions to 1,100.00 (PRD) | Built | `domain/invoicing_plan_test.go` (rows, due dates, reproportion, sum-identity property), `store/invoicing_plan_test.go` (Postgres: plan on a 12,000.00 line, the PO edit to 13,200.00 rewrites all 12 rows to 1,100.00 in the same transaction, invoiced rows keep their amount and block replace, delete and cancel). The PRD's line is a service line; service lines are FR-17.23 (later slice), so the test uses a goods line. |
 | AC4 PO total identity for 1,000 random POs | Built | `totals_test.go` (seeded, 1–50 lines, charges, tax); the database trigger refuses an unbalanced header (`store_test.go`). |
 | AC5 every deliverable has code or a row here | Built | This file. |
 | AC6 checks | Built | `go vet`/`go test` (store tests run against Postgres when `PASSAGE_TEST_DATABASE_URL` is set), vitest and tsc for the web module, `helm lint`; `openapi_test.go` and `events_test.go` keep the specs in step with the routes and payloads. |
@@ -68,7 +79,7 @@ Status values: **later slice of PSG-17** (this wave, next slices) or **handoff**
 | FR-17.11 tax from the wave 13 engine | **Handoff** to wave 13 | Tax is supplied per line (`taxAmount`). |
 | FR-17.13 purchasing policy settings | **Later slice of PSG-17** | `changeManagement` is a per-PO flag only. |
 | FR-17.14 buyer workspace | Partial | Tiles for requisitions in review, approved requisitions, lines needing a vendor, RFQs awaiting replies (SENT or REPLIES_OPEN), draft POs, POs in review and to confirm, effective purchase agreements and active price rows are built; expiring-agreement and change-order queues come with those features (**later slice of PSG-17**). |
-| FR-17.15–FR-17.24 | **Later slice of PSG-17** | See deliverables 6–10. |
+| FR-17.15–FR-17.18, FR-17.20, FR-17.22–FR-17.24 | **Later slice of PSG-17** | See deliverables 6–10. FR-17.19 and FR-17.21 are partly built (rows 9 and 10). |
 | BR-17.1 reject/cancel transitions, line cancellation | **Later slice of PSG-17** | Only DRAFT → IN_REVIEW/APPROVED on submit. |
 | BR-17.3 delivery-date price date | **Later slice of PSG-17** (`prc.delivery_date_pricing`) | The order date (UTC today) is used. |
 | BR-17.4 unit conversion fallback recorded in explain | **Later slice of PSG-17**; conversions from wave 6 UoM | The unit must match exactly. |
@@ -77,7 +88,7 @@ Status values: **later slice of PSG-17** (this wave, next slices) or **handoff**
 | BR-17.8 stale PATCH returns the current version and diff | Partial | 412 PRC-PO-009 names the current row version and update time; the diff to the caller's version is not returned, and the problem does not name the user (no user on the PO row yet). |
 | BR-17.9 cancelling a deleted line's ORDERED transactions | **Handoff** to wave 16 with the ORDERED transactions themselves | The line is CANCELLED and kept in versions. |
 | PO_FOUR_EYES segregation (3.17.17: PurchaseOrderMaintain with PurchaseOrderConfirm) | **Later slice of PSG-17** with the policy settings | A user with both duties can approve and confirm their own PO. |
-| BR-17.13, BR-17.16–19 | **Later slice of PSG-17** | Depend on schedules, RFQs and service lines. |
+| BR-17.13, BR-17.18, BR-17.19 | **Later slice of PSG-17** | Depend on schedules, reprice and service lines. BR-17.16 is built except the two-person early opening; BR-17.17 is built. |
 | BR-17.12 PO currency from the vendor; PRC-FX-001 | **Handoff** to waves 7 and 12 | Currency is supplied and not checked against rates. |
 | PO line `requisitionLineId` must name an APPROVED requisition line | Built | Direct and consolidated POs claim the line under a lock (OPEN, APPROVED, same legal entity) and mark it CONSOLIDATED. |
 | `ConsolidateLines` "vendor not blocked" (3.17.5) | **Handoff** to wave 7 | Same vendor status query as PRC-PO-008. |
@@ -102,3 +113,4 @@ Status values: **later slice of PSG-17** (this wave, next slices) or **handoff**
 | Vendor, product and legal-entity pickers in the web forms | **Handoff** to waves 6–8 web modules | Forms take UUIDs until shared pickers exist. |
 | Approval task inbox actions (approve, reject, delegate) | **Later slice of PSG-17** with the wave 4 workflow | The requisition page shows the chain only. The PO page offers approve and reject buttons to holders of PurchaseOrderConfirm until the inbox exists. |
 | Consolidation board drag-and-drop between suggested POs (3.17.6) | **Later slice of PSG-17** | The board selects lines, overrides the vendor per line and sets the window; the service does the grouping. |
+| Scoring criteria and sealed flag editable after create | **Later slice of PSG-17** with `rfq_types` and amendments | Both are fixed when the RFQ is created. |

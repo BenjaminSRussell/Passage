@@ -30,6 +30,9 @@ type rfqLog struct {
 	awards     []domain.Award
 	orders     []store.AwardedOrder
 	today      domain.Day
+	scoredBy   string
+	scores     []domain.VendorScore
+	openings   []string // users the opening of a sealed RFQ was logged for
 }
 
 func (f *fakeStore) CreateRFQ(_ context.Context, in domain.RFQ, idem store.Idem) (domain.RFQ, error) {
@@ -206,7 +209,8 @@ func TestCreateRFQ_Rejections(t *testing.T) {
 	}{
 		{"deadline already passed", mutate("2026-03-05T17:00:00Z", "2026-03-01T14:59:59Z"), "replyDeadline", 422, ""},
 		{"deadline missing", mutate(`"replyDeadline":"2026-03-05T17:00:00Z",`, ""), "replyDeadline", 422, ""},
-		{"unknown ranking rule", mutate(`"lines"`, `"rankingRule":"WEIGHTED_SCORE","lines"`), "rankingRule", 422, ""},
+		{"unknown ranking rule", mutate(`"lines"`, `"rankingRule":"BOGUS","lines"`), "rankingRule", 422, ""},
+		{"weighted score without criteria", mutate(`"lines"`, `"rankingRule":"WEIGHTED_SCORE","lines"`), "criteria", 422, ""},
 		{"no lines", `{"legalEntityId":"00000000-0000-7000-8000-0000000001e1","replyDeadline":"2026-03-05T17:00:00Z","lines":[]}`, "lines", 422, ""},
 		{"line with neither product nor description", mutate(`"description":"  Calibration ",`, ""), "lines[1].productId", 422, ""},
 		{"zero quantity", mutate(`"qty":"10"`, `"qty":"0"`), "lines[0].qty", 422, ""},

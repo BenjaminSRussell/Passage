@@ -25,6 +25,7 @@ import {
   listRFQs,
   newIdempotencyKey,
   recordRFQReplies,
+  scoreRFQVendor,
   sendRFQ,
   type PurchaseOrder,
   type RankingRule,
@@ -38,6 +39,7 @@ import {
   type RFQReplyInput,
   type RFQStatus,
   type RFQSummary,
+  type ScoringCriterion,
   type Warning,
 } from "./api/client";
 import {
@@ -61,6 +63,7 @@ const STATUSES: RFQStatus[] = ["DRAFT", "SENT", "REPLIES_OPEN", "CLOSED", "AWARD
 export const rankingLabels: Record<RankingRule, string> = {
   LOWEST_PRICE: "Lowest price, then lead time",
   LEAD_TIME: "Shortest lead time, then price",
+  WEIGHTED_SCORE: "Highest weighted score, then price",
 };
 
 /** An instant as "2026-11-01 17:00 UTC", whatever offset the service used. */
@@ -77,7 +80,16 @@ function lineItem(l: { productId?: string; description?: string }) {
 
 const listColumns: DataTableColumn<RFQSummary>[] = [
   { key: "number", header: "Number", mono: true },
-  { key: "status", header: "Status", render: (r) => <StatusBadge status={r.status} /> },
+  {
+    key: "status",
+    header: "Status",
+    render: (r) => (
+      <span className={styles.actions}>
+        <StatusBadge status={r.status} />
+        {r.sealed ? <Badge tone="info">Sealed</Badge> : null}
+      </span>
+    ),
+  },
   { key: "replyDeadline", header: "Reply deadline", mono: true, render: (r) => formatInstant(r.replyDeadline) },
   { key: "lineCount", header: "Lines", align: "end" },
   { key: "vendorCount", header: "Vendors", align: "end" },
@@ -162,14 +174,28 @@ interface LineDraft {
   requiredDate: string;
 }
 
+interface CriterionDraft {
+  key: string;
+  name: string;
+  weight: string;
+}
+
 interface HeaderDraft {
   legalEntityId: string;
   /** datetime-local value, the user's local time. */
   deadline: string;
   rankingRule: RankingRule;
+  /** Replies stay hidden until the deadline and late replies are refused (BR-17.16). */
+  sealed?: boolean;
+  /** The scoring group (FR-17.19); WEIGHTED_SCORE needs one criterion at least. */
+  criteria?: CriterionDraft[];
 }
 
 type Errors = Record<string, string>;
+
+function emptyCriterion(): CriterionDraft {
+  return { key: newIdempotencyKey(), name: "", weight: "1" };
+}
 
 function emptyLine(): LineDraft {
   return { key: newIdempotencyKey(), productId: "", description: "", qty: "", unit: "EA", requiredDate: "" };
@@ -189,6 +215,16 @@ export function validateRFQ(h: HeaderDraft, lines: LineDraft[], now = new Date()
   const deadline = new Date(h.deadline);
   if (h.deadline === "" || Number.isNaN(deadline.getTime())) errors.replyDeadline = "Enter the reply deadline.";
   else if (deadline <= now) errors.replyDeadline = "Choose a deadline in the future.";
+  const criteria = h.criteria ?? [];
+  if (h.rankingRule === "WEIGHTED_SCORE" && criteria.length === 0) errors.criteria = "Add at least one scoring criterion to rank by weighted score.";
+  const names = new Set<string>();
+  criteria.forEach((c, i) => {
+    const name = c.name.trim();
+    if (name === "") errors[`criteria[${i}].name`] = "Name the criterion.";
+    else if (names.has(name.toLowerCase())) errors[`criteria[${i}].name`] = "Use each name once.";
+    names.add(name.toLowerCase());
+    if (!decimalPattern.test(c.weight.trim()) || /^0+(\.0+)?$/.test(c.weight.trim())) errors[`criteria[${i}].weight`] = "Enter a positive weight.";
+  });
   lines.forEach((l, i) => {
     const f = (name: string) => `lines[${i}].${name}`;
     const product = l.productId.trim();
@@ -207,6 +243,8 @@ function toInput(h: HeaderDraft, lines: LineDraft[]): RFQInput {
     legalEntityId: h.legalEntityId.trim(),
     replyDeadline: new Date(h.deadline).toISOString(),
     rankingRule: h.rankingRule,
+    sealed: h.sealed ? true : undefined,
+    criteria: (h.criteria ?? []).length > 0 ? (h.criteria ?? []).map((c) => ({ name: c.name.trim(), weight: c.weight.trim() })) : undefined,
     lines: lines.map((l) => ({
       productId: opt(l.productId),
       description: opt(l.description),
@@ -220,7 +258,16 @@ function toInput(h: HeaderDraft, lines: LineDraft[]): RFQInput {
 /** New RFQ: legal entity, reply deadline, ranking rule and the lines to quote (FR-17.4). */
 export function RFQCreatePage() {
   const navigate = useNavigate();
-  const [header, setHeader] = useState<HeaderDraft>({ legalEntityId: "", deadline: defaultDeadline(), rankingRule: "LOWEST_PRICE" });
+  const [header, setHeader] = useState<HeaderDraft>({
+    legalEntityId: "",
+    deadline: defaultDeadline(),
+    rankingRule: "LOWEST_PRICE",
+    sealed: false,
+    criteria: [],
+  });
+  const criteria = header.criteria ?? [];
+  const setCriterion = (index: number, patch: Partial<CriterionDraft>) =>
+    setH({ criteria: criteria.map((c, i) => (i === index ? { ...c, ...patch } : c)) });
   const [lines, setLines] = useState<LineDraft[]>(() => [emptyLine()]);
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Failure | null>(null);
@@ -252,7 +299,7 @@ export function RFQCreatePage() {
     <div className={styles.stack}>
       <PageHeader
         title="New request for quotation"
-        description="The RFQ is saved as a draft. Send it to vendors from its page; replies after the deadline are kept but left out of the ranking."
+        description="The RFQ is saved as a draft. Send it to vendors from its page; replies after the deadline are kept but left out of the ranking, or refused when the RFQ is sealed."
       />
       <form className={styles.form} onSubmit={onSubmit} noValidate>
         <Card title="Request">
@@ -274,6 +321,44 @@ export function RFQCreatePage() {
                 </Select>
               )}
             </FormField>
+          </div>
+        </Card>
+        <Card
+          title="Bidding and scoring"
+          actions={
+            <Button size="sm" disabled={criteria.length >= 20} onClick={() => setH({ criteria: [...criteria, emptyCriterion()] })}>
+              Add criterion
+            </Button>
+          }
+        >
+          <div className={styles.form}>
+            <div className={styles.checkboxRow}>
+              <Input id="rfq-sealed" type="checkbox" checked={header.sealed ?? false} onChange={(e) => setH({ sealed: e.target.checked })} />
+              <label htmlFor="rfq-sealed">Sealed bids: keep replies hidden until the deadline and refuse late replies</label>
+            </div>
+            {criteria.length === 0 ? (
+              <p className={styles.muted}>
+                {errors.criteria ?? "No scoring criteria. Add criteria such as quality or delivery to score each vendor from 1 to 10 and rank by weighted score."}
+              </p>
+            ) : null}
+            {criteria.map((c, i) => (
+              <fieldset key={c.key} className={styles.lineCard} aria-label={`Criterion ${i + 1}`}>
+                <div className={styles.lineHead}>
+                  <p className={styles.lineTitle}>Criterion {i + 1}</p>
+                  <Button size="sm" variant="ghost" onClick={() => setH({ criteria: criteria.filter((_, j) => j !== i) })}>
+                    Remove criterion {i + 1}
+                  </Button>
+                </div>
+                <div className={styles.grid}>
+                  <FormField id={`rfq-criterion-${i}-name`} label="Criterion" error={errors[`criteria[${i}].name`]}>
+                    {(ctl) => <Input {...ctl} value={c.name} maxLength={100} onChange={(e) => setCriterion(i, { name: e.target.value })} />}
+                  </FormField>
+                  <FormField id={`rfq-criterion-${i}-weight`} label="Weight" error={errors[`criteria[${i}].weight`]}>
+                    {(ctl) => <Input {...ctl} inputMode="decimal" value={c.weight} onChange={(e) => setCriterion(i, { weight: e.target.value })} />}
+                  </FormField>
+                </div>
+              </fieldset>
+            ))}
           </div>
         </Card>
         <Card
@@ -514,12 +599,21 @@ export function RFQDetailPage() {
             { label: "Legal entity", value: rfq.legalEntityId, mono: true },
             { label: "Reply deadline", value: formatInstant(rfq.replyDeadline), mono: true },
             { label: "Ranking", value: rankingLabels[rfq.rankingRule] ?? rfq.rankingRule },
+            { label: "Bidding", value: biddingLabel(rfq) },
             { label: "Version", value: String(rfq.version), mono: true },
             { label: "Created", value: rfq.createdAt.slice(0, 10), mono: true },
           ]}
         />
       </Card>
       <DataTable label="RFQ lines" columns={lineColumns} rows={rfq.lines} getRowKey={(l) => l.id} />
+      {(rfq.criteria ?? []).length > 0 ? (
+        <DataTable
+          label="Scoring criteria"
+          columns={criterionColumns}
+          rows={rfq.criteria ?? []}
+          getRowKey={(c) => c.id}
+        />
+      ) : null}
       {rfq.status === "DRAFT" ? (
         <SendForm
           busy={busy === "send"}
@@ -550,13 +644,37 @@ export function RFQDetailPage() {
           }}
         />
       ) : null}
-      {rfq.status !== "DRAFT" ? (
+      {rfq.status !== "DRAFT" && rfq.repliesSealed ? (
+        <Card title="Replies">
+          <EmptyState
+            icon="lock"
+            title={`${rfq.replyCount ?? 0} sealed repl${rfq.replyCount === 1 ? "y" : "ies"}`}
+            description={`Sealed bids open at the reply deadline, ${formatInstant(rfq.replyDeadline)}. Until then no one can read, score, compare or award them.`}
+          />
+        </Card>
+      ) : null}
+      {rfq.status !== "DRAFT" && !rfq.repliesSealed ? (
         <DataTable
           label="Replies"
           columns={replyColumns(rfq)}
           rows={rfq.replies}
           getRowKey={(r) => r.id}
-          empty={{ title: "No replies yet", description: "Record each vendor's prices as they arrive. Replies after the deadline are flagged late." }}
+          empty={{
+            title: "No replies yet",
+            description: rfq.sealed
+              ? "Record each vendor's prices as they arrive. This RFQ is sealed: replies after the deadline are refused."
+              : "Record each vendor's prices as they arrive. Replies after the deadline are flagged late.",
+          }}
+        />
+      ) : null}
+      {scorable(rfq) ? (
+        <ScoreForm
+          rfq={rfq}
+          onScored={(r, vendorId) => {
+            setChanged(r);
+            setFailure(null);
+            setNotice(`Scores saved for vendor ${vendorId.slice(0, 8)}.`);
+          }}
         />
       ) : null}
       {awardable && rfq.replies.length > 0 ? (
@@ -571,6 +689,131 @@ export function RFQDetailPage() {
         />
       ) : null}
     </div>
+  );
+}
+
+/** How the RFQ takes bids: open, sealed until the deadline, or sealed and opened (with the opening log). */
+export function biddingLabel(rfq: RFQ): string {
+  if (!rfq.sealed) return "Open: replies are visible as they arrive";
+  if (rfq.openedAt) return `Sealed, opened ${formatInstant(rfq.openedAt)} by ${rfq.openedBy ? rfq.openedBy.slice(0, 8) : "the service"}`;
+  if (rfq.repliesSealed) return `Sealed until ${formatInstant(rfq.replyDeadline)}`;
+  return "Sealed, opens at the deadline";
+}
+
+/** The ranking rules the compare view offers: weighted score only with criteria. */
+export function rankingRules(rfq: RFQ): RankingRule[] {
+  const all = Object.keys(rankingLabels) as RankingRule[];
+  return (rfq.criteria ?? []).length > 0 ? all : all.filter((r) => r !== "WEIGHTED_SCORE");
+}
+
+/** Scores can be given while the RFQ is out or closed, once sealed replies are open. */
+export function scorable(rfq: RFQ): boolean {
+  return (
+    (rfq.criteria ?? []).length > 0 &&
+    !rfq.repliesSealed &&
+    (rfq.status === "SENT" || rfq.status === "REPLIES_OPEN" || rfq.status === "CLOSED")
+  );
+}
+
+const criterionColumns: DataTableColumn<ScoringCriterion>[] = [
+  { key: "seq", header: "#", align: "end" },
+  { key: "name", header: "Criterion" },
+  { key: "weight", header: "Weight", align: "end", mono: true },
+];
+
+const SCORE_VALUES = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
+
+/**
+ * The buyer's 1–10 score of one invited vendor per criterion (FR-17.19; duty
+ * RFQAward). A criterion left unscored counts 0 in the weighted score.
+ */
+function ScoreForm({ rfq, onScored }: { rfq: RFQ; onScored(rfq: RFQ, vendorId: string): void }) {
+  const criteria = rfq.criteria ?? [];
+  const [vendorId, setVendorId] = useState(rfq.invitations[0]?.vendorId ?? "");
+  const current = (vendor: string) =>
+    Object.fromEntries(criteria.map((c) => [c.id, String(rfq.scores?.find((s) => s.vendorId === vendor && s.criterionId === c.id)?.score ?? "")]));
+  const [values, setValues] = useState<Record<string, string>>(() => current(vendorId));
+  const [failure, setFailure] = useState<Failure | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function onSubmit(event: FormEvent) {
+    event.preventDefault();
+    const scores = criteria.filter((c) => values[c.id] !== "").map((c) => ({ criterionId: c.id, score: Number(values[c.id]) }));
+    setFailure(null);
+    if (scores.length === 0) return setError("Score at least one criterion.");
+    setError(null);
+    setBusy(true);
+    try {
+      const { body } = await scoreRFQVendor(rfq.id, vendorId, rfq.version, scores);
+      onScored(body, vendorId);
+    } catch (e) {
+      setFailure(describeProblem(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const scoreOf = (vendor: string, criterionId: string) =>
+    rfq.scores?.find((s) => s.vendorId === vendor && s.criterionId === criterionId)?.score;
+  const scoreColumns: DataTableColumn<RFQInvitation>[] = [
+    { key: "vendorId", header: "Vendor", render: (i) => <ShortId id={i.vendorId} /> },
+    ...criteria.map((c) => ({
+      key: c.id,
+      header: c.name,
+      align: "end" as const,
+      render: (i: RFQInvitation) => String(scoreOf(i.vendorId, c.id) ?? "—"),
+    })),
+  ];
+  return (
+    <Card title="Score vendors">
+      <form className={styles.form} onSubmit={onSubmit} noValidate>
+        <p className={styles.muted}>Score each invited vendor's reply from 1 (poor) to 10 (excellent). The weighted score shows in the comparison and ranks replies under the weighted-score rule.</p>
+        <DataTable label="Vendor scores" columns={scoreColumns} rows={rfq.invitations} getRowKey={(i) => i.vendorId} />
+        <div className={styles.grid}>
+          <FormField id="score-vendor" label="Vendor">
+            {(c) => (
+              <Select
+                {...c}
+                value={vendorId}
+                onChange={(e) => {
+                  setVendorId(e.target.value);
+                  setValues(current(e.target.value));
+                }}
+              >
+                {rfq.invitations.map((inv) => (
+                  <option key={inv.vendorId} value={inv.vendorId}>
+                    {inv.vendorId}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </FormField>
+          {criteria.map((crit) => (
+            <FormField key={crit.id} id={`score-${crit.id}`} label={`${crit.name} (weight ${crit.weight})`}>
+              {(c) => (
+                <Select {...c} value={values[crit.id] ?? ""} onChange={(e) => setValues((v) => ({ ...v, [crit.id]: e.target.value }))}>
+                  <option value="">Not scored</option>
+                  {SCORE_VALUES.map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </FormField>
+          ))}
+        </div>
+        <Alert tone="danger" live="alert">
+          {failure ? `${failure.message} (${failure.code})` : error}
+        </Alert>
+        <div className={styles.actions}>
+          <Button type="submit" variant="primary" loading={busy}>
+            Save scores
+          </Button>
+        </div>
+      </form>
+    </Card>
   );
 }
 
@@ -811,7 +1054,7 @@ function CompareAndAward({ rfq, onAwarded }: { rfq: RFQ; onAwarded(rfq: RFQ, ord
             <FormField id="compare-rule" label="Rank by">
               {(c) => (
                 <Select {...c} value={rule} onChange={(e) => setRule(e.target.value as RankingRule)}>
-                  {(Object.keys(rankingLabels) as RankingRule[]).map((k) => (
+                  {rankingRules(rfq).map((k) => (
                     <option key={k} value={k}>
                       {rankingLabels[k]}
                     </option>
@@ -844,7 +1087,9 @@ function CompareAndAward({ rfq, onAwarded }: { rfq: RFQ; onAwarded(rfq: RFQ, ord
                   name={name}
                   checked={c.replyId === r.replyId}
                   onSelect={() => choose(line.lineId, { replyId: r.replyId }, line)}
-                  label={`#${r.rank} vendor ${vendorLabel(r.vendorId)}: ${money(r.unitPrice, r.currency)} each, ${r.leadTimeDays} days, total ${money(r.total, r.currency)}`}
+                  label={`#${r.rank} vendor ${vendorLabel(r.vendorId)}: ${money(r.unitPrice, r.currency)} each, ${r.leadTimeDays} days, total ${money(r.total, r.currency)}${
+                    r.weightedScore !== undefined ? `, score ${r.weightedScore}` : ""
+                  }`}
                 />
               ))}
               {excluded.map((r) => (

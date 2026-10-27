@@ -101,6 +101,10 @@ type API struct {
 	rfqsSent           atomic.Int64
 	rfqRepliesRecorded atomic.Int64
 	rfqsAwarded        atomic.Int64
+	rfqVendorsScored   atomic.Int64
+	sealedRFQsOpened   atomic.Int64
+
+	invoicingPlansSaved atomic.Int64
 }
 
 // New returns the API over s using the default approval policy (FR-17.2) and
@@ -142,6 +146,12 @@ func (a *API) Register(r chi.Router) {
 		r.Post("/purchase-orders/{id}", a.orderAction)
 		inquire.Get("/purchase-orders/{id}/versions", a.orderVersions)
 		inquire.Get("/purchase-orders/{id}/versions/{n}/diff", a.orderVersionDiff)
+		// Invoicing plans per PO line (FR-17.21); a line amount change
+		// reproportions them inside the PO edit (BR-17.17).
+		inquire.Get("/purchase-orders/{id}/invoicing-plans", a.listInvoicingPlans)
+		inquire.Get("/purchase-orders/{id}/lines/{lineNo}/invoicing-plan", a.getInvoicingPlan)
+		maintain.Put("/purchase-orders/{id}/lines/{lineNo}/invoicing-plan", a.putInvoicingPlan)
+		maintain.Delete("/purchase-orders/{id}/lines/{lineNo}/invoicing-plan", a.deleteInvoicingPlan)
 		r.With(authz.RequireDuty(dutyPurchaseOrderMaintain)).Get("/pricing/lookup", a.lookupPrice)
 		ta := r.With(authz.RequireDuty(dutyTradeAgreementMaintain))
 		ta.Post("/trade-agreements", a.createAgreement)
@@ -165,6 +175,8 @@ func (a *API) Register(r chi.Router) {
 		r.Post("/rfqs/{id}", a.rfqAction)
 		rfqMaintain.Post("/rfqs/{id}/replies", a.recordRFQReplies)
 		rfqRead.Get("/rfqs/{id}/compare", a.compareRFQ)
+		// Buyer scoring of a vendor's reply on the RFQ's criteria (FR-17.19).
+		r.With(authz.RequireDuty(dutyRFQAward)).Put("/rfqs/{id}/scores/{vendorId}", a.scoreRFQVendor)
 	})
 }
 
@@ -189,6 +201,9 @@ func (a *API) Metrics() http.Handler {
 			{"purchasing_rfqs_sent_total", "RFQs sent to vendors.", a.rfqsSent.Load()},
 			{"purchasing_rfq_replies_recorded_total", "RFQ reply lines recorded.", a.rfqRepliesRecorded.Load()},
 			{"purchasing_rfqs_awarded_total", "RFQ awards accepted.", a.rfqsAwarded.Load()},
+			{"purchasing_rfq_vendors_scored_total", "RFQ vendor scorings recorded.", a.rfqVendorsScored.Load()},
+			{"purchasing_sealed_rfqs_opened_total", "Sealed RFQs whose replies were opened after the deadline.", a.sealedRFQsOpened.Load()},
+			{"purchasing_invoicing_plans_saved_total", "Invoicing plans written by PUT.", a.invoicingPlansSaved.Load()},
 		} {
 			fmt.Fprintf(w, "# HELP %[1]s %[2]s\n# TYPE %[1]s counter\n%[1]s %[3]d\n", c.name, c.help, c.value)
 		}
@@ -233,11 +248,17 @@ func caller(ctx context.Context) (string, error) {
 	return p.UserID, nil
 }
 
-// fail writes err as a problem. Domain rule errors become 422 with their PRC code.
+// fail writes err as a problem. Domain rule errors become 422 with their PRC
+// code, except PRC-RFQ-004 (sealed replies before the deadline), which is 403
+// as AC-17.14 requires.
 func fail(w http.ResponseWriter, r *http.Request, err error) {
 	var de *domain.Error
 	if errors.As(err, &de) {
-		err = httpx.NewProblem(http.StatusUnprocessableEntity, de.Code, de.Detail)
+		status := http.StatusUnprocessableEntity
+		if de.Code == domain.CodeRFQSealed {
+			status = http.StatusForbidden
+		}
+		err = httpx.NewProblem(status, de.Code, de.Detail)
 	}
 	httpx.Fail(w, r, err)
 }

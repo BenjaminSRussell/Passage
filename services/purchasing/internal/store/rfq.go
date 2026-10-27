@@ -34,6 +34,7 @@ type RFQSummary struct {
 	Status        string    `json:"status"`
 	ReplyDeadline time.Time `json:"replyDeadline"`
 	RankingRule   string    `json:"rankingRule"`
+	Sealed        bool      `json:"sealed"`
 	LineCount     int       `json:"lineCount"`
 	VendorCount   int       `json:"vendorCount"`
 	ReplyCount    int       `json:"replyCount"`
@@ -46,7 +47,8 @@ type RFQFilter struct {
 	Statuses []string
 }
 
-// CreateRFQ stores a DRAFT RFQ with its lines (FR-17.4).
+// CreateRFQ stores a DRAFT RFQ with its lines (FR-17.4), its sealed flag and
+// its scoring criteria (FR-17.19).
 func (s *Postgres) CreateRFQ(ctx context.Context, in domain.RFQ, idem Idem) (domain.RFQ, error) {
 	in.ID = ids.New()
 	var out domain.RFQ
@@ -72,9 +74,16 @@ func insertRFQ(ctx context.Context, tx pgx.Tx, in domain.RFQ) (domain.RFQ, error
 		return domain.RFQ{}, err
 	}
 	number := fmt.Sprintf("RFQ-%08d", seq)
-	if _, err := tx.Exec(ctx, `insert into purchase_rfq (tenant_id, id, legal_entity_id, number, status, reply_deadline, ranking_rule, version)
-		values ($1, $2, $3, $4, 'DRAFT', $5, $6, 1)`, p.TenantID, in.ID, in.LegalEntityID, number, in.ReplyDeadline, in.RankingRule); err != nil {
+	if _, err := tx.Exec(ctx, `insert into purchase_rfq (tenant_id, id, legal_entity_id, number, status, reply_deadline, ranking_rule, sealed, version)
+		values ($1, $2, $3, $4, 'DRAFT', $5, $6, $7, 1)`, p.TenantID, in.ID, in.LegalEntityID, number, in.ReplyDeadline, in.RankingRule,
+		in.Sealed); err != nil {
 		return domain.RFQ{}, err
+	}
+	for i, c := range in.Criteria {
+		if _, err := tx.Exec(ctx, `insert into purchase_rfq_criterion (tenant_id, rfq_id, id, seq, name, weight)
+			values ($1, $2, $3, $4, $5, $6)`, p.TenantID, in.ID, ids.New(), i+1, c.Name, c.Weight); err != nil {
+			return domain.RFQ{}, err
+		}
 	}
 	for i, l := range in.Lines {
 		if _, err := tx.Exec(ctx, `insert into purchase_rfq_line (tenant_id, rfq_id, line_no, id, product_id, description, qty, unit, required_date)
@@ -107,7 +116,7 @@ func (s *Postgres) ListRFQs(ctx context.Context, f RFQFilter, after string, limi
 	}
 	var items []RFQSummary
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `select r.id, r.number, r.legal_entity_id, r.status, r.reply_deadline, r.ranking_rule,
+		rows, err := tx.Query(ctx, `select r.id, r.number, r.legal_entity_id, r.status, r.reply_deadline, r.ranking_rule, r.sealed,
 			(select count(*) from purchase_rfq_line l where l.tenant_id = r.tenant_id and l.rfq_id = r.id),
 			(select count(*) from purchase_rfq_invitation i where i.tenant_id = r.tenant_id and i.rfq_id = r.id),
 			(select count(*) from purchase_rfq_reply y where y.tenant_id = r.tenant_id and y.rfq_id = r.id),
@@ -121,7 +130,7 @@ func (s *Postgres) ListRFQs(ctx context.Context, f RFQFilter, after string, limi
 		}
 		items, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (RFQSummary, error) {
 			var r RFQSummary
-			err := row.Scan(&r.ID, &r.Number, &r.LegalEntityID, &r.Status, &r.ReplyDeadline, &r.RankingRule,
+			err := row.Scan(&r.ID, &r.Number, &r.LegalEntityID, &r.Status, &r.ReplyDeadline, &r.RankingRule, &r.Sealed,
 				&r.LineCount, &r.VendorCount, &r.ReplyCount, &r.Version, &r.CreatedAt)
 			return r, err
 		})
@@ -203,7 +212,8 @@ func rfqSentData(r domain.RFQ, vendorIDs []string) purchasingevents.RFQSentData 
 // to (FR-17.4). A reply received after the deadline is stored with late=true
 // (BR-17.11). A revision replaces the vendor's earlier reply to the line,
 // except that a late revision cannot replace an on-time reply (PRC-RFQ-006).
-// The first reply moves a SENT RFQ to REPLIES_OPEN.
+// A late reply to a sealed RFQ is refused (PRC-RFQ-007, BR-17.16). The first
+// reply moves a SENT RFQ to REPLIES_OPEN.
 func (s *Postgres) RecordRFQReplies(ctx context.Context, rfqID, vendorID string, replies []domain.RFQReply, idem Idem) (domain.RFQ, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out domain.RFQ
@@ -244,6 +254,9 @@ func (s *Postgres) RecordRFQReplies(ctx context.Context, rfqID, vendorID string,
 				return &domain.Error{Code: domain.CodeValidation, Detail: "line " + r.LineID + " is not on RFQ " + cur.Number}
 			}
 			late := domain.IsLate(cur.ReplyDeadline, r.ReceivedAt)
+			if err := domain.CheckSealedReply(cur, late); err != nil {
+				return err
+			}
 			if err := domain.CheckRevision(prior[r.LineID], late); err != nil {
 				return err
 			}
@@ -270,6 +283,58 @@ func (s *Postgres) RecordRFQReplies(ctx context.Context, rfqID, vendorID string,
 			return err
 		}
 		out, err = loadRFQ(ctx, tx, rfqID)
+		return err
+	})
+	return out, err
+}
+
+// SetRFQScores records the buyer's criterion scores of one invited vendor
+// (FR-17.19) under If-Match, replacing earlier scores of the same criteria, and
+// bumps the RFQ version. A sealed RFQ is scored only after its deadline
+// (BR-17.16); domain.CheckScoring has the rules.
+func (s *Postgres) SetRFQScores(ctx context.Context, id string, ifMatch int, vendorID string, scores []domain.VendorScore, now time.Time) (domain.RFQ, error) {
+	p, _ := tenant.FromContext(ctx)
+	var out domain.RFQ
+	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		cur, _, err := lockForAction(ctx, tx, id, ifMatch, Idem{})
+		if err != nil {
+			return err
+		}
+		if err := domain.CheckScoring(cur, vendorID, scores, now); err != nil {
+			return stateConflict(err)
+		}
+		for _, sc := range scores {
+			if _, err := tx.Exec(ctx, `insert into purchase_rfq_score (tenant_id, rfq_id, criterion_id, vendor_id, score)
+				values ($1, $2, $3, $4, $5)
+				on conflict (tenant_id, rfq_id, criterion_id, vendor_id) do update set score = excluded.score, scored_at = now()`,
+				p.TenantID, id, sc.CriterionID, vendorID, sc.Score); err != nil {
+				return err
+			}
+		}
+		if err := bumpRFQ(ctx, tx, id, cur.Status, cur.Version); err != nil {
+			return err
+		}
+		out, err = loadRFQ(ctx, tx, id)
+		return err
+	})
+	return out, err
+}
+
+// OpenSealedRFQ logs the opening of a sealed RFQ's replies (AC-17.14): the
+// first call at or after the reply deadline stamps opened_at and opened_by;
+// later calls, calls before the deadline and unsealed RFQs change nothing.
+// It returns the RFQ as stored after the call.
+func (s *Postgres) OpenSealedRFQ(ctx context.Context, id, userID string, at time.Time) (domain.RFQ, error) {
+	p, _ := tenant.FromContext(ctx)
+	var out domain.RFQ
+	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `update purchase_rfq set opened_at = $3, opened_by = $4
+			where tenant_id = $1 and id = $2 and sealed and opened_at is null and reply_deadline <= $3`,
+			p.TenantID, id, at, userOrNil(userID)); err != nil {
+			return err
+		}
+		var err error
+		out, err = loadRFQ(ctx, tx, id)
 		return err
 	})
 	return out, err
@@ -444,11 +509,40 @@ func invited(r domain.RFQ, vendorID string) bool {
 func loadRFQ(ctx context.Context, tx pgx.Tx, id string) (domain.RFQ, error) {
 	p, _ := tenant.FromContext(ctx)
 	var o domain.RFQ
-	err := tx.QueryRow(ctx, `select id, number, legal_entity_id, status, reply_deadline, ranking_rule, version, created_at, updated_at
+	err := tx.QueryRow(ctx, `select id, number, legal_entity_id, status, reply_deadline, ranking_rule, sealed, opened_at,
+		coalesce(opened_by::text, ''), version, created_at, updated_at
 		from purchase_rfq where tenant_id = $1 and id = $2`, p.TenantID, id).
-		Scan(&o.ID, &o.Number, &o.LegalEntityID, &o.Status, &o.ReplyDeadline, &o.RankingRule, &o.Version, &o.CreatedAt, &o.UpdatedAt)
+		Scan(&o.ID, &o.Number, &o.LegalEntityID, &o.Status, &o.ReplyDeadline, &o.RankingRule, &o.Sealed, &o.OpenedAt, &o.OpenedBy,
+			&o.Version, &o.CreatedAt, &o.UpdatedAt)
 	if err != nil {
 		return domain.RFQ{}, notFound(err, CodeRFQNotFound, "RFQ not found")
+	}
+
+	crits, err := tx.Query(ctx, `select id, seq, name, weight from purchase_rfq_criterion
+		where tenant_id = $1 and rfq_id = $2 order by seq`, p.TenantID, id)
+	if err != nil {
+		return domain.RFQ{}, err
+	}
+	o.Criteria, err = pgx.CollectRows(crits, func(row pgx.CollectableRow) (domain.ScoringCriterion, error) {
+		var c domain.ScoringCriterion
+		err := row.Scan(&c.ID, &c.Seq, &c.Name, &c.Weight)
+		return c, err
+	})
+	if err != nil {
+		return domain.RFQ{}, err
+	}
+	scores, err := tx.Query(ctx, `select vendor_id, criterion_id, score from purchase_rfq_score
+		where tenant_id = $1 and rfq_id = $2 order by vendor_id, criterion_id`, p.TenantID, id)
+	if err != nil {
+		return domain.RFQ{}, err
+	}
+	o.Scores, err = pgx.CollectRows(scores, func(row pgx.CollectableRow) (domain.VendorScore, error) {
+		var v domain.VendorScore
+		err := row.Scan(&v.VendorID, &v.CriterionID, &v.Score)
+		return v, err
+	})
+	if err != nil {
+		return domain.RFQ{}, err
 	}
 
 	lines, err := tx.Query(ctx, `select id, line_no, coalesce(product_id::text, ''), description, qty, unit, required_date
@@ -507,6 +601,13 @@ func loadRFQ(ctx context.Context, tx pgx.Tx, id string) (domain.RFQ, error) {
 	if o.Replies == nil {
 		o.Replies = []domain.RFQReply{}
 	}
+	if o.Criteria == nil {
+		o.Criteria = []domain.ScoringCriterion{}
+	}
+	if o.Scores == nil {
+		o.Scores = []domain.VendorScore{}
+	}
+	o.ReplyCount = len(o.Replies)
 	return o, nil
 }
 

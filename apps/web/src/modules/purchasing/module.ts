@@ -2,6 +2,7 @@ import { createElement } from "react";
 import type { PassageModule } from "../registry";
 import { PurchaseAgreementCreatePage, PurchaseAgreementDetailPage, PurchaseAgreementsPage } from "./AgreementPages";
 import { ConsolidationPage } from "./ConsolidationPage";
+import { InvoicingPlanPage } from "./InvoicingPlanPage";
 import { PriceLookupPage } from "./PricingPage";
 import { PurchaseOrderCreatePage, PurchaseOrderDetailPage, PurchaseOrderEditPage, PurchaseOrdersPage } from "./PurchaseOrderPages";
 import { RequisitionCreatePage, RequisitionDetailPage, RequisitionsPage } from "./RequisitionPages";
@@ -12,7 +13,8 @@ import { WorkspacePage } from "./WorkspacePage";
 const purchasing: PassageModule = {
   id: "purchasing",
   title: "Purchasing",
-  description: "Requisitions, consolidation, requests for quotation, purchase orders with approval and change versions, purchase and trade agreements, and price lookup.",
+  description:
+    "Requisitions, consolidation, requests for quotation with sealed bids and scoring, purchase orders with approval, change versions and invoicing plans, purchase and trade agreements, and price lookup.",
   routes: [
     { path: "/purchasing", element: createElement(WorkspacePage) },
     { path: "/purchasing/requisitions", element: createElement(RequisitionsPage) },
@@ -26,6 +28,11 @@ const purchasing: PassageModule = {
     { path: "/purchasing/purchase-orders/new", element: createElement(PurchaseOrderCreatePage), handle: { title: "New purchase order" } },
     { path: "/purchasing/purchase-orders/:id", element: createElement(PurchaseOrderDetailPage), handle: { title: "Purchase order" } },
     { path: "/purchasing/purchase-orders/:id/edit", element: createElement(PurchaseOrderEditPage), handle: { title: "Edit purchase order" } },
+    {
+      path: "/purchasing/purchase-orders/:id/lines/:lineNo/invoicing-plan",
+      element: createElement(InvoicingPlanPage),
+      handle: { title: "Invoicing plan" },
+    },
     { path: "/purchasing/agreements", element: createElement(PurchaseAgreementsPage) },
     { path: "/purchasing/agreements/new", element: createElement(PurchaseAgreementCreatePage), handle: { title: "New purchase agreement" } },
     { path: "/purchasing/agreements/:id", element: createElement(PurchaseAgreementDetailPage), handle: { title: "Purchase agreement" } },

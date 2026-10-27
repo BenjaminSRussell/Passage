@@ -409,11 +409,27 @@ func TestRowLevelSecurity_AppRoleSeesOnlyItsTenant(t *testing.T) {
 			t.Fatalf("%s list of PO versions = %v", name, err)
 		}
 	}
+	// Invoicing plans (0006) carry no legal entity either; they are read through the PO.
+	plan, err := s.PutInvoicingPlan(a, po.ID, 1, po.RowVersion, store.InvoicingPlanInput{Kind: domain.PlanPartial,
+		Milestones: []domain.Milestone{{Date: day(t, "2027-02-01"), Amount: &po.Lines[0].LineAmount}}})
+	if err != nil || len(plan.Rows) != 1 {
+		t.Fatalf("tenant A plan = %+v, %v", plan, err)
+	}
+	for name, ctx := range map[string]context.Context{"tenant B": b, "out of scope": scoped} {
+		if _, err := s.GetInvoicingPlan(ctx, po.ID, 1); problemCode(err) != store.CodePurchaseOrderNotFound {
+			t.Fatalf("%s read of an invoicing plan = %v", name, err)
+		}
+	}
 	// Without a tenant the policy refuses: no rows, or an error when the
 	// pooled connection's tenant setting is reset to an empty string.
 	var leaked int
 	if err := app.QueryRow(ctx, `select count(*) from purchase_order_version`).Scan(&leaked); err == nil && leaked != 0 {
 		t.Fatalf("app role without a tenant sees %d versions", leaked)
+	}
+	for _, table := range []string{"purchase_invoicing_plan", "purchase_invoicing_plan_row", "purchase_rfq_criterion", "purchase_rfq_score"} {
+		if err := app.QueryRow(ctx, `select count(*) from `+table).Scan(&leaked); err == nil && leaked != 0 {
+			t.Fatalf("app role without a tenant sees %d rows of %s", leaked, table)
+		}
 	}
 	// Writes are checked too: the app role cannot insert a row for another tenant.
 	_, err = app.Exec(ctx, `insert into trade_agreement (tenant_id, id, relation, account_code, item_code, currency, unit, price, valid_from)

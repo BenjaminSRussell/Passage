@@ -30,10 +30,12 @@ const (
 var RFQActions = []string{RFQActionSend, RFQActionClose, RFQActionCancel, RFQActionAward}
 
 // Ranking rules for the compare view (rfq_default_ranking, FR-17.4).
-// WEIGHTED_SCORE waits for scoring criteria (FR-17.19).
+// WEIGHTED_SCORE ranks by the buyer's weighted vendor scores over the RFQ's
+// scoring criteria (FR-17.19).
 const (
-	RankLowestPrice = "LOWEST_PRICE"
-	RankLeadTime    = "LEAD_TIME"
+	RankLowestPrice   = "LOWEST_PRICE"
+	RankLeadTime      = "LEAD_TIME"
+	RankWeightedScore = "WEIGHTED_SCORE"
 )
 
 // Stable problem codes raised by RFQ rules (listed in the service README).
@@ -51,6 +53,11 @@ const (
 	// CodeRFQLateRevision: a reply after the deadline cannot replace the
 	// vendor's on-time reply to the same line.
 	CodeRFQLateRevision = "PRC-RFQ-006"
+	// CodeRFQSealed is PRC-RFQ-004 (BR-17.16): a sealed RFQ's replies cannot
+	// be read, scored, compared or awarded before the reply deadline.
+	CodeRFQSealed = "PRC-RFQ-004"
+	// CodeRFQSealedLate: a late reply to a sealed RFQ is rejected, not flagged (BR-17.16).
+	CodeRFQSealedLate = "PRC-RFQ-007"
 )
 
 // ReasonLate is the exclusion reason of a reply left out of the ranking (BR-17.11).
@@ -102,19 +109,30 @@ type RFQReply struct {
 }
 
 // RFQ is the request for quotation aggregate. Version is the ETag value.
+// A Sealed RFQ hides its replies and scores until the reply deadline
+// (BR-17.16): RepliesSealed is then set, Replies and Scores are empty and
+// ReplyCount still counts the replies. OpenedAt and OpenedBy log the first
+// time the sealed replies were shown after the deadline.
 type RFQ struct {
-	ID            string          `json:"id"`
-	Number        string          `json:"number"`
-	LegalEntityID string          `json:"legalEntityId"`
-	Status        string          `json:"status"`
-	ReplyDeadline time.Time       `json:"replyDeadline"`
-	RankingRule   string          `json:"rankingRule"`
-	Version       int             `json:"version"`
-	Lines         []RFQLine       `json:"lines"`
-	Invitations   []RFQInvitation `json:"invitations"`
-	Replies       []RFQReply      `json:"replies"`
-	CreatedAt     time.Time       `json:"createdAt"`
-	UpdatedAt     time.Time       `json:"updatedAt"`
+	ID            string             `json:"id"`
+	Number        string             `json:"number"`
+	LegalEntityID string             `json:"legalEntityId"`
+	Status        string             `json:"status"`
+	ReplyDeadline time.Time          `json:"replyDeadline"`
+	RankingRule   string             `json:"rankingRule"`
+	Sealed        bool               `json:"sealed"`
+	RepliesSealed bool               `json:"repliesSealed"`
+	ReplyCount    int                `json:"replyCount"`
+	OpenedAt      *time.Time         `json:"openedAt,omitempty"`
+	OpenedBy      string             `json:"openedBy,omitempty"`
+	Version       int                `json:"version"`
+	Lines         []RFQLine          `json:"lines"`
+	Invitations   []RFQInvitation    `json:"invitations"`
+	Replies       []RFQReply         `json:"replies"`
+	Criteria      []ScoringCriterion `json:"criteria"`
+	Scores        []VendorScore      `json:"scores"`
+	CreatedAt     time.Time          `json:"createdAt"`
+	UpdatedAt     time.Time          `json:"updatedAt"`
 }
 
 // Award gives one RFQ line to one reply. OverrideReason is required to award a
@@ -127,15 +145,18 @@ type Award struct {
 
 // RankedReply is one candidate in the compare view. UnitPrice is per unit of
 // measure (price divided by price unit); Total is unit price × line quantity.
+// WeightedScore is the vendor's weighted score when the RFQ has scoring
+// criteria and the vendor was scored (FR-17.19).
 type RankedReply struct {
-	Rank         int             `json:"rank"`
-	ReplyID      string          `json:"replyId"`
-	VendorID     string          `json:"vendorId"`
-	UnitPrice    decimal.Decimal `json:"unitPrice"`
-	Currency     string          `json:"currency"`
-	LeadTimeDays int             `json:"leadTimeDays"`
-	ValidUntil   *Day            `json:"validUntil,omitempty"`
-	Total        decimal.Decimal `json:"total"`
+	Rank          int              `json:"rank"`
+	ReplyID       string           `json:"replyId"`
+	VendorID      string           `json:"vendorId"`
+	UnitPrice     decimal.Decimal  `json:"unitPrice"`
+	Currency      string           `json:"currency"`
+	LeadTimeDays  int              `json:"leadTimeDays"`
+	ValidUntil    *Day             `json:"validUntil,omitempty"`
+	Total         decimal.Decimal  `json:"total"`
+	WeightedScore *decimal.Decimal `json:"weightedScore,omitempty"`
 }
 
 // ExcludedReply is a reply kept out of the ranking, with the reason.
@@ -178,23 +199,35 @@ func CheckRevision(existing *RFQReply, late bool) error {
 
 // ValidRankingRule checks a ranking rule name.
 func ValidRankingRule(rule string) error {
-	if rule != RankLowestPrice && rule != RankLeadTime {
-		return fail(CodeValidation, "ranking rule must be %s or %s", RankLowestPrice, RankLeadTime)
+	switch rule {
+	case RankLowestPrice, RankLeadTime, RankWeightedScore:
+		return nil
 	}
-	return nil
+	return fail(CodeValidation, "ranking rule must be %s, %s or %s", RankLowestPrice, RankLeadTime, RankWeightedScore)
 }
 
-// RankLine ranks the replies to one line for a quantity (FR-17.4). Late replies
-// are excluded (BR-17.11). The order is deterministic: LOWEST_PRICE sorts by
-// unit price then lead time; LEAD_TIME sorts by lead time then unit price;
-// vendor id and reply id break remaining ties.
+// RankLine ranks the replies to one line for a quantity (FR-17.4) without
+// vendor scores; see RankLineScored.
 func RankLine(qty decimal.Decimal, replies []RFQReply, rule string) ([]RankedReply, []ExcludedReply, error) {
+	return RankLineScored(qty, replies, rule, nil)
+}
+
+// RankLineScored ranks the replies to one line for a quantity (FR-17.4). Late
+// replies are excluded (BR-17.11). The order is deterministic: LOWEST_PRICE
+// sorts by unit price then lead time; LEAD_TIME by lead time then unit price;
+// WEIGHTED_SCORE by the vendor's weighted score, highest first, an unscored
+// vendor after every scored one, then unit price and lead time (FR-17.19).
+// Vendor id and reply id break remaining ties. scores holds the weighted score
+// of each scored vendor (WeightedScores).
+func RankLineScored(qty decimal.Decimal, replies []RFQReply, rule string, scores map[string]decimal.Decimal) ([]RankedReply, []ExcludedReply, error) {
 	if err := ValidRankingRule(rule); err != nil {
 		return nil, nil, err
 	}
 	type cand struct {
-		reply RFQReply
-		unit  decimal.Decimal
+		reply  RFQReply
+		unit   decimal.Decimal
+		score  decimal.Decimal
+		scored bool
 	}
 	var kept []cand
 	excluded := []ExcludedReply{}
@@ -203,12 +236,21 @@ func RankLine(qty decimal.Decimal, replies []RFQReply, rule string) ([]RankedRep
 			excluded = append(excluded, ExcludedReply{ReplyID: r.ID, VendorID: r.VendorID, Reason: ReasonLate})
 			continue
 		}
-		kept = append(kept, cand{reply: r, unit: PerUnit(r)})
+		score, scored := scores[r.VendorID]
+		kept = append(kept, cand{reply: r, unit: PerUnit(r), score: score, scored: scored})
 	}
 	sort.SliceStable(kept, func(i, j int) bool {
 		a, b := kept[i], kept[j]
 		if rule == RankLeadTime && a.reply.LeadTimeDays != b.reply.LeadTimeDays {
 			return a.reply.LeadTimeDays < b.reply.LeadTimeDays
+		}
+		if rule == RankWeightedScore {
+			if a.scored != b.scored {
+				return a.scored
+			}
+			if !a.score.Equal(b.score) {
+				return a.score.GreaterThan(b.score)
+			}
 		}
 		if !a.unit.Equal(b.unit) {
 			return a.unit.LessThan(b.unit)
@@ -223,11 +265,16 @@ func RankLine(qty decimal.Decimal, replies []RFQReply, rule string) ([]RankedRep
 	})
 	ranked := make([]RankedReply, 0, len(kept))
 	for i, c := range kept {
-		ranked = append(ranked, RankedReply{
+		rr := RankedReply{
 			Rank: i + 1, ReplyID: c.reply.ID, VendorID: c.reply.VendorID, UnitPrice: c.unit,
 			Currency: c.reply.Currency, LeadTimeDays: c.reply.LeadTimeDays, ValidUntil: c.reply.ValidUntil,
 			Total: c.unit.Mul(qty).Round(4),
-		})
+		}
+		if c.scored {
+			score := c.score
+			rr.WeightedScore = &score
+		}
+		ranked = append(ranked, rr)
 	}
 	return ranked, excluded, nil
 }
