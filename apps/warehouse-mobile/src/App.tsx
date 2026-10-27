@@ -15,6 +15,8 @@ import {
   type KeyValueStore,
   type SealCipher,
 } from "../../web/src/modules/mobile-flows/domain/offlineStore";
+import { ClusterPanel } from "../../web/src/modules/mobile-flows/ClusterPanel";
+import { ExceptionsPanel } from "../../web/src/modules/mobile-flows/ExceptionsPanel";
 import { listenForScans } from "../../web/src/modules/mobile-flows/domain/scanBridge";
 import type { ScanSource } from "../../web/src/modules/mobile-flows/domain/scanRouting";
 import { appendTiming, type StepTiming } from "../../web/src/modules/mobile-flows/domain/telemetry";
@@ -67,6 +69,11 @@ export interface AppProps {
   flows?: readonly FlowDraft[];
 }
 
+/** Device screens that sit beside the flows on the menu: exceptions and override (FR-32.8), cart positions (BR-32.5). */
+type DeviceTool = "exceptions" | "cluster";
+
+const TOOL_LABEL: Record<DeviceTool, string> = { exceptions: "exceptions", cluster: "cluster cart" };
+
 /** Menu label for a flow code, e.g. PICK_CLUSTER -> "pick cluster". */
 const flowLabel = (code: string) => code.replace(/_/g, " ").toLowerCase();
 
@@ -79,6 +86,7 @@ const flowLabel = (code: string) => code.replace(/_/g, " ").toLowerCase();
  */
 export function App({ deviceId, userId, flows = CORE_FLOWS }: AppProps) {
   const [flow, setFlow] = useState<FlowDraft | null>(flows.length === 1 ? flows[0] : null);
+  const [tool, setTool] = useState<DeviceTool | null>(null);
   const [storage, setStorage] = useState<DeviceStorage | null>(null);
   const [queue, setQueue] = useState<OfflineQueue | null>(null);
   const [runner, setRunner] = useState<RunnerState | null>(null);
@@ -147,6 +155,7 @@ export function App({ deviceId, userId, flows = CORE_FLOWS }: AppProps) {
 
   function openMenu() {
     setFlow(null);
+    setTool(null);
     setNotice(null);
     setTyped("");
   }
@@ -261,7 +270,7 @@ export function App({ deviceId, userId, flows = CORE_FLOWS }: AppProps) {
   return (
     <main className="app" dir={textDirection(navigator.language)} style={layout}>
       <header className="app__header">
-        <h1>{flow ? flowLabel(flow.code) : "menu"}</h1>
+        <h1>{flow ? flowLabel(flow.code) : tool ? TOOL_LABEL[tool] : "menu"}</h1>
         <span className="app__status">
           {waiting} queued, {DEFAULT_LIMITS.maxTx - waiting} left
         </span>
@@ -274,14 +283,29 @@ export function App({ deviceId, userId, flows = CORE_FLOWS }: AppProps) {
       ) : null}
       {!queue && !fatal ? <p>Opening device storage…</p> : null}
 
-      {queue && !flow ? (
+      {queue && !flow && !tool ? (
         <nav className="app__step" aria-label="Flows">
           {flows.map((f) => (
             <button key={f.code} type="button" className="app__button" onClick={() => setFlow(f)}>
               {flowLabel(f.code)}
             </button>
           ))}
+          {(Object.keys(TOOL_LABEL) as DeviceTool[]).map((t) => (
+            <button key={t} type="button" className="app__button app__button--secondary" onClick={() => setTool(t)}>
+              {TOOL_LABEL[t]}
+            </button>
+          ))}
         </nav>
+      ) : null}
+
+      {/* No verifyPin is wired yet, so overrides stay disabled until the server PIN check exists
+          (handoff to the mobile service, see NOT-IMPLEMENTED.md). */}
+      {queue && tool === "exceptions" ? <ExceptionsPanel deviceId={deviceId} workerId={userId} /> : null}
+      {queue && tool === "cluster" ? <ClusterPanel /> : null}
+      {queue && tool ? (
+        <button type="button" className="app__button app__button--secondary" onClick={openMenu}>
+          Menu
+        </button>
       ) : null}
 
       {queue && runner && step ? (
@@ -314,11 +338,10 @@ export function App({ deviceId, userId, flows = CORE_FLOWS }: AppProps) {
           <button type="button" className="app__button app__button--secondary" onClick={onBack} disabled={runner.history.length === 0}>
             Back
           </button>
-          {flows.length > 1 ? (
-            <button type="button" className="app__button app__button--secondary" onClick={openMenu}>
-              Menu
-            </button>
-          ) : null}
+          {/* The menu also holds the exception and cart screens, so it is reachable with one flow too. */}
+          <button type="button" className="app__button app__button--secondary" onClick={openMenu}>
+            Menu
+          </button>
         </section>
       ) : null}
 

@@ -230,6 +230,39 @@ func seedDock(t *testing.T, h http.Handler) {
 	}
 }
 
+// FR-32.7 / FR-32.13: a label that does not fit the first device's media is a
+// failed attempt there, so the job fails over and is sized for the device that prints it.
+func TestCreateJob_FailsOverWhenLabelDoesNotFitDevice(t *testing.T) {
+	sender := &fakeSender{}
+	h := router(newMemStore(), sender)
+	for i, spec := range []struct{ code, media string }{{"DOCK-1", domain.Media2x1In}, {"DOCK-2", domain.Media4x6In}} {
+		body := fmt.Sprintf(`{"code":%q,"name":"Dock","deviceType":"ZPL_II","dpi":203,"mediaSize":%q,"host":"10.0.4.%d","queueCode":"DOCK","failoverRank":%d}`,
+			spec.code, spec.media, 20+i, i+1)
+		if rec := call(t, h, http.MethodPost, "/print/v1/printers", body, "WMS_PRINT_ADMIN", "reg-"+spec.code); rec.Code != http.StatusCreated {
+			t.Fatalf("register %s: %d %s", spec.code, rec.Code, rec.Body)
+		}
+	}
+	rec := call(t, h, http.MethodPost, "/print/v1/jobs", lpBody, "WMS_PRINT", "lp-fit-1")
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create job: %d %s", rec.Code, rec.Body)
+	}
+	job := decodeJob(t, rec)
+	if job.Status != domain.JobPrinted || job.PrinterCode != "DOCK-2" {
+		t.Fatalf("want PRINTED on DOCK-2 after failover, got %s on %q", job.Status, job.PrinterCode)
+	}
+	// The misfit is refused before any bytes reach DOCK-1: only DOCK-2 accepted a payload.
+	if len(sender.sent) != 1 || sender.sent[0] != "DOCK-2" {
+		t.Fatalf("a label that does not fit the 2 x 1 in device must not be sent to it: sent %v", sender.sent)
+	}
+	if !strings.HasPrefix(sender.payloads[0], "^XA\n^PW812\n^LL1218\n") {
+		t.Fatalf("DOCK-2 payload not sized for 4 x 6 in: %q", sender.payloads[0])
+	}
+	// The refusal is not retried: one attempt on DOCK-1, one on DOCK-2.
+	if job.Attempts != 2 {
+		t.Fatalf("want 2 attempts (refused on DOCK-1, printed on DOCK-2), got %d", job.Attempts)
+	}
+}
+
 func decodeJob(t *testing.T, rec *httptest.ResponseRecorder) domain.Job {
 	t.Helper()
 	var j domain.Job
@@ -429,5 +462,27 @@ func TestCreatePrinter_DefaultsPortByDeviceType(t *testing.T) {
 		if p.Port != c.port {
 			t.Errorf("%s port = %d, want %d", c.deviceType, p.Port, c.port)
 		}
+	}
+}
+
+// A queue whose only device holds media too small for the label fails the job with
+// PRN-0007 (not MOB-0111, the device was never unreachable) and sends nothing.
+func TestCreateJob_FailsWithMediaMismatchWhenNoDeviceFits(t *testing.T) {
+	sender := &fakeSender{}
+	h := router(newMemStore(), sender)
+	body := `{"code":"DOCK-1","name":"Dock","deviceType":"ZPL_II","dpi":300,"mediaSize":"3X1_IN","host":"10.0.4.20","queueCode":"DOCK","failoverRank":1}`
+	if rec := call(t, h, http.MethodPost, "/print/v1/printers", body, "WMS_PRINT_ADMIN", "reg-small"); rec.Code != http.StatusCreated {
+		t.Fatalf("register: %d %s", rec.Code, rec.Body)
+	}
+	rec := call(t, h, http.MethodPost, "/print/v1/jobs", lpBody, "WMS_PRINT", "lp-misfit-1")
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create job: %d %s", rec.Code, rec.Body)
+	}
+	job := decodeJob(t, rec)
+	if job.Status != domain.JobFailed || job.LastError != domain.CodeMediaMismatch || job.Attempts != 1 {
+		t.Fatalf("want FAILED %s after 1 attempt, got %s %q after %d", domain.CodeMediaMismatch, job.Status, job.LastError, job.Attempts)
+	}
+	if len(sender.sent) != 0 {
+		t.Fatalf("nothing may be sent to a device the label does not fit: %v", sender.sent)
 	}
 }

@@ -19,7 +19,7 @@ components:
     jobCompleted:
       name: completed
       title: Print job completed
-      description: Emitted once when a job reaches PRINTED (accepted by the printer) or FAILED (MOB-0111 or MOB-0112). The transaction that stores the terminal state writes this row to the outbox.
+      description: Emitted once when a job reaches PRINTED (accepted by the printer) or FAILED (MOB-0111, MOB-0112 or PRN-0007). The transaction that stores the terminal state writes this row to the outbox.
       payload:
         type: object
         required: [job_id, printer, status]

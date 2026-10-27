@@ -69,7 +69,7 @@ Flow designer for warehouse handheld flows, plus the pure domain shared with
   filters), `NewPrintJobPage` (print a built-in label on a queue or by routing rule),
   `NewPrintDocumentPage` (send a PDF of up to 2 MB to the PDF over IPP printers of a queue or
   routing rule; with no matching rule it offers the browser's print dialog, BR-32.12) and
-  `PrintJobDetailPage` (outcome, MOB-0111/0112 explanation, "Print again" with `reprintOf`).
+  `PrintJobDetailPage` (outcome, MOB-0111/0112 and PRN-0007 explanation, "Print again" with `reprintOf`).
   The label form covers the LP, location, GS1 item (GTIN, optional lot, expiry and serial) and
   GS1 carton labels, with the service's check-digit, YYMMDD and set-82 rules; empty optional
   fields are left out of the request. Printers carry a media size that follows the device type
@@ -80,6 +80,13 @@ Flow designer for warehouse handheld flows, plus the pure domain shared with
   Opening a row shows the transaction and a resolution choice ("Apply as movement" or
   "Reject") that needs an explicit confirm; the call sends `If-Match` with the conflict version
   and one Idempotency-Key per conflict and choice.
+- Device screens rendered by `apps/warehouse-mobile` (they use its `app.css` classes, not the
+  shell design system, and are not shell routes): `ExceptionsPanel` (FR-32.8, BR-32.7: short
+  pick, skip and damage logged with user, device, location and time; a supervisor PIN override
+  that authorizes exactly the exception on screen, once, within 60 s, MOB-0110, never for the
+  supervisor's own work; the PIN check is a `verifyPin` callback the mobile service will back)
+  and `ClusterPanel` (BR-32.5: a cart of up to 8 works, one order's LP per position, MOB-0109 on
+  a wrong position, complete or short only after the right position is scanned).
 - `module.ts`: registered as `mobile-flows`. The designer is gated by `WMS_MOBILE_ADMIN`, the
   print pages by `WMS_PRINT`, and the conflict queue by `WMS_WORK_SUPERVISE`.
 

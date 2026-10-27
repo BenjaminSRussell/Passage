@@ -33,7 +33,7 @@ export function PrintJobsPage() {
     <div className={styles.stack}>
       <PageHeader
         title="Print jobs"
-        description="Every label and document sent to a printer, with the device that printed it and the attempts it took. Failed jobs show MOB-0111 when no device answered and MOB-0112 when the queue has no printer of the right type."
+        description="Every label and document sent to a printer, with the device that printed it and the attempts it took. Failed jobs show MOB-0111 when no device answered, MOB-0112 when the queue has no printer of the right type, and PRN-0007 when the label does not fit any printer's media."
         actions={
           <>
             <Link className={buttonClassName("secondary")} to="/mobile-flows/print-documents/new">

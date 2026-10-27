@@ -80,3 +80,35 @@ body {
 .app__message {
   font-size: 1em;
 }
+
+/* Exception and cart-position screens (FR-32.8, BR-32.5). */
+.app__panel h2 {
+  margin-block: 8px;
+  font-size: 1.1em;
+}
+
+.app__panel h3 {
+  margin-block: 16px 4px;
+  font-size: 1em;
+}
+
+.app__field {
+  display: block;
+  margin-block: 8px;
+}
+
+.app__field input,
+.app__field select,
+.app__field textarea {
+  display: block;
+  box-sizing: border-box;
+  inline-size: 100%;
+  min-block-size: var(--target, 48px);
+  margin-block-start: 4px;
+  padding: 8px;
+  font-size: 1.1em;
+}
+
+.app__log {
+  padding-inline-start: 20px;
+}

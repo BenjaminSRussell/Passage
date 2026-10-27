@@ -276,6 +276,15 @@ describe("print jobs", () => {
     expect(new Headers(post?.init.headers).get("Idempotency-Key")).toBeTruthy();
   });
 
+  it("explains a label that fits no printer's media without blaming the printer (PRN-0007)", async () => {
+    const failed: PrintJob = { ...job, status: "FAILED", printerCode: undefined, lastError: "PRN-0007" };
+    handler = (url) => (url.pathname === `/api/v1/print/jobs/${JOB}` ? json(200, failed) : undefined);
+    renderAt(`/mobile-flows/print-jobs/${JOB}`);
+    expect(await screen.findByText("The label did not print")).toBeInTheDocument();
+    expect(screen.getAllByText(/does not fit the media of any printer in the queue \(PRN-0007\)/).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Check the printer, then print again/)).toBeNull();
+  });
+
   it("shows a load error on the detail page", async () => {
     handler = () => json(404, { code: "PRN-0005", detail: "print job not found" });
     renderAt(`/mobile-flows/print-jobs/${JOB}`);

@@ -96,3 +96,40 @@ func TestDispatch_PropertyFailoverNeverLosesJobs(t *testing.T) {
 		}
 	})
 }
+
+// A rule refusal (PRN-0007, the label does not fit) is not a network failure:
+// the device is skipped without retries, and a queue where every device refused
+// reports the refusal rather than MOB-0111.
+func TestDispatch_RefusalSkipsDeviceWithoutRetry(t *testing.T) {
+	misfit := &domain.Error{Code: domain.CodeMediaMismatch, Detail: "does not fit"}
+	cases := []struct {
+		name      string
+		outcome   map[string]error
+		wantCode  string
+		wantTries int
+		wantFail  bool
+		wantErr   string
+	}{
+		{"misfit then fit fails over at once", map[string]error{"A": misfit}, "B", 2, true, ""},
+		{"every device refuses", map[string]error{"A": misfit, "B": misfit}, "B", 2, false, domain.CodeMediaMismatch},
+		{"refusal and offline device report unreachable", map[string]error{"A": misfit, "B": errors.New("refused")}, "B", 3, false, domain.CodeUnreachable},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			sends := map[string]int{}
+			out, err := domain.Dispatch(queueOf("A", "B"), 2, func(p domain.Printer) error {
+				sends[p.Code]++
+				return c.outcome[p.Code]
+			})
+			if sends["A"] != 1 {
+				t.Fatalf("a refusing device must be tried once, got %d", sends["A"])
+			}
+			if got := domain.ErrorCode(err); err != nil && got != c.wantErr || err == nil && c.wantErr != "" {
+				t.Fatalf("err = %v, want %s", err, c.wantErr)
+			}
+			if out.Printer.Code != c.wantCode || out.Attempts != c.wantTries || out.Failover != c.wantFail {
+				t.Fatalf("got printer=%q attempts=%d failover=%v", out.Printer.Code, out.Attempts, out.Failover)
+			}
+		})
+	}
+}

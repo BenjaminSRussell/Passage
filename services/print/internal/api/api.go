@@ -353,8 +353,14 @@ func (a *API) createJob(w http.ResponseWriter, r *http.Request) {
 	}
 	// A ZPL label goes to ZPL_II devices and a PDF document to PDF_IPP devices; the
 	// rest of the queue is skipped, and a queue with none fails with MOB-0112.
+	// FR-32.7: a ZPL label is sized for each device's media; a label that does not
+	// fit a device counts as a failed attempt there, so the queue fails over.
 	out, dispatchErr := domain.Dispatch(domain.Accepting(devices, domain.DeviceTypeFor(format)), a.attempts, func(d domain.Printer) error {
-		return a.sender.Send(ctx, d, zpl)
+		payload, err := domain.SizeForDevice(format, d, zpl)
+		if err != nil {
+			return err
+		}
+		return a.sender.Send(ctx, d, payload)
 	})
 	if err := created.Complete(out, dispatchErr); err != nil {
 		httpx.Fail(w, r, err)

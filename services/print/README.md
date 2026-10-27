@@ -24,6 +24,12 @@ from this pod; nothing connects inbound to the cluster.
   attempts each, two by default; devices of the other type are skipped, and a queue with none
   of the right type fails with MOB-0112), and the job ends PRINTED or FAILED. The PDF bytes are
   stored in `print_job.document` for reprints and are never returned or listed.
+- **Label geometry** (`internal/domain/geometry.go`): templates are laid out at 203 dpi. At
+  dispatch each label is sized for the device that prints it: coordinates, fonts and bar codes
+  are scaled to its dpi (300 or 600, with `^BY` for the bar module), `^PW`/`^LL` are set from
+  its media, and a label whose fields do not fit is refused there with PRN-0007. A refusal is
+  not retried: the next device is tried at once, and the job fails with PRN-0007 when no device
+  fits. The stored ZPL stays unsized, so a reprint is sized again for its device.
   The LP label's SSCC barcode is GS1-128: FNC1, AI 00, then the 18 digits. Completion writes `dev.passage.print.job.completed.v1` to the outbox
   in the same transaction.
 - **Templates**: `LP_LABEL`, `LOCATION_LABEL`, `ITEM_LABEL` (gtin, optional lot, expiry
@@ -106,6 +112,7 @@ needs `PASSAGE_TEST_APP_DATABASE_URL` (a role without BYPASSRLS).
 | PRN-0004 | 409 | Job already completed (terminal) |
 | PRN-0005 | 404 | Print job not found |
 | PRN-0006 | 409 | The queue already has a printer at this failover rank |
+| PRN-0007 | 201 (job FAILED) | The label does not fit the media of any device in the queue |
 | MOB-0111 | 201 (job FAILED) | Printer unreachable after the attempts |
 | MOB-0112 | 422 / 201 (job FAILED) | No routing rule matches the document, or the queue has no devices |
 | idempotency_key_reuse | 422 | Same Idempotency-Key with a different request body |

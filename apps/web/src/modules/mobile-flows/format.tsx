@@ -48,6 +48,7 @@ export function describeJobError(code?: string, format: JobFormat = "ZPL"): stri
   const what = format === "PDF" ? "document" : "label";
   if (code === "MOB-0111") return `No printer in the queue accepted the ${what} after its attempts (MOB-0111).`;
   if (code === "MOB-0112") return `No ${format === "PDF" ? "PDF over IPP" : "ZPL II"} printer is registered in the queue (MOB-0112).`;
+  if (code === "PRN-0007") return "The label does not fit the media of any printer in the queue (PRN-0007). Add a printer with larger labels to the queue.";
   return code ? `Failed with ${code}.` : dash;
 }
 

@@ -94,7 +94,8 @@ export function PrintJobDetailPage() {
       ) : null}
       {job.status === "FAILED" ? (
         <Alert tone="warning" title={job.format === "PDF" ? "The document did not print" : "The label did not print"}>
-          {describeJobError(job.lastError)} Check the printer, then print again.
+          {describeJobError(job.lastError, job.format)}
+          {job.lastError === "PRN-0007" ? "" : " Check the printer, then print again."}
         </Alert>
       ) : null}
       <Card>
