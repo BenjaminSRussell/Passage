@@ -1,0 +1,272 @@
+openapi: 3.1.0
+info:
+  title: Passage print service
+  version: 0.1.0
+  description: Printer registry, queues and ZPL print jobs (wave 32, FR-32.7 and FR-32.13). Every mutating call requires Idempotency-Key.
+servers:
+  - url: https://api.{env}.passage.dev
+    variables:
+      env: { default: dev }
+paths:
+  /print/v1/printers:
+    get:
+      operationId: listPrinters
+      summary: List printers of the tenant
+      x-passage-duty: WMS_PRINT
+      responses:
+        '200':
+          description: Printers ordered by code
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Printer' } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: createPrinter
+      summary: Register a printer and its queue membership
+      x-passage-duty: WMS_PRINT_ADMIN
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PrinterRequest' }
+      responses:
+        '201':
+          description: Printer registered
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Printer' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: PRN-0003 when the printer code is taken, PRN-0006 when the queue already has a device at this failover rank
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /print/v1/routing-rules:
+    get:
+      operationId: listRoutingRules
+      summary: List document routing rules in resolution order
+      x-passage-duty: WMS_PRINT
+      responses:
+        '200':
+          description: Rules ordered by sequence
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/RoutingRule' } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: createRoutingRule
+      summary: Create a document routing rule
+      x-passage-duty: WMS_PRINT_ADMIN
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RoutingRuleRequest' }
+      responses:
+        '201':
+          description: Rule created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoutingRule' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /print/v1/jobs:
+    get:
+      operationId: listPrintJobs
+      summary: Print job log, newest first (§6.32.14)
+      x-passage-duty: WMS_PRINT
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [QUEUED, PRINTED, FAILED] }
+        - name: queueCode
+          in: query
+          schema: { type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{1,39}$' }
+        - name: printerCode
+          in: query
+          schema: { type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{1,39}$' }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+      responses:
+        '200':
+          description: Jobs ordered by creation time, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/PrintJob' } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: createPrintJob
+      summary: Render a built-in template and print it on the first reachable ZPL device of the queue
+      description: A job that no device accepts is recorded as FAILED with lastError MOB-0111 (unreachable) or MOB-0112 (empty queue) and returned with 201. A documentType with no matching routing rule is refused with 422 MOB-0112 before anything is stored. A repeated key returns the stored job with Idempotent-Replayed true and prints nothing. reprintOf reuses the stored ZPL.
+      x-passage-duty: WMS_PRINT
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateJobRequest' }
+      responses:
+        '201':
+          description: Job completed (PRINTED or FAILED)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PrintJob' }
+        '200':
+          description: Idempotent replay of a stored job
+          headers:
+            Idempotent-Replayed: { schema: { type: string, enum: ['true'] } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PrintJob' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /print/v1/jobs/{id}:
+    get:
+      operationId: getPrintJob
+      summary: Read a print job
+      x-passage-duty: WMS_PRINT
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The job
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PrintJob' }
+        '404': { $ref: '#/components/responses/Problem' }
+components:
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, maxLength: 255 }
+  responses:
+    Problem:
+      description: RFC 9457 problem details
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string }
+        traceId: { type: string }
+        errors: { type: object, additionalProperties: { type: string } }
+    PrinterRequest:
+      type: object
+      required: [code, name, deviceType, dpi, host, queueCode, failoverRank]
+      additionalProperties: false
+      properties:
+        code: { type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{1,39}$' }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        deviceType: { type: string, enum: [ZPL_II, PDF_IPP, PCL_6] }
+        dpi: { type: integer, enum: [203, 300, 600] }
+        host: { type: string, minLength: 1, maxLength: 253 }
+        port: { type: integer, minimum: 1, maximum: 65535, description: Defaults to 9100 for ZPL_II. }
+        queueCode: { type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{1,39}$' }
+        failoverRank: { type: integer, minimum: 1, description: Unique within the queue; jobs try devices in rank order. }
+    Printer:
+      type: object
+      required: [id, code, name, deviceType, dpi, host, port, queueCode, failoverRank, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        deviceType: { type: string, enum: [ZPL_II, PDF_IPP, PCL_6] }
+        dpi: { type: integer, enum: [203, 300, 600] }
+        host: { type: string }
+        port: { type: integer }
+        queueCode: { type: string }
+        failoverRank: { type: integer }
+        createdAt: { type: string, format: date-time }
+    CreateJobRequest:
+      type: object
+      description: Give queueCode, or documentType (with optional zone and warehouseId) to resolve the queue by routing rule (BR-32.12).
+      additionalProperties: false
+      properties:
+        templateCode: { type: string, enum: [LP_LABEL, LOCATION_LABEL], description: Required unless reprintOf is set. }
+        queueCode: { type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{1,39}$' }
+        documentType: { $ref: '#/components/schemas/DocumentType' }
+        zone: { type: string }
+        warehouseId: { type: string }
+        data: { type: object, additionalProperties: { type: string } }
+        reprintOf: { type: string, format: uuid }
+    DocumentType:
+      type: string
+      enum: [LP_LABEL, LOCATION_LABEL, ITEM_LABEL, GS1_CARTON_LABEL, PICK_LIST, COUNT_SHEET, COA, BOL]
+    RoutingRuleRequest:
+      type: object
+      required: [documentType, queueCode, sequence]
+      additionalProperties: false
+      description: At most one of userId, zone or warehouseId. Resolution order is user, zone, warehouse, then document-type default; ties go to the lowest sequence.
+      properties:
+        documentType: { $ref: '#/components/schemas/DocumentType' }
+        userId: { type: string }
+        zone: { type: string }
+        warehouseId: { type: string }
+        queueCode: { type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{1,39}$' }
+        sequence: { type: integer, minimum: 1 }
+    RoutingRule:
+      type: object
+      required: [id, documentType, queueCode, sequence]
+      description: A stored rule. Scope fields are omitted when empty.
+      properties:
+        id: { type: string, format: uuid }
+        documentType: { $ref: '#/components/schemas/DocumentType' }
+        userId: { type: string }
+        zone: { type: string }
+        warehouseId: { type: string }
+        queueCode: { type: string }
+        sequence: { type: integer }
+    PrintJob:
+      type: object
+      required: [id, templateCode, queueCode, status, attempts, createdBy, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        templateCode: { type: string }
+        queueCode: { type: string }
+        printerId: { type: string, format: uuid }
+        printerCode: { type: string }
+        status: { type: string, enum: [QUEUED, PRINTED, FAILED] }
+        attempts: { type: integer }
+        lastError: { type: string, description: MOB-0111 or MOB-0112 when FAILED. }
+        reprintOf: { type: string, format: uuid }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }

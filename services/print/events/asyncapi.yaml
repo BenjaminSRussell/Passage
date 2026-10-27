@@ -1,0 +1,30 @@
+asyncapi: 3.0.0
+info:
+  title: print
+  version: 0.1.0
+  description: CloudEvents 1.0 envelope from platform/go/events; payloads below are the data member.
+channels:
+  passage.print.job:
+    address: passage.print.job
+    messages:
+      completed:
+        $ref: '#/components/messages/jobCompleted'
+operations:
+  onPrintJobCompleted:
+    action: send
+    channel: { $ref: '#/channels/passage.print.job' }
+    messages: [{ $ref: '#/channels/passage.print.job/messages/completed' }]
+components:
+  messages:
+    jobCompleted:
+      name: completed
+      title: Print job completed
+      description: Emitted once when a job reaches PRINTED (accepted by the printer) or FAILED (MOB-0111 or MOB-0112). The transaction that stores the terminal state writes this row to the outbox.
+      payload:
+        type: object
+        required: [job_id, printer, status]
+        properties:
+          job_id: { type: string, format: uuid }
+          printer: { type: string, description: Printer code; empty when no device accepted the job. }
+          status: { type: string, enum: [PRINTED, FAILED] }
+      x-passage-type: dev.passage.print.job.completed.v1
