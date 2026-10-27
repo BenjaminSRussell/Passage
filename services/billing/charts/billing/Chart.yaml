@@ -1,0 +1,6 @@
+apiVersion: v2
+name: billing
+description: Passage billing service for invoice proposals and posting (wave 29, PSG-29)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

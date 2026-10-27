@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    app.kubernetes.io/name: billing
+spec:
+  selector:
+    app.kubernetes.io/name: billing
+  ports:
+    - { name: http, port: {{ .Values.service.port }}, targetPort: http }
+    - { name: admin, port: {{ .Values.service.adminPort }}, targetPort: admin }

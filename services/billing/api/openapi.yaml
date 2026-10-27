@@ -1,0 +1,297 @@
+openapi: 3.1.0
+info:
+  title: Passage Billing API
+  version: 0.1.0
+  description: >
+    Invoice proposals, posting and reads for the billing context (PSG-29, slice 1).
+    Slice 1 covers free-text invoices only. Shipment, consolidated, subscription
+    and credit-note flows arrive in later slices (see NOT-IMPLEMENTED.md).
+servers:
+  - url: https://api.{env}.passage.dev
+    variables:
+      env:
+        default: dev
+paths:
+  /v1/billing/free-text-invoices:
+    post:
+      operationId: createFreeTextInvoice
+      summary: Create a free-text invoice proposal (not yet posted).
+      description: >
+        Quotes tax per line through the tax engine (FR-29.6). When the engine is
+        unavailable nothing is stored (503 BIL-0001); a tax code the engine does
+        not know is refused (422 BIL-0102). A caller scoped to one legal entity
+        may only invoice for that entity (403 AUTH-0003).
+      x-passage-duty: billing.invoice.maintain (InvoiceMaintain)
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FreeTextInvoiceRequest"
+      responses:
+        "201":
+          description: Proposal created with tax quoted per line.
+          headers:
+            ETag:
+              description: The invoice version, to send as If-Match when posting.
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Invoice"
+        "200":
+          description: Idempotent replay of an earlier completed request with the same body.
+          headers:
+            Idempotent-Replayed:
+              description: Always true on a replay.
+              schema: { type: string, enum: ["true"] }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Invoice"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "409":
+          description: A concurrent request holds the same Idempotency-Key (idempotency_in_progress).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: Idempotency-Key reused with another body (idempotency_key_reuse) or unknown tax code (BIL-0102).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /v1/billing/invoices:
+    get:
+      operationId: listInvoices
+      summary: List invoice headers, newest first (Invoices list inquiry, §5.29.14).
+      x-passage-duty: billing.invoice.view (InvoiceView)
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [PROPOSAL, POSTED, PARTIALLY_SETTLED, SETTLED, REVERSED] }
+        - name: customerId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 100 }
+      responses:
+        "200":
+          description: Invoice headers without lines.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/InvoiceSummary"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /v1/billing/invoices/{id}:
+    get:
+      operationId: getInvoice
+      summary: Read one invoice with its lines and totals.
+      x-passage-duty: billing.invoice.view (InvoiceView)
+      parameters:
+        - $ref: "#/components/parameters/InvoiceId"
+      responses:
+        "200":
+          description: The invoice.
+          headers:
+            ETag:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Invoice"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /v1/billing/invoices/{id}:post:
+    post:
+      operationId: postInvoice
+      summary: Post a proposal. Re-quotes tax, books AR and the journal, and assigns the gap-free number.
+      x-passage-duty: billing.invoice.post (InvoicePost)
+      description: >
+        Posting an already posted invoice returns it unchanged (idempotent by state;
+        the PRD's idempotency key is the invoice id). A failed post consumes no
+        invoice number. The tax is re-quoted and the post is refused when it moved
+        by more than 0.01 (409 BIL-0002) or the engine is down (503 BIL-0001).
+      parameters:
+        - $ref: "#/components/parameters/InvoiceId"
+        - name: If-Match
+          in: header
+          required: false
+          description: The ETag (version) the caller reviewed; a stale value returns 412 BIL-0103.
+          schema: { type: string }
+      responses:
+        "200":
+          description: The posted invoice with its number.
+          headers:
+            ETag:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Invoice"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          description: Not a proposal (BIL-0101) or tax moved beyond tolerance (BIL-0002).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+components:
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Client key, 1 to 255 characters. Retries with the same key and body return the same proposal.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 255
+    InvoiceId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    Problem:
+      description: RFC 9457 problem document.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+  schemas:
+    FreeTextInvoiceRequest:
+      type: object
+      required: [legalEntityId, customerId, invoiceAccountId, currency, invoiceDate, paymentTermDays, lines]
+      additionalProperties: false
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        customerId: { type: string, format: uuid }
+        invoiceAccountId: { type: string, format: uuid }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        invoiceDate: { type: string, format: date }
+        paymentTermDays: { type: integer, minimum: 0, maximum: 365 }
+        chargeAmount: { type: string, pattern: "^[0-9]{1,14}(\\.[0-9]{1,6})?$", description: "Header charge, non-negative decimal." }
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 2000
+          items:
+            $ref: "#/components/schemas/FreeTextLine"
+    FreeTextLine:
+      type: object
+      required: [description, qty, unitPrice, revenueAccount, taxCode]
+      additionalProperties: false
+      properties:
+        description: { type: string, minLength: 1, maxLength: 200 }
+        qty: { type: string, pattern: "^[0-9]{1,14}(\\.[0-9]{1,6})?$", description: "Positive decimal string." }
+        unitPrice: { type: string, pattern: "^[0-9]{1,14}(\\.[0-9]{1,6})?$", description: "Non-negative decimal string." }
+        discountPct: { type: string, pattern: "^[0-9]{1,14}(\\.[0-9]{1,6})?$", description: "Percent 0 to 100." }
+        revenueAccount: { type: string, pattern: "^[A-Za-z0-9._-]{1,20}$", description: "Ledger account; missing returns the field error ending (BIL-0004)." }
+        taxCode: { type: string, pattern: "^[A-Z0-9_-]{1,20}$", description: "Tax code quoted by the tax engine (FR-29.4)." }
+    Money:
+      type: string
+      pattern: "^-?[0-9]+\\.[0-9]+$"
+      description: Decimal string rounded to the currency minor unit.
+    Invoice:
+      allOf:
+        - $ref: "#/components/schemas/InvoiceSummary"
+        - type: object
+          required: [lines]
+          properties:
+            lines:
+              type: array
+              items:
+                type: object
+                required: [lineNo, description, qty, unitPrice, discountPct, net, tax, revenueAccount, taxCode]
+                properties:
+                  lineNo: { type: integer }
+                  description: { type: string }
+                  qty: { type: string }
+                  unitPrice: { type: string }
+                  discountPct: { type: string }
+                  net: { $ref: "#/components/schemas/Money" }
+                  tax: { $ref: "#/components/schemas/Money" }
+                  revenueAccount: { type: string }
+                  taxCode: { type: string }
+    InvoiceSummary:
+      type: object
+      required: [id, legalEntityId, customerId, invoiceAccountId, type, status, currency, invoiceDate, dueDate, paymentTermDays, totals, version]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        customerId: { type: string, format: uuid }
+        invoiceAccountId: { type: string, format: uuid }
+        type: { type: string, enum: [SHIPMENT, CONSOLIDATED, FREE_TEXT, SUBSCRIPTION, MILESTONE, CREDIT_NOTE], description: "Slice 1 creates FREE_TEXT only." }
+        status: { type: string, enum: [PROPOSAL, POSTED, PARTIALLY_SETTLED, SETTLED, REVERSED], description: "Slice 1 reaches PROPOSAL and POSTED." }
+        number: { type: string, description: "INV-<year>-<7 digits>, present once posted." }
+        currency: { type: string }
+        invoiceDate: { type: string, format: date }
+        dueDate: { type: string, format: date }
+        postingDate: { type: string, format: date }
+        paymentTermDays: { type: integer }
+        totals:
+          type: object
+          required: [net, charges, tax, gross]
+          properties:
+            net: { $ref: "#/components/schemas/Money" }
+            charges: { $ref: "#/components/schemas/Money" }
+            tax: { $ref: "#/components/schemas/Money" }
+            gross: { $ref: "#/components/schemas/Money" }
+        version: { type: integer }
+    Problem:
+      type: object
+      description: RFC 9457 problem details with a stable code.
+      required: [type, title, status]
+      properties:
+        type: { type: string, format: uri, description: "https://passage.dev/problems/<code>" }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string }
+        traceId: { type: string }
+        errors:
+          type: object
+          additionalProperties: { type: string }

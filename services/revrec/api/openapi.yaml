@@ -1,0 +1,120 @@
+openapi: 3.1.0
+info:
+  title: Passage Revenue Recognition API
+  version: 0.1.0
+  description: >
+    Stateless ASC 606 / IFRS 15 allocation preview (PSG-29, slice 1). Contracts,
+    recognition runs and roll-forward are persisted in a later slice.
+servers:
+  - url: https://api.{env}.passage.dev
+    variables:
+      env:
+        default: dev
+paths:
+  /v1/revrec/allocations:preview:
+    post:
+      operationId: previewAllocation
+      summary: Allocate a transaction price across performance obligations by SSP and return ratable schedules.
+      x-passage-duty: revrec.view (RevRecView)
+      description: >
+        Pure computation: nothing is stored and no event is emitted. Allocation
+        follows BR-29.1 (proportional to SSP, residual to the rule's obligation)
+        and BR-29.3 (2-decimal shares, last ratable period absorbs the residual).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PreviewRequest"
+      responses:
+        "200":
+          description: Allocation per obligation; ratable obligations carry their schedule.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PreviewResponse"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+components:
+  responses:
+    Problem:
+      description: RFC 9457 problem document.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+  schemas:
+    PreviewRequest:
+      type: object
+      required: [currency, transactionPrice, obligations]
+      additionalProperties: false
+      properties:
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        transactionPrice: { type: string, pattern: "^[0-9]{1,14}(\\.[0-9]{1,6})?$" }
+        residualRule: { type: string, enum: [LARGEST, FIRST, LAST], default: LARGEST }
+        obligations:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/Obligation"
+    Obligation:
+      type: object
+      required: [id, ssp, sspSource, method]
+      additionalProperties: false
+      properties:
+        id: { type: string, minLength: 1, maxLength: 64, description: "Unique within the request." }
+        ssp: { type: string, pattern: "^[0-9]{1,14}(\\.[0-9]{1,6})?$", description: "Positive standalone selling price." }
+        sspSource: { type: string, enum: [EXPLICIT, LIST, PCT_OF_LIST, RESIDUAL] }
+        method: { type: string, enum: [POINT_IN_TIME, RATABLE, MILESTONE, USAGE] }
+        termStart: { type: string, format: date, description: "Required for RATABLE." }
+        termEnd: { type: string, format: date, description: "Required for RATABLE; on or after termStart." }
+    PreviewResponse:
+      type: object
+      required: [currency, transactionPrice, residualRule, obligations]
+      properties:
+        currency: { type: string }
+        transactionPrice: { type: string }
+        residualRule: { type: string }
+        obligations:
+          type: array
+          items:
+            $ref: "#/components/schemas/AllocatedObligation"
+    AllocatedObligation:
+      type: object
+      required: [id, ssp, sspSource, method, allocated]
+      properties:
+        id: { type: string }
+        ssp: { type: string }
+        sspSource: { type: string }
+        method: { type: string }
+        allocated: { type: string }
+        schedule:
+          type: array
+          items:
+            type: object
+            required: [start, end, amount]
+            properties:
+              start: { type: string, format: date }
+              end: { type: string, format: date }
+              amount: { type: string }
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties:
+        type: { type: string, format: uri, description: "https://passage.dev/problems/<code>" }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string }
+        traceId: { type: string }
+        errors:
+          type: object
+          additionalProperties: { type: string }

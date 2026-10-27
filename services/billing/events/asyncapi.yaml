@@ -1,0 +1,66 @@
+asyncapi: 3.0.0
+info:
+  title: Passage Billing events
+  version: 0.1.0
+  description: CloudEvents published by the billing context (PSG-29, slice 1).
+defaultContentType: application/cloudevents+json
+channels:
+  invoicePosted:
+    address: passage.billing.invoice
+    description: Outbox relay topic for billing invoice lifecycle events.
+    messages:
+      invoicePosted:
+        $ref: "#/components/messages/InvoicePosted"
+operations:
+  publishInvoicePosted:
+    action: send
+    channel:
+      $ref: "#/channels/invoicePosted"
+    summary: Billing publishes invoice.posted when a free-text proposal posts.
+components:
+  messages:
+    InvoicePosted:
+      name: dev.passage.billing.invoice.posted.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [invoice_id, number, type, legal_entity_id, customer, invoice_account, currency, invoice_date, posting_date, due_date, lines, totals, journal_posting_id, intercompany]
+        additionalProperties: false
+        properties:
+          invoice_id: { type: string, format: uuid }
+          number: { type: string }
+          type: { type: string, enum: [FREE_TEXT], description: "Slice 1 posts free-text invoices only." }
+          legal_entity_id: { type: string, format: uuid }
+          customer: { type: string, format: uuid }
+          invoice_account: { type: string, format: uuid }
+          currency: { type: string, pattern: "^[A-Z]{3}$" }
+          invoice_date: { type: string, format: date }
+          posting_date: { type: string, format: date }
+          due_date: { type: string, format: date }
+          lines:
+            type: array
+            items:
+              type: object
+              required: [line_no, description, qty, net, tax, tax_code, revenue_account]
+              additionalProperties: false
+              properties:
+                line_no: { type: integer }
+                description: { type: string }
+                qty: { type: string }
+                net: { type: string, description: "Decimal string at the currency's minor unit." }
+                tax: { type: string, description: "Decimal string at the currency's minor unit." }
+                tax_code: { type: string }
+                revenue_account: { type: string }
+          totals:
+            type: object
+            required: [net, charges, tax, gross]
+            additionalProperties: false
+            properties:
+              net: { type: string }
+              charges: { type: string }
+              tax: { type: string }
+              gross: { type: string }
+          journal_posting_id:
+            type: [string, "null"]
+            description: Null until the ledger journal is wired (later slice).
+          intercompany: { type: boolean }

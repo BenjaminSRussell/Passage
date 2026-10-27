@@ -1,0 +1,6 @@
+apiVersion: v2
+name: revrec
+description: Passage revenue recognition service for ASC 606 / IFRS 15 allocation (wave 29, PSG-29)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

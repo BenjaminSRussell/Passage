@@ -1,0 +1,11 @@
+asyncapi: 3.0.0
+info:
+  title: Passage Revenue Recognition events
+  version: 0.1.0
+  description: >
+    Slice 1 of revrec publishes no events: the allocation preview is a pure
+    computation and writes nothing. The planned events (contract.allocated.v1,
+    schedule.recognized.v1) arrive with the revrec store in a later slice of PSG-29.
+defaultContentType: application/cloudevents+json
+channels: {}
+operations: {}
