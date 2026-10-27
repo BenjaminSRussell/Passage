@@ -11,8 +11,8 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-// CodeStatementAccount is raised when the statement's account IBAN is not the
-// bank account the upload was made against.
+// CodeStatementAccount is raised when the statement's account (IBAN or the
+// bank's account number) is not the bank account the upload was made against.
 const CodeStatementAccount = "TRS-0409"
 
 var (
@@ -31,6 +31,7 @@ type camtStmt struct {
 	ID      string     `xml:"Id"`
 	Seq     string     `xml:"ElctrncSeqNb"`
 	IBAN    string     `xml:"Acct>Id>IBAN"`
+	Other   string     `xml:"Acct>Id>Othr>Id"`
 	Ccy     string     `xml:"Acct>Ccy"`
 	Bals    []camtBal  `xml:"Bal"`
 	Entries []camtNtry `xml:"Ntry"`
@@ -89,12 +90,23 @@ func ParseCAMT053(data []byte) ([]Statement, error) {
 	return out, nil
 }
 
+// entryError is TRS-0493 at the given camt.053 entry (0 for the statement header).
+func entryError(entry int, detail string) *Error {
+	return &Error{Code: CodeStatementFormat, Detail: detail, Entry: entry}
+}
+
+// formatError is TRS-0493 at the given line of a text format (0 when the
+// problem is not tied to one line).
 func formatError(line int, detail string) *Error {
 	return &Error{Code: CodeStatementFormat, Detail: detail, Line: line}
 }
 
 func (s camtStmt) statement(format string) (Statement, error) {
-	st := Statement{Format: format, StatementID: strings.TrimSpace(s.ID), AccountIBAN: NormalizeIBAN(s.IBAN), Currency: strings.TrimSpace(s.Ccy)}
+	account := s.IBAN
+	if strings.TrimSpace(account) == "" {
+		account = s.Other // a non-IBAN account (for example a US account number)
+	}
+	st := Statement{Format: format, StatementID: strings.TrimSpace(s.ID), Account: NormalizeIBAN(account), Currency: strings.TrimSpace(s.Ccy)}
 	if st.StatementID == "" {
 		return Statement{}, formatError(0, "Stmt/Id is required")
 	}
@@ -165,17 +177,17 @@ func (e camtNtry) line(no int, currency string) (Line, error) {
 		return Line{}, err
 	}
 	if e.Amt.Ccy != currency {
-		return Line{}, formatError(no, fmt.Sprintf("entry currency %s differs from statement currency %s", e.Amt.Ccy, currency))
+		return Line{}, entryError(no, fmt.Sprintf("entry currency %s differs from statement currency %s", e.Amt.Ccy, currency))
 	}
 	if !validDate(e.Booking) {
-		return Line{}, formatError(no, "BookgDt/Dt must be YYYY-MM-DD")
+		return Line{}, entryError(no, "BookgDt/Dt must be YYYY-MM-DD")
 	}
 	value := e.Value
 	if value == "" {
 		value = e.Booking
 	}
 	if !validDate(value) {
-		return Line{}, formatError(no, "ValDt/Dt must be YYYY-MM-DD")
+		return Line{}, entryError(no, "ValDt/Dt must be YYYY-MM-DD")
 	}
 	counterparty := e.Debtor
 	if e.Ind == "DBIT" {
@@ -196,10 +208,10 @@ func (e camtNtry) line(no int, currency string) (Line, error) {
 }
 
 // signedAmount applies CdtDbtInd: CRDT is positive, DBIT negative.
-func signedAmount(a camtAmt, ind string, line int) (decimal.Decimal, error) {
+func signedAmount(a camtAmt, ind string, entry int) (decimal.Decimal, error) {
 	v, err := decimal.NewFromString(strings.TrimSpace(a.Value))
 	if err != nil || v.IsNegative() {
-		return decimal.Zero, formatError(line, "amount must be a non-negative decimal")
+		return decimal.Zero, entryError(entry, "amount must be a non-negative decimal")
 	}
 	switch strings.TrimSpace(ind) {
 	case "CRDT":
@@ -207,7 +219,7 @@ func signedAmount(a camtAmt, ind string, line int) (decimal.Decimal, error) {
 	case "DBIT":
 		return v.Neg(), nil
 	default:
-		return decimal.Zero, formatError(line, "CdtDbtInd must be CRDT or DBIT")
+		return decimal.Zero, entryError(entry, "CdtDbtInd must be CRDT or DBIT")
 	}
 }
 

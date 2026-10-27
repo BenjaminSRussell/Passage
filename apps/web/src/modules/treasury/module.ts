@@ -11,7 +11,7 @@ const treasury: PassageModule = {
   id: "treasury",
   title: "Treasury",
   description:
-    "House bank accounts and their lifecycle, camt.053 bank statement import, the cash flow forecast, checks, bank facilities with letters of credit and guarantees, and loan contracts.",
+    "House bank accounts and their lifecycle, camt.053, BAI2 and MT940 bank statement import, the cash flow forecast, checks, bank facilities with letters of credit and guarantees, and loan contracts.",
   routes: [
     { path: "/treasury", element: createElement(BankAccountsPage), handle: { title: "Bank accounts" } },
     { path: "/treasury/bank-accounts/new", element: createElement(NewBankAccountPage), handle: { title: "New bank account" } },

@@ -33,12 +33,15 @@ var forecastSourceTypes = map[string]bool{
 }
 
 type createBankAccountRequest struct {
-	LegalEntityID string  `json:"legalEntityId"`
-	AccountCode   string  `json:"accountCode"`
-	IBAN          string  `json:"iban"`
-	BIC           *string `json:"bic"`
-	Currency      string  `json:"currency"`
-	MainAccountID string  `json:"mainAccountId"`
+	LegalEntityID string `json:"legalEntityId"`
+	AccountCode   string `json:"accountCode"`
+	IBAN          string `json:"iban"`
+	// StatementAccount is the account number the bank writes on BAI2 and
+	// MT940 statements when it is not the IBAN; optional.
+	StatementAccount *string `json:"statementAccount"`
+	BIC              *string `json:"bic"`
+	Currency         string  `json:"currency"`
+	MainAccountID    string  `json:"mainAccountId"`
 }
 
 // requireKey returns the Idempotency-Key header or writes a 400.
@@ -81,6 +84,13 @@ func (a *API) createBankAccount(w http.ResponseWriter, r *http.Request) {
 	if !domain.ValidCurrency(req.Currency) {
 		fields["currency"] = "must be an ISO 4217 code"
 	}
+	statementAccount := ""
+	if req.StatementAccount != nil {
+		statementAccount = domain.NormalizeIBAN(*req.StatementAccount)
+		if statementAccount != "" && !domain.ValidStatementAccount(statementAccount) {
+			fields["statementAccount"] = "1 to 35 characters of A-Z, 0-9, /, . or -"
+		}
+	}
 	var bic *string
 	if req.BIC != nil && strings.TrimSpace(*req.BIC) != "" {
 		b := strings.ToUpper(strings.TrimSpace(*req.BIC))
@@ -101,12 +111,13 @@ func (a *API) createBankAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	acct, err := a.store.CreateBankAccount(r.Context(), store.NewBankAccount{
-		LegalEntityID: req.LegalEntityID,
-		AccountCode:   req.AccountCode,
-		IBAN:          domain.NormalizeIBAN(req.IBAN),
-		BIC:           bic,
-		Currency:      req.Currency,
-		MainAccountID: req.MainAccountID,
+		LegalEntityID:    req.LegalEntityID,
+		AccountCode:      req.AccountCode,
+		IBAN:             domain.NormalizeIBAN(req.IBAN),
+		StatementAccount: statementAccount,
+		BIC:              bic,
+		Currency:         req.Currency,
+		MainAccountID:    req.MainAccountID,
 	}, key)
 	if err != nil {
 		httpx.Fail(w, r, problemFrom(err))
@@ -252,9 +263,9 @@ func (a *API) importStatement(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sum := sha256.Sum256(data)
-	parsed, err := domain.ParseCAMT053(data)
+	parsed, err := domain.ParseStatements(data)
 	if err == nil && len(parsed) != 1 {
-		err = &domain.Error{Code: domain.CodeStatementFormat, Detail: "a file must hold exactly one Stmt; split multi-statement files"}
+		err = &domain.Error{Code: domain.CodeStatementFormat, Detail: "a file must hold exactly one statement (one camt.053 Stmt, BAI2 03 account or MT940 :20: block); split multi-statement files"}
 	}
 	if err != nil {
 		a.statementsRejected.Add(1)

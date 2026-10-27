@@ -168,7 +168,12 @@ paths:
   /v1/treasury/statements/import:
     post:
       operationId: importStatement
-      summary: Upload a camt.053 statement (multipart). Same bytes replay with 200.
+      summary: Upload a camt.053, BAI2 or MT940 statement (multipart). Same bytes replay with 200.
+      description: >-
+        The format is detected from the content (XML is camt.053, a leading 01 record is BAI2,
+        a :20: tag is MT940). A file must hold one statement; a parse error is TRS-0493 with the
+        failing line of a BAI2 or MT940 file in errors.line, or the failing camt.053 entry in errors.entry. The statement's account must be the bank account's IBAN or its
+        statementAccount (TRS-0409).
       x-passage-duty: treasury.statement.import
       requestBody:
         required: true
@@ -179,7 +184,7 @@ paths:
               required: [bankAccountId, file]
               properties:
                 bankAccountId: {type: string, format: uuid}
-                file: {type: string, format: binary, description: camt.053 XML, max 50 MB by default}
+                file: {type: string, format: binary, description: "camt.053 XML, BAI2 or MT940 text; max 50 MB by default"}
       responses:
         "200":
           description: Identical file, or the same statement id with the same closing balance, already imported; existing statement returned (TRS-0405, BR-36.8)
@@ -722,6 +727,7 @@ components:
         accountCode: {type: string, pattern: "^[A-Z0-9-]{1,20}$"}
         iban: {type: string, description: "Validated mod-97 (TRS-0401). Only a SHA-256 lookup hash, the masked form and the last four characters are stored; the full IBAN is not retained (see NOT-IMPLEMENTED.md)."}
         bic: {type: string, description: ISO 9362}
+        statementAccount: {type: string, description: "Optional account number the bank writes on BAI2 (03 record), MT940 (:25:) or non-IBAN camt.053 (Acct/Id/Othr/Id) statements. Spaces are removed and letters upper-cased; then 1 to 35 characters of A-Z, 0-9, /, . or -. Stored only as a SHA-256 hash and its last four characters."}
         currency: {type: string, pattern: "^[A-Z]{3}$"}
         mainAccountId: {type: string, format: uuid}
     BankAccount:
@@ -734,6 +740,7 @@ components:
         ibanMasked: {type: string}
         ibanLast4: {type: string, minLength: 4, maxLength: 4}
         bic: {type: [string, "null"]}
+        statementAccountLast4: {type: string, minLength: 1, maxLength: 4, description: Last four characters of the statement account number; absent when none was given}
         currency: {type: string}
         mainAccountId: {type: string, format: uuid}
         status: {type: string, enum: [draft, active, inactive, closed]}
@@ -749,7 +756,7 @@ components:
         legalEntityId: {type: string, format: uuid}
         statementId: {type: string}
         sequence: {type: [integer, "null"]}
-        format: {type: string, pattern: "^camt\\.053\\."}
+        format: {type: string, pattern: "^(camt\\.053\\.001\\.[0-9]{2}|BAI2|MT940)$"}
         currency: {type: string}
         openingDate: {type: string, format: date}
         openingBalance: {$ref: "#/components/schemas/Money"}

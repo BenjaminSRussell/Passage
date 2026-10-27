@@ -46,18 +46,21 @@ const (
 // BankAccount is the API view of a bank account. The IBAN itself is never
 // stored or returned: only its hash (for lookups), a mask and the last four characters.
 type BankAccount struct {
-	ID            string    `json:"id"`
-	LegalEntityID string    `json:"legalEntityId"`
-	AccountCode   string    `json:"accountCode"`
-	IBANMasked    string    `json:"ibanMasked"`
-	IBANLast4     string    `json:"ibanLast4"`
-	BIC           *string   `json:"bic,omitempty"`
-	Currency      string    `json:"currency"`
-	MainAccountID string    `json:"mainAccountId"`
-	Status        string    `json:"status"`
-	Version       int       `json:"version"`
-	CreatedAt     time.Time `json:"createdAt"`
-	UpdatedAt     time.Time `json:"updatedAt"`
+	ID            string  `json:"id"`
+	LegalEntityID string  `json:"legalEntityId"`
+	AccountCode   string  `json:"accountCode"`
+	IBANMasked    string  `json:"ibanMasked"`
+	IBANLast4     string  `json:"ibanLast4"`
+	BIC           *string `json:"bic,omitempty"`
+	// StatementAccountLast4 ends the account number the bank writes on BAI2,
+	// MT940 or non-IBAN camt.053 statements, when one was given.
+	StatementAccountLast4 *string   `json:"statementAccountLast4,omitempty"`
+	Currency              string    `json:"currency"`
+	MainAccountID         string    `json:"mainAccountId"`
+	Status                string    `json:"status"`
+	Version               int       `json:"version"`
+	CreatedAt             time.Time `json:"createdAt"`
+	UpdatedAt             time.Time `json:"updatedAt"`
 }
 
 // NewBankAccount is a validated create request. IBAN is the normalized value and is used only to derive the hash and mask.
@@ -65,9 +68,13 @@ type NewBankAccount struct {
 	LegalEntityID string
 	AccountCode   string
 	IBAN          string
-	BIC           *string
-	Currency      string
-	MainAccountID string
+	// StatementAccount is the normalized account number the bank writes on
+	// statements instead of the IBAN (BAI2, MT940 :25:), or empty. Like the
+	// IBAN it is kept only as a hash and its last four characters.
+	StatementAccount string
+	BIC              *string
+	Currency         string
+	MainAccountID    string
 }
 
 // Statement is the stored header of an imported statement.
@@ -178,17 +185,28 @@ func New(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
 // Ping checks the database connection for readiness.
 func (s *Postgres) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 
-// ibanHash is the lookup key for an IBAN: SHA-256 of the normalized value.
+// ibanHash is the lookup key for an IBAN or a statement account number:
+// SHA-256 of the normalized value.
 func ibanHash(iban string) []byte {
 	sum := sha256.Sum256([]byte(domain.NormalizeIBAN(iban)))
 	return sum[:]
 }
 
-const bankAccountColumns = "id, legal_entity_id, account_code, iban_masked, iban_last4, bic, currency, main_account_id, status, version, created_at, updated_at"
+// statementAccountKey returns the hash and last four characters stored for an
+// optional statement account number, or nils when there is none.
+func statementAccountKey(number string) ([]byte, *string) {
+	if number == "" {
+		return nil, nil
+	}
+	last4 := domain.Last4(number)
+	return ibanHash(number), &last4
+}
+
+const bankAccountColumns = "id, legal_entity_id, account_code, iban_masked, iban_last4, bic, statement_account_last4, currency, main_account_id, status, version, created_at, updated_at"
 
 func scanBankAccount(row pgx.Row, extra ...any) (BankAccount, error) {
 	var a BankAccount
-	err := row.Scan(append([]any{&a.ID, &a.LegalEntityID, &a.AccountCode, &a.IBANMasked, &a.IBANLast4, &a.BIC, &a.Currency, &a.MainAccountID, &a.Status, &a.Version, &a.CreatedAt, &a.UpdatedAt}, extra...)...)
+	err := row.Scan(append([]any{&a.ID, &a.LegalEntityID, &a.AccountCode, &a.IBANMasked, &a.IBANLast4, &a.BIC, &a.StatementAccountLast4, &a.Currency, &a.MainAccountID, &a.Status, &a.Version, &a.CreatedAt, &a.UpdatedAt}, extra...)...)
 	return a, err
 }
 
@@ -201,6 +219,7 @@ func notFound(code, detail string) error {
 func (s *Postgres) CreateBankAccount(ctx context.Context, in NewBankAccount, idempotencyKey string) (BankAccount, error) {
 	p, _ := tenant.FromContext(ctx)
 	hash := ibanHash(in.IBAN)
+	stmtHash, stmtLast4 := statementAccountKey(in.StatementAccount)
 	reqHash, err := requestHash("create-bank-account", in)
 	if err != nil {
 		return BankAccount{}, err
@@ -216,9 +235,11 @@ func (s *Postgres) CreateBankAccount(ctx context.Context, in NewBankAccount, ide
 			if count >= domain.MaxAccountsPerEntity {
 				return BankAccount{}, httpx.NewProblem(http.StatusUnprocessableEntity, CodeAccountLimit, "a legal entity may hold at most 500 bank accounts")
 			}
-			return scanBankAccount(tx.QueryRow(ctx, `insert into bank_account (tenant_id, id, legal_entity_id, account_code, iban_hash, iban_masked, iban_last4, bic, currency, main_account_id)
-				values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) returning `+bankAccountColumns,
-				p.TenantID, ids.New(), in.LegalEntityID, in.AccountCode, hash, domain.MaskIBAN(in.IBAN), domain.Last4(in.IBAN), in.BIC, in.Currency, in.MainAccountID))
+			return scanBankAccount(tx.QueryRow(ctx, `insert into bank_account (tenant_id, id, legal_entity_id, account_code, iban_hash, iban_masked, iban_last4, bic, currency, main_account_id,
+				statement_account_hash, statement_account_last4)
+				values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) returning `+bankAccountColumns,
+				p.TenantID, ids.New(), in.LegalEntityID, in.AccountCode, hash, domain.MaskIBAN(in.IBAN), domain.Last4(in.IBAN), in.BIC, in.Currency, in.MainAccountID,
+				stmtHash, stmtLast4))
 		})
 		return err
 	})
@@ -322,16 +343,19 @@ func (s *Postgres) importStatement(ctx context.Context, in StatementImport) (Imp
 	var res ImportResult
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var accountStatus, accountCurrency, legalEntityID string
-		var accountHash []byte
-		err := tx.QueryRow(ctx, `select status, currency, legal_entity_id, iban_hash from bank_account where tenant_id = $1 and id = $2`, p.TenantID, in.BankAccountID).
-			Scan(&accountStatus, &accountCurrency, &legalEntityID, &accountHash)
+		var accountHash, statementAccountHash []byte
+		err := tx.QueryRow(ctx, `select status, currency, legal_entity_id, iban_hash, statement_account_hash from bank_account where tenant_id = $1 and id = $2`, p.TenantID, in.BankAccountID).
+			Scan(&accountStatus, &accountCurrency, &legalEntityID, &accountHash, &statementAccountHash)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return notFound(CodeAccountNotFound, "bank account not found")
 		}
 		if err != nil {
 			return err
 		}
-		if string(accountHash) != string(ibanHash(in.Parsed.AccountIBAN)) {
+		// The file names its account by IBAN (camt.053) or by the bank's account
+		// number (BAI2, MT940 :25:, camt Othr/Id); either must be this account's.
+		fileAccount := ibanHash(in.Parsed.Account)
+		if string(accountHash) != string(fileAccount) && (statementAccountHash == nil || string(statementAccountHash) != string(fileAccount)) {
 			return httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeStatementAccount, "the statement belongs to another account")
 		}
 		// BR-36.8: a re-upload is answered with the stored statement before any

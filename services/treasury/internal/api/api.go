@@ -209,8 +209,11 @@ func problemFrom(err error) error {
 		status = http.StatusConflict
 	}
 	p := httpx.NewProblem(status, de.Code, de.Detail)
-	if de.Line > 0 {
+	switch {
+	case de.Line > 0:
 		p.Errors = map[string]string{"line": strconv.Itoa(de.Line)}
+	case de.Entry > 0:
+		p.Errors = map[string]string{"entry": strconv.Itoa(de.Entry)}
 	}
 	return p
 }

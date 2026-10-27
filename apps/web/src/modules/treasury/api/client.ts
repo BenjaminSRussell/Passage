@@ -20,6 +20,8 @@ export interface BankAccount {
   ibanMasked: string;
   ibanLast4: string;
   bic?: string | null;
+  /** Last four characters of the account number the bank writes on BAI2 / MT940 statements, when one was given. */
+  statementAccountLast4?: string;
   currency: string;
   mainAccountId: string;
   status: AccountStatus;
@@ -33,6 +35,8 @@ export interface BankAccountInput {
   accountCode: string;
   iban: string;
   bic?: string;
+  /** The account number the bank writes on BAI2 (03 record) or MT940 (:25:) statements when it is not the IBAN. */
+  statementAccount?: string;
   currency: string;
   mainAccountId: string;
 }

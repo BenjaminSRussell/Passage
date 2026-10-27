@@ -40,6 +40,7 @@ var (
 	ibanShape          = regexp.MustCompile(`^[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}$`)
 	accountCodePattern = regexp.MustCompile(`^[A-Z0-9-]{1,20}$`)
 	currencyPattern    = regexp.MustCompile(`^[A-Z]{3}$`)
+	statementAccount   = regexp.MustCompile(`^[A-Z0-9/.-]{1,35}$`)
 )
 
 // NormalizeIBAN strips spaces and upper-cases an IBAN.
@@ -95,6 +96,11 @@ func ValidBIC(s string) bool { return bicPattern.MatchString(strings.ToUpper(s))
 
 // ValidAccountCode checks the per-entity account code shape.
 func ValidAccountCode(s string) bool { return accountCodePattern.MatchString(s) }
+
+// ValidStatementAccount checks the optional account number a bank writes on
+// BAI2, MT940 (:25:, SWIFT 35x) or non-IBAN camt.053 statements, after
+// NormalizeIBAN: 1 to 35 characters of A-Z, 0-9, "/", "." or "-".
+func ValidStatementAccount(s string) bool { return statementAccount.MatchString(s) }
 
 // ValidCurrency checks an ISO 4217 alpha-3 shape.
 func ValidCurrency(s string) bool { return currencyPattern.MatchString(s) }

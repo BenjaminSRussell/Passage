@@ -19,6 +19,8 @@ import { useLoad } from "./useLoad";
 /** The service's default upload limit (TREASURY_MAX_FILE_MB = 50); larger files get TRS-0490 anyway. */
 export const MAX_BYTES = 50 * 1024 * 1024;
 const LINE_PAGE = 100;
+/** File pickers filter on these; the service decides the format from the content, not the name. */
+export const STATEMENT_ACCEPT = ".xml,.053,.bai,.bai2,.940,.sta,.mt940,.txt,application/xml,text/xml,text/plain";
 
 type Errors = Record<string, string>;
 
@@ -30,7 +32,7 @@ export interface ImportDraft {
 export function validateImport(v: ImportDraft): Errors {
   const errors: Errors = {};
   if (!UUID.test(v.bankAccountId.trim())) errors.bankAccountId = "Enter the bank account id (a UUID).";
-  if (!v.file) errors.file = "Choose the camt.053 file from the bank.";
+  if (!v.file) errors.file = "Choose the camt.053, BAI2 or MT940 file from the bank.";
   else if (v.file.size > MAX_BYTES) errors.file = "The file is larger than 50 MB; ask the bank for daily statements.";
   return errors;
 }
@@ -39,14 +41,14 @@ export function validateImport(v: ImportDraft): Errors {
 const IMPORT_FAILURES: Record<string, string> = {
   "TRS-0406": "A statement with this id was already imported with another closing balance",
   "TRS-0408": "The statement currency is not the account currency",
-  "TRS-0409": "This statement belongs to another bank account",
+  "TRS-0409": "The file's account is not this bank account's IBAN or statement account number",
   "TRS-0412": "The bank account is not active",
   "TRS-0490": "The file is too large",
-  "TRS-0493": "The file is not a readable camt.053 statement",
+  "TRS-0493": "The file is not a readable camt.053, BAI2 or MT940 statement",
   "TRS-0494": "The statement balances do not add up",
 };
 
-/** Upload one camt.053 file (FR-36.2). The same file again returns the stored statement (BR-36.8). */
+/** Upload one camt.053, BAI2 or MT940 file (FR-36.2); the service detects the format. The same file again returns the stored statement (BR-36.8). */
 export function ImportStatementPage() {
   const [params] = useSearchParams();
   const [values, setValues] = useState<ImportDraft>({ bankAccountId: params.get("bankAccountId") ?? "", file: null });
@@ -71,10 +73,12 @@ export function ImportStatementPage() {
       setResult(await importStatement(values.bankAccountId.trim(), values.file, values.file.name));
     } catch (error) {
       const problem = describeProblem(error);
-      // Parse errors carry the failing entry as "line"; everything else keyed by field belongs next to that field.
-      const { line, ...fields } = problem.fields;
+      // Parse errors say where the file failed: "line" of a BAI2 or MT940 file, or the camt.053 "entry".
+      // Everything else keyed by field belongs next to that field.
+      const { line, entry, ...fields } = problem.fields;
+      const where = line ? ` (line ${line})` : entry ? ` (entry ${entry})` : "";
       if (Object.keys(fields).length > 0) setErrors(fields);
-      else setFailure(line ? { ...problem, message: `${problem.message} (entry ${line})` } : problem);
+      else setFailure({ ...problem, message: `${problem.message}${where}` });
     } finally {
       setBusy(false);
     }
@@ -85,7 +89,7 @@ export function ImportStatementPage() {
     <div className={styles.stack}>
       <PageHeader
         title="Import bank statement"
-        description="Upload the bank's camt.053 file (one statement per file). Opening balance plus the entries must equal the closing balance; every entry is kept with its source XML for audit."
+        description="Upload the bank's camt.053, BAI2 or MT940 file (one statement per file); the format is recognised from the content. Opening balance plus the entries must equal the closing balance; every entry is kept with its source record for audit."
         actions={
           UUID.test(accountId) ? (
             <Link className={buttonClassName("secondary")} to={`/treasury/bank-accounts/${accountId}`}>
@@ -111,8 +115,16 @@ export function ImportStatementPage() {
               />
             )}
           </FormField>
-          <FormField id="st-file" label="camt.053 file" hint="XML, up to 50 MB." error={errors.file}>
-            {(c) => <Input {...c} type="file" accept=".xml,.053,application/xml,text/xml" onChange={chooseFile} invalid={Boolean(errors.file)} />}
+          <FormField id="st-file" label="Statement file" hint="camt.053 XML, BAI2 or MT940 text, up to 50 MB." error={errors.file}>
+            {(c) => (
+              <Input
+                {...c}
+                type="file"
+                accept={STATEMENT_ACCEPT}
+                onChange={chooseFile}
+                invalid={Boolean(errors.file)}
+              />
+            )}
           </FormField>
           {failure ? (
             <div className={styles.formActions}>

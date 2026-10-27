@@ -206,7 +206,7 @@ func TestImportStatement_DuplicateIDsConflictsAndAccountRules(t *testing.T) {
 	}
 
 	other := importInput(t, acct.ID, camt("STMT-D", 0, 1, ""))
-	other.Parsed.AccountIBAN = "GB82WEST12345698765432"
+	other.Parsed.Account = "GB82WEST12345698765432"
 	if _, err := s.ImportStatement(ctx, other); problemCode(t, err) != domain.CodeStatementAccount {
 		t.Fatalf("wrong IBAN: %v, want %s", err, domain.CodeStatementAccount)
 	}
@@ -216,7 +216,7 @@ func TestImportStatement_DuplicateIDsConflictsAndAccountRules(t *testing.T) {
 		t.Fatal(err)
 	}
 	draftFile := importInput(t, draft.ID, camt("STMT-E", 0, 1, ""))
-	draftFile.Parsed.AccountIBAN = "GB82WEST12345698765432"
+	draftFile.Parsed.Account = "GB82WEST12345698765432"
 	if _, err := s.ImportStatement(ctx, draftFile); problemCode(t, err) != CodeAccountInactive {
 		t.Fatalf("draft account: %v, want %s", err, CodeAccountInactive)
 	}
@@ -365,5 +365,73 @@ func TestForecastEntries_IdempotentAndFiltered(t *testing.T) {
 	}
 	if _, err := s.CreateForecastEntry(ctx, entry, "fc-2"); problemCode(t, err) != CodeIdempotencyReuse {
 		t.Fatalf("key reuse: %v", err)
+	}
+}
+
+// parsedInput parses any supported format, as the import handler does.
+func parsedInput(t *testing.T, accountID string, data []byte) StatementImport {
+	t.Helper()
+	sum := sha256.Sum256(data)
+	parsed, err := domain.ParseStatements(data)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	return StatementImport{BankAccountID: accountID, FileHash: hex.EncodeToString(sum[:]), Parsed: parsed[0]}
+}
+
+// TestImportStatement_BAI2AndMT940ByStatementAccount stores both new formats
+// (the widened format check of migration 0003) and matches a file's bare account
+// number against the account's statement account, not only its IBAN.
+func TestImportStatement_BAI2AndMT940ByStatementAccount(t *testing.T) {
+	s, admin := newStore(t)
+	ctx := ctxFor(1, "")
+	in := newAccount(ids.New())
+	in.Currency, in.StatementAccount = "USD", "123456789"
+	acct, err := s.CreateBankAccount(ctx, in, ids.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if acct.StatementAccountLast4 == nil || *acct.StatementAccountLast4 != "6789" {
+		t.Fatalf("statementAccountLast4 = %v", acct.StatementAccountLast4)
+	}
+	if n := count(t, admin, `select count(*) from bank_account where id = $1 and statement_account_hash is not null and statement_account_last4 = '6789'`, acct.ID); n != 1 {
+		t.Fatal("only the hash and last four characters of the statement account are stored")
+	}
+	if acct, err = s.TransitionBankAccount(ctx, acct.ID, acct.Version, domain.AccountActive); err != nil {
+		t.Fatal(err)
+	}
+
+	bai2 := []byte("01,BANK,CO,241001,1200,1,,,2/\n02,CO,BANK,1,241001,1200,USD,2/\n03,123456789,USD,010,100000,,,015,95000,,/\n" +
+		"16,475,5000,Z,BREF,CHK1001,CHECK PAID/\n49,195000,3/\n98,195000,1,5/\n99,195000,1,7/\n")
+	res, err := s.ImportStatement(ctx, parsedInput(t, acct.ID, bai2))
+	if err != nil || res.Replayed || res.Statement.Format != domain.FormatBAI2 || !decimal.RequireFromString(res.Statement.ClosingBalance).Equal(decimal.RequireFromString("950")) {
+		t.Fatalf("BAI2 import = %+v, %v", res, err)
+	}
+	var e2e, raw string
+	if err := admin.QueryRow(context.Background(), `select end_to_end_ref, raw_fragment from bank_statement_line where statement_id = $1 and line_no = 1`, res.Statement.ID).Scan(&e2e, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if e2e != "CHK1001" || !strings.HasPrefix(raw, "16,475,5000") {
+		t.Fatalf("line kept e2e %q raw %q", e2e, raw)
+	}
+
+	// MT940 naming the IBAN in :25: matches the same account.
+	mt940 := []byte(":20:REF1\n:25:DE89370400440532013000\n:28C:00007/001\n:60F:C241001USD950,00\n" +
+		":61:2410011001C25,00NTRFINV-1//B1\n:86:INVOICE 1\n:62F:C241001USD975,00\n")
+	res, err = s.ImportStatement(ctx, parsedInput(t, acct.ID, mt940))
+	if err != nil || res.Statement.Format != domain.FormatMT940 || res.Statement.Sequence == nil || *res.Statement.Sequence != 7 {
+		t.Fatalf("MT940 import = %+v, %v", res, err)
+	}
+
+	// A bare number that is neither the IBAN nor the statement account is refused.
+	other := []byte(strings.Replace(string(bai2), "03,123456789", "03,987654321", 1))
+	if _, err := s.ImportStatement(ctx, parsedInput(t, acct.ID, other)); problemCode(t, err) != domain.CodeStatementAccount {
+		t.Fatalf("other account number: %v, want %s", err, domain.CodeStatementAccount)
+	}
+
+	// An account without a statement account accepts only its IBAN.
+	plain := activeAccount(t, s, ctxFor(2, ""), ids.New())
+	if _, err := s.ImportStatement(ctxFor(2, ""), parsedInput(t, plain.ID, bai2)); problemCode(t, err) != domain.CodeStatementAccount {
+		t.Fatalf("no statement account: %v, want %s", err, domain.CodeStatementAccount)
 	}
 }

@@ -5,7 +5,11 @@ their lifecycle, bank statement import (camt.053), the cash forecast, and the
 pure matching-score engine (domain only, not yet behind an API). Slice 3:
 checks with gap-free numbers, void and reprint; bank facilities with letters
 of credit and guarantees under a limit; fixed-rate loan contracts with their
-schedules. Screens live in `apps/web/src/modules/treasury`.
+schedules. Slice 4: BAI2 and MT940 statement parsers beside camt.053, with the
+format detected from the file's content, an optional statement account number
+on the bank account (so files that name the account by its domestic number
+match), and the reconciliation close rule and BR-36.3 state machine (domain
+only, like the matching engine). Screens live in `apps/web/src/modules/treasury`.
 
 ## Run
 
@@ -103,7 +107,7 @@ Problems use `type` `https://passage.dev/problems/<code>` and carry `code` and
 | `TRS-0406` | 409 | same statement id with a different closing balance |
 | `TRS-0407` | 201 (warning) | electronic sequence number skips numbers; returned in `warnings`, the statement is stored |
 | `TRS-0408` | 422 | statement currency differs from the account currency |
-| `TRS-0409` | 422 | statement IBAN is not the bank account it was uploaded to |
+| `TRS-0409` | 422 | the statement's account (IBAN, or BAI2 / MT940 / camt `Othr` account number) is neither the bank account's IBAN nor its `statementAccount` |
 | `TRS-0412` | 422 | statements can only be imported into, and checks issued on, an active account |
 | `TRS-0413` | 404 | statement not found |
 | `TRS-0414` | 422 | a cleared check cannot be voided or reprinted (BR-36.5) |
@@ -118,11 +122,12 @@ Problems use `type` `https://passage.dev/problems/<code>` and carry `code` and
 | `TRS-0430` | 422 | instrument currency differs from the facility currency |
 | `TRS-0434` | 422 | instrument is not open |
 | `TRS-0435` | 404 | facility instrument not found |
+| `TRS-0436` | 422 | reconciliation state does not allow the transition (BR-36.3; domain rule, no endpoint yet; TRS-0410 is the close difference) |
 | `TRS-0446` | 422 | loan terms cannot produce a schedule (maturity not a whole number of periods, instalment below interest) |
 | `TRS-0447` | 404 | loan contract not found |
 | `TRS-0490` | 413 | statement file exceeds `TREASURY_MAX_FILE_MB` |
 | `TRS-0491` | 400 | statement file could not be read |
-| `TRS-0493` | 422 | statement cannot be parsed (camt.053 only; one Stmt per file) |
+| `TRS-0493` | 422 | statement cannot be parsed as camt.053, BAI2 or MT940, or the file holds more than one statement; `errors.line` names the BAI2 / MT940 line, `errors.entry` the camt.053 entry |
 | `TRS-0494` | 422 | opening balance plus lines does not equal closing balance |
 | `conflict_version` | 412 | `If-Match` does not match the current ETag |
 | `precondition_required` | 428 | `If-Match` is required on every custom method |

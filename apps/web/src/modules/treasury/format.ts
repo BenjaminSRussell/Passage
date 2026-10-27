@@ -6,6 +6,8 @@ export const DAY = /^\d{4}-\d{2}-\d{2}$/;
 export const CURRENCY = /^[A-Z]{3}$/;
 export const ACCOUNT_CODE = /^[A-Z0-9-]{1,20}$/;
 export const BIC = /^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$/;
+/** A statement account number after normalizeIban: SWIFT 35x subset accepted by the service. */
+export const STATEMENT_ACCOUNT = /^[A-Z0-9/.-]{1,35}$/;
 /** A signed decimal with up to six places, the shape the service stores (numeric(20,6)). */
 export const SIGNED_DECIMAL = /^-?\d{1,14}(\.\d{1,6})?$/;
 

@@ -22,7 +22,7 @@ func TestParseCAMT053_SampleFile(t *testing.T) {
 	if s.Format != "camt.053.001.08" || s.StatementID != "STMT-20261022" || s.Sequence != 412 || s.Currency != "EUR" {
 		t.Fatalf("header = %+v", s)
 	}
-	if s.AccountIBAN != "DE89370400440532013000" || !s.OpeningAmount.Equal(decimal.RequireFromString("1000")) || !s.ClosingAmount.Equal(decimal.RequireFromString("1337.5")) {
+	if s.Account != "DE89370400440532013000" || !s.OpeningAmount.Equal(decimal.RequireFromString("1000")) || !s.ClosingAmount.Equal(decimal.RequireFromString("1337.5")) {
 		t.Fatalf("balances = %+v", s)
 	}
 	if len(s.Lines) != 3 {
@@ -66,8 +66,8 @@ func TestParseCAMT053_Errors(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := ParseCAMT053([]byte(tc.xml))
 			var de *Error
-			if !errors.As(err, &de) || de.Code != tc.code || de.Line != tc.line {
-				t.Fatalf("err = %v; want code %s at line %d", err, tc.code, tc.line)
+			if !errors.As(err, &de) || de.Code != tc.code || de.Entry != tc.line {
+				t.Fatalf("err = %v; want code %s at entry %d", err, tc.code, tc.line)
 			}
 		})
 	}

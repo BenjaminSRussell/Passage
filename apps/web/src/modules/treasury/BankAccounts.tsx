@@ -29,7 +29,7 @@ import {
   type Problem,
   type Statement,
 } from "./api/client";
-import { ACCOUNT_CODE, BIC, CURRENCY, dateTime, money, normalizeIban, UUID, validIban } from "./format";
+import { ACCOUNT_CODE, BIC, CURRENCY, dateTime, money, normalizeIban, STATEMENT_ACCOUNT, UUID, validIban } from "./format";
 import { CommandFailure, Detail, keepKeyAfter, LoadFailure } from "./parts";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
@@ -115,6 +115,7 @@ export interface AccountDraft {
   legalEntityId: string;
   accountCode: string;
   iban: string;
+  statementAccount: string;
   bic: string;
   currency: string;
   mainAccountId: string;
@@ -126,6 +127,9 @@ export function validateAccount(v: AccountDraft): Errors {
   if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
   if (!ACCOUNT_CODE.test(v.accountCode.trim())) errors.accountCode = "Use 1 to 20 characters: A to Z, 0 to 9 or a hyphen.";
   if (!validIban(v.iban)) errors.iban = "Enter a valid IBAN; the check digits do not match.";
+  const statementAccount = normalizeIban(v.statementAccount);
+  if (statementAccount !== "" && !STATEMENT_ACCOUNT.test(statementAccount))
+    errors.statementAccount = "Use up to 35 characters: A to Z, 0 to 9, slash, dot or hyphen.";
   if (v.bic.trim() !== "" && !BIC.test(v.bic.trim().toUpperCase())) errors.bic = "Enter an 8 or 11 character BIC.";
   if (!CURRENCY.test(v.currency.trim())) errors.currency = "Enter an ISO 4217 code such as EUR.";
   if (!UUID.test(v.mainAccountId.trim())) errors.mainAccountId = "Enter the GL main account id (a UUID).";
@@ -141,6 +145,8 @@ export function toAccountInput(v: AccountDraft): BankAccountInput {
     mainAccountId: v.mainAccountId.trim(),
   };
   if (v.bic.trim() !== "") input.bic = v.bic.trim().toUpperCase();
+  const statementAccount = normalizeIban(v.statementAccount);
+  if (statementAccount !== "") input.statementAccount = statementAccount;
   return input;
 }
 
@@ -152,6 +158,7 @@ export function NewBankAccountPage() {
     legalEntityId: params.get("legalEntityId") ?? "",
     accountCode: "",
     iban: "",
+    statementAccount: "",
     bic: "",
     currency: "",
     mainAccountId: "",
@@ -196,7 +203,7 @@ export function NewBankAccountPage() {
     <div className={styles.stack}>
       <PageHeader
         title="New bank account"
-        description="The account is created as Draft. Only a masked IBAN and its last four characters are shown after saving."
+        description="The account is created as Draft. Only a masked IBAN, and the last four characters of the statement account number, are shown after saving."
         actions={
           <Link className={buttonClassName("secondary")} to="/treasury">
             Bank accounts
@@ -208,6 +215,12 @@ export function NewBankAccountPage() {
           {field("legalEntityId", "Legal entity id")}
           {field("accountCode", "Account code", "Unique per legal entity, for example OPS-01.")}
           {field("iban", "IBAN", "Spaces are allowed; the check digits are verified.")}
+          {field(
+            "statementAccount",
+            "Statement account number",
+            "The account number on the bank's BAI2 or MT940 files, if it is not the IBAN (for example a US account number).",
+            true,
+          )}
           {field("bic", "BIC", undefined, true)}
           {field("currency", "Currency", "ISO 4217, for example EUR.")}
           {field("mainAccountId", "GL main account id", "The ledger bank account this account posts to.")}
@@ -229,6 +242,7 @@ export function NewBankAccountPage() {
 
 const statementColumns: DataTableColumn<Statement>[] = [
   { key: "statementId", header: "Statement", mono: true },
+  { key: "format", header: "Format", mono: true },
   { key: "sequence", header: "Sequence", mono: true, align: "end", render: (row) => (row.sequence == null ? "None" : String(row.sequence)) },
   { key: "closingDate", header: "Closing date", mono: true },
   { key: "openingBalance", header: "Opening", mono: true, align: "end", render: (row) => money(row.openingBalance, row.currency) },
@@ -331,6 +345,9 @@ export function BankAccountDetailPage() {
         <dl className={styles.details}>
           <Detail term="IBAN" mono>
             {acct.ibanMasked}
+          </Detail>
+          <Detail term="Statement account" mono>
+            {acct.statementAccountLast4 ? `ending ${acct.statementAccountLast4}` : "IBAN only"}
           </Detail>
           <Detail term="BIC" mono>
             {acct.bic ?? "None"}

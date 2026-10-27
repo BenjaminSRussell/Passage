@@ -48,6 +48,7 @@ type fakeStore struct {
 	facilities   map[string]store.Facility
 	instruments  map[string]store.Instrument
 	loans        map[string]store.Loan
+	lastAccount  store.NewBankAccount
 }
 
 func newFakeStore() *fakeStore {
@@ -67,10 +68,15 @@ func (f *fakeStore) CreateBankAccount(_ context.Context, in store.NewBankAccount
 	if id, ok := f.byIdem[key]; ok {
 		return f.accounts[id], nil
 	}
+	f.lastAccount = in
 	acct := store.BankAccount{
 		ID: ids.New(), LegalEntityID: in.LegalEntityID, AccountCode: in.AccountCode,
 		IBANMasked: domain.MaskIBAN(in.IBAN), IBANLast4: domain.Last4(in.IBAN), BIC: in.BIC,
 		Currency: in.Currency, MainAccountID: in.MainAccountID, Status: "draft", Version: 1,
+	}
+	if in.StatementAccount != "" {
+		last4 := domain.Last4(in.StatementAccount)
+		acct.StatementAccountLast4 = &last4
 	}
 	f.accounts[acct.ID] = acct
 	f.byIdem[key] = acct.ID
@@ -275,6 +281,10 @@ func TestCreateBankAccount_Validation(t *testing.T) {
 		{name: "IBAN fails mod-97", key: "k-iban", mutate: func(m map[string]any) { m["iban"] = "DE89370400440532013001" },
 			status: http.StatusUnprocessableEntity, code: "TRS-0401"},
 		{name: "bad currency", key: "k-cur", mutate: func(m map[string]any) { m["currency"] = "eu" },
+			status: http.StatusBadRequest, code: "COM-0001"},
+		{name: "bad statement account", key: "k-stmt-acct", mutate: func(m map[string]any) { m["statementAccount"] = "12#34" },
+			status: http.StatusBadRequest, code: "COM-0001"},
+		{name: "statement account too long", key: "k-stmt-long", mutate: func(m map[string]any) { m["statementAccount"] = strings.Repeat("1", 36) },
 			status: http.StatusBadRequest, code: "COM-0001"},
 	}
 	for _, tc := range cases {
@@ -575,5 +585,101 @@ func TestStatementLines_ZeroLimitMeansFullPageWithCursor(t *testing.T) {
 	}
 	if len(page.Items) != store.MaxLinesPage || page.Next == nil || *page.Next != store.MaxLinesPage {
 		t.Fatalf("limit=0: %d items, next %v; want %d items and a cursor", len(page.Items), page.Next, store.MaxLinesPage)
+	}
+}
+
+func TestCreateBankAccount_StatementAccountIsNormalizedAndMasked(t *testing.T) {
+	h, fs := newTestServer(t)
+	b, _ := json.Marshal(map[string]any{
+		"legalEntityId": testLE, "accountCode": "US-01", "iban": testIBAN, "currency": "USD", "mainAccountId": testMainAcct,
+		"statementAccount": " 1234 56789 ",
+	})
+	rec := call(h, http.MethodPost, "/v1/treasury/bank-accounts", bytes.NewBuffer(b), "application/json", map[string]string{idempotencyKey: "k-us"})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body)
+	}
+	if fs.lastAccount.StatementAccount != "123456789" {
+		t.Fatalf("store received %q, want the normalized number", fs.lastAccount.StatementAccount)
+	}
+	if strings.Contains(rec.Body.String(), "123456789") || !strings.Contains(rec.Body.String(), `"statementAccountLast4":"6789"`) {
+		t.Fatalf("response must carry only the last four characters: %s", rec.Body)
+	}
+}
+
+func TestImportStatement_DetectsBAI2AndMT940(t *testing.T) {
+	bai2 := "01,BANK,CO,241001,1200,1,,,2/\n02,CO,BANK,1,241001,1200,USD,2/\n03,123456789,USD,010,100000,,,015,95000,,/\n" +
+		"16,475,5000,Z,BREF,CHK1001,CHECK PAID/\n49,195000,3/\n98,195000,1,5/\n99,195000,1,7/\n"
+	mt940 := ":20:REF1\n:25:DE89370400440532013000\n:28C:00007/001\n:60F:C241001EUR100,00\n" +
+		":61:2410011001C25,00NTRFINV-1//B1\n:86:INVOICE 1\n:62F:C241001EUR125,00\n"
+	for _, tc := range []struct{ name, file, format, statementID string }{
+		{"BAI2", bai2, domain.FormatBAI2, "123456789-2024-10-01"},
+		{"MT940", mt940, domain.FormatMT940, "REF1/00007/001"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, _ := newTestServer(t)
+			acct := createAccount(t, h, "k-"+tc.name)
+			body, ct := multipartStatement(t, acct.ID, []byte(tc.file))
+			rec := call(h, http.MethodPost, "/v1/treasury/statements/import", body, ct, nil)
+			if rec.Code != http.StatusCreated {
+				t.Fatalf("status %d body %s", rec.Code, rec.Body)
+			}
+			var st store.Statement
+			if err := json.Unmarshal(rec.Body.Bytes(), &st); err != nil {
+				t.Fatal(err)
+			}
+			if st.Format != tc.format || st.StatementID != tc.statementID || st.LineCount != 1 {
+				t.Fatalf("statement = %+v", st)
+			}
+		})
+	}
+}
+
+func TestImportStatement_RefusesMultiStatementFiles(t *testing.T) {
+	h, _ := newTestServer(t)
+	acct := createAccount(t, h, "k-multi")
+	two := ":20:A\n:25:X\n:60F:C241001EUR1,00\n:62F:C241001EUR1,00\n:20:B\n:25:X\n:60F:C241002EUR1,00\n:62F:C241002EUR1,00\n"
+	body, ct := multipartStatement(t, acct.ID, []byte(two))
+	rec := call(h, http.MethodPost, "/v1/treasury/statements/import", body, ct, nil)
+	if rec.Code != http.StatusUnprocessableEntity || problemCode(t, rec) != domain.CodeStatementFormat {
+		t.Fatalf("status %d body %s, want 422 TRS-0493", rec.Code, rec.Body)
+	}
+}
+
+func TestImportStatement_ParseErrorReportsLine(t *testing.T) {
+	h, _ := newTestServer(t)
+	acct := createAccount(t, h, "k-line")
+	bad := ":20:A\n:25:X\n:60F:C241001EUR1,00\n:61:NOT-AN-ENTRY\n:62F:C241001EUR1,00\n"
+	body, ct := multipartStatement(t, acct.ID, []byte(bad))
+	rec := call(h, http.MethodPost, "/v1/treasury/statements/import", body, ct, nil)
+	var p struct {
+		Code   string            `json:"code"`
+		Errors map[string]string `json:"errors"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &p); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusUnprocessableEntity || p.Code != domain.CodeStatementFormat || p.Errors["line"] != "4" {
+		t.Fatalf("status %d problem %+v", rec.Code, p)
+	}
+}
+
+func TestImportStatement_CamtParseErrorReportsEntry(t *testing.T) {
+	h, _ := newTestServer(t)
+	acct := createAccount(t, h, "k-entry")
+	bad := `<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.053.001.08"><BkToCstmrStmt><Stmt><Id>S</Id>` +
+		`<Acct><Id><IBAN>` + testIBAN + `</IBAN></Id><Ccy>EUR</Ccy></Acct>` +
+		`<Bal><Tp><CdOrPrtry><Cd>OPBD</Cd></CdOrPrtry></Tp><Amt Ccy="EUR">1</Amt><CdtDbtInd>CRDT</CdtDbtInd><Dt><Dt>2026-10-22</Dt></Dt></Bal>` +
+		`<Bal><Tp><CdOrPrtry><Cd>CLBD</Cd></CdOrPrtry></Tp><Amt Ccy="EUR">1</Amt><CdtDbtInd>CRDT</CdtDbtInd><Dt><Dt>2026-10-22</Dt></Dt></Bal>` +
+		`<Ntry><Amt Ccy="EUR">1</Amt><CdtDbtInd>XXXX</CdtDbtInd><BookgDt><Dt>2026-10-22</Dt></BookgDt></Ntry></Stmt></BkToCstmrStmt></Document>`
+	body, ct := multipartStatement(t, acct.ID, []byte(bad))
+	rec := call(h, http.MethodPost, "/v1/treasury/statements/import", body, ct, nil)
+	var p struct {
+		Errors map[string]string `json:"errors"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &p); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusUnprocessableEntity || p.Errors["entry"] != "1" || p.Errors["line"] != "" {
+		t.Fatalf("status %d errors %v, want entry 1", rec.Code, p.Errors)
 	}
 }

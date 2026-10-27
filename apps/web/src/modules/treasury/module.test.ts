@@ -16,6 +16,7 @@ const goodAccount: AccountDraft = {
   legalEntityId: LE,
   accountCode: "OPS-01",
   iban: "de89 3704 0044 0532 0130 00",
+  statementAccount: "",
   bic: "cobadeffxxx",
   currency: "EUR",
   mainAccountId: GL,
@@ -75,11 +76,21 @@ describe("validateAccount", () => {
       mainAccountId: GL,
     });
     expect(toAccountInput({ ...goodAccount, bic: " " })).not.toHaveProperty("bic");
+    expect(toAccountInput(goodAccount)).not.toHaveProperty("statementAccount");
+    expect(toAccountInput({ ...goodAccount, statementAccount: "3704 0044/0532013000" }).statementAccount).toBe("37040044/0532013000");
   });
 
   it("names every field that the service would refuse", () => {
-    const errors = validateAccount({ legalEntityId: "x", accountCode: "ops 01", iban: "DE88370400440532013000", bic: "BAD", currency: "eur", mainAccountId: "" });
-    expect(Object.keys(errors).sort()).toEqual(["accountCode", "bic", "currency", "iban", "legalEntityId", "mainAccountId"]);
+    const errors = validateAccount({
+      legalEntityId: "x",
+      accountCode: "ops 01",
+      iban: "DE88370400440532013000",
+      statementAccount: "1".repeat(36),
+      bic: "BAD",
+      currency: "eur",
+      mainAccountId: "",
+    });
+    expect(Object.keys(errors).sort()).toEqual(["accountCode", "bic", "currency", "iban", "legalEntityId", "mainAccountId", "statementAccount"]);
   });
 });
 
@@ -96,7 +107,7 @@ describe("validateImport", () => {
   it("requires an account id and a file within the upload limit", () => {
     expect(validateImport({ bankAccountId: "", file: null })).toEqual({
       bankAccountId: "Enter the bank account id (a UUID).",
-      file: "Choose the camt.053 file from the bank.",
+      file: "Choose the camt.053, BAI2 or MT940 file from the bank.",
     });
     const big = new File(["x"], "big.xml");
     Object.defineProperty(big, "size", { value: MAX_BYTES + 1 });

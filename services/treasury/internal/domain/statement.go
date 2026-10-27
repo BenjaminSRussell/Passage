@@ -17,17 +17,22 @@ const (
 	CodeIBANInvalid        = "TRS-0401"
 )
 
-// Error is a domain rule violation with a stable code. Line is set for parse
-// errors so the caller can report where the file failed.
+// Error is a domain rule violation with a stable code. Parse errors say where
+// the file failed: Line is the physical line of a BAI2 or MT940 file, Entry the
+// position of the camt.053 Ntry element (XML has no useful line).
 type Error struct {
 	Code   string
 	Detail string
 	Line   int
+	Entry  int
 }
 
 func (e *Error) Error() string {
-	if e.Line > 0 {
+	switch {
+	case e.Line > 0:
 		return fmt.Sprintf("%s (line %d): %s", e.Code, e.Line, e.Detail)
+	case e.Entry > 0:
+		return fmt.Sprintf("%s (entry %d): %s", e.Code, e.Entry, e.Detail)
 	}
 	return e.Code + ": " + e.Detail
 }
@@ -53,8 +58,8 @@ const MaxEntries = 200000
 type Statement struct {
 	Format        string
 	StatementID   string
-	Sequence      int // electronic sequence number, 0 when the format has none
-	AccountIBAN   string
+	Sequence      int    // electronic sequence number, 0 when the format has none
+	Account       string // IBAN, or the bank's own account identifier when the file has none (BAI2, MT940 :25:, camt Othr/Id)
 	Currency      string
 	OpeningDate   string
 	OpeningAmount decimal.Decimal

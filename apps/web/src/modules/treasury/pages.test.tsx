@@ -113,6 +113,31 @@ describe("new bank account", () => {
     expect(header(post, "Idempotency-Key")).toMatch(/^[0-9a-f-]{36}$/);
   });
 
+  it("sends the optional statement account number normalized and shows only its last four characters", async () => {
+    const created = { ...account, statementAccountLast4: "6789" };
+    server.handler = (url, init) => {
+      if (init.method === "POST") return json(201, created);
+      if (url.pathname.endsWith(`/bank-accounts/${ACCT}`)) return json(200, created);
+      if (url.pathname.endsWith("/statements")) return json(200, { items: [] });
+      return undefined;
+    };
+    renderAt(`/treasury/bank-accounts/new?legalEntityId=${LE}`);
+    fill("Account code", "US-01");
+    fill("IBAN", "DE89370400440532013000");
+    fill("Currency", "USD");
+    fill("GL main account id", GL);
+    fill("Statement account number", "12#45");
+    fireEvent.click(screen.getByRole("button", { name: "Create bank account" }));
+    expect(await screen.findByText("Use up to 35 characters: A to Z, 0 to 9, slash, dot or hyphen.")).toBeInTheDocument();
+    expect(server.calls).toHaveLength(0);
+
+    fill("Statement account number", " 1234 56789 ");
+    fireEvent.click(screen.getByRole("button", { name: "Create bank account" }));
+    expect(await screen.findByRole("heading", { name: "Bank account OPS-01" })).toBeInTheDocument();
+    expect(server.calls.find((c) => c.method === "POST")!.body).toMatchObject({ statementAccount: "123456789" });
+    expect(await screen.findByText("ending 6789")).toBeInTheDocument();
+  });
+
   it("shows a duplicate refusal and puts field errors next to their fields", async () => {
     server.handler = () => json(409, { code: "TRS-0404", detail: "a bank account with this code or IBAN already exists" });
     renderAt(`/treasury/bank-accounts/new?legalEntityId=${LE}`);
@@ -184,7 +209,7 @@ describe("bank account detail", () => {
 
 describe("statement import", () => {
   function choose(file: File) {
-    fireEvent.change(screen.getByLabelText("camt.053 file"), { target: { files: [file] } });
+    fireEvent.change(screen.getByLabelText("Statement file"), { target: { files: [file] } });
   }
 
   it("uploads the file as multipart and reports the new statement with its warnings", async () => {
@@ -192,7 +217,8 @@ describe("statement import", () => {
     const { container } = renderAt(`/treasury/statements/import?bankAccountId=${ACCT}`);
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Import statement" }));
-    expect(await screen.findByText("Choose the camt.053 file from the bank.")).toBeInTheDocument();
+    expect(await screen.findByText("Choose the camt.053, BAI2 or MT940 file from the bank.")).toBeInTheDocument();
+    expect(screen.getByLabelText("Statement file")).toHaveAttribute("accept", expect.stringContaining(".bai2"));
 
     choose(new File(["<Document/>"], "stmt.xml", { type: "text/xml" }));
     fireEvent.click(screen.getByRole("button", { name: "Import statement" }));
@@ -214,17 +240,37 @@ describe("statement import", () => {
   });
 
   it("names the failing entry of an unreadable file and the refusals a user can act on", async () => {
-    server.handler = () => json(422, { code: "TRS-0493", detail: "amount must be a non-negative decimal", errors: { line: "7" } });
+    server.handler = () => json(422, { code: "TRS-0493", detail: "amount must be a non-negative decimal", errors: { entry: "7" } });
     renderAt(`/treasury/statements/import?bankAccountId=${ACCT}`);
     choose(new File(["<Document/>"], "stmt.xml"));
     fireEvent.click(screen.getByRole("button", { name: "Import statement" }));
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("The file is not a readable camt.053 statement");
+    expect(alert).toHaveTextContent("The file is not a readable camt.053, BAI2 or MT940 statement");
     expect(alert).toHaveTextContent("(entry 7)");
 
     server.handler = () => json(409, { code: "TRS-0406", detail: "statement exists with a different closing balance" });
     fireEvent.click(screen.getByRole("button", { name: "Import statement" }));
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("already imported with another closing balance"));
+  });
+});
+
+describe("statement import of BAI2 and MT940", () => {
+  it("uploads a BAI2 file, shows its format, and names the failing line of a text file", async () => {
+    server.handler = () => json(201, { ...statement, statementId: "123456789-2024-10-01", format: "BAI2", currency: "USD", closingBalance: "925.00", warnings: [] });
+    renderAt(`/treasury/statements/import?bankAccountId=${ACCT}`);
+    fireEvent.change(screen.getByLabelText("Statement file"), { target: { files: [new File(["01,BANK,CO/"], "stmt.bai2", { type: "text/plain" })] } });
+    fireEvent.click(screen.getByRole("button", { name: "Import statement" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("Statement 123456789-2024-10-01");
+    expect((server.calls[0].body as FormData).get("file")).toHaveProperty("name", "stmt.bai2");
+
+    server.handler = () => json(422, { code: "TRS-0493", detail: ":61: entry does not match", errors: { line: "12" } });
+    fireEvent.click(screen.getByRole("button", { name: "Import statement" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(":61: entry does not match (line 12)");
+
+    server.handler = () => json(422, { code: "TRS-0409", detail: "the statement belongs to another account" });
+    fireEvent.click(screen.getByRole("button", { name: "Import statement" }));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("not this bank account's IBAN or statement account number"));
   });
 });
 
