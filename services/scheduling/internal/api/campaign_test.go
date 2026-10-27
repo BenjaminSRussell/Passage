@@ -260,7 +260,7 @@ func TestCreateCampaign_DefaultsAndValidation(t *testing.T) {
 		t.Fatalf("campaign = %+v", c)
 	}
 	bad := map[string]string{
-		"sequenceRule":       `{"resourceId":"` + resID + `","campaignKey":"K","plannedStart":"2027-01-04T06:00:00Z","sequenceRule":"cp-sat"}`,
+		"sequenceRule":       `{"resourceId":"` + resID + `","campaignKey":"K","plannedStart":"2027-01-04T06:00:00Z","sequenceRule":"genetic"}`,
 		"plannedStart":       `{"resourceId":"` + resID + `","campaignKey":"K"}`,
 		"orders[0].quantity": `{"resourceId":"` + resID + `","campaignKey":"K","plannedStart":"2027-01-04T06:00:00Z","orders":[{"orderId":"` + ordB + `","setupGroup":"B","quantity":0}]}`,
 		"maxQty":             `{"resourceId":"` + resID + `","campaignKey":"K","plannedStart":"2027-01-04T06:00:00Z","maxQty":"-1"}`,

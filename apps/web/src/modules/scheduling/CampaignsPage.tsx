@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Badge, Button, buttonClassName, DataTable, FormField, PageHeader, Select, type BadgeTone, type DataTableColumn } from "../../shell/ui";
-import { CAMPAIGN_STATUSES, listCampaigns, listResources, type Campaign, type CampaignStatus } from "./api/client";
+import { CAMPAIGN_STATUSES, listCampaigns, listResources, SEQUENCE_RULE_LABELS, type Campaign, type CampaignStatus } from "./api/client";
 import { formatDateTime, formatMinutes, sentence, shortId } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
@@ -35,7 +35,7 @@ export function CampaignsPage() {
     { key: "status", header: "Status", render: (row) => <Badge tone={campaignTone[row.status] ?? "neutral"}>{sentence(row.status)}</Badge> },
     { key: "plannedStart", header: "Planned start", render: (row) => formatDateTime(row.plannedStart) },
     { key: "orderCount", header: "Orders", align: "end" },
-    { key: "sequenceRule", header: "Sequence rule", render: (row) => sentence(row.sequenceRule) },
+    { key: "sequenceRule", header: "Sequence rule", render: (row) => SEQUENCE_RULE_LABELS[row.sequenceRule] ?? sentence(row.sequenceRule) },
     { key: "changeoverMinutes", header: "Changeover", align: "end", render: (row) => formatMinutes(row.changeoverMinutes) },
   ];
 

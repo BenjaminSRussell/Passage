@@ -733,6 +733,9 @@ paths:
         Sequence the campaign with the setup matrix in force on its planned start
         (BR-23.12) and insert cleanouts (BR-23.13); the campaign becomes planned and
         campaign.sequenced is published. SCHED-0012 warnings list pairs without a matrix entry.
+        A cp-sat campaign first asks scheduler-opt for its order (BR-23.9) and reports the
+        outcome as SCHED-0006; solver trouble never fails the command. Cleanouts count on
+        from the resource's cleanout counter (carryIn).
       x-passage-duty: scheduling.schedule.write
       parameters:
         - $ref: '#/components/parameters/Id'
@@ -747,7 +750,10 @@ paths:
   /v1/scheduling/campaigns/{id}:start:
     post:
       operationId: startCampaign
-      summary: Start a planned campaign; it is frozen afterwards and campaign.started is published
+      summary: >
+        Start a planned campaign; it is frozen afterwards, the resource's cleanout counter
+        becomes the plan's carryOut and campaign.started is published. 409 SCHED-0123 when
+        the counter moved after the campaign was sequenced.
       x-passage-duty: scheduling.campaign.write
       parameters:
         - $ref: '#/components/parameters/Id'
@@ -756,6 +762,7 @@ paths:
       responses:
         '200': { $ref: '#/components/responses/Campaign' }
         '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
         '412': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
         '428': { $ref: '#/components/responses/Problem' }
@@ -1264,7 +1271,11 @@ components:
         maxOrders: { type: [integer, 'null'], minimum: 1, maximum: 1000 }
         maxQty: { $ref: '#/components/schemas/Decimal' }
         maxMinutes: { type: [integer, 'null'], minimum: 1, maximum: 1000000, description: Run, changeover and cleanout minutes together }
-        sequenceRule: { type: string, enum: [nearest-neighbor, manual], default: nearest-neighbor }
+        sequenceRule:
+          type: string
+          enum: [nearest-neighbor, manual, cp-sat]
+          default: nearest-neighbor
+          description: cp-sat asks scheduler-opt for the minimum-changeover order (at most 50 orders) and keeps nearest-neighbour unless that order is certified and cheaper
         currentSetupGroup: { type: [string, 'null'], description: The resource's setup group before the campaign (leading setup) }
         orders:
           type: array
@@ -1291,6 +1302,13 @@ components:
         minutes: { type: integer }
         reason: { type: string, enum: [batches, run-time, campaign-end] }
         cleaningSetId: { type: string }
+    CleanoutCounter:
+      type: object
+      description: Batches and run minutes since the resource's last cleanout (BR-23.13)
+      required: [batches, minutes]
+      properties:
+        batches: { type: integer, minimum: 0 }
+        minutes: { type: integer, minimum: 0 }
     Campaign:
       type: object
       required: [id, resourceId, campaignKey, status, plannedStart, sequenceRule, orderCount, runMinutes, changeoverMinutes, cleanoutMinutes, plan, version, createdAt]
@@ -1303,7 +1321,7 @@ components:
         maxOrders: { type: [integer, 'null'] }
         maxQty: { type: [string, 'null'] }
         maxMinutes: { type: [integer, 'null'] }
-        sequenceRule: { type: string, enum: [nearest-neighbor, manual] }
+        sequenceRule: { type: string, enum: [nearest-neighbor, manual, cp-sat] }
         currentSetupGroup: { type: [string, 'null'] }
         orderCount: { type: integer }
         runMinutes: { type: integer }
@@ -1311,7 +1329,7 @@ components:
         cleanoutMinutes: { type: integer }
         plan:
           type: [object, 'null']
-          required: [changeovers, cleanouts, warnings]
+          required: [changeovers, cleanouts, warnings, carryIn, carryOut, optimized]
           properties:
             changeovers:
               type: array
@@ -1328,6 +1346,13 @@ components:
                   code: { type: string }
                   detail: { type: string }
             matrixId: { type: string, format: uuid }
+            carryIn: { $ref: '#/components/schemas/CleanoutCounter' }
+            carryOut: { $ref: '#/components/schemas/CleanoutCounter' }
+            solverStatus:
+              type: string
+              description: cp-sat campaigns only (SCHED-0006)
+              enum: [OPTIMAL, FEASIBLE, UNKNOWN, INFEASIBLE, MODEL_INVALID, UNAVAILABLE, TOO_LARGE]
+            optimized: { type: boolean, description: The solver's order was kept }
         sequencedAt: { type: [string, 'null'], format: date-time }
         startedAt: { type: [string, 'null'], format: date-time }
         version: { type: integer }

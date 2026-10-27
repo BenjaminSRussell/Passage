@@ -14,6 +14,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/services/scheduling/internal/api"
+	"github.com/BenjaminSRussell/passage/services/scheduling/internal/optimizer"
 	"github.com/BenjaminSRussell/passage/services/scheduling/internal/store"
 	"github.com/BenjaminSRussell/passage/services/scheduling/migrations"
 )
@@ -62,6 +63,11 @@ func run(ctx context.Context, getenv func(string) string) error {
 		}
 	}
 	a := api.New(store.New(pool), cfg)
+	// SCHED_OPT_URL is scheduler-opt (CP-SAT). Unset, cp-sat campaigns keep
+	// the nearest-neighbour sequence and report SCHED-0006 UNAVAILABLE.
+	if c := optimizer.NewClient(getenv("SCHED_OPT_URL")); c != nil {
+		a.WithSequencer(c)
+	}
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()

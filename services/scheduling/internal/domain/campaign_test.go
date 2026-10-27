@@ -78,8 +78,8 @@ func TestPlanCampaign_ManualKeepsTheGivenOrder(t *testing.T) {
 }
 
 func TestPlanCampaign_UnknownRuleRefused(t *testing.T) {
-	if _, err := PlanCampaign(CampaignInput{Status: CampaignProposed, Rule: "cp-sat", Matrix: brMatrix(t), Orders: campaignOrders()}); err == nil {
-		t.Fatal("cp-sat sequencing is not built and must be refused")
+	if _, err := PlanCampaign(CampaignInput{Status: CampaignProposed, Rule: "genetic", Matrix: brMatrix(t), Orders: campaignOrders()}); err == nil {
+		t.Fatal("an unknown sequence rule must be refused")
 	}
 }
 
@@ -110,7 +110,7 @@ func TestPlanCampaign_BatchCounterInsertsCleanouts(t *testing.T) {
 
 	batchesOnly := CleanoutRule{SetupGroup: "P", DurationMinutes: 30, AfterBatches: 2}
 	carried, err := PlanCampaign(CampaignInput{Status: CampaignProposed, Matrix: SetupMatrix{}, Cleanouts: []CleanoutRule{batchesOnly}, CurrentGroup: "P",
-		BatchesSinceCleanout: 1, Orders: orders[:1]})
+		Carry: CleanoutCounter{Batches: 1}, Orders: orders[:1]})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestPlanCampaign_CleaningChangeoverResetsCounter(t *testing.T) {
 		{SetupOrder: SetupOrder{OrderID: "o2", SetupGroup: "FREE", Minutes: 60}, Qty: w(1)},
 	}
 	plan, err := PlanCampaign(CampaignInput{Status: CampaignProposed, Rule: SequenceManual, Matrix: m, CurrentGroup: "PEANUT",
-		BatchesSinceCleanout: 5, Cleanouts: []CleanoutRule{{SetupGroup: "FREE", DurationMinutes: 30, AfterBatches: 2}}, Orders: orders})
+		Carry: CleanoutCounter{Batches: 5}, Cleanouts: []CleanoutRule{{SetupGroup: "FREE", DurationMinutes: 30, AfterBatches: 2}}, Orders: orders})
 	if err != nil {
 		t.Fatal(err)
 	}

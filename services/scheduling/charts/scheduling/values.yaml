@@ -24,6 +24,9 @@ config:
   SCHED_BOTTLENECK_PCT: "90"
   SCHED_BOTTLENECK_WEEKS: "3"
   SCHED_HORIZON_DAYS: "365"
+  # scheduler-opt (services/scheduler-py chart) for cp-sat campaign
+  # sequencing; empty keeps nearest-neighbour with SCHED-0006 UNAVAILABLE.
+  SCHED_OPT_URL: "http://scheduler-opt:8080"
 
 resources:
   requests:

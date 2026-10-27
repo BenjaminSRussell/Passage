@@ -89,6 +89,38 @@ ported. Its `PUT`-style `cleanout-rules:replace` and
 created one per setup group with idempotency keys, and
 `GET /setup-matrices?resourceId` lists every version with its active date.
 
+Slice 6 wires CP-SAT campaign sequencing and carries the cleanout counter
+from one campaign to the next. A campaign with `sequenceRule: cp-sat` asks
+scheduler-opt (`SCHED_OPT_URL`, `internal/optimizer`) for the
+minimum-changeover order before the sequencing transaction, with the
+changeover matrix priced exactly as the Go sequencers price it
+(`domain.ChangeoverMatrix`); the answer is kept only when OPTIMAL or
+FEASIBLE, complete, and strictly cheaper than nearest-neighbour when priced
+with the matrix read inside the transaction (BR-23.9). Every other outcome
+(UNKNOWN, INFEASIBLE, scheduler-opt not configured or failing, more than 50
+orders, an entry above one week) keeps nearest-neighbour; the plan records
+`solverStatus`, `optimized` and a SCHED-0006 message, and the command never
+fails because of the solver. The resource's cleanout counter
+(`scheduling_cleanout_counter`, migration
+`0005_campaign_solver_cleanout_counter.sql`) is read when a campaign is
+sequenced (`plan.carryIn`) and set to the plan's `carryOut` when it starts;
+a start whose counter moved after sequencing is refused with SCHED-0123.
+Web: the CP-SAT optimizer rule on the campaign form and list, the optimizer
+outcome and the counter on the campaign plan, and the SCHED-0123 message on
+start.
+
+The swarm draft of this slice also stored a materialized `resource_capacity`
+table with `capacity:materialize` and its own `GET /resources/{id}/capacity`,
+and a `cleanout_order` table written at campaign create. Neither was taken:
+`GET /resources/{id}/capacity` already serves the FR-23.1 open intervals
+computed from the calendar, the table had no reader (runs and moves read the
+calendar), and resource calendars cannot change yet, so a stored copy only
+added a second source that could go stale; the cleanouts already live in the
+campaign plan and in `campaign.sequenced`, and main has no campaign create
+step that plans (sequencing does). Its counter was written when a campaign
+was created, so re-planning or planning two campaigns would have counted the
+same batches twice; here it moves only when a campaign starts.
+
 Everything else in the ticket and PRD 4.23 is listed here.
 
 No file outside the wave 23 ownership entry was changed, so there are no
@@ -115,7 +147,7 @@ moved-out handoff rows.
 | 3 | Load by resource group and by day; drill-down to jobs; US week numbering | later slice of PSG-23 | Groups come from wave 9. |
 | 3 | Materialized CapacityLoad table refreshed per run and move; `bottleneck.detected` event once per episode (AC-23.6, SCHED-0015) | later slice of PSG-23 | Load is computed on read, so it is never stale; the event needs episode state and is not declared in AsyncAPI yet. |
 | 4 | CP-SAT job-shop optimizer (FR-23.6, BR-23.9) | built in `services/scheduler-py` | Weighted lateness + lambda x makespan, 2,000-operation window, time limit, `num_workers` 8; ft06 proves 55. |
-| 4 | Optimization runs from the scheduling service (`algorithm: cp-sat`, solver_status, heuristic kept on UNKNOWN, AC-23.9, SCHED-0006) | later slice of PSG-23 | The Go service does not call scheduler-opt yet; `schedule_run.algorithm` is constrained to `heuristic` and `solver_status` stays null. scheduler-opt now also takes candidate machines and network steps and returns the chosen machines. |
+| 4 | Optimization runs from the scheduling service (`algorithm: cp-sat`, solver_status, heuristic kept on UNKNOWN, AC-23.9, SCHED-0006) | later slice of PSG-23 | The Go service calls scheduler-opt for campaign sequencing only (slice 6, deliverable 7 below). Schedule runs do not call the job-shop endpoint yet; `schedule_run.algorithm` is constrained to `heuristic` and `solver_status` stays null. scheduler-opt already takes candidate machines and network steps and returns the chosen machines. |
 | 4 | OR-Library fixture set `orlib-jobshop-30` (ft10, ft20, la01-la20, abz5-abz9) and the 30/30 feasibility test (AC1) | later slice of PSG-23 | Only ft06 is checked in (`services/scheduler-py/testdata/orlib/ft06.txt`, also embedded in the Go heuristic test). The instance files must be copied from OR-Library verbatim, with their published optima. |
 | 5 | Schedule dates flow to production orders and planning (FR-23.10) | partial — consumers are waves 21 and 22 | `job.scheduled` and `orderdates.changed` are published through the outbox with start, end and late minutes. Production order date updates and the `planning.finite-capacity` flag (AC-23.8) are owned by the consuming waves. |
 | 5 | Operations fed from wave 21 production orders and jobs instead of the API | handoff — wave 21 (production orders) | Slice 1 registers operations through its own API; a consumer of wave 21 events is not built. |
@@ -130,9 +162,9 @@ moved-out handoff rows.
 | 7 | Cleanout and setup orders as lightweight production orders of type `cleanout` (`cleanout_order_id`, `setup_order_id`), consuming cleaning materials and labour | handoff — wave 21 (production orders) | Columns exist and stay null; `campaign.sequenced` carries the cleanouts for wave 21 to create them. |
 | 7 | Campaign start from the first order Started; complete and cancel transitions | partial — wave 21 (order status events) | `:start` freezes a planned campaign explicitly; there are no complete or cancel endpoints yet (later slice of PSG-23). |
 | 7 | `campaign-proposal` job proposing campaigns from planned and firmed orders sharing a campaign key within 14 days | later slice of PSG-23 (needs wave 22 planned orders) | Campaigns are created by hand with their orders. |
-| 7 | CP-SAT circuit sequencing (`AddCircuit`, 30 s, at most 50 orders) | partial — solver built, not wired | `POST /v1/optimize/campaign-sequence` in scheduler-py returns the optimal order (property-tested against brute force). The Go service does not call it, so campaign `sequence_rule` still accepts only `nearest-neighbor` and `manual` and refuses `cp-sat` with a field error. |
+| 7 | CP-SAT circuit sequencing (`AddCircuit`, at most 50 orders) | built (slice 6) | `sequenceRule: cp-sat`; `:sequence` calls `POST /v1/optimize/campaign-sequence` and keeps a certified, strictly cheaper order (BR-23.9), otherwise nearest-neighbour with SCHED-0006. The solver gets 20 s, not the PRD's 30 s, because the platform router ends every request at 30 s; a longer limit needs the asynchronous run path (FR-23.11). |
 | 7 | Setup matrix and campaign per resource group; setup group taken from the product (w8) or formula (w24) | handoff — wave 9 (resource groups), waves 8 and 24 | Matrices and campaigns are per resource; each campaign order carries its setup group. |
-| 7 | Batch and run-hour counters carried in from the resource's history | later slice of PSG-23 (needs wave 25 feedback) | Each campaign plan starts its counters at zero. |
+| 7 | Batch and run-hour counters carried in from the resource's history | built for campaigns (slice 6); actual counts are a handoff to wave 25 | `scheduling_cleanout_counter` carries the planned batches and run minutes from each started campaign into the next; a cleaning changeover or a cleanout resets it. Batches run outside campaigns and actual run hours from shop-floor feedback (wave 25) do not move it yet, and there is no endpoint to reset it by hand after an unplanned cleanout. |
 | 7 | Posting the campaign changeover allocation as `campaign-changeover` overhead cost lines before orders end (FR-23.16) | handoff — wave 21 (order costing and journals) | `:allocate-cost` computes the BR-23.14 split (amounts sum exactly to the cost, residual to the largest order) and writes nothing. |
 | 7 | SCHED-0013: refuse to end an order while the campaign cleanout is unended; `campaign.allowEarlyEnd` estimate and true-up | handoff — wave 21 (order end) | The order end lives in wave 21. |
 | 8 | Capacity blocks: definition and the BR-23.15 matching and priority rule (FR-23.17) | built | `POST/GET /v1/scheduling/capacity-blocks`; `domain.Placeable`, `MatchesAny`. |
@@ -145,7 +177,7 @@ moved-out handoff rows.
 
 | Item | Status | Reason |
 |---|---|---|
-| FR-23.1 ResourceCapacity table materialized for 365 days, rebuilt on calendar events; efficiency % and capacity overrides | later slice of PSG-23 (calendar events from wave 9) | Open intervals are computed from the weekly calendar on every read and run. |
+| FR-23.1 ResourceCapacity table materialized for 365 days, rebuilt on calendar events; efficiency % and capacity overrides | later slice of PSG-23 (calendar events from wave 9) | Open intervals are computed from the weekly calendar on every read and run (`GET /resources/{id}/capacity`). A stored table is worth building together with overrides and calendar events, which are what make it differ from the calendar; the swarm's table without them was not taken (see slice 6 above). |
 | `POST /v1/scheduling/resources/{id}/capacity-overrides` (downtime, extra shift) and the *Maintain capacity* screen for overrides | later slice of PSG-23 | Needs the materialized capacity table. |
 | AC-23.7 calendar change closes capacity and flags affected jobs (SCHED-0002 warnings on existing jobs) | later slice of PSG-23 | Depends on calendar events and the capacity table. |
 | FR-23.8 pegs fed from master planning | handoff — wave 22 (pegging) | Pegs are entered through `POST /order-pegs`; a consumer of wave 22 pegging events would fill the same table. Propagation itself is built (slice 4). |
@@ -158,7 +190,7 @@ moved-out handoff rows.
 | Block utilization inquiry (4.23.14) | built (slice 5) | `GET /resources/{id}/block-utilization` per resource and range, shown on the resource detail screen. A cross-resource report screen with period totals is not built; the inquiry is per resource. |
 | Run comparison, resource utilization KPI, changeover analysis and network feasibility reports (4.23.14) | later slice of PSG-23 | Runs list makespan and lateness; comparison screens are not built. |
 | Dispatch list, Gantt print, campaign sheet, cleanout record documents (4.23.15) | later slice of PSG-23 | No document templates yet. |
-| Feature flags `scheduling.cp-sat`, `scheduling.propagate-dependents`; config `SCHED_OPT_TIME_LIMIT_S` | later slice of PSG-23 | No flag client; propagation is chosen per move with `propagate`, and the optimizer takes its time limit per request. |
+| Feature flags `scheduling.cp-sat`, `scheduling.propagate-dependents`; config `SCHED_OPT_TIME_LIMIT_S` | later slice of PSG-23 | No flag client; CP-SAT is chosen per campaign with its sequence rule and switched off by leaving `SCHED_OPT_URL` empty, propagation is chosen per move with `propagate`, and the campaign solver limit is fixed at 20 s. |
 | Site parameters (default method and direction, resource selection rule, safety/queue time, drag snap, propagation limit) | later slice of PSG-23 | Defaults are fixed: jobs mode, forward, least finish, propagation 500 orders / 5 levels (`domain.DefaultPropagation*`). |
 | Extension points `scheduling.constraint`, `scheduling.objective` | later slice of PSG-23 | |
 | `ScheduledJob.overlap_qty`, `secondary_resource_ids`; `ScheduleRun.time_limit_s`, `started_at`, `objective_value` | later slice of PSG-23 | Columns arrive with the features that fill them. |

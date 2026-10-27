@@ -1,8 +1,8 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select } from "../../shell/ui";
-import { createCampaign, describeProblem, newKey, SEQUENCE_RULES, type NewCampaign, type Problem, type SequenceRule } from "./api/client";
-import { fromUtcInput, sentence } from "./format";
+import { createCampaign, describeProblem, newKey, SEQUENCE_RULE_LABELS, SEQUENCE_RULES, type NewCampaign, type Problem, type SequenceRule } from "./api/client";
+import { fromUtcInput } from "./format";
 import { CODE, decimalText, mapFields, optionalWhole, positive } from "./forms";
 import styles from "./pages.module.css";
 import { ResourceGate } from "./ResourceGate";
@@ -63,6 +63,7 @@ const fieldNames: Record<string, keyof CampaignValues> = {
 const ruleHints: Record<SequenceRule, string> = {
   "nearest-neighbor": "Orders follow the smallest changeover from the previous setup group (BR-23.12).",
   manual: "Orders run in the order you add them; changeovers are priced as they fall.",
+  "cp-sat": "The optimizer searches for the order with the fewest changeover minutes (up to 50 orders); nearest neighbour is kept when it finds nothing better.",
 };
 
 /** Create a proposed campaign; orders are added on the campaign page. */
@@ -155,7 +156,7 @@ export function NewCampaignPage() {
                   <Select {...control} value={values.sequenceRule} onChange={(event) => update({ sequenceRule: event.target.value as SequenceRule })}>
                     {SEQUENCE_RULES.map((rule) => (
                       <option key={rule} value={rule}>
-                        {sentence(rule)}
+                        {SEQUENCE_RULE_LABELS[rule]}
                       </option>
                     ))}
                   </Select>

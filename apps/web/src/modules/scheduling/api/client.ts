@@ -469,8 +469,19 @@ export interface BlockWindow {
 
 export const CAMPAIGN_STATUSES = ["proposed", "planned", "started", "completed", "cancelled"] as const;
 export type CampaignStatus = (typeof CAMPAIGN_STATUSES)[number];
-export const SEQUENCE_RULES = ["nearest-neighbor", "manual"] as const;
+export const SEQUENCE_RULES = ["nearest-neighbor", "manual", "cp-sat"] as const;
 export type SequenceRule = (typeof SEQUENCE_RULES)[number];
+export const SEQUENCE_RULE_LABELS: Record<SequenceRule, string> = {
+  "nearest-neighbor": "Nearest neighbour",
+  manual: "Manual",
+  "cp-sat": "CP-SAT optimizer",
+};
+
+/** Batches and run minutes since the resource's last cleanout (BR-23.13). */
+export interface CleanoutCounter {
+  batches: number;
+  minutes: number;
+}
 
 export interface CampaignOrder {
   orderId: string;
@@ -516,6 +527,12 @@ export interface CampaignPlan {
   cleanouts: PlannedCleanout[];
   warnings: { code: string; detail: string }[];
   matrixId?: string;
+  /** Absent on plans stored before slice 6. */
+  carryIn?: CleanoutCounter;
+  carryOut?: CleanoutCounter;
+  /** cp-sat campaigns only: scheduler-opt's status (SCHED-0006). */
+  solverStatus?: string;
+  optimized?: boolean;
 }
 
 export interface Campaign {

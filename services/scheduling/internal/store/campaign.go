@@ -29,6 +29,7 @@ const (
 	CodeCampaignInvalid       = "SCHED-0116"
 	CodeCampaignNotPlanned    = "SCHED-0117"
 	CodeCampaignOrderNotFound = "SCHED-0118"
+	CodeCleanoutCounterMoved  = "SCHED-0123"
 )
 
 // CampaignOrder is one production order in a campaign. Position is the order
@@ -50,12 +51,19 @@ type Message struct {
 	Detail string `json:"detail"`
 }
 
-// CampaignPlan is the stored result of the last sequencing.
+// CampaignPlan is the stored result of the last sequencing. CarryIn is the
+// resource's cleanout counter the plan started from and CarryOut the counter
+// it leaves when the campaign starts (BR-23.13). SolverStatus and Optimized
+// are set for the cp-sat rule (BR-23.9, SCHED-0006).
 type CampaignPlan struct {
-	Changeovers []domain.Changeover      `json:"changeovers"`
-	Cleanouts   []domain.PlannedCleanout `json:"cleanouts"`
-	Warnings    []Message                `json:"warnings"`
-	MatrixID    string                   `json:"matrixId,omitempty"`
+	Changeovers  []domain.Changeover      `json:"changeovers"`
+	Cleanouts    []domain.PlannedCleanout `json:"cleanouts"`
+	Warnings     []Message                `json:"warnings"`
+	MatrixID     string                   `json:"matrixId,omitempty"`
+	CarryIn      domain.CleanoutCounter   `json:"carryIn"`
+	CarryOut     domain.CleanoutCounter   `json:"carryOut"`
+	SolverStatus string                   `json:"solverStatus,omitempty"`
+	Optimized    bool                     `json:"optimized"`
 }
 
 // Campaign groups orders that run contiguously on one resource (FR-23.14).
@@ -106,11 +114,13 @@ type CampaignFilter struct {
 
 // CampaignCommand targets one campaign at the version the caller last saw
 // (If-Match). Order is the order to add; OrderID the order to remove.
+// Proposal is scheduler-opt's answer when sequencing a cp-sat campaign.
 type CampaignCommand struct {
 	CampaignID string
 	Version    int
 	Order      CampaignOrder
 	OrderID    string
+	Proposal   *domain.SolverProposal
 }
 
 // CampaignStore is the campaign part of the Store.
@@ -122,6 +132,7 @@ type CampaignStore interface {
 	RemoveCampaignOrder(ctx context.Context, cmd CampaignCommand, idem Idem) (Campaign, bool, error)
 	SequenceCampaign(ctx context.Context, cmd CampaignCommand, idem Idem) (Campaign, bool, error)
 	StartCampaign(ctx context.Context, cmd CampaignCommand, idem Idem) (Campaign, bool, error)
+	CampaignSetupMatrix(ctx context.Context, resourceID string, on time.Time) (domain.SetupMatrix, error)
 }
 
 const campaignCols = `c.id::text, c.resource_id::text, c.campaign_key, c.status, c.planned_start, c.max_orders, c.max_qty::text, c.max_minutes,
@@ -184,6 +195,22 @@ func loadCampaign(ctx context.Context, tx pgx.Tx, id string, lock bool) (Campaig
 		c.Orders = append(c.Orders, o)
 	}
 	return c, rows.Err()
+}
+
+// SetupOrders returns the campaign's orders in the order they were added,
+// which is the order PlanCampaign receives them in.
+func (c Campaign) SetupOrders() []domain.SetupOrder {
+	out := make([]domain.SetupOrder, 0, len(c.Orders))
+	for _, o := range domainOrders(byPosition(c.Orders)) {
+		out = append(out, o.SetupOrder)
+	}
+	return out
+}
+
+func byPosition(os []CampaignOrder) []CampaignOrder {
+	out := slices.Clone(os)
+	sort.Slice(out, func(i, j int) bool { return out[i].Position < out[j].Position })
+	return out
 }
 
 func domainOrders(os []CampaignOrder) []domain.CampaignOrder {
@@ -419,20 +446,30 @@ func (s *Postgres) SequenceCampaign(ctx context.Context, cmd CampaignCommand, id
 		for _, r := range stored {
 			rules = append(rules, r.Domain())
 		}
-		byPosition := slices.Clone(c.Orders)
-		sort.Slice(byPosition, func(i, j int) bool { return byPosition[i].Position < byPosition[j].Position })
 		current := ""
 		if c.CurrentSetupGroup != nil {
 			current = *c.CurrentSetupGroup
 		}
+		carry, err := cleanoutCounter(ctx, tx, c.ResourceID, false)
+		if err != nil {
+			return err
+		}
+		var proposal *domain.SolverProposal
+		if c.SequenceRule == domain.SequenceCPSAT {
+			proposal = cmd.Proposal
+		}
 		p, err := domain.PlanCampaign(domain.CampaignInput{Status: c.Status, Rule: c.SequenceRule, Matrix: m, Cleanouts: rules,
-			CurrentGroup: current, Limits: c.Limits(), Orders: domainOrders(byPosition)})
+			CurrentGroup: current, Carry: carry, Limits: c.Limits(), Orders: domainOrders(byPosition(c.Orders)), Proposal: proposal})
 		if err != nil {
 			return invalidCampaign(err)
 		}
-		plan := CampaignPlan{Changeovers: p.Sequence.Changeovers, Cleanouts: p.Cleanouts, Warnings: []Message{}}
+		plan := CampaignPlan{Changeovers: p.Sequence.Changeovers, Cleanouts: p.Cleanouts, Warnings: []Message{},
+			CarryIn: carry, CarryOut: p.CarryOut, SolverStatus: p.SolverStatus, Optimized: p.Optimized}
 		if haveMatrix {
 			plan.MatrixID = matrix.ID
+		}
+		if c.SequenceRule == domain.SequenceCPSAT {
+			plan.Warnings = append(plan.Warnings, Message{Code: domain.CodeOptimizationStatus, Detail: domain.SolverMessage(p.SolverStatus, p.Optimized)})
 		}
 		for _, pair := range p.Sequence.Missing {
 			plan.Warnings = append(plan.Warnings, Message{Code: domain.CodeMissingSetupEntry,
@@ -467,7 +504,10 @@ func (s *Postgres) SequenceCampaign(ctx context.Context, cmd CampaignCommand, id
 
 // StartCampaign freezes a planned campaign (FR-23.14): no order may join or
 // leave it afterwards. Until wave 21 reports the first order started, the
-// scheduler starts it explicitly.
+// scheduler starts it explicitly. The resource's cleanout counter becomes
+// the plan's carry-out (BR-23.13); if another campaign moved the counter
+// after this one was sequenced, the start is refused with SCHED-0123 so the
+// cleanouts are planned again from the true count.
 func (s *Postgres) StartCampaign(ctx context.Context, cmd CampaignCommand, idem Idem) (Campaign, bool, error) {
 	return s.campaignCommand(ctx, cmd, idem, func(tx pgx.Tx, c Campaign) error {
 		if c.Status != domain.CampaignPlanned {
@@ -475,6 +515,22 @@ func (s *Postgres) StartCampaign(ctx context.Context, cmd CampaignCommand, idem 
 				return err
 			}
 			return httpx.NewProblem(http.StatusUnprocessableEntity, CodeCampaignNotPlanned, "sequence the campaign before you start it")
+		}
+		if c.Plan == nil {
+			return httpx.NewProblem(http.StatusUnprocessableEntity, CodeCampaignNotPlanned, "sequence the campaign before you start it")
+		}
+		counter, err := cleanoutCounter(ctx, tx, c.ResourceID, true)
+		if err != nil {
+			return err
+		}
+		if counter != c.Plan.CarryIn {
+			return httpx.NewProblem(http.StatusConflict, CodeCleanoutCounterMoved, fmt.Sprintf(
+				"the resource has run %d batches and %d minutes since its last cleanout, not the %d and %d this campaign was sequenced from; sequence it again",
+				counter.Batches, counter.Minutes, c.Plan.CarryIn.Batches, c.Plan.CarryIn.Minutes))
+		}
+		if _, err := tx.Exec(ctx, `update scheduling_cleanout_counter set batches_since = $2, minutes_since = $3, last_campaign_id = $4,
+			updated_at = now() where resource_id = $1`, c.ResourceID, c.Plan.CarryOut.Batches, c.Plan.CarryOut.Minutes, c.ID); err != nil {
+			return err
 		}
 		var startedAt time.Time
 		var version int
@@ -485,4 +541,40 @@ func (s *Postgres) StartCampaign(ctx context.Context, cmd CampaignCommand, idem 
 		return enqueue(ctx, tx, "campaign", c.ID, schedevents.CampaignStarted,
 			schedevents.CampaignStartedData{CampaignID: c.ID, ResourceID: c.ResourceID, StartedAt: rfc(startedAt), Version: version})
 	})
+}
+
+// cleanoutCounter reads a resource's cleanout counter; a resource without one
+// has run nothing since a cleanout. lock creates the row when missing and
+// locks it, so two campaigns on one resource start one after the other.
+func cleanoutCounter(ctx context.Context, tx pgx.Tx, resourceID string, lock bool) (domain.CleanoutCounter, error) {
+	q := `select batches_since, minutes_since from scheduling_cleanout_counter where resource_id = $1`
+	if lock {
+		if _, err := tx.Exec(ctx, `insert into scheduling_cleanout_counter (tenant_id, resource_id) values ($1, $2)
+			on conflict (tenant_id, resource_id) do nothing`, tenantOf(ctx), resourceID); err != nil {
+			return domain.CleanoutCounter{}, err
+		}
+		q += ` for update`
+	}
+	var c domain.CleanoutCounter
+	err := tx.QueryRow(ctx, q, resourceID).Scan(&c.Batches, &c.Minutes)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.CleanoutCounter{}, nil
+	}
+	return c, err
+}
+
+// CampaignSetupMatrix returns the resource's setup matrix in force on a day,
+// empty when there is none. The API prices the CP-SAT request with it; the
+// sequencing transaction reprices the answer with the matrix it reads.
+func (s *Postgres) CampaignSetupMatrix(ctx context.Context, resourceID string, on time.Time) (domain.SetupMatrix, error) {
+	var out domain.SetupMatrix
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		matrix, _, err := activeMatrix(ctx, tx, resourceID, on)
+		if err != nil {
+			return err
+		}
+		out, err = domain.NewSetupMatrix(matrix.Entries)
+		return err
+	})
+	return out, err
 }

@@ -211,6 +211,26 @@ describe("New campaign", () => {
     expect(header(post, "Idempotency-Key")).toMatch(/^[0-9a-f-]{36}$/);
   });
 
+  it("offers the CP-SAT optimizer as a sequence rule", async () => {
+    handler = withResources((url, init) => {
+      if (url.pathname.endsWith("/campaigns") && init.method === "POST") return json(201, { ...proposed, sequenceRule: "cp-sat", orders: [] });
+      if (url.pathname.endsWith(`/campaigns/${CAMPAIGN}`)) return json(200, { ...proposed, sequenceRule: "cp-sat", orders: [] });
+      return undefined;
+    });
+    renderAt("/scheduling/campaigns/new");
+    fireEvent.change(await screen.findByLabelText("Resource"), { target: { value: MIX } });
+    fireEvent.change(screen.getByLabelText("Campaign key"), { target: { value: "FAMILY-2" } });
+    fireEvent.change(screen.getByLabelText("Planned start (UTC)"), { target: { value: "2027-01-04T06:00" } });
+    const rule = screen.getByLabelText("Sequence rule");
+    expect(within(rule).getByRole("option", { name: "CP-SAT optimizer" })).toBeInTheDocument();
+    fireEvent.change(rule, { target: { value: "cp-sat" } });
+    expect(screen.getByText(/fewest changeover minutes \(up to 50 orders\)/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Create campaign" }));
+    expect(await screen.findByRole("heading", { name: "FAMILY-1" })).toBeInTheDocument();
+    expect(screen.getByText("CP-SAT optimizer")).toBeInTheDocument();
+    expect(lastCall("POST", "/campaigns")!.body).toMatchObject({ sequenceRule: "cp-sat" });
+  });
+
   it("tells a new tenant to add a resource first", async () => {
     handler = withResources(() => undefined, []);
     renderAt("/scheduling/campaigns/new");
@@ -316,6 +336,56 @@ describe("Campaign detail", () => {
     fireEvent.click(screen.getByRole("button", { name: `Remove order ${ORDER_C}` }));
     await waitFor(() => expect(lastCall("DELETE", `/orders/${ORDER_C}`)).toBeDefined());
     expect(header(lastCall("DELETE", `/orders/${ORDER_C}`)!, "If-Match")).toBe('"4"');
+  });
+
+  it("shows the optimizer outcome and the cleanout counter of a cp-sat plan", async () => {
+    const optimized: Campaign = {
+      ...planned,
+      sequenceRule: "cp-sat",
+      plan: {
+        ...planned.plan!,
+        solverStatus: "OPTIMAL",
+        optimized: true,
+        carryIn: { batches: 2, minutes: 130 },
+        carryOut: { batches: 1, minutes: 90 },
+        warnings: [
+          { code: "SCHED-0006", detail: "Optimization ended with status OPTIMAL; optimized schedule kept." },
+          { code: "SCHED-0012", detail: "Setup matrix has no entry C->Z; route setup time used." },
+        ],
+      },
+    };
+    handler = withResources((url) => (url.pathname.endsWith(`/campaigns/${CAMPAIGN}`) ? json(200, optimized) : undefined));
+    const { container } = renderAt(`/scheduling/campaigns/${CAMPAIGN}`);
+    expect(await screen.findByText("Optimizer sequence kept")).toBeInTheDocument();
+    expect(screen.getByText("SCHED-0006: Optimization ended with status OPTIMAL; optimized schedule kept.")).toBeInTheDocument();
+    // The optimizer message is not repeated among the missing-entry warnings.
+    expect(screen.getAllByText(/SCHED-0006/)).toHaveLength(1);
+    expect(screen.getByText("SCHED-0012: Setup matrix has no entry C->Z; route setup time used.")).toBeInTheDocument();
+    expect(screen.getByText(/starts 2 batches and 2 h 10 min after its last cleanout and is left at 1 batch and 1 h 30 min/)).toBeInTheDocument();
+    expect(screen.getByText("CP-SAT optimizer")).toBeInTheDocument();
+    expect(pageViolations(container)).toEqual([]);
+  });
+
+  it("says when the heuristic was kept and when a start needs a new sequence", async () => {
+    const kept: Campaign = {
+      ...planned,
+      sequenceRule: "cp-sat",
+      plan: { ...planned.plan!, solverStatus: "UNAVAILABLE", optimized: false, warnings: [{ code: "SCHED-0006", detail: "Optimization ended with status UNAVAILABLE; heuristic schedule kept." }] },
+    };
+    handler = withResources((url, init) => {
+      if (url.pathname.endsWith(":start") && init.method === "POST") {
+        return json(409, { code: "SCHED-0123", detail: "the resource has run 2 batches and 130 minutes since its last cleanout, not the 0 and 0 this campaign was sequenced from; sequence it again" });
+      }
+      if (url.pathname.endsWith(`/campaigns/${CAMPAIGN}`)) return json(200, kept);
+      return undefined;
+    });
+    renderAt(`/scheduling/campaigns/${CAMPAIGN}`);
+    expect(await screen.findByText("Nearest-neighbour sequence kept")).toBeInTheDocument();
+    expect(screen.queryByText("Changeovers without a matrix entry")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Sequence the campaign again before you start it");
+    expect(alert).toHaveTextContent("SCHED-0123");
   });
 
   it("freezes a started campaign", async () => {

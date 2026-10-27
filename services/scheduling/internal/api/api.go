@@ -58,6 +58,7 @@ var DefaultConfig = Config{HorizonDays: 365, BottleneckPct: 90, BottleneckWeek: 
 type API struct {
 	store    store.Store
 	cfg      Config
+	seq      CampaignSequencer
 	created  atomic.Int64
 	runs     atomic.Int64
 	moves    atomic.Int64

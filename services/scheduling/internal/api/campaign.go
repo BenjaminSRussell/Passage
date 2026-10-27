@@ -108,8 +108,8 @@ func (a *API) createCampaign(w http.ResponseWriter, r *http.Request) {
 	if rule == "" {
 		rule = domain.SequenceNearestNeighbor
 	}
-	if rule != domain.SequenceNearestNeighbor && rule != domain.SequenceManual {
-		fields["sequenceRule"] = "must be nearest-neighbor or manual (cp-sat sequencing is not available yet)"
+	if rule != domain.SequenceNearestNeighbor && rule != domain.SequenceManual && rule != domain.SequenceCPSAT {
+		fields["sequenceRule"] = "must be nearest-neighbor, manual or cp-sat"
 	}
 	if req.CurrentSetupGroup != nil && *req.CurrentSetupGroup == "" {
 		req.CurrentSetupGroup = nil
@@ -296,6 +296,7 @@ func (a *API) sequenceCampaign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.campaignCommand(w, r, "sequence", body, func(cmd store.CampaignCommand, idem store.Idem) (store.Campaign, bool, error) {
+		cmd.Proposal = a.proposeSequence(r.Context(), cmd)
 		return a.store.SequenceCampaign(r.Context(), cmd, idem)
 	}, store.CampaignCommand{CampaignID: id})
 }

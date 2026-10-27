@@ -53,8 +53,19 @@ campaigns yet. What is not built is listed in `NOT-IMPLEMENTED.md`.
 - **Campaign / CampaignOrder** (`scheduling_campaign`, `scheduling_campaign_order`):
   resource, key, planned start, limits (orders, quantity, minutes), sequence
   rule, current setup group, status `proposed` → `planned` (sequenced) →
-  `started` (frozen), the stored plan (changeovers, cleanouts, SCHED-0012
-  warnings) and `version` for If-Match. An order belongs to one campaign.
+  `started` (frozen), the stored plan (changeovers, cleanouts, SCHED-0006 and
+  SCHED-0012 messages, the cleanout counter carried in and out, and for
+  `cp-sat` the solver status) and `version` for If-Match. An order belongs to
+  one campaign. The `cp-sat` rule asks scheduler-opt (`SCHED_OPT_URL`) for the
+  minimum-changeover order before the sequencing transaction, with a 20 s
+  limit, at most 50 orders; the answer is kept only when OPTIMAL or FEASIBLE,
+  complete and, priced with the matrix read in the transaction, strictly
+  cheaper than nearest-neighbour (BR-23.9). Anything else keeps
+  nearest-neighbour and says why in SCHED-0006.
+- **CleanoutCounter** (`scheduling_cleanout_counter`): batches and run minutes
+  a resource has run since its last cleanout (BR-23.13). Sequencing reads it;
+  starting a campaign sets it to the plan's carry-out and refuses with
+  SCHED-0123 when another campaign moved it after this one was sequenced.
 - **CapacityBlock** (`scheduling_capacity_block`): weekly windows in the
   resource's time zone, one dated window, or a recurrence (an RRULE subset,
   `FREQ=DAILY|WEEKLY` with `INTERVAL`, `BYDAY`, and `COUNT` or `UNTIL`, from a
@@ -197,6 +208,7 @@ platform naming rule allows no hyphen in the verb, so the entity is
 | `SCHED-0008` | 422 | A firmed job cannot be moved, or the move would push a firmed successor or a firmed job of a pegged order |
 | `SCHED-0009` | 422 / run message | A move puts a network step on resources without an edge; in a run, the order is unplaced as `NETWORK_INFEASIBLE` |
 | `SCHED-0010` | 422 / run warning | A move breaks a network step's transfer or maximum wait; in a run, a frozen predecessor left the successor waiting too long |
+| `SCHED-0006` | campaign plan message | cp-sat campaign: the solver status (OPTIMAL, FEASIBLE, UNKNOWN, INFEASIBLE, UNAVAILABLE when scheduler-opt is not configured or failed, TOO_LARGE above 50 orders) and whether the optimized or the heuristic sequence was kept |
 | `SCHED-0011` | 422 | The campaign has started (or is completed or cancelled); orders cannot join, leave or be resequenced |
 | `SCHED-0012` | warning | In a campaign plan or a run: no setup matrix entry for a group pair; the route setup time was used |
 | `SCHED-0014` | run warning | The job matches no capacity block on its resource and was placed in unblocked capacity |
@@ -222,6 +234,7 @@ platform naming rule allows no hyphen in the verb, so the entity is
 | `SCHED-0120` | 422 | An order to peg has no operations in scheduling |
 | `SCHED-0121` | 422 | The peg would make the parent order depend on its own dependent |
 | `SCHED-0122` | 404 | Order peg not found |
+| `SCHED-0123` | 409 | Campaign start: the resource's cleanout counter moved after the campaign was sequenced; sequence it again |
 | `precondition_required` | 428 | A campaign command was sent without If-Match |
 
 A dry-run move never fails for a constraint: it returns `feasible: false` and
@@ -237,6 +250,7 @@ the violations.
 | `SCHED_HORIZON_DAYS` | 365 | 30-730 |
 | `SCHED_BOTTLENECK_PCT` | 90 | 50-200 |
 | `SCHED_BOTTLENECK_WEEKS` | 3 | 1-12 |
+| `SCHED_OPT_URL` | empty | scheduler-opt base URL for cp-sat campaigns; empty keeps nearest-neighbour (SCHED-0006 UNAVAILABLE) |
 
 ## Run and test
 

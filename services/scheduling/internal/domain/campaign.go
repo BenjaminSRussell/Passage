@@ -16,11 +16,13 @@ const (
 	CampaignCancelled = "cancelled"
 )
 
-// Sequence rules a campaign can use (FR-23.14). The CP-SAT circuit rule is
-// not built yet (see NOT-IMPLEMENTED.md).
+// Sequence rules a campaign can use (FR-23.14). cp-sat asks scheduler-opt
+// for the minimum-changeover circuit and keeps nearest-neighbour unless the
+// solver's order is certified and cheaper (BR-23.9).
 const (
 	SequenceNearestNeighbor = "nearest-neighbor"
 	SequenceManual          = "manual"
+	SequenceCPSAT           = "cp-sat"
 )
 
 // CodeCampaignStarted is SCHED-0011: the order cannot join a frozen campaign.
@@ -45,18 +47,26 @@ type CampaignOrder struct {
 	Qty decimal.Decimal
 }
 
-// CampaignInput is everything PlanCampaign needs. BatchesSinceCleanout and
-// MinutesSinceCleanout carry the resource's counters into the campaign.
+// CleanoutCounter is what a resource has run since its last cleanout
+// (BR-23.13): batches and run minutes.
+type CleanoutCounter struct {
+	Batches int `json:"batches"`
+	Minutes int `json:"minutes"`
+}
+
+// CampaignInput is everything PlanCampaign needs. Carry is the resource's
+// cleanout counter when the campaign begins. Proposal is the CP-SAT answer
+// for the cp-sat rule (nil when the solver was not asked).
 type CampaignInput struct {
-	Status               string
-	Rule                 string
-	Matrix               SetupMatrix
-	Cleanouts            []CleanoutRule
-	CurrentGroup         string
-	BatchesSinceCleanout int
-	MinutesSinceCleanout int
-	Limits               CampaignLimits
-	Orders               []CampaignOrder
+	Status       string
+	Rule         string
+	Matrix       SetupMatrix
+	Cleanouts    []CleanoutRule
+	CurrentGroup string
+	Carry        CleanoutCounter
+	Limits       CampaignLimits
+	Orders       []CampaignOrder
+	Proposal     *SolverProposal
 }
 
 // PlannedCleanout is a cleanout order inserted after an order of the campaign.
@@ -71,6 +81,9 @@ type PlannedCleanout struct {
 // CampaignPlan is the contiguous run of a campaign on its resource: the
 // sequenced orders, the changeovers between them (the first one is the
 // leading setup), and the cleanouts that BR-23.13 demands.
+//
+// CarryOut is the cleanout counter the resource holds after the campaign.
+// SolverStatus and Optimized are set for the cp-sat rule only.
 type CampaignPlan struct {
 	Sequence          Sequence
 	Cleanouts         []PlannedCleanout
@@ -78,6 +91,9 @@ type CampaignPlan struct {
 	ChangeoverMinutes int
 	CleanoutMinutes   int
 	TotalQty          decimal.Decimal
+	CarryOut          CleanoutCounter
+	SolverStatus      string
+	Optimized         bool
 }
 
 // DurationMinutes is the campaign's length on the resource.
@@ -150,6 +166,8 @@ func PlanCampaign(in CampaignInput) (CampaignPlan, error) {
 		plan.Sequence = SequenceAsGiven(in.Matrix, in.CurrentGroup, setup)
 	case SequenceNearestNeighbor, "":
 		plan.Sequence = SequenceNearest(in.Matrix, in.CurrentGroup, setup)
+	case SequenceCPSAT:
+		plan.Sequence, plan.SolverStatus, plan.Optimized = chooseSequence(in.Matrix, in.CurrentGroup, setup, in.Proposal)
 	default:
 		return CampaignPlan{}, fmt.Errorf("sequence rule %q is not available", in.Rule)
 	}
@@ -165,7 +183,7 @@ func PlanCampaign(in CampaignInput) (CampaignPlan, error) {
 			cleaning[c.AfterOrderID] = true
 		}
 	}
-	batches, minutes := in.BatchesSinceCleanout, in.MinutesSinceCleanout
+	batches, minutes := in.Carry.Batches, in.Carry.Minutes
 	last := len(plan.Sequence.Orders) - 1
 	for i, o := range plan.Sequence.Orders {
 		if cleaning[o.OrderID] {
@@ -184,6 +202,7 @@ func PlanCampaign(in CampaignInput) (CampaignPlan, error) {
 			batches, minutes = 0, 0
 		}
 	}
+	plan.CarryOut = CleanoutCounter{Batches: batches, Minutes: minutes}
 	if in.Limits.MaxMinutes > 0 && plan.DurationMinutes() > in.Limits.MaxMinutes {
 		return CampaignPlan{}, fmt.Errorf("campaign runs %d minutes with changeovers and cleanouts, limit is %d", plan.DurationMinutes(), in.Limits.MaxMinutes)
 	}

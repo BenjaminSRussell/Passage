@@ -24,6 +24,7 @@ import {
   listResources,
   newKey,
   removeCampaignOrder,
+  SEQUENCE_RULE_LABELS,
   sequenceCampaign,
   startCampaign,
   type Allocation,
@@ -31,6 +32,7 @@ import {
   type Campaign,
   type CampaignOrder,
   type Changeover,
+  type CleanoutCounter,
   type NewCampaignOrder,
   type PlannedCleanout,
   type Problem,
@@ -196,7 +198,7 @@ export function CampaignDetailPage() {
   const facts: [string, ReactNode][] = [
     ["Resource", codes[campaign.resourceId] ?? shortId(campaign.resourceId)],
     ["Planned start", formatDateTime(campaign.plannedStart)],
-    ["Sequence rule", sentence(campaign.sequenceRule)],
+    ["Sequence rule", SEQUENCE_RULE_LABELS[campaign.sequenceRule] ?? sentence(campaign.sequenceRule)],
     ["Current setup group", campaign.currentSetupGroup ?? dash],
     ["Limits", limits.length > 0 ? limits.join(" · ") : "None"],
     ["Run time", formatMinutes(campaign.runMinutes)],
@@ -244,7 +246,7 @@ export function CampaignDetailPage() {
       {failure ? (
         <Alert
           tone="danger"
-          title={failure.code === "SCHED-0115" ? "Someone else changed this campaign" : "The command failed"}
+          title={failureTitles[failure.code] ?? "The command failed"}
           live="alert"
           action={failure.code === "SCHED-0115" ? <Button size="sm" onClick={reload}>Reload</Button> : undefined}
         >
@@ -364,6 +366,18 @@ function AddOrderForm({ disabled, onAdd }: { disabled: boolean; onAdd(order: New
   );
 }
 
+const failureTitles: Record<string, string> = {
+  "SCHED-0115": "Someone else changed this campaign",
+  "SCHED-0123": "Sequence the campaign again before you start it",
+};
+
+/** SCHED-0006 reports the optimizer outcome of a cp-sat campaign. */
+const SOLVER_CODE = "SCHED-0006";
+
+export function counterText(c: CleanoutCounter): string {
+  return `${c.batches} ${c.batches === 1 ? "batch" : "batches"} and ${formatMinutes(c.minutes)}`;
+}
+
 function PlanCard({ campaign }: { campaign: Campaign }) {
   const plan = campaign.plan;
   if (!plan) {
@@ -390,17 +404,31 @@ function PlanCard({ campaign }: { campaign: Campaign }) {
     { key: "reason", header: "Reason", render: (c) => cleanoutReasons[c.reason] ?? c.reason },
     { key: "cleaningSetId", header: "Cleaning set", render: (c) => c.cleaningSetId ?? dash },
   ];
+  const solver = plan.warnings.filter((w) => w.code === SOLVER_CODE);
+  const missing = plan.warnings.filter((w) => w.code !== SOLVER_CODE);
   return (
     <Card title="Sequence">
       <div className={styles.stack}>
-        {plan.warnings.length > 0 ? (
+        {solver.length > 0 ? (
+          <Alert tone={plan.optimized ? "success" : "info"} title={plan.optimized ? "Optimizer sequence kept" : "Nearest-neighbour sequence kept"} live="off">
+            {solver.map((w) => (
+              <p key={w.detail}>{`${w.code}: ${w.detail}`}</p>
+            ))}
+          </Alert>
+        ) : null}
+        {missing.length > 0 ? (
           <Alert tone="warning" title="Changeovers without a matrix entry" live="off">
             <ul className={styles.messages}>
-              {plan.warnings.map((w) => (
+              {missing.map((w) => (
                 <li key={w.detail}>{`${w.code}: ${w.detail}`}</li>
               ))}
             </ul>
           </Alert>
+        ) : null}
+        {plan.carryIn && plan.carryOut ? (
+          <p className={styles.note}>
+            {`Cleanout counter: the resource starts ${counterText(plan.carryIn)} after its last cleanout and is left at ${counterText(plan.carryOut)} when this campaign starts.`}
+          </p>
         ) : null}
         <p className={styles.note}>
           {plan.matrixId ? `Priced with setup matrix ${shortId(plan.matrixId)}.` : "No setup matrix is in force on the planned start; every changeover uses the route setup time."}
