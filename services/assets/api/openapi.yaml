@@ -506,7 +506,7 @@ paths:
     get:
       summary: Capital appropriation requests ordered by number (without variants)
       operationId: listCapexRequests
-      x-passage-duty: AssetView or CapexRequestCreate
+      x-passage-duty: AssetView or CapexRequestCreate or CapexRequestApprove
       parameters:
         - { name: status, in: query, schema: { $ref: "#/components/schemas/CapexStatus" } }
         - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
@@ -555,7 +555,7 @@ paths:
     get:
       summary: Read a capex request with its variants
       operationId: getCapexRequest
-      x-passage-duty: AssetView or CapexRequestCreate
+      x-passage-duty: AssetView or CapexRequestCreate or CapexRequestApprove
       parameters:
         - $ref: "#/components/parameters/CapexId"
       responses:
@@ -605,6 +605,267 @@ paths:
               schema:
                 $ref: "#/components/schemas/CapexRequest"
         "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "428":
+          $ref: "#/components/responses/Problem"
+  /v1/assets/capex-requests/{id}/approve:
+    post:
+      summary: Approve a request in approval (InApproval → Approved)
+      description: |
+        Freezes the selected variant's total as approvedAmount and publishes
+        dev.passage.assets.capexrequest.approved.v1 with the variant's amounts per
+        year in the same transaction (FR-37.17, AC-37.11). The user who created or
+        requested the request may not approve it (403 AST-0028). Which approver
+        may act at which approval level is the wave-4 workflow's job (not yet
+        wired): any holder of CapexRequestApprove can decide.
+        Every decision requires If-Match with the request's ETag, is recorded in
+        the request's decision trail and returns the request with it. Any other
+        status is 422 AST-0016.
+      operationId: approveCapexRequest
+      x-passage-duty: CapexRequestApprove
+      parameters:
+        - $ref: "#/components/parameters/CapexId"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CapexDecisionRequest"
+      responses:
+        "200":
+          description: Request after the decision
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapexRequest"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "428":
+          $ref: "#/components/responses/Problem"
+  /v1/assets/capex-requests/{id}/reject:
+    post:
+      summary: Reject a request in approval (InApproval → Rejected, terminal)
+      description: |
+        A comment giving the reason is required. The user who created or
+        requested the request may not reject it (403 AST-0028).
+        Every decision requires If-Match with the request's ETag, is recorded in
+        the request's decision trail and returns the request with it. Any other
+        status is 422 AST-0016.
+      operationId: rejectCapexRequest
+      x-passage-duty: CapexRequestApprove
+      parameters:
+        - $ref: "#/components/parameters/CapexId"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CapexDecisionRequest"
+      responses:
+        "200":
+          description: Request after the decision
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapexRequest"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "428":
+          $ref: "#/components/responses/Problem"
+  /v1/assets/capex-requests/{id}/postpone:
+    post:
+      summary: Postpone a request in approval (InApproval → Postponed)
+      description: |
+        A comment giving the reason is required. The requester can reopen a
+        postponed request to Draft. The user who created or requested the
+        request may not postpone it (403 AST-0028).
+        Every decision requires If-Match with the request's ETag, is recorded in
+        the request's decision trail and returns the request with it. Any other
+        status is 422 AST-0016.
+      operationId: postponeCapexRequest
+      x-passage-duty: CapexRequestApprove
+      parameters:
+        - $ref: "#/components/parameters/CapexId"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CapexDecisionRequest"
+      responses:
+        "200":
+          description: Request after the decision
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapexRequest"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "428":
+          $ref: "#/components/responses/Problem"
+  /v1/assets/capex-requests/{id}/reopen:
+    post:
+      summary: Return a postponed request to Draft (Postponed → Draft)
+      description: |
+        Clears the selected variant, approval level and requested amount so the
+        request is submitted afresh (BR-37.12).
+        Every decision requires If-Match with the request's ETag, is recorded in
+        the request's decision trail and returns the request with it. Any other
+        status is 422 AST-0016.
+      operationId: reopenCapexRequest
+      x-passage-duty: CapexRequestCreate
+      parameters:
+        - $ref: "#/components/parameters/CapexId"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CapexDecisionRequest"
+      responses:
+        "200":
+          description: Request after the decision
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapexRequest"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "428":
+          $ref: "#/components/responses/Problem"
+  /v1/assets/capex-requests/{id}/release:
+    post:
+      summary: Release an approved request for spending (Approved → Released)
+      description: |
+        Release marks the request as executed; creating the asset under
+        construction or the project is not yet wired (wave 41).
+        Every decision requires If-Match with the request's ETag, is recorded in
+        the request's decision trail and returns the request with it. Any other
+        status is 422 AST-0016.
+      operationId: releaseCapexRequest
+      x-passage-duty: CapexRequestApprove
+      parameters:
+        - $ref: "#/components/parameters/CapexId"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CapexDecisionRequest"
+      responses:
+        "200":
+          description: Request after the decision
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapexRequest"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "428":
+          $ref: "#/components/responses/Problem"
+  /v1/assets/capex-requests/{id}/close:
+    post:
+      summary: Close a released request (Released → Closed, terminal)
+      description: |
+        Every decision requires If-Match with the request's ETag, is recorded in
+        the request's decision trail and returns the request with it. Any other
+        status is 422 AST-0016.
+      operationId: closeCapexRequest
+      x-passage-duty: CapexRequestApprove
+      parameters:
+        - $ref: "#/components/parameters/CapexId"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CapexDecisionRequest"
+      responses:
+        "200":
+          description: Request after the decision
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapexRequest"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
           $ref: "#/components/responses/Problem"
         "403":
           $ref: "#/components/responses/Problem"
@@ -713,6 +974,38 @@ paths:
         "400":
           $ref: "#/components/responses/Problem"
         "403":
+          $ref: "#/components/responses/Problem"
+  /v1/assets/mid-quarter-test:
+    get:
+      summary: Run the mid-quarter test for one tax book and year (BR-37.5)
+      description: |
+        The mid-quarter-test job (7.37.16) run on demand. Adds the current cost
+        of every book with bookCode placed in service in the year (a calendar
+        year) by quarter, leaving out books placed in service and fully disposed
+        of in that year. When the Q4 basis is more than 40% of the year's basis,
+        applies is true with the AST-0511 warning. review lists (up to 500 of
+        reviewCount) the books whose convention does not follow the result: a
+        DecliningBalance book not on MidQuarter when the test applies, or a
+        MidQuarter book when it does not. Nothing is switched or posted. Books
+        in more than one currency are 422 AST-0029.
+      operationId: midQuarterTest
+      x-passage-duty: AssetView or AssetDepreciate
+      parameters:
+        - { name: legalEntityId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: bookCode, in: query, required: true, schema: { type: string, pattern: "^[A-Z0-9][A-Z0-9_-]{0,19}$" } }
+        - { name: year, in: query, required: true, schema: { type: integer, minimum: 1900, maximum: 2200 } }
+      responses:
+        "200":
+          description: Test result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MidQuarterReport"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "422":
           $ref: "#/components/responses/Problem"
   /v1/assets/{id}/dispose:
     post:
@@ -1005,8 +1298,8 @@ components:
         salvageValue: { type: string }
         convention:
           type: string
-          enum: [None, FullMonth, MidMonth15, HalfYear]
-          description: None, FullMonth and MidMonth15 apply to StraightLine; None and HalfYear to DecliningBalance
+          enum: [None, FullMonth, MidMonth15, HalfYear, MidQuarter]
+          description: None, FullMonth and MidMonth15 apply to StraightLine; None, HalfYear and MidQuarter to DecliningBalance (MidQuarter charges 10.5, 7.5, 4.5 or 1.5 months of the first year by in-service quarter, IRS Pub. 946)
         inServiceDate: { type: string, format: date }
         cost: { type: string }
     Book:
@@ -1481,13 +1774,67 @@ components:
         selectedVariantId: { type: [string, "null"], format: uuid }
         approvalLevel: { type: [string, "null"], enum: [PlantManager, CFO, Board, null] }
         requestedAmount: { type: [string, "null"] }
-        approvedAmount: { type: [string, "null"] }
+        approvedAmount: { type: [string, "null"], description: "The selected variant's total, set on approve" }
+        createdBy: { type: [string, "null"], description: "User that created the request; null for requests created before slice 4" }
         version: { type: integer }
         createdAt: { type: string, format: date-time }
         variants:
           type: array
-          description: Present on create, read and submit; omitted from the list
+          description: Present on create, read, submit and decisions; omitted from the list
           items: { $ref: "#/components/schemas/CapexVariant" }
+        decisions:
+          type: array
+          description: Decision trail, oldest first; present on read and decisions once a decision exists
+          items: { $ref: "#/components/schemas/CapexDecisionRecord" }
+    CapexDecisionRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        comment: { type: string, maxLength: 1000, description: "Reason for the decision; required to reject or postpone" }
+    CapexDecisionRecord:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        decision: { type: string, enum: [approve, reject, postpone, reopen, release, close] }
+        fromStatus: { $ref: "#/components/schemas/CapexStatus" }
+        toStatus: { $ref: "#/components/schemas/CapexStatus" }
+        approvalLevel: { type: [string, "null"], enum: [PlantManager, CFO, Board, null] }
+        amount: { type: [string, "null"], description: "Requested amount at the decision" }
+        comment: { type: [string, "null"] }
+        decidedBy: { type: string }
+        decidedAt: { type: string, format: date-time }
+    MidQuarterReport:
+      type: object
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        bookCode: { type: string }
+        currency: { type: [string, "null"], description: "Null when no book was placed in service in the year" }
+        year: { type: integer }
+        bookCount: { type: integer }
+        totalBasis: { type: string }
+        quarterBasis:
+          type: array
+          minItems: 4
+          maxItems: 4
+          description: Basis placed in service in Q1 to Q4
+          items: { type: string }
+        q4Share: { type: string, description: "Q4 basis / total basis, four decimals" }
+        applies: { type: boolean }
+        warnings: { type: array, items: { type: string, enum: [AST-0511] } }
+        reviewCount: { type: integer }
+        review:
+          type: array
+          items:
+            type: object
+            properties:
+              assetId: { type: string, format: uuid }
+              assetNumber: { type: string }
+              bookId: { type: string, format: uuid }
+              method: { type: string, enum: [StraightLine, DecliningBalance] }
+              convention: { type: string }
+              inServiceDate: { type: string, format: date }
+              quarter: { type: integer, minimum: 1, maximum: 4 }
+              cost: { type: string }
     CapexPage:
       type: object
       required: [items]

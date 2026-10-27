@@ -100,9 +100,15 @@ type CapexRequest struct {
 	ApprovalLevel     *string          `json:"approvalLevel"`
 	RequestedAmount   *decimal.Decimal `json:"requestedAmount"`
 	ApprovedAmount    *decimal.Decimal `json:"approvedAmount"`
-	Version           int              `json:"version"`
-	CreatedAt         time.Time        `json:"createdAt"`
-	Variants          []CapexVariant   `json:"variants,omitempty"`
+	// CreatedBy is the user that created the request (null before slice 4);
+	// that user may not approve, reject or postpone it (7.37.17).
+	CreatedBy *string        `json:"createdBy"`
+	Version   int            `json:"version"`
+	CreatedAt time.Time      `json:"createdAt"`
+	Variants  []CapexVariant `json:"variants,omitempty"`
+	// Decisions is the approver trail, oldest first; only the single-request
+	// read carries it.
+	Decisions []CapexDecisionRecord `json:"decisions,omitempty"`
 }
 
 // CapexFilter narrows ListCapexRequests. After is the id of the last request
@@ -338,12 +344,12 @@ func loadPolicies(ctx context.Context, tx pgx.Tx, tenantID, assetID, id string) 
 }
 
 const capexColumns = `id, legal_entity_id, number, title, requester_id, status, currency, selected_variant_id, approval_level, requested_amount,
-	approved_amount, version, created_at`
+	approved_amount, created_by, version, created_at`
 
 func scanCapex(row pgx.Row) (CapexRequest, error) {
 	var c CapexRequest
 	err := row.Scan(&c.ID, &c.LegalEntityID, &c.Number, &c.Title, &c.RequesterID, &c.Status, &c.Currency, &c.SelectedVariantID,
-		&c.ApprovalLevel, &c.RequestedAmount, &c.ApprovedAmount, &c.Version, &c.CreatedAt)
+		&c.ApprovalLevel, &c.RequestedAmount, &c.ApprovedAmount, &c.CreatedBy, &c.Version, &c.CreatedAt)
 	return c, err
 }
 
@@ -356,8 +362,8 @@ func (s *Postgres) CreateCapexRequest(ctx context.Context, in CapexRequest, idem
 		var err error
 		out, err = idempotent(ctx, tx, p.TenantID, idempotencyKey, "capex-request.create", in, func() (CapexRequest, error) {
 			id := ids.New()
-			if _, err := tx.Exec(ctx, `insert into capex_request (tenant_id, id, legal_entity_id, number, title, requester_id, currency)
-				values ($1, $2, $3, $4, $5, $6, $7)`, p.TenantID, id, in.LegalEntityID, in.Number, in.Title, in.RequesterID, in.Currency); err != nil {
+			if _, err := tx.Exec(ctx, `insert into capex_request (tenant_id, id, legal_entity_id, number, title, requester_id, currency, created_by)
+				values ($1, $2, $3, $4, $5, $6, $7, nullif($8, ''))`, p.TenantID, id, in.LegalEntityID, in.Number, in.Title, in.RequesterID, in.Currency, p.UserID); err != nil {
 				return CapexRequest{}, err
 			}
 			for i, v := range in.Variants {
@@ -497,5 +503,9 @@ func loadCapex(ctx context.Context, tx pgx.Tx, tenantID, id string) (CapexReques
 		}
 		out.Variants = append(out.Variants, v)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return CapexRequest{}, err
+	}
+	out.Decisions, err = loadCapexDecisions(ctx, tx, tenantID, id)
+	return out, err
 }

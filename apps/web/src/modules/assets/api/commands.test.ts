@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { addAddition, adjustBook, listAdditions, postRun, putIndexSeries, submitCapex } from "./client";
+import { addAddition, adjustBook, decideCapex, getMidQuarterTest, listAdditions, postRun, putIndexSeries, submitCapex } from "./client";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -64,5 +64,39 @@ describe("assets client, slice 2 commands", () => {
     const fn = stub(201, { id: "x" });
     await addAddition("a", { type: "Accessory", description: "Cover", addedDate: "2026-01-01", financial: false }, "k-2");
     expect(sent(fn).headers.get("Idempotency-Key")).toBe("k-2");
+  });
+});
+
+describe("assets client, slice 4 commands", () => {
+  it("posts a decision to its own route with If-Match and the trimmed comment", async () => {
+    const fn = stub(200, { id: "c", status: "Postponed" }, { ETag: '"3"' });
+    const res = await decideCapex("c", '"2"', "postpone", "  Next budget year ");
+    const { url, init, headers, body } = sent(fn);
+    expect(url).toBe("/api/v1/assets/capex-requests/c/postpone");
+    expect(init.method).toBe("POST");
+    expect(headers.get("If-Match")).toBe('"2"');
+    expect(headers.get("Idempotency-Key")).toBeNull();
+    expect(body).toEqual({ comment: "Next budget year" });
+    expect(res).toEqual({ value: { id: "c", status: "Postponed" }, etag: '"3"' });
+  });
+
+  it("sends no body for a decision without a comment", async () => {
+    const fn = stub(200, { id: "c", status: "Approved" }, { ETag: '"3"' });
+    await decideCapex("c", '"2"', "approve", "   ");
+    const { url, init, headers } = sent(fn);
+    expect(url).toBe("/api/v1/assets/capex-requests/c/approve");
+    expect(init.body).toBeUndefined();
+    expect(headers.get("Content-Type")).toBeNull();
+  });
+
+  it("raises the service problem of a refused decision", async () => {
+    stub(403, { code: "AST-0028", detail: "you created or requested this capex request" });
+    await expect(decideCapex("c", '"2"', "approve")).rejects.toMatchObject({ code: "AST-0028", status: 403 });
+  });
+
+  it("queries the mid-quarter test by entity, book and year", async () => {
+    const fn = stub(200, { applies: false });
+    await getMidQuarterTest({ legalEntityId: "le", bookCode: "TAX", year: 2026 });
+    expect(sent(fn).url).toBe("/api/v1/assets/mid-quarter-test?legalEntityId=le&bookCode=TAX&year=2026");
   });
 });

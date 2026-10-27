@@ -20,7 +20,7 @@ func TestEventsMatchAsyncAPI(t *testing.T) {
 	spec := string(raw)
 	payloads := map[string]any{AssetAcquired: AssetAcquiredData{}, AssetDisposed: AssetDisposedData{}, LeaseRecognized: LeaseRecognizedData{},
 		AssetAdjusted: AssetAdjustedData{}, DepreciationPosted: DepreciationPostedData{},
-		LeaseRemeasured: LeaseRemeasuredData{}}
+		LeaseRemeasured: LeaseRemeasuredData{}, CapexApproved: CapexApprovedData{}}
 	for typ, payload := range payloads {
 		if !events.ValidType(typ) {
 			t.Errorf("%s does not follow dev.passage.<ctx>.<entity>.<verb>.v<n>", typ)

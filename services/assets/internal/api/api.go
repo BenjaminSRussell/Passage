@@ -57,7 +57,7 @@ var (
 	classCode   = regexp.MustCompile(`^[A-Z0-9][A-Z0-9_-]{0,19}$`)
 	bookCode    = regexp.MustCompile(`^[A-Z0-9][A-Z0-9_-]{0,19}$`)
 	currency    = regexp.MustCompile(`^[A-Z]{3}$`)
-	validConv   = map[string]bool{"None": true, "FullMonth": true, "MidMonth15": true, "HalfYear": true}
+	validConv   = map[string]bool{"None": true, "FullMonth": true, "MidMonth15": true, "HalfYear": true, "MidQuarter": true}
 	validMeth   = map[string]bool{"StraightLine": true, "DecliningBalance": true}
 	validTiming = map[string]bool{"arrears": true, "advance": true}
 	validStatus = map[string]bool{"NotYetAcquired": true, "Open": true, "Sold": true, "Scrapped": true, "Transferred": true}
@@ -78,6 +78,8 @@ type API struct {
 	// Slice 3: lease remeasurements and count sessions.
 	remeasured atomic.Int64
 	counted    atomic.Int64
+	// Slice 4: capex decisions.
+	decided atomic.Int64
 }
 
 // New returns an API over s.
@@ -114,14 +116,21 @@ func (a *API) Register(r chi.Router) {
 		r.With(requireAny(DutyView, DutyInsuranceMaintain)).Get("/v1/assets/{id}/insurance-policies", a.listInsurancePolicies)
 
 		r.With(authz.RequireDuty(DutyCapexCreate)).Post("/v1/assets/capex-requests", a.createCapexRequest)
-		r.With(requireAny(DutyView, DutyCapexCreate)).Get("/v1/assets/capex-requests", a.listCapexRequests)
-		r.With(requireAny(DutyView, DutyCapexCreate)).Get("/v1/assets/capex-requests/{id}", a.getCapexRequest)
+		r.With(requireAny(DutyView, DutyCapexCreate, DutyCapexApprove)).Get("/v1/assets/capex-requests", a.listCapexRequests)
+		r.With(requireAny(DutyView, DutyCapexCreate, DutyCapexApprove)).Get("/v1/assets/capex-requests/{id}", a.getCapexRequest)
 		r.With(authz.RequireDuty(DutyCapexCreate)).Post("/v1/assets/capex-requests/{id}/submit", a.submitCapexRequest)
+		r.With(authz.RequireDuty(DutyCapexApprove)).Post("/v1/assets/capex-requests/{id}/approve", a.decideCapex(domain.DecisionApprove))
+		r.With(authz.RequireDuty(DutyCapexApprove)).Post("/v1/assets/capex-requests/{id}/reject", a.decideCapex(domain.DecisionReject))
+		r.With(authz.RequireDuty(DutyCapexApprove)).Post("/v1/assets/capex-requests/{id}/postpone", a.decideCapex(domain.DecisionPostpone))
+		r.With(authz.RequireDuty(DutyCapexCreate)).Post("/v1/assets/capex-requests/{id}/reopen", a.decideCapex(domain.DecisionReopen))
+		r.With(authz.RequireDuty(DutyCapexApprove)).Post("/v1/assets/capex-requests/{id}/release", a.decideCapex(domain.DecisionRelease))
+		r.With(authz.RequireDuty(DutyCapexApprove)).Post("/v1/assets/capex-requests/{id}/close", a.decideCapex(domain.DecisionClose))
 
 		r.With(authz.RequireDuty(DutyCount)).Post("/v1/assets/count-sessions", a.createCountSession)
 		r.With(requireAny(DutyView, DutyCount)).Get("/v1/assets/count-sessions", a.listCountSessions)
 		r.With(requireAny(DutyView, DutyCount)).Get("/v1/assets/count-sessions/{id}", a.getCountSession)
 		r.With(requireAny(DutyView, DutyInsuranceMaintain)).Get("/v1/assets/insurance-report", a.insuranceReport)
+		r.With(requireAny(DutyView, DutyDepreciate)).Get("/v1/assets/mid-quarter-test", a.midQuarterTest)
 	})
 }
 
@@ -150,6 +159,7 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# TYPE assets_capex_requests_total counter\nassets_capex_requests_total %d\n", a.capex.Load())
 		fmt.Fprintf(w, "# TYPE assets_leases_remeasured_total counter\nassets_leases_remeasured_total %d\n", a.remeasured.Load())
 		fmt.Fprintf(w, "# TYPE assets_count_sessions_total counter\nassets_count_sessions_total %d\n", a.counted.Load())
+		fmt.Fprintf(w, "# TYPE assets_capex_decisions_total counter\nassets_capex_decisions_total %d\n", a.decided.Load())
 	})
 }
 
@@ -381,7 +391,7 @@ func (a *API) addBook(w http.ResponseWriter, r *http.Request) {
 		fields["method"] = "must be StraightLine or DecliningBalance"
 	}
 	if !validConv[req.Convention] {
-		fields["convention"] = "must be None, FullMonth, MidMonth15 or HalfYear"
+		fields["convention"] = "must be None, FullMonth, MidMonth15, HalfYear or MidQuarter"
 	}
 	if req.ServiceLifePeriods < 1 || req.ServiceLifePeriods > 1200 {
 		fields["serviceLifePeriods"] = "must be 1 to 1200"

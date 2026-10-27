@@ -4,16 +4,20 @@ import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, Page
 import {
   CAPEX_STATUSES,
   createCapex,
+  decideCapex,
   describeProblem,
   getCapex,
   listCapex,
   newKey,
   submitCapex,
+  type CapexDecision,
+  type CapexDecisionRecord,
   type CapexRequest,
   type CapexStatus,
   type CapexVariant,
   type NewCapexRequest,
   type Problem,
+  type Versioned,
 } from "./api/client";
 import { StatusBadge } from "./badges";
 import { amount, DATE, dash, parseYearLines, sentence, today, UUID } from "./format";
@@ -30,10 +34,10 @@ const listColumns: DataTableColumn<CapexRequest>[] = [
   { key: "requestedAmount", header: "Requested", align: "end", render: (c) => amount(c.requestedAmount, c.requestedAmount ? c.currency : null) },
 ];
 
-/** Capital appropriation requests (FR-37.17), filterable by status. */
-export function CapexListPage() {
+/** Capital appropriation requests (FR-37.17), filterable by status; the approvals entry opens it on InApproval. */
+export function CapexListPage({ initialStatus = "" }: { initialStatus?: CapexStatus | "" }) {
   const navigate = useNavigate();
-  const [status, setStatus] = useState<CapexStatus | "">("");
+  const [status, setStatus] = useState<CapexStatus | "">(initialStatus);
   const state = useLoad((signal) => listCapex({ status }, signal), `capex|${status}`);
   const [more, setMore] = useState<CapexRequest[]>([]);
   const [cursor, setCursor] = useState<string | undefined>(undefined);
@@ -309,14 +313,81 @@ function variantColumns(currency: string, selected: string | null): DataTableCol
   ];
 }
 
-/** A capex request with its variants; a Draft is submitted here with the variant to approve. */
+interface DecisionAction {
+  decision: CapexDecision;
+  label: string;
+  variant: "primary" | "secondary" | "danger";
+  /** Reject and postpone tell the requester why (the service requires it). */
+  needsComment: boolean;
+}
+
+const decisionLabel: Record<CapexDecision, string> = {
+  approve: "Approved",
+  reject: "Rejected",
+  postpone: "Postponed",
+  reopen: "Returned to draft",
+  release: "Released",
+  close: "Closed",
+};
+
+/**
+ * The decisions offered in each status (BR-37.12). The service re-checks the
+ * move, the duty (CapexRequestApprove; reopen is the requester's
+ * CapexRequestCreate) and that the approver did not create or request it.
+ */
+export function decisionsFor(status: CapexStatus): DecisionAction[] {
+  switch (status) {
+    case "InApproval":
+      return [
+        { decision: "approve", label: "Approve", variant: "primary", needsComment: false },
+        { decision: "postpone", label: "Postpone", variant: "secondary", needsComment: true },
+        { decision: "reject", label: "Reject", variant: "danger", needsComment: true },
+      ];
+    case "Postponed":
+      return [{ decision: "reopen", label: "Return to draft", variant: "secondary", needsComment: false }];
+    case "Approved":
+      return [{ decision: "release", label: "Release", variant: "primary", needsComment: false }];
+    case "Released":
+      return [{ decision: "close", label: "Close", variant: "secondary", needsComment: false }];
+    default:
+      return [];
+  }
+}
+
+const trailColumns: DataTableColumn<CapexDecisionRecord>[] = [
+  { key: "decidedAt", header: "When", mono: true, render: (d) => d.decidedAt.replace("T", " ").slice(0, 16) },
+  { key: "decision", header: "Decision", render: (d) => decisionLabel[d.decision] ?? sentence(d.decision) },
+  { key: "fromStatus", header: "From", render: (d) => <StatusBadge status={d.fromStatus} /> },
+  { key: "toStatus", header: "To", render: (d) => <StatusBadge status={d.toStatus} /> },
+  { key: "decidedBy", header: "By", mono: true },
+  { key: "comment", header: "Comment", render: (d) => d.comment ?? dash },
+];
+
+function failureTitle(problem: Problem, action: string): string {
+  if (problem.code === "AST-0006") return "The request changed since you opened it";
+  if (problem.code === "AST-0028") return "You cannot decide your own request";
+  return `Could not ${action} the request`;
+}
+
+/** A capex request with its variants: a Draft is submitted here, and the approver decides it here. */
 export function CapexDetailPage() {
   const { id = "" } = useParams();
   const state = useLoad((signal) => getCapex(id, signal), id);
   const [variantId, setVariantId] = useState("");
-  const [submitted, setSubmitted] = useState<CapexRequest | null>(null);
-  const [failure, setFailure] = useState<Problem | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [current, setCurrent] = useState<Versioned<CapexRequest> | null>(null);
+  const [submitted, setSubmitted] = useState(false);
+  const [decided, setDecided] = useState<CapexDecision | null>(null);
+  const [comment, setComment] = useState("");
+  const [commentError, setCommentError] = useState<string | undefined>(undefined);
+  const [failure, setFailure] = useState<{ problem: Problem; action: string } | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  useEffect(() => {
+    setCurrent(null);
+    setSubmitted(false);
+    setDecided(null);
+    setFailure(null);
+  }, [state.data]);
 
   if (state.error) {
     return (
@@ -340,30 +411,82 @@ export function CapexDetailPage() {
       </div>
     );
   }
-  const request = submitted ?? state.data.value;
+  const latest = current ?? state.data;
+  const request = latest.value;
   const variants = request.variants ?? [];
+  const trail = request.decisions ?? [];
   const chosen = variantId || variants[0]?.id || "";
+  const actions = decisionsFor(request.status);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!state.data || chosen === "") return;
-    setBusy(true);
+    if (chosen === "") return;
+    setBusy("submit");
     setFailure(null);
+    setDecided(null);
     try {
-      setSubmitted((await submitCapex(request.id, state.data.etag, chosen)).value);
+      setCurrent(await submitCapex(request.id, latest.etag, chosen));
+      setSubmitted(true);
     } catch (error) {
-      setFailure(describeProblem(error));
+      setFailure({ problem: describeProblem(error), action: "submit" });
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   }
+
+  async function decide(action: DecisionAction) {
+    const text = comment.trim();
+    if (action.needsComment && text === "") {
+      setCommentError(`Say why you ${action.decision} the request.`);
+      return;
+    }
+    if (text.length > 1000) {
+      setCommentError("Keep the comment to 1,000 characters.");
+      return;
+    }
+    setCommentError(undefined);
+    setBusy(action.decision);
+    setFailure(null);
+    setSubmitted(false);
+    try {
+      setCurrent(await decideCapex(request.id, latest.etag, action.decision, text));
+      setDecided(action.decision);
+      setComment("");
+    } catch (error) {
+      const problem = describeProblem(error);
+      if (problem.fields.comment) setCommentError(problem.fields.comment);
+      setFailure({ problem, action: action.label.toLowerCase() });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const failureAlert = failure ? (
+    <div className={styles.formActions}>
+      <Alert
+        tone="danger"
+        title={failureTitle(failure.problem, failure.action)}
+        live="alert"
+        action={failure.problem.code === "AST-0006" ? <Button size="sm" onClick={state.reload}>Reload</Button> : undefined}
+      >
+        {failure.problem.message} ({failure.problem.code})
+      </Alert>
+    </div>
+  ) : null;
 
   return (
     <div className={styles.stack}>
       <PageHeader title={`${request.number} ${request.title}`} meta={<StatusBadge status={request.status} />} />
       {submitted ? (
         <Alert tone="success" title="Submitted for approval" live="status">
-          {`Routed to ${submitted.approvalLevel ? level[submitted.approvalLevel] : "approval"} for ${amount(submitted.requestedAmount, submitted.currency)}.`}
+          {`Routed to ${request.approvalLevel ? level[request.approvalLevel] : "approval"} for ${amount(request.requestedAmount, request.currency)}.`}
+        </Alert>
+      ) : null}
+      {decided ? (
+        <Alert tone="success" title={decisionLabel[decided]} live="status">
+          {decided === "approve"
+            ? `Approved ${amount(request.approvedAmount, request.currency)}. The planned acquisition is published to budgeting and the depreciation forecast.`
+            : `The request is now ${sentence(request.status).toLowerCase()}.`}
         </Alert>
       ) : null}
       <Card title="Request">
@@ -395,26 +518,52 @@ export function CapexDetailPage() {
                 </Select>
               )}
             </FormField>
-            {failure ? (
-              <div className={styles.formActions}>
-                <Alert
-                  tone="danger"
-                  title={failure.code === "AST-0006" ? "The request changed since you opened it" : "Could not submit the request"}
-                  live="alert"
-                  action={failure.code === "AST-0006" ? <Button size="sm" onClick={state.reload}>Reload</Button> : undefined}
-                >
-                  {failure.message} ({failure.code})
-                </Alert>
-              </div>
-            ) : null}
+            {failureAlert}
             <div className={styles.formActions}>
-              <Button type="submit" variant="primary" loading={busy} disabled={chosen === ""}>
+              <Button type="submit" variant="primary" loading={busy === "submit"} disabled={chosen === ""}>
                 Submit request
               </Button>
             </div>
           </form>
         </Card>
       ) : null}
+      {actions.length > 0 ? (
+        <Card title="Decision">
+          <form className={styles.form} onSubmit={(e) => e.preventDefault()} noValidate aria-label="Decide the request">
+            {request.status === "InApproval" ? (
+              <p className={styles.note}>
+                {`Waiting for the ${request.approvalLevel ? level[request.approvalLevel] : "approver"}. Approving commits ${amount(request.requestedAmount, request.currency)}; whoever created or requested it cannot decide it.`}
+              </p>
+            ) : null}
+            <FormField
+              id="capex-comment"
+              label="Comment"
+              optional={!actions.some((a) => a.needsComment)}
+              hint={actions.some((a) => a.needsComment) ? "Required to postpone or reject; the requester sees it." : undefined}
+              error={commentError}
+            >
+              {(control) => <Textarea {...control} rows={3} value={comment} onChange={(e) => setComment(e.target.value)} invalid={Boolean(commentError)} />}
+            </FormField>
+            {failureAlert}
+            <div className={styles.formActions}>
+              {actions.map((a) => (
+                <Button key={a.decision} type="button" variant={a.variant} loading={busy === a.decision} disabled={busy !== null && busy !== a.decision} onClick={() => decide(a)}>
+                  {a.label}
+                </Button>
+              ))}
+            </div>
+          </form>
+        </Card>
+      ) : null}
+      <Card title="Decision trail">
+        <DataTable
+          label="Decision trail"
+          columns={trailColumns}
+          rows={trail}
+          getRowKey={(d) => d.id}
+          empty={{ title: "No decisions yet", description: request.status === "Draft" ? "Submit the request to start the approval." : "The approver has not decided this request." }}
+        />
+      </Card>
       <div>
         <Link className={buttonClassName("ghost")} to="/assets/capex">
           Back to requests

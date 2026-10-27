@@ -15,7 +15,7 @@ export type Method = (typeof METHODS)[number];
 /** Conventions each method accepts (services/assets/internal/domain/depreciation.go). */
 export const CONVENTIONS: Record<Method, readonly string[]> = {
   StraightLine: ["None", "FullMonth", "MidMonth15"],
-  DecliningBalance: ["None", "HalfYear"],
+  DecliningBalance: ["None", "HalfYear", "MidQuarter"],
 };
 
 export const PAYMENTS_PER_YEAR = [1, 2, 4, 12] as const;
@@ -276,9 +276,62 @@ export interface CapexRequest {
   approvalLevel: "PlantManager" | "CFO" | "Board" | null;
   requestedAmount: Decimal | null;
   approvedAmount: Decimal | null;
+  /** User that created the request; that user may not approve, reject or postpone it. */
+  createdBy?: string | null;
   version: number;
   createdAt: string;
   variants?: CapexVariant[];
+  /** Decision trail, oldest first (read and decisions only). */
+  decisions?: CapexDecisionRecord[];
+}
+
+/** Decisions on a submitted request (BR-37.12); each is its own POST route. */
+export const CAPEX_DECISIONS = ["approve", "reject", "postpone", "reopen", "release", "close"] as const;
+export type CapexDecision = (typeof CAPEX_DECISIONS)[number];
+
+export interface CapexDecisionRecord {
+  id: string;
+  decision: CapexDecision;
+  fromStatus: CapexStatus;
+  toStatus: CapexStatus;
+  approvalLevel: "PlantManager" | "CFO" | "Board" | null;
+  amount: Decimal | null;
+  comment: string | null;
+  decidedBy: string;
+  decidedAt: string;
+}
+
+export interface MidQuarterBook {
+  assetId: string;
+  assetNumber: string;
+  bookId: string;
+  method: Method;
+  convention: string;
+  inServiceDate: string;
+  quarter: number;
+  cost: Decimal;
+}
+
+/** BR-37.5 mid-quarter test for one tax book code and year. */
+export interface MidQuarterReport {
+  legalEntityId: string;
+  bookCode: string;
+  currency: string | null;
+  year: number;
+  bookCount: number;
+  totalBasis: Decimal;
+  quarterBasis: [Decimal, Decimal, Decimal, Decimal];
+  q4Share: Decimal;
+  applies: boolean;
+  warnings: string[];
+  reviewCount: number;
+  review: MidQuarterBook[];
+}
+
+export interface MidQuarterFilter {
+  legalEntityId: string;
+  bookCode: string;
+  year: number;
 }
 
 export interface Disposal {
@@ -662,6 +715,16 @@ export async function submitCapex(requestId: string, etag: string, variantId: st
   return versioned(
     await send(`/assets/capex-requests/${id(requestId)}/submit`, { method: "POST", body: JSON.stringify({ variantId }), headers: { "If-Match": etag } }),
   );
+}
+
+/** Applies one decision at the version the caller read; reject and postpone need a comment. */
+export async function decideCapex(requestId: string, etag: string, decision: CapexDecision, comment?: string): Promise<Versioned<CapexRequest>> {
+  const body = comment && comment.trim() !== "" ? JSON.stringify({ comment: comment.trim() }) : undefined;
+  return versioned(await send(`/assets/capex-requests/${id(requestId)}/${decision}`, { method: "POST", body, headers: { "If-Match": etag } }));
+}
+
+export function getMidQuarterTest(filter: MidQuarterFilter, signal?: AbortSignal): Promise<MidQuarterReport> {
+  return json(`/assets/mid-quarter-test${query({ legalEntityId: filter.legalEntityId, bookCode: filter.bookCode, year: String(filter.year) })}`, {}, signal);
 }
 
 export function listCountSessions(after?: string, signal?: AbortSignal): Promise<Page<CountSession>> {

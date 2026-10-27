@@ -4,7 +4,7 @@ Module folder: `apps/web/src/modules/assets/`. Discovered by the shell through
 `module.ts` (`id: "assets"`). Pages use the shell primitives from
 `src/shell/ui` and `pages.module.css` tokens only (docs/design-system.md).
 
-## Screens (slices 1 to 3)
+## Screens (slices 1 to 4)
 
 | Route | Page | Duty (nav) | What it does |
 |---|---|---|---|
@@ -21,7 +21,9 @@ Module folder: `apps/web/src/modules/assets/`. Discovered by the shell through
 | `/assets/index-series` | `IndexSeriesPage` | AssetInsuranceMaintain | Insured-value index series and the form that loads yearly values (`PUT`) |
 | `/assets/capex` | `CapexListPage` | CapexRequestCreate | Capex requests with a status filter and "Load more" |
 | `/assets/capex/new` | `NewCapexPage` | CapexRequestCreate | Create a request with one to ten variants (amounts per year as `2026=200000.00` lines) |
-| `/assets/capex/:id` | `CapexDetailPage` | CapexRequestCreate | Request, variants with totals, and Submit of a Draft with the chosen variant (If-Match); shows the approval level it was routed to |
+| `/assets/capex/approvals` | `CapexListPage` | CapexRequestApprove | The same list opened on requests in approval, for approvers (slice 4) |
+| `/assets/capex/:id` | `CapexDetailPage` | CapexRequestCreate | Request, variants with totals, and Submit of a Draft with the chosen variant (If-Match); shows the approval level it was routed to. Slice 4: the decisions each status allows (approve, postpone or reject with a required comment, return a postponed request to draft, release, close), each sent with the latest ETag as If-Match, the AST-0028 own-request refusal, and the decision trail |
+| `/assets/mid-quarter-test` | `MidQuarterPage` | AssetDepreciate | BR-37.5 test for a legal entity, tax book and year: basis per quarter, the Q4 share, whether mid-quarter applies (AST-0511) and the books whose convention to review (slice 4) |
 | `/assets/leases` | `LeasesPage` | LeaseMaintain | Leases with liability, IBR and status |
 | `/assets/leases/new` | `NewLeasePage` | LeaseMaintain | Recognize an IFRS 16 lease, with the nominal or effective periodic rate |
 | `/assets/leases/:id` | `LeaseDetailPage` | LeaseMaintain | Recognized liability and ROU asset, the terms in force, the remeasurements and the liability / ROU schedule with the remeasurement column |
@@ -41,8 +43,8 @@ replays instead of duplicating.
 
 `api/client.ts` calls the `/api/v1/assets...` (including
 `/assets/depreciation-runs`, `/assets/index-series`,
-`/assets/capex-requests`, `/assets/count-sessions` and
-`/assets/insurance-report`) and `/api/v1/leases...` paths of
+`/assets/capex-requests` with its decision routes, `/assets/count-sessions`,
+`/assets/insurance-report` and `/assets/mid-quarter-test`) and `/api/v1/leases...` paths of
 `services/assets/api/openapi.yaml`. Amounts stay decimal strings; the page
 never parses money to floats.
 
@@ -50,7 +52,8 @@ never parses money to floats.
 
 Transfer / split, lease termination, the PWA barcode scanner (the count page
 takes pasted or keyed scans), transfer / scrap proposals from a count, group
-assets, capex approval (wave-4 workflow), run reversal and the workspace tiles
+assets, routing capex approvals to the approver of each level (wave-4
+workflow), run reversal and the workspace tiles
 are later slices of PSG-37 or handoffs (see `services/assets/NOT-IMPLEMENTED.md`).
 
 ## Needs

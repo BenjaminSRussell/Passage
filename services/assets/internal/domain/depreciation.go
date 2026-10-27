@@ -20,7 +20,8 @@ const (
 )
 
 // Convention decides how much of the first period is charged; the last period
-// takes the remainder of the life (FR-37.2). Mid-month (1st), mid-quarter and
+// takes the remainder of the life (FR-37.2). MidQuarter applies to annual
+// declining-balance books (MACRS, BR-37.5). Mid-month (1st) and
 // half-year-next-year are later slices (NOT-IMPLEMENTED.md D1d).
 type Convention string
 
@@ -29,6 +30,7 @@ const (
 	ConventionFullMonth  Convention = "FullMonth"
 	ConventionMidMonth15 Convention = "MidMonth15"
 	ConventionHalfYear   Convention = "HalfYear"
+	ConventionMidQuarter Convention = "MidQuarter"
 )
 
 // Input is one book's depreciation profile applied to a cost basis. Life is in
@@ -108,12 +110,14 @@ func straightLineFirst(c Convention) (decimal.Decimal, error) {
 	return decimal.Zero, fail(CodeInvalidDepreciation, "convention "+string(c)+" does not apply to straight-line monthly schedules")
 }
 
-func decliningFirst(c Convention) (decimal.Decimal, error) {
+func decliningFirst(c Convention, inService time.Time) (decimal.Decimal, error) {
 	switch c {
 	case ConventionNone:
 		return one, nil
 	case ConventionHalfYear:
 		return half, nil
+	case ConventionMidQuarter:
+		return MidQuarterFirstYear(inService), nil
 	}
 	return decimal.Zero, fail(CodeInvalidDepreciation, "convention "+string(c)+" does not apply to annual declining-balance schedules")
 }
@@ -145,7 +149,7 @@ func straightLine(in Input, basis decimal.Decimal, minor int32) ([]Line, error) 
 }
 
 func declining(in Input, basis decimal.Decimal, minor int32) ([]Line, error) {
-	first, err := decliningFirst(in.Convention)
+	first, err := decliningFirst(in.Convention, in.InService)
 	if err != nil {
 		return nil, err
 	}

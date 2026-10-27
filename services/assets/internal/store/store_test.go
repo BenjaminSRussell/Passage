@@ -363,7 +363,8 @@ func TestStore_RowLevelSecurity(t *testing.T) {
 	}
 	for _, table := range []string{"asset", "asset_book", "asset_transaction", "lease", "lease_schedule_line", "outbox", "idempotency_keys",
 		"depreciation_run", "depreciation_run_line", "asset_addition", "asset_index_series", "asset_index_value", "asset_insurance_policy",
-		"capex_request", "capex_request_variant", "lease_modification", "asset_count_session", "asset_count_line"} {
+		"capex_request", "capex_request_variant", "lease_modification", "asset_count_session", "asset_count_line",
+		"capex_request_decision"} {
 		var enabled, forced bool
 		if err := admin.QueryRow(ctx, `select relrowsecurity, relforcerowsecurity from pg_class where relname = $1 and relnamespace = $2::regnamespace`, table, schema).Scan(&enabled, &forced); err != nil {
 			t.Fatal(table, err)
@@ -409,6 +410,25 @@ func TestStore_RowLevelSecurity(t *testing.T) {
 	}
 	if _, err := s.GetCapexRequest(scoped(1, leA), cr.ID); problemCode(err) != store.CodeCapexNotFound {
 		t.Fatalf("scope A reads B's capex request: err = %v", err)
+	}
+	// Slice 4: a decision runs as the application role and stays inside its
+	// entity; the mid-quarter test sees only the scoped entity's books.
+	if _, err := s.SubmitCapexRequest(scoped(1, leB), cr.ID, store.SubmitInput{VariantID: cr.Variants[0].ID, Version: 1}); err != nil {
+		t.Fatal(err)
+	}
+	approverB := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: leB, UserID: "approver", Duties: map[string]struct{}{}})
+	approverA := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: leA, UserID: "approver", Duties: map[string]struct{}{}})
+	if _, err := s.DecideCapexRequest(approverA, cr.ID, store.CapexDecisionInput{Decision: domain.DecisionApprove, Version: 2}); problemCode(err) != store.CodeCapexNotFound {
+		t.Fatalf("scope A approves B's request: err = %v", err)
+	}
+	if approved, err := s.DecideCapexRequest(approverB, cr.ID, store.CapexDecisionInput{Decision: domain.DecisionApprove, Version: 2}); err != nil || len(approved.Decisions) != 1 {
+		t.Fatalf("approve as the app role = %+v, %v", approved, err)
+	}
+	if mq, err := s.MidQuarterTest(scoped(1, leB), store.MidQuarterFilter{LegalEntityID: leA, BookCode: "IFRS", Year: 2026}); err != nil || mq.BookCount != 0 {
+		t.Fatalf("scope B runs A's mid-quarter test = %+v, %v", mq, err)
+	}
+	if mq, err := s.MidQuarterTest(scoped(1, leA), store.MidQuarterFilter{LegalEntityID: leA, BookCode: "IFRS", Year: 2026}); err != nil || mq.BookCount != 1 {
+		t.Fatalf("scope A mid-quarter test = %+v, %v", mq, err)
 	}
 	// Slice 3: a remeasurement, a count session and the insurance report stay
 	// inside their entity, and run as the application role.

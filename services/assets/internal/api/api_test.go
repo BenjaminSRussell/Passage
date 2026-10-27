@@ -37,6 +37,10 @@ type fakeStore struct {
 	lastRun      store.RunInput
 	lastPolicy   store.InsurancePolicy
 	lastSubmit   store.SubmitInput
+
+	// Slice 4 (capex_decision_test.go).
+	lastDecision   store.CapexDecisionInput
+	lastMidQuarter store.MidQuarterFilter
 }
 
 func newFake() *fakeStore {

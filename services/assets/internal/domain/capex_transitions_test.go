@@ -79,3 +79,47 @@ func TestNeedsReapproval_BR37_12(t *testing.T) {
 		}
 	}
 }
+
+func TestCapexDecision_ApplyEveryStatus(t *testing.T) {
+	// Each action has exactly one source status (BR-37.12); every other status
+	// is refused with AST-0016.
+	want := map[CapexDecision][2]CapexStatus{
+		DecisionApprove:  {CapexInApproval, CapexApproved},
+		DecisionReject:   {CapexInApproval, CapexRejected},
+		DecisionPostpone: {CapexInApproval, CapexPostponed},
+		DecisionReopen:   {CapexPostponed, CapexDraft},
+		DecisionRelease:  {CapexApproved, CapexReleased},
+		DecisionClose:    {CapexReleased, CapexClosed},
+	}
+	all := []CapexStatus{CapexDraft, CapexSubmitted, CapexInApproval, CapexApproved, CapexReleased, CapexClosed, CapexRejected, CapexPostponed}
+	if len(CapexDecisions) != len(want) {
+		t.Fatalf("CapexDecisions has %d actions, want %d", len(CapexDecisions), len(want))
+	}
+	for _, decision := range CapexDecisions {
+		move := want[decision]
+		for _, from := range all {
+			got, err := decision.Apply(from)
+			if from == move[0] {
+				if err != nil || got != move[1] {
+					t.Errorf("%s from %s = %s, %v; want %s", decision, from, got, err, move[1])
+				}
+				continue
+			}
+			if ErrorCode(err) != CodeCapexState {
+				t.Errorf("%s from %s = %s, %v; want %s", decision, from, got, err, CodeCapexState)
+			}
+		}
+	}
+	if _, err := CapexDecision("cancel").Apply(CapexInApproval); ErrorCode(err) != CodeCapexState {
+		t.Errorf("unknown decision err = %v", err)
+	}
+}
+
+func TestCapexDecision_ApproverDecisions(t *testing.T) {
+	for _, d := range CapexDecisions {
+		want := d == DecisionApprove || d == DecisionReject || d == DecisionPostpone
+		if d.IsApproverDecision() != want {
+			t.Errorf("%s.IsApproverDecision() = %v, want %v", d, !want, want)
+		}
+	}
+}

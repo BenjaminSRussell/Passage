@@ -310,7 +310,7 @@ describe("add book", () => {
     expect(screen.getByLabelText("Service life (years)")).toHaveValue(5);
     expect(screen.getByLabelText("Declining-balance factor")).toHaveValue("2");
     const options = within(screen.getByLabelText("Convention")).getAllByRole("option").map((o) => o.textContent);
-    expect(options).toEqual(["None", "Half year"]);
+    expect(options).toEqual(["None", "Half year", "Mid quarter"]);
   });
 });
 

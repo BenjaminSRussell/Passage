@@ -20,7 +20,29 @@ var (
 	// is not in the PRD event table and is added so the ledger and analytics
 	// see every change of the lease liability and ROU asset.
 	LeaseRemeasured = events.Type(Context, "lease", "remeasured", 1)
+	// CapexApproved is published when a capex request is approved (FR-37.17);
+	// budget (wave 38) and the depreciation forecast consume it.
+	CapexApproved = events.Type(Context, "capexrequest", "approved", 1)
 )
+
+// CapexApprovedData is the payload of CapexApproved: the approved variant's
+// amounts per year (decimal strings keyed by four-digit year) with the request
+// currency. ProgramPositionID stays null until the investment program
+// (FR-38.21) links the request. The PRD lists requestId, variantId,
+// amountsByYear and programPositionId; the other fields are added so a
+// consumer can plan the acquisition without reading the request back.
+type CapexApprovedData struct {
+	RequestID         string            `json:"requestId"`
+	LegalEntityID     string            `json:"legalEntityId"`
+	Number            string            `json:"number"`
+	VariantID         string            `json:"variantId"`
+	AmountsByYear     map[string]string `json:"amountsByYear"`
+	ApprovedAmount    string            `json:"approvedAmount"`
+	Currency          string            `json:"currency"`
+	InServiceDate     string            `json:"inServiceDate"`
+	ProfileAssumption string            `json:"profileAssumption"`
+	ProgramPositionID *string           `json:"programPositionId"`
+}
 
 // LeaseRemeasuredData is the payload of LeaseRemeasured. Amounts are decimal
 // strings; Adjustment = LiabilityAfter - LiabilityBefore, the ROU moves by

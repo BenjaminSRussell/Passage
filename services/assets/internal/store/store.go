@@ -75,6 +75,8 @@ type Store interface {
 	ListCapexRequests(ctx context.Context, f CapexFilter) (CapexPage, error)
 	GetCapexRequest(ctx context.Context, id string) (CapexRequest, error)
 	SubmitCapexRequest(ctx context.Context, id string, in SubmitInput) (CapexRequest, error)
+	DecideCapexRequest(ctx context.Context, id string, in CapexDecisionInput) (CapexRequest, error)
+	MidQuarterTest(ctx context.Context, f MidQuarterFilter) (MidQuarterReport, error)
 
 	ModifyLease(ctx context.Context, leaseID string, in LeaseModificationInput, idempotencyKey string) (LeaseModificationResult, error)
 	CreateCountSession(ctx context.Context, in CountSessionInput, idempotencyKey string) (CountSession, error)

@@ -114,7 +114,7 @@ func TestSchedule_LifeTotalsEqualDepreciableBasis(t *testing.T) {
 			in.Life = rapid.IntRange(1, 20).Draw(t, "years")
 			in.Factor = d(rapid.SampledFrom([]string{"1.25", "1.5", "1.75", "2"}).Draw(t, "factor"))
 			in.SwitchToStraightLine = rapid.Bool().Draw(t, "switch")
-			in.Convention = rapid.SampledFrom([]Convention{ConventionNone, ConventionHalfYear}).Draw(t, "dbconv")
+			in.Convention = rapid.SampledFrom([]Convention{ConventionNone, ConventionHalfYear, ConventionMidQuarter}).Draw(t, "dbconv")
 		}
 		lines, err := Schedule(in)
 		if err != nil {
