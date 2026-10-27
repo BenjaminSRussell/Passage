@@ -41,12 +41,14 @@ type ScheduleResult struct {
 // planKeyConstraint is the default name of UNIQUE (tenant_id, idempotency_key) on plan_version.
 const planKeyConstraint = "plan_version_tenant_id_idempotency_key_key"
 
-const planColumns = `id::text, project_id, kind, sequence, copied_from_version_id::text, locked, version, created_at, updated_at`
+const planColumns = `id::text, project_id, kind, sequence, copied_from_version_id::text, superseded_by_version_id::text, locked,
+	version, created_at, updated_at`
 
 func scanPlan(row pgx.Row) (domain.PlanVersion, error) {
 	var pv domain.PlanVersion
 	var kind string
-	err := row.Scan(&pv.ID, &pv.ProjectID, &kind, &pv.Sequence, &pv.CopiedFromVersionID, &pv.Locked, &pv.Version, &pv.CreatedAt, &pv.UpdatedAt)
+	err := row.Scan(&pv.ID, &pv.ProjectID, &kind, &pv.Sequence, &pv.CopiedFromVersionID, &pv.SupersededByVersionID, &pv.Locked,
+		&pv.Version, &pv.CreatedAt, &pv.UpdatedAt)
 	pv.Kind = domain.PlanKind(kind)
 	return pv, err
 }
@@ -108,7 +110,8 @@ func (s *Postgres) CreatePlanVersion(ctx context.Context, projectID string, in N
 			source = &w
 		}
 		var kinds []domain.PlanKind
-		rows, err := tx.Query(ctx, `select kind from plan_version where tenant_id = $1 and project_id = $2`, p.TenantID, projectID)
+		rows, err := tx.Query(ctx, `select kind from plan_version where tenant_id = $1 and project_id = $2
+			and superseded_by_version_id is null`, p.TenantID, projectID)
 		if err != nil {
 			return err
 		}

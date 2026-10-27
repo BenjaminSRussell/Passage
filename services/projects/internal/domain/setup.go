@@ -115,20 +115,23 @@ func ValidPlanKind(k PlanKind) bool {
 // PlanVersion is one WBS plan of a project. Sequence orders the versions of a
 // project. Version is the optimistic-concurrency counter of its WBS.
 type PlanVersion struct {
-	ID                  string    `json:"id"`
-	ProjectID           string    `json:"projectId"`
-	Kind                PlanKind  `json:"kind"`
-	Sequence            int       `json:"sequence"`
-	CopiedFromVersionID *string   `json:"copiedFromVersionId,omitempty"`
-	Locked              bool      `json:"locked"`
-	Version             int       `json:"version"`
-	CreatedAt           time.Time `json:"createdAt"`
-	UpdatedAt           time.Time `json:"updatedAt"`
+	ID                  string   `json:"id"`
+	ProjectID           string   `json:"projectId"`
+	Kind                PlanKind `json:"kind"`
+	Sequence            int      `json:"sequence"`
+	CopiedFromVersionID *string  `json:"copiedFromVersionId,omitempty"`
+	// SupersededByVersionID is set on a BASELINE that an applied change order
+	// replaced with a new BASELINE (BR-41.13); the project's current baseline has none.
+	SupersededByVersionID *string   `json:"supersededByVersionId,omitempty"`
+	Locked                bool      `json:"locked"`
+	Version               int       `json:"version"`
+	CreatedAt             time.Time `json:"createdAt"`
+	UpdatedAt             time.Time `json:"updatedAt"`
 }
 
 // CheckNewPlan applies the FR-41.2 / FR-41.17 plan-version rules to a new
 // version of kind, copied from source (nil for an empty plan), given the kinds
-// the project already has:
+// the project already has (a superseded BASELINE is not counted):
 //   - one WORKING and one BASELINE per project;
 //   - a BASELINE is a copy of the WORKING plan and is locked on creation (the
 //     copy is the approval; a baseline is immutable after it);

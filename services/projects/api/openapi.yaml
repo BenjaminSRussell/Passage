@@ -1,11 +1,13 @@
 openapi: 3.1.0
 info:
   title: Passage Projects API
-  version: 0.2.0
+  version: 0.3.0
   description: |
     Wave 41 (PSG-41). Slice 1: project master and hierarchy (FR-41.1) with stage
     transitions. Slice 2: project groups (FR-41.1), posting profiles and fallback
     resolution (FR-41.5), plan versions, WBS replace/read and the CPM scheduler (FR-41.2).
+    Slice 3: contract value, change orders and claims with apply (FR-41.18, BR-41.13)
+    and the risk and issue register (FR-41.20).
     Journals, billing, estimates, timesheets and the rest of wave 41 are later
     slices (see NOT-IMPLEMENTED.md).
     Browser calls use `/api/v1/projects/...`; the BFF rewrites them to `/v1/projects/...`.
@@ -501,8 +503,422 @@ paths:
           $ref: '#/components/responses/Problem'
         '422':
           $ref: '#/components/responses/Problem'
+  /v1/projects/change-orders:
+    post:
+      operationId: createChangeOrder
+      summary: Create a DRAFT change order or claim with impact lines (FR-41.18)
+      x-passage-duty: ProjMaintain
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangeOrderRequest'
+      responses:
+        '201':
+          description: Change order created (number CO-0001, CO-0002, ... per project)
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeOrder'
+        '200':
+          description: Idempotent replay of an earlier create with the same key and body
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Idempotent-Replayed:
+              schema:
+                type: string
+                enum: ['true']
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeOrder'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '422':
+          description: idempotency_key_reuse, or COM-0001 when a wbsNodeId is not a node of the project's plan versions
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+    get:
+      operationId: listChangeOrders
+      summary: Change order log of one project, in number order, without lines (§8.41.14)
+      x-passage-duty: ProjInquire
+      parameters:
+        - name: projectId
+          in: query
+          required: true
+          schema:
+            type: string
+            maxLength: 20
+        - name: type
+          in: query
+          schema:
+            $ref: '#/components/schemas/ChangeOrderType'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/ChangeOrderStatus'
+      responses:
+        '200':
+          description: Change orders with their cost and revenue totals
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ChangeOrder'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+  /v1/projects/change-orders/{coId}:
+    get:
+      operationId: getChangeOrder
+      summary: One change order with its impact lines
+      x-passage-duty: ProjInquire
+      parameters:
+        - $ref: '#/components/parameters/ChangeOrderId'
+      responses:
+        '200':
+          description: The change order
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeOrder'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+  /v1/projects/change-orders/{coId}/submit:
+    post:
+      operationId: submitChangeOrder
+      summary: Submit a DRAFT change order (optionally attaching the customer approval reference)
+      x-passage-duty: ProjMaintain
+      parameters:
+        - $ref: '#/components/parameters/ChangeOrderId'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangeOrderDecisionRequest'
+      responses:
+        '200':
+          description: The change order after the move
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeOrder'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        '422':
+          description: PROJ-CO-001 (already APPLIED), PROJ-CO-002 (customer claim without approval reference), PROJ-CO-003 (move not allowed), PROJ-CO-004 (creator decides)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '428':
+          $ref: '#/components/responses/Problem'
+  /v1/projects/change-orders/{coId}/approve:
+    post:
+      operationId: approveChangeOrder
+      summary: Approve a SUBMITTED change order; the approver must not be its creator
+      x-passage-duty: ProjChangeOrderApprove
+      parameters:
+        - $ref: '#/components/parameters/ChangeOrderId'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangeOrderDecisionRequest'
+      responses:
+        '200':
+          description: The change order after the move
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeOrder'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        '422':
+          description: PROJ-CO-001 (already APPLIED), PROJ-CO-002 (customer claim without approval reference), PROJ-CO-003 (move not allowed), PROJ-CO-004 (creator decides)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '428':
+          $ref: '#/components/responses/Problem'
+  /v1/projects/change-orders/{coId}/reject:
+    post:
+      operationId: rejectChangeOrder
+      summary: Reject a SUBMITTED change order; the decider must not be its creator
+      x-passage-duty: ProjChangeOrderApprove
+      parameters:
+        - $ref: '#/components/parameters/ChangeOrderId'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: The change order after the move
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeOrder'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        '422':
+          description: PROJ-CO-001 (already APPLIED), PROJ-CO-002 (customer claim without approval reference), PROJ-CO-003 (move not allowed), PROJ-CO-004 (creator decides)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '428':
+          $ref: '#/components/responses/Problem'
+  /v1/projects/change-orders/{coId}/apply:
+    post:
+      operationId: applyChangeOrder
+      summary: Apply an APPROVED change order (BR-41.13)
+      description: |
+        Atomically: contract value += Σ revenue impact; a new locked BASELINE is copied
+        from the current baseline with each line's effort and schedule delta on the node
+        of its WBS code and rescheduled, and the old baseline is superseded; the change
+        order becomes APPLIED and immutable; changeorder.applied (budget delta for wave-38
+        budget control) and project.updated are written to the outbox. A second apply is
+        PROJ-CO-001 whatever If-Match carries, so a retry after a lost response is safe.
+      x-passage-duty: ProjChangeOrderApprove
+      parameters:
+        - $ref: '#/components/parameters/ChangeOrderId'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Applied
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplyChangeOrderResponse'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        '422':
+          description: PROJ-CO-001 (already APPLIED), PROJ-CO-002, PROJ-CO-003 (not APPROVED), PROJ-CO-004 (creator applies), PROJ-CO-005 (no current baseline), PROJ-CO-006 (a line cannot be applied)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '428':
+          $ref: '#/components/responses/Problem'
+  /v1/projects/{id}/risks:
+    get:
+      operationId: listRisks
+      summary: Risk and issue register of a project, highest score first (FR-41.20)
+      x-passage-duty: ProjInquire
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: kind
+          in: query
+          schema:
+            $ref: '#/components/schemas/RiskKind'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/RiskStatus'
+      responses:
+        '200':
+          description: Register entries
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RiskIssue'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+    post:
+      operationId: createRisk
+      summary: Add an OPEN risk or issue
+      x-passage-duty: ProjPlan
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RiskRequest'
+      responses:
+        '201':
+          description: Entry created
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RiskIssue'
+        '200':
+          description: Idempotent replay
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Idempotent-Replayed:
+              schema:
+                type: string
+                enum: ['true']
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RiskIssue'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+  /v1/projects/{id}/risks/{riskId}:
+    put:
+      operationId: updateRisk
+      summary: Replace a risk or issue (fields and status)
+      description: OPEN → MITIGATED | CLOSED, MITIGATED → OPEN | CLOSED; a CLOSED entry is final (PROJ-RISK-001).
+      x-passage-duty: ProjPlan
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: riskId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/RiskRequest'
+                - type: object
+                  required: [status]
+      responses:
+        '200':
+          description: Updated
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RiskIssue'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '428':
+          $ref: '#/components/responses/Problem'
 components:
   parameters:
+    ChangeOrderId:
+      name: coId
+      in: path
+      required: true
+      description: Change order id (UUID).
+      schema:
+        type: string
+        format: uuid
     PlanVersionId:
       name: ver
       in: path
@@ -541,7 +957,7 @@ components:
         maxLength: 20
   headers:
     ETag:
-      description: Row version (project, group, posting profile or plan version), quoted.
+      description: Row version (project, group, posting profile, plan version, change order or risk), quoted.
       schema:
         type: string
   responses:
@@ -596,6 +1012,10 @@ components:
         currency:
           type: string
           pattern: '^[A-Z]{3}$'
+        contractValue:
+          type: string
+          pattern: '^\d{1,14}(\.\d{1,6})?$'
+          description: Contract value in the project currency (default 0), rounded half-even to its minor unit. Applied change orders adjust it (BR-41.13).
         startDate:
           type: string
           format: date
@@ -612,7 +1032,7 @@ components:
           $ref: '#/components/schemas/Stage'
     Project:
       type: object
-      required: [id, legalEntityId, projectGroupId, projectType, currency, stage, startDate, version]
+      required: [id, legalEntityId, projectGroupId, projectType, currency, contractValue, stage, startDate, version]
       properties:
         id:
           type: string
@@ -633,6 +1053,9 @@ components:
           format: uuid
         currency:
           type: string
+        contractValue:
+          type: string
+          description: Decimal string in the currency's minor unit, for example "550000.00".
         stage:
           $ref: '#/components/schemas/Stage'
         startDate:
@@ -790,6 +1213,10 @@ components:
         copiedFromVersionId:
           type: string
           format: uuid
+        supersededByVersionId:
+          type: string
+          format: uuid
+          description: Set on a BASELINE replaced by the BASELINE an applied change order created (BR-41.13). One BASELINE per project has none.
         locked:
           type: boolean
           description: True for a BASELINE; a locked plan's WBS cannot be replaced or rescheduled.
@@ -980,6 +1407,257 @@ components:
               items:
                 type: string
                 format: uuid
+    ChangeOrderType:
+      type: string
+      enum: [SCOPE_CHANGE, CLAIM_CUSTOMER, CLAIM_VENDOR, INTERNAL]
+    ChangeOrderStatus:
+      type: string
+      enum: [DRAFT, SUBMITTED, APPROVED, REJECTED, APPLIED]
+    ChangeOrderLineRequest:
+      type: object
+      additionalProperties: false
+      required: [costImpact, revenueImpact]
+      properties:
+        wbsNodeId:
+          type: string
+          format: uuid
+          description: A node of one of the project's plan versions; required when the line changes effort or schedule.
+        costImpact:
+          type: string
+          pattern: '^-?\d{1,14}(\.\d{1,6})?$'
+        revenueImpact:
+          type: string
+          pattern: '^-?\d{1,14}(\.\d{1,6})?$'
+        effortHoursDelta:
+          type: string
+          pattern: '^-?\d{1,10}(\.\d{1,2})?$'
+          default: '0'
+        scheduleDaysDelta:
+          type: integer
+          default: 0
+          description: Working days added to (or removed from) the node's duration.
+    ChangeOrderRequest:
+      type: object
+      additionalProperties: false
+      required: [projectId, type, title, lines]
+      properties:
+        projectId:
+          type: string
+          maxLength: 20
+        type:
+          $ref: '#/components/schemas/ChangeOrderType'
+        title:
+          type: string
+          minLength: 1
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 2000
+        customerApprovalRef:
+          type: string
+          minLength: 1
+          maxLength: 200
+        vendorPartyId:
+          type: string
+          format: uuid
+          description: Required for, and only allowed on, a CLAIM_VENDOR.
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            $ref: '#/components/schemas/ChangeOrderLineRequest'
+    ChangeOrderDecisionRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        customerApprovalRef:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Customer approval evidence, required to approve a CLAIM_CUSTOMER (PROJ-CO-002).
+    ChangeOrderLine:
+      type: object
+      required: [lineNo, costImpact, revenueImpact, effortHoursDelta, scheduleDaysDelta]
+      properties:
+        lineNo:
+          type: integer
+          minimum: 1
+        wbsNodeId:
+          type: string
+          format: uuid
+        wbsCode:
+          type: string
+          description: The WBS code of wbsNodeId when the change order was created; apply finds the node in the current baseline by it.
+        costImpact:
+          type: string
+        revenueImpact:
+          type: string
+        effortHoursDelta:
+          type: string
+        scheduleDaysDelta:
+          type: integer
+    ChangeOrder:
+      type: object
+      required: [id, number, projectId, type, title, description, status, createdBy, costImpact, revenueImpact, lines, version, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+          example: CO-0001
+        projectId:
+          type: string
+        type:
+          $ref: '#/components/schemas/ChangeOrderType'
+        title:
+          type: string
+        description:
+          type: string
+        status:
+          $ref: '#/components/schemas/ChangeOrderStatus'
+        customerApprovalRef:
+          type: string
+        vendorPartyId:
+          type: string
+          format: uuid
+        createdBy:
+          type: string
+        decidedBy:
+          type: string
+          description: Who approved or rejected.
+        appliedBy:
+          type: string
+        appliedBaselineVersionId:
+          type: string
+          format: uuid
+        appliedAt:
+          type: string
+          format: date-time
+        costImpact:
+          type: string
+          description: Σ cost impact in the project currency.
+        revenueImpact:
+          type: string
+          description: Σ revenue impact in the project currency.
+        lines:
+          type: array
+          description: Empty in list responses.
+          items:
+            $ref: '#/components/schemas/ChangeOrderLine'
+        version:
+          type: integer
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    ApplyChangeOrderResponse:
+      type: object
+      required: [changeOrder, effect, baseline]
+      properties:
+        changeOrder:
+          $ref: '#/components/schemas/ChangeOrder'
+        effect:
+          type: object
+          required: [contractValueDelta, budgetDelta, contractValue, effortHoursDelta, scheduleDaysDelta]
+          properties:
+            contractValueDelta:
+              type: string
+            budgetDelta:
+              type: string
+            contractValue:
+              type: string
+            effortHoursDelta:
+              type: string
+            scheduleDaysDelta:
+              type: integer
+        baseline:
+          $ref: '#/components/schemas/PlanVersion'
+    RiskKind:
+      type: string
+      enum: [RISK, ISSUE]
+    RiskStatus:
+      type: string
+      enum: [OPEN, MITIGATED, CLOSED]
+    RiskRequest:
+      type: object
+      additionalProperties: false
+      required: [kind, title, probability, impact]
+      properties:
+        kind:
+          $ref: '#/components/schemas/RiskKind'
+        title:
+          type: string
+          minLength: 1
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 2000
+        probability:
+          type: integer
+          minimum: 1
+          maximum: 5
+        impact:
+          type: integer
+          minimum: 1
+          maximum: 5
+        ownerWorkerId:
+          type: string
+          format: uuid
+          description: Worker id (wave 42); not checked against a worker table yet.
+        mitigation:
+          type: string
+          maxLength: 2000
+        dueDate:
+          type: string
+          format: date
+        status:
+          $ref: '#/components/schemas/RiskStatus'
+          description: Required on PUT; must be omitted on POST (entries start OPEN).
+    RiskIssue:
+      type: object
+      required: [id, projectId, kind, title, description, probability, impact, score, mitigation, status, version, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+        kind:
+          $ref: '#/components/schemas/RiskKind'
+        title:
+          type: string
+        description:
+          type: string
+        probability:
+          type: integer
+        impact:
+          type: integer
+        score:
+          type: integer
+          description: probability × impact (1 to 25).
+        ownerWorkerId:
+          type: string
+          format: uuid
+        mitigation:
+          type: string
+        dueDate:
+          type: string
+          format: date
+        status:
+          $ref: '#/components/schemas/RiskStatus'
+        version:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
     Problem:
       type: object
       description: RFC 9457 with Passage extensions (code, traceId, errors).

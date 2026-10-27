@@ -20,6 +20,8 @@ export interface Project {
   customerPartyId?: string;
   contractId?: string;
   currency: string;
+  /** Decimal string in the currency's minor unit; applied change orders raise it (BR-41.13). */
+  contractValue: string;
   stage: Stage;
   startDate: string;
   endDate?: string;
@@ -38,6 +40,7 @@ export interface NewProject {
   customerPartyId?: string;
   contractId?: string;
   currency: string;
+  contractValue?: string;
   startDate: string;
   endDate?: string;
 }
@@ -227,6 +230,8 @@ export interface PlanVersion {
   kind: PlanKind;
   sequence: number;
   copiedFromVersionId?: string;
+  /** Set on a BASELINE an applied change order replaced (BR-41.13). */
+  supersededByVersionId?: string;
   locked: boolean;
   version: number;
   createdAt: string;
@@ -318,4 +323,184 @@ export function replaceWbs(projectId: string, planId: string, body: { nodes: Wbs
 
 export function schedulePlan(projectId: string, planId: string): Promise<ScheduleView> {
   return call<ScheduleView>(`${plansPath(projectId)}/${encodeURIComponent(planId)}/schedule`, { method: "POST" });
+}
+
+// ---- Change orders and claims (FR-41.18, BR-41.13) ----
+
+export const CHANGE_ORDER_TYPES = ["SCOPE_CHANGE", "CLAIM_CUSTOMER", "CLAIM_VENDOR", "INTERNAL"] as const;
+export type ChangeOrderType = (typeof CHANGE_ORDER_TYPES)[number];
+
+export const CHANGE_ORDER_STATUSES = ["DRAFT", "SUBMITTED", "APPROVED", "REJECTED", "APPLIED"] as const;
+export type ChangeOrderStatus = (typeof CHANGE_ORDER_STATUSES)[number];
+
+export interface ChangeOrderLine {
+  lineNo: number;
+  wbsNodeId?: string;
+  wbsCode?: string;
+  costImpact: string;
+  revenueImpact: string;
+  effortHoursDelta: string;
+  scheduleDaysDelta: number;
+}
+
+export interface ChangeOrder {
+  id: string;
+  number: string;
+  projectId: string;
+  type: ChangeOrderType;
+  title: string;
+  description: string;
+  status: ChangeOrderStatus;
+  customerApprovalRef?: string;
+  vendorPartyId?: string;
+  createdBy: string;
+  decidedBy?: string;
+  appliedBy?: string;
+  appliedBaselineVersionId?: string;
+  appliedAt?: string;
+  costImpact: string;
+  revenueImpact: string;
+  /** Empty in list responses. */
+  lines: ChangeOrderLine[];
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChangeOrderLineInput {
+  wbsNodeId?: string;
+  costImpact: string;
+  revenueImpact: string;
+  effortHoursDelta?: string;
+  scheduleDaysDelta: number;
+}
+
+export interface NewChangeOrder {
+  projectId: string;
+  type: ChangeOrderType;
+  title: string;
+  description?: string;
+  customerApprovalRef?: string;
+  vendorPartyId?: string;
+  lines: ChangeOrderLineInput[];
+}
+
+export interface ApplyResult {
+  changeOrder: ChangeOrder;
+  effect: { contractValueDelta: string; budgetDelta: string; contractValue: string; effortHoursDelta: string; scheduleDaysDelta: number };
+  baseline: PlanVersion;
+}
+
+export type ChangeOrderAction = "submit" | "approve" | "reject" | "apply";
+
+/** Actions per status (mirrors domain.CheckChangeOrderMove). The service stays authoritative. */
+export const changeOrderActions: Record<ChangeOrderStatus, ChangeOrderAction[]> = {
+  DRAFT: ["submit"],
+  SUBMITTED: ["approve", "reject"],
+  APPROVED: ["apply"],
+  REJECTED: [],
+  APPLIED: [],
+};
+
+export function listChangeOrders(
+  projectId: string,
+  filter: { type?: ChangeOrderType | ""; status?: ChangeOrderStatus | "" } = {},
+  signal?: AbortSignal,
+): Promise<Items<ChangeOrder>> {
+  const q = new URLSearchParams({ projectId });
+  if (filter.type) q.set("type", filter.type);
+  if (filter.status) q.set("status", filter.status);
+  return call<Items<ChangeOrder>>(`/change-orders?${q.toString()}`, {}, signal);
+}
+
+export function getChangeOrder(id: string, signal?: AbortSignal): Promise<ChangeOrder> {
+  return call<ChangeOrder>(`/change-orders/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** Creates a DRAFT change order. Reuse the key when retrying the same request. */
+export function createChangeOrder(input: NewChangeOrder, idempotencyKey: string): Promise<ChangeOrder> {
+  return call<ChangeOrder>("/change-orders", { method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body: JSON.stringify(input) });
+}
+
+/** Submit, approve or reject with the version the user saw; submit and approve may attach the customer approval reference. */
+export function decideChangeOrder(id: string, action: Exclude<ChangeOrderAction, "apply">, version: number, customerApprovalRef?: string): Promise<ChangeOrder> {
+  return call<ChangeOrder>(`/change-orders/${encodeURIComponent(id)}/${action}`, {
+    method: "POST",
+    headers: { "If-Match": `"${version}"` },
+    body: JSON.stringify(customerApprovalRef && action !== "reject" ? { customerApprovalRef } : {}),
+  });
+}
+
+/** Applies an APPROVED change order (BR-41.13). A second apply fails with PROJ-CO-001. */
+export function applyChangeOrder(id: string, version: number): Promise<ApplyResult> {
+  return call<ApplyResult>(`/change-orders/${encodeURIComponent(id)}/apply`, { method: "POST", headers: { "If-Match": `"${version}"` } });
+}
+
+// ---- Risk and issue register (FR-41.20) ----
+
+export const RISK_KINDS = ["RISK", "ISSUE"] as const;
+export type RiskKind = (typeof RISK_KINDS)[number];
+
+export const RISK_STATUSES = ["OPEN", "MITIGATED", "CLOSED"] as const;
+export type RiskStatus = (typeof RISK_STATUSES)[number];
+
+export interface RiskIssue {
+  id: string;
+  projectId: string;
+  kind: RiskKind;
+  title: string;
+  description: string;
+  probability: number;
+  impact: number;
+  /** probability × impact, 1 to 25. */
+  score: number;
+  ownerWorkerId?: string;
+  mitigation: string;
+  dueDate?: string;
+  status: RiskStatus;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RiskInput {
+  kind: RiskKind;
+  title: string;
+  description?: string;
+  probability: number;
+  impact: number;
+  ownerWorkerId?: string;
+  mitigation?: string;
+  dueDate?: string;
+}
+
+/** Status moves per status (mirrors domain.CheckRiskMove); CLOSED is final. */
+export const riskMoves: Record<RiskStatus, RiskStatus[]> = {
+  OPEN: ["MITIGATED", "CLOSED"],
+  MITIGATED: ["OPEN", "CLOSED"],
+  CLOSED: [],
+};
+
+const risksPath = (projectId: string) => `/${encodeURIComponent(projectId)}/risks`;
+
+export function listRisks(projectId: string, filter: { kind?: RiskKind | ""; status?: RiskStatus | "" } = {}, signal?: AbortSignal): Promise<Items<RiskIssue>> {
+  const q = new URLSearchParams();
+  if (filter.kind) q.set("kind", filter.kind);
+  if (filter.status) q.set("status", filter.status);
+  const qs = q.toString();
+  return call<Items<RiskIssue>>(`${risksPath(projectId)}${qs ? `?${qs}` : ""}`, {}, signal);
+}
+
+/** Adds an OPEN entry. Reuse the key when retrying the same request. */
+export function createRisk(projectId: string, input: RiskInput, idempotencyKey: string): Promise<RiskIssue> {
+  return call<RiskIssue>(risksPath(projectId), { method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body: JSON.stringify(input) });
+}
+
+/** Replaces an entry's fields and status under the version the user saw. */
+export function updateRisk(projectId: string, riskId: string, input: RiskInput & { status: RiskStatus }, version: number): Promise<RiskIssue> {
+  return call<RiskIssue>(`${risksPath(projectId)}/${encodeURIComponent(riskId)}`, {
+    method: "PUT",
+    headers: { "If-Match": `"${version}"` },
+    body: JSON.stringify(input),
+  });
 }

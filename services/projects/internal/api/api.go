@@ -43,6 +43,8 @@ const (
 	DutyInquire  = "ProjInquire"
 	DutyPlan     = "ProjPlan"
 	DutySetup    = "ProjSetupAdmin"
+	// DutyChangeOrderApprove guards approve, reject and apply of change orders.
+	DutyChangeOrderApprove = "ProjChangeOrderApprove"
 )
 
 // API holds the HTTP handlers and their store.
@@ -77,6 +79,10 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(DutyInquire)).Get("/{id}/plans/{ver}/wbs", a.getWBS)
 		r.With(authz.RequireDuty(DutyPlan)).Put("/{id}/plans/{ver}/wbs", a.putWBS)
 		r.With(authz.RequireDuty(DutyPlan)).Post("/{id}/plans/{ver}/schedule", a.scheduleWBS)
+
+		// Change orders and claims (FR-41.18) and the risk register (FR-41.20).
+		a.registerChangeOrders(r)
+		a.registerRisks(r)
 	})
 }
 
@@ -104,6 +110,7 @@ type createRequest struct {
 	CustomerPartyID *string `json:"customerPartyId,omitempty"`
 	ContractID      *string `json:"contractId,omitempty"`
 	Currency        string  `json:"currency"`
+	ContractValue   string  `json:"contractValue,omitempty"`
 	StartDate       string  `json:"startDate"`
 	EndDate         *string `json:"endDate,omitempty"`
 }
@@ -146,6 +153,7 @@ func (a *API) create(w http.ResponseWriter, r *http.Request) {
 	in.CustomerPartyID = req.CustomerPartyID
 	in.ContractID = req.ContractID
 	in.Currency = req.Currency
+	in.ContractValue = req.ContractValue
 	in.Stage = domain.StageCreated
 	in.StartDate = req.StartDate
 	in.EndDate = req.EndDate
@@ -313,6 +321,25 @@ func principal(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) 
 		return p, false
 	}
 	return p, true
+}
+
+// requireUser checks that the principal names a user: change orders record
+// their creator and decider, and the creator-is-not-approver rule needs both.
+func requireUser(w http.ResponseWriter, r *http.Request, p tenant.Principal) bool {
+	if strings.TrimSpace(p.UserID) == "" {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnauthorized, codeUnauthenticated, "a user identity is required"))
+		return false
+	}
+	return true
+}
+
+// idempotencyKey reads the required Idempotency-Key header, or returns the field error.
+func idempotencyKey(r *http.Request) (string, map[string]string) {
+	key := strings.TrimSpace(r.Header.Get(idempotencyHeader))
+	if key == "" || len(key) > maxIdempotencyKey {
+		return "", map[string]string{idempotencyHeader: fmt.Sprintf("header is required, at most %d characters", maxIdempotencyKey)}
+	}
+	return key, nil
 }
 
 func pageParams(r *http.Request) (int, string, error) {

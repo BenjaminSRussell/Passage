@@ -1,15 +1,17 @@
 import { createElement } from "react";
 import type { PassageModule } from "../registry";
+import { ChangeOrderDetailPage, ChangeOrdersPage, NewChangeOrderPage } from "./ChangeOrderPages";
 import { NewProjectPage } from "./NewProjectPage";
 import { ProjectDetailPage, ProjectsHome, ProjectsListPage } from "./pages";
 import { ProjectPlansPage, WbsPage } from "./PlanPages";
+import { RisksPage } from "./RiskPages";
 import { PostingProfilesPage, ProjectGroupsPage } from "./SetupPages";
 
 const projects: PassageModule = {
   id: "projects",
   title: "Projects",
   description:
-    "Create projects and sub-projects, move them through their stages, plan and schedule their WBS, and set up project groups and posting profiles.",
+    "Create projects and sub-projects, move them through their stages, plan and schedule their WBS, record and apply change orders and claims, keep a risk and issue register, and set up project groups and posting profiles.",
   routes: [
     { path: "/projects", element: createElement(ProjectsHome), handle: { title: "Projects" } },
     { path: "/projects/list", element: createElement(ProjectsListPage), handle: { title: "All projects" } },
@@ -19,6 +21,10 @@ const projects: PassageModule = {
     { path: "/projects/:id", element: createElement(ProjectDetailPage), handle: { title: "Project" } },
     { path: "/projects/:id/plans", element: createElement(ProjectPlansPage), handle: { title: "Plans" } },
     { path: "/projects/:id/plans/:planId", element: createElement(WbsPage), handle: { title: "WBS" } },
+    { path: "/projects/:id/change-orders", element: createElement(ChangeOrdersPage), handle: { title: "Change orders" } },
+    { path: "/projects/:id/change-orders/new", element: createElement(NewChangeOrderPage), handle: { title: "New change order" } },
+    { path: "/projects/:id/change-orders/:coId", element: createElement(ChangeOrderDetailPage), handle: { title: "Change order" } },
+    { path: "/projects/:id/risks", element: createElement(RisksPage), handle: { title: "Risks and issues" } },
   ],
   nav: [
     { label: "Overview", to: "/projects", duty: "ProjInquire" },

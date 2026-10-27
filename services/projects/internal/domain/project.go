@@ -5,6 +5,10 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/shopspring/decimal"
+
+	"github.com/BenjaminSRussell/passage/platform/money"
 )
 
 // Stage of a project (FR-41.1).
@@ -32,6 +36,8 @@ const (
 var (
 	projectIDPattern = regexp.MustCompile(`^[A-Z0-9][A-Z0-9-]{0,19}$`)
 	currencyPattern  = regexp.MustCompile(`^[A-Z]{3}$`)
+	// contractValuePattern fits numeric(20,6) and is never negative.
+	contractValuePattern = regexp.MustCompile(`^\d{1,14}(\.\d{1,6})?$`)
 )
 
 // transitions lists the allowed stage moves: CREATED → IN_PROCESS, IN_PROCESS ⇄ ON_HOLD,
@@ -52,12 +58,30 @@ type Project struct {
 	CustomerPartyID *string     `json:"customerPartyId,omitempty"`
 	ContractID      *string     `json:"contractId,omitempty"`
 	Currency        string      `json:"currency"`
+	ContractValue   string      `json:"contractValue"`
 	Stage           Stage       `json:"stage"`
 	StartDate       string      `json:"startDate"`
 	EndDate         *string     `json:"endDate,omitempty"`
 	Version         int         `json:"version"`
 	CreatedAt       time.Time   `json:"createdAt"`
 	UpdatedAt       time.Time   `json:"updatedAt"`
+}
+
+// ValidProjectID reports whether id has the project id format.
+func ValidProjectID(id string) bool { return projectIDPattern.MatchString(id) }
+
+// RoundContractValue returns the contract value rounded half-even to the
+// currency's minor unit ("0" stands in for an empty value).
+func RoundContractValue(v, currency string) (string, error) {
+	if v == "" {
+		v = "0"
+	}
+	d, err := decimal.NewFromString(v)
+	if err != nil {
+		return "", fmt.Errorf("%w: contract value %q", ErrInvalidInput, v)
+	}
+	scale := money.MinorUnits(currency)
+	return d.RoundBank(scale).StringFixed(scale), nil
 }
 
 // ValidProjectType reports whether t is one of the six PRD types.
@@ -101,6 +125,9 @@ func validate(p Project, inheritable bool) map[string]string {
 	}
 	if (p.ProjectGroupID == "" && !inheritable) || len(p.ProjectGroupID) > 10 {
 		fields["projectGroupId"] = "must be 1 to 10 characters"
+	}
+	if p.ContractValue != "" && !contractValuePattern.MatchString(p.ContractValue) {
+		fields["contractValue"] = "must be a non-negative decimal amount such as 500000.00"
 	}
 	start, err := time.Parse(time.DateOnly, p.StartDate)
 	if err != nil {

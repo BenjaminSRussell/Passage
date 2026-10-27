@@ -23,6 +23,7 @@ function project(overrides: Partial<Project> = {}): Project {
     projectType: "FIXED_PRICE",
     customerPartyId: CUSTOMER,
     currency: "USD",
+    contractValue: "500000.00",
     stage: "IN_PROCESS",
     startDate: "2026-09-01",
     version: 3,

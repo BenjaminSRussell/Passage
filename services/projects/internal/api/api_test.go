@@ -36,6 +36,12 @@ type fakeStore struct {
 	planKeys map[string]string
 	nodes    map[string][]domain.WBSNode
 	links    map[string][]domain.WBSLink
+
+	// Change order and risk state (see changeorders_fake_test.go).
+	cos     map[string]domain.ChangeOrder
+	coKeys  map[string]string
+	risks   map[string]domain.RiskIssue
+	riskKey map[string]string
 }
 
 // sampleProject is a valid CREATED internal project with the given id.
@@ -49,6 +55,8 @@ func newFake() *fakeStore {
 		groups: map[string]domain.ProjectGroup{}, profiles: map[domain.ProfileKey]domain.PostingProfile{},
 		plans: map[string]domain.PlanVersion{}, planKeys: map[string]string{},
 		nodes: map[string][]domain.WBSNode{}, links: map[string][]domain.WBSLink{},
+		cos: map[string]domain.ChangeOrder{}, coKeys: map[string]string{},
+		risks: map[string]domain.RiskIssue{}, riskKey: map[string]string{},
 	}
 }
 
@@ -57,6 +65,7 @@ func (f *fakeStore) Ping(context.Context) error { return f.pingErr }
 func (f *fakeStore) CreateProject(_ context.Context, in domain.Project, key string) (domain.Project, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	in.ContractValue, _ = domain.RoundContractValue(in.ContractValue, in.Currency)
 	if in.ParentProjectID != nil {
 		parent, ok := f.projects[*in.ParentProjectID]
 		if !ok {

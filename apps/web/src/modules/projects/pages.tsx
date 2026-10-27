@@ -318,6 +318,7 @@ export function ProjectDetailPage() {
     ["Customer", current.customerPartyId ?? dash, true],
     ["Contract", current.contractId ?? dash, true],
     ["Currency", current.currency, true],
+    ["Contract value", current.contractValue, true],
     ["Start date", current.startDate, true],
     ["End date", current.endDate ?? dash, true],
     ["Version", current.version],
@@ -333,6 +334,12 @@ export function ProjectDetailPage() {
           <>
             <Link className={buttonClassName("secondary")} to={`/projects/${encodeURIComponent(current.id)}/plans`}>
               Plans and WBS
+            </Link>
+            <Link className={buttonClassName("secondary")} to={`/projects/${encodeURIComponent(current.id)}/change-orders`}>
+              Change orders
+            </Link>
+            <Link className={buttonClassName("secondary")} to={`/projects/${encodeURIComponent(current.id)}/risks`}>
+              Risks and issues
             </Link>
             <Link
               className={buttonClassName("secondary")}

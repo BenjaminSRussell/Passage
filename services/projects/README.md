@@ -8,7 +8,10 @@ transitions), persists it with RLS and an outbox event per change, and ships the
 wave-41 slices wire into persistence and APIs. **Slice 2** adds project groups (now a foreign key of the
 project), posting profiles with the FR-41.5 fallback lookup, plan versions (one WORKING, one locked BASELINE
 copied from it, SIMULATION copies), bulk WBS replacement and the CPM scheduler over stored WBS nodes with the
-`wbs.scheduled` event. See [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md) for what
+`wbs.scheduled` event. **Slice 3** adds the project contract value, change orders and claims (DRAFT →
+SUBMITTED → APPROVED | REJECTED → APPLIED, creator ≠ decider) whose apply raises the contract value, creates a
+new BASELINE from the current one with the effort and schedule deltas and emits `changeorder.applied`, and the
+risk and issue register. See [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md) for what
 is still missing and why.
 
 ## Layout
@@ -19,13 +22,17 @@ internal/domain/         pure rules, no I/O: project validation, sub-project inh
                          POC (BR-41.1/41.2), EVM (FR-41.10), CPM forward and backward pass over working calendars
                          with late dates, slack and critical path (FR-41.2), posting-profile fallback (FR-41.5),
                          invoice-proposal selection predicate and "why not billed" (BR-41.3), finish blockers (BR-41.7),
-                         retention amount and release trigger (BR-41.10), monthly interest (BR-41.12)
+                         retention amount and release trigger (BR-41.10), monthly interest (BR-41.12),
+                         change-order lifecycle, decision rules and apply arithmetic (FR-41.18, BR-41.13),
+                         risk register validation and status moves (FR-41.20)
 internal/store/          Postgres repository (pgx); every call runs in dbx.WithTenantTx (RLS); writes outbox rows
 internal/events/         event type constants and payloads (events/asyncapi.yaml)
 internal/api/            HTTP handlers, DTOs, validation, problem mapping
 migrations/              0001_init.sql (project + RLS), 0002_outbox.sql (outbox, consumer inbox, idempotency),
                          0003_setup_plans.sql (project_group + project FK, posting_profile, plan_version, wbs_node,
-                         wbs_dependency, all with RLS and legal-entity scope through the project), migrations.go (embed)
+                         wbs_dependency, all with RLS and legal-entity scope through the project),
+                         0004_risk_change_order.sql (project.contract_value, superseded baselines,
+                         project_change_order + lines, project_risk_issue), migrations.go (embed)
 api/openapi.yaml         OpenAPI 3.1 for every endpoint
 events/asyncapi.yaml     AsyncAPI 3 for every event published
 charts/projects/         Helm chart (deployment, service, optional ServiceMonitor)
@@ -37,7 +44,10 @@ Web module: `apps/web/src/modules/projects/`: projects overview (counts by stage
 (stage and type filters, load more), new project / sub-project form, project detail with stage moves,
 project groups (list, add, edit), posting profiles (list, add, edit by level, account lookup), plan versions
 of a project (create working plan, save baseline, new simulation) and the WBS page (scheduled dates, slack and
-critical tasks; editor that saves the whole WBS under If-Match; run schedule; baselines read-only).
+critical tasks; editor that saves the whole WBS under If-Match; run schedule; baselines read-only), change
+orders of a project (log with type and status filters, create with impact lines on WBS nodes, detail with
+submit, approve or reject with the customer approval reference, and apply showing the new contract value and
+baseline), and the risks and issues register (list by score, add, edit and status moves).
 
 ## Endpoints
 
@@ -57,6 +67,16 @@ critical tasks; editor that saves the whole WBS under If-Match; run schedule; ba
 | GET | `/v1/projects/{id}/plans/{ver}/wbs` | ProjInquire | plan version, nodes (WBS-code order) and dependencies; `ETag` = plan version |
 | PUT | `/v1/projects/{id}/plans/{ver}/wbs` | ProjPlan | replaces every node and dependency; `If-Match` required; clears scheduled dates |
 | POST | `/v1/projects/{id}/plans/{ver}/schedule` | ProjPlan | CPM run; stores early/late dates, slack, critical flag; writes `wbs.scheduled` |
+| POST | `/v1/projects/change-orders` | ProjMaintain | `Idempotency-Key` required; DRAFT with impact lines; number CO-0001… per project |
+| GET | `/v1/projects/change-orders?projectId=` | ProjInquire | change order log, `type` and `status` filters; totals, no lines |
+| GET | `/v1/projects/change-orders/{coId}` | ProjInquire | with lines; `ETag` |
+| POST | `/v1/projects/change-orders/{coId}/submit` | ProjMaintain | `If-Match`; optional body `{"customerApprovalRef"}` |
+| POST | `/v1/projects/change-orders/{coId}/approve` | ProjChangeOrderApprove | `If-Match`; approver ≠ creator; optional `customerApprovalRef` |
+| POST | `/v1/projects/change-orders/{coId}/reject` | ProjChangeOrderApprove | `If-Match`; decider ≠ creator |
+| POST | `/v1/projects/change-orders/{coId}/apply` | ProjChangeOrderApprove | `If-Match`; BR-41.13 (below); second apply PROJ-CO-001 |
+| GET | `/v1/projects/{id}/risks` | ProjInquire | highest score first; `kind`, `status` filters |
+| POST | `/v1/projects/{id}/risks` | ProjPlan | `Idempotency-Key` required; starts OPEN |
+| PUT | `/v1/projects/{id}/risks/{riskId}` | ProjPlan | `If-Match`; fields and status |
 
 `GET /healthz` is the kernel liveness check; `GET /readyz` pings the database (503 when it is down).
 Browser calls use `/api/v1/projects/...`; the BFF rewrites them to `/v1/projects/...`.
@@ -74,6 +94,19 @@ MSO are refused until the scheduler applies them); dependencies (FS, SS, FF, SF,
 tasks, each pair once, without cycles (PROJ-WBS-001). A node with children is a summary: the scheduler
 schedules the tasks and rolls their dates, slack and critical flag up to the summary. The scheduler uses the
 standard Monday-to-Friday calendar from the project start date (role calendars are wave 8).
+
+Change orders (FR-41.18, BR-41.13): a line has a cost and revenue impact (rounded half-even to the project
+currency, negative allowed) and, when it names a WBS node of any plan version of the project, an effort and
+schedule delta; the node's WBS code is stored with the line. The creator submits; someone else approves or
+rejects and applies (§8.41.17), and the user identity header is required for these calls. A CLAIM_CUSTOMER
+needs `customerApprovalRef` to be approved (the §8.41.13 parameter defaults to on and is not yet configurable).
+Apply, in one transaction: contract value += Σ revenue impact; a new locked BASELINE is copied from the current
+baseline with the deltas on the nodes of the lines' codes and rescheduled; the previous baseline gets
+`supersededByVersionId`; the change order becomes APPLIED with `appliedBaselineVersionId`; the outbox gets
+`changeorder.applied` and `project.updated` (`changedFields: [contractValue]`). The WORKING plan is not changed.
+
+Risk register (FR-41.20): probability and impact 1 to 5, score = probability × impact; OPEN → MITIGATED |
+CLOSED, MITIGATED → OPEN | CLOSED; a CLOSED entry is final.
 
 ## Run
 
@@ -98,11 +131,14 @@ PASSAGE_TEST_DATABASE_URL=postgres://... go test ./internal/store/...   # DB-bac
   outbox CloudEvent; for slice 2 the group foreign key, group and profile upserts under If-Match, the
   table check that refuses unresolvable profile keys, plan-version kinds and copies, the locked baseline,
   concurrent WORKING creation, WBS replace and schedule with the `wbs.scheduled` outbox row, and legal-entity
-  scope on plans, nodes and dependencies. Skipped without `PASSAGE_TEST_DATABASE_URL`; also needs `PASSAGE_TEST_APP_DATABASE_URL`
+  scope on plans, nodes and dependencies; for slice 3 AC-41.12 end to end (contract value, superseded and new
+  rescheduled baseline, outbox payloads, second apply), rollback of a refused apply, change-order keys and a
+  concurrent same-key create, WBS node resolution, the risk register lifecycle, and tenant and legal-entity
+  scope on change orders, lines and risks. Skipped without `PASSAGE_TEST_DATABASE_URL`; also needs `PASSAGE_TEST_APP_DATABASE_URL`
   (uses `testkit.DBWithApp`, so the app role has no BYPASSRLS).
 
-Web: `npx vitest --run src/modules/projects` and `npx tsc --noEmit` from `apps/web` (tests in `module.test.tsx`
-and `plans.test.tsx`).
+Web: `npx vitest --run src/modules/projects` and `npx tsc --noEmit` from `apps/web` (tests in `module.test.tsx`,
+`plans.test.tsx` and `registers.test.tsx`).
 
 Chart: `helm lint charts/projects`.
 
@@ -119,7 +155,7 @@ Problem details are RFC 9457 (`application/problem+json`), `type` = `https://pas
 |---|---|---|
 | COM-0001 | 400 | Request failed validation; `errors` names the fields (includes a missing `Idempotency-Key`, and a sub-project still incomplete after inheriting from its parent) |
 | COM-0428 | 428 | `If-Match` missing on a stage move or a WBS replace, or on replacing an existing group or posting profile |
-| AUTH-0001 | 401 | Missing or malformed tenant |
+| AUTH-0001 | 401 | Missing or malformed tenant, or no user identity on a change-order write |
 | AUTH-0003 | 403 | Caller lacks the route's duty (kernel `authz`), or the project's legal entity is outside the caller's scope |
 | COM-0500 | 500 | Unexpected error; detail hidden (kernel `httpx.Fail`) |
 | PROJ-NOT-FOUND | 404 | No project (or plan version of that project) with that id in the caller's scope |
@@ -136,6 +172,13 @@ Problem details are RFC 9457 (`application/problem+json`), `type` = `https://pas
 | PROJ-POST-001 | 422 | No posting profile at any fallback level (FR-41.5), from `/posting-profiles/resolve` |
 | PROJ-WBS-001 | 422 | Dependency cycle in a WBS replace (FR-41.2) |
 | PROJ-WBS-002 | 422 | Duplicate WBS code in a WBS replace (FR-41.2) |
+| PROJ-CO-001 | 422 | Change order is already APPLIED (second apply, or any move of an applied change order) (BR-41.13) |
+| PROJ-CO-002 | 422 | Customer approval reference required to approve or apply a customer claim (BR-41.13) |
+| PROJ-CO-003 | 422 | Change-order lifecycle move not allowed (service-specific) |
+| PROJ-CO-004 | 422 | The creator of a change order cannot approve, reject or apply it (§8.41.17 SoD; service-specific) |
+| PROJ-CO-005 | 422 | Apply needs a current BASELINE plan version (service-specific) |
+| PROJ-CO-006 | 422 | An impact line cannot be applied: its WBS code is not in the current baseline, it changes a summary node's duration, or it makes the contract value, effort or duration negative (service-specific) |
+| PROJ-RISK-001 | 422 | Risk or issue status move not allowed, or the entry is CLOSED (service-specific) |
 | PROJ-RET-001 | — | Domain rule (BR-41.10): release before its trigger without override; raised by `domain.CheckRelease`, no HTTP path yet |
 
 Other wave-41 codes from PRD §8.41.18 are not raised yet; they arrive with the slices that implement their rules.
@@ -146,12 +189,17 @@ Other wave-41 codes from PRD §8.41.18 are not raised yet; they arrive with the 
 in the same transaction as the change, with `subject` = project id and `actor` = the caller's user id.
 `dev.passage.projects.wbs.scheduled.v1` (subject = plan version id; data `projectId`, `planVersionId`,
 `criticalPath[]`, `finishDate`) is written by each scheduler run over a non-empty plan
-(see `events/asyncapi.yaml`). Group, posting-profile and plan-version changes publish no event yet; the PRD
-lists none and no consumer needs one.
+(see `events/asyncapi.yaml`). `dev.passage.projects.changeorder.applied.v1` (subject = change order id; data
+`changeOrderId`, `changeOrderNumber`, `projectId`, `type`, `currency`, `contractValueDelta`, `budgetDelta`,
+`contractValue`, `newBaselineVersionId`, `vendorPartyId` for vendor claims) is written by each apply, with a
+`project.updated` for the contract value. The PRD writes the type `change-order.applied`; the platform type rule
+allows only `[a-z0-9]` per segment, so the entity is `changeorder`. Group, posting-profile, plan-version,
+change-order create/submit/decide and risk changes publish no event yet; the PRD lists none and no consumer needs one.
 
 ## Wave reference
 
 PRD §8.41 (`docs/prd/phase-8-projects-people-service.md`), ticket PSG-41, depends on PSG-40.
 Rules implemented in the domain: BR-41.1, BR-41.2, BR-41.3 (base predicate), BR-41.7 (rule only), BR-41.10 (amount
 and trigger), BR-41.12 (charge), FR-41.1 (stages, inheritance and project groups, wired to the API), FR-41.2 (plan versions, WBS and CPM, wired
-to the API), FR-41.5 (posting profiles, wired to the API), FR-41.10, FR-41.17 (simulation copies only).
+to the API), FR-41.5 (posting profiles, wired to the API), FR-41.10, FR-41.17 (simulation copies only), FR-41.18 and BR-41.13 (wired to the API; budget and
+vendor debit note are handoffs), FR-41.20 (risk and issue register; forecasts later).

@@ -1,5 +1,5 @@
 // Package store persists projects, project groups, posting profiles, plan
-// versions and WBS nodes in Postgres. Every call runs in a transaction
+// versions and WBS nodes, change orders and the risk register in Postgres. Every call runs in a transaction
 // scoped to the caller's tenant (RLS), and every state change writes its event
 // to the outbox in that same transaction.
 package store
@@ -12,10 +12,12 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/events"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/money"
 	"github.com/BenjaminSRussell/passage/platform/outbox"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/projects/internal/domain"
@@ -75,6 +77,19 @@ type Store interface {
 	ReplaceWBS(ctx context.Context, projectID, planID string, expected int, nodes []domain.WBSNodeInput, deps []domain.WBSDependencyInput) (WBS, error)
 	SchedulePlan(ctx context.Context, projectID, planID string) (ScheduleResult, error)
 
+	// Change orders and claims (FR-41.18, BR-41.13). approvalRef, when not nil,
+	// records customer approval evidence with a submit or approve.
+	CreateChangeOrder(ctx context.Context, in domain.ChangeOrder, idempotencyKey string) (domain.ChangeOrder, bool, error)
+	GetChangeOrder(ctx context.Context, id string) (domain.ChangeOrder, error)
+	ListChangeOrders(ctx context.Context, f ChangeOrderFilter) ([]domain.ChangeOrder, error)
+	DecideChangeOrder(ctx context.Context, id string, expected int, to domain.ChangeOrderStatus, approvalRef *string) (domain.ChangeOrder, error)
+	ApplyChangeOrder(ctx context.Context, id string, expected int) (AppliedChangeOrder, error)
+
+	// Risk and issue register (FR-41.20).
+	CreateRisk(ctx context.Context, in domain.RiskIssue, idempotencyKey string) (domain.RiskIssue, bool, error)
+	ListRisks(ctx context.Context, f RiskFilter) ([]domain.RiskIssue, error)
+	UpdateRisk(ctx context.Context, expected int, in domain.RiskIssue) (domain.RiskIssue, error)
+
 	Ping(ctx context.Context) error
 }
 
@@ -88,24 +103,38 @@ func New(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
 func (s *Postgres) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 
 const projectColumns = `id, legal_entity_id, parent_project_id, project_group_id, project_type, customer_party_id, contract_id,
-	currency, stage, start_date::text, end_date::text, version, created_at, updated_at`
+	currency, contract_value::text, stage, start_date::text, end_date::text, version, created_at, updated_at`
 
 func scanProject(row pgx.Row) (domain.Project, error) {
 	var p domain.Project
-	var ptype, stage string
+	var ptype, stage, contract string
 	err := row.Scan(&p.ID, &p.LegalEntityID, &p.ParentProjectID, &p.ProjectGroupID, &ptype, &p.CustomerPartyID, &p.ContractID,
-		&p.Currency, &stage, &p.StartDate, &p.EndDate, &p.Version, &p.CreatedAt, &p.UpdatedAt)
+		&p.Currency, &contract, &stage, &p.StartDate, &p.EndDate, &p.Version, &p.CreatedAt, &p.UpdatedAt)
 	p.ProjectType = domain.ProjectType(ptype)
 	p.Stage = domain.Stage(stage)
+	if err == nil {
+		p.ContractValue, err = amount(contract, p.Currency)
+	}
 	return p, err
 }
 
 // SameRequest reports whether a replayed Idempotency-Key carries the same
-// request as the stored project (after FR-41.1 inheritance on both sides).
+// request as the stored project (after FR-41.1 inheritance on both sides and
+// with the contract value rounded to the currency).
 func SameRequest(stored, in domain.Project) bool {
 	return stored.ID == in.ID && stored.LegalEntityID == in.LegalEntityID && eqPtr(stored.ParentProjectID, in.ParentProjectID) &&
 		stored.ProjectGroupID == in.ProjectGroupID && stored.ProjectType == in.ProjectType && eqPtr(stored.CustomerPartyID, in.CustomerPartyID) &&
-		eqPtr(stored.ContractID, in.ContractID) && stored.Currency == in.Currency && stored.StartDate == in.StartDate && eqPtr(stored.EndDate, in.EndDate)
+		eqPtr(stored.ContractID, in.ContractID) && stored.Currency == in.Currency && stored.ContractValue == in.ContractValue &&
+		stored.StartDate == in.StartDate && eqPtr(stored.EndDate, in.EndDate)
+}
+
+// amount formats a stored numeric as a decimal string in the currency's minor unit.
+func amount(stored, currency string) (string, error) {
+	d, err := decimal.NewFromString(stored)
+	if err != nil {
+		return "", err
+	}
+	return d.StringFixed(money.MinorUnits(currency)), nil
 }
 
 func eqPtr(a, b *string) bool {
@@ -179,7 +208,11 @@ func (s *Postgres) CreateProject(ctx context.Context, in domain.Project, idempot
 	}
 	var out domain.Project
 	created := false
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	var err error
+	if in.ContractValue, err = domain.RoundContractValue(in.ContractValue, in.Currency); err != nil {
+		return domain.Project{}, false, err
+	}
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
 		if in, err = applyParent(ctx, tx, p.TenantID, in); err != nil {
 			return err
@@ -206,12 +239,12 @@ func (s *Postgres) CreateProject(ctx context.Context, in domain.Project, idempot
 		// inserts nothing. The key lookup then tells a replay from an id taken
 		// by a different request.
 		out, err = scanProject(tx.QueryRow(ctx, `insert into project (tenant_id, id, legal_entity_id, parent_project_id, project_group_id, project_type,
-			customer_party_id, contract_id, currency, start_date, end_date, idempotency_key)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+			customer_party_id, contract_id, currency, contract_value, start_date, end_date, idempotency_key)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 			on conflict do nothing
 			returning `+projectColumns,
 			p.TenantID, in.ID, in.LegalEntityID, in.ParentProjectID, in.ProjectGroupID, string(in.ProjectType),
-			in.CustomerPartyID, in.ContractID, in.Currency, in.StartDate, in.EndDate, key))
+			in.CustomerPartyID, in.ContractID, in.Currency, in.ContractValue, in.StartDate, in.EndDate, key))
 		if errors.Is(err, pgx.ErrNoRows) {
 			if key != nil {
 				if err := replay(); !errors.Is(err, pgx.ErrNoRows) {

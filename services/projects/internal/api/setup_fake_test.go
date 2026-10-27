@@ -97,7 +97,9 @@ func (f *fakeStore) CreatePlanVersion(_ context.Context, projectID string, in st
 	seq := 0
 	for _, pv := range f.plans {
 		if pv.ProjectID == projectID {
-			kinds = append(kinds, pv.Kind)
+			if pv.SupersededByVersionID == nil {
+				kinds = append(kinds, pv.Kind)
+			}
 			seq++
 		}
 	}
