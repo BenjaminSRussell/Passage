@@ -47,6 +47,9 @@ type fakeStore struct {
 	gotStatus  string
 	gotFlowID  string
 	gotLimit   int
+	jobs       []store.Job
+	gotJobID   string
+	gotDone    domain.Completion
 }
 
 func (f *fakeStore) CreateFlow(_ context.Context, in store.Flow, idem store.Idem) (store.Flow, bool, error) {
@@ -104,6 +107,21 @@ func (f *fakeStore) MoveKanban(_ context.Context, _ string, to domain.State, ver
 func (f *fakeStore) Board(_ context.Context, filter store.BoardFilter) ([]store.Kanban, error) {
 	f.gotBoard = filter
 	return f.cards, f.err
+}
+
+func (f *fakeStore) BoardJobs(_ context.Context, filter store.BoardFilter) ([]store.Job, error) {
+	f.gotBoard = filter
+	return f.jobs, f.err
+}
+
+func (f *fakeStore) StartJob(_ context.Context, id string, version int, idem store.Idem) (store.Job, bool, error) {
+	f.gotJobID, f.gotVersion, f.gotIdem = id, version, idem
+	return store.Job{ID: id, State: domain.InProgress, CardState: domain.InProgress, Version: version + 1}, !f.replay, f.err
+}
+
+func (f *fakeStore) CompleteJob(_ context.Context, id string, version int, c domain.Completion, idem store.Idem) (store.Job, bool, error) {
+	f.gotJobID, f.gotVersion, f.gotDone, f.gotIdem = id, version, c, idem
+	return store.Job{ID: id, State: domain.Completed, Version: version + 1}, !f.replay, f.err
 }
 
 func (f *fakeStore) Ping(context.Context) error { return f.err }

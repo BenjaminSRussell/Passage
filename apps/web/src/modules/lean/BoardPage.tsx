@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Alert, Badge, Button, EmptyState, FormField, PageHeader, Select, Skeleton, StatGroup, StatTile } from "../../shell/ui";
 import {
   describeProblem,
@@ -13,7 +13,7 @@ import {
   type KanbanState,
   type Problem,
 } from "./api/client";
-import { formatDateTime, nextState, overdue, shortId, STATE_LABELS } from "./format";
+import { formatDateTime, jobDriven, nextState, overdue, shortId, STATE_LABELS } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -28,12 +28,16 @@ interface CardProps {
 
 function BoardCard({ card, busy, onMove }: CardProps) {
   const [target, setTarget] = useState<KanbanState | "">("");
-  const next = nextState(card.state, card.replenishment);
+  const step = nextState(card.state, card.replenishment);
+  // A card with jobs reaches In progress and Completed through them (BR-24.6).
+  const next = step && jobDriven(card, step) ? null : step;
   const late = overdue(card.due, card.state);
   return (
     <li className={styles.boardCard} aria-busy={busy || undefined}>
       <div className={styles.boardCardHead}>
-        <span className={styles.mono}>{card.cardNumber}</span>
+        <Link className={styles.mono} to={`/lean/kanbans/${card.id}`}>
+          {card.cardNumber}
+        </Link>
         {late ? <Badge tone="warning">Overdue</Badge> : null}
       </div>
       <dl className={styles.boardFacts}>
@@ -56,6 +60,12 @@ function BoardCard({ card, busy, onMove }: CardProps) {
           </div>
         ) : null}
       </dl>
+      {step && !next ? (
+        <p className={styles.muted}>
+          {`${card.jobCount} ${card.jobCount === 1 ? "job" : "jobs"}: the card moves on as they are started and completed on the `}
+          <Link to={`/lean/kanbans/${card.id}`}>work-cell boards</Link>.
+        </p>
+      ) : null}
       <div className={styles.actions}>
         {next ? (
           <Button size="sm" variant="primary" loading={busy} onClick={() => onMove(card, next)} aria-label={`Move ${card.cardNumber} to ${STATE_LABELS[next]}`}>
@@ -65,7 +75,7 @@ function BoardCard({ card, busy, onMove }: CardProps) {
         <label className="visually-hidden" htmlFor={`move-${card.id}`}>{`Move ${card.cardNumber} to column`}</label>
         <Select id={`move-${card.id}`} value={target} onChange={(e) => setTarget(e.target.value as KanbanState | "")}>
           <option value="">Other column…</option>
-          {KANBAN_STATES.filter((s) => s !== card.state).map((s) => (
+          {KANBAN_STATES.filter((s) => s !== card.state && !jobDriven(card, s)).map((s) => (
             <option key={s} value={s}>
               {STATE_LABELS[s]}
             </option>

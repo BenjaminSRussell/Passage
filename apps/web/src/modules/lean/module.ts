@@ -2,17 +2,21 @@ import { createElement } from "react";
 import type { PassageModule } from "../registry";
 import { BoardPage } from "./BoardPage";
 import { FlowDetailPage, FlowsPage, NewFlowPage } from "./FlowPages";
+import { KanbanPage } from "./KanbanPage";
 import { LeanHome } from "./pages";
 import { NewRulePage, RuleDetailPage, RulesPage } from "./RulePages";
 import { SubcontractPage } from "./SubcontractPage";
+import { WorkCellBoardPage } from "./WorkCellBoardPage";
 
 const lean: PassageModule = {
   id: "lean",
   title: "Lean manufacturing",
-  description: "Production flows, kanban rules, the kanban board for work cells and lean subcontracting.",
+  description: "Production flows, kanban rules, the kanban board, the work-cell board of kanban jobs and lean subcontracting.",
   routes: [
     { path: "/lean", element: createElement(LeanHome), handle: { title: "Lean manufacturing" } },
     { path: "/lean/board", element: createElement(BoardPage), handle: { title: "Kanban board" } },
+    { path: "/lean/work-cell", element: createElement(WorkCellBoardPage), handle: { title: "Work-cell board" } },
+    { path: "/lean/kanbans/:id", element: createElement(KanbanPage), handle: { title: "Kanban" } },
     { path: "/lean/rules", element: createElement(RulesPage), handle: { title: "Kanban rules" } },
     { path: "/lean/rules/new", element: createElement(NewRulePage), handle: { title: "New kanban rule" } },
     { path: "/lean/rules/:id", element: createElement(RuleDetailPage), handle: { title: "Kanban rule" } },
@@ -24,6 +28,7 @@ const lean: PassageModule = {
   nav: [
     { label: "Overview", to: "/lean", duty: "lean.read" },
     { label: "Kanban board", to: "/lean/board", duty: "lean.kanban.work" },
+    { label: "Work-cell board", to: "/lean/work-cell", duty: "lean.kanban.work" },
     { label: "Kanban rules", to: "/lean/rules", duty: "lean.read" },
     { label: "Production flows", to: "/lean/flows", duty: "lean.read" },
     { label: "Subcontracting", to: "/lean/subcontracting", duty: "lean.flow.write" },

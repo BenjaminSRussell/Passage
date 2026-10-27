@@ -3,12 +3,13 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
 import { loadModules } from "../registry";
-import type { Board, Flow, Kanban, KanbanState, Rule } from "./api/client";
+import type { Board, Flow, JobBoard, JobState, Kanban, KanbanJob, KanbanState, Rule } from "./api/client";
 import { REFRESH_MS } from "./BoardPage";
 import { validateFlow } from "./FlowPages";
 import { nextState, overdue } from "./format";
 import lean from "./module";
 import { validateRule } from "./RulePages";
+import { validateCompletion, workCells } from "./WorkCellBoardPage";
 
 const FLOW = "f1000000-0000-4000-8000-000000000001";
 const RULE = "a1000000-0000-4000-8000-000000000001";
@@ -125,6 +126,8 @@ function card(id: string, number: string, state: KanbanState, extra: Partial<Kan
     due: null,
     eventRefType: null,
     eventRefId: null,
+    handlingUnits: null,
+    jobCount: 0,
     version: 2,
     createdAt: "2026-10-20T08:00:00Z",
     updatedAt: "2026-10-20T08:00:00Z",
@@ -150,7 +153,7 @@ describe("lean module", () => {
 
   it("links every area from the overview", () => {
     const { container } = renderAt("/lean");
-    expect(within(screen.getByRole("list", { name: "Lean manufacturing areas" })).getAllByRole("link")).toHaveLength(4);
+    expect(within(screen.getByRole("list", { name: "Lean manufacturing areas" })).getAllByRole("link")).toHaveLength(5);
     expect(pageViolations(container)).toEqual([]);
   });
 
@@ -473,5 +476,221 @@ describe("slice 2", () => {
     fireEvent.click(screen.getByRole("button", { name: "Preview PO lines" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("no valid purchase agreement for service SVC-PLATING on 2027-03-10 (LEAN-0005)");
     expect((calls[0].body as { mode: string }).mode).toBe("periodic-po");
+  });
+});
+
+const CELL = "ce000000-0000-4000-8000-000000000001";
+const J1 = "b0000000-0000-4000-8000-000000000001";
+const J2 = "b0000000-0000-4000-8000-000000000002";
+
+function job(id: string, number: string, state: JobState, extra: Partial<KanbanJob> = {}): KanbanJob {
+  return {
+    id,
+    kanbanId: K1,
+    cardNumber: number,
+    ruleId: RULE,
+    ruleCode: "MIX-A",
+    itemId: ITEM,
+    ruleType: "manufacturing",
+    cardState: state === "in-progress" ? "in-progress" : "prepared",
+    cardQty: "25",
+    due: null,
+    activityId: "ac000000-0000-4000-8000-000000000001",
+    activityName: "Mix",
+    activityKind: "process",
+    sequence: 1,
+    workCellResourceId: CELL,
+    pickingRequired: false,
+    state,
+    startedAt: null,
+    completedAt: null,
+    reportedQty: null,
+    scrapQty: null,
+    handlingUnits: null,
+    version: 2,
+    updatedAt: "2026-10-26T08:00:00Z",
+    ...extra,
+  };
+}
+
+function jobBoardOf(jobs: KanbanJob[]): JobBoard {
+  const states: JobState[] = ["not-planned", "planned", "prepared", "in-progress", "completed"];
+  return { workCellId: CELL, columns: states.map((state) => ({ state, jobs: jobs.filter((j) => j.state === state) })), truncated: false };
+}
+
+describe("slice 4: kanban jobs", () => {
+  it("checks a completion report and finds a flow's work cells", () => {
+    expect(validateCompletion({ reportedQty: "19.5", scrapQty: "0", handlingUnits: "2" })).toEqual({});
+    expect(validateCompletion({ reportedQty: "0", scrapQty: "2", handlingUnits: "1" })).toEqual({});
+    expect(validateCompletion({ reportedQty: "0", scrapQty: "0", handlingUnits: "1" }).reportedQty).toBeTruthy();
+    expect(validateCompletion({ reportedQty: "-1", scrapQty: "0", handlingUnits: "1" }).reportedQty).toBeTruthy();
+    expect(validateCompletion({ reportedQty: "1", scrapQty: "0.0000001", handlingUnits: "1" }).scrapQty).toBeTruthy();
+    expect(validateCompletion({ reportedQty: "1", scrapQty: "0", handlingUnits: "0" }).handlingUnits).toBeTruthy();
+    const cells = workCells({
+      ...flow,
+      activities: flow.activities!.map((a, i) => ({ ...a, workCellResourceId: i === 0 ? CELL : null })),
+    });
+    expect(cells).toEqual([{ id: CELL, label: "Mix (ce000000)" }]);
+  });
+
+  it("asks for a work cell before loading the board", async () => {
+    handler = (url) => (url.pathname === "/api/v1/lean/flows" ? json(200, { items: [flow] }) : undefined);
+    const { container } = renderAt("/lean/work-cell");
+    expect(await screen.findByText("Choose a work cell")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Work cell id"), { target: { value: "cell-7" } });
+    fireEvent.click(screen.getByRole("button", { name: "Show board" }));
+    expect(await screen.findByText("Enter the work cell's resource id (a UUID).")).toBeInTheDocument();
+    expect(calls.some((c) => c.url.pathname === "/api/v1/lean/board")).toBe(false);
+    await waitFor(() => expect(pageViolations(container)).toEqual([]));
+  });
+
+  it("starts a job with its version and shows the card running (BR-24.6)", async () => {
+    let jobs = [job(J1, "MIX-A-0001", "prepared", { due: "2020-01-01T00:00:00Z" })];
+    handler = (url, init) => {
+      if (url.pathname === "/api/v1/lean/flows") return json(200, { items: [] });
+      if (url.pathname === "/api/v1/lean/board") return json(200, jobBoardOf(jobs));
+      if (url.pathname === `/api/v1/lean/kanban-jobs/${J1}:start` && init.method === "POST") {
+        jobs = [{ ...jobs[0], state: "in-progress", cardState: "in-progress", version: 3 }];
+        return json(200, jobs[0]);
+      }
+      return undefined;
+    };
+    const { container } = renderAt(`/lean/work-cell?workCellId=${CELL}`);
+    const prepared = await screen.findByRole("list", { name: "Prepared jobs" });
+    expect(within(prepared).getByText("MIX-A-0001")).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Work-cell metrics" })).toHaveTextContent("Overdue 1");
+    expect(calls.find((c) => c.url.pathname === "/api/v1/lean/board")?.url.searchParams.get("workCellId")).toBe(CELL);
+    await waitFor(() => expect(pageViolations(container)).toEqual([]));
+    fireEvent.click(screen.getByRole("button", { name: "Start MIX-A-0001 · 1 Mix" }));
+    expect(await screen.findByText("MIX-A-0001 · 1 Mix started. MIX-A-0001 is in progress.")).toBeInTheDocument();
+    const post = calls.find((c) => c.method === "POST")!;
+    expect(post.body).toEqual({ version: 2 });
+    expect(header(post, "Idempotency-Key")).toBeTruthy();
+    await waitFor(() => expect(within(screen.getByRole("list", { name: "In progress jobs" })).getByText("MIX-A-0001")).toBeInTheDocument());
+  });
+
+  it("completes a job with quantity, scrap and handling units", async () => {
+    let jobs = [job(J1, "MIX-A-0001", "in-progress")];
+    handler = (url, init) => {
+      if (url.pathname === "/api/v1/lean/flows") return json(200, { items: [] });
+      if (url.pathname === "/api/v1/lean/board") return json(200, jobBoardOf(jobs));
+      if (url.pathname === `/api/v1/lean/kanban-jobs/${J1}:complete` && init.method === "POST") {
+        jobs = [{ ...jobs[0], state: "completed", cardState: "completed", reportedQty: "24", scrapQty: "1", handlingUnits: 2, version: 3 }];
+        return json(200, jobs[0]);
+      }
+      return undefined;
+    };
+    renderAt(`/lean/work-cell?workCellId=${CELL}`);
+    fireEvent.click(await screen.findByRole("button", { name: "Complete MIX-A-0001 · 1 Mix" }));
+    const form = screen.getByRole("form", { name: "Report MIX-A-0001 · 1 Mix" });
+    expect(within(form).getByLabelText("Good quantity")).toHaveValue("25");
+    fireEvent.change(within(form).getByLabelText("Handling units"), { target: { value: "0" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Report completion" }));
+    expect(await within(form).findByText("Enter 1 to 100000 handling units.")).toBeInTheDocument();
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+    fireEvent.change(within(form).getByLabelText("Good quantity"), { target: { value: "24" } });
+    fireEvent.change(within(form).getByLabelText("Scrap"), { target: { value: "1" } });
+    fireEvent.change(within(form).getByLabelText("Handling units"), { target: { value: "2" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Report completion" }));
+    expect(await screen.findByText("MIX-A-0001 · 1 Mix completed. MIX-A-0001 is completed.")).toBeInTheDocument();
+    expect(calls.find((c) => c.method === "POST")?.body).toEqual({ version: 2, reportedQty: "24", scrapQty: "1", handlingUnits: 2 });
+    const completed = await screen.findByRole("list", { name: "Completed jobs" });
+    await waitFor(() => expect(within(completed).getByText("24")).toBeInTheDocument());
+  });
+
+  it("keeps a job in its column when the service refuses it (AC-24.7)", async () => {
+    handler = (url, init) => {
+      if (url.pathname === "/api/v1/lean/flows") return json(200, { items: [] });
+      if (url.pathname === "/api/v1/lean/board") return json(200, jobBoardOf([job(J2, "MIX-A-0002", "planned", { pickingRequired: true, cardState: "planned" })]));
+      if (init.method === "POST") return json(409, { code: "LEAN-0001", detail: "the activity needs picking: move the kanban to prepared before starting the job" });
+      return undefined;
+    };
+    renderAt(`/lean/work-cell?workCellId=${CELL}`);
+    const planned = await screen.findByRole("list", { name: "Planned jobs" });
+    expect(within(planned).getByText("Needs picking: move the card to Prepared before starting.")).toBeInTheDocument();
+    fireEvent.click(within(planned).getByRole("button", { name: "Start MIX-A-0002 · 1 Mix" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("MIX-A-0002 · 1 Mix stays in Planned");
+    expect(alert).toHaveTextContent("(LEAN-0001)");
+    expect(within(screen.getByRole("list", { name: "Planned jobs" })).getByText("MIX-A-0002")).toBeInTheDocument();
+  });
+
+  it("shows the empty and failed work-cell boards", async () => {
+    handler = (url) => {
+      if (url.pathname === "/api/v1/lean/flows") return json(200, { items: [] });
+      if (url.pathname === "/api/v1/lean/board") return json(200, jobBoardOf([]));
+      return undefined;
+    };
+    const { unmount } = renderAt(`/lean/work-cell?workCellId=${CELL}`);
+    expect(await screen.findByText("No jobs at this work cell")).toBeInTheDocument();
+    unmount();
+    handler = (url) => (url.pathname === "/api/v1/lean/board" ? json(503, { code: "COM-0500", detail: "service unavailable" }) : json(200, { items: [] }));
+    renderAt(`/lean/work-cell?workCellId=${CELL}`);
+    expect(await screen.findByText("service unavailable (COM-0500)")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+  });
+
+  it("offers the work cells of a chosen flow", async () => {
+    const cellFlow: Flow = { ...flow, activities: flow.activities!.map((a) => ({ ...a, workCellResourceId: CELL })) };
+    handler = (url) => {
+      if (url.pathname === "/api/v1/lean/flows") return json(200, { items: [cellFlow] });
+      if (url.pathname === `/api/v1/lean/flows/${FLOW}`) return json(200, cellFlow);
+      if (url.pathname === "/api/v1/lean/board") return json(200, jobBoardOf([]));
+      return undefined;
+    };
+    renderAt(`/lean/work-cell?flowId=${FLOW}`);
+    const pick = await screen.findByLabelText("Work cell of the flow");
+    expect(within(pick).getByRole("option", { name: "Mix, Fill (ce000000)" })).toBeInTheDocument();
+    fireEvent.change(pick, { target: { value: CELL } });
+    await waitFor(() => {
+      const load = calls.find((c) => c.url.pathname === "/api/v1/lean/board");
+      expect(load?.url.searchParams.get("workCellId")).toBe(CELL);
+      expect(load?.url.searchParams.get("flowId")).toBe(FLOW);
+    });
+  });
+
+  it("sends a card with jobs to its jobs instead of moving it to In progress", async () => {
+    handler = (url) => {
+      if (url.pathname === "/api/v1/lean/flows" || url.pathname === "/api/v1/lean/kanban-rules") return json(200, { items: [] });
+      if (url.pathname === "/api/v1/lean/board") return json(200, boardOf([card(K1, "MIX-A-0001", "prepared", { jobCount: 2 })]));
+      return undefined;
+    };
+    renderAt("/lean/board");
+    const prepared = await screen.findByRole("list", { name: "Prepared cards" });
+    expect(within(prepared).getByText(/2 jobs: the card moves on as they are started and completed/)).toBeInTheDocument();
+    expect(within(prepared).queryByRole("button", { name: "Move MIX-A-0001 to In progress" })).toBeNull();
+    const picker = within(prepared).getByLabelText("Move MIX-A-0001 to column");
+    expect(within(picker).queryByRole("option", { name: "In progress" })).toBeNull();
+    expect(within(picker).queryByRole("option", { name: "Completed" })).toBeNull();
+    expect(within(prepared).getByRole("link", { name: "MIX-A-0001" })).toHaveAttribute("href", `/lean/kanbans/${K1}`);
+  });
+
+  it("shows a kanban with its jobs", async () => {
+    const detail = card(K1, "MIX-A-0001", "completed", {
+      handlingUnits: 2,
+      jobCount: 2,
+      jobs: [
+        job(J1, "MIX-A-0001", "completed", { reportedQty: "25", scrapQty: "0", handlingUnits: 1, completedAt: "2026-10-26T09:00:00Z" }),
+        job(J2, "MIX-A-0001", "completed", { sequence: 2, activityName: "Fill", workCellResourceId: null, reportedQty: "24", scrapQty: "1", handlingUnits: 2 }),
+      ],
+    });
+    handler = (url) => (url.pathname === `/api/v1/lean/kanbans/${K1}` ? json(200, detail) : undefined);
+    const { container } = renderAt(`/lean/kanbans/${K1}`);
+    expect(await screen.findByRole("heading", { name: "MIX-A-0001" })).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Kanban facts" })).toHaveTextContent("Handling units 2");
+    const table = screen.getByRole("table", { name: "Kanban jobs" });
+    expect(within(table).getByText("Fill")).toBeInTheDocument();
+    expect(within(table).getByRole("link", { name: "Open the work-cell board of Mix" })).toHaveAttribute("href", `/lean/work-cell?workCellId=${CELL}`);
+    await waitFor(() => expect(pageViolations(container)).toEqual([]));
+  });
+
+  it("shows a card without jobs and a kanban that cannot load", async () => {
+    handler = (url) => (url.pathname === `/api/v1/lean/kanbans/${K1}` ? json(200, card(K1, "MIX-A-0001", "planned", { jobs: [] })) : undefined);
+    const { unmount } = renderAt(`/lean/kanbans/${K1}`);
+    expect(await screen.findByText("No jobs")).toBeInTheDocument();
+    unmount();
+    handler = () => json(404, { code: "LEAN-0103", detail: "kanban not found" });
+    renderAt(`/lean/kanbans/${K2}`);
+    expect(await screen.findByText("kanban not found (LEAN-0103)")).toBeInTheDocument();
   });
 });

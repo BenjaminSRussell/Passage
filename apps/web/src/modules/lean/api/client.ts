@@ -7,6 +7,10 @@ export const base = "/api/v1/lean";
 export const KANBAN_STATES = ["not-planned", "planned", "prepared", "in-progress", "completed", "emptied"] as const;
 export type KanbanState = (typeof KANBAN_STATES)[number];
 
+/** A kanban job's states: the card states without Emptied (PRD 4.24.4 KanbanJob). */
+export const JOB_STATES = ["not-planned", "planned", "prepared", "in-progress", "completed"] as const;
+export type JobState = (typeof JOB_STATES)[number];
+
 export const ACTIVITY_KINDS = ["process", "transfer", "service"] as const;
 export type ActivityKind = (typeof ACTIVITY_KINDS)[number];
 
@@ -104,9 +108,64 @@ export interface Kanban {
   due: string | null;
   eventRefType: string | null;
   eventRefId: string | null;
+  /** Reported by the card's last job when it completes. */
+  handlingUnits: number | null;
+  /** One job per activity of the rule's flow; 0 when the rule has no flow. */
+  jobCount: number;
+  /** The card's jobs in sequence order; on getKanban only. */
+  jobs?: KanbanJob[];
   version: number;
   createdAt: string;
   updatedAt: string;
+}
+
+/** A card's work at one flow activity (FR-24.10), with the card fields the work-cell board shows. */
+export interface KanbanJob {
+  id: string;
+  kanbanId: string;
+  cardNumber: string;
+  ruleId: string;
+  ruleCode: string;
+  itemId: string;
+  ruleType: RuleType;
+  cardState: KanbanState;
+  cardQty: string;
+  due: string | null;
+  activityId: string;
+  activityName: string;
+  activityKind: ActivityKind;
+  sequence: number;
+  workCellResourceId: string | null;
+  pickingRequired: boolean;
+  state: JobState;
+  startedAt: string | null;
+  completedAt: string | null;
+  reportedQty: string | null;
+  scrapQty: string | null;
+  handlingUnits: number | null;
+  version: number;
+  updatedAt: string;
+}
+
+/** What an operator reports when a job finishes; quantities are decimal strings. */
+export interface JobCompletion {
+  version: number;
+  reportedQty: string;
+  scrapQty?: string;
+  handlingUnits?: number;
+}
+
+export interface JobColumn {
+  state: JobState;
+  jobs: KanbanJob[];
+}
+
+/** The work-cell board (GET /board?workCellId): one column per job state. */
+export interface JobBoard {
+  workCellId: string;
+  columns: JobColumn[];
+  truncated: boolean;
+  takt?: Takt | null;
 }
 
 export interface GenerateInput {
@@ -265,8 +324,26 @@ export function moveKanban(id: string, input: { to: KanbanState; version: number
   return post<Kanban>(`/kanbans/${encodeURIComponent(id)}:move`, input, key);
 }
 
+export function getKanban(id: string, signal?: AbortSignal): Promise<Kanban> {
+  return send<Kanban>(`/kanbans/${encodeURIComponent(id)}`, {}, signal);
+}
+
 export function fetchBoard(filter: { siteId?: string; flowId?: string; ruleId?: string } = {}, signal?: AbortSignal): Promise<Board> {
   return send<Board>(`/board${query(filter)}`, {}, signal);
+}
+
+export function fetchJobBoard(filter: { workCellId: string; flowId?: string; ruleId?: string }, signal?: AbortSignal): Promise<JobBoard> {
+  return send<JobBoard>(`/board${query(filter)}`, {}, signal);
+}
+
+/** Starts a job (BR-24.6: the first started job runs its card); version is the one the board read. */
+export function startJob(id: string, input: { version: number }, key: string = newKey()): Promise<KanbanJob> {
+  return post<KanbanJob>(`/kanban-jobs/${encodeURIComponent(id)}:start`, input, key);
+}
+
+/** Completes an in-progress job with quantity, scrap and handling units; the last job completes its card. */
+export function completeJob(id: string, input: JobCompletion, key: string = newKey()): Promise<KanbanJob> {
+  return post<KanbanJob>(`/kanban-jobs/${encodeURIComponent(id)}:complete`, input, key);
 }
 
 // Lean subcontracting (FR-24.20, BR-24.16): a preview of the purchase order

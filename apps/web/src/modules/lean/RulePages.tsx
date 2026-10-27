@@ -334,7 +334,12 @@ export function NewRulePage() {
 }
 
 const cardColumns: DataTableColumn<Kanban>[] = [
-  { key: "cardNumber", header: "Card", mono: true },
+  {
+    key: "cardNumber",
+    header: "Card",
+    mono: true,
+    render: (k) => <Link to={`/lean/kanbans/${k.id}`}>{k.cardNumber}</Link>,
+  },
   { key: "qty", header: "Quantity", align: "end" },
   { key: "state", header: "State", render: (k) => <StatusPill status={STATE_LABELS[k.state]} /> },
   { key: "due", header: "Due", render: (k) => formatDateTime(k.due) },

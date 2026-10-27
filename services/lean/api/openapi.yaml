@@ -1,10 +1,11 @@
 openapi: 3.1.0
 info:
   title: Passage Lean Manufacturing
-  version: 0.2.0
+  version: 0.3.0
   description: >
-    Lean manufacturing (wave 24, PSG-24 slice 1): production flows with their
-    activities, kanban rules, kanban cards and the kanban board. Routes match the
+    Lean manufacturing (wave 24, PSG-24 slices 1 to 4): production flows with their
+    activities, kanban rules, kanban cards with one job per flow activity, the
+    kanban board and the work-cell board of jobs. Routes match the
     handlers in internal/api (checked by internal/api/openapi_test.go). Errors are
     RFC 9457 problem details (application/problem+json) with a stable `code`; see
     README.md. The gateway routes /api/v1/lean/* to this service.
@@ -243,7 +244,9 @@ paths:
         Completed → Emptied. The backward moves are Planned → Not planned and, for fixed rules
         only, Emptied → Not planned (card reuse, which counts against the rule's number of
         kanbans again). Moving to Planned sets the due date from the rule lead time when none
-        is set; moving back to Not planned clears it.
+        is set; moving back to Not planned clears it. A card with jobs (its rule has a flow)
+        reaches In progress and Completed only through its jobs (LEAN-0001 here); its jobs
+        follow it to Not planned, Planned and Prepared, and reuse clears what they reported.
       x-passage-duty: lean.kanban.work
       parameters:
         - $ref: '#/components/parameters/Id'
@@ -276,46 +279,114 @@ paths:
   /v1/lean/board:
     get:
       operationId: getKanbanBoard
-      summary: The kanban board, one column per card state (FR-24.10)
+      summary: The kanban board by card state, or the work-cell board of jobs (FR-24.10)
       description: >
-        Every card that is not emptied, plus emptied fixed-rule cards waiting for reuse, oldest
-        due first, at most 500 cards (truncated is true when the limit was reached). Spent
-        event-rule cards are left out.
+        Without workCellId: one column per card state with every card that is not emptied, plus
+        emptied fixed-rule cards waiting for reuse, oldest due first, at most 500 cards. Spent
+        event-rule cards are left out. With workCellId: the work-cell board, one column per job
+        state (Not planned to Completed) with the jobs at that work cell's activities whose card
+        is not emptied, oldest due card first, at most 500 jobs. truncated is true when the limit
+        was reached.
       x-passage-duty: lean.kanban.work
       parameters:
         - { name: siteId, in: query, schema: { type: string, format: uuid } }
         - { name: flowId, in: query, schema: { type: string, format: uuid } }
         - { name: ruleId, in: query, schema: { type: string, format: uuid } }
+        - { name: workCellId, in: query, description: The work cell (wave-9 resource) whose jobs to show., schema: { type: string, format: uuid } }
       responses:
         '200':
-          description: Board columns in state order.
+          description: Board columns in state order; CardBoard without workCellId, JobBoard with it.
           content:
             application/json:
               schema:
-                type: object
-                required: [columns, truncated]
-                properties:
-                  columns:
-                    type: array
-                    items:
-                      type: object
-                      required: [state, kanbans]
-                      properties:
-                        state: { $ref: '#/components/schemas/KanbanState' }
-                        kanbans: { type: array, items: { $ref: '#/components/schemas/Kanban' } }
-                  truncated: { type: boolean }
-                  takt:
-                    nullable: true
-                    description: >
-                      Takt vs cycle (FR-24.14) when the board is filtered to a flow that has a takt time
-                      and activities: the slowest activity's cycle time against the takt time.
-                    type: object
-                    properties:
-                      taktTimeS: { type: integer }
-                      cycleTimeS: { type: integer }
-                      bottleneckActivity: { type: string }
-                      withinTakt: { type: boolean }
+                oneOf:
+                  - $ref: '#/components/schemas/CardBoard'
+                  - $ref: '#/components/schemas/JobBoard'
         '400': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/lean/kanban-jobs/{id}:start:
+    post:
+      operationId: startKanbanJob
+      summary: Start a kanban job on the work-cell board (FR-24.10, BR-24.6)
+      description: >
+        A Planned or Prepared job moves to In progress. The first started job of a card moves the
+        card to In progress; a card still Planned passes through Prepared first, which an activity
+        that requires picking refuses (move the card to Prepared once picking is done). The card's
+        other jobs follow it to Prepared. A completed or running job, or a card that is not
+        Planned, Prepared or In progress, is LEAN-0001.
+      x-passage-duty: lean.kanban.work
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version: { type: integer, minimum: 1, description: The job version the caller read. }
+      responses:
+        '200':
+          description: >
+            The started job with version + 1. A replay returns the first answer with
+            Idempotent-Replayed: true. Writes dev.passage.lean.kanbanjob.statechanged.v1 and, for
+            each card step, dev.passage.lean.kanban.statechanged.v1 with the jobId.
+          content: { application/json: { schema: { $ref: '#/components/schemas/KanbanJob' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404':
+          description: LEAN-0108
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: LEAN-0001 when the job or its card cannot start; LEAN-0104 when the version is stale.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/lean/kanban-jobs/{id}:complete:
+    post:
+      operationId: completeKanbanJob
+      summary: Complete a kanban job with quantity, scrap and handling units (FR-24.10)
+      description: >
+        Only an In progress job completes: a Planned job dragged to Completed is LEAN-0001
+        (AC-24.7). The last job of a card to complete moves the card to Completed with the job's
+        handling units (BR-24.6); that card event carries the job's report and triggers the
+        report as finished (manufacturing) or the transfer (withdrawal).
+      x-passage-duty: lean.kanban.work
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version, reportedQty]
+              properties:
+                version: { type: integer, minimum: 1, description: The job version the caller read. }
+                reportedQty: { $ref: '#/components/schemas/Report', description: 'The good quantity; 0 when all was scrapped.' }
+                scrapQty: { $ref: '#/components/schemas/Report', description: Defaults to 0. reportedQty + scrapQty must be above 0. }
+                handlingUnits: { type: integer, minimum: 1, maximum: 100000, default: 1 }
+      responses:
+        '200':
+          description: >
+            The completed job with version + 1 and cardState. A replay returns the first answer
+            with Idempotent-Replayed: true. Writes dev.passage.lean.kanbanjob.statechanged.v1 and,
+            when the card completes, dev.passage.lean.kanban.statechanged.v1.
+          content: { application/json: { schema: { $ref: '#/components/schemas/KanbanJob' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404':
+          description: LEAN-0108
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: LEAN-0001 when the job is not In progress (AC-24.7); LEAN-0104 when the version is stale.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/lean/subcontracting:preview:
     post:
@@ -438,6 +509,13 @@ components:
     KanbanState:
       type: string
       enum: [not-planned, planned, prepared, in-progress, completed, emptied]
+    JobState:
+      type: string
+      enum: [not-planned, planned, prepared, in-progress, completed]
+    Report:
+      type: string
+      description: Decimal from 0 to below 10^12 with at most 6 decimals.
+      pattern: '^[0-9]{1,12}(\.[0-9]{1,6})?$'
     ActivityRequest:
       type: object
       required: [sequence, name, kind]
@@ -556,9 +634,80 @@ components:
         due: { type: [string, 'null'], format: date-time }
         eventRefType: { type: [string, 'null'] }
         eventRefId: { type: [string, 'null'] }
+        handlingUnits: { type: [integer, 'null'], description: Reported by the card's last job when it completes. }
+        jobCount: { type: integer, description: 'Jobs of the card, one per activity of the rule''s flow; 0 when the rule has no flow.' }
+        jobs: { type: array, items: { $ref: '#/components/schemas/KanbanJob' }, description: 'The card''s jobs in sequence order; on get only.' }
         version: { type: integer }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+    KanbanJob:
+      type: object
+      description: A card's work at one flow activity (PRD 4.24.4 KanbanJob), with the card and activity fields the board shows.
+      required: [id, kanbanId, cardNumber, ruleId, ruleCode, itemId, ruleType, cardState, cardQty, activityId, activityName, activityKind, sequence, pickingRequired, state, version, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        kanbanId: { type: string, format: uuid }
+        cardNumber: { type: string }
+        ruleId: { type: string, format: uuid }
+        ruleCode: { type: string }
+        itemId: { type: string, format: uuid }
+        ruleType: { type: string, enum: [manufacturing, withdrawal] }
+        cardState: { $ref: '#/components/schemas/KanbanState' }
+        cardQty: { $ref: '#/components/schemas/Decimal' }
+        due: { type: [string, 'null'], format: date-time }
+        activityId: { type: string, format: uuid }
+        activityName: { type: string }
+        activityKind: { $ref: '#/components/schemas/ActivityKind' }
+        sequence: { type: integer, minimum: 1 }
+        workCellResourceId: { type: [string, 'null'], format: uuid }
+        pickingRequired: { type: boolean }
+        state: { $ref: '#/components/schemas/JobState' }
+        startedAt: { type: [string, 'null'], format: date-time }
+        completedAt: { type: [string, 'null'], format: date-time }
+        reportedQty: { type: [string, 'null'], description: Decimal; set when completed. }
+        scrapQty: { type: [string, 'null'], description: Decimal; set when completed. }
+        handlingUnits: { type: [integer, 'null'], description: Set when completed. }
+        version: { type: integer }
+        updatedAt: { type: string, format: date-time }
+    Takt:
+      type: [object, 'null']
+      description: >
+        Takt vs cycle (FR-24.14) when the board is filtered to a flow that has a takt time
+        and activities: the slowest activity's cycle time against the takt time.
+      properties:
+        taktTimeS: { type: integer }
+        cycleTimeS: { type: integer }
+        bottleneckActivity: { type: string }
+        withinTakt: { type: boolean }
+    CardBoard:
+      type: object
+      required: [columns, truncated]
+      properties:
+        columns:
+          type: array
+          items:
+            type: object
+            required: [state, kanbans]
+            properties:
+              state: { $ref: '#/components/schemas/KanbanState' }
+              kanbans: { type: array, items: { $ref: '#/components/schemas/Kanban' } }
+        truncated: { type: boolean }
+        takt: { $ref: '#/components/schemas/Takt' }
+    JobBoard:
+      type: object
+      required: [workCellId, columns, truncated]
+      properties:
+        workCellId: { type: string, format: uuid }
+        columns:
+          type: array
+          items:
+            type: object
+            required: [state, jobs]
+            properties:
+              state: { $ref: '#/components/schemas/JobState' }
+              jobs: { type: array, items: { $ref: '#/components/schemas/KanbanJob' } }
+        truncated: { type: boolean }
+        takt: { $ref: '#/components/schemas/Takt' }
     Problem:
       type: object
       description: RFC 9457 problem details.

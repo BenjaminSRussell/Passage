@@ -1,4 +1,4 @@
-import type { KanbanState, Replenishment } from "./api/client";
+import type { Kanban, KanbanState, Replenishment } from "./api/client";
 
 export const dash = "—";
 
@@ -9,6 +9,11 @@ export const QUANTITY = /^\d{1,12}(\.\d{1,6})?$/;
 
 export function positiveQuantity(value: string): boolean {
   return QUANTITY.test(value) && !/^0+(\.0+)?$/.test(value);
+}
+
+/** A reported or scrap quantity: zero or more, up to 12 integer digits and 6 decimals. */
+export function reportQuantity(value: string): boolean {
+  return QUANTITY.test(value);
 }
 
 /** The first block of an id, enough to tell rows apart on screen. */
@@ -57,6 +62,11 @@ export function nextState(state: KanbanState, replenishment: Replenishment): Kan
     case "emptied":
       return replenishment === "fixed" ? "not-planned" : null;
   }
+}
+
+/** A card with jobs reaches In progress and Completed only through its jobs (BR-24.6). */
+export function jobDriven(card: Pick<Kanban, "jobCount">, to: KanbanState): boolean {
+  return card.jobCount > 0 && (to === "in-progress" || to === "completed");
 }
 
 /** A card is overdue when its due time has passed and it is not yet completed (FR-24.14). */

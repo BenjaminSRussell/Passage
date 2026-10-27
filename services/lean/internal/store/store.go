@@ -36,6 +36,7 @@ const (
 	CodeDuplicate           = "LEAN-0105"
 	CodeFlowNotDraft        = "LEAN-0106"
 	CodeRuleNotGenerable    = "LEAN-0107"
+	CodeJobNotFound         = "LEAN-0108"
 	CodeIdempotencyReuse    = "idempotency_key_reuse"
 	CodeIdempotencyInFlight = "idempotency_key_in_flight"
 
@@ -107,6 +108,9 @@ type Rule struct {
 }
 
 // Kanban is a kanban card (FR-24.10) with the rule fields a board shows.
+// JobCount is the number of its jobs (one per activity of the rule's flow);
+// Jobs is filled by GetKanban only. HandlingUnits is reported by the card's
+// last job.
 type Kanban struct {
 	ID            string          `json:"id"`
 	RuleID        string          `json:"ruleId"`
@@ -120,6 +124,9 @@ type Kanban struct {
 	Due           *time.Time      `json:"due"`
 	EventRefType  *string         `json:"eventRefType"`
 	EventRefID    *string         `json:"eventRefId"`
+	HandlingUnits *int            `json:"handlingUnits"`
+	JobCount      int             `json:"jobCount"`
+	Jobs          []Job           `json:"jobs,omitempty"`
 	Version       int             `json:"version"`
 	CreatedAt     time.Time       `json:"createdAt"`
 	UpdatedAt     time.Time       `json:"updatedAt"`
@@ -137,11 +144,13 @@ type Generate struct {
 	Due          *time.Time
 }
 
-// BoardFilter narrows the board; empty fields do not filter.
+// BoardFilter narrows the board; empty fields do not filter. WorkCellID
+// applies to the work-cell board of jobs (BoardJobs) only.
 type BoardFilter struct {
-	SiteID string
-	FlowID string
-	RuleID string
+	SiteID     string
+	FlowID     string
+	RuleID     string
+	WorkCellID string
 }
 
 // Store is what the API layer needs.
@@ -157,6 +166,9 @@ type Store interface {
 	GetKanban(ctx context.Context, id string) (Kanban, error)
 	MoveKanban(ctx context.Context, id string, to domain.State, version int, idem Idem) (Kanban, bool, error)
 	Board(ctx context.Context, f BoardFilter) ([]Kanban, error)
+	BoardJobs(ctx context.Context, f BoardFilter) ([]Job, error)
+	StartJob(ctx context.Context, id string, version int, idem Idem) (Job, bool, error)
+	CompleteJob(ctx context.Context, id string, version int, c domain.Completion, idem Idem) (Job, bool, error)
 	Ping(ctx context.Context) error
 }
 
@@ -614,6 +626,10 @@ func (s *Postgres) GenerateKanbans(ctx context.Context, in Generate, idem Idem) 
 		if err != nil {
 			return err
 		}
+		acts, err := flowActivityIDs(ctx, tx, r.FlowID)
+		if err != nil {
+			return err
+		}
 		var first int
 		if err := tx.QueryRow(ctx, `update kanban_rule set next_card = next_card + $2 where id = $1 returning next_card - $2`, r.ID, len(cards)).Scan(&first); err != nil {
 			return err
@@ -621,13 +637,16 @@ func (s *Postgres) GenerateKanbans(ctx context.Context, in Generate, idem Idem) 
 		p := principal(ctx)
 		for i, c := range cards {
 			k := Kanban{ID: c.ID, RuleID: r.ID, RuleCode: r.Code, ItemID: r.ItemID, RuleType: r.RuleType, Replenishment: r.Replenishment,
-				CardNumber: fmt.Sprintf("%s-%04d", r.Code, first+i), Qty: c.Qty, State: c.State, Due: due, Version: 1}
+				CardNumber: fmt.Sprintf("%s-%04d", r.Code, first+i), Qty: c.Qty, State: c.State, Due: due, JobCount: len(acts), Version: 1}
 			if domain.Replenishment(r.Replenishment) == domain.ReplenishEvent {
 				k.EventRefType, k.EventRefID = in.EventRefType, in.EventRefID
 			}
 			if err := tx.QueryRow(ctx, `insert into kanban (tenant_id, id, rule_id, card_number, qty, state, due, event_ref_type, event_ref_id)
 				values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning created_at, updated_at`,
 				p.TenantID, k.ID, k.RuleID, k.CardNumber, k.Qty, string(k.State), k.Due, k.EventRefType, k.EventRefID).Scan(&k.CreatedAt, &k.UpdatedAt); err != nil {
+				return err
+			}
+			if err := insertJobs(ctx, tx, k, acts); err != nil {
 				return err
 			}
 			var dueText *string
@@ -649,21 +668,25 @@ func (s *Postgres) GenerateKanbans(ctx context.Context, in Generate, idem Idem) 
 }
 
 const kanbanCols = `k.id, k.rule_id, r.code, r.item_id, r.rule_type, r.replenishment, k.card_number, k.qty, k.state, k.due,
-	k.event_ref_type, k.event_ref_id, k.version, k.created_at, k.updated_at`
+	k.event_ref_type, k.event_ref_id, k.handling_units, (select count(*) from kanban_job j where j.kanban_id = k.id),
+	k.version, k.created_at, k.updated_at`
 
 func scanKanban(row pgx.Row) (Kanban, error) {
 	var k Kanban
 	err := row.Scan(&k.ID, &k.RuleID, &k.RuleCode, &k.ItemID, &k.RuleType, &k.Replenishment, &k.CardNumber, &k.Qty, &k.State, &k.Due,
-		&k.EventRefType, &k.EventRefID, &k.Version, &k.CreatedAt, &k.UpdatedAt)
+		&k.EventRefType, &k.EventRefID, &k.HandlingUnits, &k.JobCount, &k.Version, &k.CreatedAt, &k.UpdatedAt)
 	return k, err
 }
 
-// GetKanban returns one card.
+// GetKanban returns one card with its jobs in sequence order.
 func (s *Postgres) GetKanban(ctx context.Context, id string) (Kanban, error) {
 	var out Kanban
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
-		out, err = getKanban(ctx, tx, id, "")
+		if out, err = getKanban(ctx, tx, id, ""); err != nil {
+			return err
+		}
+		out.Jobs, err = queryJobs(ctx, tx, ` where j.kanban_id = $1 order by j.sequence`, id)
 		return err
 	})
 	return out, err
@@ -681,7 +704,10 @@ func getKanban(ctx context.Context, tx pgx.Tx, id, lock string) (Kanban, error) 
 // MoveKanban moves a card one step through the BR-24.6 state machine. Moving
 // to Planned sets the due date from the rule's lead time when none is set;
 // moving back to Not planned clears it. Reusing an emptied fixed-rule card
-// counts against the rule's number of kanbans again (BR-24.7).
+// counts against the rule's number of kanbans again (BR-24.7). A card with
+// jobs reaches In progress and Completed only through its jobs (LEAN-0001
+// here); its jobs follow it to Not planned, Planned and Prepared, and card
+// reuse clears what they reported.
 func (s *Postgres) MoveKanban(ctx context.Context, id string, to domain.State, version int, idem Idem) (Kanban, bool, error) {
 	var out Kanban
 	changed := false
@@ -700,6 +726,10 @@ func (s *Postgres) MoveKanban(ctx context.Context, id string, to domain.State, v
 		if err := domain.CheckRuleMove(domain.Replenishment(k.Replenishment), from, to); err != nil {
 			return err
 		}
+		if k.JobCount > 0 && domain.JobDriven(to) {
+			return &domain.Error{Code: domain.CodeMove, Detail: fmt.Sprintf(
+				"kanban %s has %d jobs: it moves to %s when its jobs are started or completed on the work-cell board", k.CardNumber, k.JobCount, to)}
+		}
 		if from == domain.Emptied && to == domain.NotPlanned {
 			r, err := getRule(ctx, tx, k.RuleID, " for update of r")
 			if err != nil {
@@ -713,12 +743,18 @@ func (s *Postgres) MoveKanban(ctx context.Context, id string, to domain.State, v
 				due = case when $2 = 'not-planned' then null
 				           when $2 = 'planned' then coalesce(k.due, date_trunc('second', now()) + make_interval(hours => r.lead_time_h))
 				           else k.due end,
+				handling_units = case when $2 = 'not-planned' then null else k.handling_units end,
 				version = k.version + 1, updated_at = now()
 			from kanban_rule r where r.id = k.rule_id and k.id = $1
-			returning k.due, k.version, k.updated_at`, id, string(to)).Scan(&k.Due, &k.Version, &k.UpdatedAt); err != nil {
+			returning k.due, k.handling_units, k.version, k.updated_at`, id, string(to)).Scan(&k.Due, &k.HandlingUnits, &k.Version, &k.UpdatedAt); err != nil {
 			return err
 		}
 		k.State = to
+		if k.JobCount > 0 && domain.ValidJobState(to) {
+			if err := followCard(ctx, tx, k.ID, to); err != nil {
+				return err
+			}
+		}
 		if err := enqueue(ctx, tx, "kanban", k.ID, leanevents.KanbanStateChanged, leanevents.KanbanStateChangedData{
 			KanbanID: k.ID, RuleID: k.RuleID, CardNumber: k.CardNumber, ItemID: k.ItemID, RuleType: k.RuleType,
 			From: string(from), To: string(to), Qty: k.Qty.String(), Version: k.Version}); err != nil {

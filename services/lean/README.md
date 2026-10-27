@@ -1,15 +1,16 @@
 # lean
 
-Lean manufacturing for Passage (wave 24, PSG-24, slices 1 and 2). Production flows with their
+Lean manufacturing for Passage (wave 24, PSG-24, slices 1, 2 and 4). Production flows with their
 activities and activation, kanban rules (fixed, scheduled, event), kanban generation, the
 kanban card state machine and the kanban board (slice 1). Slice 2 adds takt vs cycle on the
 board (FR-24.14) and the lean subcontracting price rule as a preview of the purchase order
-lines for completed service jobs (FR-24.20, BR-24.16).
+lines for completed service jobs (FR-24.20, BR-24.16). Slice 4 adds kanban jobs, one per
+activity of the rule's flow, started and completed on the work-cell board with quantity, scrap
+and handling units; the jobs drive their card to In progress and Completed (FR-24.10, BR-24.6).
 
-Slice 1 persists flows, activities, rules and cards (Postgres, RLS on every table, outbox
-events in the same transaction). The subcontracting preview stores nothing. Kanban jobs per
-activity, flow costing periods, and PO creation and receipt in purchasing are later slices;
-see `NOT-IMPLEMENTED.md`.
+Flows, activities, rules, cards and jobs are stored in Postgres (RLS on every table, outbox
+events in the same transaction). The subcontracting preview stores nothing. Flow costing
+periods and PO creation and receipt in purchasing are later slices; see `NOT-IMPLEMENTED.md`.
 
 ## Layout
 
@@ -18,12 +19,15 @@ cmd/lean              entrypoint: dbx.Connect, optional dbx.Migrate, httpx route
 internal/domain       pure rules (no I/O): kanban.go (BR-24.6 state machine, event cards),
                       rules.go (FR-24.9 rule check, BR-24.7 count and capacity, BR-24.8
                       quantities), flow.go (FR-24.8 connectivity, FR-24.14 takt vs cycle),
-                      flowcost.go (BR-24.9), subcontract.go (FR-24.20, BR-24.16)
-internal/store        Postgres repository: flows, rules, generation, moves, board
+                      flowcost.go (BR-24.9), subcontract.go (FR-24.20, BR-24.16), jobs.go
+                      (job start and completion and the card steps they cause, BR-24.6)
+internal/store        Postgres repository: flows, rules, generation, moves, board (store.go);
+                      kanban jobs and the work-cell board (jobs.go)
 internal/api          HTTP handlers: decode → validate → tenant → store/domain → JSON/problem
 internal/events       event types and payloads
 migrations/           0001_init.sql (production_flow, flow_activity, kanban_rule, kanban,
-                      idempotency_keys, outbox), RLS on every table
+                      idempotency_keys, outbox), 0002_kanban_jobs.sql (kanban_job,
+                      kanban.handling_units), RLS on every table
 api/openapi.yaml      OpenAPI 3.1, checked against the router by internal/api/openapi_test.go
 events/asyncapi.yaml  AsyncAPI 3, checked against internal/events by events_test.go
 charts/lean           Helm chart (helm lint), 2 replicas as in PRD 4.24.10
@@ -59,6 +63,12 @@ skipped when `PASSAGE_TEST_DATABASE_URL` is unset.
 - FR-24.8 (`lean-flow-demo`): a process activity without an output cannot be activated
   (LEAN-0004); predecessor cycles are refused.
 - FR-24.14: the board filtered to a flow reports takt time against the slowest activity.
+- FR-24.10 and BR-24.6 with jobs: a card of a rule with a flow gets one job per activity; the
+  first started job runs the card (through Prepared unless the activity needs picking), the
+  last completed job completes it with that job's report and handling units, exactly once
+  under concurrent completions; a card with jobs is never moved to In progress or Completed by
+  hand; reuse clears the jobs (domain property test and store tests). AC-24.7 on the work-cell
+  board: a job that has not started cannot complete (LEAN-0001).
 - AC-24.17: a service job of 20 on vendor V in `po-per-kanban` mode gives one PO line of 20 at
   the agreement price; periodic-po accumulates per vendor, item and price (rapid property:
   quantity and amount are conserved); the agreement valid on the completion date prices the
@@ -77,9 +87,11 @@ skipped when `PASSAGE_TEST_DATABASE_URL` is unset.
 | GET | `/v1/lean/kanban-rules/{id}` | `lean.read` | One rule |
 | POST | `/v1/lean/kanban-rules:fixed-count` | `lean.kanban-rule.write` | Suggested number of kanbans (BR-24.7); writes nothing |
 | POST | `/v1/lean/kanbans:generate` | `lean.kanban.write` | Cards for a fixed rule (count) or an event rule (demand); Idempotency-Key |
-| GET | `/v1/lean/kanbans/{id}` | `lean.read` | One card |
+| GET | `/v1/lean/kanbans/{id}` | `lean.read` | One card with its jobs |
 | POST | `/v1/lean/kanbans/{id}:move` | `lean.kanban.work` | Move a card one step (BR-24.6); `version`; Idempotency-Key |
-| GET | `/v1/lean/board` | `lean.kanban.work` | Board columns by state; `siteId`, `flowId`, `ruleId`; with `flowId`, `takt` compares takt time and the bottleneck cycle time (FR-24.14) |
+| GET | `/v1/lean/board` | `lean.kanban.work` | Board columns by card state; `siteId`, `flowId`, `ruleId`; with `flowId`, `takt` compares takt time and the bottleneck cycle time (FR-24.14). With `workCellId`: the work-cell board, columns of jobs by job state (FR-24.10) |
+| POST | `/v1/lean/kanban-jobs/{id}:start` | `lean.kanban.work` | Start a job; the first one runs its card (BR-24.6); `version`; Idempotency-Key |
+| POST | `/v1/lean/kanban-jobs/{id}:complete` | `lean.kanban.work` | Complete a job with `reportedQty`, `scrapQty`, `handlingUnits`; the last one completes its card; `version`; Idempotency-Key |
 | POST | `/v1/lean/subcontracting:preview` | `lean.flow.write` | PO lines for completed service jobs priced by purchase agreement (FR-24.20, BR-24.16); writes nothing |
 
 Duties are enforced with the kernel `authz.RequireDuty`. The OPA entries are a handoff to
@@ -91,14 +103,15 @@ Duties are enforced with the kernel `authz.RequireDuty`. The OPA entries are a h
 |---|---|
 | `dev.passage.lean.flow.activated.v1` | a flow is activated |
 | `dev.passage.lean.kanban.created.v1` | a card is generated (one event per card) |
-| `dev.passage.lean.kanban.statechanged.v1` | a card moves (PRD `kanban.state-changed`) |
+| `dev.passage.lean.kanban.statechanged.v1` | a card moves (PRD `kanban.state-changed`); when a job moved it, with `jobId` and, on completion, the job's quantities and handling units |
+| `dev.passage.lean.kanbanjob.statechanged.v1` | a job is started or completed on the work-cell board |
 
 ## Error codes
 
 | Code | HTTP | Meaning |
 |---|---|---|
 | `COM-0001` | 400 | Malformed body or invalid input; field errors in `errors` |
-| `LEAN-0001` | 409 | Kanban move not allowed (BR-24.6, AC-24.7) |
+| `LEAN-0001` | 409 | Kanban or job move not allowed (BR-24.6, AC-24.7), including a hand move of a card with jobs to In progress or Completed |
 | `LEAN-0002` | 409 | Rule would exceed its number of kanbans (BR-24.7) |
 | `LEAN-0004` | 422 | Process activity has no output location (FR-24.8) |
 | `LEAN-0005` | 422 | No valid purchase agreement for a service item on the job's completion date (FR-24.20) |
@@ -109,6 +122,7 @@ Duties are enforced with the kernel `authz.RequireDuty`. The OPA entries are a h
 | `LEAN-0105` | 409 | Flow name in the value stream, activity name or sequence, or rule code already used |
 | `LEAN-0106` | 409 | Flow is not a draft, so it cannot be activated |
 | `LEAN-0107` | 422 | Rule cannot generate now: scheduled replenishment, or not effective today |
+| `LEAN-0108` | 404 | Kanban job not found |
 | `idempotency_key_reuse` | 422 | Idempotency-Key reused with a different request |
 | `idempotency_key_in_flight` | 409 | A concurrent request with the same key committed first; retry for its answer |
 | `AUTH-0001` | 401 | No tenant or principal |

@@ -78,6 +78,8 @@ func (a *API) Register(r chi.Router) {
 	r.With(read).Get("/v1/lean/kanbans/{id}", a.getKanban)
 	r.With(work).Post("/v1/lean/kanbans/{id}:move", a.move)
 	r.With(work).Get("/v1/lean/board", a.board)
+	r.With(work).Post("/v1/lean/kanban-jobs/{id}:start", a.startJob)
+	r.With(work).Post("/v1/lean/kanban-jobs/{id}:complete", a.completeJob)
 	r.With(authz.RequireDuty(DutyFlowWrite)).Post("/v1/lean/subcontracting:preview", handle(subcontractLines))
 }
 
@@ -93,8 +95,8 @@ func (a *API) ready(w http.ResponseWriter, r *http.Request) {
 }
 
 // fail maps domain errors to problems and writes the result. Malformed input
-// is 400; a move, capacity or settlement rule the card or rule state refuses is
-// 409 (BR-24.6, BR-24.7, BR-24.9); a flow that is not connected (FR-24.8) or a
+// is 400; a card or job move, capacity or settlement rule the card, job or rule
+// state refuses is 409 (BR-24.6, BR-24.7, BR-24.9); a flow that is not connected (FR-24.8) or a
 // service job without a purchase agreement (FR-24.20, LEAN-0005) is 422.
 func fail(w http.ResponseWriter, r *http.Request, err error) {
 	var de *domain.Error
@@ -649,15 +651,20 @@ type column struct {
 	Kanbans []store.Kanban `json:"kanbans"`
 }
 
-// board serves the kanban board: one column per state in BR-24.6 order.
+// board serves the kanban board: one column per card state in BR-24.6 order
+// or, with workCellId, the work-cell board of jobs (jobBoard).
 func (a *API) board(w http.ResponseWriter, r *http.Request) {
 	if _, ok := principal(w, r); !ok {
 		return
 	}
 	fields := map[string]string{}
-	q := uuidQuery(r, fields, "siteId", "flowId", "ruleId")
+	q := uuidQuery(r, fields, "siteId", "flowId", "ruleId", "workCellId")
 	if len(fields) > 0 {
 		invalid(w, r, fields)
+		return
+	}
+	if q["workCellId"] != "" {
+		a.jobBoard(w, r, store.BoardFilter{SiteID: q["siteId"], FlowID: q["flowId"], RuleID: q["ruleId"], WorkCellID: q["workCellId"]})
 		return
 	}
 	cards, err := a.store.Board(r.Context(), store.BoardFilter{SiteID: q["siteId"], FlowID: q["flowId"], RuleID: q["ruleId"]})
