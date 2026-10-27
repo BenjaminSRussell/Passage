@@ -43,6 +43,9 @@ type fakeStore struct {
 	putStructures []putStructureCall
 	dimValues     []domain.DimensionValue
 	putValues     []domain.DimensionValue
+	// templates answer the description template reads; putTemplates records the writes.
+	templates    []store.DescriptionTemplate
+	putTemplates []store.DescriptionTemplate
 }
 
 type putStructureCall struct {
@@ -145,6 +148,25 @@ func (f *fakeStore) ListDimensionValues(context.Context, string) ([]domain.Dimen
 
 func (f *fakeStore) PutDimensionValue(_ context.Context, _ string, in domain.DimensionValue) (domain.DimensionValue, bool, error) {
 	f.putValues = append(f.putValues, in)
+	return in, f.created, f.err
+}
+
+func (f *fakeStore) ListDescriptionTemplates(context.Context) ([]store.DescriptionTemplate, error) {
+	return f.templates, f.err
+}
+
+func (f *fakeStore) GetDescriptionTemplate(_ context.Context, id string) (store.DescriptionTemplate, error) {
+	for _, d := range f.templates {
+		if d.ID == id {
+			return d, f.err
+		}
+	}
+	return store.DescriptionTemplate{}, templateNotFound()
+}
+
+func (f *fakeStore) PutDescriptionTemplate(_ context.Context, id string, in store.DescriptionTemplate) (store.DescriptionTemplate, bool, error) {
+	in.ID = id
+	f.putTemplates = append(f.putTemplates, in)
 	return in, f.created, f.err
 }
 

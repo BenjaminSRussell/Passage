@@ -186,6 +186,17 @@ components:
             key: { type: string }
             replayed: { type: boolean }
         traceId: { type: string }
+        notices:
+          type: array
+          description: |
+            Info-severity messages on an accepted posting, such as LEDGER_DESCRIPTION_TRUNCATED when an
+            expanded default description was cut to 255 characters (FR-11.17, LEDGER-0031).
+          items:
+            type: object
+            required: [code, message]
+            properties:
+              code: { type: string, example: LEDGER_DESCRIPTION_TRUNCATED }
+              message: { type: string }
     Ledger:
       type: object
       properties:
@@ -331,6 +342,36 @@ components:
           properties:
             id: { type: string, format: uuid }
             ledgerId: { type: string, format: uuid }
+    DescriptionTemplateBody:
+      type: object
+      required: [scope, sourceType, template]
+      properties:
+        scope: { type: string, enum: [tenant, legal_entity] }
+        legalEntityId: { type: string, format: uuid, description: Required for legal_entity scope; omitted for tenant scope }
+        sourceType: { type: string, pattern: '^[a-z][a-z0-9_]{0,59}$', example: manual_journal }
+        language: { type: string, pattern: '^[a-z]{2}(-[A-Z]{2})?$', default: en }
+        template: { type: string, minLength: 1, maxLength: 255, example: "Journal %1 of %2" }
+        fieldBindings:
+          type: object
+          description: Placeholder key (1 to 9) to field name
+          additionalProperties:
+            type: string
+            enum: [voucher, party_name, document_date, amount_txn, currency_txn, source_id, period]
+          example: { "1": voucher, "2": document_date }
+    DescriptionTemplate:
+      type: object
+      required: [id, scope, legalEntityId, sourceType, language, template, fieldBindings, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        scope: { type: string, enum: [tenant, legal_entity] }
+        legalEntityId: { type: [string, "null"], format: uuid }
+        sourceType: { type: string }
+        language: { type: string }
+        template: { type: string }
+        fieldBindings:
+          type: object
+          additionalProperties: { type: string }
+        updatedAt: { type: string, format: date-time }
     DimensionValueBody:
       type: object
       required: [name, suspended]
@@ -666,12 +707,14 @@ paths:
       operationId: postEntry
       x-passage-duty: ledger.journal.post
       description: |
-        Posts one balanced entry atomically or rejects it entirely. Pipeline (slice 1): schema,
+        Posts one balanced entry atomically or rejects it entirely. Pipeline: schema,
         ledger resolution, posting-date window, account existence, postability and suspension,
         reconciliation-account protection for manual journals (source ledger/manual_journal),
-        currency and scale, dimension attributes, combination interning, balance check, sequence
-        assignment, insert, balance upsert, outbox. Account structures, fiscal periods and FX
-        are not yet applied (NOT-IMPLEMENTED.md). The database re-checks the balance at commit.
+        currency and scale, dimension attributes, account structure and dimension value register
+        checks, combination interning, balance check, default descriptions (FR-11.17: the
+        source.type template fills an omitted description and omitted line texts), sequence
+        assignment, insert, balance upsert, outbox. Fiscal periods and FX are not yet applied
+        (NOT-IMPLEMENTED.md). The database re-checks the balance at commit.
         Retries with the same Idempotency-Key and payload replay the stored response (200 with
         idempotency.replayed = true). Idempotency records are kept 400 days; replays after expiry
         are new requests.
@@ -929,6 +972,83 @@ paths:
         "400": { $ref: "#/components/responses/Problem400" }
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }
+  /api/v1/ledger/description-templates:
+    get:
+      tags: [templates]
+      operationId: listDescriptionTemplates
+      x-passage-duty: ledger.journal.read
+      description: |
+        Default description templates (FR-11.17): the tenant templates and the legal entity templates
+        inside the caller's legal-entity scope, ordered by sourceType, language, tenant first.
+      responses:
+        "200":
+          description: Templates
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/DescriptionTemplate" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+  /api/v1/ledger/description-templates/{id}:
+    get:
+      tags: [templates]
+      operationId: getDescriptionTemplate
+      x-passage-duty: ledger.journal.read
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Template
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DescriptionTemplate" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+    put:
+      tags: [templates]
+      operationId: putDescriptionTemplate
+      x-passage-duty: ledger.setup.write
+      description: |
+        Creates (201) or replaces (200) a default description template (FR-11.17). Naturally
+        idempotent. Every placeholder %1..%9 in the template must be bound in fieldBindings and every
+        binding must appear in the template. A legal entity template overrides the tenant template
+        for the same sourceType and language. A second template for the same scope, legal entity,
+        sourceType and language is 409 LEDGER_DESCRIPTION_TEMPLATE_DUPLICATE. A caller scoped to one
+        legal entity may write only that entity's templates (403 AUTH-0003 otherwise). Posting applies
+        the template when the request omits its description or a line omits its text.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DescriptionTemplateBody" }
+      responses:
+        "200":
+          description: Template replaced
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DescriptionTemplate" }
+        "201":
+          description: Template created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DescriptionTemplate" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "409": { $ref: "#/components/responses/Problem409" }
   /readyz:
     get:
       tags: [ops]

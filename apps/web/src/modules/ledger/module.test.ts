@@ -37,6 +37,9 @@ describe("ledger module", () => {
       "/ledger/structures/new",
       "/ledger/structures/:id",
       "/ledger/dimension-values",
+      "/ledger/description-templates",
+      "/ledger/description-templates/new",
+      "/ledger/description-templates/:id",
     ]);
     expect(ledger.nav.every((n) => n.to.startsWith("/ledger"))).toBe(true);
   });
@@ -49,6 +52,8 @@ describe("ledger module", () => {
     // GET .../account-structures and .../dimension-values require ledger.journal.read.
     expect(ledger.nav.find((n) => n.to === "/ledger/structures")?.duty).toBe("ledger.journal.read");
     expect(ledger.nav.find((n) => n.to === "/ledger/dimension-values")?.duty).toBe("ledger.journal.read");
+    // GET /api/v1/ledger/description-templates requires ledger.journal.read.
+    expect(ledger.nav.find((n) => n.to === "/ledger/description-templates")?.duty).toBe("ledger.journal.read");
   });
 
   it("is auto-discovered by the registry", () => {

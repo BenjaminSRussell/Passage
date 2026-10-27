@@ -2,7 +2,7 @@
 
 The ledger is the universal journal: one append-only, double-entry journal per
 ledger, the chart of accounts, the posting API every subledger calls, and the
-balance projection that trial balances read. Wave 11 (PSG-11, slices 1 to 3).
+balance projection that trial balances read. Wave 11 (PSG-11, slices 1 to 4).
 
 Reference: `docs/prd/phase-2-financial-core.md` section 2.11. What is built and
 what is not is listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
@@ -94,6 +94,28 @@ what is not is listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
 - Web: account structure list and editor (segments, filter, constraint grid, activate,
   retire) and a dimension value list and form.
 
+## What slice 4 adds
+
+- Default description templates (FR-11.17): `GET /api/v1/ledger/description-templates`,
+  `GET`/`PUT .../description-templates/{id}` (201 created, 200 replaced; duty
+  `ledger.setup.write`, PRD "Maintain ledger setup"). A template has a scope (`tenant`, or
+  `legal_entity` with `legalEntityId`), a `sourceType` (the posting's `source.type`, such as
+  `manual_journal`), a `language` (default `en`), text of at most 255 characters with
+  placeholders `%1`..`%9`, and `fieldBindings` from placeholder to one of `voucher`,
+  `party_name`, `document_date`, `amount_txn`, `currency_txn`, `source_id`, `period`. Every
+  placeholder must be bound and every binding used. One template per scope, legal entity,
+  source type and language (409 `LEDGER_DESCRIPTION_TEMPLATE_DUPLICATE`).
+- Legal-entity scope: tenant templates are visible to every caller; a legal entity's own
+  templates only inside the caller's scope (restrictive RLS policy). A caller scoped to one
+  legal entity may write only that entity's templates (403 `AUTH-0003`).
+- Posting stage (after the balance check, before sequence assignment): when the request
+  omits `description` or a line omits `text`, the template for the source type is expanded
+  (the legal entity's template first, then the tenant's) and fills only the empty fields
+  (AC-11.19). `voucher` is the voucher the entry receives; `amount_txn` is the debit total.
+  An expansion longer than 255 characters is cut with an ellipsis and the response carries
+  the info notice `LEDGER_DESCRIPTION_TRUNCATED` in `notices[]` (LEDGER-0031).
+- Web: description template list and create/edit form with a live preview.
+
 ## Layout
 
 ```
@@ -102,7 +124,7 @@ internal/domain/       pure rules: validation, combination hashing, balance aggr
 internal/store/        Postgres repositories (pgx, RLS through dbx.WithTenantTx)
 internal/api/          HTTP handlers, DTOs, duties (authz.RequireDuty)
 internal/events/       event type constants and payloads
-migrations/            0001..0007 SQL, applied in order by dbx.Migrate (0005: passage_app grants; 0006: reason codes; 0007: account structures, dimension values)
+migrations/            0001..0008 SQL, applied in order by dbx.Migrate (0005: passage_app grants; 0006: reason codes; 0007: account structures, dimension values; 0008: description templates)
 api/openapi.yaml       OpenAPI 3.1 for every route
 events/asyncapi.yaml   AsyncAPI 3 for every event
 charts/ledger/         Helm chart (ports 8080 http, 9090 admin; readiness on admin /readyz)
@@ -144,7 +166,7 @@ mounted route and its duty is in `api/openapi.yaml`. Store tests use
 |---|---|
 | `ledger.ledger.write` | `POST /ledgers` |
 | `ledger.account.write` | `PUT /charts/{chart}/accounts/{number}` |
-| `ledger.journal.read` | `GET /ledgers/{id}`, `GET /charts/{chart}/accounts`, `GET /journal-entries/{id}`, `GET /reason-codes[/{code}]`, `GET /ledgers/{ledger}/account-structures[/{id}]`, `GET /ledgers/{ledger}/dimension-values` |
+| `ledger.journal.read` | `GET /ledgers/{id}`, `GET /charts/{chart}/accounts`, `GET /journal-entries/{id}`, `GET /reason-codes[/{code}]`, `GET /ledgers/{ledger}/account-structures[/{id}]`, `GET /ledgers/{ledger}/dimension-values`, `GET /description-templates[/{id}]` |
 | `ledger.journal.post` | `POST /journal-entries`, `POST /validate` |
 | `ledger.journal.reverse` | `POST /journal-entries/{id}/reverse` |
 | `ledger.balance.read` | `GET /balances` |
@@ -152,6 +174,7 @@ mounted route and its duty is in `api/openapi.yaml`. Store tests use
 | `ledger.reason.write` | `PUT /reason-codes/{code}` (PRD duty "Maintain reason codes") |
 | `ledger.structure.write` | `PUT /ledgers/{ledger}/account-structures/{id}` (PRD duty "Maintain account structures") |
 | `ledger.dimension.write` | `PUT /ledgers/{ledger}/dimension-values/{attribute}/{value}` (PRD duty "Maintain financial dimensions") |
+| `ledger.setup.write` | `PUT /description-templates/{id}` (PRD duty "Maintain ledger setup") |
 
 ## Error codes
 
@@ -189,6 +212,9 @@ today:
 | `LEDGER_ENTRY_NOT_FOUND` | 404: journal entry does not exist or is outside the caller's scope |
 | `LEDGER_REASON_NOT_FOUND` | 404: reason code does not exist in the tenant |
 | `LEDGER_CODE_DUPLICATE` | 409: a ledger with this code already exists in the tenant |
+| `LEDGER_DESCRIPTION_TEMPLATE_NOT_FOUND` | 404: description template does not exist or belongs to a legal entity outside the caller's scope |
+| `LEDGER_DESCRIPTION_TEMPLATE_DUPLICATE` | 409: a template already exists for the scope, legal entity, source type and language (FR-11.17) |
+| `LEDGER_DESCRIPTION_TRUNCATED` | Info notice in `notices[]` of an accepted posting: the expanded default description was cut to 255 characters (FR-11.17, LEDGER-0031) |
 
 Platform codes: `AUTH-0001` (401, missing or malformed tenant), `AUTH-0003`
 (403, missing duty or caller scoped to another legal entity), `COM-0001`

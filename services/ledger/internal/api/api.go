@@ -56,6 +56,9 @@ const (
 	// Maintain account structures (§2.11.17) and the dimension register.
 	dutyStructureWrite = "ledger.structure.write"
 	dutyDimensionWrite = "ledger.dimension.write"
+
+	// Maintain ledger setup (§2.11.17): description templates, splitting rules.
+	dutySetupWrite = "ledger.setup.write"
 )
 
 var (
@@ -104,6 +107,9 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(dutyStructureWrite)).Put("/ledgers/{ledger}/account-structures/{id}", a.putStructure)
 		r.With(authz.RequireDuty(dutyRead)).Get("/ledgers/{ledger}/dimension-values", a.listDimensionValues)
 		r.With(authz.RequireDuty(dutyDimensionWrite)).Put("/ledgers/{ledger}/dimension-values/{attribute}/{value}", a.putDimensionValue)
+		r.With(authz.RequireDuty(dutyRead)).Get("/description-templates", a.listDescriptionTemplates)
+		r.With(authz.RequireDuty(dutyRead)).Get("/description-templates/{id}", a.getDescriptionTemplate)
+		r.With(authz.RequireDuty(dutySetupWrite)).Put("/description-templates/{id}", a.putDescriptionTemplate)
 	})
 }
 

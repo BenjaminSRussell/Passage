@@ -366,3 +366,66 @@ export async function reverseEntry(
   if (!res.ok) throw await readProblem(res);
   return reverseResultSchema.parse(await res.json()).entries;
 }
+
+/** Named fields a description template placeholder may bind to (FR-11.17), in PRD order. */
+export const DESCRIPTION_FIELDS = [
+  "voucher",
+  "party_name",
+  "document_date",
+  "amount_txn",
+  "currency_txn",
+  "source_id",
+  "period",
+] as const;
+export type DescriptionField = (typeof DESCRIPTION_FIELDS)[number];
+
+/** Default description template (FR-11.17). A legal entity template overrides the tenant one. */
+export const descriptionTemplateSchema = z.object({
+  id: z.string(),
+  scope: z.enum(["tenant", "legal_entity"]),
+  legalEntityId: z.string().nullable(),
+  sourceType: z.string(),
+  language: z.string(),
+  template: z.string(),
+  fieldBindings: z.record(z.string()),
+  updatedAt: z.string(),
+});
+export type DescriptionTemplate = z.infer<typeof descriptionTemplateSchema>;
+
+/** Body of PUT /api/v1/ledger/description-templates/{id}. */
+export interface DescriptionTemplateInput {
+  scope: DescriptionTemplate["scope"];
+  legalEntityId?: string;
+  sourceType: string;
+  language: string;
+  template: string;
+  fieldBindings: Record<string, string>;
+}
+
+const descriptionTemplateListSchema = z.object({ items: z.array(descriptionTemplateSchema) });
+
+/** GET /api/v1/ledger/description-templates: tenant templates and those of legal entities in scope. */
+export async function fetchDescriptionTemplates(fetchImpl: FetchLike = defaultFetch): Promise<DescriptionTemplate[]> {
+  const body = await getJSON("/api/v1/ledger/description-templates", descriptionTemplateListSchema, fetchImpl);
+  return body.items;
+}
+
+/** GET /api/v1/ledger/description-templates/{id}; 404 LEDGER_DESCRIPTION_TEMPLATE_NOT_FOUND when missing. */
+export function fetchDescriptionTemplate(id: string, fetchImpl: FetchLike = defaultFetch): Promise<DescriptionTemplate> {
+  return getJSON(`/api/v1/ledger/description-templates/${encodeURIComponent(id)}`, descriptionTemplateSchema, fetchImpl);
+}
+
+/** PUT /api/v1/ledger/description-templates/{id}: creates or replaces a template. */
+export async function putDescriptionTemplate(
+  id: string,
+  input: DescriptionTemplateInput,
+  fetchImpl: FetchLike = defaultFetch,
+): Promise<DescriptionTemplate> {
+  const res = await fetchImpl(`/api/v1/ledger/description-templates/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw await readProblem(res);
+  return descriptionTemplateSchema.parse(await res.json());
+}

@@ -85,6 +85,9 @@ func TestOpenAPI_MatchesRoutes(t *testing.T) {
 		"PUT /api/v1/ledger/ledgers/{ledger}/account-structures/{id}":              dutyStructureWrite,
 		"GET /api/v1/ledger/ledgers/{ledger}/dimension-values":                     dutyRead,
 		"PUT /api/v1/ledger/ledgers/{ledger}/dimension-values/{attribute}/{value}": dutyDimensionWrite,
+		"GET /api/v1/ledger/description-templates":                                 dutyRead,
+		"GET /api/v1/ledger/description-templates/{id}":                            dutyRead,
+		"PUT /api/v1/ledger/description-templates/{id}":                            dutySetupWrite,
 	}
 	for op, want := range duties {
 		if got := documented[op]; got != want {

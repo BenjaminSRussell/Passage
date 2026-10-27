@@ -44,6 +44,9 @@ type Store interface {
 	ListReasonCodes(ctx context.Context) ([]ReasonCode, error)
 	GetReasonCode(ctx context.Context, code string) (ReasonCode, error)
 	PutReasonCode(ctx context.Context, code string, in ReasonCode) (ReasonCode, bool, error)
+	ListDescriptionTemplates(ctx context.Context) ([]DescriptionTemplate, error)
+	GetDescriptionTemplate(ctx context.Context, id string) (DescriptionTemplate, error)
+	PutDescriptionTemplate(ctx context.Context, id string, in DescriptionTemplate) (DescriptionTemplate, bool, error)
 	ListStructures(ctx context.Context, ledgerID string) ([]domain.Structure, error)
 	GetStructure(ctx context.Context, ledgerID, id string) (domain.Structure, error)
 	PutStructure(ctx context.Context, ledgerID, id string, in domain.Structure) (domain.Structure, bool, error)
@@ -157,6 +160,14 @@ type EntryResult struct {
 	Entries     []Entry     `json:"entries"`
 	Idempotency Idempotency `json:"idempotency"`
 	TraceID     string      `json:"traceId"`
+	Notices     []Notice    `json:"notices,omitempty"`
+}
+
+// Notice is an info-severity message on an accepted posting, such as
+// LEDGER_DESCRIPTION_TRUNCATED (LEDGER-0031).
+type Notice struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }
 
 // Entry is a posted journal entry with its lines.

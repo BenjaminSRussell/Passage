@@ -75,19 +75,23 @@ func (s *Postgres) PostEntry(ctx context.Context, in PostInput) (EntryResult, er
 		if !res.Valid() {
 			return &domain.RejectedError{Violations: res.Violations}
 		}
+		description, notices, err := applyDefaultDescriptions(ctx, tx, p.TenantID, ledger, in, res.Lines)
+		if err != nil {
+			return err
+		}
 		lines := make([]writeLine, 0, len(res.Lines))
 		for _, v := range res.Lines {
 			lines = append(lines, writeLine{id: ids.New(), valid: v})
 		}
 		entry, err := writeEntry(ctx, tx, p.TenantID, newEntry{
 			ledger: ledger, documentID: in.DocumentID, postingDate: in.PostingDate, documentDate: in.DocumentDate,
-			description: in.Description, source: in.Source, key: in.Key, hash: in.Hash, actor: in.Actor,
+			description: description, source: in.Source, key: in.Key, hash: in.Hash, actor: in.Actor,
 			traceID: in.TraceID, lines: lines,
 		})
 		if err != nil {
 			return err
 		}
-		out = EntryResult{Entries: []Entry{entry}, Idempotency: Idempotency{Key: in.Key}, TraceID: in.TraceID}
+		out = EntryResult{Entries: []Entry{entry}, Idempotency: Idempotency{Key: in.Key}, TraceID: in.TraceID, Notices: notices}
 		return storeIdempotent(ctx, tx, p.TenantID, ledger.LegalEntityID, in.Key, in.Hash, out)
 	})
 	return out, idempotencyRace(err)
@@ -222,6 +226,11 @@ func reversalLines(ctx context.Context, tx pgx.Tx, tenantID, entryID string, neg
 	return out, rows.Err()
 }
 
+// voucherOf formats the voucher of posting sequence seq on a ledger (FR-11.6).
+func voucherOf(ledgerCode string, seq int64) string {
+	return fmt.Sprintf("%s-%07d", ledgerCode, seq)
+}
+
 // writeEntry inserts an entry, its lines, new dimension combinations and the
 // balance projection deltas, and enqueues journal.posted. It runs inside the
 // caller's transaction, after the ledger row lock.
@@ -231,7 +240,7 @@ func writeEntry(ctx context.Context, tx pgx.Tx, tenantID string, ne newEntry) (E
 	if _, err := tx.Exec(ctx, `update ledger set next_sequence = next_sequence + 1 where tenant_id = $1 and id = $2`, tenantID, l.ID); err != nil {
 		return Entry{}, err
 	}
-	voucher := fmt.Sprintf("%s-%07d", l.Code, seq)
+	voucher := voucherOf(l.Code, seq)
 	entryID := ids.New()
 	period := domain.PeriodKey(ne.postingDate)
 	postingDate := ne.postingDate.Format(time.DateOnly)
