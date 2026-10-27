@@ -22,8 +22,10 @@ import (
 
 // Origin source types written by this service.
 const (
-	sourceJournalLine = "INVENT_JOURNAL_LINE"
-	sourceBlocking    = "BLOCKING"
+	sourceJournalLine     = "INVENT_JOURNAL_LINE"
+	sourceBlocking        = "BLOCKING"
+	sourceOwnershipChange = "OWNERSHIP_CHANGE" // receipt leg of an ownership-change line
+	sourceConsignmentLine = "CONSIGNMENT_LINE" // vendor-owned receipt of a replenishment line
 )
 
 // PostParams are the posting-profile and policy inputs of a journal post.
@@ -32,6 +34,23 @@ type PostParams struct {
 	InventoryAccount  string
 	AdjustmentAccount string // offset for ADJUSTMENT and COUNT journals
 	OpeningAccount    string // offset (migration clearing) for OPENING_BALANCE journals
+	// ConsignmentAccount is the consignment accrual offset of OWNERSHIP_CHANGE
+	// journals (posting profile account consignment_accrual; SAP OBYC KON).
+	ConsignmentAccount string
+}
+
+// offsetAccount is the GL offset of a journal: MOVEMENT its own offset account,
+// the other types the posting-profile account for their type.
+func offsetAccount(j domain.Journal, p PostParams) string {
+	switch j.Type {
+	case domain.JournalAdjustment, domain.JournalCount:
+		return p.AdjustmentAccount
+	case domain.JournalOpeningBalance:
+		return p.OpeningAccount
+	case domain.JournalOwnershipChange:
+		return p.ConsignmentAccount
+	}
+	return j.OffsetAccountID
 }
 
 // row is one projection row touched by a posting: the indexes of its plan
@@ -108,12 +127,9 @@ func (s *Postgres) postLoaded(ctx context.Context, tx pgx.Tx, tenantID string, j
 	if err := domain.ValidateJournal(j, s.rules); err != nil {
 		return domainProblem(err)
 	}
-	offset := j.OffsetAccountID
-	switch j.Type {
-	case domain.JournalAdjustment, domain.JournalCount:
-		offset = p.AdjustmentAccount
-	case domain.JournalOpeningBalance:
-		offset = p.OpeningAccount
+	offset := offsetAccount(j, p)
+	if offset == "" {
+		return problem(http.StatusUnprocessableEntity, CodeAccountMissing, fmt.Sprintf("no offset account is configured for %s journals", j.Type))
 	}
 	plan := domain.PlanPosting(j)
 	rows, order, err := groupRows(plan)
@@ -130,12 +146,20 @@ func (s *Postgres) postLoaded(ctx context.Context, tx pgx.Tx, tenantID string, j
 	}
 	for _, k := range order {
 		r := rows[k]
-		if err := lockRow(ctx, tx, tenantID, j.LegalEntityID, j.Currency, r); err != nil {
+		vendorOwned := domain.VendorOwned(r.dims)
+		currency := j.Currency
+		if vendorOwned {
+			currency = "" // vendor-owned rows are never valued, in any currency
+		}
+		if err := lockRow(ctx, tx, tenantID, j.LegalEntityID, currency, r); err != nil {
 			return err
 		}
 		for _, i := range r.lines {
 			l := plan[i].Line
-			if orig, ok := corrected[l.ReversesLineID]; ok {
+			if vendorOwned {
+				// Vendor-owned stock never carries value (BR-16.14).
+				plan[i].Value = decimal.Zero
+			} else if orig, ok := corrected[l.ReversesLineID]; ok {
 				// A reversal line mirrors the transaction it corrects (BR-16.12).
 				plan[i].Value, plan[i].Corrects = orig.value.Neg(), orig.id
 			} else if l.Qty.Sign() > 0 {
@@ -147,10 +171,16 @@ func (s *Postgres) postLoaded(ctx context.Context, tx pgx.Tx, tenantID string, j
 				return err
 			}
 		}
-		if err := checkNegative(r, p.Negative); err != nil {
-			return err
+		if vendorOwned {
+			if err := checkVendorOwned(r); err != nil {
+				return err
+			}
+		} else {
+			if err := checkNegative(r, p.Negative); err != nil {
+				return err
+			}
+			r.currency = j.Currency
 		}
-		r.currency = j.Currency
 		if err := saveRow(ctx, tx, tenantID, j.LegalEntityID, r, len(r.lines)); err != nil {
 			return err
 		}
@@ -169,11 +199,19 @@ func (s *Postgres) postLoaded(ctx context.Context, tx pgx.Tx, tenantID string, j
 	for _, k := range order {
 		r := rows[k]
 		for _, i := range r.lines {
-			if _, err := writeTransaction(ctx, tx, tenantID, doc, plan[i].Line.ID, r, plan[i]); err != nil {
+			d := doc
+			if plan[i].Paired {
+				d.sourceType = sourceOwnershipChange
+			}
+			if _, err := writeTransaction(ctx, tx, tenantID, d, plan[i].Line.ID, r, plan[i]); err != nil {
 				return err
 			}
 		}
-		if err := enqueueOnHand(ctx, tx, tenantID, j.LegalEntityID, r, invevents.BucketPosted, r.oh.PostedQty.Sub(r.before.PostedQty)); err != nil {
+		bucket, delta := invevents.BucketPosted, r.oh.PostedQty.Sub(r.before.PostedQty)
+		if domain.VendorOwned(r.dims) {
+			bucket, delta = invevents.BucketDeducted, r.oh.Deducted.Sub(r.before.Deducted)
+		}
+		if err := enqueueOnHand(ctx, tx, tenantID, j.LegalEntityID, r, bucket, delta); err != nil {
 			return err
 		}
 	}
@@ -185,7 +223,50 @@ func (s *Postgres) postLoaded(ctx context.Context, tx pgx.Tx, tenantID string, j
 		where tenant_id = $1 and id = $2`, tenantID, j.ID, glJSON); err != nil {
 		return err
 	}
-	return enqueue(ctx, tx, "journal", j.ID, invevents.JournalPosted, tenantID, journalPosted(j, entry))
+	if err := enqueue(ctx, tx, "journal", j.ID, invevents.JournalPosted, tenantID, journalPosted(j, entry)); err != nil {
+		return err
+	}
+	if j.Type == domain.JournalOwnershipChange {
+		return enqueue(ctx, tx, "journal", j.ID, invevents.OwnershipChanged, tenantID, ownershipChanged(j, plan))
+	}
+	return nil
+}
+
+// checkVendorOwned enforces BR-16.14 on a vendor-owned row after its deltas:
+// it never carries posted quantity or value, and an ownership change cannot
+// take more than its available physical quantity (INV-OWN-002), whatever the
+// negative policy says, because the stock is not the company's.
+func checkVendorOwned(r *row) error {
+	if !r.oh.PostedQty.IsZero() || !r.oh.PostedValue.IsZero() {
+		return problem(http.StatusUnprocessableEntity, domain.CodeOwnershipValue,
+			fmt.Sprintf("vendor-owned stock of product %s at %s cannot be valued or financially posted", r.product, describeDims(r.dims)))
+	}
+	if avail := r.oh.AvailPhysical(); avail.Sign() < 0 && avail.LessThan(r.before.AvailPhysical()) {
+		have := decimal.Max(r.before.AvailPhysical(), decimal.Zero)
+		return problem(http.StatusUnprocessableEntity, domain.CodeOwnershipExceeds,
+			fmt.Sprintf("ownership change of %s exceeds vendor-owned quantity %s at %s", have.Sub(avail), have, describeDims(r.dims)))
+	}
+	return nil
+}
+
+// ownershipChanged is the ownership.changed payload: per journal line the
+// vendor-owned dimension set it moved, the quantity, the consignment price and
+// the accounting amount (the value of its receipt leg).
+func ownershipChanged(j domain.Journal, plan []domain.PostedLine) invevents.OwnershipChangedData {
+	out := invevents.OwnershipChangedData{JournalID: j.ID, LegalEntityID: j.LegalEntityID, VendorID: domain.OwnershipVendor(j),
+		PostingDate: j.PostingDate.Format(dateLayout), Currency: j.Currency, LedgerEntryID: nil, Lines: []invevents.OwnershipLineData{}}
+	total := decimal.Zero
+	for _, pl := range plan {
+		if !pl.Paired {
+			continue
+		}
+		total = total.Add(pl.Value)
+		out.Lines = append(out.Lines, invevents.OwnershipLineData{JournalLineID: pl.Line.ID, ProductID: pl.Line.ProductID,
+			DimensionSet: map[string]string(pl.Line.Dims), Qty: pl.Line.Qty.String(), Unit: pl.Line.EnteredUnit,
+			ConsignmentPrice: pl.Line.CostPrice.String(), AmountAcct: pl.Value.String()})
+	}
+	out.TotalAmount = total.String()
+	return out
 }
 
 // postedTransaction is the transaction a posted journal line produced.
@@ -433,21 +514,28 @@ func writeTransaction(ctx context.Context, tx pgx.Tx, tenantID string, doc docum
 	}
 	value := pl.Value.String()
 	date := doc.date.Format(dateLayout)
+	// The financial date and posted amount are set only when a financial
+	// status is reached (FR-16.11); a physical receipt or deduction (vendor
+	// consignment) carries neither.
+	var financialDate, posted *string
+	if domain.IsFinancial(pl.Status) {
+		financialDate, posted = &date, &value
+	}
 	var corrects *string
 	if pl.Corrects != "" {
 		corrects = &pl.Corrects
 	}
 	if _, err := tx.Exec(ctx, `insert into inventory_transaction (tenant_id, legal_entity_id, id, origin_id, product_id, dimension_set_hash, qty, entered_qty,
 		entered_unit, issue_status, receipt_status, physical_date, financial_date, currency, cost_amount_physical, cost_amount_posted, corrects_transaction_id)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12, $13, $14, $14, $15)`,
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
 		tenantID, doc.legalEntityID, txnID, originID, r.product, r.hash, pl.Line.Qty.String(), pl.Line.EnteredQty.String(), pl.Line.EnteredUnit,
-		issue, receipt, date, doc.currency, value, corrects); err != nil {
+		issue, receipt, date, financialDate, doc.currency, value, posted, corrects); err != nil {
 		return "", err
 	}
 	data := invevents.TransactionPostedData{
 		TransactionID: txnID, LegalEntityID: doc.legalEntityID, SourceType: doc.sourceType, OriginID: originID, ProductID: r.product,
 		DimensionSet: map[string]string(r.dims), Qty: pl.Line.Qty.String(), IssueStatus: issue, ReceiptStatus: receipt,
-		PhysicalDate: date, FinancialDate: date, Currency: doc.currency, CostAmountPhysical: value, CostAmountPosted: value,
+		PhysicalDate: date, FinancialDate: financialDate, Currency: doc.currency, CostAmountPhysical: value, CostAmountPosted: posted,
 		CorrectsTransactionID: corrects,
 	}
 	if doc.journalID != "" {

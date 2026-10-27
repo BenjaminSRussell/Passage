@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -52,6 +53,11 @@ type reserveRequest struct {
 	ShelfLifeMarginDays int               `json:"shelfLifeMarginDays"`
 	AllowPartial        bool              `json:"allowPartial"`
 	Dimensions          map[string]string `json:"dimensions"`
+	// SegmentType and SegmentRef name the segment of the demand (FR-16.20);
+	// SegmentFallback (default true) lets it take unsegmented stock.
+	SegmentType     string `json:"segmentType"`
+	SegmentRef      string `json:"segmentRef"`
+	SegmentFallback *bool  `json:"segmentFallback"`
 }
 
 type reservationResponse struct {
@@ -62,6 +68,7 @@ type reservationResponse struct {
 	Qty           string            `json:"qty"`
 	DemandType    string            `json:"demandType"`
 	DemandID      string            `json:"demandId"`
+	DemandSegment string            `json:"demandSegment,omitempty"`
 	Policy        string            `json:"policy"`
 	Status        string            `json:"status"`
 	AllocationNo  int               `json:"allocationNo"`
@@ -172,12 +179,21 @@ func (a *API) createReservation(w http.ResponseWriter, r *http.Request) {
 	} else if policy == domain.PolicyManual && strings.TrimSpace(dims[domain.DimSite]) == "" {
 		fields["dimensions"] = "a MANUAL reservation names the dimension set, including its site"
 	}
+	segment, err := domain.SegmentValue(domain.SegmentType(strings.ToUpper(strings.TrimSpace(req.SegmentType))), req.SegmentRef)
+	if err != nil {
+		fields["segmentType"] = detail(err)
+	}
+	fallback := true
+	if req.SegmentFallback != nil {
+		fallback = *req.SegmentFallback
+	}
 	key := idempotencyKey(r, fields)
 	if len(fields) > 0 {
 		fieldProblem(w, r, fields)
 		return
 	}
 	out, err := a.store.Reserve(r.Context(), store.ReserveInput{
+		Segment: segment, SegmentFallback: fallback,
 		LegalEntityID: req.LegalEntityID, ProductID: req.ProductID, Qty: qty, DemandType: domain.DemandType(req.DemandType),
 		DemandID: req.DemandID, Policy: policy, Dims: dims, RequiredDate: required, ShelfLifeMarginDays: req.ShelfLifeMarginDays,
 		AllowPartial: req.AllowPartial, IdempotencyKey: key,
@@ -374,6 +390,15 @@ func (a *API) listTransactions(w http.ResponseWriter, r *http.Request) {
 
 func toReservationResponse(res domain.Reservation) reservationResponse {
 	return reservationResponse{ID: res.ID, LegalEntityID: res.LegalEntityID, ProductID: res.ProductID, Dimensions: res.Dims, Qty: res.Qty.String(),
-		DemandType: string(res.DemandType), DemandID: res.DemandID, Policy: string(res.Policy), Status: string(res.Status),
+		DemandType: string(res.DemandType), DemandID: res.DemandID, DemandSegment: res.DemandSegment, Policy: string(res.Policy), Status: string(res.Status),
 		AllocationNo: res.AllocationNo, CreatedAt: res.CreatedAt, ReleasedAt: res.ReleasedAt}
+}
+
+// detail is the message of a domain rule violation without its code.
+func detail(err error) string {
+	var de *domain.Error
+	if errors.As(err, &de) {
+		return de.Detail
+	}
+	return err.Error()
 }

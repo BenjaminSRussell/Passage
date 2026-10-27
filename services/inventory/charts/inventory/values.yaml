@@ -26,3 +26,6 @@ inventory:
   inventoryAccount: ""
   adjustmentAccount: ""
   openingClearingAccount: ""
+  # Consignment accrual (posting profile consignment_accrual, FR-16.17). Optional:
+  # OWNERSHIP_CHANGE journals are refused (INV-JNL-005) while it is empty.
+  consignmentAccrualAccount: ""

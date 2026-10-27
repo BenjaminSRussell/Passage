@@ -77,7 +77,7 @@ func (s *Postgres) ListTransactions(ctx context.Context, f TransactionFilter) ([
 			from inventory_transaction t
 			join inventory_transaction_origin o on o.tenant_id = t.tenant_id and o.id = t.origin_id
 			join dimension_set d on d.tenant_id = t.tenant_id and d.hash = t.dimension_set_hash
-			left join inventory_journal_line l on o.source_type = 'INVENT_JOURNAL_LINE' and l.tenant_id = o.tenant_id and l.id = o.source_id
+			left join inventory_journal_line l on o.source_type in ('INVENT_JOURNAL_LINE', 'OWNERSHIP_CHANGE') and l.tenant_id = o.tenant_id and l.id = o.source_id
 			where t.tenant_id = $1
 			  and ($2 = '' or t.product_id::text = $2)
 			  and ($3 = '' or t.issue_status = $3 or t.receipt_status = $3)

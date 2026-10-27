@@ -49,3 +49,14 @@ func TestLoadConfig_allowNegative(t *testing.T) {
 		t.Fatal("allow must enable physical negative in posting params")
 	}
 }
+
+func TestLoadConfig_consignmentAccrualIsOptional(t *testing.T) {
+	c, err := loadConfig(env(nil))
+	if err != nil || c.post.ConsignmentAccount != "" {
+		t.Fatalf("without INV_CONSIGNMENT_ACCRUAL_ACCOUNT: err %v, account %q; want nil, empty", err, c.post.ConsignmentAccount)
+	}
+	c, err = loadConfig(env(map[string]string{"INV_CONSIGNMENT_ACCRUAL_ACCOUNT": "2190"}))
+	if err != nil || c.post.ConsignmentAccount != "2190" {
+		t.Fatalf("with the account: err %v, account %q; want nil, 2190", err, c.post.ConsignmentAccount)
+	}
+}

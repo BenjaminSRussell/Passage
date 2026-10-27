@@ -3,21 +3,28 @@
 
 export const base = "/api/v1/inventory";
 
-export const JOURNAL_TYPES = ["MOVEMENT", "ADJUSTMENT", "OPENING_BALANCE", "COUNT"] as const;
+export const JOURNAL_TYPES = ["MOVEMENT", "ADJUSTMENT", "OPENING_BALANCE", "COUNT", "OWNERSHIP_CHANGE"] as const;
 export type JournalType = (typeof JOURNAL_TYPES)[number];
 
-/** Types a user creates directly; COUNT journals come from posted count sheets. */
-export const KEYED_JOURNAL_TYPES = ["MOVEMENT", "ADJUSTMENT", "OPENING_BALANCE"] as const;
+/**
+ * Types a user creates directly; COUNT journals come from posted count sheets.
+ * OWNERSHIP_CHANGE also needs inventory.consignment.write (FR-16.17).
+ */
+export const KEYED_JOURNAL_TYPES = ["MOVEMENT", "ADJUSTMENT", "OPENING_BALANCE", "OWNERSHIP_CHANGE"] as const;
 export type KeyedJournalType = (typeof KEYED_JOURNAL_TYPES)[number];
 
 export const JOURNAL_STATUSES = ["DRAFT", "SUBMITTED", "APPROVED", "POSTING", "POSTED", "REJECTED", "CANCELLED"] as const;
 export type JournalStatus = (typeof JOURNAL_STATUSES)[number];
 
-/** Dimensions a journal line can carry in this slice (owner and license_plate are reserved). */
-export const LINE_DIMENSIONS = ["site", "warehouse", "location", "batch", "serial", "inventory_status"] as const;
+/**
+ * Dimensions a journal line can carry (license_plate is reserved). owner (a
+ * vendor id) is set only on OWNERSHIP_CHANGE lines; segment is
+ * SALES_ORDER:<ref> or PROJECT:<ref> (FR-16.20).
+ */
+export const LINE_DIMENSIONS = ["site", "warehouse", "location", "batch", "serial", "inventory_status", "owner", "segment"] as const;
 export type LineDimension = (typeof LINE_DIMENSIONS)[number];
 
-export const ON_HAND_GROUPS = ["product", "legal_entity", "site", "warehouse", "location", "batch", "serial", "inventory_status"] as const;
+export const ON_HAND_GROUPS = ["product", "legal_entity", "site", "warehouse", "location", "batch", "serial", "inventory_status", "owner", "segment"] as const;
 export type OnHandGroup = (typeof ON_HAND_GROUPS)[number];
 
 export interface JournalSummary {
@@ -108,6 +115,10 @@ export interface OnHandQuery {
   site?: string;
   warehouse?: string;
   batch?: string;
+  /** Vendor id of vendor-owned stock. */
+  owner?: string;
+  /** SALES_ORDER:<ref> or PROJECT:<ref>. */
+  segment?: string;
 }
 
 /** A failed call, carrying the RFC 9457 code and any field errors. */
@@ -170,7 +181,7 @@ function newKey(): string {
 export function onHandUrl(q: OnHandQuery): string {
   const params = new URLSearchParams();
   if (q.groupBy.length > 0) params.set("groupBy", q.groupBy.join(","));
-  for (const key of ["product", "site", "warehouse", "batch"] as const) {
+  for (const key of ["product", "site", "warehouse", "batch", "owner", "segment"] as const) {
     const value = q[key]?.trim();
     if (value) params.set(key, value);
   }
@@ -236,6 +247,26 @@ export async function postJournal(journalId: string, version: number): Promise<J
   return (await send<Journal>(`/journals/${encodeURIComponent(journalId)}:post`, { method: "POST", headers: { "If-Match": `"${version}"` } })).body;
 }
 
+/** Approval workflow steps of BR-16.11, each guarded by the journal version (If-Match). */
+export type JournalStep = "submit" | "approve" | "reject" | "reopen" | "cancel";
+
+export async function moveJournal(journalId: string, version: number, step: JournalStep): Promise<Journal> {
+  return (await send<Journal>(`/journals/${encodeURIComponent(journalId)}:${step}`, { method: "POST", headers: { "If-Match": `"${version}"` } })).body;
+}
+
+export interface Validation {
+  valid: true;
+  journalId: string;
+  status: JournalStatus;
+  version: number;
+  lineCount: number;
+}
+
+/** Dry-runs the post (FR-16.6); a journal that would not post rejects with the post's problem. */
+export async function validateJournal(journalId: string): Promise<Validation> {
+  return (await send<Validation>(`/journals/${encodeURIComponent(journalId)}:validate`, { method: "POST" })).body;
+}
+
 /**
  * Creates the DRAFT reversal of a POSTED journal (BR-16.12). A journal has one
  * reversal, so repeating the call returns the same one.
@@ -261,7 +292,7 @@ export const TRANSACTION_STATUSES = [
 ] as const;
 export type TransactionStatus = (typeof TRANSACTION_STATUSES)[number];
 
-export const SOURCE_TYPES = ["INVENT_JOURNAL_LINE", "BLOCKING", "TRANSFER_LINE"] as const;
+export const SOURCE_TYPES = ["INVENT_JOURNAL_LINE", "BLOCKING", "TRANSFER_LINE", "CONSIGNMENT_LINE", "OWNERSHIP_CHANGE"] as const;
 export type SourceType = (typeof SOURCE_TYPES)[number];
 
 export interface Transaction {
@@ -335,6 +366,8 @@ export interface Reservation {
   qty: string;
   demandType: DemandType;
   demandId: string;
+  /** Segment of the demand (FR-16.20); absent when unsegmented. */
+  demandSegment?: string;
   policy: ReservationPolicy;
   status: ReservationStatus;
   allocationNo: number;
@@ -353,7 +386,15 @@ export interface ReserveInput {
   shelfLifeMarginDays?: number;
   allowPartial?: boolean;
   dimensions: Partial<Record<string, string>>;
+  /** Segment of the demand: a policy reservation takes this segment's stock first (BR-16.17). */
+  segmentType?: SegmentType;
+  segmentRef?: string;
+  /** Let a segmented demand take unsegmented stock (default true). */
+  segmentFallback?: boolean;
 }
+
+export const SEGMENT_TYPES = ["NONE", "SALES_ORDER", "PROJECT"] as const;
+export type SegmentType = (typeof SEGMENT_TYPES)[number];
 
 export interface ReserveResult {
   items: Reservation[];
@@ -379,6 +420,13 @@ function cleanDimensions(dims: Partial<Record<string, string>>): Record<string, 
 export async function createReservation(input: ReserveInput, key: string = newKey()): Promise<ReserveResult> {
   const body = { ...input, dimensions: cleanDimensions(input.dimensions) };
   if (!body.requiredDate) delete body.requiredDate;
+  if (!body.segmentType || body.segmentType === "NONE") {
+    delete body.segmentType;
+    delete body.segmentRef;
+    delete body.segmentFallback;
+  } else {
+    body.segmentRef = body.segmentRef?.trim();
+  }
   const { body: out } = await send<ReserveResult>("/reservations", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(body) });
   return { items: out.items ?? [], shortfall: out.shortfall ?? "0" };
 }
@@ -813,4 +861,116 @@ export async function listAbcRuns(signal?: AbortSignal): Promise<AbcRun[]> {
 
 export async function getAbcRun(id: string, signal?: AbortSignal): Promise<AbcRun> {
   return (await send<AbcRun>(`/abc-runs/${encodeURIComponent(id)}`, {}, signal)).body;
+}
+
+// ---- Vendor consignment (FR-16.17) ----
+
+export const CONSIGNMENT_STATUSES = ["CREATED", "PARTIALLY_RECEIVED", "RECEIVED"] as const;
+export type ConsignmentStatus = (typeof CONSIGNMENT_STATUSES)[number];
+
+/** Dimensions a replenishment line may name; site, warehouse and owner come from the order. */
+export const CONSIGNMENT_LINE_DIMENSIONS = ["location", "batch", "serial"] as const;
+export type ConsignmentLineDimension = (typeof CONSIGNMENT_LINE_DIMENSIONS)[number];
+
+export interface ConsignmentLine {
+  id: string;
+  lineNo: number;
+  productId: string;
+  /** The vendor-owned dimension set received into (site, warehouse and owner included). */
+  dimensions: Partial<Record<string, string>>;
+  unit: string;
+  qty: string;
+  receivedQty: string;
+  openQty: string;
+  consignmentPrice: string;
+}
+
+export interface ConsignmentOrder {
+  id: string;
+  legalEntityId: string;
+  number: string;
+  vendorId: string;
+  siteId: string;
+  warehouseId: string;
+  requestedDate: string;
+  currency: string;
+  status: ConsignmentStatus;
+  version: number;
+  createdAt: string;
+  lines: ConsignmentLine[];
+}
+
+export interface ConsignmentLineInput {
+  productId: string;
+  unit: string;
+  qty: string;
+  consignmentPrice?: string;
+  dimensions: Partial<Record<ConsignmentLineDimension, string>>;
+}
+
+export interface ConsignmentInput {
+  legalEntityId: string;
+  vendorId: string;
+  siteId: string;
+  warehouseId: string;
+  requestedDate: string;
+  currency: string;
+  lines: ConsignmentLineInput[];
+}
+
+export interface ConsignmentReceiptInput {
+  lineId: string;
+  qty: string;
+}
+
+export interface ConsignmentStockItem {
+  legalEntityId: string;
+  vendorId: string;
+  productId: string;
+  dimensions: Partial<Record<string, string>>;
+  qty: string;
+  consignmentPrice: string | null;
+  currency?: string;
+  /** qty x consignment price: a statistic, never posted. */
+  statisticalValue: string | null;
+  oldestReceipt: string | null;
+  ageDays: number | null;
+}
+
+/** Creates a replenishment order; the key makes a retried submit replay instead of creating twice. */
+export async function createConsignment(input: ConsignmentInput, key: string = newKey()): Promise<ConsignmentOrder> {
+  const body = {
+    ...input,
+    lines: input.lines.map((line) => {
+      const out: Record<string, unknown> = { productId: line.productId, unit: line.unit, qty: line.qty, dimensions: cleanDimensions(line.dimensions) };
+      if (line.consignmentPrice?.trim()) out.consignmentPrice = line.consignmentPrice.trim();
+      return out;
+    }),
+  };
+  return (await send<ConsignmentOrder>("/consignment-orders", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(body) })).body;
+}
+
+export async function listConsignments(q: { status?: ConsignmentStatus | ""; vendor?: string } = {}, signal?: AbortSignal): Promise<ConsignmentOrder[]> {
+  const { body } = await send<{ items?: ConsignmentOrder[] }>(`/consignment-orders${query({ ...q })}`, {}, signal);
+  return body.items ?? [];
+}
+
+export async function getConsignment(id: string, signal?: AbortSignal): Promise<ConsignmentOrder> {
+  return (await send<ConsignmentOrder>(`/consignment-orders/${encodeURIComponent(id)}`, {}, signal)).body;
+}
+
+/** Receives vendor-owned stock at the version the screen shows (If-Match). */
+export async function receiveConsignment(id: string, version: number, receiptDate: string, lines: ConsignmentReceiptInput[]): Promise<ConsignmentOrder> {
+  return (
+    await send<ConsignmentOrder>(`/consignment-orders/${encodeURIComponent(id)}:receive`, {
+      method: "POST",
+      headers: { "If-Match": `"${version}"` },
+      body: JSON.stringify({ receiptDate, lines }),
+    })
+  ).body;
+}
+
+export async function listConsignmentStock(vendor = "", signal?: AbortSignal): Promise<ConsignmentStockItem[]> {
+  const { body } = await send<{ items?: ConsignmentStockItem[] }>(`/consignment/stock${query({ vendor })}`, {}, signal);
+  return body.items ?? [];
 }

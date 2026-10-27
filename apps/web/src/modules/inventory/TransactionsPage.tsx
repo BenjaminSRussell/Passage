@@ -18,7 +18,13 @@ import { ALL_DIMENSIONS, money, ProblemAlert } from "./parts";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
-const sourceLabels: Record<SourceType, string> = { INVENT_JOURNAL_LINE: "Journal line", BLOCKING: "Blocking", TRANSFER_LINE: "Transfer order" };
+const sourceLabels: Record<SourceType, string> = {
+  INVENT_JOURNAL_LINE: "Journal line",
+  BLOCKING: "Blocking",
+  TRANSFER_LINE: "Transfer order",
+  CONSIGNMENT_LINE: "Consignment receipt",
+  OWNERSHIP_CHANGE: "Ownership change",
+};
 
 function origin(row: Transaction) {
   if (row.journalId) {
@@ -26,6 +32,9 @@ function origin(row: Transaction) {
   }
   if (row.sourceType === "TRANSFER_LINE" && row.reference) {
     return <Link to={`/inventory/transfer-orders/${row.reference}`}>Transfer order {shortId(row.reference)}</Link>;
+  }
+  if (row.sourceType === "CONSIGNMENT_LINE" && row.reference) {
+    return <Link to={`/inventory/consignment-orders/${row.reference}`}>Replenishment order {shortId(row.reference)}</Link>;
   }
   return `${sourceLabels[row.sourceType] ?? row.sourceType}${row.reference ? ` ${shortId(row.reference)}` : ""}`;
 }

@@ -37,8 +37,12 @@ type OnHandFilter struct {
 	SiteID      string
 	WarehouseID string
 	BatchID     string
-	GroupBy     []string
-	Limit       int
+	// Owner and Segment filter on the owner (a vendor id) and segment
+	// dimensions (FR-16.17, FR-16.20).
+	Owner   string
+	Segment string
+	GroupBy []string
+	Limit   int
 }
 
 // OnHandResult is the inquiry answer; Truncated is true when more groups
@@ -114,12 +118,13 @@ func (s *Postgres) ListOnHand(ctx context.Context, f OnHandFilter) (OnHandResult
 		join dimension_set d on d.tenant_id = o.tenant_id and d.hash = o.dimension_set_hash
 		where o.tenant_id = $1 and ($2 = '' or o.product_id::text = $2) and ($3 = '' or d.dims->>'site' = $3)
 		and ($4 = '' or d.dims->>'warehouse' = $4) and ($5 = '' or d.dims->>'batch' = $5)
+		and ($6 = '' or d.dims->>'owner' = $6) and ($7 = '' or d.dims->>'segment' = $7)
 		group by %s order by %s limit %d`, strings.Join(selects, ", "), strings.Join(positions, ", "), strings.Join(positions, ", "), limit+1)
 
 	p, _ := tenant.FromContext(ctx)
 	out := []OnHandRow{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, q, p.TenantID, f.ProductID, f.SiteID, f.WarehouseID, f.BatchID)
+		rows, err := tx.Query(ctx, q, p.TenantID, f.ProductID, f.SiteID, f.WarehouseID, f.BatchID, f.Owner, f.Segment)
 		if err != nil {
 			return err
 		}

@@ -35,7 +35,7 @@ func TestValidateJournal_Table(t *testing.T) {
 		{"site is mandatory", Journal{Type: JournalAdjustment, Currency: "USD", Lines: with(func(l *JournalLine) { l.Dims = Dimensions{DimWarehouse: "W1"} })}, CodeDimensionMandatory},
 		{"unknown dimension", Journal{Type: JournalAdjustment, Currency: "USD", Lines: with(func(l *JournalLine) { l.Dims = Dimensions{DimSite: "S1", "colour": "RED"} })}, CodeInvalid},
 		{"license plate reserved", Journal{Type: JournalAdjustment, Currency: "USD", Lines: with(func(l *JournalLine) { l.Dims = Dimensions{DimSite: "S1", DimLicensePlate: "LP1"} })}, CodeInvalid},
-		{"owner reserved", Journal{Type: JournalAdjustment, Currency: "USD", Lines: with(func(l *JournalLine) { l.Dims = Dimensions{DimSite: "S1", DimOwner: "V1"} })}, CodeInvalid},
+		{"vendor-owned stock is never valued", Journal{Type: JournalAdjustment, Currency: "USD", Lines: with(func(l *JournalLine) { l.Dims = Dimensions{DimSite: "S1", DimOwner: "V1"} })}, CodeOwnershipValue},
 		{"serial qty must be one", Journal{Type: JournalAdjustment, Currency: "USD", Lines: with(func(l *JournalLine) { l.Dims = Dimensions{DimSite: "S1", DimSerial: "S-1"} })}, CodeSerialQty},
 		{"serial qty one ok", Journal{Type: JournalAdjustment, Currency: "USD", Lines: with(func(l *JournalLine) {
 			l.Dims, l.Qty, l.EnteredQty = Dimensions{DimSite: "S1", DimSerial: "S"}, d("-1"), d("-1")

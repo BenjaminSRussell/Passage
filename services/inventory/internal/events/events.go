@@ -16,23 +16,28 @@ const (
 // All lists every event type the service publishes.
 func All() []string {
 	return []string{TransactionPosted, OnhandChanged, JournalPosted, ReservationCreated, ReservationReleased, BlockingCreated, BlockingReleased,
-		TransferShipped, TransferReceived}
+		TransferShipped, TransferReceived, OwnershipChanged}
 }
 
 // On-hand buckets an onhand.changed event names as moved. BucketPosted is
 // posted quantity and value (financial statuses SOLD / PURCHASED), moved by
-// journals and by blocking legs; BucketReservedPhysical is moved by
-// reservations.
+// journals and by blocking and transfer legs; BucketReservedPhysical is moved
+// by reservations; BucketReceived by vendor-owned consignment receipts and
+// BucketDeducted by the vendor-owned leg of an ownership change (FR-16.17).
 const (
 	BucketPosted           = "POSTED"
 	BucketReservedPhysical = "RESERVED_PHYSICAL"
+	BucketReceived         = "RECEIVED"
+	BucketDeducted         = "DEDUCTED"
 )
 
 // TransactionPostedData is one inventory transaction written by a posting.
 // Cost amounts are signed, in Currency (the accounting currency), rounded to
-// its minor unit. SourceType is the origin type (INVENT_JOURNAL_LINE,
-// BLOCKING); JournalID is set for journal lines and ReferenceID for the other
-// documents (the blocking id).
+// its minor unit. SourceType is the origin type; JournalID is set for journal
+// lines (and the receipt leg of an ownership change) and ReferenceID for the
+// other documents (blocking, transfer or replenishment order id).
+// FinancialDate and CostAmountPosted are null for a physical status (a
+// vendor-owned RECEIVED or DEDUCTED transaction, FR-16.11).
 type TransactionPostedData struct {
 	TransactionID      string            `json:"transactionId"`
 	LegalEntityID      string            `json:"legalEntityId"`
@@ -46,10 +51,10 @@ type TransactionPostedData struct {
 	IssueStatus        *string           `json:"issueStatus"`
 	ReceiptStatus      *string           `json:"receiptStatus"`
 	PhysicalDate       string            `json:"physicalDate"`
-	FinancialDate      string            `json:"financialDate"`
+	FinancialDate      *string           `json:"financialDate"`
 	Currency           string            `json:"currency"`
 	CostAmountPhysical string            `json:"costAmountPhysical"`
-	CostAmountPosted   string            `json:"costAmountPosted"`
+	CostAmountPosted   *string           `json:"costAmountPosted"`
 	// CorrectsTransactionID is the transaction a reversal line negates (BR-16.12).
 	CorrectsTransactionID *string `json:"correctsTransactionId"`
 }
@@ -98,6 +103,7 @@ type ReservationData struct {
 	Qty           string            `json:"qty"`
 	DemandType    string            `json:"demandType"`
 	DemandID      string            `json:"demandId"`
+	DemandSegment string            `json:"demandSegment"`
 	Policy        string            `json:"policy"`
 	Status        string            `json:"status"`
 }

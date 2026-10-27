@@ -399,7 +399,8 @@ func TestLinesRequireSiteAndValidDimensions(t *testing.T) {
 	}{
 		"site missing":           {domain.Dimensions{domain.DimWarehouse: "W1"}, domain.CodeDimensionMandatory},
 		"unknown dimension":      {domain.Dimensions{domain.DimSite: "S1", "colour": "red"}, domain.CodeInvalid},
-		"owner reserved":         {domain.Dimensions{domain.DimSite: "S1", domain.DimOwner: "V1"}, domain.CodeInvalid},
+		"vendor-owned stock":     {domain.Dimensions{domain.DimSite: "S1", domain.DimOwner: "V1"}, domain.CodeOwnershipValue},
+		"malformed segment":      {domain.Dimensions{domain.DimSite: "S1", domain.DimSegment: "P1"}, domain.CodeInvalid},
 		"license plate reserved": {domain.Dimensions{domain.DimSite: "S1", domain.DimLicensePlate: "LP"}, domain.CodeInvalid},
 	}
 	for name, c := range cases {

@@ -22,6 +22,8 @@ describe("inventory module", () => {
       "/inventory/transfer-orders": "inventory.read",
       "/inventory/in-transit": "inventory.read",
       "/inventory/abc-runs": "inventory.read",
+      "/inventory/consignment-orders": "inventory.read",
+      "/inventory/consignment/stock": "inventory.read",
     });
   });
 
@@ -52,6 +54,18 @@ describe("inventory module", () => {
       "/inventory/abc-runs",
       "/inventory/abc-runs/new",
       "/inventory/abc-runs/:id",
+    ]) {
+      expect(paths).toContain(path);
+    }
+  });
+
+  it("routes every slice 5 screen", () => {
+    const paths = inventory.routes.map((r) => r.path);
+    for (const path of [
+      "/inventory/consignment-orders",
+      "/inventory/consignment-orders/new",
+      "/inventory/consignment-orders/:id",
+      "/inventory/consignment/stock",
     ]) {
       expect(paths).toContain(path);
     }

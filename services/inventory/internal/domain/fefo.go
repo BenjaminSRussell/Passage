@@ -29,6 +29,9 @@ type BatchStock struct {
 	ReceiptDate time.Time
 	Available   decimal.Decimal
 	Status      string // AVAILABLE, BLOCKED or QUARANTINE
+	// Segment is the stock's segment dimension value, "" when unsegmented
+	// (FR-16.20). PlanDemandPolicy matches it against the demand.
+	Segment string
 }
 
 // Allocation is the quantity taken from one batch at one dimension set.

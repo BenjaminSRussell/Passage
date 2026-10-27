@@ -27,10 +27,15 @@ const (
 	DimStyle        = "style"
 	DimLicensePlate = "license_plate"
 	DimOwner        = "owner"
+	// DimSegment holds sales-order or project segregated stock as
+	// "SALES_ORDER:<ref>" or "PROJECT:<ref>" (FR-16.20). It is appended last,
+	// and absent dimensions do not contribute to the canonical form, so adding
+	// it left every existing dimension-set hash unchanged.
+	DimSegment = "segment"
 )
 
 var dimensionOrder = []string{DimSite, DimWarehouse, DimLocation, DimBatch, DimSerial, DimStatus,
-	DimConfig, DimSize, DimColor, DimStyle, DimLicensePlate, DimOwner}
+	DimConfig, DimSize, DimColor, DimStyle, DimLicensePlate, DimOwner, DimSegment}
 
 // DimensionNames returns the dimension names in canonical order.
 func DimensionNames() []string { return slices.Clone(dimensionOrder) }
@@ -42,7 +47,8 @@ const maxDimensionValue = 60
 type Dimensions map[string]string
 
 // Normalize returns a copy with blank values dropped and surrounding space
-// trimmed. Unknown names and over-long values are errors.
+// trimmed. Unknown names, over-long values and a segment that is not
+// "SALES_ORDER:<ref>" or "PROJECT:<ref>" are errors.
 func (d Dimensions) Normalize() (Dimensions, error) {
 	out := Dimensions{}
 	for name, v := range d {
@@ -55,6 +61,11 @@ func (d Dimensions) Normalize() (Dimensions, error) {
 		}
 		if utf8.RuneCountInString(v) > maxDimensionValue {
 			return nil, fmt.Errorf("dimension %s is longer than %d characters", name, maxDimensionValue)
+		}
+		if name == DimSegment {
+			if _, _, err := ParseSegment(v); err != nil {
+				return nil, err
+			}
 		}
 		out[name] = v
 	}

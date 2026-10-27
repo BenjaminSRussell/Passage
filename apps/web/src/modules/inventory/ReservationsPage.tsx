@@ -50,7 +50,11 @@ export function ReservationsPage() {
     { key: "productId", header: "Product", mono: true, render: (row) => shortId(row.productId) },
     { key: "dimensions", header: "Dimensions", render: (row) => describeDimensions(row.dimensions, ALL_DIMENSIONS) },
     { key: "qty", header: "Quantity", align: "end", mono: true },
-    { key: "demand", header: "Demand", render: (row) => `${sentence(row.demandType)} ${row.demandId}` },
+    {
+      key: "demand",
+      header: "Demand",
+      render: (row) => `${sentence(row.demandType)} ${row.demandId}${row.demandSegment ? ` (segment ${row.demandSegment})` : ""}`,
+    },
     { key: "policy", header: "Policy", render: (row) => row.policy },
     { key: "status", header: "Status", render: (row) => <Badge tone={stateTones[row.status] ?? "neutral"}>{sentence(row.status)}</Badge> },
     {

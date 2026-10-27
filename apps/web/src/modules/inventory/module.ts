@@ -3,6 +3,9 @@ import type { PassageModule } from "../registry";
 import { AbcRunPage } from "./AbcRunPage";
 import { AbcRunsPage } from "./AbcRunsPage";
 import { BlockingsPage } from "./BlockingsPage";
+import { ConsignmentOrderPage } from "./ConsignmentOrderPage";
+import { ConsignmentOrdersPage } from "./ConsignmentOrdersPage";
+import { ConsignmentStockPage } from "./ConsignmentStockPage";
 import { CountPlansPage } from "./CountPlansPage";
 import { CountSheetPage } from "./CountSheetPage";
 import { CountSheetsPage } from "./CountSheetsPage";
@@ -11,6 +14,7 @@ import { InTransitPage } from "./InTransitPage";
 import { JournalDetailPage } from "./JournalDetailPage";
 import { JournalsPage } from "./JournalsPage";
 import { NewBlockingPage } from "./NewBlockingPage";
+import { NewConsignmentPage } from "./NewConsignmentPage";
 import { NewCountPlanPage } from "./NewCountPlanPage";
 import { NewJournalPage } from "./NewJournalPage";
 import { NewAbcRunPage } from "./NewAbcRunPage";
@@ -26,7 +30,7 @@ const inventory: PassageModule = {
   id: "inventory",
   title: "Inventory",
   description:
-    "On-hand stock by any dimension, the journals and transactions that move it, reservations, blocking, cycle and tag counts, journal reversals, transfer orders and ABC classification.",
+    "On-hand stock by any dimension, the journals that move it with their approval workflow, transactions, reservations, blocking, cycle and tag counts, journal reversals, transfer orders, vendor consignment and ABC classification.",
   routes: [
     { path: "/inventory", element: createElement(OnHandPage), handle: { title: "On-hand inquiry" } },
     { path: "/inventory/onhand", element: createElement(OnHandPage) },
@@ -50,6 +54,10 @@ const inventory: PassageModule = {
     { path: "/inventory/abc-runs", element: createElement(AbcRunsPage) },
     { path: "/inventory/abc-runs/new", element: createElement(NewAbcRunPage) },
     { path: "/inventory/abc-runs/:id", element: createElement(AbcRunPage), handle: { title: "ABC run" } },
+    { path: "/inventory/consignment-orders", element: createElement(ConsignmentOrdersPage) },
+    { path: "/inventory/consignment-orders/new", element: createElement(NewConsignmentPage) },
+    { path: "/inventory/consignment-orders/:id", element: createElement(ConsignmentOrderPage), handle: { title: "Consignment order" } },
+    { path: "/inventory/consignment/stock", element: createElement(ConsignmentStockPage) },
   ],
   nav: [
     { label: "On-hand", to: "/inventory/onhand", duty: "inventory.read" },
@@ -63,6 +71,8 @@ const inventory: PassageModule = {
     { label: "Transfer orders", to: "/inventory/transfer-orders", duty: "inventory.read" },
     { label: "Stock in transit", to: "/inventory/in-transit", duty: "inventory.read" },
     { label: "ABC classification", to: "/inventory/abc-runs", duty: "inventory.read" },
+    { label: "Consignment orders", to: "/inventory/consignment-orders", duty: "inventory.read" },
+    { label: "Consignment stock", to: "/inventory/consignment/stock", duty: "inventory.read" },
   ],
 };
 

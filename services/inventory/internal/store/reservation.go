@@ -31,6 +31,11 @@ type ReserveInput struct {
 	ShelfLifeMarginDays int
 	AllowPartial        bool
 	IdempotencyKey      string
+	// Segment is the segment dimension value of the demand ("" when
+	// unsegmented) and SegmentFallback lets a segmented demand take
+	// unsegmented stock (FR-16.20, BR-16.17).
+	Segment         string
+	SegmentFallback bool
 }
 
 // ReserveResult lists the allocations and the quantity that could not be
@@ -70,6 +75,15 @@ func (s *Postgres) Reserve(ctx context.Context, in ReserveInput) (ReserveResult,
 	}
 	if in.Policy == domain.PolicyManual && filter[domain.DimSite] == "" {
 		return ReserveResult{}, domainProblem(&domain.Error{Code: domain.CodeDimensionMandatory, Detail: "a MANUAL reservation names the dimension set, including its site"})
+	}
+	if in.Policy == domain.PolicyManual {
+		// The named stock must be eligible for the demand's segment (BR-16.17).
+		if err := domain.CheckSegment(filter[domain.DimSegment], in.Segment, in.SegmentFallback); err != nil {
+			return ReserveResult{}, domainProblem(err)
+		}
+	} else if filter[domain.DimSegment] != "" {
+		return ReserveResult{}, domainProblem(&domain.Error{Code: domain.CodeInvalid,
+			Detail: "a policy reservation takes the demand's segment (segmentType, segmentRef), not a segment dimension filter"})
 	}
 	p, _ := tenant.FromContext(ctx)
 	var out ReserveResult
@@ -113,7 +127,8 @@ func (s *Postgres) Reserve(ctx context.Context, in ReserveInput) (ReserveResult,
 			if err != nil {
 				return err
 			}
-			sel, err := domain.PlanPolicy(in.Policy, cands, in.Qty, in.RequiredDate, in.ShelfLifeMarginDays, in.AllowPartial)
+			sel, err := domain.PlanDemandPolicy(in.Policy, cands, in.Qty, in.RequiredDate, in.ShelfLifeMarginDays, in.AllowPartial,
+				in.Segment, in.SegmentFallback)
 			if err != nil {
 				return domainProblem(err)
 			}
@@ -126,12 +141,13 @@ func (s *Postgres) Reserve(ctx context.Context, in ReserveInput) (ReserveResult,
 				return err
 			}
 			res := domain.Reservation{ID: ids.New(), LegalEntityID: in.LegalEntityID, ProductID: in.ProductID, Dims: r.dims, Qty: a.Qty,
-				DemandType: in.DemandType, DemandID: in.DemandID, Policy: in.Policy, Status: domain.ReservationActive, AllocationNo: i + 1}
+				DemandType: in.DemandType, DemandID: in.DemandID, DemandSegment: in.Segment, Policy: in.Policy, Status: domain.ReservationActive,
+				AllocationNo: i + 1}
 			if err := tx.QueryRow(ctx, `insert into inventory_reservation (tenant_id, legal_entity_id, id, idempotency_key, allocation_no,
-				product_id, dimension_set_hash, qty, requested_qty, demand_type, demand_id, policy, status, created_by)
-				values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'ACTIVE', $13) returning created_at`,
+				product_id, dimension_set_hash, qty, requested_qty, demand_type, demand_id, policy, status, created_by, demand_segment)
+				values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'ACTIVE', $13, $14) returning created_at`,
 				p.TenantID, in.LegalEntityID, res.ID, in.IdempotencyKey, res.AllocationNo, in.ProductID, r.hash,
-				a.Qty.String(), in.Qty.String(), string(in.DemandType), in.DemandID, string(in.Policy), optionalText(p.UserID)).Scan(&res.CreatedAt); err != nil {
+				a.Qty.String(), in.Qty.String(), string(in.DemandType), in.DemandID, string(in.Policy), optionalText(p.UserID), in.Segment).Scan(&res.CreatedAt); err != nil {
 				return scopeProblem(err)
 			}
 			if err := enqueue(ctx, tx, "reservation", res.ID, invevents.ReservationCreated, p.TenantID, reservationData(res)); err != nil {
@@ -318,14 +334,16 @@ func policyCandidates(ctx context.Context, tx pgx.Tx, tenantID string, in Reserv
 	}
 	var out []domain.BatchStock
 	for key, r := range rows {
-		if !matchesFilter(r.dims, filter) {
+		// Vendor-owned stock is consumed only after an ownership change (FR-16.17).
+		if !matchesFilter(r.dims, filter) || domain.VendorOwned(r.dims) {
 			continue
 		}
 		status := r.dims[domain.DimStatus]
 		if status == "" {
 			status = domain.StockAvailable
 		}
-		c := domain.BatchStock{BatchID: r.dims[domain.DimBatch], Key: key, Available: r.oh.AvailPhysical(), Status: status, ReceiptDate: in.RequiredDate}
+		c := domain.BatchStock{BatchID: r.dims[domain.DimBatch], Key: key, Available: r.oh.AvailPhysical(), Status: status, ReceiptDate: in.RequiredDate,
+			Segment: r.dims[domain.DimSegment]}
 		if e, ok := expiry[c.BatchID]; ok && c.BatchID != "" {
 			c.Expiry = &e
 		}
@@ -356,7 +374,7 @@ type reservationRow struct {
 // sets; where is the rest of the statement after "where".
 func queryReservations(ctx context.Context, tx pgx.Tx, where string, args ...any) ([]reservationRow, error) {
 	rows, err := tx.Query(ctx, `select r.id::text, r.legal_entity_id::text, r.product_id::text, d.dims, r.qty::text, r.requested_qty::text,
-		r.demand_type, r.demand_id, r.policy, r.status, r.allocation_no, r.created_at, r.released_at
+		r.demand_type, r.demand_id, r.demand_segment, r.policy, r.status, r.allocation_no, r.created_at, r.released_at
 		from inventory_reservation r join dimension_set d on d.tenant_id = r.tenant_id and d.hash = r.dimension_set_hash
 		where `+where, args...)
 	if err != nil {
@@ -368,7 +386,7 @@ func queryReservations(ctx context.Context, tx pgx.Tx, where string, args ...any
 		var rr reservationRow
 		var raw []byte
 		var qty, requested, demand, policy, status string
-		if err := rows.Scan(&rr.ID, &rr.LegalEntityID, &rr.ProductID, &raw, &qty, &requested, &demand, &rr.DemandID, &policy, &status,
+		if err := rows.Scan(&rr.ID, &rr.LegalEntityID, &rr.ProductID, &raw, &qty, &requested, &demand, &rr.DemandID, &rr.DemandSegment, &policy, &status,
 			&rr.AllocationNo, &rr.CreatedAt, &rr.ReleasedAt); err != nil {
 			return nil, err
 		}
@@ -386,10 +404,11 @@ func queryReservations(ctx context.Context, tx pgx.Tx, where string, args ...any
 func samePriorRequest(prior []reservationRow, in ReserveInput) bool {
 	first := prior[0]
 	return first.LegalEntityID == in.LegalEntityID && first.ProductID == in.ProductID && first.DemandType == in.DemandType &&
-		first.DemandID == in.DemandID && first.Policy == in.Policy && first.requested.Equal(in.Qty)
+		first.DemandID == in.DemandID && first.DemandSegment == in.Segment && first.Policy == in.Policy && first.requested.Equal(in.Qty)
 }
 
 func reservationData(r domain.Reservation) invevents.ReservationData {
 	return invevents.ReservationData{ReservationID: r.ID, LegalEntityID: r.LegalEntityID, ProductID: r.ProductID, DimensionSet: map[string]string(r.Dims),
-		Qty: r.Qty.String(), DemandType: string(r.DemandType), DemandID: r.DemandID, Policy: string(r.Policy), Status: string(r.Status)}
+		Qty: r.Qty.String(), DemandType: string(r.DemandType), DemandID: r.DemandID, DemandSegment: r.DemandSegment, Policy: string(r.Policy),
+		Status: string(r.Status)}
 }

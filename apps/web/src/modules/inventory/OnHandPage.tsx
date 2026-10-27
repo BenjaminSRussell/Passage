@@ -14,6 +14,8 @@ export const GROUP_LABELS: Record<OnHandGroup, string> = {
   batch: "Batch",
   serial: "Serial",
   inventory_status: "Inventory status",
+  owner: "Owner (vendor)",
+  segment: "Segment",
 };
 
 interface Filters {
@@ -21,9 +23,11 @@ interface Filters {
   site: string;
   warehouse: string;
   batch: string;
+  owner: string;
+  segment: string;
 }
 
-const noFilters: Filters = { product: "", site: "", warehouse: "", batch: "" };
+const noFilters: Filters = { product: "", site: "", warehouse: "", batch: "", owner: "", segment: "" };
 
 const amountColumns: DataTableColumn<OnHandRow>[] = [
   { key: "physicalInvent", header: "Physical", align: "end", mono: true },
@@ -104,6 +108,12 @@ export function OnHandPage() {
           </FormField>
           <FormField id="onhand-batch" label="Batch" optional>
             {(control) => <Input {...control} {...field("batch")} />}
+          </FormField>
+          <FormField id="onhand-owner" label="Owner (vendor)" optional hint="Vendor-owned consignment stock only.">
+            {(control) => <Input {...control} {...field("owner")} />}
+          </FormField>
+          <FormField id="onhand-segment" label="Segment" optional hint="SALES_ORDER:reference or PROJECT:reference.">
+            {(control) => <Input {...control} {...field("segment")} />}
           </FormField>
           <div className={styles.formActions}>
             <Button type="submit" variant="primary">

@@ -11,7 +11,7 @@ export type FormDimension = (typeof FORM_DIMENSIONS)[number];
 export const emptyDimensions = (): Record<FormDimension, string> => ({ site: "", warehouse: "", location: "", batch: "", serial: "" });
 
 /** All dimensions in canonical order, for describing stored dimension sets. */
-export const ALL_DIMENSIONS = ["site", "warehouse", "location", "batch", "serial", "inventory_status", "config", "size", "color", "style"] as const;
+export const ALL_DIMENSIONS = ["site", "warehouse", "location", "batch", "serial", "inventory_status", "config", "size", "color", "style", "owner", "segment"] as const;
 
 export function Detail({ term, children, mono = false }: { term: string; children: string; mono?: boolean }) {
   return (

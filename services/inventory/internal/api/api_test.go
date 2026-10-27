@@ -75,6 +75,18 @@ type fakeStore struct {
 	reverseReplay   bool
 	reverseDate     time.Time
 	repair          bool
+
+	// slice 5: journal workflow, consignment (fake methods in slice5_test.go)
+	transitionTo      domain.JournalStatus
+	transitionVersion int
+	validated         string
+	consIn            domain.ConsignmentOrder
+	consKey           string
+	consFilter        store.ConsignmentFilter
+	consVersion       int
+	consReceipts      []domain.ConsignmentReceipt
+	consDate          time.Time
+	stockVendor       string
 }
 
 func (f *fakeStore) CreateJournal(_ context.Context, j domain.Journal, key string) (domain.Journal, bool, error) {
@@ -478,7 +490,7 @@ func TestListJournalsFiltersAndPages(t *testing.T) {
 
 func TestOnHandRejectsUnknownGrouping(t *testing.T) {
 	h := newServer(t, &fakeStore{})
-	for _, q := range []string{"groupBy=colour", "groupBy=segment", "product=not-a-uuid"} {
+	for _, q := range []string{"groupBy=colour", "groupBy=project", "product=not-a-uuid"} {
 		if rec := do(t, h, http.MethodGet, "/v1/inventory/onhand?"+q, "", []string{"inventory.read"}, nil); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: status %d, want 400", q, rec.Code)
 		}
@@ -547,8 +559,8 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		served[route+" "+strings.ToLower(method)] = true
 		return nil
 	})
-	if len(served) != 38 {
-		t.Fatalf("router walk yielded %d operations, want 38: %v", len(served), served)
+	if len(served) != 49 {
+		t.Fatalf("router walk yielded %d operations, want 49: %v", len(served), served)
 	}
 	declared := declaredOperations(string(spec))
 	for op := range served {

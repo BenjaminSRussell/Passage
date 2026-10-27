@@ -1,12 +1,14 @@
 openapi: 3.1.0
 info:
   title: Passage Inventory
-  version: 0.16.4
+  version: 0.16.5
   description: |
     Inventory journals, posting, the on-hand and transaction inquiries, reservations, blocking
     and quarantine, cycle counting (wave 16, slices 1 and 2), transfer orders with stock in
     transit and ABC classification (slice 3), journal reversal, tag counting and the on-hand
-    rebuild-and-compare (slice 4). Quantities and money are decimal strings; money
+    rebuild-and-compare (slice 4), the journal approval workflow and :validate, vendor consignment
+    (replenishment orders, OWNERSHIP_CHANGE journals, consignment stock) and segment-aware
+    reservations (slice 5). Quantities and money are decimal strings; money
     is in the journal (accounting) currency, rounded to its minor unit. Browser calls use
     /api/v1/inventory/..., which the web BFF rewrites to these paths.
 servers:
@@ -174,9 +176,11 @@ paths:
         - { name: site, in: query, schema: { type: string } }
         - { name: warehouse, in: query, schema: { type: string } }
         - { name: batch, in: query, schema: { type: string } }
+        - { name: owner, in: query, description: Vendor id of vendor-owned stock, schema: { type: string } }
+        - { name: segment, in: query, description: 'SALES_ORDER:<ref> or PROJECT:<ref>', schema: { type: string } }
         - name: groupBy
           in: query
-          description: Comma-separated groupings (product, legal_entity, site, warehouse, location, batch, serial, inventory_status, config, size, color, style, license_plate, owner). Default product.
+          description: Comma-separated groupings (product, legal_entity, site, warehouse, location, batch, serial, inventory_status, config, size, color, style, license_plate, owner, segment). Default product.
           schema: { type: string }
       responses:
         '200':
@@ -1111,6 +1115,317 @@ paths:
         '412': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
         '428': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/journals/{id}:validate:
+    post:
+      operationId: validateInventoryJournal
+      summary: Dry-run the posting of a journal (FR-16.6)
+      description: |
+        Runs the posting of a DRAFT, SUBMITTED or APPROVED journal in a transaction that is always
+        rolled back: the same line rules, offset account, negative-stock policy and vendor-owned
+        quantity under the row locks, serial uniqueness and currency checks as :post, and nothing is
+        written. 200 with valid=true when the post would succeed now; otherwise the problem the post
+        would return (for example INV-NEG-001, INV-OWN-002, INV-SER-001). Any other status is
+        INV-JNL-004 (409). The result holds for the stock at the time of the call.
+      x-passage-duty: inventory.journal.write
+      parameters:
+        - $ref: '#/components/parameters/JournalId'
+      responses:
+        '200':
+          description: The journal would post
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [valid, journalId, status, version, lineCount]
+                properties:
+                  valid: { type: boolean, enum: [true] }
+                  journalId: { type: string, format: uuid }
+                  status: { $ref: '#/components/schemas/JournalStatus' }
+                  version: { type: integer }
+                  lineCount: { type: integer }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/journals/{id}:submit:
+    post:
+      operationId: submitInventoryJournal
+      summary: Submit a DRAFT journal for approval (BR-16.11)
+      description: |
+        DRAFT -> SUBMITTED. The line rules are checked again (a journal without lines or with an
+        invalid line cannot be submitted). A SUBMITTED journal takes no lines and cannot be posted
+        until approved. Any other status is INV-JNL-004 (409). Requires If-Match.
+      x-passage-duty: inventory.journal.write
+      parameters:
+        - $ref: '#/components/parameters/JournalId'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Journal after the step
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Journal' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/journals/{id}:approve:
+    post:
+      operationId: approveInventoryJournal
+      summary: Approve a SUBMITTED journal (BR-16.11)
+      description: |
+        SUBMITTED -> APPROVED, the approval task of InventoryJournalPost. An APPROVED journal is
+        posted with :post. Any other status is INV-JNL-004 (409). Requires If-Match.
+      x-passage-duty: inventory.journal.post
+      parameters:
+        - $ref: '#/components/parameters/JournalId'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Journal after the step
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Journal' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/journals/{id}:reject:
+    post:
+      operationId: rejectInventoryJournal
+      summary: Reject a SUBMITTED journal (BR-16.11)
+      description: |
+        SUBMITTED -> REJECTED. A rejected journal is reopened to DRAFT (:reopen) or cancelled.
+        Any other status is INV-JNL-004 (409). Requires If-Match.
+      x-passage-duty: inventory.journal.post
+      parameters:
+        - $ref: '#/components/parameters/JournalId'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Journal after the step
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Journal' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/journals/{id}:reopen:
+    post:
+      operationId: reopenInventoryJournal
+      summary: Reopen a REJECTED journal as DRAFT (BR-16.11)
+      description: |
+        REJECTED -> DRAFT, so lines can be corrected and the journal submitted again. Any other
+        status is INV-JNL-004 (409). Requires If-Match.
+      x-passage-duty: inventory.journal.write
+      parameters:
+        - $ref: '#/components/parameters/JournalId'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Journal after the step
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Journal' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/journals/{id}:cancel:
+    post:
+      operationId: cancelInventoryJournal
+      summary: Cancel a DRAFT or REJECTED journal (BR-16.11)
+      description: |
+        DRAFT or REJECTED -> CANCELLED; nothing was posted, so nothing is reversed. A reversal
+        draft cannot be cancelled (it is its original's one reversal). Any other status is
+        INV-JNL-004 (409). Requires If-Match.
+      x-passage-duty: inventory.journal.write
+      parameters:
+        - $ref: '#/components/parameters/JournalId'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Journal after the step
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Journal' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/consignment-orders:
+    post:
+      operationId: createConsignmentOrder
+      summary: Create a vendor consignment replenishment order (FR-16.17)
+      description: |
+        Stores a CREATED order (number CRO- plus 12 hex digits) for vendor-owned stock at a site
+        and warehouse. Lines name the product, unit, quantity, consignment price (in currency) and
+        optional location / batch / serial / config / size / color / style; site, warehouse and
+        owner come from the order. Creating it posts nothing. A repeated Idempotency-Key with the
+        same body returns the order (200, Idempotent-Replayed: true); with a different body it is
+        idempotency_key_reuse (422).
+      x-passage-duty: inventory.consignment.write
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateConsignmentRequest' }
+      responses:
+        '201':
+          description: Order created
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConsignmentOrder' }
+        '200':
+          description: Idempotent replay of a previous create
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+            Idempotent-Replayed: { schema: { type: string, enum: ['true'] } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConsignmentOrder' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listConsignmentOrders
+      summary: List replenishment orders, newest first (at most 500)
+      x-passage-duty: inventory.read
+      parameters:
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/ConsignmentStatus' } }
+        - { name: vendor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Orders with their lines
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/ConsignmentOrder' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/consignment-orders/{id}:
+    get:
+      operationId: getConsignmentOrder
+      summary: Get a replenishment order with its lines
+      x-passage-duty: inventory.read
+      parameters:
+        - $ref: '#/components/parameters/ConsignmentId'
+      responses:
+        '200':
+          description: The order
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConsignmentOrder' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/consignment-orders/{id}:receive:
+    post:
+      operationId: receiveConsignmentOrder
+      summary: Receive vendor-owned stock against a replenishment order (FR-16.17, BR-16.14)
+      description: |
+        Each receipt line is a RECEIVED transaction (origin CONSIGNMENT_LINE, reference = the order
+        id) at the line's dimensions with owner = the vendor: quantity only, posted value 0, no
+        financial date, no GL entry and no GR/IR. Rows are locked in ascending order; a serial already
+        in physical stock is INV-SER-001. A line cannot receive beyond its ordered quantity
+        (INV-CNS-002); an unknown line is INV-CNS-001, a fully received order INV-CNS-003. The order
+        becomes PARTIALLY_RECEIVED or RECEIVED. receiptDate defaults to today. Requires If-Match.
+      x-passage-duty: inventory.consignment.write
+      parameters:
+        - $ref: '#/components/parameters/ConsignmentId'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReceiveConsignmentRequest' }
+      responses:
+        '200':
+          description: Order after the receipt
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConsignmentOrder' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/consignment/stock:
+    get:
+      operationId: listConsignmentStock
+      summary: Consignment stock by vendor (PRD 3.16.14, SAP MB54)
+      description: |
+        Vendor-owned physical stock by vendor and dimension set, oldest first receipt first (at
+        most 500 rows). consignmentPrice is the price of the vendor's latest replenishment line for
+        the product and statisticalValue qty x price in its currency: a statistic, not posted value
+        (vendor-owned stock is never valued). Both are null when no order carries a price.
+      x-passage-duty: inventory.read
+      parameters:
+        - { name: vendor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Vendor-owned stock rows
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/ConsignmentStockItem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
   /internal/v1/inventory/onhand:rebuild:
     post:
       operationId: rebuildInventoryOnHand
@@ -1183,6 +1498,11 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+    ConsignmentId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
   headers:
     ETag:
       description: Resource version, quoted
@@ -1196,8 +1516,16 @@ components:
   schemas:
     JournalType:
       type: string
-      description: COUNT journals are created by count-sheet posting, never by POST /journals.
-      enum: [MOVEMENT, ADJUSTMENT, OPENING_BALANCE, COUNT]
+      description: |
+        COUNT journals are created by count-sheet posting, never by POST /journals. An
+        OWNERSHIP_CHANGE journal (FR-16.17) also needs inventory.consignment.write to create; each
+        line names vendor-owned stock (dimension owner = the vendor, one vendor per journal), a
+        positive quantity and the consignment price as costPrice. It posts a DEDUCTED issue of the
+        vendor-owned stock at value 0 and a PURCHASED receipt at the same dimensions without owner
+        at quantity x price, Dr inventory / Cr consignment accrual, and emits
+        dev.passage.inventory.ownership.changed.v1. More than the available vendor-owned quantity
+        is INV-OWN-002; it cannot be reversed.
+      enum: [MOVEMENT, ADJUSTMENT, OPENING_BALANCE, COUNT, OWNERSHIP_CHANGE]
     JournalStatus:
       type: string
       enum: [DRAFT, SUBMITTED, APPROVED, POSTING, POSTED, REJECTED, CANCELLED]
@@ -1229,7 +1557,12 @@ components:
           items: { $ref: '#/components/schemas/JournalLineRequest' }
     Dimensions:
       type: object
-      description: Dimension values by name (site, warehouse, location, batch, serial, inventory_status, config, size, color, style). site is mandatory; owner and license_plate are reserved.
+      description: |
+        Dimension values by name (site, warehouse, location, batch, serial, inventory_status, config,
+        size, color, style, owner, segment). site is mandatory. owner (a vendor id) is set only by
+        consignment receipts and read only by OWNERSHIP_CHANGE lines; on any other document it is
+        INV-OWN-001. segment is SALES_ORDER:<ref> or PROJECT:<ref> (FR-16.20). license_plate is
+        reserved.
       additionalProperties: { type: string, maxLength: 60 }
     JournalLineRequest:
       type: object
@@ -1322,10 +1655,10 @@ components:
         id: { type: string, format: uuid }
         legalEntityId: { type: string, format: uuid }
         originId: { type: string, format: uuid }
-        sourceType: { type: string, enum: [INVENT_JOURNAL_LINE, BLOCKING] }
+        sourceType: { type: string, enum: [INVENT_JOURNAL_LINE, BLOCKING, TRANSFER_LINE, CONSIGNMENT_LINE, OWNERSHIP_CHANGE] }
         sourceId: { type: string, format: uuid }
-        journalId: { type: string, format: uuid, description: Set for journal lines }
-        reference: { type: string, description: Source document of other origins (the blocking id) }
+        journalId: { type: string, format: uuid, description: Set for journal lines and the receipt leg of an ownership change }
+        reference: { type: string, description: 'Source document of other origins (blocking, transfer or replenishment order id)' }
         productId: { type: string, format: uuid }
         dimensions: { $ref: '#/components/schemas/Dimensions' }
         qty: { $ref: '#/components/schemas/Decimal' }
@@ -1334,7 +1667,7 @@ components:
         issueStatus: { $ref: '#/components/schemas/TransactionStatus' }
         receiptStatus: { $ref: '#/components/schemas/TransactionStatus' }
         physicalDate: { type: string, format: date }
-        financialDate: { type: string, format: date }
+        financialDate: { type: string, format: date, description: Absent for a physical status (a vendor-owned RECEIVED or DEDUCTED transaction) }
         currency: { type: string }
         costAmountPhysical: { $ref: '#/components/schemas/Decimal' }
         costAmountPosted: { $ref: '#/components/schemas/Decimal' }
@@ -1353,7 +1686,10 @@ components:
         requiredDate: { type: string, format: date, description: Defaults to today (UTC) }
         shelfLifeMarginDays: { type: integer, minimum: 0, maximum: 365, default: 0 }
         allowPartial: { type: boolean, default: false }
-        dimensions: { $ref: '#/components/schemas/Dimensions', description: 'MANUAL: the exact dimension set. Policies: a filter (every named dimension must match).' }
+        dimensions: { $ref: '#/components/schemas/Dimensions', description: 'MANUAL: the exact dimension set. Policies: a filter (every named dimension must match; no segment, which comes from segmentType). Vendor-owned stock (owner) is INV-OWN-001.' }
+        segmentType: { type: string, enum: [NONE, SALES_ORDER, PROJECT], default: NONE, description: 'Segment of the demand (FR-16.20). A policy reservation takes stock of this segment first, then unsegmented stock when segmentFallback; never another segment. An unsegmented demand never takes segmented stock. MANUAL stock of an ineligible segment is INV-SEG-001.' }
+        segmentRef: { type: string, maxLength: 48, description: Sales order or project reference; required with SALES_ORDER and PROJECT }
+        segmentFallback: { type: boolean, default: true }
     Reservation:
       type: object
       required: [id, legalEntityId, productId, dimensions, qty, demandType, demandId, policy, status, allocationNo, createdAt]
@@ -1365,6 +1701,7 @@ components:
         qty: { $ref: '#/components/schemas/Decimal' }
         demandType: { type: string }
         demandId: { type: string }
+        demandSegment: { type: string, description: 'Segment of the demand (SALES_ORDER:<ref> or PROJECT:<ref>); absent when unsegmented' }
         policy: { type: string, enum: [MANUAL, FIFO, FEFO, LIFO] }
         status: { type: string, enum: [ACTIVE, RELEASED, CONSUMED] }
         allocationNo: { type: integer, description: Position of this allocation within its request }
@@ -1623,6 +1960,96 @@ components:
               value: { $ref: '#/components/schemas/Decimal' }
               cumPct: { type: string, description: Cumulative share of the value up to and including the item, percent with 2 decimals }
               class: { type: string, enum: [A, B, C, N] }
+    ConsignmentStatus:
+      type: string
+      enum: [CREATED, PARTIALLY_RECEIVED, RECEIVED]
+    CreateConsignmentRequest:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId, vendorId, siteId, warehouseId, requestedDate, currency, lines]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        vendorId: { type: string, minLength: 1, maxLength: 60, description: 'Vendor id; becomes the owner dimension of the received stock' }
+        siteId: { type: string, minLength: 1, maxLength: 60 }
+        warehouseId: { type: string, minLength: 1, maxLength: 60 }
+        requestedDate: { type: string, format: date }
+        currency: { type: string, pattern: '^[A-Z]{3}$', description: Currency of the consignment prices }
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            type: object
+            additionalProperties: false
+            required: [productId, unit, qty]
+            properties:
+              productId: { type: string, format: uuid }
+              dimensions: { $ref: '#/components/schemas/Dimensions', description: 'Only location, batch, serial, config, size, color, style' }
+              unit: { type: string, pattern: '^[A-Z0-9_-]{1,12}$' }
+              qty: { $ref: '#/components/schemas/Decimal', description: 'Positive, at most 6 decimals; 1 for a serial' }
+              consignmentPrice: { $ref: '#/components/schemas/Decimal', description: 'Non-negative, default 0' }
+    ReceiveConsignmentRequest:
+      type: object
+      additionalProperties: false
+      required: [lines]
+      properties:
+        receiptDate: { type: string, format: date, description: Defaults to today (UTC) }
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            type: object
+            additionalProperties: false
+            required: [lineId, qty]
+            properties:
+              lineId: { type: string, format: uuid }
+              qty: { $ref: '#/components/schemas/Decimal' }
+    ConsignmentLine:
+      type: object
+      required: [id, lineNo, productId, dimensions, unit, qty, receivedQty, openQty, consignmentPrice]
+      properties:
+        id: { type: string, format: uuid }
+        lineNo: { type: integer }
+        productId: { type: string, format: uuid }
+        dimensions: { $ref: '#/components/schemas/Dimensions', description: 'The vendor-owned dimension set received into (site, warehouse and owner included)' }
+        unit: { type: string }
+        qty: { $ref: '#/components/schemas/Decimal' }
+        receivedQty: { $ref: '#/components/schemas/Decimal' }
+        openQty: { $ref: '#/components/schemas/Decimal' }
+        consignmentPrice: { $ref: '#/components/schemas/Decimal' }
+    ConsignmentOrder:
+      type: object
+      required: [id, legalEntityId, number, vendorId, siteId, warehouseId, requestedDate, currency, status, version, createdAt, lines]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        number: { type: string, description: CRO- plus 12 hex digits }
+        vendorId: { type: string }
+        siteId: { type: string }
+        warehouseId: { type: string }
+        requestedDate: { type: string, format: date }
+        currency: { type: string }
+        status: { $ref: '#/components/schemas/ConsignmentStatus' }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+        lines:
+          type: array
+          items: { $ref: '#/components/schemas/ConsignmentLine' }
+    ConsignmentStockItem:
+      type: object
+      required: [legalEntityId, vendorId, productId, dimensions, qty, consignmentPrice, statisticalValue, oldestReceipt, ageDays]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        vendorId: { type: string }
+        productId: { type: string, format: uuid }
+        dimensions: { $ref: '#/components/schemas/Dimensions' }
+        qty: { $ref: '#/components/schemas/Decimal' }
+        consignmentPrice: { type: [string, 'null'] }
+        currency: { type: string }
+        statisticalValue: { type: [string, 'null'], description: 'qty x consignmentPrice, rounded to the currency minor unit; not posted' }
+        oldestReceipt: { type: [string, 'null'], format: date }
+        ageDays: { type: [integer, 'null'] }
     CountTagStatus:
       type: string
       enum: [OPEN, USED, VOID, MISSING]

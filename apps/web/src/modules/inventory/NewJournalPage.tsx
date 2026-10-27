@@ -1,5 +1,5 @@
 import { useRef, useState, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select } from "../../shell/ui";
 import { createJournal, describeProblem, KEYED_JOURNAL_TYPES, type KeyedJournalType, type Problem } from "./api/client";
 import { today, typeLabels, UUID } from "./format";
@@ -19,6 +19,7 @@ const typeHints: Record<KeyedJournalType, string> = {
   MOVEMENT: "Receipts and issues against an offset account you choose.",
   ADJUSTMENT: "Stock corrections posted to the inventory adjustment account.",
   OPENING_BALANCE: "Initial stock posted against the migration clearing account.",
+  OWNERSHIP_CHANGE: "Takes vendor-owned consignment stock into company ownership at the consignment price, against the consignment accrual account.",
 };
 
 /** Client-side checks that mirror the service, so most mistakes never leave the form. */
@@ -44,7 +45,10 @@ const fieldNames: Record<string, keyof Values> = {
 /** New journal header (DRAFT). On success the user lands on the journal to add lines. */
 export function NewJournalPage() {
   const navigate = useNavigate();
-  const [values, setValues] = useState<Values>({ journalType: "MOVEMENT", legalEntityId: "", postingDate: today(), currency: "", offsetAccountId: "" });
+  const [params] = useSearchParams();
+  // ?type=OWNERSHIP_CHANGE (from the consignment stock report) preselects the type.
+  const requested = KEYED_JOURNAL_TYPES.find((t) => t === params.get("type")) ?? "MOVEMENT";
+  const [values, setValues] = useState<Values>({ journalType: requested, legalEntityId: "", postingDate: today(), currency: "", offsetAccountId: "" });
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);

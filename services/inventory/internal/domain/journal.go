@@ -34,8 +34,8 @@ func fail(code, format string, args ...any) *Error {
 	return &Error{Code: code, Detail: fmt.Sprintf(format, args...)}
 }
 
-// JournalType is the kind of inventory journal. TRANSFER and BOM need the
-// transfer aggregate and the BOM explosion and are not built yet.
+// JournalType is the kind of inventory journal. TRANSFER and BOM are not built
+// yet (the BOM explosion is wave 9's).
 type JournalType string
 
 const (
@@ -46,14 +46,19 @@ const (
 	// is created only by count-sheet posting and offsets to the adjustment
 	// account like an ADJUSTMENT journal.
 	JournalCount JournalType = "COUNT"
+	// JournalOwnershipChange moves vendor-owned (consignment) stock to the
+	// legal entity at the consignment price (FR-16.17, BR-16.14). Each line
+	// names the vendor-owned source; it posts a paired issue and receipt that
+	// differ only in the owner, and offsets to the consignment accrual account.
+	JournalOwnershipChange JournalType = "OWNERSHIP_CHANGE"
 )
 
 // JournalTypes are the journal types stored and listed.
-var JournalTypes = []JournalType{JournalMovement, JournalAdjustment, JournalOpeningBalance, JournalCount}
+var JournalTypes = []JournalType{JournalMovement, JournalAdjustment, JournalOpeningBalance, JournalCount, JournalOwnershipChange}
 
 // KeyedJournalTypes are the journal types a user may create directly; COUNT
 // journals come from count sheets.
-var KeyedJournalTypes = []JournalType{JournalMovement, JournalAdjustment, JournalOpeningBalance}
+var KeyedJournalTypes = []JournalType{JournalMovement, JournalAdjustment, JournalOpeningBalance, JournalOwnershipChange}
 
 // JournalStatus is the journal state machine of BR-16.11.
 type JournalStatus string
@@ -145,9 +150,10 @@ var DefaultJournalRules = JournalRules{MaxLines: 10000, MaxScale: 6}
 // maxCostScale is the precision of cost_price (numeric(20,6)).
 const maxCostScale = 6
 
-// reservedDimensions are hashed but not yet accepted on a line: license_plate
-// belongs to wave 31 and owner to the consignment slice (FR-16.17), which must
-// keep vendor-owned stock free of value (BR-16.14).
+// reservedDimensions are hashed but not accepted on keyed documents:
+// license_plate belongs to wave 31, and owner is set only by a consignment
+// replenishment receipt and read only by an ownership change (FR-16.17), which
+// keeps vendor-owned stock free of value (BR-16.14).
 var reservedDimensions = []string{DimLicensePlate, DimOwner}
 
 // ValidateHeader checks the journal header: a supported type, a currency, and an
@@ -169,11 +175,20 @@ func ValidateHeader(j Journal) error {
 	return nil
 }
 
-// ValidateLine checks the rules of one line that need no database: product,
-// non-zero quantity within precision, entered quantity on the same side, a
-// non-negative cost, known dimensions with a site (FR-16.5), no reserved
-// dimension, and ±1 for a serial (BR-16.9).
+// ValidateLine checks a line of a valued document (any journal type but
+// OWNERSHIP_CHANGE, and transfer lines); see ValidateLineFor.
 func ValidateLine(l JournalLine, maxScale int32) error {
+	return ValidateLineFor(JournalMovement, l, maxScale)
+}
+
+// ValidateLineFor checks the rules of one line of a journal of type t that
+// need no database: product, non-zero quantity within precision, entered
+// quantity on the same side, a non-negative cost, known dimensions with a site
+// (FR-16.5), ±1 for a serial (BR-16.9), and the owner rule: an
+// OWNERSHIP_CHANGE line names vendor-owned stock and a positive quantity (the
+// quantity moved to the legal entity); any other line is refused on
+// vendor-owned stock, which never carries value (INV-OWN-001, BR-16.14).
+func ValidateLineFor(t JournalType, l JournalLine, maxScale int32) error {
 	if l.ProductID == "" {
 		return fail(CodeInvalid, "line %d has no product", l.LineNo)
 	}
@@ -193,10 +208,16 @@ func ValidateLine(l JournalLine, maxScale int32) error {
 	if err != nil {
 		return fail(CodeInvalid, "line %d: %v", l.LineNo, err)
 	}
-	for _, name := range reservedDimensions {
-		if dims[name] != "" {
-			return fail(CodeInvalid, "line %d: dimension %s is reserved and cannot be set yet", l.LineNo, name)
-		}
+	switch {
+	case t == JournalOwnershipChange && !VendorOwned(dims):
+		return fail(CodeInvalid, "line %d: an ownership change line names the vendor-owned stock it moves (dimension owner)", l.LineNo)
+	case t == JournalOwnershipChange && l.Qty.Sign() < 0:
+		return fail(CodeInvalid, "line %d: an ownership change quantity is the positive quantity moved to the legal entity", l.LineNo)
+	case t != JournalOwnershipChange && VendorOwned(dims):
+		return fail(CodeOwnershipValue, "line %d: vendor-owned stock cannot be valued or financially posted; post an ownership change first", l.LineNo)
+	}
+	if dims[DimLicensePlate] != "" {
+		return fail(CodeInvalid, "line %d: dimension %s is reserved and cannot be set yet", l.LineNo, DimLicensePlate)
 	}
 	if dims[DimSite] == "" {
 		return fail(CodeDimensionMandatory, "dimension %s is mandatory for product %s (line %d)", DimSite, l.ProductID, l.LineNo)
@@ -220,9 +241,12 @@ func ValidateJournal(j Journal, r JournalRules) error {
 		return fail(CodeJournalMax, "journal exceeds %d lines", r.MaxLines)
 	}
 	for _, l := range j.Lines {
-		if err := ValidateLine(l, r.MaxScale); err != nil {
+		if err := ValidateLineFor(j.Type, l, r.MaxScale); err != nil {
 			return err
 		}
+	}
+	if j.Type == JournalOwnershipChange {
+		return CheckOwnershipLines(j.Lines)
 	}
 	return nil
 }
@@ -231,19 +255,39 @@ func ValidateJournal(j Journal, r JournalRules) error {
 // the signed cost in the accounting currency, rounded to its minor unit; it is
 // set by the posting once the on-hand row is locked (issues are valued at the
 // row's running average). Corrects is the transaction a reversal line
-// negates (corrects_transaction_id, FR-16.1).
+// negates (corrects_transaction_id, FR-16.1). Paired marks the receipt leg of
+// an ownership change, which shares its journal line with the issue leg.
 type PostedLine struct {
 	Line     JournalLine
 	Status   Status
 	Value    decimal.Decimal
 	Corrects string
+	Paired   bool
 }
 
 // PlanPosting turns journal lines into transactions. Each line is posted in one
 // step at its financial status: receipts become PURCHASED, issues become SOLD,
 // so posted quantity and value move with the journal's GL entry. Physical
 // statuses other than these are reached by later slices (receiving, shipping).
+//
+// An OWNERSHIP_CHANGE line becomes a pair (FR-16.17, BR-16.14): a DEDUCTED
+// issue of the vendor-owned source, which stays quantity-only and is valued at
+// zero, and a PURCHASED receipt of the same quantity at the same dimensions
+// owned by the legal entity, valued at the consignment price. Physical stock
+// summed across owners is unchanged.
 func PlanPosting(j Journal) []PostedLine {
+	if j.Type == JournalOwnershipChange {
+		out := make([]PostedLine, 0, 2*len(j.Lines))
+		for _, l := range j.Lines {
+			issue := l
+			issue.Qty, issue.EnteredQty = l.Qty.Neg(), l.EnteredQty.Neg()
+			receipt := l
+			receipt.Dims = WithOwner(l.Dims, "")
+			out = append(out, PostedLine{Line: issue, Status: StatusDeducted, Value: decimal.Zero},
+				PostedLine{Line: receipt, Status: StatusPurchased, Paired: true})
+		}
+		return out
+	}
 	out := make([]PostedLine, 0, len(j.Lines))
 	for _, l := range j.Lines {
 		st := StatusSold
@@ -264,6 +308,9 @@ func PlanPosting(j Journal) []PostedLine {
 func ReverseJournal(orig Journal, newID string, postingDate time.Time) (Journal, error) {
 	if orig.Status != JournalPosted {
 		return Journal{}, fail(CodeJournalNotReady, "only a POSTED journal can be reversed; this one is %s", orig.Status)
+	}
+	if orig.Type == JournalOwnershipChange {
+		return Journal{}, fail(CodeJournalNotReady, "an ownership change cannot be reversed: returning stock to the vendor is a later slice")
 	}
 	if orig.ReversedByJournalID != "" {
 		return Journal{}, fail(CodeJournalNotReady, "journal is already reversed by %s", orig.ReversedByJournalID)

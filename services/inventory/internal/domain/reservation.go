@@ -53,6 +53,8 @@ type Reservation struct {
 	Qty           decimal.Decimal
 	DemandType    DemandType
 	DemandID      string
+	// DemandSegment is the segment of the demand ("" when unsegmented, FR-16.20).
+	DemandSegment string
 	Policy        ReservationPolicy
 	Status        ReservationStatus
 	AllocationNo  int
@@ -60,11 +62,16 @@ type Reservation struct {
 	ReleasedAt    *time.Time
 }
 
-// ValidateReservable rejects a manual reservation at a blocked or quarantined
-// dimension set (FR-16.8: restricted stock is excluded from reservation).
+// ValidateReservable rejects a reservation at a blocked or quarantined
+// dimension set (FR-16.8: restricted stock is excluded from reservation) and
+// at vendor-owned stock, which the company may consume only after an ownership
+// change (FR-16.17, BR-16.14).
 func ValidateReservable(dims Dimensions) error {
 	if s := dims[DimStatus]; IsRestricted(s) {
 		return fail(CodeBlockedReserve, "stock with inventory status %s cannot be reserved", s)
+	}
+	if VendorOwned(dims) {
+		return fail(CodeOwnershipValue, "vendor-owned stock cannot be reserved; post an ownership change first")
 	}
 	return nil
 }
@@ -86,6 +93,16 @@ func CheckReservable(qty, avail decimal.Decimal) error {
 // shortfall is INV-RES-001 and nothing should be written. A FEFO request with
 // no eligible batch at all is INV-RES-002.
 func PlanPolicy(policy ReservationPolicy, batches []BatchStock, qty decimal.Decimal, requiredDate time.Time, marginDays int, allowPartial bool) (Selection, error) {
+	return PlanDemandPolicy(policy, batches, qty, requiredDate, marginDays, allowPartial, "", false)
+}
+
+// PlanDemandPolicy is PlanPolicy for a demand in segment demandSegment ("" for
+// unsegmented demand; FR-16.20, BR-16.17). Stock of the demand's own segment is
+// taken first, in policy order; unsegmented stock fills the remainder only when
+// fallback is set. Stock of any other segment is never selected, so an
+// unsegmented demand never takes segregated stock.
+func PlanDemandPolicy(policy ReservationPolicy, batches []BatchStock, qty decimal.Decimal, requiredDate time.Time, marginDays int,
+	allowPartial bool, demandSegment string, fallback bool) (Selection, error) {
 	if qty.Sign() <= 0 {
 		return Selection{}, fail(CodeInvalid, "reservation quantity must be positive")
 	}
@@ -95,7 +112,12 @@ func PlanPolicy(policy ReservationPolicy, batches []BatchStock, qty decimal.Deci
 	if marginDays < 0 {
 		return Selection{}, fail(CodeInvalid, "shelf life margin must not be negative")
 	}
-	sel := SelectBatches(policy, batches, qty, requiredDate, marginDays)
+	sel := SelectBatches(policy, inSegment(batches, demandSegment), qty, requiredDate, marginDays)
+	if sel.Shortfall.Sign() > 0 && demandSegment != "" && fallback {
+		rest := SelectBatches(policy, inSegment(batches, ""), sel.Shortfall, requiredDate, marginDays)
+		sel.Allocations = append(sel.Allocations, rest.Allocations...)
+		sel.Shortfall = rest.Shortfall
+	}
 	if len(sel.Allocations) == 0 {
 		if policy == PolicyFEFO {
 			return sel, fail(CodeReserveNoEligible, "no eligible batch found for FEFO reservation (expiry margin %d days)", marginDays)
@@ -106,4 +128,15 @@ func PlanPolicy(policy ReservationPolicy, batches []BatchStock, qty decimal.Deci
 		return sel, &Error{Code: CodeReserveShortfall, Detail: fmt.Sprintf("only %s available to reserve, %s requested", qty.Sub(sel.Shortfall), qty)}
 	}
 	return sel, nil
+}
+
+// inSegment keeps the candidates whose segment is exactly segment.
+func inSegment(batches []BatchStock, segment string) []BatchStock {
+	out := make([]BatchStock, 0, len(batches))
+	for _, b := range batches {
+		if b.Segment == segment {
+			out = append(out, b)
+		}
+	}
+	return out
 }

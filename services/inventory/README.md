@@ -10,7 +10,11 @@ blocking and quarantine, cycle counting with tolerance approval and blind count
 through an in-transit warehouse (ship, receive with tolerances and close-short,
 cancel), the stock-in-transit inquiry and ABC classification by on-hand value. Slice 4:
 journal reversal (BR-16.12), tag counting with transfer to a count sheet (FR-16.18) and
-the on-hand rebuild-and-compare (FR-16.3). The web screens live in
+the on-hand rebuild-and-compare (FR-16.3). Slice 5: the journal approval workflow
+(BR-16.11) and the `:validate` dry run, vendor consignment (replenishment orders received
+as vendor-owned, quantity-only stock; OWNERSHIP_CHANGE journals; the consignment stock
+report; FR-16.17, BR-16.14) and the segment dimension with segment-aware reservations
+(FR-16.20, BR-16.17). The web screens live in
 `apps/web/src/modules/inventory`.
 
 Requirements source: `docs/prd/phase-3-procure-to-pay.md` section 3.16.
@@ -27,7 +31,8 @@ internal/store/           pgx repositories: journals, posting, on-hand projectio
 internal/api/             HTTP handlers, DTOs, validation, Problem responses
 internal/events/          event type constants and payloads
 migrations/               0001 ledger, 0002 reservations and batch expiry, 0003 blocking and counts,
-                          0004 transfer orders, 0005 ABC runs, 0006 reversal links and count tags
+                          0004 transfer orders, 0005 ABC runs, 0006 reversal links and count tags,
+                          0007 consignment orders, ownership-change origins, reservation segment
                           (embedded, applied by dbx.Migrate)
 api/openapi.yaml          OpenAPI 3.1 for every endpoint (parity is tested)
 events/asyncapi.yaml      AsyncAPI 3 for every event published (payload parity is tested)
@@ -76,6 +81,20 @@ charts/inventory/         Helm chart (Deployment, Service, HPA, ServiceMonitor t
 | POST | `/v1/inventory/count-tags/{id}:use` | `inventory.count.write` | CycleCountMaintain |
 | POST | `/v1/inventory/count-tags/{id}:void` | `inventory.count.write` | CycleCountMaintain |
 | POST | `/internal/v1/inventory/onhand:rebuild` | `inventory.admin` | InventoryAdmin |
+| POST | `/v1/inventory/journals/{id}:validate` | `inventory.journal.write` | InventoryJournalMaintain |
+| POST | `/v1/inventory/journals/{id}:submit` | `inventory.journal.write` | InventoryJournalMaintain |
+| POST | `/v1/inventory/journals/{id}:approve` | `inventory.journal.post` | InventoryJournalPost (approval task) |
+| POST | `/v1/inventory/journals/{id}:reject` | `inventory.journal.post` | InventoryJournalPost (approval task) |
+| POST | `/v1/inventory/journals/{id}:reopen` | `inventory.journal.write` | InventoryJournalMaintain |
+| POST | `/v1/inventory/journals/{id}:cancel` | `inventory.journal.write` | InventoryJournalMaintain |
+| POST | `/v1/inventory/consignment-orders` | `inventory.consignment.write` | ConsignmentMaintain |
+| GET | `/v1/inventory/consignment-orders` | `inventory.read` | InventoryInquire |
+| GET | `/v1/inventory/consignment-orders/{id}` | `inventory.read` | InventoryInquire |
+| POST | `/v1/inventory/consignment-orders/{id}:receive` | `inventory.consignment.write` | ConsignmentMaintain |
+| GET | `/v1/inventory/consignment/stock` | `inventory.read` | InventoryInquire |
+
+Creating an OWNERSHIP_CHANGE journal also needs `inventory.consignment.write`
+(ConsignmentMaintain); its lines and posting use the journal duties.
 
 Duty names follow the repository's `<context>.<entity>.<action>` convention; the
 right-hand column is the PRD 3.16.17 name each one stands for.

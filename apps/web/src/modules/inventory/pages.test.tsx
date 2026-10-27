@@ -251,7 +251,7 @@ describe("Journal detail", () => {
   });
 
   it("checks lines before sending them", () => {
-    const base = { productId: PRODUCT_ID, qty: "2", enteredUnit: "EA", costPrice: "", dimensions: { site: "S1", warehouse: "", location: "", batch: "", serial: "", inventory_status: "" } };
+    const base = { productId: PRODUCT_ID, qty: "2", enteredUnit: "EA", costPrice: "", dimensions: { site: "S1", warehouse: "", location: "", batch: "", serial: "", inventory_status: "", owner: "", segment: "" } };
     expect(validateLine(base)).toEqual({});
     expect(validateLine({ ...base, dimensions: { ...base.dimensions, site: "" } })).toEqual({ site: "Site is required on every line." });
     expect(validateLine({ ...base, dimensions: { ...base.dimensions, serial: "SN-1" } }).qty).toBe("A serial number moves one unit at a time: use 1 or -1.");

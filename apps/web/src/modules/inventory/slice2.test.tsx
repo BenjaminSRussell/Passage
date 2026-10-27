@@ -215,6 +215,9 @@ describe("New reservation", () => {
     shelfLifeMarginDays: "7",
     allowPartial: false,
     dimensions: emptyDimensions(),
+    segmentType: "NONE" as const,
+    segmentRef: "",
+    segmentFallback: true,
   };
 
   it("validates before calling the service", () => {

@@ -6,11 +6,13 @@ import {
   DEMAND_TYPES,
   describeProblem,
   RESERVATION_POLICIES,
+  SEGMENT_TYPES,
   type DemandType,
   type Problem,
   type Reservation,
   type ReservationPolicy,
   type ReserveResult,
+  type SegmentType,
 } from "./api/client";
 import { DECIMAL, describeDimensions, sentence, today, UUID } from "./format";
 import { ALL_DIMENSIONS, emptyDimensions, fieldErrorsOf, FORM_DIMENSIONS, type FormDimension } from "./parts";
@@ -27,9 +29,25 @@ export interface ReservationValues {
   shelfLifeMarginDays: string;
   allowPartial: boolean;
   dimensions: Record<FormDimension, string>;
+  /** Segment of the demand (FR-16.20): sales-order or project stock. */
+  segmentType: SegmentType;
+  segmentRef: string;
+  segmentFallback: boolean;
 }
 
-const fields = ["legalEntityId", "productId", "qty", "policy", "demandType", "demandId", "requiredDate", "shelfLifeMarginDays", "dimensions"] as const;
+const fields = [
+  "legalEntityId",
+  "productId",
+  "qty",
+  "policy",
+  "demandType",
+  "demandId",
+  "requiredDate",
+  "shelfLifeMarginDays",
+  "dimensions",
+  "segmentType",
+  "segmentRef",
+] as const;
 type Field = (typeof fields)[number];
 type Errors = Partial<Record<Field, string>>;
 
@@ -51,6 +69,8 @@ export function validateReservation(values: ReservationValues): Errors {
   const margin = values.shelfLifeMarginDays.trim();
   if (margin !== "" && (!/^\d+$/.test(margin) || Number(margin) > 365)) errors.shelfLifeMarginDays = "Enter 0 to 365 days.";
   if (values.policy === "MANUAL" && values.dimensions.site.trim() === "") errors.dimensions = "A manual reservation names the site and every dimension of the stock.";
+  const ref = values.segmentRef.trim();
+  if (values.segmentType !== "NONE" && (ref === "" || ref.length > 48)) errors.segmentRef = "Enter the sales order or project reference (up to 48 characters).";
   return errors;
 }
 
@@ -71,7 +91,16 @@ const blank = (): ReservationValues => ({
   shelfLifeMarginDays: "0",
   allowPartial: false,
   dimensions: emptyDimensions(),
+  segmentType: "NONE",
+  segmentRef: "",
+  segmentFallback: true,
 });
+
+const segmentHints: Record<SegmentType, string> = {
+  NONE: "Unsegmented demand takes unsegmented stock only.",
+  SALES_ORDER: "Sales-order stock of this reference is taken first.",
+  PROJECT: "Project stock of this reference is taken first.",
+};
 
 /** Reservation dialog (PRD 3.16.6): reserve by policy or for one exact dimension set. */
 export function NewReservationPage() {
@@ -90,6 +119,8 @@ export function NewReservationPage() {
     setFailure(null);
     if (Object.keys(found).length > 0) return;
     setBusy(true);
+    const segmented = values.segmentType !== "NONE";
+    const segment = segmented ? `${values.segmentType}:${values.segmentRef.trim()}` : "";
     try {
       const out = await createReservation(
         {
@@ -102,7 +133,11 @@ export function NewReservationPage() {
           requiredDate: values.requiredDate,
           shelfLifeMarginDays: Number(values.shelfLifeMarginDays || "0"),
           allowPartial: values.allowPartial,
-          dimensions: values.dimensions,
+          // A manual reservation of a segmented demand reserves that segment's stock.
+          dimensions: values.policy === "MANUAL" && segmented ? { ...values.dimensions, segment } : values.dimensions,
+          segmentType: values.segmentType,
+          segmentRef: values.segmentRef,
+          segmentFallback: values.segmentFallback,
         },
         key.current,
       );
@@ -123,7 +158,7 @@ export function NewReservationPage() {
     setValues(next);
     key.current = crypto.randomUUID();
   };
-  const set = (name: Exclude<keyof ReservationValues, "dimensions" | "allowPartial">) => (event: { target: { value: string } }) =>
+  const set = (name: Exclude<keyof ReservationValues, "dimensions" | "allowPartial" | "segmentFallback">) => (event: { target: { value: string } }) =>
     change({ ...values, [name]: event.target.value });
   const setDim = (name: FormDimension) => (event: { target: { value: string } }) =>
     change({ ...values, dimensions: { ...values.dimensions, [name]: event.target.value } });
@@ -175,6 +210,22 @@ export function NewReservationPage() {
               <Input {...control} inputMode="numeric" value={values.shelfLifeMarginDays} onChange={set("shelfLifeMarginDays")} invalid={Boolean(errors.shelfLifeMarginDays)} />
             )}
           </FormField>
+          <FormField id="res-segment-type" label="Demand segment" hint={segmentHints[values.segmentType]} error={errors.segmentType}>
+            {(control) => (
+              <Select {...control} value={values.segmentType} onChange={set("segmentType")}>
+                {SEGMENT_TYPES.map((t) => (
+                  <option key={t} value={t}>
+                    {t === "NONE" ? "None" : sentence(t)}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </FormField>
+          {values.segmentType !== "NONE" ? (
+            <FormField id="res-segment-ref" label="Segment reference" error={errors.segmentRef}>
+              {(control) => <Input {...control} value={values.segmentRef} maxLength={48} onChange={set("segmentRef")} invalid={Boolean(errors.segmentRef)} />}
+            </FormField>
+          ) : null}
           {FORM_DIMENSIONS.map((name) => (
             <FormField
               key={name}
@@ -198,6 +249,17 @@ export function NewReservationPage() {
               />
               <label htmlFor="res-partial">Reserve what is available if not all of it is</label>
             </span>
+            {values.segmentType !== "NONE" ? (
+              <span className={styles.check}>
+                <Input
+                  type="checkbox"
+                  id="res-segment-fallback"
+                  checked={values.segmentFallback}
+                  onChange={(event) => change({ ...values, segmentFallback: event.target.checked })}
+                />
+                <label htmlFor="res-segment-fallback">Use unsegmented stock when the segment runs short</label>
+              </span>
+            ) : null}
           </div>
           {failure ? (
             <div className={styles.formActions}>

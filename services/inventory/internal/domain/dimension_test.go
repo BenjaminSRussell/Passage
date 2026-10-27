@@ -82,6 +82,9 @@ func TestDimensions_HashDeterministicProperty(t *testing.T) {
 		for _, n := range names {
 			if rapid.Bool().Draw(t, "set") {
 				d[n] = rapid.StringMatching(`[A-Z0-9-]{1,12}`).Draw(t, n)
+				if n == DimSegment {
+					d[n] = rapid.SampledFrom([]string{"SALES_ORDER:", "PROJECT:"}).Draw(t, "segment type") + d[n]
+				}
 			}
 		}
 		a, err := d.Normalize()

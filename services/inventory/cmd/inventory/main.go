@@ -83,6 +83,9 @@ func loadConfig(getenv func(string) string) (config, error) {
 			return c, fmt.Errorf("%s is required", name)
 		}
 	}
+	// Optional: only OWNERSHIP_CHANGE journals post to the consignment accrual
+	// account (FR-16.17); without it they are refused with INV-JNL-005.
+	c.post.ConsignmentAccount = getenv("INV_CONSIGNMENT_ACCRUAL_ACCOUNT")
 	c.post.Negative = c.negative
 	return c, nil
 }

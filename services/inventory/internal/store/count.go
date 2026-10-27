@@ -130,12 +130,14 @@ func (s *Postgres) GenerateCountSheet(ctx context.Context, planID, key string) (
 }
 
 // snapshotLines writes one sheet line per on-hand row of the plan holding
-// physical stock, in (product, dimension set) order.
+// physical stock, in (product, dimension set) order. Vendor-owned rows are
+// left out: a count variance posts a valued COUNT journal, which vendor-owned
+// stock never carries (BR-16.14).
 func snapshotLines(ctx context.Context, tx pgx.Tx, tenantID string, plan domain.CountPlan, sheetID string) error {
 	rows, err := tx.Query(ctx, `select o.product_id::text, o.dimension_set_hash, (o.posted_qty + o.received + o.registered - o.deducted - o.picked)::text
 		from on_hand o join dimension_set d on d.tenant_id = o.tenant_id and d.hash = o.dimension_set_hash
 		where o.tenant_id = $1 and o.legal_entity_id = $2 and ($3 = '' or d.dims->>'warehouse' = $3)
-		  and o.posted_qty + o.received + o.registered - o.deducted - o.picked <> 0
+		  and o.posted_qty + o.received + o.registered - o.deducted - o.picked <> 0 and d.dims->>'owner' is null
 		order by o.product_id, o.dimension_set_hash`, tenantID, plan.LegalEntityID, plan.Warehouse)
 	if err != nil {
 		return err

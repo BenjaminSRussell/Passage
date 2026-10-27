@@ -76,6 +76,8 @@ func (a *API) Register(r chi.Router) {
 	a.registerCount(r)
 	a.registerTransfers(r)
 	a.registerTags(r)
+	a.registerJournalWorkflow(r)
+	a.registerConsignment(r)
 	a.registerOps(r)
 }
 
@@ -209,7 +211,7 @@ func (a *API) createJournal(w http.ResponseWriter, r *http.Request) {
 		fields["legalEntityId"] = "must be a UUID"
 	}
 	if !slices.Contains(domain.KeyedJournalTypes, domain.JournalType(req.JournalType)) {
-		fields["journalType"] = "must be MOVEMENT, ADJUSTMENT or OPENING_BALANCE"
+		fields["journalType"] = "must be MOVEMENT, ADJUSTMENT, OPENING_BALANCE or OWNERSHIP_CHANGE"
 	}
 	date, err := time.Parse("2006-01-02", req.PostingDate)
 	if err != nil {
@@ -233,6 +235,9 @@ func (a *API) createJournal(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(fields) > 0 {
 		fieldProblem(w, r, fields)
+		return
+	}
+	if !a.mayKeyJournal(w, r, domain.JournalType(req.JournalType)) {
 		return
 	}
 	in := domain.Journal{LegalEntityID: req.LegalEntityID, Type: domain.JournalType(req.JournalType), PostingDate: date,
@@ -301,7 +306,7 @@ func (a *API) listJournals(w http.ResponseWriter, r *http.Request) {
 		fields["status"] = "unknown journal status"
 	}
 	if f.Type != "" && !slices.Contains(domain.JournalTypes, f.Type) {
-		fields["type"] = "must be MOVEMENT, ADJUSTMENT, OPENING_BALANCE or COUNT"
+		fields["type"] = "must be MOVEMENT, ADJUSTMENT, OPENING_BALANCE, COUNT or OWNERSHIP_CHANGE"
 	}
 	if raw := q.Get("limit"); raw != "" {
 		n, err := strconv.Atoi(raw)
@@ -404,7 +409,8 @@ func (a *API) onHand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	f := store.OnHandFilter{ProductID: q.Get("product"), SiteID: q.Get("site"), WarehouseID: q.Get("warehouse"), BatchID: q.Get("batch")}
+	f := store.OnHandFilter{ProductID: q.Get("product"), SiteID: q.Get("site"), WarehouseID: q.Get("warehouse"), BatchID: q.Get("batch"),
+		Owner: q.Get("owner"), Segment: q.Get("segment")}
 	fields := map[string]string{}
 	if f.ProductID != "" && !ids.Valid(f.ProductID) {
 		fields["product"] = "must be a UUID"

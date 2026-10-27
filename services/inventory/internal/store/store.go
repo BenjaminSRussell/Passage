@@ -32,6 +32,7 @@ const (
 	CodeJournalNotFound  = "INV-JNL-NOT-FOUND"
 	CodeJournalState     = "INV-JNL-004"
 	CodeCurrencyMismatch = "INV-CUR-001"
+	CodeAccountMissing   = "INV-JNL-005" // the posting profile has no offset account for the journal type
 	CodeConflictVersion  = "conflict_version"
 	CodeIdempotencyReuse = "idempotency_key_reuse"
 	CodeOutOfScope       = "AUTH-0003"
@@ -48,6 +49,8 @@ type Store interface {
 	GetJournal(ctx context.Context, id string) (domain.Journal, error)
 	ListJournals(ctx context.Context, f JournalFilter) (JournalPage, error)
 	PostJournal(ctx context.Context, id string, version int, p PostParams) (domain.Journal, error)
+	ValidateJournal(ctx context.Context, id string, p PostParams) (domain.Journal, error)
+	TransitionJournal(ctx context.Context, id string, version int, to domain.JournalStatus) (domain.Journal, error)
 	ListOnHand(ctx context.Context, f OnHandFilter) (OnHandResult, error)
 	ListTransactions(ctx context.Context, f TransactionFilter) ([]TransactionRow, error)
 	Reserve(ctx context.Context, in ReserveInput) (ReserveResult, error)
@@ -81,6 +84,11 @@ type Store interface {
 	UseTag(ctx context.Context, tagID string, version int, productID string, dims domain.Dimensions, qty decimal.Decimal) (domain.CountTag, error)
 	VoidTag(ctx context.Context, tagID string, version int) (domain.CountTag, error)
 	TransferTags(ctx context.Context, planID, key string, markOpenMissing, canApprove bool) (domain.CountSheet, bool, error)
+	CreateConsignment(ctx context.Context, key string, o domain.ConsignmentOrder) (domain.ConsignmentOrder, bool, error)
+	GetConsignment(ctx context.Context, id string) (domain.ConsignmentOrder, error)
+	ListConsignments(ctx context.Context, f ConsignmentFilter) ([]domain.ConsignmentOrder, error)
+	ReceiveConsignment(ctx context.Context, id string, version int, receipts []domain.ConsignmentReceipt, receiptDate time.Time) (domain.ConsignmentOrder, error)
+	ListConsignmentStock(ctx context.Context, vendor string) ([]ConsignmentStockRow, error)
 	Ping(ctx context.Context) error
 }
 
@@ -276,16 +284,12 @@ func (s *Postgres) CreateJournal(ctx context.Context, j domain.Journal, idempote
 }
 
 // AddJournalLines appends lines to a DRAFT journal. Each line is validated
-// (site, serial, precision) and its dimension set stored. A line whose client
+// for the journal type (site, serial, precision, owner; an ownership change
+// moves stock of one vendor) and its dimension set stored. A line whose client
 // key already exists on the journal is a replay: it is skipped when identical
 // and rejected as idempotency_key_reuse when it differs, so a retried bulk call
 // never duplicates lines. The line-count limit applies to the journal total.
 func (s *Postgres) AddJournalLines(ctx context.Context, journalID string, lines []domain.JournalLine) (domain.Journal, error) {
-	for _, l := range lines {
-		if err := domain.ValidateLine(l, s.rules.MaxScale); err != nil {
-			return domain.Journal{}, domainProblem(err)
-		}
-	}
 	p, _ := tenant.FromContext(ctx)
 	var out domain.Journal
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
@@ -298,6 +302,16 @@ func (s *Postgres) AddJournalLines(ctx context.Context, journalID string, lines 
 		}
 		if j.ReversesJournalID != "" {
 			return problem(http.StatusConflict, CodeJournalState, "a reversal journal holds exactly the reversed lines; post a new journal for other movements")
+		}
+		for _, l := range lines {
+			if err := domain.ValidateLineFor(j.Type, l, s.rules.MaxScale); err != nil {
+				return domainProblem(err)
+			}
+		}
+		if j.Type == domain.JournalOwnershipChange {
+			if err := domain.CheckOwnershipLines(append(slices.Clone(j.Lines), lines...)); err != nil {
+				return domainProblem(err)
+			}
 		}
 		existing := map[string]domain.JournalLine{}
 		for _, l := range j.Lines {

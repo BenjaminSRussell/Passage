@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: Passage Inventory events
-  version: 0.16.3
+  version: 0.16.5
   description: |
     Published through the transactional outbox in the same database transaction as the
     posting, relayed by Debezium. CloudEvents 1.0 envelope (tenantid, correlationid,
@@ -44,6 +44,11 @@ channels:
         $ref: '#/components/messages/TransferShipped'
       transferReceived:
         $ref: '#/components/messages/TransferReceived'
+  ownershipChanged:
+    address: passage.inventory.ownership
+    messages:
+      ownershipChanged:
+        $ref: '#/components/messages/OwnershipChanged'
 operations:
   publishTransactionPosted:
     action: send
@@ -69,6 +74,10 @@ operations:
     action: send
     channel: { $ref: '#/channels/transfer' }
     summary: A transfer order was shipped, or a receipt was booked against it (FR-16.15)
+  publishOwnershipChanged:
+    action: send
+    channel: { $ref: '#/channels/ownershipChanged' }
+    summary: An OWNERSHIP_CHANGE journal posted, moving vendor-owned stock to the legal entity (FR-16.17); wave 18 settles it
 components:
   messages:
     TransactionPosted:
@@ -125,7 +134,42 @@ components:
       contentType: application/json
       payload:
         $ref: '#/components/schemas/TransferData'
+    OwnershipChanged:
+      name: dev.passage.inventory.ownership.changed.v1
+      x-passage-type: dev.passage.inventory.ownership.changed.v1
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/OwnershipChangedData'
   schemas:
+    OwnershipChangedData:
+      type: object
+      required: [journalId, legalEntityId, vendorId, postingDate, currency, totalAmount, ledgerEntryId, lines]
+      description: |
+        Emitted in the posting transaction of an OWNERSHIP_CHANGE journal, after journal.posted. The
+        journal's GL entry is Dr inventory / Cr consignment accrual for totalAmount. One vendor per
+        journal; wave 18 (FR-18.16) creates the consignment settlement invoice from it.
+      properties:
+        journalId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        vendorId: { type: string, description: The vendor (owner) the stock was taken from }
+        postingDate: { type: string, format: date }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        totalAmount: { type: string, description: Sum of the line amounts }
+        ledgerEntryId: { type: [string, 'null'], format: uuid, description: Null until the wave 11 ledger Post exists }
+        lines:
+          type: array
+          items: { $ref: '#/components/schemas/OwnershipLineData' }
+    OwnershipLineData:
+      type: object
+      required: [journalLineId, productId, dimensionSet, qty, unit, consignmentPrice, amountAcct]
+      properties:
+        journalLineId: { type: string, format: uuid }
+        productId: { type: string, format: uuid }
+        dimensionSet: { type: object, additionalProperties: { type: string }, description: The dimensions the stock now has (legal-entity owned; the owner key removed) }
+        qty: { type: string }
+        unit: { type: string }
+        consignmentPrice: { type: string }
+        amountAcct: { type: string, description: 'qty x consignmentPrice in currency, rounded to its minor unit' }
     TransferData:
       type: object
       required: [transferOrderId, legalEntityId, number, status, fromWarehouse, toWarehouse, transitWarehouse, shipDate, receiptDate, lines]
@@ -163,20 +207,20 @@ components:
       properties:
         transactionId: { type: string, format: uuid }
         legalEntityId: { type: string, format: uuid }
-        sourceType: { type: string, enum: [INVENT_JOURNAL_LINE, BLOCKING, TRANSFER_LINE], description: Origin type of the transaction }
-        journalId: { type: [string, 'null'], format: uuid, description: Inventory journal of a journal line; null for other origins }
-        referenceId: { type: [string, 'null'], format: uuid, description: Source document of a non-journal origin (the blocking or transfer order id); null for journal lines }
+        sourceType: { type: string, enum: [INVENT_JOURNAL_LINE, BLOCKING, TRANSFER_LINE, CONSIGNMENT_LINE, OWNERSHIP_CHANGE], description: 'Origin type of the transaction; OWNERSHIP_CHANGE is the receipt leg of an ownership-change line' }
+        journalId: { type: [string, 'null'], format: uuid, description: 'Inventory journal of a journal line (both legs of an ownership change); null for other origins' }
+        referenceId: { type: [string, 'null'], format: uuid, description: 'Source document of a non-journal origin (the blocking, transfer or replenishment order id); null for journal lines' }
         originId: { type: string, format: uuid }
         productId: { type: string, format: uuid }
         dimensionSet: { type: object, additionalProperties: { type: string } }
         qty: { type: string, description: Signed quantity; negative for issues }
-        issueStatus: { type: [string, 'null'], enum: [ON_ORDER, RESERVED_ORDERED, RESERVED_PHYSICAL, PICKED, DEDUCTED, SOLD, null], description: Set for issues; journals, blocking and transfer legs post SOLD }
-        receiptStatus: { type: [string, 'null'], enum: [ORDERED, ARRIVED, REGISTERED, RECEIVED, PURCHASED, null], description: Set for receipts; journals, blocking and transfer legs post PURCHASED }
+        issueStatus: { type: [string, 'null'], enum: [ON_ORDER, RESERVED_ORDERED, RESERVED_PHYSICAL, PICKED, DEDUCTED, SOLD, null], description: 'Set for issues; journals, blocking and transfer legs post SOLD; the vendor-owned leg of an ownership change DEDUCTED' }
+        receiptStatus: { type: [string, 'null'], enum: [ORDERED, ARRIVED, REGISTERED, RECEIVED, PURCHASED, null], description: 'Set for receipts; journals, blocking and transfer legs post PURCHASED; vendor-owned consignment receipts RECEIVED' }
         physicalDate: { type: string, format: date }
-        financialDate: { type: string, format: date }
+        financialDate: { type: [string, 'null'], format: date, description: 'Null for a physical status (RECEIVED, DEDUCTED): the value is recognised only at a financial status (FR-16.11)' }
         currency: { type: string, pattern: '^[A-Z]{3}$' }
         costAmountPhysical: { type: string, description: Signed value in currency, rounded to its minor unit }
-        costAmountPosted: { type: string }
+        costAmountPosted: { type: [string, 'null'], description: Null for a physical status }
         correctsTransactionId: { type: [string, 'null'], format: uuid, description: 'Transaction a reversal line negates (BR-16.12, FR-16.1 corrects_transaction_id); null otherwise' }
     OnhandChangedData:
       type: object
@@ -188,7 +232,7 @@ components:
         availPhysical: { type: string }
         availOrdered: { type: string }
         physicalInvent: { type: string }
-        deltaBucket: { type: string, enum: [POSTED, RESERVED_PHYSICAL], description: 'Projection bucket the change moved: POSTED for journals and blocking legs, RESERVED_PHYSICAL for reservations' }
+        deltaBucket: { type: string, enum: [POSTED, RESERVED_PHYSICAL, RECEIVED, DEDUCTED], description: 'Projection bucket the change moved: POSTED for journals, blocking and transfer legs, RESERVED_PHYSICAL for reservations, RECEIVED for vendor-owned consignment receipts, DEDUCTED for the vendor-owned leg of an ownership change' }
         deltaQty: { type: string, description: Net signed quantity change of that bucket }
     JournalPostedData:
       type: object
@@ -196,7 +240,7 @@ components:
       properties:
         journalId: { type: string, format: uuid }
         legalEntityId: { type: string, format: uuid }
-        journalType: { type: string, enum: [MOVEMENT, ADJUSTMENT, OPENING_BALANCE, COUNT] }
+        journalType: { type: string, enum: [MOVEMENT, ADJUSTMENT, OPENING_BALANCE, COUNT, OWNERSHIP_CHANGE] }
         postingDate: { type: string, format: date }
         currency: { type: string, pattern: '^[A-Z]{3}$' }
         lineCount: { type: integer }
@@ -213,7 +257,7 @@ components:
         reversesJournalId: { type: [string, 'null'], format: uuid, description: 'The journal this one reverses (BR-16.12): same type, negated lines, each valued at the negated value of the transaction it corrects; null for other journals' }
     ReservationData:
       type: object
-      required: [reservationId, legalEntityId, productId, dimensionSet, qty, demandType, demandId, policy, status]
+      required: [reservationId, legalEntityId, productId, dimensionSet, qty, demandType, demandId, demandSegment, policy, status]
       properties:
         reservationId: { type: string, format: uuid }
         legalEntityId: { type: string, format: uuid }
@@ -222,6 +266,7 @@ components:
         qty: { type: string, description: Reserved quantity of this allocation }
         demandType: { type: string, enum: [MANUAL, SALES_ORDER, PRODUCTION_ORDER, TRANSFER_ORDER] }
         demandId: { type: string }
+        demandSegment: { type: string, description: 'Segment of the demand (SALES_ORDER:<ref> or PROJECT:<ref>); empty when unsegmented (FR-16.20)' }
         policy: { type: string, enum: [MANUAL, FIFO, FEFO, LIFO] }
         status: { type: string, enum: [ACTIVE, RELEASED, CONSUMED] }
     BlockingData:
