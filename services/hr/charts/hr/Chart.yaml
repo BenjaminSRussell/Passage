@@ -1,0 +1,6 @@
+apiVersion: v2
+name: passage-hr
+description: "Passage HR service (wave 42 slice 1: workers, employments, positions, PII vault)"
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

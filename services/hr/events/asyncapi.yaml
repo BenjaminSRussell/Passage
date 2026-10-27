@@ -1,0 +1,140 @@
+asyncapi: 3.0.0
+info:
+  title: Passage HR events
+  version: 0.1.0
+  description: |
+    Events published by the HR service through the transactional outbox (same
+    transaction as the state change). Payloads carry no P2/P3 values; the PII
+    vault never leaves the service (8.42.5, FR-42.1).
+defaultContentType: application/cloudevents+json
+channels:
+  workerCreated:
+    address: passage.hr.worker
+    messages:
+      workerCreated:
+        $ref: "#/components/messages/WorkerCreated"
+  employmentChanged:
+    address: passage.hr.employment
+    messages:
+      employmentChanged:
+        $ref: "#/components/messages/EmploymentChanged"
+  positionAssignmentChanged:
+    address: passage.hr.positionassignment
+    messages:
+      positionAssignmentChanged:
+        $ref: "#/components/messages/PositionAssignmentChanged"
+operations:
+  publishWorkerCreated:
+    action: send
+    channel:
+      $ref: "#/channels/workerCreated"
+    messages:
+      - $ref: "#/channels/workerCreated/messages/workerCreated"
+  publishEmploymentChanged:
+    action: send
+    channel:
+      $ref: "#/channels/employmentChanged"
+    messages:
+      - $ref: "#/channels/employmentChanged/messages/employmentChanged"
+  publishPositionAssignmentChanged:
+    action: send
+    channel:
+      $ref: "#/channels/positionAssignmentChanged"
+    messages:
+      - $ref: "#/channels/positionAssignmentChanged/messages/positionAssignmentChanged"
+components:
+  messages:
+    WorkerCreated:
+      name: dev.passage.hr.worker.created.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/WorkerCreatedData"
+    EmploymentChanged:
+      name: dev.passage.hr.employment.changed.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/EmploymentChangedData"
+    PositionAssignmentChanged:
+      name: dev.passage.hr.positionassignment.changed.v1
+      description: |
+        PRD name position.assignment.changed; the kernel event-type regex
+        allows three segments after the namespace, so the entity collapses to
+        positionassignment (same rule as org's teammembership.changed).
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/PositionAssignmentChangedData"
+  schemas:
+    WorkerCreatedData:
+      type: object
+      required: [id, personnel_number, worker_type, party_person_id]
+      properties:
+        id:
+          type: string
+          format: uuid
+        personnel_number:
+          type: string
+        worker_type:
+          type: string
+          enum: [EMPLOYEE, CONTRACTOR]
+        party_person_id:
+          type: string
+          format: uuid
+    EmploymentChangedData:
+      type: object
+      required: [id, worker_id, legal_entity_id, employment_type, assignment_kind, action, valid_from, valid_to]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: The employment id (8.0 employmentId).
+        worker_id:
+          type: string
+          format: uuid
+        legal_entity_id:
+          type: string
+          format: uuid
+        employment_type:
+          type: string
+          enum: [FULL_TIME, PART_TIME, TEMP, CONTRACTOR]
+        assignment_kind:
+          type: string
+          enum: [PRIMARY, CONCURRENT, GLOBAL_HOST]
+        action:
+          type: string
+          enum: [HIRE]
+          description: Only HIRE (a new employment) is emitted in slice 1; transfer, termination and the other personnel actions arrive with FR-42.5.
+        valid_from:
+          type: string
+          format: date-time
+          description: 8.0 effectiveFrom.
+        valid_to:
+          type: [string, "null"]
+          format: date-time
+          description: 8.0 effectiveTo, exclusive; null when open-ended.
+    PositionAssignmentChangedData:
+      type: object
+      required: [id, worker_id, position_id, manager_position_id, fte_share, is_primary, valid_from, valid_to]
+      properties:
+        id:
+          type: string
+          format: uuid
+        worker_id:
+          type: string
+          format: uuid
+        position_id:
+          type: string
+          format: uuid
+        manager_position_id:
+          type: [string, "null"]
+          format: uuid
+          description: Reports-to position as-of valid_from (8.42.5 managerPositionId); null at the top of the hierarchy.
+        fte_share:
+          type: string
+        is_primary:
+          type: boolean
+        valid_from:
+          type: string
+          format: date-time
+        valid_to:
+          type: [string, "null"]
+          format: date-time

@@ -1,0 +1,720 @@
+openapi: 3.1.0
+info:
+  title: Passage HR API
+  version: 0.1.0
+  description: |
+    Wave 42 slice 1 (PSG-42): workers, employments, positions and position
+    assignments with effective dating, the as-of manager query, and the audited
+    PII vault. Personnel actions, absence, benefits, learning, questionnaires,
+    incidents, recruiting and compensation cycles are later slices (see
+    NOT-IMPLEMENTED.md).
+servers:
+  - url: https://api.{env}.passage.dev
+    variables:
+      env:
+        default: dev
+security:
+  - bearerAuth: []
+paths:
+  /readyz:
+    get:
+      operationId: readiness
+      summary: Readiness (pings Postgres within 500 ms)
+      x-passage-duty: none
+      security: []
+      responses:
+        "200":
+          description: Ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Status"
+        "503":
+          description: Database unreachable
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/hr/workers:
+    get:
+      operationId: listWorkers
+      summary: List workers by personnel number (no PII)
+      x-passage-duty: HcmWorkerInquire
+      parameters:
+        - name: q
+          in: query
+          required: false
+          description: Case-insensitive match on personnel number, legal name or preferred name.
+          schema:
+            type: string
+            maxLength: 100
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: One page of workers
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkerList"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createWorker
+      summary: Create a worker and seal its PII into the vault
+      x-passage-duty: HcmWorkerMaintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWorkerRequest"
+      responses:
+        "201":
+          description: Worker created (or the stored response on idempotent replay)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Worker"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/workers/{id}:
+    get:
+      operationId: getWorker
+      summary: Get a worker with PII masked
+      x-passage-duty: HcmWorkerInquire
+      parameters:
+        - $ref: "#/components/parameters/WorkerId"
+      responses:
+        "200":
+          description: Worker with masked PII; every call is audited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkerDetail"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/workers/{id}/as-of:
+    get:
+      operationId: workerAsOf
+      summary: Employments, primary position and manager as-of a date (FR-42.4, BR-42.1)
+      x-passage-duty: HcmWorkerInquire
+      parameters:
+        - $ref: "#/components/parameters/WorkerId"
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: As-of view
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AsOfView"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/workers/{id}/pii:
+    get:
+      operationId: revealPII
+      summary: Unmasked PII, audited with a reason (FR-42.1, AC-42.7)
+      x-passage-duty: HcmPIIRead
+      parameters:
+        - $ref: "#/components/parameters/WorkerId"
+        - name: reason
+          in: query
+          required: true
+          description: At least 10 characters (tenant parameter PII reveal reason minimum length).
+          schema:
+            type: string
+            minLength: 10
+            maxLength: 500
+      responses:
+        "200":
+          description: Unmasked PII; the audit row is written in the same transaction
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PIIView"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/workers/{id}/employments:
+    get:
+      operationId: listEmployments
+      summary: Every employment of a worker, oldest first, with status as-of now
+      x-passage-duty: HcmWorkerInquire
+      parameters:
+        - $ref: "#/components/parameters/WorkerId"
+      responses:
+        "200":
+          description: Employments
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmploymentList"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createEmployment
+      summary: Start an employment at a legal entity (FR-42.2, FR-42.23)
+      x-passage-duty: HcmWorkerMaintain
+      parameters:
+        - $ref: "#/components/parameters/WorkerId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateEmploymentRequest"
+      responses:
+        "201":
+          description: Employment created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Employment"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/positions:
+    get:
+      operationId: listPositions
+      summary: List positions by position number
+      x-passage-duty: HcmOrgInquire
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: One page of positions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PositionList"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "403":
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createPosition
+      summary: Create a position with an FTE (FR-42.3)
+      x-passage-duty: HcmOrgMaintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePositionRequest"
+      responses:
+        "201":
+          description: Position created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Position"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/positions/{id}:
+    get:
+      operationId: getPosition
+      summary: A position with every assignment on it
+      x-passage-duty: HcmOrgInquire
+      parameters:
+        - $ref: "#/components/parameters/PositionId"
+      responses:
+        "200":
+          description: Position detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PositionDetail"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/positions/{id}/assignments:
+    post:
+      operationId: createAssignment
+      summary: Place a worker on a position; FTE and primary rules apply (FR-42.3)
+      x-passage-duty: HcmActionMaintain
+      parameters:
+        - $ref: "#/components/parameters/PositionId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAssignmentRequest"
+      responses:
+        "201":
+          description: Assignment created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PositionAssignment"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    WorkerId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    PositionId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: |
+        Stored on the created row per tenant. A replay with the same body
+        returns the stored row (201, no second event); the same key with a
+        different body is 422 idempotency_key_reuse, and a concurrent request
+        still holding the key is 409 idempotency_key_in_flight.
+      schema:
+        type: string
+        maxLength: 255
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 100
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: nextCursor from the previous page.
+      schema:
+        type: string
+  responses:
+    Problem:
+      description: RFC 9457 problem
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    ValidationFailed:
+      description: Request failed validation (COM-0001); errors names each field
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+  schemas:
+    Status:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ready, unavailable]
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type:
+          type: string
+          format: uri
+          example: https://passage.dev/problems/HCM-POS-001
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+        code:
+          type: string
+        serviceCode:
+          type: string
+        traceId:
+          type: string
+        errors:
+          type: object
+          additionalProperties:
+            type: string
+    CreateWorkerRequest:
+      type: object
+      additionalProperties: false
+      required: [personnelNumber, workerType, partyPersonId, legalName, nationalId]
+      properties:
+        personnelNumber:
+          type: string
+          pattern: "^[A-Z0-9][A-Z0-9-]{0,19}$"
+        workerType:
+          type: string
+          enum: [EMPLOYEE, CONTRACTOR]
+        partyPersonId:
+          type: string
+          format: uuid
+        legalName:
+          type: string
+          maxLength: 200
+        preferredName:
+          type: string
+        userId:
+          type: string
+          format: uuid
+        nationalId:
+          type: string
+          maxLength: 32
+          description: Sealed with AES-256-GCM; never returned unmasked except through the audited reveal.
+        bankAccount:
+          type: string
+          maxLength: 34
+    Worker:
+      type: object
+      required: [id, personnelNumber, workerType, partyPersonId, legalName, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        personnelNumber:
+          type: string
+        workerType:
+          type: string
+          enum: [EMPLOYEE, CONTRACTOR]
+        partyPersonId:
+          type: string
+          format: uuid
+        legalName:
+          type: string
+        preferredName:
+          type: string
+        userId:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    WorkerDetail:
+      allOf:
+        - $ref: "#/components/schemas/Worker"
+        - type: object
+          required: [pii]
+          properties:
+            pii:
+              $ref: "#/components/schemas/PIIView"
+    PIIView:
+      type: object
+      required: [nationalId, masked]
+      properties:
+        nationalId:
+          type: string
+          description: "Masked as ***-**-#### unless revealed."
+        bankAccount:
+          type: string
+          description: "Masked as ****#### unless revealed."
+        masked:
+          type: boolean
+    WorkerList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Worker"
+        nextCursor:
+          type: string
+    EmploymentList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Employment"
+    PositionList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Position"
+        nextCursor:
+          type: string
+    PositionDetail:
+      allOf:
+        - $ref: "#/components/schemas/Position"
+        - type: object
+          required: [assignments]
+          properties:
+            assignments:
+              type: array
+              items:
+                $ref: "#/components/schemas/PositionAssignment"
+    CreateEmploymentRequest:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId, employmentType, hireDate]
+      properties:
+        legalEntityId:
+          type: string
+          format: uuid
+        employmentType:
+          type: string
+          enum: [FULL_TIME, PART_TIME, TEMP, CONTRACTOR]
+        assignmentKind:
+          type: string
+          enum: [PRIMARY, CONCURRENT, GLOBAL_HOST]
+          default: PRIMARY
+        homeLegalEntityId:
+          type: string
+          format: uuid
+          description: Required for GLOBAL_HOST and must differ from legalEntityId.
+        plannedEndDate:
+          type: string
+          format: date
+          description: Required for GLOBAL_HOST; not before hireDate.
+        hireDate:
+          type: string
+          format: date
+        terminationDate:
+          type: string
+          format: date
+          description: Last day employed (inclusive); must not be before hireDate (HCM-EMP-002). validTo is the next day.
+    Employment:
+      type: object
+      required: [id, workerId, legalEntityId, employmentType, assignmentKind, hireDate, validFrom, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        workerId:
+          type: string
+          format: uuid
+        legalEntityId:
+          type: string
+          format: uuid
+        employmentType:
+          type: string
+        assignmentKind:
+          type: string
+          enum: [PRIMARY, CONCURRENT, GLOBAL_HOST]
+        homeLegalEntityId:
+          type: string
+          format: uuid
+        plannedEndDate:
+          type: string
+          format: date
+        hireDate:
+          type: string
+          format: date
+        terminationDate:
+          type: string
+          format: date
+        validFrom:
+          type: string
+          format: date-time
+        validTo:
+          type: string
+          format: date-time
+          description: Exclusive end of the range [validFrom, validTo).
+        status:
+          type: string
+          enum: [PENDING, ACTIVE, TERMINATED]
+          description: Derived from the range as-of the read (the as-of date, or now for lists). ON_LEAVE arrives with personnel actions.
+    CreatePositionRequest:
+      type: object
+      additionalProperties: false
+      required: [positionNumber, jobCode, departmentId, legalEntityId, validFrom]
+      properties:
+        positionNumber:
+          type: string
+          pattern: "^[A-Z0-9][A-Z0-9-]{0,19}$"
+        jobCode:
+          type: string
+          pattern: "^[A-Z0-9][A-Z0-9_-]{0,19}$"
+        departmentId:
+          type: string
+          format: uuid
+        legalEntityId:
+          type: string
+          format: uuid
+        fte:
+          type: string
+          pattern: "^[0-9]+(\\.[0-9]{1,2})?$"
+          default: "1.00"
+          description: Decimal string from 0.05 to 2.00 (never a float); 1.00 when omitted.
+        allowOverfill:
+          type: boolean
+          default: false
+        validFrom:
+          type: string
+          format: date
+        validTo:
+          type: string
+          format: date
+        reportsToPositionId:
+          type: string
+          format: uuid
+          description: Must exist on validFrom (HCM-POS-PARENT-INVALID).
+    Position:
+      type: object
+      required: [id, positionNumber, jobCode, departmentId, legalEntityId, fte, allowOverfill, validFrom]
+      properties:
+        id:
+          type: string
+          format: uuid
+        positionNumber:
+          type: string
+        jobCode:
+          type: string
+        departmentId:
+          type: string
+          format: uuid
+        legalEntityId:
+          type: string
+          format: uuid
+        fte:
+          type: string
+        allowOverfill:
+          type: boolean
+        validFrom:
+          type: string
+          format: date-time
+        validTo:
+          type: string
+          format: date-time
+        reportsToPositionId:
+          type: string
+          format: uuid
+    CreateAssignmentRequest:
+      type: object
+      additionalProperties: false
+      required: [workerId, employmentId, fteShare, validFrom]
+      properties:
+        workerId:
+          type: string
+          format: uuid
+        employmentId:
+          type: string
+          format: uuid
+        fteShare:
+          type: string
+          pattern: "^[0-9]+(\\.[0-9]{1,2})?$"
+        isPrimary:
+          type: boolean
+          default: false
+        validFrom:
+          type: string
+          format: date
+        validTo:
+          type: string
+          format: date
+    PositionAssignment:
+      type: object
+      required: [id, positionId, workerId, employmentId, fteShare, isPrimary, validFrom]
+      properties:
+        id:
+          type: string
+          format: uuid
+        positionId:
+          type: string
+          format: uuid
+        workerId:
+          type: string
+          format: uuid
+        employmentId:
+          type: string
+          format: uuid
+        fteShare:
+          type: string
+        isPrimary:
+          type: boolean
+        validFrom:
+          type: string
+          format: date-time
+        validTo:
+          type: string
+          format: date-time
+    AsOfView:
+      type: object
+      required: [workerId, date, employments]
+      properties:
+        workerId:
+          type: string
+          format: uuid
+        date:
+          type: string
+          format: date
+        employments:
+          type: array
+          items:
+            $ref: "#/components/schemas/Employment"
+        positionId:
+          type: [string, "null"]
+        positionNumber:
+          type: [string, "null"]
+        fteShare:
+          type: [string, "null"]
+        managerWorkerId:
+          type: [string, "null"]
+          description: Incumbent of the reports-to position as-of the date, walking up at most the configured depth; null when vacant (BR-42.1).

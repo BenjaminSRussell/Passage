@@ -1,0 +1,84 @@
+package store
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+
+	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/BenjaminSRussell/passage/platform/testkit"
+	"github.com/BenjaminSRussell/passage/services/hr/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/hr/migrations"
+)
+
+// TestRowLevelSecurity runs the store as the application role, which cannot
+// bypass RLS. Another tenant sees no HR row in any table even without a
+// tenant filter, and the legal-entity scope hides employments and positions
+// outside the caller's entity. It needs PASSAGE_TEST_APP_DATABASE_URL too.
+func TestRowLevelSecurity(t *testing.T) {
+	if os.Getenv(testkit.EnvURL) == "" || os.Getenv(testkit.EnvAppURL) == "" {
+		t.Skip("PASSAGE_TEST_DATABASE_URL and PASSAGE_TEST_APP_DATABASE_URL are needed for the RLS test")
+	}
+	admin, app := testkit.DBWithApp(t)
+	bg := context.Background()
+	if err := dbx.Migrate(bg, admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	var schema, appUser string
+	if err := admin.QueryRow(bg, `select current_schema()`).Scan(&schema); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.QueryRow(bg, `select current_user`).Scan(&appUser); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := admin.Exec(bg, fmt.Sprintf(`grant usage on schema %s to %s; grant select, insert, update, delete on all tables in schema %[1]s to %[2]s`, schema, appUser)); err != nil {
+		t.Fatal(err)
+	}
+	sealer, err := domain.NewSealer(bytes.Repeat([]byte{7}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := New(app, sealer, 10)
+	le, otherLE := ids.New(), ids.New()
+	scoped := func(tenantID, entity string) context.Context {
+		return tenant.With(bg, tenant.Principal{TenantID: tenantID, LegalEntityID: entity, UserID: "user-test", Duties: map[string]struct{}{}})
+	}
+	one := scoped(testkit.TenantID(1), "")
+	w := mustWorker(t, s, one, "Rls")
+	mustEmployment(t, s, one, w.ID, le, "PRIMARY", day(time.January, 1))
+	mustEmployment(t, s, one, w.ID, otherLE, "PRIMARY", day(time.January, 1))
+	mustPosition(t, s, one, "POS-RLS", ids.New(), le, "1.00", false, day(time.January, 1), nil)
+
+	count := func(ctx context.Context, table string) int {
+		var n int
+		if err := dbx.WithTenantTx(ctx, app, func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `select count(*) from `+table).Scan(&n)
+		}); err != nil {
+			t.Fatalf("count %s: %v", table, err)
+		}
+		return n
+	}
+	two := scoped(testkit.TenantID(2), "")
+	for _, table := range []string{"worker", "worker_pii", "employment", "hr_position", "position_hierarchy", "position_assignment", "audit_event", "outbox"} {
+		if n := count(two, table); n != 0 {
+			t.Errorf("tenant 2 sees %d rows in %s", n, table)
+		}
+	}
+	if n := count(one, "employment"); n != 2 {
+		t.Fatalf("tenant 1 with all entities sees %d employments, want 2", n)
+	}
+	inEntity := scoped(testkit.TenantID(1), le)
+	if n := count(inEntity, "employment"); n != 1 {
+		t.Errorf("scope %s sees %d employments, want 1", le, n)
+	}
+	if n := count(scoped(testkit.TenantID(1), otherLE), "hr_position"); n != 0 {
+		t.Errorf("scope %s sees %d positions of another entity", otherLE, n)
+	}
+}
