@@ -1,5 +1,5 @@
 import { useState, type FormEvent, type ReactNode } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import { Alert, Badge, Button, buttonClassName, Card, DataTable, EmptyState, FormField, Input, PageHeader, Select, Skeleton, StatusPill, type DataTableColumn } from "../../shell/ui";
 import {
   applyHold,
@@ -13,6 +13,7 @@ import {
   type ListingOverride,
   type ManualHoldType,
   MANUAL_HOLD_TYPES,
+  type Notice,
   type Order,
   type OrderLine,
   type Problem,
@@ -42,6 +43,8 @@ interface Outcome {
 /** One order: header, lines, holds and the last credit check, with confirm and release. */
 export function OrderDetailPage() {
   const { id = "" } = useParams();
+  const location = useLocation();
+  const added = ((location.state as { warnings?: Notice[] } | null)?.warnings ?? []).filter((w) => w.code === "SLS-0012");
   const state = useLoad((signal) => getOrder(id, signal), id);
   const [latest, setLatest] = useState<Versioned<Order> | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -150,6 +153,11 @@ export function OrderDetailPage() {
     { key: "requestedShipDate", header: "Requested", mono: true },
     { key: "confirmedShipDate", header: "Confirmed", mono: true, render: (l) => l.confirmedShipDate ?? dash },
     { key: "lineStatus", header: "Status", render: (l) => <StatusPill status={l.lineStatus} /> },
+    {
+      key: "parentLineNo",
+      header: "Supplementary",
+      render: (l) => (l.supplementaryOf ? <Badge tone="info">{`For line ${l.parentLineNo ?? "?"}`}</Badge> : dash),
+    },
   ];
 
   const holdColumns: DataTableColumn<Hold>[] = [
@@ -237,6 +245,11 @@ export function OrderDetailPage() {
           }
         >
           {failure.message} ({failure.code})
+        </Alert>
+      ) : null}
+      {added.length > 0 ? (
+        <Alert tone="info" title="Supplementary items added">
+          {`Mandatory supplementary items were added to this order: ${added.map((w) => w.message.replace(/^Mandatory supplementary item /, "")).join("; ")}. They follow their parent line.`}
         </Alert>
       ) : null}
       {confirmable && blocked ? <p className={styles.note}>An active credit or fraud hold blocks confirmation until it is released.</p> : null}

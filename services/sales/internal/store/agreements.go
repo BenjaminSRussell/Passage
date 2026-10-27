@@ -268,6 +268,7 @@ func (s *Postgres) ReleaseAgreement(ctx context.Context, id string, in Agreement
 				return err
 			}
 			out.Order, err = loadOrder(ctx, tx, p.TenantID, priorOrder, false)
+			out.Order.Warnings = supplementaryWarnings(out.Order)
 			return err
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {

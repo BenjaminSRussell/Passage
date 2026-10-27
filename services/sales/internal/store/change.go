@@ -59,8 +59,11 @@ type OrderVersion struct {
 // RESERVED lines can change (BR-27.5). On a CONFIRMED order a changed quantity
 // or requested date re-promises that line, and only that line (AC-27.7): its
 // confirmed ship date follows the requested date, the same delivery date
-// control confirm applies until the ATP projection exists. A request that
-// changes nothing returns an empty diff and leaves the order untouched.
+// control confirm applies until the ATP projection exists. A supplementary
+// line follows its parent and cannot be changed on its own (BR-27.14): its
+// quantity and requested date are refused, and a change of the parent
+// recomputes, re-dates or cancels it. A request that changes nothing returns
+// an empty diff and leaves the order untouched.
 func ApplyChange(o *Order, req ChangeRequest) ([]domain.FieldChange, []int, error) {
 	if len(req.Reason) > changeReasonMaxSize {
 		return nil, nil, errors.New("reason is too long")
@@ -91,6 +94,14 @@ func ApplyChange(o *Order, req ChangeRequest) ([]domain.FieldChange, []int, erro
 		l := &o.Lines[i]
 		if !domain.LineChangeable(l.LineStatus) {
 			return nil, nil, fmt.Errorf("line %d is %s and cannot change", c.LineNo, l.LineStatus)
+		}
+		if l.SupplementaryOf != nil && (c.Quantity != nil && !c.Quantity.Equal(l.Quantity) ||
+			c.RequestedShipDate != nil && *c.RequestedShipDate != l.RequestedShipDate) {
+			parent := 0
+			if l.ParentLineNo != nil {
+				parent = *l.ParentLineNo
+			}
+			return nil, nil, fmt.Errorf("line %d is a supplementary line of line %d; change the parent line's quantity or date instead", c.LineNo, parent)
 		}
 		before := domain.LineState{Quantity: l.Quantity, UnitPrice: l.UnitPrice, DiscPct: l.DiscPct, RequestedShipDate: l.RequestedShipDate}
 		after := before
@@ -138,6 +149,14 @@ func ApplyChange(o *Order, req ChangeRequest) ([]domain.FieldChange, []int, erro
 		l.Quantity, l.UnitPrice, l.DiscPct, l.RequestedShipDate = after.Quantity, after.UnitPrice, after.DiscPct, after.RequestedShipDate
 		l.LineNet = net
 		diff = append(diff, lineDiff...)
+	}
+	followDiff, followed, err := followParents(o)
+	if err != nil {
+		return nil, nil, err
+	}
+	diff = append(diff, followDiff...)
+	if o.Status == domain.OrderConfirmed {
+		repromised = append(repromised, followed...)
 	}
 	if len(diff) > 0 {
 		o.NetTotal = netOf(o.Lines)
@@ -209,14 +228,14 @@ func (s *Postgres) ChangeOrder(ctx context.Context, id string, version int, req 
 		for _, l := range o.Lines {
 			b := before[l.LineNo]
 			if l.Quantity.Equal(b.Quantity) && l.UnitPrice.Equal(b.UnitPrice) && l.DiscPct.Equal(b.DiscPct) &&
-				l.RequestedShipDate == b.RequestedShipDate && sameDay(l.ConfirmedShipDate, b.ConfirmedShipDate) {
+				l.RequestedShipDate == b.RequestedShipDate && sameDay(l.ConfirmedShipDate, b.ConfirmedShipDate) && l.LineStatus == b.LineStatus {
 				continue
 			}
 			if _, err := tx.Exec(ctx, `update sales_order_line set quantity = $4::numeric, unit_price = $5::numeric, disc_pct = $6::numeric,
-					line_net = $7::numeric, requested_ship_date = $8::date, confirmed_ship_date = $9::date
+					line_net = $7::numeric, requested_ship_date = $8::date, confirmed_ship_date = $9::date, line_status = $10
 				where tenant_id = $1 and order_id = $2 and line_no = $3`,
 				p.TenantID, id, l.LineNo, l.Quantity.String(), l.UnitPrice.String(), l.DiscPct.String(), l.LineNet.String(),
-				l.RequestedShipDate, l.ConfirmedShipDate); err != nil {
+				l.RequestedShipDate, l.ConfirmedShipDate, l.LineStatus); err != nil {
 				return err
 			}
 		}

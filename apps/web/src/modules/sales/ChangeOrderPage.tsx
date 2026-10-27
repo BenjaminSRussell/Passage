@@ -26,6 +26,8 @@ const REASON_MAX = 500;
 
 export interface LineEdit {
   lineNo: number;
+  /** Set on a supplementary line: its quantity and date follow this parent line (BR-27.14). */
+  parentLineNo?: number;
   quantity: string;
   unitPrice: string;
   discPct: string;
@@ -45,7 +47,14 @@ export function editsOf(order: Order): ChangeValues {
     reason: "",
     lines: order.lines
       .filter((l) => CHANGEABLE_LINE_STATUSES.includes(l.lineStatus))
-      .map((l) => ({ lineNo: l.lineNo, quantity: l.quantity, unitPrice: l.unitPrice, discPct: l.discPct, requestedShipDate: l.requestedShipDate })),
+      .map((l) => ({
+        lineNo: l.lineNo,
+        ...(l.supplementaryOf ? { parentLineNo: l.parentLineNo ?? 0 } : {}),
+        quantity: l.quantity,
+        unitPrice: l.unitPrice,
+        discPct: l.discPct,
+        requestedShipDate: l.requestedShipDate,
+      })),
   };
 }
 
@@ -62,6 +71,9 @@ const lineFields = [
   ["discPct", "Discount %"],
   ["requestedShipDate", "Requested ship date"],
 ] as const;
+
+/** Fields a supplementary line takes from its parent and cannot change on its own (BR-27.14). */
+const followsParent = (field: string) => field === "quantity" || field === "requestedShipDate";
 
 /**
  * Validates the edits like the service (api/change.go, store/change.go) and
@@ -93,6 +105,10 @@ export function buildChange(order: Order, values: ChangeValues): { errors: Error
       const before = current[field];
       const after = edit[field];
       const same = field === "requestedShipDate" ? before === after : canonical(before) === canonical(after);
+      if (!same && current.supplementaryOf && followsParent(field)) {
+        errors[at(field)] = `This supplementary line follows line ${current.parentLineNo ?? "?"}; change that line instead.`;
+        continue;
+      }
       if (!same) {
         change[field] = after.trim();
         diff.push({ lineNo: edit.lineNo, field, old: before, new: after.trim() });
@@ -113,6 +129,7 @@ const fieldNames: Record<string, string> = {
   requestedShipDate: "Requested ship date",
   confirmedShipDate: "Confirmed ship date",
   status: "Status",
+  lineStatus: "Line status",
 };
 
 export const diffColumns: DataTableColumn<FieldChange>[] = [
@@ -280,16 +297,20 @@ export function ChangeOrderPage() {
                 {form.lines.length === 0 ? <p className={styles.note}>No line can change: every line is past reservation or cancelled.</p> : null}
                 {form.lines.map((l) => (
                   <fieldset key={l.lineNo} className={styles.lineCard}>
-                    <legend className={styles.lineLegend}>Line {l.lineNo}</legend>
+                    <legend className={styles.lineLegend}>
+                      Line {l.lineNo}
+                      {l.parentLineNo !== undefined ? ` · supplementary item for line ${l.parentLineNo}` : null}
+                    </legend>
                     {lineFields.map(([field, label]) => {
                       const key = `line-${l.lineNo}.${field}`;
+                      const locked = l.parentLineNo !== undefined && followsParent(field);
                       return (
-                        <FormField key={field} id={`line-${l.lineNo}-${field}`} label={label} error={errors[key]}>
+                        <FormField key={field} id={`line-${l.lineNo}-${field}`} label={label} hint={locked ? `Follows line ${l.parentLineNo}.` : undefined} error={errors[key]}>
                           {(control) =>
                             field === "requestedShipDate" ? (
-                              <Input {...control} type="date" value={l[field]} onChange={(e) => updateLine(l.lineNo, { [field]: e.target.value })} invalid={Boolean(errors[key])} />
+                              <Input {...control} type="date" readOnly={locked} value={l[field]} onChange={(e) => updateLine(l.lineNo, { [field]: e.target.value })} invalid={Boolean(errors[key])} />
                             ) : (
-                              <Input {...control} inputMode="decimal" value={l[field]} onChange={(e) => updateLine(l.lineNo, { [field]: e.target.value })} invalid={Boolean(errors[key])} />
+                              <Input {...control} inputMode="decimal" readOnly={locked} value={l[field]} onChange={(e) => updateLine(l.lineNo, { [field]: e.target.value })} invalid={Boolean(errors[key])} />
                             )
                           }
                         </FormField>
@@ -315,6 +336,11 @@ export function ChangeOrderPage() {
               {order.status === "CONFIRMED" ? (
                 <p className={`${styles.note} ${styles.formActions}`}>
                   The order is confirmed: a new quantity or date re-promises that line, and a higher total runs the credit check again.
+                </p>
+              ) : null}
+              {form.lines.some((l) => l.parentLineNo !== undefined) ? (
+                <p className={`${styles.note} ${styles.formActions}`}>
+                  Supplementary lines follow their parent line: a new parent quantity recomputes them, and they are cancelled when the parent drops below the rule&apos;s base quantity. The service shows those changes in the saved version.
                 </p>
               ) : null}
               <div className={styles.formActions}>

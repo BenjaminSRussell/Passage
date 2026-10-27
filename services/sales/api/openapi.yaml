@@ -57,6 +57,13 @@ paths:
         "403": {$ref: "#/components/responses/Problem"}
     post:
       summary: Create an order (UI or channel intake)
+      description: >-
+        MANDATORY supplementary item rules of the legal entity (FR-27.14) add
+        their lines at commit, numbered after the ordered lines, each naming
+        its parent line in supplementaryOf and inheriting the parent's site,
+        warehouse and requested date (BR-27.14). The response lists each added
+        line as an SLS-0012 warning. OPTIONAL rules are offered by
+        POST /v1/sales/supplementary-items:evaluate and never added.
       operationId: createOrder
       x-passage-duty: sales.order.write | sales.channel.intake
       parameters:
@@ -104,6 +111,12 @@ paths:
         "404": {$ref: "#/components/responses/Problem"}
     patch:
       summary: Change an order's header or lines; creates a new version with a field-level diff and re-prices changed lines (FR-27.9)
+      description: >-
+        A supplementary line follows its parent (BR-27.14): changing its own
+        quantity or requested date is refused (422 SLS-0024); a change of the
+        parent's quantity recomputes it, cancels it when the parent drops below
+        the rule's base quantity, and a change of the parent's dates moves it
+        with the parent. Those follow-on changes are part of the version's diff.
       operationId: changeOrder
       x-passage-duty: sales.order.write
       parameters:
@@ -1108,8 +1121,19 @@ components:
         listingOverrides:
           type: array
           items: {$ref: "#/components/schemas/ListingOverride"}
+        warnings:
+          type: array
+          description: set only on the result of a create (and its replay), a quotation conversion or an agreement release
+          items: {$ref: "#/components/schemas/Notice"}
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}
+    Notice:
+      type: object
+      required: [code, message]
+      properties:
+        code: {type: string, example: SLS-0012}
+        message: {type: string, example: "Mandatory supplementary item 6f1c… added (2 EA)"}
+        lineNo: {type: integer, description: the order line the warning is about}
     OrderLine:
       type: object
       properties:
@@ -1126,6 +1150,9 @@ components:
         requestedShipDate: {type: string, format: date}
         confirmedShipDate: {type: string, format: date}
         lineStatus: {type: string, enum: [OPEN, RESERVED, PICKED, DELIVERED, INVOICED, CANCELLED]}
+        supplementaryOf: {type: string, format: uuid, description: "id of the parent line a MANDATORY supplementary line was added for (FR-27.14); absent on ordinary lines"}
+        parentLineNo: {type: integer, description: line number of the parent line; set with supplementaryOf}
+        supplementaryRuleId: {type: string, format: uuid, description: the supplementary item rule that added the line}
     Hold:
       type: object
       properties:

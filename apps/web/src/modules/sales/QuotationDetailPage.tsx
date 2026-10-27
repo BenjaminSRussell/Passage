@@ -2,7 +2,7 @@ import { useState, type FormEvent, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, DataTable, EmptyState, FormField, Input, PageHeader, Skeleton, Textarea, type DataTableColumn } from "../../shell/ui";
 import { convertQuotation, describeProblem, getQuotation, loseQuotation, sendQuotation, type Order, type Problem, type QuotationLine } from "./api/client";
-import { formatDateTime, money } from "./format";
+import { formatDateTime, money, supplementaryNote } from "./format";
 import styles from "./pages.module.css";
 import { isExpired, QuotationStatusBadge } from "./QuotationsPage";
 import { useLoad } from "./useLoad";
@@ -96,11 +96,12 @@ export function QuotationDetailPage() {
         ...(override.trim() ? { listingOverrideReason: override.trim() } : {}),
       });
       const order: Order = res.value.order;
+      const quoted = order.lines.filter((l) => !l.supplementaryOf).length;
       setOverride("");
       return (
         <>
-          Draft order <Link to={`/sales/orders/${order.id}`}>{order.orderNumber}</Link> was created with {order.lines.length} {order.lines.length === 1 ? "line" : "lines"} at
-          the quoted prices.
+          Draft order <Link to={`/sales/orders/${order.id}`}>{order.orderNumber}</Link> was created with {quoted} {quoted === 1 ? "line" : "lines"} at
+          the quoted prices.{supplementaryNote(order.lines)}
         </>
       );
     });

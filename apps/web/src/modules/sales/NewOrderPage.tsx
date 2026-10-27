@@ -95,7 +95,7 @@ export function NewOrderPage() {
     setBusy(true);
     try {
       const created = await createOrder(input, key.current);
-      navigate(`/sales/orders/${created.value.id}`);
+      navigate(`/sales/orders/${created.value.id}`, { state: { warnings: created.value.warnings ?? [] } });
     } catch (error) {
       const problem = describeProblem(error);
       if (Object.keys(problem.fields).length > 0) setErrors(problem.fields);

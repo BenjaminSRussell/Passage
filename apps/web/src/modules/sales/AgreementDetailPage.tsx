@@ -11,7 +11,7 @@ import {
   type Problem,
   type ReleaseOrderInput,
 } from "./api/client";
-import { DECIMAL, formatDateTime, money, today, UUID } from "./format";
+import { DECIMAL, formatDateTime, money, supplementaryNote, today, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -183,7 +183,7 @@ export function AgreementDetailPage() {
         <Alert tone="success" live="status">
           {created ? (
             <>
-              Draft order <Link to={`/sales/orders/${created.id}`}>{created.orderNumber}</Link> was created at the agreed price.
+              Draft order <Link to={`/sales/orders/${created.id}`}>{created.orderNumber}</Link> was created at the agreed price.{supplementaryNote(created.lines)}
             </>
           ) : null}
         </Alert>

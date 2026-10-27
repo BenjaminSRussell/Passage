@@ -68,6 +68,18 @@ export interface OrderLine {
   requestedShipDate: string;
   confirmedShipDate?: string;
   lineStatus: string;
+  /** Parent line id of a MANDATORY supplementary line added at commit (FR-27.14). */
+  supplementaryOf?: string;
+  /** Line number of that parent; the line follows it (BR-27.14). */
+  parentLineNo?: number;
+  supplementaryRuleId?: string;
+}
+
+/** A non-blocking message, such as SLS-0012 for each supplementary line an order received. */
+export interface Notice {
+  code: string;
+  message: string;
+  lineNo?: number;
 }
 
 export interface Hold {
@@ -115,6 +127,8 @@ export interface Order {
   holds: Hold[];
   /** Denied lines accepted with sales.order.approve and a reason (FR-27.15). */
   listingOverrides?: ListingOverride[];
+  /** Set only on the result of a create, a quotation conversion or an agreement release. */
+  warnings?: Notice[];
   createdAt: string;
   updatedAt: string;
 }

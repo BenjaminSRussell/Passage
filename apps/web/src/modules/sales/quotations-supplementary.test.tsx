@@ -213,7 +213,7 @@ describe("Sales quotation detail", () => {
     handler = (_url, init) => {
       if (init.method === "POST") {
         current = converted;
-        return { status: 201, body: { quotation: converted, order: { id: ORDER_ID, orderNumber: "SO-0000050", lines: [{}, {}] } }, etag: '"3"' };
+        return { status: 201, body: { quotation: converted, order: { id: ORDER_ID, orderNumber: "SO-0000050", lines: [{}, {}, { supplementaryOf: "l1" }] } }, etag: '"3"' };
       }
       return { status: 200, body: current, etag: current === converted ? '"3"' : '"2"' };
     };
@@ -226,6 +226,8 @@ describe("Sales quotation detail", () => {
     expect(screen.getByText(/2 of 3 open lines selected/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Convert selected lines" }));
     expect(await screen.findByRole("link", { name: "SO-0000050" })).toHaveAttribute("href", `/sales/orders/${ORDER_ID}`);
+    // The mandatory supplementary line the service added is not counted as a quoted line (FR-27.14).
+    expect(screen.getByText(/created with 2 lines at\s+the quoted prices\. It also has 1 mandatory supplementary line\./)).toBeInTheDocument();
     const post = calls.find((c) => c.method === "POST");
     expect(post?.url.pathname).toBe(`/api/v1/sales/quotations/${QUOTE_ID}:convert`);
     expect(post?.headers.get("If-Match")).toBe('"2"');

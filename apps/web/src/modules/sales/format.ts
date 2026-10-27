@@ -32,3 +32,13 @@ export function formatDateTime(iso?: string | null): string {
 export function today(now: Date = new Date()): string {
   return now.toISOString().slice(0, 10);
 }
+
+/**
+ * " It also has 2 mandatory supplementary lines." for an order the service
+ * added supplementary lines to at commit (FR-27.14, SLS-0012); "" otherwise.
+ */
+export function supplementaryNote(lines: { supplementaryOf?: string }[]): string {
+  const n = lines.filter((l) => l.supplementaryOf).length;
+  if (n === 0) return "";
+  return ` It also has ${n} mandatory supplementary ${n === 1 ? "line" : "lines"}.`;
+}

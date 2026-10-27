@@ -213,7 +213,12 @@ components:
         actor: {type: string}
         diff:
           type: array
-          description: field-level changes; line_no 0 is a header field
+          description: >-
+            field-level changes; line_no 0 is a header field. A change of a
+            parent line also lists the follow-on changes of its supplementary
+            lines (BR-27.14): quantity, requested and confirmed ship date, and
+            lineStatus OPEN to CANCELLED when the parent drops below the rule's
+            base quantity.
           items:
             type: object
             required: [line_no, field, old, new]
@@ -224,7 +229,7 @@ components:
               new: {type: string}
         repromised_lines:
           type: array
-          description: line numbers whose confirmed ship date was re-promised (quantity or date changed on a confirmed order)
+          description: line numbers whose confirmed ship date was re-promised (quantity or date changed on a confirmed order), including supplementary lines that moved with their parent
           items: {type: integer}
     OrderCancelledData:
       type: object

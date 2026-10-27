@@ -107,8 +107,8 @@ func EvaluateSupplementary(rules []SupplementaryRule, parentProductID, customerI
 		if r.CustomerID == nil && hasCustomerRule[r.SupplementaryProduct] {
 			continue
 		}
-		multiples := qty.Div(r.BaseQuantity).Floor()
-		if !multiples.IsPositive() {
+		q := SupplementaryQuantity(qty, r.BaseQuantity, r.QuantityPerBase)
+		if !q.IsPositive() {
 			continue
 		}
 		price := decimal.Zero
@@ -116,8 +116,63 @@ func EvaluateSupplementary(rules []SupplementaryRule, parentProductID, customerI
 			price = r.UnitPrice
 		}
 		out = append(out, SupplementaryLine{RuleID: r.ID, ProductID: r.SupplementaryProduct, Unit: r.Unit,
-			Requirement: r.Requirement, Quantity: multiples.Mul(r.QuantityPerBase), UnitPrice: price,
-			SupplementaryOf: parentProductID})
+			Requirement: r.Requirement, Quantity: q, UnitPrice: price, SupplementaryOf: parentProductID})
+	}
+	return out, nil
+}
+
+// SupplementaryQuantity is the supplementary quantity a parent quantity
+// triggers: perBase for each whole base quantity of the parent (AC-27.10: 1
+// per 10, so 25 gives 2). It is zero when the parent is below one base
+// quantity, which removes the supplementary line (BR-27.14).
+func SupplementaryQuantity(parentQty, base, perBase decimal.Decimal) decimal.Decimal {
+	if !base.IsPositive() || !parentQty.IsPositive() {
+		return decimal.Zero
+	}
+	return parentQty.Div(base).Floor().Mul(perBase)
+}
+
+// SupplementaryParent is an order line that may trigger supplementary lines.
+type SupplementaryParent struct {
+	LineNo    int
+	ProductID string
+	Quantity  decimal.Decimal
+}
+
+// MandatoryLine is a MANDATORY supplementary line the commit of ParentLineNo
+// adds (FR-27.14). BaseQuantity and QuantityPerBase are the rule's, kept on
+// the order line so a later parent change can recompute or remove it
+// (BR-27.14) even after the rule is removed.
+type MandatoryLine struct {
+	ParentLineNo int
+	SupplementaryLine
+	BaseQuantity    decimal.Decimal
+	QuantityPerBase decimal.Decimal
+}
+
+// MandatorySupplementary returns the MANDATORY lines the parent lines of one
+// order add at commit, parent by parent in input order and, for each parent,
+// in rule order. OPTIONAL rules are only offered by the evaluation (the
+// prompt) and never added here.
+func MandatorySupplementary(rules []SupplementaryRule, customerID string, parents []SupplementaryParent) ([]MandatoryLine, error) {
+	byID := make(map[string]SupplementaryRule, len(rules))
+	for _, r := range rules {
+		byID[r.ID] = r
+	}
+	var out []MandatoryLine
+	for _, p := range parents {
+		lines, err := EvaluateSupplementary(rules, p.ProductID, customerID, p.Quantity)
+		if err != nil {
+			return nil, err
+		}
+		for _, l := range lines {
+			if l.Requirement != SuppMandatory {
+				continue
+			}
+			r := byID[l.RuleID]
+			out = append(out, MandatoryLine{ParentLineNo: p.LineNo, SupplementaryLine: l,
+				BaseQuantity: r.BaseQuantity, QuantityPerBase: r.QuantityPerBase})
+		}
 	}
 	return out, nil
 }

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/jackc/pgx/v5"
@@ -109,4 +110,150 @@ func (s *Postgres) DeleteSupplementaryRule(ctx context.Context, id string) error
 		}
 		return nil
 	})
+}
+
+// CodeSupplementaryAdded is the SLS-0012 warning returned for each MANDATORY
+// supplementary line an order received at commit (PRD §5.27.16).
+const CodeSupplementaryAdded = "SLS-0012"
+
+// mandatorySupplementaryTx loads the supplementary item rules of the order's
+// legal entity for the ordered products (OPTIONAL ones too, since a
+// customer's OPTIONAL rule replaces the all-customers rule for the same item)
+// and returns the MANDATORY lines they add (FR-27.14, AC-27.10), numbered after the order's own lines. Each line
+// inherits its parent's site, warehouse and requested date (BR-27.14), takes
+// the rule's unit and price (zero for FREE) and carries no discount.
+// Product listings are checked on the ordered lines only; a supplementary
+// item goes with its parent.
+func mandatorySupplementaryTx(ctx context.Context, tx pgx.Tx, tenantID string, in NewOrder) ([]Line, error) {
+	products := make([]string, 0, len(in.Lines))
+	parents := make([]domain.SupplementaryParent, 0, len(in.Lines))
+	byNo := make(map[int]Line, len(in.Lines))
+	last := 0
+	for _, l := range in.Lines {
+		products = append(products, l.ProductID)
+		parents = append(parents, domain.SupplementaryParent{LineNo: l.LineNo, ProductID: l.ProductID, Quantity: l.Quantity})
+		byNo[l.LineNo] = l
+		last = max(last, l.LineNo)
+	}
+	rows, err := tx.Query(ctx, `select `+supplementaryColumns+` from supplementary_item_rule
+		where tenant_id = $1 and legal_entity_id = $2 and parent_product_id = any($3::uuid[])
+		order by created_at, id`, tenantID, in.LegalEntityID, products)
+	if err != nil {
+		return nil, err
+	}
+	rules, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.SupplementaryRule, error) {
+		return scanSupplementaryRule(row)
+	})
+	if err != nil || len(rules) == 0 {
+		return nil, err
+	}
+	added, err := domain.MandatorySupplementary(rules, in.CustomerID, parents)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Line, 0, len(added))
+	for i, a := range added {
+		parent := byNo[a.ParentLineNo]
+		net, err := domain.LineNet(a.Quantity, a.UnitPrice, decimal.Zero)
+		if err != nil {
+			return nil, err
+		}
+		parentNo, ruleID := a.ParentLineNo, a.RuleID
+		out = append(out, Line{LineNo: last + i + 1, ProductID: a.ProductID, Quantity: a.Quantity, Unit: a.Unit,
+			SiteID: parent.SiteID, WarehouseID: parent.WarehouseID, UnitPrice: a.UnitPrice, DiscPct: decimal.Zero, LineNet: net,
+			RequestedShipDate: parent.RequestedShipDate, ParentLineNo: &parentNo, SupplementaryRuleID: &ruleID,
+			suppBase: a.BaseQuantity, suppPerBase: a.QuantityPerBase})
+	}
+	return out, nil
+}
+
+// linkSupplementaryParents sets ParentLineNo on each supplementary line from
+// its parent line's id.
+func linkSupplementaryParents(lines []Line) {
+	numbers := make(map[string]int, len(lines))
+	for _, l := range lines {
+		numbers[l.ID] = l.LineNo
+	}
+	for i := range lines {
+		if lines[i].SupplementaryOf == nil {
+			continue
+		}
+		if no, ok := numbers[*lines[i].SupplementaryOf]; ok {
+			lines[i].ParentLineNo = &no
+		}
+	}
+}
+
+// supplementaryWarnings returns the SLS-0012 warning for each open
+// supplementary line of a newly created order.
+func supplementaryWarnings(o Order) []Notice {
+	var out []Notice
+	for _, l := range o.Lines {
+		if l.SupplementaryOf == nil || l.LineStatus == domain.LineCancelled {
+			continue
+		}
+		out = append(out, Notice{Code: CodeSupplementaryAdded, LineNo: l.LineNo,
+			Message: fmt.Sprintf("Mandatory supplementary item %s added (%s %s)", l.ProductID, l.Quantity.String(), l.Unit)})
+	}
+	return out
+}
+
+// followParents applies BR-27.14 after a change: each open supplementary line
+// takes its parent's requested date and, on a confirmed order, its confirmed
+// date; its quantity is recomputed from the parent's quantity, and it is
+// cancelled when the parent drops below one base quantity or is cancelled.
+// It returns the diff of the lines it moved and the numbers of those whose
+// quantity or dates changed (they are re-promised with their parent).
+func followParents(o *Order) ([]domain.FieldChange, []int, error) {
+	byID := make(map[string]int, len(o.Lines))
+	for i, l := range o.Lines {
+		byID[l.ID] = i
+	}
+	var diff []domain.FieldChange
+	var moved []int
+	for i := range o.Lines {
+		l := &o.Lines[i]
+		if l.SupplementaryOf == nil || !domain.LineChangeable(l.LineStatus) {
+			continue
+		}
+		pi, ok := byID[*l.SupplementaryOf]
+		if !ok {
+			continue
+		}
+		parent := o.Lines[pi]
+		qty := domain.SupplementaryQuantity(parent.Quantity, l.suppBase, l.suppPerBase)
+		if parent.LineStatus == domain.LineCancelled || !qty.IsPositive() {
+			diff = append(diff, domain.FieldChange{LineNo: l.LineNo, Field: "lineStatus", Old: l.LineStatus, New: domain.LineCancelled})
+			l.LineStatus = domain.LineCancelled
+			continue
+		}
+		before := domain.LineState{Quantity: l.Quantity, UnitPrice: l.UnitPrice, DiscPct: l.DiscPct, RequestedShipDate: l.RequestedShipDate}
+		after := before
+		after.Quantity, after.RequestedShipDate = qty, parent.RequestedShipDate
+		lineDiff := domain.DiffLine(l.LineNo, before, after)
+		if o.Status == domain.OrderConfirmed && !sameDay(l.ConfirmedShipDate, parent.ConfirmedShipDate) {
+			lineDiff = append(lineDiff, domain.FieldChange{LineNo: l.LineNo, Field: "confirmedShipDate", Old: dayOrEmpty(l.ConfirmedShipDate),
+				New: dayOrEmpty(parent.ConfirmedShipDate)})
+			l.ConfirmedShipDate = parent.ConfirmedShipDate
+		}
+		if len(lineDiff) == 0 {
+			continue
+		}
+		net, err := domain.LineNet(qty, l.UnitPrice, l.DiscPct)
+		if err != nil {
+			return nil, nil, fmt.Errorf("supplementary line %d: %w", l.LineNo, err)
+		}
+		l.LineNet = net
+		l.Quantity, l.RequestedShipDate = qty, parent.RequestedShipDate
+		diff = append(diff, lineDiff...)
+		moved = append(moved, l.LineNo)
+	}
+	return diff, moved, nil
+}
+
+func dayOrEmpty(d *string) string {
+	if d == nil {
+		return ""
+	}
+	return *d
 }

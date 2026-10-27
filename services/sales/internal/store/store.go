@@ -65,6 +65,26 @@ type Line struct {
 	RequestedShipDate string          `json:"requestedShipDate"`
 	ConfirmedShipDate *string         `json:"confirmedShipDate,omitempty"`
 	LineStatus        string          `json:"lineStatus"`
+
+	// SupplementaryOf is the id of the parent line a MANDATORY supplementary
+	// line was added for at commit, ParentLineNo that line's number and
+	// SupplementaryRuleID the rule that added it (FR-27.14, BR-27.14). All
+	// three are absent on ordinary lines.
+	SupplementaryOf     *string `json:"supplementaryOf,omitempty"`
+	ParentLineNo        *int    `json:"parentLineNo,omitempty"`
+	SupplementaryRuleID *string `json:"supplementaryRuleId,omitempty"`
+	// suppBase and suppPerBase are the adding rule's base quantity and
+	// quantity per base, kept so a parent change recomputes the line.
+	suppBase    decimal.Decimal
+	suppPerBase decimal.Decimal
+}
+
+// Notice is a non-blocking message returned with a result, such as the
+// SLS-0012 warning for each mandatory supplementary line an order received.
+type Notice struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	LineNo  int    `json:"lineNo,omitempty"`
 }
 
 // Hold is an order hold. OrderAmount is the net total when the hold was applied.
@@ -100,9 +120,12 @@ type Order struct {
 	Lines             []Line            `json:"lines"`
 	Holds             []Hold            `json:"holds"`
 	ListingOverrides  []ListingOverride `json:"listingOverrides"`
-	RequestHash       string            `json:"-"`
-	CreatedAt         time.Time         `json:"createdAt"`
-	UpdatedAt         time.Time         `json:"updatedAt"`
+	// Warnings is set only on the result of a create (including a replay),
+	// a quotation conversion or an agreement release.
+	Warnings    []Notice  `json:"warnings,omitempty"`
+	RequestHash string    `json:"-"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
 // NewOrder is an intake request after validation.
@@ -260,6 +283,7 @@ func (s *Postgres) CreateOrder(ctx context.Context, in NewOrder) (Order, bool, e
 		}
 		if found {
 			out = existing
+			out.Warnings = supplementaryWarnings(out)
 			return nil
 		}
 		out, err = createOrderTx(ctx, tx, p.TenantID, in)
@@ -287,6 +311,10 @@ func createOrderTx(ctx context.Context, tx pgx.Tx, tenantID string, in NewOrder)
 	if err != nil {
 		return Order{}, err
 	}
+	supplementary, err := mandatorySupplementaryTx(ctx, tx, tenantID, in)
+	if err != nil {
+		return Order{}, err
+	}
 	seq, err := nextOrderSequence(ctx, tx, tenantID, in.LegalEntityID)
 	if err != nil {
 		return Order{}, err
@@ -296,6 +324,9 @@ func createOrderTx(ctx context.Context, tx pgx.Tx, tenantID string, in NewOrder)
 	for _, l := range in.Lines {
 		net = net.Add(l.LineNet)
 	}
+	for _, l := range supplementary {
+		net = net.Add(l.LineNet)
+	}
 	if _, err := tx.Exec(ctx, `insert into sales_order (tenant_id, id, legal_entity_id, order_number, customer_id, invoice_account_id, order_type, status, currency,
 			requested_ship_date, net_total, channel, external_ref, idempotency_key, request_hash, listing_overrides, customer_group)
 		values ($1, $2, $3, $4, $5, $6, $7, 'DRAFT', $8, $9::date, $10::numeric, $11, $12, $13, $14, $15::jsonb, $16)`,
@@ -303,16 +334,31 @@ func createOrderTx(ctx context.Context, tx pgx.Tx, tenantID string, in NewOrder)
 		in.RequestedShipDate, net.String(), in.Channel, in.ExternalRef, in.IdempotencyKey, in.RequestHash, string(overrideJSON), in.CustomerGroup); err != nil {
 		return Order{}, err
 	}
+	lineIDs := make(map[int]string, len(in.Lines))
 	for _, l := range in.Lines {
+		lineIDs[l.LineNo] = ids.New()
 		if _, err := tx.Exec(ctx, `insert into sales_order_line (tenant_id, id, order_id, line_no, product_id, quantity, unit, site_id, warehouse_id,
 				unit_price, disc_pct, line_net, requested_ship_date, line_status)
 			values ($1, $2, $3, $4, $5, $6::numeric, $7, $8, $9, $10::numeric, $11::numeric, $12::numeric, $13::date, 'OPEN')`,
-			tenantID, ids.New(), id, l.LineNo, l.ProductID, l.Quantity.String(), l.Unit, l.SiteID, l.WarehouseID,
+			tenantID, lineIDs[l.LineNo], id, l.LineNo, l.ProductID, l.Quantity.String(), l.Unit, l.SiteID, l.WarehouseID,
 			l.UnitPrice.String(), l.DiscPct.String(), l.LineNet.String(), l.RequestedShipDate); err != nil {
 			return Order{}, err
 		}
 	}
-	return loadOrder(ctx, tx, tenantID, id, false)
+	for _, l := range supplementary {
+		if _, err := tx.Exec(ctx, `insert into sales_order_line (tenant_id, id, order_id, line_no, product_id, quantity, unit, site_id, warehouse_id,
+				unit_price, disc_pct, line_net, requested_ship_date, line_status,
+				supplementary_of, supplementary_rule_id, supplementary_base_qty, supplementary_qty_per_base)
+			values ($1, $2, $3, $4, $5, $6::numeric, $7, $8, $9, $10::numeric, 0, $11::numeric, $12::date, 'OPEN', $13, $14, $15::numeric, $16::numeric)`,
+			tenantID, ids.New(), id, l.LineNo, l.ProductID, l.Quantity.String(), l.Unit, l.SiteID, l.WarehouseID,
+			l.UnitPrice.String(), l.LineNet.String(), l.RequestedShipDate, lineIDs[*l.ParentLineNo], l.SupplementaryRuleID,
+			l.suppBase.String(), l.suppPerBase.String()); err != nil {
+			return Order{}, err
+		}
+	}
+	o, err := loadOrder(ctx, tx, tenantID, id, false)
+	o.Warnings = supplementaryWarnings(o)
+	return o, err
 }
 
 func findIntake(ctx context.Context, tx pgx.Tx, tenantID string, in NewOrder) (Order, bool, error) {
@@ -395,7 +441,8 @@ func loadOrder(ctx context.Context, tx pgx.Tx, tenantID, id string, lock bool) (
 		return Order{}, err
 	}
 	lineRows, err := tx.Query(ctx, `select id::text, line_no, product_id::text, quantity::text, unit, site_id::text, warehouse_id::text,
-			unit_price::text, disc_pct::text, line_net::text, requested_ship_date::text, confirmed_ship_date::text, line_status
+			unit_price::text, disc_pct::text, line_net::text, requested_ship_date::text, confirmed_ship_date::text, line_status,
+			supplementary_of::text, supplementary_rule_id::text, coalesce(supplementary_base_qty, 0)::text, coalesce(supplementary_qty_per_base, 0)::text
 		from sales_order_line where tenant_id = $1 and order_id = $2 order by line_no`, tenantID, id)
 	if err != nil {
 		return Order{}, err
@@ -404,18 +451,20 @@ func loadOrder(ctx context.Context, tx pgx.Tx, tenantID, id string, lock bool) (
 	o.Lines = []Line{}
 	for lineRows.Next() {
 		var l Line
-		var qty, price, disc, net string
+		var qty, price, disc, net, base, perBase string
 		if err := lineRows.Scan(&l.ID, &l.LineNo, &l.ProductID, &qty, &l.Unit, &l.SiteID, &l.WarehouseID, &price, &disc, &net,
-			&l.RequestedShipDate, &l.ConfirmedShipDate, &l.LineStatus); err != nil {
+			&l.RequestedShipDate, &l.ConfirmedShipDate, &l.LineStatus, &l.SupplementaryOf, &l.SupplementaryRuleID, &base, &perBase); err != nil {
 			return Order{}, err
 		}
 		l.Quantity, l.UnitPrice = decimal.RequireFromString(qty), decimal.RequireFromString(price)
 		l.DiscPct, l.LineNet = decimal.RequireFromString(disc), decimal.RequireFromString(net)
+		l.suppBase, l.suppPerBase = decimal.RequireFromString(base), decimal.RequireFromString(perBase)
 		o.Lines = append(o.Lines, l)
 	}
 	if err := lineRows.Err(); err != nil {
 		return Order{}, err
 	}
+	linkSupplementaryParents(o.Lines)
 	holdRows, err := tx.Query(ctx, `select id::text, hold_type, reason_code, status, order_amount::text, applied_by, released_by, released_until, applied_at
 		from order_hold where tenant_id = $1 and order_id = $2 order by applied_at, id`, tenantID, id)
 	if err != nil {

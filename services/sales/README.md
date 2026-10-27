@@ -6,15 +6,16 @@ cancel with versions and diffs, the scheduling-release reconciliation check and
 the backorder run preview, holds applied by hand (MANUAL, FRAUD, PRICE_REVIEW),
 product listings and exclusions checked at order entry, sales agreements whose
 releases create orders, quotations converted whole or by line into orders, the
-hold release queue, and supplementary item rules with a stateless evaluation.
-Wave 27, slices 1 to 4 of PSG-27. Reference:
+hold release queue, supplementary item rules with a stateless evaluation, and
+MANDATORY supplementary lines added to orders at commit that follow their
+parent line. Wave 27, slices 1 to 5 of PSG-27. Reference:
 `docs/prd/phase-5-order-to-cash.md` §5.27.
 
 Out of these slices (see `NOT-IMPLEMENTED.md`): amount-based agreements and
 scheduling-agreement release storage, the ATP projection and reservations,
 change approval and `:cancel-remainder`, the committed backorder run,
-allocation, consignment, supplementary lines added to orders at line commit,
-cross-selling, quotation expiry job and PDF, the intake dedup window beyond the
+allocation, consignment, OPTIONAL supplementary items prompted in an order-entry
+grid, cross-selling, quotation expiry job and PDF, the intake dedup window beyond the
 order's own key, and the Temporal release workflow.
 
 ## Run
@@ -187,7 +188,14 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
   25 gives 2), for one customer or every customer of the legal entity; a
   customer's own rule replaces the all-customers rule for the same item. FREE
   items carry unit price 0, PRICED items a positive price. The evaluation is
-  stateless; lines are not yet added to orders (see NOT-IMPLEMENTED).
+  stateless. Every new order (UI or channel create, quotation conversion,
+  agreement release) gets the lines of the MANDATORY rules at commit, after its
+  own lines, each naming its parent line (`supplementaryOf`, `parentLineNo`)
+  and returned as an `SLS-0012` warning; OPTIONAL rules are only offered by the
+  evaluation. **BR-27.14**: a supplementary line inherits its parent's site,
+  warehouse and dates, cannot be changed on its own (`SLS-0024`), is
+  recomputed when the parent's quantity changes, is cancelled when the parent
+  drops below the rule's base quantity, and is cancelled with the order.
 - **BR-27.10** intake: a repeat of `(channel, externalRef)` with the same body
   returns the original order with 200; a different body is a conflict.
 - **BR-27.6** optimistic concurrency with `If-Match` and the version column.
@@ -205,13 +213,14 @@ Problem details are `application/problem+json` with `type` =
 | `SLS-0007` | 409 | Duplicate `(channel, externalRef)` with a different payload; or a concurrent create of the same agreement, release or quotation |
 | `SLS-0008` | 422 | Agreement commitment exhausted (`AGREEMENT_EXHAUSTED`) |
 | `SLS-0011` | 422 | Product not listed for the customer (`PRODUCT_NOT_LISTED`) |
+| `SLS-0012` | 201 (warning) | Mandatory supplementary item added at commit (`warnings[]` on the order) |
 | `SLS-0014` | 200 (held) | Cumulative quantity mismatch; the scheduling release is held (`code` = `CUM_QTY_MISMATCH`) |
 | `SLS-0015` | 200 (warning) | Backorder run preview would deconfirm lines (`warningCode`) |
 | `SLS-0019` | 422 | Order not confirmable in its current state |
 | `SLS-0021` | 422 | Order has an active hold that blocks this action |
 | `SLS-0022` | 422 | Hold is not ACTIVE |
 | `SLS-0023` | 422 | Order is shipped, closed or cancelled and cannot be changed |
-| `SLS-0024` | 422 | Change refused: unknown line, a line that is not OPEN or RESERVED, invalid quantity, bad price or date, or reason too long |
+| `SLS-0024` | 422 | Change refused: unknown line, a line that is not OPEN or RESERVED, a supplementary line's own quantity or date, invalid quantity, bad price or date, or reason too long |
 | `SLS-0025` | 422 | Order cannot be cancelled: shipped, closed or cancelled, or a line is picked, delivered or invoiced |
 | `SLS-0026` | 422 | Scheduling release refused: negative quantities, unordered or decreasing buckets |
 | `SLS-0027` | 422 | Backorder run refused: unknown strategy, supply below zero, or a WIN, GAIN or LOSE run that cannot keep a protected confirmation |
