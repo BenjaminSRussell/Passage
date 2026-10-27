@@ -1,8 +1,9 @@
-// Package api exposes the expense rules over HTTP as stateless previews: report
-// policy evaluation, advance settlement, travel variance, per diem, advance aging,
-// requisition window and closure, card feed parsing, the requisition category
-// gate, lodging cap, mileage and batch card matching. Report persistence,
-// receipts, stored card import and AP posting arrive in later slices.
+// Package api exposes the expense service over HTTP: persisted expense reports
+// and lines (create, add line with commit-time policy, submit, list, get) and
+// the stateless previews of the expense rules (report policy evaluation,
+// advance settlement, travel variance, per diem, advance aging, requisition
+// window and closure, card feed parsing, lodging cap, mileage and batch card
+// matching). Receipts, stored card import and AP posting arrive in later slices.
 package api
 
 import (
@@ -41,6 +42,8 @@ type Pinger interface {
 // API holds handlers and counters.
 type API struct {
 	db                Pinger
+	reports           reportStore
+	now               func() time.Time
 	evaluations       atomic.Int64
 	settlements       atomic.Int64
 	variances         atomic.Int64
@@ -51,10 +54,13 @@ type API struct {
 	lodgings          atomic.Int64
 	mileages          atomic.Int64
 	cardMatches       atomic.Int64
+	reportsCreated    atomic.Int64
+	linesAdded        atomic.Int64
+	reportsSubmitted  atomic.Int64
 }
 
 // New returns the API. db may be nil in tests.
-func New(db Pinger) *API { return &API{db: db} }
+func New(db Pinger) *API { return &API{db: db, now: time.Now} }
 
 // Register mounts the routes on r.
 func (a *API) Register(r chi.Router) {
@@ -71,6 +77,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(duty).Post("/v1/expense/mileage-computations", a.mileage)
 	r.With(duty).Post("/v1/expense/card-matches", a.cardMatch)
 	r.With(authz.RequireDuty(dutyCardImport)).Post("/v1/expense/card-transactions:parse", a.cardFeedParse)
+	a.registerReports(r, duty)
 }
 
 // Metrics serves Prometheus text on the admin port.
@@ -86,6 +93,9 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP expense_lodging_checks_total Lodging cap checks served.\n# TYPE expense_lodging_checks_total counter\nexpense_lodging_checks_total %d\n", a.lodgings.Load())
 		fmt.Fprintf(w, "# HELP expense_mileage_computations_total Mileage computations served.\n# TYPE expense_mileage_computations_total counter\nexpense_mileage_computations_total %d\n", a.mileages.Load())
 		fmt.Fprintf(w, "# HELP expense_card_matches_total Card match previews served.\n# TYPE expense_card_matches_total counter\nexpense_card_matches_total %d\n", a.cardMatches.Load())
+		fmt.Fprintf(w, "# HELP expense_reports_created_total Expense reports created.\n# TYPE expense_reports_created_total counter\nexpense_reports_created_total %d\n", a.reportsCreated.Load())
+		fmt.Fprintf(w, "# HELP expense_lines_added_total Expense lines committed.\n# TYPE expense_lines_added_total counter\nexpense_lines_added_total %d\n", a.linesAdded.Load())
+		fmt.Fprintf(w, "# HELP expense_reports_submitted_total Expense reports submitted.\n# TYPE expense_reports_submitted_total counter\nexpense_reports_submitted_total %d\n", a.reportsSubmitted.Load())
 	})
 }
 

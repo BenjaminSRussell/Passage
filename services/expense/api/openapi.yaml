@@ -1,20 +1,29 @@
 openapi: 3.1.0
 info:
   title: expense
-  version: 0.1.0
+  version: 0.4.0
   description: >-
-    Expense management, slices 1-3 of PSG-43. Stateless previews: policy evaluation of report
-    lines against the default rule set (receipts at 25.00 and up, alcohol blocked, submission
-    later than 60 days blocked, duplicates of merchant, amount and date blocked, meals over
-    75.00 a day without attendees needing justification), oldest-first cash-advance settlement
-    (BR-43.9), travel requisition variance (BR-43.13), per diem (BR-43.6), cash-advance aging
-    (FR-43.15), requisition window and closure (BR-43.13), card feed parsing (CSV, OFX;
-    FR-43.13), the travel requisition category gate (FR-43.16), the lodging cap and mileage
-    amount (BR-43.5) and one-to-one card-to-receipt matching (FR-43.13). Nothing is persisted, so no call takes an Idempotency-Key. Money is a decimal
+    Expense management, slices 1-4 of PSG-43. Slice 4 persists expense reports and lines
+    (FR-43.11): create a report, add a line (evaluated against the default rule set at
+    commit, FR-43.12), delete a line, submit, list and get. Creating POSTs and submit take a
+    required Idempotency-Key; a repeated key with the same request replays the first outcome
+    (header Idempotent-Replayed: true), with another request it is refused (422 EXP-IDEM-001).
+    Every report response carries ETag "<version>"; submit and line delete honour If-Match
+    (412 EXP-REP-004 on a stale version). The other operations are stateless previews of the
+    rules: policy evaluation of report lines (receipts at 25.00 and up, alcohol blocked,
+    submission later than 60 days blocked, duplicates of merchant, amount and date blocked,
+    meals over 75.00 a day without attendees needing justification), oldest-first
+    cash-advance settlement (BR-43.9), travel requisition variance (BR-43.13), per diem
+    (BR-43.6), cash-advance aging (FR-43.15), requisition window and closure (BR-43.13), card
+    feed parsing (CSV, OFX; FR-43.13), the travel requisition category gate (FR-43.16), the
+    lodging cap and mileage amount (BR-43.5) and one-to-one card-to-receipt matching
+    (FR-43.13); previews persist nothing and take no Idempotency-Key. Money is a decimal
     string, never a float.
-    Error codes: COM-0001, AUTH-0001, AUTH-0003, COM-0500. Result codes (in bodies, not
-    errors): EXP-POL-001, EXP-POL-002, EXP-REC-001, EXP-TR-001, EXP-TR-002, EXP-ADV-002,
-    EXP-ADV-003.
+    Error codes: COM-0001, COM-0503, AUTH-0001, AUTH-0003, AUTH-0004, EXP-REP-001,
+    EXP-REP-002, EXP-REP-003, EXP-REP-004, EXP-LINE-001, EXP-LINE-002, EXP-LINE-003,
+    EXP-IDEM-001, COM-0500; a refused submit is a 422 carrying the first unsatisfied
+    result's code (EXP-POL-001, EXP-REC-001 or EXP-TR-002). Result codes (in bodies):
+    EXP-POL-001, EXP-POL-002, EXP-REC-001, EXP-TR-001, EXP-TR-002, EXP-ADV-002, EXP-ADV-003.
 servers:
   - url: https://app.local.passage.dev
 paths:
@@ -228,6 +237,149 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/CardMatchResponse' }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/expense/reports:
+    get:
+      operationId: listReports
+      x-passage-duty: expense.report.write
+      description: Reports visible to the caller (tenant and legal-entity scope), in id order, without lines.
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [DRAFT, SUBMITTED, APPROVED, REJECTED, RETURNED, POSTED, PAID] } }
+        - { name: workerId, in: query, schema: { type: string, format: uuid } }
+        - { name: cursor, in: query, description: nextCursor of the previous page., schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: One page; nextCursor is empty on the last page.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportPage' }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: createReport
+      x-passage-duty: expense.report.write
+      description: >-
+        Creates a DRAFT report with zero totals. The legal entity must be inside the caller's
+        legal-entity scope (403 AUTH-0004).
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateReportRequest' }
+      responses:
+        '201':
+          description: Created.
+          headers: { ETag: { $ref: '#/components/headers/ETag' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExpenseReport' }
+        '200':
+          description: Replay of an earlier create with the same key and body.
+          headers: { ETag: { $ref: '#/components/headers/ETag' }, Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExpenseReport' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/expense/reports/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ReportId'
+    get:
+      operationId: getReport
+      x-passage-duty: expense.report.write
+      responses:
+        '200':
+          description: The report with its lines and each line's stored policy results.
+          headers: { ETag: { $ref: '#/components/headers/ETag' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExpenseReport' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/expense/reports/{id}/lines:
+    parameters:
+      - $ref: '#/components/parameters/ReportId'
+    post:
+      operationId: addReportLine
+      x-passage-duty: expense.report.write
+      description: >-
+        Adds a line to a DRAFT report (409 EXP-REP-002 otherwise) and re-evaluates every line
+        of the report at today's date (FR-43.12), so PER_DAY rules and duplicate detection
+        can change an earlier line's results. The line is stored whatever its outcome; submit
+        is where unsatisfied results stop the report. The id is generated when omitted. Totals
+        are recomputed (total = reimbursable + companyPaid). At most 500 lines (422
+        EXP-LINE-003); a line id already used is 409 EXP-LINE-001.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NewReportLine' }
+      responses:
+        '201':
+          description: The report with the new line.
+          headers: { ETag: { $ref: '#/components/headers/ETag' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExpenseReport' }
+        '200':
+          description: Replay of an earlier add with the same key and body.
+          headers: { ETag: { $ref: '#/components/headers/ETag' }, Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExpenseReport' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/expense/reports/{id}/lines/{lineId}:
+    parameters:
+      - $ref: '#/components/parameters/ReportId'
+      - { name: lineId, in: path, required: true, schema: { type: string, format: uuid } }
+    delete:
+      operationId: deleteReportLine
+      x-passage-duty: expense.report.write
+      description: >-
+        Removes a line from a DRAFT report and re-evaluates the remaining lines; this is how a
+        line flagged by a refused submit is corrected. 404 EXP-LINE-002 when the line is not on
+        the report.
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: The report without the line.
+          headers: { ETag: { $ref: '#/components/headers/ETag' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExpenseReport' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/expense/reports/{id}/submit:
+    parameters:
+      - $ref: '#/components/parameters/ReportId'
+    post:
+      operationId: submitReport
+      x-passage-duty: expense.report.write
+      description: >-
+        Submits a DRAFT report with at least one line (422 EXP-REP-003). Every line is
+        re-evaluated at today's date and the results are stored. When any BLOCK applies or any
+        REQUIRE_* is unsatisfied (8.43.5) the report stays DRAFT and the answer is 422 with the
+        first unsatisfied result's code and one error per result keyed "<lineId>/<ruleId>";
+        each BLOCK result is still published as dev.passage.expense.policy.violated.v1. The
+        outcome, success or refusal, is stored against the Idempotency-Key and replayed on a
+        retry, which never publishes the violations again.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: The SUBMITTED report (or the replay of an earlier submit).
+          headers: { ETag: { $ref: '#/components/headers/ETag' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExpenseReport' }
+        '422':
+          description: Refused by policy, empty report, or an Idempotency-Key reused with another request.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
   /readyz:
     get:
       operationId: readyz
@@ -242,6 +394,30 @@ paths:
       responses:
         '200': { description: Process is alive. }
 components:
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 200 }
+    IfMatch:
+      name: If-Match
+      in: header
+      required: false
+      description: The report version as an entity tag, for example "3" (412 EXP-REP-004 when stale).
+      schema: { type: string }
+    ReportId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  headers:
+    ETag:
+      description: The report version, for example "3".
+      schema: { type: string }
+    IdempotentReplayed:
+      description: true when the response replays an earlier request with the same Idempotency-Key.
+      schema: { type: string, enum: ['true'] }
   responses:
     Problem:
       description: RFC 9457 problem details.
@@ -578,3 +754,65 @@ components:
         unmatchedCards: { type: array, items: { type: string } }
         unmatchedReceipts: { type: array, items: { type: string } }
         autoMatchRate: { type: string, example: '0.9500', description: Matched cards over all cards, four places; 0.0000 for no cards. }
+    CreateReportRequest:
+      type: object
+      required: [legalEntityId, workerId, purpose, currency]
+      additionalProperties: false
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        workerId: { type: string, format: uuid }
+        purpose: { type: string, minLength: 1, maxLength: 500, description: Trimmed before it is stored. }
+        currency: { type: string, pattern: '^[A-Z]{3}$', example: USD }
+    NewReportLine:
+      type: object
+      required: [category, txnDate, amount]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid, description: Generated when omitted. }
+        category: { type: string, maxLength: 32, example: MEALS }
+        txnDate: { type: string, format: date }
+        amount: { type: string, description: Non-negative decimal in the report currency. }
+        merchant: { type: string, maxLength: 200 }
+        attendees: { type: integer, minimum: 0, maximum: 500 }
+        hasReceipt: { type: boolean }
+        justification: { type: string, maxLength: 500 }
+        paidBy: { type: string, enum: [EMPLOYEE, COMPANY_CARD], default: EMPLOYEE }
+    ReportLine:
+      type: object
+      required: [id, lineNo, category, txnDate, amount, merchant, attendees, hasReceipt, justification, paidBy, policyResults]
+      properties:
+        id: { type: string, format: uuid }
+        lineNo: { type: integer, minimum: 1 }
+        category: { type: string }
+        txnDate: { type: string, format: date }
+        amount: { type: string, description: Decimal with two places. }
+        merchant: { type: string }
+        attendees: { type: integer }
+        hasReceipt: { type: boolean }
+        justification: { type: string }
+        paidBy: { type: string, enum: [EMPLOYEE, COMPANY_CARD] }
+        policyResults: { type: array, items: { $ref: '#/components/schemas/PolicyResult' }, description: Results of the line's last evaluation (commit, delete or submit). }
+    ExpenseReport:
+      type: object
+      required: [id, legalEntityId, workerId, purpose, currency, status, total, reimbursable, companyPaid, submittable, version, createdAt, submittedAt, lines]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        workerId: { type: string, format: uuid }
+        purpose: { type: string }
+        currency: { type: string }
+        status: { type: string, enum: [DRAFT, SUBMITTED, APPROVED, REJECTED, RETURNED, POSTED, PAID] }
+        total: { type: string, description: Sum of the lines; equals reimbursable + companyPaid. }
+        reimbursable: { type: string, description: Employee-paid lines. }
+        companyPaid: { type: string, description: Company-card lines. }
+        submittable: { type: boolean, description: 'DRAFT, at least one line, and no unsatisfied stored result. Always false in list pages, which carry no lines. Submit re-evaluates at its own date.' }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        submittedAt: { type: [string, 'null'], format: date-time }
+        lines: { type: array, items: { $ref: '#/components/schemas/ReportLine' }, description: Empty in list pages. }
+    ReportPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/ExpenseReport' } }
+        nextCursor: { type: string }

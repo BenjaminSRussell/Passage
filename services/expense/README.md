@@ -1,10 +1,38 @@
 # expense
 
-Expense management, wave 43 (PSG-43), slices 1-3.
+Expense management, wave 43 (PSG-43), slices 1-4.
 
 ## What it does
 
-Slices 1-3 are the pure expense rules and calculations behind stateless HTTP previews:
+Slice 4 persists expense reports and lines (FR-43.11, `internal/store/reports.go`,
+migration `0002_reports.sql`):
+
+- A worker creates a DRAFT report (legal entity, worker, purpose, currency), adds lines
+  (category, date, amount, merchant, attendees, receipt flag, justification, paid by
+  employee or company card), removes lines while the report is DRAFT, and submits it.
+- Lines are evaluated at commit (FR-43.12): every add and every delete re-evaluates the
+  whole report with the default rule set at that day's date, so the PER_DAY meal rule
+  and duplicate detection can change an earlier line's results, and each line stores its
+  results. A line is stored whatever its outcome.
+- Submit re-evaluates at the submit date. When any BLOCK applies or any REQUIRE_* is
+  unsatisfied (8.43.5), the report stays DRAFT and the answer is a 422 with the first
+  unsatisfied result's code and one error per result; each BLOCK result is still
+  written to the outbox as `dev.passage.expense.policy.violated.v1` in the same
+  transaction. A clean submit moves the report to SUBMITTED.
+- Stored totals follow the lines in the same transaction and satisfy
+  total = reimbursable + company-paid (a table check constraint, 8.43.4).
+- Creating POSTs and submit take a required `Idempotency-Key`. Report and line keys are
+  stored on the row (line keys per report); the submit outcome, success or refusal, is
+  stored in `idempotency_keys`, so a retried refusal never publishes twice. The same key
+  with another request is `EXP-IDEM-001`. Responses carry `ETag: "<version>"`; submit and
+  line delete honour `If-Match` (`EXP-REP-004`).
+- Every table has `tenant_id`, forced row-level security with the tenant policy, and the
+  legal-entity scope policy (lines follow their report); every query also names the
+  tenant, and a report for a legal entity outside the caller's scope is refused
+  (`AUTH-0004`).
+
+Slices 1-3 are the pure expense rules and calculations, also behind stateless HTTP
+previews:
 
 - Policy evaluation (BR-43.5, `internal/domain/policy.go`): typed, versioned rules
   evaluated over a report's lines at the submit date; the highest version effective on
@@ -64,7 +92,7 @@ Slices 1-3 are the pure expense rules and calculations behind stateless HTTP pre
   (`platform/money` minor units) rejects the row. SHA-256 file hash for
   de-duplication. Spend is positive, refunds negative. Nothing is stored.
 
-Nothing is persisted or posted yet. See `NOT-IMPLEMENTED.md`.
+Reports are not approved, posted to AP or paid yet. See `NOT-IMPLEMENTED.md`.
 
 ## Layout
 
@@ -73,10 +101,12 @@ cmd/expense/            entrypoint: dbx.Connect -> dbx.Migrate -> httpx.NewRoute
 internal/domain/        pure rules, settlement, variance, card matching, per diem,
                         advance aging, requisition window, card feed parsing,
                         requisition gate, lodging cap, mileage (no I/O)
+internal/store/         Postgres persistence of reports and lines (pgx, tenant transactions)
+internal/events/        event type and payload
 internal/api/           HTTP handlers and DTOs
-migrations/             NNNN_*.sql applied by dbx.Migrate (infrastructure tables only so far)
+migrations/             NNNN_*.sql applied by dbx.Migrate (outbox, idempotency_keys, reports, lines)
 api/openapi.yaml        OpenAPI 3.1 for every endpoint
-events/asyncapi.yaml    AsyncAPI 3 (no events are published yet)
+events/asyncapi.yaml    AsyncAPI 3 for dev.passage.expense.policy.violated.v1
 charts/expense/         Helm chart
 ```
 
@@ -93,8 +123,10 @@ PASSAGE_ENV=dev SERVICE_NAME=expense DATABASE_URL=postgres://... \
 go vet ./... && go test ./...
 ```
 
-Domain tests are pure. API tests and store tests use `platform/go/testkit` and are
-skipped unless `PASSAGE_TEST_DATABASE_URL` is set.
+Domain and API tests are pure (the API tests use an in-memory report store). Store and
+migration tests use `platform/go/testkit` and are skipped unless
+`PASSAGE_TEST_DATABASE_URL` is set; run them as a role without superuser or BYPASSRLS so
+the row-level security test is not skipped.
 
 ## Endpoints
 
@@ -110,6 +142,12 @@ skipped unless `PASSAGE_TEST_DATABASE_URL` is set.
 | POST   | /v1/expense/mileage-computations       | expense.report.write |
 | POST   | /v1/expense/card-matches               | expense.report.write |
 | POST   | /v1/expense/card-transactions:parse    | expense.card.import  |
+| GET    | /v1/expense/reports                    | expense.report.write |
+| POST   | /v1/expense/reports                    | expense.report.write |
+| GET    | /v1/expense/reports/{id}               | expense.report.write |
+| POST   | /v1/expense/reports/{id}/lines         | expense.report.write |
+| DELETE | /v1/expense/reports/{id}/lines/{lineId}| expense.report.write |
+| POST   | /v1/expense/reports/{id}/submit        | expense.report.write |
 | GET    | /healthz, /readyz                      | public               |
 
 ## Error codes
@@ -121,6 +159,17 @@ Problem details use `type: https://passage.dev/problems/<code>`.
 | COM-0001  | 400  | Request failed validation (bad decimal, date, category, count, repeated line or advance id) |
 | AUTH-0001 | 401  | Unauthenticated                                                |
 | AUTH-0003 | 403  | Missing duty                                                   |
+| AUTH-0004 | 403  | Legal entity outside the caller's scope                        |
+| EXP-REP-001 | 404 | Expense report not found (or not visible to the caller)      |
+| EXP-REP-002 | 409 | Report is not DRAFT (add line, delete line, submit)           |
+| EXP-REP-003 | 422 | Submit of a report without lines                              |
+| EXP-REP-004 | 412 | If-Match names a stale report version                         |
+| EXP-LINE-001 | 409 | A line with this id already exists                           |
+| EXP-LINE-002 | 404 | Line not found on the report                                 |
+| EXP-LINE-003 | 422 | Report already holds 500 lines                               |
+| EXP-IDEM-001 | 422 | Idempotency-Key already used with a different request       |
+| EXP-POL-001, EXP-REC-001, EXP-TR-002 | 422 | Submit refused: the code of the first unsatisfied policy result |
+| COM-0503  | 503  | Report persistence not configured                              |
 | COM-0500  | 500  | Unexpected failure                                             |
 
 Result codes reported in response bodies (not HTTP errors): each policy result carries
@@ -131,14 +180,14 @@ check returns `EXP-TR-001` when justification is required; the settlement previe
 returns `EXP-ADV-003` when any advance was applied; the aging check returns
 `EXP-ADV-002` when new advances are blocked.
 
-Duties: `expense.report.write` is the EssExpense duty for the previews (card matching
-is part of the ESS expense report screen, 8.43.6);
+Duties: `expense.report.write` is the EssExpense duty for the reports and the previews
+(card matching is part of the ESS expense report screen, 8.43.6);
 `expense.card.import` is the ExpenseAdmin duty for card feeds (PRD 8.43.16 puts card
 import with ExpenseAdmin).
 
 ## Dependencies
 
-Platform kernel only, plus shopspring/decimal. No new third-party dependencies.
+Platform kernel only, plus shopspring/decimal and pgx/v5 (both already in the platform module). No new third-party dependencies.
 CEL is not used; the rule schema is typed (see NOT-IMPLEMENTED.md).
 
 ## Wave reference

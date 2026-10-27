@@ -13,6 +13,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/services/expense/internal/api"
+	"github.com/BenjaminSRussell/passage/services/expense/internal/store"
 	"github.com/BenjaminSRussell/passage/services/expense/migrations"
 )
 
@@ -55,7 +56,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
-	a := api.New(pool)
+	a := api.New(pool).WithReports(store.New(pool))
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()

@@ -1,7 +1,9 @@
 // Typed client for services/expense (contract: services/expense/api/openapi.yaml).
 // The browser calls /api/v1/...; the BFF rewrites the path and attaches the session.
-// Every call here is a stateless preview: nothing is stored, so none takes an
-// Idempotency-Key.
+// The report calls persist (slice 4): creating POSTs and submit send an
+// Idempotency-Key, and submit and line removal send If-Match with the report
+// version. Every other call is a stateless preview that stores nothing and takes
+// no key.
 
 export interface ExpenseLineInput {
   id: string;
@@ -210,12 +212,12 @@ export function describeProblem(error: unknown): Problem {
   return { code: "NETWORK", message: "The expense service could not be reached. Check your connection and try again.", fields: {} };
 }
 
-async function post<T>(path: string, body: unknown, fetchImpl: typeof fetch): Promise<T> {
+async function request<T>(method: string, path: string, body: unknown, fetchImpl: typeof fetch, headers: Record<string, string> = {}): Promise<T> {
   const res = await fetchImpl(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    method,
+    headers: { ...(body === undefined ? {} : { "Content-Type": "application/json" }), Accept: "application/json", ...headers },
     credentials: "same-origin",
-    body: JSON.stringify(body),
+    body: body === undefined ? undefined : JSON.stringify(body),
   });
   const json = (await res.json().catch(() => null)) as Record<string, unknown> | null;
   if (!res.ok) {
@@ -225,6 +227,10 @@ async function post<T>(path: string, body: unknown, fetchImpl: typeof fetch): Pr
     throw new ExpenseProblem(res.status, code, message, fields);
   }
   return json as T;
+}
+
+function post<T>(path: string, body: unknown, fetchImpl: typeof fetch): Promise<T> {
+  return request("POST", path, body, fetchImpl);
 }
 
 export function evaluateReport(
@@ -263,3 +269,112 @@ export function computeMileage(input: MileageInput, fetchImpl: typeof fetch = fe
 export function matchCards(input: CardMatchInput, fetchImpl: typeof fetch = fetch): Promise<CardMatchResult> {
   return post("/api/v1/expense/card-matches", input, fetchImpl);
 }
+
+// ---- Expense reports (slice 4, persisted) ----
+
+export type ReportStatus = "DRAFT" | "SUBMITTED" | "APPROVED" | "REJECTED" | "RETURNED" | "POSTED" | "PAID";
+export type PaidBy = "EMPLOYEE" | "COMPANY_CARD";
+
+export interface ReportLine {
+  id: string;
+  lineNo: number;
+  category: string;
+  txnDate: string;
+  amount: string;
+  merchant: string;
+  attendees: number;
+  hasReceipt: boolean;
+  justification: string;
+  paidBy: PaidBy;
+  policyResults: PolicyResult[];
+}
+
+export interface ExpenseReport {
+  id: string;
+  legalEntityId: string;
+  workerId: string;
+  purpose: string;
+  currency: string;
+  status: ReportStatus;
+  total: string;
+  reimbursable: string;
+  companyPaid: string;
+  /** DRAFT, at least one line and no open stored result; submit re-checks at its own date. */
+  submittable: boolean;
+  version: number;
+  createdAt: string;
+  submittedAt: string | null;
+  lines: ReportLine[];
+}
+
+export interface ReportPage {
+  items: ExpenseReport[];
+  nextCursor: string;
+}
+
+export interface ReportQuery {
+  status?: ReportStatus;
+  workerId?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+export interface NewReportInput {
+  legalEntityId: string;
+  workerId: string;
+  purpose: string;
+  currency: string;
+}
+
+export interface NewLineInput {
+  category: string;
+  txnDate: string;
+  amount: string;
+  merchant: string;
+  attendees: number;
+  hasReceipt: boolean;
+  justification: string;
+  paidBy: PaidBy;
+}
+
+const REPORTS = "/api/v1/expense/reports";
+
+/** A fresh Idempotency-Key for one user action; a retry of that action reuses it. */
+export function newIdempotencyKey(): string {
+  return crypto.randomUUID();
+}
+
+export function listReports(query: ReportQuery = {}, fetchImpl: typeof fetch = fetch): Promise<ReportPage> {
+  const params = new URLSearchParams();
+  for (const [k, v] of Object.entries(query)) {
+    if (v !== undefined && v !== "") params.set(k, String(v));
+  }
+  const qs = params.toString();
+  return request("GET", qs ? `${REPORTS}?${qs}` : REPORTS, undefined, fetchImpl);
+}
+
+export function getReport(id: string, fetchImpl: typeof fetch = fetch): Promise<ExpenseReport> {
+  return request("GET", `${REPORTS}/${encodeURIComponent(id)}`, undefined, fetchImpl);
+}
+
+export function createReport(input: NewReportInput, key: string, fetchImpl: typeof fetch = fetch): Promise<ExpenseReport> {
+  return request("POST", REPORTS, input, fetchImpl, { "Idempotency-Key": key });
+}
+
+export function addReportLine(reportId: string, line: NewLineInput, key: string, fetchImpl: typeof fetch = fetch): Promise<ExpenseReport> {
+  return request("POST", `${REPORTS}/${encodeURIComponent(reportId)}/lines`, line, fetchImpl, { "Idempotency-Key": key });
+}
+
+export function deleteReportLine(reportId: string, lineId: string, version: number, fetchImpl: typeof fetch = fetch): Promise<ExpenseReport> {
+  return request("DELETE", `${REPORTS}/${encodeURIComponent(reportId)}/lines/${encodeURIComponent(lineId)}`, undefined, fetchImpl, {
+    "If-Match": `"${version}"`,
+  });
+}
+
+export function submitReport(reportId: string, version: number, key: string, fetchImpl: typeof fetch = fetch): Promise<ExpenseReport> {
+  return request("POST", `${REPORTS}/${encodeURIComponent(reportId)}/submit`, undefined, fetchImpl, {
+    "Idempotency-Key": key,
+    "If-Match": `"${version}"`,
+  });
+}
+

@@ -1,11 +1,43 @@
 asyncapi: 3.0.0
 info:
   title: expense
-  version: 0.1.0
+  version: 0.4.0
   description: >-
-    No events are published by slice 1 of PSG-43. Previews are stateless. Planned events
-    (PRD 8.43.5, not implemented): dev.passage.expense.report.approved.v1,
-    dev.passage.expense.policy.violated.v1 and dev.passage.expense.cash-advance.paid.v1.
-channels: {}
+    CloudEvents 1.0 envelope from platform/go/events (source /passage/expense/expense,
+    subject the report id); payloads below are the data member. Events are written to the
+    outbox in the transaction of the change and relayed to Kafka keyed by aggregate
+    (expense_report, report id). Slice 4 of PSG-43 publishes
+    dev.passage.expense.policy.violated.v1: one message per BLOCK result when a report
+    submit is refused. The refusal commits the evaluation and the messages, and a retry
+    with the same Idempotency-Key replays the refusal without publishing again. Not yet
+    published (PRD 8.43.5, later slices): dev.passage.expense.report.approved.v1 and
+    dev.passage.expense.cash-advance.paid.v1.
+channels:
+  passage.expense.policy:
+    address: passage.expense.policy
+    messages:
+      violated:
+        $ref: '#/components/messages/policyViolated'
+operations:
+  publishPolicyViolated:
+    action: send
+    channel:
+      $ref: '#/channels/passage.expense.policy'
+    summary: A report submit was refused and at least one line has a BLOCK outcome.
+    messages:
+      - $ref: '#/channels/passage.expense.policy/messages/violated'
 components:
-  messages: {}
+  messages:
+    policyViolated:
+      name: dev.passage.expense.policy.violated.v1
+      title: Policy violated at submit
+      contentType: application/json
+      payload:
+        type: object
+        required: [reportId, lineId, ruleId, outcome]
+        additionalProperties: false
+        properties:
+          reportId: { type: string, format: uuid }
+          lineId: { type: string, format: uuid }
+          ruleId: { type: string, example: EXP-DUP-001 }
+          outcome: { type: string, enum: [BLOCK] }
