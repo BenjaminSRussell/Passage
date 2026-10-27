@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Alert, Badge, Button, Card, DataTable, PageHeader, Skeleton, type DataTableColumn } from "../../shell/ui";
+import { Alert, Badge, Button, buttonClassName, Card, DataTable, PageHeader, Skeleton, type DataTableColumn } from "../../shell/ui";
 import { allocateVoyage, describeProblem, getVoyage, type Container, type Folio, type Leg, type Problem, type Voyage, type VoyageCostLine, type VoyageReceiptLine } from "./api/client";
 import { Details } from "./Details";
 import { dash, fixed, formatDateTime, money, stateTone, statusLabel, sumAmounts } from "./format";
@@ -112,11 +112,16 @@ export function VoyageDetailPage() {
         title={`Voyage ${voyage.reference}`}
         meta={<Badge tone={stateTone(voyage.status)}>{statusLabel(voyage.status)}</Badge>}
         actions={
-          voyage.status === "ESTIMATED" ? (
-            <Button variant="primary" loading={busy} onClick={allocate}>
-              Allocate and post
-            </Button>
-          ) : null
+          <div className={styles.actions}>
+            <Link className={buttonClassName("secondary")} to={`/transport/goods-in-transit?voyageId=${voyage.id}`}>
+              Goods in transit
+            </Link>
+            {voyage.status === "ESTIMATED" ? (
+              <Button variant="primary" loading={busy} onClick={allocate}>
+                Allocate and post
+              </Button>
+            ) : null}
+          </div>
         }
       />
       <Alert tone="success" live="status">

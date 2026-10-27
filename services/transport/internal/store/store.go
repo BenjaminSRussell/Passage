@@ -1,5 +1,6 @@
 // Package store persists rate cards, freight bills and their decisions, carrier
-// invoices, tenders, tracking events, landed-cost voyages, loads and DG checks. Every query runs inside
+// invoices, tenders, tracking events, landed-cost voyages, loads, DG checks, gate
+// visits with their gate log, and goods-in-transit orders. Every query runs inside
 // dbx.WithTenantTx so row-level security applies.
 package store
 
@@ -96,6 +97,15 @@ type Store interface {
 	ListDGChecks(ctx context.Context, loadID string) ([]domain.DGCheck, error)
 	DecideFreightBill(ctx context.Context, id, action, reason string, version int, idem Idem, now time.Time) (domain.FreightBill, error)
 	ListBillDecisions(ctx context.Context, billID string) ([]domain.Decision, error)
+	CheckIn(ctx context.Context, in domain.GateVisit, idem Idem) (domain.GateVisit, error)
+	RecordSeal(ctx context.Context, id, seal string, now time.Time) (domain.GateVisit, error)
+	CheckOut(ctx context.Context, id, declaredSeal string, at time.Time, hourlyRate decimal.Decimal, idem Idem) (domain.GateVisit, error)
+	GetGateVisit(ctx context.Context, id string) (domain.GateVisit, []domain.GateLogEntry, error)
+	ListGateVisits(ctx context.Context, f GateVisitFilter) ([]domain.GateVisit, error)
+	CreateGoodsInTransit(ctx context.Context, voyageID, incoterm, siteID string, lines []int, idem Idem) (domain.GoodsInTransit, error)
+	GetGoodsInTransit(ctx context.Context, id string) (domain.GoodsInTransit, error)
+	ListGoodsInTransit(ctx context.Context, f GoodsInTransitFilter) ([]domain.GoodsInTransit, error)
+	ShipGoodsInTransit(ctx context.Context, id string, at time.Time) (domain.GoodsInTransit, error)
 	Ping(ctx context.Context) error
 }
 

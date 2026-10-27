@@ -8,7 +8,9 @@ reconciliation API; slice 2 adds the tender cascade, tracking ingest and timelin
 and voyages with landed-cost allocation and posting; slice 3 adds rule-based load
 building, freight bill approval and dispute, the transport dangerous-goods check with
 DG shipping-paper lines and a tender gate, the denied-party screening hook, and the pure
-Incoterm transfer, gate and detention rules. What is not built yet is listed
+Incoterm transfer, gate and detention rules; slice 4 adds driver check-in and check-out
+with seal verification, detention and an append-only gate log, and goods-in-transit
+orders that move voyage receipt lines into transit at the Incoterm transfer event. What is not built yet is listed
 in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
 
 Route optimization (VRP) lives in the sibling Python service `services/routing-py`.
@@ -22,14 +24,16 @@ internal/domain/        pure rules, no I/O: rating, freight-bill matching, ISO 6
                         projection (BR-34.9), voyage validation and allocation, load building
                         (BR-34.8), freight bill decisions (BR-34.4), DG check (BR-34.15),
                         screening hook (BR-34.17), Incoterm transfer (BR-34.11), gate
-                        arrival, seal and detention (BR-34.13, BR-34.14)
+                        arrival, seal and detention (BR-34.13, BR-34.14), gate visits,
+                        goods-in-transit orders (BR-34.11)
 internal/store/         pgx repositories, every query inside dbx.WithTenantTx (RLS applies)
 internal/api/           HTTP handlers, request validation, duty checks
 internal/events/        event type constants and payload structs
 migrations/             0001_init.sql (rate_card, freight_bill, carrier_invoice, outbox),
                         0002_tender_tracking_voyage.sql (tender, tracking_event, voyage),
                         0003_load_dg_decision.sql (load_build, load, load_shipment, dg_check,
-                        freight_bill_decision), applied in order
+                        freight_bill_decision), 0004_gate_goods_in_transit.sql (gate_visit,
+                        gate_event, goods_in_transit_order, goods_in_transit_line), applied in order
 api/openapi.yaml        OpenAPI 3.1 for every endpoint in this slice
 events/asyncapi.yaml    AsyncAPI 3 for every event the service publishes
 charts/transport/       Helm chart (image, DATABASE_URL from a secret, probes, ServiceMonitor toggle)
@@ -79,18 +83,38 @@ charts/transport/       Helm chart (image, DATABASE_URL from a secret, probes, S
 | POST | /v1/transport/freight-bills/{id}:approve | TMS_RECONCILE_APPROVE | MATCHED, VARIANCE or DISPUTED to APPROVED; a reason is required except for MATCHED; `If-Match` required; publishes `freightbill.approved` |
 | POST | /v1/transport/freight-bills/{id}:dispute | TMS_RECONCILE | VARIANCE to DISPUTED with a reason; `If-Match` required |
 
+## Endpoints (slice 4)
+
+| Method | Path | Duty | Notes |
+|---|---|---|---|
+| POST | /v1/transport/gate/check-in | TMS_GATE | Direction, carrier SCAC, trailer, optional seal and load, driver name and license, appointment id with its time (or a walk-in); ON_TIME within `toleranceMin` (default 60), else EARLY or LATE with TMS-0127; a trailer already in the site's yard is TMS-0118; publishes `gate.checkedin`; `Idempotency-Key` optional |
+| POST | /v1/transport/gate/check-out | TMS_GATE | `{visitId, sealNo, checkOutAt?, hourlyRate?}`; seal mismatch or an outbound visit without a seal is 422 TMS-0129 and logged as CHECK_OUT_BLOCKED; detention per BR-34.13 (TMS-0126); `Idempotency-Key` optional |
+| GET | /v1/transport/gate/visits | TMS_GATE | Gate log, newest check-in first, at most 500; filter by `siteId`, `status`, `carrierScac`, `date` (UTC day) |
+| GET | /v1/transport/gate/visits/{id} | TMS_GATE | The visit with its gate log rows in the order written |
+| POST | /v1/transport/gate/visits/{id}:seal | TMS_GATE | Records the seal applied at load confirmation while IN_YARD; logged as SEALED |
+| POST | /v1/transport/goods-in-transit | TMS_LANDED_COST | `{voyageId, incoterm, siteId, receiptLines?}` on an ESTIMATED voyage; origin Incoterms only (TMS-0120 otherwise); each line's estimate per cost type is its BR-34.6 share; a line is on one order (TMS-0119); `Idempotency-Key` optional |
+| GET | /v1/transport/goods-in-transit | TMS_LANDED_COST | Newest first, at most 500; filter by `voyageId`, `status` |
+| GET | /v1/transport/goods-in-transit/{id} | TMS_LANDED_COST | |
+| POST | /v1/transport/goods-in-transit/{id}:ship | TMS_LANDED_COST | `{shippedAt?}`; PENDING to IN_TRANSIT (TMS-0121) and publishes `goodsintransit.shipped`; an IN_TRANSIT order is returned unchanged |
+
+TMS_GATE also guards the gate log reads: the visits carry driver names and license ids
+(personal data, 90-day retention), so TMS_VIEW does not read them. The gate log rows and
+the `gate.checkedin` event carry no driver PII; the application role may only insert and
+read `gate_event`, and a trigger refuses updates and deletes.
+
 Browser paths are `/api/v1/transport/...`, rewritten by the web BFF to `/v1/transport/...`
 like every other service. The PRD writes the paths as `/tms/v1/...`; the route names after
 the prefix follow the PRD.
 
 Idempotency: `Idempotency-Key` (1 to 200 characters) is stored on the rate card, freight
-bill, tender, voyage, load build or freight bill decision it creates with a SHA-256 fingerprint of method, path and body. A repeat with the same
+bill, tender, voyage, load build, freight bill decision, gate visit or goods-in-transit order it creates with a SHA-256 fingerprint of method, path and body. A repeat with the same
 body returns that record; a different body is 422 `idempotency_key_reuse`; a concurrent
 repeat waits for the first and returns its record. A carrier invoice's natural key is the
 carrier and invoice number (TMS-0108); a tracking event's is source and ref (a different
 report under the same pair is 422 `idempotency_key_reuse`). Tender responses and voyage
 allocation are naturally idempotent: repeating them returns the stored result and writes
-no event. Freight bill decisions also need `If-Match` with the bill version (the ETag of
+no event; so is shipping a goods-in-transit order. A gate check-out stores its own key on
+the visit, so a retried check-out returns the checked-out visit. Freight bill decisions also need `If-Match` with the bill version (the ETag of
 `GET /freight-bills/{id}`): without it 428 `COM-0428`, stale 412 `conflict_version`. A
 replayed decision key returns the bill as it is now.
 
@@ -100,7 +124,9 @@ grid) and form, carrier invoice list and registration form, tender board, start-
 form and tender detail with the carrier response, tracking list, load timeline and
 status form, voyage list, form and detail with allocation, load list, build-loads form
 and load detail with the DG check (findings and shipping papers) and party screening,
-and approve and dispute on the freight bill detail with its decision history.
+approve and dispute on the freight bill detail with its decision history, the gate log
+with check-in, seal and check-out (blocked attempts shown in the visit's log), and
+goods-in-transit orders (list, form prefilled from a voyage, detail with ship).
 
 ## Run
 
@@ -179,9 +205,18 @@ go test ./internal/store/
   FAIL blocks a tender of the load with TMS-0130 (AC-34.13, `dg_check_mode` BLOCK).
 - BR-34.17 screening: every party through the provider with a 5 s timeout; POTENTIAL_MATCH,
   BLOCKED, an error, a timeout or an unknown status hold the load; the hook never clears.
-- BR-34.11, BR-34.13, BR-34.14 as pure rules: Incoterm transfer event, arrival ON_TIME /
-  EARLY / LATE within `gate_tolerance_min` (TMS-0127), seal match (TMS-0129), walk-in check
-  (TMS-0128), detention = ceil((dwell − free time) ÷ 60) × hourly rate (AC-34.11).
+- BR-34.11, BR-34.13, BR-34.14: Incoterm transfer event, arrival ON_TIME / EARLY / LATE
+  within `gate_tolerance_min` (TMS-0127), seal match (TMS-0129), walk-in check (TMS-0128),
+  detention = ceil((dwell − free time) ÷ 60) × hourly rate (AC-34.11), raised at check-in
+  and check-out. The declared seal must equal the recorded one: the seal of an inbound
+  sealed trailer from check-in, or the seal recorded at load confirmation; an outbound
+  visit without a seal has no confirmed load and cannot leave (AC-34.12). A trailer is in
+  a site's yard once (partial unique index plus a per-trailer advisory lock).
+- FR-34.12 goods in transit: an origin Incoterm (EXW, FCA, FAS, FOB, CFR, CIF, CPT, CIP)
+  opens a PENDING order for receipt lines of an ESTIMATED voyage into `TRANSIT-{site}`;
+  each line carries its BR-34.6 share of every voyage cost line, so orders that cover the
+  voyage carry its cost total to the cent. A receipt line is on one order
+  (`goods_in_transit_line` key). Shipping moves ownership (TMS-0121).
 
 ## Error codes
 
@@ -209,7 +244,14 @@ Envelope: RFC 9457 `application/problem+json`, `type` = `https://passage.dev/pro
 | TMS-0115 | 422 | A shipment exceeds the capacity of an empty load on its own (slice-local) |
 | TMS-0116 | 409 | A shipment is already on a load (slice-local) |
 | TMS-0117 | 422 | The decision does not fit the freight bill's state, or approving a variance or dispute without a reason (slice-local) |
-| TMS-0121 | info | An origin Incoterm opens a goods-in-transit order; on the transfer rule |
+| TMS-0118 | 409 | The gate visit is already checked out, a seal is recorded after check-out, or the trailer is already in the site's yard (slice-local) |
+| TMS-0119 | 409 / 422 | The voyage is not ESTIMATED, a receipt line is already on another goods-in-transit order (409), or a line is not on the voyage (422 with `errors.receiptLines`) (slice-local) |
+| TMS-0120 | 422 | The Incoterm transfers ownership at destination receipt; no goods-in-transit order is opened (slice-local) |
+| TMS-0121 | info | An origin Incoterm opens a goods-in-transit order; on the transfer rule, and on a shipped order |
+| TMS-0126 | info | Detention accrued; on the visit's `detention.code` at check-out |
+| TMS-0127 | warning | Arrival EARLY or LATE; on the visit's `arrival.code` |
+| TMS-0128 | 422 | No appointment and the site refuses walk-ins (not reachable until sites have the setting) |
+| TMS-0129 | 422 | Declared seal does not match, or an outbound visit has no seal; the attempt is in the gate log |
 | TMS-0124 | 422 | A voyage container number fails the ISO 6346 check digit; the container is named in `errors` |
 | TMS-0130 | 422 / finding | DG segregation FAIL finding; a tender of a load whose latest DG check FAILed is refused with it |
 | TMS-0131 | finding | ADR 1.1.3.6 points above 1,000 |
@@ -218,9 +260,9 @@ Envelope: RFC 9457 `application/problem+json`, `type` = `https://passage.dev/pro
 | COM-0428 | 428 | `If-Match` missing on approve or dispute |
 | conflict_version | 412 | `If-Match` is not the bill's current version |
 
-TMS-0100 is also the not-found code for tenders, voyages and loads. Codes not yet raised
-(TMS-0103, 0104, 0107, 0125-0129, 0132, 0135) are listed in NOT-IMPLEMENTED.md; TMS-0126 to
-0129 are returned by the pure gate rules but no endpoint calls them yet.
+TMS-0100 is also the not-found code for tenders, voyages, loads, gate visits and
+goods-in-transit orders. Codes not yet raised (TMS-0103, 0104, 0107, 0125, 0132, 0135) are
+listed in NOT-IMPLEMENTED.md.
 
 ## Events
 
@@ -231,6 +273,8 @@ TMS-0100 is also the not-found code for tenders, voyages and loads. Codes not ye
 | dev.passage.tms.tracking.event.v1 | A status report is stored (not on replay) | load id |
 | dev.passage.tms.landedcost.posted.v1 | A voyage is allocated and posted; Σ receiptLines = total | voyage id |
 | dev.passage.tms.freightbill.approved.v1 | A freight bill is approved; expected (accrued), invoiced and variance amounts for AP and the ledger | freight bill id |
+| dev.passage.tms.gate.checkedin.v1 | A driver and trailer check in (not on replay); no driver PII | gate visit id |
+| dev.passage.tms.goodsintransit.shipped.v1 | A goods-in-transit order ships; goods value and estimated cost per line and cost type, Σ lines = estimatedTotal | order id |
 
 Each is written to the outbox in the transaction that makes the change.
 

@@ -1,6 +1,7 @@
 // Package api exposes the transport HTTP routes: rate cards, rate shopping,
 // freight bills and their approval, carrier invoices, tenders, tracking events,
-// landed-cost voyages, load building, DG checks and trade-compliance screening.
+// landed-cost voyages and goods in transit, load building, DG checks,
+// trade-compliance screening, and driver check-in and check-out at the gate.
 package api
 
 import (
@@ -82,6 +83,11 @@ type API struct {
 	screenings       atomic.Int64
 	billsApproved    atomic.Int64
 	billsDisputed    atomic.Int64
+	gateCheckIns     atomic.Int64
+	gateCheckOuts    atomic.Int64
+	gateBlocked      atomic.Int64
+	gitCreated       atomic.Int64
+	gitShipped       atomic.Int64
 	serverErrors     atomic.Int64
 }
 
@@ -136,6 +142,15 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(DutyLandedCost)).Get(prefix+"/voyages", a.listVoyages)
 	r.With(authz.RequireDuty(DutyLandedCost)).Get(prefix+"/voyages/{id}", a.getVoyage)
 	r.With(authz.RequireDuty(DutyLandedCost)).Post(prefix+"/landed-cost/voyages/{id}:allocate", a.allocateVoyage)
+	r.With(authz.RequireDuty(DutyLandedCost)).Post(prefix+"/goods-in-transit", a.createGoodsInTransit)
+	r.With(authz.RequireDuty(DutyLandedCost)).Get(prefix+"/goods-in-transit", a.listGoodsInTransit)
+	r.With(authz.RequireDuty(DutyLandedCost)).Get(prefix+"/goods-in-transit/{id}", a.getGoodsInTransit)
+	r.With(authz.RequireDuty(DutyLandedCost)).Post(prefix+"/goods-in-transit/{id}:ship", a.shipGoodsInTransit)
+	r.With(authz.RequireDuty(DutyGate)).Post(prefix+"/gate/check-in", a.checkIn)
+	r.With(authz.RequireDuty(DutyGate)).Post(prefix+"/gate/check-out", a.checkOut)
+	r.With(authz.RequireDuty(DutyGate)).Get(prefix+"/gate/visits", a.listGateVisits)
+	r.With(authz.RequireDuty(DutyGate)).Get(prefix+"/gate/visits/{id}", a.getGateVisit)
+	r.With(authz.RequireDuty(DutyGate)).Post(prefix+"/gate/visits/{id}:seal", a.recordSeal)
 }
 
 type rateCardRequest struct {
@@ -569,6 +584,11 @@ func (a *API) Metrics() http.Handler {
 			{"transport_screenings_total", "Load screening requests answered with a decision.", a.screenings.Load()},
 			{"transport_freight_bills_approved_total", "Freight bill approvals applied or replayed.", a.billsApproved.Load()},
 			{"transport_freight_bills_disputed_total", "Freight bill disputes applied or replayed.", a.billsDisputed.Load()},
+			{"transport_gate_check_ins_total", "Gate check-in requests answered with a visit, replays included.", a.gateCheckIns.Load()},
+			{"transport_gate_check_outs_total", "Gate check-outs applied or replayed.", a.gateCheckOuts.Load()},
+			{"transport_gate_check_outs_blocked_total", "Gate check-outs blocked by a seal mismatch or an unconfirmed load (TMS-0129).", a.gateBlocked.Load()},
+			{"transport_goods_in_transit_created_total", "Goods-in-transit order create requests answered with an order, replays included.", a.gitCreated.Load()},
+			{"transport_goods_in_transit_shipped_total", "Goods-in-transit ship requests answered with a shipped order, replays included.", a.gitShipped.Load()},
 			{"transport_server_errors_total", "Requests that failed with a server error.", a.serverErrors.Load()},
 		} {
 			fmt.Fprintf(w, "# HELP %[1]s %[2]s\n# TYPE %[1]s counter\n%[1]s %[3]d\n", m.name, m.help, m.value)

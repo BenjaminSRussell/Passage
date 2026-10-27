@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: Passage Transport events
-  version: 0.3.0
+  version: 0.4.0
   description: CloudEvents 1.0 envelope; amounts are decimal strings. Each event is written to the outbox in the transaction that makes the change; the Debezium outbox router sends it to the topic of its aggregate.
 defaultContentType: application/cloudevents+json
 channels:
@@ -35,6 +35,18 @@ channels:
     messages:
       landedCostPosted:
         $ref: '#/components/messages/LandedCostPosted'
+  gate:
+    address: passage.tms.gate
+    description: Topic for gate check-ins (FR-34.14); subject is the gate visit id. Payloads carry no driver PII.
+    messages:
+      gateCheckedIn:
+        $ref: '#/components/messages/GateCheckedIn'
+  goodsInTransit:
+    address: passage.tms.goodsintransit
+    description: Topic for goods-in-transit orders (FR-34.12, BR-34.11); subject is the order id.
+    messages:
+      goodsInTransitShipped:
+        $ref: '#/components/messages/GoodsInTransitShipped'
 operations:
   publishFreightBillMatched:
     action: send
@@ -73,6 +85,20 @@ operations:
     summary: A voyage's landed cost was allocated and posted. Consumer costing (wave 20).
     messages:
       - $ref: '#/channels/landedCost/messages/landedCostPosted'
+  publishGateCheckedIn:
+    action: send
+    channel:
+      $ref: '#/channels/gate'
+    summary: A driver and trailer checked in at the gate (replays are not published). Consumer wms (wave 31), which releases the door work.
+    messages:
+      - $ref: '#/channels/gate/messages/gateCheckedIn'
+  publishGoodsInTransitShipped:
+    action: send
+    channel:
+      $ref: '#/channels/goodsInTransit'
+    summary: A goods-in-transit order shipped at the transfer event and ownership of its receipt lines moved to the in-transit warehouse (TMS-0121). A repeated ship is not published. Consumers inventory and costing (wave 20).
+    messages:
+      - $ref: '#/channels/goodsInTransit/messages/goodsInTransitShipped'
 components:
   messages:
     FreightBillMatched:
@@ -249,6 +275,82 @@ components:
                   properties:
                     line: { type: integer }
                     amount: { type: string }
+    GateCheckedIn:
+      name: dev.passage.tms.gate.checkedin.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [type, source, id, specversion, tenantid, data]
+        properties:
+          specversion: { type: string, const: '1.0' }
+          type: { type: string, const: dev.passage.tms.gate.checkedin.v1 }
+          source: { type: string, const: /passage/tms/transport }
+          id: { type: string }
+          tenantid: { type: string, format: uuid }
+          subject: { type: string, description: gate visit id }
+          time: { type: string, format: date-time }
+          datacontenttype: { type: string, const: application/json }
+          data:
+            type: object
+            required: [visitId, siteId, direction, carrierScac, trailerNo, arrivalDeltaMin, checkedInAt]
+            properties:
+              visitId: { type: string, format: uuid }
+              siteId: { type: string, format: uuid }
+              direction: { type: string, enum: [INBOUND, OUTBOUND] }
+              loadId: { type: string, format: uuid }
+              carrierScac: { type: string }
+              trailerNo: { type: string }
+              appointmentId: { type: string, format: uuid, description: Absent for a walk-in }
+              arrivalStatus: { type: string, enum: [ON_TIME, EARLY, LATE], description: Absent for a walk-in (BR-34.14) }
+              arrivalDeltaMin: { type: integer, description: Minutes after (positive) or before (negative) the appointment; 0 for a walk-in }
+              checkedInAt: { type: string, format: date-time }
+    GoodsInTransitShipped:
+      name: dev.passage.tms.goodsintransit.shipped.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [type, source, id, specversion, tenantid, data]
+        properties:
+          specversion: { type: string, const: '1.0' }
+          type: { type: string, const: dev.passage.tms.goodsintransit.shipped.v1 }
+          source: { type: string, const: /passage/tms/transport }
+          id: { type: string }
+          tenantid: { type: string, format: uuid }
+          subject: { type: string, description: goods-in-transit order id }
+          time: { type: string, format: date-time }
+          datacontenttype: { type: string, const: application/json }
+          data:
+            type: object
+            required: [orderId, voyageId, siteId, incoterm, transferEvent, inTransitWarehouse, currency, shippedAt, goodsValue, estimatedTotal, lines]
+            properties:
+              orderId: { type: string, format: uuid }
+              voyageId: { type: string, format: uuid }
+              siteId: { type: string, format: uuid }
+              incoterm: { type: string, enum: [EXW, FCA, FAS, FOB, CFR, CIF, CPT, CIP] }
+              transferEvent: { type: string, const: ORIGIN_SHIPMENT }
+              inTransitWarehouse: { type: string, description: 'TRANSIT-{site} by default (in_transit_warehouse)' }
+              currency: { type: string }
+              shippedAt: { type: string, format: date-time }
+              goodsValue: { type: string, description: Sum of lines.value }
+              estimatedTotal: { type: string, description: Estimated landed cost; equals the sum of lines.estimated to the cent }
+              lines:
+                type: array
+                items:
+                  type: object
+                  required: [line, value, quantity, estimated, costs]
+                  properties:
+                    line: { type: integer, description: Voyage receipt line }
+                    value: { type: string }
+                    quantity: { type: string }
+                    estimated: { type: string, description: Sum of costs.amount }
+                    costs:
+                      type: array
+                      items:
+                        type: object
+                        required: [costType, amount]
+                        properties:
+                          costType: { type: string }
+                          amount: { type: string }
   schemas:
     TenderOutcome:
       type: object

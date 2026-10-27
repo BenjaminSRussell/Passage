@@ -100,6 +100,7 @@ export function stateTone(status: string): BadgeTone {
     case "PENDING":
     case "ARRIVED":
     case "PICKED_UP":
+    case "IN_TRANSIT":
       return "info";
     case "DECLINED":
     case "EXPIRED":
@@ -130,6 +131,32 @@ export function checkTone(result: string): BadgeTone {
     default:
       return "neutral";
   }
+}
+
+/** Badge tone for a gate visit status, arrival classification or gate log row. */
+export function gateTone(status: string): BadgeTone {
+  switch (status) {
+    case "ON_TIME":
+    case "CHECK_OUT":
+      return "success";
+    case "IN_YARD":
+    case "CHECK_IN":
+    case "SEALED":
+      return "info";
+    case "EARLY":
+    case "LATE":
+      return "warning";
+    case "CHECK_OUT_BLOCKED":
+      return "danger";
+    default:
+      return "neutral";
+  }
+}
+
+/** "95 min late", "61 min early", "10 min after" for an arrival against its appointment. */
+export function arrivalText(status: string, deltaMin: number): string {
+  if (status === "ON_TIME") return deltaMin === 0 ? "On the minute" : `${Math.abs(deltaMin)} min ${deltaMin < 0 ? "before" : "after"}`;
+  return `${Math.abs(deltaMin)} min ${status === "EARLY" ? "early" : "late"}`;
 }
 
 const labels: Record<string, string> = {
@@ -176,6 +203,18 @@ const labels: Record<string, string> = {
   CONSIGNEE: "Consignee",
   FORWARDER: "Forwarder",
   CARRIER: "Carrier",
+  IN_YARD: "In yard",
+  CHECKED_OUT: "Checked out",
+  INBOUND: "Inbound",
+  OUTBOUND: "Outbound",
+  ON_TIME: "On time",
+  EARLY: "Early",
+  LATE: "Late",
+  WALK_IN: "Walk-in",
+  CHECK_IN: "Checked in",
+  SEALED: "Sealed",
+  CHECK_OUT: "Checked out",
+  CHECK_OUT_BLOCKED: "Check-out blocked",
 };
 
 /** EDI 214 status codes the service accepts (FR-34.6). */

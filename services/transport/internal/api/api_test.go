@@ -67,6 +67,21 @@ type fakeStore struct {
 	decision   fakeDecision
 	decideErr  error
 	decisions  []domain.Decision
+
+	// Slice 4: gate visits and goods in transit (gate_test.go).
+	checkedIn    domain.GateVisit
+	checkInIdem  store.Idem
+	gateErr      error
+	visit        domain.GateVisit
+	gateLog      []domain.GateLogEntry
+	checkOutCall fakeCheckOut
+	sealed       string
+	visitFilter  store.GateVisitFilter
+	git          domain.GoodsInTransit
+	gitErr       error
+	gitCall      fakeGITCreate
+	gitFilter    store.GoodsInTransitFilter
+	shippedAt    time.Time
 }
 
 func (f *fakeStore) CreateRateCard(_ context.Context, in domain.RateCard, idem store.Idem) (domain.RateCard, error) {

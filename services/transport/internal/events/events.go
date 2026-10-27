@@ -100,3 +100,61 @@ type FreightBillApprovedPayload struct {
 	ApprovedBy       string `json:"approvedBy"`
 	ApprovedAt       string `json:"approvedAt"`
 }
+
+// GateCheckedIn is published when a driver and trailer check in at the gate
+// (FR-34.14); wms releases the door work from it. The subject is the visit id.
+// It carries no driver PII.
+const GateCheckedIn = "dev.passage.tms.gate.checkedin.v1"
+
+// GateCheckedInPayload is the data of GateCheckedIn. ArrivalStatus is empty for
+// a walk-in.
+type GateCheckedInPayload struct {
+	VisitID       string `json:"visitId"`
+	SiteID        string `json:"siteId"`
+	Direction     string `json:"direction"`
+	LoadID        string `json:"loadId,omitempty"`
+	CarrierSCAC   string `json:"carrierScac"`
+	TrailerNo     string `json:"trailerNo"`
+	AppointmentID string `json:"appointmentId,omitempty"`
+	ArrivalStatus string `json:"arrivalStatus,omitempty"`
+	ArrivalDelta  int    `json:"arrivalDeltaMin"`
+	CheckedInAt   string `json:"checkedInAt"`
+}
+
+// GoodsInTransitShipped is published when a goods-in-transit order ships at the
+// Incoterm transfer event and ownership of its receipt lines moves to the
+// in-transit warehouse (BR-34.11). Consumers: inventory and costing (wave 20),
+// which carry the goods value and the estimated landed cost on the in-transit
+// account. The subject is the order id.
+const GoodsInTransitShipped = "dev.passage.tms.goodsintransit.shipped.v1"
+
+// GITCostPayload is one cost type's estimate on a receipt line.
+type GITCostPayload struct {
+	CostType string `json:"costType"`
+	Amount   string `json:"amount"`
+}
+
+// GITLinePayload is one receipt line of GoodsInTransitShippedPayload.
+type GITLinePayload struct {
+	Line      int              `json:"line"`
+	Value     string           `json:"value"`
+	Quantity  string           `json:"quantity"`
+	Estimated string           `json:"estimated"`
+	Costs     []GITCostPayload `json:"costs"`
+}
+
+// GoodsInTransitShippedPayload is the data of GoodsInTransitShipped.
+// estimatedTotal equals the sum of lines[].estimated.
+type GoodsInTransitShippedPayload struct {
+	OrderID            string           `json:"orderId"`
+	VoyageID           string           `json:"voyageId"`
+	SiteID             string           `json:"siteId"`
+	Incoterm           string           `json:"incoterm"`
+	TransferEvent      string           `json:"transferEvent"`
+	InTransitWarehouse string           `json:"inTransitWarehouse"`
+	Currency           string           `json:"currency"`
+	ShippedAt          string           `json:"shippedAt"`
+	GoodsValue         string           `json:"goodsValue"`
+	EstimatedTotal     string           `json:"estimatedTotal"`
+	Lines              []GITLinePayload `json:"lines"`
+}

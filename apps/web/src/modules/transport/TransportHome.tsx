@@ -43,6 +43,16 @@ const areas = [
     to: "/transport/voyages",
     text: "Containers, folios and the freight, duty and other costs of inbound shipments, allocated to receipt lines.",
   },
+  {
+    title: "Goods in transit",
+    to: "/transport/goods-in-transit",
+    text: "Receipt lines bought under an origin Incoterm, owned from departure with their estimated landed cost until they are received.",
+  },
+  {
+    title: "Gate",
+    to: "/transport/gate",
+    text: "Check drivers in against their dock appointment, record seals, check them out with the seal verified and see detention.",
+  },
 ];
 
 /** Transportation workspace landing page (PRD 6.34.6). */
@@ -51,7 +61,7 @@ export function TransportHome() {
     <div className={styles.stack}>
       <PageHeader
         title="Transportation"
-        description="Build, rate and tender loads to carriers, track them to delivery, reconcile carrier invoices against the freight you expected to pay,, and put landed cost onto inventory. Route optimization, yard and gate come in a later release."
+        description="Build, rate and tender loads to carriers, track them to delivery, run the gate, reconcile carrier invoices against the freight you expected to pay, and put landed cost onto inventory. Route optimization and yard moves come in a later release."
       />
       <CardGrid as="ul" label="Transportation areas">
         {areas.map((area) => (

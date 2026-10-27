@@ -668,3 +668,177 @@ export function checkLoadDG(id: string, input: DGRequest): Promise<DGCheck> {
 export function screenLoad(id: string, input: { crossBorder?: boolean; parties: ScreeningParty[] }): Promise<ScreeningDecision> {
   return post<ScreeningDecision>(`/loads/${encodeURIComponent(id)}:screen`, input);
 }
+
+// ---- Gate check-in and check-out (FR-34.14, BR-34.13, BR-34.14) --------------
+
+export type VisitDirection = "INBOUND" | "OUTBOUND";
+export const VISIT_DIRECTIONS: VisitDirection[] = ["INBOUND", "OUTBOUND"];
+
+export type VisitStatus = "IN_YARD" | "CHECKED_OUT";
+export const VISIT_STATUSES: VisitStatus[] = ["IN_YARD", "CHECKED_OUT"];
+
+export type ArrivalStatus = "ON_TIME" | "EARLY" | "LATE";
+
+export type GateLogKind = "CHECK_IN" | "SEALED" | "CHECK_OUT" | "CHECK_OUT_BLOCKED";
+
+export interface NewCheckIn {
+  siteId: string;
+  direction: VisitDirection;
+  loadId?: string;
+  carrierScac: string;
+  trailerNo: string;
+  sealNo?: string;
+  driverName: string;
+  driverLicenseId: string;
+  appointmentId?: string;
+  scheduledAt?: string;
+  arrivedAt?: string;
+  freeTimeMin?: number;
+  toleranceMin?: number;
+}
+
+export interface Arrival {
+  status: ArrivalStatus;
+  deltaMin: number;
+  code?: string;
+}
+
+export interface Detention {
+  dwellMin: number;
+  detentionMin: number;
+  hours: number;
+  charge: string;
+  code?: string;
+}
+
+export interface GateVisit {
+  id: string;
+  siteId: string;
+  direction: VisitDirection;
+  loadId?: string;
+  carrierScac: string;
+  trailerNo: string;
+  sealNo?: string;
+  driverName: string;
+  driverLicenseId: string;
+  appointmentId?: string;
+  scheduledAt?: string;
+  walkIn: boolean;
+  arrival?: Arrival;
+  checkedInAt: string;
+  checkedOutAt?: string;
+  freeTimeMin: number;
+  status: VisitStatus;
+  detention?: Detention;
+  version: number;
+}
+
+export interface GateLogEntry {
+  id: string;
+  visitId: string;
+  kind: GateLogKind;
+  occurredAt: string;
+  recordedBy: string;
+  detail: Record<string, string>;
+}
+
+export interface GateVisitDetail extends GateVisit {
+  log: GateLogEntry[];
+}
+
+export interface CheckOut {
+  visitId: string;
+  sealNo: string;
+  checkOutAt?: string;
+  hourlyRate?: string;
+}
+
+export interface GateVisitFilter {
+  siteId?: string;
+  status?: VisitStatus | "";
+  carrierScac?: string;
+  date?: string;
+}
+
+/** Checks a driver and trailer in; reuse one key per form so a retried submit cannot open two visits. */
+export function checkIn(input: NewCheckIn, key: string = newKey()): Promise<GateVisit> {
+  return post<GateVisit>("/gate/check-in", input, key);
+}
+
+/** Checks a visit out; a seal that does not match is TMS-0129 and stays in the gate log (AC-34.12). */
+export function checkOut(input: CheckOut, key: string = newKey()): Promise<GateVisit> {
+  return post<GateVisit>("/gate/check-out", input, key);
+}
+
+/** Records the seal applied at load confirmation. */
+export function recordSeal(id: string, sealNo: string): Promise<GateVisit> {
+  return post<GateVisit>(`/gate/visits/${encodeURIComponent(id)}:seal`, { sealNo });
+}
+
+export function listGateVisits(filter: GateVisitFilter = {}, signal?: AbortSignal): Promise<GateVisit[]> {
+  return items<GateVisit>(`/gate/visits${query({ ...filter })}`, signal);
+}
+
+export function getGateVisit(id: string, signal?: AbortSignal): Promise<GateVisitDetail> {
+  return send<GateVisitDetail>(`/gate/visits/${encodeURIComponent(id)}`, {}, signal);
+}
+
+// ---- Goods in transit (FR-34.12, BR-34.11) -----------------------------------
+
+export type GITStatus = "PENDING" | "IN_TRANSIT";
+export const GIT_STATUSES: GITStatus[] = ["PENDING", "IN_TRANSIT"];
+
+/** Incoterms 2020 rules that move ownership at origin and so open a goods-in-transit order (BR-34.11). */
+export const ORIGIN_INCOTERMS = ["EXW", "FCA", "FAS", "FOB", "CFR", "CIF", "CPT", "CIP"] as const;
+
+export interface NewGoodsInTransit {
+  voyageId: string;
+  incoterm: string;
+  siteId: string;
+  receiptLines?: number[];
+}
+
+export interface GITLine {
+  line: number;
+  value: string;
+  quantity: string;
+  costs: { costType: string; amount: string }[];
+  estimated: string;
+}
+
+export interface GoodsInTransit {
+  id: string;
+  voyageId: string;
+  voyageReference: string;
+  siteId: string;
+  incoterm: string;
+  transferEvent: string;
+  inTransitWarehouse: string;
+  currency: string;
+  status: GITStatus;
+  lines: GITLine[];
+  goodsValue: string;
+  estimatedTotal: string;
+  version: number;
+  createdAt: string;
+  shippedAt?: string;
+  code?: string;
+}
+
+/** Opens a goods-in-transit order; reuse one key per form so a retried submit cannot open two. */
+export function createGoodsInTransit(input: NewGoodsInTransit, key: string = newKey()): Promise<GoodsInTransit> {
+  return post<GoodsInTransit>("/goods-in-transit", input, key);
+}
+
+export function listGoodsInTransit(filter: { voyageId?: string; status?: GITStatus | "" } = {}, signal?: AbortSignal): Promise<GoodsInTransit[]> {
+  return items<GoodsInTransit>(`/goods-in-transit${query(filter)}`, signal);
+}
+
+export function getGoodsInTransit(id: string, signal?: AbortSignal): Promise<GoodsInTransit> {
+  return send<GoodsInTransit>(`/goods-in-transit/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** Ships the order at the transfer event (TMS-0121); a shipped order comes back unchanged. */
+export function shipGoodsInTransit(id: string, shippedAt?: string): Promise<GoodsInTransit> {
+  return post<GoodsInTransit>(`/goods-in-transit/${encodeURIComponent(id)}:ship`, shippedAt ? { shippedAt } : {});
+}

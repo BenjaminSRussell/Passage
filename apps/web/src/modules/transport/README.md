@@ -25,7 +25,13 @@ Screens for the transport service (`services/transport`), through the web BFF at
 | `/transport/tracking/:loadId` | Stop states (inferred pickups flagged, BR-34.9) and the event timeline | TMS_VIEW |
 | `/transport/voyages` | Landed cost voyages, filter by status | TMS_LANDED_COST |
 | `/transport/voyages/new` | Voyage form: legs, containers (TMS-0124 check digit), folios, cost lines, receipt lines | TMS_LANDED_COST |
-| `/transport/voyages/:id` | Voyage detail; "Allocate and post" shows each receipt line's share per cost line | TMS_LANDED_COST |
+| `/transport/voyages/:id` | Voyage detail; "Allocate and post" shows each receipt line's share per cost line; links to its goods in transit | TMS_LANDED_COST |
+| `/transport/goods-in-transit` | Goods-in-transit orders with goods value and estimated landed cost; status filter, `?voyageId=` for one voyage | TMS_LANDED_COST |
+| `/transport/goods-in-transit/new` | Open an order: voyage (prefilled from `?voyageId=`), origin Incoterm, destination site, receipt lines (empty for all); TMS-0119 and TMS-0120 shown | TMS_LANDED_COST |
+| `/transport/goods-in-transit/:id` | Order detail with each line's estimate per cost type; "Ship" with the departure time moves ownership (TMS-0121) | TMS_LANDED_COST |
+| `/transport/gate` | Gate log: trucks in the yard by default; filter by status, site, check-in day and carrier; arrival and detention per visit | TMS_GATE |
+| `/transport/gate/check-in` | Check-in form: direction, carrier, trailer, seal, load, driver, appointment and time (or walk-in), paper-fallback arrival time, on-time window and free time | TMS_GATE |
+| `/transport/gate/:id` | Visit detail: arrival (TMS-0127), seal at load confirmation, check-out with the declared seal and detention rate (TMS-0129 blocks and the attempt appears in the log, TMS-0126 detention), gate log | TMS_GATE |
 
 Amounts stay decimal strings (`format.ts` rounds and sums on the digits). Create forms keep one
 `Idempotency-Key` per form until a field changes. Tests: `npx vitest --run src/modules/transport`.

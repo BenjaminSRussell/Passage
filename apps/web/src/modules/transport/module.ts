@@ -2,13 +2,19 @@ import { createElement } from "react";
 import type { PassageModule } from "../registry";
 import { BuildLoadsPage } from "./BuildLoadsPage";
 import { CarrierInvoicesPage } from "./CarrierInvoicesPage";
+import { CheckInPage } from "./CheckInPage";
 import { FreightBillDetailPage } from "./FreightBillDetailPage";
 import { FreightBillsPage } from "./FreightBillsPage";
+import { GatePage } from "./GatePage";
+import { GateVisitDetailPage } from "./GateVisitDetailPage";
+import { GoodsInTransitDetailPage } from "./GoodsInTransitDetailPage";
+import { GoodsInTransitPage } from "./GoodsInTransitPage";
 import { LoadDetailPage } from "./LoadDetailPage";
 import { LoadsPage } from "./LoadsPage";
 import { LoadTrackingPage } from "./LoadTrackingPage";
 import { NewCarrierInvoicePage } from "./NewCarrierInvoicePage";
 import { NewFreightBillPage } from "./NewFreightBillPage";
+import { NewGoodsInTransitPage } from "./NewGoodsInTransitPage";
 import { NewRateCardPage } from "./NewRateCardPage";
 import { NewTenderPage } from "./NewTenderPage";
 import { NewTrackingEventPage } from "./NewTrackingEventPage";
@@ -25,7 +31,8 @@ import { VoyagesPage } from "./VoyagesPage";
 const transport: PassageModule = {
   id: "transport",
   title: "Transportation",
-  description: "Build loads, check dangerous goods and screen parties, rate shop and tender loads to carriers, track shipments, reconcile carrier invoices and allocate landed cost.",
+  description:
+    "Build loads, check dangerous goods and screen parties, rate shop and tender loads to carriers, track shipments, check drivers in and out at the gate, reconcile carrier invoices, allocate landed cost and move goods in transit.",
   routes: [
     { path: "/transport", element: createElement(TransportHome), handle: { title: "Transportation" } },
     { path: "/transport/loads", element: createElement(LoadsPage), handle: { title: "Loads" } },
@@ -48,6 +55,12 @@ const transport: PassageModule = {
     { path: "/transport/voyages", element: createElement(VoyagesPage), handle: { title: "Landed cost voyages" } },
     { path: "/transport/voyages/new", element: createElement(NewVoyagePage), handle: { title: "New voyage" } },
     { path: "/transport/voyages/:id", element: createElement(VoyageDetailPage), handle: { title: "Voyage" } },
+    { path: "/transport/goods-in-transit", element: createElement(GoodsInTransitPage), handle: { title: "Goods in transit" } },
+    { path: "/transport/goods-in-transit/new", element: createElement(NewGoodsInTransitPage), handle: { title: "New goods-in-transit order" } },
+    { path: "/transport/goods-in-transit/:id", element: createElement(GoodsInTransitDetailPage), handle: { title: "Goods in transit" } },
+    { path: "/transport/gate", element: createElement(GatePage), handle: { title: "Gate" } },
+    { path: "/transport/gate/check-in", element: createElement(CheckInPage), handle: { title: "Check in" } },
+    { path: "/transport/gate/:id", element: createElement(GateVisitDetailPage), handle: { title: "Gate visit" } },
   ],
   nav: [
     { label: "Transportation", to: "/transport", duty: "TMS_VIEW" },
@@ -59,6 +72,8 @@ const transport: PassageModule = {
     { label: "Tenders", to: "/transport/tenders", duty: "TMS_TENDER" },
     { label: "Tracking", to: "/transport/tracking", duty: "TMS_VIEW" },
     { label: "Landed cost voyages", to: "/transport/voyages", duty: "TMS_LANDED_COST" },
+    { label: "Goods in transit", to: "/transport/goods-in-transit", duty: "TMS_LANDED_COST" },
+    { label: "Gate", to: "/transport/gate", duty: "TMS_GATE" },
   ],
 };
 

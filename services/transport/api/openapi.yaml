@@ -1,12 +1,13 @@
 openapi: 3.1.0
 info:
   title: Passage Transport (TMS) API
-  version: 0.3.0
+  version: 0.4.0
   description: |
-    Wave 34 slices 1 to 3: rate cards, rate shopping, freight bills with their
+    Wave 34 slices 1 to 4: rate cards, rate shopping, freight bills with their
     approval and dispute, carrier invoices, tenders, tracking events, landed-cost
-    voyages, rule-based load building, dangerous-goods checks and
-    trade-compliance screening. Errors are RFC 9457 problem details (application/problem+json)
+    voyages and goods-in-transit orders, rule-based load building, dangerous-goods
+    checks, trade-compliance screening, and driver check-in and check-out with
+    the gate log. Errors are RFC 9457 problem details (application/problem+json)
     with a stable `code`; see README.md for the error code list. Browsers call
     /api/v1/transport/..., which the web BFF rewrites to these /v1/transport/...
     paths. Amounts are decimal strings, never floats. Identifiers are lower-case
@@ -762,8 +763,281 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+  /v1/transport/goods-in-transit:
+    post:
+      operationId: createGoodsInTransit
+      summary: Open a goods-in-transit order for receipt lines of a voyage (FR-34.12, BR-34.11)
+      description: |
+        Only the origin Incoterms 2020 rules (EXW, FCA, FAS, FOB, CFR, CIF, CPT,
+        CIP) open an order; DAP, DPU and DDP transfer at destination receipt and
+        are 422 TMS-0120. The voyage must be ESTIMATED (409 TMS-0119). An empty
+        `receiptLines` takes every line of the voyage; a line that is not on
+        the voyage is 422 TMS-0119 with `errors.receiptLines`, and a line
+        already on another order is 409 TMS-0119. Each line carries its share
+        of every voyage cost line as allocated under BR-34.6.
+      x-passage-duty: TMS_LANDED_COST
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GoodsInTransitRequest' }
+      responses:
+        '201':
+          description: Created PENDING (or the replayed order for a repeated Idempotency-Key)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GoodsInTransit' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listGoodsInTransit
+      summary: List goods-in-transit orders, newest first (at most 500)
+      x-passage-duty: TMS_LANDED_COST
+      parameters:
+        - name: voyageId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: status
+          in: query
+          schema: { type: string, enum: [PENDING, IN_TRANSIT] }
+      responses:
+        '200':
+          description: Goods-in-transit orders
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/GoodsInTransit' } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/transport/goods-in-transit/{id}:
+    get:
+      operationId: getGoodsInTransit
+      summary: Get a goods-in-transit order
+      x-passage-duty: TMS_LANDED_COST
+      parameters:
+        - $ref: '#/components/parameters/GoodsInTransitId'
+      responses:
+        '200':
+          description: Goods-in-transit order
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GoodsInTransit' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/transport/goods-in-transit/{id}:ship:
+    post:
+      operationId: shipGoodsInTransit
+      summary: Post goods in transit at the transfer event (BR-34.11, TMS-0121)
+      description: |
+        Moves a PENDING order to IN_TRANSIT: ownership of its receipt lines
+        moves to the in-transit warehouse and
+        dev.passage.tms.goodsintransit.shipped.v1 is published with the goods
+        value and the estimated landed cost. `shippedAt` is the departure the
+        forwarder reported (default now; not in the future). An order already
+        IN_TRANSIT is returned unchanged with 200 and nothing is published, so
+        a retry is safe.
+      x-passage-duty: TMS_LANDED_COST
+      parameters:
+        - $ref: '#/components/parameters/GoodsInTransitId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                shippedAt: { type: string, format: date-time }
+      responses:
+        '200':
+          description: The shipped order
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GoodsInTransit' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/transport/gate/check-in:
+    post:
+      operationId: gateCheckIn
+      summary: Check a driver and trailer in at the gate (FR-34.14, BR-34.14)
+      description: |
+        `appointmentId` and `scheduledAt` come together from the dock
+        appointment; the arrival is ON_TIME within `toleranceMin` (default 60)
+        either side, otherwise EARLY or LATE with TMS-0127. Without an
+        appointment the visit is a walk-in (walk_in_allowed defaults to true;
+        TMS-0128 when a site refuses walk-ins). `arrivedAt` defaults to now
+        and may be earlier for a paper fallback entered later. A trailer
+        already in the site's yard is 409 TMS-0118. Writes the CHECK_IN row of
+        the gate log and publishes dev.passage.tms.gate.checkedin.v1.
+      x-passage-duty: TMS_GATE
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GateCheckInRequest' }
+      responses:
+        '201':
+          description: The visit, IN_YARD (or the replayed visit for a repeated Idempotency-Key)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GateVisit' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /v1/transport/gate/check-out:
+    post:
+      operationId: gateCheckOut
+      summary: Check a visit out with seal verification and detention (BR-34.13, BR-34.14)
+      description: |
+        When a seal is recorded on the visit (at check-in or load
+        confirmation) the declared `sealNo` must equal it; an OUTBOUND visit
+        with no recorded seal has no confirmed load. Both are 422 TMS-0129 and
+        the attempt is kept in the gate log as CHECK_OUT_BLOCKED (AC-34.12).
+        Detention = ceil((dwell − free time) ÷ 60) × `hourlyRate`
+        (TMS-0126 when it accrues, AC-34.11). A visit already checked out is
+        409 TMS-0118, unless the request repeats the check-out's
+        Idempotency-Key and body, which returns the visit.
+      x-passage-duty: TMS_GATE
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [visitId]
+              properties:
+                visitId: { type: string, format: uuid }
+                sealNo: { type: string, maxLength: 20, description: Seal the driver declares }
+                checkOutAt: { type: string, format: date-time, description: Default now; not before check-in or in the future }
+                hourlyRate: { type: string, description: The carrier's hourly detention rate; default 0 }
+      responses:
+        '200':
+          description: The visit, CHECKED_OUT, with its detention
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GateVisit' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /v1/transport/gate/visits:
+    get:
+      operationId: listGateVisits
+      summary: Gate log, newest check-in first (at most 500)
+      x-passage-duty: TMS_GATE
+      parameters:
+        - name: siteId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: status
+          in: query
+          schema: { type: string, enum: [IN_YARD, CHECKED_OUT] }
+        - name: carrierScac
+          in: query
+          schema: { type: string }
+        - name: date
+          in: query
+          description: UTC check-in day
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: Gate visits
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/GateVisit' } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/transport/gate/visits/{id}:
+    get:
+      operationId: getGateVisit
+      summary: A gate visit with its append-only gate log
+      x-passage-duty: TMS_GATE
+      parameters:
+        - $ref: '#/components/parameters/VisitId'
+      responses:
+        '200':
+          description: Visit and gate log in the order written
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/GateVisit'
+                  - type: object
+                    required: [log]
+                    properties:
+                      log: { type: array, items: { $ref: '#/components/schemas/GateLogEntry' } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/transport/gate/visits/{id}:seal:
+    post:
+      operationId: recordGateSeal
+      summary: Record the seal applied at load confirmation (BR-34.14)
+      description: |
+        Allowed while the visit is IN_YARD (409 TMS-0118 after check-out). A
+        later seal replaces an earlier one; the gate log keeps each as SEALED.
+      x-passage-duty: TMS_GATE
+      parameters:
+        - $ref: '#/components/parameters/VisitId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sealNo]
+              properties:
+                sealNo: { type: string, minLength: 1, maxLength: 20 }
+      responses:
+        '200':
+          description: The visit with its recorded seal
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GateVisit' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
 components:
   parameters:
+    GoodsInTransitId:
+      name: id
+      in: path
+      required: true
+      description: Goods-in-transit order id
+      schema: { type: string, format: uuid }
+    VisitId:
+      name: id
+      in: path
+      required: true
+      description: Gate visit id
+      schema: { type: string, format: uuid }
     BillId:
       name: id
       in: path
@@ -1340,3 +1614,112 @@ components:
         receiptLines: { type: integer }
         createdAt: { type: string, format: date-time }
         postedAt: { type: string, format: date-time }
+    GoodsInTransitRequest:
+      type: object
+      required: [voyageId, incoterm, siteId]
+      properties:
+        voyageId: { type: string, format: uuid }
+        incoterm: { type: string, description: Incoterms 2020 rule; only EXW, FCA, FAS, FOB, CFR, CIF, CPT and CIP open an order }
+        siteId: { type: string, format: uuid, description: 'Destination site; the in-transit warehouse is TRANSIT-{site}' }
+        receiptLines: { type: array, items: { type: integer, minimum: 1 }, maxItems: 3000, description: Voyage receipt lines, each once; empty means every line }
+    GoodsInTransit:
+      type: object
+      required: [id, voyageId, voyageReference, siteId, incoterm, transferEvent, inTransitWarehouse, currency, status, lines, goodsValue, estimatedTotal, version, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        voyageId: { type: string, format: uuid }
+        voyageReference: { type: string }
+        siteId: { type: string, format: uuid }
+        incoterm: { type: string }
+        transferEvent: { type: string, const: ORIGIN_SHIPMENT }
+        inTransitWarehouse: { type: string }
+        currency: { type: string }
+        status: { type: string, enum: [PENDING, IN_TRANSIT] }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [line, value, quantity, costs, estimated]
+            properties:
+              line: { type: integer }
+              value: { type: string }
+              quantity: { type: string }
+              costs:
+                type: array
+                items:
+                  type: object
+                  required: [costType, amount]
+                  properties:
+                    costType: { type: string }
+                    amount: { type: string }
+              estimated: { type: string, description: Sum of costs.amount }
+        goodsValue: { type: string }
+        estimatedTotal: { type: string, description: Sum of lines.estimated }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+        shippedAt: { type: string, format: date-time }
+        code: { type: string, description: TMS-0121 once ownership has moved }
+    GateCheckInRequest:
+      type: object
+      required: [siteId, direction, carrierScac, trailerNo, driverName, driverLicenseId]
+      properties:
+        siteId: { type: string, format: uuid }
+        direction: { type: string, enum: [INBOUND, OUTBOUND] }
+        loadId: { type: string, format: uuid }
+        carrierScac: { type: string, pattern: '^[A-Za-z]{2,4}$' }
+        trailerNo: { type: string, minLength: 1, maxLength: 20, description: Trailer or container number }
+        sealNo: { type: string, maxLength: 20, description: Seal of an inbound sealed trailer }
+        driverName: { type: string, minLength: 1, maxLength: 100, description: Personal data; pseudonymized after gate_pii_retention_days }
+        driverLicenseId: { type: string, minLength: 1, maxLength: 32, description: Personal data; pseudonymized after gate_pii_retention_days }
+        appointmentId: { type: string, format: uuid }
+        scheduledAt: { type: string, format: date-time, description: Appointment time; required with appointmentId }
+        arrivedAt: { type: string, format: date-time, description: Default now; not in the future }
+        freeTimeMin: { type: integer, minimum: 0, maximum: 1440, description: 'Carrier detention free time, default 120' }
+        toleranceMin: { type: integer, minimum: 0, maximum: 480, description: 'Site gate tolerance, default 60' }
+    GateVisit:
+      type: object
+      required: [id, siteId, direction, carrierScac, trailerNo, driverName, driverLicenseId, walkIn, checkedInAt, freeTimeMin, status, version]
+      properties:
+        id: { type: string, format: uuid }
+        siteId: { type: string, format: uuid }
+        direction: { type: string, enum: [INBOUND, OUTBOUND] }
+        loadId: { type: string, format: uuid }
+        carrierScac: { type: string }
+        trailerNo: { type: string }
+        sealNo: { type: string, description: Recorded seal }
+        driverName: { type: string }
+        driverLicenseId: { type: string }
+        appointmentId: { type: string, format: uuid }
+        scheduledAt: { type: string, format: date-time }
+        walkIn: { type: boolean }
+        arrival:
+          type: object
+          required: [status, deltaMin]
+          properties:
+            status: { type: string, enum: [ON_TIME, EARLY, LATE] }
+            deltaMin: { type: integer }
+            code: { type: string, description: TMS-0127 when EARLY or LATE }
+        checkedInAt: { type: string, format: date-time }
+        checkedOutAt: { type: string, format: date-time }
+        freeTimeMin: { type: integer }
+        status: { type: string, enum: [IN_YARD, CHECKED_OUT] }
+        detention:
+          type: object
+          required: [dwellMin, detentionMin, hours, charge]
+          properties:
+            dwellMin: { type: integer }
+            detentionMin: { type: integer }
+            hours: { type: integer, description: Detention minutes rounded up to whole hours }
+            charge: { type: string, description: hours × hourlyRate, to the cent }
+            code: { type: string, description: TMS-0126 when detention accrued }
+        version: { type: integer }
+    GateLogEntry:
+      type: object
+      required: [id, visitId, kind, occurredAt, recordedBy, detail]
+      properties:
+        id: { type: string, format: uuid }
+        visitId: { type: string, format: uuid }
+        kind: { type: string, enum: [CHECK_IN, SEALED, CHECK_OUT, CHECK_OUT_BLOCKED] }
+        occurredAt: { type: string, format: date-time }
+        recordedBy: { type: string }
+        detail: { type: object, additionalProperties: { type: string }, description: No driver PII }

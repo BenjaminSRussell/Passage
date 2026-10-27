@@ -22,8 +22,7 @@ const (
 	DefaultDetentionFreeTimeMin = 120
 )
 
-// Gate and yard codes (§6.34.18). The check-in and check-out endpoints that
-// raise them come with the gate log; these rules are the pure part.
+// Gate and yard codes (§6.34.18), raised by the gate check-in and check-out.
 const (
 	CodeArrivalOutsideWindow = "TMS-0127"
 	CodeNoAppointment        = "TMS-0128"
@@ -77,12 +76,14 @@ func CheckWalkIn(hasAppointment, walkInAllowed bool) error {
 	return &Error{Code: CodeNoAppointment, Detail: "no appointment found and walk-ins are not allowed at this site"}
 }
 
-// Detention is the dwell beyond free time and the charge built from it (BR-34.13).
+// Detention is the dwell beyond free time and the charge built from it
+// (BR-34.13). Code is TMS-0126 when detention accrued.
 type Detention struct {
 	DwellMin     int             `json:"dwellMin"`
 	DetentionMin int             `json:"detentionMin"`
 	Hours        int             `json:"hours"`
 	Charge       decimal.Decimal `json:"charge"`
+	Code         string          `json:"code,omitempty"`
 }
 
 // ComputeDetention returns dwell = checkOut − checkIn, detention = max(0, dwell −
@@ -93,6 +94,7 @@ func ComputeDetention(checkIn, checkOut time.Time, freeTimeMin int, hourlyRate d
 	if extra := dwell - freeTimeMin; extra > 0 {
 		d.DetentionMin = extra
 		d.Hours = (extra + 59) / 60
+		d.Code = CodeDetention
 	}
 	d.Charge = hourlyRate.Mul(decimal.NewFromInt(int64(d.Hours))).Round(2)
 	return d
