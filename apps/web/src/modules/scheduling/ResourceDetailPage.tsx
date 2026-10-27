@@ -1,6 +1,7 @@
 import { Link, useParams } from "react-router-dom";
 import { Alert, Badge, Button, buttonClassName, Card, DataTable, PageHeader, Skeleton } from "../../shell/ui";
-import { getResource, getResourceCapacity, type Interval, type Resource } from "./api/client";
+import { getBlockUtilization, getResource, getResourceCapacity, type BlockWindow, type Interval, type Resource } from "./api/client";
+import { describeCondition } from "./CapacityBlocksPage";
 import { clock, dayStart, formatDateTime, formatMinutes, today, WEEK_ORDER, WEEKDAYS } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
@@ -12,7 +13,59 @@ interface Detail {
 
 const CAPACITY_DAYS = 7;
 
-/** A resource, its weekly calendar and its open capacity for the next week (FR-23.1). */
+/**
+ * The capacity blocks of a resource over the next week with what each window
+ * holds and how much of it matching jobs use (FR-23.17, PRD 4.23.14 Block
+ * utilization). It loads on its own so a failure here leaves the rest of the
+ * page usable.
+ */
+export function BlockUtilizationCard({ resourceId, from, to }: { resourceId: string; from: string; to: string }) {
+  const state = useLoad<BlockWindow[]>((signal) => getBlockUtilization(resourceId, from, to, signal), `${resourceId}|${from}|${to}`);
+  const rows = state.data ?? [];
+  const held = rows.reduce((sum, w) => sum + w.blockMinutes, 0);
+  const matched = rows.reduce((sum, w) => sum + w.matchedMinutes, 0);
+  return (
+    <Card
+      title="Capacity blocks, next 7 days"
+      actions={
+        <Link className={buttonClassName("secondary")} to="/scheduling/capacity-blocks/new">
+          New block
+        </Link>
+      }
+    >
+      {state.error ? (
+        <Alert tone="danger" title="Could not load the block windows" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
+          {state.error.message} ({state.error.code})
+        </Alert>
+      ) : (
+        <div className={styles.stack}>
+          {rows.length > 0 && <p className={styles.note}>{`Blocks hold ${formatMinutes(held)} of open time; matching jobs use ${formatMinutes(matched)}.`}</p>}
+          <DataTable
+            label="Block windows"
+            columns={[
+              { key: "code", header: "Block", mono: true },
+              { key: "start", header: "From", render: (w: BlockWindow) => formatDateTime(w.start) },
+              { key: "end", header: "To", render: (w: BlockWindow) => formatDateTime(w.end) },
+              { key: "condition", header: "Condition", mono: true, render: (w: BlockWindow) => describeCondition(w.condition) },
+              { key: "blockMinutes", header: "Held min", align: "end" },
+              { key: "matchedMinutes", header: "Used min", align: "end" },
+              { key: "unusedMinutes", header: "Unused min", align: "end" },
+            ]}
+            rows={rows}
+            getRowKey={(w) => `${w.blockId}|${w.start}`}
+            loading={state.loading}
+            empty={{
+              title: "No block windows in the next 7 days",
+              description: "Every job may use this resource's open capacity. Add a capacity block to reserve time for matching jobs.",
+            }}
+          />
+        </div>
+      )}
+    </Card>
+  );
+}
+
+/** A resource, its weekly calendar, its open capacity and its block windows for the next week (FR-23.1, FR-23.17). */
 export function ResourceDetailPage() {
   const { id = "" } = useParams();
   const from = dayStart(today());
@@ -89,6 +142,7 @@ export function ResourceDetailPage() {
           />
         </div>
       </Card>
+      <BlockUtilizationCard resourceId={resource.id} from={from} to={to} />
     </div>
   );
 }

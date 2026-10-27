@@ -587,6 +587,42 @@ paths:
                     type: array
                     items: { $ref: '#/components/schemas/CapacityBlock' }
         '400': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/resources/{id}/block-utilization:
+    get:
+      operationId: getBlockUtilization
+      summary: Capacity block windows of a resource in a window of at most 62 days, with held, matched and unused minutes (FR-23.17, PRD 4.23.14 Block utilization)
+      description: >
+        Every window of the resource's active capacity blocks that overlaps [from, to), expanded in the
+        resource's time zone (weekly windows, recurrences or the dated window) and clipped to the range.
+        blockMinutes counts the open calendar minutes the window holds once higher-priority blocks have
+        taken theirs (BR-23.15); matchedMinutes counts the finite booked minutes of jobs whose attributes
+        match the block condition inside them; unusedMinutes is the difference. Sorted by start, then
+        priority (highest first).
+      x-passage-duty: scheduling.read
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: Block windows clipped to the range
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/BlockWindow' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
   /v1/scheduling/campaigns:
     post:
       operationId: createCampaign
@@ -1185,6 +1221,21 @@ components:
             id: { type: string, format: uuid }
             version: { type: integer }
             createdAt: { type: string, format: date-time }
+    BlockWindow:
+      type: object
+      required: [blockId, code, priority, condition, start, end, blockMinutes, matchedMinutes, unusedMinutes]
+      properties:
+        blockId: { type: string, format: uuid }
+        code: { type: string }
+        priority: { type: integer }
+        condition:
+          type: array
+          items: { $ref: '#/components/schemas/Predicate' }
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+        blockMinutes: { type: integer, minimum: 0, description: Open calendar minutes the window holds after higher-priority blocks }
+        matchedMinutes: { type: integer, minimum: 0, description: Finite booked minutes of matching jobs in those minutes }
+        unusedMinutes: { type: integer, minimum: 0 }
     CampaignOrderRequest:
       type: object
       required: [orderId, setupGroup, quantity]

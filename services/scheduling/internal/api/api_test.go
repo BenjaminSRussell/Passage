@@ -50,6 +50,10 @@ type fakeStore struct {
 
 	// slice 4
 	lastPeg store.Peg
+
+	// slice 5
+	lastUseID              string
+	lastUseFrom, lastUseTo time.Time
 }
 
 func (f *fakeStore) CreateResource(_ context.Context, in store.Resource, _ store.Idem) (store.Resource, bool, error) {

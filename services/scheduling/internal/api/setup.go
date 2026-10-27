@@ -469,3 +469,30 @@ func (a *API) listCapacityBlocks(w http.ResponseWriter, r *http.Request) {
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
 }
+
+// blockUtilization lists the windows of a resource's active capacity blocks in
+// [from, to) with their held, matched and unused minutes (FR-23.17, PRD
+// 4.23.14 Block utilization).
+func (a *API) blockUtilization(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	id := strings.ToLower(chi.URLParam(r, "id"))
+	if !ids.Valid(id) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeResourceNotFound, "resource not found"))
+		return
+	}
+	q := r.URL.Query()
+	from, errFrom := time.Parse(time.RFC3339, q.Get("from"))
+	to, errTo := time.Parse(time.RFC3339, q.Get("to"))
+	if errFrom != nil || errTo != nil || !to.After(from) || to.Sub(from) > store.MaxCapacityDays*24*time.Hour {
+		invalid(w, r, map[string]string{"from": fmt.Sprintf("from and to are RFC 3339 times, to after from, at most %d days apart", store.MaxCapacityDays)})
+		return
+	}
+	items, err := a.store.BlockUtilization(r.Context(), id, from.UTC(), to.UTC())
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
+}

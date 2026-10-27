@@ -73,6 +73,22 @@ job shop, plus campaign sequencing with `AddCircuit`
 (`POST /v1/optimize/campaign-sequence`, FR-23.14). Web: "Move pegged orders
 too" on the Gantt workspace with the pegged orders in the preview; order pegs
 list (filter, remove) and create; recurring blocks in the block form and list.
+
+Slice 5 builds the block utilization inquiry
+(`GET /resources/{id}/block-utilization?from&to`, `domain.BlockUtilization`):
+every window of a resource's active capacity blocks over a range of at most
+62 days, expanded in its time zone, with the open minutes it holds after
+higher-priority blocks (BR-23.15), the finite booked minutes of matching jobs
+and the unused rest (FR-23.17, PRD 4.23.14). The resource detail screen shows
+the next 7 days of block windows. The swarm draft of this slice rebuilt the
+slice 2 configuration tables, endpoints and screens a second time (its own
+migration `0003_config.sql`, cost as bigint minor units); main already holds
+the reviewed versions of all of them, so only the expanded-window read was
+ported. Its `PUT`-style `cleanout-rules:replace` and
+`resources/{id}/setup-matrix` (latest version) routes were not taken: rules are
+created one per setup group with idempotency keys, and
+`GET /setup-matrices?resourceId` lists every version with its active date.
+
 Everything else in the ticket and PRD 4.23 is listed here.
 
 No file outside the wave 23 ownership entry was changed, so there are no
@@ -139,7 +155,8 @@ moved-out handoff rows.
 | FR-23.11 runs as Temporal jobs with checkpoints every 500 operations; nightly site run at 00:30; per-order `:schedule` (scope `order`) | later slice of PSG-23 | Runs execute synchronously inside one transaction (5,000 operations schedule in well under the 60 s budget in the domain test). |
 | Sites: `siteId` on resources, runs and the Gantt query | handoff — wave 9 (sites on resources) | Slice 1 schedules every resource of the tenant as one plant. |
 | Order header data on bars (item, quantity) and the Late orders inquiry | handoff — wave 21 | Bars carry order id, operation number and late minutes only. |
-| Run comparison, resource utilization KPI, changeover analysis, network feasibility and block utilization reports (4.23.14) | later slice of PSG-23 | Runs list makespan and lateness; comparison screens are not built. |
+| Block utilization inquiry (4.23.14) | built (slice 5) | `GET /resources/{id}/block-utilization` per resource and range, shown on the resource detail screen. A cross-resource report screen with period totals is not built; the inquiry is per resource. |
+| Run comparison, resource utilization KPI, changeover analysis and network feasibility reports (4.23.14) | later slice of PSG-23 | Runs list makespan and lateness; comparison screens are not built. |
 | Dispatch list, Gantt print, campaign sheet, cleanout record documents (4.23.15) | later slice of PSG-23 | No document templates yet. |
 | Feature flags `scheduling.cp-sat`, `scheduling.propagate-dependents`; config `SCHED_OPT_TIME_LIMIT_S` | later slice of PSG-23 | No flag client; propagation is chosen per move with `propagate`, and the optimizer takes its time limit per request. |
 | Site parameters (default method and direction, resource selection rule, safety/queue time, drag snap, propagation limit) | later slice of PSG-23 | Defaults are fixed: jobs mode, forward, least finish, propagation 500 orders / 5 levels (`domain.DefaultPropagation*`). |

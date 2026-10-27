@@ -361,6 +361,7 @@ describe("Resources", () => {
   it("lists resources with their calendars and opens one with its open capacity", async () => {
     handler = (url) => {
       if (url.pathname.endsWith("/capacity")) return json(200, { items: [{ start: at(8), end: at(16), minutes: 480 }] });
+      if (url.pathname.endsWith("/block-utilization")) return json(200, { items: [] });
       if (url.pathname.endsWith(`/resources/${MIX}`)) return json(200, resources[0]);
       return json(200, { items: resources });
     };
@@ -375,6 +376,60 @@ describe("Resources", () => {
     expect(screen.getByRole("table", { name: "Open intervals" })).toHaveTextContent("480");
     const capacity = calls.find((c) => c.url.pathname.endsWith("/capacity"))!;
     expect(capacity.url.searchParams.get("from")).toBe(day);
+  });
+
+  it("shows the block windows of the next week with held, used and unused minutes", async () => {
+    const windows = [
+      {
+        blockId: "b0000000-0000-4000-8000-000000000001",
+        code: "MON-WHITE",
+        priority: 10,
+        condition: [{ attribute: "color", op: "=", value: "white" }],
+        start: at(8),
+        end: at(12),
+        blockMinutes: 240,
+        matchedMinutes: 90,
+        unusedMinutes: 150,
+      },
+    ];
+    handler = (url) => {
+      if (url.pathname.endsWith("/capacity")) return json(200, { items: [] });
+      if (url.pathname.endsWith(`/resources/${MIX}/block-utilization`)) return json(200, { items: windows });
+      if (url.pathname.endsWith(`/resources/${MIX}`)) return json(200, resources[0]);
+      return undefined;
+    };
+    const { container } = renderAt(`/scheduling/resources/${MIX}`);
+    const table = await screen.findByRole("table", { name: "Block windows" });
+    await waitFor(() => expect(table).toHaveTextContent("MON-WHITE"));
+    const row = within(table).getByText("MON-WHITE").closest("tr")!;
+    expect(row).toHaveTextContent("color = white");
+    expect(within(row).getAllByRole("cell").map((c) => c.textContent)).toEqual(expect.arrayContaining(["240", "90", "150"]));
+    expect(screen.getByText("Blocks hold 4 h of open time; matching jobs use 1 h 30 min.")).toBeInTheDocument();
+    const call = calls.find((c) => c.url.pathname.endsWith("/block-utilization"))!;
+    expect(call.url.searchParams.get("from")).toBe(day);
+    expect(call.url.searchParams.get("to")).toBe(dayStart(today(), 7));
+    expect(screen.getByRole("link", { name: "New block" })).toHaveAttribute("href", "/scheduling/capacity-blocks/new");
+    expect(pageViolations(container)).toEqual([]);
+  });
+
+  it("says when a resource has no block windows, and keeps the page when they fail to load", async () => {
+    let fail = true;
+    handler = (url) => {
+      if (url.pathname.endsWith("/capacity")) return json(200, { items: [{ start: at(8), end: at(16), minutes: 480 }] });
+      if (url.pathname.endsWith("/block-utilization")) {
+        return fail ? json(500, { code: "COM-0500", detail: "database unavailable" }) : json(200, { items: [] });
+      }
+      if (url.pathname.endsWith(`/resources/${MIX}`)) return json(200, resources[0]);
+      return undefined;
+    };
+    renderAt(`/scheduling/resources/${MIX}`);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Could not load the block windows");
+    expect(screen.getByRole("table", { name: "Open intervals" })).toHaveTextContent("480");
+    fail = false;
+    fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("No block windows in the next 7 days")).toBeInTheDocument();
+    expect(screen.queryByText(/Blocks hold/)).not.toBeInTheDocument();
   });
 
   it("validates a new resource and builds one shift per working day", () => {

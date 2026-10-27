@@ -449,6 +449,24 @@ export interface NewCapacityBlock {
   active: boolean;
 }
 
+/**
+ * One window of an active capacity block inside an inquiry range (FR-23.17,
+ * PRD 4.23.14 Block utilization). blockMinutes are the open minutes the window
+ * holds after higher-priority blocks; matchedMinutes are booked by jobs that
+ * match the block condition; unusedMinutes are the rest.
+ */
+export interface BlockWindow {
+  blockId: string;
+  code: string;
+  priority: number;
+  condition: Predicate[];
+  start: string;
+  end: string;
+  blockMinutes: number;
+  matchedMinutes: number;
+  unusedMinutes: number;
+}
+
 export const CAMPAIGN_STATUSES = ["proposed", "planned", "started", "completed", "cancelled"] as const;
 export type CampaignStatus = (typeof CAMPAIGN_STATUSES)[number];
 export const SEQUENCE_RULES = ["nearest-neighbor", "manual"] as const;
@@ -587,6 +605,10 @@ export function createCleanoutRule(input: NewCleanoutRule, key: string = newKey(
 
 export function listCapacityBlocks(resourceId = "", signal?: AbortSignal): Promise<CapacityBlock[]> {
   return items<CapacityBlock>(`/capacity-blocks${query({ resourceId })}`, signal);
+}
+
+export function getBlockUtilization(resourceId: string, from: string, to: string, signal?: AbortSignal): Promise<BlockWindow[]> {
+  return items<BlockWindow>(`/resources/${encodeURIComponent(resourceId)}/block-utilization${query({ from, to })}`, signal);
 }
 
 export function createCapacityBlock(input: NewCapacityBlock, key: string = newKey()): Promise<CapacityBlock> {

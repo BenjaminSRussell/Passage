@@ -15,8 +15,10 @@ capacity blocks (see the rules below). Slice 4 adds order pegs and moves that
 push pegged orders behind their parents (FR-23.8, BR-23.10), keeps changeovers
 in one piece (BR-23.3), adds recurring capacity blocks (FR-23.17), and gives
 the optimizer in `services/scheduler-py` network steps and campaign
-sequencing. Runs do not place campaigns yet. What is not built is listed in
-`NOT-IMPLEMENTED.md`.
+sequencing. Slice 5 adds the block utilization inquiry: each window of a
+resource's capacity blocks over a range with the open minutes it holds and how
+many of them matching jobs use (FR-23.17, PRD 4.23.14). Runs do not place
+campaigns yet. What is not built is listed in `NOT-IMPLEMENTED.md`.
 
 ## Model
 
@@ -121,6 +123,17 @@ Slice 4:
   conflict in a dependent refuses the whole move. The commit announces
   `orderdates.changed` for the moved order and each dependent that moved.
 
+Slice 5:
+
+- **Block utilization** (`GET /resources/{id}/block-utilization?from&to`, at
+  most 62 days): the active blocks' windows are expanded in the resource's
+  time zone and clipped to the range. A window holds only open calendar time
+  that no higher-priority block (BR-23.15), nor an earlier window of the same
+  block, has claimed, so no minute counts twice; `matchedMinutes` are the
+  finite booked minutes (changeover included) of jobs whose attributes match
+  the block condition in that time, `unusedMinutes` the rest. Inactive blocks
+  and infinite-run bookings are left out.
+
 ## API
 
 All routes need the tenant headers set by the gateway; duties in brackets.
@@ -145,6 +158,7 @@ All routes need the tenant headers set by the gateway; duties in brackets.
 | GET | `/v1/scheduling/networks[/{id}]`, `/setup-matrices[/{id}]?resourceId`, `/cleanout-rules` | `scheduling.read` |
 | POST | `/v1/scheduling/capacity-blocks` (Idempotency-Key) | `scheduling.capacity.write` |
 | GET | `/v1/scheduling/capacity-blocks?resourceId` | `scheduling.read` |
+| GET | `/v1/scheduling/resources/{id}/block-utilization?from&to` | `scheduling.read` |
 | POST | `/v1/scheduling/campaigns` (Idempotency-Key) | `scheduling.campaign.write` |
 | GET | `/v1/scheduling/campaigns?status&resourceId&limit`, `/v1/scheduling/campaigns/{id}` (ETag) | `scheduling.read` |
 | POST / DELETE | `/v1/scheduling/campaigns/{id}/orders`, `/orders/{orderId}` (Idempotency-Key, If-Match) | `scheduling.campaign.write` |
