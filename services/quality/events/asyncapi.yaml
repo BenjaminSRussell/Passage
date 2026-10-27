@@ -1,0 +1,102 @@
+asyncapi: 3.0.0
+info:
+  title: Passage Quality events
+  version: 0.1.0
+  description: |
+    Events published by the quality service through the transactional outbox.
+    Envelope: CloudEvents 1.0 (tenantid, correlationid, causationid, traceparent,
+    actor, sequence, dataschema). Schema evolution is additive only.
+defaultContentType: application/cloudevents+json
+channels:
+  qualityOrder:
+    address: passage.quality.order
+    messages:
+      orderCreated:
+        $ref: "#/components/messages/OrderCreated"
+  qualityResult:
+    address: passage.quality.result
+    messages:
+      resultRecorded:
+        $ref: "#/components/messages/ResultRecorded"
+  qualityUsageDecision:
+    address: passage.quality.usagedecision
+    messages:
+      usageDecisionPosted:
+        $ref: "#/components/messages/UsageDecisionPosted"
+operations:
+  publishOrderCreated:
+    action: send
+    channel: { $ref: "#/channels/qualityOrder" }
+    messages:
+      - $ref: "#/channels/qualityOrder/messages/orderCreated"
+  publishResultRecorded:
+    action: send
+    channel: { $ref: "#/channels/qualityResult" }
+    messages:
+      - $ref: "#/channels/qualityResult/messages/resultRecorded"
+  publishUsageDecisionPosted:
+    action: send
+    channel: { $ref: "#/channels/qualityUsageDecision" }
+    messages:
+      - $ref: "#/channels/qualityUsageDecision/messages/usageDecisionPosted"
+components:
+  messages:
+    OrderCreated:
+      name: dev.passage.quality.order.created.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/OrderCreatedData"
+    ResultRecorded:
+      name: dev.passage.quality.result.recorded.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/ResultRecordedData"
+    UsageDecisionPosted:
+      name: dev.passage.quality.usagedecision.posted.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/UsageDecisionPostedData"
+  schemas:
+    OrderCreatedData:
+      type: object
+      required: [quality_order_id, trigger, source_ref, item_id, dims, lot_qty, sample_qty]
+      properties:
+        quality_order_id: { type: string, format: uuid }
+        trigger: { type: string }
+        source_ref:
+          type: object
+          properties:
+            type: { type: string }
+            id: { type: string, format: uuid }
+            line: { type: string }
+        item_id: { type: string, format: uuid }
+        dims: { type: object, additionalProperties: { type: string } }
+        lot_qty: { type: string, description: Decimal string }
+        sample_qty: { type: string, description: Decimal string }
+    ResultRecordedData:
+      type: object
+      required: [quality_order_id, results]
+      properties:
+        quality_order_id: { type: string, format: uuid }
+        results:
+          type: array
+          items:
+            type: object
+            required: [test_id, sample_no, retest_no, passed]
+            properties:
+              test_id: { type: string, format: uuid }
+              sample_no: { type: integer }
+              retest_no: { type: integer }
+              passed: { type: boolean }
+    UsageDecisionPostedData:
+      type: object
+      required: [quality_order_id, decisions, accept_qty, reject_qty, deviation_qty, user]
+      properties:
+        quality_order_id: { type: string, format: uuid }
+        decisions:
+          type: array
+          items: { type: string }
+        accept_qty: { type: string }
+        reject_qty: { type: string }
+        deviation_qty: { type: string }
+        user: { type: string }

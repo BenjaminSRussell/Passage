@@ -1,0 +1,168 @@
+import { Link, useParams } from "react-router-dom";
+import { Alert, Badge, Button, buttonClassName, Card, DataTable, PageHeader, Skeleton, StatGroup, StatTile, type DataTableColumn } from "../../shell/ui";
+import { getOrder, listInstruments, type Instrument, type OrderView, type Result } from "./api/client";
+import { DECISION_LABELS, dash, formatDateTime, qty, shortId, TRIGGER_LABELS } from "./format";
+import { OrderStatusBadge } from "./OrdersPage";
+import styles from "./pages.module.css";
+import { ResultsEntry } from "./ResultsEntry";
+import { UsageDecisionForm } from "./UsageDecisionForm";
+import { useLoad } from "./useLoad";
+
+interface Detail {
+  order: OrderView;
+  instruments: Instrument[];
+}
+
+function resultColumns(order: OrderView, instruments: Instrument[]): DataTableColumn<Result>[] {
+  const names = new Map(order.testGroup.tests.map((t) => [t.testId, t.name || shortId(t.testId)]));
+  const codes = new Map(instruments.map((i) => [i.id, i.code]));
+  return [
+    { key: "sampleNo", header: "Sample", align: "end", render: (row) => String(row.sampleNo) },
+    { key: "testId", header: "Test", render: (row) => names.get(row.testId) ?? shortId(row.testId) },
+    { key: "retestNo", header: "Retest", align: "end", render: (row) => (row.retestNo > 0 ? String(row.retestNo) : dash) },
+    { key: "value", header: "Value or outcome", mono: true, render: (row) => (row.value !== undefined ? qty(row.value) : shortId(row.outcomeId)) },
+    {
+      key: "passed",
+      header: "Result",
+      render: (row) => <span className={row.passed ? styles.pass : styles.fail}>{row.passed ? "Pass" : "Fail"}</span>,
+    },
+    { key: "instrumentId", header: "Instrument", mono: true, render: (row) => (row.instrumentId ? (codes.get(row.instrumentId) ?? shortId(row.instrumentId)) : dash) },
+    { key: "recordedBy", header: "Recorded by", render: (row) => row.recordedBy || dash },
+    { key: "recordedAt", header: "Recorded", render: (row) => formatDateTime(row.recordedAt) },
+  ];
+}
+
+/** One quality order: lot and sample, results per test and sample, the computed verdict and the usage decision. */
+export function OrderDetailPage() {
+  const { id = "" } = useParams();
+  const state = useLoad<Detail>(async (signal) => {
+    const [order, instruments] = await Promise.all([getOrder(id, signal), listInstruments(signal).catch(() => [] as Instrument[])]);
+    return { order, instruments };
+  }, id);
+
+  if (state.error) {
+    return (
+      <div className={styles.stack}>
+        <PageHeader title="Quality order" />
+        <Alert tone="danger" title="Could not load the quality order" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
+          {state.error.message} ({state.error.code})
+        </Alert>
+      </div>
+    );
+  }
+  if (!state.data) {
+    return (
+      <div className={styles.stack} aria-busy="true">
+        <PageHeader title="Quality order" />
+        <span className="visually-hidden">Loading the quality order…</span>
+        <Skeleton height="tile" />
+      </div>
+    );
+  }
+  const { order, instruments } = state.data;
+  const ev = order.evaluation;
+  const complete = ev.missingRequired.length === 0;
+
+  return (
+    <div className={styles.stack}>
+      <PageHeader
+        title={`Quality order ${shortId(order.id)}`}
+        description={`${TRIGGER_LABELS[order.trigger] ?? order.trigger}, ${order.sourceRef.type} ${shortId(order.sourceRef.id)}`}
+        meta={<OrderStatusBadge status={order.status} />}
+        actions={
+          <Link className={buttonClassName("secondary")} to="/quality/orders">
+            All quality orders
+          </Link>
+        }
+      />
+      <StatGroup label="Inspection summary">
+        <StatTile label="Lot" value={`${qty(order.lotQty)} ${order.uom}`} />
+        <StatTile label="Sample" value={qty(order.sampleQty)} />
+        <StatTile label="Accept / reject" value={`${order.acceptNo} / ${order.rejectNo}`} />
+        <StatTile label="Defective samples" value={ev.defectiveSamples} tone={ev.passed ? "neutral" : "danger"} />
+      </StatGroup>
+      {complete ? (
+        <Alert tone={ev.passed ? "success" : "warning"} title={ev.passed ? "The lot passes" : "The lot fails"}>
+          {ev.passed
+            ? `${ev.defectiveSamples} defective ${ev.defectiveSamples === 1 ? "sample" : "samples"}, within the acceptance number ${order.acceptNo}.`
+            : `${ev.defectiveSamples} defective samples reach the rejection number ${order.rejectNo}. Retest, or decide with a reject, rework or deviation.`}
+        </Alert>
+      ) : (
+        <Alert tone="info" title="Results still needed">
+          {`${ev.missingRequired.length} required ${ev.missingRequired.length === 1 ? "test lacks" : "tests lack"} a result for every sample. The usage decision opens once they are recorded.`}
+        </Alert>
+      )}
+      <Card title="Order">
+        <dl className={styles.details}>
+          <div className={styles.entry}>
+            <dt className={styles.term}>Item</dt>
+            <dd className={`${styles.value} ${styles.mono}`}>{order.itemId}</dd>
+          </div>
+          <div className={styles.entry}>
+            <dt className={styles.term}>Site / warehouse</dt>
+            <dd className={`${styles.value} ${styles.mono}`}>{`${shortId(order.siteId)} / ${shortId(order.warehouseId)}`}</dd>
+          </div>
+          <div className={styles.entry}>
+            <dt className={styles.term}>Test group</dt>
+            <dd className={styles.value}>{`${order.testGroup.code} v${order.testGroupVersion}`}</dd>
+          </div>
+          <div className={styles.entry}>
+            <dt className={styles.term}>Sampling</dt>
+            <dd className={styles.value}>
+              {order.samplingMethod === "AQL" ? `AQL code ${order.codeLetter}, ${order.severity.toLowerCase()}` : order.samplingMethod.toLowerCase()}
+            </dd>
+          </div>
+          <div className={styles.entry}>
+            <dt className={styles.term}>Created</dt>
+            <dd className={styles.value}>{formatDateTime(order.createdAt)}</dd>
+          </div>
+          <div className={styles.entry}>
+            <dt className={styles.term}>Inventory hold</dt>
+            <dd className={styles.value}>
+              <Badge tone="neutral">Placed by the inventory ledger (handoff)</Badge>
+            </dd>
+          </div>
+        </dl>
+      </Card>
+      <Card title="Results">
+        <DataTable
+          label="Results"
+          columns={resultColumns(order, instruments)}
+          rows={order.results}
+          getRowKey={(row) => `${row.testId}|${row.sampleNo}|${row.retestNo}`}
+          empty={{ title: "No results yet", description: "Record a result for each required test on each sample." }}
+        />
+      </Card>
+      {order.status !== "CLOSED" && order.status !== "CANCELLED" ? <ResultsEntry order={order} instruments={instruments} onRecorded={state.reload} /> : null}
+      {order.decision ? (
+        <Card title="Usage decision">
+          <dl className={styles.details}>
+            <div className={styles.entry}>
+              <dt className={styles.term}>Accepted</dt>
+              <dd className={`${styles.value} ${styles.mono}`}>{qty(order.decision.split.acceptQty)}</dd>
+            </div>
+            <div className={styles.entry}>
+              <dt className={styles.term}>Rejected</dt>
+              <dd className={`${styles.value} ${styles.mono}`}>{qty(order.decision.split.rejectQty)}</dd>
+            </div>
+            <div className={styles.entry}>
+              <dt className={styles.term}>With deviation</dt>
+              <dd className={`${styles.value} ${styles.mono}`}>{qty(order.decision.split.deviationQty)}</dd>
+            </div>
+            <div className={styles.entry}>
+              <dt className={styles.term}>Decided</dt>
+              <dd className={styles.value}>{`${order.decision.decidedBy || dash}, ${formatDateTime(order.decision.decidedAt)}`}</dd>
+            </div>
+          </dl>
+          <ul className={styles.plainList} aria-label="Decision lines">
+            {order.decision.lines.map((line, i) => (
+              <li key={i}>{`${DECISION_LABELS[line.decision] ?? line.decision}: ${qty(line.quantity)} ${order.uom}${line.reason ? ` (${line.reason})` : ""}`}</li>
+            ))}
+          </ul>
+        </Card>
+      ) : order.status === "PENDING_DECISION" ? (
+        <UsageDecisionForm order={order} onPosted={state.reload} />
+      ) : null}
+    </div>
+  );
+}

@@ -1,0 +1,724 @@
+openapi: 3.1.0
+info:
+  title: Passage Quality API
+  version: 0.1.0
+  description: |
+    Quality management slice 1 (PSG-33): test groups, instruments, quality
+    associations, sampling (ANSI/ASQ Z1.4 Table I and II-A excerpt), quality
+    orders, result recording and usage decisions. Errors are RFC 9457 problem
+    details (application/problem+json) with a stable `code`; see README.md.
+servers:
+  - url: https://api.{env}.passage.dev
+    variables:
+      env: { default: dev }
+security:
+  - bearerAuth: []
+tags:
+  - name: setup
+  - name: orders
+  - name: system
+paths:
+  /readyz:
+    get:
+      tags: [system]
+      operationId: readyz
+      x-passage-duty: none
+      summary: Readiness (own Postgres reachable within 500 ms)
+      security: []
+      responses:
+        "200":
+          description: Ready
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+        "503":
+          description: Not ready
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+  /v1/quality/sampling-plans:size:
+    post:
+      tags: [orders]
+      operationId: sizeSample
+      x-passage-duty: QM_VIEW
+      summary: Compute the sample draw for a lot quantity and plan (no side effects)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SizeRequest" }
+      responses:
+        "200":
+          description: Sample draw
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SampleDraw" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/quality/test-groups:
+    get:
+      tags: [setup]
+      operationId: listTestGroups
+      x-passage-duty: QM_VIEW
+      summary: Test group versions, newest version of each code first
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: List
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/TestGroup" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    post:
+      tags: [setup]
+      operationId: createTestGroup
+      x-passage-duty: QM_SETUP_MAINTAIN
+      summary: Create a new immutable version of a test group
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TestGroupRequest" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TestGroup" }
+        "200":
+          description: Idempotent replay of a completed request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TestGroup" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/quality/test-groups/{id}:
+    get:
+      tags: [setup]
+      operationId: getTestGroup
+      x-passage-duty: QM_VIEW
+      summary: Read one test group version
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Test group version
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TestGroup" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/quality/instruments:
+    get:
+      tags: [setup]
+      operationId: listInstruments
+      x-passage-duty: QM_VIEW
+      summary: Instruments with their calibration status (BR-33.8), soonest due first
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: List
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Instrument" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    post:
+      tags: [setup]
+      operationId: createInstrument
+      x-passage-duty: QM_SETUP_MAINTAIN
+      summary: Register an instrument with a calibration interval (BR-33.8)
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InstrumentRequest" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Instrument" }
+        "200":
+          description: Idempotent replay
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Instrument" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+  /v1/quality/instruments/{id}:calibrate:
+    post:
+      tags: [setup]
+      operationId: calibrateInstrument
+      x-passage-duty: QM_SETUP_MAINTAIN
+      summary: Record a calibration and move the due date on by the interval (BR-33.8)
+      description: Idempotent by value; recording the same calibration time again changes nothing. A time in the future or before the recorded calibration is refused.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [calibratedAt]
+              properties:
+                calibratedAt: { type: string, format: date-time }
+      responses:
+        "200":
+          description: Instrument with its new due date
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Instrument" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/quality/associations:
+    get:
+      tags: [setup]
+      operationId: listAssociations
+      x-passage-duty: QM_VIEW
+      summary: Every quality association of the tenant, by sequence
+      responses:
+        "200":
+          description: List
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Association" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    post:
+      tags: [setup]
+      operationId: createAssociation
+      x-passage-duty: QM_SETUP_MAINTAIN
+      summary: Create a quality association (trigger to test group and sampling)
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Association" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Association" }
+        "200":
+          description: Idempotent replay
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Association" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/quality/quality-orders:
+    get:
+      tags: [orders]
+      operationId: listOrders
+      x-passage-duty: QM_VIEW
+      summary: Quality order worklist, newest first (section 6.33.14)
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: "#/components/schemas/OrderStatus" }
+        - name: siteId
+          in: query
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: List
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Order" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    post:
+      tags: [orders]
+      operationId: createOrder
+      x-passage-duty: QM_ORDER_MAINTAIN
+      summary: Create a quality order (manual, or from the best matching association)
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OrderRequest" }
+      responses:
+        "201":
+          description: Created
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Order" }
+        "200":
+          description: Idempotent replay
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Order" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/quality/quality-orders/{id}:
+    get:
+      tags: [orders]
+      operationId: getOrder
+      x-passage-duty: QM_VIEW
+      summary: Read a quality order with its test group, results, evaluation and decision
+      parameters:
+        - { $ref: "#/components/parameters/OrderId" }
+      responses:
+        "200":
+          description: Order view
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrderView" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/quality/quality-orders/{id}/results:
+    post:
+      tags: [orders]
+      operationId: recordResults
+      x-passage-duty: QM_RESULTS_RECORD
+      summary: Record a batch of 1 to 1,000 results (variable or attribute)
+      description: |
+        A pending order (PENDING_DECISION) accepts only retests (retestNo above 0,
+        each following the previous retest of the same test and sample); a closed
+        order answers 409 QM-0109. A replayed Idempotency-Key answers 200 with the
+        order as it is now and writes nothing.
+      parameters:
+        - { $ref: "#/components/parameters/OrderId" }
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ResultsRequest" }
+      responses:
+        "201":
+          description: Batch applied
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrderView" }
+        "200":
+          description: Idempotent replay
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrderView" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/quality/quality-orders/{id}:usage-decision:
+    post:
+      tags: [orders]
+      operationId: postUsageDecision
+      x-passage-duty: QM_USAGE_DECISION
+      summary: Post a usage decision whose line quantities sum to the lot quantity
+      parameters:
+        - { $ref: "#/components/parameters/OrderId" }
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DecisionRequest" }
+      responses:
+        "201":
+          description: Decision posted
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DecisionResponse" }
+        "200":
+          description: Idempotent replay of the stored decision
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DecisionResponse" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, maxLength: 200 }
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: The order's ETag from its last read.
+      schema: { type: string }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+    OrderId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  headers:
+    ETag:
+      description: Order version, quoted.
+      schema: { type: string }
+  responses:
+    Problem:
+      description: RFC 9457 problem details
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+  schemas:
+    Status:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [ready, unavailable] }
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: { type: string, format: uri, example: "https://passage.dev/problems/QM-0104" }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string }
+        serviceCode: { type: string }
+        traceId: { type: string }
+        errors:
+          type: object
+          additionalProperties: { type: string }
+    Decimal:
+      type: string
+      description: Decimal string; never a JSON number.
+      pattern: "^-?[0-9]+(\\.[0-9]+)?$"
+    Method:
+      type: string
+      enum: [FIXED, PERCENT, AQL]
+    Severity:
+      type: string
+      enum: [NORMAL, TIGHTENED, REDUCED]
+    SamplingPlan:
+      type: object
+      required: [method]
+      properties:
+        method: { $ref: "#/components/schemas/Method" }
+        fixedQty: { $ref: "#/components/schemas/Decimal" }
+        percent: { $ref: "#/components/schemas/Decimal" }
+        aql: { $ref: "#/components/schemas/Decimal" }
+        severity: { $ref: "#/components/schemas/Severity" }
+        inspectionLevel: { type: string, enum: [II], description: Only level II is loaded in this slice. }
+    SizeRequest:
+      allOf:
+        - $ref: "#/components/schemas/SamplingPlan"
+        - type: object
+          required: [lotQty]
+          properties:
+            lotQty: { $ref: "#/components/schemas/Decimal" }
+    SampleDraw:
+      type: object
+      properties:
+        codeLetter: { type: string }
+        sampleQty: { $ref: "#/components/schemas/Decimal" }
+        acceptNo: { type: integer }
+        rejectNo: { type: integer }
+        severity: { $ref: "#/components/schemas/Severity" }
+        inspectionLevel: { type: string }
+    TestLine:
+      type: object
+      required: [testId, name, kind]
+      properties:
+        testId: { type: string, format: uuid }
+        name: { type: string }
+        kind: { type: string, enum: [VARIABLE, ATTRIBUTE] }
+        required: { type: boolean }
+        decimals: { type: integer, minimum: 0, maximum: 6 }
+        min: { $ref: "#/components/schemas/Decimal" }
+        max: { $ref: "#/components/schemas/Decimal" }
+        passingOutcomeIds:
+          type: array
+          items: { type: string, format: uuid }
+        destructive: { type: boolean }
+    TestGroupRequest:
+      type: object
+      required: [code, tests]
+      properties:
+        code: { type: string, pattern: "^[A-Z0-9][A-Z0-9_-]{1,31}$" }
+        tests:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items: { $ref: "#/components/schemas/TestLine" }
+    TestGroup:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        version: { type: integer }
+        tests:
+          type: array
+          items: { $ref: "#/components/schemas/TestLine" }
+    InstrumentRequest:
+      type: object
+      required: [code, name, calibrationIntervalDays, lastCalibratedAt]
+      properties:
+        code: { type: string, pattern: "^[A-Z0-9][A-Z0-9_-]{1,31}$" }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        calibrationIntervalDays: { type: integer, minimum: 1, maximum: 3650 }
+        lastCalibratedAt: { type: string, format: date-time }
+    Instrument:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        calibrationIntervalDays: { type: integer }
+        lastCalibratedAt: { type: string, format: date-time }
+        dueAt: { type: string, format: date-time, description: "last + interval (BR-33.8)" }
+        calibrationStatus:
+          type: string
+          enum: [IN_CALIBRATION, DUE_SOON, OVERDUE]
+          description: DUE_SOON within 14 days of dueAt (QM-0103 horizon); results from an OVERDUE instrument are refused with QM-0102.
+    Association:
+      type: object
+      required: [trigger, itemScope, partyScope, siteScope, testGroupId, samplingPlan]
+      properties:
+        id: { type: string, format: uuid, readOnly: true }
+        trigger:
+          type: string
+          enum: [PURCHASE_RECEIPT, PRODUCTION_RAF, SALES_PICK, TRANSFER_RECEIPT, QUARANTINE, SOURCE_INSPECTION]
+        itemScope: { type: string, enum: [ITEM, ITEM_GROUP, ALL] }
+        itemRef: { type: string, format: uuid }
+        partyScope: { type: string, enum: [PARTY, ALL] }
+        partyRef: { type: string, format: uuid }
+        siteScope: { type: string, enum: [SITE, ALL] }
+        siteRef: { type: string, format: uuid }
+        sequence: { type: integer, description: Lowest wins on equal specificity (BR-33.3). }
+        testGroupId: { type: string, format: uuid }
+        samplingPlan: { $ref: "#/components/schemas/SamplingPlan" }
+    SourceRef:
+      type: object
+      required: [type, id]
+      properties:
+        type: { type: string, maxLength: 40 }
+        id: { type: string, format: uuid }
+        line: { type: string }
+    OrderRequest:
+      type: object
+      required: [trigger, sourceRef, itemId, siteId, warehouseId, lotQty, uom]
+      properties:
+        trigger:
+          type: string
+          enum: [PURCHASE_RECEIPT, PRODUCTION_RAF, SALES_PICK, TRANSFER_RECEIPT, QUARANTINE, MANUAL, SOURCE_INSPECTION]
+        sourceRef: { $ref: "#/components/schemas/SourceRef" }
+        itemId: { type: string, format: uuid }
+        itemGroupId: { type: string, format: uuid }
+        partyId: { type: string, format: uuid }
+        siteId: { type: string, format: uuid }
+        warehouseId: { type: string, format: uuid }
+        dims: { type: object, additionalProperties: { type: string } }
+        lotQty: { $ref: "#/components/schemas/Decimal" }
+        uom: { type: string, maxLength: 10 }
+        testGroupId: { type: string, format: uuid, description: Required for MANUAL. }
+        samplingPlan:
+          allOf:
+            - $ref: "#/components/schemas/SamplingPlan"
+          description: Required for MANUAL; other triggers take the plan of the best matching association.
+    Order:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        trigger: { type: string }
+        sourceRef: { $ref: "#/components/schemas/SourceRef" }
+        itemId: { type: string, format: uuid }
+        siteId: { type: string, format: uuid }
+        warehouseId: { type: string, format: uuid }
+        dims: { type: object, additionalProperties: { type: string } }
+        lotQty: { $ref: "#/components/schemas/Decimal" }
+        sampleQty: { $ref: "#/components/schemas/Decimal" }
+        uom: { type: string }
+        testGroupId: { type: string, format: uuid }
+        testGroupVersion: { type: integer }
+        samplingMethod: { $ref: "#/components/schemas/Method" }
+        severity: { $ref: "#/components/schemas/Severity" }
+        codeLetter: { type: string }
+        acceptNo: { type: integer }
+        rejectNo: { type: integer }
+        status: { $ref: "#/components/schemas/OrderStatus" }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+        closedAt: { type: string, format: date-time }
+    Result:
+      type: object
+      properties:
+        testId: { type: string, format: uuid }
+        sampleNo: { type: integer }
+        retestNo: { type: integer }
+        value: { $ref: "#/components/schemas/Decimal" }
+        outcomeId: { type: string, format: uuid }
+        passed: { type: boolean }
+        instrumentId: { type: string, format: uuid }
+        recordedBy: { type: string }
+        recordedAt: { type: string, format: date-time }
+    OrderStatus:
+      type: string
+      enum: [CREATED, OPEN, RESULTS_IN_PROGRESS, PENDING_DECISION, CLOSED, CANCELLED]
+    Evaluation:
+      type: object
+      description: Computed from the latest retest per test and sample (FR-33.4, BR-33.6).
+      required: [defectiveSamples, passed, missingRequired]
+      properties:
+        defectiveSamples: { type: integer }
+        passed: { type: boolean, description: "defectiveSamples <= acceptNo; meaningful once missingRequired is empty" }
+        missingRequired:
+          type: array
+          items: { type: string, format: uuid }
+    OrderView:
+      allOf:
+        - $ref: "#/components/schemas/Order"
+        - type: object
+          properties:
+            testGroup: { $ref: "#/components/schemas/TestGroup" }
+            results:
+              type: array
+              items: { $ref: "#/components/schemas/Result" }
+            evaluation: { $ref: "#/components/schemas/Evaluation" }
+            decision: { $ref: "#/components/schemas/Decision" }
+    ResultInput:
+      type: object
+      required: [testId, sampleNo]
+      properties:
+        testId: { type: string, format: uuid }
+        sampleNo: { type: integer, minimum: 1 }
+        retestNo: { type: integer, minimum: 0, default: 0 }
+        value: { $ref: "#/components/schemas/Decimal" }
+        outcomeId: { type: string, format: uuid }
+        instrumentId: { type: string, format: uuid }
+    ResultsRequest:
+      type: object
+      required: [results]
+      properties:
+        results:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items: { $ref: "#/components/schemas/ResultInput" }
+    DecisionLine:
+      type: object
+      required: [decision, quantity]
+      properties:
+        decision:
+          type: string
+          enum: [ACCEPT, REJECT, ACCEPT_WITH_DEVIATION, REWORK, RETURN_TO_VENDOR, SCRAP]
+        quantity: { $ref: "#/components/schemas/Decimal" }
+        reason: { type: string, maxLength: 500, description: Required for ACCEPT_WITH_DEVIATION. }
+    DecisionRequest:
+      type: object
+      required: [lines]
+      properties:
+        lines:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/DecisionLine" }
+    Decision:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        lines:
+          type: array
+          items: { $ref: "#/components/schemas/DecisionLine" }
+        split:
+          type: object
+          properties:
+            acceptQty: { $ref: "#/components/schemas/Decimal" }
+            rejectQty: { $ref: "#/components/schemas/Decimal" }
+            deviationQty: { $ref: "#/components/schemas/Decimal" }
+        decidedBy: { type: string }
+        decidedAt: { type: string, format: date-time }
+    DecisionResponse:
+      type: object
+      properties:
+        order: { $ref: "#/components/schemas/OrderView" }
+        decision: { $ref: "#/components/schemas/Decision" }
