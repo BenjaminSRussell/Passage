@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/events"
@@ -124,6 +125,13 @@ type Bar struct {
 	Firmed            bool      `json:"firmed"`
 	SetupGroup        *string   `json:"setupGroup"`
 	ChangeoverMinutes int       `json:"changeoverMinutes"`
+	// ChangeoverCost is the matrix entry's cost of the changeover in
+	// ChangeoverCurrency, and CleaningSetID the cleaning standard operation set
+	// it requires (FR-23.15). Null when no entry priced the job, and on later
+	// segments.
+	ChangeoverCost     *decimal.Decimal `json:"changeoverCost"`
+	ChangeoverCurrency *string          `json:"changeoverCurrency"`
+	CleaningSetID      *string          `json:"cleaningSetId"`
 }
 
 type RunRequest struct {
@@ -639,7 +647,7 @@ func (s *Postgres) Gantt(ctx context.Context, from, to time.Time, resourceIDs []
 	bars := []Bar{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select j.job_id::text, j.order_id::text, j.oper_number, j.resource_id::text, j.segment_no, j.start_at, j.end_at,
-				j.late_minutes, j.firmed, o.setup_group, j.changeover_minutes
+				j.late_minutes, j.firmed, o.setup_group, j.changeover_minutes, j.changeover_cost::text, j.changeover_currency, j.cleaning_operation_set_id
 			from scheduled_job j join scheduling_operation o on o.tenant_id = j.tenant_id and o.id = j.job_id
 			where j.end_at > $1 and j.start_at < $2 and ($3::boolean or j.resource_id = any($4::uuid[]))
 			order by j.start_at, j.resource_id, j.segment_no limit $5`,
@@ -650,9 +658,14 @@ func (s *Postgres) Gantt(ctx context.Context, from, to time.Time, resourceIDs []
 		defer rows.Close()
 		for rows.Next() {
 			var b Bar
+			var cost *string
 			if err := rows.Scan(&b.JobID, &b.OrderID, &b.OperNumber, &b.ResourceID, &b.Segment, &b.Start, &b.End, &b.LateMinutes, &b.Firmed,
-				&b.SetupGroup, &b.ChangeoverMinutes); err != nil {
+				&b.SetupGroup, &b.ChangeoverMinutes, &cost, &b.ChangeoverCurrency, &b.CleaningSetID); err != nil {
 				return err
+			}
+			if cost != nil {
+				v := dec(*cost)
+				b.ChangeoverCost = &v
 			}
 			bars = append(bars, b)
 		}
@@ -669,7 +682,7 @@ func (s *Postgres) Gantt(ctx context.Context, from, to time.Time, resourceIDs []
 
 // writePlacements inserts one scheduled_job row per segment, pipelined in a
 // single batch. finite maps resource id to whether the row reserves capacity.
-// The job's changeover minutes go on its first segment.
+// The job's changeover minutes, cost and cleaning set go on its first segment.
 func writePlacements(ctx context.Context, tx pgx.Tx, runID string, ps []domain.Placement, finite map[string]bool) error {
 	tenantID := tenantOf(ctx)
 	batch := &pgx.Batch{}
@@ -677,13 +690,20 @@ func writePlacements(ctx context.Context, tx pgx.Tx, runID string, ps []domain.P
 		for i, seg := range pl.Segments {
 			minutes := int(seg.End.Sub(seg.Start) / time.Minute)
 			changeover := 0
+			var cost, currency, cleaning *string
 			if i == 0 {
 				changeover = pl.ChangeoverMinutes
+				if pl.ChangeoverCost != nil {
+					v := pl.ChangeoverCost.Value.String()
+					cost, currency = &v, &pl.ChangeoverCost.Currency
+				}
+				cleaning = nullable(pl.CleaningSetID)
 			}
 			batch.Queue(`insert into scheduled_job (tenant_id, id, job_id, order_id, oper_number, resource_id, segment_no,
-				start_at, end_at, minutes, run_id, finite, late_minutes, changeover_minutes) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+				start_at, end_at, minutes, run_id, finite, late_minutes, changeover_minutes, changeover_cost, changeover_currency,
+				cleaning_operation_set_id) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::numeric, $16, $17)`,
 				tenantID, ids.New(), pl.OperationID, pl.OrderID, pl.OperNumber, pl.ResourceID, i+1, seg.Start, seg.End, minutes,
-				runID, finite[pl.ResourceID], pl.LateMinutes, changeover)
+				runID, finite[pl.ResourceID], pl.LateMinutes, changeover, cost, currency, cleaning)
 		}
 	}
 	return tx.SendBatch(ctx, batch).Close()
@@ -697,13 +717,30 @@ func setStatus(ctx context.Context, tx pgx.Tx, opIDs []string, status string) er
 	return err
 }
 
+// costOf and currencyOf spell a placement's changeover cost for events: the
+// exact decimal and its currency, empty when no matrix entry priced it.
+func costOf(pl domain.Placement) string {
+	if pl.ChangeoverCost == nil {
+		return ""
+	}
+	return pl.ChangeoverCost.Value.String()
+}
+
+func currencyOf(pl domain.Placement) string {
+	if pl.ChangeoverCost == nil {
+		return ""
+	}
+	return pl.ChangeoverCost.Currency
+}
+
 // enqueuePlacements writes one job.scheduled event per placed operation.
 func enqueuePlacements(ctx context.Context, tx pgx.Tx, runID string, ps []domain.Placement, firmed bool) error {
 	batch := &pgx.Batch{}
 	for _, pl := range ps {
 		evt, err := newEvent(ctx, schedevents.JobScheduled, pl.OperationID, schedevents.JobScheduledData{JobID: pl.OperationID,
 			OrderID: pl.OrderID, OperNumber: pl.OperNumber, ResourceID: pl.ResourceID, Start: rfc(pl.Start), End: rfc(pl.End),
-			ChangeoverMinutes: pl.ChangeoverMinutes, RunID: runID, Firmed: firmed})
+			ChangeoverMinutes: pl.ChangeoverMinutes, ChangeoverCost: costOf(pl), ChangeoverCurrency: currencyOf(pl),
+			CleaningSetID: pl.CleaningSetID, RunID: runID, Firmed: firmed})
 		if err != nil {
 			return err
 		}

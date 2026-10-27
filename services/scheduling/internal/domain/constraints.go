@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"time"
+
+	"github.com/BenjaminSRussell/passage/platform/money"
 )
 
 // DefaultNetworkDelayDays is the BR-23.11 limit on delaying a predecessor to
@@ -69,12 +71,16 @@ func follower(bs []Busy, t time.Time) (Busy, bool) {
 	return Busy{}, false
 }
 
-// slot is a candidate placement of one job on one resource.
+// slot is a candidate placement of one job on one resource. cost and
+// cleaningSetID come from the matrix entry that priced the changeover; cost is
+// nil when none did.
 type slot struct {
-	segs       []Segment
-	changeover int
-	from       string
-	missing    bool
+	segs          []Segment
+	changeover    int
+	from          string
+	missing       bool
+	cost          *money.Amount
+	cleaningSetID string
 }
 
 // fillSlot lays op from t on a resource, with the changeover from the group
@@ -127,7 +133,12 @@ func fillSlot(c capacity, iv []Interval, op Operation, bs []Busy, t time.Time, e
 				Detail: fmt.Sprintf("the job after this slot would need a %d min changeover but has %d min", need, next.Changeover)}
 		}
 	}
-	return slot{segs: segs, changeover: co, from: from, missing: missing}, nil
+	out := slot{segs: segs, changeover: co, from: from, missing: missing}
+	if e, ok := c.res.Matrix.Priced(from, op.SetupGroup); ok {
+		out.cost = &money.Amount{Value: e.Cost, Currency: c.res.Matrix.Currency}
+		out.cleaningSetID = e.CleaningSetID
+	}
+	return out, nil
 }
 
 // nextOpen is the start of the first open interval that begins at or after t.
@@ -378,8 +389,7 @@ func (e *engine) placeOp(op Operation, ready time.Time, prev *Placement, frozen 
 		if conf != nil {
 			continue
 		}
-		cand := newPlacement(op, rid, s.segs)
-		cand.ChangeoverMinutes = s.changeover
+		cand := newPlacement(op, rid, s.segs).withSlot(s)
 		if net != nil && !edge.WaitOK(prev.End, cand.Start) {
 			if late := cand.Start.Sub(prev.End) - minutes(*edge.MaxWaitMinutes); shortest < 0 || late < shortest {
 				shortest = late

@@ -30,9 +30,11 @@ type SetupEntry struct {
 }
 
 // SetupMatrix holds the changeover entries of one resource. Two orders in the
-// same setup group never need a changeover.
+// same setup group never need a changeover. Currency is the ISO code entry
+// costs are in; the scheduler copies it onto each priced changeover.
 type SetupMatrix struct {
-	entries map[[2]string]SetupEntry
+	entries  map[[2]string]SetupEntry
+	Currency string
 }
 
 // NewSetupMatrix validates the entries and indexes them by group pair.
@@ -69,6 +71,17 @@ func (m SetupMatrix) Len() int { return len(m.entries) }
 func (m SetupMatrix) Lookup(from, to string) (SetupEntry, bool) {
 	if from == to || from == "" {
 		return SetupEntry{FromGroup: from, ToGroup: to}, true
+	}
+	e, ok := m.entries[[2]string{from, to}]
+	return e, ok
+}
+
+// Priced returns the matrix entry that prices a real changeover from one group
+// to another: false for the same group, an unknown previous group (from is
+// empty) and a pair without an entry (SCHED-0012, route setup used).
+func (m SetupMatrix) Priced(from, to string) (SetupEntry, bool) {
+	if from == "" || to == "" || from == to {
+		return SetupEntry{}, false
 	}
 	e, ok := m.entries[[2]string{from, to}]
 	return e, ok

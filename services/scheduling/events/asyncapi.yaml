@@ -104,6 +104,9 @@ components:
         start: { type: string, format: date-time }
         end: { type: string, format: date-time }
         changeoverMinutes: { type: integer, minimum: 0, description: 'Changeover at the start of the job, inside [start, end) (FR-23.15).' }
+        changeoverCost: { type: string, pattern: '^[0-9]+(\.[0-9]+)?$', description: 'Exact decimal cost of the changeover from the setup matrix entry that priced it. Omitted when no entry priced the job.' }
+        changeoverCurrency: { type: string, pattern: '^[A-Z]{3}$', description: 'ISO 4217 currency of changeoverCost (the matrix currency); present exactly when changeoverCost is.' }
+        cleaningSetId: { type: string, description: 'Cleaning standard operation set the matrix entry requires (recipe-dependent cleaning). Omitted when none.' }
         runId: { type: string, format: uuid }
         firmed: { type: boolean }
     OrderDatesChangedData:

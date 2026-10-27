@@ -998,6 +998,13 @@ components:
         firmed: { type: boolean }
         setupGroup: { type: [string, 'null'] }
         changeoverMinutes: { type: integer, description: 'Changeover at the start of the job (first segment only; 0 on later segments).' }
+        changeoverCost:
+          description: 'Cost of the changeover from the setup matrix entry that priced it, in changeoverCurrency (FR-23.15). Null when no entry priced the job (same setup group, or the route setup was used, SCHED-0012) and on later segments.'
+          oneOf:
+            - { $ref: '#/components/schemas/Decimal' }
+            - { type: 'null' }
+        changeoverCurrency: { type: [string, 'null'], pattern: '^[A-Z]{3}$', description: 'ISO 4217 currency of changeoverCost (the setup matrix currency); null with it.' }
+        cleaningSetId: { type: [string, 'null'], description: 'Cleaning standard operation set the matrix entry requires (recipe-dependent cleaning); null when none.' }
     MoveRequest:
       type: object
       required: [start]

@@ -122,6 +122,15 @@ export interface GanttBar {
   setupGroup: string | null;
   /** Changeover at the start of the job, on its first segment only (FR-23.15). */
   changeoverMinutes: number;
+  /**
+   * Cost of the changeover (exact decimal string) in changeoverCurrency, from the
+   * setup matrix entry that priced it. Null when no entry priced the job (same
+   * setup group, or the route setup was used, SCHED-0012) and on later segments.
+   */
+  changeoverCost: string | null;
+  changeoverCurrency: string | null;
+  /** Cleaning standard operation set the matrix entry requires; null when none. */
+  cleaningSetId: string | null;
 }
 
 export interface MoveRequest {

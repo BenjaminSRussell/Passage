@@ -38,7 +38,9 @@ campaigns yet. What is not built is listed in `NOT-IMPLEMENTED.md`.
   (unplaced operations) and warnings (SCHED-0010, SCHED-0012, SCHED-0014).
 - **ScheduledJob** (`scheduled_job`): one row per contiguous segment of an
   operation on a resource, with `run_id`, `firmed`, `finite`, `late_minutes`
-  and, on the first segment, `changeover_minutes`.
+  and, on the first segment, `changeover_minutes` with the `changeover_cost`
+  (numeric(20,6)), `changeover_currency` and `cleaning_operation_set_id` of the
+  setup matrix entry that priced it (null when none did).
   `EXCLUDE USING gist (tenant_id WITH =, resource_id WITH =, tstzrange(start_at, end_at) WITH &&) WHERE (finite)`.
 
 - **ResourceNetwork / NetworkEdge** (`scheduling_resource_network`,

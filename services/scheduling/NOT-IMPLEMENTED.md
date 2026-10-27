@@ -121,6 +121,34 @@ step that plans (sequencing does). Its counter was written when a campaign
 was created, so re-planning or planning two campaigns would have counted the
 same batches twice; here it moves only when a campaign starts.
 
+Slice 7 puts the price of each scheduled changeover on the job. The
+heuristic, moves and the jobs a move pushes copy the cost (in the setup
+matrix currency, `money.Amount`) and the cleaning standard operation set of
+the matrix entry that priced the changeover onto the placement; a job that
+keeps its setup group, or that falls back to the route setup (SCHED-0012),
+carries none. `scheduled_job` stores them on the first segment (migration
+`0006_job_changeover_cost.sql`: `changeover_cost` numeric(20,6),
+`changeover_currency`, `cleaning_operation_set_id`, with checks that cost and
+currency come together and only on segment 1); the Gantt bar and
+`job.scheduled` carry them (FR-23.15, input to the changeover analysis report
+and to FR-23.16 settlement). A move that keeps a pushed job's dates but
+changes its cost or cleaning set rewrites it. Web: the jobs table on the
+workspace shows the changeover cost and cleaning set, and each bar's title
+names them.
+
+The swarm draft of this slice was built on its own unreviewed slices 1-6 and
+was not cherry-picked as is. Only its placement pricing was ported (it
+carried cost as int64 minor units with no currency; here it is the exact
+matrix decimal with its currency, and it is also persisted, published and
+shown). Not taken: its `PlanMove` repricing (main has repriced the moved job
+and its successors since slice 3); its nightly `materialize-capacity`
+CronJob, `ListResourceIDs` and `internal/capacityjob` (they rebuild the
+`resource_capacity` table that slice 6 did not take, see above, so there is
+nothing to rebuild); the OpenAPI entries for that table's endpoints and for a
+campaign `cleanouts` field main does not serve; and its `CampaignPage.tsx`
+(main already has the campaign list, create and detail screens from slice 2,
+with the plan's cleanouts and the slice 6 optimizer outcome).
+
 Everything else in the ticket and PRD 4.23 is listed here.
 
 No file outside the wave 23 ownership entry was changed, so there are no
@@ -138,7 +166,7 @@ moved-out handoff rows.
 | 1 | Resource selection by resource group and capability with level and expiry (FR-23.2, FR-23.12, SCHED-0004 for capabilities) | handoff — wave 9 (resources, groups, capabilities) | Candidates are explicit resource ids in priority order. Slice 1 keeps its own `scheduling_resource` table with a weekly calendar; wave 9 resources, calendars, efficiency % and capacity-per-day overrides replace it. |
 | 1 | Setup optimization inside schedule runs: the changeover from the matrix (or the route setup, SCHED-0012) laid in front of each job on a resource | built | `domain/constraints.go`; the changeover is part of the job's span and stored as `scheduled_job.changeover_minutes` on its first segment. The run places orders in priority order and prices each changeover from the job before it; it does not reorder jobs to cut changeovers outside a campaign. |
 | 1 | Changeover kept in one piece: BR-23.3 says setup is never split across closed time and moves to the next open interval when it does not fit | built | `fillSlot` in `domain/constraints.go`; an exact move start that would split it is SCHED-0002. Route setup without a matrix is not laid as a separate block (see the job scheduling row above). |
-| 1 | Changeover cost and the matrix's cleaning operation set on each scheduled changeover | later slice of PSG-23 | Jobs carry changeover minutes only; costs are on the matrix and the campaign plan (`:allocate-cost`). |
+| 1 | Changeover cost and the matrix's cleaning operation set on each scheduled changeover | built (slice 7) | `Placement.ChangeoverCost` / `CleaningSetID`, stored on `scheduled_job` (first segment), on the Gantt bar and in `job.scheduled`. A route-setup fallback (SCHED-0012) has no matrix price and carries none. The cleaning set is a reference only: generating the cleaning operations it names is part of the cleanout orders handoff (deliverable 7). |
 | 1 | Reported hours and `finished` jobs frozen with remaining minutes (BR-23.6) | handoff — wave 25 (shop-floor feedback) | Only firmed jobs are frozen; there is no reported-hours input yet. |
 | 2 | Gantt with drag-reschedule, dry-run preview, constraint warnings and firm | built | `apps/web/src/modules/scheduling`. Bars are DOM buttons; a keyboard move form gives the same preview and commit. |
 | 2 | Canvas rendering above 1,000 bars, row virtualization, zoom, Shift+drag of a whole order, undo stack of 20 moves, user drag-snap setting | later slice of PSG-23 | The page fetches a 1-14 day window and snaps to 5 minutes. |

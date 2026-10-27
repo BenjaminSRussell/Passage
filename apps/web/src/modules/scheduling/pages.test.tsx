@@ -76,8 +76,8 @@ const resources: Resource[] = [
 const day = dayStart(today());
 const at = (h: number) => new Date(Date.parse(day) + h * 3_600_000).toISOString().replace(".000Z", "Z");
 const bars: GanttBar[] = [
-  { jobId: JOB1, orderId: ORDER, operNumber: 10, resourceId: MIX, segment: 1, start: at(8), end: at(9), lateMinutes: 0, firmed: false, setupGroup: null, changeoverMinutes: 0 },
-  { jobId: JOB2, orderId: ORDER, operNumber: 20, resourceId: FILL, segment: 1, start: at(9), end: at(11), lateMinutes: 45, firmed: true, setupGroup: "WHITE", changeoverMinutes: 30 },
+  { jobId: JOB1, orderId: ORDER, operNumber: 10, resourceId: MIX, segment: 1, start: at(8), end: at(9), lateMinutes: 0, firmed: false, setupGroup: null, changeoverMinutes: 0, changeoverCost: null, changeoverCurrency: null, cleaningSetId: null },
+  { jobId: JOB2, orderId: ORDER, operNumber: 20, resourceId: FILL, segment: 1, start: at(9), end: at(11), lateMinutes: 45, firmed: true, setupGroup: "WHITE", changeoverMinutes: 30, changeoverCost: "45.5", changeoverCurrency: "EUR", cleaningSetId: "WET-CLEAN" },
 ];
 
 const run: Run = {
@@ -147,7 +147,15 @@ describe("Scheduling workspace", () => {
     // JOB2 opens with a 30 min changeover: drawn over the bar and named in its title.
     expect(container.querySelectorAll("rect[data-changeover]")).toHaveLength(1);
     expect(container.querySelector(`rect[data-changeover="${JOB2}"]`)).not.toBeNull();
-    expect(container.querySelector(`rect[data-job="${JOB2}"] title`)?.textContent).toContain("starts with a 30 min changeover to WHITE");
+    expect(container.querySelector(`rect[data-job="${JOB2}"] title`)?.textContent).toContain(
+      "starts with a 30 min changeover to WHITE (costing 45.50 EUR, cleaning set WET-CLEAN)",
+    );
+    // FR-23.15: the jobs table shows the matrix cost and cleaning set; the unpriced job shows dashes.
+    const rows = within(table).getAllByRole("row");
+    expect(rows[2]).toHaveTextContent("45.50 EUR");
+    expect(rows[2]).toHaveTextContent("WET-CLEAN");
+    expect(rows[1]).not.toHaveTextContent("EUR");
+    expect(within(table).getByRole("columnheader", { name: "Changeover cost" })).toBeInTheDocument();
     const gantt = calls.find((c) => c.url.pathname.endsWith("/gantt"));
     expect(gantt?.url.searchParams.get("from")).toBe(day);
     expect(gantt?.url.searchParams.get("to")).toBe(dayStart(today(), 2));

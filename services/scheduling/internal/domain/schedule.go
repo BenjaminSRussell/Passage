@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/BenjaminSRussell/passage/platform/money"
 )
 
 // Conflict codes (message catalog SCHED-0001, -0002, -0004, -0008).
@@ -84,6 +86,13 @@ type Segment struct {
 // Placement is where one operation landed. When ChangeoverMinutes is set, the
 // first that many minutes of the job are the changeover from the previous
 // setup group (FR-23.15); the process minutes follow.
+//
+// ChangeoverCost and CleaningSetID come from the setup matrix entry that
+// priced the changeover: its cost in the matrix currency and the cleaning
+// standard operation set it requires (FR-23.15, recipe-dependent cleaning).
+// ChangeoverCost is nil when no entry priced one (no change of setup group,
+// or SCHED-0012 with the route setup used); CleaningSetID is empty when the
+// entry names no set.
 type Placement struct {
 	OperationID       string
 	OrderID           string
@@ -94,6 +103,24 @@ type Placement struct {
 	End               time.Time
 	LateMinutes       int
 	ChangeoverMinutes int
+	ChangeoverCost    *money.Amount
+	CleaningSetID     string
+}
+
+// withSlot copies the changeover a slot was priced with onto the placement.
+func (p Placement) withSlot(s slot) Placement {
+	p.ChangeoverMinutes = s.changeover
+	p.ChangeoverCost, p.CleaningSetID = s.cost, s.cleaningSetID
+	return p
+}
+
+// sameChangeover reports whether two placements carry the same changeover:
+// minutes, cost and cleaning set.
+func sameChangeover(a, b Placement) bool {
+	if a.ChangeoverMinutes != b.ChangeoverMinutes || a.CleaningSetID != b.CleaningSetID || (a.ChangeoverCost == nil) != (b.ChangeoverCost == nil) {
+		return false
+	}
+	return a.ChangeoverCost == nil || (a.ChangeoverCost.Currency == b.ChangeoverCost.Currency && a.ChangeoverCost.Value.Equal(b.ChangeoverCost.Value))
 }
 
 // Conflict explains why a placement is infeasible.
@@ -496,8 +523,7 @@ func PlanMove(in MoveInput) MovePlan {
 	if conf != nil {
 		return MovePlan{Conflict: conf}
 	}
-	moved := newPlacement(*mv, in.ResourceID, s.segs)
-	moved.ChangeoverMinutes = s.changeover
+	moved := newPlacement(*mv, in.ResourceID, s.segs).withSlot(s)
 	if c.res.Finite {
 		busy[in.ResourceID] = insertBusy(busy[in.ResourceID], busyOf(*mv, moved)...)
 	}
@@ -535,12 +561,11 @@ func PlanMove(in MoveInput) MovePlan {
 			if conf != nil {
 				return nil, conf
 			}
-			next := newPlacement(op, cur.ResourceID, ns.segs)
-			next.ChangeoverMinutes = ns.changeover
+			next := newPlacement(op, cur.ResourceID, ns.segs).withSlot(ns)
 			if cc.res.Finite {
 				busy[cur.ResourceID] = insertBusy(busy[cur.ResourceID], busyOf(op, next)...)
 			}
-			if !next.Start.Equal(cur.Start) || !next.End.Equal(cur.End) || next.ChangeoverMinutes != cur.ChangeoverMinutes {
+			if !next.Start.Equal(cur.Start) || !next.End.Equal(cur.End) || !sameChangeover(next, cur) {
 				out = append(out, next)
 				touch(cur.ResourceID, cur.Start)
 			}

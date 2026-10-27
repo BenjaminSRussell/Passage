@@ -12,6 +12,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/money"
 	"github.com/BenjaminSRussell/passage/services/scheduling/internal/domain"
 )
 
@@ -419,7 +420,8 @@ func scanBusy(rows pgx.Rows) ([]domain.Busy, error) {
 // placementsOfOrders rebuilds each scheduled operation's placement of the
 // given orders from its segments, keyed by operation id.
 func placementsOfOrders(ctx context.Context, tx pgx.Tx, orderIDs []string) (map[string]domain.Placement, error) {
-	rows, err := tx.Query(ctx, `select job_id::text, order_id::text, oper_number, resource_id::text, start_at, end_at, late_minutes, changeover_minutes
+	rows, err := tx.Query(ctx, `select job_id::text, order_id::text, oper_number, resource_id::text, start_at, end_at, late_minutes, changeover_minutes,
+			changeover_cost::text, changeover_currency, coalesce(cleaning_operation_set_id, '')
 		from scheduled_job where order_id = any($1::uuid[]) order by job_id, segment_no`, orderIDs)
 	if err != nil {
 		return nil, err
@@ -427,16 +429,20 @@ func placementsOfOrders(ctx context.Context, tx pgx.Tx, orderIDs []string) (map[
 	defer rows.Close()
 	out := map[string]domain.Placement{}
 	for rows.Next() {
-		var jobID, oid, rid string
+		var jobID, oid, rid, cleaning string
+		var cost, currency *string
 		var oper, late, changeover int
 		var start, end time.Time
-		if err := rows.Scan(&jobID, &oid, &oper, &rid, &start, &end, &late, &changeover); err != nil {
+		if err := rows.Scan(&jobID, &oid, &oper, &rid, &start, &end, &late, &changeover, &cost, &currency, &cleaning); err != nil {
 			return nil, err
 		}
 		pl, ok := out[jobID]
 		if !ok {
 			pl = domain.Placement{OperationID: jobID, OrderID: oid, OperNumber: oper, ResourceID: rid, Start: start, LateMinutes: late,
-				ChangeoverMinutes: changeover}
+				ChangeoverMinutes: changeover, CleaningSetID: cleaning}
+			if cost != nil && currency != nil {
+				pl.ChangeoverCost = &money.Amount{Value: dec(*cost), Currency: *currency}
+			}
 		}
 		pl.Segments = append(pl.Segments, domain.Segment{Start: start, End: end})
 		pl.End = end

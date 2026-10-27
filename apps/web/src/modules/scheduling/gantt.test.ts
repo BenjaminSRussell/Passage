@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { barPosition, changeoverSpan, draggedStart, groupByResource, jobsOf, localOverlaps, ORDER_TONES, orderTone, snapMinutes, type GanttBar } from "./gantt";
-import { describeShifts, formatMinutes, fromUtcInput, parseClock, toUtcInput } from "./format";
+import { describeShifts, formatAmount, formatMinutes, fromUtcInput, parseClock, toUtcInput } from "./format";
 
 const base: GanttBar = {
   jobId: "job-a",
@@ -14,6 +14,9 @@ const base: GanttBar = {
   firmed: false,
   setupGroup: null,
   changeoverMinutes: 0,
+  changeoverCost: null,
+  changeoverCurrency: null,
+  cleaningSetId: null,
 };
 
 describe("changeoverSpan", () => {
@@ -130,5 +133,14 @@ describe("format", () => {
     );
     expect(formatMinutes(150)).toBe("2 h 30 min");
     expect(formatMinutes(45)).toBe("45 min");
+  });
+});
+
+describe("formatAmount", () => {
+  it("pads to two decimals without rounding the exact decimal", () => {
+    expect(formatAmount("45.5", "EUR")).toBe("45.50 EUR");
+    expect(formatAmount("120", "USD")).toBe("120.00 USD");
+    expect(formatAmount("30.125", "GBP")).toBe("30.125 GBP");
+    expect(formatAmount("0", "USD")).toBe("0.00 USD");
   });
 });

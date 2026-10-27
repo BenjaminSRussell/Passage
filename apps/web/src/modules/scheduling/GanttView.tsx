@@ -1,7 +1,7 @@
 import { useRef, useState, type PointerEvent } from "react";
 import { cx } from "../../shell/ui/cx";
 import type { GanttBar } from "./api/client";
-import { formatDateTime } from "./format";
+import { formatAmount, formatDateTime } from "./format";
 import { barPosition, changeoverSpan, draggedStart, groupByResource, orderTone, SNAP_MINUTES } from "./gantt";
 import styles from "./GanttView.module.css";
 
@@ -130,7 +130,13 @@ export function GanttView({ bars, resources, from, days, selectedJobId, violatio
                 const late = bar.lateMinutes > 0 ? `, late by ${bar.lateMinutes} min` : "";
                 const changeover = changeoverSpan(bar);
                 const changeoverPos = changeover ? barPosition(changeover, from, to) : null;
-                const setup = changeover ? `, starts with a ${bar.changeoverMinutes} min changeover${bar.setupGroup ? ` to ${bar.setupGroup}` : ""}` : "";
+                const priced = [
+                  bar.changeoverCost !== null && bar.changeoverCurrency !== null ? `costing ${formatAmount(bar.changeoverCost, bar.changeoverCurrency)}` : "",
+                  bar.cleaningSetId ? `cleaning set ${bar.cleaningSetId}` : "",
+                ].filter(Boolean);
+                const setup = changeover
+                  ? `, starts with a ${bar.changeoverMinutes} min changeover${bar.setupGroup ? ` to ${bar.setupGroup}` : ""}${priced.length > 0 ? ` (${priced.join(", ")})` : ""}`
+                  : "";
                 return (
                   <g key={`${bar.jobId}-${bar.segment}`}>
                     <rect

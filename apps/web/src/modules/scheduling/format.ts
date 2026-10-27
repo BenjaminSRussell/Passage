@@ -30,6 +30,15 @@ export function formatMinutes(minutes: number): string {
   return m === 0 ? `${h} h` : `${h} h ${m} min`;
 }
 
+/**
+ * An exact decimal amount with its currency, padded to at least two decimals
+ * and never rounded: "45.5", "EUR" → "45.50 EUR"; "30.125" stays "30.125".
+ */
+export function formatAmount(value: string, currency: string): string {
+  const [whole, fraction = ""] = value.split(".");
+  return `${whole}.${fraction.padEnd(2, "0")} ${currency}`;
+}
+
 export function hours(minutes: number): string {
   return (minutes / 60).toFixed(1);
 }

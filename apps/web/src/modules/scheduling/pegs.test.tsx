@@ -76,7 +76,7 @@ const at = (h: number) => new Date(Date.parse(day) + h * 3_600_000).toISOString(
 
 describe("Moves that propagate to pegged orders (FR-23.8)", () => {
   const bars: GanttBar[] = [
-    { jobId: JOB1, orderId: PARENT, operNumber: 10, resourceId: MIX, segment: 1, start: at(8), end: at(9), lateMinutes: 0, firmed: false, setupGroup: null, changeoverMinutes: 0 },
+    { jobId: JOB1, orderId: PARENT, operNumber: 10, resourceId: MIX, segment: 1, start: at(8), end: at(9), lateMinutes: 0, firmed: false, setupGroup: null, changeoverMinutes: 0, changeoverCost: null, changeoverCurrency: null, cleaningSetId: null },
   ];
   const preview: MoveResponse = {
     dryRun: true,

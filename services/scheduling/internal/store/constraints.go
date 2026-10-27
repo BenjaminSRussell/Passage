@@ -72,11 +72,11 @@ func (b CapacityBlock) expand(loc *time.Location, from time.Time, days int) (dom
 }
 
 // activeMatrices returns, per resource, the setup matrix in force on day: the
-// highest version whose active_from is on or before it.
+// highest version whose active_from is on or before it, with its currency.
 func activeMatrices(ctx context.Context, tx pgx.Tx, day string) (map[string]domain.SetupMatrix, error) {
-	rows, err := tx.Query(ctx, `select m.resource_id::text, e.from_setup_group, e.to_setup_group, e.changeover_minutes, e.changeover_cost::text,
+	rows, err := tx.Query(ctx, `select m.resource_id::text, m.currency, e.from_setup_group, e.to_setup_group, e.changeover_minutes, e.changeover_cost::text,
 			coalesce(e.cleaning_operation_set_id, '')
-		from (select distinct on (resource_id) id, resource_id from scheduling_setup_matrix
+		from (select distinct on (resource_id) id, resource_id, currency from scheduling_setup_matrix
 			where active_from <= $1::date order by resource_id, version desc) m
 		join scheduling_setup_matrix_entry e on e.matrix_id = m.id`, day)
 	if err != nil {
@@ -84,14 +84,16 @@ func activeMatrices(ctx context.Context, tx pgx.Tx, day string) (map[string]doma
 	}
 	defer rows.Close()
 	entries := map[string][]domain.SetupEntry{}
+	currency := map[string]string{}
 	for rows.Next() {
-		var rid, cost string
+		var rid, cur, cost string
 		var e domain.SetupEntry
-		if err := rows.Scan(&rid, &e.FromGroup, &e.ToGroup, &e.Minutes, &cost, &e.CleaningSetID); err != nil {
+		if err := rows.Scan(&rid, &cur, &e.FromGroup, &e.ToGroup, &e.Minutes, &cost, &e.CleaningSetID); err != nil {
 			return nil, err
 		}
 		e.Cost = dec(cost)
 		entries[rid] = append(entries[rid], e)
+		currency[rid] = cur
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -102,6 +104,7 @@ func activeMatrices(ctx context.Context, tx pgx.Tx, day string) (map[string]doma
 		if err != nil {
 			return nil, fmt.Errorf("setup matrix of resource %s: %w", rid, err)
 		}
+		m.Currency = currency[rid]
 		out[rid] = m
 	}
 	return out, nil

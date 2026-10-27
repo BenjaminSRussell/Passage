@@ -30,16 +30,22 @@ type RunCompletedData struct {
 
 // JobScheduledData is one placed operation. ChangeoverMinutes is the
 // changeover at the start of the job (FR-23.15), inside [start, end).
+// ChangeoverCost (an exact decimal string) and ChangeoverCurrency come from the
+// setup matrix entry that priced it, with the cleaning standard operation set
+// it requires; all three are omitted when no entry priced the job.
 type JobScheduledData struct {
-	JobID             string `json:"jobId"`
-	OrderID           string `json:"orderId"`
-	OperNumber        int    `json:"operNumber"`
-	ResourceID        string `json:"resourceId"`
-	Start             string `json:"start"`
-	End               string `json:"end"`
-	ChangeoverMinutes int    `json:"changeoverMinutes"`
-	RunID             string `json:"runId"`
-	Firmed            bool   `json:"firmed"`
+	JobID              string `json:"jobId"`
+	OrderID            string `json:"orderId"`
+	OperNumber         int    `json:"operNumber"`
+	ResourceID         string `json:"resourceId"`
+	Start              string `json:"start"`
+	End                string `json:"end"`
+	ChangeoverMinutes  int    `json:"changeoverMinutes"`
+	ChangeoverCost     string `json:"changeoverCost,omitempty"`
+	ChangeoverCurrency string `json:"changeoverCurrency,omitempty"`
+	CleaningSetID      string `json:"cleaningSetId,omitempty"`
+	RunID              string `json:"runId"`
+	Firmed             bool   `json:"firmed"`
 }
 
 type OrderDatesChangedData struct {
