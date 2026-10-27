@@ -1,16 +1,21 @@
 # lean
 
-Lean manufacturing for Passage (wave 24, PSG-24, slices 1, 2 and 4). Production flows with their
+Lean manufacturing for Passage (wave 24, PSG-24, slices 1, 2, 4 and 5). Production flows with their
 activities and activation, kanban rules (fixed, scheduled, event), kanban generation, the
 kanban card state machine and the kanban board (slice 1). Slice 2 adds takt vs cycle on the
 board (FR-24.14) and the lean subcontracting price rule as a preview of the purchase order
 lines for completed service jobs (FR-24.20, BR-24.16). Slice 4 adds kanban jobs, one per
 activity of the rule's flow, started and completed on the work-cell board with quantity, scrap
 and handling units; the jobs drive their card to In progress and Completed (FR-24.10, BR-24.6).
+Slice 5 adds flow costing periods (FR-24.12): a period is opened for a flow and date range and
+settled after its last day, only when every card with jobs in it is Completed or Emptied
+(BR-24.9, LEAN-0003), with variance = material + conversion − output in the period currency
+(AC-24.8) and the `flowperiod.settled` event.
 
 Flows, activities, rules, cards and jobs are stored in Postgres (RLS on every table, outbox
-events in the same transaction). The subcontracting preview stores nothing. Flow costing
-periods and PO creation and receipt in purchasing are later slices; see `NOT-IMPLEMENTED.md`.
+events in the same transaction). The subcontracting preview stores nothing. Deriving period
+costs from material issues and cycle times, the ledger journal, and PO creation and receipt in
+purchasing are later slices or handoffs; see `NOT-IMPLEMENTED.md`.
 
 ## Layout
 
@@ -19,15 +24,17 @@ cmd/lean              entrypoint: dbx.Connect, optional dbx.Migrate, httpx route
 internal/domain       pure rules (no I/O): kanban.go (BR-24.6 state machine, event cards),
                       rules.go (FR-24.9 rule check, BR-24.7 count and capacity, BR-24.8
                       quantities), flow.go (FR-24.8 connectivity, FR-24.14 takt vs cycle),
-                      flowcost.go (BR-24.9), subcontract.go (FR-24.20, BR-24.16), jobs.go
+                      flowcost.go (BR-24.9 gate, variance in money), subcontract.go (FR-24.20, BR-24.16), jobs.go
                       (job start and completion and the card steps they cause, BR-24.6)
 internal/store        Postgres repository: flows, rules, generation, moves, board (store.go);
-                      kanban jobs and the work-cell board (jobs.go)
+                      kanban jobs and the work-cell board (jobs.go); flow costing
+                      periods and the settlement gate (costing.go)
 internal/api          HTTP handlers: decode → validate → tenant → store/domain → JSON/problem
 internal/events       event types and payloads
 migrations/           0001_init.sql (production_flow, flow_activity, kanban_rule, kanban,
                       idempotency_keys, outbox), 0002_kanban_jobs.sql (kanban_job,
-                      kanban.handling_units), RLS on every table
+                      kanban.handling_units), 0003_flow_costing.sql
+                      (flow_costing_period), RLS on every table
 api/openapi.yaml      OpenAPI 3.1, checked against the router by internal/api/openapi_test.go
 events/asyncapi.yaml  AsyncAPI 3, checked against internal/events by events_test.go
 charts/lean           Helm chart (helm lint), 2 replicas as in PRD 4.24.10
@@ -69,6 +76,14 @@ skipped when `PASSAGE_TEST_DATABASE_URL` is unset.
   under concurrent completions; a card with jobs is never moved to In progress or Completed by
   hand; reuse clears the jobs (domain property test and store tests). AC-24.7 on the work-cell
   board: a job that has not started cannot complete (LEAN-0001).
+- AC-24.8 and BR-24.9 (store, against Postgres under RLS): a period with an open card that has
+  jobs in it is refused with LEAN-0003 naming the card and stays open; once every card is done
+  it settles with variance 900.10 + 300.00 − 1150.25 = 49.85 USD, writes one
+  `flowperiod.settled` event, replays by key and never settles twice (LEAN-0111); a card in
+  progress since an earlier period blocks, a reused card's earlier cycle does not; a period that
+  includes today is LEAN-0112; overlapping periods are LEAN-0109; amounts finer than the
+  currency's minor unit are refused, not rounded (domain table and rapid property: output +
+  variance = material + conversion).
 - AC-24.17: a service job of 20 on vendor V in `po-per-kanban` mode gives one PO line of 20 at
   the agreement price; periodic-po accumulates per vendor, item and price (rapid property:
   quantity and amount are conserved); the agreement valid on the completion date prices the
@@ -92,6 +107,9 @@ skipped when `PASSAGE_TEST_DATABASE_URL` is unset.
 | GET | `/v1/lean/board` | `lean.kanban.work` | Board columns by card state; `siteId`, `flowId`, `ruleId`; with `flowId`, `takt` compares takt time and the bottleneck cycle time (FR-24.14). With `workCellId`: the work-cell board, columns of jobs by job state (FR-24.10) |
 | POST | `/v1/lean/kanban-jobs/{id}:start` | `lean.kanban.work` | Start a job; the first one runs its card (BR-24.6); `version`; Idempotency-Key |
 | POST | `/v1/lean/kanban-jobs/{id}:complete` | `lean.kanban.work` | Complete a job with `reportedQty`, `scrapQty`, `handlingUnits`; the last one completes its card; `version`; Idempotency-Key |
+| POST | `/v1/lean/flows/{id}/costing-periods` | `lean.flow.settle` | Open a costing period (`periodStart`, `periodEnd`, `currency`); no overlap with the flow's other periods; Idempotency-Key |
+| GET | `/v1/lean/flows/{id}/costing-periods` | `lean.read` | The flow's periods, latest first; `limit` |
+| POST | `/v1/lean/flows/{id}/costing-periods/{periodId}:settle` | `lean.flow.settle` | Settle after the last day with `materialCost`, `conversionCost`, `outputValue` (BR-24.9, AC-24.8); `version`; Idempotency-Key |
 | POST | `/v1/lean/subcontracting:preview` | `lean.flow.write` | PO lines for completed service jobs priced by purchase agreement (FR-24.20, BR-24.16); writes nothing |
 
 Duties are enforced with the kernel `authz.RequireDuty`. The OPA entries are a handoff to
@@ -105,6 +123,7 @@ Duties are enforced with the kernel `authz.RequireDuty`. The OPA entries are a h
 | `dev.passage.lean.kanban.created.v1` | a card is generated (one event per card) |
 | `dev.passage.lean.kanban.statechanged.v1` | a card moves (PRD `kanban.state-changed`); when a job moved it, with `jobId` and, on completion, the job's quantities and handling units |
 | `dev.passage.lean.kanbanjob.statechanged.v1` | a job is started or completed on the work-cell board |
+| `dev.passage.lean.flowperiod.settled.v1` | a costing period is settled (PRD `flow-period.settled`): amounts, variance, card count; `journalEntryId` null until the ledger posts it |
 
 ## Error codes
 
@@ -113,6 +132,7 @@ Duties are enforced with the kernel `authz.RequireDuty`. The OPA entries are a h
 | `COM-0001` | 400 | Malformed body or invalid input; field errors in `errors` |
 | `LEAN-0001` | 409 | Kanban or job move not allowed (BR-24.6, AC-24.7), including a hand move of a card with jobs to In progress or Completed |
 | `LEAN-0002` | 409 | Rule would exceed its number of kanbans (BR-24.7) |
+| `LEAN-0003` | 409 | Period cannot be settled: cards with jobs in it are not Completed or Emptied; the first 20 card numbers are listed (BR-24.9, `FLOW_PERIOD_OPEN_KANBANS`) |
 | `LEAN-0004` | 422 | Process activity has no output location (FR-24.8) |
 | `LEAN-0005` | 422 | No valid purchase agreement for a service item on the job's completion date (FR-24.20) |
 | `LEAN-0101` | 404 | Production flow not found |
@@ -123,14 +143,18 @@ Duties are enforced with the kernel `authz.RequireDuty`. The OPA entries are a h
 | `LEAN-0106` | 409 | Flow is not a draft, so it cannot be activated |
 | `LEAN-0107` | 422 | Rule cannot generate now: scheduled replenishment, or not effective today |
 | `LEAN-0108` | 404 | Kanban job not found |
+| `LEAN-0109` | 409 | Costing period overlaps another period of the flow |
+| `LEAN-0110` | 404 | Costing period not found on this flow |
+| `LEAN-0111` | 409 | Costing period is already settled |
+| `LEAN-0112` | 409 | Costing period has not ended (its last day, UTC, has not passed) |
 | `idempotency_key_reuse` | 422 | Idempotency-Key reused with a different request |
 | `idempotency_key_in_flight` | 409 | A concurrent request with the same key committed first; retry for its answer |
 | `AUTH-0001` | 401 | No tenant or principal |
 | `AUTH-0003` | 403 | Missing duty |
 | `COM-0500` | 500 | Internal error (detail hidden) |
 
-`LEAN-0003` (period cannot settle, BR-24.9) is raised by the domain rule `CheckSettleable`,
-which is not reachable over HTTP until flow costing is built.
+Amounts are validated against the period currency's minor unit (COM-0001 when finer), so the
+stored variance is exact; the table also checks variance = material + conversion − output.
 
 ## Wave reference
 

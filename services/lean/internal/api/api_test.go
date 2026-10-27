@@ -50,6 +50,8 @@ type fakeStore struct {
 	jobs       []store.Job
 	gotJobID   string
 	gotDone    domain.Completion
+	gotOpen    store.OpenPeriod
+	gotSettle  store.SettlePeriod
 }
 
 func (f *fakeStore) CreateFlow(_ context.Context, in store.Flow, idem store.Idem) (store.Flow, bool, error) {
@@ -122,6 +124,21 @@ func (f *fakeStore) StartJob(_ context.Context, id string, version int, idem sto
 func (f *fakeStore) CompleteJob(_ context.Context, id string, version int, c domain.Completion, idem store.Idem) (store.Job, bool, error) {
 	f.gotJobID, f.gotVersion, f.gotDone, f.gotIdem = id, version, c, idem
 	return store.Job{ID: id, State: domain.Completed, Version: version + 1}, !f.replay, f.err
+}
+
+func (f *fakeStore) OpenPeriod(_ context.Context, in store.OpenPeriod, idem store.Idem) (store.Period, bool, error) {
+	f.gotOpen, f.gotIdem = in, idem
+	return store.Period{ID: periodID, FlowID: in.FlowID, Status: "open", Version: 1}, !f.replay, f.err
+}
+
+func (f *fakeStore) ListPeriods(_ context.Context, flow string, limit int) ([]store.Period, error) {
+	f.gotFlowID, f.gotLimit = flow, limit
+	return []store.Period{}, f.err
+}
+
+func (f *fakeStore) SettlePeriod(_ context.Context, in store.SettlePeriod, idem store.Idem) (store.Period, bool, error) {
+	f.gotSettle, f.gotIdem = in, idem
+	return store.Period{ID: in.PeriodID, FlowID: in.FlowID, Status: "settled", Version: in.Version + 1}, !f.replay, f.err
 }
 
 func (f *fakeStore) Ping(context.Context) error { return f.err }

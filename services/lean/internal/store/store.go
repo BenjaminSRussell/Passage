@@ -1,5 +1,5 @@
-// Package store persists production flows, kanban rules and kanban cards in
-// Postgres. Every query runs inside dbx.WithTenantTx, so row-level security
+// Package store persists production flows, kanban rules, kanban cards and
+// jobs, and flow costing periods in Postgres. Every query runs inside dbx.WithTenantTx, so row-level security
 // applies, and every write commits its outbox events in that same transaction.
 package store
 
@@ -169,6 +169,9 @@ type Store interface {
 	BoardJobs(ctx context.Context, f BoardFilter) ([]Job, error)
 	StartJob(ctx context.Context, id string, version int, idem Idem) (Job, bool, error)
 	CompleteJob(ctx context.Context, id string, version int, c domain.Completion, idem Idem) (Job, bool, error)
+	OpenPeriod(ctx context.Context, in OpenPeriod, idem Idem) (Period, bool, error)
+	ListPeriods(ctx context.Context, flowID string, limit int) ([]Period, error)
+	SettlePeriod(ctx context.Context, in SettlePeriod, idem Idem) (Period, bool, error)
 	Ping(ctx context.Context) error
 }
 

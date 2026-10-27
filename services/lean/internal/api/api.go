@@ -31,14 +31,16 @@ import (
 )
 
 // Duties (PRD 4.24.17): "Maintain production flows / kanban rules", "Work
-// kanban board", and generate under "Maintain kanbans" (PRD 4.24.5). Reads of
-// flows, rules and cards need DutyRead.
+// kanban board", "Settle production flows" (open and settle flow costing
+// periods), and generate under "Maintain kanbans" (PRD 4.24.5). Reads of
+// flows, rules, cards and costing periods need DutyRead.
 const (
 	DutyRead        = "lean.read"
 	DutyFlowWrite   = "lean.flow.write"
 	DutyRuleWrite   = "lean.kanban-rule.write"
 	DutyKanbanWrite = "lean.kanban.write"
 	DutyKanbanWork  = "lean.kanban.work"
+	DutyFlowSettle  = "lean.flow.settle"
 )
 
 const (
@@ -70,6 +72,9 @@ func (a *API) Register(r chi.Router) {
 	r.With(read).Get("/v1/lean/flows", a.listFlows)
 	r.With(read).Get("/v1/lean/flows/{id}", a.getFlow)
 	r.With(authz.RequireDuty(DutyFlowWrite)).Post("/v1/lean/flows/{id}:activate", a.activateFlow)
+	r.With(authz.RequireDuty(DutyFlowSettle)).Post("/v1/lean/flows/{id}/costing-periods", a.openPeriod)
+	r.With(read).Get("/v1/lean/flows/{id}/costing-periods", a.listPeriods)
+	r.With(authz.RequireDuty(DutyFlowSettle)).Post("/v1/lean/flows/{id}/costing-periods/{periodId}:settle", a.settlePeriod)
 	r.With(authz.RequireDuty(DutyRuleWrite)).Post("/v1/lean/kanban-rules", a.createRule)
 	r.With(read).Get("/v1/lean/kanban-rules", a.listRules)
 	r.With(read).Get("/v1/lean/kanban-rules/{id}", a.getRule)
@@ -96,7 +101,8 @@ func (a *API) ready(w http.ResponseWriter, r *http.Request) {
 
 // fail maps domain errors to problems and writes the result. Malformed input
 // is 400; a card or job move, capacity or settlement rule the card, job or rule
-// state refuses is 409 (BR-24.6, BR-24.7, BR-24.9); a flow that is not connected (FR-24.8) or a
+// state refuses is 409 (BR-24.6, BR-24.7, BR-24.9: LEAN-0003 lists the open
+// cards); a flow that is not connected (FR-24.8) or a
 // service job without a purchase agreement (FR-24.20, LEAN-0005) is 422.
 func fail(w http.ResponseWriter, r *http.Request, err error) {
 	var de *domain.Error

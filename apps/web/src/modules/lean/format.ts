@@ -81,3 +81,27 @@ export const REPLENISHMENT_LABELS: Record<Replenishment, string> = {
   scheduled: "Scheduled",
   event: "Event",
 };
+
+/** A period amount as the service accepts it: zero or more, up to 14 integer digits and 6 decimals. */
+export const AMOUNT = /^\d{1,14}(\.\d{1,6})?$/;
+
+/** A three-letter ISO 4217 currency code. */
+export const CURRENCY = /^[A-Z]{3}$/;
+
+function scaled(value: string): bigint {
+  const [whole, fraction = ""] = value.split(".");
+  return BigInt(`${whole}${fraction.padEnd(6, "0")}`);
+}
+
+/**
+ * Material + conversion − output (BR-24.9), computed exactly on decimal
+ * strings (no floating point); null while an amount is not valid.
+ */
+export function variance(material: string, conversion: string, output: string): string | null {
+  if (![material, conversion, output].every((v) => AMOUNT.test(v))) return null;
+  const v = scaled(material) + scaled(conversion) - scaled(output);
+  const negative = v < 0n;
+  const digits = (negative ? -v : v).toString().padStart(7, "0");
+  const text = `${digits.slice(0, -6)}.${digits.slice(-6)}`.replace(/0+$/, "").replace(/\.$/, "");
+  return negative ? `-${text}` : text;
+}

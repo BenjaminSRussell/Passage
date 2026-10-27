@@ -1,12 +1,13 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
 import { loadModules } from "../registry";
-import type { Board, Flow, JobBoard, JobState, Kanban, KanbanJob, KanbanState, Rule } from "./api/client";
+import type { Board, CostingPeriod, Flow, JobBoard, JobState, Kanban, KanbanJob, KanbanState, Rule } from "./api/client";
 import { REFRESH_MS } from "./BoardPage";
+import { validatePeriod } from "./CostingPage";
 import { validateFlow } from "./FlowPages";
-import { nextState, overdue } from "./format";
+import { nextState, overdue, variance } from "./format";
 import lean from "./module";
 import { validateRule } from "./RulePages";
 import { validateCompletion, workCells } from "./WorkCellBoardPage";
@@ -153,7 +154,7 @@ describe("lean module", () => {
 
   it("links every area from the overview", () => {
     const { container } = renderAt("/lean");
-    expect(within(screen.getByRole("list", { name: "Lean manufacturing areas" })).getAllByRole("link")).toHaveLength(5);
+    expect(within(screen.getByRole("list", { name: "Lean manufacturing areas" })).getAllByRole("link")).toHaveLength(6);
     expect(pageViolations(container)).toEqual([]);
   });
 
@@ -694,3 +695,161 @@ describe("slice 4: kanban jobs", () => {
     expect(await screen.findByText("kanban not found (LEAN-0103)")).toBeInTheDocument();
   });
 });
+
+describe("slice 5: flow costing", () => {
+  const P1 = "e0000000-0000-4000-8000-000000000001";
+  const P2 = "e0000000-0000-4000-8000-000000000002";
+  const periodsPath = `/api/v1/lean/flows/${FLOW}/costing-periods`;
+  const open: CostingPeriod = {
+    id: P1,
+    flowId: FLOW,
+    periodStart: "2026-09-01",
+    periodEnd: "2026-09-30",
+    currency: "USD",
+    status: "open",
+    materialCost: null,
+    conversionCost: null,
+    outputValue: null,
+    variance: null,
+    kanbans: null,
+    journalEntryId: null,
+    settledAt: null,
+    settledBy: null,
+    version: 1,
+    createdAt: "2026-10-01T08:00:00Z",
+    updatedAt: "2026-10-01T08:00:00Z",
+  };
+  const settled: CostingPeriod = {
+    ...open,
+    id: P2,
+    periodStart: "2026-08-01",
+    periodEnd: "2026-08-31",
+    status: "settled",
+    materialCost: "900.10",
+    conversionCost: "300.00",
+    outputValue: "1150.25",
+    variance: "49.85",
+    kanbans: 10,
+    settledAt: "2026-09-02T09:00:00Z",
+    settledBy: "cost-1",
+    version: 2,
+  };
+  const flowList = () => json(200, { items: [{ ...flow, status: "active", activities: undefined }] });
+
+  it("computes the variance exactly and checks a period before opening it", () => {
+    expect(variance("900.10", "300", "1150.25")).toBe("49.85");
+    expect(variance("0.1", "0.2", "0.3")).toBe("0");
+    expect(variance("100", "50", "200.005")).toBe("-50.005");
+    expect(variance("1", "-1", "0")).toBeNull();
+    expect(validatePeriod({ periodStart: "2026-09-30", periodEnd: "2026-09-01", currency: "USD" }).periodEnd).toBe("The last day cannot be before the first day.");
+    expect(validatePeriod({ periodStart: "", periodEnd: "2026-09-01", currency: "us" })).toMatchObject({ periodStart: expect.any(String), currency: expect.any(String) });
+    expect(validatePeriod({ periodStart: "2026-09-01", periodEnd: "2026-09-30", currency: "EUR" })).toEqual({});
+  });
+
+  it("asks for a flow, then lists its periods and shows a settled one", async () => {
+    handler = (url) => {
+      if (url.pathname === "/api/v1/lean/flows") return flowList();
+      if (url.pathname === periodsPath) return json(200, { items: [open, settled] });
+      return undefined;
+    };
+    const { container } = renderAt("/lean/costing");
+    expect(await screen.findByText("Choose a production flow")).toBeInTheDocument();
+    await screen.findByRole("option", { name: "Sauce line" });
+    fireEvent.change(screen.getByLabelText("Production flow"), { target: { value: FLOW } });
+    const table = await screen.findByRole("table", { name: "Costing periods" });
+    expect(within(table).getByText("49.85 USD")).toBeInTheDocument();
+    expect(within(table).getByText("10")).toBeInTheDocument();
+    expect(pageViolations(container)).toEqual([]);
+    fireEvent.click(within(table).getByRole("button", { name: "2026-08-01 to 2026-08-31" }));
+    expect(screen.getByRole("list", { name: "Settlement" })).toHaveTextContent("Variance 49.85 USD");
+    expect(screen.getByText(/journal entry pending the ledger integration/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Settle period" })).toBeNull();
+  });
+
+  it("shows the empty and failed period lists", async () => {
+    let fail = false;
+    handler = (url) => {
+      if (url.pathname === "/api/v1/lean/flows") return flowList();
+      if (url.pathname === periodsPath) return fail ? json(404, { code: "LEAN-0101", detail: "production flow not found" }) : json(200, { items: [] });
+      return undefined;
+    };
+    renderAt(`/lean/costing?flowId=${FLOW}`);
+    expect(await screen.findByText("No costing periods yet")).toBeInTheDocument();
+    fail = true;
+    cleanupAndRender(`/lean/costing?flowId=${FLOW}`);
+    expect(await screen.findByRole("alert")).toHaveTextContent("production flow not found (LEAN-0101)");
+    fail = false;
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("No costing periods yet")).toBeInTheDocument();
+  });
+
+  it("opens a period with a key and checks the dates first", async () => {
+    let periods: CostingPeriod[] = [];
+    handler = (url, init) => {
+      if (url.pathname === "/api/v1/lean/flows") return flowList();
+      if (url.pathname === periodsPath && init.method === "POST") {
+        periods = [open];
+        return json(201, open);
+      }
+      if (url.pathname === periodsPath) return json(200, { items: periods });
+      return undefined;
+    };
+    renderAt(`/lean/costing?flowId=${FLOW}`);
+    await screen.findByText("No costing periods yet");
+    fireEvent.change(screen.getByLabelText("First day"), { target: { value: "2026-09-30" } });
+    fireEvent.change(screen.getByLabelText("Last day"), { target: { value: "2026-09-01" } });
+    fireEvent.click(screen.getByRole("button", { name: "Open period" }));
+    expect(await screen.findByText("The last day cannot be before the first day.")).toBeInTheDocument();
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+    fireEvent.change(screen.getByLabelText("First day"), { target: { value: "2026-09-01" } });
+    fireEvent.change(screen.getByLabelText("Last day"), { target: { value: "2026-09-30" } });
+    fireEvent.click(screen.getByRole("button", { name: "Open period" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("Opened 2026-09-01 to 2026-09-30.");
+    const post = calls.find((c) => c.method === "POST")!;
+    expect(header(post, "Idempotency-Key")).toBeTruthy();
+    expect(post.body).toEqual({ periodStart: "2026-09-01", periodEnd: "2026-09-30", currency: "USD" });
+    expect(await screen.findByRole("button", { name: "2026-09-01 to 2026-09-30" })).toBeInTheDocument();
+  });
+
+  it("settles a period with its version, shows LEAN-0003 and then the variance (BR-24.9, AC-24.8)", async () => {
+    let refuse = true;
+    let periods: CostingPeriod[] = [open];
+    handler = (url, init) => {
+      if (url.pathname === "/api/v1/lean/flows") return flowList();
+      if (url.pathname === `${periodsPath}/${P1}:settle` && init.method === "POST") {
+        if (refuse) return json(409, { code: "LEAN-0003", detail: "period cannot be settled: 1 kanbans open (MIX-A-0002)" });
+        const done = { ...settled, id: P1, periodStart: "2026-09-01", periodEnd: "2026-09-30" };
+        periods = [done];
+        return json(200, done);
+      }
+      if (url.pathname === periodsPath) return json(200, { items: periods });
+      return undefined;
+    };
+    const { container } = renderAt(`/lean/costing?flowId=${FLOW}`);
+    fireEvent.click(await screen.findByRole("button", { name: "2026-09-01 to 2026-09-30" }));
+    fireEvent.change(screen.getByLabelText("Material cost"), { target: { value: "900.10" } });
+    fireEvent.change(screen.getByLabelText("Conversion cost"), { target: { value: "300" } });
+    fireEvent.click(screen.getByRole("button", { name: "Settle period" }));
+    expect(await screen.findByText("Enter an amount of zero or more in USD.")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Output value"), { target: { value: "1150.25" } });
+    expect(screen.getByText("Variance 49.85 USD")).toBeInTheDocument();
+    expect(pageViolations(container)).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Settle period" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Cards with jobs in this period are still open");
+    expect(alert).toHaveTextContent("1 kanbans open (MIX-A-0002) (LEAN-0003)");
+    const first = calls.filter((c) => c.method === "POST").at(-1)!;
+    expect(first.body).toEqual({ version: 1, materialCost: "900.10", conversionCost: "300", outputValue: "1150.25" });
+    refuse = false;
+    fireEvent.click(screen.getByRole("button", { name: "Settle period" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("Settled 2026-09-01 to 2026-09-30 with a variance of 49.85 USD.");
+    const second = calls.filter((c) => c.method === "POST").at(-1)!;
+    expect(header(second, "Idempotency-Key")).not.toBe(header(first, "Idempotency-Key"));
+    expect(await screen.findByRole("list", { name: "Settlement" })).toHaveTextContent("Cards 10");
+  });
+});
+
+function cleanupAndRender(path: string) {
+  cleanup();
+  return renderAt(path);
+}

@@ -378,6 +378,9 @@ export function FlowDetailPage() {
             <Link className={buttonClassName("secondary")} to={`/lean/board?flowId=${flow.id}`}>
               Board
             </Link>
+            <Link className={buttonClassName("secondary")} to={`/lean/costing?flowId=${flow.id}`}>
+              Costing periods
+            </Link>
           </>
         }
       />

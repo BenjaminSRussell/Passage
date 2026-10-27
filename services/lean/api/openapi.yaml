@@ -1,11 +1,11 @@
 openapi: 3.1.0
 info:
   title: Passage Lean Manufacturing
-  version: 0.3.0
+  version: 0.4.0
   description: >
-    Lean manufacturing (wave 24, PSG-24 slices 1 to 4): production flows with their
+    Lean manufacturing (wave 24, PSG-24 slices 1 to 5): production flows with their
     activities, kanban rules, kanban cards with one job per flow activity, the
-    kanban board and the work-cell board of jobs. Routes match the
+    kanban board, the work-cell board of jobs and flow costing periods. Routes match the
     handlers in internal/api (checked by internal/api/openapi_test.go). Errors are
     RFC 9457 problem details (application/problem+json) with a stable `code`; see
     README.md. The gateway routes /api/v1/lean/* to this service.
@@ -103,6 +103,86 @@ paths:
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '422':
           description: LEAN-0004 when a process activity has no output location; idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/lean/flows/{id}/costing-periods:
+    post:
+      operationId: openCostingPeriod
+      summary: Open a costing period of a flow (FR-24.12)
+      x-passage-duty: lean.flow.settle
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PeriodRequest' } } }
+      responses:
+        '201':
+          description: 'The open period. A replay returns 200 with Idempotent-Replayed: true.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/CostingPeriod' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404':
+          description: LEAN-0101 when the flow does not exist.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: LEAN-0109 when the dates overlap another period of the flow.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listCostingPeriods
+      summary: A flow's costing periods, latest first (FR-24.12, PRD 4.24.14 flow costing period)
+      x-passage-duty: lean.read
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: The periods.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/CostingPeriod' } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404':
+          description: LEAN-0101 when the flow does not exist.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/lean/flows/{id}/costing-periods/{periodId}:settle:
+    post:
+      operationId: settleCostingPeriod
+      summary: Settle a period after its last day with variance = material + conversion − output (BR-24.9, AC-24.8)
+      x-passage-duty: lean.flow.settle
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - { name: periodId, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/SettleRequest' } } }
+      responses:
+        '200':
+          description: 'The settled period with version + 1. A replay returns the first answer with Idempotent-Replayed: true. Writes dev.passage.lean.flowperiod.settled.v1.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/CostingPeriod' } } }
+        '400':
+          description: COM-0001, including an amount with more decimals than the period currency's minor unit.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '404':
+          description: LEAN-0110 when the period does not exist on this flow.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: >-
+            LEAN-0003 (FLOW_PERIOD_OPEN_KANBANS) listing the cards with jobs in the period that are not
+            completed or emptied; LEAN-0104 when the version is stale; LEAN-0111 when the period is already
+            settled; LEAN-0112 when the period's last day has not passed (UTC).
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: idempotency_key_reuse.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/lean/kanban-rules:
@@ -708,6 +788,45 @@ components:
               jobs: { type: array, items: { $ref: '#/components/schemas/KanbanJob' } }
         truncated: { type: boolean }
         takt: { $ref: '#/components/schemas/Takt' }
+    PeriodRequest:
+      type: object
+      required: [periodStart, periodEnd, currency]
+      properties:
+        periodStart: { type: string, format: date, description: First day, inclusive (UTC). }
+        periodEnd: { type: string, format: date, description: Last day, inclusive; not before periodStart. }
+        currency: { type: string, pattern: '^[A-Z]{3}$', description: ISO 4217 code of the period's amounts. }
+    SettleRequest:
+      type: object
+      required: [version, materialCost, conversionCost, outputValue]
+      description: >-
+        The period's amounts, zero or more, with no more decimals than the currency's minor unit. The
+        cards checked by BR-24.9 are found by the service, not supplied.
+      properties:
+        version: { type: integer, minimum: 1, description: The period version the caller read (optimistic concurrency). }
+        materialCost: { $ref: '#/components/schemas/Decimal' }
+        conversionCost: { $ref: '#/components/schemas/Decimal' }
+        outputValue: { $ref: '#/components/schemas/Decimal' }
+    CostingPeriod:
+      type: object
+      required: [id, flowId, periodStart, periodEnd, currency, status, version]
+      properties:
+        id: { type: string, format: uuid }
+        flowId: { type: string, format: uuid }
+        periodStart: { type: string, format: date }
+        periodEnd: { type: string, format: date }
+        currency: { type: string }
+        status: { type: string, enum: [open, settled] }
+        materialCost: { type: [string, 'null'], description: Decimal at the currency's minor unit; null while open. }
+        conversionCost: { type: [string, 'null'], description: Decimal at the currency's minor unit; null while open. }
+        outputValue: { type: [string, 'null'], description: Decimal at the currency's minor unit; null while open. }
+        variance: { type: [string, 'null'], description: 'materialCost + conversionCost − outputValue; negative when favourable; null while open.' }
+        kanbans: { type: [integer, 'null'], description: Cards with jobs in the period at settlement. }
+        journalEntryId: { type: [string, 'null'], format: uuid, description: Null until the ledger integration posts the journal. }
+        settledAt: { type: [string, 'null'], format: date-time }
+        settledBy: { type: [string, 'null'] }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
     Problem:
       type: object
       description: RFC 9457 problem details.

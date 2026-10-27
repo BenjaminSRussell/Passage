@@ -2,7 +2,8 @@
 // through its outbox. Types follow the kernel rule
 // dev.passage.<context>.<entity>.<verb>.v<n>. PRD 4.24.5 names the card
 // transition passage.lean.kanban.state-changed.v1; the kernel rule allows no
-// hyphen, so the verb is "statechanged".
+// hyphen, so the verb is "statechanged"; for the same reason the PRD's
+// passage.lean.flow-period.settled.v1 is dev.passage.lean.flowperiod.settled.v1.
 package events
 
 // Source is the CloudEvents source of every event this service writes.
@@ -14,11 +15,12 @@ const (
 	KanbanCreated      = "dev.passage.lean.kanban.created.v1"
 	KanbanStateChanged = "dev.passage.lean.kanban.statechanged.v1"
 	JobStateChanged    = "dev.passage.lean.kanbanjob.statechanged.v1"
+	FlowPeriodSettled  = "dev.passage.lean.flowperiod.settled.v1"
 )
 
 // All lists every event type this service publishes.
 func All() []string {
-	return []string{FlowActivated, KanbanCreated, KanbanStateChanged, JobStateChanged}
+	return []string{FlowActivated, KanbanCreated, KanbanStateChanged, JobStateChanged, FlowPeriodSettled}
 }
 
 // FlowActivatedData is the payload of FlowActivated.
@@ -88,4 +90,24 @@ type JobStateChangedData struct {
 	ScrapQty           *string `json:"scrapQty,omitempty"`
 	HandlingUnits      *int    `json:"handlingUnits,omitempty"`
 	Version            int     `json:"version"`
+}
+
+// FlowPeriodSettledData is the payload of FlowPeriodSettled (PRD 4.24.5:
+// flowId, period, materialCost, conversionCost, outputValue, variance,
+// journalEntryId). Amounts are decimal strings at the currency's minor unit;
+// variance = materialCost + conversionCost − outputValue (BR-24.9). The ledger
+// (wave 13) posts the variance to the flow's posting profile and the journal
+// entry; until then JournalEntryID is null.
+type FlowPeriodSettledData struct {
+	FlowID         string  `json:"flowId"`
+	PeriodID       string  `json:"periodId"`
+	PeriodStart    string  `json:"periodStart"`
+	PeriodEnd      string  `json:"periodEnd"`
+	Currency       string  `json:"currency"`
+	MaterialCost   string  `json:"materialCost"`
+	ConversionCost string  `json:"conversionCost"`
+	OutputValue    string  `json:"outputValue"`
+	Variance       string  `json:"variance"`
+	Kanbans        int     `json:"kanbans"`
+	JournalEntryID *string `json:"journalEntryId"`
 }

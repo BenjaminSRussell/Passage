@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import type { PassageModule } from "../registry";
 import { BoardPage } from "./BoardPage";
+import { CostingPage } from "./CostingPage";
 import { FlowDetailPage, FlowsPage, NewFlowPage } from "./FlowPages";
 import { KanbanPage } from "./KanbanPage";
 import { LeanHome } from "./pages";
@@ -11,7 +12,7 @@ import { WorkCellBoardPage } from "./WorkCellBoardPage";
 const lean: PassageModule = {
   id: "lean",
   title: "Lean manufacturing",
-  description: "Production flows, kanban rules, the kanban board, the work-cell board of kanban jobs and lean subcontracting.",
+  description: "Production flows, kanban rules, the kanban board, the work-cell board of kanban jobs, flow costing and lean subcontracting.",
   routes: [
     { path: "/lean", element: createElement(LeanHome), handle: { title: "Lean manufacturing" } },
     { path: "/lean/board", element: createElement(BoardPage), handle: { title: "Kanban board" } },
@@ -23,6 +24,7 @@ const lean: PassageModule = {
     { path: "/lean/flows", element: createElement(FlowsPage), handle: { title: "Production flows" } },
     { path: "/lean/flows/new", element: createElement(NewFlowPage), handle: { title: "New production flow" } },
     { path: "/lean/flows/:id", element: createElement(FlowDetailPage), handle: { title: "Production flow" } },
+    { path: "/lean/costing", element: createElement(CostingPage), handle: { title: "Flow costing" } },
     { path: "/lean/subcontracting", element: createElement(SubcontractPage), handle: { title: "Lean subcontracting" } },
   ],
   nav: [
@@ -31,6 +33,7 @@ const lean: PassageModule = {
     { label: "Work-cell board", to: "/lean/work-cell", duty: "lean.kanban.work" },
     { label: "Kanban rules", to: "/lean/rules", duty: "lean.read" },
     { label: "Production flows", to: "/lean/flows", duty: "lean.read" },
+    { label: "Flow costing", to: "/lean/costing", duty: "lean.read" },
     { label: "Subcontracting", to: "/lean/subcontracting", duty: "lean.flow.write" },
   ],
 };

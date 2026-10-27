@@ -389,3 +389,59 @@ export interface PoLine {
 export function previewSubcontract(req: SubcontractRequest): Promise<{ mode: SubcontractMode; lines: PoLine[] }> {
   return post<{ mode: SubcontractMode; lines: PoLine[] }>("/subcontracting:preview", req);
 }
+
+// Flow costing (FR-24.12, BR-24.9): periods of a production flow, opened for a
+// date range and settled after their last day with variance = material +
+// conversion − output. Amounts are decimal strings at the currency's minor unit.
+
+export type PeriodStatus = "open" | "settled";
+
+export interface CostingPeriod {
+  id: string;
+  flowId: string;
+  periodStart: string;
+  periodEnd: string;
+  currency: string;
+  status: PeriodStatus;
+  /** Null while the period is open. */
+  materialCost: string | null;
+  conversionCost: string | null;
+  outputValue: string | null;
+  variance: string | null;
+  /** Cards with jobs in the period at settlement. */
+  kanbans: number | null;
+  /** Null until the ledger integration posts the journal. */
+  journalEntryId: string | null;
+  settledAt: string | null;
+  settledBy: string | null;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OpenPeriodInput {
+  periodStart: string;
+  periodEnd: string;
+  currency: string;
+}
+
+export interface SettlePeriodInput {
+  version: number;
+  materialCost: string;
+  conversionCost: string;
+  outputValue: string;
+}
+
+export function listPeriods(flowId: string, signal?: AbortSignal): Promise<CostingPeriod[]> {
+  return items<CostingPeriod>(`/flows/${encodeURIComponent(flowId)}/costing-periods${query({ limit: 200 })}`, signal);
+}
+
+/** Opens a costing period; reuse one key per form so a retried submit cannot open two. */
+export function openPeriod(flowId: string, input: OpenPeriodInput, key: string = newKey()): Promise<CostingPeriod> {
+  return post<CostingPeriod>(`/flows/${encodeURIComponent(flowId)}/costing-periods`, input, key);
+}
+
+/** Settles a period (BR-24.9); refused with LEAN-0003 while a card with jobs in it is open. */
+export function settlePeriod(flowId: string, periodId: string, input: SettlePeriodInput, key: string = newKey()): Promise<CostingPeriod> {
+  return post<CostingPeriod>(`/flows/${encodeURIComponent(flowId)}/costing-periods/${encodeURIComponent(periodId)}:settle`, input, key);
+}

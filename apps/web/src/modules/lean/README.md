@@ -1,4 +1,4 @@
-# lean web module (PSG-24 slices 1, 2 and 4)
+# lean web module (PSG-24 slices 1, 2, 4 and 5)
 
 Front end for `services/lean`. Discovered by the shell through `module.ts`. Pages use the
 `shell/ui` primitives and `pages.module.css` (tokens only), as in `docs/design-system.md`.
@@ -16,7 +16,8 @@ Front end for `services/lean`. Discovered by the shell through `module.ts`. Page
 | `/lean/rules/:id` | Rule detail: facts, its cards, generate kanbans (fixed: count; event: demand and its reference, AC-24.6) | `GET /kanban-rules/{id}`, `GET /board?ruleId`, `POST /kanbans:generate` | `lean.read` / `lean.kanban.write` |
 | `/lean/flows` | Production flow list with status filter | `GET /api/v1/lean/flows` | `lean.read` |
 | `/lean/flows/new` | Flow designer: activities with kind, cycle time, output location and predecessors (FR-24.8) | `POST /api/v1/lean/flows` | `lean.flow.write` |
-| `/lean/flows/:id` | Flow detail: activities (missing outputs flagged), activate from a date; LEAN-0004 shown when not connected | `GET /flows/{id}`, `POST /flows/{id}:activate` | `lean.read` / `lean.flow.write` |
+| `/lean/flows/:id` | Flow detail: activities (missing outputs flagged), activate from a date; LEAN-0004 shown when not connected; links to its rules, board and costing periods | `GET /flows/{id}`, `POST /flows/{id}:activate` | `lean.read` / `lean.flow.write` |
+| `/lean/costing` | Flow costing (FR-24.12): choose a flow (or arrive from its detail page with `?flowId`); its periods with material, conversion, output, variance and card count; open a period (first and last day, currency, checked before sending); select an open period to settle it with the three amounts and a live exact variance preview, sending the period version; LEAN-0003 names the open cards and LEAN-0112 says the period has not ended; select a settled period to see its settlement and that the journal entry waits for the ledger | `GET /flows`, `GET /flows/{id}/costing-periods`, `POST /flows/{id}/costing-periods`, `POST /flows/{id}/costing-periods/{p}:settle` | `lean.read` / `lean.flow.settle` |
 | `/lean/subcontracting` | Lean subcontracting preview: mode, purchase agreements and completed service jobs; the PO lines with price, amount and jobs, LEAN-0005 when no agreement covers a job (FR-24.20, BR-24.16) | `POST /api/v1/lean/subcontracting:preview` | `lean.flow.write` |
 
 Every command sends an `Idempotency-Key`; moves send the card version the board read, and job
@@ -37,7 +38,10 @@ with version, the refused move (AC-24.7), the 30-second refresh, takt vs cycle (
 the subcontracting preview (AC-24.17, LEAN-0005), and for slice 4 the work-cell picker, job
 start and completion with version and the completion checks, the refused start (AC-24.7), the
 empty and failed work-cell boards, the card board's hand-off of cards with jobs, and the kanban
-detail with and without jobs, plus the in-repo WCAG checks.
+detail with and without jobs, and for slice 5 the exact variance and period checks, the flow
+picker, the period list (settled facts, empty and failed states), opening a period with its
+key and settling one with its version through the LEAN-0003 refusal (BR-24.9, AC-24.8), plus
+the in-repo WCAG checks.
 
 ## Needs (for the shell owner, wave 5)
 
