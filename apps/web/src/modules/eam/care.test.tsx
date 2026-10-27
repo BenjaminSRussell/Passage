@@ -1,3 +1,4 @@
+import { findStatus, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -195,7 +196,7 @@ describe("asset detail: lifecycle, criticality and warranties", () => {
     );
     const { container } = renderAt(`/eam/assets/${PUMP}`);
     fireEvent.click(await screen.findByRole("button", { name: "Retire asset" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Asset retired.");
+    expect(await findStatus()).toHaveTextContent("Asset retired.");
     const [call] = sent("POST", "/lifecycle");
     expect(call.body).toEqual({ to: "INACTIVE" });
     expect(header(call, "If-Match")).toBe('"2"');
@@ -231,7 +232,7 @@ describe("asset detail: lifecycle, criticality and warranties", () => {
     fireEvent.change(within(form).getByLabelText("Likelihood of failure"), { target: { value: "4" } });
     expect(within(form).getByText("Risk score 20, criticality 5.")).toBeInTheDocument();
     fireEvent.click(within(form).getByRole("button", { name: "Record assessment" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Assessment version 1 recorded: risk 20, criticality 5.");
+    expect(await findStatus()).toHaveTextContent("Assessment version 1 recorded: risk 20, criticality 5.");
     const [call] = sent("POST", "/criticality");
     expect(call.body).toEqual({ consequence: { safety: 3, environment: 1, production: 5, quality: 1, cost: 2 }, likelihood: 4 });
     expect(header(call, "Idempotency-Key")).toBeTruthy();
@@ -259,7 +260,7 @@ describe("asset detail: lifecycle, criticality and warranties", () => {
       return undefined;
     });
     renderAt(`/eam/assets/${PUMP}`);
-    const table = await screen.findByRole("table", { name: "Warranties" });
+    const table = await findTable({ name: "Warranties" });
     expect(await within(table).findByText("2027-11-01")).toBeInTheDocument();
     expect(within(table).getByText("Parts")).toBeInTheDocument();
     const form = screen.getByRole("form", { name: "Add warranty" });
@@ -270,7 +271,7 @@ describe("asset detail: lifecycle, criticality and warranties", () => {
     fireEvent.change(within(form).getByLabelText("Vendor party id"), { target: { value: VENDOR } });
     fireEvent.change(within(form).getByLabelText("Start date"), { target: { value: "2025-11-01" } });
     fireEvent.click(within(form).getByRole("button", { name: "Add warranty" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Warranty OEM recorded.");
+    expect(await findStatus()).toHaveTextContent("Warranty OEM recorded.");
     expect(sent("POST", "/warranties")[0].body).toEqual({
       warrantyType: "OEM",
       vendorPartyId: VENDOR,
@@ -307,7 +308,7 @@ describe("work order detail: fault and downtime", () => {
     fireEvent.change(within(form).getByLabelText("Symptom"), { target: { value: "LEAK" } });
     expect(within(within(form).getByLabelText("Area")).getAllByRole("option").map((o) => o.textContent)).toEqual(["Seal"]);
     fireEvent.click(within(form).getByRole("button", { name: "Register fault" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Fault registered.");
+    expect(await findStatus()).toHaveTextContent("Fault registered.");
     const [call] = sent("POST", "/faults");
     expect(call.body).toEqual({ symptom: "LEAK", area: "SEAL", type: "WEAR", cause: "FATIGUE", remedy: "REPLACE" });
     expect(header(call, "Idempotency-Key")).toBeTruthy();
@@ -350,7 +351,7 @@ describe("work order detail: fault and downtime", () => {
     expect(await within(form).findByText("The stop must end at least one minute after it began.")).toBeInTheDocument();
     fireEvent.change(within(form).getByLabelText("Running again at (UTC)"), { target: { value: "2026-10-21T12:00" } });
     fireEvent.click(within(form).getByRole("button", { name: "Record downtime" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Downtime recorded.");
+    expect(await findStatus()).toHaveTextContent("Downtime recorded.");
     expect(sent("POST", "/downtime")[0].body).toEqual({ from: "2026-10-21T08:00:00.000Z", to: "2026-10-21T12:00:00.000Z" });
     expect(await within(screen.getByRole("table", { name: "Downtime windows" })).findByText(M12)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Complete" }));
@@ -368,10 +369,10 @@ describe("request triage", () => {
       return undefined;
     };
     const { container } = renderAt("/eam/requests");
-    const table = await screen.findByRole("table", { name: "Maintenance requests" });
+    const table = await findTable({ name: "Maintenance requests" });
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(within(table).getByRole("button", { name: "Defer" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Request deferred: it is now deferred.");
+    expect(await findStatus()).toHaveTextContent("Request deferred: it is now deferred.");
     const [call] = sent("POST", "/triage");
     expect(call.body).toEqual({ action: "DEFER" });
     expect(header(call, "Idempotency-Key")).toBeTruthy();
@@ -380,7 +381,7 @@ describe("request triage", () => {
   it("offers triage and reject, not conversion, on a deferred request", async () => {
     handler = (url, init) => (isGet("/requests")(url, init) ? json(200, { items: [{ ...request, status: "DEFERRED", triageNote: "next shutdown" }] }) : undefined);
     renderAt("/eam/requests?status=DEFERRED");
-    const table = await screen.findByRole("table", { name: "Maintenance requests" });
+    const table = await findTable({ name: "Maintenance requests" });
     expect(within(table).getByText("next shutdown")).toBeInTheDocument();
     expect(within(table).getByRole("button", { name: "Triage" })).toBeInTheDocument();
     expect(within(table).getByRole("button", { name: "Reject" })).toBeInTheDocument();
@@ -394,7 +395,7 @@ describe("request triage", () => {
       return undefined;
     };
     renderAt("/eam/requests");
-    fireEvent.click(within(await screen.findByRole("table", { name: "Maintenance requests" })).getByRole("button", { name: "Reject" }));
+    fireEvent.click(within(await findTable({ name: "Maintenance requests" })).getByRole("button", { name: "Reject" }));
     expect(await screen.findByText("Could not update the request")).toBeInTheDocument();
     expect(screen.getByText(/\(EAM-REQ-001\)/)).toBeInTheDocument();
   });
@@ -408,7 +409,7 @@ describe("fault catalog designer", () => {
       return undefined;
     };
     const { container } = renderAt("/eam/fault-catalogs");
-    const table = await screen.findByRole("table", { name: "Fault catalogs" });
+    const table = await findTable({ name: "Fault catalogs" });
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(within(table).getByRole("button", { name: "PUMP" }));
     expect(await screen.findByText("Allowed combinations for PUMP (version 3)")).toBeInTheDocument();
@@ -449,7 +450,7 @@ describe("fault catalog designer", () => {
     fireEvent.change(within(form).getByLabelText("Remedies"), { target: { value: text.remedies } });
     fireEvent.change(within(form).getByLabelText("Allowed combinations"), { target: { value: text.combinations } });
     fireEvent.click(within(form).getByRole("button", { name: "Save catalog" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Catalog for PUMP saved as version 1.");
+    expect(await findStatus()).toHaveTextContent("Catalog for PUMP saved as version 1.");
     const [call] = sent("PUT", "/fault-catalogs/PUMP");
     expect(header(call, "If-Match")).toBe('"0"');
     expect((call.body as { allowedCombinations: unknown[] }).allowedCombinations).toEqual(catalog.allowedCombinations);
@@ -462,7 +463,7 @@ describe("fault catalog designer", () => {
       return undefined;
     };
     renderAt("/eam/fault-catalogs?type=PUMP");
-    const table = await screen.findByRole("table", { name: "Allowed combinations" });
+    const table = await findTable({ name: "Allowed combinations" });
     expect(within(table).getByText("LEAK · Leak")).toBeInTheDocument();
     const form = screen.getByRole("form", { name: "Fault catalog" });
     await waitFor(() => expect(within(form).getByLabelText("Symptoms")).toHaveValue("NOISE Abnormal noise\nLEAK Leak"));

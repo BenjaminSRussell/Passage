@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -177,7 +178,7 @@ describe("cost roll-up page", () => {
     expect(pageViolations(container)).toEqual([]);
 
     fireEvent.click(screen.getByRole("button", { name: "Roll item" }));
-    const table = await screen.findByRole("table", { name: "Cost component split of FG-100" });
+    const table = await findTable({ name: "Cost component split of FG-100" });
     expect(calls).toHaveLength(1);
     expect(calls[0].method).toBe("POST");
     expect(calls[0].init.credentials).toBe("same-origin");
@@ -242,12 +243,12 @@ describe("cost roll-up page", () => {
     expect(calls[0].body).not.toHaveProperty("itemId");
 
     fireEvent.click(within(results).getByRole("button", { name: "FG-100" }));
-    const split = await screen.findByRole("table", { name: "Cost component split of FG-100" });
+    const split = await findTable({ name: "Cost component split of FG-100" });
     expect(within(split).getByRole("row", { name: /^IND-MAT/ })).toHaveTextContent("2.12");
     expect(within(split).getByRole("row", { name: /^DL/ })).toHaveTextContent("54.00");
 
     fireEvent.click(within(results).getByRole("button", { name: "LOOP" }));
-    const diagnostics = await screen.findByRole("table", { name: "Diagnostics of LOOP" });
+    const diagnostics = await findTable({ name: "Diagnostics of LOOP" });
     expect(diagnostics).toHaveTextContent("cycle detected: LOOP -> LOOP");
   });
 });
@@ -331,7 +332,7 @@ describe("activation preview page", () => {
     const { container } = renderAt("/productcost/activation-preview");
     expect(screen.getByRole("heading", { name: "No preview yet" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Preview revaluation" }));
-    const journal = await screen.findByRole("table", { name: "Revaluation journal" });
+    const journal = await findTable({ name: "Revaluation journal" });
     expect(calls[0].body).toEqual({
       currency: "USD",
       lines: [{ itemId: "RM-301", siteId: "PLANT-1", qty: "1000", oldStd: "10.00", newStd: "10.50" }],
@@ -419,7 +420,7 @@ describe("cost roll-up page explosion modes", () => {
     renderAt("/productcost/roll");
     fireEvent.change(screen.getByLabelText("Explosion mode"), { target: { value: "MakeToOrder" } });
     fireEvent.click(screen.getByRole("button", { name: "Mass roll" }));
-    await screen.findByRole("table", { name: "Roll results" });
+    await findTable({ name: "Roll results" });
     expect((calls[0].body as { options: unknown }).options).toEqual({ mode: "MakeToOrder", fallbackToActive: false, view: "Legal" });
   });
 });
@@ -536,7 +537,7 @@ describe("sales order estimate page", () => {
     });
     renderAt("/productcost/sales-order-estimate");
     fireEvent.click(screen.getByRole("button", { name: "Cost the line" }));
-    const diagnostics = await screen.findByRole("table", { name: "Diagnostics of CFG-LINE" });
+    const diagnostics = await findTable({ name: "Diagnostics of CFG-LINE" });
     expect(diagnostics).toHaveTextContent("CST-0702");
     expect(screen.getByRole("list", { name: "Line margin" })).toHaveTextContent("Margin —");
     expect(screen.queryByRole("table", { name: "Cost by component of CFG-LINE" })).not.toBeInTheDocument();
@@ -578,7 +579,7 @@ describe("estimate comparison page", () => {
     expect(screen.getByRole("list", { name: "Comparison" })).toHaveTextContent("Changed 1");
     expect(within(table).getByRole("row", { name: /NEW-1/ })).toHaveTextContent("Candidate only");
     fireEvent.click(within(table).getByRole("button", { name: "FG-100" }));
-    const change = await screen.findByRole("table", { name: "Change by component of FG-100" });
+    const change = await findTable({ name: "Change by component of FG-100" });
     expect(within(change).getByRole("row", { name: /^DM/ })).toHaveTextContent("3.00");
     expect(pageViolations(container)).toEqual([]);
   });

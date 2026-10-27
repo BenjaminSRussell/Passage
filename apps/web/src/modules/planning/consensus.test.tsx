@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -142,7 +143,7 @@ describe("Increase messages (FR-22.7)", () => {
     const fetchMock = vi.fn(async (url: string) => json({ items: url.includes("action=increase") ? [increase] : [increase, shortage] }));
     vi.stubGlobal("fetch", fetchMock);
     renderAt("/planning/messages");
-    const table = await screen.findByRole("table", { name: "Messages" });
+    const table = await findTable({ name: "Messages" });
     await waitFor(() => expect(within(table).getByText("Increase")).toBeInTheDocument());
     fireEvent.change(screen.getByLabelText("Action"), { target: { value: "increase" } });
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url.includes("action=increase"))).toBe(true));

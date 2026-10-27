@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -155,7 +156,7 @@ describe("benefit plans list", () => {
   it("lists plans with their window and options, opens one, and passes the page checks", async () => {
     handler = (url) => (url.pathname === "/api/v1/hr/benefits/plans" ? json(200, { items: [medical] }) : undefined);
     const { container } = renderAt("/hr/benefits/plans");
-    const table = await screen.findByRole("table", { name: "Benefit plans" });
+    const table = await findTable({ name: "Benefit plans" });
     expect(within(table).getByText("MED-PPO")).toBeInTheDocument();
     expect(within(table).getByText("2026-11-01 to 2026-11-30")).toBeInTheDocument();
     expect(within(table).getByText("Pre-tax")).toBeInTheDocument();
@@ -320,7 +321,7 @@ describe("benefit plan detail", () => {
     const form = screen.getByRole("form", { name: "Simulate eligibility" });
     fireEvent.change(within(form).getByLabelText("As of"), { target: { value: "2026-11-15" } });
     fireEvent.click(within(form).getByRole("button", { name: "Simulate" }));
-    const table = await screen.findByRole("table", { name: "Eligibility on 2026-11-15" });
+    const table = await findTable({ name: "Eligibility on 2026-11-15" });
     expect(gets(`/api/v1/hr/benefits/plans/${PLAN}/simulate`)[0].url.searchParams.get("asOf")).toBe("2026-11-15");
     expect(within(table).getByText("rule false")).toBeInTheDocument();
     expect(within(table).getByRole("link", { name: "WRK-1001" })).toHaveAttribute("href", `/hr/workers/${ADA}`);
@@ -380,7 +381,7 @@ describe("worker benefits card", () => {
   it("shows enrollments with their cost and life events with their window, and passes the page checks", async () => {
     fakeWorker();
     const { container } = renderAt(`/hr/workers/${ADA}`);
-    const enrollments = await screen.findByRole("table", { name: "Benefit enrollments" });
+    const enrollments = await findTable({ name: "Benefit enrollments" });
     expect(within(enrollments).getByText("48.10 USD per pay period")).toBeInTheDocument();
     expect(within(enrollments).getByText("Starts later")).toBeInTheDocument();
     expect(within(screen.getByRole("table", { name: "Life events" })).getByText("2027-01-09")).toBeInTheDocument();
@@ -462,7 +463,7 @@ describe("worker benefits card", () => {
         : undefined,
     );
     renderAt(`/hr/workers/${ADA}`);
-    const enrollments = await screen.findByRole("table", { name: "Benefit enrollments" });
+    const enrollments = await findTable({ name: "Benefit enrollments" });
     fireEvent.click(within(enrollments).getByRole("button", { name: "End MED-PPO coverage" }));
     const form = screen.getByRole("form", { name: "End MED-PPO coverage" });
     fireEvent.change(within(form).getByLabelText("Reason"), { target: { value: "TERMINATION" } });

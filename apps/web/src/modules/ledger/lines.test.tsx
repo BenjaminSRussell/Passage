@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { fetchJournalLines, type JournalLine } from "./api/client";
@@ -100,7 +101,7 @@ describe("Ledger transactions page", () => {
     fireEvent.change(screen.getByLabelText(/Dimension values/), { target: { value: "DEPT=D100" } });
     fireEvent.click(screen.getByRole("button", { name: "Show lines" }));
 
-    const table = await screen.findByRole("table", { name: "Ledger transactions" });
+    const table = await findTable({ name: "Ledger transactions" });
     await waitFor(() => expect(within(table).getByText("GL-000001")).toBeInTheDocument());
     const call = server.calls[0];
     expect(call.url.searchParams.get("ledger")).toBe(LEDGER);
@@ -123,7 +124,7 @@ describe("Ledger transactions page", () => {
       return url.searchParams.get("cursor") === "1.1" ? json(200, { items: [line(2)] }) : json(200, { items: [line(1)], nextCursor: "1.1" });
     };
     renderAt(`/ledger/transactions?ledger=${LEDGER}&voucher=GL-000001`);
-    const table = await screen.findByRole("table", { name: "Ledger transactions" });
+    const table = await findTable({ name: "Ledger transactions" });
     await waitFor(() => expect(within(table).getByText("GL-000001")).toBeInTheDocument());
     expect(server.calls[0].url.searchParams.get("voucher")).toBe("GL-000001");
     expect(screen.getByLabelText(/Voucher/)).toHaveValue("GL-000001");
@@ -146,7 +147,7 @@ describe("Ledger transactions page", () => {
     server.handler = () =>
       fail ? json(404, { code: "LEDGER_NOT_FOUND", detail: "ledger not found" }) : json(200, { items: [line(1)] });
     renderAt(`/ledger/transactions?ledger=${LEDGER}`);
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert.textContent).toContain("Could not load the ledger lines");
     expect(alert.textContent).toContain("ledger not found");
     fail = false;

@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -85,7 +86,7 @@ function bodyOf(fetchMock: ReturnType<typeof vi.fn>, method: string, fragment: s
 }
 
 function at(path: string) {
-  const route = (p: string, el: () => JSX.Element) => createElement(Route, { path: p, element: createElement(el) });
+  const route = (p: string, el: () => React.JSX.Element) => createElement(Route, { path: p, element: createElement(el) });
   return render(
     createElement(
       MemoryRouter,
@@ -114,10 +115,10 @@ describe("ValuationSetupPage", () => {
       "GET /api/v1/costing/valuation-categories": () => json(200, { items: [origin] }),
     });
     const { container } = at("/costing/valuation-setup");
-    const ledgers = await screen.findByRole("table", { name: "Valuation ledgers" });
+    const ledgers = await findTable({ name: "Valuation ledgers" });
     expect(await within(ledgers).findByText("USGAAP")).toBeInTheDocument();
     expect(within(ledgers).getByText("Primary")).toBeInTheDocument();
-    const categories = await screen.findByRole("table", { name: "Valuation categories" });
+    const categories = await findTable({ name: "Valuation categories" });
     expect(await within(categories).findByText("DOMESTIC → 1300, IMPORT → 1301")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
 
@@ -134,7 +135,7 @@ describe("ValuationSetupPage", () => {
       "GET /api/v1/costing/valuation-categories": () => json(200, { items: [] }),
     });
     at("/costing/valuation-setup");
-    expect(await screen.findByRole("alert")).toHaveTextContent("COM-0500");
+    expect(await findAlert()).toHaveTextContent("COM-0500");
     expect(await screen.findByText("No valuation categories yet")).toBeInTheDocument();
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
@@ -183,7 +184,7 @@ describe("CreateLedgerPage", () => {
     fireEvent.change(screen.getByLabelText("Code"), { target: { value: "TAX" } });
     fireEvent.click(screen.getByLabelText("Primary ledger"));
     fireEvent.click(screen.getByRole("button", { name: "Create ledger" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("CST-VLG-003");
+    expect(await findAlert()).toHaveTextContent("CST-VLG-003");
   });
 });
 
@@ -227,7 +228,7 @@ describe("AgingSnapshotsPage", () => {
       [`GET /api/v1/costing/aging/snapshots/${SNAP}`]: () => json(200, snapshot),
     });
     const { container } = at("/costing/aging/snapshots");
-    const table = await screen.findByRole("table", { name: "Aging snapshots" });
+    const table = await findTable({ name: "Aging snapshots" });
     expect(await within(table).findByText("800.00 EUR")).toBeInTheDocument();
     expect(within(table).getByText("Ties")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
@@ -303,7 +304,7 @@ describe("CreateSnapshotPage", () => {
     expect(await screen.findByText("Each bound must be larger than the one before it.")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Bucket bounds"), { target: { value: "30, 90" } });
     fireEvent.click(screen.getByRole("button", { name: "Store snapshot" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("lines[0].transactions[2].financialDate is after asOf");
+    expect(await findAlert()).toHaveTextContent("lines[0].transactions[2].financialDate is after asOf");
   });
 });
 
@@ -311,7 +312,7 @@ describe("SnapshotDetailPage", () => {
   it("shows totals, buckets and lines with their valuation types", async () => {
     stubRoutes({ [`GET /api/v1/costing/aging/snapshots/${SNAP}`]: () => json(200, snapshot) });
     const { container } = at(`/costing/aging/snapshots/${SNAP}`);
-    const bucketTable = await screen.findByRole("table", { name: "Snapshot buckets" });
+    const bucketTable = await findTable({ name: "Snapshot buckets" });
     expect(within(bucketTable).getByText("> 90")).toBeInTheDocument();
     const lines = screen.getByRole("table", { name: "Snapshot lines" });
     expect(within(lines).getByText("IMPORT 800.00")).toBeInTheDocument();
@@ -344,7 +345,7 @@ describe("BucketSetsPage", () => {
     fireEvent.change(screen.getByLabelText("Bucket bounds"), { target: { value: "90, 180" } });
     fireEvent.click(screen.getByRole("button", { name: "Save bucket set" }));
     expect(await screen.findByText("Saved the bucket set Quarter.")).toBeInTheDocument();
-    const table = await screen.findByRole("table", { name: "Aging bucket sets" });
+    const table = await findTable({ name: "Aging bucket sets" });
     expect(await within(table).findByText("90, 180")).toBeInTheDocument();
     expect(bodyOf(fetchMock, "POST", "/aging/bucket-sets")).toEqual({ legalEntityId: LE, name: "Quarter", bounds: [90, 180] });
   });

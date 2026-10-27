@@ -1,6 +1,7 @@
 // Pages of slice 2: container types, packing rules, packaging materials, packaging
 // fees with the report, returnable packaging, and auto-pack and packaging fees on
 // the shipment and packing slip pages (FR-28.14 to FR-28.16).
+import { findAlert, findStatus, findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { AutoPackResult, ContainerType, PackingSlip, Shipment } from "./api/client";
@@ -34,7 +35,7 @@ describe("container types", () => {
       return json(200, { items: types });
     };
     const { container } = renderAt("/fulfillment/container-types");
-    const table = await screen.findByRole("table", { name: "Container types" });
+    const table = await findTable({ name: "Container types" });
     expect((await within(table).findByText("PALLET")).closest("tr")?.textContent).toContain("Returnable");
     expect(pageViolations(container)).toEqual([]);
 
@@ -47,7 +48,7 @@ describe("container types", () => {
     fireEvent.change(screen.getByLabelText("Tare weight (kg)"), { target: { value: "0.5" } });
     fireEvent.change(screen.getByLabelText("Packaging material"), { target: { value: "cardboard" } });
     fireEvent.click(screen.getByRole("button", { name: "Save container type" }));
-    expect((await screen.findByRole("status")).textContent).toBe("Saved container type C12.");
+    expect((await findStatus()).textContent).toBe("Saved container type C12.");
     const call = posts("/container-types")[0];
     expect(idempotencyKey(call)).toBeTruthy();
     expect(call.body).toEqual({ code: "C12", tareKg: "0.5", returnable: false, packagingMaterial: "CARDBOARD" });
@@ -67,7 +68,7 @@ describe("container types", () => {
     let fail = true;
     server.handler = () => (fail ? json(503, { code: "COM-0500", detail: "internal error" }) : json(200, { items: [] }));
     renderAt("/fulfillment/container-types");
-    expect((await screen.findByRole("alert")).textContent).toContain("COM-0500");
+    expect((await findAlert()).textContent).toContain("COM-0500");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No container types yet")).toBeInTheDocument();
@@ -88,7 +89,7 @@ describe("packing rules", () => {
       });
     };
     const { container } = renderAt("/fulfillment/packing-rules");
-    const table = await screen.findByRole("table", { name: "Packing rules" });
+    const table = await findTable({ name: "Packing rules" });
     expect((await within(table).findByText("C12")).closest("tr")?.textContent).toContain("All customers");
     expect(pageViolations(container)).toEqual([]);
 
@@ -102,7 +103,7 @@ describe("packing rules", () => {
 
     fireEvent.change(screen.getByLabelText("Quantity per container"), { target: { value: "12" } });
     fireEvent.click(screen.getByRole("button", { name: "Save packing rule" }));
-    expect((await screen.findByRole("status")).textContent).toContain("12 per C12");
+    expect((await findStatus()).textContent).toContain("12 per C12");
     expect(posts("/packing-rules")[0].body).toEqual({ productId: PRODUCT, customerId: null, containerType: "C12", qtyPerContainer: "12", maxWeightKg: "15" });
   });
 
@@ -131,7 +132,7 @@ describe("packing rules", () => {
     fireEvent.change(screen.getByLabelText("Quantity per container"), { target: { value: "12" } });
     fireEvent.change(screen.getByLabelText("Max gross weight (kg)"), { target: { value: "15" } });
     fireEvent.click(screen.getByRole("button", { name: "Save packing rule" }));
-    expect((await screen.findByRole("alert")).textContent).toContain("FUL-0050");
+    expect((await findAlert()).textContent).toContain("FUL-0050");
   });
 });
 
@@ -142,13 +143,13 @@ describe("packaging materials", () => {
       return json(200, { items: [{ productId: PRODUCT, materialCode: "PLASTIC", weightPerUnitKg: "0.05" }] });
     };
     const { container } = renderAt("/fulfillment/packaging-materials");
-    expect(await within(await screen.findByRole("table", { name: "Packaging per product unit" })).findByText("PLASTIC")).toBeInTheDocument();
+    expect(await within(await findTable({ name: "Packaging per product unit" })).findByText("PLASTIC")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
     fireEvent.change(screen.getByLabelText("Product id", { selector: "#pp-product" }), { target: { value: PRODUCT } });
     fireEvent.change(screen.getByLabelText("Material code"), { target: { value: "cardboard" } });
     fireEvent.change(screen.getByLabelText("Weight per unit (kg)"), { target: { value: "0.2" } });
     fireEvent.click(screen.getByRole("button", { name: "Save packaging" }));
-    expect((await screen.findByRole("status")).textContent).toContain("0.2 kg CARDBOARD");
+    expect((await findStatus()).textContent).toContain("0.2 kg CARDBOARD");
     expect(posts("/product-packaging")[0].body).toEqual({ productId: PRODUCT, materialCode: "CARDBOARD", weightPerUnitKg: "0.2" });
   });
 
@@ -169,7 +170,7 @@ describe("packaging fees", () => {
       return json(200, { items: [{ countryCode: "FR", materialCode: "GLASS", currency: "EUR", ratePerKg: "0.10", validFrom: "2026-01-01" }] });
     };
     const { container } = renderAt("/fulfillment/packaging-fees");
-    expect(await within(await screen.findByRole("table", { name: "Packaging fee rates" })).findByText("GLASS")).toBeInTheDocument();
+    expect(await within(await findTable({ name: "Packaging fee rates" })).findByText("GLASS")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
 
     fireEvent.change(screen.getByLabelText("Country", { selector: "#rate-country" }), { target: { value: "de" } });
@@ -177,7 +178,7 @@ describe("packaging fees", () => {
     fireEvent.change(screen.getByLabelText("Rate per kg"), { target: { value: "0.50" } });
     fireEvent.change(screen.getByLabelText("Valid from"), { target: { value: "2026-01-01" } });
     fireEvent.click(screen.getByRole("button", { name: "Save fee rate" }));
-    expect((await screen.findByRole("status")).textContent).toContain("0.50 EUR per kg");
+    expect((await findStatus()).textContent).toContain("0.50 EUR per kg");
     const call = posts("/packaging-fee-rates")[0];
     expect(idempotencyKey(call)).toBeTruthy();
     expect(call.body).toEqual({ countryCode: "DE", materialCode: "CARDBOARD", currency: "EUR", ratePerKg: "0.50", validFrom: "2026-01-01" });
@@ -185,7 +186,7 @@ describe("packaging fees", () => {
     fireEvent.change(screen.getByLabelText("Country", { selector: "#report-country" }), { target: { value: "DE" } });
     fireEvent.change(screen.getByLabelText("Month"), { target: { value: "2026-10" } });
     fireEvent.click(screen.getByRole("button", { name: "Show report" }));
-    const report = await screen.findByRole("table", { name: "Packaging report DE 2026-10" });
+    const report = await findTable({ name: "Packaging report DE 2026-10" });
     const row = (await within(report).findByText("CARDBOARD")).closest("tr");
     expect(row?.textContent).toContain("20");
     expect(row?.textContent).toContain("10.00 EUR");
@@ -218,7 +219,7 @@ describe("returnable packaging", () => {
       return json(200, { items: [{ customerId: CUSTOMER, containerType: "PALLET", balance, lastShippedAt: "2026-10-26T08:00:00Z", lastReturnedAt: null }] });
     };
     const { container } = renderAt("/fulfillment/returnable-packaging");
-    const table = await screen.findByRole("table", { name: "Returnable packaging balances" });
+    const table = await findTable({ name: "Returnable packaging balances" });
     expect((await within(table).findByText("PALLET")).closest("tr")?.textContent).toContain("6");
     expect(pageViolations(container)).toEqual([]);
 
@@ -235,11 +236,11 @@ describe("returnable packaging", () => {
 
     fireEvent.change(screen.getByLabelText("Quantity returned"), { target: { value: "7" } });
     fireEvent.click(screen.getByRole("button", { name: "Record return" }));
-    expect((await screen.findByRole("alert")).textContent).toContain("FUL-0015");
+    expect((await findAlert()).textContent).toContain("FUL-0015");
 
     fireEvent.change(screen.getByLabelText("Quantity returned"), { target: { value: "4" } });
     fireEvent.click(screen.getByRole("button", { name: "Record return" }));
-    expect((await screen.findByRole("status")).textContent).toContain("now holds 2 PALLET");
+    expect((await findStatus()).textContent).toContain("now holds 2 PALLET");
     const calls = posts("/returnable-packaging:return");
     expect(calls.at(-1)?.body).toEqual({ customerId: CUSTOMER, containerType: "PALLET", qty: "4" });
     expect(idempotencyKey(calls[0])).not.toBe(idempotencyKey(calls[1]));
@@ -323,7 +324,7 @@ describe("auto-pack on the shipment page (FR-28.15)", () => {
     expect(header(call, "If-Match")).toBe('"4"');
     expect(idempotencyKey(call)).toBeTruthy();
     expect(call.body).toEqual({ unitWeights: { [LINE]: "1" } });
-    const table = await screen.findByRole("table", { name: "Containers" });
+    const table = await findTable({ name: "Containers" });
     expect((await within(table).findByText("006141410000000035")).closest("tr")?.textContent).toContain("6.5");
   });
 
@@ -342,7 +343,7 @@ describe("auto-pack on the shipment page (FR-28.15)", () => {
     expect(await screen.findByText(/2-letter country code/)).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Ship-to country"), { target: { value: "fr" } });
     fireEvent.click(screen.getByRole("button", { name: "Post packing slip" }));
-    expect((await screen.findByRole("alert")).textContent).toContain("FUL-0014");
+    expect((await findAlert()).textContent).toContain("FUL-0014");
     expect(posts(":post-packing-slip")[0].body).toMatchObject({ countryCode: "FR" });
   });
 });
@@ -368,7 +369,7 @@ describe("packing slip packaging fees (BR-28.12)", () => {
     };
     server.handler = () => json(200, slip);
     const { container } = renderAt(`/fulfillment/packing-slips/${SLIP}`);
-    const fees = await screen.findByRole("table", { name: "Packaging fees" });
+    const fees = await findTable({ name: "Packaging fees" });
     expect(within(fees).getByText("CARDBOARD").closest("tr")?.textContent).toContain("10.00 EUR");
     expect(within(screen.getByRole("table", { name: "Journal" })).queryByText("CARDBOARD")).toBeNull();
     expect(pageViolations(container)).toEqual([]);

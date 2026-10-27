@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -77,7 +78,7 @@ describe("offline conflicts (BR-32.4, AC-32.6)", () => {
       return undefined;
     };
     const { container } = renderAt("/mobile-flows/conflicts");
-    const table = await screen.findByRole("table", { name: "Offline conflicts" });
+    const table = await findTable({ name: "Offline conflicts" });
     await waitFor(() => expect(within(table).getByText(/line was CANCELLED by alice/)).toBeInTheDocument());
     expect(pageViolations(container)).toEqual([]);
 
@@ -108,7 +109,7 @@ describe("offline conflicts (BR-32.4, AC-32.6)", () => {
     fireEvent.click(await screen.findByRole("button", { name: "dev-7:41" }));
     fireEvent.change(screen.getByLabelText("Resolution"), { target: { value: "reject" } });
     fireEvent.click(screen.getByRole("button", { name: "Confirm resolution" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("Another supervisor changed this conflict");
     expect(screen.getByRole("heading", { name: "Resolve dev-7:41" })).toBeInTheDocument();
   });
@@ -123,7 +124,7 @@ describe("offline conflicts (BR-32.4, AC-32.6)", () => {
     fireEvent.click(await screen.findByRole("button", { name: "dev-7:41" }));
     fireEvent.change(screen.getByLabelText("Resolution"), { target: { value: "reject" } });
     fireEvent.click(screen.getByRole("button", { name: "Confirm resolution" }));
-    await screen.findByRole("alert");
+    await findAlert();
     fireEvent.click(screen.getByRole("button", { name: "Confirm resolution" }));
     await waitFor(() => expect(calls.filter((c) => c.method === "POST")).toHaveLength(2));
     fireEvent.change(screen.getByLabelText("Resolution"), { target: { value: "reapply" } });
@@ -143,7 +144,7 @@ describe("offline conflicts (BR-32.4, AC-32.6)", () => {
   it("explains that the mobile service is not deployed yet and retries", async () => {
     handler = () => ({ status: 404, body: undefined });
     renderAt("/mobile-flows/conflicts");
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("The mobile service is not available yet");
     handler = () => json(200, { items: [conflict] });
     fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
@@ -160,7 +161,7 @@ describe("printer status (§6.32.14)", () => {
   it("lists state, queue depth and last error per printer", async () => {
     handler = (url) => (url.pathname === "/api/v1/print/printers/status" ? json(200, { items: statuses }) : undefined);
     const { container } = renderAt("/mobile-flows/printer-status");
-    const table = await screen.findByRole("table", { name: "Printer status" });
+    const table = await findTable({ name: "Printer status" });
     await waitFor(() => expect(within(table).getByText("DOCK-1")).toBeInTheDocument());
     expect(within(table).getByText("Error")).toBeInTheDocument();
     expect(within(table).getByText("Idle")).toBeInTheDocument();
@@ -177,7 +178,7 @@ describe("printer status (§6.32.14)", () => {
 
     handler = () => json(503, { code: "COM-0500", detail: "internal error" });
     renderAt("/mobile-flows/printer-status");
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("Could not load printer status");
     expect(alert).toHaveTextContent("COM-0500");
     handler = () => json(200, { items: statuses });

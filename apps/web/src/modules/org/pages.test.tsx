@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -22,7 +23,7 @@ describe("Legal entities page", () => {
   it("lists entities with status pills", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => json({ items: entities })));
     renderAt("/org/legal-entities");
-    const table = await screen.findByRole("table", { name: "Legal entities" });
+    const table = await findTable({ name: "Legal entities" });
     await waitFor(() => expect(within(table).getByText("Alpha")).toBeInTheDocument());
     expect(within(table).getByText("Active")).toBeInTheDocument();
     expect(within(table).getByText("Inactive")).toBeInTheDocument();

@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -122,7 +123,7 @@ describe("Product listings", () => {
   it("lists entries and passes the filter to the inquiry", async () => {
     handler = () => ({ status: 200, body: { items: [listing] } });
     const { container } = renderAt("/sales/product-listings");
-    const table = await screen.findByRole("table", { name: "Product listings" });
+    const table = await findTable({ name: "Product listings" });
     await waitFor(() => expect(within(table).getByText(PRODUCT)).toBeInTheDocument());
     expect(within(table).getByText("Deny")).toBeInTheDocument();
     expect(within(table).getByText("Always")).toBeInTheDocument();
@@ -200,7 +201,7 @@ describe("Sales agreements", () => {
   it("lists agreements with remaining quantity and filters by status", async () => {
     handler = () => ({ status: 200, body: { items: [agreement] } });
     const { container } = renderAt("/sales/agreements");
-    const table = await screen.findByRole("table", { name: "Sales agreements" });
+    const table = await findTable({ name: "Sales agreements" });
     await waitFor(() => expect(within(table).getByText("SA-0000007")).toBeInTheDocument());
     expect(within(table).getByText("400 EA")).toBeInTheDocument();
     expect(within(table).getByText("12.5 USD / EA")).toBeInTheDocument();
@@ -322,7 +323,7 @@ describe("Order holds and listing overrides", () => {
     handler = (url, init) =>
       init.method === "POST" ? { status: 201, body: held, etag: '"2"' } : url.pathname.endsWith("/versions") ? { status: 200, body: { items: [] } } : { status: 200, body: order({ listingOverrides: overrides }), etag: '"1"' };
     const { container } = renderAt(`/sales/orders/${ORDER_ID}`);
-    const table = await screen.findByRole("table", { name: "Listing overrides" });
+    const table = await findTable({ name: "Listing overrides" });
     expect(within(table).getByText("replacement for recalled batch")).toBeInTheDocument();
     expect(within(table).getByText("Customer deny")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);

@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { CellSummary, Definition, RunRequest, RunSummary } from "./api/client";
@@ -74,7 +75,7 @@ describe("RunsPage", () => {
       return undefined;
     };
     const { container } = renderAt("/finreport");
-    const table = await screen.findByRole("table", { name: "Statement runs" });
+    const table = await findTable({ name: "Statement runs" });
     expect(await within(table).findByRole("button", { name: "PL-STD v2" })).toBeInTheDocument();
     expect(within(table).getByText("2026-03")).toBeInTheDocument();
     expect(within(table).getByText("abababababab")).toBeInTheDocument();
@@ -218,7 +219,7 @@ describe("RunPage", () => {
   it("renders the statement grid with labels, amounts and the as-of stamp", async () => {
     statementServer(() => json(404, {}));
     const { container } = renderAt(`/finreport/runs/${RUN}`);
-    const table = await screen.findByRole("table", { name: "Statement" });
+    const table = await findTable({ name: "Statement" });
     expect(within(table).getByRole("columnheader", { name: "March last year" })).toBeInTheDocument();
     expect(within(table).getByRole("button", { name: "Revenue, March: 1,000.00. Show balances" })).toBeInTheDocument();
     expect(within(table).getAllByText("n/a")).toHaveLength(2);

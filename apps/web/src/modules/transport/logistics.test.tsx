@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -93,7 +94,7 @@ describe("Tender board", () => {
   it("lists tenders with the pending carrier and flags overdue ones", async () => {
     handler = (url) => (url.pathname === "/api/v1/transport/tenders" ? json(200, { items: [tender({ overdue: true })] }) : undefined);
     const { container } = renderAt("/transport/tenders");
-    const table = await screen.findByRole("table", { name: "Tenders" });
+    const table = await findTable({ name: "Tenders" });
     await waitFor(() => expect(table).toHaveTextContent("Pending"));
     expect(table).toHaveTextContent("Overdue");
     expect(table).toHaveTextContent("1 of 2");
@@ -130,7 +131,7 @@ describe("Tender board", () => {
   it("shows a failed load with a retry", async () => {
     handler = () => problem(503, "COM-0500", "service unavailable");
     renderAt("/transport/tenders");
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("Could not load tenders");
     expect(alert).toHaveTextContent("COM-0500");
     handler = () => json(200, { items: [] });
@@ -161,7 +162,7 @@ describe("Start tender", () => {
     renderAt(`/transport/tenders/new?loadId=${LOAD}`);
     fill("Carrier 1 carrier id", C1);
     fireEvent.click(screen.getByRole("button", { name: "Start tender" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("Could not start the tender");
     expect(alert).toHaveTextContent("TMS-0114");
   });
@@ -183,7 +184,7 @@ describe("Tender detail", () => {
       return undefined;
     };
     const { container } = renderAt(`/transport/tenders/${TENDER}`);
-    const attempts = await screen.findByRole("table", { name: "Tender attempts" });
+    const attempts = await findTable({ name: "Tender attempts" });
     expect(attempts).toHaveTextContent("412.50 USD");
     expect(screen.getByLabelText("Responding carrier id")).toHaveValue(C1);
     expect(violations(container)).toEqual([]);
@@ -199,7 +200,7 @@ describe("Tender detail", () => {
     renderAt(`/transport/tenders/${TENDER}`);
     expect(await screen.findByText(/The deadline has passed/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Record acceptance" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("TMS-0105");
   });
 
@@ -213,7 +214,7 @@ describe("Tender detail", () => {
   it("shows a missing tender", async () => {
     handler = () => problem(404, "TMS-0100", "tender not found");
     renderAt(`/transport/tenders/${TENDER}`);
-    expect(await screen.findByRole("alert")).toHaveTextContent("TMS-0100");
+    expect(await findAlert()).toHaveTextContent("TMS-0100");
   });
 });
 
@@ -234,7 +235,7 @@ describe("Tracking", () => {
   it("lists the latest reports and opens a load timeline", async () => {
     handler = (url) => (url.pathname === "/api/v1/transport/tracking-events" ? json(200, { items: [event()] }) : undefined);
     const { container } = renderAt("/transport/tracking");
-    const table = await screen.findByRole("table", { name: "Latest status reports" });
+    const table = await findTable({ name: "Latest status reports" });
     await waitFor(() => expect(table).toHaveTextContent("D1 delivered"));
     expect(table).toHaveTextContent("Dallas TX");
     expect(violations(container)).toEqual([]);
@@ -260,7 +261,7 @@ describe("Tracking", () => {
     };
     handler = (url) => (url.pathname === `/api/v1/transport/loads/${LOAD}/tracking` ? json(200, timeline) : undefined);
     const { container } = renderAt(`/transport/tracking/${LOAD}`);
-    const stops = await screen.findByRole("table", { name: "Stops" });
+    const stops = await findTable({ name: "Stops" });
     expect(stops).toHaveTextContent("Delivered");
     expect(stops).toHaveTextContent("Inferred");
     expect(screen.getByRole("table", { name: "Status reports" })).toHaveTextContent("ISA-1");
@@ -274,7 +275,7 @@ describe("Tracking", () => {
     unmount();
     handler = () => problem(400, "COM-0001", "request failed validation");
     renderAt(`/transport/tracking/${LOAD}`);
-    expect(await screen.findByRole("alert")).toHaveTextContent("Could not load the timeline");
+    expect(await findAlert()).toHaveTextContent("Could not load the timeline");
   });
 
   it("records a status report and opens the load", async () => {
@@ -295,7 +296,7 @@ describe("Tracking", () => {
     fill("Occurred at (UTC)", "2026-06-01T15:00");
     fill("Reference", "call-7");
     fireEvent.click(screen.getByRole("button", { name: "Record status" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("idempotency_key_reuse");
+    expect(await findAlert()).toHaveTextContent("idempotency_key_reuse");
   });
 });
 
@@ -361,7 +362,7 @@ describe("Landed cost voyages", () => {
   it("lists voyages with their landed cost", async () => {
     handler = (url) => (url.pathname === "/api/v1/transport/voyages" ? json(200, { items: [summary] }) : undefined);
     const { container } = renderAt("/transport/voyages");
-    const table = await screen.findByRole("table", { name: "Voyages" });
+    const table = await findTable({ name: "Voyages" });
     await waitFor(() => expect(table).toHaveTextContent("1000.00 USD"));
     expect(table).toHaveTextContent("Estimated");
     expect(violations(container)).toEqual([]);
@@ -374,7 +375,7 @@ describe("Landed cost voyages", () => {
     unmount();
     handler = () => problem(403, "AUTH-0003", "missing duty TMS_LANDED_COST");
     renderAt("/transport/voyages");
-    expect(await screen.findByRole("alert")).toHaveTextContent("AUTH-0003");
+    expect(await findAlert()).toHaveTextContent("AUTH-0003");
   });
 
   it("allocates and posts a voyage (AC-34.6)", async () => {
@@ -384,7 +385,7 @@ describe("Landed cost voyages", () => {
       return undefined;
     };
     const { container } = renderAt(`/transport/voyages/${VOYAGE}`);
-    expect(await screen.findByRole("table", { name: "Containers" })).toHaveTextContent("CSQU3054383");
+    expect(await findTable({ name: "Containers" })).toHaveTextContent("CSQU3054383");
     // The header total and the freight cost line.
     expect(screen.getAllByText("1000.00 USD")).toHaveLength(2);
     expect(violations(container)).toEqual([]);

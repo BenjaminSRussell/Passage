@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -85,7 +86,7 @@ describe("project groups", () => {
       return { status: 200, body: { items } };
     };
     const { container } = renderAt("/projects/groups");
-    const table = await screen.findByRole("table", { name: "Project groups" });
+    const table = await findTable({ name: "Project groups" });
     await waitFor(() => expect(table).toHaveTextContent("Engineering"));
     expect(pageViolations(container)).toEqual([]);
 
@@ -99,7 +100,7 @@ describe("project groups", () => {
     expect(created.headers.get("If-Match")).toBeNull();
     expect(created.body).toEqual({ name: "Operations", defaultProjectType: "TIME_MATERIAL" });
 
-    fireEvent.click(within(await screen.findByRole("table", { name: "Project groups" })).getByRole("button", { name: "ENG" }));
+    fireEvent.click(within(await findTable({ name: "Project groups" })).getByRole("button", { name: "ENG" }));
     expect(screen.getByRole("heading", { name: "Edit group ENG" })).toBeInTheDocument();
     expect(screen.getByLabelText("Group id")).toHaveAttribute("readonly");
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Engineering services" } });
@@ -163,7 +164,7 @@ describe("posting profiles", () => {
   it("lists profiles, replaces a known key with its version and adds a catch-all without one", async () => {
     handler = (_url, init) => (init.method === "PUT" ? { status: 200, body: profile({ version: 2 }) } : { status: 200, body: { items: [profile()] } });
     const { container } = renderAt("/projects/posting-profiles");
-    const table = await screen.findByRole("table", { name: "Posting profiles" });
+    const table = await findTable({ name: "Posting profiles" });
     await waitFor(() => expect(table).toHaveTextContent("5200"));
     expect(table).toHaveTextContent("Any");
     expect(pageViolations(container)).toEqual([]);
@@ -241,7 +242,7 @@ describe("plan versions", () => {
         ? problem(422, "PROJ-PLAN-001", "the project already has a BASELINE plan version")
         : { status: 200, body: { items: [planVersion()] } };
     const { container } = renderAt("/projects/ES-1001/plans");
-    const table = await screen.findByRole("table", { name: "Plan versions" });
+    const table = await findTable({ name: "Plan versions" });
     await waitFor(() => expect(table).toHaveTextContent("Working plan 1"));
     expect(pageViolations(container)).toEqual([]);
     const actions = screen.getByRole("group", { name: "Plan actions" });

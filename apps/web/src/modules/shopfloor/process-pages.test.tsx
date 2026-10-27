@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -82,7 +83,7 @@ describe("Process message monitor", () => {
   it("lists messages with their status, out-of-limit flag and per-destination state", async () => {
     handler = (url) => (url.pathname.endsWith("/process-messages") ? json(200, { items: [message()] }) : undefined);
     const { container } = renderAt("/shopfloor/process-messages");
-    const table = await screen.findByRole("table", { name: "Process messages" });
+    const table = await findTable({ name: "Process messages" });
     await waitFor(() => expect(table).toHaveTextContent("Quality result"));
     expect(table).toHaveTextContent("Partially delivered");
     expect(table).toHaveTextContent("Out of limit");
@@ -112,7 +113,7 @@ describe("Process message monitor", () => {
       return url.searchParams.get("cursor") === "c-1" ? json(200, { items: [second], nextCursor: null }) : json(200, { items: [message()], nextCursor: "c-1" });
     };
     renderAt("/shopfloor/process-messages?status=partially-delivered");
-    const table = await screen.findByRole("table", { name: "Process messages" });
+    const table = await findTable({ name: "Process messages" });
     await waitFor(() => expect(within(table).getAllByRole("link")).toHaveLength(1));
     expect(screen.getByText("Showing the newest 1 message.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Load more messages" }));
@@ -163,7 +164,7 @@ describe("Process message detail", () => {
       return undefined;
     };
     const { container } = renderAt(`/shopfloor/process-messages/${MSG}`);
-    const values = await screen.findByRole("table", { name: "Values" });
+    const values = await findTable({ name: "Values" });
     expect(values).toHaveTextContent("7.9 pH");
     expect(values).toHaveTextContent("6.5 to 7.5");
     const deliveries = screen.getByRole("table", { name: "Deliveries" });
@@ -238,7 +239,7 @@ describe("Process message detail", () => {
     const m = message();
     handler = () => json(200, { ...m, deliveries: m.deliveries.map((d) => (d.status === "error" ? { ...d, status: "pending", attempts: 2 } : d)) });
     renderAt(`/shopfloor/process-messages/${MSG}`);
-    await screen.findByRole("table", { name: "Deliveries" });
+    await findTable({ name: "Deliveries" });
     expect(screen.queryByRole("button", { name: "Delete message" })).toBeNull();
   });
 
@@ -312,7 +313,7 @@ describe("Record process message", () => {
     fill("Value 1", "7.9");
     fill("Value 1 upper limit", "7.5");
     fireEvent.click(screen.getByRole("button", { name: "Record message" }));
-    expect(await screen.findByRole("table", { name: "Deliveries" })).toBeInTheDocument();
+    expect(await findTable({ name: "Deliveries" })).toBeInTheDocument();
     const [create] = posts("/process-messages");
     expect(create.body).toMatchObject({ source: "manual", categoryCode: "quality-result", orderId: ORDER, values: [{ name: "ph", type: "numeric", value: "7.9", max: "7.5" }] });
     expect((create.body as { sourceMessageId: string }).sourceMessageId).toMatch(/^[0-9a-f-]{36}$/);

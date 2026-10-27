@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { findTable } from "../../test-utils";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { COVERAGE_DEFAULTS, type CoverageGroup } from "./api/client";
@@ -75,7 +76,7 @@ describe("Coverage groups page", () => {
     stubApi(["/coverage-groups/REQ", () => json(req)], ["/coverage-groups", () => json({ items: [autoFirm, req] })]);
     renderAt("/planning/coverage-groups");
     expect(screen.getByRole("heading", { level: 2, name: "Coverage groups" })).toBeInTheDocument();
-    const table = await screen.findByRole("table", { name: "Coverage groups" });
+    const table = await findTable({ name: "Coverage groups" });
     await waitFor(() => expect(within(table).getByText("FIRM5")).toBeInTheDocument());
     expect(within(table).getByText("Auto-firm, 5 d")).toBeInTheDocument();
     expect(within(table).getAllByText("Requirement (lot-for-lot)")).toHaveLength(2);
@@ -140,6 +141,8 @@ describe("Coverage group page", () => {
     ]);
     renderAt("/planning/coverage-groups/REQ");
     const freeze = await screen.findByLabelText("Freeze fence (days)");
+    // Flush the page's passive effect that clears `saved` on load; under load it can otherwise run after the save.
+    await act(async () => {});
     expect(screen.queryByLabelText("Code")).not.toBeInTheDocument();
     fireEvent.change(freeze, { target: { value: "3" } });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));

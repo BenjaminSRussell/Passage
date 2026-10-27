@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -144,7 +145,7 @@ describe("RulesPage", () => {
   it("lists rule versions and opens one", async () => {
     detailRoutes({ "GET /api/v1/budget/control-rules": () => json(200, { items: [rule] }) });
     const { container } = at("/budgeting");
-    const table = await screen.findByRole("table", { name: "Budget control rules" });
+    const table = await findTable({ name: "Budget control rules" });
     expect(await within(table).findByText(LE)).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(within(table).getByRole("button", { name: "DEPT" }));
@@ -157,7 +158,7 @@ describe("RulesPage", () => {
       "GET /api/v1/budget/control-rules": () => (fail ? json(503, { title: "down", code: "COM-0500", detail: "internal error" }) : json(200, { items: [] })),
     });
     at("/budgeting");
-    expect(await screen.findByRole("alert")).toHaveTextContent("COM-0500");
+    expect(await findAlert()).toHaveTextContent("COM-0500");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No budget control rules yet")).toBeInTheDocument();
@@ -191,7 +192,7 @@ describe("RuleDetailPage", () => {
   it("shows available funds, entries, encumbrances and checks, and filters encumbrances", async () => {
     const fetchMock = detailRoutes();
     const { container } = at(`/budgeting/rules/${R1}`);
-    const funds = await screen.findByRole("table", { name: "Available funds" });
+    const funds = await findTable({ name: "Available funds" });
     expect(await within(funds).findByText("10000.00")).toBeInTheDocument();
     expect(screen.getByRole("list", { name: "Funds summary" })).toHaveTextContent("Available 10000.00");
     expect(await within(screen.getByRole("table", { name: "Register entries" })).findByText("Original")).toBeInTheDocument();
@@ -200,7 +201,7 @@ describe("RuleDetailPage", () => {
 
     fireEvent.change(screen.getByLabelText("Encumbrance status"), { target: { value: "Open" } });
     await waitFor(() => expect(calls(fetchMock, "GET", `encumbrances?rule=${R1}&status=Open`)).toHaveLength(1));
-    fireEvent.click(within(await screen.findByRole("table", { name: "Encumbrances" })).getByRole("button", { name: D1 }));
+    fireEvent.click(within(await findTable({ name: "Encumbrances" })).getByRole("button", { name: D1 }));
     expect(await screen.findByRole("heading", { name: "Encumbrance" })).toBeInTheDocument();
   });
 
@@ -220,7 +221,7 @@ describe("RuleDetailPage", () => {
   it("shows the problem when the rule cannot be loaded", async () => {
     stubRoutes({ [`GET /api/v1/budget/control-rules/${R1}`]: () => json(404, { title: "Not Found", code: "BUD-0001", detail: "budget control rule version not found" }) });
     at(`/budgeting/rules/${R1}`);
-    expect(await screen.findByRole("alert")).toHaveTextContent("BUD-0001");
+    expect(await findAlert()).toHaveTextContent("BUD-0001");
   });
 });
 
@@ -262,7 +263,7 @@ describe("BudgetCheckPage", () => {
     fireEvent.change(screen.getByLabelText("Time span"), { target: { value: "FY2026" } });
     fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "12000" } });
     fireEvent.click(screen.getByRole("button", { name: "Run check" }));
-    const lines = await screen.findByRole("table", { name: "Check lines" });
+    const lines = await findTable({ name: "Check lines" });
     expect(within(lines).getByText("20.00%")).toBeInTheDocument();
     expect(within(lines).getByText("Over budget: blocked")).toBeInTheDocument();
     expect(screen.getByText(/threshold:fail/)).toBeInTheDocument();
@@ -293,7 +294,7 @@ describe("BudgetCheckPage", () => {
   it("shows a recorded check", async () => {
     stubRoutes({ [`GET /api/v1/budget/checks/${C1}`]: () => json(200, failed) });
     at(`/budgeting/checks/${C1}`);
-    expect(await screen.findByRole("table", { name: "Check lines" })).toHaveTextContent("10000.00");
+    expect(await findTable({ name: "Check lines" })).toHaveTextContent("10000.00");
   });
 });
 
@@ -305,7 +306,7 @@ describe("EncumbrancePage", () => {
         json(200, { encumbranceId: E1, relieved: "500", remaining: "0", excess: "20", status: "Relieved" }),
     });
     const { container } = at(`/budgeting/encumbrances/${E1}`);
-    expect(await screen.findByRole("table", { name: "Encumbrance history" })).toHaveTextContent("Reserve");
+    expect(await findTable({ name: "Encumbrance history" })).toHaveTextContent("Reserve");
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Relieve encumbrance" }));
     expect(await screen.findByText("Enter the invoice id (a UUID).")).toBeInTheDocument();

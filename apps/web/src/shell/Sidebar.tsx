@@ -12,7 +12,7 @@ export interface SidebarProps {
   modules: PassageModule[];
   shellNav: ShellNavItem[];
   drawerOpen: boolean;
-  searchRef: RefObject<HTMLButtonElement>;
+  searchRef: RefObject<HTMLButtonElement | null>;
   onOpenSearch(): void;
   onCloseDrawer(): void;
 }

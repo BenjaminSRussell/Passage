@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -165,7 +166,7 @@ describe("Item coverage list", () => {
     );
     renderAt("/planning/item-coverages");
     expect(screen.getByRole("heading", { level: 2, name: "Item coverage" })).toBeInTheDocument();
-    const table = await screen.findByRole("table", { name: "Item coverage" });
+    const table = await findTable({ name: "Item coverage" });
     await waitFor(() => expect(within(table).getByText("MIN")).toBeInTheDocument());
     expect(within(table).getByText(`Warehouse ${WH}`)).toBeInTheDocument();
     expect(within(table).getAllByText("100.5")).toHaveLength(2);
@@ -179,7 +180,7 @@ describe("Item coverage list", () => {
     fireEvent.click(screen.getByRole("button", { name: "Show coverage" }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes(`itemId=${ITEM}`))).toBe(true));
 
-    fireEvent.click(within(await screen.findByRole("table", { name: "Item coverage" })).getAllByRole("button", { name: ITEM })[0]);
+    fireEvent.click(within(await findTable({ name: "Item coverage" })).getAllByRole("button", { name: ITEM })[0]);
     expect(screen.getByTestId("location")).toHaveTextContent(`/planning/item-coverages/${siteCoverage.id}`);
   });
 

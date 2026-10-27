@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -135,7 +136,7 @@ describe("projects list", () => {
     const child = project({ id: "ES-1002", projectType: "INTERNAL", stage: "CREATED", parentProjectId: "ES-1001" });
     handler = (url) => (url.pathname === "/api/v1/projects/ES-1002" ? { status: 200, body: child } : { status: 200, body: { items: [project(), child] } });
     const { container } = renderAt("/projects/list");
-    const table = await screen.findByRole("table", { name: "Projects" });
+    const table = await findTable({ name: "Projects" });
     await waitFor(() => expect(table).toHaveTextContent("ES-1002"));
     expect(table).toHaveTextContent("Fixed price");
     expect(table).toHaveTextContent("In process");

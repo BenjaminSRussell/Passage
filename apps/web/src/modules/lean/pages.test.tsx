@@ -1,3 +1,4 @@
+import { findAlert, findStatus, findTable } from "../../test-utils";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -194,7 +195,7 @@ describe("production flows", () => {
       return url.searchParams.get("status") === "active" ? json(200, { items: [] }) : json(200, { items: [{ ...flow, activities: undefined }] });
     };
     const { container } = renderAt("/lean/flows");
-    const table = await screen.findByRole("table", { name: "Production flows" });
+    const table = await findTable({ name: "Production flows" });
     expect(within(table).getByRole("button", { name: "Sauce line" })).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "active" } });
@@ -249,12 +250,12 @@ describe("production flows", () => {
       return undefined;
     };
     const { container } = renderAt(`/lean/flows/${FLOW}`);
-    const table = await screen.findByRole("table", { name: "Flow activities" });
+    const table = await findTable({ name: "Flow activities" });
     expect(within(table).getByText("Missing")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
     fireEvent.change(screen.getByLabelText("Active from"), { target: { value: "2026-11-02" } });
     fireEvent.click(screen.getByRole("button", { name: "Activate flow" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("flow activity Fill has no output location (LEAN-0004)");
+    expect(await findAlert()).toHaveTextContent("flow activity Fill has no output location (LEAN-0004)");
     expect(calls.at(-1)?.body).toEqual({ version: 1, activeFrom: "2026-11-02" });
     refuse = false;
     fireEvent.click(screen.getByRole("button", { name: "Activate flow" }));
@@ -277,7 +278,7 @@ describe("kanban rules", () => {
   it("lists rules with their active cards", async () => {
     handler = (url) => (url.pathname === "/api/v1/lean/kanban-rules" ? json(200, { items: [rule, eventRule] }) : undefined);
     const { container } = renderAt(`/lean/rules?flowId=${FLOW}`);
-    const table = await screen.findByRole("table", { name: "Kanban rules" });
+    const table = await findTable({ name: "Kanban rules" });
     expect(within(table).getByText("1 of 3")).toBeInTheDocument();
     expect(within(table).getByText("Event")).toBeInTheDocument();
     expect(calls[0].url.searchParams.get("flowId")).toBe(FLOW);
@@ -356,7 +357,7 @@ describe("kanban rules", () => {
     const post = calls.find((c) => c.method === "POST")!;
     expect(post.body).toEqual({ ruleId: EVENT_RULE, demandQty: "50", eventRefType: "sales-line", eventRefId: "SO-1/10" });
     expect(header(post, "Idempotency-Key")).toBeTruthy();
-    const table = await screen.findByRole("table", { name: "Kanban cards" });
+    const table = await findTable({ name: "Kanban cards" });
     await waitFor(() => expect(within(table).getAllByText("20")).toHaveLength(3));
   });
 
@@ -369,7 +370,7 @@ describe("kanban rules", () => {
     };
     renderAt(`/lean/rules/${RULE}`);
     fireEvent.click(await screen.findByRole("button", { name: "Generate kanbans" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("rule MIX-A already has 3 active kanbans (max 3) (LEAN-0002)");
+    expect(await findAlert()).toHaveTextContent("rule MIX-A already has 3 active kanbans (max 3) (LEAN-0002)");
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({ ruleId: RULE });
   });
 });
@@ -412,7 +413,7 @@ describe("kanban board", () => {
     renderAt("/lean/board");
     fireEvent.change(await screen.findByLabelText("Move MIX-A-0001 to column"), { target: { value: "completed" } });
     fireEvent.click(screen.getByRole("button", { name: "Move MIX-A-0001" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("MIX-A-0001 stays in Planned");
     expect(alert).toHaveTextContent("kanban move planned → completed is not allowed (LEAN-0001)");
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({ to: "completed", version: 2 });
@@ -482,7 +483,7 @@ describe("slice 2", () => {
         : undefined;
     const { container } = renderAt("/lean/subcontracting");
     fireEvent.click(screen.getByRole("button", { name: "Preview PO lines" }));
-    const table = await screen.findByRole("table", { name: "Purchase order lines" });
+    const table = await findTable({ name: "Purchase order lines" });
     expect(within(table).getByText("90 USD")).toBeInTheDocument();
     expect(within(table).getByText("KJ-0001")).toBeInTheDocument();
     expect(calls[0].body).toEqual({
@@ -503,7 +504,7 @@ describe("slice 2", () => {
     fireEvent.change(screen.getByLabelText("Completed quantity"), { target: { value: "20" } });
     fireEvent.change(screen.getByLabelText("Mode"), { target: { value: "periodic-po" } });
     fireEvent.click(screen.getByRole("button", { name: "Preview PO lines" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("no valid purchase agreement for service SVC-PLATING on 2027-03-10 (LEAN-0005)");
+    expect(await findAlert()).toHaveTextContent("no valid purchase agreement for service SVC-PLATING on 2027-03-10 (LEAN-0005)");
     expect((calls[0].body as { mode: string }).mode).toBe("periodic-po");
   });
 });
@@ -638,7 +639,7 @@ describe("slice 4: kanban jobs", () => {
     const planned = await screen.findByRole("list", { name: "Planned jobs" });
     expect(within(planned).getByText("Needs picking: move the card to Prepared before starting.")).toBeInTheDocument();
     fireEvent.click(within(planned).getByRole("button", { name: "Start MIX-A-0002 · 1 Mix" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("MIX-A-0002 · 1 Mix stays in Planned");
     expect(alert).toHaveTextContent("(LEAN-0001)");
     expect(within(screen.getByRole("list", { name: "Planned jobs" })).getByText("MIX-A-0002")).toBeInTheDocument();
@@ -785,7 +786,7 @@ describe("slice 5: flow costing", () => {
     expect(await screen.findByText("Choose a production flow")).toBeInTheDocument();
     await screen.findByRole("option", { name: "Sauce line" });
     fireEvent.change(screen.getByLabelText("Production flow"), { target: { value: FLOW } });
-    const table = await screen.findByRole("table", { name: "Costing periods" });
+    const table = await findTable({ name: "Costing periods" });
     expect(within(table).getByText("49.85 USD")).toBeInTheDocument();
     expect(within(table).getByText("10")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
@@ -808,7 +809,7 @@ describe("slice 5: flow costing", () => {
     expect(await screen.findByText("No costing periods yet")).toBeInTheDocument();
     fail = true;
     cleanupAndRender(`/lean/costing?flowId=${FLOW}`);
-    expect(await screen.findByRole("alert")).toHaveTextContent("production flow not found (LEAN-0101)");
+    expect(await findAlert()).toHaveTextContent("production flow not found (LEAN-0101)");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No costing periods yet")).toBeInTheDocument();
@@ -835,7 +836,7 @@ describe("slice 5: flow costing", () => {
     fireEvent.change(screen.getByLabelText("First day"), { target: { value: "2026-09-01" } });
     fireEvent.change(screen.getByLabelText("Last day"), { target: { value: "2026-09-30" } });
     fireEvent.click(screen.getByRole("button", { name: "Open period" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Opened 2026-09-01 to 2026-09-30.");
+    expect(await findStatus()).toHaveTextContent("Opened 2026-09-01 to 2026-09-30.");
     const post = calls.find((c) => c.method === "POST")!;
     expect(header(post, "Idempotency-Key")).toBeTruthy();
     expect(post.body).toEqual({ periodStart: "2026-09-01", periodEnd: "2026-09-30", currency: "USD" });
@@ -867,14 +868,14 @@ describe("slice 5: flow costing", () => {
     expect(screen.getByText("Variance 49.85 USD")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Settle period" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("Cards with jobs in this period are still open");
     expect(alert).toHaveTextContent("1 kanbans open (MIX-A-0002) (LEAN-0003)");
     const first = calls.filter((c) => c.method === "POST").at(-1)!;
     expect(first.body).toEqual({ version: 1, materialCost: "900.10", conversionCost: "300", outputValue: "1150.25" });
     refuse = false;
     fireEvent.click(screen.getByRole("button", { name: "Settle period" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Settled 2026-09-01 to 2026-09-30 with a variance of 49.85 USD.");
+    expect(await findStatus()).toHaveTextContent("Settled 2026-09-01 to 2026-09-30 with a variance of 49.85 USD.");
     const second = calls.filter((c) => c.method === "POST").at(-1)!;
     expect(header(second, "Idempotency-Key")).not.toBe(header(first, "Idempotency-Key"));
     expect(await screen.findByRole("list", { name: "Settlement" })).toHaveTextContent("Cards 10");
@@ -1003,7 +1004,7 @@ describe("slice 6: rule analysis, backflush and export", () => {
     expect(tiles).toHaveTextContent("Active cards 3");
     fail = true;
     cleanupAndRender(`/lean/rules/${RULE}`);
-    expect(await screen.findByRole("alert")).toHaveTextContent("request failed validation (COM-0001)");
+    expect(await findAlert()).toHaveTextContent("request failed validation (COM-0001)");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No completed cycles in this period")).toBeInTheDocument();
@@ -1030,7 +1031,7 @@ describe("slice 6: rule analysis, backflush and export", () => {
 
     fireEvent.change(mix, { target: { value: "90" } });
     fireEvent.click(screen.getByRole("button", { name: "Preview backflush" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Fill completed 9 jobs in the period and needs a cost rate (COM-0001)");
+    expect(await findAlert()).toHaveTextContent("Fill completed 9 jobs in the period and needs a cost rate (COM-0001)");
     const sent = calls.find((c) => c.url.pathname.endsWith(":backflush"))!;
     // A read-only preview: only the rates given, and no Idempotency-Key.
     expect(sent.body).toEqual({ rates: [{ activityId: MIX, ratePerHour: "90" }] });
@@ -1039,7 +1040,7 @@ describe("slice 6: rule analysis, backflush and export", () => {
     refuse = false;
     fireEvent.change(screen.getByLabelText("2. Fill"), { target: { value: "72.5" } });
     fireEvent.click(screen.getByRole("button", { name: "Preview backflush" }));
-    const table = await screen.findByRole("table", { name: "Conversion by activity" });
+    const table = await findTable({ name: "Conversion by activity" });
     expect(within(table).getByText("281.25 USD")).toBeInTheDocument();
     expect(within(table).getByText("1.8458")).toBeInTheDocument();
     expect(screen.getByText("Conversion cost 415.07 USD")).toBeInTheDocument();
@@ -1058,7 +1059,7 @@ describe("slice 6: rule analysis, backflush and export", () => {
       return undefined;
     };
     renderAt(`/lean/costing?flowId=${FLOW}`);
-    await screen.findByRole("table", { name: "Costing periods" });
+    await findTable({ name: "Costing periods" });
     fireEvent.click(screen.getByRole("button", { name: "Export periods" }));
     const link = await screen.findByRole("link", { name: "Download CSV" });
     expect(link).toHaveAttribute("href", `data:text/csv;charset=utf-8,${encodeURIComponent(csv)}`);
@@ -1067,7 +1068,7 @@ describe("slice 6: rule analysis, backflush and export", () => {
     expect(header(sent, "Accept")).toBe("text/csv");
     fail = true;
     fireEvent.click(screen.getByRole("button", { name: "Export periods" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("missing duty lean.read (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty lean.read (AUTH-0003)");
     expect(screen.queryByRole("link", { name: "Download CSV" })).toBeNull();
   });
 });
@@ -1105,7 +1106,7 @@ describe("slice 7: retrying board commands", () => {
     };
     renderAt(`/lean/work-cell?workCellId=${CELL}`);
     fireEvent.click(await screen.findByRole("button", { name: "Start MIX-A-0001 · 1 Mix" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("MIX-A-0001 · 1 Mix stays in Prepared");
     expect(alert).toHaveTextContent("Failed to fetch");
     await waitFor(() => expect(screen.getByRole("button", { name: "Start MIX-A-0001 · 1 Mix" })).toBeEnabled());
@@ -1125,7 +1126,7 @@ describe("slice 7: retrying board commands", () => {
     };
     renderAt(`/lean/work-cell?workCellId=${CELL}`);
     fireEvent.click(await screen.findByRole("button", { name: "Start MIX-A-0002 · 1 Mix" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("(LEAN-0001)");
+    expect(await findAlert()).toHaveTextContent("(LEAN-0001)");
     await waitFor(() => expect(screen.getByRole("button", { name: "Start MIX-A-0002 · 1 Mix" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Start MIX-A-0002 · 1 Mix" }));
     await waitFor(() => expect(keysOf(`/api/v1/lean/kanban-jobs/${J2}:start`)).toHaveLength(2));
@@ -1175,7 +1176,7 @@ describe("slice 7: retrying board commands", () => {
     };
     renderAt("/lean/board");
     fireEvent.click(await screen.findByRole("button", { name: "Move MIX-A-0001 to Prepared" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("MIX-A-0001 stays in Planned");
+    expect(await findAlert()).toHaveTextContent("MIX-A-0001 stays in Planned");
     await waitFor(() => expect(screen.getByRole("button", { name: "Move MIX-A-0001 to Prepared" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Move MIX-A-0001 to Prepared" }));
     expect(await screen.findByText("MIX-A-0001 moved to Prepared.")).toBeInTheDocument();
@@ -1251,7 +1252,7 @@ describe("slice 8: fixed-kanban count check", () => {
     renderAt(`/lean/rules/${RULE}`);
     fireEvent.change(await screen.findByLabelText("Daily demand"), { target: { value: "40" } });
     fireEvent.click(screen.getByRole("button", { name: "Check count" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("within 25 % of the 3 suggested");
+    expect(await findStatus()).toHaveTextContent("within 25 % of the 3 suggested");
     const sent = calls.find((c) => c.url.pathname === countPath)!;
     expect(sent.url.searchParams.has("safetyPct")).toBe(false);
   });
@@ -1264,7 +1265,7 @@ describe("slice 8: fixed-kanban count check", () => {
     renderAt(`/lean/rules/${RULE}`);
     fireEvent.change(await screen.findByLabelText("Daily demand"), { target: { value: "10" } });
     fireEvent.click(screen.getByRole("button", { name: "Check count" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("kanban rule MIX-A is not a fixed rule (LEAN-0113)");
+    expect(await findAlert()).toHaveTextContent("kanban rule MIX-A is not a fixed rule (LEAN-0113)");
     expect(screen.queryByRole("list", { name: "Kanban count check" })).toBeNull();
     refuse = false;
     fireEvent.click(screen.getByRole("button", { name: "Check count" }));

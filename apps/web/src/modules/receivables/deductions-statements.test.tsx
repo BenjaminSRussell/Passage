@@ -1,3 +1,4 @@
+import { findAlert, findStatus, findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { BankStatementBatch, Deduction, Payment } from "./api/client";
@@ -70,7 +71,7 @@ describe("Bank statements", () => {
   it("lists imported statements with their counts", async () => {
     server.handler = (url) => (url.pathname.endsWith("/bank-statements/imports") ? json(200, { items: [statement] }) : undefined);
     const { container } = renderAt("/receivables/bank-statements");
-    const table = await screen.findByRole("table", { name: "Bank statement imports" });
+    const table = await findTable({ name: "Bank statement imports" });
     await waitFor(() => expect(table).toHaveTextContent("bbbbbbbbbbbb"));
     const row = within(table).getAllByRole("row")[1];
     expect(row).toHaveTextContent("1");
@@ -86,7 +87,7 @@ describe("Bank statements", () => {
     first.unmount();
     server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty ARView" });
     renderAt("/receivables/bank-statements");
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("Could not load the bank statement imports");
     expect(alert).toHaveTextContent("AUTH-0003");
   });
@@ -103,7 +104,7 @@ describe("Bank statements", () => {
     fill("Legal entity id", LE);
     fill("Statement XML", "<Document/>");
     fireEvent.click(screen.getByRole("button", { name: "Import statement" }));
-    const status = await screen.findByRole("status");
+    const status = await findStatus();
     expect(status).toHaveTextContent("1 payment(s) from 1 statement(s); 2 already imported, 3 entries not customer credits");
     expect(lastCall("/bank-statements/imports")!.body).toEqual({ legalEntityId: LE, content: "<Document/>" });
     const created = screen.getByRole("table", { name: "Payments created" });
@@ -119,14 +120,14 @@ describe("Bank statements", () => {
     fill("Legal entity id", LE);
     fill("Statement XML", "<Document/>");
     fireEvent.click(screen.getByRole("button", { name: "Import statement" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("This file was already imported");
+    expect(await findAlert()).toHaveTextContent("This file was already imported");
     first.unmount();
     server.handler = () => json(400, { code: "AR-0004", detail: "Line 12: Amt must be a positive decimal" });
     renderAt("/receivables/bank-statements/new");
     fill("Legal entity id", LE);
     fill("Statement XML", "<Document/>");
     fireEvent.click(screen.getByRole("button", { name: "Import statement" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("Could not import the statement");
     expect(alert).toHaveTextContent("Line 12");
   });
@@ -145,7 +146,7 @@ describe("Deductions", () => {
       return undefined;
     };
     const { container } = renderAt("/receivables/deductions");
-    const table = await screen.findByRole("table", { name: "Deductions" });
+    const table = await findTable({ name: "Deductions" });
     await waitFor(() => expect(table).toHaveTextContent("300.00 USD"));
     expect(table).toHaveTextContent("Promotion");
     expect(table).toHaveTextContent("FUND-7");
@@ -156,7 +157,7 @@ describe("Deductions", () => {
     await waitFor(() => expect(server.calls.some((c) => c.url.searchParams.get("status") === "MATCHED")).toBe(true));
     fireEvent.change(screen.getByLabelText("Type"), { target: { value: "PRICE" } });
     await waitFor(() => expect(server.calls.some((c) => c.url.searchParams.get("type") === "PRICE")).toBe(true));
-    fireEvent.click(within(await screen.findByRole("table", { name: "Deductions" })).getAllByRole("button", { name: "INV-30001" })[0]);
+    fireEvent.click(within(await findTable({ name: "Deductions" })).getAllByRole("button", { name: "INV-30001" })[0]);
     expect(await screen.findByRole("heading", { name: "Deduction 300.00 USD" })).toBeInTheDocument();
   });
 
@@ -167,7 +168,7 @@ describe("Deductions", () => {
     first.unmount();
     server.handler = () => json(500, { code: "COM-0500", detail: "database unavailable" });
     renderAt("/receivables/deductions");
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("Could not load the deductions");
     expect(alert).toHaveTextContent("COM-0500");
   });
@@ -203,7 +204,7 @@ describe("Deductions", () => {
     renderAt(`/receivables/deductions/new?legalEntity=${LE}&openItem=${ITEM}&amount=300.00`);
     fill("Customer's reason", "promo");
     fireEvent.click(screen.getByRole("button", { name: "Record deduction" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("Could not record the deduction");
     expect(alert).toHaveTextContent("AR-DISPUTE-EXISTS");
   });
@@ -231,7 +232,7 @@ describe("Deductions", () => {
 
     fill("Claim remaining", "300.00");
     fireEvent.click(screen.getByRole("button", { name: "Match" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Matched to the claim");
+    expect(await findStatus()).toHaveTextContent("Matched to the claim");
     const call = lastCall(":match")!;
     expect(new Headers(call.init.headers).get("If-Match")).toBe('"1"');
     expect(call.body).toEqual({ claimType: "PROMOTION_FUND", claimRef: "FUND-7", claimRemaining: "300.00" });
@@ -249,7 +250,7 @@ describe("Deductions", () => {
     expect(await screen.findByText("Promotion fund FUND-7, 300.00 USD remaining")).toBeInTheDocument();
     fill("Decision note", "fund confirmed");
     fireEvent.click(screen.getByRole("button", { name: "Approve" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("The deduction changed since you opened it");
+    expect(await findAlert()).toHaveTextContent("The deduction changed since you opened it");
     const call = lastCall(":approve")!;
     expect(new Headers(call.init.headers).get("If-Match")).toBe('"2"');
     expect(call.body).toEqual({ note: "fund confirmed" });
@@ -271,24 +272,24 @@ describe("Deductions", () => {
     expect(await screen.findByText("The parts sum to 299.99; they must sum to 300.00.")).toBeInTheDocument();
     fill("Part amounts", "200.00, 100.00");
     fireEvent.click(screen.getByRole("button", { name: "Split" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Split.");
+    expect(await findStatus()).toHaveTextContent("Split.");
     expect(lastCall(":split")!.body).toEqual({ parts: ["200.00", "100.00"] });
 
     fireEvent.click(await screen.findByRole("button", { name: "Write off" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("AR-0006");
+    expect(await findAlert()).toHaveTextContent("AR-0006");
 
     fireEvent.change(screen.getByLabelText("Denial reason"), { target: { value: "EXPIRED" } });
     fireEvent.click(screen.getByRole("button", { name: "Deny and re-bill" }));
     await waitFor(() => expect(lastCall(":deny")).toBeDefined());
     expect(lastCall(":deny")!.body).toEqual({ reason: "EXPIRED" });
-    expect(await screen.findByRole("status")).toHaveTextContent("re-billed");
+    expect(await findStatus()).toHaveTextContent("re-billed");
   });
 
   it("shows a split deduction's parts and no workbench actions", async () => {
     const child: Deduction = { ...deduction, id: "0190f0a0-0000-7000-8000-000000000d02", parentId: DED, amount: "100.00" };
     server.handler = () => json(200, { ...deduction, status: "SPLIT", resolvedAt: "2027-03-09T10:00:00Z", children: [child] });
     const { container } = renderAt(`/receivables/deductions/${DED}`);
-    const parts = await screen.findByRole("table", { name: "Parts" });
+    const parts = await findTable({ name: "Parts" });
     expect(parts).toHaveTextContent("100.00 USD");
     expect(screen.queryByRole("button", { name: "Write off" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Match" })).not.toBeInTheDocument();
@@ -298,7 +299,7 @@ describe("Deductions", () => {
   it("shows the detail load failure with a retry", async () => {
     server.handler = () => json(404, { code: "AR-DEDUCTION-NOT-FOUND", detail: "deduction not found" });
     renderAt(`/receivables/deductions/${DED}`);
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("AR-DEDUCTION-NOT-FOUND");
     expect(within(alert).getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });

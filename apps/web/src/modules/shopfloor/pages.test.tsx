@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -102,7 +103,7 @@ describe("Workers list", () => {
     handler = (url) => (url.pathname.endsWith("/workers") ? json(200, { items: workers }) : undefined);
     const { container } = renderAt("/shopfloor/workers");
     expect(screen.getByRole("heading", { name: "Workers" })).toBeInTheDocument();
-    const table = await screen.findByRole("table", { name: "Workers" });
+    const table = await findTable({ name: "Workers" });
     await waitFor(() => expect(table).toHaveTextContent("Ana Silva"));
     expect(table).toHaveTextContent("B-1");
     expect(table).toHaveTextContent("20.00 USD/h");
@@ -239,7 +240,7 @@ describe("Worker detail", () => {
     const { container } = renderAt(`/shopfloor/workers/${ANA}`);
     expect(await screen.findByRole("heading", { name: "Ana Silva" })).toBeInTheDocument();
     expect(screen.getByText("20.00 USD per hour")).toBeInTheDocument();
-    const regs = await screen.findByRole("table", { name: "Registrations" });
+    const regs = await findTable({ name: "Registrations" });
     await waitFor(() => expect(regs).toHaveTextContent("clock-in"));
     expect(regs).toHaveTextContent("Offline replay");
     expect(regs).toHaveTextContent("Clock corrected +7 min");
@@ -301,7 +302,7 @@ describe("Time approval", () => {
       workerDay(BEN, "Ben Ito", "2026-10-20", { flags: ["missing-clock-out"], payLines: [] }),
     ]);
     const { container } = renderAt("/shopfloor/time");
-    const table = await screen.findByRole("table", { name: "Worker-days" });
+    const table = await findTable({ name: "Worker-days" });
     await waitFor(() => expect(table).toHaveTextContent("Ben Ito"));
     expect(within(table).getByText("Missing clock-out")).toBeInTheDocument();
     expect(within(table).getByRole("button", { name: "Approve Ana Silva 2026-10-20" })).toBeInTheDocument();
@@ -413,7 +414,7 @@ describe("Bundle detail", () => {
       return undefined;
     };
     const { container } = renderAt(`/shopfloor/bundles/${BUNDLE}`);
-    const table = await screen.findByRole("table", { name: "Bundle jobs" });
+    const table = await findTable({ name: "Bundle jobs" });
     expect(table).toHaveTextContent(JOB1);
     expect(table).toHaveTextContent("1.50 h");
     expect(table).toHaveTextContent("0.50 h");
@@ -432,7 +433,7 @@ describe("Bundle detail", () => {
       return undefined;
     };
     renderAt(`/shopfloor/bundles/${BUNDLE}`);
-    const table = await screen.findByRole("table", { name: "Bundle jobs" });
+    const table = await findTable({ name: "Bundle jobs" });
     expect(table).toHaveTextContent("Auto-stopped");
     expect(table).toHaveTextContent("Capped at 24 h");
   });

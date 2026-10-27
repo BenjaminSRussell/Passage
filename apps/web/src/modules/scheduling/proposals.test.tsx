@@ -1,3 +1,4 @@
+import { findAlert } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -153,7 +154,7 @@ describe("CampaignProposalsPage", () => {
       return undefined;
     };
     renderAt("/scheduling/campaign-proposals");
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("Could not load campaign proposals");
     expect(alert).toHaveTextContent("validation_failed");
     fail = false;

@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -152,7 +153,7 @@ describe("raw payload viewer", () => {
       return undefined;
     };
     renderAt(`/integration/interchanges/${IC_A}`);
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("the stored interchange no longer parses (EDI-0003)");
     fail = false;
     fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
@@ -256,7 +257,7 @@ describe("bulk reprocess", () => {
     expect(header(apply, "Idempotency-Key")).toMatch(/^[0-9a-f-]{36}$/);
     // The list is read again; the outcome stays with the ISA13s it ran on.
     await waitFor(() => expect(calls.filter((c) => c.url.pathname === "/api/v1/edi/messages")).toHaveLength(2));
-    const done = await screen.findByRole("table", { name: "Bulk reprocess outcome" });
+    const done = await findTable({ name: "Bulk reprocess outcome" });
     expect(within(done).getByText("000000001")).toBeInTheDocument();
     expect(screen.getByText("No failed inbound transaction is left in this list.")).toBeInTheDocument();
   });
@@ -274,7 +275,7 @@ describe("bulk reprocess", () => {
     };
     renderAt("/integration/messages");
     fireEvent.click(await screen.findByRole("button", { name: "Reprocess 1" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("database unavailable (COM-0503)");
+    expect(await findAlert()).toHaveTextContent("database unavailable (COM-0503)");
     fireEvent.click(screen.getByRole("button", { name: "Reprocess 1" }));
     expect(await screen.findByText("1 transaction in 1 interchange changed.")).toBeInTheDocument();
     const keys = calls.filter((c) => c.url.pathname.endsWith("interchanges:reprocess")).map((c) => header(c, "Idempotency-Key"));
@@ -289,7 +290,7 @@ describe("bulk reprocess", () => {
       return undefined;
     };
     renderAt("/integration/messages");
-    expect(await screen.findByRole("table", { name: "Messages" })).toBeInTheDocument();
+    expect(await findTable({ name: "Messages" })).toBeInTheDocument();
     await waitFor(() => expect(screen.getAllByText("Demo distributor").length).toBeGreaterThan(0));
     expect(screen.queryByRole("button", { name: /^Reprocess/ })).not.toBeInTheDocument();
   });

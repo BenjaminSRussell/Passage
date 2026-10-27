@@ -1,3 +1,4 @@
+import { findAlert, findStatus, findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { PackingSlip, PackingSlipSummary, Shipment, ShipmentSummary } from "./api/client";
@@ -82,7 +83,7 @@ describe("shipments list", () => {
       return undefined;
     };
     const { container } = renderAt("/fulfillment/shipments");
-    const table = await screen.findByRole("table", { name: "Shipments" });
+    const table = await findTable({ name: "Shipments" });
     await within(table).findByText("SH-0000001");
     expect(within(table).getByText("Released")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
@@ -105,7 +106,7 @@ describe("shipments list", () => {
     let fail = true;
     server.handler = () => (fail ? json(503, { code: "COM-0500", detail: "internal error" }) : json(200, { items: [summary("RELEASED", "SH-0000009")] }));
     renderAt("/fulfillment/shipments");
-    expect((await screen.findByRole("alert")).textContent).toContain("COM-0500");
+    expect((await findAlert()).textContent).toContain("COM-0500");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("SH-0000009")).toBeInTheDocument();
@@ -152,7 +153,7 @@ describe("release lines", () => {
     fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "10" } });
     fireEvent.click(screen.getByRole("button", { name: "Run release" }));
 
-    expect((await screen.findByRole("status")).textContent).toBe("Created 1 shipment; 1 line not released.");
+    expect((await findStatus()).textContent).toBe("Created 1 shipment; 1 line not released.");
     const call = posts("/releases:run")[0];
     expect(idempotencyKey(call)).toBeTruthy();
     expect(call.body).toMatchObject({ warehouseId: WH, requireFullAtp: true, lines: [{ orderLineId: ORDER_LINE, qty: "10", unit: "EA", atpOk: true, held: false }] });
@@ -234,7 +235,7 @@ describe("shipment detail", () => {
     fireEvent.change(screen.getByLabelText("Container type"), { target: { value: "C12" } });
     expect(screen.getByLabelText(/to pack$/)).toHaveValue("30");
     fireEvent.click(screen.getByRole("button", { name: "Close container" }));
-    expect(await within(await screen.findByRole("table", { name: "Containers" })).findByText("006141410000000011")).toBeInTheDocument();
+    expect(await within(await findTable({ name: "Containers" })).findByText("006141410000000011")).toBeInTheDocument();
     const call = posts("/containers")[0];
     expect(header(call, "If-Match")).toBe('"4"');
     expect(call.body).toEqual({ containerType: "C12", lines: [{ shipmentLineId: LINE, qty: "30" }] });
@@ -276,13 +277,13 @@ describe("shipment detail", () => {
     fireEvent.change(await screen.findByLabelText("Unit cost"), { target: { value: "1" } });
     fireEvent.change(screen.getByLabelText("Cost snapshot id"), { target: { value: "s" } });
     fireEvent.click(screen.getByRole("button", { name: "Post packing slip" }));
-    expect((await screen.findByRole("alert")).textContent).toContain("Someone else changed this shipment");
+    expect((await findAlert()).textContent).toContain("Someone else changed this shipment");
   });
 
   it("shows a load error with its code", async () => {
     server.handler = () => json(404, { code: "FUL-0020", detail: "shipment not found" });
     renderAt(`/fulfillment/shipments/${SH}`);
-    expect((await screen.findByRole("alert")).textContent).toContain("FUL-0020");
+    expect((await findAlert()).textContent).toContain("FUL-0020");
   });
 });
 
@@ -296,7 +297,7 @@ describe("packing slips", () => {
         ],
       });
     renderAt("/fulfillment/packing-slips");
-    const table = await screen.findByRole("table", { name: "Packing slips" });
+    const table = await findTable({ name: "Packing slips" });
     expect((await within(table).findByText("PS-0000002")).closest("tr")?.textContent).toContain("Reversal");
     expect(within(table).getByText("-125.00 USD")).toBeInTheDocument();
   });
@@ -323,7 +324,7 @@ describe("packing slips", () => {
       return undefined;
     };
     const { container } = renderAt(`/fulfillment/packing-slips/${SLIP}`);
-    const journal = await screen.findByRole("table", { name: "Journal" });
+    const journal = await findTable({ name: "Journal" });
     const debit = within(journal).getByText("1405").closest("tr");
     expect(debit?.children[2].textContent).toBe("125.00 USD");
     expect(within(journal).getByText("1400").closest("tr")?.children[3].textContent).toBe("125.00 USD");
@@ -335,7 +336,7 @@ describe("packing slips", () => {
     expect(await screen.findByRole("heading", { name: "Packing slip PS-0000002" })).toBeInTheDocument();
     expect(idempotencyKey(posts(":cancel")[0])).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Cancel packing slip" })).toBeNull();
-    const mirrored = within(await screen.findByRole("table", { name: "Journal" })).getByText("1405").closest("tr");
+    const mirrored = within(await findTable({ name: "Journal" })).getByText("1405").closest("tr");
     expect(mirrored?.children[3].textContent).toBe("125.00 USD");
   });
 
@@ -345,6 +346,6 @@ describe("packing slips", () => {
     renderAt(`/fulfillment/packing-slips/${SLIP}`);
     fireEvent.click(await screen.findByRole("button", { name: "Cancel packing slip" }));
     fireEvent.click(screen.getByRole("button", { name: "Yes, cancel it" }));
-    expect((await screen.findByRole("alert")).textContent).toContain("FUL-0010");
+    expect((await findAlert()).textContent).toContain("FUL-0010");
   });
 });

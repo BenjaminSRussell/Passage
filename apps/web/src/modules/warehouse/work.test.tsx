@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { Work } from "./api/client";
@@ -36,7 +37,7 @@ describe("WorkListPage", () => {
       return undefined;
     };
     const { container } = renderAt(`/warehouse/work?warehouse=${WH}`);
-    const table = await screen.findByRole("table", { name: "Work" });
+    const table = await findTable({ name: "Work" });
     await waitFor(() => expect(table).toHaveTextContent("Sales pick"));
     expect(table).toHaveTextContent("Assigned");
     expect(table).toHaveTextContent("picker");
@@ -148,7 +149,7 @@ describe("WorkDetailPage", () => {
     server.handler = () => json(200, pick);
     const { container } = renderAt(`/warehouse/work/${WORK}`);
     expect(screen.getByText("Loading the work…")).toBeInTheDocument();
-    const lines = await screen.findByRole("table", { name: "Work lines" });
+    const lines = await findTable({ name: "Work lines" });
     expect(lines).toHaveTextContent("BOLT");
     expect(screen.getByText("picker")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);

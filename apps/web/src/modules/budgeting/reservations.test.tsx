@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -113,7 +114,7 @@ describe("ReservationsPage", () => {
       [`GET /api/v1/budget/reservations/${RES}`]: () => json(200, reservation),
     });
     const { container } = at(`/budgeting/reservations?rule=${R1}`);
-    const table = await screen.findByRole("table", { name: "Earmarked funds" });
+    const table = await findTable({ name: "Earmarked funds" });
     expect(await within(table).findByText("Trade show booth")).toBeInTheDocument();
     expect(within(table).getAllByText("20000.00")).toHaveLength(2);
     expect(calls(fetchMock, "GET", `reservations?rule=${R1}`)).toHaveLength(1);
@@ -130,7 +131,7 @@ describe("ReservationsPage", () => {
       "GET /api/v1/budget/reservations": () => (fail ? json(503, { title: "down", code: "COM-0500", detail: "internal error" }) : json(200, { items: [] })),
     });
     at("/budgeting/reservations");
-    expect(await screen.findByRole("alert")).toHaveTextContent("COM-0500");
+    expect(await findAlert()).toHaveTextContent("COM-0500");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No reservation documents")).toBeInTheDocument();
@@ -222,7 +223,7 @@ describe("ReservationDetailPage", () => {
       documentLineId: POL,
       amount: "8000",
     });
-    const history = await screen.findByRole("table", { name: "Consumption history" });
+    const history = await findTable({ name: "Consumption history" });
     expect(await within(history).findByRole("link", { name: "Open encumbrance" })).toHaveAttribute("href", `/budgeting/encumbrances/${ENC}`);
   });
 
@@ -243,6 +244,6 @@ describe("ReservationDetailPage", () => {
   it("shows the problem when the document cannot be loaded", async () => {
     stubRoutes({ [`GET /api/v1/budget/reservations/${RES}`]: () => json(404, { title: "Not Found", code: "BUD-0005", detail: "reservation not found" }) });
     at(`/budgeting/reservations/${RES}`);
-    expect(await screen.findByRole("alert")).toHaveTextContent("BUD-0005");
+    expect(await findAlert()).toHaveTextContent("BUD-0005");
   });
 });

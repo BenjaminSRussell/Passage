@@ -56,8 +56,8 @@ export function Shell({ modules }: ShellProps) {
   const lastPath = useRef(pathname);
   const wasOnline = useRef(online);
   const announced = useRef("");
-  const announceFrame = useRef<number>();
-  const toastTimer = useRef<number>();
+  const announceFrame = useRef<number | undefined>(undefined);
+  const toastTimer = useRef<number | undefined>(undefined);
 
   const page = useMemo(() => resolvePage(pathname, modules, shellNav), [pathname, modules]);
 

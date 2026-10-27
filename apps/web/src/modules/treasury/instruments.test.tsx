@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { Check, Facility, FacilityInstrument, Loan } from "./api/client";
@@ -101,7 +102,7 @@ describe("check register", () => {
 
     fill("Bank account id", ACCT);
     fireEvent.click(screen.getByRole("button", { name: "Show checks" }));
-    const table = await screen.findByRole("table", { name: "Checks" });
+    const table = await findTable({ name: "Checks" });
     await waitFor(() => expect(table).toHaveTextContent("Acme Supplies"));
     expect(table).toHaveTextContent("1500.00 USD");
     expect(server.calls[0].url.searchParams.get("bankAccountId")).toBe(ACCT);
@@ -119,11 +120,11 @@ describe("check register", () => {
 
     server.handler = () => json(500, { code: "COM-0500", detail: "internal error" });
     renderAt(`/treasury/checks?bankAccountId=${ACCT}`);
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("Could not load the checks");
     server.handler = () => json(200, { items: [check] });
     fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
-    expect(await screen.findByRole("table", { name: "Checks" })).toHaveTextContent("Acme Supplies");
+    expect(await findTable({ name: "Checks" })).toHaveTextContent("Acme Supplies");
   });
 });
 
@@ -159,7 +160,7 @@ describe("issue check", () => {
     fill("Amount", "10");
     fill("Currency", "USD");
     fireEvent.click(screen.getByRole("button", { name: "Issue check" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("The bank account is not active");
+    expect(await findAlert()).toHaveTextContent("The bank account is not active");
     view.unmount();
 
     server.handler = () => json(422, { code: "TRS-0426", detail: "check currency USD differs from the bank account currency EUR" });
@@ -229,7 +230,7 @@ describe("check detail", () => {
     await screen.findByRole("heading", { name: "Check 1001" });
     expect(screen.getByText(/also sends a void record to positive pay/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Mark cleared" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("This check changed since you opened it");
+    expect(await findAlert()).toHaveTextContent("This check changed since you opened it");
     view.unmount();
 
     server.handler = (url) => (url.pathname.endsWith(`/checks/${CHK}`) ? json(200, { ...check, status: "cleared" }) : undefined);
@@ -241,7 +242,7 @@ describe("check detail", () => {
   it("shows a load error with a retry", async () => {
     server.handler = () => json(404, { code: "TRS-0423", detail: "check not found" });
     renderAt(`/treasury/checks/${CHK}`);
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("Could not load the check");
     expect(alert).toHaveTextContent("TRS-0423");
   });
@@ -251,7 +252,7 @@ describe("facilities", () => {
   it("lists facilities with utilization and shows the empty state", async () => {
     server.handler = () => json(200, { items: [facility] });
     const { container } = renderAt(`/treasury/facilities?legalEntityId=${LE}`);
-    const table = await screen.findByRole("table", { name: "Facilities" });
+    const table = await findTable({ name: "Facilities" });
     await waitFor(() => expect(table).toHaveTextContent("LC-DB-01"));
     expect(table).toHaveTextContent("950000.00 EUR");
     expect(table).toHaveTextContent("50000.00 EUR");
@@ -299,7 +300,7 @@ describe("facilities", () => {
     fill("Issue date", "2026-10-27");
     fill("Expiry date", "2027-04-30");
     fireEvent.click(screen.getByRole("button", { name: "Book instrument" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("The facility limit would be exceeded");
     expect(alert).toHaveTextContent("TRS-0415");
     const firstKey = header(server.calls.filter((c) => c.method === "POST")[0], "Idempotency-Key");
@@ -330,7 +331,7 @@ describe("facilities", () => {
   it("shows a load error for a missing facility", async () => {
     server.handler = () => json(404, { code: "TRS-0428", detail: "facility not found" });
     renderAt(`/treasury/facilities/${FAC}`);
-    expect(await screen.findByRole("alert")).toHaveTextContent("Could not load the facility");
+    expect(await findAlert()).toHaveTextContent("Could not load the facility");
   });
 });
 
@@ -338,7 +339,7 @@ describe("loans", () => {
   it("lists loans and shows the empty and error states", async () => {
     server.handler = () => json(200, { items: [loan] });
     const first = renderAt(`/treasury/loans?legalEntityId=${LE}`);
-    const table = await screen.findByRole("table", { name: "Loans" });
+    const table = await findTable({ name: "Loans" });
     await waitFor(() => expect(table).toHaveTextContent("Passage Holdings BV"));
     expect(table).toHaveTextContent("3%");
     expect(pageViolations(first.container)).toEqual([]);
@@ -351,7 +352,7 @@ describe("loans", () => {
 
     server.handler = () => json(500, { code: "COM-0500", detail: "internal error" });
     renderAt(`/treasury/loans?legalEntityId=${LE}`);
-    expect(await screen.findByRole("alert")).toHaveTextContent("Could not load the loans");
+    expect(await findAlert()).toHaveTextContent("Could not load the loans");
   });
 
   it("creates a loan with the rate as a fraction and opens its schedule", async () => {
@@ -386,7 +387,7 @@ describe("loans", () => {
       dayCount: "ACT/360",
       periodMonths: 1,
     });
-    const schedule = await screen.findByRole("table", { name: "Loan schedule" });
+    const schedule = await findTable({ name: "Loan schedule" });
     expect(schedule).toHaveTextContent("2500");
   });
 
@@ -407,6 +408,6 @@ describe("loans", () => {
   it("shows a load error for a missing loan", async () => {
     server.handler = () => json(404, { code: "TRS-0447", detail: "loan contract not found" });
     renderAt(`/treasury/loans/${LOAN}`);
-    expect(await screen.findByRole("alert")).toHaveTextContent("Could not load the loan");
+    expect(await findAlert()).toHaveTextContent("Could not load the loan");
   });
 });

@@ -1,3 +1,4 @@
+import { findAlert, findStatus, findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuditEntry } from "./api/client";
@@ -86,7 +87,7 @@ describe("AuditTrailPage", () => {
   it("lists the month's entries with their kind, actor and trace, and opens one", async () => {
     server.handler = (url) => (url.pathname === PATH ? json(200, { items: [reopen, posted, run], limit: 100, nextCursor: null }) : undefined);
     const { container } = renderAt("/finreport/audit-trail");
-    const table = await screen.findByRole("table", { name: "Audit entries" });
+    const table = await findTable({ name: "Audit entries" });
     expect(await within(table).findByText("Reopen approved")).toBeInTheDocument();
     expect(within(table).getByText("journal:JV-0042")).toBeInTheDocument();
     expect(within(table).getByText("amount: 1250.000000; voucher: JV-0042")).toBeInTheDocument();
@@ -117,7 +118,7 @@ describe("AuditTrailPage", () => {
       return fail ? problem(403, "AUTH-0003", "missing duty reporting.audit.view") : json(200, { items: [posted], limit: 100, nextCursor: null });
     };
     renderAt("/finreport/audit-trail");
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("Could not load the audit trail");
     expect(alert).toHaveTextContent("AUTH-0003");
     fail = false;
@@ -171,7 +172,7 @@ describe("AuditTrailPage", () => {
     renderAt("/finreport/audit-trail");
     await screen.findByText("journal:JV-0042");
     fireEvent.click(screen.getByRole("button", { name: "Export CSV" }));
-    const status = await screen.findByRole("status");
+    const status = await findStatus();
     await waitFor(() => expect(status).toHaveTextContent(sha));
     expect(status).toHaveTextContent("1 entry in audit-trail-e-1.csv");
     expect(status).toHaveTextContent("audit-export:e-1");
@@ -188,7 +189,7 @@ describe("AuditTrailPage", () => {
     renderAt("/finreport/audit-trail");
     await screen.findByText("journal:JV-0042");
     fireEvent.click(screen.getByRole("button", { name: "Export CSV" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("Too many entries for one export");
     expect(alert).toHaveTextContent("REPORT-0030");
   });

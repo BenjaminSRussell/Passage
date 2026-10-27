@@ -1,3 +1,4 @@
+import { findAlert, findStatus, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -128,7 +129,7 @@ describe("Master planning workspace", () => {
   it("shows the problem code when the service fails", async () => {
     stubApi(["/", () => problem(500, "COM-0500", "internal error")]);
     renderAt("/planning");
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     await waitFor(() => expect(alert).toHaveTextContent("COM-0500"));
     expect(alert).toHaveTextContent("Could not load plan MAIN");
   });
@@ -155,7 +156,7 @@ describe("Planned orders page", () => {
       ["/planned-orders", () => json({ items: [order, purchase] })],
     );
     renderAt("/planning/planned-orders");
-    const table = await screen.findByRole("table", { name: "Planned orders" });
+    const table = await findTable({ name: "Planned orders" });
     await waitFor(() => expect(within(table).getByText("PLN-000005")).toBeInTheDocument());
     expect(within(table).getByText("7 days")).toBeInTheDocument();
     expect(within(table).getByText("Production")).toBeInTheDocument();
@@ -219,7 +220,7 @@ describe("Action messages page", () => {
   it("lists messages and filters by action", async () => {
     const fetchMock = stubApi(["/messages", () => json({ items: [delay] })]);
     renderAt("/planning/messages?plan=MAIN");
-    const table = await screen.findByRole("table", { name: "Messages" });
+    const table = await findTable({ name: "Messages" });
     await waitFor(() => expect(within(table).getByText("SO-1")).toBeInTheDocument());
     expect(within(table).getByText("Delay")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Action"), { target: { value: "postpone" } });
@@ -237,7 +238,7 @@ describe("Plan runs page", () => {
   it("lists versions newest first", async () => {
     stubApi(["/versions", () => json({ items: [version, { ...version, id: "v2", number: 2, status: "complete" }] })]);
     renderAt("/planning/runs");
-    const table = await screen.findByRole("table", { name: "Plan runs" });
+    const table = await findTable({ name: "Plan runs" });
     await waitFor(() => expect(within(table).getByText("Complete")).toBeInTheDocument());
     expect(within(table).getAllByText("0f3a9c1d2e4b5a69")).toHaveLength(2);
   });
@@ -268,7 +269,7 @@ describe("Run plan page", () => {
     fireEvent.change(screen.getByLabelText("Site"), { target: { value: site } });
     fireEvent.change(screen.getByLabelText("Plan date"), { target: { value: "2026-11-02" } });
     fireEvent.click(screen.getByRole("button", { name: "Run plan" }));
-    const status = await screen.findByRole("status");
+    const status = await findStatus();
     await waitFor(() => expect(status).toHaveTextContent("Version 3 of plan MAIN is current"));
     expect(status).toHaveTextContent("6 planned orders and 4 messages from 3 items.");
 

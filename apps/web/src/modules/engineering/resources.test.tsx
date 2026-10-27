@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -32,7 +33,7 @@ describe("ResourcesPage", () => {
     const opened: string[] = [];
     renderInRouter(<ResourcesPage onOpen={(id) => opened.push(id)} />);
     expect(screen.getByRole("table", { name: "Resources" })).toHaveAttribute("aria-busy", "true");
-    const table = await screen.findByRole("table", { name: "Resources" });
+    const table = await findTable({ name: "Resources" });
     await waitFor(() => expect(table).not.toHaveAttribute("aria-busy"));
     expect(table).toHaveTextContent("Name a");
     expect(table).toHaveTextContent("Yes");
@@ -51,7 +52,7 @@ describe("ResourcesPage", () => {
     let calls = 0;
     const fetchMock = stub(() => (++calls === 1 ? problem(422, "ENG-INVALID-QUERY", "groupId must be a UUID") : ok({ items: [resource("a")] })));
     renderInRouter(<ResourcesPage initial={{ groupId: "nope" }} />);
-    expect(await screen.findByRole("alert")).toHaveTextContent("groupId must be a UUID");
+    expect(await findAlert()).toHaveTextContent("groupId must be a UUID");
     expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/resources?groupId=nope");
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await screen.findByText("RES-a");
@@ -117,7 +118,7 @@ describe("ResourceDetailPage", () => {
   it("shows a distinct not-found message without Retry", async () => {
     stub(() => problem(404, "ENG-RESOURCE-NOTFOUND", "Resource not found"));
     renderInRouter(<ResourceDetailPage id="x" />);
-    expect(await screen.findByRole("alert")).toHaveTextContent("This resource does not exist");
+    expect(await findAlert()).toHaveTextContent("This resource does not exist");
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
   });
 
@@ -125,7 +126,7 @@ describe("ResourceDetailPage", () => {
     let calls = 0;
     stub(() => (++calls === 1 ? problem(500, "ENG-INTERNAL", "Something broke") : ok(resource("a"))));
     renderInRouter(<ResourceDetailPage id="a" />);
-    expect(await screen.findByRole("alert")).toHaveTextContent("Something broke");
+    expect(await findAlert()).toHaveTextContent("Something broke");
     expect(screen.getByRole("alert")).not.toHaveTextContent("does not exist");
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(await screen.findByRole("heading", { name: "Resource RES-a" })).toBeInTheDocument();
@@ -145,7 +146,7 @@ describe("ResourceGroupsPage", () => {
     let fail = true;
     const fetchMock = stub(() => (fail ? problem(500, "ENG-INTERNAL", "Groups unavailable") : ok({ items: [] })));
     renderInRouter(<ResourceGroupsPage />);
-    expect(await screen.findByRole("alert")).toHaveTextContent("Groups unavailable");
+    expect(await findAlert()).toHaveTextContent("Groups unavailable");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(await screen.findByText("No resource groups match")).toBeInTheDocument();
@@ -174,7 +175,7 @@ describe("CapabilitiesPage", () => {
     let empty = false;
     stub(() => (empty ? ok({ items: [] }) : problem(500, "ENG-INTERNAL", "Capabilities unavailable")));
     renderInRouter(<CapabilitiesPage />);
-    expect(await screen.findByRole("alert")).toHaveTextContent("Capabilities unavailable");
+    expect(await findAlert()).toHaveTextContent("Capabilities unavailable");
     empty = true;
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(await screen.findByText("No capabilities yet")).toBeInTheDocument();
@@ -198,7 +199,7 @@ describe("CalendarDaysPage", () => {
       }),
     );
     renderInRouter(<CalendarDaysPage id="cal/1" initialRange={range} />);
-    const table = await screen.findByRole("table", { name: "Calendar days" });
+    const table = await findTable({ name: "Calendar days" });
     await waitFor(() => expect(table).not.toHaveAttribute("aria-busy"));
     expect(table).toHaveTextContent("Open06:00-14:00, 14:00-22:0016");
     expect(table).toHaveTextContent("2026-10-03Closed0");
@@ -218,7 +219,7 @@ describe("CalendarDaysPage", () => {
   it("shows the error with Retry", async () => {
     stub(() => problem(404, "ENG-CALENDAR-NOTFOUND", "Calendar not found"));
     renderInRouter(<CalendarDaysPage id="c1" initialRange={range} />);
-    expect(await screen.findByRole("alert")).toHaveTextContent("Calendar not found");
+    expect(await findAlert()).toHaveTextContent("Calendar not found");
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
 });

@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -124,7 +125,7 @@ describe("trading partners", () => {
   it("lists partners from the service and filters by environment", async () => {
     handler = (url) => (url.pathname === "/api/v1/edi/partners" ? json(200, { items: [partner] }) : undefined);
     const { container } = renderAt("/integration/partners");
-    const table = await screen.findByRole("table", { name: "Trading partners" });
+    const table = await findTable({ name: "Trading partners" });
     await waitFor(() => expect(within(table).getByText("ZZ/DISTRIBUTOR")).toBeInTheDocument());
     expect(within(table).getByText("60 min")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
@@ -143,7 +144,7 @@ describe("trading partners", () => {
     let fail = true;
     handler = () => (fail ? json(500, { code: "COM-0500", detail: "internal error" }) : json(200, { items: [partner] }));
     renderAt("/integration/partners");
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("Could not load partners");
     expect(alert).toHaveTextContent("internal error (COM-0500)");
     fail = false;
@@ -199,7 +200,7 @@ describe("trading partners", () => {
     handler = (url) =>
       url.pathname.startsWith("/api/v1/edi/partners/") ? json(404, { code: "EDI-0005", detail: "partner not found" }) : json(200, { items: [] });
     renderAt(`/integration/partners/${PARTNER_ID}`);
-    expect(await screen.findByRole("alert")).toHaveTextContent("partner not found (EDI-0005)");
+    expect(await findAlert()).toHaveTextContent("partner not found (EDI-0005)");
   });
 });
 
@@ -211,7 +212,7 @@ describe("interchanges", () => {
       return undefined;
     };
     const { container } = renderAt("/integration/interchanges");
-    const table = await screen.findByRole("table", { name: "Interchanges" });
+    const table = await findTable({ name: "Interchanges" });
     await waitFor(() => expect(within(table).getByText("000000905")).toBeInTheDocument());
     expect(within(table).getByText("Accepted with errors")).toBeInTheDocument();
     expect(within(table).getByText("X12 00401")).toBeInTheDocument();
@@ -271,7 +272,7 @@ describe("interchanges", () => {
     renderAt("/integration/interchanges/receive");
     fill("Raw X12 interchange", "ISA*00*");
     fireEvent.click(screen.getByRole("button", { name: "Receive interchange" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("This interchange was already received");
     expect(alert).toHaveTextContent("EDI-0102");
   });

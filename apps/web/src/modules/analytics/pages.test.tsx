@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -120,7 +121,7 @@ describe("governed metrics list", () => {
     handler = () => ({ status: 200, body: catalog });
     const { container } = renderAt("/analytics/metrics");
     expect(screen.getByRole("table", { name: "Governed metrics" })).toHaveAttribute("aria-busy", "true");
-    const table = await screen.findByRole("table", { name: "Governed metrics" });
+    const table = await findTable({ name: "Governed metrics" });
     await waitFor(() => expect(within(table).getByText("ledger.balance_by_account")).toBeInTheDocument());
     expect(within(table).getByText("Non-financial")).toBeInTheDocument();
     expect(within(table).getByText("Sales line")).toBeInTheDocument();
@@ -142,7 +143,7 @@ describe("governed metrics list", () => {
     let attempt = 0;
     handler = () => (++attempt === 1 ? { status: 403, body: { code: "AUTH-0003", detail: "missing duty AnalyticsView" } } : { status: 200, body: catalog });
     renderAt("/analytics");
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("missing duty AnalyticsView (AUTH-0003)");
     fireEvent.click(within(alert.closest("div") as HTMLElement).getByRole("button", { name: "Try again" }));
     expect(await screen.findByRole("button", { name: "revenue" })).toBeInTheDocument();
@@ -151,7 +152,7 @@ describe("governed metrics list", () => {
   it("refuses a response that breaks the contract instead of rendering it", async () => {
     handler = () => ({ status: 200, body: { items: [{ metricId: 1 }] } });
     renderAt("/analytics");
-    expect(await screen.findByRole("alert")).toHaveTextContent("(CONTRACT)");
+    expect(await findAlert()).toHaveTextContent("(CONTRACT)");
   });
 });
 
@@ -178,7 +179,7 @@ describe("metric detail", () => {
   it("shows an error when the catalog cannot load", async () => {
     handler = () => ({ status: 503, body: {} });
     renderAt("/analytics/metrics/revenue");
-    expect(await screen.findByRole("alert")).toHaveTextContent("(HTTP-503)");
+    expect(await findAlert()).toHaveTextContent("(HTTP-503)");
   });
 });
 
@@ -221,7 +222,7 @@ describe("explorer", () => {
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Build plan" }));
 
-    const filters = await screen.findByRole("table", { name: "Scope filters" });
+    const filters = await findTable({ name: "Scope filters" });
     expect(within(filters).getByText(USMF)).toBeInTheDocument();
     const post = calls.find((c) => c.method === "POST");
     expect(post?.url.pathname).toBe("/api/v1/analytics/query");
@@ -282,7 +283,7 @@ describe("metric reconciliation", () => {
       body: { date: "2026-10-26", failedCount: 1, items: [reconRow(USMF, "OK", "0", true), reconRow(DEMF, "FAILED", "-0.01")] },
     });
     const { container } = renderAt("/analytics/reconciliation");
-    const table = await screen.findByRole("table", { name: "Reconciliation results" });
+    const table = await findTable({ name: "Reconciliation results" });
     await waitFor(() => expect(within(table).getByText("-0.01")).toBeInTheDocument());
     expect(within(table).getByText("Trusted")).toBeInTheDocument();
     expect(within(table).getByText("Failed")).toBeInTheDocument();
@@ -321,7 +322,7 @@ describe("metric reconciliation", () => {
   it("shows the problem when the caller lacks FinanceView", async () => {
     handler = () => ({ status: 403, body: { code: "AUTH-0003", detail: "missing duty FinanceView" } });
     renderAt("/analytics/reconciliation");
-    expect(await screen.findByRole("alert")).toHaveTextContent("missing duty FinanceView (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty FinanceView (AUTH-0003)");
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
   });
 });

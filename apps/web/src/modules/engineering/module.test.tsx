@@ -1,3 +1,4 @@
+import { findAlert, findStatus, findTable } from "../../test-utils";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
 import { loadModules } from "../registry";
@@ -99,7 +100,7 @@ describe("engineering module", () => {
     fireEvent.change(screen.getByLabelText("Component"), { target: { value: "SPOKE" } });
     fireEvent.change(screen.getByLabelText("As of date"), { target: { value: "2026-03-01" } });
     fireEvent.click(screen.getByRole("button", { name: "Find parents" }));
-    const table = await screen.findByRole("table", { name: "Where-used results" });
+    const table = await findTable({ name: "Where-used results" });
     expect(table).toHaveTextContent("WHEEL");
     expect(table).toHaveTextContent("BIKE");
     expect(screen.getByRole("status")).toHaveTextContent("2 parents found");
@@ -111,7 +112,7 @@ describe("engineering module", () => {
     render(<WhereUsedPage />);
     fireEvent.change(screen.getByLabelText("Component"), { target: { value: "SPOKE" } });
     fireEvent.click(screen.getByRole("button", { name: "Find parents" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Where-used lookup failed");
+    expect(await findAlert()).toHaveTextContent("Where-used lookup failed");
     expect(screen.queryByRole("table")).toBeNull();
     expect(screen.getByLabelText("Component")).toHaveValue("SPOKE");
   });
@@ -121,7 +122,7 @@ describe("engineering module", () => {
     render(<WhereUsedPage />);
     fireEvent.change(screen.getByLabelText("Component"), { target: { value: "SPOKE" } });
     fireEvent.click(screen.getByRole("button", { name: "Find parents" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("No active BOM uses this component on that date.");
+    expect(await findStatus()).toHaveTextContent("No active BOM uses this component on that date.");
     expect(screen.queryByRole("table")).toBeNull();
     expect(await screen.findByText("No parents found")).toBeInTheDocument();
   });

@@ -1,3 +1,4 @@
+import { findStatus, findTable } from "../../test-utils";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
@@ -50,7 +51,7 @@ describe("DirectiveSimulatorPage", () => {
     reply = () => ({ status: 200, body: hit });
     const { container } = render(<DirectiveSimulatorPage />);
     simulate();
-    expect(await screen.findByRole("status")).toHaveTextContent("Location R-05-02-01 chosen by DIR-10, line 3, action 1.");
+    expect(await findStatus()).toHaveTextContent("Location R-05-02-01 chosen by DIR-10, line 3, action 1.");
     const trace = screen.getByRole("table", { name: "Rule trace" });
     expect(within(trace).getByText("DIR-10")).toBeInTheDocument();
     expect(trace).toHaveTextContent("Hit");
@@ -77,7 +78,7 @@ describe("DirectiveSimulatorPage", () => {
   it("reports a blocked line with WMS-0101 and an empty trace", async () => {
     render(<DirectiveSimulatorPage />);
     simulate();
-    expect(await screen.findByRole("status")).toHaveTextContent("Blocked (WMS-0101): no directive action found a location for this line.");
+    expect(await findStatus()).toHaveTextContent("Blocked (WMS-0101): no directive action found a location for this line.");
     expect(screen.getByText("No directive was evaluated")).toBeInTheDocument();
   });
 
@@ -120,7 +121,7 @@ describe("DirectiveSimulatorPage", () => {
     reply = () => ({ status: 200, body: hit });
     render(<DirectiveSimulatorPage />);
     simulate();
-    expect(await screen.findByRole("table", { name: "Rule trace" })).toBeInTheDocument();
+    expect(await findTable({ name: "Rule trace" })).toBeInTheDocument();
     reply = () => Promise.reject(new TypeError("Failed to fetch"));
     simulate();
     expect(await screen.findByText("Failed to fetch (NETWORK)")).toBeInTheDocument();
@@ -151,7 +152,7 @@ describe("DirectiveSimulatorPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Load hazmat example" }));
     expect(screen.getByLabelText("Item")).toHaveValue("SOLV-3");
     simulate();
-    expect(await screen.findByRole("status")).toHaveTextContent("Location H-03-01-01 chosen by DIR-HAZ, line 1, action 1.");
+    expect(await findStatus()).toHaveTextContent("Location H-03-01-01 chosen by DIR-HAZ, line 1, action 1.");
     expect(screen.getByRole("table", { name: "Rule trace" })).toHaveTextContent("hazmat: class 3 vs 5.1 prohibited in FCS-02");
     const body = calls[0].body as { compliance: { segregation: unknown[]; sectionLimitsKg: Record<string, string> }; locations: { fireSection?: string }[] };
     expect(body.compliance.segregation).toEqual([{ a: "3", b: "5.1", rel: "prohibited" }]);

@@ -1,3 +1,4 @@
+import { findAlert, findStatus, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -190,17 +191,17 @@ describe("depreciation runs", () => {
     fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(screen.getByLabelText("Period"), { target: { value: "2026-03" } });
     fireEvent.click(screen.getByRole("button", { name: "Propose run" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("That period is already posted");
+    expect(await findAlert()).toHaveTextContent("That period is already posted");
   });
 
   it("lists runs and shows the load error with a retry", async () => {
     let fail = true;
     handler = () => (fail ? { status: 503, body: { code: "COM-0500", detail: "internal error" } } : { status: 200, body: { items: [{ ...run, lines: undefined }] } });
     renderAt("/assets/depreciation-runs");
-    expect(await screen.findByRole("alert")).toHaveTextContent("internal error (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("internal error (COM-0500)");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-    const table = await screen.findByRole("table", { name: "Depreciation runs" });
+    const table = await findTable({ name: "Depreciation runs" });
     await waitFor(() => expect(within(table).getByText("166.67 USD")).toBeInTheDocument());
   });
 
@@ -210,12 +211,12 @@ describe("depreciation runs", () => {
         ? { status: 200, body: { ...run, status: "Posted", version: 3, postedAt: "2026-04-01T09:00:00Z", lines: [{ ...run.lines[0], status: "Posted" }, run.lines[1]] }, etag: '"3"' }
         : { status: 200, body: run, etag: '"2"' };
     const { container } = renderAt(`/assets/depreciation-runs/${RUN}`);
-    const lines = await screen.findByRole("table", { name: "Run lines" });
+    const lines = await findTable({ name: "Run lines" });
     expect(within(lines).getByText("AST-0503: previous period 2026-02 is not depreciated")).toBeInTheDocument();
     expect(screen.getByRole("list", { name: "Run totals" })).toHaveTextContent("Books due 1");
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Post run" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("1 books posted 166.67 USD; 1 stayed out as exceptions.");
+    expect(await findStatus()).toHaveTextContent("1 books posted 166.67 USD; 1 stayed out as exceptions.");
     expect(posts()[0].headers.get("If-Match")).toBe('"2"');
     expect(posts()[0].url.pathname).toBe(`/api/v1/assets/depreciation-runs/${RUN}/post`);
     expect(screen.queryByRole("button", { name: "Post run" })).not.toBeInTheDocument();
@@ -225,7 +226,7 @@ describe("depreciation runs", () => {
     handler = (_url, init) => (init.method === "POST" ? { status: 412, body: { code: "AST-0006", detail: "the run was proposed again" } } : { status: 200, body: run, etag: '"2"' });
     renderAt(`/assets/depreciation-runs/${RUN}`);
     fireEvent.click(await screen.findByRole("button", { name: "Post run" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("The run was proposed again since you opened it");
+    expect(await findAlert()).toHaveTextContent("The run was proposed again since you opened it");
     expect(screen.getByRole("button", { name: "Reload" })).toBeInTheDocument();
   });
 });
@@ -259,7 +260,7 @@ describe("adjustments", () => {
     fireEvent.change(screen.getByLabelText("Transaction date"), { target: { value: "2026-06-30" } });
     fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "-2000" } });
     fireEvent.click(screen.getByRole("button", { name: "Post adjustment" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Impairment posted on TAX");
+    expect(await findStatus()).toHaveTextContent("Impairment posted on TAX");
     expect(screen.getByText("AST-0512: impairment reversal limited to 1500.00")).toBeInTheDocument();
     expect(posts()[0].body).toEqual({ bookId: TAX, type: "Impairment", transactionDate: "2026-06-30", amount: "-2000" });
     expect(posts()[0].url.pathname).toBe(`/api/v1/assets/${ASSET}/transactions`);
@@ -271,7 +272,7 @@ describe("adjustments", () => {
     fireEvent.change(await screen.findByLabelText("Amount"), { target: { value: "99999" } });
     fireEvent.change(screen.getByLabelText("Transaction date"), { target: { value: "2026-06-30" } });
     fireEvent.click(screen.getByRole("button", { name: "Post adjustment" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("impairment would make NBV negative (AST-0014)");
+    expect(await findAlert()).toHaveTextContent("impairment would make NBV negative (AST-0014)");
   });
 });
 
@@ -302,7 +303,7 @@ describe("additions", () => {
     fireEvent.click(screen.getByLabelText("Post the cost to the books"));
     fireEvent.change(screen.getByLabelText("Cost"), { target: { value: "2000" } });
     fireEvent.click(screen.getByRole("button", { name: "Record addition" }));
-    const table = await screen.findByRole("table", { name: "Additions" });
+    const table = await findTable({ name: "Additions" });
     await waitFor(() => expect(within(table).getByText("2000 USD on 2 books")).toBeInTheDocument());
     expect(posts()[0].body).toMatchObject({ type: "Improvement", description: "Coolant system", financial: true, cost: "2000", currency: "USD" });
     expect(posts()[0].body).not.toHaveProperty("bookIds");
@@ -366,7 +367,7 @@ describe("insurance", () => {
     fireEvent.change(screen.getByLabelText("Index series"), { target: { value: "US-MACH" } });
     fireEvent.change(screen.getByLabelText("Index base year"), { target: { value: "2024" } });
     fireEvent.click(screen.getByRole("button", { name: "Record policy" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Indexed replacement value 105803.57 USD (index year 2026)");
+    expect(await findStatus()).toHaveTextContent("Indexed replacement value 105803.57 USD (index year 2026)");
     expect(screen.getByText("AST-0532: the asset is under-insured: 95000.00 vs 105803.57 indexed")).toBeInTheDocument();
     expect(posts()[0].body).toMatchObject({ indexSeriesCode: "US-MACH", indexBaseYear: 2024, baseValue: "100000.00" });
   });
@@ -385,7 +386,7 @@ describe("insurance", () => {
     fireEvent.change(screen.getByLabelText("Asset class"), { target: { value: "machine" } });
     fireEvent.change(screen.getByLabelText("Values"), { target: { value: "2024=112.0\n2026=118.5" } });
     fireEvent.click(screen.getByRole("button", { name: "Save series" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("2 years loaded.");
+    expect(await findStatus()).toHaveTextContent("2 years loaded.");
     const put = posts()[0];
     expect(put.url.pathname).toBe("/api/v1/assets/index-series/US-MACH");
     expect(put.body).toEqual({ country: "US", classCode: "MACHINE", values: [{ year: 2024, value: "112.0" }, { year: 2026, value: "118.5" }] });
@@ -405,7 +406,7 @@ describe("capex requests", () => {
   it("lists requests and filters by status", async () => {
     handler = () => ({ status: 200, body: { items: [{ ...capex, status: "InApproval", approvalLevel: "CFO", requestedAmount: "320000", variants: undefined }] } });
     const { container } = renderAt("/assets/capex");
-    const table = await screen.findByRole("table", { name: "Capex requests" });
+    const table = await findTable({ name: "Capex requests" });
     await waitFor(() => expect(within(table).getByText("320000 USD")).toBeInTheDocument());
     expect(within(table).getByText("CFO")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
@@ -442,11 +443,11 @@ describe("capex requests", () => {
         ? { status: 200, body: { ...capex, status: "InApproval", approvalLevel: "CFO", requestedAmount: "320000", selectedVariantId: VARIANT, version: 2 }, etag: '"2"' }
         : { status: 200, body: capex, etag: '"1"' };
     const { container } = renderAt(`/assets/capex/${CAPEX}`);
-    const variants = await screen.findByRole("table", { name: "Variants" });
+    const variants = await findTable({ name: "Variants" });
     expect(within(variants).getByText("2026: 200000, 2027: 120000")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Submit request" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Routed to CFO for 320000 USD.");
+    expect(await findStatus()).toHaveTextContent("Routed to CFO for 320000 USD.");
     expect(posts()[0].headers.get("If-Match")).toBe('"1"');
     expect(posts()[0].body).toEqual({ variantId: VARIANT });
     expect(screen.queryByRole("button", { name: "Submit request" })).not.toBeInTheDocument();
@@ -455,7 +456,7 @@ describe("capex requests", () => {
   it("reports an unknown request", async () => {
     handler = () => ({ status: 404, body: { code: "AST-0021", detail: "no capex request with id x" } });
     renderAt(`/assets/capex/${CAPEX}`);
-    expect(await screen.findByRole("alert")).toHaveTextContent("no capex request with id x (AST-0021)");
+    expect(await findAlert()).toHaveTextContent("no capex request with id x (AST-0021)");
   });
 });
 
@@ -471,7 +472,7 @@ describe("asset detail, slice 2", () => {
       return { status: 200, body: { ...detail, books: [book({ lastDepreciatedPeriod: "2026-03" })] }, etag: '"3"' };
     };
     const { container } = renderAt(`/assets/${ASSET}`);
-    const policies = await screen.findByRole("table", { name: "Insurance policies" });
+    const policies = await findTable({ name: "Insurance policies" });
     await waitFor(() => expect(within(policies).getByText("Under-insured")).toBeInTheDocument());
     expect(within(policies).getByText("Machinery breakdown")).toBeInTheDocument();
     expect(await screen.findByText("No additions yet")).toBeInTheDocument();

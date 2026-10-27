@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -223,7 +224,7 @@ describe("intercompany planning page", () => {
     const { container } = renderAt("/intercompany/planning");
     expect(screen.getByRole("heading", { name: "No run order yet" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Sequence group" }));
-    await screen.findByRole("table", { name: "Intercompany demand" });
+    await findTable({ name: "Intercompany demand" });
     expect(calls[0].body).toEqual({
       members: [{ entityId: "A" }, { entityId: "B" }, { entityId: "C" }],
       edges: [

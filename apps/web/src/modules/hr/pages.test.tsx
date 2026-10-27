@@ -1,3 +1,4 @@
+import { findAlert, findStatus, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -118,7 +119,7 @@ describe("workers list", () => {
   it("lists workers, opens one, and passes the page checks", async () => {
     handler = (url) => (url.pathname === "/api/v1/hr/workers" ? json(200, { items: [boss, ada] }) : undefined);
     const { container } = renderAt("/hr/workers");
-    const table = await screen.findByRole("table", { name: "Workers" });
+    const table = await findTable({ name: "Workers" });
     expect(within(table).getByText("Ada Lovelace")).toBeInTheDocument();
     expect(within(table).getAllByText("Employee")).toHaveLength(2);
     expect(pageViolations(container)).toEqual([]);
@@ -148,7 +149,7 @@ describe("workers list", () => {
     let fail = true;
     handler = (url) => (url.pathname === "/api/v1/hr/workers" ? (fail ? json(503, { code: "COM-0500", detail: "HR is down" }) : json(200, { items: [] })) : undefined);
     renderAt("/hr/workers");
-    expect(await screen.findByRole("alert")).toHaveTextContent("HR is down (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("HR is down (COM-0500)");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No workers yet")).toBeInTheDocument();
@@ -294,7 +295,7 @@ describe("positions", () => {
   it("lists positions with their reports-to number", async () => {
     handler = (url) => (url.pathname === "/api/v1/hr/positions" ? json(200, { items: [low, top] }) : undefined);
     const { container } = renderAt("/hr/positions");
-    const table = await screen.findByRole("table", { name: "Positions" });
+    const table = await findTable({ name: "Positions" });
     const row = within(table).getByRole("button", { name: "POS-100" }).closest("tr") as HTMLElement;
     expect(within(row).getByText("POS-TOP")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
@@ -354,7 +355,7 @@ describe("positions", () => {
       return undefined;
     };
     const { container } = renderAt(`/hr/positions/${LOW}`);
-    const table = await screen.findByRole("table", { name: "Assignments" });
+    const table = await findTable({ name: "Assignments" });
     expect(within(table).getByText("2026-03-31")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
 
@@ -371,7 +372,7 @@ describe("positions", () => {
     expect(await within(form).findByText("Position FTE 1.00 would be exceeded")).toBeInTheDocument();
     over = false;
     fireEvent.click(within(form).getByRole("button", { name: "Assign worker" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Worker assigned from 2026-04-01.");
+    expect(await findStatus()).toHaveTextContent("Worker assigned from 2026-04-01.");
     expect(posts("/assignments")[1].body).toEqual({ workerId: ADA, employmentId: EMP, fteShare: "0.50", isPrimary: true, validFrom: "2026-04-01" });
   });
 });

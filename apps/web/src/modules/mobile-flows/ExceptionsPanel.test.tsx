@@ -1,3 +1,4 @@
+import { findAlert } from "../../test-utils";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ExceptionsPanel, overrideAction } from "./ExceptionsPanel";
@@ -97,7 +98,7 @@ describe("ExceptionsPanel supervisor override (BR-32.7)", () => {
     setup({ verifyPin });
     fillOverride("SUP-7");
     requestOverride();
-    expect(await screen.findByRole("alert")).toHaveTextContent("Fill in the exception to authorize first.");
+    expect(await findAlert()).toHaveTextContent("Fill in the exception to authorize first.");
     expect(verifyPin).not.toHaveBeenCalled();
   });
 
@@ -107,7 +108,7 @@ describe("ExceptionsPanel supervisor override (BR-32.7)", () => {
     fillSkip();
     fillOverride("SUP-7", "");
     requestOverride();
-    expect(await screen.findByRole("alert")).toHaveTextContent("Override needs a configured reason.");
+    expect(await findAlert()).toHaveTextContent("Override needs a configured reason.");
     expect(verifyPin).not.toHaveBeenCalled();
   });
 

@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -185,7 +186,7 @@ describe("Forecast page", () => {
   it("lists the model's cells with their reduced forecast", async () => {
     const fetchMock = stubApi(["/forecasts/", () => json({ model, items: [cell] })]);
     renderAt("/planning/forecast");
-    const table = await screen.findByRole("table", { name: "Forecast cells" });
+    const table = await findTable({ name: "Forecast cells" });
     await waitFor(() => expect(within(table).getByText("70.000000")).toBeInTheDocument());
     expect(within(table).getByText("Manual")).toBeInTheDocument();
     // The model card shows the principle; the form's select offers it too.
@@ -218,7 +219,7 @@ describe("Forecast page", () => {
     expect(JSON.parse(put[1]?.body as string)).toEqual({
       lines: [{ itemId: cell.itemId, siteId: cell.siteId, periodStart: "2026-11-02", periodEnd: "2026-11-08", qty: "100", salesQty: "30" }],
     });
-    const table = await screen.findByRole("table", { name: "Forecast cells" });
+    const table = await findTable({ name: "Forecast cells" });
     await waitFor(() => expect(within(table).getByText("70.000000")).toBeInTheDocument());
   });
 
@@ -228,7 +229,7 @@ describe("Forecast page", () => {
       (_url, init) => (init?.method === "PUT" ? json({ model: { ...model, version: 4, reductionPrinciple: "percent" }, updated: 1 }) : json({ model, items: [cell] })),
     ]);
     renderAt("/planning/forecast");
-    const table = await screen.findByRole("table", { name: "Forecast cells" });
+    const table = await findTable({ name: "Forecast cells" });
     await waitFor(() => expect(within(table).getByText("70.000000")).toBeInTheDocument());
     fireEvent.click(within(table).getByText("70.000000"));
     const form = screen.getByRole("form", { name: "Forecast cell" });

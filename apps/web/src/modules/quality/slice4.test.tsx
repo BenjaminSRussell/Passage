@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -184,7 +185,7 @@ describe("incoming certificates on the order", () => {
   it("lists an out-of-specification certificate with its deviations and the NCR it raised", async () => {
     serve(view({ certificateStatus: "RECEIVED_NOK" }), { required: "EN10204_31", certificateStatus: "RECEIVED_NOK", items: [nokRecord] });
     renderAt(`/quality/orders/${ORDER}`);
-    const table = await screen.findByRole("table", { name: "Certificates" });
+    const table = await findTable({ name: "Certificates" });
     await waitFor(() => expect(within(table).getByText("Out of specification")).toBeInTheDocument());
     expect(within(table).getByText("Yield strength, Surface")).toBeInTheDocument();
     expect(within(table).getByRole("link", { name: "Open NCR 0195f0a0" })).toHaveAttribute("href", `/quality/nonconformances/${NCR}`);
@@ -242,7 +243,7 @@ describe("physical samples", () => {
     handler = (url) => (url.pathname === "/api/v1/quality/samples" ? json(200, { items: url.searchParams.get("status") ? [] : [reserve] }) : undefined);
     const { container } = renderAt("/quality/samples");
     expect(screen.getByRole("table", { name: "Physical samples" })).toHaveAttribute("aria-busy", "true");
-    const table = await screen.findByRole("table", { name: "Physical samples" });
+    const table = await findTable({ name: "Physical samples" });
     await waitFor(() => expect(within(table).getByText("Due for disposal")).toBeInTheDocument());
     expect(within(table).getByRole("link", { name: "Open order 0195f0a0" })).toHaveAttribute("href", `/quality/orders/${ORDER}`);
     expect(within(table).getByText("0.5 KG")).toBeInTheDocument();
@@ -265,7 +266,7 @@ describe("physical samples", () => {
     serve(view({ certificateRequired: "NONE", certificateStatus: "NOT_REQUIRED" }), { required: "NONE", certificateStatus: "NOT_REQUIRED", items: [] }, [primary, reserve]);
     renderAt(`/quality/orders/${ORDER}`);
     const form = await screen.findByRole("form", { name: "Register a sample" });
-    await screen.findByRole("table", { name: "Samples of this order" });
+    await findTable({ name: "Samples of this order" });
     fireEvent.change(within(form).getByLabelText("Kind"), { target: { value: "RESERVE" } });
     fireEvent.change(within(form).getByLabelText("Quantity (KG)"), { target: { value: "0.5" } });
     fireEvent.click(within(form).getByRole("button", { name: "Register sample" }));

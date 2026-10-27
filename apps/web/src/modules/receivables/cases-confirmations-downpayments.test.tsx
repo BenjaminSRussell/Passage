@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { CollectionCase, ConfirmationRun, DownPayment } from "./api/client";
@@ -97,7 +98,7 @@ describe("Collection cases", () => {
       return undefined;
     };
     const { container } = renderAt("/receivables/cases");
-    const table = await screen.findByRole("table", { name: "Collection cases" });
+    const table = await findTable({ name: "Collection cases" });
     await waitFor(() => expect(table).toHaveTextContent("1200.00 USD"));
     expect(table).toHaveTextContent("SLA breached");
     expect(table).toHaveTextContent("High");
@@ -106,7 +107,7 @@ describe("Collection cases", () => {
 
     fireEvent.change(screen.getByLabelText("Category"), { target: { value: "DISPUTE" } });
     await waitFor(() => expect(server.calls.some((c) => c.url.searchParams.get("category") === "DISPUTE")).toBe(true));
-    fireEvent.click(within(await screen.findByRole("table", { name: "Collection cases" })).getAllByRole("button", { name: "Collection" })[0]);
+    fireEvent.click(within(await findTable({ name: "Collection cases" })).getAllByRole("button", { name: "Collection" })[0]);
     expect(await screen.findByRole("heading", { name: "Collection case" })).toBeInTheDocument();
   });
 
@@ -117,7 +118,7 @@ describe("Collection cases", () => {
     first.unmount();
     server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty ARView" });
     renderAt("/receivables/cases");
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("Could not load the cases");
     expect(alert).toHaveTextContent("AUTH-0003");
   });
@@ -207,7 +208,7 @@ describe("Balance confirmations", () => {
   it("lists runs with their counts and shows the empty and error states", async () => {
     server.handler = () => json(200, { items: [{ ...run, confirmations: undefined }] });
     const first = renderAt("/receivables/balance-confirmations");
-    const table = await screen.findByRole("table", { name: "Balance confirmation runs" });
+    const table = await findTable({ name: "Balance confirmation runs" });
     await waitFor(() => expect(table).toHaveTextContent("2027-03-31"));
     expect(pageViolations(first.container)).toEqual([]);
     first.unmount();
@@ -217,7 +218,7 @@ describe("Balance confirmations", () => {
     second.unmount();
     server.handler = () => json(500, { code: "COM-0500", detail: "internal error" });
     renderAt("/receivables/balance-confirmations");
-    expect(await screen.findByRole("alert")).toHaveTextContent("Could not load the confirmation runs");
+    expect(await findAlert()).toHaveTextContent("Could not load the confirmation runs");
   });
 
   it("starts a run with the defaults and an Idempotency-Key", async () => {
@@ -258,7 +259,7 @@ describe("Balance confirmations", () => {
       return undefined;
     };
     const { container } = renderAt(`/receivables/balance-confirmations/${RUN}`);
-    const differences = await screen.findByRole("table", { name: "Difference list" });
+    const differences = await findTable({ name: "Difference list" });
     await waitFor(() => expect(differences).toHaveTextContent("-250.00 USD"));
     expect(within(differences).getByRole("link", { name: "Open case" })).toHaveAttribute("href", `/receivables/cases/${CASE}`);
     expect(screen.getByRole("list", { name: "Replies" })).toHaveTextContent("No reply");
@@ -291,11 +292,11 @@ describe("Balance confirmations", () => {
     const first = renderAt(`/receivables/balance-confirmations/${RUN}`);
     fireEvent.change(await screen.findByLabelText("Customer"), { target: { value: CONF } });
     fireEvent.click(screen.getByRole("button", { name: "Record reply" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("AR-CONFIRMATION-REPLIED");
+    expect(await findAlert()).toHaveTextContent("AR-CONFIRMATION-REPLIED");
     first.unmount();
     server.handler = () => json(404, { code: "AR-CONFIRMATION-NOT-FOUND", detail: "balance confirmation run not found" });
     renderAt(`/receivables/balance-confirmations/${RUN}`);
-    expect(await screen.findByRole("alert")).toHaveTextContent("AR-CONFIRMATION-NOT-FOUND");
+    expect(await findAlert()).toHaveTextContent("AR-CONFIRMATION-NOT-FOUND");
   });
 
   it("validates runs and replies like the service does", () => {
@@ -321,7 +322,7 @@ describe("Down payments and deposits", () => {
   it("lists down payments, filters by kind and shows the empty and error states", async () => {
     server.handler = () => json(200, { items: [downPayment] });
     const first = renderAt("/receivables/down-payments");
-    const table = await screen.findByRole("table", { name: "Down payments and deposits" });
+    const table = await findTable({ name: "Down payments and deposits" });
     await waitFor(() => expect(table).toHaveTextContent("2000.00 USD"));
     expect(table).toHaveTextContent("Requested");
     expect(pageViolations(first.container)).toEqual([]);
@@ -334,7 +335,7 @@ describe("Down payments and deposits", () => {
     second.unmount();
     server.handler = () => json(500, { code: "COM-0500", detail: "internal error" });
     renderAt("/receivables/down-payments");
-    expect(await screen.findByRole("alert")).toHaveTextContent("Could not load the down payments");
+    expect(await findAlert()).toHaveTextContent("Could not load the down payments");
   });
 
   it("records a request with an Idempotency-Key", async () => {
@@ -397,7 +398,7 @@ describe("Down payments and deposits", () => {
     expect(await screen.findByText("Cleared against the item.")).toBeInTheDocument();
     expect(ifMatch(":clear")).toBe('"2"');
     expect(server.calls.find((c) => c.url.pathname.endsWith(":clear"))!.body).toEqual({ openItemId: ITEM });
-    const clearings = await screen.findByRole("table", { name: "Clearings" });
+    const clearings = await findTable({ name: "Clearings" });
     await waitFor(() => expect(clearings).toHaveTextContent("INV-SO-4000"));
   });
 
@@ -411,7 +412,7 @@ describe("Down payments and deposits", () => {
     renderAt(`/receivables/down-payments/${DP}`);
     fireEvent.change(await screen.findByLabelText("Open item id"), { target: { value: ITEM } });
     fireEvent.click(screen.getByRole("button", { name: "Offset" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("AR-0017");
+    expect(await findAlert()).toHaveTextContent("AR-0017");
     fireEvent.click(screen.getByRole("button", { name: "Release 700.00 USD for refund" }));
     expect(await screen.findByText("The deposit's remainder is released for refund.")).toBeInTheDocument();
     expect(ifMatch(":release")).toBe('"4"');

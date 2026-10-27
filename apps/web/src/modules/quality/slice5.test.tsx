@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -205,7 +206,7 @@ describe("receipts against source inspection", () => {
       return json(200, { items: [{ ...skipped, id: "0195f0a0-0000-7000-8000-000000000511", skip: false, code: undefined, normalQty: "200", coveredQty: "400", receivedQty: "600" }] });
     };
     const { container } = renderAt("/quality/receiving");
-    const table = await screen.findByRole("table", { name: "Checked receipt lines" });
+    const table = await findTable({ name: "Checked receipt lines" });
     await waitFor(() => expect(within(table).getByText("Quality order needed")).toBeInTheDocument());
     expect(within(table).getByText("200")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
@@ -346,7 +347,7 @@ describe("certificates of analysis on a closed order", () => {
   it("lists the revisions, previews one, and needs a reason for the next batch revision", async () => {
     serveOrder(closedView(), [coa1]);
     const { container } = renderAt(`/quality/orders/${ORDER}`);
-    const table = await screen.findByRole("table", { name: "Certificate of analysis revisions" });
+    const table = await findTable({ name: "Certificate of analysis revisions" });
     await waitFor(() => expect(within(table).getByText("Batch certificate")).toBeInTheDocument());
     fireEvent.click(within(table).getByRole("button", { name: "View revision 1" }));
     const doc = await screen.findByRole("region", { name: "Certificate of analysis revision 1" });
@@ -389,7 +390,7 @@ describe("certificates of analysis on a closed order", () => {
     serveOrder({ ...closedView(), status: "PENDING_DECISION", decision: undefined }, []);
     renderAt(`/quality/orders/${ORDER}`);
     expect(await screen.findByRole("heading", { name: "Quality order 0195f0a0" })).toBeInTheDocument();
-    await screen.findByRole("table", { name: "Certificates" });
+    await findTable({ name: "Certificates" });
     expect(screen.queryByText("Certificates of analysis")).toBeNull();
     expect(calls.some((c) => c.url.pathname.endsWith("/coas"))).toBe(false);
   });

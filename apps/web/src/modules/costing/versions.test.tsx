@@ -1,3 +1,4 @@
+import { findAlert, findStatus, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -117,7 +118,7 @@ describe("VersionsPage", () => {
       [`GET /api/v1/costing/versions/${V1}/item-costs`]: () => json(200, { items: [] }),
     });
     const { container } = at("/costing/versions");
-    const table = await screen.findByRole("table", { name: "Costing versions" });
+    const table = await findTable({ name: "Costing versions" });
     expect(await within(table).findByText("STD-2026")).toBeInTheDocument();
     expect(within(table).getByText("STD-2027")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
@@ -135,7 +136,7 @@ describe("VersionsPage", () => {
       "GET /api/v1/costing/versions": () => (fail ? json(503, { title: "down", code: "COM-0500", detail: "internal error" }) : json(200, { items: [] })),
     });
     at("/costing/versions");
-    expect(await screen.findByRole("alert")).toHaveTextContent("COM-0500");
+    expect(await findAlert()).toHaveTextContent("COM-0500");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByRole("heading", { name: "No costing versions yet" })).toBeInTheDocument();
@@ -193,7 +194,7 @@ describe("CreateVersionPage", () => {
     fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(screen.getByLabelText("Code"), { target: { value: "STD-2026" } });
     fireEvent.click(screen.getByRole("button", { name: "Create version" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("CST-VER-CODE-DUPLICATE");
+    expect(await findAlert()).toHaveTextContent("CST-VER-CODE-DUPLICATE");
   });
 });
 
@@ -201,9 +202,9 @@ describe("VersionDetailPage", () => {
   it("shows the details and compares each pending cost to the active one", async () => {
     detailRoutes();
     const { container } = at(`/costing/versions/${V1}`);
-    const table = await screen.findByRole("table", { name: "Item costs" });
-    const rows = await within(table).findAllByRole("row");
-    expect(rows[1]).toHaveTextContent("11");
+    const table = await findTable({ name: "Item costs" });
+    await waitFor(() => expect(within(table).getAllByRole("row")[1]).toHaveTextContent("11"));
+    const rows = within(table).getAllByRole("row");
     expect(rows[1]).toHaveTextContent("+1");
     expect(rows[2]).toHaveTextContent("5.5");
     expect(rows[2]).toHaveTextContent("—");
@@ -247,7 +248,7 @@ describe("VersionDetailPage", () => {
     expect(activate).toBeEnabled();
 
     fireEvent.click(activate);
-    expect(await screen.findByRole("status")).toHaveTextContent("Version STD-2027 is active. Revaluation 110.00 EUR.");
+    expect(await findStatus()).toHaveTextContent("Version STD-2027 is active. Revaluation 110.00 EUR.");
     const [[, activateInit]] = calls(fetchMock, "POST", ":activate");
     expect((activateInit.headers as Record<string, string>)["If-Match"]).toBe('"4"');
   });

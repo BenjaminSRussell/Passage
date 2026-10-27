@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -92,7 +93,7 @@ describe("Journal approval workflow", () => {
       init.method === "POST" ? json(422, { code: "INV-NEG-001", detail: "issue would make available physical stock negative (shortfall 1)" }) : json(200, journal());
     renderAt(`/inventory/journals/${JOURNAL_ID}`);
     fireEvent.click(await screen.findByRole("button", { name: "Validate" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("The journal would not post");
     expect(alert).toHaveTextContent("(INV-NEG-001)");
   });
@@ -145,7 +146,7 @@ describe("Journal approval workflow", () => {
     handler = (_url, init) => (init.method === "POST" ? json(412, { code: "conflict_version", detail: "journal changed since it was read" }) : json(200, journal()));
     renderAt(`/inventory/journals/${JOURNAL_ID}`);
     fireEvent.click(await screen.findByRole("button", { name: "Cancel journal" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("The journal was not cancelled");
     expect(within(alert).getByRole("button", { name: "Reload journal" })).toBeInTheDocument();
   });
@@ -229,7 +230,7 @@ describe("Consignment orders", () => {
   it("lists orders with status and received progress, and an empty state", async () => {
     handler = (url) => json(200, { items: url.searchParams.get("status") === "RECEIVED" ? [] : [{ ...order, status: "PARTIALLY_RECEIVED", lines: [{ ...order.lines[0], receivedQty: "120", openQty: "380" }] }] });
     const { container } = renderAt("/inventory/consignment-orders");
-    const table = await screen.findByRole("table", { name: "Consignment orders" });
+    const table = await findTable({ name: "Consignment orders" });
     expect(within(table).getByRole("link", { name: "CRO-00000000A1B2" })).toHaveAttribute("href", `/inventory/consignment-orders/${ORDER_ID}`);
     expect(table).toHaveTextContent("Partially received");
     expect(table).toHaveTextContent("120 of 500");
@@ -241,7 +242,7 @@ describe("Consignment orders", () => {
   it("shows a load failure with a retry", async () => {
     handler = () => json(500, { code: "COM-0500", detail: "database unavailable" });
     renderAt("/inventory/consignment-orders");
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("Could not load consignment orders");
     expect(within(alert).getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
@@ -340,7 +341,7 @@ describe("Consignment orders", () => {
     handler = (_url, init) => (init.method === "POST" ? json(422, { code: "INV-CNS-002", detail: "receipt of 600 on line 1 exceeds the open quantity 500" }) : json(200, order));
     renderAt(`/inventory/consignment-orders/${ORDER_ID}`);
     fireEvent.click(await screen.findByRole("button", { name: "Book receipt" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("The receipt was not booked");
     expect(alert).toHaveTextContent("(INV-CNS-002)");
   });
@@ -369,7 +370,7 @@ describe("Consignment stock", () => {
   it("lists vendor-owned stock with age and statistical value, filtered by vendor", async () => {
     handler = (url) => json(200, { items: url.searchParams.get("vendor") === "V9" ? [] : [item] });
     const { container } = renderAt("/inventory/consignment/stock");
-    const table = await screen.findByRole("table", { name: "Consignment stock" });
+    const table = await findTable({ name: "Consignment stock" });
     expect(table).toHaveTextContent("380");
     expect(table).toHaveTextContent("1520 USD");
     expect(table).toHaveTextContent("25");
@@ -454,7 +455,7 @@ describe("Segmented reservations", () => {
         ],
       });
     renderAt("/inventory/reservations");
-    expect(await screen.findByRole("table")).toHaveTextContent("Sales order SO-1 (segment PROJECT:P-1)");
+    expect(await findTable()).toHaveTextContent("Sales order SO-1 (segment PROJECT:P-1)");
   });
 });
 

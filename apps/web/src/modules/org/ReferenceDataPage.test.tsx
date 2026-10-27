@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createElement } from "react";
@@ -78,7 +79,7 @@ describe("tabs", () => {
     expect(callsTo(fetchMock, "GET", "/currencies")).toHaveLength(0);
     expect(callsTo(fetchMock, "GET", "/uom/")).toHaveLength(0);
     await user.click(screen.getByRole("tab", { name: "Currencies" }));
-    await screen.findByRole("table", { name: "Currencies" });
+    await findTable({ name: "Currencies" });
     expect(callsTo(fetchMock, "GET", "/currencies")).toHaveLength(1);
     expect(callsTo(fetchMock, "GET", "/countries")).toHaveLength(1);
   });
@@ -100,7 +101,7 @@ describe("reference lists", () => {
   it("lists rows with status pills and filters by status", async () => {
     const fetchMock = serve({ "GET /countries": () => json({ items: countries }) });
     const { user } = renderPage();
-    const table = await screen.findByRole("table", { name: "Countries" });
+    const table = await findTable({ name: "Countries" });
     await within(table).findByText("Germany");
     expect(within(table).getByText("Inactive")).toBeInTheDocument();
     await user.selectOptions(screen.getByLabelText("Filter by status"), "inactive");
@@ -170,7 +171,7 @@ describe("reference lists", () => {
     });
     const { user } = renderPage();
     await user.click(await screen.findByRole("tab", { name: "Regions" }));
-    const table = await screen.findByRole("table", { name: "Regions" });
+    const table = await findTable({ name: "Regions" });
     await within(table).findByText("North");
     expect(within(table).getByText("Nord")).toBeInTheDocument();
   });

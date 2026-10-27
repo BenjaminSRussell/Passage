@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { Directive, Location } from "./api/client";
@@ -54,7 +55,7 @@ describe("LocationsPage", () => {
   it("lists the warehouse's locations with capacity, use and stock", async () => {
     server.handler = (url) => (url.pathname === "/api/v1/warehouse/locations" ? json(200, { items: [location] }) : undefined);
     const { container } = renderAt(`/warehouse/locations?warehouse=${WH}`);
-    const table = await screen.findByRole("table", { name: "Locations" });
+    const table = await findTable({ name: "Locations" });
     await waitFor(() => expect(within(table).getByText("R-05-02-01")).toBeInTheDocument());
     expect(table).toHaveTextContent("≤ 20 kg · ≤ 1 LP");
     expect(table).toHaveTextContent("14.4 kg · 0 m³ · 1 LP");
@@ -186,7 +187,7 @@ describe("DirectivesPage", () => {
   it("lists directives with their scope and bands in order", async () => {
     server.handler = () => json(200, { items: [directive] });
     const { container } = renderAt(`/warehouse/directives?warehouse=${WH}`);
-    const table = await screen.findByRole("table", { name: "Location directives" });
+    const table = await findTable({ name: "Location directives" });
     await waitFor(() => expect(table).toHaveTextContent("item_group = FASTENERS"));
     expect(table).toHaveTextContent("0–100: consolidate in FWD; 100–∞: empty_location in RESERVE");
     expect(table).toHaveTextContent("Purchase putaway");
@@ -213,7 +214,7 @@ describe("NewDirectivePage", () => {
     fill("Applies to", "item_group=FASTENERS");
     fill("Sequence", "20");
     fireEvent.click(screen.getByRole("button", { name: "Create directive" }));
-    expect(await screen.findByRole("table", { name: "Location directives" })).toBeInTheDocument();
+    expect(await findTable({ name: "Location directives" })).toBeInTheDocument();
     const post = server.calls.find((c) => c.method === "POST");
     expect(post && idempotencyKey(post)).toBeTruthy();
     expect(post?.body).toMatchObject({ warehouseId: WH, workType: "PURCHASE_PUTAWAY", direction: "PUT", sequence: 20, query: { item_group: "FASTENERS" } });

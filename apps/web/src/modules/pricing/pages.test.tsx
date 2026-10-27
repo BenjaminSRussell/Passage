@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -133,7 +134,7 @@ describe("Pricing workspace", () => {
     expect(list).toHaveTextContent("Vendor claims to approve 2");
     expect(list).toHaveTextContent("Customer rebates accrued this month 200 USD · 12.5 EUR");
     expect(list).toHaveTextContent("Vendor rebates accrued this month 600 USD");
-    const table = await screen.findByRole("table", { name: "Expiring agreements" });
+    const table = await findTable({ name: "Expiring agreements" });
     expect(within(table).getByText("BOLT")).toBeInTheDocument();
     expect(within(table).queryByText("All products")).toBeNull();
     // Fewer rows than a page: the list is complete, so no "first 100" note.
@@ -182,7 +183,7 @@ describe("Pricing workspace", () => {
       return undefined;
     };
     renderAt("/pricing");
-    expect(await screen.findByRole("alert")).toHaveTextContent("internal error (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("internal error (COM-0500)");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("Nothing expires in the next 30 days")).toBeInTheDocument();
@@ -200,7 +201,7 @@ describe("Trade agreements", () => {
       return undefined;
     };
     const { container } = renderAt("/pricing/agreements");
-    const table = await screen.findByRole("table", { name: "Trade agreements" });
+    const table = await findTable({ name: "Trade agreements" });
     await waitFor(() => expect(table).toHaveTextContent("SHIRT"));
     expect(table).toHaveTextContent("Group PG-A");
     expect(table).toHaveTextContent("10% + 5%");
@@ -223,14 +224,14 @@ describe("Trade agreements", () => {
       return json(200, { items: to ? active.filter((r) => r.validTo <= to) : active });
     };
     renderAt("/pricing/agreements");
-    const table = await screen.findByRole("table", { name: "Trade agreements" });
+    const table = await findTable({ name: "Trade agreements" });
     await waitFor(() => expect(table).toHaveTextContent("Group PG-A"));
     fireEvent.change(screen.getByLabelText(/Ends on or before/), { target: { value: addDays(day, 30) } });
     await waitFor(() => expect(calls.at(-1)?.url.searchParams.get("validToTo")).toBe(addDays(day, 30)));
     await waitFor(() => expect(table).not.toHaveTextContent("Group PG-A"));
     expect(table).toHaveTextContent("BOLT");
     fireEvent.change(screen.getByLabelText(/Ends on or after/), { target: { value: addDays(day, 60) } });
-    expect(await screen.findByRole("alert")).toHaveTextContent("Could not load the trade agreements");
+    expect(await findAlert()).toHaveTextContent("Could not load the trade agreements");
   });
 
   it("shows the empty state when nothing matches", async () => {
@@ -242,7 +243,7 @@ describe("Trade agreements", () => {
   it("shows the service error instead of the table", async () => {
     handler = () => json(403, { code: "AUTH-0003", detail: "missing duty pricing.view" });
     renderAt("/pricing/agreements");
-    expect(await screen.findByRole("alert")).toHaveTextContent("missing duty pricing.view (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty pricing.view (AUTH-0003)");
     expect(screen.queryByRole("table")).toBeNull();
   });
 });
@@ -349,7 +350,7 @@ describe("Trade agreement detail", () => {
     };
     renderAt(`/pricing/agreements/${R3}`);
     fireEvent.click(await screen.findByRole("button", { name: "Activate" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("Another active agreement overlaps this one");
     expect(alert).toHaveTextContent(R1);
     expect(screen.getByText("Draft")).toBeInTheDocument();
@@ -371,7 +372,7 @@ describe("Trade agreement detail", () => {
   it("shows a load error with a retry", async () => {
     handler = () => json(404, { code: "PRC-0030", detail: `no condition record ${R1}` });
     renderAt(`/pricing/agreements/${R1}`);
-    expect(await screen.findByRole("alert")).toHaveTextContent("PRC-0030");
+    expect(await findAlert()).toHaveTextContent("PRC-0030");
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });
@@ -461,7 +462,7 @@ describe("Price simulation", () => {
     fill("Customer", "C1");
     fill("Product", "BOLT");
     fireEvent.click(screen.getByRole("button", { name: "Run simulation" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("request exceeds 500 lines (PRC-0009)");
+    expect(await findAlert()).toHaveTextContent("request exceeds 500 lines (PRC-0009)");
     expect(screen.getByLabelText("Product")).toHaveValue("BOLT");
   });
 });

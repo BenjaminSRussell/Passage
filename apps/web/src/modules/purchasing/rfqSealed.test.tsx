@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { biddingLabel, rankingRules, scorable, validateRFQ } from "./RfqPages";
@@ -213,7 +214,7 @@ describe("sealed RFQ pages", () => {
       }),
     );
     renderAt("/purchasing/rfqs");
-    const table = await screen.findByRole("table", { name: "Requests for quotation" });
+    const table = await findTable({ name: "Requests for quotation" });
     expect(await within(table).findByText("Sealed")).toBeInTheDocument();
   });
 });

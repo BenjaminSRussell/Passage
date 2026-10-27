@@ -1,3 +1,4 @@
+import { findStatus, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -94,7 +95,7 @@ describe("requisition list", () => {
         ],
       }),
     );
-    const table = await screen.findByRole("table", { name: "Requisitions" });
+    const table = await findTable({ name: "Requisitions" });
     await waitFor(() => expect(within(table).getByText("PR-00000007")).toBeInTheDocument());
     expect(within(table).getByText("In review")).toBeInTheDocument();
     expect(within(table).getByText("5000 USD")).toBeInTheDocument();
@@ -206,7 +207,7 @@ describe("requisition detail", () => {
     const closed = { ...requisition, status: "CLOSED", lines: [{ ...requisition.lines[0], status: "CONSOLIDATED", purchaseOrderId: PO_ID, purchaseOrderLineNo: 2 }] };
     stubFetch(() => json(closed));
     renderAt(`/purchasing/requisitions/${REQ_ID}`);
-    const lines = await screen.findByRole("table", { name: "Requisition lines" });
+    const lines = await findTable({ name: "Requisition lines" });
     expect(within(lines).getByText("Consolidated")).toBeInTheDocument();
     expect(within(lines).getByRole("link", { name: "Line 2 of the order" })).toHaveAttribute("href", `/purchasing/purchase-orders/${PO_ID}`);
   });
@@ -357,7 +358,7 @@ describe("trade agreements", () => {
   it("lists rows with their level, break and validity", async () => {
     stubFetch(() => json({ items: [agreement] }));
     renderAt("/purchasing/trade-agreements");
-    const table = await screen.findByRole("table", { name: "Trade agreements" });
+    const table = await findTable({ name: "Trade agreements" });
     await waitFor(() => expect(within(table).getByText("10 USD / 1 EA")).toBeInTheDocument());
     expect(within(table).getByText("0 to under 100")).toBeInTheDocument();
     expect(within(table).getByText("Open")).toBeInTheDocument();
@@ -415,7 +416,7 @@ describe("price lookup", () => {
     fireEvent.change(screen.getByLabelText("Product id"), { target: { value: PRODUCT } });
     fireEvent.change(screen.getByLabelText("Price date"), { target: { value: "2026-03-01" } });
     fireEvent.click(screen.getByRole("button", { name: "Find price" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("10 USD per 1 EA");
+    expect(await findStatus()).toHaveTextContent("10 USD per 1 EA");
     const table = screen.getByRole("table", { name: "Candidates considered" });
     expect(within(table).getByText("Winner")).toBeInTheDocument();
     expect(within(table).getByText("lower rank than a more specific row")).toBeInTheDocument();
