@@ -1,0 +1,14 @@
+asyncapi: 3.0.0
+info:
+  title: Passage warehouse events (wave 31, slice 1)
+  version: 0.1.0
+  description: >
+    Slice 1 publishes no events: the simulation endpoint is read-only and no
+    work, wave, load or receipt is created yet. The wave-31 events
+    (dev.passage.wms.work.created.v1, work.completed.v1, wave.released.v1,
+    load.shipped.v1, receipt.registered.v1) arrive with their state changes in
+    later slices. Nothing is consumed.
+channels: {}
+operations: {}
+components:
+  messages: {}

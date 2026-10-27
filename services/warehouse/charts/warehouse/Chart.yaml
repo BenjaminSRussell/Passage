@@ -1,0 +1,6 @@
+apiVersion: v2
+name: warehouse
+description: Passage warehouse management (wave 31, slice 1 - location directive simulation)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

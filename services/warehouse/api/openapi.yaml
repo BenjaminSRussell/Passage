@@ -1,0 +1,204 @@
+openapi: 3.1.0
+info:
+  title: Passage warehouse (wave 31, slice 1)
+  version: 0.1.0
+  description: >
+    Location-directive simulation. Stateless in this slice: the caller sends the
+    line, the directives and the candidate locations, and receives the location
+    the rules choose with a rule-by-rule trace. Persistence, work, waves and the
+    other wave-31 endpoints are later slices (see NOT-IMPLEMENTED.md).
+servers:
+  - url: https://api.{env}.passage.dev
+    variables:
+      env: { default: dev }
+paths:
+  /v1/warehouse/location-directives:simulate:
+    post:
+      operationId: simulateLocationDirective
+      summary: Evaluate location directives for a hypothetical line
+      description: >
+        BR-31.1 without persistence. Directives are taken in sequence order; the
+        first directive in scope whose query matches and whose line (quantity
+        band, from_qty <= qty < to_qty) covers the quantity runs its actions in
+        seq order, and the first action with a candidate wins. A PUT candidate
+        passes status, mixing and capacity (BR-31.2); a PICK candidate holds at
+        least the line quantity of the item (no split picks yet). The body is
+        capped at 4 MiB by the platform decoder.
+      x-passage-duty: warehouse.setup.view
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SimulateRequest" }
+      responses:
+        "200":
+          description: Evaluation result. A blocked line is a 200 with blocked true and code WMS-0101.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SimulateResponse" }
+        "400":
+          description: >
+            Validation failed (COM-0001) with field errors: missing or malformed
+            line fields, unknown strategy or status, a directive line without
+            actions, overlapping quantity bands in one directive, duplicate
+            directive or location ids, negative capacity, usage or stock.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "401":
+          description: No tenant (AUTH-0001).
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "403":
+          description: Missing duty warehouse.setup.view (AUTH-0003).
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+  /healthz:
+    get:
+      operationId: healthz
+      responses:
+        "200": { description: Process is alive }
+  /readyz:
+    get:
+      operationId: readyz
+      responses:
+        "200": { description: Process is ready to serve }
+components:
+  schemas:
+    Decimal:
+      type: string
+      description: Decimal as a string, never a float.
+      pattern: "^-?[0-9]+(\\.[0-9]+)?$"
+    SimulateRequest:
+      type: object
+      additionalProperties: false
+      required: [line, directives, locations]
+      properties:
+        line: { $ref: "#/components/schemas/Line" }
+        directives:
+          type: array
+          maxItems: 1000
+          items: { $ref: "#/components/schemas/Directive" }
+        locations:
+          type: array
+          maxItems: 50000
+          items: { $ref: "#/components/schemas/Location" }
+    Line:
+      type: object
+      additionalProperties: false
+      required: [itemId, workType, direction, warehouseId, qty]
+      properties:
+        itemId: { type: string }
+        workType: { type: string, examples: [PURCHASE_PUTAWAY, SALES_PICK] }
+        direction: { type: string, enum: [PUT, PICK] }
+        warehouseId: { type: string, format: uuid }
+        qty: { $ref: "#/components/schemas/Decimal" }
+        weight: { $ref: "#/components/schemas/Decimal" }
+        volume: { $ref: "#/components/schemas/Decimal" }
+        lps: { type: integer, minimum: 0 }
+        attributes: { type: object, additionalProperties: { type: string } }
+    Directive:
+      type: object
+      additionalProperties: false
+      required: [id, sequence, workType, direction, warehouseId, lines]
+      properties:
+        id: { type: string }
+        sequence: { type: integer }
+        workType: { type: string }
+        direction: { type: string, enum: [PUT, PICK] }
+        warehouseId: { type: string, format: uuid }
+        query: { type: object, additionalProperties: { type: string } }
+        lines:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/Band" }
+    Band:
+      type: object
+      additionalProperties: false
+      required: [seq, fromQty, actions]
+      properties:
+        seq: { type: integer }
+        fromQty: { $ref: "#/components/schemas/Decimal" }
+        toQty: { $ref: "#/components/schemas/Decimal" }
+        actions:
+          type: array
+          items: { $ref: "#/components/schemas/Action" }
+    Action:
+      type: object
+      additionalProperties: false
+      required: [seq, strategy]
+      properties:
+        seq: { type: integer }
+        strategy:
+          type: string
+          enum: [consolidate, fifo, lifo, fefo, empty_location, match_packing_quantity, round_up_to_lp, outbound_staging]
+        zone: { type: string }
+    Location:
+      type: object
+      additionalProperties: false
+      required: [id, name, zone, status]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        zone: { type: string }
+        pickSequence: { type: integer }
+        status:
+          type: string
+          enum: [ACTIVE, BLOCKED_IN, BLOCKED_OUT, BLOCKED, INACTIVE]
+        capacity:
+          type: object
+          additionalProperties: false
+          properties:
+            maxWeight: { $ref: "#/components/schemas/Decimal" }
+            maxVolume: { $ref: "#/components/schemas/Decimal" }
+            maxLps: { type: integer, minimum: 0 }
+            maxItems: { type: integer, minimum: 0 }
+            allowMixedItems: { type: boolean }
+        used:
+          type: object
+          additionalProperties: false
+          description: Current weight, volume and LP count. The item count is derived from stock.
+          properties:
+            weight: { $ref: "#/components/schemas/Decimal" }
+            volume: { $ref: "#/components/schemas/Decimal" }
+            lps: { type: integer, minimum: 0 }
+        stock:
+          type: object
+          additionalProperties: { $ref: "#/components/schemas/Decimal" }
+    SimulateResponse:
+      type: object
+      required: [blocked, trace]
+      properties:
+        blocked: { type: boolean }
+        code: { type: string, description: "WMS-0101 when blocked" }
+        locationId: { type: string }
+        location: { type: string }
+        directive: { type: string }
+        trace:
+          type: array
+          items:
+            type: object
+            required: [directive, outcome, reason]
+            properties:
+              directive: { type: string }
+              band: { type: integer }
+              action: { type: integer }
+              outcome: { type: string, enum: [hit, miss, skip] }
+              reason: { type: string }
+    Problem:
+      type: object
+      description: RFC 9457 problem details with a stable code.
+      required: [type, title, status]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string }
+        traceId: { type: string }
+        errors:
+          type: object
+          additionalProperties: { type: string }

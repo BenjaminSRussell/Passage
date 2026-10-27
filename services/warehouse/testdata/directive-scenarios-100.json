@@ -1,0 +1,1172 @@
+{
+ "description": "AC-31.1 directive fixture: 100 inbound put-away lines of BOLT-M8 (10 quantities x 10 occupancy layouts) against the BR-31.1 demo directives. A layout gives the state of the locations F, C, R and O in that order: E empty, B holds BOLT-M8 (the line's item), X holds another item (mixing refused), - absent. Expectations are derived by hand from BR-31.1: band 1 (qty < 100) consolidates in FWD, band 2 (100 to 1199) consolidates in CASE then takes an empty CASE location, band 3 (1200 and above) takes an empty RESERVE then an empty OVERFLOW location; DIR-20 is the catch-all that takes the first empty location by pick sequence. DIR-20 is listed first on purpose: evaluation must follow sequence, not array order.",
+ "line": {
+  "itemId": "BOLT-M8",
+  "workType": "PURCHASE_PUTAWAY",
+  "direction": "PUT",
+  "warehouseId": "0190b2a4-7c1e-7d3a-9b5f-2a4c6e8f0a11",
+  "weight": "0",
+  "lps": 0,
+  "attributes": {
+   "item_group": "FASTENERS"
+  }
+ },
+ "directives": [
+  {
+   "id": "DIR-20",
+   "sequence": 20,
+   "workType": "PURCHASE_PUTAWAY",
+   "direction": "PUT",
+   "warehouseId": "0190b2a4-7c1e-7d3a-9b5f-2a4c6e8f0a11",
+   "lines": [
+    {
+     "seq": 1,
+     "fromQty": "0",
+     "actions": [
+      {
+       "seq": 1,
+       "strategy": "empty_location"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "DIR-10",
+   "sequence": 10,
+   "workType": "PURCHASE_PUTAWAY",
+   "direction": "PUT",
+   "warehouseId": "0190b2a4-7c1e-7d3a-9b5f-2a4c6e8f0a11",
+   "query": {
+    "item_group": "FASTENERS"
+   },
+   "lines": [
+    {
+     "seq": 1,
+     "fromQty": "0",
+     "toQty": "100",
+     "actions": [
+      {
+       "seq": 1,
+       "strategy": "consolidate",
+       "zone": "FWD"
+      }
+     ]
+    },
+    {
+     "seq": 2,
+     "fromQty": "100",
+     "toQty": "1200",
+     "actions": [
+      {
+       "seq": 1,
+       "strategy": "consolidate",
+       "zone": "CASE"
+      },
+      {
+       "seq": 2,
+       "strategy": "empty_location",
+       "zone": "CASE"
+      }
+     ]
+    },
+    {
+     "seq": 3,
+     "fromQty": "1200",
+     "actions": [
+      {
+       "seq": 1,
+       "strategy": "empty_location",
+       "zone": "RESERVE"
+      },
+      {
+       "seq": 2,
+       "strategy": "empty_location",
+       "zone": "OVERFLOW"
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "locations": {
+  "F": {
+   "id": "loc-F",
+   "name": "FWD-01-01-01",
+   "zone": "FWD",
+   "pickSequence": 1,
+   "status": "ACTIVE"
+  },
+  "C": {
+   "id": "loc-C",
+   "name": "CASE-01-01-01",
+   "zone": "CASE",
+   "pickSequence": 2,
+   "status": "ACTIVE"
+  },
+  "R": {
+   "id": "loc-R",
+   "name": "RESERVE-01-01-01",
+   "zone": "RESERVE",
+   "pickSequence": 3,
+   "status": "ACTIVE"
+  },
+  "O": {
+   "id": "loc-O",
+   "name": "OVERFLOW-01-01-01",
+   "zone": "OVERFLOW",
+   "pickSequence": 4,
+   "status": "ACTIVE"
+  }
+ },
+ "stock": {
+  "B": {
+   "BOLT-M8": "10"
+  },
+  "X": {
+   "OTHER": "1"
+  }
+ },
+ "scenarios": [
+  {
+   "name": "qty 1, layout EEEE",
+   "qty": "1",
+   "layout": "EEEE",
+   "expect": {
+    "location": "FWD-01-01-01",
+    "directive": "DIR-10",
+    "band": 1,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 1, layout BEEE",
+   "qty": "1",
+   "layout": "BEEE",
+   "expect": {
+    "location": "FWD-01-01-01",
+    "directive": "DIR-10",
+    "band": 1,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 1, layout XEEE",
+   "qty": "1",
+   "layout": "XEEE",
+   "expect": {
+    "location": "CASE-01-01-01",
+    "directive": "DIR-20",
+    "band": 1,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 1, layout EEXE",
+   "qty": "1",
+   "layout": "EEXE",
+   "expect": {
+    "location": "FWD-01-01-01",
+    "directive": "DIR-10",
+    "band": 1,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 1, layout EEXX",
+   "qty": "1",
+   "layout": "EEXX",
+   "expect": {
+    "location": "FWD-01-01-01",
+    "directive": "DIR-10",
+    "band": 1,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 1, layout XBEE",
+   "qty": "1",
+   "layout": "XBEE",
+   "expect": {
+    "location": "RESERVE-01-01-01",
+    "directive": "DIR-20",
+    "band": 1,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 1, layout XXXX",
+   "qty": "1",
+   "layout": "XXXX",
+   "expect": {
+    "blocked": true
+   }
+  },
+  {
+   "name": "qty 1, layout ----",
+   "qty": "1",
+   "layout": "----",
+   "expect": {
+    "blocked": true
+   }
+  },
+  {
+   "name": "qty 1, layout BEXE",
+   "qty": "1",
+   "layout": "BEXE",
+   "expect": {
+    "location": "FWD-01-01-01",
+    "directive": "DIR-10",
+    "band": 1,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 1, layout EXEX",
+   "qty": "1",
+   "layout": "EXEX",
+   "expect": {
+    "location": "FWD-01-01-01",
+    "directive": "DIR-10",
+    "band": 1,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 50, layout EEEE",
+   "qty": "50",
+   "layout": "EEEE",
+   "expect": {
+    "location": "FWD-01-01-01",
+    "directive": "DIR-10",
+    "band": 1,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 50, layout BEEE",
+   "qty": "50",
+   "layout": "BEEE",
+   "expect": {
+    "location": "FWD-01-01-01",
+    "directive": "DIR-10",
+    "band": 1,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 50, layout XEEE",
+   "qty": "50",
+   "layout": "XEEE",
+   "expect": {
+    "location": "CASE-01-01-01",
+    "directive": "DIR-20",
+    "band": 1,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 50, layout EEXE",
+   "qty": "50",
+   "layout": "EEXE",
+   "expect": {
+    "location": "FWD-01-01-01",
+    "directive": "DIR-10",
+    "band": 1,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 50, layout EEXX",
+   "qty": "50",
+   "layout": "EEXX",
+   "expect": {
+    "location": "FWD-01-01-01",
+    "directive": "DIR-10",
+    "band": 1,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 50, layout XBEE",
+   "qty": "50",
+   "layout": "XBEE",
+   "expect": {
+    "location": "RESERVE-01-01-01",
+    "directive": "DIR-20",
+    "band": 1,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 50, layout XXXX",
+   "qty": "50",
+   "layout": "XXXX",
+   "expect": {
+    "blocked": true
+   }
+  },
+  {
+   "name": "qty 50, layout ----",
+   "qty": "50",
+   "layout": "----",
+   "expect": {
+    "blocked": true
+   }
+  },
+  {
+   "name": "qty 50, layout BEXE",
+   "qty": "50",
+   "layout": "BEXE",
+   "expect": {
+    "location": "FWD-01-01-01",
+    "directive": "DIR-10",
+    "band": 1,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 50, layout EXEX",
+   "qty": "50",
+   "layout": "EXEX",
+   "expect": {
+    "location": "FWD-01-01-01",
+    "directive": "DIR-10",
+    "band": 1,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 99, layout EEEE",
+   "qty": "99",
+   "layout": "EEEE",
+   "expect": {
+    "location": "FWD-01-01-01",
+    "directive": "DIR-10",
+    "band": 1,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 99, layout BEEE",
+   "qty": "99",
+   "layout": "BEEE",
+   "expect": {
+    "location": "FWD-01-01-01",
+    "directive": "DIR-10",
+    "band": 1,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 99, layout XEEE",
+   "qty": "99",
+   "layout": "XEEE",
+   "expect": {
+    "location": "CASE-01-01-01",
+    "directive": "DIR-20",
+    "band": 1,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 99, layout EEXE",
+   "qty": "99",
+   "layout": "EEXE",
+   "expect": {
+    "location": "FWD-01-01-01",
+    "directive": "DIR-10",
+    "band": 1,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 99, layout EEXX",
+   "qty": "99",
+   "layout": "EEXX",
+   "expect": {
+    "location": "FWD-01-01-01",
+    "directive": "DIR-10",
+    "band": 1,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 99, layout XBEE",
+   "qty": "99",
+   "layout": "XBEE",
+   "expect": {
+    "location": "RESERVE-01-01-01",
+    "directive": "DIR-20",
+    "band": 1,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 99, layout XXXX",
+   "qty": "99",
+   "layout": "XXXX",
+   "expect": {
+    "blocked": true
+   }
+  },
+  {
+   "name": "qty 99, layout ----",
+   "qty": "99",
+   "layout": "----",
+   "expect": {
+    "blocked": true
+   }
+  },
+  {
+   "name": "qty 99, layout BEXE",
+   "qty": "99",
+   "layout": "BEXE",
+   "expect": {
+    "location": "FWD-01-01-01",
+    "directive": "DIR-10",
+    "band": 1,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 99, layout EXEX",
+   "qty": "99",
+   "layout": "EXEX",
+   "expect": {
+    "location": "FWD-01-01-01",
+    "directive": "DIR-10",
+    "band": 1,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 100, layout EEEE",
+   "qty": "100",
+   "layout": "EEEE",
+   "expect": {
+    "location": "CASE-01-01-01",
+    "directive": "DIR-10",
+    "band": 2,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 100, layout BEEE",
+   "qty": "100",
+   "layout": "BEEE",
+   "expect": {
+    "location": "CASE-01-01-01",
+    "directive": "DIR-10",
+    "band": 2,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 100, layout XEEE",
+   "qty": "100",
+   "layout": "XEEE",
+   "expect": {
+    "location": "CASE-01-01-01",
+    "directive": "DIR-10",
+    "band": 2,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 100, layout EEXE",
+   "qty": "100",
+   "layout": "EEXE",
+   "expect": {
+    "location": "CASE-01-01-01",
+    "directive": "DIR-10",
+    "band": 2,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 100, layout EEXX",
+   "qty": "100",
+   "layout": "EEXX",
+   "expect": {
+    "location": "CASE-01-01-01",
+    "directive": "DIR-10",
+    "band": 2,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 100, layout XBEE",
+   "qty": "100",
+   "layout": "XBEE",
+   "expect": {
+    "location": "CASE-01-01-01",
+    "directive": "DIR-10",
+    "band": 2,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 100, layout XXXX",
+   "qty": "100",
+   "layout": "XXXX",
+   "expect": {
+    "blocked": true
+   }
+  },
+  {
+   "name": "qty 100, layout ----",
+   "qty": "100",
+   "layout": "----",
+   "expect": {
+    "blocked": true
+   }
+  },
+  {
+   "name": "qty 100, layout BEXE",
+   "qty": "100",
+   "layout": "BEXE",
+   "expect": {
+    "location": "CASE-01-01-01",
+    "directive": "DIR-10",
+    "band": 2,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 100, layout EXEX",
+   "qty": "100",
+   "layout": "EXEX",
+   "expect": {
+    "location": "FWD-01-01-01",
+    "directive": "DIR-20",
+    "band": 1,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 500, layout EEEE",
+   "qty": "500",
+   "layout": "EEEE",
+   "expect": {
+    "location": "CASE-01-01-01",
+    "directive": "DIR-10",
+    "band": 2,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 500, layout BEEE",
+   "qty": "500",
+   "layout": "BEEE",
+   "expect": {
+    "location": "CASE-01-01-01",
+    "directive": "DIR-10",
+    "band": 2,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 500, layout XEEE",
+   "qty": "500",
+   "layout": "XEEE",
+   "expect": {
+    "location": "CASE-01-01-01",
+    "directive": "DIR-10",
+    "band": 2,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 500, layout EEXE",
+   "qty": "500",
+   "layout": "EEXE",
+   "expect": {
+    "location": "CASE-01-01-01",
+    "directive": "DIR-10",
+    "band": 2,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 500, layout EEXX",
+   "qty": "500",
+   "layout": "EEXX",
+   "expect": {
+    "location": "CASE-01-01-01",
+    "directive": "DIR-10",
+    "band": 2,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 500, layout XBEE",
+   "qty": "500",
+   "layout": "XBEE",
+   "expect": {
+    "location": "CASE-01-01-01",
+    "directive": "DIR-10",
+    "band": 2,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 500, layout XXXX",
+   "qty": "500",
+   "layout": "XXXX",
+   "expect": {
+    "blocked": true
+   }
+  },
+  {
+   "name": "qty 500, layout ----",
+   "qty": "500",
+   "layout": "----",
+   "expect": {
+    "blocked": true
+   }
+  },
+  {
+   "name": "qty 500, layout BEXE",
+   "qty": "500",
+   "layout": "BEXE",
+   "expect": {
+    "location": "CASE-01-01-01",
+    "directive": "DIR-10",
+    "band": 2,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 500, layout EXEX",
+   "qty": "500",
+   "layout": "EXEX",
+   "expect": {
+    "location": "FWD-01-01-01",
+    "directive": "DIR-20",
+    "band": 1,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 1199, layout EEEE",
+   "qty": "1199",
+   "layout": "EEEE",
+   "expect": {
+    "location": "CASE-01-01-01",
+    "directive": "DIR-10",
+    "band": 2,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 1199, layout BEEE",
+   "qty": "1199",
+   "layout": "BEEE",
+   "expect": {
+    "location": "CASE-01-01-01",
+    "directive": "DIR-10",
+    "band": 2,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 1199, layout XEEE",
+   "qty": "1199",
+   "layout": "XEEE",
+   "expect": {
+    "location": "CASE-01-01-01",
+    "directive": "DIR-10",
+    "band": 2,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 1199, layout EEXE",
+   "qty": "1199",
+   "layout": "EEXE",
+   "expect": {
+    "location": "CASE-01-01-01",
+    "directive": "DIR-10",
+    "band": 2,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 1199, layout EEXX",
+   "qty": "1199",
+   "layout": "EEXX",
+   "expect": {
+    "location": "CASE-01-01-01",
+    "directive": "DIR-10",
+    "band": 2,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 1199, layout XBEE",
+   "qty": "1199",
+   "layout": "XBEE",
+   "expect": {
+    "location": "CASE-01-01-01",
+    "directive": "DIR-10",
+    "band": 2,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 1199, layout XXXX",
+   "qty": "1199",
+   "layout": "XXXX",
+   "expect": {
+    "blocked": true
+   }
+  },
+  {
+   "name": "qty 1199, layout ----",
+   "qty": "1199",
+   "layout": "----",
+   "expect": {
+    "blocked": true
+   }
+  },
+  {
+   "name": "qty 1199, layout BEXE",
+   "qty": "1199",
+   "layout": "BEXE",
+   "expect": {
+    "location": "CASE-01-01-01",
+    "directive": "DIR-10",
+    "band": 2,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 1199, layout EXEX",
+   "qty": "1199",
+   "layout": "EXEX",
+   "expect": {
+    "location": "FWD-01-01-01",
+    "directive": "DIR-20",
+    "band": 1,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 1200, layout EEEE",
+   "qty": "1200",
+   "layout": "EEEE",
+   "expect": {
+    "location": "RESERVE-01-01-01",
+    "directive": "DIR-10",
+    "band": 3,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 1200, layout BEEE",
+   "qty": "1200",
+   "layout": "BEEE",
+   "expect": {
+    "location": "RESERVE-01-01-01",
+    "directive": "DIR-10",
+    "band": 3,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 1200, layout XEEE",
+   "qty": "1200",
+   "layout": "XEEE",
+   "expect": {
+    "location": "RESERVE-01-01-01",
+    "directive": "DIR-10",
+    "band": 3,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 1200, layout EEXE",
+   "qty": "1200",
+   "layout": "EEXE",
+   "expect": {
+    "location": "OVERFLOW-01-01-01",
+    "directive": "DIR-10",
+    "band": 3,
+    "action": 2
+   }
+  },
+  {
+   "name": "qty 1200, layout EEXX",
+   "qty": "1200",
+   "layout": "EEXX",
+   "expect": {
+    "location": "FWD-01-01-01",
+    "directive": "DIR-20",
+    "band": 1,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 1200, layout XBEE",
+   "qty": "1200",
+   "layout": "XBEE",
+   "expect": {
+    "location": "RESERVE-01-01-01",
+    "directive": "DIR-10",
+    "band": 3,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 1200, layout XXXX",
+   "qty": "1200",
+   "layout": "XXXX",
+   "expect": {
+    "blocked": true
+   }
+  },
+  {
+   "name": "qty 1200, layout ----",
+   "qty": "1200",
+   "layout": "----",
+   "expect": {
+    "blocked": true
+   }
+  },
+  {
+   "name": "qty 1200, layout BEXE",
+   "qty": "1200",
+   "layout": "BEXE",
+   "expect": {
+    "location": "OVERFLOW-01-01-01",
+    "directive": "DIR-10",
+    "band": 3,
+    "action": 2
+   }
+  },
+  {
+   "name": "qty 1200, layout EXEX",
+   "qty": "1200",
+   "layout": "EXEX",
+   "expect": {
+    "location": "RESERVE-01-01-01",
+    "directive": "DIR-10",
+    "band": 3,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 2400, layout EEEE",
+   "qty": "2400",
+   "layout": "EEEE",
+   "expect": {
+    "location": "RESERVE-01-01-01",
+    "directive": "DIR-10",
+    "band": 3,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 2400, layout BEEE",
+   "qty": "2400",
+   "layout": "BEEE",
+   "expect": {
+    "location": "RESERVE-01-01-01",
+    "directive": "DIR-10",
+    "band": 3,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 2400, layout XEEE",
+   "qty": "2400",
+   "layout": "XEEE",
+   "expect": {
+    "location": "RESERVE-01-01-01",
+    "directive": "DIR-10",
+    "band": 3,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 2400, layout EEXE",
+   "qty": "2400",
+   "layout": "EEXE",
+   "expect": {
+    "location": "OVERFLOW-01-01-01",
+    "directive": "DIR-10",
+    "band": 3,
+    "action": 2
+   }
+  },
+  {
+   "name": "qty 2400, layout EEXX",
+   "qty": "2400",
+   "layout": "EEXX",
+   "expect": {
+    "location": "FWD-01-01-01",
+    "directive": "DIR-20",
+    "band": 1,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 2400, layout XBEE",
+   "qty": "2400",
+   "layout": "XBEE",
+   "expect": {
+    "location": "RESERVE-01-01-01",
+    "directive": "DIR-10",
+    "band": 3,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 2400, layout XXXX",
+   "qty": "2400",
+   "layout": "XXXX",
+   "expect": {
+    "blocked": true
+   }
+  },
+  {
+   "name": "qty 2400, layout ----",
+   "qty": "2400",
+   "layout": "----",
+   "expect": {
+    "blocked": true
+   }
+  },
+  {
+   "name": "qty 2400, layout BEXE",
+   "qty": "2400",
+   "layout": "BEXE",
+   "expect": {
+    "location": "OVERFLOW-01-01-01",
+    "directive": "DIR-10",
+    "band": 3,
+    "action": 2
+   }
+  },
+  {
+   "name": "qty 2400, layout EXEX",
+   "qty": "2400",
+   "layout": "EXEX",
+   "expect": {
+    "location": "RESERVE-01-01-01",
+    "directive": "DIR-10",
+    "band": 3,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 5000, layout EEEE",
+   "qty": "5000",
+   "layout": "EEEE",
+   "expect": {
+    "location": "RESERVE-01-01-01",
+    "directive": "DIR-10",
+    "band": 3,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 5000, layout BEEE",
+   "qty": "5000",
+   "layout": "BEEE",
+   "expect": {
+    "location": "RESERVE-01-01-01",
+    "directive": "DIR-10",
+    "band": 3,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 5000, layout XEEE",
+   "qty": "5000",
+   "layout": "XEEE",
+   "expect": {
+    "location": "RESERVE-01-01-01",
+    "directive": "DIR-10",
+    "band": 3,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 5000, layout EEXE",
+   "qty": "5000",
+   "layout": "EEXE",
+   "expect": {
+    "location": "OVERFLOW-01-01-01",
+    "directive": "DIR-10",
+    "band": 3,
+    "action": 2
+   }
+  },
+  {
+   "name": "qty 5000, layout EEXX",
+   "qty": "5000",
+   "layout": "EEXX",
+   "expect": {
+    "location": "FWD-01-01-01",
+    "directive": "DIR-20",
+    "band": 1,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 5000, layout XBEE",
+   "qty": "5000",
+   "layout": "XBEE",
+   "expect": {
+    "location": "RESERVE-01-01-01",
+    "directive": "DIR-10",
+    "band": 3,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 5000, layout XXXX",
+   "qty": "5000",
+   "layout": "XXXX",
+   "expect": {
+    "blocked": true
+   }
+  },
+  {
+   "name": "qty 5000, layout ----",
+   "qty": "5000",
+   "layout": "----",
+   "expect": {
+    "blocked": true
+   }
+  },
+  {
+   "name": "qty 5000, layout BEXE",
+   "qty": "5000",
+   "layout": "BEXE",
+   "expect": {
+    "location": "OVERFLOW-01-01-01",
+    "directive": "DIR-10",
+    "band": 3,
+    "action": 2
+   }
+  },
+  {
+   "name": "qty 5000, layout EXEX",
+   "qty": "5000",
+   "layout": "EXEX",
+   "expect": {
+    "location": "RESERVE-01-01-01",
+    "directive": "DIR-10",
+    "band": 3,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 10000, layout EEEE",
+   "qty": "10000",
+   "layout": "EEEE",
+   "expect": {
+    "location": "RESERVE-01-01-01",
+    "directive": "DIR-10",
+    "band": 3,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 10000, layout BEEE",
+   "qty": "10000",
+   "layout": "BEEE",
+   "expect": {
+    "location": "RESERVE-01-01-01",
+    "directive": "DIR-10",
+    "band": 3,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 10000, layout XEEE",
+   "qty": "10000",
+   "layout": "XEEE",
+   "expect": {
+    "location": "RESERVE-01-01-01",
+    "directive": "DIR-10",
+    "band": 3,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 10000, layout EEXE",
+   "qty": "10000",
+   "layout": "EEXE",
+   "expect": {
+    "location": "OVERFLOW-01-01-01",
+    "directive": "DIR-10",
+    "band": 3,
+    "action": 2
+   }
+  },
+  {
+   "name": "qty 10000, layout EEXX",
+   "qty": "10000",
+   "layout": "EEXX",
+   "expect": {
+    "location": "FWD-01-01-01",
+    "directive": "DIR-20",
+    "band": 1,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 10000, layout XBEE",
+   "qty": "10000",
+   "layout": "XBEE",
+   "expect": {
+    "location": "RESERVE-01-01-01",
+    "directive": "DIR-10",
+    "band": 3,
+    "action": 1
+   }
+  },
+  {
+   "name": "qty 10000, layout XXXX",
+   "qty": "10000",
+   "layout": "XXXX",
+   "expect": {
+    "blocked": true
+   }
+  },
+  {
+   "name": "qty 10000, layout ----",
+   "qty": "10000",
+   "layout": "----",
+   "expect": {
+    "blocked": true
+   }
+  },
+  {
+   "name": "qty 10000, layout BEXE",
+   "qty": "10000",
+   "layout": "BEXE",
+   "expect": {
+    "location": "OVERFLOW-01-01-01",
+    "directive": "DIR-10",
+    "band": 3,
+    "action": 2
+   }
+  },
+  {
+   "name": "qty 10000, layout EXEX",
+   "qty": "10000",
+   "layout": "EXEX",
+   "expect": {
+    "location": "RESERVE-01-01-01",
+    "directive": "DIR-10",
+    "band": 3,
+    "action": 1
+   }
+  }
+ ]
+}
