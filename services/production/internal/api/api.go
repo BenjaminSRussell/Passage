@@ -91,6 +91,9 @@ type Config struct {
 	// AutoStartOnFeedback lets a route card start a Released order
 	// (PRODUCTION_AUTOSTART_ON_FEEDBACK, default true).
 	AutoStartOnFeedback bool
+	// EstimateOnCreate estimates every new order in its create transaction
+	// (PRODUCTION_ESTIMATE_ON_CREATE, default false).
+	EstimateOnCreate bool
 }
 
 // API holds the handlers and their counters.
@@ -141,6 +144,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/orders/{id}/trigger-points", a.listTriggerPoints)
 	r.With(authz.RequireDuty(DutySetupWrite)).Post("/v1/production/orders/{id}/trigger-points", a.createTriggerPoint)
 	r.With(authz.RequireDuty(DutySetupWrite)).Delete("/v1/production/trigger-points/{id}", a.deleteTriggerPoint)
+	r.With(authz.RequireDuty(DutyJournalPost)).Post("/v1/production/orders/{id}/operations/{operCommand}", a.operationCommand)
 }
 
 // Metrics serves Prometheus text for the admin port.
@@ -184,6 +188,27 @@ type createRequest struct {
 	// ReworkReference names the original order, batch or serial of a rework
 	// order (FR-21.20); it implies originType Rework.
 	ReworkReference *domain.ReworkRef `json:"reworkReference"`
+	// MinimumQty, MaximumQty and Multiple are the item's order settings (FR-21.1),
+	// passed by the caller until released-product settings (wave 8) are read.
+	// Absent or 0 means no rule; omitempty keeps the request hash of a body
+	// without them as it was.
+	MinimumQty *decimal.Decimal `json:"minimumQty,omitempty"`
+	MaximumQty *decimal.Decimal `json:"maximumQty,omitempty"`
+	Multiple   *decimal.Decimal `json:"multiple,omitempty"`
+}
+
+// quantityRules validates the optional item order settings of a create or a
+// PATCH into fields and returns them; a nil setting is no rule.
+func quantityRules(minimum, maximum, multiple *decimal.Decimal, fields map[string]string) domain.OrderQuantityRules {
+	setting := func(name string, v *decimal.Decimal) decimal.Decimal {
+		if v == nil {
+			return decimal.Zero
+		}
+		checkQuantity(name, *v, false, fields)
+		return *v
+	}
+	return domain.OrderQuantityRules{Minimum: setting("minimumQty", minimum), Maximum: setting("maximumQty", maximum),
+		Multiple: setting("multiple", multiple)}
 }
 
 func (a *API) createOrder(w http.ResponseWriter, r *http.Request) {
@@ -207,11 +232,16 @@ func (a *API) createOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	key, fields := idempotencyKey(r)
 	validateCreate(req, fields)
+	rules := quantityRules(req.MinimumQty, req.MaximumQty, req.Multiple, fields)
 	if p.LegalEntityID != "" && req.LegalEntityID != p.LegalEntityID {
 		fields["legalEntityId"] = "must be the legal entity of the caller"
 	}
 	if len(fields) > 0 {
 		invalid(w, r, fields)
+		return
+	}
+	if err := domain.CheckOrderQuantity(req.Quantity, rules); err != nil {
+		httpx.Fail(w, r, problemFrom(err))
 		return
 	}
 	if req.OriginType == domain.OriginRework && !p.HasDuty(DutyRework) {
@@ -237,7 +267,8 @@ func (a *API) createOrder(w http.ResponseWriter, r *http.Request) {
 	order, created, err := a.store.CreateOrder(r.Context(), store.NewOrder{
 		LegalEntityID: req.LegalEntityID, ProductID: req.ProductID, SiteID: req.SiteID, WarehouseID: req.WarehouseID, ItemGroup: req.ItemGroup,
 		Currency: req.Currency, Quantity: req.Quantity, DeliveryDate: req.DeliveryDate, OriginType: req.OriginType, OriginID: req.OriginID,
-		ReworkReference: req.ReworkReference, Lines: lines, Operations: ops, IdempotencyKey: key, RequestHash: hashOf(req),
+		ReworkReference: req.ReworkReference, Lines: lines, Operations: ops, EstimateOnCreate: a.cfg.EstimateOnCreate,
+		TraceID: middleware.GetReqID(r.Context()), IdempotencyKey: key, RequestHash: hashOf(req),
 	})
 	if err != nil {
 		a.fail(w, r, "create production order", err)
@@ -322,6 +353,11 @@ func (a *API) getStatusLog(w http.ResponseWriter, r *http.Request) {
 type patchRequest struct {
 	Quantity     *decimal.Decimal `json:"quantity"`
 	DeliveryDate json.RawMessage  `json:"deliveryDate"`
+	// MinimumQty, MaximumQty and Multiple are the item's order settings that a
+	// new quantity must meet (FR-21.1); they accompany a quantity.
+	MinimumQty *decimal.Decimal `json:"minimumQty"`
+	MaximumQty *decimal.Decimal `json:"maximumQty"`
+	Multiple   *decimal.Decimal `json:"multiple"`
 }
 
 func (a *API) patchOrder(w http.ResponseWriter, r *http.Request) {
@@ -345,8 +381,11 @@ func (a *API) patchOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	u := store.OrderUpdate{OrderID: id, IfMatch: ifMatch, Quantity: req.Quantity, Actor: p.UserID}
 	fields := map[string]string{}
+	rules := quantityRules(req.MinimumQty, req.MaximumQty, req.Multiple, fields)
 	if req.Quantity != nil {
 		checkQuantity("quantity", *req.Quantity, true, fields)
+	} else if req.MinimumQty != nil || req.MaximumQty != nil || req.Multiple != nil {
+		fields["quantity"] = "is required with minimumQty, maximumQty or multiple"
 	}
 	if len(req.DeliveryDate) > 0 {
 		u.SetDeliveryDate = true
@@ -364,6 +403,12 @@ func (a *API) patchOrder(w http.ResponseWriter, r *http.Request) {
 	if len(fields) > 0 {
 		invalid(w, r, fields)
 		return
+	}
+	if req.Quantity != nil {
+		if err := domain.CheckOrderQuantity(*req.Quantity, rules); err != nil {
+			httpx.Fail(w, r, problemFrom(err))
+			return
+		}
 	}
 	order, err := a.store.UpdateOrder(r.Context(), u)
 	if err != nil {

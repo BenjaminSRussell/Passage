@@ -4,7 +4,8 @@ Production orders for Passage (wave 21, ticket PSG-21, PRD section 4.21). Slice 
 order itself; slice 2 adds journals, WIP postings and settlement; slice 3 adds rework orders and
 as-built genealogy; slice 4 adds the bulk status update, and split and merge; slice 5 adds
 order-specific BOM and route edits and the WIP balance and variance reports; slice 6 adds trigger
-points on operation feedback.
+points on operation feedback; slice 7 adds subcontract purchase requests; slice 9 adds the item's
+order quantity rules, estimate on create and the operation finish and reopen commands.
 
 Slice 1:
 
@@ -187,6 +188,24 @@ Slice 7:
 - Migration `0007_subcontract.sql` adds `production_operation.po_requested_at` and a partial index
   on the subcontract operations.
 
+Slice 9:
+
+- Order quantity rules (FR-21.1): create takes the item's `minimumQty`, `maximumQty` and
+  `multiple` (absent or 0 is no rule) until released-product settings (wave 8) are read, and
+  refuses a quantity outside them with 422 `PRODUCTION_ORDER_QUANTITY`; a PATCH of the quantity
+  takes and checks them the same way.
+- Estimate on create (4.21.13): with `PRODUCTION_ESTIMATE_ON_CREATE=true` a new order is estimated
+  in its create transaction: it is returned Estimated at version 2 with its planned cost, an
+  `estimate` status-log row and `order.statuschanged` after `order.created`. A replay emits nothing.
+- Operation commands (FR-21.6): `POST …/orders/{id}/operations/{operNumber}:finish` closes an
+  operation to further route cards without posting one; `:reopen` opens a finished operation
+  again, as `started` when it has feedback and `open` otherwise. Both apply while the order is
+  Started or ReportedAsFinished and not to a subcontracted operation (409
+  `PRODUCTION_OPERATION_STATE`), need `production.journal.post`, If-Match on the order version and
+  an Idempotency-Key. A change bumps the order version, writes a `production_operation_log` row and
+  emits `operation.statuschanged`; a command already in effect changes nothing. Migration
+  `0008_operation_log.sql` adds the log with RLS and grants.
+
 Inventory transactions (wave 16), GL booking (wave 11) and period control (wave 14) are
 handoffs. Everything not built is listed in `NOT-IMPLEMENTED.md`.
 
@@ -201,14 +220,16 @@ internal/domain/       pure rules: status.go (BR-21.1 state machine, reset, RAF 
                        bulk.go (FR-21.12), split.go (FR-21.15 split and merge),
                        order_edit.go (FR-21.18 BOM and route edits), inquiry.go (variance % of planned),
                        trigger.go (FR-21.17 conditions, due triggers, inserted numbering, rework route),
-                       subcontract.go (FR-21.10 purchase requests)
+                       subcontract.go (FR-21.10 purchase requests),
+                       operation.go (FR-21.1 order quantity rules, FR-21.6 finish and reopen)
 internal/domain/testdata/  prod-orders-50.json and the exact-fraction generator that computed it
 internal/store/        Postgres repositories (pgx), tenant-scoped transactions, row locks, outbox writes:
                        store.go (orders, commands), journal.go (journals, postings, settlement, reversals),
                        profile.go (posting profiles), asbuilt.go (as-built genealogy),
                        split.go (split, merge, bulk status), order_edit.go (BOM and route edits, audit),
                        inquiry.go (WIP balance and variance reports), trigger.go (trigger points, firing on route cards),
-                       subcontract.go (purchase requests at release, subcontract operations inquiry)
+                       subcontract.go (purchase requests at release, subcontract operations inquiry),
+                       operation.go (finish and reopen)
 internal/api/          HTTP handlers, request validation, platform authz duties
 internal/events/       event types and payloads
 migrations/            0001_init.sql (orders), 0002_journals.sql (profiles, journals, WIP postings,
@@ -216,7 +237,8 @@ migrations/            0001_init.sql (orders), 0002_journals.sql (profiles, jour
                        as-built records), 0004_split_merge.sql (split and merge links),
                        0005_order_edits.sql (orderBomModified, edit audit, report indexes),
                        0006_trigger_points.sql (trigger points and firings), with RLS and app-role grants
-                       on every table, 0007_subcontract.sql (purchase request stamp); migrations.go (embed)
+                       on every table, 0007_subcontract.sql (purchase request stamp),
+                       0008_operation_log.sql (operation finish and reopen log); migrations.go (embed)
 api/openapi.yaml       OpenAPI 3.1 for every route (a test checks it against the router)
 events/asyncapi.yaml   AsyncAPI 3 for every event (a test checks it against the payloads)
 charts/production/     Helm chart (deployment, service, HPA on CPU 70%, optional ServiceMonitor)
@@ -236,6 +258,7 @@ DATABASE_URL=postgres://... MIGRATE_ON_START=true go run ./cmd/production
 | `PRODUCTION_RAF_TOLERANCE_PCT` | `0` | over-delivery allowed on report as finished, 0 to 100 (PRD 4.21.13) |
 | `PRODUCTION_OVERCONSUMPTION_PCT` | `10` | picking beyond the required quantity allowed without the over-consumption duty, 0 to 1000 |
 | `PRODUCTION_AUTOSTART_ON_FEEDBACK` | `true` | a route card on a Released order starts it |
+| `PRODUCTION_ESTIMATE_ON_CREATE` | `false` | a new order is estimated in its create transaction (4.21.13 "Estimate on create") |
 
 The gateway supplies the principal through the `X-Passage-Tenant`, `X-Passage-Legal-Entity`,
 `X-Passage-User` and `X-Passage-Duties` headers until wave 2 replaces them with JWT validation.
@@ -266,7 +289,7 @@ drift-free RAF receipts and the variances clearing the posted WIP in every curre
 | Maintain order BOM after release | `production.order.bom-after-release` | `PATCH …/{id}/bom` on a Released order (with `production.order.write`) |
 | Create rework orders | `production.order.rework` | create with `originType` `Rework` (with `production.order.write`); defining a `create-rework-order` trigger point (with `production.setup.write`) |
 | Release production orders | `production.order.release` | `:release`, `:start`, `:cancel`, `:reset-status`, `:split`, `orders:merge`, `orders:bulk-status` (with the command's duty) |
-| Post production journals | `production.journal.post` | `:report-finished`, create, `:post` and delete journals, assign and `:detach` as-built records |
+| Post production journals | `production.journal.post` | `:report-finished`, create, `:post` and delete journals, assign and `:detach` as-built records, operation `:finish` and `:reopen` |
 | Post production over-consumption | `production.journal.over-consume` | posting beyond the requirement plus `PRODUCTION_OVERCONSUMPTION_PCT` |
 | View production setup | `production.setup.read` | `GET /v1/production/posting-profiles` |
 | Maintain production setup | `production.setup.write` | `PUT /v1/production/posting-profiles`, define and delete trigger points |
@@ -289,11 +312,14 @@ Problems are RFC 9457 with `type` `https://passage.dev/problems/<code>`.
 | `PRODUCTION_ZERO_OUTPUT_NOT_PERMITTED` | 422 | Ending with zero output without the zero-output duty (PROD-0013) |
 | `PRODUCTION_INVALID_INPUT` | 422 | Explosion or planning rule failed (quantities, scrap, series, operation order) |
 | `PRODUCTION_ORDER_NOT_FOUND` | 404 | No order with that id in the caller's tenant and legal-entity scope |
-| `PRODUCTION_UNKNOWN_ACTION` | 404 | The `:command` is not one of the eight or `:split`, a journal action is not `:post`, or an as-built action is not `:detach` |
+| `PRODUCTION_UNKNOWN_ACTION` | 404 | The `:command` is not one of the eight or `:split`, a journal action is not `:post`, an as-built action is not `:detach`, or an operation command is not `{operNumber}:finish` or `:reopen` |
 | `PRODUCTION_JOURNAL_NOT_FOUND` | 404 | No journal with that id in the caller's scope |
 | `PRODUCTION_JOURNAL_NOT_ALLOWED` | 409 | The journal type cannot post on the order's status |
 | `PRODUCTION_JOURNAL_ALREADY_POSTED` | 409 | Posting or deleting a posted journal |
 | `PRODUCTION_OPERATION_FINISHED` | 409 | Feedback on a finished operation |
+| `PRODUCTION_OPERATION_STATE` | 409 | `:finish` or `:reopen` on an order that is not Started or ReportedAsFinished, or on a subcontracted operation |
+| `PRODUCTION_OPERATION_NOT_FOUND` | 404 | The operation number is not on the order's route |
+| `PRODUCTION_ORDER_QUANTITY` | 422 | The order quantity is below the item's minimum, above its maximum or not a multiple of its multiple (FR-21.1) |
 | `PRODUCTION_UNPOSTED_JOURNALS` | 409 | End with draft journals (PROD-0012) |
 | `PRODUCTION_JOURNAL_EMPTY` | 422 | The proposal found nothing to post |
 | `PRODUCTION_INVALID_JOURNAL_LINE` | 422 | A line names an unknown BOM line or operation, or a subcontracted operation |

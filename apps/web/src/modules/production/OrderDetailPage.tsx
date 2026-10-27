@@ -15,6 +15,7 @@ import {
 } from "../../shell/ui";
 import {
   allowedCommands,
+  canCommandOperations,
   canEditBOM,
   canSplit,
   describeProblem,
@@ -26,11 +27,13 @@ import {
   nextCommand,
   resetTargets,
   runCommand,
+  runOperationCommand,
   type CommandBody,
   type CostGroup,
   type CostRow,
   type CostView,
   type Operation,
+  type OperationCommand,
   type OrderLine,
   type OrderSummary,
   type Problem,
@@ -180,6 +183,7 @@ export function ProductionOrderDetail({ orderId, onBack, onCreateRework, onOpenO
   const [rafErrors, setRafErrors] = useState<{ quantity?: string; errorQuantity?: string }>({});
   const [resetTo, setResetTo] = useState<ProductionStatus | "">("");
   const [confirming, setConfirming] = useState<ProductionCommand | null>(null);
+  const [operBusy, setOperBusy] = useState<number | null>(null);
   // One Idempotency-Key per command and version, so a retry after a lost response replays.
   const keys = useRef(new Map<string, string>());
 
@@ -252,6 +256,28 @@ export function ProductionOrderDetail({ orderId, onBack, onCreateRework, onOpenO
     }
   };
 
+  // FR-21.6: finish closes an operation to route cards; reopen opens a finished one again.
+  const operate = async (operNumber: number, command: OperationCommand) => {
+    if (!current || operBusy !== null) {
+      return;
+    }
+    const slot = `operation ${operNumber}:${command}@${current.version}`;
+    const key = keys.current.get(slot) ?? newIdempotencyKey();
+    keys.current.set(slot, key);
+    setOperBusy(operNumber);
+    setCommandError(null);
+    setNotice("");
+    try {
+      const updated = await runOperationCommand(current.id, operNumber, command, current.version, key);
+      setOrder({ value: updated, loading: false, error: null });
+      setNotice(`Operation ${operNumber} ${command === "finish" ? "finished" : "reopened"}.`);
+    } catch (failure) {
+      setCommandError(describeProblem(failure));
+    } finally {
+      setOperBusy(null);
+    }
+  };
+
   const submitRaf = (event: FormEvent) => {
     event.preventDefault();
     const errors: typeof rafErrors = {};
@@ -307,6 +333,26 @@ export function ProductionOrderDetail({ orderId, onBack, onCreateRework, onOpenO
   const canReport = current.status === "Started" || current.status === "ReportedAsFinished";
   const targets = resetTargets(current.status);
   const unit = (value: string) => `${value} ${current.currency}`;
+  const routeColumns: DataTableColumn<Operation>[] = canCommandOperations(current.status)
+    ? [
+        ...operationColumns,
+        {
+          key: "action",
+          header: "Feedback action",
+          render: (row) => {
+            if (row.subcontract) {
+              return dash;
+            }
+            const command: OperationCommand = row.status === "finished" ? "reopen" : "finish";
+            return (
+              <Button size="sm" variant="secondary" loading={operBusy === row.operNumber} onClick={() => void operate(row.operNumber, command)}>
+                {command === "finish" ? `Finish operation ${row.operNumber}` : `Reopen operation ${row.operNumber}`}
+              </Button>
+            );
+          },
+        },
+      ]
+    : operationColumns;
 
   return (
     <div className={styles.stack}>
@@ -508,7 +554,18 @@ export function ProductionOrderDetail({ orderId, onBack, onCreateRework, onOpenO
       </Card>
 
       <Card title="Route" padded={false}>
-        <DataTable label="Order operations" columns={operationColumns} rows={current.operations} getRowKey={(row) => String(row.operNumber)} />
+        <DataTable
+          label="Order operations"
+          columns={routeColumns}
+          rows={current.operations}
+          getRowKey={(row) => String(row.operNumber)}
+          empty={{ title: "No operations", description: "The order's route has no operations." }}
+        />
+        {canCommandOperations(current.status) ? (
+          <p className={`${styles.hint} ${styles.tableNote}`}>
+            A finished operation takes no more route cards until it is reopened. Route cards can also finish an operation.
+          </p>
+        ) : null}
       </Card>
 
       {canEditBOM(current.status) ? (

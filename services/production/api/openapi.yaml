@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Passage production orders
-  version: 0.21.7
+  version: 0.21.9
   description: |
     Wave 21 slices 1 to 4 of PSG-21. Creates production orders with BOM and route
     explosion, lists and reads them, edits the header, runs the status state machine
@@ -22,6 +22,10 @@ info:
     Slice 6 adds trigger points (FR-21.17, BR-21.13): rules on an order's operations that
     route-card feedback evaluates, inserting rework operations, creating a rework order for
     the error quantity or publishing a notification; the firings come back on the post.
+    Slice 7 adds the subcontract purchase requests and inquiry (FR-21.10).
+    Slice 9 adds the item's minimum, maximum and multiple order quantity on create and on a
+    quantity PATCH (FR-21.1), estimate on create (PRODUCTION_ESTIMATE_ON_CREATE, 4.21.13), and
+    the operation commands :finish and :reopen (FR-21.6).
     Problems are RFC 9457 with a stable `code` (see README). The gateway serves these paths
     under `/api`.
 servers:
@@ -259,6 +263,9 @@ components:
             Defaults to Rework when reworkReference is set.
         originId: { type: [string, 'null'], format: uuid }
         reworkReference: { $ref: '#/components/schemas/ReworkReference' }
+        minimumQty: { $ref: '#/components/schemas/Decimal', description: 'The item''s minimum order quantity (FR-21.1); absent or 0 is no minimum. Passed by the caller until released-product settings (wave 8) are read.' }
+        maximumQty: { $ref: '#/components/schemas/Decimal', description: 'The item''s maximum order quantity; absent or 0 is no maximum. Below minimumQty is 422 PRODUCTION_INVALID_INPUT.' }
+        multiple: { $ref: '#/components/schemas/Decimal', description: 'The quantity must be a whole multiple of it; absent or 0 is no rule.' }
         bom:
           type: array
           maxItems: 5000
@@ -272,10 +279,16 @@ components:
       type: object
       additionalProperties: false
       minProperties: 1
-      description: Quantity while Created or Estimated (re-explodes and re-estimates); delivery date until Released.
+      description: |
+        Quantity while Created or Estimated (re-explodes and re-estimates); delivery date until Released.
+        minimumQty, maximumQty and multiple are the item's order rules (FR-21.1) that the new
+        quantity must meet; they are accepted only with a quantity.
       properties:
         quantity: { $ref: '#/components/schemas/Decimal' }
         deliveryDate: { type: [string, 'null'], format: date }
+        minimumQty: { $ref: '#/components/schemas/Decimal' }
+        maximumQty: { $ref: '#/components/schemas/Decimal' }
+        multiple: { $ref: '#/components/schemas/Decimal' }
     CommandBody:
       type: object
       additionalProperties: false
@@ -859,7 +872,11 @@ paths:
             schema: { $ref: '#/components/schemas/CreateOrder' }
       responses:
         '201':
-          description: Created; emits dev.passage.production.order.created.v1.
+          description: |
+            Created; emits dev.passage.production.order.created.v1. With PRODUCTION_ESTIMATE_ON_CREATE
+            (4.21.13 "Estimate on create") the order is estimated in the same transaction: it is
+            returned Estimated at version 2 with its planned cost, an `estimate` status-log row and
+            dev.passage.production.order.statuschanged.v1 after order.created.
           headers:
             ETag: { $ref: '#/components/headers/ETag' }
             Location: { schema: { type: string } }
@@ -877,7 +894,7 @@ paths:
         '400': { description: 'Validation failed or Idempotency-Key missing (COM-0001)', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { description: 'AUTH-0003: a missing route duty, or originType Rework without production.order.rework', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '422': { description: 'Explosion or operation rule failed (PRODUCTION_INVALID_INPUT); the rework reference does not name an order of the same product with enough output (PRODUCTION_REWORK_REFERENCE_INVALID); key reused with another body (idempotency_key_reuse)', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: 'Explosion or operation rule failed (PRODUCTION_INVALID_INPUT); the quantity breaks the minimumQty, maximumQty or multiple (PRODUCTION_ORDER_QUANTITY); the rework reference does not name an order of the same product with enough output (PRODUCTION_REWORK_REFERENCE_INVALID); key reused with another body (idempotency_key_reuse)', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/production/orders:bulk-status:
     post:
       operationId: bulkProductionOrderStatus
@@ -984,6 +1001,7 @@ paths:
         '404': { $ref: '#/components/responses/Problem' }
         '409': { description: The field cannot change in the current status (PRODUCTION_FIELD_NOT_EDITABLE), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '412': { description: If-Match does not match the current version (conflict_version, PROD-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: The new quantity breaks the order rules (PRODUCTION_ORDER_QUANTITY), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: If-Match missing (precondition_required), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/production/orders/{id}/status-log:
     get:
@@ -1552,6 +1570,41 @@ paths:
               schema: { $ref: '#/components/schemas/SubcontractReport' }
         '400': { description: COM-0001, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '403': { $ref: '#/components/responses/Problem' }
+  /v1/production/orders/{id}/operations/{operNumber}:{command}:
+    post:
+      operationId: commandProductionOperation
+      summary: Finish or reopen one operation of an order (FR-21.6)
+      description: |
+        `:finish` closes the operation to further route cards without posting one (a route card
+        line with `finished` does the same with its feedback); `:reopen` opens a finished
+        operation again, as started when it has feedback and open otherwise. Both apply while the
+        order is Started or ReportedAsFinished, not to a subcontracted operation (409
+        PRODUCTION_OPERATION_STATE). A change bumps the order version, writes an operation-log row
+        and emits dev.passage.production.operation.statuschanged.v1 in the same transaction; a
+        command already in effect returns the order unchanged and emits nothing.
+      x-passage-duty: production.journal.post
+      parameters:
+        - { $ref: '#/components/parameters/OrderId' }
+        - { name: operNumber, in: path, required: true, schema: { type: integer, minimum: 1, maximum: 2147483647 } }
+        - { name: command, in: path, required: true, schema: { type: string, enum: [finish, reopen] } }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      responses:
+        '200':
+          description: The order after the command. Replays return the current order with Idempotent-Replayed.
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Order' }
+        '400': { description: A body, or Idempotency-Key or If-Match malformed (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: 'Unknown order, operation or command (PRODUCTION_ORDER_NOT_FOUND, PRODUCTION_OPERATION_NOT_FOUND, PRODUCTION_UNKNOWN_ACTION)', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: The order takes no feedback or the operation is subcontracted (PRODUCTION_OPERATION_STATE), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '412': { description: conflict_version, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: Key reused for another operation or command (idempotency_key_reuse), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '428': { description: precondition_required, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/production/orders/{id}/trigger-points:
     get:
       operationId: listProductionTriggerPoints

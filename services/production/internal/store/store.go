@@ -138,8 +138,12 @@ type NewOrder struct {
 	ReworkReference *domain.ReworkRef
 	Lines           []domain.OrderLine
 	Operations      []domain.Operation
-	IdempotencyKey  string
-	RequestHash     string
+	// EstimateOnCreate runs `:estimate` in the create transaction (PRD 4.21.13
+	// "Estimate on create"), so the order is created Estimated with its planned cost.
+	EstimateOnCreate bool
+	TraceID          string
+	IdempotencyKey   string
+	RequestHash      string
 }
 
 // OrderUpdate is a PATCH of the header. A nil Quantity leaves it; SetDeliveryDate
@@ -203,6 +207,7 @@ type Store interface {
 	ListTriggerPoints(ctx context.Context, orderID string) ([]TriggerPoint, error)
 	DeleteTriggerPoint(ctx context.Context, id string) error
 	SubcontractOperations(ctx context.Context, f SubcontractFilter) (SubcontractReport, error)
+	ApplyOperationCommand(ctx context.Context, c OperationCommand) (Order, OperationOutcome, error)
 }
 
 // Postgres is the production store.
@@ -274,11 +279,48 @@ func (s *Postgres) CreateOrder(ctx context.Context, in NewOrder) (Order, bool, e
 		if err != nil {
 			return err
 		}
+		if in.EstimateOnCreate {
+			if err := estimateOnCreate(ctx, tx, p.TenantID, p.UserID, id, in); err != nil {
+				return err
+			}
+		}
 		out, err = loadOrder(ctx, tx, p.TenantID, id)
 		created = err == nil
 		return err
 	})
 	return out, created, err
+}
+
+// estimateOnCreate applies `:estimate` to a just-created order inside its create
+// transaction (PRD 4.21.13): the planned cost rows, Created → Estimated with a
+// version bump, the status log entry and order.statuschanged after order.created,
+// as the command itself does. Its log key derives from the create's key.
+func estimateOnCreate(ctx context.Context, tx pgx.Tx, tenantID, actor, orderID string, in NewOrder) error {
+	to, err := domain.Transition(domain.Created, domain.CmdEstimate)
+	if err != nil {
+		return domainProblem(err)
+	}
+	if err := replaceEstimate(ctx, tx, tenantID, orderID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `update production_order set status = $3, version = version + 1, updated_at = now() where tenant_id = $1 and id = $2`,
+		tenantID, orderID, string(to)); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `insert into production_status_log (tenant_id, id, legal_entity_id, order_id, command, from_status, to_status, actor, trace_id, idempotency_key, request_hash)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`, tenantID, ids.New(), in.LegalEntityID, orderID, string(domain.CmdEstimate),
+		string(domain.Created), string(to), actor, in.TraceID, "sys:estimate-on-create:"+in.IdempotencyKey, in.RequestHash); err != nil {
+		return err
+	}
+	var updatedAt time.Time
+	if err := tx.QueryRow(ctx, `select updated_at from production_order where tenant_id = $1 and id = $2`, tenantID, orderID).Scan(&updatedAt); err != nil {
+		return err
+	}
+	zero := "0"
+	return enqueue(ctx, tx, orderID, prodevents.OrderStatusChanged, tenantID, actor, prodevents.OrderStatusChangedData{
+		OrderID: orderID, From: string(domain.Created), To: string(to), Quantity: in.Quantity.String(), QtyRAF: zero,
+		QtyError: zero, Actor: actor, OccurredAt: updatedAt.UTC().Format(time.RFC3339Nano),
+	})
 }
 
 // insertOrder allocates the order number from the legal entity's sequence, inserts the
@@ -761,7 +803,8 @@ func replaceEstimate(ctx context.Context, tx pgx.Tx, tenantID, orderID string) e
 
 // domainProblem maps a domain rule violation to a problem: an illegal
 // transition, a locked field, an as-built change or an order edit in the wrong
-// status, or an edit that collides with the order's lines, operations or
+// status, an operation command on an order or operation that takes no
+// feedback, or an edit that collides with the order's lines, operations or
 // journals is a 409 conflict with the order's state, the other rules are 422.
 func domainProblem(err error) error {
 	var de *domain.Error
@@ -771,7 +814,7 @@ func domainProblem(err error) error {
 	status := http.StatusUnprocessableEntity
 	switch de.Code {
 	case domain.CodeIllegalTransition, domain.CodeNotEditable, domain.CodeAsBuiltState,
-		domain.CodeEditNotAllowed, domain.CodeEditTargetExists, domain.CodeEditTargetInUse:
+		domain.CodeEditNotAllowed, domain.CodeEditTargetExists, domain.CodeEditTargetInUse, domain.CodeOperationState:
 		status = http.StatusConflict
 	}
 	return httpx.NewProblem(status, de.Code, de.Detail)

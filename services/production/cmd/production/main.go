@@ -47,7 +47,8 @@ func newLogger(w io.Writer) *slog.Logger {
 // finished, 0 to 100, default 0; PRODUCTION_OVERCONSUMPTION_PCT, the picking
 // beyond the requirement allowed without the over-consumption duty, 0 to
 // 1000, default 10; PRODUCTION_AUTOSTART_ON_FEEDBACK, whether a route card
-// starts a Released order, default true.
+// starts a Released order, default true; PRODUCTION_ESTIMATE_ON_CREATE, whether
+// a new order is estimated in its create transaction, default false.
 func config(getenv func(string) string) (api.Config, error) {
 	cfg := api.Config{RAFTolerancePct: decimal.Zero, OverConsumptionPct: decimal.NewFromInt(10), AutoStartOnFeedback: true}
 	pct := func(name string, max int64, into *decimal.Decimal) error {
@@ -74,6 +75,13 @@ func config(getenv func(string) string) (api.Config, error) {
 		cfg.AutoStartOnFeedback = false
 	default:
 		return cfg, fmt.Errorf("PRODUCTION_AUTOSTART_ON_FEEDBACK must be true or false, got %q", raw)
+	}
+	switch raw := getenv("PRODUCTION_ESTIMATE_ON_CREATE"); raw {
+	case "", "false":
+	case "true":
+		cfg.EstimateOnCreate = true
+	default:
+		return cfg, fmt.Errorf("PRODUCTION_ESTIMATE_ON_CREATE must be true or false, got %q", raw)
 	}
 	return cfg, nil
 }

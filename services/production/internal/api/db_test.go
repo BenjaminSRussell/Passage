@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -118,5 +119,60 @@ func TestHTTP_OrderThroughTheDatabase(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &wip); err != nil || len(wip.Items) != 1 || wip.Items[0].WIPBalance != "3950.00" ||
 		wip.Items[0].Consumption != "3950.00" || wip.Totals[0].Orders != 1 {
 		t.Fatalf("wip report: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// FR-21.6 over HTTP and a real database: a Started order's operation is finished
+// and reopened through its route, a replay answers the same order, and a Created
+// order refuses the command.
+func TestHTTP_OperationCommandsThroughTheDatabase(t *testing.T) {
+	pool := testkit.DB(t)
+	if err := dbx.Migrate(context.Background(), pool, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	r := httpx.NewRouter()
+	New(store.New(pool), Config{EstimateOnCreate: true}).Register(r)
+	all := []string{DutyRead, DutyWrite, DutyRelease, DutyJournalPost, DutySetupWrite}
+	if rec := do(r, call{method: http.MethodPut, path: "/v1/production/posting-profiles", body: profileBody(nil), duties: all}); rec.Code != http.StatusCreated {
+		t.Fatalf("profile: %d %s", rec.Code, rec.Body.String())
+	}
+	rec := do(r, call{method: http.MethodPost, path: "/v1/production/orders", body: createBody(nil), duties: all,
+		headers: map[string]string{idempotencyName: "http-op-create"}})
+	var order store.Order
+	if err := json.Unmarshal(rec.Body.Bytes(), &order); err != nil || rec.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
+	}
+	// Estimate on create: Estimated at version 2.
+	if order.Status != domain.Estimated || rec.Header().Get("ETag") != `"2"` {
+		t.Fatalf("estimate on create: %s %s", order.Status, rec.Header().Get("ETag"))
+	}
+	finish := func(key, ifMatch string) *httptest.ResponseRecorder {
+		return do(r, call{method: http.MethodPost, path: "/v1/production/orders/" + order.ID + "/operations/10:finish", duties: all,
+			headers: map[string]string{"If-Match": ifMatch, idempotencyName: key}})
+	}
+	expectProblem(t, finish("http-op-early", `"2"`), http.StatusConflict, domain.CodeOperationState)
+
+	version := 2
+	for i, cmd := range []string{"schedule", "release", "start"} {
+		c := commandCall(order.ID, cmd, "", all...)
+		c.headers["If-Match"] = fmt.Sprintf(`"%d"`, version)
+		c.headers[idempotencyName] = fmt.Sprintf("http-op-%d", i)
+		if rec := do(r, c); rec.Code != http.StatusOK {
+			t.Fatalf("%s: %d %s", cmd, rec.Code, rec.Body.String())
+		}
+		version++
+	}
+	rec = finish("http-op-finish", fmt.Sprintf(`"%d"`, version))
+	if err := json.Unmarshal(rec.Body.Bytes(), &order); err != nil || rec.Code != http.StatusOK || order.Operations[0].Status != domain.OperFinished ||
+		rec.Header().Get("ETag") != fmt.Sprintf(`"%d"`, version+1) {
+		t.Fatalf("finish: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := finish("http-op-finish", fmt.Sprintf(`"%d"`, version)); rec.Code != http.StatusOK || rec.Header().Get("Idempotent-Replayed") != "true" {
+		t.Fatalf("replay: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = do(r, call{method: http.MethodPost, path: "/v1/production/orders/" + order.ID + "/operations/10:reopen", duties: all,
+		headers: map[string]string{"If-Match": fmt.Sprintf(`"%d"`, version+1), idempotencyName: "http-op-reopen"}})
+	if err := json.Unmarshal(rec.Body.Bytes(), &order); err != nil || rec.Code != http.StatusOK || order.Operations[0].Status != domain.OperOpen {
+		t.Fatalf("reopen: %d %s", rec.Code, rec.Body.String())
 	}
 }

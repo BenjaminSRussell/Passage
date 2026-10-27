@@ -24,12 +24,29 @@ var (
 	// SubcontractPORequested asks purchasing for the vendor PO of one subcontract
 	// operation of a released order (FR-21.10); the PRD's subcontract.po-requested.
 	SubcontractPORequested = events.Type(Context, "subcontract", "porequested", 1)
+	// OperationStatusChanged reports an operation finished or reopened by its
+	// `:finish` or `:reopen` command (FR-21.6), for scheduling and the shop floor.
+	OperationStatusChanged = events.Type(Context, "operation", "statuschanged", 1)
 )
 
 // All lists every event type this service publishes.
 func All() []string {
 	return []string{OrderCreated, OrderUpdated, OrderStatusChanged, OrderSettled, JournalPosted, AsBuiltAssigned, AsBuiltDetached, OrderBOMEdited, TriggerPointFired,
-		SubcontractPORequested}
+		SubcontractPORequested, OperationStatusChanged}
+}
+
+// OperationStatusChangedData is the payload of operation.statuschanged.v1: one
+// operation finished or reopened. From and To are open, started or finished;
+// OrderVersion is the order's version after the change.
+type OperationStatusChangedData struct {
+	OrderID      string `json:"orderId"`
+	OperNumber   int    `json:"operNumber"`
+	Action       string `json:"action"`
+	From         string `json:"from"`
+	To           string `json:"to"`
+	OrderVersion int    `json:"orderVersion"`
+	Actor        string `json:"actor"`
+	OccurredAt   string `json:"occurredAt"`
 }
 
 // SubcontractPORequestedData is the payload of subcontract.porequested.v1: one

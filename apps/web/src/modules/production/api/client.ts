@@ -218,6 +218,10 @@ export interface CreateOrderInput {
   currency: string;
   quantity: string;
   deliveryDate?: string;
+  /** The item's order rules (FR-21.1); absent or 0 means no rule. */
+  minimumQty?: string;
+  maximumQty?: string;
+  multiple?: string;
   bom: BOMComponentInput[];
   operations: OperationInput[];
 }
@@ -924,6 +928,31 @@ export function runCommand(
     headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey, "If-Match": `"${version}"` },
     body: JSON.stringify(body),
   });
+}
+
+/** A command on one operation of an order (FR-21.6). */
+export type OperationCommand = "finish" | "reopen";
+
+/**
+ * Finishes or reopens an operation. version is the order's ETag (If-Match); the
+ * answer is the order with the operation's new status and the next version.
+ */
+export function runOperationCommand(
+  id: string,
+  operNumber: number,
+  command: OperationCommand,
+  version: number,
+  idempotencyKey: string,
+): Promise<ProductionOrder> {
+  return request<ProductionOrder>(`/${encodeURIComponent(id)}/operations/${operNumber}:${command}`, {
+    method: "POST",
+    headers: { "Idempotency-Key": idempotencyKey, "If-Match": `"${version}"` },
+  });
+}
+
+/** Operations are finished and reopened while the order takes feedback (FR-21.6). */
+export function canCommandOperations(status: ProductionStatus): boolean {
+  return status === "Started" || status === "ReportedAsFinished";
 }
 
 /** Applies one command to up to 500 orders; every order gets its own result (FR-21.12). */

@@ -46,6 +46,10 @@ export interface OrderValues {
   currency: string;
   quantity: string;
   deliveryDate: string;
+  /** The item's minimum, maximum and multiple order quantity (FR-21.1); empty for no rule. */
+  minimumQty: string;
+  maximumQty: string;
+  multiple: string;
   lines: LineValues[];
   operations: OperationValues[];
   /** A rework order (FR-21.20): no BOM explosion by default, cost settles as rework. */
@@ -76,6 +80,9 @@ export const initialValues = (): OrderValues => ({
   currency: "USD",
   quantity: "",
   deliveryDate: "",
+  minimumQty: "",
+  maximumQty: "",
+  multiple: "",
   lines: [emptyLine(1)],
   operations: [emptyOperation(1)],
   rework: false,
@@ -102,6 +109,11 @@ export function validateOrder(values: OrderValues): OrderErrors {
   }
   if (values.deliveryDate !== "" && !datePattern.test(values.deliveryDate)) {
     errors.deliveryDate = "Enter a date (YYYY-MM-DD).";
+  }
+  for (const key of ["minimumQty", "maximumQty", "multiple"] as const) {
+    if (!optionalDecimal(values[key])) {
+      errors[key] = "Enter a quantity with up to 6 decimals, or leave it empty.";
+    }
   }
   if (values.itemGroup.length > 40 || values.itemGroup.trim() === "All") {
     errors.itemGroup = "Enter up to 40 characters; All is reserved for posting profiles.";
@@ -162,6 +174,9 @@ export function validateOrder(values: OrderValues): OrderErrors {
 
 const optional = (v: string) => (v === "" ? undefined : v);
 
+/** The service's code for a quantity outside the item's order rules (FR-21.1). */
+export const ORDER_QUANTITY = "PRODUCTION_ORDER_QUANTITY";
+
 /** Maps the form to the CreateOrder body of api/openapi.yaml. */
 export function toInput(values: OrderValues): CreateOrderInput {
   const rework: Partial<CreateOrderInput> = values.rework
@@ -179,6 +194,9 @@ export function toInput(values: OrderValues): CreateOrderInput {
     currency: values.currency,
     quantity: values.quantity,
     deliveryDate: optional(values.deliveryDate),
+    minimumQty: optional(values.minimumQty),
+    maximumQty: optional(values.maximumQty),
+    multiple: optional(values.multiple),
     bom: values.lines.map((line) => ({
       lineNo: line.lineNo.trim(),
       itemId: line.itemId.trim(),
@@ -252,6 +270,9 @@ export function CreateProductionOrderPage({ onCreated, onCancel, initial }: Crea
       setFailure(problem);
       if (problem.errors) {
         setErrors(Object.fromEntries(Object.entries(problem.errors).map(([field, message]) => [formKey(field), message])));
+      } else if (problem.code === ORDER_QUANTITY) {
+        // FR-21.1: the quantity breaks the item's minimum, maximum or multiple.
+        setErrors({ quantity: problem.message });
       }
     } finally {
       setBusy(false);
@@ -338,6 +359,18 @@ export function CreateProductionOrderPage({ onCreated, onCancel, initial }: Crea
             {text("po-siteId", "Site", values.siteId, (v) => set({ siteId: v }))}
             {text("po-warehouseId", "Warehouse", values.warehouseId, (v) => set({ warehouseId: v }))}
             {text("po-itemGroup", "Item group", values.itemGroup, (v) => set({ itemGroup: v }), { optional: true, hint: "Selects the posting profile with the site." })}
+          </div>
+        </Card>
+
+        <Card title="Order quantity rules">
+          <p className={styles.hint}>
+            The released product&apos;s default order settings. The quantity must be at least the minimum, at most the maximum
+            and a whole multiple of the multiple; leave a rule empty when the item has none.
+          </p>
+          <div className={styles.fields}>
+            {text("po-minimumQty", "Minimum order quantity", values.minimumQty, (v) => set({ minimumQty: v }), { optional: true, inputMode: "decimal" })}
+            {text("po-maximumQty", "Maximum order quantity", values.maximumQty, (v) => set({ maximumQty: v }), { optional: true, inputMode: "decimal" })}
+            {text("po-multiple", "Order multiple", values.multiple, (v) => set({ multiple: v }), { optional: true, inputMode: "decimal" })}
           </div>
         </Card>
 

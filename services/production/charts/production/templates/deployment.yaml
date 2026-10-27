@@ -43,6 +43,8 @@ spec:
               value: {{ .Values.config.overConsumptionPct | quote }}
             - name: PRODUCTION_AUTOSTART_ON_FEEDBACK
               value: {{ .Values.config.autoStartOnFeedback | quote }}
+            - name: PRODUCTION_ESTIMATE_ON_CREATE
+              value: {{ .Values.config.estimateOnCreate | quote }}
           ports:
             - { name: http, containerPort: 8080 }
             - { name: admin, containerPort: 9090 }

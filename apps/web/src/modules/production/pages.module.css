@@ -148,3 +148,8 @@
   font-size: var(--text-sm-size);
   line-height: var(--text-sm-leading);
 }
+
+/* A note under a table in an unpadded card. */
+.tableNote {
+  padding: var(--space-3) var(--space-4);
+}

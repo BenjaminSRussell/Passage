@@ -27,14 +27,16 @@ func TestConfig(t *testing.T) {
 
 func TestConfig_JournalParameters(t *testing.T) {
 	cfg, err := config(env(nil))
-	if err != nil || cfg.OverConsumptionPct.String() != "10" || !cfg.AutoStartOnFeedback {
-		t.Fatalf("defaults: over %s autostart %v, %v", cfg.OverConsumptionPct, cfg.AutoStartOnFeedback, err)
+	if err != nil || cfg.OverConsumptionPct.String() != "10" || !cfg.AutoStartOnFeedback || cfg.EstimateOnCreate {
+		t.Fatalf("defaults: over %s autostart %v estimate on create %v, %v", cfg.OverConsumptionPct, cfg.AutoStartOnFeedback, cfg.EstimateOnCreate, err)
 	}
-	cfg, err = config(env(map[string]string{"PRODUCTION_OVERCONSUMPTION_PCT": "250", "PRODUCTION_AUTOSTART_ON_FEEDBACK": "false"}))
-	if err != nil || cfg.OverConsumptionPct.String() != "250" || cfg.AutoStartOnFeedback {
-		t.Fatalf("overrides: over %s autostart %v, %v", cfg.OverConsumptionPct, cfg.AutoStartOnFeedback, err)
+	cfg, err = config(env(map[string]string{"PRODUCTION_OVERCONSUMPTION_PCT": "250", "PRODUCTION_AUTOSTART_ON_FEEDBACK": "false",
+		"PRODUCTION_ESTIMATE_ON_CREATE": "true"}))
+	if err != nil || cfg.OverConsumptionPct.String() != "250" || cfg.AutoStartOnFeedback || !cfg.EstimateOnCreate {
+		t.Fatalf("overrides: over %s autostart %v estimate on create %v, %v", cfg.OverConsumptionPct, cfg.AutoStartOnFeedback, cfg.EstimateOnCreate, err)
 	}
-	for name, bad := range map[string]string{"PRODUCTION_OVERCONSUMPTION_PCT": "1000.5", "PRODUCTION_AUTOSTART_ON_FEEDBACK": "yes"} {
+	for name, bad := range map[string]string{"PRODUCTION_OVERCONSUMPTION_PCT": "1000.5", "PRODUCTION_AUTOSTART_ON_FEEDBACK": "yes",
+		"PRODUCTION_ESTIMATE_ON_CREATE": "1"} {
 		if _, err := config(env(map[string]string{name: bad})); err == nil {
 			t.Errorf("%s=%q accepted", name, bad)
 		}
