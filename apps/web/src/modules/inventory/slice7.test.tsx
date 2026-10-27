@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -82,7 +83,7 @@ describe("Reconciliation runs", () => {
   it("lists runs with both sides and the difference, links to the run and filters by status", async () => {
     handler = () => json(200, { items: [run(), run({ id: "r2", runDate: "2026-10-26", status: "MATCHED", diff: "0", ledgerBalance: "350", negativeRows: 2 })] });
     const { container } = renderAt("/inventory/reconciliations");
-    const table = await screen.findByRole("table", { name: "Reconciliation runs" });
+    const table = await findTable({ name: "Reconciliation runs" });
     expect(table).toHaveTextContent("350 USD");
     expect(table).toHaveTextContent("425.5 USD");
     expect(table).toHaveTextContent("-75.5 USD");
@@ -106,7 +107,7 @@ describe("Reconciliation runs", () => {
   it("reports a load failure with a retry", async () => {
     handler = () => json(500, { code: "COM-0500", detail: "unexpected error" });
     renderAt("/inventory/reconciliations");
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("Could not load reconciliation runs");
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(calls).toHaveLength(2));
@@ -147,7 +148,7 @@ describe("Reconciliation run", () => {
   it("reports a load failure", async () => {
     handler = () => json(500, { code: "COM-0500", detail: "unexpected error" });
     renderAt(`/inventory/reconciliations/${RUN_ID}`);
-    expect(await screen.findByRole("alert")).toHaveTextContent("Could not load the reconciliation run");
+    expect(await findAlert()).toHaveTextContent("Could not load the reconciliation run");
   });
 });
 
@@ -192,7 +193,7 @@ describe("Run reconciliation", () => {
 
     handler = () => json(403, { code: "AUTH-0002", detail: "missing duty inventory.admin" });
     fireEvent.click(screen.getByRole("button", { name: "Run reconciliation" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("Could not run the reconciliation");
     expect(alert).toHaveTextContent("(AUTH-0002)");
   });

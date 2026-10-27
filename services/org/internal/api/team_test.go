@@ -125,6 +125,19 @@ func TestTeamTypesCursorReachesStore(t *testing.T) {
 	}
 }
 
+func TestIdempotencyKeyLengthIsBounded(t *testing.T) {
+	r, _ := newRouter(&fakeStore{})
+	body := `{"code":"STEW","name":"Stewards","memberKinds":["user"]}`
+	atLimit := do(r, http.MethodPost, teamTypesPath, body, teamDuties, true, "Idempotency-Key", strings.Repeat("k", 200))
+	tooLong := do(r, http.MethodPost, teamTypesPath, body, teamDuties, true, "Idempotency-Key", strings.Repeat("k", 201))
+	if atLimit.Code != http.StatusCreated {
+		t.Fatalf("at limit = %d %s", atLimit.Code, atLimit.Body)
+	}
+	if tooLong.Code != http.StatusBadRequest || !strings.Contains(tooLong.Body.String(), "COM-0001") || !strings.Contains(tooLong.Body.String(), "Idempotency-Key") {
+		t.Fatalf("too long = %d %s", tooLong.Code, tooLong.Body)
+	}
+}
+
 func TestTeamTypeReplayIsNotCountedAndKeyReuseIsRefused(t *testing.T) {
 	r, a := newRouter(&fakeStore{})
 	body := `{"code":"STEW","name":"Stewards","memberKinds":["user"]}`

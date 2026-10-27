@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -155,7 +156,7 @@ describe("Quota arrangement list", () => {
     const fetchMock = stubApi([`/quota-arrangements/${arrangement.id}`, () => json(arrangement)], ["/quota-arrangements", () => json({ items: [arrangement] })]);
     renderAt("/planning/quota-arrangements");
     expect(screen.getByRole("heading", { level: 2, name: "Quota arrangements" })).toBeInTheDocument();
-    const table = await screen.findByRole("table", { name: "Quota arrangements" });
+    const table = await findTable({ name: "Quota arrangements" });
     await waitFor(() => expect(within(table).getByText("2026-11-01 to 2026-12-31")).toBeInTheDocument());
     expect(within(table).getByText("Vendor 60 · Vendor 40 · Transfer 0")).toBeInTheDocument();
     expect(within(table).getByText(`Vendor ${VENDOR_B}`)).toBeInTheDocument();
@@ -166,7 +167,7 @@ describe("Quota arrangement list", () => {
     await waitFor(() =>
       expect(fetchMock.mock.calls.some(([url]) => String(url).includes(`itemId=${ITEM}`) && String(url).includes("validOn=2026-11-15"))).toBe(true),
     );
-    fireEvent.click(within(await screen.findByRole("table", { name: "Quota arrangements" })).getAllByRole("button", { name: ITEM })[0]);
+    fireEvent.click(within(await findTable({ name: "Quota arrangements" })).getAllByRole("button", { name: ITEM })[0]);
     expect(screen.getByTestId("location")).toHaveTextContent(`/planning/quota-arrangements/${arrangement.id}`);
   });
 
@@ -252,7 +253,7 @@ describe("Quota arrangement form", () => {
       },
     ]);
     renderAt(`/planning/quota-arrangements/${arrangement.id}`);
-    const sources = await screen.findByRole("table", { name: "Quota sources" });
+    const sources = await findTable({ name: "Quota sources" });
     expect(within(sources).getByText("2.5")).toBeInTheDocument();
     expect(within(sources).getByText("Fallback")).toBeInTheDocument();
     expect(screen.getByText(`Without split, the next requirement goes to vendor ${VENDOR_B} (lowest rating 2.5).`)).toBeInTheDocument();

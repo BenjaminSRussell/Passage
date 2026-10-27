@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
@@ -199,7 +200,7 @@ describe("Trigger points on the order detail", () => {
     ];
     detailFetch(routed(), (url) => (url.endsWith("/trigger-points") ? json({ orderId, items: points }) : undefined));
     const { container, location } = renderAt(`/production/${orderId}`);
-    const table = await screen.findByRole("table", { name: "Trigger points of this order" });
+    const table = await findTable({ name: "Trigger points of this order" });
     await waitFor(() => expect(within(table).getByText("Hours is at least 8")).toBeInTheDocument());
     expect(within(table).getAllByText("Error quantity is more than 0")).toHaveLength(2);
     expect(within(table).getByText("Every time")).toBeInTheDocument();
@@ -258,7 +259,7 @@ describe("Trigger points on the order detail", () => {
       ],
     });
     expect((create?.[1]?.headers as Record<string, string>)["Idempotency-Key"]).toMatch(/.+/);
-    const table = await screen.findByRole("table", { name: "Trigger points of this order" });
+    const table = await findTable({ name: "Trigger points of this order" });
     await waitFor(() => expect(within(table).getByText("Insert operations")).toBeInTheDocument());
     expect(within(form).getByLabelText("Sequence")).toHaveValue("20");
   });

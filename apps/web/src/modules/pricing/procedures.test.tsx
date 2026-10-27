@@ -1,3 +1,4 @@
+import { findAlert, findStatus, findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { Procedure, ProcedureStep } from "./api/client";
@@ -55,7 +56,7 @@ describe("Pricing procedures", () => {
       return undefined;
     };
     const { container } = renderAt("/pricing/procedures");
-    const table = await screen.findByRole("table", { name: "Pricing procedures" });
+    const table = await findTable({ name: "Pricing procedures" });
     await waitFor(() => expect(table).toHaveTextContent("AX_STANDARD"));
     const rows = within(table).getAllByRole("row");
     expect(rows[1]).toHaveTextContent("Draft");
@@ -73,7 +74,7 @@ describe("Pricing procedures", () => {
     first.unmount();
     server.handler = () => json(503, { code: "COM-0500", detail: "internal error" });
     renderAt("/pricing/procedures");
-    expect(await screen.findByRole("alert")).toHaveTextContent("internal error (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("internal error (COM-0500)");
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });
@@ -144,17 +145,17 @@ describe("Procedure detail", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Remove step 50" }));
     fireEvent.click(screen.getByRole("button", { name: "Activate version 2" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("The steps have unsaved changes.");
+    expect(await findAlert()).toHaveTextContent("The steps have unsaved changes.");
 
     fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Draft saved (revision 2).");
+    expect(await findStatus()).toHaveTextContent("Draft saved (revision 2).");
     const revise = server.calls.find((c) => c.url.pathname.endsWith(":revise"))!;
     expect((revise.body as { revision: number; steps: ProcedureStep[] }).revision).toBe(1);
     expect((revise.body as { steps: ProcedureStep[] }).steps).toHaveLength(4);
     expect(idempotencyKey(revise)).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Activate version 2" }));
-    expect(await screen.findByRole("table", { name: "Procedure steps" })).toBeInTheDocument();
+    expect(await findTable({ name: "Procedure steps" })).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("Version 2 of AX_STANDARD is active");
     expect(screen.queryByRole("button", { name: "Activate version 2" })).toBeNull();
     expect(idempotencyKey(server.calls.find((c) => c.url.pathname.endsWith(":activate"))!)).toBeTruthy();
@@ -163,7 +164,7 @@ describe("Procedure detail", () => {
   it("shows an active version read-only with a link to a new version", async () => {
     server.handler = (url) => (url.pathname.endsWith(`/procedures/${P1}`) ? json(200, { ...active, steps: [step(10, "PRICE"), step(20, "LINE_DISC", { exclusionGroup: "EG1", exclusionMode: "FIRST", requirementCel: "line.qty > 1" })] }) : undefined);
     renderAt(`/pricing/procedures/${P1}`);
-    const table = await screen.findByRole("table", { name: "Procedure steps" });
+    const table = await findTable({ name: "Procedure steps" });
     expect(table).toHaveTextContent("EG1 (first)");
     expect(table).toHaveTextContent("line.qty > 1");
     expect(screen.queryByRole("button", { name: "Save draft" })).toBeNull();
@@ -178,7 +179,7 @@ describe("Procedure detail", () => {
     };
     renderAt(`/pricing/procedures/${P2}`);
     fireEvent.click(await screen.findByRole("button", { name: "Activate version 2" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("This version can no longer change");
     expect(alert).toHaveTextContent("(PRC-0008)");
   });
@@ -186,6 +187,6 @@ describe("Procedure detail", () => {
   it("shows the error state when the version is unknown", async () => {
     server.handler = () => json(404, { code: "PRC-0042", detail: "no pricing procedure x" });
     renderAt(`/pricing/procedures/${P2}`);
-    expect(await screen.findByRole("alert")).toHaveTextContent("(PRC-0042)");
+    expect(await findAlert()).toHaveTextContent("(PRC-0042)");
   });
 });

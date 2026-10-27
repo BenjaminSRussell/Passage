@@ -11,7 +11,7 @@ paths:
       operationId: createLegalEntity
       x-passage-duty: org.legal-entity.write
       parameters:
-        - { name: Idempotency-Key, in: header, schema: { type: string } }
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/CreateLegalEntity' } } }
@@ -90,7 +90,7 @@ paths:
       operationId: createOperatingUnit
       x-passage-duty: org.operating-unit.write
       parameters:
-        - { name: Idempotency-Key, in: header, schema: { type: string } }
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/CreateOperatingUnit' } } }
@@ -159,7 +159,7 @@ paths:
       operationId: createTeamType
       x-passage-duty: org.operating-unit.write
       parameters:
-        - { name: Idempotency-Key, in: header, schema: { type: string } }
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/CreateTeamType' } } }
@@ -200,7 +200,7 @@ paths:
       operationId: createTeam
       x-passage-duty: org.operating-unit.write
       parameters:
-        - { name: Idempotency-Key, in: header, schema: { type: string } }
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/CreateTeam' } } }
@@ -254,7 +254,7 @@ paths:
       x-passage-duty: org.operating-unit.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
-        - { name: Idempotency-Key, in: header, schema: { type: string } }
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/AddTeamMember' } } }
@@ -294,7 +294,7 @@ paths:
       operationId: createSite
       x-passage-duty: org.site.write
       parameters:
-        - { name: Idempotency-Key, in: header, schema: { type: string } }
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/CreateSite' } } }
@@ -357,7 +357,7 @@ paths:
       operationId: createWarehouse
       x-passage-duty: org.site.write
       parameters:
-        - { name: Idempotency-Key, in: header, schema: { type: string } }
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/CreateWarehouse' } } }
@@ -410,7 +410,7 @@ paths:
       operationId: createFiscalCalendar
       x-passage-duty: org.fiscal-calendar.write
       parameters:
-        - { name: Idempotency-Key, in: header, schema: { type: string } }
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/CreateFiscalCalendar' } } }
@@ -503,7 +503,7 @@ paths:
       operationId: createHierarchyType
       x-passage-duty: org.hierarchy.write
       parameters:
-        - { name: Idempotency-Key, in: header, schema: { type: string } }
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/CreateHierarchyType' } } }
@@ -542,7 +542,7 @@ paths:
       x-passage-duty: org.hierarchy.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
-        - { name: Idempotency-Key, in: header, schema: { type: string } }
+        - $ref: '#/components/parameters/IdempotencyKey'
       responses:
         '201':
           description: A draft version numbered one above the type's highest version, with the node set copied from the published version with the latest effective_from, or empty when none is published. The request has no body. Replaying the key for the same type returns the same draft. 404 ORG-HIER-TYPE-NOT-FOUND for a malformed, unknown or other tenant's id. 409 ORG-HIER-DRAFT-EXISTS when the type already has an open draft. 422 idempotency_key_reuse when the key belongs to another type. 403 AUTH-0003 without the duty or for a legal-entity-scoped caller.
@@ -589,7 +589,7 @@ paths:
       x-passage-duty: org.hierarchy.publish
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
-        - { name: Idempotency-Key, in: header, schema: { type: string } }
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/PublishHierarchyVersion' } } }
@@ -629,7 +629,7 @@ paths:
       operationId: createLocation
       x-passage-duty: org.site.write
       parameters:
-        - { name: Idempotency-Key, in: header, schema: { type: string } }
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/CreateLocation' } } }
@@ -682,7 +682,7 @@ paths:
       operationId: createAddress
       x-passage-duty: org.address.write
       parameters:
-        - { name: Idempotency-Key, in: header, schema: { type: string } }
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/CreateAddress' } } }
@@ -1247,7 +1247,7 @@ paths:
       operationId: createUnit
       x-passage-duty: org.reference.write
       parameters:
-        - { name: Idempotency-Key, in: header, schema: { type: string } }
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/CreateUnit' } } }
@@ -1304,7 +1304,7 @@ paths:
       operationId: createUomConversion
       x-passage-duty: org.reference.write
       parameters:
-        - { name: Idempotency-Key, in: header, schema: { type: string } }
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/CreateUomConversion' } } }
@@ -1333,6 +1333,10 @@ paths:
         '503': { description: Database unreachable. }
 components:
   parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      schema: { type: string, maxLength: 200 }
     Language:
       name: language
       in: path

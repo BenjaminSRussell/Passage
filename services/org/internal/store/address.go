@@ -284,6 +284,9 @@ func (s *Postgres) CreateAddress(ctx context.Context, in Address, idempotencyKey
 	var address Address
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		if key != nil {
+			if err := lockIdempotencyKey(ctx, tx, "postal_address", p.TenantID, *key); err != nil {
+				return err
+			}
 			replay, err := loadAddress(ctx, tx, `idempotency_key = $2 and valid_to is null`, p.TenantID, *key)
 			if err == nil {
 				address = replay

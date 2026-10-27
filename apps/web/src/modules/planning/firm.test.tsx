@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -89,7 +90,7 @@ function renderAt(path: string) {
 }
 
 async function ordersTable() {
-  const table = await screen.findByRole("table", { name: "Planned orders" });
+  const table = await findTable({ name: "Planned orders" });
   await waitFor(() => expect(within(table).getByText("PLN-000002")).toBeInTheDocument());
   return table;
 }
@@ -213,7 +214,7 @@ describe("Cancel and decrease messages (FR-22.7)", () => {
     const decrease: Message = { ...cancel, action: "decrease", supplyRef: "PO-1", demandRef: "SO-1", qty: "200" };
     const fetchMock = stubApi(["/messages", (url) => json({ items: url.includes("action=cancel") ? [cancel] : [cancel, decrease] })]);
     renderAt("/planning/messages");
-    const table = await screen.findByRole("table", { name: "Messages" });
+    const table = await findTable({ name: "Messages" });
     await waitFor(() => expect(within(table).getByText("Decrease")).toBeInTheDocument());
     expect(within(table).getByText("Cancel")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Action"), { target: { value: "cancel" } });

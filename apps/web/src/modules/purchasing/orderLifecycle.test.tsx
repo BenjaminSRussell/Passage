@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { describeChange, editOutcome, purchaseOrderActions } from "./PurchaseOrderPages";
@@ -148,7 +149,7 @@ describe("purchase order versions", () => {
   it("lists versions with each change in business terms and marks the pending one", async () => {
     serve({ ...confirmed, approvalStatus: "IN_REVIEW" }, [v1, v2]);
     const { container } = renderAt(`/purchasing/purchase-orders/${PO_ID}`);
-    const table = await screen.findByRole("table", { name: "Versions" });
+    const table = await findTable({ name: "Versions" });
     await within(table).findByText("Line 1 quantity → 110");
     expect(table).toHaveTextContent("First confirmed version");
     expect(table).toHaveTextContent("Line 2 status → CANCELLED");

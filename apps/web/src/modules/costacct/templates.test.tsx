@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -151,14 +152,14 @@ describe("MeasuresPage", () => {
         mode === "fail" ? json(503, { title: "down", code: "COM-0500", detail: "internal error" }) : json(200, { items: mode === "ok" ? [measure] : [] }),
     });
     const { container } = at("/costacct/measures");
-    expect(await screen.findByRole("alert")).toHaveTextContent("COM-0500");
+    expect(await findAlert()).toHaveTextContent("COM-0500");
     mode = "empty";
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No statistical measures yet")).toBeInTheDocument();
     mode = "ok";
     fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
     await waitFor(() => expect(calls(fetchMock, "GET", `statistical-measures?legalEntityId=${LE}`)).toHaveLength(1));
-    const table = await screen.findByRole("table", { name: "Statistical measures" });
+    const table = await findTable({ name: "Statistical measures" });
     expect(await within(table).findByText("m.inspectionLots")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
   });
@@ -187,7 +188,7 @@ describe("MeasuresPage", () => {
     });
     const { container } = at(`/costacct/measures/${M1}`);
     fireEvent.change(await screen.findByLabelText("Period"), { target: { value: "2026-09" } });
-    const values = await screen.findByRole("table", { name: "Measure values" });
+    const values = await findTable({ name: "Measure values" });
     expect(await within(values).findByText("ORDER-1")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
 
@@ -204,7 +205,7 @@ describe("TemplatesPage", () => {
   it("lists templates and opens one", async () => {
     ledger();
     const { container } = at("/costacct/templates");
-    const table = await screen.findByRole("table", { name: "Allocation templates" });
+    const table = await findTable({ name: "Allocation templates" });
     expect(await within(table).findByText("Inspection")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(within(table).getByRole("button", { name: "TPL-INSP" }));
@@ -215,7 +216,7 @@ describe("TemplatesPage", () => {
     let fail = true;
     stubRoutes({ "GET /api/v1/controlling/allocation-templates": () => (fail ? json(503, { title: "down", code: "COM-0500" }) : json(200, { items: [] })) });
     at("/costacct/templates");
-    expect(await screen.findByRole("alert")).toHaveTextContent("COM-0500");
+    expect(await findAlert()).toHaveTextContent("COM-0500");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No allocation templates yet")).toBeInTheDocument();
@@ -281,7 +282,7 @@ describe("TemplateDetailPage", () => {
     expect(await within(screen.getByRole("table", { name: "Template runs" })).findByText("2026-09")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Period"), { target: { value: "2026-09" } });
     fireEvent.click(screen.getByRole("button", { name: "Dry run" }));
-    const dry = await screen.findByRole("table", { name: "Dry run" });
+    const dry = await findTable({ name: "Dry run" });
     expect(within(dry).getByText("200.00")).toBeInTheDocument();
     expect(screen.getByRole("list", { name: "Dry run totals" })).toHaveTextContent("Sender credited 200.00");
     expect(pageViolations(container)).toEqual([]);
@@ -323,7 +324,7 @@ describe("TemplateRunDetailPage", () => {
   it("shows a load error", async () => {
     stubRoutes({ [`GET /api/v1/controlling/template-allocations/runs/${RUN}`]: () => json(404, { title: "not found", code: "CST-0019", detail: "template allocation run not found" }) });
     at(`/costacct/template-runs/${RUN}`);
-    expect(await screen.findByRole("alert")).toHaveTextContent("CST-0019");
+    expect(await findAlert()).toHaveTextContent("CST-0019");
   });
 });
 

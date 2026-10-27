@@ -27,6 +27,10 @@ var (
 	maxRate      = decimal.NewFromInt(domain.MaxRate)
 )
 
+type StatusError struct{ Code int }
+
+func (e *StatusError) Error() string { return fmt.Sprintf("unexpected status %d", e.Code) }
+
 type RatePoint struct {
 	From              string
 	To                string
@@ -104,7 +108,7 @@ func fetchBody(ctx context.Context, client *http.Client, name, target string) ([
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%s: unexpected status %d", name, resp.StatusCode)
+		return nil, fmt.Errorf("%s: %w", name, &StatusError{Code: resp.StatusCode})
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
 	if err != nil {

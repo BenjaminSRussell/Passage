@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -150,7 +151,7 @@ describe("ProgramsPage", () => {
   it("lists programs and opens one", async () => {
     stubRoutes({ "GET /api/v1/budget/investment-programs": () => json(200, { items: [program] }), [`GET /api/v1/budget/investment-programs/${P1}`]: () => json(200, view) });
     const { container } = at("/budgeting/programs");
-    const table = await screen.findByRole("table", { name: "Investment programs" });
+    const table = await findTable({ name: "Investment programs" });
     expect(await within(table).findByText("Plant capex")).toBeInTheDocument();
     expect(within(table).getByText("4800000.00")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
@@ -164,7 +165,7 @@ describe("ProgramsPage", () => {
       "GET /api/v1/budget/investment-programs": () => (fail ? json(503, { title: "down", code: "COM-0500", detail: "internal error" }) : json(200, { items: [] })),
     });
     at("/budgeting/programs");
-    expect(await screen.findByRole("alert")).toHaveTextContent("COM-0500");
+    expect(await findAlert()).toHaveTextContent("COM-0500");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No investment programs yet")).toBeInTheDocument();
@@ -215,7 +216,7 @@ describe("ProgramDetailPage", () => {
   it("shows a load error with a retry", async () => {
     stubRoutes({ [`GET /api/v1/budget/investment-programs/${P1}`]: () => json(404, { title: "not found", code: "BUD-0030", detail: "investment program not found" }) });
     at(`/budgeting/programs/${P1}`);
-    expect(await screen.findByRole("alert")).toHaveTextContent("BUD-0030");
+    expect(await findAlert()).toHaveTextContent("BUD-0030");
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 

@@ -1,3 +1,4 @@
+import { findAlert, findStatus, findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { BalanceSnapshot, Payment, Statement } from "./api/client";
@@ -65,7 +66,7 @@ describe("Customer statement", () => {
   it("loads from the address, lists the lines with the running balance, the closing balance and the aging footer", async () => {
     server.handler = (url) => (url.pathname.endsWith("/statements") ? json(200, statement) : undefined);
     const { container } = renderAt(`/receivables/statements?legalEntityId=${LE}&customer=${CUST}&asOf=2027-03-31`);
-    const lines = await screen.findByRole("table", { name: "USD statement lines" });
+    const lines = await findTable({ name: "USD statement lines" });
     const call = server.calls[0];
     expect(call.url.searchParams.get("legalEntityId")).toBe(LE);
     expect(call.url.searchParams.get("customer")).toBe(CUST);
@@ -87,7 +88,7 @@ describe("Customer statement", () => {
   it("reloads for another statement date", async () => {
     server.handler = (url) => (url.pathname.endsWith("/statements") ? json(200, { ...statement, asOf: url.searchParams.get("asOf") }) : undefined);
     renderAt(`/receivables/statements?legalEntityId=${LE}&customer=${CUST}&asOf=2027-03-31`);
-    await screen.findByRole("table", { name: "USD statement lines" });
+    await findTable({ name: "USD statement lines" });
     fill("Statement date", "2027-01-31");
     await waitFor(() => expect(server.calls.at(-1)?.url.searchParams.get("asOf")).toBe("2027-01-31"));
   });
@@ -99,7 +100,7 @@ describe("Customer statement", () => {
     first.unmount();
     server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty ARView" });
     renderAt(`/receivables/statements?legalEntityId=${LE}&customer=${CUST}`);
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("Could not load the statement");
     expect(alert).toHaveTextContent("AUTH-0003");
   });
@@ -126,7 +127,7 @@ describe("Balance snapshots", () => {
     const { container } = renderAt("/receivables/balance-snapshots");
     expect(await screen.findByText("Choose a legal entity")).toBeInTheDocument();
     fill("Legal entity id", LE);
-    const table = await screen.findByRole("table", { name: "Balance snapshots for 2027-03-31" });
+    const table = await findTable({ name: "Balance snapshots for 2027-03-31" });
     expect(server.calls[0].url.searchParams.get("legalEntityId")).toBe(LE);
     expect(server.calls[0].url.searchParams.has("asOf")).toBe(false);
     const rows = within(table).getAllByRole("row").slice(1);
@@ -153,7 +154,7 @@ describe("Balance snapshots", () => {
     expect(await screen.findByText("No snapshot")).toBeInTheDocument();
     const lists = server.calls.filter((c) => c.method === "GET").length;
     fireEvent.click(screen.getByRole("button", { name: "Run snapshot now" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("2 balance(s) stored for 2027-03-30; 1 change(s) announced.");
+    expect(await findStatus()).toHaveTextContent("2 balance(s) stored for 2027-03-30; 1 change(s) announced.");
     const post = server.calls.find((c) => c.method === "POST")!;
     expect(post.body).toEqual({ legalEntityId: LE, asOf: "2027-03-30" });
     await waitFor(() => expect(server.calls.filter((c) => c.method === "GET").length).toBeGreaterThan(lists));
@@ -169,14 +170,14 @@ describe("Balance snapshots", () => {
     fill("Legal entity id", LE);
     await screen.findByText("No snapshot");
     fireEvent.click(screen.getByRole("button", { name: "Run snapshot now" }));
-    const refused = await screen.findByRole("alert");
+    const refused = await findAlert();
     expect(refused).toHaveTextContent("You may not run the snapshot");
     expect(refused).toHaveTextContent("ARAgingRun");
     first.unmount();
     server.handler = () => json(500, { code: "COM-0500", detail: "database unavailable" });
     renderAt("/receivables/balance-snapshots");
     fill("Legal entity id", LE);
-    const failed = await screen.findByRole("alert");
+    const failed = await findAlert();
     expect(failed).toHaveTextContent("Could not load the balance snapshots");
     expect(failed).toHaveTextContent("COM-0500");
   });

@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -138,7 +139,7 @@ describe("Scheduling workspace", () => {
     handler = workspace();
     const { container } = renderAt("/scheduling");
     expect(screen.getByRole("heading", { name: "Scheduling workspace" })).toBeInTheDocument();
-    const table = await screen.findByRole("table", { name: "Jobs in window" });
+    const table = await findTable({ name: "Jobs in window" });
     await waitFor(() => expect(table).toHaveTextContent("45 min"));
     expect(table).toHaveTextContent("Firmed");
     expect(within(table).getAllByRole("row")[2]).toHaveTextContent("30 min");
@@ -181,13 +182,13 @@ describe("Scheduling workspace", () => {
       return json(200, { ...preview, dryRun: body.dryRun });
     });
     renderAt("/scheduling");
-    const table = await screen.findByRole("table", { name: "Jobs in window" });
+    const table = await findTable({ name: "Jobs in window" });
     await waitFor(() => expect(within(table).getAllByRole("button", { name: /^Move order/ })).toHaveLength(2));
     fireEvent.click(within(table).getByRole("button", { name: "Move order b1000000 operation 10" }));
     fireEvent.change(screen.getByLabelText("New start (UTC)"), { target: { value: at(12).slice(0, 16) } });
     fireEvent.click(screen.getByRole("button", { name: "Preview move" }));
 
-    const affected = await screen.findByRole("table", { name: "Affected operations" });
+    const affected = await findTable({ name: "Affected operations" });
     expect(within(affected).getAllByRole("row")).toHaveLength(3);
     const dry = calls.find((c) => c.url.pathname.endsWith(`/jobs/${JOB1}:move`));
     expect(dry?.body).toEqual({ start: at(12), resourceId: MIX, dryRun: true });
@@ -208,7 +209,7 @@ describe("Scheduling workspace", () => {
         : undefined,
     );
     const { container } = renderAt("/scheduling");
-    const table = await screen.findByRole("table", { name: "Jobs in window" });
+    const table = await findTable({ name: "Jobs in window" });
     await waitFor(() => within(table).getByRole("button", { name: "Move order b1000000 operation 10" }));
     fireEvent.click(within(table).getByRole("button", { name: "Move order b1000000 operation 10" }));
     fireEvent.click(screen.getByRole("button", { name: "Preview move" }));
@@ -225,7 +226,7 @@ describe("Scheduling workspace", () => {
       return undefined;
     });
     renderAt("/scheduling");
-    const table = await screen.findByRole("table", { name: "Jobs in window" });
+    const table = await findTable({ name: "Jobs in window" });
     await waitFor(() => within(table).getByRole("button", { name: "Firm order b1000000 operation 10" }));
     fireEvent.click(within(table).getByRole("button", { name: "Firm order b1000000 operation 10" }));
     expect(await screen.findByText(/Operation 10 is firmed/)).toBeInTheDocument();
@@ -248,11 +249,11 @@ describe("Scheduling workspace", () => {
   it("shows a load failure and retries", async () => {
     handler = () => json(500, { code: "COM-0500", detail: "internal error" });
     renderAt("/scheduling");
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("internal error (COM-0500)");
     handler = workspace();
     fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
-    expect(await screen.findByRole("table", { name: "Jobs in window" })).toBeInTheDocument();
+    expect(await findTable({ name: "Jobs in window" })).toBeInTheDocument();
   });
 });
 
@@ -268,7 +269,7 @@ describe("Capacity load", () => {
           })
         : json(200, { items: resources });
     const { container } = renderAt("/scheduling/load");
-    const table = await screen.findByRole("table", { name: "Capacity load" });
+    const table = await findTable({ name: "Capacity load" });
     await waitFor(() => expect(table).toHaveTextContent("MIX-1"));
     expect(table).toHaveTextContent("Bottleneck");
     expect(table).toHaveTextContent("40.0");
@@ -287,7 +288,7 @@ describe("Capacity load", () => {
     first.unmount();
     handler = () => json(403, { code: "AUTH-0003", detail: "missing duty scheduling.read" });
     renderAt("/scheduling/load");
-    expect(await screen.findByRole("alert")).toHaveTextContent("missing duty scheduling.read (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty scheduling.read (AUTH-0003)");
   });
 });
 
@@ -295,7 +296,7 @@ describe("Schedule runs", () => {
   it("lists runs and opens one", async () => {
     handler = (url) => (url.pathname.endsWith(`/runs/${RUN}`) ? json(200, { ...run, messages: [`${JOB1}: no candidate resource has open capacity in the horizon`] }) : json(200, { items: [run] }));
     const { container } = renderAt("/scheduling/runs");
-    const table = await screen.findByRole("table", { name: "Schedule runs" });
+    const table = await findTable({ name: "Schedule runs" });
     await waitFor(() => expect(table).toHaveTextContent("2 h 30 min"));
     expect(table).toHaveTextContent("Whole site");
     expect(pageViolations(container)).toEqual([]);
@@ -331,7 +332,7 @@ describe("Schedule runs", () => {
   it("shows a missing run as an error", async () => {
     handler = () => json(404, { code: "SCHED-0104", detail: "schedule run not found" });
     renderAt(`/scheduling/runs/${RUN}`);
-    expect(await screen.findByRole("alert")).toHaveTextContent("schedule run not found (SCHED-0104)");
+    expect(await findAlert()).toHaveTextContent("schedule run not found (SCHED-0104)");
   });
 
   it("validates a selection run before calling the service", () => {
@@ -374,7 +375,7 @@ describe("Resources", () => {
       return json(200, { items: resources });
     };
     const { container } = renderAt("/scheduling/resources");
-    const table = await screen.findByRole("table", { name: "Resources" });
+    const table = await findTable({ name: "Resources" });
     await waitFor(() => expect(table).toHaveTextContent("Mon 08:00–16:00"));
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(within(table).getByRole("button", { name: "MIX-1" }));
@@ -407,7 +408,7 @@ describe("Resources", () => {
       return undefined;
     };
     const { container } = renderAt(`/scheduling/resources/${MIX}`);
-    const table = await screen.findByRole("table", { name: "Block windows" });
+    const table = await findTable({ name: "Block windows" });
     await waitFor(() => expect(table).toHaveTextContent("MON-WHITE"));
     const row = within(table).getByText("MON-WHITE").closest("tr")!;
     expect(row).toHaveTextContent("color = white");
@@ -431,7 +432,7 @@ describe("Resources", () => {
       return undefined;
     };
     renderAt(`/scheduling/resources/${MIX}`);
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("Could not load the block windows");
     expect(screen.getByRole("table", { name: "Open intervals" })).toHaveTextContent("480");
     fail = false;
@@ -485,7 +486,7 @@ describe("Operations", () => {
       return json(200, { items: resources });
     };
     const { container } = renderAt("/scheduling/operations");
-    const table = await screen.findByRole("table", { name: "Operations" });
+    const table = await findTable({ name: "Operations" });
     await waitFor(() => expect(table).toHaveTextContent("FILL-1, MIX-1"));
     expect(table).toHaveTextContent("Unplaced");
     const row = within(table).getAllByRole("row")[2];
@@ -537,7 +538,7 @@ describe("Operations", () => {
     fireEvent.click(screen.getByLabelText("MIX-1"));
     expect(screen.getByText("#2")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Add operation" }));
-    expect(await screen.findByRole("table", { name: "Operations" })).toBeInTheDocument();
+    expect(await findTable({ name: "Operations" })).toBeInTheDocument();
     const post = calls.find((c) => c.method === "POST")!;
     expect(post.body).toEqual({ orderId: ORDER, operNumber: 10, minutes: 90, dueAt: "2026-11-02T17:00:00Z", resourceIds: [FILL, MIX] });
   });
@@ -560,7 +561,7 @@ describe("Operations", () => {
     fireEvent.change(screen.getByLabelText(/^Resource network/), { target: { value: NETWORK } });
     fireEvent.change(screen.getByLabelText(/^Attributes/), { target: { value: "color = white\ngrade = 2" } });
     fireEvent.click(screen.getByRole("button", { name: "Add operation" }));
-    expect(await screen.findByRole("table", { name: "Operations" })).toBeInTheDocument();
+    expect(await findTable({ name: "Operations" })).toBeInTheDocument();
     expect(calls.find((c) => c.method === "POST")!.body).toEqual({
       orderId: ORDER,
       operNumber: 20,

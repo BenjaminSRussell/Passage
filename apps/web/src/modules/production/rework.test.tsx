@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
@@ -156,7 +157,7 @@ describe("Production orders list: rework", () => {
       url.includes("originType=Rework") ? json({ items: [] }) : json({ items: [summary(), summary({ id: reworkId, orderNumber: "PO-000002", originType: "Rework" })] }),
     );
     renderAt("/production");
-    const table = await screen.findByRole("table", { name: "Production orders" });
+    const table = await findTable({ name: "Production orders" });
     await waitFor(() => expect(within(table).getByText("PO-000002")).toBeInTheDocument());
     expect(within(table).getByText("Rework")).toBeInTheDocument();
     await userEvent.selectOptions(screen.getByLabelText("Origin"), "Rework");
@@ -256,7 +257,7 @@ describe("Production order detail: rework and as-built", () => {
       url.includes("reworkOf=") ? json({ items: [summary({ id: reworkId, orderNumber: "PO-000002", originType: "Rework", status: "Released", quantity: "5" })] }) : undefined,
     );
     const { location, container } = renderAt(`/production/${orderId}`);
-    const reworks = await screen.findByRole("table", { name: "Rework orders of this order" });
+    const reworks = await findTable({ name: "Rework orders of this order" });
     await waitFor(() => expect(within(reworks).getByText("PO-000002")).toBeInTheDocument());
     expect(screen.queryByRole("button", { name: "Create rework order" })).not.toBeInTheDocument();
     expect(checkAxeAA(container)).toEqual([]);
@@ -289,7 +290,7 @@ describe("Production order detail: rework and as-built", () => {
       return url.endsWith("/as-built") ? json({ orderId, items: rows }) : undefined;
     });
     const { container } = renderAt(`/production/${orderId}`);
-    const table = await screen.findByRole("table", { name: "As-built records" });
+    const table = await findTable({ name: "As-built records" });
     await waitFor(() => expect(within(table).getByText("M-1")).toBeInTheDocument());
     expect(checkAxeAA(container)).toEqual([]);
 
@@ -339,7 +340,7 @@ describe("Production order detail: rework and as-built", () => {
   it("keeps as-built read-only outside Started and Reported as finished", async () => {
     detailFetch(order({ status: "Ended" }), (url) => (url.endsWith("/as-built") ? json({ orderId, items: [record()] }) : undefined));
     renderAt(`/production/${orderId}`);
-    const table = await screen.findByRole("table", { name: "As-built records" });
+    const table = await findTable({ name: "As-built records" });
     await waitFor(() => expect(within(table).getByText("M-1")).toBeInTheDocument());
     expect(screen.queryByRole("form", { name: "Assign as-built" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Detach M-1" })).not.toBeInTheDocument();
@@ -364,7 +365,7 @@ describe("As-built and where-used inquiry", () => {
     const { container, location } = renderAt("/production/as-built");
     await userEvent.type(screen.getByLabelText("Serial or batch number"), "S-2");
     await userEvent.click(screen.getByRole("button", { name: "Trace" }));
-    const asBuilt = await screen.findByRole("table", { name: "As-built of S-2" });
+    const asBuilt = await findTable({ name: "As-built of S-2" });
     await waitFor(() => expect(within(asBuilt).getByText("M-2")).toBeInTheDocument());
     expect(calls(fetchMock)[0][0]).toBe("/api/v1/production/as-built?finishedSerialOrBatch=S-2");
     expect(checkAxeAA(container)).toEqual([]);
@@ -373,7 +374,7 @@ describe("As-built and where-used inquiry", () => {
     await userEvent.clear(screen.getByLabelText("Serial or batch number"));
     await userEvent.type(screen.getByLabelText("Serial or batch number"), "M-1");
     await userEvent.click(screen.getByRole("button", { name: "Trace" }));
-    const whereUsed = await screen.findByRole("table", { name: "Where-used of M-1" });
+    const whereUsed = await findTable({ name: "Where-used of M-1" });
     await waitFor(() => expect(within(whereUsed).getByText("S-1")).toBeInTheDocument());
     expect(calls(fetchMock)[1][0]).toBe("/api/v1/production/as-built?componentSerialOrBatch=M-1");
 
@@ -396,7 +397,7 @@ describe("As-built and where-used inquiry", () => {
 
     fail = true;
     await userEvent.click(screen.getByRole("button", { name: "Trace" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("Could not trace the serial");
     expect(alert).toHaveTextContent("AUTH-0003");
   });

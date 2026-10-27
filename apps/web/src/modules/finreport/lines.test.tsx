@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { CellSummary, Definition, DrillLine, LinePage, RunSummary } from "./api/client";
@@ -134,7 +135,7 @@ function drillServer(lines: (url: URL) => Reply | undefined) {
 async function openRevenueBalances() {
   const view = renderAt(`/finreport/runs/${RUN}`);
   fireEvent.click(await screen.findByRole("button", { name: /^Revenue, March/ }));
-  await screen.findByRole("table", { name: "Balances" });
+  await findTable({ name: "Balances" });
   await screen.findByText("4100");
   return view;
 }

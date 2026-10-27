@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -104,7 +105,7 @@ describe("loads list", () => {
   it("lists loads with their fill against capacity and filters by status", async () => {
     handler = (url) => (url.pathname === "/api/v1/transport/loads" ? json(200, { items: [load(), load({ id: LOAD2, status: "TENDERED", shipmentIds: [SHIP1], totalWeightKg: "1600", pallets: 1 })] }) : undefined);
     const { container } = renderAt("/transport/loads");
-    const table = await screen.findByRole("table", { name: "Loads" });
+    const table = await findTable({ name: "Loads" });
     expect(within(table).getByText("19200 / 20000 kg")).toBeInTheDocument();
     expect(within(table).getByText("12 / 26")).toBeInTheDocument();
     expect(within(table).getByText("Tendered")).toBeInTheDocument();
@@ -125,7 +126,7 @@ describe("loads list", () => {
     expect(await screen.findByText(/transport is down/)).toBeInTheDocument();
     handler = () => json(200, { items: [load()] });
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-    expect(await screen.findByRole("table", { name: "Loads" })).toBeInTheDocument();
+    expect(await findTable({ name: "Loads" })).toBeInTheDocument();
   });
 });
 
@@ -322,7 +323,7 @@ describe("freight bill decisions", () => {
 
     fill("Reason", "fuel charged twice");
     fireEvent.click(screen.getByRole("button", { name: "Dispute with carrier" }));
-    const table = await screen.findByRole("table", { name: "Approvals and disputes" });
+    const table = await findTable({ name: "Approvals and disputes" });
     expect(within(table).getByText("fuel charged twice")).toBeInTheDocument();
     const [call] = posts(":dispute");
     expect(header(call, "If-Match")).toBe('"2"');

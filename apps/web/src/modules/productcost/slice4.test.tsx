@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -152,14 +153,14 @@ describe("ad-hoc estimate page", () => {
     });
     renderAt("/productcost/estimates");
     fireEvent.click(screen.getByRole("button", { name: "Compute the estimate" }));
-    expect(await screen.findByRole("table", { name: "Diagnostics of Q-1001" })).toHaveTextContent("CST-0703");
+    expect(await findTable({ name: "Diagnostics of Q-1001" })).toHaveTextContent("CST-0703");
   });
 
   it("shows the service's refusal and keeps the form", async () => {
     handler = () => ({ status: 422, body: { code: "CST-0764", detail: "characteristic hours has no value and no default" } });
     renderAt("/productcost/estimates");
     fireEvent.click(screen.getByRole("button", { name: "Compute the estimate" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("The estimate was not computed");
     expect(alert).toHaveTextContent("CST-0764");
     expect(screen.getByRole("heading", { name: "No estimate yet" })).toBeInTheDocument();
@@ -244,14 +245,14 @@ describe("sales order estimate versions page", () => {
     expect(pageViolations(container)).toEqual([]);
 
     fireEvent.click(screen.getByRole("button", { name: "Refresh the estimate" }));
-    const table = await screen.findByRole("table", { name: "Estimate versions" });
+    const table = await findTable({ name: "Estimate versions" });
     expect(within(table).getByRole("row", { name: /cfg-1/ })).toHaveTextContent("1860.00");
     expect(screen.getByRole("list", { name: "Current estimate" })).toHaveTextContent("Margin 540.00");
     expect(calls[0].body).toMatchObject({ lineId: "SO-1001/10", configHash: "cfg-1", versions: [] });
 
     fireEvent.change(screen.getByLabelText("Configuration"), { target: { value: "cfg-2" } });
     fireEvent.click(screen.getByRole("button", { name: "Refresh the estimate" }));
-    expect(await screen.findByRole("table", { name: "Refresh diagnostics" })).toHaveTextContent("CST-0751");
+    expect(await findTable({ name: "Refresh diagnostics" })).toHaveTextContent("CST-0751");
     expect((calls[1].body as { versions: EstimateVersion[] }).versions).toEqual([v1]);
     expect(within(screen.getByRole("table", { name: "Estimate versions" })).getByRole("row", { name: /cfg-1/ })).toHaveTextContent(
       "Superseded",
@@ -274,10 +275,10 @@ describe("sales order estimate versions page", () => {
         : { status: 422, body: { code: "CST-0763", detail: "estimate of line SO-1001/10 did not roll and cannot be frozen" } };
     renderAt("/productcost/sales-order-versions");
     fireEvent.click(screen.getByRole("button", { name: "Refresh the estimate" }));
-    const table = await screen.findByRole("table", { name: "Estimate versions" });
+    const table = await findTable({ name: "Estimate versions" });
     expect(table).toHaveTextContent("Not costed");
     fireEvent.click(screen.getByRole("button", { name: "Confirm the line" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("The line's estimate was not frozen");
     expect(alert).toHaveTextContent("CST-0763");
   });
@@ -286,7 +287,7 @@ describe("sales order estimate versions page", () => {
     handler = () => ({ status: 200, body: { current: v1, versions: [v1], changed: true, diagnostics: [] } });
     renderAt("/productcost/sales-order-versions");
     fireEvent.click(screen.getByRole("button", { name: "Refresh the estimate" }));
-    await screen.findByRole("table", { name: "Estimate versions" });
+    await findTable({ name: "Estimate versions" });
     fireEvent.change(screen.getByLabelText("Sales order line"), { target: { value: "SO-2/10" } });
     expect(screen.getByRole("heading", { name: "No estimate versions yet" })).toBeInTheDocument();
   });

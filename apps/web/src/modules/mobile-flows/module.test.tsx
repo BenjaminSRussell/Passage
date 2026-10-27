@@ -1,3 +1,4 @@
+import { findAlert } from "../../test-utils";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { createElement } from "react";
 import { MemoryRouter } from "react-router-dom";
@@ -61,7 +62,7 @@ describe("mobile-flows module", () => {
     try {
       render(createElement(MemoryRouter, null, mobileFlows.routes[0].element));
       fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
-      expect(await screen.findByRole("alert")).toHaveTextContent("The mobile flow service is not available yet");
+      expect(await findAlert()).toHaveTextContent("The mobile flow service is not available yet");
     } finally {
       vi.unstubAllGlobals();
     }

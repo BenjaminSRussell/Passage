@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { repriceSummary, signedMoney, toRunInput } from "./RepricePages";
@@ -106,7 +107,7 @@ describe("price change for one order", () => {
     const fetchMock = serve(order);
     const { container } = renderAt(PAGE);
     expect(await screen.findByRole("heading", { name: "Price change for PO-00000042" })).toBeInTheDocument();
-    const moving = await screen.findByRole("table", { name: "Lines that move" });
+    const moving = await findTable({ name: "Lines that move" });
     expect(within(moving).getByText("−50.00 USD")).toBeInTheDocument();
     expect(within(moving).getByText("950.00 USD")).toBeInTheDocument();
     const invoiced = screen.getByRole("table", { name: "Invoiced lines sent to payables" });
@@ -200,7 +201,7 @@ describe("price change run", () => {
     expect(screen.getByText("Nothing previewed yet")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText(/Trade agreement row/), { target: { value: T1 } });
     fireEvent.click(screen.getByRole("button", { name: "Preview price changes" }));
-    const table = await screen.findByRole("table", { name: "Orders with price changes" });
+    const table = await findTable({ name: "Orders with price changes" });
     expect(within(table).getByRole("link", { name: "PO-00000042" })).toHaveAttribute("href", PAGE);
     expect(screen.getByText("3 confirmed orders checked on this page.")).toBeInTheDocument();
     expect(bodies[0]).toEqual({ apply: false, tradeAgreementId: T1 });

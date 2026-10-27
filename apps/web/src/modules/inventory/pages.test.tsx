@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -91,7 +92,7 @@ describe("On-hand inquiry", () => {
     const { container } = renderAt("/inventory/onhand");
     expect(screen.getByRole("heading", { name: "On-hand inquiry" })).toBeInTheDocument();
     expect(screen.getByRole("table", { name: "On-hand" })).toHaveAttribute("aria-busy", "true");
-    const table = await screen.findByRole("table", { name: "On-hand" });
+    const table = await findTable({ name: "On-hand" });
     await waitFor(() => expect(table).toHaveTextContent("Negative stock"));
     expect(table).toHaveTextContent("36.00 USD");
     expect(table).toHaveTextContent("S1");
@@ -133,7 +134,7 @@ describe("On-hand inquiry", () => {
   it("shows the problem code when the inquiry fails and retries on request", async () => {
     handler = () => json(403, { code: "AUTH-0003", detail: "missing duty inventory.read" });
     renderAt("/inventory/onhand");
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("missing duty inventory.read (AUTH-0003)");
     expect(screen.queryByRole("table", { name: "On-hand" })).not.toBeInTheDocument();
     handler = () => json(200, { items: [onHandRow], truncated: false });
@@ -147,7 +148,7 @@ describe("Journal list", () => {
     handler = (url) =>
       url.pathname.endsWith(`/journals/${JOURNAL_ID}`) ? json(200, journal()) : json(200, { items: [journal({ lines: undefined })] });
     const { container } = renderAt("/inventory/journals");
-    const table = await screen.findByRole("table", { name: "Journals" });
+    const table = await findTable({ name: "Journals" });
     await waitFor(() => expect(table).toHaveTextContent("Movement"));
     expect(table).toHaveTextContent("Draft");
     expect(screen.getByRole("link", { name: "New journal" })).toHaveAttribute("href", "/inventory/journals/new");
@@ -176,7 +177,7 @@ describe("Journal list", () => {
     first.unmount();
     handler = () => json(500, { code: "COM-0500", detail: "internal error" });
     renderAt("/inventory/journals");
-    expect(await screen.findByRole("alert")).toHaveTextContent("internal error (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("internal error (COM-0500)");
   });
 });
 
@@ -268,7 +269,7 @@ describe("Journal detail", () => {
     handler = (_url, init) => (init.method === "POST" ? json(200, posted) : json(200, journal()));
     renderAt(`/inventory/journals/${JOURNAL_ID}`);
     fireEvent.click(await screen.findByRole("button", { name: "Post journal" }));
-    expect(await screen.findByRole("table", { name: "GL entry" })).toHaveTextContent("500100");
+    expect(await findTable({ name: "GL entry" })).toHaveTextContent("500100");
     expect(screen.getByRole("status")).toHaveTextContent("Journal posted: 1 line.");
     expect(screen.queryByRole("button", { name: "Post journal" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Add line" })).not.toBeInTheDocument();
@@ -284,7 +285,7 @@ describe("Journal detail", () => {
         : json(200, journal());
     renderAt(`/inventory/journals/${JOURNAL_ID}`);
     fireEvent.click(await screen.findByRole("button", { name: "Post journal" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("The journal was not posted");
     expect(alert).toHaveTextContent("(shortfall 4) (INV-NEG-001)");
     expect(screen.getByRole("button", { name: "Post journal" })).toBeInTheDocument();

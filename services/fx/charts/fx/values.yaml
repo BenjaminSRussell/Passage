@@ -1,0 +1,32 @@
+image:
+  repository: ghcr.io/benjaminsrussell/fx
+  digest: ""
+  tag: ""
+  pullPolicy: IfNotPresent
+databaseSecret: fx-db
+migrateOnStart: false
+replicaCount: 1
+import:
+  tenantId: ""
+  provider: ecb
+  rateType: ""
+  interval: 1h
+  providerTimeoutSeconds: 10
+  oxrSecret: ""
+resources:
+  requests: { cpu: 50m, memory: 64Mi }
+  limits: { cpu: 250m, memory: 128Mi }
+networkPolicy:
+  enabled: true
+  ingressFrom: []
+  ingressNamespaces: []
+  metricsFrom: [observability]
+serviceMonitor:
+  enabled: true
+  interval: 30s
+alerts:
+  enabled: true
+  labels: {}
+  severity: page
+  ecbStaleDays: 4
+  oxrStaleDays: 2

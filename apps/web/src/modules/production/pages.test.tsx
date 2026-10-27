@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
@@ -54,7 +55,7 @@ describe("Production orders list", () => {
       json({ items: [summary({ status: "Estimated", plannedCost: "5000" }), summary({ id: uuid(2), orderNumber: "PO-000002", status: "ReportedAsFinished", remaining: "40" })] }),
     );
     const { container } = renderAt("/production");
-    const table = await screen.findByRole("table", { name: "Production orders" });
+    const table = await findTable({ name: "Production orders" });
     await waitFor(() => expect(within(table).getByText("PO-000002")).toBeInTheDocument());
     expect(within(table).getByText("5000.00 USD")).toBeInTheDocument();
     expect(within(table).getByText("Reported as finished")).toBeInTheDocument();
@@ -78,7 +79,7 @@ describe("Production orders list", () => {
   it("shows the problem code when the list fails", async () => {
     stubFetch(() => problem(403, "AUTH-0003", "missing duty production.order.read"));
     renderAt("/production");
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("Could not load production orders");
     expect(alert).toHaveTextContent("missing duty production.order.read (AUTH-0003)");
   });
@@ -151,7 +152,7 @@ describe("Production order detail", () => {
     const totals = await screen.findByRole("list", { name: "Planned cost by group" });
     expect(totals).toHaveTextContent("Material 3950.00 USD");
     expect(totals).toHaveTextContent("Total 5450.00 USD");
-    const log = await screen.findByRole("table", { name: "Status log" });
+    const log = await findTable({ name: "Status log" });
     await waitFor(() => expect(within(log).getByText("trace-abc")).toBeInTheDocument());
     expect(screen.getByRole("button", { name: "Schedule" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Re-estimate" })).toBeInTheDocument();
@@ -182,7 +183,7 @@ describe("Production order detail", () => {
     );
     renderAt(`/production/${orderId}`);
     await userEvent.click(await screen.findByRole("button", { name: "Release" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("The command was refused");
     expect(alert).toHaveTextContent("PRODUCTION_ILLEGAL_TRANSITION");
     expect(screen.getByRole("heading", { name: "Production order PO-000001" })).toBeInTheDocument();

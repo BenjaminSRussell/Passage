@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { Hierarchy, HierarchySummary } from "./api/client";
@@ -42,7 +43,7 @@ describe("HierarchiesPage", () => {
         ? json(200, { items: [summary, { ...summary, code: "HIER-CC", subject: "dimension_value", strict: false, hasDraft: false, unassignedCount: 3 }] })
         : undefined;
     const { container } = renderAt("/finreport/hierarchies");
-    const table = await screen.findByRole("table", { name: "Derived hierarchies" });
+    const table = await findTable({ name: "Derived hierarchies" });
     expect(await within(table).findByRole("button", { name: "HIER-BS" })).toBeInTheDocument();
     expect(within(table).getAllByText("v2")).toHaveLength(2);
     expect(within(table).getByText("3 unassigned")).toBeInTheDocument();

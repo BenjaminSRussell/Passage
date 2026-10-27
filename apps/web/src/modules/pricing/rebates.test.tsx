@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { RebateAccrual, RebateAgreement } from "./api/client";
@@ -58,7 +59,7 @@ describe("Rebate agreements", () => {
       return undefined;
     };
     const { container } = renderAt("/pricing/rebates");
-    const table = await screen.findByRole("table", { name: "Rebate agreements" });
+    const table = await findTable({ name: "Rebate agreements" });
     await waitFor(() => expect(table).toHaveTextContent("Acme quarterly"));
     expect(table).toHaveTextContent("from 0: 1% · from 5000: 2.5%");
     expect(table).toHaveTextContent(`Group ${G1}`);
@@ -74,7 +75,7 @@ describe("Rebate agreements", () => {
     first.unmount();
     server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty pricing.rebate.view" });
     renderAt("/pricing/rebates");
-    expect(await screen.findByRole("alert")).toHaveTextContent("missing duty pricing.rebate.view (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty pricing.rebate.view (AUTH-0003)");
   });
 });
 
@@ -142,7 +143,7 @@ describe("New rebate agreement", () => {
     fill("Valid to", "2027-12-31");
     fill("Rate %", "2");
     fireEvent.click(screen.getByRole("button", { name: "Save agreement" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("database unavailable (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("database unavailable (COM-0500)");
   });
 });
 
@@ -238,7 +239,7 @@ describe("Retroactive recompute", () => {
     expect(server.calls.some((c) => c.method === "POST")).toBe(false);
     fill("Posted invoice lines", "INV-A, 2027-03-05, 100");
     fireEvent.click(screen.getByRole("button", { name: "Recompute" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("agreement is not retroactive (COM-0001)");
+    expect(await findAlert()).toHaveTextContent("agreement is not retroactive (COM-0001)");
   });
 
   it("parses pasted rows", () => {

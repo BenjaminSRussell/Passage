@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -134,7 +135,7 @@ describe("Sales orders list", () => {
   it("lists orders with status, holds and net, and passes the chosen filter", async () => {
     handler = () => ({ status: 200, body: { items: [summary] } });
     const { container } = renderAt("/sales/orders");
-    const table = await screen.findByRole("table", { name: "Sales orders" });
+    const table = await findTable({ name: "Sales orders" });
     await waitFor(() => expect(within(table).getByText("SO-0000042")).toBeInTheDocument());
     expect(within(table).getByText("Credit")).toBeInTheDocument();
     expect(within(table).getByText("3000 USD")).toBeInTheDocument();
@@ -279,7 +280,7 @@ describe("Credit profiles", () => {
   it("lists profiles and opens one", async () => {
     handler = (url) => (url.pathname.endsWith("/credit-profiles") ? { status: 200, body: { items: [profile] } } : { status: 200, body: profile, etag: '"4"' });
     const { container } = renderAt("/sales/credit-profiles");
-    const table = await screen.findByRole("table", { name: "Credit profiles" });
+    const table = await findTable({ name: "Credit profiles" });
     await waitFor(() => expect(within(table).getByText("10000 USD")).toBeInTheDocument());
     expect(within(table).getByText("8500 USD")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);

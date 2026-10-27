@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -111,7 +112,7 @@ describe("compliance lists", () => {
     handler = (url) => (url.pathname === "/api/v1/quality/compliance-lists" ? json(200, { items: [rohs] }) : undefined);
     const { container } = renderAt("/quality/compliance/lists");
     expect(screen.getByRole("table", { name: "Compliance lists" })).toHaveAttribute("aria-busy", "true");
-    const table = await screen.findByRole("table", { name: "Compliance lists" });
+    const table = await findTable({ name: "Compliance lists" });
     await waitFor(() => expect(within(table).getByText("ROHS")).toBeInTheDocument());
     expect(within(table).getByText("v2")).toBeInTheDocument();
     expect(within(table).getByText("Block (QM-0122)")).toBeInTheDocument();
@@ -138,7 +139,7 @@ describe("compliance lists", () => {
     fireEvent.change(screen.getByLabelText("Substance name"), { target: { value: "Lead" } });
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Save list version" }));
-    await screen.findByRole("table", { name: "Compliance lists" });
+    await findTable({ name: "Compliance lists" });
     const post = calls.find((c) => c.method === "POST");
     expect(post?.url.pathname).toBe("/api/v1/quality/compliance-lists");
     expect(header(post!, "Idempotency-Key")).toBeTruthy();
@@ -191,7 +192,7 @@ describe("item compliance", () => {
       init.method === "POST" ? json(201, { itemId: ITEM, version: 1, direct: { [DEHP]: "0.024" }, parts: [] }) : json(404, { code: "QM-0164", detail: "no composition is recorded for this item" });
     const { container } = renderAt(`/quality/compliance/items/${ITEM}`);
     expect(await screen.findByText("No composition declared yet")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("CAS number"), { target: { value: DEHP } });
+    fireEvent.change(await screen.findByLabelText("CAS number"), { target: { value: DEHP } });
     fireEvent.change(screen.getByLabelText("Mass fraction"), { target: { value: "0.024" } });
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Save composition" }));
@@ -210,10 +211,10 @@ describe("item compliance", () => {
       return undefined;
     };
     const { container } = renderAt(`/quality/compliance/items/${ITEM}`);
-    const parts = await screen.findByRole("table", { name: "Components" });
+    const parts = await findTable({ name: "Components" });
     expect(within(parts).getByRole("link", { name: CASING })).toHaveAttribute("href", `/quality/compliance/items/${CASING}`);
     fireEvent.click(screen.getByRole("button", { name: "Evaluate" }));
-    const results = await screen.findByRole("table", { name: "Compliance results" });
+    const results = await findTable({ name: "Compliance results" });
     expect(within(results).getByText("QM-0121 warning")).toBeInTheDocument();
     expect(within(results).getByText("DEHP: 0.12 % > 0.1 %")).toBeInTheDocument();
     expect(within(results).getByText("Below every threshold")).toBeInTheDocument();
@@ -230,7 +231,7 @@ describe("item compliance", () => {
       return undefined;
     };
     renderAt(`/quality/compliance/items/${ITEM}`);
-    await screen.findByRole("table", { name: "Components" });
+    await findTable({ name: "Components" });
     fireEvent.change(screen.getByLabelText("Destination region"), { target: { value: "europe" } });
     fireEvent.click(screen.getByRole("button", { name: "Evaluate" }));
     expect(await screen.findByText("Enter a region code in capitals, such as EU, DE or US-CA.")).toBeInTheDocument();
@@ -252,7 +253,7 @@ describe("stability studies", () => {
   it("lists studies with the next pull and filters by status", async () => {
     handler = (url) => (url.pathname === "/api/v1/quality/stability-studies" ? json(200, { items: url.search ? [] : [study] }) : undefined);
     const { container } = renderAt("/quality/stability");
-    const table = await screen.findByRole("table", { name: "Stability studies" });
+    const table = await findTable({ name: "Stability studies" });
     await waitFor(() => expect(within(table).getByRole("link", { name: "Open study 0195f0a0" })).toHaveAttribute("href", `/quality/stability/${STUDY}`));
     expect(within(table).getByText("0 months, 2026-01-31")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
@@ -276,7 +277,7 @@ describe("stability studies", () => {
     fireEvent.change(screen.getByLabelText("Test group"), { target: { value: GROUP } });
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Plan study" }));
-    const schedule = await screen.findByRole("table", { name: "Pull schedule" });
+    const schedule = await findTable({ name: "Pull schedule" });
     expect(within(schedule).getByText("2026-04-30")).toBeInTheDocument();
     expect(within(schedule).getByText("2026-04-23")).toBeInTheDocument();
     const post = calls.find((c) => c.method === "POST");
@@ -357,7 +358,7 @@ describe("SPC charts", () => {
     fireEvent.change(screen.getByLabelText("Test group"), { target: { value: GROUP } });
     fireEvent.change(screen.getByLabelText("Test"), { target: { value: TEST } });
     fireEvent.click(screen.getByRole("button", { name: "Show chart" }));
-    const table = await screen.findByRole("table", { name: "Subgroups" });
+    const table = await findTable({ name: "Subgroups" });
     expect(within(table).getByText("Rule 1: a point beyond 3σ")).toBeInTheDocument();
     expect(within(table).getByRole("link", { name: "Open the order of point 2" })).toHaveAttribute("href", `/quality/orders/${ORDER_B}`);
     expect(screen.getByRole("img", { name: "X-bar chart: 2 points, centre 10.1, 1 flagged." })).toBeInTheDocument();

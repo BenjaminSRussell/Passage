@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { OpenItem, Payment } from "./api/client";
@@ -62,7 +63,7 @@ describe("AR workspace", () => {
       return undefined;
     };
     const { container } = renderAt("/receivables");
-    const table = await screen.findByRole("table", { name: "Aging by currency" });
+    const table = await findTable({ name: "Aging by currency" });
     await waitFor(() => expect(table).toHaveTextContent("1250.00"));
     expect(screen.getByRole("list", { name: "Receivables tiles" })).toHaveTextContent("Payments to apply 1");
     expect(screen.getByRole("list", { name: "Receivables tiles" })).toHaveTextContent("Currencies with overdue items 1");
@@ -79,7 +80,7 @@ describe("AR workspace", () => {
 
     server.handler = () => json(503, { code: "COM-0500", detail: "internal error" });
     renderAt("/receivables");
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("Could not load the AR workspace");
     expect(alert).toHaveTextContent("COM-0500");
     server.handler = (url) => (url.pathname.endsWith("/aging") ? json(200, { asOf: "2027-03-31", totals: [] }) : json(200, { items: [] }));
@@ -92,7 +93,7 @@ describe("Open items", () => {
   it("lists items with open amount and discount and filters by customer", async () => {
     server.handler = (url) => (url.pathname.endsWith("/open-items") ? json(200, { items: [item] }) : undefined);
     const { container } = renderAt("/receivables/open-items");
-    const table = await screen.findByRole("table", { name: "Open items" });
+    const table = await findTable({ name: "Open items" });
     await waitFor(() => expect(table).toHaveTextContent("INV-30001"));
     expect(table).toHaveTextContent("1000.00 USD");
     expect(table).toHaveTextContent("20.00 USD by 2027-03-11");
@@ -111,7 +112,7 @@ describe("Open items", () => {
     first.unmount();
     server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty ARView" });
     renderAt("/receivables/open-items");
-    expect(await screen.findByRole("alert")).toHaveTextContent("AUTH-0003");
+    expect(await findAlert()).toHaveTextContent("AUTH-0003");
   });
 });
 
@@ -124,7 +125,7 @@ describe("Payments", () => {
       return undefined;
     };
     const { container } = renderAt("/receivables/payments");
-    const table = await screen.findByRole("table", { name: "Payments" });
+    const table = await findTable({ name: "Payments" });
     await waitFor(() => expect(table).toHaveTextContent("ACH-7"));
     expect(table).toHaveTextContent("980.00 USD");
     expect(table).toHaveTextContent("Received");
@@ -133,7 +134,7 @@ describe("Payments", () => {
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "ON_ACCOUNT" } });
     await waitFor(() => expect(server.calls.some((c) => c.url.searchParams.get("status") === "ON_ACCOUNT")).toBe(true));
 
-    fireEvent.click(within(await screen.findByRole("table", { name: "Payments" })).getByRole("button", { name: "2027-03-08" }));
+    fireEvent.click(within(await findTable({ name: "Payments" })).getByRole("button", { name: "2027-03-08" }));
     expect(await screen.findByRole("heading", { name: "Payment ACH-7" })).toBeInTheDocument();
   });
 
@@ -176,7 +177,7 @@ describe("Record payment", () => {
     fill("Legal entity id", LE);
     fill("Amount", "10");
     fireEvent.click(screen.getByRole("button", { name: "Record payment" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("AR-PAYMENT-DUPLICATE");
+    expect(await findAlert()).toHaveTextContent("AR-PAYMENT-DUPLICATE");
   });
 });
 
@@ -202,11 +203,11 @@ describe("Payment detail", () => {
     );
     const { container } = renderAt(`/receivables/payments/${PAY}`);
     expect(await screen.findByRole("heading", { name: "Payment ACH-7" })).toBeInTheDocument();
-    expect(await screen.findByRole("table", { name: "Open items to settle" })).toHaveTextContent("INV-30001");
+    expect(await findTable({ name: "Open items to settle" })).toHaveTextContent("INV-30001");
     expect(pageViolations(container)).toEqual([]);
 
     fireEvent.click(screen.getByRole("button", { name: "Find matches" }));
-    const candidates = await screen.findByRole("table", { name: "Match candidates" });
+    const candidates = await findTable({ name: "Match candidates" });
     expect(candidates).toHaveTextContent("93");
     expect(screen.getByText(/Auto-apply/)).toBeInTheDocument();
     fireEvent.click(within(candidates).getByRole("button", { name: "Use INV-30001" }));
@@ -225,14 +226,14 @@ describe("Payment detail", () => {
   it("explains a stale version and blocks a plan above the unapplied amount", async () => {
     detailServer(() => json(412, { code: "conflict_version", detail: "payment changed since it was read" }));
     renderAt(`/receivables/payments/${PAY}`);
-    await screen.findByRole("table", { name: "Open items to settle" });
+    await findTable({ name: "Open items to settle" });
     fill("Apply for INV-30001", "1000.00");
     expect(screen.getByText("The settlements exceed the 980.00 still unapplied.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Apply payment" })).toBeDisabled();
     fill("Apply for INV-30001", "900.00");
     expect(screen.getByText(/80.00 USD goes on account/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Apply payment" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("The payment changed since you opened it");
     expect(alert).toHaveTextContent("conflict_version");
   });
@@ -240,7 +241,7 @@ describe("Payment detail", () => {
   it("shows a load error with a retry and hides apply for an applied payment", async () => {
     server.handler = () => json(404, { code: "AR-PAYMENT-NOT-FOUND", detail: "payment not found" });
     const first = renderAt(`/receivables/payments/${PAY}`);
-    expect(await screen.findByRole("alert")).toHaveTextContent("AR-PAYMENT-NOT-FOUND");
+    expect(await findAlert()).toHaveTextContent("AR-PAYMENT-NOT-FOUND");
     first.unmount();
 
     server.handler = (url) => {

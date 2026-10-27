@@ -466,7 +466,7 @@ AX ships code as LCS deployable packages built on a build VM and applied with Ax
 ### 0.1.3 Functional requirements
 
 - **FR-1.1 Monorepo layout** — Must. The system shall keep all Passage source in one repository with the layout `services/go/<svc>`, `services/ts/<svc>`, `services/py/<svc>`, `web/shell`, `web/remotes/<name>`, `deploy/charts/<svc>`, `deploy/envs/{dev,stage,prod}`, `infra/modules/<provider>`, `metadata/entities`, `docs/`.
-  - Notes: each service owns a `Dockerfile`, `Makefile`, `CODEOWNERS` entry and a Helm chart; CI path filters build only changed services; a `go.work` and `pnpm` workspace root pin toolchain versions (Go 1.23, Node 22, Python 3.12).
+  - Notes: each service owns a `Dockerfile`, `Makefile`, `CODEOWNERS` entry and a Helm chart; CI path filters build only changed services; a `go.work` and `pnpm` workspace root pin toolchain versions (Go 1.25, Node 24, Python 3.12).
 - **FR-1.2 Cluster bootstrap module** — Must. The system shall provide an OpenTofu module `infra/modules/cluster` with one variable interface (`provider ∈ {k3d, eks, gke, aks, baremetal}`, `name`, `node_pools[]`, `kubernetes_version`) that outputs a kubeconfig and installs the base add-ons.
   - Notes: base add-ons are Argo CD, Envoy Gateway, cert-manager, External Secrets Operator, CloudNativePG operator, sigstore policy-controller, metrics-server; provider modules contain only networking, node pools and storage classes; k3d module runs with 3 agent nodes and 8 GB RAM.
 - **FR-1.3 Argo CD app-of-apps** — Must. The system shall define a root Application per environment that reconciles child Applications from `deploy/envs/<env>/apps/*.yaml`, each pinning a chart version and an image digest.

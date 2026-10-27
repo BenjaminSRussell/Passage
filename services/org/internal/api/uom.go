@@ -134,6 +134,10 @@ func (a *API) createUnit(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) || refuseScopedCaller(w, r, "create units") {
 		return
 	}
+	idemKey, keyOK := idempotencyKeyOf(w, r)
+	if !keyOK {
+		return
+	}
 	var req createUnitRequest
 	if err := httpx.Decode(r, &req); err != nil {
 		httpx.Fail(w, r, err)
@@ -159,7 +163,7 @@ func (a *API) createUnit(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
-	unit, err := a.store.CreateUnit(r.Context(), in, r.Header.Get(idempotencyKey))
+	unit, err := a.store.CreateUnit(r.Context(), in, idemKey)
 	if err != nil {
 		slog.Error("create unit failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)
@@ -223,6 +227,10 @@ func (a *API) createConversion(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) || refuseScopedCaller(w, r, "create conversions") {
 		return
 	}
+	idemKey, keyOK := idempotencyKeyOf(w, r)
+	if !keyOK {
+		return
+	}
 	var req createConversionRequest
 	if err := httpx.Decode(r, &req); err != nil {
 		httpx.Fail(w, r, err)
@@ -251,7 +259,7 @@ func (a *API) createConversion(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
-	conv, created, err := a.store.CreateConversion(r.Context(), store.Conversion{FromCode: req.FromCode, ToCode: req.ToCode, Factor: factor, Offset: offset}, r.Header.Get(idempotencyKey))
+	conv, created, err := a.store.CreateConversion(r.Context(), store.Conversion{FromCode: req.FromCode, ToCode: req.ToCode, Factor: factor, Offset: offset}, idemKey)
 	if err != nil {
 		slog.Error("create conversion failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)

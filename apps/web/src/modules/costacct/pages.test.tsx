@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -128,7 +129,7 @@ describe("CostObjectsPage", () => {
         }),
     });
     const { container } = at("/costacct");
-    const table = await screen.findByRole("table", { name: "Cost objects" });
+    const table = await findTable({ name: "Cost objects" });
     expect(await within(table).findByText("Maintenance")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
     fireEvent.change(screen.getByLabelText("Kind"), { target: { value: "InternalOrder" } });
@@ -137,7 +138,7 @@ describe("CostObjectsPage", () => {
     fireEvent.click(within(table).getByRole("button", { name: "CC-A" }));
     expect(await screen.findByRole("heading", { name: "CC-A Maintenance" })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Period"), { target: { value: "2026-09" } });
-    const entries = await screen.findByRole("table", { name: "Cost entries" });
+    const entries = await findTable({ name: "Cost entries" });
     expect(await within(entries).findByText("PR-600")).toBeInTheDocument();
     expect(within(entries).getByRole("link", { name: "Allocation run" })).toHaveAttribute("href", `/costacct/allocation-runs/${RUN}`);
     expect(screen.getByText("Period total (USD)").nextSibling).toHaveTextContent("0.00");
@@ -149,7 +150,7 @@ describe("CostObjectsPage", () => {
       "GET /api/v1/controlling/cost-objects": () => (fail ? json(503, { title: "down", code: "COM-0500", detail: "internal error" }) : json(200, { items: [] })),
     });
     at("/costacct");
-    expect(await screen.findByRole("alert")).toHaveTextContent("COM-0500");
+    expect(await findAlert()).toHaveTextContent("COM-0500");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No cost objects yet")).toBeInTheDocument();
@@ -184,7 +185,7 @@ describe("CostElementsPage", () => {
   it("lists elements with their ranges and creates a primary element", async () => {
     const fetchMock = lists({ "POST /api/v1/controlling/cost-elements": () => json(201, elements[0]) });
     const { container } = at("/costacct/cost-elements");
-    const table = await screen.findByRole("table", { name: "Cost elements" });
+    const table = await findTable({ name: "Cost elements" });
     expect(await within(table).findByText("600000..609999")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
 
@@ -200,7 +201,7 @@ describe("CostElementsPage", () => {
     fireEvent.change(screen.getByLabelText("Main account to"), { target: { value: "609999" } });
     fireEvent.change(screen.getByLabelText("Default behavior"), { target: { value: "Fixed" } });
     fireEvent.click(screen.getByRole("button", { name: "Save cost element" }));
-    expect(await screen.findByRole("table", { name: "Cost elements" })).toBeInTheDocument();
+    expect(await findTable({ name: "Cost elements" })).toBeInTheDocument();
     expect(JSON.parse(calls(fetchMock, "POST", "cost-elements")[0][1].body as string)).toEqual({
       legalEntityId: LE,
       code: "PR-600",
@@ -217,7 +218,7 @@ describe("Allocation runs", () => {
   it("lists runs and shows a run's conserved totals, postings and flows", async () => {
     lists({ [`GET /api/v1/controlling/allocation-runs/${RUN}`]: () => json(200, run) });
     const { container } = at("/costacct/allocation-runs");
-    const table = await screen.findByRole("table", { name: "Allocation runs" });
+    const table = await findTable({ name: "Allocation runs" });
     fireEvent.click(await within(table).findByRole("button", { name: "2026-09" }));
     expect(await screen.findByRole("heading", { name: "Allocation run 2026-09" })).toBeInTheDocument();
     expect(screen.getByText("Conserved to the cent")).toBeInTheDocument();
@@ -299,7 +300,7 @@ describe("Allocation runs", () => {
   it("shows each run's status in the list", async () => {
     lists({ "GET /api/v1/controlling/allocation-runs": () => json(200, { items: [{ ...run, id: "r2", warnings: [] }, { ...run, status: "Reversed", reversedByRunId: "r2" }] }) });
     at("/costacct/allocation-runs");
-    const table = await screen.findByRole("table", { name: "Allocation runs" });
+    const table = await findTable({ name: "Allocation runs" });
     expect(await within(table).findByText("Reversed")).toBeInTheDocument();
     expect(within(table).getByText("Completed")).toBeInTheDocument();
   });

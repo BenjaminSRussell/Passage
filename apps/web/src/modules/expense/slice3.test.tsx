@@ -1,3 +1,4 @@
+import { findAlert } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
@@ -115,7 +116,7 @@ describe("lodging cap page", () => {
     type("Cost of the stay", "200");
     type("Per-diem lodging rate per night", "150");
     fireEvent.click(screen.getByRole("button", { name: "Check stay" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("must be 1 to 366");
+    expect(await findAlert()).toHaveTextContent("must be 1 to 366");
     expect(screen.getByLabelText("Nights")).toHaveAttribute("aria-invalid", "true");
   });
 });
@@ -147,7 +148,7 @@ describe("mileage page", () => {
     type("Distance", "100");
     type("Rate per unit", "0.70");
     fireEvent.click(screen.getByRole("button", { name: "Compute mileage" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("(NETWORK)");
+    expect(await findAlert()).toHaveTextContent("(NETWORK)");
     expect(screen.queryByRole("list", { name: "Mileage claim" })).not.toBeInTheDocument();
   });
 });
@@ -207,6 +208,6 @@ describe("card matching page", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     type("Card transactions", cards);
     fireEvent.click(screen.getByRole("button", { name: "Match" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("internal error (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("internal error (COM-0500)");
   });
 });

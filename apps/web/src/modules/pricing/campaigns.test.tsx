@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { Campaign, ConditionRecord } from "./api/client";
@@ -78,7 +79,7 @@ describe("Campaigns", () => {
       return undefined;
     };
     const { container } = renderAt("/pricing/campaigns");
-    const table = await screen.findByRole("table", { name: "Campaigns" });
+    const table = await findTable({ name: "Campaigns" });
     await waitFor(() => expect(table).toHaveTextContent("Spring push"));
     const rows = within(table).getAllByRole("row");
     expect(rows[1]).toHaveTextContent("Customer group RETAIL");
@@ -98,7 +99,7 @@ describe("Campaigns", () => {
     first.unmount();
     server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty pricing.view" });
     renderAt("/pricing/campaigns");
-    expect(await screen.findByRole("alert")).toHaveTextContent("(AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("(AUTH-0003)");
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });
@@ -202,14 +203,14 @@ describe("Campaign detail", () => {
     };
     renderAt(`/pricing/campaigns/${CMP}`);
     fireEvent.click(await screen.findByRole("button", { name: "Restore campaign" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("campaign version does not match (conflict_version)");
+    expect(await findAlert()).toHaveTextContent("campaign version does not match (conflict_version)");
     expect(server.calls.find((c) => c.method === "POST")!.body).toEqual({ version: 4 });
   });
 
   it("shows the error state when the campaign is unknown", async () => {
     server.handler = () => json(404, { code: "PRC-0041", detail: "no campaign x" });
     renderAt(`/pricing/campaigns/${CMP}`);
-    expect(await screen.findByRole("alert")).toHaveTextContent("(PRC-0041)");
+    expect(await findAlert()).toHaveTextContent("(PRC-0041)");
   });
 });
 

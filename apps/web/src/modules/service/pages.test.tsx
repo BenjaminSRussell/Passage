@@ -1,3 +1,4 @@
+import { findAlert, findStatus, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -151,7 +152,7 @@ describe("cases", () => {
       return { status: 200, body: serviceCase };
     };
     const { container } = renderAt("/service/cases");
-    const table = await screen.findByRole("table", { name: "Service cases" });
+    const table = await findTable({ name: "Service cases" });
     expect(within(table).getByText("CS-000042")).toBeInTheDocument();
     expect(within(table).getByText("Running")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
@@ -172,12 +173,12 @@ describe("cases", () => {
     let failing = true;
     handler = () => (failing ? { status: 503, body: { code: "COM-0500", detail: "internal error" } } : { status: 200, body: { items: [serviceCase] } });
     renderAt("/service/cases");
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("Could not load service cases");
     expect(alert).toHaveTextContent("COM-0500");
     failing = false;
     fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
-    expect(await screen.findByRole("table", { name: "Service cases" })).toBeInTheDocument();
+    expect(await findTable({ name: "Service cases" })).toBeInTheDocument();
   });
 
   it("validates the open-case form like the service does", () => {
@@ -216,7 +217,7 @@ describe("cases", () => {
     fireEvent.change(screen.getByLabelText("Customer"), { target: { value: CUSTOMER } });
     fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.click(screen.getByRole("button", { name: "Open case" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("No agreement covers this case");
     expect(alert).toHaveTextContent("SVC-ENT-002");
   });
@@ -231,7 +232,7 @@ describe("cases", () => {
     expect(sla).toHaveTextContent("2026-10-26 19:00 UTC");
     expect(screen.getByRole("list", { name: "Entitlement trace" })).toHaveTextContent("priority rank 5");
     expect(screen.getByRole("link", { name: "Create work order" })).toHaveAttribute("href", `/service/work-orders/new?caseId=${CASE}`);
-    expect(await screen.findByRole("table", { name: "Case work orders" })).toHaveTextContent("SWO-000003");
+    expect(await findTable({ name: "Case work orders" })).toHaveTextContent("SWO-000003");
     expect(calls.find((c) => c.url.pathname === "/api/v1/service/work-orders")?.url.searchParams.get("caseId")).toBe(CASE);
     expect(pageViolations(container)).toEqual([]);
   });
@@ -239,7 +240,7 @@ describe("cases", () => {
   it("reports a case that cannot be loaded", async () => {
     handler = () => ({ status: 404, body: { code: "SVC-CASE-001", detail: "service case not found" } });
     renderAt(`/service/cases/${CASE}`);
-    expect(await screen.findByRole("alert")).toHaveTextContent("SVC-CASE-001");
+    expect(await findAlert()).toHaveTextContent("SVC-CASE-001");
   });
 });
 
@@ -286,9 +287,9 @@ describe("agreements", () => {
   it("lists agreements and shows the empty state", async () => {
     handler = () => ({ status: 200, body: { items: [agreement], nextCursor: AGREEMENT } });
     const view = renderAt("/service/agreements");
-    expect(await screen.findByRole("table", { name: "Service agreements" })).toHaveTextContent("SA-000007");
+    await waitFor(() => expect(screen.getByRole("table", { name: "Service agreements" })).toHaveTextContent("SA-000007"));
     handler = () => ({ status: 200, body: { items: [] } });
-    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Load more" }));
     await waitFor(() => expect(calls.at(-1)?.url.searchParams.get("cursor")).toBe(AGREEMENT));
     view.unmount();
     renderAt("/service/agreements");
@@ -336,7 +337,7 @@ describe("work orders", () => {
     expect(pageViolations(container)).toEqual([]);
 
     fireEvent.click(screen.getByRole("button", { name: "Complete" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Work order is now completed.");
+    expect(await findStatus()).toHaveTextContent("Work order is now completed.");
     const move = calls.find((c) => c.method === "POST");
     expect(move?.url.pathname).toBe(`/api/v1/service/work-orders/${WO}:transition`);
     expect(move?.headers.get("If-Match")).toBe('"5"');
@@ -361,7 +362,7 @@ describe("work orders", () => {
     };
     renderAt(`/service/work-orders/${WO}`);
     fireEvent.click(await screen.findByRole("button", { name: "Post to billing" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Posted: 190.00 USD billable.");
+    expect(await findStatus()).toHaveTextContent("Posted: 190.00 USD billable.");
     const post = calls.find((c) => c.method === "POST");
     expect(post?.url.pathname).toBe(`/api/v1/service/work-orders/${WO}:post`);
     expect(post?.headers.get("If-Match")).toBe('"6"');
@@ -380,14 +381,14 @@ describe("work orders", () => {
     };
     renderAt(`/service/work-orders/${WO}`);
     fireEvent.click(await screen.findByRole("button", { name: "Put on hold" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Someone else changed this work order");
+    expect(await findAlert()).toHaveTextContent("Someone else changed this work order");
     await waitFor(() => expect(calls.filter((c) => c.method === "GET").length).toBe(2));
   });
 
   it("lists work orders with what each billed", async () => {
     handler = () => ({ status: 200, body: { items: [workOrder({ status: "POSTED", posting: { currency: "USD", billableTotal: "190.00", warrantyCost: "0", entitlementConsumed: "1", lines: [] } })] } });
     renderAt("/service/work-orders");
-    const table = await screen.findByRole("table", { name: "Service work orders" });
+    const table = await findTable({ name: "Service work orders" });
     expect(table).toHaveTextContent("SWO-000003");
     expect(table).toHaveTextContent("190.00 USD");
   });
@@ -427,7 +428,7 @@ describe("SLA profiles", () => {
   it("lists profiles with their hours and targets", async () => {
     handler = () => ({ status: 200, body: { items: [profile] } });
     const { container } = renderAt("/service/sla-profiles");
-    const table = await screen.findByRole("table", { name: "SLA profiles" });
+    const table = await findTable({ name: "SLA profiles" });
     expect(table).toHaveTextContent("Mon–Fri 08:00–18:00");
     expect(table).toHaveTextContent("P2 1 h / 8 h");
     expect(pageViolations(container)).toEqual([]);
@@ -439,7 +440,7 @@ describe("SLA profiles", () => {
     fireEvent.change(screen.getByLabelText("Code"), { target: { value: "gold" } });
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Gold" } });
     fireEvent.click(screen.getByRole("button", { name: "Create SLA profile" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("That code is taken");
+    expect(await findAlert()).toHaveTextContent("That code is taken");
     expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({ code: "GOLD", openMinute: 480, closeMinute: 1080 });
   });
 });

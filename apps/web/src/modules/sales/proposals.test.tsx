@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -96,7 +97,7 @@ describe("Product proposal rules", () => {
   it("lists rules with their acceptance rate and removes one after confirmation", async () => {
     handler = (_url, init) => (init.method === "DELETE" ? { status: 204, body: null } : { status: 200, body: { items: [rule] } });
     const { container } = renderAt("/sales/product-proposals");
-    const table = await screen.findByRole("table", { name: "Product proposal rules" });
+    const table = await findTable({ name: "Product proposal rules" });
     await waitFor(() => expect(within(table).getByText("3 of 4 (75%)")).toBeInTheDocument());
     expect(within(table).getByText("Every customer")).toBeInTheDocument();
     expect(within(table).getByText("Accessory")).toBeInTheDocument();
@@ -126,7 +127,7 @@ describe("Product proposal rules", () => {
     expect(await screen.findByText("Could not load product proposal rules")).toBeInTheDocument();
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-    expect(await screen.findByRole("table", { name: "Product proposal rules" })).toBeInTheDocument();
+    expect(await findTable({ name: "Product proposal rules" })).toBeInTheDocument();
   });
 
   it("checks proposals for an order without storing anything", async () => {
@@ -143,7 +144,7 @@ describe("Product proposal rules", () => {
     fireEvent.change(within(form).getByLabelText("Products being ordered"), { target: { value: PRODUCT } });
     fireEvent.change(within(form).getByLabelText(/Products already on the order/), { target: { value: UPGRADE } });
     fireEvent.click(within(form).getByRole("button", { name: "Check proposals" }));
-    const result = await screen.findByRole("table", { name: "Proposals for the order" });
+    const result = await findTable({ name: "Proposals for the order" });
     expect(within(result).getByText(ACCESSORY)).toBeInTheDocument();
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({ legalEntityId: LE, productIds: [PRODUCT], currentProductIds: [UPGRADE] });
   });
@@ -202,7 +203,7 @@ describe("Proposals on the new order form", () => {
     enterOrder();
     expect(show).toBeEnabled();
     fireEvent.click(show);
-    const table = await screen.findByRole("table", { name: "Proposed products" });
+    const table = await findTable({ name: "Proposed products" });
     expect(calls[0].body).toEqual({ legalEntityId: LE, customerId: CUSTOMER, productIds: [PRODUCT] });
     expect(pageViolations(container)).toEqual([]);
 
@@ -241,7 +242,7 @@ describe("Proposals on the new order form", () => {
     expect(await screen.findByText("Could not load proposals")).toBeInTheDocument();
     evaluateFails = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-    const table = await screen.findByRole("table", { name: "Proposed products" });
+    const table = await findTable({ name: "Proposed products" });
     fireEvent.click(within(table).getByRole("button", { name: `Add a line for ${ACCESSORY}` }));
     expect(await screen.findByText("Your answer was not recorded")).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Line 2" })).toBeInTheDocument();

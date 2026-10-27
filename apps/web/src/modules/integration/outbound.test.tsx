@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -148,7 +149,7 @@ describe("send EDI document", () => {
       init.method === "POST" ? json(422, { code: "idempotency_key_reuse", detail: "Idempotency-Key was already used" }) : partnersOnly(url, init);
     renderAt(`/integration/interchanges/outbound?partnerId=${PARTNER_ID}`);
     fireEvent.click(await screen.findByRole("button", { name: "Generate document" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Idempotency-Key was already used (idempotency_key_reuse)");
+    expect(await findAlert()).toHaveTextContent("Idempotency-Key was already used (idempotency_key_reuse)");
     fireEvent.click(screen.getByRole("button", { name: "Generate document" }));
     await waitFor(() => expect(posts()).toHaveLength(2));
     expect(header(posts()[1], "Idempotency-Key")).not.toBe(header(posts()[0], "Idempotency-Key"));
@@ -165,7 +166,7 @@ describe("send EDI document", () => {
     let fail = true;
     handler = (url, init) => (fail ? json(503, { code: "COM-0503", detail: "unavailable" }) : partnersOnly(url, init));
     renderAt("/integration/interchanges/outbound");
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("unavailable (COM-0503)");
     fail = false;
     fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
@@ -202,7 +203,7 @@ describe("outbound and acknowledgment interchanges", () => {
       return undefined;
     };
     renderAt("/integration/interchanges?direction=OUT");
-    const table = await screen.findByRole("table", { name: "Interchanges" });
+    const table = await findTable({ name: "Interchanges" });
     await waitFor(() => expect(within(table).getByText("Outbound")).toBeInTheDocument());
     expect(within(table).getByText("Pending")).toBeInTheDocument();
     const listCalls = () => calls.filter((c) => c.url.pathname === "/api/v1/edi/interchanges");

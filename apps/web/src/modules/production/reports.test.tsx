@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import {
   fireEvent,
   render,
@@ -133,7 +134,7 @@ describe("WIP balance report (4.21.14)", () => {
           }),
     );
     const { container, location } = renderAt("/production/wip-balances");
-    const table = await screen.findByRole("table", {
+    const table = await findTable({
       name: "WIP balance as of 2026-10-26",
     });
     await waitFor(() =>
@@ -169,7 +170,7 @@ describe("WIP balance report (4.21.14)", () => {
           }),
     );
     renderAt("/production/wip-balances");
-    await screen.findByRole("table", { name: /WIP balance/ });
+    await findTable({ name: /WIP balance/ });
     const form = screen.getByRole("form", { name: "Filter the WIP balance" });
     await userEvent.selectOptions(
       within(form).getByLabelText("Status"),
@@ -200,7 +201,7 @@ describe("WIP balance report (4.21.14)", () => {
       json({ asOf: "2026-10-26", items: [], totals: [] }),
     );
     renderAt("/production/wip-balances");
-    await screen.findByRole("table", { name: /WIP balance/ });
+    await findTable({ name: /WIP balance/ });
     const form = screen.getByRole("form", { name: "Filter the WIP balance" });
     await userEvent.type(within(form).getByLabelText(/Site/), "plant 1");
     await userEvent.click(within(form).getByRole("button", { name: "Show" }));
@@ -273,7 +274,7 @@ describe("variance report (4.21.14)", () => {
       }),
     );
     const { container } = renderAt("/production/variances");
-    const table = await screen.findByRole("table", {
+    const table = await findTable({
       name: "Posted variances",
     });
     await waitFor(() =>
@@ -333,7 +334,7 @@ describe("variance report (4.21.14)", () => {
   it("shows a failure with its code", async () => {
     stubFetch(() => problem(500, "COM-0500", "internal error"));
     renderAt("/production/variances");
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("COM-0500");
   });
 

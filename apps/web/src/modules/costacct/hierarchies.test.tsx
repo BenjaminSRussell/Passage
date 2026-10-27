@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -166,7 +167,7 @@ describe("hierarchy logic", () => {
 describe("Cost object hierarchies", () => {
   it("lists hierarchies and opens one", async () => {
     const { container } = (lists(), at("/costacct/hierarchies"));
-    const table = await screen.findByRole("table", { name: "Cost object hierarchies" });
+    const table = await findTable({ name: "Cost object hierarchies" });
     expect(await within(table).findByText("Pump products")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(within(table).getByRole("button", { name: "PUMPS" }));
@@ -177,7 +178,7 @@ describe("Cost object hierarchies", () => {
     let fail = true;
     stubRoutes({ "GET /api/v1/controlling/cost-object-hierarchies": () => (fail ? json(503, { title: "down", code: "COM-0500" }) : json(200, { items: [] })) });
     at("/costacct/hierarchies");
-    expect(await screen.findByRole("alert")).toHaveTextContent("COM-0500");
+    expect(await findAlert()).toHaveTextContent("COM-0500");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No hierarchies yet")).toBeInTheDocument();
@@ -202,11 +203,11 @@ describe("Cost object hierarchies", () => {
 
   it("shows the node tree with what each node holds", async () => {
     const { container } = (lists(), at(`/costacct/hierarchies/${H}`));
-    const nodes = await screen.findByRole("table", { name: "Nodes" });
+    const nodes = await findTable({ name: "Nodes" });
     expect(await within(nodes).findByRole("link", { name: "PG-PUMPS" })).toHaveAttribute("href", `/costacct/cost-objects/${PG}`);
     expect(within(nodes).getByText("Fixed percentage")).toBeInTheDocument();
     expect(await within(nodes).findByText("900.00 USD OVERHEAD")).toBeInTheDocument();
-    const history = await screen.findByRole("table", { name: "Distribution runs" });
+    const history = await findTable({ name: "Distribution runs" });
     expect(await within(history).findByText("810.00")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
   });
@@ -267,7 +268,7 @@ describe("Cost object hierarchies", () => {
     fireEvent.change(screen.getByLabelText("Percent of P-100 Pump 100"), { target: { value: "60" } });
     fireEvent.click(screen.getByLabelText("Include P-200 Pump 200"));
     fireEvent.change(screen.getByLabelText("Percent of P-200 Pump 200"), { target: { value: "30" } });
-    const grid = await screen.findByRole("table", { name: "Distribution basis" });
+    const grid = await findTable({ name: "Distribution basis" });
     expect(await within(grid).findByText("540.00")).toBeInTheDocument();
     expect(screen.getByText("Stays on the node: 90.00")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
@@ -299,6 +300,6 @@ describe("Cost object hierarchies", () => {
   it("shows a load error for a missing run", async () => {
     stubRoutes({ [`GET /api/v1/controlling/hierarchy-distributions/${RUN}`]: () => json(404, { title: "Not found", code: "CST-0027", detail: "hierarchy distribution run not found" }) });
     at(`/costacct/hierarchy-distributions/${RUN}`);
-    expect(await screen.findByRole("alert")).toHaveTextContent("CST-0027");
+    expect(await findAlert()).toHaveTextContent("CST-0027");
   });
 });

@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Journal } from "./api/client";
@@ -86,7 +87,7 @@ describe("Price journal CSV import", () => {
     renderAt("/pricing/journals/import");
     fillImport(csvFile(`${CSV_HEADER},colour\n`));
     fireEvent.click(screen.getByRole("button", { name: "Import journal" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(within(alert).getAllByRole("listitem").map((li) => li.textContent)).toEqual([
       'Header: unknown column "colour"',
       "Row 1, record.amount: must not be negative",
@@ -99,7 +100,7 @@ describe("Price journal CSV import", () => {
     renderAt("/pricing/journals/import");
     fillImport(csvFile(`${CSV_HEADER}\n`));
     fireEvent.click(screen.getByRole("button", { name: "Import journal" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("the CSV file is larger than 32 MB (COM-0001)");
+    expect(await findAlert()).toHaveTextContent("the CSV file is larger than 32 MB (COM-0001)");
   });
 
   it("validates the draft and refuses a file over 32 MB", () => {
@@ -143,7 +144,7 @@ describe("Commission settlement", () => {
     expect(screen.getByRole("heading", { name: "Commission settlement" })).toBeInTheDocument();
     fillSettlement();
     fireEvent.click(screen.getByRole("button", { name: "Preview settlement" }));
-    const table = await screen.findByRole("table", { name: "Commission settlement" });
+    const table = await findTable({ name: "Commission settlement" });
     expect(table).toHaveTextContent("240.00 USD");
     expect(within(table).getByText("R,2")).toBeInTheDocument();
     expect(screen.getByRole("list", { name: "Settlement totals" })).toHaveTextContent("Commission 400 USD");
@@ -185,7 +186,7 @@ describe("Commission settlement", () => {
 
     server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty pricing.commission.view" });
     fireEvent.click(screen.getByRole("button", { name: "Preview settlement" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("missing duty pricing.commission.view (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty pricing.commission.view (AUTH-0003)");
   });
 
   it("validates the period before asking the service", () => {

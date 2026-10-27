@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { draftFromPlan, emptyPlanDraft, toPlanInput } from "./InvoicingPlanPage";
@@ -169,7 +170,7 @@ describe("invoicing plan page", () => {
   it("shows the schedule and removes the plan after confirmation", async () => {
     const fetchMock = serve(plan, () => new Response(null, { status: 204, headers: { ETag: '"8"' } }));
     const { container } = renderAt(PAGE);
-    const rows = await screen.findByRole("table", { name: "Plan rows" });
+    const rows = await findTable({ name: "Plan rows" });
     expect(within(rows).getAllByRole("row")).toHaveLength(13);
     expect(screen.getByText("Periodic")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
@@ -221,7 +222,7 @@ describe("purchase order detail", () => {
   it("links each open line to its invoicing plan", async () => {
     serve(plan);
     renderAt(`/purchasing/purchase-orders/${PO_ID}`);
-    const lines = await screen.findByRole("table", { name: "Purchase order lines" });
+    const lines = await findTable({ name: "Purchase order lines" });
     const link = await within(lines).findByRole("link", { name: "Invoicing plan of line 1" });
     expect(link).toHaveAttribute("href", PAGE);
     expect(link).toHaveTextContent("Periodic, 12 rows");
@@ -231,7 +232,7 @@ describe("purchase order detail", () => {
   it("offers to add a plan to an open line without one", async () => {
     serve(null);
     renderAt(`/purchasing/purchase-orders/${PO_ID}`);
-    const lines = await screen.findByRole("table", { name: "Purchase order lines" });
+    const lines = await findTable({ name: "Purchase order lines" });
     expect(await within(lines).findByRole("link", { name: "Add an invoicing plan to line 1" })).toHaveAttribute("href", PAGE);
   });
 });

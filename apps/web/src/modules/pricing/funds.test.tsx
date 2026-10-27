@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { Fund, FundUsage } from "./api/client";
@@ -45,7 +46,7 @@ describe("Trade funds", () => {
       return undefined;
     };
     const { container } = renderAt("/pricing/funds");
-    const table = await screen.findByRole("table", { name: "Trade funds" });
+    const table = await findTable({ name: "Trade funds" });
     await waitFor(() => expect(table).toHaveTextContent("Spring TPM"));
     expect(table).toHaveTextContent("1000 USD");
     expect(table).toHaveTextContent("Blocked");
@@ -62,7 +63,7 @@ describe("Trade funds", () => {
     first.unmount();
     server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty pricing.view or pricing.fund.maintain" });
     renderAt("/pricing/funds");
-    expect(await screen.findByRole("alert")).toHaveTextContent("(AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("(AUTH-0003)");
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });
@@ -149,7 +150,7 @@ describe("Trade fund detail", () => {
     fill("Reference", "CLM-9");
     fill("Amount (USD)", "475");
     fireEvent.click(screen.getByRole("button", { name: "Record usage" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("Over the period budget");
     expect(alert).toHaveTextContent("budget exceeded by 100.00 (PRC-0012)");
   });
@@ -198,11 +199,11 @@ describe("Trade fund detail", () => {
     const first = renderAt(`/pricing/funds/${FUND}`);
     await screen.findByRole("heading", { name: "Spring TPM" });
     fireEvent.click(screen.getByRole("button", { name: "Close fund" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("fund version does not match (conflict_version)");
+    expect(await findAlert()).toHaveTextContent("fund version does not match (conflict_version)");
     first.unmount();
     server.handler = () => json(404, { code: "PRC-0039", detail: `no trade fund ${FUND}` });
     renderAt(`/pricing/funds/${FUND}`);
-    expect(await screen.findByRole("alert")).toHaveTextContent("(PRC-0039)");
+    expect(await findAlert()).toHaveTextContent("(PRC-0039)");
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });

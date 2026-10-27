@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -120,7 +121,7 @@ describe("order BOM and route editor (FR-21.18)", () => {
       return json(state.order);
     });
     const { container } = renderAt(`/production/${orderId}`);
-    const history = await screen.findByRole("table", { name: "Edit history" });
+    const history = await findTable({ name: "Edit history" });
     await waitFor(() => expect(within(history).getByText("No edits yet")).toBeInTheDocument());
 
     const form = screen.getByRole("form", { name: "Edit the BOM or route" });

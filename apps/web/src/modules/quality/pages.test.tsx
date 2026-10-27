@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -115,7 +116,7 @@ describe("quality orders list", () => {
     handler = (url) => (url.pathname === "/api/v1/quality/quality-orders" ? json(200, { items: [order] }) : undefined);
     const { container } = renderAt("/quality/orders");
     expect(screen.getByRole("table", { name: "Quality orders" })).toHaveAttribute("aria-busy", "true");
-    const table = await screen.findByRole("table", { name: "Quality orders" });
+    const table = await findTable({ name: "Quality orders" });
     await waitFor(() => expect(within(table).getByText("Results in progress")).toBeInTheDocument());
     expect(within(table).getByRole("link", { name: "Open order 0195f0a0" })).toHaveAttribute("href", `/quality/orders/${ORDER}`);
     expect(within(table).getByText("100 EA")).toBeInTheDocument();
@@ -341,7 +342,7 @@ describe("setup pages", () => {
     fireEvent.change(screen.getByLabelText("Maximum"), { target: { value: "10.1" } });
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Save test group" }));
-    const table = await screen.findByRole("table", { name: "Test groups" });
+    const table = await findTable({ name: "Test groups" });
     await waitFor(() => expect(within(table).getByText("INCOMING-STEEL")).toBeInTheDocument());
     const post = calls.find((c) => c.method === "POST")?.body as { code: string; tests: { name: string; min: string; max: string; decimals: number }[] };
     expect(post.code).toBe("INCOMING-STEEL");
@@ -351,7 +352,7 @@ describe("setup pages", () => {
   it("lists instruments with their calibration state", async () => {
     handler = () => json(200, { items: [instrument, { ...instrument, id: "x", code: "PH-02", calibrationStatus: "OVERDUE" }] });
     const { container } = renderAt("/quality/instruments");
-    const table = await screen.findByRole("table", { name: "Instruments" });
+    const table = await findTable({ name: "Instruments" });
     await waitFor(() => expect(within(table).getByText("Overdue")).toBeInTheDocument());
     expect(within(table).getByText("In calibration")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
@@ -388,7 +389,7 @@ describe("setup pages", () => {
         ? json(200, { items: [{ id: "a", trigger: "PURCHASE_RECEIPT", itemScope: "ITEM", itemRef: ITEM, partyScope: "ALL", siteScope: "ALL", sequence: 10, testGroupId: GROUP, samplingPlan: { method: "AQL", aql: "2.5", severity: "NORMAL", inspectionLevel: "II" } }] })
         : json(200, { items: [group] });
     renderAt("/quality/associations");
-    const table = await screen.findByRole("table", { name: "Quality associations" });
+    const table = await findTable({ name: "Quality associations" });
     await waitFor(() => expect(within(table).getByText("INCOMING-STEEL v2")).toBeInTheDocument());
     expect(within(table).getByText("AQL 2.5, normal, level II")).toBeInTheDocument();
     expect(within(table).getByText("Item 0195f0a0")).toBeInTheDocument();
@@ -405,7 +406,7 @@ describe("setup pages", () => {
     fireEvent.change(screen.getByLabelText("Percentage"), { target: { value: "10" } });
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Save association" }));
-    await screen.findByRole("table", { name: "Quality associations" });
+    await findTable({ name: "Quality associations" });
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({
       trigger: "PURCHASE_RECEIPT",
       itemScope: "ITEM",

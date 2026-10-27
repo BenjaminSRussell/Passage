@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -80,7 +81,7 @@ describe("dispatch list", () => {
   it("lists open jobs in start order with quantities and links to each job", async () => {
     handler = (url) => (url.pathname === "/api/v1/shopfloor/jobs" ? json(200, { items: [job({ results: [] })] }) : undefined);
     const { container } = renderAt("/shopfloor/jobs");
-    const table = await screen.findByRole("table", { name: "Jobs" });
+    const table = await findTable({ name: "Jobs" });
     const row = within(table).getByRole("link", { name: "Open MO-1 OP-10" }).closest("tr") as HTMLElement;
     expect(row).toHaveTextContent("100");
     expect(row).toHaveTextContent("40.25");

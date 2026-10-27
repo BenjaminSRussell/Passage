@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { Appointment, DockDoor } from "./api/client";
@@ -34,11 +35,11 @@ describe("DockSchedulePage", () => {
       return undefined;
     };
     const { container } = renderAt(`/warehouse/docks?warehouse=${WH}`);
-    const table = await screen.findByRole("table", { name: "Appointments" });
+    const table = await findTable({ name: "Appointments" });
     await waitFor(() => expect(table).toHaveTextContent("09:00–09:45"));
     expect(table).toHaveTextContent("ASN-1");
     expect(table).toHaveTextContent("Inbound");
-    expect(await screen.findByRole("table", { name: "Dock doors" })).toHaveTextContent("D1");
+    expect(await findTable({ name: "Dock doors" })).toHaveTextContent("D1");
     const call = server.calls.find((c) => c.url.pathname.endsWith("dock-appointments"));
     expect(call?.url.searchParams.get("from")).toBe(localInstant(DAY, "00:00"));
     expect(pageViolations(container)).toEqual([]);

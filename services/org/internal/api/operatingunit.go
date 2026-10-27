@@ -72,6 +72,10 @@ func (a *API) createOperatingUnit(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
 	}
+	idemKey, keyOK := idempotencyKeyOf(w, r)
+	if !keyOK {
+		return
+	}
 	var req createOperatingUnitRequest
 	if err := httpx.Decode(r, &req); err != nil {
 		httpx.Fail(w, r, err)
@@ -98,7 +102,7 @@ func (a *API) createOperatingUnit(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
-	unit, err := a.store.CreateOperatingUnit(r.Context(), in, r.Header.Get(idempotencyKey))
+	unit, err := a.store.CreateOperatingUnit(r.Context(), in, idemKey)
 	if err != nil {
 		slog.Error("create operating unit failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)

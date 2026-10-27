@@ -1,3 +1,4 @@
+import { findAlert, findStatus, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -107,7 +108,7 @@ describe("Transfer orders", () => {
       });
     const { container } = renderAt("/inventory/transfer-orders");
     expect(screen.getByRole("table", { name: "Transfer orders" })).toHaveAttribute("aria-busy", "true");
-    const table = await screen.findByRole("table", { name: "Transfer orders" });
+    const table = await findTable({ name: "Transfer orders" });
     await waitFor(() => expect(table).toHaveTextContent("Partially received"));
     expect(table).toHaveTextContent("60 of 100 received");
     expect(within(table).getByRole("link", { name: "TO-ABCDEF123456" })).toHaveAttribute("href", `/inventory/transfer-orders/${ORDER_ID}`);
@@ -123,7 +124,7 @@ describe("Transfer orders", () => {
     first.unmount();
     handler = () => json(403, { code: "AUTH-0003", detail: "missing duty inventory.read" });
     renderAt("/inventory/transfer-orders");
-    expect(await screen.findByRole("alert")).toHaveTextContent("missing duty inventory.read (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty inventory.read (AUTH-0003)");
   });
 });
 
@@ -226,7 +227,7 @@ describe("Transfer order detail", () => {
     expect(pageViolations(container)).toEqual([]);
     fireEvent.change(screen.getByLabelText("Ship date"), { target: { value: "2026-09-02" } });
     fireEvent.click(screen.getByRole("button", { name: "Ship order" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Shipped: 1 line is now in transit at T1.");
+    expect(await findStatus()).toHaveTextContent("Shipped: 1 line is now in transit at T1.");
     const post = sent("POST")[0];
     expect(post.url.pathname).toBe(`/api/v1/inventory/transfer-orders/${ORDER_ID}:ship`);
     expect(header(post, "If-Match")).toBe('"1"');
@@ -248,7 +249,7 @@ describe("Transfer order detail", () => {
     fireEvent.click(screen.getByLabelText("Close line 1 short (within 10%)"));
     fireEvent.change(screen.getByLabelText("Receipt date"), { target: { value: "2026-09-05" } });
     fireEvent.click(screen.getByRole("button", { name: "Book receipt" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Transfer order TO-ABCDEF123456 fully received.");
+    expect(await findStatus()).toHaveTextContent("Transfer order TO-ABCDEF123456 fully received.");
     const post = sent("POST")[0];
     expect(post.url.pathname).toBe(`/api/v1/inventory/transfer-orders/${ORDER_ID}:receive`);
     expect(header(post, "If-Match")).toBe('"2"');
@@ -262,13 +263,13 @@ describe("Transfer order detail", () => {
     const first = renderAt(`/inventory/transfer-orders/${ORDER_ID}`);
     fireEvent.change(await screen.findByLabelText("Line 1: received EA"), { target: { value: "120" } });
     fireEvent.click(screen.getByRole("button", { name: "Book receipt" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("plus tolerance 0 % (INV-TRF-002)");
+    expect(await findAlert()).toHaveTextContent("plus tolerance 0 % (INV-TRF-002)");
     first.unmount();
     calls = [];
     handler = (_url, init) => (init.method === "POST" ? json(200, order({ status: "CANCELLED", version: 2 })) : json(200, order()));
     renderAt(`/inventory/transfer-orders/${ORDER_ID}`);
     fireEvent.click(await screen.findByRole("button", { name: "Cancel order" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Transfer order TO-ABCDEF123456 cancelled.");
+    expect(await findStatus()).toHaveTextContent("Transfer order TO-ABCDEF123456 cancelled.");
     expect(sent("POST")[0].url.pathname).toBe(`/api/v1/inventory/transfer-orders/${ORDER_ID}:cancel`);
   });
 
@@ -288,7 +289,7 @@ describe("Stock in transit", () => {
         ],
       });
     const { container } = renderAt("/inventory/in-transit");
-    const table = await screen.findByRole("table", { name: "Stock in transit" });
+    const table = await findTable({ name: "Stock in transit" });
     await waitFor(() => expect(table).toHaveTextContent("W1 → T1 → W2"));
     expect(table).toHaveTextContent("5 EA");
     expect(table).toHaveTextContent("Closed short, investigate");
@@ -308,7 +309,7 @@ describe("ABC classification", () => {
   it("lists runs with class counts", async () => {
     handler = () => json(200, { items: [run()] });
     const { container } = renderAt("/inventory/abc-runs");
-    const table = await screen.findByRole("table", { name: "ABC runs" });
+    const table = await findTable({ name: "ABC runs" });
     await waitFor(() => expect(table).toHaveTextContent("80 / 15 / 5"));
     expect(within(table).getByRole("link", { name: "2026-09-01 08:00 UTC" })).toHaveAttribute("href", `/inventory/abc-runs/${RUN_ID}`);
     expect(pageViolations(container)).toEqual([]);
@@ -331,7 +332,7 @@ describe("ABC classification", () => {
     fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: ENTITY_ID } });
     fireEvent.change(screen.getByLabelText("Products with no value"), { target: { value: "N" } });
     fireEvent.click(screen.getByRole("button", { name: "Run classification" }));
-    const table = await screen.findByRole("table", { name: "Classified items" });
+    const table = await findTable({ name: "Classified items" });
     expect(table).toHaveTextContent("Class A");
     expect(table).toHaveTextContent("800.00");
     const post = sent("POST")[0];
@@ -344,7 +345,7 @@ describe("ABC classification", () => {
     renderAt("/inventory/abc-runs/new");
     fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: ENTITY_ID } });
     fireEvent.click(screen.getByRole("button", { name: "Run classification" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("ABC thresholds must sum to 100 (got 99)");
+    expect(await findAlert()).toHaveTextContent("ABC thresholds must sum to 100 (got 99)");
   });
 
   it("says when a run does not exist", async () => {

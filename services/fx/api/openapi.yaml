@@ -1,0 +1,316 @@
+openapi: 3.1.0
+info:
+  title: fx
+  version: 0.1.0
+  description: Exchange rate types, rate publication and audit history, rate lookup with inverse and triangulation, and stateless conversion. Rates are append-only; a correction for the same type, pair and day supersedes the previous version and keeps it in the history.
+servers:
+  - url: https://app.local.passage.dev
+paths:
+  /v1/fx/rate-types:
+    get:
+      operationId: listRateTypes
+      x-passage-duty: View exchange rates
+      responses:
+        '200':
+          description: Rate types of the tenant, ordered by code.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/RateType' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /v1/fx/rate-types/{code}:
+    parameters:
+      - name: code
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: getRateType
+      x-passage-duty: View exchange rates
+      responses:
+        '200':
+          description: The rate type.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RateType' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem', description: FX_RATE_TYPE_UNKNOWN }
+        '500': { $ref: '#/components/responses/Problem' }
+    put:
+      operationId: putRateType
+      x-passage-duty: Maintain exchange rates
+      description: Creates or replaces the rate type. Naturally idempotent, so it takes neither Idempotency-Key nor If-Match; rate types carry no version.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RateTypeInput' }
+      responses:
+        '200':
+          description: The stored rate type.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RateType' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001 malformed body; FX_RATE_INVALID missing code or name.' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /v1/fx/rates:
+    post:
+      operationId: publishRates
+      x-passage-duty: Maintain exchange rates
+      description: Publishes up to 5000 manual rates in one transaction. A repeated Idempotency-Key with the same body replays the stored response; the same key with a different body is rejected. Rates are never updated in place, so the endpoint takes no If-Match; publishing a different value for an existing day supersedes the earlier version.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 255 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PublishRequest' }
+      responses:
+        '201':
+          description: One entry per submitted rate, in order.
+          headers:
+            Idempotent-Replayed: { schema: { type: string, enum: ['true'] }, description: Present on replays only. }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PublishResponse' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001 validation with errors naming each field; FX_RATE_INVALID rate or pair rejected.' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem', description: 'FX_RATE_CONFLICT a concurrent write created the same version; FX_IDEMPOTENCY_IN_PROGRESS another request holds this key (Retry-After: 1).' }
+        '422': { $ref: '#/components/responses/Problem', description: 'COM-0409 idempotency key reused with a different request; FX_RATE_DATE_FUTURE.' }
+        '500': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: lookupRate
+      x-passage-duty: View exchange rates
+      description: Resolves a rate for a type, pair and date - exact pair, then inverse when the type allows it, then triangulation through the optional via currency.
+      parameters:
+        - { name: type, in: query, required: true, schema: { type: string } }
+        - { name: from, in: query, required: true, schema: { type: string, minLength: 3, maxLength: 3 } }
+        - { name: to, in: query, required: true, schema: { type: string, minLength: 3, maxLength: 3 } }
+        - { name: date, in: query, required: false, schema: { type: string, format: date }, description: Defaults to today (UTC). }
+        - { name: via, in: query, required: false, schema: { type: string, minLength: 3, maxLength: 3 }, description: Reference currency for triangulation. }
+      responses:
+        '200':
+          description: The resolved rate and the hops that make it up.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Resolution' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem', description: 'LEDGER_RATE_MISSING no rate resolves; FX_RATE_DATE_FUTURE.' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /v1/fx/rates/history:
+    get:
+      operationId: rateHistory
+      x-passage-duty: View exchange rates
+      description: Every version stored for the pair, including superseded ones, ordered by valid_from then version.
+      parameters:
+        - { name: type, in: query, required: true, schema: { type: string } }
+        - { name: from, in: query, required: true, schema: { type: string, minLength: 3, maxLength: 3 } }
+        - { name: to, in: query, required: true, schema: { type: string, minLength: 3, maxLength: 3 } }
+      responses:
+        '200':
+          description: History entries.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [entries]
+                properties:
+                  entries:
+                    type: array
+                    items: { $ref: '#/components/schemas/HistoryEntry' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /v1/fx/convert:
+    post:
+      operationId: convertAmounts
+      x-passage-duty: View exchange rates
+      description: Stateless conversion of up to 100 amounts to one currency at the rate valid on the date, rounded once to the target currency's minor units. Side-effect free, so no Idempotency-Key.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConvertRequest' }
+      responses:
+        '200':
+          description: One result per amount, in order.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConvertResponse' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem', description: 'LEDGER_RATE_MISSING; FX_RATE_DATE_FUTURE.' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /healthz:
+    get:
+      operationId: liveness
+      x-passage-duty: public
+      responses:
+        '200': { description: Process is alive. }
+  /readyz:
+    get:
+      operationId: readiness
+      x-passage-duty: public
+      responses:
+        '200': { description: Database reachable. }
+        '503': { description: Database unreachable or slower than 500 ms. }
+components:
+  responses:
+    Problem:
+      description: RFC 9457 problem details.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status, code, traceId]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string, description: 'Stable code such as COM-0001, AUTH-0001, AUTH-0003, FX_RATE_INVALID.' }
+        traceId: { type: string }
+        errors:
+          type: object
+          additionalProperties: { type: string }
+    RateType:
+      type: object
+      required: [id, code, name, allowInverse]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        allowInverse: { type: boolean }
+        provider: { type: string }
+    RateTypeInput:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1 }
+        allowInverse: { type: boolean }
+        provider: { type: string }
+    RateInput:
+      type: object
+      additionalProperties: false
+      required: [rateType, from, to, validFrom, rate]
+      properties:
+        rateType: { type: string }
+        from: { type: string, minLength: 3, maxLength: 3 }
+        to: { type: string, minLength: 3, maxLength: 3 }
+        validFrom: { type: string, format: date, description: Not in the future. }
+        rate: { type: string, description: 'Decimal string, "1 from = rate to", greater than 0, at most 1000000000, at most 10 decimals.' }
+    PublishRequest:
+      type: object
+      additionalProperties: false
+      required: [rates]
+      properties:
+        rates:
+          type: array
+          minItems: 1
+          maxItems: 5000
+          items: { $ref: '#/components/schemas/RateInput' }
+    PublishResponse:
+      type: object
+      required: [rates]
+      properties:
+        rates:
+          type: array
+          items:
+            type: object
+            required: [id, version, superseded, unchanged]
+            properties:
+              id: { type: string, format: uuid }
+              version: { type: integer }
+              superseded: { type: boolean, description: The new row lost to a higher-priority current rate and is not current. }
+              unchanged: { type: boolean, description: An identical current rate already existed; nothing was written. }
+    Hop:
+      type: object
+      required: [from, to, rate, validFrom]
+      properties:
+        from: { type: string }
+        to: { type: string }
+        rate: { type: string }
+        validFrom: { type: string, format: date }
+    Resolution:
+      type: object
+      required: [rateType, from, to, date, path, rate, hops]
+      properties:
+        rateType: { type: string }
+        from: { type: string }
+        to: { type: string }
+        date: { type: string, format: date }
+        path: { type: string, enum: [direct, inverse, triangulated] }
+        rate: { type: string, description: Product of the hop rates at 10 decimals. }
+        hops:
+          type: array
+          items: { $ref: '#/components/schemas/Hop' }
+    HistoryEntry:
+      type: object
+      required: [id, version, validFrom, rate, source, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        version: { type: integer }
+        validFrom: { type: string, format: date }
+        rate: { type: string }
+        source: { type: string, enum: [manual, ecb, openexchangerates, csv, migration] }
+        providerTimestamp: { type: string, format: date-time }
+        payloadHash: { type: string, description: Hex SHA-256 of the provider record. }
+        supersededBy: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+        createdBy: { type: string }
+    Amount:
+      type: object
+      additionalProperties: false
+      required: [value, currency]
+      properties:
+        value: { type: string, description: 'Decimal string, at most 10 decimals, at most 1e15 in magnitude.' }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+    ConvertRequest:
+      type: object
+      additionalProperties: false
+      required: [rateType, to, amounts]
+      properties:
+        rateType: { type: string }
+        to: { type: string, minLength: 3, maxLength: 3 }
+        date: { type: string, format: date, description: Defaults to today (UTC). }
+        via: { type: string, minLength: 3, maxLength: 3 }
+        amounts:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items: { $ref: '#/components/schemas/Amount' }
+    ConvertResponse:
+      type: object
+      required: [rateType, date, to, results]
+      properties:
+        rateType: { type: string }
+        date: { type: string, format: date }
+        to: { type: string }
+        results:
+          type: array
+          items:
+            type: object
+            required: [amount, converted, path, rate]
+            properties:
+              amount: { $ref: '#/components/schemas/Amount' }
+              converted: { $ref: '#/components/schemas/Amount' }
+              path: { type: string, enum: [direct, inverse, triangulated] }
+              rate: { type: string }

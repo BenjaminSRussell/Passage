@@ -1,3 +1,4 @@
+import { findAlert, findStatus, findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { BankAccount, Forecast, Statement, StatementLine } from "./api/client";
@@ -62,7 +63,7 @@ describe("bank accounts list", () => {
 
     fill("Legal entity id", LE);
     fireEvent.click(screen.getByRole("button", { name: "Show accounts" }));
-    const table = await screen.findByRole("table", { name: "Bank accounts" });
+    const table = await findTable({ name: "Bank accounts" });
     await waitFor(() => expect(table).toHaveTextContent("OPS-01"));
     expect(table).toHaveTextContent("DE****************3000");
     expect(table).toHaveTextContent("Draft");
@@ -78,12 +79,12 @@ describe("bank accounts list", () => {
 
     server.handler = () => json(503, { code: "COM-0500", detail: "internal error" });
     renderAt(`/treasury?legalEntityId=${LE}`);
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("Could not load the bank accounts");
     expect(alert).toHaveTextContent("COM-0500");
     server.handler = () => json(200, { items: [account] });
     fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
-    expect(await screen.findByRole("table", { name: "Bank accounts" })).toHaveTextContent("OPS-01");
+    expect(await findTable({ name: "Bank accounts" })).toHaveTextContent("OPS-01");
   });
 });
 
@@ -146,7 +147,7 @@ describe("new bank account", () => {
     fill("Currency", "EUR");
     fill("GL main account id", GL);
     fireEvent.click(screen.getByRole("button", { name: "Create bank account" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("This account already exists");
+    expect(await findAlert()).toHaveTextContent("This account already exists");
     const firstKey = header(server.calls[0], "Idempotency-Key");
 
     server.handler = () => json(400, { code: "COM-0001", detail: "request failed validation", errors: { currency: "must be an ISO 4217 code" } });
@@ -191,19 +192,19 @@ describe("bank account detail", () => {
       return json(200, { items: [statement] });
     };
     renderAt(`/treasury/bank-accounts/${ACCT}`);
-    const table = await screen.findByRole("table", { name: "Statements" });
+    const table = await findTable({ name: "Statements" });
     await waitFor(() => expect(table).toHaveTextContent("STMT-20261022"));
     expect(table).toHaveTextContent("1337.50 EUR");
     const gets = server.calls.filter((c) => c.url.pathname.endsWith(`/bank-accounts/${ACCT}`)).length;
     fireEvent.click(screen.getByRole("button", { name: "Activate" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("This account changed since you opened it");
+    expect(await findAlert()).toHaveTextContent("This account changed since you opened it");
     await waitFor(() => expect(server.calls.filter((c) => c.url.pathname.endsWith(`/bank-accounts/${ACCT}`)).length).toBe(gets + 1));
   });
 
   it("shows a load failure for an unknown account", async () => {
     server.handler = () => json(404, { code: "TRS-0400", detail: "bank account not found" });
     renderAt(`/treasury/bank-accounts/${ACCT}`);
-    expect(await screen.findByRole("alert")).toHaveTextContent("TRS-0400");
+    expect(await findAlert()).toHaveTextContent("TRS-0400");
   });
 });
 
@@ -222,7 +223,7 @@ describe("statement import", () => {
 
     choose(new File(["<Document/>"], "stmt.xml", { type: "text/xml" }));
     fireEvent.click(screen.getByRole("button", { name: "Import statement" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Statement STMT-20261022: 2 entries, closing balance 1337.50 EUR.");
+    expect(await findStatus()).toHaveTextContent("Statement STMT-20261022: 2 entries, closing balance 1337.50 EUR.");
     expect(screen.getByText(/expected 411, received 412 \(TRS-0407\)/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open statement" })).toHaveAttribute("href", `/treasury/statements/${STMT}`);
     const form = server.calls[0].body as FormData;
@@ -236,7 +237,7 @@ describe("statement import", () => {
     renderAt(`/treasury/statements/import?bankAccountId=${ACCT}`);
     choose(new File(["<Document/>"], "stmt.xml"));
     fireEvent.click(screen.getByRole("button", { name: "Import statement" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("imported before as statement STMT-20261022; nothing was added (TRS-0405)");
+    expect(await findStatus()).toHaveTextContent("imported before as statement STMT-20261022; nothing was added (TRS-0405)");
   });
 
   it("names the failing entry of an unreadable file and the refusals a user can act on", async () => {
@@ -244,7 +245,7 @@ describe("statement import", () => {
     renderAt(`/treasury/statements/import?bankAccountId=${ACCT}`);
     choose(new File(["<Document/>"], "stmt.xml"));
     fireEvent.click(screen.getByRole("button", { name: "Import statement" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("The file is not a readable camt.053, BAI2 or MT940 statement");
     expect(alert).toHaveTextContent("(entry 7)");
 
@@ -260,12 +261,12 @@ describe("statement import of BAI2 and MT940", () => {
     renderAt(`/treasury/statements/import?bankAccountId=${ACCT}`);
     fireEvent.change(screen.getByLabelText("Statement file"), { target: { files: [new File(["01,BANK,CO/"], "stmt.bai2", { type: "text/plain" })] } });
     fireEvent.click(screen.getByRole("button", { name: "Import statement" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Statement 123456789-2024-10-01");
+    expect(await findStatus()).toHaveTextContent("Statement 123456789-2024-10-01");
     expect((server.calls[0].body as FormData).get("file")).toHaveProperty("name", "stmt.bai2");
 
     server.handler = () => json(422, { code: "TRS-0493", detail: ":61: entry does not match", errors: { line: "12" } });
     fireEvent.click(screen.getByRole("button", { name: "Import statement" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent(":61: entry does not match (line 12)");
 
     server.handler = () => json(422, { code: "TRS-0409", detail: "the statement belongs to another account" });
@@ -301,7 +302,7 @@ describe("statement detail", () => {
   it("shows a load failure with a retry", async () => {
     server.handler = () => json(404, { code: "TRS-0413", detail: "statement not found" });
     renderAt(`/treasury/statements/${STMT}`);
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("TRS-0413");
     expect(within(alert).getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
@@ -327,7 +328,7 @@ describe("cash forecast", () => {
     fireEvent.change(screen.getByLabelText("Buckets"), { target: { value: "weekly" } });
     fill("As of", "2026-10-20");
     fireEvent.click(screen.getByRole("button", { name: "Show forecast" }));
-    const table = await screen.findByRole("table", { name: "Forecast buckets" });
+    const table = await findTable({ name: "Forecast buckets" });
     await waitFor(() => expect(table).toHaveTextContent("60.00 EUR"));
     expect(table).toHaveTextContent("-40.00 EUR");
     expect(screen.getByText("3 entries fall after the last bucket and are not shown.")).toBeInTheDocument();
@@ -357,7 +358,7 @@ describe("cash forecast", () => {
 
     server.handler = () => json(400, { code: "COM-0001", detail: "request failed validation" });
     renderAt(`/treasury/cash-forecast?legalEntityId=${LE}`);
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("Could not load the cash forecast");
     expect(within(alert).getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });

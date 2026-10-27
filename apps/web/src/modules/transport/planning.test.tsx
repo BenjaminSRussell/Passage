@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -81,7 +82,7 @@ describe("screening holds", () => {
   it("lists open holds with the held parties and filters by status", async () => {
     handler = (url) => (url.pathname === "/api/v1/transport/screening-holds" ? json(200, { items: [hold()] }) : undefined);
     const { container } = renderAt("/transport/screening-holds");
-    const table = await screen.findByRole("table", { name: "Screening holds" });
+    const table = await findTable({ name: "Screening holds" });
     expect(within(table).getByText("Northwind (potential match)")).toBeInTheDocument();
     expect(within(table).queryByText(/Acme/)).not.toBeInTheDocument();
     expect(calls[0].url.searchParams.get("status")).toBe("OPEN");
@@ -206,7 +207,7 @@ describe("route plans", () => {
   it("lists plans with dropped stops flagged, and the empty and error states", async () => {
     handler = (url) => (url.pathname === "/api/v1/transport/routes" ? json(200, { items: [summary(), summary({ id: HOLD, droppedCount: 0 })] }) : undefined);
     const { container, unmount } = renderAt("/transport/routes");
-    const table = await screen.findByRole("table", { name: "Route plans" });
+    const table = await findTable({ name: "Route plans" });
     expect(within(table).getByText("1 dropped")).toBeInTheDocument();
     expect(within(table).getByText("All served")).toBeInTheDocument();
     expect(within(table).getAllByText("21.4 km")).toHaveLength(2);

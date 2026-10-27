@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -106,7 +107,7 @@ describe("nonconformance list", () => {
     handler = (url) => (url.pathname === "/api/v1/quality/nonconformances" ? json(200, { items: [ncr] }) : undefined);
     const { container } = renderAt("/quality/nonconformances");
     expect(screen.getByRole("table", { name: "Nonconformances" })).toHaveAttribute("aria-busy", "true");
-    const table = await screen.findByRole("table", { name: "Nonconformances" });
+    const table = await findTable({ name: "Nonconformances" });
     await waitFor(() => expect(within(table).getByText("Major")).toBeInTheDocument());
     expect(within(table).getByRole("link", { name: "Open NCR 0195f0a0" })).toHaveAttribute("href", `/quality/nonconformances/${NCR}`);
     expect(within(table).getByText("10 EA")).toBeInTheDocument();

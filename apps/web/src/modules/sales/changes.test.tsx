@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -197,7 +198,7 @@ describe("Order change history on the order detail", () => {
           }
         : { status: 200, body: order({ version: 4 }), etag: '"4"' };
     renderAt(`/sales/orders/${ORDER_ID}`);
-    const versions = await screen.findByRole("table", { name: "Versions" });
+    const versions = await findTable({ name: "Versions" });
     expect(await within(versions).findByText("customer call")).toBeInTheDocument();
     const diff = screen.getByRole("table", { name: "Changes in version 4" });
     expect(within(diff).getByText("Quantity")).toBeInTheDocument();
@@ -239,7 +240,7 @@ describe("Scheduling release check", () => {
     fireEvent.change(screen.getByLabelText("Date"), { target: { value: "2027-04-15" } });
     fireEvent.change(screen.getByLabelText("Cumulative required"), { target: { value: "1500" } });
     fireEvent.click(screen.getByRole("button", { name: "Check release" }));
-    const lines = await screen.findByRole("table", { name: "Open schedule lines" });
+    const lines = await findTable({ name: "Open schedule lines" });
     expect(within(lines).getByText("2027-04-15")).toBeInTheDocument();
     expect(screen.getByText("300 open over 1 schedule line.")).toBeInTheDocument();
     expect(calls[0].body).toEqual({ cumReceived: "1200", cumShipped: "1200", buckets: [{ date: "2027-04-15", cumRequired: "1500" }] });
@@ -298,7 +299,7 @@ describe("Backorder run preview", () => {
     fireEvent.change(within(line).getByLabelText("Requested date"), { target: { value: "2027-03-01" } });
     fireEvent.change(within(line).getByLabelText("Quantity"), { target: { value: "20" } });
     fireEvent.click(screen.getByRole("button", { name: "Preview run" }));
-    const table = await screen.findByRole("table", { name: "Preview by line" });
+    const table = await findTable({ name: "Preview by line" });
     expect(within(table).getByText("Loses confirmation")).toBeInTheDocument();
     expect(screen.getByText(/take confirmation away from 1 line \(SLS-0015\)/)).toBeInTheDocument();
     expect(calls[0].body).toEqual({

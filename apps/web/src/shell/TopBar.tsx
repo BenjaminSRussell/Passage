@@ -7,8 +7,8 @@ import { Button, Icon } from "./ui";
 
 export interface TopBarProps {
   page: PageMeta;
-  titleRef: RefObject<HTMLHeadingElement>;
-  menuRef: RefObject<HTMLButtonElement>;
+  titleRef: RefObject<HTMLHeadingElement | null>;
+  menuRef: RefObject<HTMLButtonElement | null>;
   drawerOpen: boolean;
   compact: boolean;
   onOpenDrawer(): void;

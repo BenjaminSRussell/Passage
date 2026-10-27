@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { Invoice } from "./api/client";
@@ -77,7 +78,7 @@ describe("Posted invoice", () => {
     expect(screen.getByText("208.33 EUR")).toBeInTheDocument();
     expect(screen.getByRole("table", { name: "Installments" })).toHaveTextContent("173.59");
     expect(screen.getByText("2027-05-09 (last installment)")).toBeInTheDocument();
-    const credits = await screen.findByRole("table", { name: "Credit notes of this invoice" });
+    const credits = await findTable({ name: "Credit notes of this invoice" });
     await waitFor(() => expect(credits).toHaveTextContent("CN-2027-0000002"));
     const listCall = server.calls.find((c) => c.url.pathname === "/api/v1/billing/invoices");
     expect(listCall?.url.searchParams.get("type")).toBe("CREDIT_NOTE");
@@ -157,7 +158,7 @@ describe("New credit note", () => {
     renderAt(`/billing/credit-notes/new?invoice=${INV}`);
     fireEvent.change(await screen.findByLabelText("Reason"), { target: { value: "Price error" } });
     fireEvent.click(screen.getByRole("button", { name: "Save credit note proposal" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("The credit exceeds what the invoice still allows");
     expect(alert).toHaveTextContent("(BIL-0005)");
 
@@ -179,7 +180,7 @@ describe("New credit note", () => {
   it("shows a load error with a retry, and asks for an invoice when none is given", async () => {
     server.handler = () => json(404, { code: "BIL-0100", detail: "invoice not found" });
     renderAt(`/billing/credit-notes/new?invoice=${INV}`);
-    expect(await screen.findByRole("alert")).toHaveTextContent("invoice not found (BIL-0100)");
+    expect(await findAlert()).toHaveTextContent("invoice not found (BIL-0100)");
     server.handler = (url) => (url.pathname === `/api/v1/billing/invoices/${INV}` ? json(200, original) : undefined);
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByLabelText("What to credit")).toBeInTheDocument();
@@ -235,7 +236,7 @@ describe("Credit note detail", () => {
     };
     renderAt(`/billing/invoices/${CN}`);
     fireEvent.click(await screen.findByRole("button", { name: "Post credit note" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("The credit no longer fits the original invoice");
+    expect(await findAlert()).toHaveTextContent("The credit no longer fits the original invoice");
     expect(screen.getByRole("button", { name: "Post credit note" })).toBeInTheDocument();
   });
 });
@@ -244,7 +245,7 @@ describe("Credit notes list", () => {
   it("lists credit notes with their original and filters by status", async () => {
     server.handler = (url) => (url.pathname === "/api/v1/billing/invoices" ? json(200, { items: [creditPosted] }) : undefined);
     const { container } = renderAt("/billing/credit-notes");
-    const table = await screen.findByRole("table", { name: "Credit notes" });
+    const table = await findTable({ name: "Credit notes" });
     await waitFor(() => expect(table).toHaveTextContent("CN-2027-0000002"));
     expect(table).toHaveTextContent("INV-2027-0000001");
     expect(table).toHaveTextContent("119.00 EUR");
@@ -263,7 +264,7 @@ describe("Credit notes list", () => {
         ? json(200, { items: [{ ...creditPosted, id: "cn-older", number: "CN-2027-0000001" }] })
         : json(200, { items: [creditPosted], nextCursor: "c1" });
     renderAt("/billing/credit-notes");
-    const table = await screen.findByRole("table", { name: "Credit notes" });
+    const table = await findTable({ name: "Credit notes" });
     fireEvent.click(await screen.findByRole("button", { name: "Load more credit notes" }));
     await waitFor(() => expect(table).toHaveTextContent("CN-2027-0000001"));
     expect(table).toHaveTextContent("CN-2027-0000002");
@@ -274,7 +275,7 @@ describe("Credit notes list", () => {
   it("shows the error state with a retry", async () => {
     server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty billing.invoice.view" });
     renderAt("/billing/credit-notes");
-    expect(await screen.findByRole("alert")).toHaveTextContent("missing duty billing.invoice.view (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty billing.invoice.view (AUTH-0003)");
     server.handler = () => json(200, { items: [] });
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No credit notes yet")).toBeInTheDocument();

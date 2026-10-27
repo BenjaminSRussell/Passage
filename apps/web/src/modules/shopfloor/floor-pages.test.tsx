@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -85,7 +86,7 @@ describe("Machines", () => {
   it("lists machines with their resource, cycle time and last sequence", async () => {
     handler = (url) => (url.pathname.endsWith("/machines") ? json(200, { items: [machine] }) : undefined);
     const { container } = renderAt("/shopfloor/machines");
-    const table = await screen.findByRole("table", { name: "Machines" });
+    const table = await findTable({ name: "Machines" });
     await waitFor(() => expect(table).toHaveTextContent("M-101"));
     expect(table).toHaveTextContent("60 s");
     expect(table).toHaveTextContent("300 s");
@@ -126,7 +127,7 @@ describe("Machines", () => {
     fill("Resource id", RESOURCE);
     fill("Ideal cycle time (seconds)", "60");
     fireEvent.click(screen.getByRole("button", { name: "Register machine" }));
-    expect(await screen.findByRole("table", { name: "Machines" })).toBeInTheDocument();
+    expect(await findTable({ name: "Machines" })).toBeInTheDocument();
     const [create] = posts("/machines");
     expect(create.body).toEqual({ machineId: "M-101", resourceId: RESOURCE, siteId: null, idealCycleSeconds: "60" });
     expect(header(create, "Idempotency-Key")).toMatch(/^[0-9a-f-]{36}$/);
@@ -159,7 +160,7 @@ describe("Downtimes", () => {
       return undefined;
     };
     const { container } = renderAt("/shopfloor/downtimes");
-    const table = await screen.findByRole("table", { name: "Downtimes" });
+    const table = await findTable({ name: "Downtimes" });
     await waitFor(() => expect(table).toHaveTextContent("Not coded"));
     expect(calls[0].url.search).toBe("?open=true");
     expect(within(table).getByText("Raised")).toBeInTheDocument();
@@ -208,7 +209,7 @@ describe("Andon board", () => {
   it("lists open alerts with a link to code the downtime", async () => {
     handler = (url) => (url.pathname.endsWith("/andon") ? json(200, { items: [alert] }) : undefined);
     const { container } = renderAt("/shopfloor/andon");
-    const table = await screen.findByRole("table", { name: "Open andon alerts" });
+    const table = await findTable({ name: "Open andon alerts" });
     await waitFor(() => expect(table).toHaveTextContent("Machine down over 10 min"));
     expect(within(table).getByRole("link", { name: "Code reason" })).toHaveAttribute("href", `/shopfloor/downtimes?downtime=${DOWN}&open=false`);
     expect(screen.getByRole("list", { name: "Andon summary" })).toHaveTextContent("Open alerts 1");
@@ -252,7 +253,7 @@ describe("OEE", () => {
       return undefined;
     };
     const { container } = renderAt("/shopfloor/oee");
-    const table = await screen.findByRole("table", { name: "OEE buckets" });
+    const table = await findTable({ name: "OEE buckets" });
     await waitFor(() => expect(table).toHaveTextContent("84.0 %"));
     expect(table).toHaveTextContent("M-101");
     expect(table).toHaveTextContent("87.5 %");
@@ -301,7 +302,7 @@ describe("Payroll export", () => {
       return undefined;
     };
     const { container } = renderAt("/shopfloor/pay-exports");
-    const table = await screen.findByRole("table", { name: "Export batches" });
+    const table = await findTable({ name: "Export batches" });
     await waitFor(() => expect(table).toHaveTextContent("2026-10-19 to 2026-10-25"));
     expect(pageViolations(container)).toEqual([]);
 

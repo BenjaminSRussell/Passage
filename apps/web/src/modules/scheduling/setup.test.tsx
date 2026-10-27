@@ -1,3 +1,4 @@
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -140,7 +141,7 @@ describe("Campaign list", () => {
   it("lists campaigns with the resource code and filters by status", async () => {
     handler = withResources((url) => (url.pathname.endsWith("/campaigns") ? json(200, { items: [planned] }) : undefined));
     const { container } = renderAt("/scheduling/campaigns");
-    const table = await screen.findByRole("table", { name: "Campaigns" });
+    const table = await findTable({ name: "Campaigns" });
     await waitFor(() => expect(table).toHaveTextContent("MIX-1"));
     expect(table).toHaveTextContent("Planned");
     expect(table).toHaveTextContent("50 min");
@@ -156,7 +157,7 @@ describe("Campaign list", () => {
 
     handler = () => json(403, { code: "AUTH-0003", detail: "missing duty scheduling.read" });
     renderAt("/scheduling/campaigns");
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("missing duty scheduling.read (AUTH-0003)");
     expect(within(alert).getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
@@ -294,7 +295,7 @@ describe("Campaign detail", () => {
     });
     renderAt(`/scheduling/campaigns/${CAMPAIGN}`);
     fireEvent.click(await screen.findByRole("button", { name: "Start" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("Someone else changed this campaign");
     expect(header(lastCall("POST", ":start")!, "If-Match")).toBe('"4"');
     fireEvent.click(within(alert).getByRole("button", { name: "Reload" }));
@@ -383,7 +384,7 @@ describe("Campaign detail", () => {
     expect(await screen.findByText("Nearest-neighbour sequence kept")).toBeInTheDocument();
     expect(screen.queryByText("Changeovers without a matrix entry")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
-    const alert = await screen.findByRole("alert");
+    const alert = await findAlert();
     expect(alert).toHaveTextContent("Sequence the campaign again before you start it");
     expect(alert).toHaveTextContent("SCHED-0123");
   });
@@ -427,7 +428,7 @@ describe("Campaign detail", () => {
     const form = await screen.findByRole("form", { name: "Allocate changeover cost" });
     fireEvent.change(within(form).getByLabelText("Cost to allocate"), { target: { value: "900.00" } });
     fireEvent.click(within(form).getByRole("button", { name: "Allocate" }));
-    const table = await screen.findByRole("table", { name: "Allocation" });
+    const table = await findTable({ name: "Allocation" });
     expect(within(table).getAllByRole("row").map((r) => r.textContent)).toEqual([
       "OrderWeightAmount (USD)",
       "b1000000100150.00",
@@ -484,7 +485,7 @@ describe("Setup matrices", () => {
   it("lists matrices with the resource code and filters by resource", async () => {
     handler = withResources((url) => (url.pathname.endsWith("/setup-matrices") ? json(200, { items: [matrix] }) : undefined));
     const { container } = renderAt("/scheduling/setup-matrices");
-    const table = await screen.findByRole("table", { name: "Setup matrices" });
+    const table = await findTable({ name: "Setup matrices" });
     await waitFor(() => expect(table).toHaveTextContent("MIX-1"));
     fireEvent.change(screen.getByLabelText("Resource"), { target: { value: MIX } });
     await waitFor(() => expect(lastCall("GET", "/setup-matrices")?.url.searchParams.get("resourceId")).toBe(MIX));
@@ -494,7 +495,7 @@ describe("Setup matrices", () => {
   it("shows a missing matrix as an error", async () => {
     handler = withResources((url) => (url.pathname.includes("/setup-matrices/") ? json(404, { code: "SCHED-0110", detail: "setup matrix not found" }) : undefined));
     renderAt(`/scheduling/setup-matrices/${MATRIX}`);
-    expect(await screen.findByRole("alert")).toHaveTextContent("setup matrix not found (SCHED-0110)");
+    expect(await findAlert()).toHaveTextContent("setup matrix not found (SCHED-0110)");
   });
 });
 
@@ -561,7 +562,7 @@ describe("Resource networks", () => {
       { fromResourceId: MIX, toResourceId: FILL, transferMinutes: 0, maxWaitMinutes: 120 },
       { fromResourceId: FILL, toResourceId: LINE, transferMinutes: 0, maxWaitMinutes: null },
     ]);
-    const table = await screen.findByRole("table", { name: "Allowed transitions" });
+    const table = await findTable({ name: "Allowed transitions" });
     await waitFor(() => expect(table).toHaveTextContent("LINE-1"));
     expect(table).toHaveTextContent("No limit");
   });
@@ -587,7 +588,7 @@ describe("Cleanout rules", () => {
     expect(describeTriggers(rule)).toBe("After 5 batches · at campaign end");
     handler = (url) => (url.pathname.endsWith("/cleanout-rules") ? json(200, { items: [rule] }) : undefined);
     const { container } = renderAt("/scheduling/cleanout-rules");
-    const table = await screen.findByRole("table", { name: "Cleanout rules" });
+    const table = await findTable({ name: "Cleanout rules" });
     await waitFor(() => expect(table).toHaveTextContent("After 5 batches"));
     expect(pageViolations(container)).toEqual([]);
   });
@@ -684,7 +685,7 @@ describe("Capacity blocks", () => {
     fireEvent.change(screen.getByLabelText("Priority"), { target: { value: "10" } });
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Create block" }));
-    const table = await screen.findByRole("table", { name: "Capacity blocks" });
+    const table = await findTable({ name: "Capacity blocks" });
     await waitFor(() => expect(table).toHaveTextContent("color = white"));
     expect(table).toHaveTextContent("Weekly: Mon 06:00–14:00");
     const post = lastCall("POST", "/capacity-blocks")!;

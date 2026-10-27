@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -212,7 +213,7 @@ describe("centralized payment reversal", () => {
     fireEvent.click(screen.getByRole("button", { name: "Preview postings" }));
     await screen.findByText("Balanced in each entity");
     fireEvent.click(screen.getByRole("button", { name: "Preview reversal" }));
-    const table = await screen.findByRole("table", { name: "Reversal legs" });
+    const table = await findTable({ name: "Reversal legs" });
     expect(calls[1].url.pathname).toBe("/api/v1/interco/centralized-payments/reversals:preview");
     expect(calls[1].body).toEqual({ ...(calls[0].body as object), pairId });
     expect(bodyRows(table).map(cells)).toEqual([

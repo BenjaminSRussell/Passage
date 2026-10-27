@@ -1,3 +1,4 @@
+import { findAlert } from "../../test-utils";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MetadataForm } from "./MetadataForm";
@@ -47,7 +48,7 @@ describe("MetadataForm", () => {
     render(<MetadataForm entity="Vendor" />);
 
     expect(screen.getByText("Loading Vendor metadata…")).toBeInTheDocument();
-    expect(await screen.findByRole("alert")).toHaveTextContent("We couldn't load this form");
+    expect(await findAlert()).toHaveTextContent("We couldn't load this form");
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByLabelText("Code")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save Vendor" })).toBeInTheDocument();

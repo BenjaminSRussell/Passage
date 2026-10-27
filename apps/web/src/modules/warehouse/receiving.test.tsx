@@ -1,3 +1,4 @@
+import { findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { Receipt, ReceiptSummary, Received, Work } from "./api/client";
@@ -61,7 +62,7 @@ describe("ReceiptsPage", () => {
       return undefined;
     };
     const { container } = renderAt(`/warehouse/receipts?warehouse=${WH}`);
-    const table = await screen.findByRole("table", { name: "Receipts" });
+    const table = await findTable({ name: "Receipts" });
     await waitFor(() => expect(table).toHaveTextContent("ASN-3"));
     expect(table).toHaveTextContent("1 of 3");
     expect(table).toHaveTextContent("Partially received");
@@ -90,7 +91,7 @@ describe("ReceiptsPage", () => {
     expect(await screen.findByText("missing duty warehouse.inquiry.view (AUTH-0003)")).toBeInTheDocument();
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-    expect(await screen.findByRole("table", { name: "Receipts" })).toHaveTextContent("ASN-3");
+    expect(await findTable({ name: "Receipts" })).toHaveTextContent("ASN-3");
   });
 });
 
@@ -197,7 +198,7 @@ describe("ReceiptDetailPage", () => {
       return undefined;
     };
     const { container } = renderAt(`/warehouse/receipts/${RECEIPT}`);
-    const table = await screen.findByRole("table", { name: "Pallets" });
+    const table = await findTable({ name: "Pallets" });
     expect(table).toHaveTextContent("LP-2");
     expect(pageViolations(container)).toEqual([]);
 
