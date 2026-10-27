@@ -7,9 +7,11 @@ info:
     the kiosk with client UUIDs, pay calculation per worker-day, approval, and
     the lists the supervisor approval screen reads. Slice 2: machines, edge
     machine-event ingest, downtimes and reason codes, andon, the OEE series and
-    payroll export batches. Commands that change
-    state (except the registration batch, which is idempotent per item id)
-    require an `Idempotency-Key` header; a repeated key returns the stored
+    payroll export batches. Slice 4: process messages (record, monitor, delivery
+    reports from the consuming contexts, reprocess). Commands that change state
+    (except the registration batch, idempotent per item id, and process message
+    creation, idempotent per source and sourceMessageId) require an
+    `Idempotency-Key` header; a repeated key returns the stored
     outcome with `Idempotent-Replayed: true`. Errors are RFC 9457 problem
     details (application/problem+json) with a stable `code`; see README.md.
 servers:
@@ -652,6 +654,207 @@ paths:
         "403":
           $ref: "#/components/responses/Problem"
         "404":
+          $ref: "#/components/responses/Problem"
+  /api/v1/shopfloor/process-messages:
+    post:
+      operationId: createProcessMessage
+      summary: Record a process message (FR-25.17, BR-25.13)
+      description: |
+        From a kiosk PI sheet, the edge connector or manual entry. The category decides the
+        destinations. Numeric values outside their limits are flagged (`outOfLimit`) and
+        accepted, unless the category rejects out-of-limit values (SF-0114). Idempotent by
+        (source, sourceMessageId): a replay answers 200 with the stored message and
+        `duplicate: true`, so no Idempotency-Key is needed.
+      x-passage-duty: shopfloor.process.create
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NewProcessMessage"
+      responses:
+        "201":
+          description: Stored; deliveries are pending except Kafka, which is the outbox event.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProcessIngest"
+        "200":
+          description: Replay of a stored (source, sourceMessageId); nothing was written.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProcessIngest"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+    get:
+      operationId: listProcessMessages
+      summary: Process message monitor, newest first (CO54 equivalent)
+      x-passage-duty: shopfloor.view
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/ProcessMessageStatus"
+        - name: category
+          in: query
+          schema:
+            $ref: "#/components/schemas/ProcessCategory"
+        - name: destination
+          in: query
+          description: Messages that route to this destination.
+          schema:
+            $ref: "#/components/schemas/ProcessDestination"
+        - name: orderId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+      responses:
+        "200":
+          description: Messages with their per-destination deliveries.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ProcessMessage"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /api/v1/shopfloor/process-messages/{id}:
+    get:
+      operationId: getProcessMessage
+      summary: One process message with its deliveries
+      x-passage-duty: shopfloor.view
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The message.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProcessMessage"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /api/v1/shopfloor/process-messages/{id}/deliveries/{destination}:report:
+    post:
+      operationId: reportProcessMessageDelivery
+      summary: Report a destination outcome (consuming context)
+      description: |
+        Called by the context that owns the destination after it handled
+        `processmessage.received`. A failure waits 1, 5, 15 and then 60 minutes; after the
+        fifth failed attempt the destination is `error` until reprocessed. A delivered
+        destination is final; reporting again changes nothing. The message becomes
+        `delivered` (and `processmessage.delivered` is published once) when every
+        destination is delivered.
+      x-passage-duty: shopfloor.process.deliver
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: destination
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/ProcessDestination"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeliveryReport"
+      responses:
+        "200":
+          description: The message after the report.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProcessMessage"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /api/v1/shopfloor/process-messages/{id}:reprocess:
+    post:
+      operationId: reprocessProcessMessage
+      summary: Send a destination in error again, with a reason
+      description: Only a destination in `error` can be reprocessed (SF-0116). It returns to pending with its attempts reset, and `processmessage.received` is published naming that destination alone.
+      x-passage-duty: shopfloor.process.create
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Reprocess"
+      responses:
+        "200":
+          description: The message after the reprocess.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProcessMessage"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
           $ref: "#/components/responses/Problem"
   /healthz:
     get:
@@ -1315,6 +1518,159 @@ components:
           description: |
             Present on create and on get. Header batchId,workerId,workDate,payType,hours,multiplier,amount,currency;
             decimals keep their stored scale.
+    ProcessCategory:
+      type: string
+      enum: [phase-start, phase-end, consumption, yield, process-data, quality-result, deviation, order-status, custom]
+    ProcessDestination:
+      type: string
+      enum: [ebr, journal, quality, kafka, webhook]
+    ProcessMessageStatus:
+      type: string
+      enum: [received, delivered, partially-delivered, error]
+    Characteristic:
+      type: object
+      required: [name, type, value]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: Unique within the message.
+        type:
+          type: string
+          enum: [numeric, text, boolean]
+        value:
+          type: string
+          description: Decimal string for numeric, "true" or "false" for boolean, at most 500 characters for text.
+        min:
+          type: string
+          description: Decimal lower limit (numeric only).
+        max:
+          type: string
+          description: Decimal upper limit (numeric only).
+        unit:
+          type: string
+        outOfLimit:
+          type: boolean
+          readOnly: true
+          description: Set by the server when a numeric value is outside its limits.
+    NewProcessMessage:
+      type: object
+      required: [source, sourceMessageId, categoryCode, orderId, occurredAt]
+      properties:
+        source:
+          type: string
+          enum: [kiosk, edge, manual]
+        sourceMessageId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: Unique per source; a replay returns the stored message.
+        categoryCode:
+          $ref: "#/components/schemas/ProcessCategory"
+        orderId:
+          type: string
+          format: uuid
+        phasePath:
+          type: string
+          maxLength: 255
+          description: ISA-88 path, procedure/unit procedure/operation/phase.
+        occurredAt:
+          type: string
+          format: date-time
+        values:
+          type: array
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/Characteristic"
+    ProcessDelivery:
+      type: object
+      required: [destination, status, attempts, lastError, nextAttemptAt, deliveredAt]
+      properties:
+        destination:
+          $ref: "#/components/schemas/ProcessDestination"
+        status:
+          type: string
+          enum: [pending, delivered, error]
+        attempts:
+          type: integer
+          minimum: 0
+          maximum: 5
+        lastError:
+          type: [string, "null"]
+        nextAttemptAt:
+          type: [string, "null"]
+          format: date-time
+        deliveredAt:
+          type: [string, "null"]
+          format: date-time
+    ProcessMessage:
+      type: object
+      required: [id, source, sourceMessageId, categoryCode, orderId, phasePath, occurredAt, receivedAt, status, outOfLimit, values, deliveries]
+      properties:
+        id:
+          type: string
+          format: uuid
+        source:
+          type: string
+          enum: [kiosk, edge, manual]
+        sourceMessageId:
+          type: string
+        categoryCode:
+          $ref: "#/components/schemas/ProcessCategory"
+        orderId:
+          type: string
+          format: uuid
+        phasePath:
+          type: string
+        occurredAt:
+          type: string
+          format: date-time
+        receivedAt:
+          type: string
+          format: date-time
+        status:
+          $ref: "#/components/schemas/ProcessMessageStatus"
+        outOfLimit:
+          type: boolean
+          description: At least one value is outside its limits (BR-25.13).
+        values:
+          type: array
+          items:
+            $ref: "#/components/schemas/Characteristic"
+        deliveries:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProcessDelivery"
+    ProcessIngest:
+      type: object
+      required: [message, duplicate]
+      properties:
+        message:
+          $ref: "#/components/schemas/ProcessMessage"
+        duplicate:
+          type: boolean
+    DeliveryReport:
+      type: object
+      required: [outcome]
+      properties:
+        outcome:
+          type: string
+          enum: [delivered, failed]
+        error:
+          type: string
+          maxLength: 1000
+          description: Why the destination failed; kept as lastError.
+    Reprocess:
+      type: object
+      required: [destination, reason]
+      properties:
+        destination:
+          $ref: "#/components/schemas/ProcessDestination"
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
     Problem:
       type: object
       description: RFC 9457 problem details with Passage extensions.

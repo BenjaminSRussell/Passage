@@ -5,10 +5,13 @@ import { BundleDetailPage } from "./BundleDetailPage";
 import { DowntimesPage } from "./DowntimesPage";
 import { MachinesPage } from "./MachinesPage";
 import { NewMachinePage } from "./NewMachinePage";
+import { NewProcessMessagePage } from "./NewProcessMessagePage";
 import { NewWorkerPage } from "./NewWorkerPage";
 import { OeePage } from "./OeePage";
 import { PayExportDetailPage } from "./PayExportDetailPage";
 import { PayExportsPage } from "./PayExportsPage";
+import { ProcessMessageDetailPage } from "./ProcessMessageDetailPage";
+import { ProcessMessagesPage } from "./ProcessMessagesPage";
 import { TimeApprovalPage } from "./TimeApprovalPage";
 import { WorkerDetailPage } from "./WorkerDetailPage";
 import { WorkersPage } from "./WorkersPage";
@@ -16,7 +19,7 @@ import { WorkersPage } from "./WorkersPage";
 const shopfloor: PassageModule = {
   id: "shopfloor",
   title: "Shop floor",
-  description: "Workers and their time, job bundles, pay approval and payroll export; machines, downtimes, andon alerts and OEE.",
+  description: "Workers and their time, job bundles, pay approval and payroll export; machines, downtimes, andon alerts and OEE; process messages and their deliveries.",
   routes: [
     { path: "/shopfloor/workers", element: createElement(WorkersPage), handle: { title: "Workers" } },
     { path: "/shopfloor/workers/new", element: createElement(NewWorkerPage), handle: { title: "New worker" } },
@@ -30,6 +33,9 @@ const shopfloor: PassageModule = {
     { path: "/shopfloor/downtimes", element: createElement(DowntimesPage), handle: { title: "Downtimes" } },
     { path: "/shopfloor/andon", element: createElement(AndonPage), handle: { title: "Andon board" } },
     { path: "/shopfloor/oee", element: createElement(OeePage), handle: { title: "OEE" } },
+    { path: "/shopfloor/process-messages", element: createElement(ProcessMessagesPage), handle: { title: "Process messages" } },
+    { path: "/shopfloor/process-messages/new", element: createElement(NewProcessMessagePage), handle: { title: "Record process message" } },
+    { path: "/shopfloor/process-messages/:id", element: createElement(ProcessMessageDetailPage), handle: { title: "Process message" } },
   ],
   nav: [
     { label: "Workers", to: "/shopfloor/workers", duty: "shopfloor.view" },
@@ -39,6 +45,7 @@ const shopfloor: PassageModule = {
     { label: "Downtimes", to: "/shopfloor/downtimes", duty: "shopfloor.view" },
     { label: "Andon board", to: "/shopfloor/andon", duty: "shopfloor.view" },
     { label: "OEE", to: "/shopfloor/oee", duty: "shopfloor.view" },
+    { label: "Process messages", to: "/shopfloor/process-messages", duty: "shopfloor.view" },
   ],
 };
 

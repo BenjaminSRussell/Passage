@@ -15,6 +15,9 @@ import {
   listDowntimes,
   describeProblem,
   listWorkerDays,
+  listProcessMessages,
+  createProcessMessage,
+  reprocessProcessMessage,
   MAX_BATCH,
   ShopfloorApiError,
   type RegistrationInput,
@@ -49,6 +52,9 @@ describe("shopfloor module", () => {
       "/shopfloor/downtimes",
       "/shopfloor/andon",
       "/shopfloor/oee",
+      "/shopfloor/process-messages",
+      "/shopfloor/process-messages/new",
+      "/shopfloor/process-messages/:id",
     ]);
   });
 
@@ -61,6 +67,7 @@ describe("shopfloor module", () => {
       { label: "Downtimes", to: "/shopfloor/downtimes", duty: "shopfloor.view" },
       { label: "Andon board", to: "/shopfloor/andon", duty: "shopfloor.view" },
       { label: "OEE", to: "/shopfloor/oee", duty: "shopfloor.view" },
+      { label: "Process messages", to: "/shopfloor/process-messages", duty: "shopfloor.view" },
     ]);
   });
 
@@ -176,6 +183,36 @@ describe("shopfloor floor client", () => {
     ]);
     expect(calls.map(([, init]) => new Headers(init.headers).get("Idempotency-Key"))).toEqual(["m-key", "d-key", "e-key"]);
     expect(JSON.parse(calls[1][1].body as string)).toEqual({ reasonCode: "JAM" });
+  });
+});
+
+describe("shopfloor process message client", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+  beforeEach(() => {
+    fetchMock = vi.fn(async () => new Response(JSON.stringify({ items: [] }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("lists with the monitor filters and drops empty ones", async () => {
+    await listProcessMessages({ status: "error", category: "quality-result", destination: "", limit: 20 });
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/shopfloor/process-messages?status=error&category=quality-result&limit=20");
+  });
+
+  it("records without an Idempotency-Key (the source message id is the key) and reprocesses with one", async () => {
+    await createProcessMessage({
+      source: "manual",
+      sourceMessageId: "s1",
+      categoryCode: "custom",
+      orderId: item.workerId,
+      occurredAt: "2026-10-21T08:00:00.000Z",
+      values: [],
+    });
+    await reprocessProcessMessage("m/1", { destination: "quality", reason: "QMS back" }, "r-key");
+    const calls = fetchMock.mock.calls as unknown as [string, RequestInit][];
+    expect(calls.map(([url]) => url)).toEqual(["/api/v1/shopfloor/process-messages", "/api/v1/shopfloor/process-messages/m%2F1:reprocess"]);
+    expect(calls.map(([, init]) => new Headers(init.headers).get("Idempotency-Key"))).toEqual([null, "r-key"]);
+    expect(JSON.parse(calls[1][1].body as string)).toEqual({ destination: "quality", reason: "QMS back" });
   });
 });
 

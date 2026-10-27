@@ -189,3 +189,52 @@ func TestHTTP_OfflineBundleReplay(t *testing.T) {
 		t.Fatalf("late member: %d %s", rec.Code, rec.Body.String())
 	}
 }
+
+// FR-25.17 over HTTP and Postgres: a kiosk quality result is stored once per
+// (source, sourceMessageId), the w33 consumer reports a failure under an
+// Idempotency-Key (a retried report answers from the stored outcome and does not
+// count twice), and the monitor finds the message by status and destination. Kafka
+// is delivered at commit, so a message with other destinations pending is
+// partially delivered from the start.
+func TestHTTP_ProcessMessageMonitor(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	h := newRouter(store.New(app))
+	duties := "shopfloor.process.create,shopfloor.process.deliver,shopfloor.view"
+	body := fmt.Sprintf(`{"source":"kiosk","sourceMessageId":"pi-1","categoryCode":"quality-result","orderId":%q,"occurredAt":"2026-10-20T09:00:00Z",
+		"values":[{"name":"ph","type":"numeric","value":"7.9","min":"6.5","max":"7.5"}]}`, jobID)
+	first := call(t, h, http.MethodPost, "/api/v1/shopfloor/process-messages", body, duties)
+	again := call(t, h, http.MethodPost, "/api/v1/shopfloor/process-messages", body, duties)
+	if first.Code != http.StatusCreated || again.Code != http.StatusOK {
+		t.Fatalf("create %d / replay %d: %s", first.Code, again.Code, again.Body.String())
+	}
+	var created, replayed store.ProcessIngest
+	_ = json.Unmarshal(first.Body.Bytes(), &created)
+	_ = json.Unmarshal(again.Body.Bytes(), &replayed)
+	if !replayed.Duplicate || replayed.Message.ID != created.Message.ID || !created.Message.OutOfLimit {
+		t.Fatalf("created %+v replayed %+v", created, replayed)
+	}
+	report := "/api/v1/shopfloor/process-messages/" + created.Message.ID + "/deliveries/quality:report"
+	key := map[string]string{"Idempotency-Key": "w33-1"}
+	r1 := callWith(t, h, http.MethodPost, report, `{"outcome":"failed","error":"QMS unavailable"}`, duties, key)
+	r2 := callWith(t, h, http.MethodPost, report, `{"outcome":"failed","error":"QMS unavailable"}`, duties, key)
+	if r1.Code != http.StatusOK || r2.Code != http.StatusOK || r2.Header().Get("Idempotent-Replayed") != "true" {
+		t.Fatalf("report %d / replay %d %s", r1.Code, r2.Code, r2.Body.String())
+	}
+	list := call(t, h, http.MethodGet, "/api/v1/shopfloor/process-messages?status=partially-delivered&destination=quality", "", duties)
+	var out struct{ Items []store.ProcessMessage }
+	_ = json.Unmarshal(list.Body.Bytes(), &out)
+	if len(out.Items) != 1 {
+		t.Fatalf("monitor: %s", list.Body.String())
+	}
+	for _, d := range out.Items[0].Deliveries {
+		if d.Destination == "quality" && (d.Attempts != 1 || d.LastError == nil || *d.LastError != "QMS unavailable") {
+			t.Fatalf("quality delivery %+v", d)
+		}
+	}
+	if rec := call(t, h, http.MethodPost, "/api/v1/shopfloor/process-messages/"+created.Message.ID+":reprocess", `{"destination":"quality","reason":"try"}`, duties); rec.Code != http.StatusUnprocessableEntity || problemCode(t, rec) != "SF-0116" {
+		t.Fatalf("reprocess of a pending destination: %d %s", rec.Code, rec.Body.String())
+	}
+}

@@ -7,7 +7,7 @@ info:
     outbox (Debezium relays to Kafka), written in the same transaction as the
     change. Source is `shopfloor`; the Kafka key is the aggregate id
     (registration id, worker id for payday approvals, batch id for payroll
-    exports, alert id for andon).
+    exports, alert id for andon, message id for process messages).
     Schema evolution is additive only.
 defaultContentType: application/cloudevents+json
 channels:
@@ -31,7 +31,31 @@ channels:
     messages:
       andonRaised:
         $ref: "#/components/messages/AndonRaised"
+  processMessages:
+    address: passage.shopfloor.process-messages
+    description: |
+      The Kafka destination of process messages (FR-25.17, PRD topic
+      `shopfloor.process-messages`). Consuming contexts (w21 journal, w33 quality,
+      w24 EBR, w35 webhook) act on the destinations they own and report the
+      outcome to POST /process-messages/{id}/deliveries/{destination}:report.
+    messages:
+      processMessageReceived:
+        $ref: "#/components/messages/ProcessMessageReceived"
+      processMessageDelivered:
+        $ref: "#/components/messages/ProcessMessageDelivered"
 operations:
+  publishProcessMessageReceived:
+    action: send
+    channel:
+      $ref: "#/channels/processMessages"
+    messages:
+      - $ref: "#/channels/processMessages/messages/processMessageReceived"
+  publishProcessMessageDelivered:
+    action: send
+    channel:
+      $ref: "#/channels/processMessages"
+    messages:
+      - $ref: "#/channels/processMessages/messages/processMessageDelivered"
   publishPaydayExported:
     action: send
     channel:
@@ -78,7 +102,88 @@ components:
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/AndonRaisedData"
+    ProcessMessageReceived:
+      name: dev.passage.shopfloor.processmessage.received.v1
+      contentType: application/cloudevents+json
+      description: Published when a process message is stored, and again when a destination in error is reprocessed (then `destinations` holds only that destination).
+      payload:
+        $ref: "#/components/schemas/ProcessMessageReceivedData"
+    ProcessMessageDelivered:
+      name: dev.passage.shopfloor.processmessage.delivered.v1
+      contentType: application/cloudevents+json
+      description: Published once, when every destination of the message is delivered.
+      payload:
+        $ref: "#/components/schemas/ProcessMessageDeliveredData"
   schemas:
+    ProcessMessageReceivedData:
+      type: object
+      required: [messageId, source, sourceMessageId, categoryCode, orderId, phasePath, destinations, values, outOfLimit, occurredAt]
+      properties:
+        messageId:
+          type: string
+          format: uuid
+        source:
+          type: string
+          enum: [kiosk, edge, manual]
+        sourceMessageId:
+          type: string
+        categoryCode:
+          type: string
+          enum: [phase-start, phase-end, consumption, yield, process-data, quality-result, deviation, order-status, custom]
+        orderId:
+          type: string
+          format: uuid
+        phasePath:
+          type: string
+          description: ISA-88 path of the phase; empty when the message is not tied to a phase.
+        destinations:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            enum: [ebr, journal, quality, kafka, webhook]
+        values:
+          type: array
+          items:
+            $ref: "#/components/schemas/Characteristic"
+        outOfLimit:
+          type: boolean
+          description: A value is outside its limits; the EBR consumer records an exception (BR-25.13).
+        occurredAt:
+          type: string
+          format: date-time
+    ProcessMessageDeliveredData:
+      type: object
+      required: [messageId, categoryCode, orderId]
+      properties:
+        messageId:
+          type: string
+          format: uuid
+        categoryCode:
+          type: string
+        orderId:
+          type: string
+          format: uuid
+    Characteristic:
+      type: object
+      required: [name, type, value, outOfLimit]
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+          enum: [numeric, text, boolean]
+        value:
+          type: string
+          description: Decimal string for numeric, "true" or "false" for boolean.
+        min:
+          type: string
+        max:
+          type: string
+        unit:
+          type: string
+        outOfLimit:
+          type: boolean
     PaydayExportedData:
       type: object
       required: [batchId, fromDate, toDate, lineCount, createdBy, lines]

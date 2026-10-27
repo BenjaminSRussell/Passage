@@ -406,3 +406,116 @@ export function listPayExports(signal?: AbortSignal): Promise<PayExport[]> {
 export function getPayExport(id: string, signal?: AbortSignal): Promise<PayExport> {
   return send<PayExport>(`/pay-exports/${encodeURIComponent(id)}`, {}, signal);
 }
+
+// --- Process messages (slice 4, FR-25.17) ---
+
+export type ProcessSource = "kiosk" | "edge" | "manual";
+
+export type ProcessCategory =
+  | "phase-start"
+  | "phase-end"
+  | "consumption"
+  | "yield"
+  | "process-data"
+  | "quality-result"
+  | "deviation"
+  | "order-status"
+  | "custom";
+
+export type ProcessDestination = "ebr" | "journal" | "quality" | "kafka" | "webhook";
+
+export type ProcessStatus = "received" | "delivered" | "partially-delivered" | "error";
+
+export type CharacteristicType = "numeric" | "text" | "boolean";
+
+export interface Characteristic {
+  name: string;
+  type: CharacteristicType;
+  /** Decimal string for numeric, "true" or "false" for boolean. */
+  value: string;
+  /** Decimal string limits, numeric only. */
+  min?: string | null;
+  max?: string | null;
+  unit?: string | null;
+  /** Set by the server when a numeric value is outside its limits (BR-25.13). */
+  outOfLimit?: boolean;
+}
+
+export interface NewProcessMessage {
+  source: ProcessSource;
+  /** Unique per source; a replay returns the stored message. */
+  sourceMessageId: string;
+  categoryCode: ProcessCategory;
+  orderId: string;
+  phasePath?: string;
+  occurredAt: string;
+  values: Characteristic[];
+}
+
+export interface ProcessDelivery {
+  destination: ProcessDestination;
+  status: "pending" | "delivered" | "error";
+  attempts: number;
+  lastError: string | null;
+  nextAttemptAt: string | null;
+  deliveredAt: string | null;
+}
+
+export interface ProcessMessage {
+  id: string;
+  source: ProcessSource;
+  sourceMessageId: string;
+  categoryCode: ProcessCategory;
+  orderId: string;
+  phasePath: string;
+  occurredAt: string;
+  receivedAt: string;
+  status: ProcessStatus;
+  outOfLimit: boolean;
+  values: Characteristic[];
+  deliveries: ProcessDelivery[];
+}
+
+export interface ProcessIngest {
+  message: ProcessMessage;
+  duplicate: boolean;
+}
+
+export interface ProcessFilter {
+  status?: ProcessStatus | "";
+  category?: ProcessCategory | "";
+  destination?: ProcessDestination | "";
+  orderId?: string;
+  limit?: number;
+}
+
+export function listProcessMessages(filter: ProcessFilter = {}, signal?: AbortSignal): Promise<ProcessMessage[]> {
+  return items<ProcessMessage>(
+    `/process-messages${query({
+      status: filter.status,
+      category: filter.category,
+      destination: filter.destination,
+      orderId: filter.orderId,
+      limit: filter.limit,
+    })}`,
+    signal,
+  );
+}
+
+export function getProcessMessage(id: string, signal?: AbortSignal): Promise<ProcessMessage> {
+  return send<ProcessMessage>(`/process-messages/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** Records a process message. No Idempotency-Key: (source, sourceMessageId) makes a resend a replay. */
+export function createProcessMessage(input: NewProcessMessage): Promise<ProcessIngest> {
+  return post<ProcessIngest>("/process-messages", input);
+}
+
+/** Sends a destination in error again; keep one key per form so a retried submit replays. */
+export function reprocessProcessMessage(
+  id: string,
+  input: { destination: ProcessDestination; reason: string },
+  key: string = newKey(),
+): Promise<ProcessMessage> {
+  return post<ProcessMessage>(`/process-messages/${encodeURIComponent(id)}:reprocess`, input, key);
+}

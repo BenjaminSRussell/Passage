@@ -1,9 +1,12 @@
 package events
 
 import (
+	"time"
+
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/events"
+	"github.com/BenjaminSRussell/passage/services/shopfloor/internal/domain"
 )
 
 // Context is the bounded context segment of every event type this service emits.
@@ -14,11 +17,40 @@ var (
 	PaydayApproved     = events.Type(Context, "payday", "approved", 1)
 	PaydayExported     = events.Type(Context, "payday", "exported", 1)
 	AndonRaised        = events.Type(Context, "andon", "raised", 1)
+	// The entity is one word: the naming rule allows only [a-z0-9] per segment.
+	ProcessMessageReceived  = events.Type(Context, "processmessage", "received", 1)
+	ProcessMessageDelivered = events.Type(Context, "processmessage", "delivered", 1)
 )
 
 // All lists every event type the service publishes (used by the startup registry check).
 func All() []string {
-	return []string{RegistrationPosted, PaydayApproved, PaydayExported, AndonRaised}
+	return []string{RegistrationPosted, PaydayApproved, PaydayExported, AndonRaised, ProcessMessageReceived, ProcessMessageDelivered}
+}
+
+// ProcessMessageReceivedData is the payload of dev.passage.shopfloor.processmessage.received.v1,
+// published when a process message is stored and again for one destination when it is
+// reprocessed (FR-25.17). Each consuming context (w21 journal, w33 quality, w24 EBR,
+// w35 webhook) acts on the destinations it owns and reports the outcome back.
+// OutOfLimit tells the EBR consumer to record an exception (BR-25.13).
+type ProcessMessageReceivedData struct {
+	MessageID       string                  `json:"messageId"`
+	Source          string                  `json:"source"`
+	SourceMessageID string                  `json:"sourceMessageId"`
+	CategoryCode    string                  `json:"categoryCode"`
+	OrderID         string                  `json:"orderId"`
+	PhasePath       string                  `json:"phasePath"`
+	Destinations    []string                `json:"destinations"`
+	Values          []domain.Characteristic `json:"values"`
+	OutOfLimit      bool                    `json:"outOfLimit"`
+	OccurredAt      time.Time               `json:"occurredAt"`
+}
+
+// ProcessMessageDeliveredData is the payload of dev.passage.shopfloor.processmessage.delivered.v1,
+// published once when every destination of a message is delivered.
+type ProcessMessageDeliveredData struct {
+	MessageID    string `json:"messageId"`
+	CategoryCode string `json:"categoryCode"`
+	OrderID      string `json:"orderId"`
 }
 
 // PaydayExportedData is the payload of dev.passage.shopfloor.payday.exported.v1:

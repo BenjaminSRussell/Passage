@@ -3,6 +3,42 @@
 Shop floor execution service. Wave reference: **PSG-25 / Wave 25**
 (Shop Floor Execution, Time Registration & IoT), PRD section 4.25.
 
+## Slice 4: process messages
+
+- Record (`POST process-messages`, duty `shopfloor.process.create`, FR-25.17): messages from
+  kiosk PI sheets, the edge connector or manual entry, each with a category (phase-start,
+  phase-end, consumption, yield, process-data, quality-result, deviation, order-status,
+  custom), an order, an optional ISA-88 phase path and characteristic values (numeric,
+  text or boolean). Idempotent by `(source, sourceMessageId)`: a replay answers 200 with
+  the stored message and `duplicate: true` and writes nothing.
+- Validation (BR-25.13): numeric values are decimal strings checked against their inline
+  `min`/`max`; an out-of-limit value is accepted and flagged (`outOfLimit` on the value and
+  the message, and in the event so the EBR consumer records an exception). A category that
+  rejects out-of-limit values refuses the message with SF-0114 (no default category does
+  yet). A malformed value is SF-0115.
+- Routing: the category decides the destinations (`domain.CategoryByCode`): EBR, journal
+  (w21), quality (w33), Kafka and webhook (w35). One delivery row per destination is
+  written with the message and `dev.passage.shopfloor.processmessage.received.v1` in one
+  transaction. Kafka is that outbox event, so it is delivered at commit.
+- Delivery reports (`POST process-messages/{id}/deliveries/{destination}:report`, duty
+  `shopfloor.process.deliver`, held by the consuming contexts, `Idempotency-Key`): a failure
+  waits 1, 5, 15 and then 60 minutes (`nextAttemptAt`); the fifth failed attempt leaves the
+  destination in `error`. A delivered destination is final. Message status: `delivered`
+  when every destination is, `partially-delivered` when some are, `received` while none is
+  delivered and some are pending, `error` when none is delivered and none can retry. The
+  first time a message becomes delivered, `processmessage.delivered.v1` is published.
+  Failures are logged as SF-0016 warnings.
+- Reprocess (`POST process-messages/{id}:reprocess`, duty `shopfloor.process.create`,
+  `Idempotency-Key`): a destination in `error` returns to pending with its attempts reset
+  and the reason kept; `processmessage.received` is published again naming that
+  destination alone, so the other consumers do not write twice (AC-25.13).
+- Monitor (`GET process-messages`, `GET process-messages/{id}`, duty `shopfloor.view`):
+  newest first, filtered by status, category, destination and order, with per-destination
+  attempts, last error and next attempt.
+- Web: process message monitor (filters, status, out-of-limit flag), message detail with
+  values and deliveries and a reprocess form for destinations in error, and a manual
+  record form.
+
 ## Slice 3: job bundles and offline replay
 
 - Bundle split (FR-25.3, BR-25.1) in `POST registrations`: the closed job registrations of
@@ -98,6 +134,8 @@ internal/events        event payload structs
 migrations/            0001_init.sql (worker, time_registration, worker_day, pay_line, idempotency_keys, outbox)
                        0002_floor.sql (machine, machine_event, downtime_record, andon_alert,
                        pay_export_batch, pay_export_line)
+                       0003_bundles_offline.sql (clock offset, bundle index)
+                       0004_process_messages.sql (process_message, process_message_delivery)
 api/openapi.yaml       OpenAPI 3.1 for every endpoint
 events/asyncapi.yaml   AsyncAPI 3 for every event
 charts/shopfloor       Helm chart (3 replicas, /healthz and /readyz probes, ServiceMonitor toggle)
@@ -142,6 +180,9 @@ OpenAPI and AsyncAPI files in step with the router and the published event types
 | POST `/api/v1/shopfloor/machine-events` | `shopfloor.machine.ingest` (edge gateway service identity) |
 | POST `/api/v1/shopfloor/downtimes/{id}:code` | `shopfloor.time.register` |
 | POST `/api/v1/shopfloor/pay:export`, GET `/pay-exports`, `/pay-exports/{id}` | `shopfloor.pay.export` (Export time to payroll) |
+| POST `/api/v1/shopfloor/process-messages`, `/process-messages/{id}:reprocess` | `shopfloor.process.create` (Create process messages) |
+| GET `/api/v1/shopfloor/process-messages`, `/process-messages/{id}` | `shopfloor.view` |
+| POST `/api/v1/shopfloor/process-messages/{id}/deliveries/{destination}:report` | `shopfloor.process.deliver` (consuming context service identities) |
 
 Duties are checked by the platform `authz` middleware. The OPA decision point replaces the
 local check in a later wave, behind the same interface.
@@ -170,11 +211,17 @@ Problem details use `application/problem+json` with `type` `https://passage.dev/
 | `SF-0111` | 422 | No approved pay lines left to export in the range |
 | `SF-0112` | 404 | Export batch not found |
 | `SF-0113` | 422 | A bundle already has closed jobs from another batch; send every job of a bundle in one batch |
+| `SF-0114` | 422 | A value is outside its limits and the category rejects out-of-limit values |
+| `SF-0115` | 422 | A characteristic value does not match its type, or its limits are malformed |
+| `SF-0116` | 422 | Only a destination in `error` can be reprocessed |
+| `SF-0117` | 404 | Process message not found |
+| `SF-0118` | 404 | The message has no delivery to that destination |
 | `idempotency_key_reuse` | 422 | `Idempotency-Key` already used with a different request |
 
 Catalog entries SF-0001..SF-0020 (PRD 4.25.18) are reserved; only the codes above are raised.
 SF-0008 (sequence gap) is reported in the ingest response `gaps` and counted in
-`shopfloor_machine_seq_gaps_total`, not raised as an error.
+`shopfloor_machine_seq_gaps_total`, not raised as an error. SF-0016 (delivery failed) is a
+logged warning on a failed delivery report, not an error response.
 
 ## Dependencies
 

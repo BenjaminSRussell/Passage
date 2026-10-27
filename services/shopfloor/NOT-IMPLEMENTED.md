@@ -1,6 +1,6 @@
-# NOT-IMPLEMENTED — PSG-25 (Wave 25) slices 1 to 3
+# NOT-IMPLEMENTED — PSG-25 (Wave 25) slices 1 to 4
 
-Every PSG-25 deliverable and acceptance criterion that slices 1 to 3 do not build, with its
+Every PSG-25 deliverable and acceptance criterion that slices 1 to 4 do not build, with its
 status and reason. Slice 1 covers the time and attendance core of the shopfloor service
 (workers, registrations, pay calculation, approval, review lists, OEE arithmetic), the
 supervisor web pages in `apps/web/src/modules/shopfloor/`, and the iot-edge domain core.
@@ -10,6 +10,11 @@ web pages (machines, downtimes, andon board, OEE, payroll export).
 Slice 3 adds the BR-25.1 bundle split and the BR-25.7 device clock correction to the
 registration batch, bundle read-back (`GET registrations?bundleId=`), the offline replay
 domain rules, the iot-edge policy rules, and the bundle web page.
+Slice 4 adds process messages (FR-25.17, BR-25.13): record with category routing and limit
+flags, idempotent by source message id, per-destination deliveries with the 1, 5, 15, 60
+minute schedule, delivery reports from the consuming contexts, reprocess with a reason,
+the monitor API, the `processmessage.received` and `.delivered` events, and the monitor,
+detail and manual record web pages.
 The edge connector's own gaps are in [../iot-edge/NOT-IMPLEMENTED.md](../iot-edge/NOT-IMPLEMENTED.md).
 
 ## Ticket deliverables
@@ -32,7 +37,13 @@ The edge connector's own gaps are in [../iot-edge/NOT-IMPLEMENTED.md](../iot-edg
 | D5 | Offline-tolerant kiosk (PWA) with sync | partial | Server side built: client-UUID idempotent batch replay (≤ 500 items, duplicate reported, stored in client timestamp order) and BR-25.7 clock-skew correction (a batch with `deviceSentAt` more than 5 minutes off the server has its times corrected and the offset stored per registration). Not built: the IndexedDB queue and PWA (D1, `apps/shopfloor/`), which will enforce the 5,000-action cap with `domain.CheckQueueCapacity` (SF-0010) and the site setting "Offline max actions" (not persisted); the `job-finished-conflict` flag (SF-0004), whose rule `domain.FinishedConflicts` is written and tested but needs the job model (FR-25.3, w23) and a flags column on registrations. `chunk()` in the web client splits offline queues. |
 | D6 | Control recipes (ISA-88) to kiosk or PCS, monitor with resend | later slice of PSG-25 | Needs batch orders (w24) and the edge write path (`iot-edge`). |
 | D7 | PI sheet designer, versioned StepLibrary, kiosk execution, PI sheet archive | later slice of PSG-25 | Not started. Depends on ECO (w9) for library release and on w5 document store for archives. |
-| D8 | Process messages with categories, destinations, retry and monitor | later slice of PSG-25 | Not started. Destinations depend on w21 journals, w33 quality and w35 webhooks. |
+| D8 | Process messages with categories, destinations, retry and monitor | partial (slice 4) | Built: record (kiosk, edge, manual), category routing, BR-25.13 limit flags, delivery state and retry schedule, delivery reports, reprocess with reason, monitor and web pages. Not built: the retry job, category master data, the unknown-order check, deletion with reason, and the consumers (rows below). |
+| D8a | Retry job (every 1 min): re-publish `processmessage.received` for deliveries whose `nextAttemptAt` is due | later slice of PSG-25 | The schedule is computed and stored (`next_attempt_at`, indexed); the sweep needs a per-tenant scheduler, which no service has yet. Until then a failed destination is retried only when its consumer retries on its own or a supervisor reprocesses it after `error`. |
+| D8b | Destination consumers: w21 production journal, w33 quality results, w24 EBR section, w35 outbound webhook | handoff (waves 21, 24, 33, 35) | This service owns routing, delivery state and the schedule. Each consuming context reads `processmessage.received` from `passage.shopfloor.process-messages`, handles the destinations it owns and calls `:report`. |
+| D8c | Category master data (O05C/O06C/O07C): characteristic definitions with types and limits, destinations per category, `reject-out-of-limit` flag, per-tenant retry schedule | later slice of PSG-25 | Categories and destinations are fixed defaults in `domain.CategoryByCode`; limits travel inline on each value; no default category rejects out-of-limit values, so SF-0114 is only reachable once categories are configurable. Needs the *Maintain shop floor setup* screens. |
+| D8d | BR-25.13 unknown order or phase: status `error` without delivery (SF-0015) | handoff (waves 21–24) | Needs the order and routing read model. Messages are accepted without the order lookup. |
+| D8e | Delete an error message with a reason; cursor pagination of the monitor | later slice of PSG-25 | Reprocess with a reason is built; the monitor returns the newest 100 (up to 500) rows. |
+| D8f | Duties `shopfloor.process.create` and `shopfloor.process.deliver` in the OPA bundle | handoff (policies/) | Declared in the OpenAPI (`x-passage-duty`) and enforced by `authz.RequireDuty`; the role grants live outside this wave's paths. |
 | D9 | iot-edge as a deployable (signed image, Helm, static binary, enrollment, mTLS, config, heartbeat, ring rollout, write-back) | partial | Domain core, config validation, Helm chart and admin endpoint are built; slice 3 adds the policy rules (versioned config document and apply rule, tag normalization, write guard and readback check, certificate renewal decision, ring promotion and rollback). The rest is listed in `../iot-edge/NOT-IMPLEMENTED.md`. |
 | Deploy | Kiosk app and edge chart deployed to the demo plant | later slice of PSG-25 | Depends on D1 and on the edge enrollment work. Edge chart exists with demo-plant defaults. |
 
@@ -63,7 +74,7 @@ The edge connector's own gaps are in [../iot-edge/NOT-IMPLEMENTED.md](../iot-edg
 | AC-25.10 Phase exit with configured product | later slice of PSG-25 | Same as AC4. |
 | AC-25.11 Setpoint write to `pcs-opcua` | later slice of PSG-25 | Needs D6 and the edge write path. |
 | AC-25.12 PI sheet completion rules | later slice of PSG-25 | Needs D7. |
-| AC-25.13 Process message retry 1/5/15/60 min | later slice of PSG-25 | Needs D8. |
+| AC-25.13 Process message retry 1/5/15/60 min | partial (slice 4) | The rules are tested through the database (`store/process_test.go`): quality fails five times with waits of 1, 5, 15 and 60 min into `error` while EBR is delivered once (`partially-delivered`), a reprocess re-publishes for quality alone, and the message is then delivered with one `processmessage.delivered`. Not built: the timed retry job (D8a) and the real w33 consumer (D8b). |
 | AC-25.14 PI sheet archive PDF/A-2b with hash | later slice of PSG-25 | Needs D7 and w5 document store. |
 | AC-25.15 Edge enrollment, config v1, canary rollback | later slice of PSG-25 | Needs the edge work in `../iot-edge/NOT-IMPLEMENTED.md`. |
 
@@ -84,7 +95,9 @@ The edge connector's own gaps are in [../iot-edge/NOT-IMPLEMENTED.md](../iot-edg
 | `shopfloor-bff` (TS, SSE) | handoff | Owned by the BFF wave (web-bff / device-bff). Not in this service's owned paths. |
 | Kafka consumer group `shopfloor-oee`, rollup and partition jobs | later slice of PSG-25 | Need D3a and D3b. The HTTP ingest is the only path in slice 2. |
 | Feature flags `shopfloor.iot`, `shopfloor.oee`, `shopfloor.pay-export` | later slice of PSG-25 | Flag service is not wired. |
-| Catalog codes SF-0001..SF-0020 (except SF-0006 and SF-0007, raised here) | later slice of PSG-25 | Each code is raised by the feature that needs it. |
+| Catalog codes SF-0001..SF-0020 (except SF-0006 and SF-0007, raised here, and SF-0016, logged as a warning on a failed delivery report) | later slice of PSG-25 | Each code is raised by the feature that needs it. The process message rule codes are service codes SF-0114..SF-0118 (README), because SF-0014 is the PI sheet "comment required" warning and SF-0015 needs the order lookup (D8d). |
+| `Idempotency-Key` on process message create | not applicable | Create is idempotent by `(source, sourceMessageId)` (FR-25.17), like the registration batch; `:report` and `:reprocess` take the key. |
+| `:report` and `deliveries/{destination}` routes, `orderId` and `destination` monitor filters | added | Not in the PRD API table. The report route is how a consuming context hands its outcome back; the filters serve the CO54-style monitor. |
 | Operator analytics switch `shopfloor.operator-analytics` | later slice of PSG-25 | Relevant when OEE per operator is built (FR-25.13). |
 
 ## Requirements questions

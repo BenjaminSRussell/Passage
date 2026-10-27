@@ -1,7 +1,8 @@
 // Package api exposes the shop floor HTTP surface: workers, batch registrations
 // from the kiosk (client UUIDs), pay calculation, approval and the review lists
 // the supervisor approval screen reads, plus machines, edge machine-event
-// ingest, downtimes, andon, OEE and payroll export (floor.go).
+// ingest, downtimes, andon, OEE and payroll export (floor.go), and process
+// messages with their per-destination deliveries (process.go).
 package api
 
 import (
@@ -81,6 +82,11 @@ type Store interface {
 	ExportPay(ctx context.Context, fromDate, toDate, createdBy string, idem store.Idem) (store.PayExport, error)
 	ListPayExports(ctx context.Context, limit int) ([]store.PayExport, error)
 	GetPayExport(ctx context.Context, id string) (store.PayExport, error)
+	IngestProcessMessage(ctx context.Context, in domain.NewMessage, cat domain.Category, now time.Time) (store.ProcessIngest, error)
+	ListProcessMessages(ctx context.Context, f store.ProcessFilter) ([]store.ProcessMessage, error)
+	GetProcessMessage(ctx context.Context, id string) (store.ProcessMessage, error)
+	ReportDelivery(ctx context.Context, messageID, destination, outcome string, errText *string, now time.Time, idem store.Idem) (store.ProcessMessage, error)
+	ReprocessDelivery(ctx context.Context, messageID, destination, reason string, now time.Time, idem store.Idem) (store.ProcessMessage, error)
 }
 
 // API holds the handlers and the counters served on the admin port.
@@ -98,6 +104,10 @@ type API struct {
 	seqGaps        atomic.Int64
 	andonsRaised   atomic.Int64
 	exportedLines  atomic.Int64
+	processStored  atomic.Int64
+	processReplays atomic.Int64
+	// processReprocessed counts manual reprocesses of destinations in error.
+	processReprocessed atomic.Int64
 }
 
 // New returns the API over s.
@@ -190,6 +200,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(DutyApprove)).Post("/api/v1/shopfloor/pay:approve", a.approvePay)
 	r.With(authz.RequireDuty(DutyView)).Get("/api/v1/shopfloor/worker-days", a.listWorkerDays)
 	a.registerFloor(r)
+	a.registerProcess(r)
 }
 
 // Metrics serves the counters in Prometheus text format on the admin port.
@@ -208,6 +219,9 @@ func (a *API) Metrics() http.Handler {
 		counter("shopfloor_machine_seq_gaps_total", "Missing machine sequence runs reported to the edge (SF-0008).", a.seqGaps.Load())
 		counter("shopfloor_andons_raised_total", "Andon alerts raised from downtimes.", a.andonsRaised.Load())
 		counter("shopfloor_pay_export_lines_total", "Approved pay lines written to payroll export batches.", a.exportedLines.Load())
+		counter("shopfloor_process_messages_stored_total", "Process messages stored (FR-25.17).", a.processStored.Load())
+		counter("shopfloor_process_message_replays_total", "Process messages replayed by (source, sourceMessageId) and not stored again.", a.processReplays.Load())
+		counter("shopfloor_process_deliveries_reprocessed_total", "Process message destinations in error sent again by a supervisor.", a.processReprocessed.Load())
 		counter("shopfloor_failed_total", "Requests that failed in the store.", a.failed.Load())
 	})
 }
