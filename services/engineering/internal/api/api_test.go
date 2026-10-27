@@ -56,6 +56,7 @@ type fakeStore struct {
 	created  []domain.BomVersion
 	released []releaseCall
 	res      *resourceState
+	routes   []domain.RouteVersion
 }
 
 func (f *fakeStore) CreateBomVersion(_ context.Context, v domain.BomVersion, idem store.Idem, check func(store.Snapshot) error) (domain.BomVersion, error) {

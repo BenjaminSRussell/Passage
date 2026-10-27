@@ -29,6 +29,7 @@ const (
 	CodeDuplicate        = "ENG-DUPLICATE"
 	CodeEcoNotFound      = "ENG-ECO-NOTFOUND"
 	CodeVersionNotFound  = "ENG-BOM-VERSION-NOTFOUND"
+	CodeBomNotFound      = "ENG-BOM-NOTFOUND"
 	CodeCalNotFound      = "ENG-CAL-NOTFOUND"
 	CodeResNotFound      = "ENG-RES-NOTFOUND"
 	eventSource          = "/passage/engineering/engineering"
@@ -63,9 +64,19 @@ func (s Snapshot) VersionsUsing(component string) []domain.BomVersion {
 	return out
 }
 
-type BomVersionPage struct {
-	Items  []domain.BomVersion
+type Page[T any] struct {
+	Items  []T
 	NextID string
+}
+
+type BomVersionPage = Page[domain.BomVersion]
+
+func trimPage[T any](items []T, limit int, id func(T) string) Page[T] {
+	if len(items) > limit {
+		items = items[:limit]
+		return Page[T]{Items: items, NextID: id(items[limit-1])}
+	}
+	return Page[T]{Items: items}
 }
 
 type EcoRecord struct {
@@ -76,6 +87,7 @@ type EcoRecord struct {
 type Store interface {
 	CreateBomVersion(ctx context.Context, v domain.BomVersion, idem Idem, check func(Snapshot) error) (domain.BomVersion, error)
 	ListBomVersions(ctx context.Context, afterID string, limit int) (BomVersionPage, error)
+	GetBomVersion(ctx context.Context, id string) (domain.BomVersion, error)
 	Catalog(ctx context.Context, roots []string, up bool) (Snapshot, error)
 	CreateEco(ctx context.Context, e domain.Eco, idem Idem) (domain.Eco, error)
 	GetEco(ctx context.Context, id string) (EcoRecord, error)
@@ -90,6 +102,8 @@ type Store interface {
 	CreateRouteVersion(ctx context.Context, v domain.RouteVersion, idem Idem) (domain.RouteVersion, error)
 	GetRouteVersion(ctx context.Context, id string) (domain.RouteVersion, error)
 	ActivateRouteVersion(ctx context.Context, id string) (domain.RouteVersion, error)
+	ListRouteVersions(ctx context.Context, f RouteVersionFilter, afterID string, limit int) (Page[RouteVersionHeader], error)
+	ActiveRouteVersion(ctx context.Context, productID, siteID string, asOf time.Time) (domain.RouteVersion, error)
 	Ping(ctx context.Context) error
 }
 
@@ -369,16 +383,28 @@ func (s *Postgres) ListBomVersions(ctx context.Context, afterID string, limit in
 	if afterID == "" {
 		afterID = ids.Nil
 	}
-	var page BomVersionPage
+	var items []domain.BomVersion
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) (err error) {
-		page.Items, err = queryVersions(ctx, tx, `select `+versionColumns+` from bom_version v where tenant_id = $1 and id > $2::uuid order by id limit $3`, p.TenantID, afterID, limit+1)
+		items, err = queryVersions(ctx, tx, `select `+versionColumns+` from bom_version v where tenant_id = $1 and id > $2::uuid order by id limit $3`, p.TenantID, afterID, limit+1)
 		return err
 	})
-	if len(page.Items) > limit {
-		page.Items = page.Items[:limit]
-		page.NextID = page.Items[limit-1].ID
-	}
-	return page, err
+	return trimPage(items, limit, func(v domain.BomVersion) string { return v.ID }), err
+}
+
+func (s *Postgres) GetBomVersion(ctx context.Context, id string) (v domain.BomVersion, err error) {
+	p, _ := tenant.FromContext(ctx)
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		found, err := loadVersions(ctx, tx, p.TenantID, `id = $2::uuid`, id)
+		if err != nil {
+			return err
+		}
+		if len(found) == 0 {
+			return notFound(CodeBomNotFound, "BOM version not found")
+		}
+		v = found[0]
+		return nil
+	})
+	return v, err
 }
 
 func getEco(ctx context.Context, tx pgx.Tx, tenantID, id string) (domain.Eco, error) {

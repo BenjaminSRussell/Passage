@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: engineering
   version: 0.1.0
-  description: Engineering data service. Covers BOM versions, explosion, where-used, routing lead time, engineering change orders, and (slice 4) work calendars, resource groups, capabilities and resources.
+  description: Engineering data service. Covers BOM versions, explosion, where-used, routing lead time, engineering change orders, and (slice 4) work calendars, resource groups, capabilities and resources, and (slice 6) read APIs for route versions, the active route version as of a date, and BOM version detail.
 servers:
   - url: https://app.local.passage.dev
 paths:
@@ -32,6 +32,62 @@ paths:
           content:
             application/json:
               schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/BomVersion' } }, nextCursor: { type: string } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/bom-versions/{id}:
+    get:
+      operationId: getBomVersion
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The BOM version with its lines in line-number order, the body create returns.
+          content: { application/json: { schema: { $ref: '#/components/schemas/BomVersion' } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/route-versions:
+    get:
+      operationId: listRouteVersions
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: productId, in: query, schema: { type: string, maxLength: 64 } }
+        - { name: siteId, in: query, schema: { type: string, maxLength: 64 } }
+        - { name: status, in: query, schema: { type: string, enum: [draft, active, expired] } }
+        - { name: asOf, in: query, description: Only versions whose effective range covers this date., schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: One page of route version headers ordered by id, each with operationCount and no operations. Pass nextCursor as cursor for the next page. A bad filter, limit or cursor is 400 COM-0001.
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/RouteVersionHeader' } }, nextCursor: { type: string } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/route-versions:active:
+    get:
+      operationId: getActiveRouteVersion
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: productId, in: query, required: true, schema: { type: string, maxLength: 64 } }
+        - { name: siteId, in: query, required: true, schema: { type: string, maxLength: 64 } }
+        - { name: asOf, in: query, description: Defaults to today (UTC)., schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: The single active route version covering asOf, with operations and requirements. Drafts and expired versions never match.
+          content: { application/json: { schema: { $ref: '#/components/schemas/RouteVersion' } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/route-versions/{id}:
+    get:
+      operationId: getRouteVersion
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The route version with its operations and their requirements.
+          content: { application/json: { schema: { $ref: '#/components/schemas/RouteVersion' } } }
+        '404': { $ref: '#/components/responses/NotFound' }
         default: { $ref: '#/components/responses/Problem' }
   /v1/engineering/boms:explode:
     post:
@@ -256,6 +312,27 @@ components:
         toQty: { type: string }
         status: { type: string, enum: [draft, active, expired, superseded], default: draft }
         lines: { type: array, minItems: 1, maxItems: 5000, items: { $ref: '#/components/schemas/BomLine' } }
+    OperationRequirement:
+      type: object
+      properties: { kind: { type: string, enum: [resource, group, capability, type] }, refId: { type: string }, level: { type: integer, minimum: 0 }, quantity: { type: integer, minimum: 1 } }
+    RouteVersionOperation:
+      type: object
+      properties:
+        { no: { type: integer }, operationId: { type: string, maxLength: 20 }, nextNo: { type: integer }, linkType: { type: string, enum: [hard, soft] },
+          priority: { type: string, enum: [primary, secondary1, secondary2, secondary3] }, setupH: { type: string }, runH: { type: string }, processQty: { type: string },
+          queueBeforeH: { type: string }, queueAfterH: { type: string }, transitH: { type: string }, efficiencyPct: { type: string }, overlapQty: { type: string }, scrapPercent: { type: string },
+          requirements: { type: array, items: { $ref: '#/components/schemas/OperationRequirement' } } }
+    RouteVersionHeader:
+      type: object
+      required: [id, productId, siteId, routeCode, versionNo, effectiveFrom, status, operationCount]
+      properties:
+        { id: { type: string, format: uuid }, productId: { type: string }, siteId: { type: string }, routeCode: { type: string }, versionNo: { type: integer },
+          effectiveFrom: { type: string, format: date }, effectiveTo: { type: string, format: date }, status: { type: string, enum: [draft, active, expired] },
+          operationCount: { type: integer } }
+    RouteVersion:
+      allOf:
+        - { $ref: '#/components/schemas/RouteVersionHeader' }
+        - { type: object, required: [operations], properties: { operations: { type: array, items: { $ref: '#/components/schemas/RouteVersionOperation' } } } }
     ExplodeRequest:
       type: object
       additionalProperties: false
@@ -416,7 +493,7 @@ components:
       description: RFC 9457 problem details.
       content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
     NotFound:
-      description: ENG-CAL-NOTFOUND or ENG-RES-NOTFOUND as RFC 9457 problem details.
+      description: ENG-CAL-NOTFOUND, ENG-RES-NOTFOUND, ENG-ROUTE-NOTFOUND or ENG-BOM-NOTFOUND as RFC 9457 problem details.
       content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
     Conflict:
       description: ENG-DUPLICATE, a record with this code already exists.

@@ -63,6 +63,7 @@ type API struct {
 	calendarsCreated atomic.Int64
 	resourcesCreated atomic.Int64
 	resourceFailed   atomic.Int64
+	routeFailed      atomic.Int64
 }
 
 func New(s store.Store, approver domain.Approver, now func() time.Time) *API {
@@ -75,6 +76,10 @@ func (a *API) Register(r chi.Router) {
 		r.Get("/readyz", a.ready)
 		r.With(authz.RequireDuty(dutyBomWrite)).Post("/v1/engineering/bom-versions", a.createBomVersion)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/bom-versions", a.listBomVersions)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/bom-versions/{id}", a.getBomVersion)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/route-versions", a.listRouteVersions)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/route-versions:active", a.activeRouteVersion)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/route-versions/{id}", a.getRouteVersion)
 		r.With(authz.RequireDuty(dutyRead)).Post("/v1/engineering/boms:explode", a.explode)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/boms:where-used", a.whereUsed)
 		r.With(authz.RequireDuty(dutyRead)).Post("/v1/engineering/routes:lead-time", a.leadTime)
@@ -305,24 +310,7 @@ func (a *API) listBomVersions(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
 	}
-	limit, after, err := pageParams(r)
-	if err != nil {
-		httpx.Fail(w, r, err)
-		return
-	}
-	result, err := a.store.ListBomVersions(r.Context(), after, limit)
-	if err != nil {
-		a.fail(w, r, "list bom versions", err, &a.bomFailed)
-		return
-	}
-	body := page[bomVersionBody]{Items: make([]bomVersionBody, len(result.Items))}
-	for i, v := range result.Items {
-		body.Items[i] = bodyFromVersion(v)
-	}
-	if result.NextID != "" {
-		body.NextCursor = base64.RawURLEncoding.EncodeToString([]byte(result.NextID))
-	}
-	httpx.JSON(w, http.StatusOK, body)
+	listPage(a, w, r, "list bom versions", &a.bomFailed, a.store.ListBomVersions, bodyFromVersion)
 }
 
 func pageParams(r *http.Request) (int, string, error) {

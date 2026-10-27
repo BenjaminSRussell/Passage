@@ -3,12 +3,14 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/engineering/internal/domain"
 	engevents "github.com/BenjaminSRussell/passage/services/engineering/internal/events"
@@ -23,9 +25,19 @@ const (
 		values ($1, $2, $3, $4, $5, $6, $7, $8::numeric, $9::numeric, $10::numeric, $11::numeric, $12::numeric, $13::numeric, $14::numeric, $15::numeric, $16::numeric)`
 )
 
-func scanRouteVersion(row pgx.Row) (v domain.RouteVersion, err error) {
+type RouteVersionFilter struct {
+	ProductID, SiteID, Status string
+	AsOf                      time.Time
+}
+
+type RouteVersionHeader struct {
+	Version    domain.RouteVersion
+	Operations int
+}
+
+func scanRouteVersion(row pgx.Row, extra ...any) (v domain.RouteVersion, err error) {
 	var to *time.Time
-	if err = row.Scan(&v.ID, &v.ProductID, &v.SiteID, &v.RouteCode, &v.VersionNo, &v.EffectiveFrom, &to, &v.Status); err == nil {
+	if err = row.Scan(append([]any{&v.ID, &v.ProductID, &v.SiteID, &v.RouteCode, &v.VersionNo, &v.EffectiveFrom, &to, &v.Status}, extra...)...); err == nil {
 		v.EffectiveTo = valueOrZero(to)
 	}
 	return v, err
@@ -123,6 +135,63 @@ func (s *Postgres) CreateRouteVersion(ctx context.Context, v domain.RouteVersion
 func (s *Postgres) GetRouteVersion(ctx context.Context, id string) (v domain.RouteVersion, err error) {
 	p, _ := tenant.FromContext(ctx)
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) (err error) {
+		v, err = getRouteVersion(ctx, tx, p.TenantID, id)
+		return err
+	})
+	return v, err
+}
+
+func (s *Postgres) ListRouteVersions(ctx context.Context, f RouteVersionFilter, afterID string, limit int) (Page[RouteVersionHeader], error) {
+	p, _ := tenant.FromContext(ctx)
+	if afterID == "" {
+		afterID = ids.Nil
+	}
+	query := `select ` + routeVersionColumns + `, (select count(*) from route_operation o where o.tenant_id = v.tenant_id and o.route_version_id = v.id)
+		from route_version v where v.tenant_id = $1 and v.id > $2::uuid`
+	args := []any{p.TenantID, afterID}
+	for _, c := range []struct {
+		value  any
+		clause string
+		set    bool
+	}{
+		{f.ProductID, `v.product_id = $%d`, f.ProductID != ""},
+		{f.SiteID, `v.site_id = $%d`, f.SiteID != ""},
+		{f.Status, `v.status = $%d`, f.Status != ""},
+		{f.AsOf, `v.effective_from <= $%[1]d and (v.effective_to is null or v.effective_to >= $%[1]d)`, !f.AsOf.IsZero()},
+	} {
+		if c.set {
+			args = append(args, c.value)
+			query += ` and ` + fmt.Sprintf(c.clause, len(args))
+		}
+	}
+	query += fmt.Sprintf(` order by v.id limit $%d`, len(args)+1)
+	var items []RouteVersionHeader
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, query, append(args, limit+1)...)
+		if err != nil {
+			return err
+		}
+		items, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (h RouteVersionHeader, err error) {
+			h.Version, err = scanRouteVersion(row, &h.Operations)
+			return h, err
+		})
+		return err
+	})
+	return trimPage(items, limit, func(h RouteVersionHeader) string { return h.Version.ID }), err
+}
+
+func (s *Postgres) ActiveRouteVersion(ctx context.Context, productID, siteID string, asOf time.Time) (v domain.RouteVersion, err error) {
+	p, _ := tenant.FromContext(ctx)
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var id string
+		err := tx.QueryRow(ctx, `select id::text from route_version where tenant_id = $1 and product_id = $2 and site_id = $3 and status = 'active'
+			and effective_from <= $4 and (effective_to is null or effective_to >= $4) order by effective_from desc, id limit 1`, p.TenantID, productID, siteID, asOf).Scan(&id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return notFound(CodeRouteNotFound, "no active route version covers the date")
+		}
+		if err != nil {
+			return err
+		}
 		v, err = getRouteVersion(ctx, tx, p.TenantID, id)
 		return err
 	})
