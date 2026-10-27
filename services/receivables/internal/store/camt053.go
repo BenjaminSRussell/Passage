@@ -102,16 +102,20 @@ func insertCAMTPayment(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID s
 	if err != nil {
 		return Payment{}, false, err
 	}
-	var payer *string
+	var payer, account *string
 	if c.DebtorName != "" {
 		payer = &c.DebtorName
 	}
+	if c.DebtorAccountHash != "" {
+		account = &c.DebtorAccountHash
+	}
 	saved, err := scanPayment(tx.QueryRow(ctx, `insert into payment (tenant_id, id, legal_entity_id, customer_id, payment_mode, source,
-		source_ref, amount, unapplied_amount, currency, received_date, value_date, payer_name, remittance, status, idempotency_key)
-		values ($1, $2, $3, null, 'WIRE', 'CAMT053', $4, $5, $5, $6, $7, $7, $8, $9, 'RECEIVED', $10)
+		source_ref, amount, unapplied_amount, currency, received_date, value_date, payer_name, remittance, status, idempotency_key,
+		payer_account_hash)
+		values ($1, $2, $3, null, 'WIRE', 'CAMT053', $4, $5, $5, $6, $7, $7, $8, $9, 'RECEIVED', $10, $11)
 		on conflict (tenant_id, source, source_ref) do nothing
 		returning `+paymentColumns,
-		tenantID, ids.New(), legalEntityID, ref, c.Amount.String(), c.Currency, c.ValueDate, payer, raw, "camt053:"+ref))
+		tenantID, ids.New(), legalEntityID, ref, c.Amount.String(), c.Currency, c.ValueDate, payer, raw, "camt053:"+ref, account))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Payment{}, false, nil
 	}

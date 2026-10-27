@@ -13,6 +13,7 @@ import { NewPaymentPage } from "./NewPaymentPage";
 import { OpenItemsPage } from "./OpenItemsPage";
 import { PaymentDetailPage } from "./PaymentDetailPage";
 import { PaymentsPage } from "./PaymentsPage";
+import { BalanceSnapshotsPage, StatementPage } from "./Statements";
 import { NewPromisePage, PromisesPage } from "./Promises";
 import { WorklistPage } from "./WorklistPage";
 import { WorkspacePage } from "./WorkspacePage";
@@ -21,7 +22,7 @@ const receivables: PassageModule = {
   id: "receivables",
   title: "Accounts receivable",
   description:
-    "Open items, aging and cash application (manual, lockbox and camt.053 bank statements), collections (worklist, cases, disputes, promises to pay, dunning and interest), the deductions workbench, balance confirmations, and down payments and security deposits.",
+    "Open items, aging and cash application (manual, lockbox and camt.053 bank statements), collections (worklist, cases, disputes, promises to pay, dunning and interest), the deductions workbench, balance confirmations, down payments and security deposits, customer statements and the nightly balance snapshots.",
   routes: [
     { path: "/receivables", element: createElement(WorkspacePage), handle: { title: "AR workspace" } },
     { path: "/receivables/open-items", element: createElement(OpenItemsPage), handle: { title: "Open items" } },
@@ -55,6 +56,8 @@ const receivables: PassageModule = {
     { path: "/receivables/deductions", element: createElement(DeductionsPage), handle: { title: "Deductions" } },
     { path: "/receivables/deductions/new", element: createElement(NewDeductionPage), handle: { title: "Record deduction" } },
     { path: "/receivables/deductions/:id", element: createElement(DeductionDetailPage), handle: { title: "Deduction" } },
+    { path: "/receivables/statements", element: createElement(StatementPage), handle: { title: "Customer statement" } },
+    { path: "/receivables/balance-snapshots", element: createElement(BalanceSnapshotsPage), handle: { title: "Balance snapshots" } },
   ],
   nav: [
     { label: "AR workspace", to: "/receivables", duty: "ARView" },
@@ -72,6 +75,8 @@ const receivables: PassageModule = {
     { label: "Balance confirmations", to: "/receivables/balance-confirmations", duty: "ARView" },
     { label: "Down payments", to: "/receivables/down-payments", duty: "ARView" },
     { label: "Deductions", to: "/receivables/deductions", duty: "ARView" },
+    { label: "Customer statements", to: "/receivables/statements", duty: "ARView" },
+    { label: "Balance snapshots", to: "/receivables/balance-snapshots", duty: "ARView" },
   ],
 };
 

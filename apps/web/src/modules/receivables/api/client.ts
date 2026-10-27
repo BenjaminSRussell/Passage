@@ -58,6 +58,10 @@ export interface PaymentInput {
   receivedDate: string;
   valueDate: string;
   payerName: string | null;
+  /** The payer's IBAN or MICR account (R4); the service stores only its hash. */
+  payerAccount: string | null;
+  /** Explains a short payment (R7). */
+  shortPayReason: string | null;
   remittance: RemittanceLine[];
 }
 
@@ -74,6 +78,8 @@ export interface Payment {
   receivedDate: string;
   valueDate: string;
   payerName?: string | null;
+  payerAccountHash?: string | null;
+  shortPayReason?: string | null;
   remittance: RemittanceLine[];
   status: PaymentStatus;
   version: number;
@@ -896,4 +902,71 @@ export function moveDeduction(id: string, version: number, command: DeductionAct
     headers: { "If-Match": `"${version}"` },
     body: JSON.stringify(body),
   });
+}
+
+// ---- Customer statements (FR-30.13) and the aging snapshot job (§5.30.16) ----
+export interface StatementLine {
+  /** The open item's source, DEDUCTION for a deduction being worked, PAYMENT for unapplied cash. */
+  sourceType: string;
+  documentNumber: string;
+  documentDate: string;
+  dueDate: string | null;
+  amount: string;
+  openAmount: string;
+  runningBalance: string;
+}
+
+export interface StatementSection {
+  currency: string;
+  lines: StatementLine[];
+  closingBalance: string;
+  aging: AgingTotal[];
+}
+
+export interface Statement {
+  legalEntityId: string;
+  customerId: string;
+  asOf: string;
+  sections: StatementSection[];
+}
+
+/** GET /statements - what the customer had open at the end of asOf (today by default); reads only. */
+export function fetchStatement(legalEntityId: string, customer: string, asOf?: string, signal?: AbortSignal): Promise<Statement> {
+  return send<Statement>(`/statements${query({ legalEntityId, customer, asOf })}`, {}, signal);
+}
+
+export interface BalanceSnapshot {
+  legalEntityId: string;
+  customerId: string;
+  currency: string;
+  asOf: string;
+  totalOpen: string;
+  overdue: string;
+  oldestItemDays: number;
+  dunningLevel: number;
+  riskScore: number;
+  takenAt: string;
+}
+
+export interface SnapshotFilter {
+  legalEntityId: string;
+  asOf?: string;
+  customer?: string;
+}
+
+export interface SnapshotResult {
+  legalEntityId: string;
+  asOf: string;
+  rows: number;
+  changed: number;
+}
+
+/** GET /aging-snapshots - stored balances for a key date (the latest when omitted), riskiest first. */
+export function listBalanceSnapshots(filter: SnapshotFilter, signal?: AbortSignal): Promise<BalanceSnapshot[]> {
+  return items<BalanceSnapshot>(`/aging-snapshots${query({ legalEntityId: filter.legalEntityId, asOf: filter.asOf, customer: filter.customer })}`, signal);
+}
+
+/** POST /aging-snapshots - runs the nightly snapshot now; a re-run for the date announces only moved balances. */
+export function runAgingSnapshot(legalEntityId: string, asOf?: string): Promise<SnapshotResult> {
+  return send<SnapshotResult>("/aging-snapshots", { method: "POST", body: JSON.stringify(asOf ? { legalEntityId, asOf } : { legalEntityId }) });
 }

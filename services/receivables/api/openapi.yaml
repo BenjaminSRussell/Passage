@@ -239,6 +239,78 @@ paths:
                     items: { $ref: "#/components/schemas/CustomerRisk" }
         "400": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/statements:
+    get:
+      operationId: getStatement
+      summary: Customer account statement as of a date, by currency, with running balance and aging footer (FR-30.13)
+      description: |
+        Lists the customer's documents still open at the end of asOf (default today) in one legal entity, on the
+        balance confirmation's as-of basis: a debit item is its amount less the settlements, down-payment clearings
+        and deductions booked by then; a deduction still being worked that day is its own DEDUCTION line without a due
+        date (aged apart from invoices); an unapplied payment is a negative PAYMENT line. Read-only (BR-30.10).
+      x-passage-duty: ARView
+      parameters:
+        - { name: legalEntityId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: customer, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: asOf, in: query, required: false, schema: { type: string, format: date } }
+      responses:
+        "200":
+          description: Statement sections, one per currency
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Statement" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/aging-snapshots:
+    post:
+      operationId: runAgingSnapshot
+      summary: Store dated customer balances and emit customerbalance.changed.v1 for moved balances (§5.30.16)
+      description: |
+        The nightly aging snapshot and risk score job (01:30), callable for one legal entity. Writes one row per
+        customer and currency for the key date (key = (customer, date); a re-run rewrites the rows). Emits
+        dev.passage.receivables.customerbalance.changed.v1 when a balance, overdue amount, dunning level or risk score
+        differs from the latest snapshot on or before the date, and a zero row with one event for a customer whose
+        items all settled. Balances are those at the time of the run, so asOf may not be in the future.
+      x-passage-duty: ARAgingRun
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AgingSnapshotRequest" }
+      responses:
+        "200":
+          description: Snapshot run summary
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgingSnapshotResult" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    get:
+      operationId: listAgingSnapshots
+      summary: Stored customer balances for a key date (the latest when omitted), riskiest first
+      x-passage-duty: ARView
+      parameters:
+        - { name: legalEntityId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: asOf, in: query, schema: { type: string, format: date } }
+        - { name: customer, in: query, schema: { type: string, format: uuid } }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: Snapshot rows
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/BalanceSnapshot" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
   /api/v1/receivables/dunning-runs:
     get:
       operationId: listDunningRuns
@@ -1460,6 +1532,69 @@ components:
       properties:
         reference: { type: string, maxLength: 200 }
         amount: { $ref: "#/components/schemas/Money" }
+    StatementLine:
+      type: object
+      required: [sourceType, documentNumber, documentDate, dueDate, amount, openAmount, runningBalance]
+      properties:
+        sourceType: { type: string, description: "the open item's source (INVOICE, FEE, INTEREST, DEDUCTION re-bill ...), DEDUCTION for a deduction being worked, PAYMENT for unapplied cash" }
+        documentNumber: { type: string }
+        documentDate: { type: string, format: date }
+        dueDate: { type: [string, "null"], format: date, description: null for deductions and payments }
+        amount: { $ref: "#/components/schemas/Money" }
+        openAmount: { $ref: "#/components/schemas/Money" }
+        runningBalance: { $ref: "#/components/schemas/Money" }
+    StatementSection:
+      type: object
+      required: [currency, lines, closingBalance, aging]
+      properties:
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        lines:
+          type: array
+          items: { $ref: "#/components/schemas/StatementLine" }
+        closingBalance: { $ref: "#/components/schemas/Money" }
+        aging:
+          type: array
+          description: Open debit items by aging bucket; deductions and payments are not aged here.
+          items: { $ref: "#/components/schemas/AgingTotal" }
+    Statement:
+      type: object
+      required: [legalEntityId, customerId, asOf, sections]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        customerId: { type: string, format: uuid }
+        asOf: { type: string, format: date }
+        sections:
+          type: array
+          items: { $ref: "#/components/schemas/StatementSection" }
+    AgingSnapshotRequest:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        asOf: { type: string, format: date, description: key date, today by default; not after today }
+    AgingSnapshotResult:
+      type: object
+      required: [legalEntityId, asOf, rows, changed]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        asOf: { type: string, format: date }
+        rows: { type: integer, description: balances written for the date }
+        changed: { type: integer, description: customerbalance.changed.v1 events enqueued }
+    BalanceSnapshot:
+      type: object
+      required: [legalEntityId, customerId, currency, asOf, totalOpen, overdue, oldestItemDays, dunningLevel, riskScore, takenAt]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        customerId: { type: string, format: uuid }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        asOf: { type: string, format: date }
+        totalOpen: { $ref: "#/components/schemas/Money" }
+        overdue: { $ref: "#/components/schemas/Money" }
+        oldestItemDays: { type: integer, minimum: 0 }
+        dunningLevel: { type: integer, minimum: 0, maximum: 4 }
+        riskScore: { type: integer, minimum: 0, maximum: 100 }
+        takenAt: { type: string, format: date-time }
     CreatePaymentRequest:
       type: object
       additionalProperties: false
@@ -1474,7 +1609,14 @@ components:
         currency: { type: string, pattern: "^[A-Z]{3}$" }
         receivedDate: { type: string, format: date }
         valueDate: { type: string, format: date }
-        payerName: { type: [string, "null"] }
+        payerName: { type: [string, "null"], minLength: 1, maxLength: 140, description: matched against learned payer names (R5) }
+        payerAccount:
+          type: [string, "null"]
+          maxLength: 64
+          description: >-
+            The payer's IBAN or MICR routing and account as on the advice, 8 or more letters and digits (R4). Only its
+            SHA-256 hash is stored; the account is never echoed.
+        shortPayReason: { type: [string, "null"], minLength: 1, maxLength: 120, description: explains a short payment (R7) }
         remittance:
           type: array
           items: { $ref: "#/components/schemas/RemittanceLine" }
@@ -1493,6 +1635,8 @@ components:
         receivedDate: { type: string, format: date }
         valueDate: { type: string, format: date }
         payerName: { type: [string, "null"] }
+        payerAccountHash: { type: string, pattern: "^[0-9a-f]{64}$", description: "SHA-256 of the payer's normalized account (R4); absent when none was given" }
+        shortPayReason: { type: string, description: absent when none was given (R7) }
         remittance:
           type: array
           items: { $ref: "#/components/schemas/RemittanceLine" }
@@ -1537,7 +1681,13 @@ components:
             properties:
               openItemIds: { type: array, items: { type: string, format: uuid } }
               score: { type: integer }
-              rules: { type: array, items: { type: string, enum: [R1, R2, R2-SUBSET, R3, R6] } }
+              rules:
+                type: array
+                description: >-
+                  R1 reference +60, R2 amount +30 (R2-SUBSET +25), R3 amount less cash discount +28, R4 payer account
+                  bound to the customer +15, R5 payer name Jaro-Winkler >= 0.92 to a learned name +10, R6 value date
+                  within 7 days of due +5, R7 short by < 1% or < 50.00 USD / 45.00 EUR with a reason +20 (BR-30.1).
+                items: { type: string, enum: [R1, R2, R2-SUBSET, R3, R4, R5, R6, R7] }
     ApplyRequest:
       type: object
       additionalProperties: false

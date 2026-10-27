@@ -23,7 +23,7 @@ const camtSample = `<?xml version="1.0" encoding="UTF-8"?>
         <NtryRef>E2E-1</NtryRef>
         <NtryDtls><TxDtls>
           <Refs><EndToEndId>NOTPROVIDED</EndToEndId></Refs>
-          <RltdPties><Dbtr><Nm>Acme GmbH</Nm></Dbtr></RltdPties>
+          <RltdPties><Dbtr><Nm>Acme GmbH</Nm></Dbtr><DbtrAcct><Id><IBAN>FR14 2004 1010 0505 0001 3M02 606</IBAN></Id></DbtrAcct></RltdPties>
           <RmtInf><Strd><CdtrRefInf><Ref>INV-2001</Ref></CdtrRefInf></Strd></RmtInf>
         </TxDtls></NtryDtls>
       </Ntry>
@@ -52,6 +52,10 @@ func TestParseCAMT053_ReturnsCreditsOnly(t *testing.T) {
 	}
 	if !c.Amount.Equal(decimal.RequireFromString("2380.00")) {
 		t.Errorf("amount = %s", c.Amount)
+	}
+	// The debtor's account (not the statement's own Acct) becomes the R4 hash.
+	if c.DebtorAccountHash != AccountHash("FR1420041010050500013M02606") || c.DebtorAccountHash == AccountHash("DE89370400440532013000") {
+		t.Errorf("debtor account hash = %q, want the hash of the debtor IBAN", c.DebtorAccountHash)
 	}
 	if c.Line == 0 {
 		t.Errorf("credit has no line number")
@@ -110,7 +114,7 @@ func TestParseCAMT053_RejectsNonStatements(t *testing.T) {
 func TestParseCAMT053_VersionsStatusAndReversals(t *testing.T) {
 	doc := `<Document><BkToCstmrStmt><Stmt><Id>S-1</Id>
 <Ntry><NtryRef>A</NtryRef><Amt Ccy="USD">10.00</Amt><CdtDbtInd>CRDT</CdtDbtInd><Sts>BOOK</Sts><BookgDt><DtTm>2027-04-01T08:00:00</DtTm></BookgDt>
-  <NtryDtls><TxDtls><RltdPties><Dbtr><Pty><Nm>Beta Inc</Nm></Pty></Dbtr></RltdPties><RmtInf><Ustrd> INV-7 </Ustrd></RmtInf></TxDtls></NtryDtls></Ntry>
+  <NtryDtls><TxDtls><RltdPties><Dbtr><Pty><Nm>Beta Inc</Nm></Pty></Dbtr><DbtrAcct><Id><Othr><Id>021000021-12345678</Id></Othr></Id></DbtrAcct></RltdPties><RmtInf><Ustrd> INV-7 </Ustrd></RmtInf></TxDtls></NtryDtls></Ntry>
 <Ntry><NtryRef>B</NtryRef><Amt Ccy="USD">20.00</Amt><CdtDbtInd>CRDT</CdtDbtInd><Sts><Cd>PDNG</Cd></Sts><ValDt><Dt>2027-04-01</Dt></ValDt></Ntry>
 <Ntry><NtryRef>C</NtryRef><Amt Ccy="USD">30.00</Amt><CdtDbtInd>CRDT</CdtDbtInd><RvslInd>true</RvslInd><ValDt><Dt>2027-04-01</Dt></ValDt></Ntry>
 <Ntry><AcctSvcrRef>BANK-9</AcctSvcrRef><Amt Ccy="USD">40.00</Amt><CdtDbtInd>CRDT</CdtDbtInd><Sts><Cd>BOOK</Cd></Sts><ValDt><Dt>2027-04-02</Dt></ValDt></Ntry>
@@ -127,6 +131,9 @@ func TestParseCAMT053_VersionsStatusAndReversals(t *testing.T) {
 	first, bankRef, second := res.Credits[0], res.Credits[1], res.Credits[2]
 	if first.DebtorName != "Beta Inc" || first.RemittanceRef != "INV-7" || first.ValueDate != "2027-04-01" {
 		t.Errorf("first = %+v, want the .001.08 debtor, trimmed Ustrd and the booking date", first)
+	}
+	if first.DebtorAccountHash != AccountHash("021000021 12345678") || bankRef.DebtorAccountHash != "" {
+		t.Errorf("account hashes = %q / %q, want the Othr id's hash and none without TxDtls", first.DebtorAccountHash, bankRef.DebtorAccountHash)
 	}
 	if bankRef.Reference != "BANK-9" || bankRef.StatementID != "S-1" {
 		t.Errorf("second = %+v, want AcctSvcrRef when NtryRef is absent", bankRef)

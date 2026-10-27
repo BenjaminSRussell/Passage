@@ -17,6 +17,8 @@ export interface PaymentDraft {
   receivedDate: string;
   valueDate: string;
   payerName: string;
+  payerAccount: string;
+  shortPayReason: string;
   remittance: { reference: string; amount: string }[];
 }
 
@@ -31,6 +33,8 @@ export function emptyPayment(day: string = today()): PaymentDraft {
     receivedDate: day,
     valueDate: day,
     payerName: "",
+    payerAccount: "",
+    shortPayReason: "",
     remittance: [{ reference: "", amount: "" }],
   };
 }
@@ -45,6 +49,12 @@ export function validatePayment(v: PaymentDraft): Errors {
   if (!DAY.test(v.receivedDate)) errors.receivedDate = "Enter the date the payment arrived.";
   if (!DAY.test(v.valueDate)) errors.valueDate = "Enter the bank value date.";
   if (v.sourceRef.trim().length > 120) errors.sourceRef = "Use up to 120 characters.";
+  if (v.payerName.trim().length > 140) errors.payerName = "Use up to 140 characters.";
+  const account = v.payerAccount.replace(/[^A-Za-z0-9]/g, "");
+  if (v.payerAccount.trim() !== "" && (account.length < 8 || v.payerAccount.trim().length > 64)) {
+    errors.payerAccount = "Enter the IBAN or bank account (8 or more letters and digits) or leave it empty.";
+  }
+  if (v.shortPayReason.trim().length > 120) errors.shortPayReason = "Use up to 120 characters.";
   v.remittance.forEach((line, i) => {
     const blank = line.reference.trim() === "" && line.amount.trim() === "";
     if (blank) return;
@@ -68,6 +78,8 @@ export function toPaymentInput(v: PaymentDraft): PaymentInput {
     receivedDate: v.receivedDate,
     valueDate: v.valueDate,
     payerName: blankToNull(v.payerName),
+    payerAccount: blankToNull(v.payerAccount),
+    shortPayReason: blankToNull(v.shortPayReason),
     remittance: v.remittance
       .filter((l) => l.reference.trim() !== "")
       .map((l) => ({ reference: l.reference.trim(), amount: l.amount.trim() === "" ? "0" : l.amount.trim() })),
@@ -113,7 +125,7 @@ export function NewPaymentPage() {
     }
   }
 
-  type TextField = "legalEntityId" | "customerId" | "sourceRef" | "amount" | "currency" | "payerName";
+  type TextField = "legalEntityId" | "customerId" | "sourceRef" | "amount" | "currency" | "payerName" | "payerAccount" | "shortPayReason";
   function text(id: string, field: TextField, label: string, opts: { hint?: string; optional?: boolean; mono?: boolean; decimal?: boolean } = {}) {
     return (
       <FormField id={id} label={label} hint={opts.hint} optional={opts.optional} error={errors[field]}>
@@ -158,7 +170,13 @@ export function NewPaymentPage() {
           <FormField id="np-value" label="Value date" hint="Cash discounts count from this date." error={errors.valueDate}>
             {(c) => <Input {...c} type="date" value={values.valueDate} onChange={(e) => update({ valueDate: e.target.value })} invalid={Boolean(errors.valueDate)} />}
           </FormField>
-          {text("np-payer", "payerName", "Payer name", { optional: true })}
+          {text("np-payer", "payerName", "Payer name", { optional: true, hint: "Matched against the names this customer paid under before." })}
+          {text("np-account", "payerAccount", "Payer bank account", {
+            optional: true,
+            mono: true,
+            hint: "IBAN or routing and account from the check or advice. Only a hash is kept, to recognise the payer next time.",
+          })}
+          {text("np-short", "shortPayReason", "Short-pay reason", { optional: true, hint: "Why the payer paid less than the invoice, if they said." })}
           <fieldset className={styles.lineSet}>
             <legend className={styles.groupsLegend}>Remittance: the documents the payer says this pays</legend>
             {values.remittance.map((line, i) => (

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -35,6 +36,10 @@ const (
 	maxKeyLength     = 200
 	maxSourceRef     = 120
 	maxReference     = 200
+	// maxPayerAccount bounds the raw payer account (IBAN is at most 34; MICR routing and account fit).
+	maxPayerAccount   = 64
+	maxShortPayReason = 120
+	maxPayerName      = 140
 )
 
 var (
@@ -74,6 +79,7 @@ func (a *API) Register(r chi.Router) {
 		a.downPaymentRoutes(r)
 		a.bankStatementRoutes(r)
 		a.deductionRoutes(r)
+		a.statementRoutes(r)
 		r.With(authz.RequireDuty(dutyImport)).Post("/lockbox/imports", a.importLockbox)
 		r.With(authz.RequireDuty(dutyView)).Get("/lockbox/imports", a.listLockboxBatches)
 		r.With(authz.RequireDuty(dutyView)).Get("/worklist", a.worklist)
@@ -115,6 +121,11 @@ type createPaymentRequest struct {
 	ValueDate     string                  `json:"valueDate"`
 	PayerName     *string                 `json:"payerName"`
 	Remittance    []domain.RemittanceLine `json:"remittance"`
+	// PayerAccount is the payer's IBAN or MICR account as on the advice (R4). Only
+	// its hash is stored.
+	PayerAccount *string `json:"payerAccount"`
+	// ShortPayReason explains a short payment (R7).
+	ShortPayReason *string `json:"shortPayReason"`
 }
 
 func (a *API) createPayment(w http.ResponseWriter, r *http.Request) {
@@ -142,7 +153,11 @@ func (a *API) createPayment(w http.ResponseWriter, r *http.Request) {
 	}
 	in := store.Payment{LegalEntityID: req.LegalEntityID, CustomerID: req.CustomerID, PaymentMode: req.PaymentMode, Source: req.Source,
 		SourceRef: req.SourceRef, Amount: req.Amount, UnappliedAmount: req.Amount, Currency: req.Currency, ReceivedDate: req.ReceivedDate,
-		ValueDate: req.ValueDate, PayerName: req.PayerName, Remittance: req.Remittance}
+		ValueDate: req.ValueDate, PayerName: req.PayerName, Remittance: req.Remittance, ShortPayReason: trimmed(req.ShortPayReason)}
+	if req.PayerAccount != nil {
+		h := domain.AccountHash(*req.PayerAccount)
+		in.PayerAccountHash = &h
+	}
 	out, err := a.store.CreatePayment(r.Context(), in, key)
 	if err != nil {
 		a.fail("create payment", w, r, err)
@@ -187,10 +202,32 @@ func validatePayment(req createPaymentRequest, key string) map[string]string {
 			fields[fmt.Sprintf("remittance[%d]", i)] = "needs a reference of 1 to 200 characters and a non-negative amount"
 		}
 	}
+	if req.PayerName != nil && (strings.TrimSpace(*req.PayerName) == "" || utf8.RuneCountInString(*req.PayerName) > maxPayerName) {
+		fields["payerName"] = fmt.Sprintf("must be 1 to %d characters", maxPayerName)
+	}
+	if req.PayerAccount != nil {
+		if n := domain.NormalizeAccount(*req.PayerAccount); len(n) < 8 || len(*req.PayerAccount) > maxPayerAccount {
+			fields["payerAccount"] = fmt.Sprintf("must be an IBAN or bank account of 8 to %d letters and digits", maxPayerAccount)
+		}
+	}
+	if req.ShortPayReason != nil {
+		if n := utf8.RuneCountInString(strings.TrimSpace(*req.ShortPayReason)); n == 0 || n > maxShortPayReason {
+			fields["shortPayReason"] = fmt.Sprintf("must be 1 to %d characters", maxShortPayReason)
+		}
+	}
 	if key == "" || len(key) > maxKeyLength {
 		fields[idempotencyKey] = "must be 1 to 200 characters"
 	}
 	return fields
+}
+
+// trimmed returns a copy of an optional text with surrounding space removed.
+func trimmed(s *string) *string {
+	if s == nil {
+		return nil
+	}
+	t := strings.TrimSpace(*s)
+	return &t
 }
 
 func (a *API) getPayment(w http.ResponseWriter, r *http.Request) {

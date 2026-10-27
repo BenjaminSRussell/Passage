@@ -55,6 +55,11 @@ channels:
         $ref: "#/components/messages/DeductionOpened"
       deductionResolved:
         $ref: "#/components/messages/DeductionResolved"
+  customerBalanceEvents:
+    address: passage.receivables.customerbalance
+    messages:
+      customerBalanceChanged:
+        $ref: "#/components/messages/CustomerBalanceChanged"
 operations:
   publishDisputeOpened:
     action: send
@@ -121,6 +126,11 @@ operations:
     channel: { $ref: "#/channels/deductionEvents" }
     messages:
       - { $ref: "#/channels/deductionEvents/messages/deductionResolved" }
+  publishCustomerBalanceChanged:
+    action: send
+    channel: { $ref: "#/channels/customerBalanceEvents" }
+    messages:
+      - { $ref: "#/channels/customerBalanceEvents/messages/customerBalanceChanged" }
 components:
   messages:
     PaymentReceived:
@@ -201,7 +211,30 @@ components:
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/DeductionResolvedData"
+    CustomerBalanceChanged:
+      name: dev.passage.receivables.customerbalance.changed.v1
+      summary: >-
+        The aging snapshot job (§5.30.16) found a customer's balance in one currency, its overdue amount, dunning level
+        or risk score different from the latest earlier snapshot (the PRD's customer-balance.changed.v1; the kernel's
+        type rule allows no hyphen). A customer whose items all settled gets one event with balance 0. Re-running the
+        job for the same date emits nothing new. Consumers: sales credit, portal.
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/CustomerBalanceChangedData"
   schemas:
+    CustomerBalanceChangedData:
+      type: object
+      required: [legal_entity_id, customer_id, currency, as_of, balance, overdue, oldest_item_days, dunning_level, risk_score]
+      properties:
+        legal_entity_id: { type: string, format: uuid }
+        customer_id: { type: string, format: uuid }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        as_of: { type: string, format: date, description: the snapshot's key date }
+        balance: { type: string, description: "decimal string; open debit items in this currency" }
+        overdue: { type: string, description: "decimal string; the part past its due date" }
+        oldest_item_days: { type: integer, minimum: 0, description: days the oldest open item is overdue }
+        dunning_level: { type: integer, minimum: 0, maximum: 4, description: highest level of the open items }
+        risk_score: { type: integer, minimum: 0, maximum: 100, description: FR-30.10 score }
     CaseOpenedData:
       type: object
       required: [case_id, legal_entity_id, customer_id, category, priority, owner, reason, currency, open_item_id, attached_amount, sla_due]

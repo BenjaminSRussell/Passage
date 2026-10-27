@@ -103,6 +103,11 @@ type Payment struct {
 	Remittance      []domain.RemittanceLine `json:"remittance"`
 	Status          string                  `json:"status"`
 	Version         int                     `json:"version"`
+	// PayerAccountHash is the hex SHA-256 of the payer's normalized bank account
+	// (R4); the account itself is never stored.
+	PayerAccountHash *string `json:"payerAccountHash,omitempty"`
+	// ShortPayReason explains a short payment (R7).
+	ShortPayReason *string `json:"shortPayReason,omitempty"`
 }
 
 // ApplyRequest is the settlement plan for one payment. Open amounts and discount
@@ -181,6 +186,9 @@ type Store interface {
 	DenyDeduction(ctx context.Context, id string, version int, reason string, note *string) (Deduction, error)
 	SplitDeduction(ctx context.Context, id string, version int, parts []decimal.Decimal) (Deduction, error)
 	WriteOffDeduction(ctx context.Context, id string, version int, mayApprove bool, note *string) (Deduction, error)
+	Statement(ctx context.Context, legalEntityID, customerID string, asOf time.Time) ([]domain.StatementSection, error)
+	RunAgingSnapshot(ctx context.Context, legalEntityID string, asOf time.Time) (SnapshotResult, error)
+	ListBalanceSnapshots(ctx context.Context, f SnapshotFilter, limit int) ([]BalanceSnapshot, error)
 	Ping(ctx context.Context) error
 }
 
@@ -197,7 +205,7 @@ const openItemColumns = `id, legal_entity_id, customer_id, source_type, document
 	currency, amount::text, open_amount::text, cash_discount_date::text, cash_discount_amount::text, dunning_level, dunning_block, status, version`
 
 const paymentColumns = `id, legal_entity_id, customer_id, payment_mode, source, source_ref, amount::text, unapplied_amount::text,
-	currency, received_date::text, value_date::text, payer_name, remittance, status, version`
+	currency, received_date::text, value_date::text, payer_name, remittance, status, version, payer_account_hash, short_pay_reason`
 
 type rowScanner interface{ Scan(dest ...any) error }
 
@@ -226,7 +234,8 @@ func scanPayment(row rowScanner) (Payment, error) {
 	var amount, unapplied string
 	var remittance []byte
 	if err := row.Scan(&p.ID, &p.LegalEntityID, &p.CustomerID, &p.PaymentMode, &p.Source, &p.SourceRef, &amount, &unapplied,
-		&p.Currency, &p.ReceivedDate, &p.ValueDate, &p.PayerName, &remittance, &p.Status, &p.Version); err != nil {
+		&p.Currency, &p.ReceivedDate, &p.ValueDate, &p.PayerName, &remittance, &p.Status, &p.Version,
+		&p.PayerAccountHash, &p.ShortPayReason); err != nil {
 		return Payment{}, err
 	}
 	var err error
@@ -374,11 +383,12 @@ func (s *Postgres) CreatePayment(ctx context.Context, in Payment, idempotencyKey
 			return err
 		}
 		row := tx.QueryRow(ctx, `insert into payment (tenant_id, id, legal_entity_id, customer_id, payment_mode, source, source_ref,
-			amount, unapplied_amount, currency, received_date, value_date, payer_name, remittance, status, idempotency_key)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $8, $9, $10, $11, $12, $13, 'RECEIVED', $14)
+			amount, unapplied_amount, currency, received_date, value_date, payer_name, remittance, status, idempotency_key,
+			payer_account_hash, short_pay_reason)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $8, $9, $10, $11, $12, $13, 'RECEIVED', $14, $15, $16)
 			returning `+paymentColumns,
 			p.TenantID, in.ID, in.LegalEntityID, in.CustomerID, in.PaymentMode, in.Source, in.SourceRef, in.Amount.String(),
-			in.Currency, in.ReceivedDate, in.ValueDate, in.PayerName, remittance, idempotencyKey)
+			in.Currency, in.ReceivedDate, in.ValueDate, in.PayerName, remittance, idempotencyKey, in.PayerAccountHash, in.ShortPayReason)
 		out, err = scanPayment(row)
 		if err != nil {
 			return err
@@ -396,7 +406,8 @@ func sameRequest(stored, in Payment) bool {
 	return stored.LegalEntityID == in.LegalEntityID && stored.Amount.Equal(in.Amount) && stored.Currency == in.Currency &&
 		stored.PaymentMode == in.PaymentMode && stored.Source == in.Source && stored.ReceivedDate == in.ReceivedDate &&
 		stored.ValueDate == in.ValueDate && eqStrPtr(stored.CustomerID, in.CustomerID) && eqStrPtr(stored.SourceRef, in.SourceRef) &&
-		eqStrPtr(stored.PayerName, in.PayerName) && sameRemittance(stored.Remittance, in.Remittance)
+		eqStrPtr(stored.PayerName, in.PayerName) && sameRemittance(stored.Remittance, in.Remittance) &&
+		eqStrPtr(stored.PayerAccountHash, in.PayerAccountHash) && eqStrPtr(stored.ShortPayReason, in.ShortPayReason)
 }
 
 func sameRemittance(a, b []domain.RemittanceLine) bool {
@@ -462,14 +473,25 @@ func (s *Postgres) MatchPayment(ctx context.Context, id string) (domain.Result, 
 		if err := rows.Err(); err != nil {
 			return err
 		}
-		res = domain.Match(domain.Payment{Amount: pay.UnappliedAmount, ValueDate: parseDay(pay.ValueDate), Remittance: pay.Remittance}, pool)
+		dp := domain.Payment{Amount: pay.UnappliedAmount, ValueDate: parseDay(pay.ValueDate), Remittance: pay.Remittance,
+			PayerName: valueOrEmpty(pay.PayerName), ShortPayReason: valueOrEmpty(pay.ShortPayReason)}
+		if dp.PayerCustomers, err = payerCustomers(ctx, tx, pay.LegalEntityID, pay.PayerAccountHash); err != nil {
+			return err
+		}
+		if dp.PayerName != "" {
+			if dp.LearnedNames, err = learnedPayerNames(ctx, tx, pay.LegalEntityID, poolCustomers(pool)); err != nil {
+				return err
+			}
+		}
+		res = domain.Match(dp, pool)
 		return nil
 	})
 	return res, err
 }
 
 func toDomainItem(o OpenItem) domain.Item {
-	it := domain.Item{ID: o.ID, DocumentNumber: o.DocumentNumber, DueDate: parseDay(o.DueDate), OpenAmount: o.OpenAmount, DiscountAmount: o.CashDiscountAmount}
+	it := domain.Item{ID: o.ID, CustomerID: o.CustomerID, Currency: o.Currency, DocumentNumber: o.DocumentNumber,
+		DueDate: parseDay(o.DueDate), OpenAmount: o.OpenAmount, DiscountAmount: o.CashDiscountAmount}
 	if o.CashDiscountDate != nil {
 		d := parseDay(*o.CashDiscountDate)
 		it.DiscountDate = &d
@@ -565,6 +587,10 @@ func (s *Postgres) ApplyPayment(ctx context.Context, id string, version int, req
 			return err
 		}
 		out.Payment = pay
+		// Learn the payer's account and name for the customer it paid (R4, R5).
+		if err := learnPayer(ctx, tx, p.TenantID, pay.LegalEntityID, pay.CustomerID, pay.PayerAccountHash, pay.PayerName); err != nil {
+			return err
+		}
 		if err := enqueue(ctx, tx, "payment", pay.ID, rcvevents.PaymentApplied, p.TenantID, rcvevents.PaymentAppliedData{
 			PaymentID: pay.ID, LegalEntityID: pay.LegalEntityID, CustomerID: pay.CustomerID, Currency: pay.Currency,
 			Settlements: settled, Residual: req.Residual, Status: newStatus,

@@ -29,6 +29,8 @@ type fakeStore struct {
 	payment     store.Payment
 	lockbox     store.LockboxImport
 	seenFiles   map[string]bool
+	statement   statementCall
+	snapshots   store.SnapshotFilter
 }
 
 func (f *fakeStore) CreateOpenItem(context.Context, store.OpenItem) (store.OpenItem, error) {
@@ -124,6 +126,30 @@ func (f *fakeStore) ImportLockbox(_ context.Context, in store.LockboxImport) (st
 
 func (f *fakeStore) Worklist(context.Context, string, time.Time) ([]domain.CustomerRisk, error) {
 	return []domain.CustomerRisk{{CustomerID: testItem, Currency: "USD", RiskScore: 45}}, nil
+}
+
+// The statement and snapshot fakes record what the handler forwarded.
+type statementCall struct {
+	legalEntity, customer, asOf string
+}
+
+func (f *fakeStore) RunAgingSnapshot(_ context.Context, le string, asOf time.Time) (store.SnapshotResult, error) {
+	f.statement = statementCall{legalEntity: le, asOf: asOf.Format("2006-01-02")}
+	return store.SnapshotResult{LegalEntityID: le, AsOf: asOf.Format("2006-01-02"), Rows: 2, Changed: 1}, nil
+}
+
+func (f *fakeStore) ListBalanceSnapshots(_ context.Context, filter store.SnapshotFilter, _ int) ([]store.BalanceSnapshot, error) {
+	f.snapshots = filter
+	return []store.BalanceSnapshot{{LegalEntityID: filter.LegalEntityID, CustomerID: testItem, Currency: "USD", AsOf: "2027-03-31",
+		TotalOpen: decimal.RequireFromString("100.00"), Overdue: decimal.RequireFromString("40.00"), RiskScore: 45}}, nil
+}
+
+func (f *fakeStore) Statement(_ context.Context, le, customer string, asOf time.Time) ([]domain.StatementSection, error) {
+	f.statement = statementCall{legalEntity: le, customer: customer, asOf: asOf.Format("2006-01-02")}
+	return []domain.StatementSection{{Currency: "USD", ClosingBalance: decimal.RequireFromString("100.00"), Aging: []domain.AgingTotal{},
+		Lines: []domain.StatementLine{{SourceType: "INVOICE", DocumentNumber: "INV-9", DocumentDate: "2027-03-01",
+			Amount: decimal.RequireFromString("100.00"), OpenAmount: decimal.RequireFromString("100.00"),
+			RunningBalance: decimal.RequireFromString("100.00")}}}}, nil
 }
 
 const (

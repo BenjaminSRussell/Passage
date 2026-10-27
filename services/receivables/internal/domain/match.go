@@ -26,7 +26,8 @@ const (
 	MaxRefLength = 4
 )
 
-// Rule weights (BR-30.1). R4, R5 and R7 need data the slice does not carry yet.
+// Rule weights for R1, R2, R3 and R6 (BR-30.1). The payer-identity rules R4, R5
+// and R7 live in identity.go.
 const (
 	weightR1       = 60
 	weightR2Single = 30
@@ -39,6 +40,8 @@ const (
 // Item is the part of an open item the matcher reads. Amounts are positive.
 type Item struct {
 	ID             string
+	CustomerID     string
+	Currency       string
 	DocumentNumber string
 	DueDate        time.Time
 	OpenAmount     decimal.Decimal
@@ -57,6 +60,16 @@ type Payment struct {
 	Amount     decimal.Decimal
 	ValueDate  time.Time
 	Remittance []RemittanceLine
+	// PayerName is the payer name as received (R5).
+	PayerName string
+	// ShortPayReason explains a short payment; R7 needs it (empty means none).
+	ShortPayReason string
+	// PayerCustomers holds the customers already bound to the payer account hash (R4).
+	PayerCustomers map[string]bool
+	// LearnedNames holds payer names previously applied per customer (R5).
+	LearnedNames map[string][]string
+
+	nameScores map[string]float64
 }
 
 // Candidate is one scored set of open items that could settle a payment.
@@ -85,6 +98,7 @@ type Result struct {
 // scored over all open items; multi-item sets are searched only among the first
 // MaxSubsetPool items by due date so the search stays bounded.
 func Match(p Payment, open []Item) Result {
+	p.nameScores = payerNameScores(p)
 	pool := append([]Item(nil), open...)
 	sort.SliceStable(pool, func(i, j int) bool {
 		if !pool[i].DueDate.Equal(pool[j].DueDate) {
@@ -104,7 +118,11 @@ func Match(p Payment, open []Item) Result {
 		limit = MaxSubsetPool
 	}
 	exactSubsets(pool[:limit], p.Amount, MaxSubsetSize, func(picked []Item) {
-		sets = append(sets, scoreSubset(p, picked))
+		// A payment settles one customer's items (apply refuses a mix), so a set
+		// spanning customers is never a candidate.
+		if oneCustomer(picked) {
+			sets = append(sets, scoreSubset(p, picked))
+		}
 	})
 
 	sort.SliceStable(sets, func(i, j int) bool {
@@ -164,6 +182,19 @@ func scoreSingle(p Payment, it Item) (Candidate, bool) {
 		c.Rules = append(c.Rules, "R3")
 		strong = true
 	}
+	if payerKnown(p, it) {
+		c.Score += weightR4
+		c.Rules = append(c.Rules, "R4")
+	}
+	if payerNameMatches(p, it) {
+		c.Score += weightR5
+		c.Rules = append(c.Rules, "R5")
+	}
+	if !hasRule(c.Rules, "R3") && shortPaid(p, it) {
+		c.Score += weightR7
+		c.Rules = append(c.Rules, "R7")
+		strong = true
+	}
 	if withinWindow(p.ValueDate, it.DueDate) {
 		c.Score += weightR6
 		c.Rules = append(c.Rules, "R6")
@@ -189,11 +220,39 @@ func scoreSubset(p Payment, picked []Item) Candidate {
 		c.Score += weightR1
 		c.Rules = append(c.Rules, "R1")
 	}
+	// The items share one customer, so R4 and R5 hold for all of them or none.
+	if payerKnown(p, picked[0]) {
+		c.Score += weightR4
+		c.Rules = append(c.Rules, "R4")
+	}
+	if payerNameMatches(p, picked[0]) {
+		c.Score += weightR5
+		c.Rules = append(c.Rules, "R5")
+	}
 	if withinWindow(p.ValueDate, earliest) {
 		c.Score += weightR6
 		c.Rules = append(c.Rules, "R6")
 	}
 	return c
+}
+
+// oneCustomer reports whether every item belongs to the same customer.
+func oneCustomer(items []Item) bool {
+	for _, it := range items[1:] {
+		if it.CustomerID != items[0].CustomerID {
+			return false
+		}
+	}
+	return true
+}
+
+func hasRule(rules []string, code string) bool {
+	for _, r := range rules {
+		if r == code {
+			return true
+		}
+	}
+	return false
 }
 
 // exactSubsets calls visit for every subset of two to max items of pool whose

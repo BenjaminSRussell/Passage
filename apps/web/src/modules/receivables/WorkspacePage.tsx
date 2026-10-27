@@ -17,7 +17,7 @@ const BUCKET_LABELS: Record<Bucket, string> = {
   "OVER-180": "Over 180 days",
 };
 
-interface AgingRow {
+export interface AgingRow {
   currency: string;
   cells: Record<Bucket, string>;
   total: string;
@@ -42,7 +42,8 @@ export function agingRows(aging: AgingResponse): AgingRow[] {
   });
 }
 
-const columns: DataTableColumn<AgingRow>[] = [
+/** Aging table columns: currency, one per bucket, total; shared with the statement footer. */
+export const agingColumns: DataTableColumn<AgingRow>[] = [
   { key: "currency", header: "Currency", mono: true },
   ...BUCKETS.map(
     (b): DataTableColumn<AgingRow> => ({ key: b, header: BUCKET_LABELS[b], align: "end", mono: true, render: (row) => row.cells[b] }),
@@ -116,7 +117,7 @@ export function WorkspacePage() {
               </div>
               <DataTable
                 label="Aging by currency"
-                columns={columns}
+                columns={agingColumns}
                 rows={rows}
                 getRowKey={(row) => row.currency}
                 loading={state.loading}

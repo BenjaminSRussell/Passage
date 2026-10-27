@@ -38,16 +38,23 @@ interface Loaded {
 
 const emptyLine: Line = { amount: "", cashDiscount: "", writeOff: "" };
 
-/** The plan a matcher candidate proposes: each item settled in full, taking the cash discount when R3 scored it. */
-export function planFromCandidate(candidate: MatchCandidate, items: OpenItem[]): Plan {
+/**
+ * The plan a matcher candidate proposes: each item settled in full, taking the cash discount when R3 scored it.
+ * A single item the payment does not cover (a short pay, R7, or a partial payment naming the invoice) is settled
+ * with what the payment has, leaving the rest of the item open for a deduction or a later payment.
+ */
+export function planFromCandidate(candidate: MatchCandidate, items: OpenItem[], unapplied?: string): Plan {
   const plan: Plan = {};
+  const single = candidate.openItemIds.length === 1;
   for (const id of candidate.openItemIds) {
     const item = items.find((i) => i.id === id);
     if (!item) continue;
-    const discounted = candidate.rules.includes("R3") && candidate.openItemIds.length === 1;
-    plan[id] = discounted
+    const discounted = candidate.rules.includes("R3") && single;
+    let line: Line = discounted
       ? { amount: subtract(item.openAmount, item.cashDiscountAmount), cashDiscount: item.cashDiscountAmount, writeOff: "" }
       : { amount: item.openAmount, cashDiscount: "", writeOff: "" };
+    if (single && unapplied !== undefined && compareDecimals(line.amount, unapplied) > 0) line = { amount: unapplied, cashDiscount: "", writeOff: "" };
+    plan[id] = line;
   }
   return plan;
 }
@@ -165,7 +172,7 @@ export function PaymentDetailPage() {
       key: "use",
       header: "Plan",
       render: (row) => (
-        <Button size="sm" onClick={() => setPlan(planFromCandidate(row, items))}>
+        <Button size="sm" onClick={() => setPlan(planFromCandidate(row, items, payment.unappliedAmount))}>
           Use {row.openItemIds.map(docOf).join(", ")}
         </Button>
       ),
@@ -221,6 +228,8 @@ export function PaymentDetailPage() {
           <Detail term="Value date" mono>{payment.valueDate}</Detail>
           <Detail term="Customer" mono>{payment.customerId ?? "Unidentified"}</Detail>
           <Detail term="Payer">{payment.payerName ?? "Not given"}</Detail>
+          <Detail term="Payer account">{payment.payerAccountHash ? "Given (kept as a hash)" : "Not given"}</Detail>
+          <Detail term="Short-pay reason">{payment.shortPayReason ?? "None"}</Detail>
           <Detail term="Remittance" mono>{payment.remittance.length > 0 ? payment.remittance.map((r) => r.reference).join(", ") : "None"}</Detail>
         </dl>
       </Card>
@@ -258,7 +267,7 @@ export function PaymentDetailPage() {
                 />
               </div>
             ) : (
-              <p className={styles.note}>The matcher scores reference, amount, discount and due date (rules R1, R2, R3, R6). Nothing changes until you apply.</p>
+              <p className={styles.note}>The matcher scores reference, amount and discount (R1, R2, R3), a payer account or name seen before for the customer (R4, R5), due date (R6) and a short payment with a reason (R7). Nothing changes until you apply.</p>
             )}
           </Card>
           <Card title="Apply" headingLevel={3}>

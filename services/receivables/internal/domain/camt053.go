@@ -27,6 +27,9 @@ type CAMTCredit struct {
 	ValueDate     string
 	DebtorName    string
 	RemittanceRef string
+	// DebtorAccountHash is AccountHash of the debtor's IBAN or other account id
+	// (RltdPties/DbtrAcct), for matcher rule R4; "" when the bank gave none.
+	DebtorAccountHash string
 }
 
 // CAMTStatement is a parsed statement file. Skipped counts the entries that are
@@ -83,7 +86,15 @@ func (p camtParty) name() string {
 
 type camtTx struct {
 	RltdPties struct {
-		Dbtr camtParty `xml:"Dbtr"`
+		Dbtr     camtParty `xml:"Dbtr"`
+		DbtrAcct struct {
+			ID struct {
+				IBAN string `xml:"IBAN"`
+				Othr struct {
+					ID string `xml:"Id"`
+				} `xml:"Othr"`
+			} `xml:"Id"`
+		} `xml:"DbtrAcct"`
 	} `xml:"RltdPties"`
 	RmtInf struct {
 		Ustrd []string `xml:"Ustrd"`
@@ -229,6 +240,13 @@ func entryToCredit(e camtEntry, stmtID string, line int) (CAMTCredit, bool, erro
 		for _, tx := range d.TxDtls {
 			if credit.DebtorName == "" {
 				credit.DebtorName = tx.RltdPties.Dbtr.name()
+			}
+			if credit.DebtorAccountHash == "" {
+				acct := tx.RltdPties.DbtrAcct.ID.IBAN
+				if strings.TrimSpace(acct) == "" {
+					acct = tx.RltdPties.DbtrAcct.ID.Othr.ID
+				}
+				credit.DebtorAccountHash = AccountHash(acct)
 			}
 			if credit.RemittanceRef == "" {
 				credit.RemittanceRef = remittanceRef(tx)

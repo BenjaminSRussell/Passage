@@ -54,6 +54,8 @@ describe("receivables module", () => {
       "/receivables/deductions",
       "/receivables/deductions/new",
       "/receivables/deductions/:id",
+      "/receivables/statements",
+      "/receivables/balance-snapshots",
     ]);
     // Every nav entry points at a registered route; each route has a title for the shell.
     const paths = new Set(receivables.routes.map((r) => r.path));
@@ -197,6 +199,14 @@ describe("apply plan", () => {
       "i-1": { amount: "980.00", cashDiscount: "20.00", writeOff: "" },
     });
     expect(planFromCandidate({ openItemIds: ["i-1"], score: 65, rules: ["R1", "R6"] }, [item])["i-1"].amount).toBe("1000.00");
+  });
+
+  it("settles a short pay (R7) with what the payment has and leaves the rest of the item open", () => {
+    expect(planFromCandidate({ openItemIds: ["i-1"], score: 85, rules: ["R1", "R7", "R6"] }, [item], "995.00")).toEqual({
+      "i-1": { amount: "995.00", cashDiscount: "", writeOff: "" },
+    });
+    // A payment that covers the item still settles it in full.
+    expect(planFromCandidate({ openItemIds: ["i-1"], score: 90, rules: ["R1", "R2"] }, [item], "1000.00")["i-1"].amount).toBe("1000.00");
   });
 
   it("puts the rest on account and refuses a plan above the unapplied amount", () => {
