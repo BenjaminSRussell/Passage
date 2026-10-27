@@ -11,19 +11,56 @@ import (
 	"os"
 	"os/exec"
 	"sort"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 )
 
-const contractTenant = "tenant-a"
+const (
+	contractTenant   = "tenant-a"
+	seededDutyCount  = 37
+	unassignedUserID = "user-without-duty"
+)
 
 type seededDuty struct {
 	Permissions []struct {
 		Resource string   `json:"resource"`
 		Methods  []string `json:"methods"`
 	} `json:"permissions"`
+}
+
+func (d seededDuty) grants(method, resource string) bool {
+	for _, permission := range d.Permissions {
+		if resource != permission.Resource && !strings.HasPrefix(resource, permission.Resource+"/") {
+			continue
+		}
+		for _, m := range permission.Methods {
+			if m == method {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 func startRealPolicy(t *testing.T) string {
@@ -42,24 +79,36 @@ func startRealPolicy(t *testing.T) string {
 	addr := listener.Addr().String()
 	_ = listener.Close()
 
+	stderr := &syncBuffer{}
 	cmd := exec.Command(bin, "run", "--server", "--addr", addr, "../../policies/authz")
+	cmd.Stderr = stderr
+	cmd.Stdout = stderr
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		<-exited
+	})
 
 	base := "http://" + addr
-	deadline := time.Now().Add(10 * time.Second)
+	probe := &http.Client{Timeout: 500 * time.Millisecond}
+	deadline := time.After(10 * time.Second)
 	for {
-		resp, err := http.Get(base + "/health")
-		if err == nil {
+		select {
+		case err := <-exited:
+			t.Fatalf("opa exited early: %v\n%s", err, stderr.String())
+		case <-deadline:
+			t.Fatalf("opa server did not become healthy\n%s", stderr.String())
+		default:
+		}
+		if resp, err := probe.Get(base + "/health"); err == nil {
 			_ = resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
 				return base
 			}
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("opa server did not become healthy")
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
@@ -75,7 +124,7 @@ func putAssignments(t *testing.T, base string, assignments map[string][]string) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +134,15 @@ func putAssignments(t *testing.T, base string, assignments map[string][]string) 
 	}
 }
 
-func TestDutyContractAgainstRealPolicy(t *testing.T) {
+type contractHarness struct {
+	duties  map[string]seededDuty
+	names   []string
+	userFor map[string]string
+	serve   func(user, method, resource string) *httptest.ResponseRecorder
+}
+
+func newContractHarness(t *testing.T) contractHarness {
+	t.Helper()
 	base := startRealPolicy(t)
 
 	raw, err := os.ReadFile("../../policies/authz/data.json")
@@ -98,14 +155,14 @@ func TestDutyContractAgainstRealPolicy(t *testing.T) {
 	if err := json.Unmarshal(raw, &seeded); err != nil {
 		t.Fatal(err)
 	}
+	if len(seeded.Duties) != seededDutyCount {
+		t.Fatalf("seeded duties = %d, want %d", len(seeded.Duties), seededDutyCount)
+	}
 	names := make([]string, 0, len(seeded.Duties))
 	for name := range seeded.Duties {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	if len(names) < 20 {
-		t.Fatalf("seeded duties = %d, want at least 20", len(names))
-	}
 
 	assignments := map[string][]string{}
 	userFor := map[string]string{}
@@ -116,35 +173,104 @@ func TestDutyContractAgainstRealPolicy(t *testing.T) {
 	}
 	putAssignments(t, base, assignments)
 
-	client, err := NewOPAClient(base, nil)
+	client, err := NewOPAClient(base, &http.Client{Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	serve := func(user, method, resource string) int {
+	serve := func(user, method, resource string) *httptest.ResponseRecorder {
 		handler := RequireOPA(client, method, resource)(
 			http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }),
 		)
-		req := httptest.NewRequest(method, resource+"/item-1", nil)
+		req := httptest.NewRequest(method, resource, nil)
 		ctx := tenant.With(req.Context(), tenant.Principal{TenantID: contractTenant, UserID: user})
 		req = req.WithContext(context.WithValue(ctx, verifiedPrincipalKey{}, true))
 		resp := httptest.NewRecorder()
 		handler.ServeHTTP(resp, req)
-		return resp.Code
+		return resp
 	}
+	return contractHarness{duties: seeded.Duties, names: names, userFor: userFor, serve: serve}
+}
 
-	for _, name := range names {
-		for _, permission := range seeded.Duties[name].Permissions {
+func assertForbiddenWithDuty(t *testing.T, resp *httptest.ResponseRecorder, who string) {
+	t.Helper()
+	if resp.Code != http.StatusForbidden {
+		t.Errorf("%s: status = %d, want 403", who, resp.Code)
+		return
+	}
+	if ct := resp.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/problem+json") {
+		t.Errorf("%s: content type = %q, want application/problem+json", who, ct)
+	}
+	var problem struct {
+		Errors map[string]string `json:"errors"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &problem); err != nil || problem.Errors["duty_missing"] == "" {
+		t.Errorf("%s: body lacks errors.duty_missing: %s", who, resp.Body.String())
+	}
+}
+
+func TestDutyContractAgainstRealPolicy(t *testing.T) {
+	h := newContractHarness(t)
+
+	type pair struct{ method, resource string }
+	seen := map[pair]bool{}
+	var pairs []pair
+	for _, name := range h.names {
+		for _, permission := range h.duties[name].Permissions {
 			for _, method := range permission.Methods {
-				t.Run(fmt.Sprintf("%s/%s %s", name, method, permission.Resource), func(t *testing.T) {
-					if got := serve(userFor[name], method, permission.Resource); got < 200 || got > 299 {
-						t.Errorf("with duty status = %d, want 2xx", got)
-					}
-					if got := serve("user-without-duty", method, permission.Resource); got != http.StatusForbidden {
-						t.Errorf("without duty status = %d, want 403", got)
-					}
-				})
+				p := pair{method, permission.Resource + "/item-1"}
+				if !seen[p] {
+					seen[p] = true
+					pairs = append(pairs, p)
+				}
 			}
 		}
+	}
+
+	for _, p := range pairs {
+		t.Run(p.method+" "+p.resource, func(t *testing.T) {
+			for _, name := range h.names {
+				resp := h.serve(h.userFor[name], p.method, p.resource)
+				if h.duties[name].grants(p.method, p.resource) {
+					if resp.Code < 200 || resp.Code > 299 {
+						t.Errorf("%q should be allowed: status = %d, want 2xx", name, resp.Code)
+					}
+					continue
+				}
+				assertForbiddenWithDuty(t, resp, fmt.Sprintf("%q should be denied", name))
+			}
+			assertForbiddenWithDuty(t, h.serve(unassignedUserID, p.method, p.resource), "unassigned user")
+		})
+	}
+}
+
+func TestDutyContractExpectations(t *testing.T) {
+	h := newContractHarness(t)
+	tests := []struct {
+		duty, method, resource string
+		wantAllowed            bool
+		wantDutyMissing        string
+	}{
+		{duty: "Maintain vendors", method: http.MethodPut, resource: "/v1/vendors", wantAllowed: true},
+		{duty: "Maintain vendors", method: http.MethodPut, resource: "/v1/vendors/vendor-a", wantAllowed: true},
+		{duty: "View vendors", method: http.MethodGet, resource: "/v1/vendors/vendor-a", wantAllowed: true},
+		{duty: "View vendors", method: http.MethodPut, resource: "/v1/vendors", wantDutyMissing: "Maintain vendors"},
+		{duty: "Maintain vendors", method: http.MethodPut, resource: "/v1/vendors-extra/vendor-a"},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%s/%s %s", tt.duty, tt.method, tt.resource), func(t *testing.T) {
+			resp := h.serve(h.userFor[tt.duty], tt.method, tt.resource)
+			if tt.wantAllowed {
+				if resp.Code < 200 || resp.Code > 299 {
+					t.Fatalf("status = %d, want 2xx", resp.Code)
+				}
+				return
+			}
+			if resp.Code != http.StatusForbidden {
+				t.Fatalf("status = %d, want 403", resp.Code)
+			}
+			if tt.wantDutyMissing != "" && !strings.Contains(resp.Body.String(), `"duty_missing":"`+tt.wantDutyMissing+`"`) {
+				t.Fatalf("body = %s, want duty_missing %q", resp.Body.String(), tt.wantDutyMissing)
+			}
+		})
 	}
 }
