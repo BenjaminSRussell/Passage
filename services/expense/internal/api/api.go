@@ -1,6 +1,7 @@
-// Package api exposes the expense rules over HTTP. This slice serves stateless
-// previews: report policy evaluation, advance settlement and travel variance.
-// Report persistence, receipts, card import and AP posting arrive in later slices.
+// Package api exposes the expense rules over HTTP as stateless previews: report
+// policy evaluation, advance settlement, travel variance, per diem, advance aging,
+// requisition window and closure, and card feed parsing. Report persistence,
+// receipts, stored card import and AP posting arrive in later slices.
 package api
 
 import (
@@ -24,6 +25,7 @@ import (
 const (
 	readyTimeout     = 500 * time.Millisecond
 	dutyExpense      = "expense.report.write"
+	dutyCardImport   = "expense.card.import"
 	validationDetail = "request failed validation"
 	dateLayout       = "2006-01-02"
 	maxLines         = 500
@@ -37,10 +39,14 @@ type Pinger interface {
 
 // API holds handlers and counters.
 type API struct {
-	db          Pinger
-	evaluations atomic.Int64
-	settlements atomic.Int64
-	variances   atomic.Int64
+	db                Pinger
+	evaluations       atomic.Int64
+	settlements       atomic.Int64
+	variances         atomic.Int64
+	perDiems          atomic.Int64
+	agings            atomic.Int64
+	requisitionChecks atomic.Int64
+	feeds             atomic.Int64
 }
 
 // New returns the API. db may be nil in tests.
@@ -54,6 +60,10 @@ func (a *API) Register(r chi.Router) {
 	r.With(duty).Post("/v1/expense/report-evaluations", a.evaluate)
 	r.With(duty).Post("/v1/expense/cash-advance-settlements", a.settle)
 	r.With(duty).Post("/v1/expense/travel-variances", a.variance)
+	r.With(duty).Post("/v1/expense/per-diem-computations", a.perDiem)
+	r.With(duty).Post("/v1/expense/cash-advance-aging", a.advanceAging)
+	r.With(duty).Post("/v1/expense/travel-requisition-checks", a.requisitionCheck)
+	r.With(authz.RequireDuty(dutyCardImport)).Post("/v1/expense/card-transactions:parse", a.cardFeedParse)
 }
 
 // Metrics serves Prometheus text on the admin port.
@@ -62,6 +72,10 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP expense_report_evaluations_total Policy evaluations served.\n# TYPE expense_report_evaluations_total counter\nexpense_report_evaluations_total %d\n", a.evaluations.Load())
 		fmt.Fprintf(w, "# HELP expense_advance_settlements_total Advance settlement previews served.\n# TYPE expense_advance_settlements_total counter\nexpense_advance_settlements_total %d\n", a.settlements.Load())
 		fmt.Fprintf(w, "# HELP expense_travel_variances_total Requisition variance checks served.\n# TYPE expense_travel_variances_total counter\nexpense_travel_variances_total %d\n", a.variances.Load())
+		fmt.Fprintf(w, "# HELP expense_per_diem_computations_total Per diem computations served.\n# TYPE expense_per_diem_computations_total counter\nexpense_per_diem_computations_total %d\n", a.perDiems.Load())
+		fmt.Fprintf(w, "# HELP expense_cash_advance_aging_total Advance aging checks served.\n# TYPE expense_cash_advance_aging_total counter\nexpense_cash_advance_aging_total %d\n", a.agings.Load())
+		fmt.Fprintf(w, "# HELP expense_requisition_checks_total Requisition window checks served.\n# TYPE expense_requisition_checks_total counter\nexpense_requisition_checks_total %d\n", a.requisitionChecks.Load())
+		fmt.Fprintf(w, "# HELP expense_card_feed_parses_total Card feed parses served.\n# TYPE expense_card_feed_parses_total counter\nexpense_card_feed_parses_total %d\n", a.feeds.Load())
 	})
 }
 

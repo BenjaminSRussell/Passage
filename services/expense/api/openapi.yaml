@@ -3,14 +3,16 @@ info:
   title: expense
   version: 0.1.0
   description: >-
-    Expense management, slice 1 of PSG-43. Stateless previews: policy evaluation of report
+    Expense management, slices 1-2 of PSG-43. Stateless previews: policy evaluation of report
     lines against the default rule set (receipts at 25.00 and up, alcohol blocked, submission
     later than 60 days blocked, duplicates of merchant, amount and date blocked, meals over
     75.00 a day without attendees needing justification), oldest-first cash-advance settlement
-    (BR-43.9) and travel requisition variance (BR-43.13). Nothing is persisted, so no call
-    takes an Idempotency-Key. Money is a decimal string, never a float.
+    (BR-43.9), travel requisition variance (BR-43.13), per diem (BR-43.6), cash-advance aging
+    (FR-43.15), requisition window and closure (BR-43.13) and card feed parsing (CSV, OFX;
+    FR-43.13). Nothing is persisted, so no call takes an Idempotency-Key. Money is a decimal
+    string, never a float.
     Error codes: COM-0001, AUTH-0001, AUTH-0003, COM-0500. Result codes (in bodies, not
-    errors): EXP-POL-001, EXP-POL-002, EXP-REC-001, EXP-TR-001, EXP-ADV-003.
+    errors): EXP-POL-001, EXP-POL-002, EXP-REC-001, EXP-TR-001, EXP-ADV-002, EXP-ADV-003.
 servers:
   - url: https://app.local.passage.dev
 paths:
@@ -65,6 +67,98 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/VarianceResponse' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/expense/per-diem-computations:
+    post:
+      operationId: computePerDiem
+      x-passage-duty: expense.report.write
+      description: >-
+        BR-43.6 per diem for one trip. days must be consecutive calendar days in date order
+        (400 COM-0001 on days otherwise). The first and last day pay 75% of the M&IE rate (a
+        one-day trip is both); provided breakfast, lunch and dinner are deducted at 20/30/50% of
+        the full-day rate, also on partial days, and a day never goes below zero (GSA and BMF
+        practice). Lodging per charged night. Each day is rounded half away from zero to the rate
+        currency's minor unit (JPY 0, KWD 3, otherwise 2), and amounts are formatted at that
+        unit. The rate table is supplied by the caller; conversion to the line currency is not
+        done here.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PerDiemRequest' }
+      responses:
+        '200':
+          description: Per-day lines and totals in the rate currency.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PerDiemResponse' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/expense/cash-advance-aging:
+    post:
+      operationId: checkAdvanceAging
+      x-passage-duty: expense.report.write
+      description: >-
+        FR-43.15 aging. open = paid - settled - returned - recovered - writtenOff (BR-43.9); the
+        cleared amounts together may not exceed paid and ids must be unique (400 COM-0001). An
+        advance is overdue when it still has an open balance after its due date, tripEnd plus
+        limitDays (default 30); the due date itself is in time. newAdvancesBlocked is true, with
+        code EXP-ADV-002, while any advance is overdue. Nothing is stored.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AgingRequest' }
+      responses:
+        '200':
+          description: Blocking flag and the overdue advances with due date and open balance.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgingResponse' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/expense/travel-requisition-checks:
+    post:
+      operationId: checkRequisitionWindow
+      x-passage-duty: expense.report.write
+      description: >-
+        BR-43.13 window and closure. Travel dates outside the approved window (inclusive) are
+        returned as WARN candidates. closeDate is 60 days after lastTravelDate (default trip.to);
+        closeDue is true when the linked report is posted or asOf is on or after closeDate.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RequisitionCheckRequest' }
+      responses:
+        '200':
+          description: Out-of-range dates and the closure flag.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RequisitionCheckResponse' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/expense/card-transactions:parse:
+    post:
+      operationId: parseCardFeed
+      x-passage-duty: expense.card.import
+      description: >-
+        FR-43.13 card feed parse (ExpenseAdmin). CSV with a header holding card_last4, txn_date,
+        post_date, merchant, amount and currency (optional mcc; a UTF-8 BOM is ignored), or OFX
+        1.x/2.x STMTTRN blocks (DTUSER as the transaction date, else DTPOSTED; SIC as mcc; each
+        statement's own ACCTID and CURDEF). Rows that fail validation, including malformed CSV
+        rows, are returned in rejected and do not stop the file. Amounts are never rounded: more
+        decimals than the currency allows, a zero amount or a post date before the transaction
+        date rejects the row. fileHash is the SHA-256 of the content and keys de-duplication.
+        Nothing is stored.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CardFeedRequest' }
+      responses:
+        '200':
+          description: Parsed transactions (spend positive, refunds negative), rejected rows and the file hash.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CardFeedResponse' }
         default: { $ref: '#/components/responses/Problem' }
   /readyz:
     get:
@@ -193,3 +287,156 @@ components:
       properties:
         requiresJustification: { type: boolean }
         code: { type: string, example: EXP-TR-001 }
+    PerDiemRequest:
+      type: object
+      required: [rate, days]
+      additionalProperties: false
+      properties:
+        rate:
+          type: object
+          required: [currency, lodging, mealsIncidentals]
+          additionalProperties: false
+          properties:
+            country: { type: string, pattern: '^[A-Z]{2}$' }
+            city: { type: string, maxLength: 64 }
+            currency: { type: string, pattern: '^[A-Z]{3}$' }
+            lodging: { type: string, description: Non-negative lodging per night. }
+            mealsIncidentals: { type: string, description: Non-negative M&IE per day. }
+        days:
+          type: array
+          minItems: 1
+          maxItems: 60
+          items:
+            type: object
+            required: [date]
+            additionalProperties: false
+            properties:
+              date: { type: string, format: date }
+              lodging: { type: boolean, description: Night charged. }
+              breakfastProvided: { type: boolean }
+              lunchProvided: { type: boolean }
+              dinnerProvided: { type: boolean }
+    PerDiemResponse:
+      type: object
+      required: [currency, lines, totals]
+      properties:
+        currency: { type: string }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [date, partial, lodging, mie, total]
+            properties:
+              date: { type: string, format: date }
+              partial: { type: boolean, description: First or last day of the trip (75% M&IE). }
+              lodging: { type: string }
+              mie: { type: string }
+              total: { type: string }
+        totals:
+          type: object
+          required: [lodging, mie, total]
+          properties:
+            lodging: { type: string }
+            mie: { type: string }
+            total: { type: string }
+    AgingRequest:
+      type: object
+      required: [asOf, advances]
+      additionalProperties: false
+      properties:
+        asOf: { type: string, format: date }
+        limitDays: { type: integer, minimum: 1, maximum: 180, default: 30 }
+        advances:
+          type: array
+          maxItems: 500
+          items:
+            type: object
+            required: [id, tripEnd, paid]
+            additionalProperties: false
+            properties:
+              id: { type: string, maxLength: 64 }
+              tripEnd: { type: string, format: date }
+              paid: { type: string }
+              settled: { type: string, description: Applied by expense reports. Default 0. }
+              returned: { type: string, description: Cash returned by the worker. Default 0. }
+              recovered: { type: string, description: Recovered through payroll. Default 0. }
+              writtenOff: { type: string, description: Written off with ExpenseAdmin approval. Default 0. }
+    AgingResponse:
+      type: object
+      required: [newAdvancesBlocked, overdue]
+      properties:
+        newAdvancesBlocked: { type: boolean }
+        code: { type: string, example: EXP-ADV-002, description: Present when new advances are blocked. }
+        overdue:
+          type: array
+          items:
+            type: object
+            required: [id, dueDate, daysPastDue, open]
+            properties:
+              id: { type: string }
+              dueDate: { type: string, format: date }
+              daysPastDue: { type: integer, minimum: 1 }
+              open: { type: string }
+    RequisitionCheckRequest:
+      type: object
+      required: [trip, travelDates, asOf]
+      additionalProperties: false
+      properties:
+        trip:
+          type: object
+          required: [from, to]
+          additionalProperties: false
+          properties:
+            from: { type: string, format: date }
+            to: { type: string, format: date }
+        travelDates:
+          type: array
+          maxItems: 366
+          items: { type: string, format: date }
+        lastTravelDate: { type: string, format: date, description: Defaults to trip.to. }
+        asOf: { type: string, format: date }
+        reportPosted: { type: boolean }
+    RequisitionCheckResponse:
+      type: object
+      required: [outOfRangeDates, closeDate, closeDue]
+      properties:
+        outOfRangeDates:
+          type: array
+          items: { type: string, format: date }
+        closeDate: { type: string, format: date }
+        closeDue: { type: boolean }
+    CardFeedRequest:
+      type: object
+      required: [format, content]
+      additionalProperties: false
+      properties:
+        format: { type: string, enum: [CSV, OFX, csv, ofx] }
+        content: { type: string, minLength: 1, maxLength: 2097152, description: Raw file content as text. }
+    CardFeedResponse:
+      type: object
+      required: [format, fileHash, transactions, rejected]
+      properties:
+        format: { type: string, enum: [CSV, OFX] }
+        fileHash: { type: string, description: SHA-256 hex of the content. }
+        transactions:
+          type: array
+          items:
+            type: object
+            required: [line, cardLast4, txnDate, postDate, merchant, mcc, amount, currency]
+            properties:
+              line: { type: integer, description: File line of a CSV row, or the position of an OFX STMTTRN block. }
+              cardLast4: { type: string, minLength: 4, maxLength: 4 }
+              txnDate: { type: string, format: date }
+              postDate: { type: string, format: date }
+              merchant: { type: string }
+              mcc: { type: string }
+              amount: { type: string, description: Spend positive, refunds negative, at the currency minor unit. }
+              currency: { type: string }
+        rejected:
+          type: array
+          items:
+            type: object
+            required: [line, reason]
+            properties:
+              line: { type: integer }
+              reason: { type: string }

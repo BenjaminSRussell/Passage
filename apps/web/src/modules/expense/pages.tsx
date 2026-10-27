@@ -1,81 +1,117 @@
 import { useState, type FormEvent } from "react";
-import { evaluateReport, ExpenseProblem, type EvaluationResponse } from "./api/client";
+import { Alert, Badge, Button, Card, DataTable, EmptyState, FormField, Input, PageHeader, Select, type BadgeTone, type DataTableColumn } from "../../shell/ui";
+import { describeProblem, evaluateReport, type EvaluationResponse, type Outcome, type PolicyResult, type Problem } from "./api/client";
+import { DECIMAL, today } from "./format";
+import styles from "./pages.module.css";
+
+const OUTCOME_TONE: Record<Outcome, BadgeTone> = { BLOCK: "danger", REQUIRE_JUSTIFICATION: "warning", REQUIRE_RECEIPT: "warning", WARN: "info" };
+const OUTCOME_LABEL: Record<Outcome, string> = { BLOCK: "Blocked", REQUIRE_JUSTIFICATION: "Justification required", REQUIRE_RECEIPT: "Receipt required", WARN: "Warning" };
+
+const resultColumns: DataTableColumn<PolicyResult>[] = [
+  { key: "ruleId", header: "Rule", mono: true },
+  { key: "outcome", header: "Outcome", render: (r) => <Badge tone={OUTCOME_TONE[r.outcome]}>{OUTCOME_LABEL[r.outcome]}</Badge> },
+  { key: "satisfied", header: "Status", render: (r) => (r.satisfied ? "Satisfied" : "Open") },
+  { key: "code", header: "Code", mono: true },
+  { key: "message", header: "Message" },
+];
 
 /** Check one expense line against the policy rules before it goes on a report. */
 export function ExpenseHome() {
-  const today = new Date().toISOString().slice(0, 10);
   const [category, setCategory] = useState("MEALS");
   const [amount, setAmount] = useState("80.00");
   const [hasReceipt, setHasReceipt] = useState(true);
   const [justification, setJustification] = useState("");
   const [result, setResult] = useState<EvaluationResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [amountError, setAmountError] = useState<string | undefined>();
+  const [failure, setFailure] = useState<Problem | null>(null);
+  const [busy, setBusy] = useState(false);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    setError(null);
+    setFailure(null);
+    if (!DECIMAL.test(amount.trim())) {
+      setAmountError("Enter the amount as a number such as 80.00.");
+      return;
+    }
+    setAmountError(undefined);
+    const date = today();
+    setBusy(true);
     try {
       setResult(
-        await evaluateReport(today, [
-          {
-            id: "draft-1",
-            category,
-            txnDate: today,
-            amount,
-            merchant: "",
-            attendees: 0,
-            hasReceipt,
-            justification,
-            paidBy: "EMPLOYEE",
-          },
+        await evaluateReport(date, [
+          { id: "draft-1", category, txnDate: date, amount: amount.trim(), merchant: "", attendees: 0, hasReceipt, justification, paidBy: "EMPLOYEE" },
         ]),
       );
     } catch (err) {
       setResult(null);
-      setError(err instanceof ExpenseProblem ? `${err.code}: ${err.message}` : "The line could not be checked.");
+      setFailure(describeProblem(err));
+    } finally {
+      setBusy(false);
     }
   }
 
   return (
-    <section aria-labelledby="expense-title">
-      <h1 id="expense-title">Check an expense line</h1>
-      <p>Policy outcomes are shown before you submit. A blocked line cannot be submitted.</p>
-      <form onSubmit={onSubmit}>
-        <label>
-          Category
-          <select value={category} onChange={(e) => setCategory(e.target.value)}>
-            <option value="MEALS">Meals</option>
-            <option value="TRAVEL">Travel</option>
-            <option value="ALCOHOL">Alcohol</option>
-          </select>
-        </label>
-        <label>
-          Amount
-          <input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" />
-        </label>
-        <label>
-          <input type="checkbox" checked={hasReceipt} onChange={(e) => setHasReceipt(e.target.checked)} />
-          Receipt attached
-        </label>
-        <label>
-          Justification
-          <input value={justification} onChange={(e) => setJustification(e.target.value)} />
-        </label>
-        <button type="submit">Check line</button>
-      </form>
-      {error && <p role="alert">{error}</p>}
-      {result && (
-        <div>
-          <p>{result.submittable ? "Ready to submit" : "Cannot submit yet"}</p>
-          <ul>
-            {result.results.map((r) => (
-              <li key={`${r.lineId}-${r.ruleId}`}>
-                {r.ruleId}: {r.outcome} {r.satisfied ? "(satisfied)" : "(open)"} - {r.code} {r.message}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </section>
+    <div className={styles.stack}>
+      <PageHeader title="Check an expense line" description="Policy outcomes are shown before you submit. A blocked line cannot be submitted. Nothing is saved." />
+      <Card>
+        <form className={styles.form} onSubmit={onSubmit} noValidate>
+          <FormField id="line-category" label="Category">
+            {(c) => (
+              <Select {...c} value={category} onChange={(e) => setCategory(e.target.value)}>
+                <option value="MEALS">Meals</option>
+                <option value="TRAVEL">Travel</option>
+                <option value="ALCOHOL">Alcohol</option>
+              </Select>
+            )}
+          </FormField>
+          <FormField id="line-amount" label="Amount" error={amountError}>
+            {(c) => <Input {...c} className={styles.mono} value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" invalid={Boolean(amountError)} />}
+          </FormField>
+          <FormField id="line-justification" label="Justification" optional>
+            {(c) => <Input {...c} value={justification} onChange={(e) => setJustification(e.target.value)} />}
+          </FormField>
+          <div className={styles.formActions}>
+            <span className={styles.check}>
+              <Input id="line-receipt" type="checkbox" checked={hasReceipt} onChange={(e) => setHasReceipt(e.target.checked)} />
+              <label htmlFor="line-receipt">Receipt attached</label>
+            </span>
+          </div>
+          {failure ? (
+            <div className={styles.formActions}>
+              <Alert tone="danger" title="The line could not be checked" live="alert">
+                {failure.message} ({failure.code})
+              </Alert>
+            </div>
+          ) : null}
+          <div className={styles.formActions}>
+            <Button type="submit" variant="primary" loading={busy}>
+              Check line
+            </Button>
+          </div>
+        </form>
+      </Card>
+      <Card title="Result">
+        {result ? (
+          <div className={styles.stack}>
+            {result.submittable ? (
+              <Alert tone="success" title="Ready to submit" />
+            ) : (
+              <Alert tone="warning" title="Cannot submit yet" />
+            )}
+            <DataTable
+              label="Policy results"
+              columns={resultColumns}
+              rows={result.results}
+              getRowKey={(r) => `${r.lineId}-${r.ruleId}`}
+              empty={{ title: "No policy rule applies to this line" }}
+            />
+          </div>
+        ) : busy ? (
+          <DataTable label="Policy results" columns={resultColumns} rows={[]} getRowKey={(r) => `${r.lineId}-${r.ruleId}`} loading />
+        ) : (
+          <EmptyState icon="receipt" title="No line checked yet" description="Enter the line, then check it against the policy." compact />
+        )}
+      </Card>
+    </div>
   );
 }
