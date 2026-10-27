@@ -20,6 +20,7 @@ const (
 	RunRunning       = "running"
 	RunSucceeded     = "succeeded"
 	RunFailed        = "failed"
+	RunDegraded      = "degraded"
 )
 
 var ErrRunNotFound = errors.New("import run not found")
@@ -122,6 +123,14 @@ func (s *Postgres) FinishRunSucceeded(ctx context.Context, runID string, importe
 }
 
 func (s *Postgres) FinishRunFailed(ctx context.Context, runID string, attempts int, cause error) error {
+	return s.finishUnhealthy(ctx, runID, attempts, cause, RunFailed)
+}
+
+func (s *Postgres) FinishRunDegraded(ctx context.Context, runID string, attempts int, cause error) error {
+	return s.finishUnhealthy(ctx, runID, attempts, cause, RunDegraded)
+}
+
+func (s *Postgres) finishUnhealthy(ctx context.Context, runID string, attempts int, cause error, status string) error {
 	p, _ := tenant.FromContext(ctx)
 	message := "unknown error"
 	if cause != nil {
@@ -129,8 +138,8 @@ func (s *Postgres) FinishRunFailed(ctx context.Context, runID string, attempts i
 	}
 	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var provider, typeID string
-		err := tx.QueryRow(ctx, `update provider_import_run set status='failed', attempts=$3, error=$4, finished_at=$5
-			where tenant_id=$1 and id=$2 returning provider, rate_type_id`, p.TenantID, runID, attempts, message, s.now()).Scan(&provider, &typeID)
+		err := tx.QueryRow(ctx, `update provider_import_run set status=$6, attempts=$3, error=$4, finished_at=$5
+			where tenant_id=$1 and id=$2 returning provider, rate_type_id`, p.TenantID, runID, attempts, message, s.now(), status).Scan(&provider, &typeID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrRunNotFound
 		}

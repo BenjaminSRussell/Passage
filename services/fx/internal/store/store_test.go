@@ -394,6 +394,36 @@ func TestFinishRunFailedEnqueuesDegradedEventAndAllowsRestart(t *testing.T) {
 	}
 }
 
+func TestFinishRunDegradedMarksRunAndEnqueuesDegradedEvent(t *testing.T) {
+	s, pool, ctx := migrated(t)
+	ok, _, err := s.StartRun(ctx, "ecb", "CLOSING", valid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.FinishRunSucceeded(ctx, ok.ID, 1, 0); err != nil {
+		t.Fatal(err)
+	}
+	run, _, err := s.StartRun(ctx, "ecb", "CLOSING", valid.AddDate(0, 0, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.FinishRunDegraded(ctx, run.ID, 4, errors.New("ecb: unexpected status 503")); err != nil {
+		t.Fatal(err)
+	}
+	runs, err := s.ListRuns(ctx, "ecb")
+	if err != nil || len(runs) != 2 || runs[0].Status != store.RunDegraded || runs[0].Attempts != 4 || runs[0].FinishedAt == nil {
+		t.Fatalf("runs = %+v, %v", runs, err)
+	}
+	if n := count(t, ctx, pool, `select count(*) from outbox where type = 'dev.passage.fx.provider.degraded.v1' and aggregate_id = '`+run.ID+`'
+		and payload->'data'->>'last_success_at' is not null`); n != 1 {
+		t.Fatalf("degraded events = %d, want 1", n)
+	}
+	restarted, done, err := s.StartRun(ctx, "ecb", "CLOSING", valid.AddDate(0, 0, 1))
+	if err != nil || done || restarted.Status != store.RunRunning {
+		t.Fatalf("restart = %+v done=%v err=%v", restarted, done, err)
+	}
+}
+
 func TestPostRatesReportsUnchanged(t *testing.T) {
 	s, pool, ctx := migrated(t)
 	first, err := s.PostRates(ctx, []store.RateInput{in("ecb", "1.1")})

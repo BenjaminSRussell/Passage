@@ -1,0 +1,19 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: passage-fx
+  labels:
+    app.kubernetes.io/name: fx
+spec:
+  groups:
+    - name: fx.providers
+      rules:
+        - alert: FxRateProviderDegraded
+          expr: max by (provider, rate_type) (fx_provider_degraded) == 1
+          for: 5m
+          labels:
+            severity: warning
+            service: fx
+          annotations:
+            summary: FX rate provider {{ $labels.provider }} is down for {{ $labels.rate_type }}
+            description: The latest import failed after retries and the last-known rates are being served. See the dev.passage.fx.provider.degraded.v1 event for the last success time.
