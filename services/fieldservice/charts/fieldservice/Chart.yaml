@@ -1,0 +1,6 @@
+apiVersion: v2
+name: fieldservice
+description: Passage field-service API (service agreements, SLA clocks, cases and service work orders)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

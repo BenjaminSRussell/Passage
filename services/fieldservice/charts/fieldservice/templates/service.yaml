@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    app.kubernetes.io/name: fieldservice
+spec:
+  selector:
+    app.kubernetes.io/name: fieldservice
+  ports:
+    - { name: http, port: 8080, targetPort: http }
+    - { name: admin, port: 9090, targetPort: admin }

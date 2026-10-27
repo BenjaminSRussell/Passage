@@ -1,0 +1,92 @@
+asyncapi: 3.0.0
+info:
+  title: Passage Field Service events
+  version: 0.1.0
+  description: |
+    Events published by the fieldservice service (wave 45, slice 1). Every event is
+    written to the service outbox in the same transaction as the state change and
+    relayed by Debezium to Kafka. Envelope: CloudEvents 1.0 (source /passage/service/fieldservice).
+defaultContentType: application/json
+channels:
+  caseOpened:
+    address: passage.service.case
+    messages:
+      caseOpened:
+        $ref: "#/components/messages/CaseOpened"
+  workOrderPosted:
+    address: passage.service.workorder
+    messages:
+      workOrderPosted:
+        $ref: "#/components/messages/WorkOrderPosted"
+operations:
+  publishCaseOpened:
+    action: send
+    channel: { $ref: "#/channels/caseOpened" }
+    summary: A service case was opened and its entitlement and SLA clocks started.
+    messages:
+      - $ref: "#/channels/caseOpened/messages/caseOpened"
+  publishWorkOrderPosted:
+    action: send
+    channel: { $ref: "#/channels/workOrderPosted" }
+    summary: A completed service work order was posted to billing and warranty cost.
+    messages:
+      - $ref: "#/channels/workOrderPosted/messages/workOrderPosted"
+components:
+  messages:
+    CaseOpened:
+      name: dev.passage.service.case.opened.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [caseId, number, customerId, priority, agreementId, responseDue, resolutionDue]
+        additionalProperties: false
+        properties:
+          caseId: { type: string, format: uuid }
+          number: { type: string, example: CS-000001 }
+          customerId: { type: string, format: uuid }
+          priority: { type: integer, minimum: 1, maximum: 4 }
+          agreementId: { type: [string, "null"], format: uuid }
+          responseDue: { type: string, format: date-time }
+          resolutionDue: { type: string, format: date-time }
+    WorkOrderPosted:
+      name: dev.passage.service.workorder.posted.v1
+      contentType: application/cloudevents+json
+      description: |
+        Carries what wave-29 invoicing needs to invoice the BILLABLE lines (customer,
+        legal entity, lines with coverage) and what the GL needs for warranty cost.
+        The invoice id of PRD 8.45.5 is assigned by invoicing, not here.
+      payload:
+        type: object
+        required: [workOrderId, number, customerId, legalEntityId, caseId, agreementId, currency, billableTotal, warrantyCost, entitlementConsumed, lines]
+        additionalProperties: false
+        properties:
+          workOrderId: { type: string, format: uuid }
+          number: { type: string, example: SWO-000001 }
+          customerId: { type: string, format: uuid }
+          legalEntityId: { type: string, format: uuid }
+          caseId: { type: [string, "null"], format: uuid }
+          agreementId: { type: [string, "null"], format: uuid }
+          currency: { type: string, pattern: "^[A-Z]{3}$" }
+          billableTotal:
+            type: string
+            description: Sum of BILLABLE line amounts as a decimal string (never a float).
+          warrantyCost:
+            type: string
+            description: Cost of WARRANTY lines recorded for the warranty expense account.
+          entitlementConsumed:
+            type: string
+            description: Included hours consumed from the agreement.
+          lines:
+            type: array
+            items:
+              type: object
+              required: [lineId, kind, coverage, qty, amount, warrantyCost, agreementHours]
+              additionalProperties: false
+              properties:
+                lineId: { type: string, format: uuid }
+                kind: { type: string, enum: [LABOR, PART, TRAVEL, FEE] }
+                coverage: { type: string, enum: [BILLABLE, WARRANTY, AGREEMENT] }
+                qty: { type: string }
+                amount: { type: string, description: Billed amount; zero unless BILLABLE }
+                warrantyCost: { type: string }
+                agreementHours: { type: string }

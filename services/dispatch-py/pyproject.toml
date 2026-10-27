@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "passage-dispatch"
+version = "0.1.0"
+description = "Passage dispatch feasibility and solver (wave 45)"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+# CP-SAT solver (not yet wired; see NOT-IMPLEMENTED.md).
+solver = ["ortools>=9.10"]
+dev = ["pytest>=8", "hypothesis>=6.100"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

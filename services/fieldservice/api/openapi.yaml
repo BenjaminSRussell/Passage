@@ -1,0 +1,564 @@
+openapi: 3.1.0
+info:
+  title: Passage Field Service API
+  version: 0.1.0
+  description: |
+    Service agreements, SLA profiles, cases and service work orders (wave 45, slice 1).
+    Routes are mounted under /v1/service on the service; the browser reaches them as
+    /api/v1/service/... through the web BFF. Every mutating operation requires an
+    Idempotency-Key header. Custom methods (`:transition`, `:post`) require If-Match
+    with the current aggregate version. Errors are RFC 9457 problem details whose
+    `code` is listed in the service README.
+servers:
+  - url: https://api.{env}.passage.dev
+    variables:
+      env:
+        default: dev
+paths:
+  /v1/service/sla-profiles:
+    post:
+      operationId: createSlaProfile
+      summary: Create an SLA profile with business-hour calendar, holidays and priority targets
+      x-passage-duty: SvcAgreementMaintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SlaProfileRequest" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SlaProfile" }
+        "200": { $ref: "#/components/responses/Replayed" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+    get:
+      operationId: listSlaProfiles
+      summary: List the tenant's SLA profiles by code (at most 500)
+      x-passage-duty: SvcInquire
+      responses:
+        "200":
+          description: The profiles
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/SlaProfile" } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/service/sla-profiles/{id}:
+    get:
+      operationId: getSlaProfile
+      summary: Read an SLA profile
+      x-passage-duty: SvcInquire
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The profile
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SlaProfile" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/service/agreements:
+    post:
+      operationId: createAgreement
+      summary: Create a service agreement with covered lines and billing model
+      x-passage-duty: SvcAgreementMaintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AgreementRequest" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Agreement" }
+        "200": { $ref: "#/components/responses/Replayed" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+    get:
+      operationId: listAgreements
+      summary: List agreements newest first inside the caller's legal-entity scope
+      x-passage-duty: SvcInquire
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [DRAFT, ACTIVE, SUSPENDED, EXPIRED, CANCELED] } }
+        - { name: customerPartyId, in: query, schema: { type: string, format: uuid } }
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: One page
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgreementPage" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/service/agreements/{id}:
+    get:
+      operationId: getAgreement
+      summary: Read a service agreement with its consumed included hours
+      x-passage-duty: SvcInquire
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The agreement
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Agreement" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/service/cases:
+    post:
+      operationId: openCase
+      summary: Open a service case; resolves the entitlement and starts the SLA clocks (BR-45.1, BR-45.2)
+      x-passage-duty: SvcCaseCreate
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OpenCaseRequest" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Case" }
+        "200": { $ref: "#/components/responses/Replayed" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+    get:
+      operationId: listCases
+      summary: List cases newest first inside the caller's legal-entity scope
+      x-passage-duty: SvcInquire
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [NEW, IN_PROGRESS, WAITING_CUSTOMER, WAITING_PARTS, RESOLVED, CLOSED, CANCELED] } }
+        - { name: slaState, in: query, schema: { type: string, enum: [RUNNING, PAUSED, MET, BREACHED] } }
+        - { name: customerPartyId, in: query, schema: { type: string, format: uuid } }
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: One page
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CasePage" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/service/cases/{id}:
+    get:
+      operationId: getCase
+      summary: Read a service case with its SLA state
+      x-passage-duty: SvcInquire
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The case
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Case" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/service/work-orders:
+    post:
+      operationId: createWorkOrder
+      summary: Create a service work order; from a case it inherits the case's agreement (FR-45.6)
+      x-passage-duty: SvcWoMaintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WorkOrderRequest" }
+      responses:
+        "201":
+          description: Created
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WorkOrder" }
+        "200": { $ref: "#/components/responses/Replayed" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+    get:
+      operationId: listWorkOrders
+      summary: List work orders newest first inside the caller's legal-entity scope
+      x-passage-duty: SvcInquire
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [UNSCHEDULED, SCHEDULED, DISPATCHED, TRAVELING, IN_PROGRESS, ON_HOLD, COMPLETED, POSTED, CANCELED] } }
+        - { name: territoryId, in: query, schema: { type: string, format: uuid } }
+        - { name: caseId, in: query, schema: { type: string, format: uuid } }
+        - { name: customerPartyId, in: query, schema: { type: string, format: uuid } }
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: One page
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WorkOrderPage" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/service/work-orders/{id}:
+    get:
+      operationId: getWorkOrder
+      summary: Read a service work order
+      x-passage-duty: SvcInquire
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The work order
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WorkOrder" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/service/work-orders/{id}:transition:
+    post:
+      operationId: transitionWorkOrder
+      summary: Move a work order along the BR-45.5 status machine
+      x-passage-duty: SvcWoMaintain
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to]
+              additionalProperties: false
+              properties:
+                to:
+                  type: string
+                  enum: [SCHEDULED, DISPATCHED, TRAVELING, IN_PROGRESS, ON_HOLD, COMPLETED, CANCELED]
+      responses:
+        "200":
+          description: Transitioned (a request for the current status is a no-op)
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WorkOrder" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/service/work-orders/{id}:post:
+    post:
+      operationId: postWorkOrder
+      summary: Post a completed work order to billing (billable lines) and warranty cost (BR-45.4)
+      x-passage-duty: SvcBillingPost
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Posted (or replayed with Idempotent-Replayed true; a replay skips the If-Match check)
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WorkOrder" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+components:
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, maxLength: 255 }
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: The ETag of the current version, such as "3" (optimistic concurrency).
+      schema: { type: string, example: '"3"' }
+    Cursor:
+      name: cursor
+      in: query
+      description: The nextCursor of the previous page.
+      schema: { type: string, format: uuid }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+  headers:
+    ETag:
+      description: The aggregate version, quoted ("3"); echo it in If-Match.
+      schema: { type: string }
+  responses:
+    Problem:
+      description: RFC 9457 problem details
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Replayed:
+      description: The stored result of an earlier request with the same Idempotency-Key and body (header Idempotent-Replayed true).
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties:
+        type: { type: string, example: "https://passage.dev/problems/SVC-WO-011" }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string }
+        traceId: { type: string }
+        errors:
+          type: object
+          additionalProperties: { type: string }
+    Money:
+      type: object
+      description: Amounts are decimal strings; never floats.
+      properties:
+        amount: { type: string, pattern: "^-?[0-9]+(\\.[0-9]{1,6})?$" }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+    SlaTarget:
+      type: object
+      required: [priority, responseMinutes, resolutionMinutes]
+      properties:
+        priority: { type: integer, minimum: 1, maximum: 4 }
+        responseMinutes: { type: integer, minimum: 1 }
+        resolutionMinutes: { type: integer, minimum: 1 }
+    SlaProfileRequest:
+      type: object
+      required: [code, name, timeZone, targets]
+      additionalProperties: false
+      properties:
+        code: { type: string, pattern: "^[A-Z0-9][A-Z0-9_-]{1,19}$" }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        timeZone: { type: string, description: IANA zone of the service site }
+        allDay: { type: boolean, description: 24x7 profile when true }
+        openMinute: { type: integer, minimum: 0, maximum: 1440, description: Required unless allDay; stored as 0 for 24x7 }
+        closeMinute: { type: integer, minimum: 0, maximum: 1440, description: Required unless allDay; stored as 1440 for 24x7 }
+        pauseOnParts: { type: boolean }
+        holidays:
+          type: array
+          maxItems: 400
+          description: Local dates without business time (BR-45.2); ignored by 24x7 profiles.
+          items: { type: string, format: date }
+        targets:
+          type: array
+          minItems: 1
+          maxItems: 4
+          items: { $ref: "#/components/schemas/SlaTarget" }
+    SlaProfile:
+      allOf:
+        - $ref: "#/components/schemas/SlaProfileRequest"
+        - type: object
+          properties:
+            id: { type: string, format: uuid }
+    AgreementLine:
+      type: object
+      description: Covers one service object or one category (not both).
+      properties:
+        serviceObjectId: { type: string, format: uuid }
+        categoryId: { type: string, format: uuid }
+        includedVisits: { type: integer, minimum: 0, description: Recorded; visit consumption is a later slice }
+        includedHours: { type: string, description: decimal labor hours consumed first-in first-out (BR-45.4) }
+        partsCovered: { type: boolean }
+        laborCovered: { type: boolean }
+        travelCovered: { type: boolean }
+    AgreementRequest:
+      type: object
+      required: [customerPartyId, legalEntityId, validFrom, slaProfileId, billingModel, priorityRank, lines]
+      additionalProperties: false
+      properties:
+        customerPartyId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        validFrom: { type: string, format: date }
+        validTo: { type: [string, "null"], format: date }
+        slaProfileId: { type: string, format: uuid }
+        billingModel: { type: string, enum: [PREPAID, PER_VISIT, SUBSCRIPTION] }
+        priorityRank: { type: integer, minimum: 1, maximum: 100, description: Entitlement tie-break after specificity; the higher rank wins }
+        status: { type: string, enum: [DRAFT, ACTIVE], default: DRAFT, description: Only ACTIVE agreements entitle cases and cover work orders }
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items: { $ref: "#/components/schemas/AgreementLine" }
+    Agreement:
+      allOf:
+        - $ref: "#/components/schemas/AgreementRequest"
+        - type: object
+          properties:
+            id: { type: string, format: uuid }
+            number: { type: string, example: SA-000001 }
+            status: { type: string, enum: [DRAFT, ACTIVE, SUSPENDED, EXPIRED, CANCELED] }
+            hoursConsumed: { type: string, description: Included labor hours consumed by posted work orders }
+    AgreementPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Agreement" } }
+        nextCursor: { type: string, format: uuid }
+    CasePage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Case" } }
+        nextCursor: { type: string, format: uuid }
+    WorkOrderPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/WorkOrder" } }
+        nextCursor: { type: string, format: uuid }
+    OpenCaseRequest:
+      type: object
+      required: [customerPartyId, legalEntityId, channel, priority]
+      additionalProperties: false
+      properties:
+        customerPartyId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        serviceObjectId: { type: [string, "null"], format: uuid }
+        channel: { type: string, enum: [PHONE, EMAIL, PORTAL, IOT, INTERNAL] }
+        priority: { type: integer, minimum: 1, maximum: 4 }
+        description: { type: string, maxLength: 4000 }
+        openedAt: { type: string, format: date-time, description: defaults to server time }
+        fallbackSlaProfileId: { type: [string, "null"], format: uuid, description: used when no agreement matches (SVC-ENT-001) }
+    Case:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        number: { type: string, example: CS-000001 }
+        customerPartyId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        serviceObjectId: { type: [string, "null"], format: uuid }
+        channel: { type: string }
+        priority: { type: integer }
+        description: { type: string }
+        status: { type: string, description: "NEW on open; later transitions are case-stage work (not in slice 1)" }
+        agreementId: { type: [string, "null"], format: uuid }
+        slaProfileId: { type: string, format: uuid }
+        entitlementTrace:
+          type: array
+          items: { type: string }
+          description: Resolution trace from BR-45.1 (why this agreement was chosen)
+        slaState: { type: string, enum: [RUNNING, PAUSED, MET, BREACHED] }
+        slaPausedMinutes: { type: integer }
+        openedAt: { type: string, format: date-time }
+        slaResponseDue: { type: string, format: date-time }
+        slaResolutionDue: { type: string, format: date-time }
+    WorkLine:
+      type: object
+      required: [kind, qty]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid, description: server-generated when absent }
+        kind: { type: string, enum: [LABOR, PART, TRAVEL, FEE] }
+        qty: { type: string, description: decimal quantity, must be positive }
+        unitPrice: { type: string, description: decimal, non-negative; defaults to 0 }
+        unitCost: { type: string, description: decimal, non-negative; defaults to 0; recorded as warranty cost on WARRANTY lines }
+    WorkOrderRequest:
+      type: object
+      required: [customerPartyId, legalEntityId, territoryId, estDurationMinutes, currency]
+      additionalProperties: false
+      properties:
+        customerPartyId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        territoryId: { type: string, format: uuid }
+        caseId: { type: [string, "null"], format: uuid, description: Must belong to the same customer and legal entity (SVC-CASE-002) }
+        agreementId: { type: [string, "null"], format: uuid, description: Defaults to the case's agreement; must belong to the same customer and legal entity (SVC-AGR-003) }
+        incidentTypeId: { type: [string, "null"], format: uuid }
+        estDurationMinutes: { type: integer, minimum: 1, maximum: 1440 }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        lines:
+          type: array
+          maxItems: 200
+          items: { $ref: "#/components/schemas/WorkLine" }
+    WorkOrder:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        number: { type: string, example: SWO-000001 }
+        customerPartyId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        territoryId: { type: string, format: uuid }
+        caseId: { type: [string, "null"], format: uuid }
+        agreementId: { type: [string, "null"], format: uuid }
+        status:
+          type: string
+          enum: [UNSCHEDULED, SCHEDULED, DISPATCHED, TRAVELING, IN_PROGRESS, ON_HOLD, COMPLETED, POSTED, CANCELED]
+        estDurationMinutes: { type: integer }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        lines:
+          type: array
+          items: { $ref: "#/components/schemas/WorkLine" }
+        incidentTypeId: { type: [string, "null"], format: uuid }
+        posting: { $ref: "#/components/schemas/Posting" }
+        version: { type: integer }
+    PostedLine:
+      type: object
+      properties:
+        lineId: { type: string, format: uuid }
+        kind: { type: string, enum: [LABOR, PART, TRAVEL, FEE] }
+        coverage: { type: string, enum: [BILLABLE, WARRANTY, AGREEMENT] }
+        qty: { type: string }
+        amount: { type: string, description: Billed amount, rounded half-even to the currency minor unit }
+        warrantyCost: { type: string }
+        agreementHours: { type: string }
+    Posting:
+      type: object
+      description: Present once POSTED (BR-45.4). A labor line split between included and billable hours yields two posted lines.
+      properties:
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        lines: { type: array, items: { $ref: "#/components/schemas/PostedLine" } }
+        billableTotal: { type: string }
+        warrantyCost: { type: string }
+        entitlementConsumed: { type: string }
