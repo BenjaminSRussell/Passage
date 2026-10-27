@@ -6,7 +6,8 @@ Flow designer for warehouse handheld flows, plus the pure domain shared with
 ## What is here
 
 - `domain/gs1.ts`: GS1 application identifier parser (BR-32.1). Covers AI 00, 01, 10, 11,
-  17, 21, 37, 400, 410, 412, 310n and 91 to 99.
+  17, 21, 37, 400, 410, 412, 420 (ship-to postal code, on the print service's carton label),
+  310n and 91 to 99.
   Check digits, YYMMDD dates (DD=00 is last day of month, century window -49/+50), set 82
   charset, FNC1 substitutes, and the GS1 symbology identifiers `]C1`, `]d2`, `]Q3`. Any other
   symbology identifier (`]C0`, `]E0`, ...) is stripped and the rest is a plain value.
@@ -41,6 +42,12 @@ Flow designer for warehouse handheld flows, plus the pure domain shared with
 - `domain/telemetry.ts`: step timing (FR-32.11): validation, nearest-rank median and p95
   rollups by flow and step (by user only on request, §6.32.20), and the 30 to 365 day
   retention (90 by default).
+- `domain/otlp.ts`: step timings as OpenTelemetry `mobile.step` spans (FR-32.11), from the
+  step's start to the moment the runner recorded it, with flow, step, device and outcome and
+  never the user id (§6.32.20); timings past the retention window are dropped. `exportSpans`
+  posts OTLP/HTTP JSON to `{endpoint}/v1/traces`. The device app does not call it yet.
+- `domain/deviceProfiles.ts`: the `zebra-tc52` and `honeywell-ct45` device profiles (§6.32.9
+  fixtures) with their `scanner_profile` and capture bridge, and the Android WebView 100 minimum.
 - `domain/exceptions.ts`: on-device exceptions (FR-32.8) and the supervisor override
   (BR-32.7): one action, one worker, 60 s, never for the supervisor's own work (MOB-0110).
 - `domain/scanBridge.ts`: the page side of the scanner intent bridge (`passage:scan` events
@@ -73,7 +80,8 @@ Flow designer for warehouse handheld flows, plus the pure domain shared with
   The label form covers the LP, location, GS1 item (GTIN, optional lot, expiry and serial) and
   GS1 carton labels, with the service's check-digit, YYMMDD and set-82 rules; empty optional
   fields are left out of the request. Printers carry a media size that follows the device type
-  (label sizes for ZPL II, A4 or Letter otherwise). Printers may leave the port empty: the service uses
+  (label sizes for ZPL II, A4 or Letter otherwise); the list and the form say what each media
+  prints (2 x 1 and 3 x 1 in print the 1 in LP, location and item layouts, not the carton label). Printers may leave the port empty: the service uses
   9100 for ZPL II and PCL 6 and 631 for PDF over IPP.
 - `PrinterStatusPage` (§6.32.14): state, queue depth, last error and last job per printer.
 - `OfflineConflictsPage` (BR-32.4, AC-32.6): the supervisor queue of CONFLICT transactions.
@@ -117,6 +125,6 @@ already present in `apps/web`. No npm dependencies were added.
 - The simulator runs a flow by hand; smoke scripts that replay every core path before publish
   (BR-32.9) are not built.
 - Flow list, version history, diff, and the four-eyes approval UI are not built (§6.32.14).
-- GS1 AIs 420 and 710 to 715 are not in the parser table yet.
+- GS1 AIs 710 to 715 are not in the parser table yet.
   Unknown AIs report MOB-0103 with their position. The GS1 AI test suite vectors (the external
   suite file `gs1-ai-vectors.json`) are not imported yet; the vectors are inline in the tests.

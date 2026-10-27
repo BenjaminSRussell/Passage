@@ -1,4 +1,4 @@
-# NOT-IMPLEMENTED: print (PSG-32, wave 32, slice 5)
+# NOT-IMPLEMENTED: print (PSG-32, wave 32, slice 6)
 
 Every PSG-32 deliverable or acceptance criterion that this service does not yet cover.
 Status is either `later slice of PSG-32` (owned here, not built yet) or `handoff`
@@ -9,7 +9,8 @@ Status is either `later slice of PSG-32` (owned here, not built yet) or `handoff
 | Job input for PCL documents | FR-32.13 | later slice of PSG-32 | `POST /print/v1/jobs` takes ZPL labels (built-in templates) and PDF documents (`format: PDF`, base64, at most 2 MiB, sent to `PDF_IPP` devices only). The PCL 6 over raw TCP transport is built and tested, but no job carries a PCL payload, so dispatch never offers a job to a `PCL_6` device. |
 | PDF documents larger than 2 MiB | FR-32.13 | later slice of PSG-32 | The document travels base64 in the JSON job request, and the platform caps a request body at 4 MiB. Larger documents (a long bill of lading run) need an upload or object-store reference. |
 | PDF documents from their owning waves (pick lists, count sheets, CoAs, bills of lading) | FR-32.13, §6.32.15 | handoff | The documents are produced by the waves that own them (wms, quality, shipping). This service routes and sends them once those waves hand over PDF bytes. |
-| Label layouts for 1 in media (2 x 1 and 3 x 1 in) and a bar code width check | FR-32.7, FR-32.13, §6.32.13 | later slice of PSG-32 | Every ZPL label is now sized at dispatch for the device that prints it (`internal/domain/geometry.go`): the 203 dpi layout is scaled to the device's dpi (300 or 600), `^PW`/`^LL` come from its media, and a label whose fields do not fit is refused there with PRN-0007 and the next device in the queue is tried without retries. The built-in layouts fit 4 x 6 and 4 x 2 in media; none fits 1 in media, so a queue of only 2 x 1 or 3 x 1 in printers fails those jobs with PRN-0007 until smaller layouts are authored. The fit check measures each field's origin and height, not the width of a bar code. |
+| Reprints laid out for 1 in media (BR-32.8, FR-32.7) | FR-32.7, BR-32.8 | later slice of PSG-32 | A new label job prints the compact layout on a 2 x 1 or 3 x 1 in device (`domain.LabelForDevice`), rendered from the request data. A reprint reuses the stored payload, which is the standard layout, because the template data is not kept on `print_job`; a 1 in device refuses it with PRN-0007 and the queue fails over (`TestCreateJob_ReprintOnOneInchDeviceFailsOver`). Keeping the data needs a migration. |
+| Width check for text and Data Matrix fields | FR-32.13 | later slice of PSG-32 | The fit check measures every field's origin and height and the width of each Code 128 bar code with its quiet zones. Text width depends on the printer font and Data Matrix size on the data, so for those fields only the origin is checked across the label. |
 | Hardware check of IPP and PCL 6 on the demo printers | FR-32.13, §6.32.9 | later slice of PSG-32 | The transports are tested against an `httptest` IPP server and a local TCP listener. No printer is reachable from CI. |
 | Carrier and ship-from on the GS1 carton label | §6.32.15 | later slice of PSG-32 | The carton label prints ship-to, SSCC and the AI 00/400/420 barcode. Carrier and ship-from come from shipping (wave 28) and are not job fields yet. |
 | Browser printing fallback on the handheld and in other waves' screens, and the `browser_print_fallback` setting | FR-32.13, BR-32.12, §6.32.13 | later slice of PSG-32 | The web "Print document" screen (`apps/web/src/modules/mobile-flows/NewPrintDocumentPage.tsx`) offers to open the PDF for the browser's print dialog when no routing rule matches (MOB-0112). The device app and the screens of the waves that produce documents do not, and there is no per-tenant setting to turn the fallback off. |
@@ -26,6 +27,16 @@ Status is either `later slice of PSG-32` (owned here, not built yet) or `handoff
 | Automation adapter (FR-32.12), RFID EPC ingest, voice adapter | FR-32.9, FR-32.12 | handoff | Owned by the wms automation and mobile services, not by this service. |
 | Deploy: print service live (Argo CD application, image build, one pod per site network) | Ticket deploy line, §6.32.10 | handoff | Lives in `deploy/` and the CI pipeline, which the deployment-cicd owner controls. The chart lints and is ready for it. |
 | Site network egress policy for TCP 9100 and IPP | §6.32.10, FR-32.13 | handoff | Network policy is owned by deployment-cicd and the site IT team. |
+
+Delivered in slice 6 (row replaced above): 1 in label layouts and a bar code width check.
+`internal/domain/layouts.go` holds compact 2 x 1 and 3 x 1 in layouts for `LP_LABEL`,
+`LOCATION_LABEL` and `ITEM_LABEL` (the GS1 carton label is 4 x 6 in only, §6.32.15), printed per
+device at dispatch. `SizeLabel` now also refuses a Code 128 bar code that, with its 10-module
+quiet zones, is wider than the media (PRN-0007). The GS1 bar code switches between Code 128
+subsets B and C (`gs1Code128`), which brought the carton and full item bar codes inside a 4 in
+label (in subset B alone they were wider than the media and printed clipped). Golden:
+`testdata/golden/lp-label-2x1.zpl`. Tests: `internal/domain/layouts_test.go`, `code128_test.go`
+and `internal/api/api_test.go`.
 
 Delivered in slice 5 (row narrowed above): label geometry per device. `domain.SizeForDevice`
 sizes each ZPL label at dispatch (scaled from 203 dpi, `^PW`/`^LL` from the media, the

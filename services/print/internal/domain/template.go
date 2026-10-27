@@ -7,8 +7,10 @@ import (
 )
 
 // Built-in template codes. Templates are ZPL with {{field}} placeholders and
-// helpers {{bc128 f}}, {{sscc f}}, {{gs1 f}} and {{dm f}} (FR-32.7). The item and
-// carton codes are declared with their GS1 rules in gs1label.go.
+// helpers {{bc128 f}}, {{sscc f}}, {{gs1 f}} and {{dm f}} (FR-32.7). The bar code
+// helpers have compact forms {{bc128sm f}}, {{ssccsm f}} and {{gs1sm f}} for the
+// 1 in layouts (layouts.go). The item and carton codes are declared with their GS1
+// rules in gs1label.go.
 const (
 	TemplateLP       = "LP_LABEL"
 	TemplateLocation = "LOCATION_LABEL"
@@ -41,7 +43,15 @@ const itemLabel = "^XA\n^CI28\n^FO40,40^A0N,40,40^FDGTIN {{gtin}}^FS\n^FO40,100{
 const cartonLabel = "^XA\n^CI28\n^PW812\n^LL1218\n^FO40,40^A0N,40,40^FDSHIP TO {{shipToName}}^FS\n" +
 	"^FO40,110^A0N,30,30^FDSSCC {{sscc}}^FS\n^FO40,170{{gs1 gs1}}\n^XZ\n"
 
-const placeholderPattern = `\{\{\s*(?:(bc128|sscc|gs1|dm)\s+)?([a-zA-Z][a-zA-Z0-9_]*)\s*\}\}`
+const placeholderPattern = `\{\{\s*(?:(bc128sm|ssccsm|gs1sm|bc128|sscc|gs1|dm)\s+)?([a-zA-Z][a-zA-Z0-9_]*)\s*\}\}`
+
+// Code 128 commands: the standard bars are 100 dots high with the human-readable
+// line; the compact bars of the 1 in layouts are 50 dots high without it, so the
+// layout prints the value as its own text field.
+const (
+	standardBars = "^BCN,100,Y,N,N"
+	compactBars  = "^BCN,50,N,N,N"
+)
 
 // Render substitutes data into a ZPL template. Values may not contain ZPL
 // control characters (^ and ~) or control runes, so data cannot inject commands.
@@ -54,6 +64,10 @@ func Render(tpl string, data map[string]string) (string, error) {
 		}
 		parts := re.FindStringSubmatch(m)
 		helper, field := parts[1], parts[2]
+		bars := standardBars
+		if compact, ok := strings.CutSuffix(helper, "sm"); ok {
+			helper, bars = compact, compactBars
+		}
 		value, ok := data[field]
 		if !ok {
 			firstErr = &Error{CodeInvalid, fmt.Sprintf("field %s is missing", field)}
@@ -65,12 +79,12 @@ func Render(tpl string, data map[string]string) (string, error) {
 		}
 		switch helper {
 		case "bc128":
-			return "^BCN,100,Y,N,N^FD" + value + "^FS"
+			return bars + "^FD" + value + "^FS"
 		case "sscc":
 			// GS1-128: start code C (>;), FNC1 (>8), then AI 00 and the 18-digit SSCC.
-			return "^BCN,100,Y,N,N^FD>;>800" + value + "^FS"
+			return bars + "^FD>;>800" + value + "^FS"
 		case "gs1":
-			return gs1Barcode(value)
+			return bars + "^FD" + gs1Code128(value) + "^FS"
 		case "dm":
 			return "^BXN,6,200^FD" + value + "^FS"
 		}

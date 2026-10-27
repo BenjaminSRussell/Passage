@@ -288,6 +288,9 @@ func (a *API) createJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var zpl, template string
+	// labelData is the template data of a new label job, so a 1 in device can get
+	// its compact layout (FR-32.7). A reprint has none and reuses the stored payload.
+	var labelData map[string]string
 	if req.ReprintOf != nil {
 		// BR-32.8: a reprint reuses the stored payload and makes a new job with reprint_of.
 		orig, err := a.store.GetJob(r.Context(), *req.ReprintOf)
@@ -315,7 +318,7 @@ func (a *API) createJob(w http.ResponseWriter, r *http.Request) {
 			httpx.Fail(w, r, problemFrom(err))
 			return
 		}
-		zpl, template = rendered, req.TemplateCode
+		zpl, template, labelData = rendered, req.TemplateCode, data
 	}
 	queue := req.QueueCode
 	if queue == "" {
@@ -353,10 +356,15 @@ func (a *API) createJob(w http.ResponseWriter, r *http.Request) {
 	}
 	// A ZPL label goes to ZPL_II devices and a PDF document to PDF_IPP devices; the
 	// rest of the queue is skipped, and a queue with none fails with MOB-0112.
-	// FR-32.7: a ZPL label is sized for each device's media; a label that does not
-	// fit a device counts as a failed attempt there, so the queue fails over.
+	// FR-32.7: a ZPL label is laid out and sized for each device's media (the
+	// compact layout on 2 x 1 and 3 x 1 in); a label that does not fit a device
+	// counts as a failed attempt there, so the queue fails over.
 	out, dispatchErr := domain.Dispatch(domain.Accepting(devices, domain.DeviceTypeFor(format)), a.attempts, func(d domain.Printer) error {
-		payload, err := domain.SizeForDevice(format, d, zpl)
+		label, err := domain.LabelForDevice(d, template, zpl, labelData)
+		if err != nil {
+			return err
+		}
+		payload, err := domain.SizeForDevice(format, d, label)
 		if err != nil {
 			return err
 		}

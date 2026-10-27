@@ -220,17 +220,82 @@ func ParseGS1(s string) (map[string]string, error) {
 	return out, nil
 }
 
-// gs1Barcode returns the ZPL ^BC command for an element string. Code 128 subset C packs
-// digit pairs, so an all-numeric string whose elements have even length starts in C (>;);
-// anything else starts in subset B (>:), which encodes digits and set 82 alike. FNC1 (>8)
-// follows the start code in both, which marks the symbol as GS1-128.
-func gs1Barcode(value string) string {
-	start := ">;"
-	for _, seg := range strings.Split(value, fnc1) {
-		if !allDigits(seg) || len(seg)%2 != 0 {
-			start = ">:"
-			break
-		}
+// Code 128 invocation codes inside ZPL ^BC field data (mode N).
+const (
+	startB  = ">:"
+	startC  = ">;"
+	switchB = ">6"
+	switchC = ">5"
+)
+
+// gs1Code128 returns the ^BC field data for a GS1 element string (FNC1 written
+// as ">8"): a start code, FNC1 (which marks the symbol as GS1-128), then the data.
+// Digit runs are packed two per symbol in subset C and everything else goes in
+// subset B, switching between them so the symbol stays short enough for a 4 in
+// label (an SSCC, PO and postal code in subset B alone is over 4 in wide). A run
+// switches to subset C when it has at least 4 digits at the end of the data or 6
+// in the middle (ISO/IEC 15417 Annex E); an odd run leaves its first digit in B.
+func gs1Code128(value string) string {
+	tokens := splitFNC1(value)
+	var b strings.Builder
+	inC := digitRun(tokens, 0) >= 4 || (digitRun(tokens, 0) == len(tokens) && len(tokens)%2 == 0)
+	if inC {
+		b.WriteString(startC)
+	} else {
+		b.WriteString(startB)
 	}
-	return "^BCN,100,Y,N,N^FD" + start + fnc1 + value + "^FS"
+	b.WriteString(fnc1)
+	for i := 0; i < len(tokens); {
+		if tokens[i] == fnc1 {
+			b.WriteString(fnc1)
+			i++
+			continue
+		}
+		run := digitRun(tokens, i)
+		if inC {
+			if run >= 2 {
+				b.WriteString(tokens[i] + tokens[i+1])
+				i += 2
+				continue
+			}
+			b.WriteString(switchB)
+			inC = false
+			continue
+		}
+		if (run >= 4 && i+run == len(tokens)) || run >= 6 {
+			if run%2 == 1 {
+				b.WriteString(tokens[i])
+				i++
+			}
+			b.WriteString(switchC)
+			inC = true
+			continue
+		}
+		b.WriteString(tokens[i])
+		i++
+	}
+	return b.String()
+}
+
+// splitFNC1 splits an element string into single characters and FNC1 tokens.
+func splitFNC1(value string) []string {
+	var out []string
+	for i := 0; i < len(value); {
+		if strings.HasPrefix(value[i:], fnc1) {
+			out = append(out, fnc1)
+			i += len(fnc1)
+			continue
+		}
+		out = append(out, value[i:i+1])
+		i++
+	}
+	return out
+}
+
+// digitRun counts the digit tokens from i up to the next non-digit or FNC1.
+func digitRun(tokens []string, i int) int {
+	n := 0
+	for ; i+n < len(tokens) && len(tokens[i+n]) == 1 && tokens[i+n][0] >= '0' && tokens[i+n][0] <= '9'; n++ {
+	}
+	return n
 }

@@ -24,6 +24,19 @@ export function mediaLabel(media: MediaSize | string): string {
   return media === "LETTER" ? "Letter sheet" : media === "A4" ? "A4 sheet" : media;
 }
 
+/**
+ * What a device prints, by device type and media (services/print: layouts.go and the
+ * dispatch fit check). 2 x 1 and 3 x 1 in labels print the 1 in layout of the LP, location
+ * and item labels; the GS1 carton label is 4 x 6 in only, so those devices pass it to the
+ * next device in the queue. No job carries PCL yet.
+ */
+export function printsOn(deviceType: DeviceType, media: MediaSize | string): string {
+  if (deviceType === "PDF_IPP") return "PDF documents";
+  if (deviceType === "PCL_6") return "Nothing yet: no job carries PCL";
+  if (media === "2X1_IN" || media === "3X1_IN") return "LP, location and item labels in the 1 in layout; carton labels go to the next printer";
+  return "LP, location, item and carton labels";
+}
+
 /** Job payload formats: a ZPL label from a template, or a PDF document for PDF over IPP devices. */
 export const JOB_FORMATS = ["ZPL", "PDF"] as const;
 export type JobFormat = (typeof JOB_FORMATS)[number];

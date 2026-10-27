@@ -10,6 +10,7 @@ import {
   mediaFor,
   mediaLabel,
   newKey,
+  printsOn,
   type DeviceType,
   type MediaSize,
   type NewPrinter,
@@ -172,7 +173,12 @@ export function NewPrinterPage() {
               </Select>
             )}
           </FormField>
-          <FormField id="printer-mediaSize" label="Media size" hint="The label or sheet size loaded in the printer." error={errors.mediaSize}>
+          <FormField
+            id="printer-mediaSize"
+            label="Media size"
+            hint={`The label or sheet size loaded in the printer. Prints: ${printsOn(values.deviceType, values.mediaSize)}.`}
+            error={errors.mediaSize}
+          >
             {(control) => (
               <Select
                 {...control}

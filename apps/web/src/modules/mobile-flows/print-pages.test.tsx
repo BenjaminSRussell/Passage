@@ -90,8 +90,20 @@ describe("printers", () => {
     expect(within(table).getByText("10.0.4.20:9100")).toBeInTheDocument();
     expect(within(table).getByText("ZPL II")).toBeInTheDocument();
     expect(within(table).getByText("4 x 6 in label")).toBeInTheDocument();
+    expect(within(table).getByText("LP, location, item and carton labels")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Register printer" })).toHaveAttribute("href", "/mobile-flows/printers/new");
     expect(pageViolations(container)).toEqual([]);
+  });
+
+  it("says which labels each printer's media takes (FR-32.7 1 in layouts)", async () => {
+    const small: Printer = { ...printer, id: "0195f0a0-0000-7000-8000-000000000002", code: "PACK-1", mediaSize: "2X1_IN" };
+    const office: Printer = { ...printer, id: "0195f0a0-0000-7000-8000-000000000003", code: "OFFICE-1", deviceType: "PDF_IPP", mediaSize: "A4", port: 631 };
+    handler = (url) => (url.pathname === "/api/v1/print/printers" ? json(200, { items: [small, office] }) : undefined);
+    renderAt("/mobile-flows/printers");
+    const table = await screen.findByRole("table", { name: "Printers" });
+    const smallRow = (await within(table).findByText("PACK-1")).closest("tr") as HTMLElement;
+    expect(smallRow).toHaveTextContent("LP, location and item labels in the 1 in layout; carton labels go to the next printer");
+    expect(within(table).getByText("OFFICE-1").closest("tr")).toHaveTextContent("PDF documents");
   });
 
   it("shows the empty state and a retryable error", async () => {
@@ -166,6 +178,9 @@ describe("printers", () => {
     const { container } = renderAt("/mobile-flows/printers/new");
     const media = screen.getByLabelText("Media size") as HTMLSelectElement;
     expect([...media.options].map((o) => o.value)).toEqual(["4X6_IN", "4X2_IN", "3X1_IN", "2X1_IN"]);
+    expect(media).toHaveAccessibleDescription(expect.stringContaining("Prints: LP, location, item and carton labels."));
+    fireEvent.change(media, { target: { value: "3X1_IN" } });
+    expect(media).toHaveAccessibleDescription(expect.stringContaining("carton labels go to the next printer"));
     fireEvent.change(screen.getByLabelText("Device type"), { target: { value: "PDF_IPP" } });
     expect([...media.options].map((o) => o.textContent)).toEqual(["A4 sheet", "Letter sheet"]);
     expect(media.value).toBe("A4");

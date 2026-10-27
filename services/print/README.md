@@ -27,9 +27,17 @@ from this pod; nothing connects inbound to the cluster.
 - **Label geometry** (`internal/domain/geometry.go`): templates are laid out at 203 dpi. At
   dispatch each label is sized for the device that prints it: coordinates, fonts and bar codes
   are scaled to its dpi (300 or 600, with `^BY` for the bar module), `^PW`/`^LL` are set from
-  its media, and a label whose fields do not fit is refused there with PRN-0007. A refusal is
-  not retried: the next device is tried at once, and the job fails with PRN-0007 when no device
-  fits. The stored ZPL stays unsized, so a reprint is sized again for its device.
+  its media, and a label whose fields do not fit is refused there with PRN-0007. The fit check
+  covers each field's origin and height and each Code 128 bar code's width with its 10-module
+  quiet zone on both sides. A refusal is not retried: the next device is tried at once, and the
+  job fails with PRN-0007 when no device fits. The stored ZPL stays unsized, so a reprint is
+  sized again for its device.
+- **1 in layouts** (`internal/domain/layouts.go`): on a 2 x 1 or 3 x 1 in device, a new
+  `LP_LABEL`, `LOCATION_LABEL` or `ITEM_LABEL` job prints a compact layout (50-dot bars, the
+  human-readable value as its own text line) rendered from the job's data; 4 x 2 and 4 x 6 in
+  devices print the standard layout. The GS1 carton label is 4 x 6 in only. An item label with
+  lot, expiry and serial is too wide for 1 in devices and fails over. A reprint reuses the
+  stored standard payload, so a 1 in device refuses it (see NOT-IMPLEMENTED.md).
   The LP label's SSCC barcode is GS1-128: FNC1, AI 00, then the 18 digits. Completion writes `dev.passage.print.job.completed.v1` to the outbox
   in the same transaction.
 - **Templates**: `LP_LABEL`, `LOCATION_LABEL`, `ITEM_LABEL` (gtin, optional lot, expiry
@@ -37,8 +45,9 @@ from this pod; nothing connects inbound to the cluster.
   shipToPostal; 4 x 6 in). The two GS1 labels compose their element string from the fields
   (AI 01, 10, 17, 21 and AI 00, 400, 420; `internal/domain/gs1label.go`). Check digits, dates
   (`DD=00` is the month end, BR-32.10), lengths and GS1 set 82 are checked before render, and
-  FNC1 (`>8`) follows every variable-length element that another element follows. An
-  all-numeric string starts in Code 128 subset C, anything else in subset B.
+  FNC1 (`>8`) follows every variable-length element that another element follows. The bar
+  code packs digit runs two per character in Code 128 subset C and switches to subset B
+  (`>6`, back with `>5`) for other characters, so the carton and item bar codes fit a 4 in label.
 - **Device transports** (`internal/transport`): `Router` picks the transport by device type.
   `ZPL_II` and `PCL_6` are written to raw TCP. `PDF_IPP` posts an RFC 8010 Print-Job
   (`application/pdf`) to `http://<host>:<port>/ipp/print` and fails on any IPP status above

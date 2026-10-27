@@ -58,6 +58,8 @@ const AI_TABLE: AIDef[] = [
   { ai: "400", kind: "variable", length: 30, charset: "set82" },
   { ai: "410", kind: "fixedNumeric", length: 13, charset: "numeric" },
   { ai: "412", kind: "fixedNumeric", length: 13, charset: "numeric" },
+  // AI 420: ship-to postal code, printed on the GS1 carton label (§6.32.15).
+  { ai: "420", kind: "variable", length: 20, charset: "set82" },
   // AI 91 to 99: company-internal information, variable up to 90 characters.
   ...["91", "92", "93", "94", "95", "96", "97", "98", "99"].map((ai): AIDef => ({ ai, kind: "variable", length: 90, charset: "set82" })),
 ];

@@ -230,19 +230,30 @@ func seedDock(t *testing.T, h http.Handler) {
 	}
 }
 
+// registerMedia registers one 203 dpi ZPL printer per media size on the DOCK
+// queue, in failover order (DOCK-1, DOCK-2, ...).
+func registerMedia(t *testing.T, h http.Handler, medias ...string) {
+	t.Helper()
+	for i, media := range medias {
+		code := fmt.Sprintf("DOCK-%d", i+1)
+		body := fmt.Sprintf(`{"code":%q,"name":"Dock","deviceType":"ZPL_II","dpi":203,"mediaSize":%q,"host":"10.0.4.%d","queueCode":"DOCK","failoverRank":%d}`,
+			code, media, 20+i, i+1)
+		if rec := call(t, h, http.MethodPost, "/print/v1/printers", body, "WMS_PRINT_ADMIN", "reg-"+code); rec.Code != http.StatusCreated {
+			t.Fatalf("register %s: %d %s", code, rec.Code, rec.Body)
+		}
+	}
+}
+
+const cartonBody = `{"templateCode":"GS1_CARTON_LABEL","queueCode":"DOCK","data":{"sscc":"340123456789012340","shipToName":"DOCK 9","poNumber":"PO-7","shipToPostal":"90210"}}`
+
 // FR-32.7 / FR-32.13: a label that does not fit the first device's media is a
-// failed attempt there, so the job fails over and is sized for the device that prints it.
+// failed attempt there, so the job fails over and is sized for the device that
+// prints it. The GS1 carton label is 4 x 6 in only (no 1 in layout).
 func TestCreateJob_FailsOverWhenLabelDoesNotFitDevice(t *testing.T) {
 	sender := &fakeSender{}
 	h := router(newMemStore(), sender)
-	for i, spec := range []struct{ code, media string }{{"DOCK-1", domain.Media2x1In}, {"DOCK-2", domain.Media4x6In}} {
-		body := fmt.Sprintf(`{"code":%q,"name":"Dock","deviceType":"ZPL_II","dpi":203,"mediaSize":%q,"host":"10.0.4.%d","queueCode":"DOCK","failoverRank":%d}`,
-			spec.code, spec.media, 20+i, i+1)
-		if rec := call(t, h, http.MethodPost, "/print/v1/printers", body, "WMS_PRINT_ADMIN", "reg-"+spec.code); rec.Code != http.StatusCreated {
-			t.Fatalf("register %s: %d %s", spec.code, rec.Code, rec.Body)
-		}
-	}
-	rec := call(t, h, http.MethodPost, "/print/v1/jobs", lpBody, "WMS_PRINT", "lp-fit-1")
+	registerMedia(t, h, domain.Media2x1In, domain.Media4x6In)
+	rec := call(t, h, http.MethodPost, "/print/v1/jobs", cartonBody, "WMS_PRINT", "carton-fit-1")
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create job: %d %s", rec.Code, rec.Body)
 	}
@@ -260,6 +271,51 @@ func TestCreateJob_FailsOverWhenLabelDoesNotFitDevice(t *testing.T) {
 	// The refusal is not retried: one attempt on DOCK-1, one on DOCK-2.
 	if job.Attempts != 2 {
 		t.Fatalf("want 2 attempts (refused on DOCK-1, printed on DOCK-2), got %d", job.Attempts)
+	}
+}
+
+// FR-32.7: a 2 x 1 in device prints the LP label's compact layout, so the first
+// device in the queue takes the job; the stored payload stays the standard one.
+func TestCreateJob_OneInchDevicePrintsCompactLayout(t *testing.T) {
+	sender := &fakeSender{}
+	ms := newMemStore()
+	h := router(ms, sender)
+	registerMedia(t, h, domain.Media2x1In, domain.Media4x6In)
+	job := decodeJob(t, call(t, h, http.MethodPost, "/print/v1/jobs", lpBody, "WMS_PRINT", "lp-small-1"))
+	if job.Status != domain.JobPrinted || job.PrinterCode != "DOCK-1" || job.Attempts != 1 {
+		t.Fatalf("want PRINTED on the 2 x 1 in DOCK-1 without failover, got %s on %q after %d attempts", job.Status, job.PrinterCode, job.Attempts)
+	}
+	if len(sender.payloads) != 1 {
+		t.Fatalf("want one payload, got %d", len(sender.payloads))
+	}
+	payload := sender.payloads[0]
+	for _, part := range []string{"^XA\n^PW406\n^LL203\n", "^FO20,88^BCN,50,N,N,N^FD>;>800340123456789012340^FS", "(00) 340123456789012340"} {
+		if !strings.Contains(payload, part) {
+			t.Fatalf("2 x 1 payload lacks %q: %q", part, payload)
+		}
+	}
+	if strings.Contains(payload, "^BCN,100") {
+		t.Fatalf("the 4 x 6 bar code reached a 2 x 1 label: %q", payload)
+	}
+	if stored := ms.jobs[job.ID].ZPL; !strings.Contains(stored, "^FO40,220^BCN,100,Y,N,N") {
+		t.Fatalf("stored payload should be the standard layout: %q", stored)
+	}
+}
+
+// BR-32.8 with FR-32.7: a reprint has no template data, so it reuses the stored
+// 4 x 6 in payload, which a 2 x 1 in device refuses; the queue fails over.
+func TestCreateJob_ReprintOnOneInchDeviceFailsOver(t *testing.T) {
+	sender := &fakeSender{}
+	h := router(newMemStore(), sender)
+	registerMedia(t, h, domain.Media2x1In, domain.Media4x6In)
+	orig := decodeJob(t, call(t, h, http.MethodPost, "/print/v1/jobs", lpBody, "WMS_PRINT", "lp-orig"))
+	body := fmt.Sprintf(`{"queueCode":"DOCK","reprintOf":%q}`, orig.ID)
+	rec := call(t, h, http.MethodPost, "/print/v1/jobs", body, "WMS_PRINT", "lp-reprint")
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("reprint: %d %s", rec.Code, rec.Body)
+	}
+	if j := decodeJob(t, rec); j.Status != domain.JobPrinted || j.PrinterCode != "DOCK-2" || j.Attempts != 2 {
+		t.Fatalf("want the reprint PRINTED on DOCK-2 after one refusal, got %+v", j)
 	}
 }
 
@@ -421,7 +477,7 @@ func TestCreateJob_ItemLabelComposesGS1FromFields(t *testing.T) {
 	if j.Status != domain.JobPrinted || j.TemplateCode != domain.TemplateItem {
 		t.Fatalf("item label job = %+v", j)
 	}
-	if want := ">:>8" + "0109501101020917" + "10123ABC>817261231" + "21SN0007"; !strings.Contains(ms.jobs[j.ID].ZPL, want) {
+	if want := ">;>8" + "0109501101020917" + "1012>63ABC>8>5" + "17261231" + "21>6SN>50007"; !strings.Contains(ms.jobs[j.ID].ZPL, want) {
 		t.Fatalf("stored ZPL lacks the GS1 element string %q:\n%s", want, ms.jobs[j.ID].ZPL)
 	}
 	bad := strings.Replace(item, "09501101020917", "09501101020918", 1)
@@ -474,7 +530,8 @@ func TestCreateJob_FailsWithMediaMismatchWhenNoDeviceFits(t *testing.T) {
 	if rec := call(t, h, http.MethodPost, "/print/v1/printers", body, "WMS_PRINT_ADMIN", "reg-small"); rec.Code != http.StatusCreated {
 		t.Fatalf("register: %d %s", rec.Code, rec.Body)
 	}
-	rec := call(t, h, http.MethodPost, "/print/v1/jobs", lpBody, "WMS_PRINT", "lp-misfit-1")
+	// The carton label is 4 x 6 in only; the LP label would print its 1 in layout here.
+	rec := call(t, h, http.MethodPost, "/print/v1/jobs", cartonBody, "WMS_PRINT", "carton-misfit-1")
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create job: %d %s", rec.Code, rec.Body)
 	}

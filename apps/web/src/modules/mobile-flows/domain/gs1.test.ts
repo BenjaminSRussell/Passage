@@ -122,6 +122,24 @@ describe("parseGS1 vectors", () => {
       errors: [],
     },
     {
+      name: "ship-to postal code AI 420 followed by a GTIN",
+      raw: "420" + "90210" + GS + "0109501234567891",
+      fields: { "420": "90210", "01": "09501234567891" },
+      errors: [],
+    },
+    {
+      name: "the print service's GS1 carton label: SSCC, PO (AI 400) and ship-to postal code (AI 420)",
+      raw: "]C1" + "00340123456789012340" + "400PO-7" + GS + "42090210",
+      fields: { "00": "340123456789012340", "400": "PO-7", "420": "90210" },
+      errors: [],
+    },
+    {
+      name: "ship-to postal code over 20 characters is malformed",
+      raw: "420" + "9".repeat(21),
+      fields: {},
+      errors: ["MOB-0103"],
+    },
+    {
       name: "variable AI over its maximum length",
       raw: "10" + "A".repeat(21),
       fields: {},

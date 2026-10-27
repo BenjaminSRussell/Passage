@@ -106,9 +106,10 @@ func TestRender_ItemLabelMatchesGoldenZPL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The lot and serial are alphanumeric, so the symbol starts in Code 128 subset B (>:), then FNC1.
-	want := "^XA\n^CI28\n^FO40,40^A0N,40,40^FDGTIN " + exampleGTIN + "^FS\n^FO40,100^BCN,100,Y,N,N^FD>:>8" +
-		"0109501101020917" + "10123ABC" + ">8" + "17261231" + "21SN0007" + "^FS\n^XZ\n"
+	// Start code C (>;) and FNC1, digit pairs in subset C, a switch to subset B (>6) for
+	// "3ABC" and "SN", and back to C (>5) for the expiry and serial digits.
+	want := "^XA\n^CI28\n^FO40,40^A0N,40,40^FDGTIN " + exampleGTIN + "^FS\n^FO40,100^BCN,100,Y,N,N^FD>;>8" +
+		"0109501101020917" + "1012" + ">6" + "3ABC" + ">8" + ">5" + "1726123121" + ">6" + "SN" + ">5" + "0007" + "^FS\n^XZ\n"
 	if got != want {
 		t.Fatalf("ZPL differs:\n got %q\nwant %q", got, want)
 	}
@@ -124,7 +125,7 @@ func TestRender_CartonLabelCarriesSSCCAndGS1(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, part := range []string{"SHIP TO ACME DC", "SSCC 340123456789012340", "^PW812", "^BCN,100,Y,N,N^FD>:>8" + "00340123456789012340"} {
+	for _, part := range []string{"SHIP TO ACME DC", "SSCC 340123456789012340", "^PW812", "^BCN,100,Y,N,N^FD>;>8" + "0034012345678901234040" + ">6" + "0PO-7781" + ">8" + ">5" + "42060601"} {
 		if !strings.Contains(got, part) {
 			t.Fatalf("carton ZPL missing %q:\n%s", part, got)
 		}

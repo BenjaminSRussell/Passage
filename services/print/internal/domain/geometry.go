@@ -19,6 +19,10 @@ const LayoutDpi = 203
 // defaultModuleWidth is the ZPL ^BY bar module width (dots) the templates rely on.
 const defaultModuleWidth = 2
 
+// quietZoneModules is the clear space Code 128 needs on each side of the bars
+// (ISO/IEC 15417 §4.4.3, GS1 General Specifications §5.4.4: 10 modules).
+const quietZoneModules = 10
+
 // interpretationLine is the height (dots at LayoutDpi) allowed for the human-readable
 // line that ^BC prints under a bar code when its interpretation flag is Y.
 const interpretationLine = 30
@@ -56,6 +60,8 @@ var (
 	code128Cmd = regexp.MustCompile(`\^BC([NRIB]),(\d+),([YN])`)
 	// ^BXo,m Data Matrix module size.
 	dataMatrixCmd = regexp.MustCompile(`\^BX([NRIB]),(\d+)`)
+	// ^FD field data, up to the end of the field's commands.
+	fieldDataCmd = regexp.MustCompile(`\^FD(.*)$`)
 	// One field: its origin, then its commands up to ^FS. Field data cannot hold
 	// a caret (Render refuses it), so a field never matches across another.
 	fieldCmd = regexp.MustCompile(`\^FO(\d+),(\d+)([^\n]*?)\^FS`)
@@ -66,8 +72,9 @@ var (
 // media's, and checks that every field lies inside the label. A label authored
 // for larger media is refused with PRN-0007 instead of printing clipped. The fit
 // check covers each field's origin and its height (font, Code 128 bars and the
-// interpretation line); bar code widths are not estimated, so across the label
-// only the origin is checked.
+// interpretation line), and the width of each Code 128 bar code with its quiet
+// zone on both sides. Text width and Data Matrix size are not estimated, so for
+// those fields only the origin is checked across the label.
 func SizeLabel(zpl, media string, dpi int) (string, error) {
 	w, h, ok := LabelDots(media, dpi)
 	if !ok {
@@ -83,6 +90,12 @@ func SizeLabel(zpl, media string, dpi int) (string, error) {
 		y, _ := strconv.Atoi(m[2])
 		if x >= w || y+fieldHeight(m[3], dpi) > h {
 			return "", &Error{CodeMediaMismatch, fmt.Sprintf("field at %d,%d does not fit the %s label at %d dpi", x, y, media, dpi)}
+		}
+		if bars, ok := code128Width(m[3], dpi); ok {
+			quiet := scaleDots(quietZoneModules*defaultModuleWidth, dpi)
+			if x < quiet || x+bars+quiet > w {
+				return "", &Error{CodeMediaMismatch, fmt.Sprintf("bar code at %d,%d is %d dots wide and does not fit the %s label at %d dpi", x, y, bars, media, dpi)}
+			}
 		}
 	}
 	head := fmt.Sprintf("^PW%d\n^LL%d\n", w, h)
@@ -107,6 +120,56 @@ func fieldHeight(cmds string, dpi int) int {
 	}
 	return 0
 }
+
+// code128Width is the width in device dots of a field's Code 128 bars, without
+// quiet zones. ok is false when the field is not a Code 128 bar code.
+func code128Width(cmds string, dpi int) (int, bool) {
+	if !code128Cmd.MatchString(cmds) {
+		return 0, false
+	}
+	data := ""
+	if m := fieldDataCmd.FindStringSubmatch(cmds); m != nil {
+		data = m[1]
+	}
+	return code128Modules(data) * scaleDots(defaultModuleWidth, dpi), true
+}
+
+// code128Modules counts the modules of a Code 128 symbol from ZPL ^BC field data
+// (mode N): every symbol character is 11 modules (the start code, each data
+// character, the check character) and the stop pattern is 13. The data starts in
+// subset B unless it opens with a start code (>9 A, >: B, >; C). In subset C two
+// digits make one character. Every other invocation code (>5, >6, >7 code set
+// switches, >8 FNC1) is one character.
+func code128Modules(data string) int {
+	chars := 2 // start and check characters
+	subsetC := false
+	switch {
+	case strings.HasPrefix(data, ">;"):
+		subsetC, data = true, data[2:]
+	case strings.HasPrefix(data, ">:"), strings.HasPrefix(data, ">9"):
+		data = data[2:]
+	}
+	for i := 0; i < len(data); chars++ {
+		if data[i] == '>' && i+1 < len(data) {
+			switch data[i+1] {
+			case '5':
+				subsetC = true
+			case '6', '7':
+				subsetC = false
+			}
+			i += 2
+			continue
+		}
+		if subsetC && i+1 < len(data) && isDigit(data[i]) && isDigit(data[i+1]) {
+			i += 2
+			continue
+		}
+		i++
+	}
+	return chars*11 + 13
+}
+
+func isDigit(c byte) bool { return c >= '0' && c <= '9' }
 
 // scaleLayout converts the dot values of a LayoutDpi layout to dpi.
 func scaleLayout(body string, dpi int) string {
