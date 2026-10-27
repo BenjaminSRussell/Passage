@@ -2,7 +2,7 @@ import { useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, PageHeader, Skeleton } from "../../shell/ui";
 import { describeProblem, getJob, newKey, reprintJob, type Problem } from "./api/print";
-import { dash, describeJobError, formatDateTime, JobStatusBadge } from "./format";
+import { dash, describeJobContent, describeJobError, formatDateTime, JobStatusBadge } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -62,11 +62,12 @@ export function PrintJobDetailPage() {
 
   const entries: [string, ReactNode, boolean?][] = [
     ["Status", <JobStatusBadge key="s" status={job.status} />],
-    ["Template", job.templateCode, true],
+    ["Content", describeJobContent(job), job.format !== "PDF"],
+    ["Format", job.format === "PDF" ? "PDF document" : "ZPL label"],
     ["Queue", job.queueCode, true],
     ["Printer", job.printerCode || dash, true],
     ["Attempts", String(job.attempts)],
-    ["Error", job.status === "FAILED" ? describeJobError(job.lastError) : dash],
+    ["Error", job.status === "FAILED" ? describeJobError(job.lastError, job.format) : dash],
     ["Created by", job.createdBy || dash],
     ["Created", formatDateTime(job.createdAt)],
     ["Completed", job.status === "QUEUED" ? dash : formatDateTime(job.updatedAt)],
@@ -92,7 +93,7 @@ export function PrintJobDetailPage() {
         </Alert>
       ) : null}
       {job.status === "FAILED" ? (
-        <Alert tone="warning" title="The label did not print">
+        <Alert tone="warning" title={job.format === "PDF" ? "The document did not print" : "The label did not print"}>
           {describeJobError(job.lastError)} Check the printer, then print again.
         </Alert>
       ) : null}

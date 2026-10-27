@@ -1,7 +1,20 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select } from "../../shell/ui";
-import { CODE, createPrinter, describeProblem, DEVICE_TYPES, DPIS, newKey, type DeviceType, type NewPrinter, type Problem } from "./api/print";
+import {
+  CODE,
+  createPrinter,
+  describeProblem,
+  DEVICE_TYPES,
+  DPIS,
+  mediaFor,
+  mediaLabel,
+  newKey,
+  type DeviceType,
+  type MediaSize,
+  type NewPrinter,
+  type Problem,
+} from "./api/print";
 import styles from "./pages.module.css";
 
 export interface PrinterValues {
@@ -9,6 +22,8 @@ export interface PrinterValues {
   name: string;
   deviceType: DeviceType;
   dpi: string;
+  /** Label media for ZPL II, sheet media for PDF and PCL 6 (FR-32.13). */
+  mediaSize: MediaSize;
   host: string;
   /** Empty means the service default: 9100 for ZPL II and PCL 6, 631 for PDF over IPP. */
   port: string;
@@ -31,6 +46,9 @@ export function validatePrinter(values: PrinterValues): { errors: Errors; input?
   if (!CODE.test(code)) errors.code = "Use 2 to 40 capital letters, digits, _ or -, such as DOCK-1.";
   if (values.name.trim() === "" || values.name.trim().length > 120) errors.name = "Enter a name of up to 120 characters.";
   if (!DPIS.includes(Number(values.dpi) as (typeof DPIS)[number])) errors.dpi = "Choose 203, 300 or 600 dpi.";
+  if (!mediaFor(values.deviceType).includes(values.mediaSize)) {
+    errors.mediaSize = values.deviceType === "ZPL_II" ? "Choose a label size for a ZPL II printer." : "Choose A4 or Letter for this printer.";
+  }
   if (host === "" || host.length > 253) errors.host = "Enter the printer's host name or IP address.";
   if (port !== "" && (!WHOLE.test(port) || Number(port) < 1 || Number(port) > 65535)) errors.port = "Enter a port from 1 to 65535.";
   if (!CODE.test(queue)) errors.queueCode = "Use 2 to 40 capital letters, digits, _ or -, such as DOCK.";
@@ -41,6 +59,7 @@ export function validatePrinter(values: PrinterValues): { errors: Errors; input?
     name: values.name.trim(),
     deviceType: values.deviceType,
     dpi: Number(values.dpi),
+    mediaSize: values.mediaSize,
     host,
     queueCode: queue,
     failoverRank: Number(values.failoverRank),
@@ -57,6 +76,7 @@ export function NewPrinterPage() {
     name: "",
     deviceType: "ZPL_II",
     dpi: "203",
+    mediaSize: "4X6_IN",
     host: "",
     port: "",
     queueCode: "",
@@ -98,7 +118,7 @@ export function NewPrinterPage() {
     }
   }
 
-  const text = (id: Exclude<Field, "deviceType" | "dpi">, label: string, hint?: string, optional?: boolean, extra?: Record<string, unknown>) => (
+  const text = (id: Exclude<Field, "deviceType" | "dpi" | "mediaSize">, label: string, hint?: string, optional?: boolean, extra?: Record<string, unknown>) => (
     <FormField id={`printer-${id}`} label={label} hint={hint} optional={optional} error={errors[id]}>
       {(control) => (
         <Input
@@ -124,7 +144,15 @@ export function NewPrinterPage() {
           {text("name", "Name", undefined, false, { maxLength: 120 })}
           <FormField id="printer-deviceType" label="Device type" hint="Labels print on ZPL II devices; PDF and PCL 6 devices take office documents.">
             {(control) => (
-              <Select {...control} value={values.deviceType} onChange={(event) => update({ deviceType: event.target.value as DeviceType })}>
+              <Select
+                {...control}
+                value={values.deviceType}
+                onChange={(event) => {
+                  const deviceType = event.target.value as DeviceType;
+                  // A device type takes only its own kind of media, so switching resets it to the type's default.
+                  update({ deviceType, mediaSize: mediaFor(deviceType)[0] });
+                }}
+              >
                 {DEVICE_TYPES.map((t) => (
                   <option key={t} value={t}>
                     {t === "ZPL_II" ? "ZPL II" : t === "PDF_IPP" ? "PDF over IPP" : "PCL 6"}
@@ -139,6 +167,22 @@ export function NewPrinterPage() {
                 {DPIS.map((d) => (
                   <option key={d} value={String(d)}>
                     {d} dpi
+                  </option>
+                ))}
+              </Select>
+            )}
+          </FormField>
+          <FormField id="printer-mediaSize" label="Media size" hint="The label or sheet size loaded in the printer." error={errors.mediaSize}>
+            {(control) => (
+              <Select
+                {...control}
+                value={values.mediaSize}
+                onChange={(event) => update({ mediaSize: event.target.value as MediaSize })}
+                invalid={Boolean(errors.mediaSize)}
+              >
+                {mediaFor(values.deviceType).map((m) => (
+                  <option key={m} value={m}>
+                    {mediaLabel(m)}
                   </option>
                 ))}
               </Select>

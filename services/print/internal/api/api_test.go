@@ -183,8 +183,9 @@ func (m *memStore) GetJob(_ context.Context, id string) (domain.Job, error) {
 
 // fakeSender refuses delivery to printers listed in down and records what it sent.
 type fakeSender struct {
-	down map[string]bool
-	sent []string
+	down     map[string]bool
+	sent     []string // printer codes that accepted a payload
+	payloads []string // the payloads they accepted
 }
 
 func (f *fakeSender) Send(_ context.Context, p domain.Printer, zpl string) error {
@@ -192,7 +193,7 @@ func (f *fakeSender) Send(_ context.Context, p domain.Printer, zpl string) error
 		return errors.New("connection refused")
 	}
 	f.sent = append(f.sent, p.Code)
-	_ = zpl
+	f.payloads = append(f.payloads, zpl)
 	return nil
 }
 

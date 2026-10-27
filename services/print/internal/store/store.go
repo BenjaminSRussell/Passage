@@ -70,11 +70,11 @@ func New(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
 // Ping checks the database connection for readiness.
 func (s *Postgres) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 
-const printerColumns = "id::text, code, name, device_type, dpi, host, port, queue_code, failover_rank, created_at"
+const printerColumns = "id::text, code, name, device_type, dpi, media_size, host, port, queue_code, failover_rank, created_at"
 
 func scanPrinter(row pgx.Row) (domain.Printer, error) {
 	var p domain.Printer
-	err := row.Scan(&p.ID, &p.Code, &p.Name, &p.DeviceType, &p.Dpi, &p.Host, &p.Port, &p.QueueCode, &p.FailoverRank, &p.CreatedAt)
+	err := row.Scan(&p.ID, &p.Code, &p.Name, &p.DeviceType, &p.Dpi, &p.MediaSize, &p.Host, &p.Port, &p.QueueCode, &p.FailoverRank, &p.CreatedAt)
 	return p, err
 }
 
@@ -86,10 +86,10 @@ func (s *Postgres) CreatePrinter(ctx context.Context, in domain.Printer, idempot
 	var inserted bool
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
-		out, err = scanPrinter(tx.QueryRow(ctx, `insert into print_device (tenant_id, id, code, name, device_type, dpi, host, port, queue_code, failover_rank, idempotency_key)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		out, err = scanPrinter(tx.QueryRow(ctx, `insert into print_device (tenant_id, id, code, name, device_type, dpi, media_size, host, port, queue_code, failover_rank, idempotency_key)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 			on conflict (tenant_id, idempotency_key) do nothing
-			returning `+printerColumns, p.TenantID, ids.New(), in.Code, in.Name, in.DeviceType, in.Dpi, in.Host, in.Port, in.QueueCode, in.FailoverRank, idempotencyKey))
+			returning `+printerColumns, p.TenantID, ids.New(), in.Code, in.Name, in.DeviceType, in.Dpi, in.MediaSize, in.Host, in.Port, in.QueueCode, in.FailoverRank, idempotencyKey))
 		if errors.Is(err, pgx.ErrNoRows) {
 			out, err = scanPrinter(tx.QueryRow(ctx, `select `+printerColumns+` from print_device where tenant_id = $1 and idempotency_key = $2`, p.TenantID, idempotencyKey))
 			if err == nil {
@@ -123,7 +123,7 @@ func (s *Postgres) CreatePrinter(ctx context.Context, in domain.Printer, idempot
 const rankConstraint = "print_device_tenant_id_queue_code_failover_rank_key"
 
 func samePrinter(a, b domain.Printer) bool {
-	return a.Code == b.Code && a.Name == b.Name && a.DeviceType == b.DeviceType && a.Dpi == b.Dpi &&
+	return a.Code == b.Code && a.Name == b.Name && a.DeviceType == b.DeviceType && a.Dpi == b.Dpi && a.MediaSize == b.MediaSize &&
 		a.Host == b.Host && a.Port == b.Port && a.QueueCode == b.QueueCode && a.FailoverRank == b.FailoverRank
 }
 
@@ -171,18 +171,48 @@ func (s *Postgres) QueueDevices(ctx context.Context, queueCode string) ([]domain
 	return out, err
 }
 
-const jobColumns = "id::text, template_code, queue_code, coalesce(printer_id::text, ''), coalesce(printer_code, ''), status, attempts, coalesce(last_error, ''), reprint_of::text, created_by, created_at, updated_at, zpl, request_hash"
+// jobColumns are a job without its payload; the job log and job creation read
+// these, so a list never loads PDF documents. payloadColumns follow them where the
+// payload is needed (a reprint).
+const (
+	jobColumns     = "id::text, template_code, queue_code, payload_format, coalesce(printer_id::text, ''), coalesce(printer_code, ''), status, attempts, coalesce(last_error, ''), reprint_of::text, created_by, created_at, updated_at, request_hash"
+	payloadColumns = "zpl, document"
+)
 
 type jobRow struct {
 	job  domain.Job
 	hash string
 }
 
+func (r *jobRow) fields() []any {
+	return []any{&r.job.ID, &r.job.TemplateCode, &r.job.QueueCode, &r.job.Format, &r.job.PrinterID, &r.job.PrinterCode, &r.job.Status, &r.job.Attempts,
+		&r.job.LastError, &r.job.ReprintOf, &r.job.CreatedBy, &r.job.CreatedAt, &r.job.UpdatedAt, &r.hash}
+}
+
 func scanJob(row pgx.Row) (jobRow, error) {
 	var r jobRow
-	err := row.Scan(&r.job.ID, &r.job.TemplateCode, &r.job.QueueCode, &r.job.PrinterID, &r.job.PrinterCode, &r.job.Status, &r.job.Attempts,
-		&r.job.LastError, &r.job.ReprintOf, &r.job.CreatedBy, &r.job.CreatedAt, &r.job.UpdatedAt, &r.job.ZPL, &r.hash)
+	err := row.Scan(r.fields()...)
 	return r, err
+}
+
+// scanJobWithPayload reads jobColumns then payloadColumns. A PDF job's payload is
+// its document bytes; a ZPL job's is the rendered ZPL.
+func scanJobWithPayload(row pgx.Row) (jobRow, error) {
+	var r jobRow
+	var doc []byte
+	err := row.Scan(append(r.fields(), &r.job.ZPL, &doc)...)
+	if err == nil && r.job.Format == domain.FormatPDF {
+		r.job.ZPL = string(doc)
+	}
+	return r, err
+}
+
+// splitPayload returns the zpl and document column values for a job.
+func splitPayload(j domain.Job) (format, zpl string, document []byte) {
+	if j.Format == domain.FormatPDF {
+		return domain.FormatPDF, "", []byte(j.ZPL)
+	}
+	return domain.FormatZPL, j.ZPL, nil
 }
 
 // CreateJob inserts a QUEUED job. A repeated Idempotency-Key returns the stored
@@ -192,13 +222,15 @@ func (s *Postgres) CreateJob(ctx context.Context, in NewJob) (domain.Job, bool, 
 	var out jobRow
 	var inserted bool
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		format, zpl, document := splitPayload(in.Job)
 		var err error
-		out, err = scanJob(tx.QueryRow(ctx, `insert into print_job (tenant_id, id, template_code, queue_code, zpl, status, request_hash, idempotency_key, created_by, reprint_of)
-			values ($1, $2, $3, $4, $5, 'QUEUED', $6, $7, $8, $9::uuid)
+		out, err = scanJob(tx.QueryRow(ctx, `insert into print_job (tenant_id, id, template_code, queue_code, payload_format, zpl, document, status, request_hash, idempotency_key, created_by, reprint_of)
+			values ($1, $2, $3, $4, $5, $6, $7, 'QUEUED', $8, $9, $10, $11::uuid)
 			on conflict (tenant_id, idempotency_key) do nothing
-			returning `+jobColumns, p.TenantID, in.Job.ID, in.Job.TemplateCode, in.Job.QueueCode, in.Job.ZPL, in.RequestHash, in.IdempotencyKey, in.Job.CreatedBy, in.Job.ReprintOf))
+			returning `+jobColumns, p.TenantID, in.Job.ID, in.Job.TemplateCode, in.Job.QueueCode, format, zpl, document, in.RequestHash, in.IdempotencyKey, in.Job.CreatedBy, in.Job.ReprintOf))
 		if err == nil {
 			inserted = true
+			out.job.ZPL = in.Job.ZPL
 			return nil
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
@@ -240,13 +272,13 @@ func (s *Postgres) CompleteJob(ctx context.Context, j domain.Job) error {
 	})
 }
 
-// GetJob returns a job of the tenant, including its stored ZPL for reprints.
+// GetJob returns a job of the tenant, including its stored payload for reprints.
 func (s *Postgres) GetJob(ctx context.Context, id string) (domain.Job, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out jobRow
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
-		out, err = scanJob(tx.QueryRow(ctx, `select `+jobColumns+` from print_job where tenant_id = $1 and id = $2`, p.TenantID, id))
+		out, err = scanJobWithPayload(tx.QueryRow(ctx, `select `+jobColumns+`, `+payloadColumns+` from print_job where tenant_id = $1 and id = $2`, p.TenantID, id))
 		return err
 	})
 	if errors.Is(err, pgx.ErrNoRows) {

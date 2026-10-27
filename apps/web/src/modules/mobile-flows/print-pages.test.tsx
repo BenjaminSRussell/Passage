@@ -5,6 +5,7 @@ import { checkAxeAA } from "../../shell/a11y";
 import type { PrintJob, Printer, RoutingRule } from "./api/print";
 import mobileFlows from "./module";
 import { validateJob, validYYMMDD } from "./NewPrintJobPage";
+import { buildDocumentJob } from "./NewPrintDocumentPage";
 import { validatePrinter } from "./NewPrinterPage";
 import { validateRule } from "./NewRoutingRulePage";
 
@@ -59,6 +60,7 @@ const printer: Printer = {
   name: "Dock door 1",
   deviceType: "ZPL_II",
   dpi: 203,
+  mediaSize: "4X6_IN",
   host: "10.0.4.20",
   port: 9100,
   queueCode: "DOCK",
@@ -70,6 +72,7 @@ const job: PrintJob = {
   id: JOB,
   templateCode: "LP_LABEL",
   queueCode: "DOCK",
+  format: "ZPL",
   printerCode: "DOCK-2",
   status: "PRINTED",
   attempts: 3,
@@ -86,6 +89,7 @@ describe("printers", () => {
     await waitFor(() => expect(within(table).getByText("DOCK-1")).toBeInTheDocument());
     expect(within(table).getByText("10.0.4.20:9100")).toBeInTheDocument();
     expect(within(table).getByText("ZPL II")).toBeInTheDocument();
+    expect(within(table).getByText("4 x 6 in label")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Register printer" })).toHaveAttribute("href", "/mobile-flows/printers/new");
     expect(pageViolations(container)).toEqual([]);
   });
@@ -107,11 +111,33 @@ describe("printers", () => {
   });
 
   it("validates the registration like the service and leaves the default port to it", () => {
-    const base = { code: "DOCK-1", name: "Dock", deviceType: "ZPL_II" as const, dpi: "203", host: "10.0.4.20", port: "", queueCode: "DOCK", failoverRank: "1" };
-    expect(validatePrinter(base).input).toEqual({ code: "DOCK-1", name: "Dock", deviceType: "ZPL_II", dpi: 203, host: "10.0.4.20", queueCode: "DOCK", failoverRank: 1 });
+    const base = {
+      code: "DOCK-1",
+      name: "Dock",
+      deviceType: "ZPL_II" as const,
+      dpi: "203",
+      mediaSize: "4X6_IN" as const,
+      host: "10.0.4.20",
+      port: "",
+      queueCode: "DOCK",
+      failoverRank: "1",
+    };
+    expect(validatePrinter(base).input).toEqual({
+      code: "DOCK-1",
+      name: "Dock",
+      deviceType: "ZPL_II",
+      dpi: 203,
+      mediaSize: "4X6_IN",
+      host: "10.0.4.20",
+      queueCode: "DOCK",
+      failoverRank: 1,
+    });
     // Every device type has a service default port (9100 raw TCP, 631 IPP), so the port may be left empty.
-    expect(validatePrinter({ ...base, deviceType: "PDF_IPP" }).input).not.toHaveProperty("port");
-    expect(validatePrinter({ ...base, deviceType: "PCL_6", port: "9101" }).input).toMatchObject({ deviceType: "PCL_6", port: 9101 });
+    expect(validatePrinter({ ...base, deviceType: "PDF_IPP", mediaSize: "A4" }).input).not.toHaveProperty("port");
+    expect(validatePrinter({ ...base, deviceType: "PCL_6", mediaSize: "LETTER", port: "9101" }).input).toMatchObject({ deviceType: "PCL_6", port: 9101 });
+    // Media follows the device type like the service's mediaSize rule (FR-32.13).
+    expect(validatePrinter({ ...base, deviceType: "PDF_IPP" }).errors.mediaSize).toBe("Choose A4 or Letter for this printer.");
+    expect(validatePrinter({ ...base, mediaSize: "A4" }).errors.mediaSize).toBe("Choose a label size for a ZPL II printer.");
     expect(Object.keys(validatePrinter({ ...base, code: "dock", queueCode: "", failoverRank: "0", port: "70000" }).errors).sort()).toEqual([
       "code",
       "failoverRank",
@@ -132,7 +158,25 @@ describe("printers", () => {
     const post = calls.find((c) => c.method === "POST");
     expect(post?.url.pathname).toBe("/api/v1/print/printers");
     expect(new Headers(post?.init.headers).get("Idempotency-Key")).toBeTruthy();
-    expect(post?.body).toEqual({ code: "DOCK-2", name: "Dock 2", deviceType: "ZPL_II", dpi: 203, host: "10.0.4.21", queueCode: "DOCK", failoverRank: 1 });
+    expect(post?.body).toEqual({ code: "DOCK-2", name: "Dock 2", deviceType: "ZPL_II", dpi: 203, mediaSize: "4X6_IN", host: "10.0.4.21", queueCode: "DOCK", failoverRank: 1 });
+  });
+
+  it("offers sheet media for a PDF printer and sends the chosen size", async () => {
+    handler = (_url, init) => (init.method === "POST" ? json(201, { ...printer, deviceType: "PDF_IPP", mediaSize: "LETTER" }) : json(200, { items: [] }));
+    const { container } = renderAt("/mobile-flows/printers/new");
+    const media = screen.getByLabelText("Media size") as HTMLSelectElement;
+    expect([...media.options].map((o) => o.value)).toEqual(["4X6_IN", "4X2_IN", "3X1_IN", "2X1_IN"]);
+    fireEvent.change(screen.getByLabelText("Device type"), { target: { value: "PDF_IPP" } });
+    expect([...media.options].map((o) => o.textContent)).toEqual(["A4 sheet", "Letter sheet"]);
+    expect(media.value).toBe("A4");
+    fireEvent.change(media, { target: { value: "LETTER" } });
+    fireEvent.change(screen.getByLabelText("Printer code"), { target: { value: "OFFICE-1" } });
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Office" } });
+    fireEvent.change(screen.getByLabelText("Host"), { target: { value: "10.0.7.1" } });
+    fireEvent.change(screen.getByLabelText("Queue"), { target: { value: "OFFICE" } });
+    expect(pageViolations(container)).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Register printer" }));
+    await waitFor(() => expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({ deviceType: "PDF_IPP", mediaSize: "LETTER" }));
   });
 
   it("returns to the list after a successful registration", async () => {
@@ -342,6 +386,86 @@ describe("print jobs", () => {
     fireEvent.change(screen.getByLabelText("Location"), { target: { value: "A-01-02" } });
     fireEvent.click(screen.getByRole("button", { name: "Print label" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("no printer is routed for LOCATION_LABEL (MOB-0112)");
+  });
+});
+
+const pdfFile = (text: string, name = "pick-list.pdf") => new File([text], name, { type: "application/pdf" });
+
+describe("print document (FR-32.13)", () => {
+  const values = { documentType: "PICK_LIST" as const, target: "queue" as const, queueCode: "OFFICE", zone: "", warehouseId: "" };
+
+  it("builds a PDF job with the document as base64 and refuses other files before any request", async () => {
+    const ok = await buildDocumentJob({ ...values, file: pdfFile("%PDF-1.4 pick") });
+    expect(ok.input).toEqual({ format: "PDF", queueCode: "OFFICE", documentBase64: btoa("%PDF-1.4 pick") });
+    expect((await buildDocumentJob({ ...values, file: pdfFile("hello", "notes.txt") })).errors.file).toBe("The file is not a PDF document.");
+    expect((await buildDocumentJob({ ...values, file: null })).errors.file).toBe("Choose the PDF to print.");
+    expect((await buildDocumentJob({ ...values, queueCode: "office", file: pdfFile("%PDF-") })).errors.queueCode).toBe("Use the queue code, such as OFFICE.");
+    const big = new File([new Uint8Array(2 * 1024 * 1024 + 1)], "big.pdf", { type: "application/pdf" });
+    expect((await buildDocumentJob({ ...values, file: big })).errors.file).toBe("The PDF is larger than 2 MB.");
+    const routed = await buildDocumentJob({ ...values, target: "rule", zone: "PACK", file: pdfFile("%PDF-1.7") });
+    expect(routed.input).toMatchObject({ format: "PDF", documentType: "PICK_LIST", zone: "PACK" });
+    expect(routed.input).not.toHaveProperty("queueCode");
+  });
+
+  it("prints a PDF on a queue and opens the recorded job", async () => {
+    const pdfJob: PrintJob = { ...job, format: "PDF", templateCode: "PDF_DOCUMENT", queueCode: "OFFICE", printerCode: "OFFICE-1", attempts: 1 };
+    handler = (url, init) => {
+      if (init.method === "POST") return json(201, pdfJob);
+      if (url.pathname === `/api/v1/print/jobs/${JOB}`) return json(200, pdfJob);
+      return undefined;
+    };
+    const { container } = renderAt("/mobile-flows/print-documents/new");
+    expect(screen.getByRole("heading", { name: "Print document" })).toBeInTheDocument();
+    expect(pageViolations(container)).toEqual([]);
+    fireEvent.change(screen.getByLabelText("Queue"), { target: { value: "OFFICE" } });
+    fireEvent.change(screen.getByLabelText("PDF file"), { target: { files: [pdfFile("%PDF-1.4 pick")] } });
+    fireEvent.click(screen.getByRole("button", { name: "Print document" }));
+    expect(await screen.findAllByText("PDF document", { selector: "dd" })).toHaveLength(2);
+    const post = calls.find((c) => c.method === "POST");
+    expect(post?.body).toEqual({ format: "PDF", queueCode: "OFFICE", documentBase64: btoa("%PDF-1.4 pick") });
+    expect(new Headers(post?.init.headers).get("Idempotency-Key")).toBeTruthy();
+  });
+
+  it("shows a file-type error without calling the service", async () => {
+    renderAt("/mobile-flows/print-documents/new");
+    fireEvent.change(screen.getByLabelText("Queue"), { target: { value: "OFFICE" } });
+    fireEvent.change(screen.getByLabelText("PDF file"), { target: { files: [pdfFile("not a pdf")] } });
+    fireEvent.click(screen.getByRole("button", { name: "Print document" }));
+    expect(await screen.findByText("The file is not a PDF document.")).toBeInTheDocument();
+    expect(calls.filter((c) => c.method === "POST")).toEqual([]);
+  });
+
+  it("offers browser printing when no routing rule matches (BR-32.12)", async () => {
+    handler = (_url, init) => (init.method === "POST" ? json(422, { code: "MOB-0112", detail: "no printer is routed for COA" }) : undefined);
+    const open = vi.fn();
+    vi.stubGlobal("open", open);
+    const createObjectURL = vi.fn(() => "blob:coa");
+    Object.assign(URL, { createObjectURL, revokeObjectURL: vi.fn() });
+    renderAt("/mobile-flows/print-documents/new");
+    fireEvent.change(screen.getByLabelText("Document type"), { target: { value: "COA" } });
+    fireEvent.change(screen.getByLabelText("Printer selection"), { target: { value: "rule" } });
+    const file = pdfFile("%PDF-1.4 coa", "coa.pdf");
+    fireEvent.change(screen.getByLabelText("PDF file"), { target: { files: [file] } });
+    fireEvent.click(screen.getByRole("button", { name: "Print document" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("no printer is routed for COA (MOB-0112)");
+    fireEvent.click(within(alert).getByRole("button", { name: "Print from the browser" }));
+    expect(createObjectURL).toHaveBeenCalledWith(file);
+    expect(open).toHaveBeenCalledWith("blob:coa", "_blank", "noopener");
+  });
+
+  it("explains a failed PDF job as a missing PDF printer", async () => {
+    const failed: PrintJob = { ...job, format: "PDF", templateCode: "PDF_DOCUMENT", status: "FAILED", printerCode: undefined, lastError: "MOB-0112" };
+    handler = (url) => (url.pathname === `/api/v1/print/jobs/${JOB}` ? json(200, failed) : undefined);
+    renderAt(`/mobile-flows/print-jobs/${JOB}`);
+    expect(await screen.findByText("The document did not print")).toBeInTheDocument();
+    expect(screen.getAllByText("No PDF over IPP printer is registered in the queue (MOB-0112).").length).toBeGreaterThan(0);
+  });
+
+  it("links the job log to the document form", async () => {
+    handler = () => json(200, { items: [] });
+    renderAt("/mobile-flows/print-jobs");
+    expect(await screen.findByRole("link", { name: "Print document" })).toHaveAttribute("href", "/mobile-flows/print-documents/new");
   });
 });
 

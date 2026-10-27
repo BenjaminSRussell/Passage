@@ -8,6 +8,29 @@ export type DeviceType = (typeof DEVICE_TYPES)[number];
 
 export const DPIS = [203, 300, 600] as const;
 
+/** Media sizes (FR-32.13): label media for ZPL II devices, sheets for PDF and PCL 6 devices. */
+export const LABEL_MEDIA = ["2X1_IN", "3X1_IN", "4X2_IN", "4X6_IN"] as const;
+export const SHEET_MEDIA = ["A4", "LETTER"] as const;
+export type MediaSize = (typeof LABEL_MEDIA)[number] | (typeof SHEET_MEDIA)[number];
+
+/** The media sizes a device type takes; the first is the service default. */
+export function mediaFor(deviceType: DeviceType): readonly MediaSize[] {
+  return deviceType === "ZPL_II" ? ["4X6_IN", "4X2_IN", "3X1_IN", "2X1_IN"] : SHEET_MEDIA;
+}
+
+export function mediaLabel(media: MediaSize | string): string {
+  const inches = /^(\d)X(\d)_IN$/.exec(media);
+  if (inches) return `${inches[1]} x ${inches[2]} in label`;
+  return media === "LETTER" ? "Letter sheet" : media === "A4" ? "A4 sheet" : media;
+}
+
+/** Job payload formats: a ZPL label from a template, or a PDF document for PDF over IPP devices. */
+export const JOB_FORMATS = ["ZPL", "PDF"] as const;
+export type JobFormat = (typeof JOB_FORMATS)[number];
+
+/** Largest PDF a job may carry (the service refuses more). */
+export const MAX_DOCUMENT_BYTES = 2 * 1024 * 1024;
+
 export const DOCUMENT_TYPES = [
   "LP_LABEL",
   "LOCATION_LABEL",
@@ -47,6 +70,7 @@ export interface Printer {
   name: string;
   deviceType: DeviceType;
   dpi: number;
+  mediaSize: MediaSize;
   host: string;
   port: number;
   queueCode: string;
@@ -59,6 +83,8 @@ export interface NewPrinter {
   name: string;
   deviceType: DeviceType;
   dpi: number;
+  /** Omitted to use the default: 4 x 6 in for ZPL_II, A4 otherwise. */
+  mediaSize?: MediaSize;
   host: string;
   /** Omitted to use the default: raw TCP 9100 for ZPL_II and PCL_6, IPP 631 for PDF_IPP. */
   port?: number;
@@ -80,8 +106,10 @@ export type NewRoutingRule = Omit<RoutingRule, "id">;
 
 export interface PrintJob {
   id: string;
+  /** PDF_DOCUMENT for a PDF job. */
   templateCode: string;
   queueCode: string;
+  format: JobFormat;
   printerId?: string;
   printerCode?: string;
   status: JobStatus;
@@ -111,6 +139,9 @@ export interface PrinterStatus {
 
 export interface NewPrintJob {
   templateCode?: TemplateCode;
+  /** Omitted for a ZPL label. PDF sends documentBase64 to PDF over IPP devices. */
+  format?: JobFormat;
+  documentBase64?: string;
   queueCode?: string;
   documentType?: DocumentType;
   zone?: string;
@@ -222,7 +253,30 @@ export function createJob(input: NewPrintJob, key: string): Promise<PrintJob> {
   return post<PrintJob>("/jobs", input, key);
 }
 
-/** "Print again" (BR-32.8): a new job with reprintOf, reusing the stored ZPL. */
+/** "Print again" (BR-32.8): a new job with reprintOf, reusing the stored ZPL or PDF. */
 export function reprintJob(job: PrintJob, key: string): Promise<PrintJob> {
   return post<PrintJob>("/jobs", { queueCode: job.queueCode, reprintOf: job.id }, key);
+}
+
+/** Reads a blob with FileReader, which every supported browser (and jsdom) implements. */
+function readBytes(file: Blob): Promise<Uint8Array> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(new Uint8Array(reader.result as ArrayBuffer));
+    reader.onerror = () => reject(new Error("The file could not be read."));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+/** Reads a PDF file as standard base64 for documentBase64. Refuses a file that is not a PDF or is too large. */
+export async function pdfToBase64(file: Blob): Promise<string> {
+  if (file.size === 0) throw new Error("The file is empty.");
+  if (file.size > MAX_DOCUMENT_BYTES) throw new Error("The PDF is larger than 2 MB.");
+  const bytes = await readBytes(file);
+  const header = String.fromCharCode(...bytes.subarray(0, 5));
+  if (header !== "%PDF-") throw new Error("The file is not a PDF document.");
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  return btoa(binary);
 }

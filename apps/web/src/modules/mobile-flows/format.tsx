@@ -1,5 +1,5 @@
 import { Badge, type BadgeTone } from "../../shell/ui";
-import type { DocumentType, JobStatus, PrinterState, RoutingRule } from "./api/print";
+import type { DocumentType, JobFormat, JobStatus, PrinterState, PrintJob, RoutingRule } from "./api/print";
 
 export const dash = "—";
 
@@ -43,11 +43,17 @@ export function PrinterStateBadge({ state }: { state: PrinterState }) {
   return <Badge tone={s.tone}>{s.label}</Badge>;
 }
 
-/** Catalog text for a failed job's code (§6.32.18). */
-export function describeJobError(code?: string): string {
-  if (code === "MOB-0111") return "No printer in the queue accepted the label after its attempts (MOB-0111).";
-  if (code === "MOB-0112") return "No ZPL printer is registered in the queue (MOB-0112).";
+/** Catalog text for a failed job's code (§6.32.18). A PDF job needs a PDF over IPP printer, a label a ZPL II one. */
+export function describeJobError(code?: string, format: JobFormat = "ZPL"): string {
+  const what = format === "PDF" ? "document" : "label";
+  if (code === "MOB-0111") return `No printer in the queue accepted the ${what} after its attempts (MOB-0111).`;
+  if (code === "MOB-0112") return `No ${format === "PDF" ? "PDF over IPP" : "ZPL II"} printer is registered in the queue (MOB-0112).`;
   return code ? `Failed with ${code}.` : dash;
+}
+
+/** What a job printed: the label template, or "PDF document". */
+export function describeJobContent(job: Pick<PrintJob, "format" | "templateCode">): string {
+  return job.format === "PDF" ? "PDF document" : job.templateCode;
 }
 
 /** The scope a rule matches on, most specific first (BR-32.12). */

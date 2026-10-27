@@ -2,8 +2,10 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -105,6 +107,7 @@ type printerRequest struct {
 	Name         string `json:"name"`
 	DeviceType   string `json:"deviceType"`
 	Dpi          int    `json:"dpi"`
+	MediaSize    string `json:"mediaSize"`
 	Host         string `json:"host"`
 	Port         int    `json:"port"`
 	QueueCode    string `json:"queueCode"`
@@ -113,14 +116,43 @@ type printerRequest struct {
 
 // createJobRequest names the queue directly, or a documentType (and optional
 // zone/warehouseId) that the routing rules resolve to a queue (BR-32.12).
+// A label job renders templateCode with data; a PDF job (format PDF) carries the
+// document in documentBase64 instead.
 type createJobRequest struct {
-	TemplateCode string            `json:"templateCode"`
-	QueueCode    string            `json:"queueCode,omitempty"`
-	DocumentType string            `json:"documentType,omitempty"`
-	Zone         string            `json:"zone,omitempty"`
-	WarehouseID  string            `json:"warehouseId,omitempty"`
-	Data         map[string]string `json:"data"`
-	ReprintOf    *string           `json:"reprintOf,omitempty"`
+	TemplateCode   string            `json:"templateCode"`
+	Format         string            `json:"format,omitempty"`
+	DocumentBase64 string            `json:"documentBase64,omitempty"`
+	QueueCode      string            `json:"queueCode,omitempty"`
+	DocumentType   string            `json:"documentType,omitempty"`
+	Zone           string            `json:"zone,omitempty"`
+	WarehouseID    string            `json:"warehouseId,omitempty"`
+	Data           map[string]string `json:"data"`
+	ReprintOf      *string           `json:"reprintOf,omitempty"`
+}
+
+// pdfDocument checks the PDF fields of a job request and returns the decoded
+// document. A PDF job has no template and no label data.
+func pdfDocument(req createJobRequest, fields map[string]string) []byte {
+	if req.TemplateCode != "" {
+		fields["templateCode"] = "must be empty for a PDF document"
+	}
+	if len(req.Data) > 0 {
+		fields["data"] = "must be empty for a PDF document"
+	}
+	if req.DocumentBase64 == "" {
+		fields["documentBase64"] = "is required for a PDF document"
+		return nil
+	}
+	doc, err := base64.StdEncoding.DecodeString(req.DocumentBase64)
+	switch {
+	case err != nil:
+		fields["documentBase64"] = "must be standard base64"
+	case len(doc) > domain.MaxDocumentBytes:
+		fields["documentBase64"] = "must decode to at most 2 MiB"
+	case !bytes.HasPrefix(doc, []byte("%PDF-")):
+		fields["documentBase64"] = "must be a PDF document (starting with %PDF-)"
+	}
+	return doc
 }
 
 func principal(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) {
@@ -160,10 +192,13 @@ func (a *API) createPrinter(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
-	in := domain.Printer{Code: req.Code, Name: req.Name, DeviceType: req.DeviceType, Dpi: req.Dpi, Host: req.Host, Port: req.Port,
-		QueueCode: req.QueueCode, FailoverRank: req.FailoverRank}
+	in := domain.Printer{Code: req.Code, Name: req.Name, DeviceType: req.DeviceType, Dpi: req.Dpi, MediaSize: req.MediaSize,
+		Host: req.Host, Port: req.Port, QueueCode: req.QueueCode, FailoverRank: req.FailoverRank}
 	if in.Port == 0 {
 		in.Port = domain.DefaultPort(in.DeviceType)
+	}
+	if in.MediaSize == "" {
+		in.MediaSize = domain.DefaultMedia(in.DeviceType)
 	}
 	if fields := in.Validate(); len(fields) > 0 {
 		validationFailed(w, r, fields)
@@ -235,19 +270,34 @@ func (a *API) createJob(w http.ResponseWriter, r *http.Request) {
 	if req.ReprintOf != nil && !ids.Valid(*req.ReprintOf) {
 		fields["reprintOf"] = "must be a UUID"
 	}
+	format := domain.FormatZPL
+	var doc []byte
+	switch {
+	case req.Format == domain.FormatPDF && req.ReprintOf != nil:
+		fields["format"] = "must be omitted on a reprint, which reuses the original job's format"
+	case req.Format == domain.FormatPDF:
+		format = domain.FormatPDF
+		doc = pdfDocument(req, fields)
+	case req.Format != "" && req.Format != domain.FormatZPL:
+		fields["format"] = "must be ZPL or PDF"
+	case req.DocumentBase64 != "":
+		fields["documentBase64"] = "is only allowed with format PDF"
+	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
 		return
 	}
 	var zpl, template string
 	if req.ReprintOf != nil {
-		// BR-32.8: a reprint reuses the stored ZPL and makes a new job with reprint_of.
+		// BR-32.8: a reprint reuses the stored payload and makes a new job with reprint_of.
 		orig, err := a.store.GetJob(r.Context(), *req.ReprintOf)
 		if err != nil {
 			httpx.Fail(w, r, err)
 			return
 		}
-		zpl, template = orig.ZPL, orig.TemplateCode
+		zpl, template, format = orig.ZPL, orig.TemplateCode, orig.Format
+	} else if format == domain.FormatPDF {
+		zpl, template = string(doc), domain.PDFDocumentTemplate
 	} else {
 		tpl, known := domain.Template(req.TemplateCode)
 		if !known {
@@ -281,7 +331,7 @@ func (a *API) createJob(w http.ResponseWriter, r *http.Request) {
 		}
 		queue = rule.QueueCode
 	}
-	job := domain.Job{ID: ids.New(), TemplateCode: template, QueueCode: queue, Status: domain.JobQueued,
+	job := domain.Job{ID: ids.New(), TemplateCode: template, QueueCode: queue, Format: format, Status: domain.JobQueued,
 		ReprintOf: req.ReprintOf, CreatedBy: p.UserID, ZPL: zpl}
 	created, inserted, err := a.store.CreateJob(r.Context(), store.NewJob{Job: job, RequestHash: requestHash(req), IdempotencyKey: key})
 	if err != nil {
@@ -301,8 +351,9 @@ func (a *API) createJob(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
-	// Every built-in template is ZPL; PDF and PCL devices in the queue are skipped.
-	out, dispatchErr := domain.Dispatch(domain.Accepting(devices, domain.DeviceZPL), a.attempts, func(d domain.Printer) error {
+	// A ZPL label goes to ZPL_II devices and a PDF document to PDF_IPP devices; the
+	// rest of the queue is skipped, and a queue with none fails with MOB-0112.
+	out, dispatchErr := domain.Dispatch(domain.Accepting(devices, domain.DeviceTypeFor(format)), a.attempts, func(d domain.Printer) error {
 		return a.sender.Send(ctx, d, zpl)
 	})
 	if err := created.Complete(out, dispatchErr); err != nil {

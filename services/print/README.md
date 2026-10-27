@@ -7,18 +7,23 @@ from this pod; nothing connects inbound to the cluster.
 
 ## What it does
 
-- **Printer registry** (`POST/GET /print/v1/printers`): device code, device type, dpi, host,
-  port, queue and failover rank. Codes are unique per tenant, and a failover rank is unique
+- **Printer registry** (`POST/GET /print/v1/printers`): device code, device type, dpi, media
+  size, host, port, queue and failover rank. `ZPL_II` devices take label media (`2X1_IN`,
+  `3X1_IN`, `4X2_IN`, `4X6_IN`, default `4X6_IN`); `PDF_IPP` and `PCL_6` take sheets (`A4`,
+  `LETTER`, default `A4`). A database constraint (`0004`) enforces the pairing. Codes are unique per tenant, and a failover rank is unique
   within its queue. A registration without a port gets 9100 for `ZPL_II` and `PCL_6` and 631
   for `PDF_IPP`.
 - **Document routing** (`POST/GET /print/v1/routing-rules`): a document type goes to a queue
   by the most specific matching scope. Precedence is user, then zone, then warehouse, then
   the document-type default. Ties go to the lowest `sequence` (BR-32.12).
 - **Print jobs** (`POST /print/v1/jobs`, `GET /print/v1/jobs/{id}`): give a `queueCode`, or a
-  `documentType` (with optional `zone`/`warehouseId`) and the rules pick the queue. The job
-  renders ZPL from a built-in template, is sent to the queue's ZPL II devices in failover order
-  (`PRINT_RETRY` + 1 attempts each, two by default; PDF and PCL devices in the queue are
-  skipped), and ends PRINTED or FAILED.
+  `documentType` (with optional `zone`/`warehouseId`) and the rules pick the queue. A label job
+  renders ZPL from a built-in template and goes to the queue's `ZPL_II` devices; a PDF job
+  (`format: PDF`, the document base64 in `documentBase64`, at most 2 MiB, starting `%PDF-`)
+  goes to the queue's `PDF_IPP` devices. Devices are tried in failover order (`PRINT_RETRY` + 1
+  attempts each, two by default; devices of the other type are skipped, and a queue with none
+  of the right type fails with MOB-0112), and the job ends PRINTED or FAILED. The PDF bytes are
+  stored in `print_job.document` for reprints and are never returned or listed.
   The LP label's SSCC barcode is GS1-128: FNC1, AI 00, then the 18 digits. Completion writes `dev.passage.print.job.completed.v1` to the outbox
   in the same transaction.
 - **Templates**: `LP_LABEL`, `LOCATION_LABEL`, `ITEM_LABEL` (gtin, optional lot, expiry
@@ -32,9 +37,9 @@ from this pod; nothing connects inbound to the cluster.
   `ZPL_II` and `PCL_6` are written to raw TCP. `PDF_IPP` posts an RFC 8010 Print-Job
   (`application/pdf`) to `http://<host>:<port>/ipp/print` and fails on any IPP status above
   `0x00FF`. A PDF payload never goes to a raw TCP device and a non-PDF payload never goes to
-  an IPP device (`ErrWrongDocumentFormat`). Jobs carry ZPL only today, so only `ZPL_II`
-  devices are offered a job; see NOT-IMPLEMENTED.md for PDF job input.
-- **Reprints**: `reprintOf` reuses the stored ZPL and records the source job.
+  an IPP device (`ErrWrongDocumentFormat`). No job carries PCL yet, so `PCL_6` devices are
+  never offered a job; see NOT-IMPLEMENTED.md.
+- **Reprints**: `reprintOf` reuses the stored ZPL or PDF and records the source job.
 - **Job log** (`GET /print/v1/jobs?status=&queueCode=&printerCode=&limit=`): newest first (§6.32.14).
 - **Printer status** (`GET /print/v1/printers/status`): per printer, the state from its last job
   (IDLE, BUSY, READY, ERROR), the queue depth (QUEUED jobs on its queue) and the last error
@@ -47,10 +52,11 @@ from this pod; nothing connects inbound to the cluster.
 - **Metrics** on the admin port (`ADMIN_ADDR`, default `:9090`, `GET /metrics`):
   `print_jobs_printed_total`, `print_jobs_failed_total`, `print_jobs_purged_total`.
 - Multi-tenant: every table, the outbox included, carries `tenant_id` with ENABLE and FORCE
-  row-level security (`0001`, `0002`); `0003` adds the partial index for queue depth.
+  row-level security (`0001`, `0002`); `0003` adds the partial index for queue depth; `0004`
+  adds media sizes and PDF job payloads.
 
-The web screens (printers, printer status, routing rules, print job log, print label, job
-detail with "print again") live in `apps/web/src/modules/mobile-flows`.
+The web screens (printers with media size, printer status, routing rules, print job log,
+print a label or a PDF document, job detail with "print again") live in `apps/web/src/modules/mobile-flows`.
 
 ## Run
 

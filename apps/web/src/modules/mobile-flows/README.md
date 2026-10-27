@@ -32,7 +32,12 @@ Flow designer for warehouse handheld flows, plus the pure domain shared with
   `startFlow` refuses a graph that fails validation; `submitStep` takes a scan, a typed value,
   a branch outcome or a confirmation and returns the next state and a `StepTiming`; `goBack`
   returns one step. GS1 fields of scanned labels are kept per step.
-- `domain/coreFlows.ts`: the bundled receive/put-away flow and the `ConfirmWorkLine` payload.
+- `domain/coreFlows.ts`: the seven bundled core flows (FR-32.4: receive/put-away, pick with a
+  short-pick reason, cluster pick, pack, move, count, inquiry), the `ConfirmWorkLine` payload,
+  and `completionFor`, which queues work flows, never queues an inquiry and keeps a count
+  online only (§6.32.13 `offline_enabled`).
+- `domain/shellCache.ts`: the device app-shell cache policy that
+  `apps/warehouse-mobile/public/sw.js` applies (FR-32.5 offline start); its test runs `sw.js`.
 - `domain/telemetry.ts`: step timing (FR-32.11): validation, nearest-rank median and p95
   rollups by flow and step (by user only on request, §6.32.20), and the 30 to 365 day
   retention (90 by default).
@@ -52,7 +57,8 @@ Flow designer for warehouse handheld flows, plus the pure domain shared with
   `GET /api/v1/mobile/offline/conflicts` and `POST .../offline/conflicts/{key}:resolve`. The
   mobile service is a handoff, so these pages report that it is unavailable.
 - `api/print.ts`: client for `services/print` through the BFF at `/api/v1/print`.
-- `pages.tsx`: designer screen. It opens on the bundled receive/put-away flow, edits the flow
+- `pages.tsx`: designer screen. It opens on the bundled receive/put-away flow (any core flow can
+  be loaded with "Start from"), edits the flow
   as JSON, validates, saves a draft, and runs a virtual scanner that uses the GS1 parser.
 - `FlowSimulator.tsx`: on the designer screen, runs the edited flow step by step with the
   device runner (§6.32.6 "designer simulation"): a virtual scanner feeds every step (scans on
@@ -60,11 +66,14 @@ Flow designer for warehouse handheld flows, plus the pure domain shared with
   and a step timing table shows attempts, errors, median and p95.
 - Print management (FR-32.7, FR-32.13): `PrintersPage` and `NewPrinterPage`,
   `RoutingRulesPage` and `NewRoutingRulePage`, `PrintJobsPage` (job log with status and queue
-  filters), `NewPrintJobPage` (print a built-in label on a queue or by routing rule) and
+  filters), `NewPrintJobPage` (print a built-in label on a queue or by routing rule),
+  `NewPrintDocumentPage` (send a PDF of up to 2 MB to the PDF over IPP printers of a queue or
+  routing rule; with no matching rule it offers the browser's print dialog, BR-32.12) and
   `PrintJobDetailPage` (outcome, MOB-0111/0112 explanation, "Print again" with `reprintOf`).
   The label form covers the LP, location, GS1 item (GTIN, optional lot, expiry and serial) and
   GS1 carton labels, with the service's check-digit, YYMMDD and set-82 rules; empty optional
-  fields are left out of the request. Printers may leave the port empty: the service uses
+  fields are left out of the request. Printers carry a media size that follows the device type
+  (label sizes for ZPL II, A4 or Letter otherwise). Printers may leave the port empty: the service uses
   9100 for ZPL II and PCL 6 and 631 for PDF over IPP.
 - `PrinterStatusPage` (§6.32.14): state, queue depth, last error and last job per printer.
 - `OfflineConflictsPage` (BR-32.4, AC-32.6): the supervisor queue of CONFLICT transactions.

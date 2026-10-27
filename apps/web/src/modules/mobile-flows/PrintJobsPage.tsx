@@ -2,13 +2,13 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
 import { CODE, JOB_STATUSES, listJobs, type JobStatus, type PrintJob } from "./api/print";
-import { dash, formatDateTime, JobStatusBadge } from "./format";
+import { dash, describeJobContent, formatDateTime, JobStatusBadge } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
 const columns: DataTableColumn<PrintJob>[] = [
   { key: "createdAt", header: "Created", render: (row) => formatDateTime(row.createdAt) },
-  { key: "templateCode", header: "Template", mono: true },
+  { key: "templateCode", header: "Content", mono: true, render: (row) => describeJobContent(row) },
   { key: "queueCode", header: "Queue", mono: true },
   { key: "printerCode", header: "Printer", mono: true, render: (row) => row.printerCode || dash },
   { key: "status", header: "Status", render: (row) => <JobStatusBadge status={row.status} /> },
@@ -33,11 +33,16 @@ export function PrintJobsPage() {
     <div className={styles.stack}>
       <PageHeader
         title="Print jobs"
-        description="Every label sent to a printer, with the device that printed it and the attempts it took. Failed jobs show MOB-0111 when no device answered and MOB-0112 when the queue has no label printer."
+        description="Every label and document sent to a printer, with the device that printed it and the attempts it took. Failed jobs show MOB-0111 when no device answered and MOB-0112 when the queue has no printer of the right type."
         actions={
-          <Link className={buttonClassName("primary")} to="/mobile-flows/print-jobs/new">
-            Print label
-          </Link>
+          <>
+            <Link className={buttonClassName("secondary")} to="/mobile-flows/print-documents/new">
+              Print document
+            </Link>
+            <Link className={buttonClassName("primary")} to="/mobile-flows/print-jobs/new">
+              Print label
+            </Link>
+          </>
         }
       />
       <div className={styles.toolbar}>
@@ -69,7 +74,7 @@ export function PrintJobsPage() {
           getRowKey={(row) => row.id}
           loading={state.loading}
           onRowOpen={(row) => navigate(`/mobile-flows/print-jobs/${row.id}`)}
-          empty={{ title: "No print jobs", description: "Jobs appear here when a device or this page prints a label." }}
+          empty={{ title: "No print jobs", description: "Jobs appear here when a device or this page prints a label or a document." }}
         />
       )}
     </div>

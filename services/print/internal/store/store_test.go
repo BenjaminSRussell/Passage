@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
@@ -33,7 +34,7 @@ func migrated(t *testing.T) (*store.Postgres, *pgxpool.Pool) {
 }
 
 func dock(code string, rank int) domain.Printer {
-	return domain.Printer{Code: code, Name: "Dock", DeviceType: domain.DeviceZPL, Dpi: 203, Host: "10.0.4.20", Port: 9100, QueueCode: "DOCK", FailoverRank: rank}
+	return domain.Printer{Code: code, Name: "Dock", DeviceType: domain.DeviceZPL, Dpi: 203, MediaSize: domain.Media4x6In, Host: "10.0.4.20", Port: 9100, QueueCode: "DOCK", FailoverRank: rank}
 }
 
 func problemCode(err error) string {
@@ -75,6 +76,49 @@ func TestPrinterRegistry_IdempotencyAndConflicts(t *testing.T) {
 	}
 	if other, err := s.ListPrinters(tenantCtx(2)); err != nil || len(other) != 0 {
 		t.Fatalf("tenant 2 saw %+v %v", other, err)
+	}
+}
+
+// TestPDFJobs_BinaryDocumentAndMediaSize covers slice 4 (FR-32.13): media size is
+// stored per device and the database refuses sheet media on a label printer; a PDF
+// job keeps its binary document (NUL bytes included) for reprints, and the job log
+// does not load it.
+func TestPDFJobs_BinaryDocumentAndMediaSize(t *testing.T) {
+	s, pool := migrated(t)
+	ctx := tenantCtx(1)
+	office := domain.Printer{Code: "OFFICE-1", Name: "Office", DeviceType: domain.DevicePDFIPP, Dpi: 300, MediaSize: domain.MediaLetter,
+		Host: "10.0.7.1", Port: 631, QueueCode: "OFFICE", FailoverRank: 1}
+	got, _, err := s.CreatePrinter(ctx, office, "office-1")
+	if err != nil || got.MediaSize != domain.MediaLetter {
+		t.Fatalf("create office printer: %+v %v", got, err)
+	}
+	a4 := office
+	a4.MediaSize = domain.MediaA4
+	if _, _, err := s.CreatePrinter(ctx, a4, "office-1"); problemCode(err) != store.CodeIdempotencyReuse {
+		t.Fatalf("same key with another media size: %v", err)
+	}
+	err = dbx.WithTenantTx(ctx, pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `insert into print_device (tenant_id, id, code, name, device_type, dpi, media_size, host, port, queue_code, failover_rank, idempotency_key)
+			values ($1, $2, 'LBL-9', 'Label', 'ZPL_II', 203, 'A4', '10.0.7.9', 9100, 'DOCK', 9, 'lbl-9')`, testkit.TenantID(1), ids.New())
+		return err
+	})
+	if err == nil {
+		t.Fatal("database accepted A4 media on a ZPL_II printer")
+	}
+
+	doc := "%PDF-1.7\n\x00\xff\xfe binary\n%%EOF"
+	job := domain.Job{ID: ids.New(), TemplateCode: domain.PDFDocumentTemplate, QueueCode: "OFFICE", Format: domain.FormatPDF, Status: domain.JobQueued, ZPL: doc}
+	created, inserted, err := s.CreateJob(ctx, store.NewJob{Job: job, RequestHash: "pdf-h", IdempotencyKey: "pdf-1"})
+	if err != nil || !inserted || created.Format != domain.FormatPDF {
+		t.Fatalf("create PDF job: %+v %v %v", created, inserted, err)
+	}
+	stored, err := s.GetJob(ctx, job.ID)
+	if err != nil || stored.Format != domain.FormatPDF || stored.ZPL != doc {
+		t.Fatalf("stored PDF job: format %q payload %q err %v", stored.Format, stored.ZPL, err)
+	}
+	log, err := s.ListJobs(ctx, store.JobFilter{QueueCode: "OFFICE", Limit: 10})
+	if err != nil || len(log) != 1 || log[0].Format != domain.FormatPDF || log[0].ZPL != "" {
+		t.Fatalf("job log: %+v %v", log, err)
 	}
 }
 

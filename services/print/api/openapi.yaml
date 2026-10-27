@@ -232,19 +232,24 @@ components:
         name: { type: string, minLength: 1, maxLength: 120 }
         deviceType: { type: string, enum: [ZPL_II, PDF_IPP, PCL_6] }
         dpi: { type: integer, enum: [203, 300, 600] }
+        mediaSize:
+          type: string
+          enum: [2X1_IN, 3X1_IN, 4X2_IN, 4X6_IN, A4, LETTER]
+          description: Label sizes (2X1_IN, 3X1_IN, 4X2_IN, 4X6_IN) for ZPL_II; sheet sizes (A4, LETTER) for PDF_IPP and PCL_6. Defaults to 4X6_IN for ZPL_II and A4 otherwise (FR-32.13).
         host: { type: string, minLength: 1, maxLength: 253 }
         port: { type: integer, minimum: 1, maximum: 65535, description: Defaults to 9100 (raw TCP) for ZPL_II and PCL_6 and to 631 (IPP) for PDF_IPP. }
         queueCode: { type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{1,39}$' }
         failoverRank: { type: integer, minimum: 1, description: Unique within the queue; jobs try devices in rank order. }
     Printer:
       type: object
-      required: [id, code, name, deviceType, dpi, host, port, queueCode, failoverRank, createdAt]
+      required: [id, code, name, deviceType, dpi, mediaSize, host, port, queueCode, failoverRank, createdAt]
       properties:
         id: { type: string, format: uuid }
         code: { type: string }
         name: { type: string }
         deviceType: { type: string, enum: [ZPL_II, PDF_IPP, PCL_6] }
         dpi: { type: integer, enum: [203, 300, 600] }
+        mediaSize: { type: string, enum: [2X1_IN, 3X1_IN, 4X2_IN, 4X6_IN, A4, LETTER] }
         host: { type: string }
         port: { type: integer }
         queueCode: { type: string }
@@ -259,9 +264,22 @@ components:
           type: string
           enum: [LP_LABEL, LOCATION_LABEL, ITEM_LABEL, GS1_CARTON_LABEL]
           description: >-
-            Required unless reprintOf is set. LP_LABEL needs lp, item, lot, expiry and sscc; LOCATION_LABEL needs location;
+            Required for a ZPL label unless reprintOf is set; must be empty for a PDF document. LP_LABEL needs lp, item, lot, expiry and sscc; LOCATION_LABEL needs location;
             ITEM_LABEL needs gtin and takes optional lot, expiry (YYMMDD, DD=00 is month end) and serial;
             GS1_CARTON_LABEL needs sscc and shipToName and takes optional poNumber and shipToPostal.
+        format:
+          type: string
+          enum: [ZPL, PDF]
+          description: >-
+            Defaults to ZPL (a label rendered from templateCode, sent to ZPL_II devices only). PDF sends the document in
+            documentBase64 (a pick list, count sheet, CoA or bill of lading) to PDF_IPP devices only; a queue without one
+            fails the job with MOB-0112. Omit it on a reprint, which keeps the original job's format.
+        documentBase64:
+          type: string
+          contentEncoding: base64
+          contentMediaType: application/pdf
+          maxLength: 2796204
+          description: Required with format PDF and refused otherwise. The decoded document must start with %PDF- and be at most 2 MiB.
         queueCode: { type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{1,39}$' }
         documentType: { $ref: '#/components/schemas/DocumentType' }
         zone: { type: string }
@@ -297,11 +315,12 @@ components:
         sequence: { type: integer }
     PrintJob:
       type: object
-      required: [id, templateCode, queueCode, status, attempts, createdBy, createdAt, updatedAt]
+      required: [id, templateCode, queueCode, format, status, attempts, createdBy, createdAt, updatedAt]
       properties:
         id: { type: string, format: uuid }
-        templateCode: { type: string }
+        templateCode: { type: string, description: PDF_DOCUMENT for a PDF job. }
         queueCode: { type: string }
+        format: { type: string, enum: [ZPL, PDF] }
         printerId: { type: string, format: uuid }
         printerCode: { type: string }
         status: { type: string, enum: [QUEUED, PRINTED, FAILED] }

@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { Alert, Button, buttonClassName, DataTable, PageHeader, type DataTableColumn } from "../../shell/ui";
-import { listPrinters, type Printer } from "./api/print";
+import { listPrinters, mediaLabel, type Printer } from "./api/print";
 import { formatDateTime } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
@@ -12,6 +12,7 @@ const columns: DataTableColumn<Printer>[] = [
   { key: "name", header: "Name" },
   { key: "deviceType", header: "Device type", render: (row) => DEVICE_LABELS[row.deviceType] ?? row.deviceType },
   { key: "dpi", header: "Resolution", align: "end", render: (row) => `${row.dpi} dpi` },
+  { key: "mediaSize", header: "Media", render: (row) => mediaLabel(row.mediaSize) },
   { key: "host", header: "Address", mono: true, render: (row) => `${row.host}:${row.port}` },
   { key: "queueCode", header: "Queue", mono: true },
   { key: "failoverRank", header: "Failover rank", align: "end", render: (row) => String(row.failoverRank) },

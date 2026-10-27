@@ -1,5 +1,6 @@
 import { createElement } from "react";
 import type { PassageModule } from "../registry";
+import { NewPrintDocumentPage } from "./NewPrintDocumentPage";
 import { NewPrinterPage } from "./NewPrinterPage";
 import { NewPrintJobPage } from "./NewPrintJobPage";
 import { NewRoutingRulePage } from "./NewRoutingRulePage";
@@ -15,7 +16,7 @@ const mobileFlows: PassageModule = {
   id: "mobile-flows",
   title: "Mobile flows",
   description:
-    "Design, validate and simulate warehouse handheld flows without an app release; register label printers and queues, route documents to them, follow printer status and the print job log, and resolve offline replay conflicts.",
+    "Design, validate and simulate warehouse handheld flows without an app release; register label and document printers and queues, route documents to them, print labels and PDF documents, follow printer status and the print job log, and resolve offline replay conflicts.",
   routes: [
     { path: "/mobile-flows", element: createElement(FlowDesigner), handle: { title: "Flow designer" } },
     { path: "/mobile-flows/printers", element: createElement(PrintersPage), handle: { title: "Printers" } },
@@ -25,6 +26,7 @@ const mobileFlows: PassageModule = {
     { path: "/mobile-flows/routing-rules/new", element: createElement(NewRoutingRulePage), handle: { title: "Add routing rule" } },
     { path: "/mobile-flows/print-jobs", element: createElement(PrintJobsPage), handle: { title: "Print jobs" } },
     { path: "/mobile-flows/print-jobs/new", element: createElement(NewPrintJobPage), handle: { title: "Print label" } },
+    { path: "/mobile-flows/print-documents/new", element: createElement(NewPrintDocumentPage), handle: { title: "Print document" } },
     { path: "/mobile-flows/print-jobs/:id", element: createElement(PrintJobDetailPage), handle: { title: "Print job" } },
     { path: "/mobile-flows/conflicts", element: createElement(OfflineConflictsPage), handle: { title: "Offline conflicts" } },
   ],

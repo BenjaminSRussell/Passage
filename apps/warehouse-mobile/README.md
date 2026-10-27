@@ -7,15 +7,21 @@ release.
 
 ## What is here
 
-- `src/App.tsx`: the device shell for one flow, the bundled receive/put-away flow
-  (`coreFlows.ts`, LP scan, location scan, confirm). The shared runner decides every step:
+- `src/App.tsx`: the device shell. Its menu offers the seven bundled core flows
+  (`coreFlows.ts`: receive/put-away, pick, cluster pick, pack, move, count, inquiry); Menu
+  leaves the current flow. The shared runner decides every step:
   one input per screen, Enter or a hardware scan advances, Back returns one step (§6.32.6).
   Scan steps check the expected class and the GS1 label (MOB-0101..0104, BR-32.1, BR-32.2);
   input, select and branch steps take a value or an outcome. A finished flow is queued as a
-  `ConfirmWorkLine` with the captured values and GS1 fields. The queue is sealed with
+  `ConfirmWorkLine` with the captured values and GS1 fields; an inquiry queues nothing, and a
+  count is refused offline and stays on its last step until the device is connected. The queue is sealed with
   AES-256-GCM under the non-extractable device key in IndexedDB after every enqueue and
   sync (FR-32.5), and reloaded on start. Sync replays it in `seq` order (BR-32.3) and prunes
   applied transactions. The header shows the queue against its 500-transaction cap.
+- `public/sw.js`: the app-shell service worker (FR-32.5), registered by `main.tsx` in
+  production builds. It caches the shell, its build assets and the manifest at install so the
+  app starts offline, and never caches writes or `/api/`, `/mobile/`, `/print/`, `/rfid/` and
+  `/wms/` requests. The policy and its tests are `shellCache.ts` in the web module.
 - Scanner intents (FR-32.10): the native shell forwards each decoded scan as a
   `passage:scan` event (`scanBridge.ts`). A scan that arrives while a confirm, display or
   other non-scan step has focus is ignored and logged on the device (AC-32.7).

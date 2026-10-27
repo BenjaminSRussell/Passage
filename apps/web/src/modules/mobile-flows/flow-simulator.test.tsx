@@ -2,7 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
-import { RECEIVE_PUTAWAY_FLOW } from "./domain/coreFlows";
+import { PICK_FLOW, RECEIVE_PUTAWAY_FLOW } from "./domain/coreFlows";
 import { FlowSimulator } from "./FlowSimulator";
 import mobileFlows from "./module";
 
@@ -27,6 +27,16 @@ describe("flow simulator", () => {
     fireEvent.click(screen.getByRole("button", { name: "Run flow" }));
     expect(screen.getByText("Scan the license plate")).toBeInTheDocument();
     expect(checkAxeAA(container).filter((v) => !shellRules.has(v.id))).toEqual([]);
+  });
+
+  it("loads another bundled core flow into the editor and runs it", () => {
+    render(<MemoryRouter>{mobileFlows.routes[0].element}</MemoryRouter>);
+    fireEvent.change(screen.getByLabelText("Start from"), { target: { value: "PICK" } });
+    expect(JSON.parse((screen.getByLabelText("Flow definition (JSON)") as HTMLTextAreaElement).value)).toEqual(PICK_FLOW);
+    fireEvent.click(screen.getByRole("button", { name: "Validate" }));
+    expect(screen.getByRole("status")).toHaveTextContent("Flow graph is valid");
+    fireEvent.click(screen.getByRole("button", { name: "Run flow" }));
+    expect(screen.getByText("Scan the pick location")).toBeInTheDocument();
   });
 
   it("runs the flow end to end, rejecting a wrong scan and ignoring a scan on the confirm step", () => {

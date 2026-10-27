@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { Alert, Button, Card, FormField, Input, PageHeader, Select, Textarea } from "../../shell/ui";
 import { describeFlowError, saveDraft } from "./api/client";
-import { RECEIVE_PUTAWAY_FLOW } from "./domain/coreFlows";
+import { CORE_FLOWS, RECEIVE_PUTAWAY_FLOW } from "./domain/coreFlows";
 import { type FlowDraft, type GraphIssue, validateFlow } from "./domain/flowGraph";
 import { checkScan, type Classified, classifyScan, type ScanClass, type ScanVerdict } from "./domain/gs1";
 import { FlowSimulator } from "./FlowSimulator";
 import styles from "./pages.module.css";
 
-/** The designer opens on the bundled receive/put-away flow, the graph devices run today. */
+/** The designer opens on the bundled receive/put-away flow; any bundled core flow can be loaded as a starting point. */
 const SAMPLE: FlowDraft = RECEIVE_PUTAWAY_FLOW;
 
 const SCAN_CLASS_LABELS: Record<ScanClass, string> = { LP: "LP", GTIN: "GTIN", LOCATION: "Location", ANY: "Any barcode" };
@@ -15,6 +15,7 @@ const SCAN_CLASS_LABELS: Record<ScanClass, string> = { LP: "LP", GTIN: "GTIN", L
 /** Flow designer: edit the graph as JSON, validate it (MOB-0113), save a draft, test single scans and run the whole flow. */
 export function FlowDesigner() {
   const [text, setText] = useState(() => JSON.stringify(SAMPLE, null, 2));
+  const [startFrom, setStartFrom] = useState(SAMPLE.code);
   const [issues, setIssues] = useState<GraphIssue[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
@@ -62,6 +63,17 @@ export function FlowDesigner() {
     }
   }
 
+  /** Replaces the editor with a bundled core flow (FR-32.4). */
+  function onStartFrom(code: string) {
+    const flow = CORE_FLOWS.find((f) => f.code === code);
+    if (!flow) return;
+    setStartFrom(code);
+    setText(JSON.stringify(flow, null, 2));
+    setIssues([]);
+    setMessage(null);
+    setFailure(null);
+  }
+
   function onSimulate() {
     const classified = classifyScan(scan, { expectGs1: true });
     setSimulated({ classified, verdict: checkScan(expected, classified) });
@@ -75,6 +87,17 @@ export function FlowDesigner() {
       />
       <Card title="Flow definition">
         <div className={styles.form}>
+          <FormField id="flow-start" label="Start from" hint="Loads a bundled core flow into the editor, replacing the current text.">
+            {(control) => (
+              <Select {...control} value={startFrom} onChange={(e) => onStartFrom(e.target.value)}>
+                {CORE_FLOWS.map((f) => (
+                  <option key={f.code} value={f.code}>
+                    {f.code}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </FormField>
           <div className={styles.wide}>
             <FormField id="flow-json" label="Flow definition (JSON)" hint="Steps: scan, input, select, confirm, display, branch, call. A null next target ends the flow.">
               {(control) => <Textarea {...control} rows={18} mono value={text} onChange={(e) => setText(e.target.value)} />}

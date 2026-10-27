@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import "./app.css";
-import { CONFIRM_WORK_LINE, confirmationPayload, RECEIVE_PUTAWAY_FLOW } from "../../web/src/modules/mobile-flows/domain/coreFlows";
+import { completionFor, CONFIRM_WORK_LINE, confirmationPayload, CORE_FLOWS } from "../../web/src/modules/mobile-flows/domain/coreFlows";
 import type { FlowDraft } from "../../web/src/modules/mobile-flows/domain/flowGraph";
 import { goBack, startFlow, submitStep, type RunnerResult, type RunnerState } from "../../web/src/modules/mobile-flows/domain/flowRunner";
 import { CLASS_LABEL } from "../../web/src/modules/mobile-flows/domain/gs1";
@@ -63,16 +63,22 @@ function readFlag(key: string): boolean {
 export interface AppProps {
   deviceId: string;
   userId: string;
-  flow?: FlowDraft;
+  /** The flows on the device menu, in menu order. Defaults to the bundled core flows (FR-32.4). */
+  flows?: readonly FlowDraft[];
 }
 
+/** Menu label for a flow code, e.g. PICK_CLUSTER -> "pick cluster". */
+const flowLabel = (code: string) => code.replace(/_/g, " ").toLowerCase();
+
 /**
- * Device shell for one flow (FR-32.1, FR-32.4). The shared runner decides every step: one input
- * per screen, Enter or a hardware scan advances, Back returns one step (§6.32.6). A finished
- * flow is queued as ConfirmWorkLine in the offline queue, which is sealed with the device key
- * in IndexedDB after every change (FR-32.5) and replayed in order on Sync (BR-32.3).
+ * Device shell (FR-32.1, FR-32.4). The worker picks a flow from the menu; the shared runner then
+ * decides every step: one input per screen, Enter or a hardware scan advances, Back returns one
+ * step (§6.32.6). A finished flow is queued as ConfirmWorkLine in the offline queue, which is
+ * sealed with the device key in IndexedDB after every change (FR-32.5) and replayed in order on
+ * Sync (BR-32.3). An inquiry queues nothing, and a count is not queued while offline (§6.32.13).
  */
-export function App({ deviceId, userId, flow = RECEIVE_PUTAWAY_FLOW }: AppProps) {
+export function App({ deviceId, userId, flows = CORE_FLOWS }: AppProps) {
+  const [flow, setFlow] = useState<FlowDraft | null>(flows.length === 1 ? flows[0] : null);
   const [storage, setStorage] = useState<DeviceStorage | null>(null);
   const [queue, setQueue] = useState<OfflineQueue | null>(null);
   const [runner, setRunner] = useState<RunnerState | null>(null);
@@ -94,21 +100,30 @@ export function App({ deviceId, userId, flow = RECEIVE_PUTAWAY_FLOW }: AppProps)
       const store = new IndexedDbStore<string>();
       const loaded = await loadQueue(store, cipher, deviceId, DEFAULT_LIMITS, Date.now);
       if (cancelled) return;
-      const started = startFlow(flow, Date.now());
-      if (!started.ok) {
-        setFatal(started.issues.map((i) => `${i.code} ${i.message}`).join("; "));
-        return;
-      }
       setStorage({ store, cipher });
       setQueue(loaded);
-      setRunner(started.state);
     })().catch((e: unknown) => {
       if (!cancelled) setFatal(e instanceof Error ? `Device storage could not be opened: ${e.message}` : "Device storage could not be opened.");
     });
     return () => {
       cancelled = true;
     };
-  }, [deviceId, flow]);
+  }, [deviceId]);
+
+  // Start the chosen flow at its entry step. A flow that fails validation does not run.
+  useEffect(() => {
+    if (!flow) {
+      setRunner(null);
+      return;
+    }
+    const started = startFlow(flow, Date.now());
+    if (!started.ok) {
+      setNotice({ tone: "error", text: started.issues.map((i) => `${i.code} ${i.message}`).join("; ") });
+      setFlow(null);
+      return;
+    }
+    setRunner(started.state);
+  }, [flow]);
 
   // Hardware scans forwarded by the native shell's intent bridge (FR-32.10).
   useEffect(
@@ -125,8 +140,15 @@ export function App({ deviceId, userId, flow = RECEIVE_PUTAWAY_FLOW }: AppProps)
   }
 
   function restart() {
+    if (!flow) return;
     const started = startFlow(flow, Date.now());
     if (started.ok) setRunner(started.state);
+  }
+
+  function openMenu() {
+    setFlow(null);
+    setNotice(null);
+    setTyped("");
   }
 
   async function queueConfirmation(done: RunnerState) {
@@ -161,13 +183,27 @@ export function App({ deviceId, userId, flow = RECEIVE_PUTAWAY_FLOW }: AppProps)
       setNotice({ tone: "error", text: result.code ? `${result.code} ${result.message}` : result.message });
       return;
     }
+    if (result.finished && flow) {
+      const completion = completionFor(flow.code, navigator.onLine);
+      if (completion.kind === "blocked") {
+        // Stay on the last step so the worker can confirm again once connected.
+        setNotice({ tone: "error", text: completion.message });
+        return;
+      }
+      setRunner(result.state);
+      if (completion.kind === "queue") void queueConfirmation(result.state);
+      else {
+        restart();
+        setNotice({ tone: "info", text: "Done." });
+      }
+      return;
+    }
     setNotice(null);
     setRunner(result.state);
-    if (result.finished) void queueConfirmation(result.state);
   }
 
   onScanRef.current = (raw, source) => {
-    if (runner) apply(submitStep(flow, runner, { kind: "scan", raw, source }, { deviceId, userId }, Date.now()), source);
+    if (runner && flow) apply(submitStep(flow, runner, { kind: "scan", raw, source }, { deviceId, userId }, Date.now()), source);
   };
 
   function onKeyboardScan(e: FormEvent<HTMLFormElement>) {
@@ -179,16 +215,16 @@ export function App({ deviceId, userId, flow = RECEIVE_PUTAWAY_FLOW }: AppProps)
 
   function onValue(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (runner) apply(submitStep(flow, runner, { kind: "value", value: typed }, { deviceId, userId }, Date.now()));
+    if (runner && flow) apply(submitStep(flow, runner, { kind: "value", value: typed }, { deviceId, userId }, Date.now()));
     setTyped("");
   }
 
   function onOutcome(outcome: string) {
-    if (runner) apply(submitStep(flow, runner, { kind: "value", value: outcome }, { deviceId, userId }, Date.now()));
+    if (runner && flow) apply(submitStep(flow, runner, { kind: "value", value: outcome }, { deviceId, userId }, Date.now()));
   }
 
   function onConfirm() {
-    if (runner) apply(submitStep(flow, runner, { kind: "confirm" }, { deviceId, userId }, Date.now()));
+    if (runner && flow) apply(submitStep(flow, runner, { kind: "confirm" }, { deviceId, userId }, Date.now()));
   }
 
   function onBack() {
@@ -217,7 +253,7 @@ export function App({ deviceId, userId, flow = RECEIVE_PUTAWAY_FLOW }: AppProps)
     }
   }
 
-  const step = runner?.stepId ? flow.steps.find((s) => s.id === runner.stepId) : undefined;
+  const step = flow && runner?.stepId ? flow.steps.find((s) => s.id === runner.stepId) : undefined;
   const waiting = queue ? queue.snapshot().filter((t) => t.replayStatus !== "APPLIED" && !t.resolved).length : 0;
   const largeTargets = readFlag("passage.largeTargets");
   const layout = { "--font-base": `${fontSizePx(18, largeTargets)}px`, "--target": `${targetSizePx(largeTargets)}px` } as CSSProperties;
@@ -225,7 +261,7 @@ export function App({ deviceId, userId, flow = RECEIVE_PUTAWAY_FLOW }: AppProps)
   return (
     <main className="app" dir={textDirection(navigator.language)} style={layout}>
       <header className="app__header">
-        <h1>{flow.code.replace(/_/g, " ").toLowerCase()}</h1>
+        <h1>{flow ? flowLabel(flow.code) : "menu"}</h1>
         <span className="app__status">
           {waiting} queued, {DEFAULT_LIMITS.maxTx - waiting} left
         </span>
@@ -237,6 +273,16 @@ export function App({ deviceId, userId, flow = RECEIVE_PUTAWAY_FLOW }: AppProps)
         </p>
       ) : null}
       {!queue && !fatal ? <p>Opening device storage…</p> : null}
+
+      {queue && !flow ? (
+        <nav className="app__step" aria-label="Flows">
+          {flows.map((f) => (
+            <button key={f.code} type="button" className="app__button" onClick={() => setFlow(f)}>
+              {flowLabel(f.code)}
+            </button>
+          ))}
+        </nav>
+      ) : null}
 
       {queue && runner && step ? (
         <section className="app__step" aria-label="Current step">
@@ -268,6 +314,11 @@ export function App({ deviceId, userId, flow = RECEIVE_PUTAWAY_FLOW }: AppProps)
           <button type="button" className="app__button app__button--secondary" onClick={onBack} disabled={runner.history.length === 0}>
             Back
           </button>
+          {flows.length > 1 ? (
+            <button type="button" className="app__button app__button--secondary" onClick={openMenu}>
+              Menu
+            </button>
+          ) : null}
         </section>
       ) : null}
 

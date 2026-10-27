@@ -6,8 +6,9 @@ import (
 )
 
 // Device types (FR-32.13). ZPL_II and PCL_6 are sent over raw TCP, PDF_IPP over IPP
-// (internal/transport). Every built-in template is ZPL, so job dispatch only offers
-// labels to ZPL_II devices (see Accepting).
+// (internal/transport). Job dispatch offers a ZPL label to ZPL_II devices and a PDF
+// document to PDF_IPP devices only (see Accepting and DeviceTypeFor). No job carries a
+// PCL payload yet.
 const (
 	DeviceZPL    = "ZPL_II"
 	DevicePDFIPP = "PDF_IPP"
@@ -33,6 +34,7 @@ type Printer struct {
 	Name         string    `json:"name"`
 	DeviceType   string    `json:"deviceType"`
 	Dpi          int       `json:"dpi"`
+	MediaSize    string    `json:"mediaSize"`
 	Host         string    `json:"host"`
 	Port         int       `json:"port"`
 	QueueCode    string    `json:"queueCode"`
@@ -62,6 +64,9 @@ func (p Printer) Validate() map[string]string {
 	}
 	if p.Dpi != 203 && p.Dpi != 300 && p.Dpi != 600 {
 		fields["dpi"] = "must be 203, 300 or 600"
+	}
+	if !MediaForDevice(p.DeviceType, p.MediaSize) {
+		fields["mediaSize"] = "must be a label size (2X1_IN, 3X1_IN, 4X2_IN, 4X6_IN) for ZPL_II, or a sheet size (A4, LETTER) for PDF_IPP and PCL_6"
 	}
 	if p.Host == "" || len(p.Host) > 253 {
 		fields["host"] = "must be 1 to 253 characters"
