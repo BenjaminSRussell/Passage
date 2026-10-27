@@ -101,6 +101,9 @@ func (s *Postgres) CreateLocation(ctx context.Context, in Location, idempotencyK
 	var location Location
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		if key != nil {
+			if err := lockIdempotencyKey(ctx, tx, "location", p.TenantID, *key); err != nil {
+				return err
+			}
 			replay, err := scanLocation(tx.QueryRow(ctx, `select `+locationColumns+` from location where tenant_id = $1 and idempotency_key = $2`, p.TenantID, *key))
 			if err == nil {
 				location = replay

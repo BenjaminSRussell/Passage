@@ -95,6 +95,9 @@ func (s *Postgres) CreateSite(ctx context.Context, in Site, idempotencyKey strin
 	var stored *Warehouse
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		if key != nil {
+			if err := lockIdempotencyKey(ctx, tx, "site", p.TenantID, *key); err != nil {
+				return err
+			}
 			replay, err := scanSite(tx.QueryRow(ctx, `select `+siteColumns+` from site where tenant_id = $1 and idempotency_key = $2`, p.TenantID, *key))
 			if err == nil {
 				site, site.Replayed = replay, true

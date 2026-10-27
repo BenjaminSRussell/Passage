@@ -147,6 +147,10 @@ func (a *API) createFiscalCalendar(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) || rejectScopedCaller(w, r, "create fiscal calendars") {
 		return
 	}
+	idemKey, keyOK := idempotencyKeyOf(w, r)
+	if !keyOK {
+		return
+	}
 	var req createFiscalCalendarRequest
 	if err := httpx.Decode(r, &req); err != nil {
 		httpx.Fail(w, r, err)
@@ -182,7 +186,7 @@ func (a *API) createFiscalCalendar(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
-	calendar, err := a.store.CreateFiscalCalendar(r.Context(), in, r.Header.Get(idempotencyKey))
+	calendar, err := a.store.CreateFiscalCalendar(r.Context(), in, idemKey)
 	if err != nil {
 		slog.Error("create fiscal calendar failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)

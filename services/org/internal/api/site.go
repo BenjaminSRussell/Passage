@@ -61,6 +61,10 @@ func (a *API) createSite(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
 	}
+	idemKey, keyOK := idempotencyKeyOf(w, r)
+	if !keyOK {
+		return
+	}
 	var req createSiteRequest
 	if err := httpx.Decode(r, &req); err != nil {
 		httpx.Fail(w, r, err)
@@ -89,7 +93,7 @@ func (a *API) createSite(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
-	site, err := a.store.CreateSite(r.Context(), in, r.Header.Get(idempotencyKey))
+	site, err := a.store.CreateSite(r.Context(), in, idemKey)
 	if err != nil {
 		slog.Error("create site failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)

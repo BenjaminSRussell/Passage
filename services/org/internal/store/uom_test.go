@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io/fs"
 	"slices"
+	"sync"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -406,5 +407,28 @@ func TestPostgres_CreateConversionReplaysIdempotencyKey(t *testing.T) {
 	}
 	if mine, err := s.ListConversions(ctx, store.ConversionFilter{Unit: "BX12"}); err != nil || len(mine) != 1 {
 		t.Fatalf("conversions after replay = %d, %v; want 1", len(mine), err)
+	}
+}
+
+func TestPostgres_UnitConcurrentSameKeyReturnsOneUnit(t *testing.T) {
+	s, _ := seededStore(t)
+	ctx := principalContext(1)
+	in := store.Unit{Code: "rc", Name: "Race", Class: "each", DecimalPrecision: 1}
+	const callers = 8
+	units := make([]store.Unit, callers)
+	errs := make([]error, callers)
+	var wg sync.WaitGroup
+	for i := range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			units[i], errs[i] = s.CreateUnit(ctx, in, "race-key")
+		}()
+	}
+	wg.Wait()
+	for i := range callers {
+		if errs[i] != nil || units[i] != units[0] {
+			t.Fatalf("caller %d = %+v, %v; want %+v", i, units[i], errs[i], units[0])
+		}
 	}
 }

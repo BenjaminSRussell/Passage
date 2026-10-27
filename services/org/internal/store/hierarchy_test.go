@@ -856,3 +856,58 @@ func TestPostgres_HierarchyHonoursConfiguredTreeLimits(t *testing.T) {
 		t.Fatalf("default limits must accept the chain: %v", err)
 	}
 }
+
+func concurrentSameKey(t *testing.T, calls ...func() error) {
+	t.Helper()
+	errs := make([]error, len(calls))
+	var wg sync.WaitGroup
+	for i, call := range calls {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs[i] = call()
+		}()
+	}
+	wg.Wait()
+	succeeded := 0
+	for i, err := range errs {
+		if err == nil {
+			succeeded++
+			continue
+		}
+		if problemCode(t, err) != store.CodeIdempotencyReuse {
+			t.Fatalf("caller %d = %v; want success or %s", i, err, store.CodeIdempotencyReuse)
+		}
+	}
+	if succeeded != 1 {
+		t.Fatalf("%d callers succeeded, want exactly 1", succeeded)
+	}
+}
+
+func TestPostgres_HierarchyDraftConcurrentSameKeyAcrossTypesIsRefusedNotFailed(t *testing.T) {
+	s, ctx, _ := lifecycleStore(t)
+	a := mustCreateHierarchyType(t, s, ctx, "KEYA")
+	b := mustCreateHierarchyType(t, s, ctx, "KEYB")
+	concurrentSameKey(t,
+		func() error { _, err := s.CreateHierarchyDraft(ctx, a.ID, "shared-key", editor); return err },
+		func() error { _, err := s.CreateHierarchyDraft(ctx, b.ID, "shared-key", editor); return err },
+	)
+}
+
+func TestPostgres_HierarchyPublishConcurrentSameKeyAcrossTypesIsRefusedNotFailed(t *testing.T) {
+	s, ctx, _ := lifecycleStore(t)
+	units := createHierarchyUnits(t, s, ctx)
+	a := draftWithNodes(t, s, ctx, mustCreateHierarchyType(t, s, ctx, "PUBA").ID, units.deepNodes())
+	b := draftWithNodes(t, s, ctx, mustCreateHierarchyType(t, s, ctx, "PUBB").ID, units.deepNodes())
+	from := day(2026, 1, 1)
+	concurrentSameKey(t,
+		func() error {
+			_, err := s.PublishHierarchyVersion(ctx, a.ID, a.Version, from, "", "shared-pub", publisher, false)
+			return err
+		},
+		func() error {
+			_, err := s.PublishHierarchyVersion(ctx, b.ID, b.Version, from, "", "shared-pub", publisher, false)
+			return err
+		},
+	)
+}
