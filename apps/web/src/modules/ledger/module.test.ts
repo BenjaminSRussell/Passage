@@ -28,6 +28,12 @@ describe("ledger module", () => {
   it("uses its folder name as id and declares routes and nav", () => {
     expect(ledger.id).toBe("ledger");
     expect(ledger.routes.map((r) => r.path)).toEqual([
+      "/ledger/journal-batches",
+      "/ledger/journal-batches/new",
+      "/ledger/journal-batches/:id",
+      "/ledger/journal-names",
+      "/ledger/journal-names/new",
+      "/ledger/journal-names/:code",
       "/ledger/trial-balance",
       "/ledger/entries/:id",
       "/ledger/reason-codes",
@@ -52,6 +58,9 @@ describe("ledger module", () => {
     // GET .../account-structures and .../dimension-values require ledger.journal.read.
     expect(ledger.nav.find((n) => n.to === "/ledger/structures")?.duty).toBe("ledger.journal.read");
     expect(ledger.nav.find((n) => n.to === "/ledger/dimension-values")?.duty).toBe("ledger.journal.read");
+    // GET /api/v1/ledger/journal-batches and /journal-names require ledger.journal.read.
+    expect(ledger.nav.find((n) => n.to === "/ledger/journal-batches")?.duty).toBe("ledger.journal.read");
+    expect(ledger.nav.find((n) => n.to === "/ledger/journal-names")?.duty).toBe("ledger.journal.read");
     // GET /api/v1/ledger/description-templates requires ledger.journal.read.
     expect(ledger.nav.find((n) => n.to === "/ledger/description-templates")?.duty).toBe("ledger.journal.read");
   });

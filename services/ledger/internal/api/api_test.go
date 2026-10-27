@@ -46,6 +46,23 @@ type fakeStore struct {
 	// templates answer the description template reads; putTemplates records the writes.
 	templates    []store.DescriptionTemplate
 	putTemplates []store.DescriptionTemplate
+	// journalNames answer the journal name reads; putNames records the writes.
+	journalNames []store.JournalName
+	putNames     []store.JournalName
+	// batch answers every batch call; batchCalls records them in order.
+	batch      store.Batch
+	batchCalls []batchCall
+}
+
+// batchCall is one journal batch store call as the handler made it.
+type batchCall struct {
+	op      string
+	id      string
+	version int
+	create  store.BatchInput
+	patch   store.BatchPatch
+	filter  store.BatchFilter
+	post    store.PostBatchInput
 }
 
 type putStructureCall struct {
@@ -168,6 +185,71 @@ func (f *fakeStore) PutDescriptionTemplate(_ context.Context, id string, in stor
 	in.ID = id
 	f.putTemplates = append(f.putTemplates, in)
 	return in, f.created, f.err
+}
+
+func (f *fakeStore) ListJournalNames(context.Context) ([]store.JournalName, error) {
+	return f.journalNames, f.err
+}
+
+func (f *fakeStore) GetJournalName(_ context.Context, code string) (store.JournalName, error) {
+	for _, n := range f.journalNames {
+		if n.Code == code {
+			return n, f.err
+		}
+	}
+	return store.JournalName{}, httpx.NewProblem(http.StatusNotFound, "LEDGER_JOURNAL_NAME_NOT_FOUND", "journal name not found")
+}
+
+func (f *fakeStore) PutJournalName(_ context.Context, code string, in store.JournalName) (store.JournalName, bool, error) {
+	in.Code = code
+	f.putNames = append(f.putNames, in)
+	return in, f.created, f.err
+}
+
+func (f *fakeStore) batchResult(c batchCall) (store.Batch, error) {
+	f.batchCalls = append(f.batchCalls, c)
+	return f.batch, f.err
+}
+
+func (f *fakeStore) CreateBatch(_ context.Context, in store.BatchInput) (store.Batch, error) {
+	return f.batchResult(batchCall{op: "create", create: in})
+}
+
+func (f *fakeStore) GetBatch(_ context.Context, id string) (store.Batch, error) {
+	return f.batchResult(batchCall{op: "get", id: id})
+}
+
+func (f *fakeStore) ListBatches(_ context.Context, filter store.BatchFilter) ([]store.Batch, error) {
+	b, err := f.batchResult(batchCall{op: "list", filter: filter})
+	return []store.Batch{b}, err
+}
+
+func (f *fakeStore) UpdateBatch(_ context.Context, id string, version int, in store.BatchPatch) (store.Batch, error) {
+	return f.batchResult(batchCall{op: "update", id: id, version: version, patch: in})
+}
+
+func (f *fakeStore) SubmitBatch(_ context.Context, id string, version int, _ time.Time) (store.Batch, error) {
+	return f.batchResult(batchCall{op: "submit", id: id, version: version})
+}
+
+func (f *fakeStore) DecideBatch(_ context.Context, id string, version int, approve bool) (store.Batch, error) {
+	op := "reject"
+	if approve {
+		op = "approve"
+	}
+	return f.batchResult(batchCall{op: op, id: id, version: version})
+}
+
+func (f *fakeStore) CancelBatch(_ context.Context, id string, version int) (store.Batch, error) {
+	return f.batchResult(batchCall{op: "cancel", id: id, version: version})
+}
+
+func (f *fakeStore) PostBatch(_ context.Context, in store.PostBatchInput) (store.EntryResult, error) {
+	f.batchCalls = append(f.batchCalls, batchCall{op: "post", id: in.ID, version: in.Version, post: in})
+	if f.err != nil {
+		return store.EntryResult{}, f.err
+	}
+	return store.EntryResult{Entries: []store.Entry{{ID: testEntry}}, Idempotency: store.Idempotency{Key: in.Key, Replayed: f.replay}}, nil
 }
 
 func (f *fakeStore) Ping(context.Context) error { return f.err }

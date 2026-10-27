@@ -110,6 +110,7 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(dutyRead)).Get("/description-templates", a.listDescriptionTemplates)
 		r.With(authz.RequireDuty(dutyRead)).Get("/description-templates/{id}", a.getDescriptionTemplate)
 		r.With(authz.RequireDuty(dutySetupWrite)).Put("/description-templates/{id}", a.putDescriptionTemplate)
+		a.registerBatches(r)
 	})
 }
 

@@ -11,7 +11,24 @@ const (
 	JournalPosted   = "dev.passage.ledger.journal.posted.v1"
 	JournalReversed = "dev.passage.ledger.journal.reversed.v1"
 	BalanceRebuilt  = "dev.passage.ledger.balance.rebuilt.v1"
+	// BatchStatusChanged is the PRD's batch.status-changed event. The platform
+	// naming rule allows only letters and digits in the verb, so the verb is
+	// written statuschanged, as in production.order.statuschanged.v1.
+	BatchStatusChanged = "dev.passage.ledger.batch.statuschanged.v1"
 )
+
+// BatchStatusChangedData is the payload of dev.passage.ledger.batch.statuschanged.v1
+// (BR-11.10). From and To are batch statuses; Actor is the user who caused the
+// transition. PostedEntryID is set on the transition to posted.
+type BatchStatusChangedData struct {
+	BatchID       string `json:"batchId"`
+	LedgerID      string `json:"ledgerId"`
+	JournalName   string `json:"journalName"`
+	From          string `json:"from"`
+	To            string `json:"to"`
+	Actor         string `json:"actor"`
+	PostedEntryID string `json:"postedEntryId,omitempty"`
+}
 
 // Source is the FR-11.12 source object carried on every entry.
 type Source struct {

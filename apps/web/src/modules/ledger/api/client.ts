@@ -93,18 +93,23 @@ export interface ReverseInput {
   description?: string;
 }
 
-/** Error raised for any non-2xx response. `violations` is set for 422 rule rejections. */
+/**
+ * Error raised for any non-2xx response. `violations` is set for 422 rule
+ * rejections, `fields` for 400 validation errors (field path to message).
+ */
 export class LedgerApiError extends Error {
   readonly status: number;
   readonly code: string;
   readonly violations: Violation[];
+  readonly fields: Record<string, string>;
 
-  constructor(status: number, code: string, message: string, violations: Violation[] = []) {
+  constructor(status: number, code: string, message: string, violations: Violation[] = [], fields: Record<string, string> = {}) {
     super(message);
     this.name = "LedgerApiError";
     this.status = status;
     this.code = code;
     this.violations = violations;
+    this.fields = fields;
   }
 }
 
@@ -117,7 +122,7 @@ export interface TrialBalanceQuery {
 }
 
 async function readProblem(res: Response): Promise<LedgerApiError> {
-  let body: { code?: unknown; detail?: unknown; violations?: unknown } = {};
+  let body: { code?: unknown; detail?: unknown; violations?: unknown; errors?: unknown } = {};
   try {
     body = (await res.json()) as typeof body;
   } catch {
@@ -126,7 +131,8 @@ async function readProblem(res: Response): Promise<LedgerApiError> {
   const code = typeof body.code === "string" ? body.code : "COM-0500";
   const detail = typeof body.detail === "string" ? body.detail : `request failed with status ${res.status}`;
   const parsed = z.array(violationSchema).safeParse(body.violations ?? []);
-  return new LedgerApiError(res.status, code, detail, parsed.success ? parsed.data : []);
+  const fields = z.record(z.string()).safeParse(body.errors ?? {});
+  return new LedgerApiError(res.status, code, detail, parsed.success ? parsed.data : [], fields.success ? fields.data : {});
 }
 
 async function getJSON<T>(url: string, schema: z.ZodType<T>, fetchImpl: FetchLike): Promise<T> {
@@ -400,6 +406,213 @@ export interface DescriptionTemplateInput {
   language: string;
   template: string;
   fieldBindings: Record<string, string>;
+}
+
+/** Journal name code format enforced by the service: ^[A-Za-z0-9_-]{1,20}$. */
+export const JOURNAL_NAME_CODE = /^[A-Za-z0-9_-]{1,20}$/;
+
+/** Setup of a kind of manual journal (FR-11.9, AX LedgerJournalName). */
+export const journalNameSchema = z.object({
+  code: z.string(),
+  name: z.string(),
+  requiresApproval: z.boolean(),
+  selfApprovalAllowed: z.boolean(),
+  reversalReasonRequired: z.boolean(),
+  allowReconAccounts: z.boolean(),
+  linesLimit: z.number().int(),
+  active: z.boolean(),
+  updatedAt: z.string(),
+});
+export type JournalName = z.infer<typeof journalNameSchema>;
+
+/** Body of PUT /api/v1/ledger/journal-names/{code}. */
+export interface JournalNameInput {
+  name: string;
+  requiresApproval: boolean;
+  selfApprovalAllowed: boolean;
+  reversalReasonRequired: boolean;
+  allowReconAccounts: boolean;
+  linesLimit: number;
+  active: boolean;
+}
+
+const journalNameListSchema = z.object({ items: z.array(journalNameSchema) });
+
+/** GET /api/v1/ledger/journal-names: every journal name of the tenant, by code. */
+export async function fetchJournalNames(fetchImpl: FetchLike = defaultFetch): Promise<JournalName[]> {
+  const body = await getJSON("/api/v1/ledger/journal-names", journalNameListSchema, fetchImpl);
+  return body.items;
+}
+
+/** GET /api/v1/ledger/journal-names/{code}; 404 LEDGER_JOURNAL_NAME_NOT_FOUND when missing. */
+export function fetchJournalName(code: string, fetchImpl: FetchLike = defaultFetch): Promise<JournalName> {
+  return getJSON(`/api/v1/ledger/journal-names/${encodeURIComponent(code)}`, journalNameSchema, fetchImpl);
+}
+
+async function sendJSON<T>(
+  method: string,
+  url: string,
+  schema: z.ZodType<T>,
+  fetchImpl: FetchLike,
+  body?: unknown,
+  headers: Record<string, string> = {},
+): Promise<T> {
+  const res = await fetchImpl(url, {
+    method,
+    headers: { Accept: "application/json", "Content-Type": "application/json", ...headers },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!res.ok) throw await readProblem(res);
+  return schema.parse(await res.json());
+}
+
+/** PUT /api/v1/ledger/journal-names/{code}: creates or replaces a journal name. */
+export function putJournalName(code: string, input: JournalNameInput, fetchImpl: FetchLike = defaultFetch): Promise<JournalName> {
+  return sendJSON("PUT", `/api/v1/ledger/journal-names/${encodeURIComponent(code)}`, journalNameSchema, fetchImpl, input);
+}
+
+/** One line of a manual journal batch as the service returns it. Amounts are decimal strings. */
+export const batchLineSchema = z.object({
+  lineNumber: z.number().int(),
+  account: z.string(),
+  dimensions: z.record(z.string()).optional(),
+  debitCredit: z.enum(["D", "C"]),
+  amount: z.string(),
+  currency: z.string(),
+  text: z.string().optional(),
+  sourceLineRef: z.string().optional(),
+});
+export type BatchLine = z.infer<typeof batchLineSchema>;
+
+/** BR-11.10 statuses. `posting` is a lock inside the posting transaction and is never returned. */
+export const BATCH_STATUSES = ["draft", "validated", "in_approval", "approved", "rejected", "posting", "posted", "cancelled"] as const;
+export type BatchStatus = (typeof BATCH_STATUSES)[number];
+
+/** Manual journal batch (FR-11.9). `lines` is present on single-batch reads only. */
+export const journalBatchSchema = z.object({
+  id: z.string(),
+  ledgerId: z.string(),
+  legalEntityId: z.string(),
+  journalName: z.string(),
+  description: z.string(),
+  postingDate: z.string(),
+  documentDate: z.string().optional(),
+  currency: z.string(),
+  status: z.enum(BATCH_STATUSES),
+  version: z.number().int(),
+  requiresApproval: z.boolean(),
+  selfApprovalAllowed: z.boolean(),
+  submittedBy: z.string().optional(),
+  decidedBy: z.string().optional(),
+  postedBy: z.string().optional(),
+  postedAt: z.string().optional(),
+  postedEntryId: z.string().optional(),
+  lastError: z.string().optional(),
+  totalDebit: z.string(),
+  totalCredit: z.string(),
+  lineCount: z.number().int(),
+  createdBy: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  lines: z.array(batchLineSchema).optional(),
+});
+export type JournalBatch = z.infer<typeof journalBatchSchema>;
+
+/** Wire form of one line sent to the service (amount as an object, as in the posting API). */
+export interface BatchLineInput {
+  account: string;
+  dimensions?: Record<string, string>;
+  debitCredit: "D" | "C";
+  amount: { currency: string; value: string };
+  text?: string;
+}
+
+/** Body of POST /api/v1/ledger/journal-batches. */
+export interface JournalBatchInput {
+  ledgerId: string;
+  journalName: string;
+  description: string;
+  postingDate: string;
+  documentDate?: string;
+  lines: BatchLineInput[];
+}
+
+/** Body of PATCH /api/v1/ledger/journal-batches/{id}: `lines` replaces every line; "" clears documentDate. */
+export interface JournalBatchPatch {
+  description?: string;
+  postingDate?: string;
+  documentDate?: string;
+  lines?: BatchLineInput[];
+}
+
+const journalBatchListSchema = z.object({ items: z.array(journalBatchSchema) });
+const postBatchResultSchema = z.object({
+  entries: z.array(z.object({ id: z.string(), voucher: z.string() })),
+  idempotency: z.object({ key: z.string(), replayed: z.boolean() }),
+  notices: z.array(z.object({ code: z.string(), message: z.string() })).optional(),
+});
+export type PostBatchResult = z.infer<typeof postBatchResultSchema>;
+
+/** The entity tag of a batch version, for If-Match. */
+function ifMatch(version: number): Record<string, string> {
+  return { "If-Match": `"${version}"` };
+}
+
+/** GET /api/v1/ledger/journal-batches: the newest 200, optionally by status or journal name. */
+export async function fetchJournalBatches(
+  filter: { status?: string; journalName?: string } = {},
+  fetchImpl: FetchLike = defaultFetch,
+): Promise<JournalBatch[]> {
+  const params = new URLSearchParams();
+  if (filter.status) params.set("status", filter.status);
+  if (filter.journalName) params.set("journalName", filter.journalName);
+  const query = params.toString();
+  const body = await getJSON(`/api/v1/ledger/journal-batches${query ? `?${query}` : ""}`, journalBatchListSchema, fetchImpl);
+  return body.items;
+}
+
+/** GET /api/v1/ledger/journal-batches/{id}: header, totals and lines. */
+export function fetchJournalBatch(id: string, fetchImpl: FetchLike = defaultFetch): Promise<JournalBatch> {
+  return getJSON(`/api/v1/ledger/journal-batches/${encodeURIComponent(id)}`, journalBatchSchema, fetchImpl);
+}
+
+/** POST /api/v1/ledger/journal-batches: creates a draft batch. */
+export function createJournalBatch(input: JournalBatchInput, fetchImpl: FetchLike = defaultFetch): Promise<JournalBatch> {
+  return sendJSON("POST", "/api/v1/ledger/journal-batches", journalBatchSchema, fetchImpl, input);
+}
+
+/** PATCH /api/v1/ledger/journal-batches/{id} at the version the user edited; any edit returns the batch to draft. */
+export function patchJournalBatch(
+  id: string,
+  version: number,
+  input: JournalBatchPatch,
+  fetchImpl: FetchLike = defaultFetch,
+): Promise<JournalBatch> {
+  return sendJSON("PATCH", `/api/v1/ledger/journal-batches/${encodeURIComponent(id)}`, journalBatchSchema, fetchImpl, input, ifMatch(version));
+}
+
+/** The lifecycle actions that answer with the batch. */
+export type BatchAction = "submit" | "approve" | "reject" | "cancel";
+
+/** POST /api/v1/ledger/journal-batches/{id}/{action} at the version the user saw. */
+export function batchAction(id: string, action: BatchAction, version: number, fetchImpl: FetchLike = defaultFetch): Promise<JournalBatch> {
+  return sendJSON("POST", `/api/v1/ledger/journal-batches/${encodeURIComponent(id)}/${action}`, journalBatchSchema, fetchImpl, undefined, ifMatch(version));
+}
+
+/**
+ * POST /api/v1/ledger/journal-batches/{id}/post. Reuse the key when retrying the
+ * same post, so a timeout replays instead of failing on a posted batch.
+ */
+export function postJournalBatch(
+  id: string,
+  version: number,
+  idempotencyKey: string,
+  fetchImpl: FetchLike = defaultFetch,
+): Promise<PostBatchResult> {
+  return sendJSON("POST", `/api/v1/ledger/journal-batches/${encodeURIComponent(id)}/post`, postBatchResultSchema, fetchImpl, undefined, {
+    ...ifMatch(version),
+    "Idempotency-Key": idempotencyKey,
+  });
 }
 
 const descriptionTemplateListSchema = z.object({ items: z.array(descriptionTemplateSchema) });

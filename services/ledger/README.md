@@ -2,7 +2,7 @@
 
 The ledger is the universal journal: one append-only, double-entry journal per
 ledger, the chart of accounts, the posting API every subledger calls, and the
-balance projection that trial balances read. Wave 11 (PSG-11, slices 1 to 4).
+balance projection that trial balances read. Wave 11 (PSG-11, slices 1 to 5).
 
 Reference: `docs/prd/phase-2-financial-core.md` section 2.11. What is built and
 what is not is listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
@@ -116,6 +116,41 @@ what is not is listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
   the info notice `LEDGER_DESCRIPTION_TRUNCATED` in `notices[]` (LEDGER-0031).
 - Web: description template list and create/edit form with a live preview.
 
+## What slice 5 adds
+
+- Journal names (FR-11.9, AX `LedgerJournalName`): `GET /api/v1/ledger/journal-names`,
+  `GET`/`PUT .../journal-names/{code}` (201 created, 200 replaced; duty `ledger.setup.write`).
+  A name carries `requiresApproval`, `selfApprovalAllowed`, `reversalReasonRequired`
+  (FR-11.15), `allowReconAccounts` (BR-11.8), `linesLimit` (default 5,000, at most 10,000)
+  and `active`. Names are deactivated, never deleted.
+- Journal batches (FR-11.9, BR-11.10): `GET`/`POST /journal-batches`, `GET`/`PATCH
+  /journal-batches/{id}` and the actions `/submit`, `/approve`, `/reject`, `/post`, `/cancel`.
+  A batch has a ledger, an active journal name, description, posting date, optional document
+  date and lines (account, dimensions, D/C, amount, text). Responses carry the batch `version`
+  as `ETag`; `If-Match` on `PATCH` and the actions is checked when sent (412
+  `LEDGER_VERSION_CONFLICT`).
+- State machine (`internal/domain/batch.go`): submit validates every line with the posting
+  rules and moves `draft -> validated`, then `-> in_approval` when the journal name requires
+  approval; approve or reject decides (the submitter may not approve unless the name allows
+  self-approval, 403 `LEDGER_SELF_APPROVAL`); any edit of a validated, approved or rejected
+  batch returns it to draft; draft, validated and rejected batches can be cancelled; posted
+  and cancelled are terminal.
+- Posting (`/post`, `Idempotency-Key` required): the batch row lock is the `posting` lock.
+  The entry (source `ledger`/`manual_journal`, `documentId` = batch id) goes through the
+  posting pipeline and the batch is marked posted in the same transaction, so a batch is
+  posted exactly when its entry exists. An empty description is filled from the
+  `manual_journal` template (AC-11.19). A rejected post rolls back, leaves the batch approved
+  (or validated) and records `lastError`. The same key on the posted batch replays.
+  Posting a validated batch (journal name without workflow) also needs
+  `ledger.journal.postdirect` ("Post ledger journals without approval").
+- Reversal: an entry posted from a batch whose journal name sets `reversalReasonRequired`
+  needs a reason code even when the ledger does not (FR-11.15, AC-11.11).
+- Events: every transition writes `dev.passage.ledger.batch.statuschanged.v1` (aggregate
+  `journal_batch`, topic `passage.ledger.batch`) to the outbox in the same transaction.
+- Web: journal name list and form, journal batch list (status filter), new batch form with a
+  line grid and totals, and the batch screen with submit, approve, reject, post, cancel and
+  line editing.
+
 ## Layout
 
 ```
@@ -124,7 +159,7 @@ internal/domain/       pure rules: validation, combination hashing, balance aggr
 internal/store/        Postgres repositories (pgx, RLS through dbx.WithTenantTx)
 internal/api/          HTTP handlers, DTOs, duties (authz.RequireDuty)
 internal/events/       event type constants and payloads
-migrations/            0001..0008 SQL, applied in order by dbx.Migrate (0005: passage_app grants; 0006: reason codes; 0007: account structures, dimension values; 0008: description templates)
+migrations/            0001..0009 SQL, applied in order by dbx.Migrate (0005: passage_app grants; 0006: reason codes; 0007: account structures, dimension values; 0008: description templates; 0009: journal names and batches)
 api/openapi.yaml       OpenAPI 3.1 for every route
 events/asyncapi.yaml   AsyncAPI 3 for every event
 charts/ledger/         Helm chart (ports 8080 http, 9090 admin; readiness on admin /readyz)
@@ -166,15 +201,18 @@ mounted route and its duty is in `api/openapi.yaml`. Store tests use
 |---|---|
 | `ledger.ledger.write` | `POST /ledgers` |
 | `ledger.account.write` | `PUT /charts/{chart}/accounts/{number}` |
-| `ledger.journal.read` | `GET /ledgers/{id}`, `GET /charts/{chart}/accounts`, `GET /journal-entries/{id}`, `GET /reason-codes[/{code}]`, `GET /ledgers/{ledger}/account-structures[/{id}]`, `GET /ledgers/{ledger}/dimension-values`, `GET /description-templates[/{id}]` |
-| `ledger.journal.post` | `POST /journal-entries`, `POST /validate` |
+| `ledger.journal.read` | `GET /ledgers/{id}`, `GET /charts/{chart}/accounts`, `GET /journal-entries/{id}`, `GET /reason-codes[/{code}]`, `GET /ledgers/{ledger}/account-structures[/{id}]`, `GET /ledgers/{ledger}/dimension-values`, `GET /description-templates[/{id}]`, `GET /journal-names[/{code}]`, `GET /journal-batches[/{id}]` |
+| `ledger.journal.post` | `POST /journal-entries`, `POST /validate`, `POST /journal-batches/{id}/post` (PRD "Post ledger journals") |
+| `ledger.journal.postdirect` | Checked inside `POST /journal-batches/{id}/post` for a validated batch whose journal name has no workflow (PRD "Post ledger journals without approval") |
+| `ledger.journal.write` | `POST /journal-batches`, `PATCH /journal-batches/{id}`, `POST .../submit`, `POST .../cancel` (PRD "Maintain ledger journals") |
+| `ledger.journal.approve` | `POST .../approve`, `POST .../reject` (PRD "Approve ledger journals") |
 | `ledger.journal.reverse` | `POST /journal-entries/{id}/reverse` |
 | `ledger.balance.read` | `GET /balances` |
 | `ledger.balance.rebuild` | `POST /balances:rebuild` |
 | `ledger.reason.write` | `PUT /reason-codes/{code}` (PRD duty "Maintain reason codes") |
 | `ledger.structure.write` | `PUT /ledgers/{ledger}/account-structures/{id}` (PRD duty "Maintain account structures") |
 | `ledger.dimension.write` | `PUT /ledgers/{ledger}/dimension-values/{attribute}/{value}` (PRD duty "Maintain financial dimensions") |
-| `ledger.setup.write` | `PUT /description-templates/{id}` (PRD duty "Maintain ledger setup") |
+| `ledger.setup.write` | `PUT /description-templates/{id}`, `PUT /journal-names/{code}` (PRD duty "Maintain ledger setup") |
 
 ## Error codes
 
@@ -186,7 +224,7 @@ today:
 |---|---|
 | `LEDGER_UNBALANCED` | Debits do not equal credits in the ledger currency (BR-11.1) |
 | `LEDGER_LINE_EMPTY` | Entry has no lines, or a zero-amount line without text (BR-11.2) |
-| `LEDGER_LINE_LIMIT` | More than 10,000 lines (FR-11.5) |
+| `LEDGER_LINE_LIMIT` | More than 10,000 lines (FR-11.5); 422 problem: more batch lines than the journal name's `linesLimit` (FR-11.9) |
 | `LEDGER_AMOUNT_SCALE` | Amount has more decimals than the currency allows (BR-11.3) |
 | `LEDGER_CURRENCY_MISMATCH` | Line currency differs from the ledger currency |
 | `LEDGER_ACCOUNT_NOT_FOUND` | Account number not in the ledger's chart |
@@ -214,6 +252,13 @@ today:
 | `LEDGER_CODE_DUPLICATE` | 409: a ledger with this code already exists in the tenant |
 | `LEDGER_DESCRIPTION_TEMPLATE_NOT_FOUND` | 404: description template does not exist or belongs to a legal entity outside the caller's scope |
 | `LEDGER_DESCRIPTION_TEMPLATE_DUPLICATE` | 409: a template already exists for the scope, legal entity, source type and language (FR-11.17) |
+| `LEDGER_JOURNAL_NAME_NOT_FOUND` | 404: journal name does not exist in the tenant |
+| `LEDGER_JOURNAL_NAME_INVALID` | 422: a batch names an unknown or inactive journal name (create, submit) |
+| `LEDGER_BATCH_NOT_FOUND` | 404: journal batch does not exist or is outside the caller's tenant or legal-entity scope |
+| `LEDGER_BATCH_STATE` | 409: the batch's status does not allow the action (BR-11.10), or a posted batch is posted again with another key |
+| `LEDGER_BATCH_APPROVAL_REQUIRED` | 409: posting a validated batch whose journal name now requires approval; submit it for approval |
+| `LEDGER_SELF_APPROVAL` | 403: the submitter approves a batch of a journal name that does not allow self-approval |
+| `LEDGER_VERSION_CONFLICT` | 412: `If-Match` names an older batch version |
 | `LEDGER_DESCRIPTION_TRUNCATED` | Info notice in `notices[]` of an accepted posting: the expanded default description was cut to 255 characters (FR-11.17, LEDGER-0031) |
 
 Platform codes: `AUTH-0001` (401, missing or malformed tenant), `AUTH-0003`

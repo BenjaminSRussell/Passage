@@ -26,7 +26,20 @@ channels:
     messages:
       balanceRebuilt:
         $ref: "#/components/messages/BalanceRebuilt"
+  batchStatusChanged:
+    address: passage.ledger.batch
+    description: |
+      A manual journal batch changed status (BR-11.10), written to the outbox in the transaction
+      that changed it (aggregate type journal_batch). The PRD's batch.status-changed is spelled
+      statuschanged because the platform naming rule allows only letters and digits in the verb.
+    messages:
+      batchStatusChanged:
+        $ref: "#/components/messages/BatchStatusChanged"
 operations:
+  publishBatchStatusChanged:
+    action: send
+    channel: { $ref: "#/channels/batchStatusChanged" }
+    summary: A manual journal batch moved to another status.
   publishJournalPosted:
     action: send
     channel: { $ref: "#/channels/journalPosted" }
@@ -99,6 +112,28 @@ components:
               postingDate: { type: string, format: date }
               reasonCode: { type: string, description: Shared reason code (FR-11.15); present when the reversal carried one }
               reasonComment: { type: string, maxLength: 255 }
+    BatchStatusChanged:
+      name: dev.passage.ledger.batch.statuschanged.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [type, source, tenantid, subject, data]
+        properties:
+          type: { const: dev.passage.ledger.batch.statuschanged.v1 }
+          source: { const: /passage/ledger/ledger }
+          tenantid: { type: string, format: uuid }
+          subject: { type: string, format: uuid, description: Batch id }
+          data:
+            type: object
+            required: [batchId, ledgerId, journalName, from, to, actor]
+            properties:
+              batchId: { type: string, format: uuid }
+              ledgerId: { type: string, format: uuid }
+              journalName: { type: string }
+              from: { type: string, enum: [draft, validated, in_approval, approved, rejected, posted, cancelled] }
+              to: { type: string, enum: [draft, validated, in_approval, approved, rejected, posted, cancelled] }
+              actor: { type: string, description: User who caused the transition }
+              postedEntryId: { type: string, format: uuid, description: Set when to = posted }
     BalanceRebuilt:
       name: dev.passage.ledger.balance.rebuilt.v1
       contentType: application/cloudevents+json

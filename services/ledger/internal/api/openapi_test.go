@@ -88,6 +88,18 @@ func TestOpenAPI_MatchesRoutes(t *testing.T) {
 		"GET /api/v1/ledger/description-templates":                                 dutyRead,
 		"GET /api/v1/ledger/description-templates/{id}":                            dutyRead,
 		"PUT /api/v1/ledger/description-templates/{id}":                            dutySetupWrite,
+		"GET /api/v1/ledger/journal-names":                                         dutyRead,
+		"GET /api/v1/ledger/journal-names/{code}":                                  dutyRead,
+		"PUT /api/v1/ledger/journal-names/{code}":                                  dutySetupWrite,
+		"GET /api/v1/ledger/journal-batches":                                       dutyRead,
+		"POST /api/v1/ledger/journal-batches":                                      dutyJournalWrite,
+		"GET /api/v1/ledger/journal-batches/{id}":                                  dutyRead,
+		"PATCH /api/v1/ledger/journal-batches/{id}":                                dutyJournalWrite,
+		"POST /api/v1/ledger/journal-batches/{id}/submit":                          dutyJournalWrite,
+		"POST /api/v1/ledger/journal-batches/{id}/approve":                         dutyJournalApprove,
+		"POST /api/v1/ledger/journal-batches/{id}/reject":                          dutyJournalApprove,
+		"POST /api/v1/ledger/journal-batches/{id}/post":                            dutyPost,
+		"POST /api/v1/ledger/journal-batches/{id}/cancel":                          dutyJournalWrite,
 	}
 	for op, want := range duties {
 		if got := documented[op]; got != want {

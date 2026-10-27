@@ -55,46 +55,54 @@ func (s *Postgres) PostEntry(ctx context.Context, in PostInput) (EntryResult, er
 	}
 	var out EntryResult
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		ledger, err := loadLedger(ctx, tx, p.TenantID, in.LedgerID, true)
-		if err != nil {
-			return err
-		}
-		replayed, err := replayIdempotent(ctx, tx, p.TenantID, ledger.LegalEntityID, in.Key, in.Hash, &out)
-		if err != nil || replayed {
-			return err
-		}
-		accounts, err := loadAccounts(ctx, tx, p.TenantID, ledger.ChartCode, accountNumbers(in.Lines))
-		if err != nil {
-			return err
-		}
-		rules, err := withStructures(ctx, tx, p.TenantID, ledger.ID, in.rules(ledger), in.Lines)
-		if err != nil {
-			return err
-		}
-		res := domain.ValidateEntry(rules, accounts, in.PostingDate, in.Today, in.Lines)
-		if !res.Valid() {
-			return &domain.RejectedError{Violations: res.Violations}
-		}
-		description, notices, err := applyDefaultDescriptions(ctx, tx, p.TenantID, ledger, in, res.Lines)
-		if err != nil {
-			return err
-		}
-		lines := make([]writeLine, 0, len(res.Lines))
-		for _, v := range res.Lines {
-			lines = append(lines, writeLine{id: ids.New(), valid: v})
-		}
-		entry, err := writeEntry(ctx, tx, p.TenantID, newEntry{
-			ledger: ledger, documentID: in.DocumentID, postingDate: in.PostingDate, documentDate: in.DocumentDate,
-			description: description, source: in.Source, key: in.Key, hash: in.Hash, actor: in.Actor,
-			traceID: in.TraceID, lines: lines,
-		})
-		if err != nil {
-			return err
-		}
-		out = EntryResult{Entries: []Entry{entry}, Idempotency: Idempotency{Key: in.Key}, TraceID: in.TraceID, Notices: notices}
-		return storeIdempotent(ctx, tx, p.TenantID, ledger.LegalEntityID, in.Key, in.Hash, out)
+		out, err = postEntryTx(ctx, tx, p.TenantID, in)
+		return err
 	})
 	return out, idempotencyRace(err)
+}
+
+// postEntryTx is the posting pipeline inside the caller's transaction, so a
+// journal batch can be marked posted in the same commit as its entry.
+func postEntryTx(ctx context.Context, tx pgx.Tx, tenantID string, in PostInput) (EntryResult, error) {
+	var out EntryResult
+	ledger, err := loadLedger(ctx, tx, tenantID, in.LedgerID, true)
+	if err != nil {
+		return out, err
+	}
+	replayed, err := replayIdempotent(ctx, tx, tenantID, ledger.LegalEntityID, in.Key, in.Hash, &out)
+	if err != nil || replayed {
+		return out, err
+	}
+	accounts, err := loadAccounts(ctx, tx, tenantID, ledger.ChartCode, accountNumbers(in.Lines))
+	if err != nil {
+		return out, err
+	}
+	rules, err := withStructures(ctx, tx, tenantID, ledger.ID, in.rules(ledger), in.Lines)
+	if err != nil {
+		return out, err
+	}
+	res := domain.ValidateEntry(rules, accounts, in.PostingDate, in.Today, in.Lines)
+	if !res.Valid() {
+		return out, &domain.RejectedError{Violations: res.Violations}
+	}
+	description, notices, err := applyDefaultDescriptions(ctx, tx, tenantID, ledger, in, res.Lines)
+	if err != nil {
+		return out, err
+	}
+	lines := make([]writeLine, 0, len(res.Lines))
+	for _, v := range res.Lines {
+		lines = append(lines, writeLine{id: ids.New(), valid: v})
+	}
+	entry, err := writeEntry(ctx, tx, tenantID, newEntry{
+		ledger: ledger, documentID: in.DocumentID, postingDate: in.PostingDate, documentDate: in.DocumentDate,
+		description: description, source: in.Source, key: in.Key, hash: in.Hash, actor: in.Actor,
+		traceID: in.TraceID, lines: lines,
+	})
+	if err != nil {
+		return out, err
+	}
+	out = EntryResult{Entries: []Entry{entry}, Idempotency: Idempotency{Key: in.Key}, TraceID: in.TraceID, Notices: notices}
+	return out, storeIdempotent(ctx, tx, tenantID, ledger.LegalEntityID, in.Key, in.Hash, out)
 }
 
 // ReverseEntry posts an exact negating entry for a posted entry (FR-11.8). An
@@ -152,7 +160,14 @@ func (s *Postgres) ReverseEntry(ctx context.Context, in ReverseInput) (EntryResu
 		if err != nil {
 			return err
 		}
-		negative, reasonViolations := domain.CheckReversal(ledger.ReversalPolicy(), reason, domain.ReversalRequest{
+		policy := ledger.ReversalPolicy()
+		if !policy.ReasonRequired {
+			// A journal name can demand a reason for the entries its batches posted (FR-11.15).
+			if policy.ReasonRequired, err = journalNameRequiresReason(ctx, tx, p.TenantID, in.EntryID); err != nil {
+				return err
+			}
+		}
+		negative, reasonViolations := domain.CheckReversal(policy, reason, domain.ReversalRequest{
 			ReasonCode: in.ReasonCode, ReasonComment: in.ReasonComment, OriginalDate: origDate, ReversalDate: postingDate,
 		})
 		if v = append(v, reasonViolations...); len(v) > 0 {
@@ -375,31 +390,37 @@ func (s *Postgres) GetEntry(ctx context.Context, id string) (Entry, error) {
 	}
 	var e Entry
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		row := tx.QueryRow(ctx, `select e.id, e.ledger_id, e.document_id, e.voucher, e.posting_sequence, e.posting_date::text, e.period_key,
-				e.document_date::text, coalesce(e.description, ''), e.source_system, e.source_type, e.source_id, coalesce(e.source_uri, ''),
-				e.reversal_of_entry_id::text, e.posted_at, e.posted_by, e.trace_id, e.reason_code, e.reason_comment, l.currency
-			from journal_entry e join ledger l on l.tenant_id = e.tenant_id and l.id = e.ledger_id
-			where e.tenant_id = $1 and e.id = $2`, p.TenantID, id)
-		var currency string
-		var src ledgerevents.Source
-		err := row.Scan(&e.ID, &e.LedgerID, &e.DocumentID, &e.Voucher, &e.PostingSequence, &e.PostingDate, &e.PeriodKey,
-			&e.DocumentDate, &e.Description, &src.System, &src.Type, &src.ID, &src.URI, &e.ReversalOfEntryID, &e.PostedAt,
-			&e.PostedBy, &e.TraceID, &e.ReasonCode, &e.ReasonComment, &currency)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return httpx.NewProblem(http.StatusNotFound, "LEDGER_ENTRY_NOT_FOUND", "journal entry not found")
-		}
-		if err != nil {
-			return err
-		}
-		e.Source = src
-		e.Lines, err = loadLines(ctx, tx, p.TenantID, id, currency)
-		if err != nil {
-			return err
-		}
-		e.Totals = totals(currency, e.Lines)
-		return nil
+		e, err = loadEntryTx(ctx, tx, p.TenantID, id)
+		return err
 	})
 	return e, err
+}
+
+// loadEntryTx reads one posted entry with its lines inside tx.
+func loadEntryTx(ctx context.Context, tx pgx.Tx, tenantID, id string) (Entry, error) {
+	var e Entry
+	row := tx.QueryRow(ctx, `select e.id, e.ledger_id, e.document_id, e.voucher, e.posting_sequence, e.posting_date::text, e.period_key,
+			e.document_date::text, coalesce(e.description, ''), e.source_system, e.source_type, e.source_id, coalesce(e.source_uri, ''),
+			e.reversal_of_entry_id::text, e.posted_at, e.posted_by, e.trace_id, e.reason_code, e.reason_comment, l.currency
+		from journal_entry e join ledger l on l.tenant_id = e.tenant_id and l.id = e.ledger_id
+		where e.tenant_id = $1 and e.id = $2`, tenantID, id)
+	var currency string
+	var src ledgerevents.Source
+	err := row.Scan(&e.ID, &e.LedgerID, &e.DocumentID, &e.Voucher, &e.PostingSequence, &e.PostingDate, &e.PeriodKey,
+		&e.DocumentDate, &e.Description, &src.System, &src.Type, &src.ID, &src.URI, &e.ReversalOfEntryID, &e.PostedAt,
+		&e.PostedBy, &e.TraceID, &e.ReasonCode, &e.ReasonComment, &currency)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return e, httpx.NewProblem(http.StatusNotFound, "LEDGER_ENTRY_NOT_FOUND", "journal entry not found")
+	}
+	if err != nil {
+		return e, err
+	}
+	e.Source = src
+	if e.Lines, err = loadLines(ctx, tx, tenantID, id, currency); err != nil {
+		return e, err
+	}
+	e.Totals = totals(currency, e.Lines)
+	return e, nil
 }
 
 func loadLines(ctx context.Context, tx pgx.Tx, tenantID, entryID, currency string) ([]Line, error) {

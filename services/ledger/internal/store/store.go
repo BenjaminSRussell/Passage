@@ -52,6 +52,17 @@ type Store interface {
 	PutStructure(ctx context.Context, ledgerID, id string, in domain.Structure) (domain.Structure, bool, error)
 	ListDimensionValues(ctx context.Context, ledgerID string) ([]domain.DimensionValue, error)
 	PutDimensionValue(ctx context.Context, ledgerID string, in domain.DimensionValue) (domain.DimensionValue, bool, error)
+	ListJournalNames(ctx context.Context) ([]JournalName, error)
+	GetJournalName(ctx context.Context, code string) (JournalName, error)
+	PutJournalName(ctx context.Context, code string, in JournalName) (JournalName, bool, error)
+	CreateBatch(ctx context.Context, in BatchInput) (Batch, error)
+	GetBatch(ctx context.Context, id string) (Batch, error)
+	ListBatches(ctx context.Context, f BatchFilter) ([]Batch, error)
+	UpdateBatch(ctx context.Context, id string, version int, in BatchPatch) (Batch, error)
+	SubmitBatch(ctx context.Context, id string, version int, today time.Time) (Batch, error)
+	DecideBatch(ctx context.Context, id string, version int, approve bool) (Batch, error)
+	CancelBatch(ctx context.Context, id string, version int) (Batch, error)
+	PostBatch(ctx context.Context, in PostBatchInput) (EntryResult, error)
 	Ping(ctx context.Context) error
 }
 
@@ -125,13 +136,17 @@ type PostInput struct {
 	Actor        string
 	TraceID      string
 	Today        time.Time
+	// AllowReconAccounts lifts the BR-11.8 protection for a manual journal whose
+	// journal name sets allow_recon_accounts (migration and correction use).
+	AllowReconAccounts bool
 }
 
 // rules returns the ledger's posting rules for this input: a manual journal
-// source additionally protects reconciliation accounts (BR-11.8).
+// source additionally protects reconciliation accounts (BR-11.8), unless its
+// journal name allows them.
 func (in PostInput) rules(l Ledger) domain.Rules {
 	r := l.Rules()
-	r.Manual = domain.IsManualSource(in.Source.System, in.Source.Type)
+	r.Manual = domain.IsManualSource(in.Source.System, in.Source.Type) && !in.AllowReconAccounts
 	return r
 }
 
@@ -252,11 +267,16 @@ func principalOf(ctx context.Context) (tenant.Principal, error) {
 }
 
 func enqueue(ctx context.Context, tx pgx.Tx, aggregateID, eventType, tenantID string, data any) error {
+	return enqueueFor(ctx, tx, "journal", aggregateID, eventType, tenantID, data)
+}
+
+// enqueueFor writes an event to the outbox under the named aggregate type.
+func enqueueFor(ctx context.Context, tx pgx.Tx, aggregateType, aggregateID, eventType, tenantID string, data any) error {
 	evt, err := events.New(eventType, ledgerevents.EventSource, aggregateID, tenantID, data)
 	if err != nil {
 		return err
 	}
-	return outbox.Enqueue(ctx, tx, "journal", aggregateID, evt)
+	return outbox.Enqueue(ctx, tx, aggregateType, aggregateID, evt)
 }
 
 func isUnique(err error) bool {

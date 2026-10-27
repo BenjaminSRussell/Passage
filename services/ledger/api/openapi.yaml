@@ -55,6 +55,17 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+    JournalNameCode:
+      name: code
+      in: path
+      required: true
+      schema: { type: string, pattern: '^[A-Za-z0-9_-]{1,20}$' }
+    IfMatch:
+      name: If-Match
+      in: header
+      required: false
+      description: The batch version the caller last read, as an entity tag ("3"). When sent and stale, 412 LEDGER_VERSION_CONFLICT and nothing changes; when absent, no check is made.
+      schema: { type: string }
   schemas:
     Problem:
       type: object
@@ -388,6 +399,116 @@ components:
           properties:
             attribute: { type: string, pattern: '^[A-Z][A-Z0-9_]{0,19}$' }
             value: { type: string, pattern: '^[A-Za-z0-9._-]{1,20}$' }
+    JournalNameBody:
+      type: object
+      required: [name]
+      description: Setup of a kind of manual journal (FR-11.9, AX LedgerJournalName).
+      properties:
+        name: { type: string, minLength: 1, maxLength: 60 }
+        requiresApproval: { type: boolean, default: false, description: Submitted batches go to in_approval (the approval workflow of the journal name). }
+        selfApprovalAllowed: { type: boolean, default: false, description: The submitter may approve; only with requiresApproval. }
+        reversalReasonRequired: { type: boolean, default: false, description: Reversing an entry posted from a batch of this name needs a reason code (FR-11.15). }
+        allowReconAccounts: { type: boolean, default: false, description: Lines may hit reconciliation accounts (BR-11.8; migration and correction use). }
+        linesLimit: { type: integer, minimum: 1, maximum: 10000, default: 5000 }
+        active: { type: boolean, default: true, description: Inactive names keep their batches but take no new or submitted batches. }
+    JournalName:
+      allOf:
+        - $ref: "#/components/schemas/JournalNameBody"
+        - type: object
+          required: [code, name, requiresApproval, selfApprovalAllowed, reversalReasonRequired, allowReconAccounts, linesLimit, active, updatedAt]
+          properties:
+            code: { type: string, pattern: '^[A-Za-z0-9_-]{1,20}$' }
+            updatedAt: { type: string, format: date-time }
+    BatchStatus:
+      type: string
+      description: BR-11.10 state machine. `posting` is held as the batch row lock inside the posting transaction and is never returned.
+      enum: [draft, validated, in_approval, approved, rejected, posting, posted, cancelled]
+    BatchLineBody:
+      type: object
+      required: [account, debitCredit, amount]
+      properties:
+        account: { type: string, pattern: '^[A-Za-z0-9._-]{1,20}$' }
+        dimensions:
+          type: object
+          additionalProperties: { type: string, minLength: 1, maxLength: 20 }
+        debitCredit: { type: string, enum: [D, C] }
+        amount: { $ref: "#/components/schemas/Amount" }
+        text: { type: string, maxLength: 255, description: Omitted text is filled from the default description template at posting (FR-11.17). }
+        sourceLineRef: { type: string, maxLength: 200 }
+    JournalBatchBody:
+      type: object
+      required: [ledgerId, journalName, postingDate, lines]
+      properties:
+        ledgerId: { type: string, format: uuid }
+        journalName: { type: string, pattern: '^[A-Za-z0-9_-]{1,20}$', description: An active journal name (422 LEDGER_JOURNAL_NAME_INVALID otherwise). }
+        description: { type: string, maxLength: 255, description: Empty means the default description template applies at posting (FR-11.17, AC-11.19). }
+        postingDate: { type: string, format: date }
+        documentDate: { type: string, format: date, description: Defaults to the posting date when the batch is posted. }
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 10000
+          description: At most the journal name's linesLimit (422 LEDGER_LINE_LIMIT).
+          items: { $ref: "#/components/schemas/BatchLineBody" }
+    JournalBatchPatch:
+      type: object
+      description: Absent fields keep their value; `lines` replaces every line; an empty documentDate clears it.
+      properties:
+        description: { type: string, maxLength: 255 }
+        postingDate: { type: string, format: date }
+        documentDate: { type: string, description: A date as YYYY-MM-DD, or empty to clear }
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 10000
+          items: { $ref: "#/components/schemas/BatchLineBody" }
+    BatchLine:
+      type: object
+      required: [lineNumber, account, debitCredit, amount, currency]
+      properties:
+        lineNumber: { type: integer, minimum: 1 }
+        account: { type: string }
+        dimensions:
+          type: object
+          additionalProperties: { type: string }
+        debitCredit: { type: string, enum: [D, C] }
+        amount: { type: string, description: Decimal string at the currency's minor-unit scale }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        text: { type: string }
+        sourceLineRef: { type: string }
+    JournalBatch:
+      type: object
+      required: [id, ledgerId, legalEntityId, journalName, description, postingDate, currency, status, version,
+        requiresApproval, selfApprovalAllowed, totalDebit, totalCredit, lineCount, createdBy, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        ledgerId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        journalName: { type: string }
+        description: { type: string }
+        postingDate: { type: string, format: date }
+        documentDate: { type: string, format: date }
+        currency: { type: string, pattern: '^[A-Z]{3}$', description: Ledger currency }
+        status: { $ref: "#/components/schemas/BatchStatus" }
+        version: { type: integer, minimum: 1, description: Optimistic concurrency token, also sent as the ETag; every change increments it. }
+        requiresApproval: { type: boolean, description: Current setting of the journal name }
+        selfApprovalAllowed: { type: boolean, description: Current setting of the journal name }
+        submittedBy: { type: string }
+        decidedBy: { type: string, description: User who approved or rejected }
+        postedBy: { type: string }
+        postedAt: { type: string, format: date-time }
+        postedEntryId: { type: string, format: uuid }
+        lastError: { type: string, description: Why the last post failed; cleared by the next change }
+        totalDebit: { type: string }
+        totalCredit: { type: string }
+        lineCount: { type: integer }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        lines:
+          type: array
+          description: Present on single-batch reads, absent in lists
+          items: { $ref: "#/components/schemas/BatchLine" }
   responses:
     Problem400:
       description: Validation failed (COM-0001 with errors map)
@@ -423,7 +544,349 @@ components:
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/ViolationProblem" }
+    BatchProblem409:
+      description: LEDGER_BATCH_STATE (the batch's status does not allow the action), LEDGER_BATCH_APPROVAL_REQUIRED, or an idempotency conflict on posting
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Problem412:
+      description: LEDGER_VERSION_CONFLICT, the If-Match version is stale; reload and retry
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    BatchProblem422:
+      description: Rule violations (violations[]), LEDGER_JOURNAL_NAME_INVALID or LEDGER_LINE_LIMIT; nothing changed
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/ViolationProblem" }
+  headers:
+    BatchETag:
+      description: The batch version as an entity tag, for If-Match on the next change
+      schema: { type: string, example: '"3"' }
 paths:
+  /api/v1/ledger/journal-names:
+    get:
+      tags: [journal]
+      operationId: listJournalNames
+      x-passage-duty: ledger.journal.read
+      responses:
+        "200":
+          description: Every journal name of the tenant, by code
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/JournalName" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+  /api/v1/ledger/journal-names/{code}:
+    get:
+      tags: [journal]
+      operationId: getJournalName
+      x-passage-duty: ledger.journal.read
+      parameters:
+        - $ref: "#/components/parameters/JournalNameCode"
+      responses:
+        "200":
+          description: Journal name
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JournalName" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+    put:
+      tags: [journal]
+      operationId: putJournalName
+      x-passage-duty: ledger.setup.write
+      description: |
+        Creates (201) or replaces (200) a journal name; naturally idempotent. Names are deactivated,
+        never deleted. A change applies to the next action on each batch: submit reads requiresApproval,
+        approve reads selfApprovalAllowed, post reads allowReconAccounts, reversal reads reversalReasonRequired.
+      parameters:
+        - $ref: "#/components/parameters/JournalNameCode"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/JournalNameBody" }
+      responses:
+        "200":
+          description: Journal name replaced
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JournalName" }
+        "201":
+          description: Journal name created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JournalName" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+  /api/v1/ledger/journal-batches:
+    get:
+      tags: [journal]
+      operationId: listJournalBatches
+      x-passage-duty: ledger.journal.read
+      parameters:
+        - { name: ledger, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/BatchStatus" } }
+        - { name: journalName, in: query, schema: { type: string, pattern: '^[A-Za-z0-9_-]{1,20}$' } }
+      responses:
+        "200":
+          description: Newest 200 batches (headers and side totals, no lines)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/JournalBatch" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+    post:
+      tags: [journal]
+      operationId: createJournalBatch
+      x-passage-duty: ledger.journal.write
+      description: |
+        Creates a draft batch (FR-11.9). Line shape and amount scale are checked here (400); posting rules
+        (accounts, dimensions, currency, balance, dates) run at submit and post. The journal name must be
+        active (422 LEDGER_JOURNAL_NAME_INVALID) and its linesLimit holds (422 LEDGER_LINE_LIMIT); an
+        unknown ledger is 404 LEDGER_NOT_FOUND.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/JournalBatchBody" }
+      responses:
+        "201":
+          description: Draft batch with its lines
+          headers:
+            ETag: { $ref: "#/components/headers/BatchETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JournalBatch" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "422": { $ref: "#/components/responses/BatchProblem422" }
+  /api/v1/ledger/journal-batches/{id}:
+    get:
+      tags: [journal]
+      operationId: getJournalBatch
+      x-passage-duty: ledger.journal.read
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Batch with its lines
+          headers:
+            ETag: { $ref: "#/components/headers/BatchETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JournalBatch" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+    patch:
+      tags: [journal]
+      operationId: patchJournalBatch
+      x-passage-duty: ledger.journal.write
+      description: |
+        Edits the header and, when `lines` is present, replaces every line. Any edit of a validated,
+        approved or rejected batch returns it to draft and clears its submit and approval (BR-11.10);
+        409 LEDGER_BATCH_STATE while in_approval, posted or cancelled.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/JournalBatchPatch" }
+      responses:
+        "200":
+          description: Edited draft batch
+          headers:
+            ETag: { $ref: "#/components/headers/BatchETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JournalBatch" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "409": { $ref: "#/components/responses/BatchProblem409" }
+        "412": { $ref: "#/components/responses/Problem412" }
+        "422": { $ref: "#/components/responses/BatchProblem422" }
+  /api/v1/ledger/journal-batches/{id}/submit:
+    post:
+      tags: [journal]
+      operationId: submitJournalBatch
+      x-passage-duty: ledger.journal.write
+      description: |
+        Validates every line with the posting rules (the journal name's allowReconAccounts applies). Success
+        moves a draft to validated, and on to in_approval when the journal name requires approval; a validated
+        batch is re-submitted only when its journal name gained a workflow. On violations the batch stays where
+        it was and 422 lists them. An inactive journal name is 422 LEDGER_JOURNAL_NAME_INVALID.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: Validated or in_approval batch
+          headers:
+            ETag: { $ref: "#/components/headers/BatchETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JournalBatch" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "409": { $ref: "#/components/responses/BatchProblem409" }
+        "412": { $ref: "#/components/responses/Problem412" }
+        "422": { $ref: "#/components/responses/BatchProblem422" }
+  /api/v1/ledger/journal-batches/{id}/approve:
+    post:
+      tags: [journal]
+      operationId: approveJournalBatch
+      x-passage-duty: ledger.journal.approve
+      description: |
+        in_approval to approved. The approver may not be the submitter unless the journal name allows
+        self-approval (403 LEDGER_SELF_APPROVAL). Approval runs here until the wave 4 Temporal workflow
+        template is bound (see NOT-IMPLEMENTED.md).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: Approved batch
+          headers:
+            ETag: { $ref: "#/components/headers/BatchETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JournalBatch" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "409": { $ref: "#/components/responses/BatchProblem409" }
+        "412": { $ref: "#/components/responses/Problem412" }
+  /api/v1/ledger/journal-batches/{id}/reject:
+    post:
+      tags: [journal]
+      operationId: rejectJournalBatch
+      x-passage-duty: ledger.journal.approve
+      description: |
+        in_approval to rejected.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: Rejected batch (edit it to return it to draft, or cancel it)
+          headers:
+            ETag: { $ref: "#/components/headers/BatchETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JournalBatch" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "409": { $ref: "#/components/responses/BatchProblem409" }
+        "412": { $ref: "#/components/responses/Problem412" }
+  /api/v1/ledger/journal-batches/{id}/cancel:
+    post:
+      tags: [journal]
+      operationId: cancelJournalBatch
+      x-passage-duty: ledger.journal.write
+      description: |
+        draft, validated or rejected to cancelled.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: Cancelled (terminal) batch
+          headers:
+            ETag: { $ref: "#/components/headers/BatchETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JournalBatch" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "409": { $ref: "#/components/responses/BatchProblem409" }
+        "412": { $ref: "#/components/responses/Problem412" }
+  /api/v1/ledger/journal-batches/{id}/post:
+    post:
+      tags: [journal]
+      operationId: postJournalBatch
+      x-passage-duty: ledger.journal.post
+      description: |
+        Posts the batch as one journal entry (source ledger/manual_journal, documentId = batch id) through
+        the posting pipeline, and marks the batch posted with the entry id in the same transaction. An
+        approved batch can be posted; a validated batch only when its journal name has no workflow (409
+        LEDGER_BATCH_APPROVAL_REQUIRED otherwise) and the caller also holds ledger.journal.postdirect
+        ("Post ledger journals without approval", 403 AUTH-0003 otherwise). On a rule rejection (422) or
+        other failure nothing is posted, the batch stays approved or validated and lastError records the
+        cause. The same key on the posted batch replays the stored response (200); another key is 409
+        LEDGER_BATCH_STATE.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "201":
+          description: Entry posted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EntryResult" }
+        "200":
+          description: Replay of the stored response
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EntryResult" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "409": { $ref: "#/components/responses/BatchProblem409" }
+        "412": { $ref: "#/components/responses/Problem412" }
+        "422": { $ref: "#/components/responses/Problem422" }
   /api/v1/ledger/ledgers/{ledger}/account-structures:
     parameters:
       - name: ledger
