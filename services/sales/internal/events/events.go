@@ -15,11 +15,29 @@ var (
 	CreditCheckEvaluated = events.Type(Context, "creditcheck", "evaluated", 1)
 	OrderChanged         = events.Type(Context, "order", "changed", 1)
 	OrderCancelled       = events.Type(Context, "order", "cancelled", 1)
+	AgreementReleased    = events.Type(Context, "agreement", "released", 1)
 )
 
 // All lists every event type this service publishes.
 func All() []string {
-	return []string{OrderConfirmed, OrderHoldApplied, OrderHoldReleased, CreditCheckEvaluated, OrderChanged, OrderCancelled}
+	return []string{OrderConfirmed, OrderHoldApplied, OrderHoldReleased, CreditCheckEvaluated, OrderChanged, OrderCancelled, AgreementReleased}
+}
+
+// AgreementReleasedData is the data member of agreement.released.v1: one
+// release drew quantity against the agreement commitment and created the DRAFT
+// order sales_order_id (FR-27.10).
+type AgreementReleasedData struct {
+	AgreementID     string `json:"agreement_id"`
+	AgreementNumber string `json:"agreement_number"`
+	CustomerID      string `json:"customer_id"`
+	ProductID       string `json:"product_id"`
+	SalesOrderID    string `json:"sales_order_id"`
+	Quantity        string `json:"quantity"`
+	Released        string `json:"released_qty"`
+	Remaining       string `json:"remaining_qty"`
+	Status          string `json:"status"`
+	Version         int    `json:"version"`
+	Actor           string `json:"actor"`
 }
 
 // FieldChange is one entry of order.changed's diff. line_no is 0 for a header

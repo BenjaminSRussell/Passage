@@ -12,6 +12,19 @@ export type OrderStatus = (typeof ORDER_STATUSES)[number];
 export const HOLD_TYPES = ["CREDIT", "FRAUD", "MANUAL", "PRICE_REVIEW"] as const;
 export type HoldType = (typeof HOLD_TYPES)[number];
 
+/** Hold types a sales manager or fraud analyst applies by hand; CREDIT comes only from the credit check. */
+export const MANUAL_HOLD_TYPES = ["MANUAL", "FRAUD", "PRICE_REVIEW"] as const;
+export type ManualHoldType = (typeof MANUAL_HOLD_TYPES)[number];
+
+export const LISTING_SCOPES = ["CUSTOMER", "GROUP"] as const;
+export type ListingScope = (typeof LISTING_SCOPES)[number];
+
+export const LISTING_TYPES = ["DENY", "ALLOW"] as const;
+export type ListingType = (typeof LISTING_TYPES)[number];
+
+export const AGREEMENT_STATUSES = ["ACTIVE", "EXHAUSTED"] as const;
+export type AgreementStatus = (typeof AGREEMENT_STATUSES)[number];
+
 export const LIMIT_TYPES = ["NONE", "BALANCE", "BALANCE_PACKING_SLIP", "BALANCE_ALL"] as const;
 export type LimitType = (typeof LIMIT_TYPES)[number];
 
@@ -94,13 +107,24 @@ export interface Order {
   requestedShipDate: string;
   channel: string;
   externalRef?: string;
+  customerGroup?: string;
   netTotal: Decimal;
   version: number;
   creditCheck?: CreditEvaluation;
   lines: OrderLine[];
   holds: Hold[];
+  /** Denied lines accepted with sales.order.approve and a reason (FR-27.15). */
+  listingOverrides?: ListingOverride[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ListingOverride {
+  lineNo: number;
+  productId: string;
+  decision: string;
+  reason: string;
+  actor: string;
 }
 
 /** Confirm and release answer with the order and whether it is now confirmed. */
@@ -128,7 +152,75 @@ export interface NewOrder {
   requestedShipDate: string;
   channel?: string;
   externalRef?: string;
+  customerGroup?: string;
+  listingOverrideReason?: string;
   lines: NewOrderLine[];
+}
+
+export interface ProductListingInput {
+  legalEntityId: string;
+  scopeType: ListingScope;
+  scopeKey: string;
+  productId: string;
+  listingType: ListingType;
+  validFrom?: string;
+  validTo?: string;
+}
+
+export interface ProductListing extends ProductListingInput {
+  id: string;
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface AgreementInput {
+  legalEntityId: string;
+  customerId: string;
+  invoiceAccountId?: string;
+  productId: string;
+  unit: string;
+  unitPrice: Decimal;
+  currency: string;
+  commitmentQty: Decimal;
+  validFrom?: string;
+  validTo?: string;
+}
+
+export interface AgreementRelease {
+  id: string;
+  quantity: Decimal;
+  salesOrderId: string;
+  orderNumber: string;
+  actor: string;
+  releasedAt: string;
+}
+
+export interface Agreement extends Required<Omit<AgreementInput, "validFrom" | "validTo">> {
+  id: string;
+  agreementNumber: string;
+  releasedQty: Decimal;
+  remainingQty: Decimal;
+  status: AgreementStatus;
+  validFrom?: string;
+  validTo?: string;
+  version: number;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  /** Present on a single read, newest first. */
+  releases?: AgreementRelease[];
+}
+
+export interface ReleaseOrderInput {
+  quantity: Decimal;
+  siteId: string;
+  warehouseId: string;
+  requestedShipDate: string;
+}
+
+export interface ReleaseOrderResult {
+  agreement: Agreement;
+  order: Order;
 }
 
 export interface Exposure {
@@ -455,4 +547,69 @@ export function checkScheduleRelease(input: ReleaseCheckInput): Promise<ReleaseC
 /** Previews a backorder run; nothing is committed (BR-27.11). */
 export function previewBackorderRun(input: BackorderPreviewInput): Promise<BackorderPreviewResult> {
   return json<BackorderPreviewResult>("/backorder-runs:preview", { method: "POST", body: JSON.stringify(input) });
+}
+
+/** Applies a MANUAL, FRAUD or PRICE_REVIEW hold at the given ETag (FR-27.8). */
+export function applyHold(orderId: string, etag: string, holdType: ManualHoldType, reasonCode: string): Promise<Versioned<Order>> {
+  return versioned<Order>(`/orders/${encodeURIComponent(orderId)}/holds`, {
+    method: "POST",
+    body: JSON.stringify({ holdType, reasonCode }),
+    headers: { "If-Match": etag },
+  });
+}
+
+export interface ListingFilter {
+  legalEntityId?: string;
+  productId?: string;
+  scopeKey?: string;
+}
+
+/** The listing inquiry (BR-27.13), newest first. */
+export async function listProductListings(filter: ListingFilter = {}, signal?: AbortSignal): Promise<ProductListing[]> {
+  const body = await json<{ items?: ProductListing[] }>(
+    `/product-listings${query({ legalEntityId: filter.legalEntityId, productId: filter.productId, scopeKey: filter.scopeKey, limit: 200 })}`,
+    {},
+    signal,
+  );
+  return body.items ?? [];
+}
+
+export function createProductListing(input: ProductListingInput): Promise<ProductListing> {
+  return json<ProductListing>("/product-listings", { method: "POST", body: JSON.stringify(input) });
+}
+
+export async function deleteProductListing(id: string): Promise<void> {
+  await send(`/product-listings/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export interface AgreementFilter {
+  legalEntityId?: string;
+  customerId?: string;
+  status?: AgreementStatus | "";
+}
+
+export async function listAgreements(filter: AgreementFilter = {}, signal?: AbortSignal): Promise<Agreement[]> {
+  const body = await json<{ items?: Agreement[] }>(
+    `/agreements${query({ legalEntityId: filter.legalEntityId, customerId: filter.customerId, status: filter.status, limit: 200 })}`,
+    {},
+    signal,
+  );
+  return body.items ?? [];
+}
+
+export function getAgreement(id: string, signal?: AbortSignal): Promise<Versioned<Agreement>> {
+  return versioned<Agreement>(`/agreements/${encodeURIComponent(id)}`, {}, signal);
+}
+
+export function createAgreement(input: AgreementInput, key: string = newKey()): Promise<Versioned<Agreement>> {
+  return versioned<Agreement>("/agreements", { method: "POST", body: JSON.stringify(input), headers: { "Idempotency-Key": key } });
+}
+
+/** Draws quantity against the agreement and creates a DRAFT order at its price (FR-27.10). */
+export function releaseAgreementOrder(id: string, input: ReleaseOrderInput, key: string = newKey()): Promise<ReleaseOrderResult> {
+  return json<ReleaseOrderResult>(`/agreements/${encodeURIComponent(id)}:release-order`, {
+    method: "POST",
+    body: JSON.stringify(input),
+    headers: { "Idempotency-Key": key },
+  });
 }

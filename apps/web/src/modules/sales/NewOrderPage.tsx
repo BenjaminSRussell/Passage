@@ -24,6 +24,8 @@ export interface OrderValues {
   currency: string;
   requestedShipDate: string;
   externalRef: string;
+  customerGroup: string;
+  listingOverrideReason: string;
   lines: LineValues[];
 }
 
@@ -46,6 +48,10 @@ export function validateOrder(values: OrderValues): { errors: Errors; input?: Ne
   if (!DATE.test(values.requestedShipDate)) errors.requestedShipDate = "Choose the requested ship date.";
   const ref = values.externalRef.trim();
   if (ref.length > 100) errors.externalRef = "Use at most 100 characters.";
+  const group = values.customerGroup.trim();
+  if (group.length > 80) errors.customerGroup = "Use at most 80 characters.";
+  const override = values.listingOverrideReason.trim();
+  if (override.length > 500) errors.listingOverrideReason = "Use at most 500 characters.";
   if (values.lines.length === 0) errors.lines = "Add at least one line.";
   values.lines.forEach((l, i) => {
     const at = (name: string) => `lines[${i}].${name}`;
@@ -69,6 +75,8 @@ export function validateOrder(values: OrderValues): { errors: Errors; input?: Ne
       currency: values.currency,
       requestedShipDate: values.requestedShipDate,
       ...(ref ? { externalRef: ref } : {}),
+      ...(group ? { customerGroup: group } : {}),
+      ...(override ? { listingOverrideReason: override } : {}),
       lines: values.lines.map((l) => ({
         productId: l.productId.trim(),
         quantity: l.quantity,
@@ -106,6 +114,8 @@ export function NewOrderPage() {
     currency: "USD",
     requestedShipDate: start,
     externalRef: "",
+    customerGroup: "",
+    listingOverrideReason: "",
     lines: [emptyLine(start)],
   });
   const [errors, setErrors] = useState<Errors>({});
@@ -182,6 +192,8 @@ export function NewOrderPage() {
           {header("currency", "Currency")}
           {header("requestedShipDate", "Requested ship date", undefined, { type: "date" })}
           {header("externalRef", "Customer reference", "For example the customer's PO number.", { optional: true })}
+          {header("customerGroup", "Customer group", "Applies group listing entries, for example EU-RETAIL.", { optional: true })}
+          {header("listingOverrideReason", "Listing override reason", "Needs the sales.order.approve duty. Accepts lines the product listing denies and logs the reason.", { optional: true })}
           <div className={`${styles.formActions} ${styles.lines}`}>
             {values.lines.map((line, i) => (
               <fieldset key={i} className={styles.lineCard}>
@@ -226,7 +238,7 @@ export function NewOrderPage() {
           </div>
           {failure ? (
             <div className={styles.formActions}>
-              <Alert tone="danger" title="Could not save the order" live="alert">
+              <Alert tone="danger" title={failure.code === "SLS-0011" ? "A product is not listed for this customer" : "Could not save the order"} live="alert">
                 {failure.message} ({failure.code})
               </Alert>
             </div>

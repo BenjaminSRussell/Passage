@@ -180,6 +180,207 @@ paths:
             application/problem+json:
               schema: {$ref: "#/components/schemas/Problem"}
         "428": {$ref: "#/components/responses/Problem"}
+  /v1/sales/orders/{id}/holds:
+    post:
+      summary: >-
+        Apply a MANUAL, FRAUD or PRICE_REVIEW hold (FR-27.8). CREDIT holds come only
+        from the credit check. A FRAUD hold blocks confirmation (BR-27.4). If-Match
+        carries the order ETag, so a retried request cannot apply the hold twice.
+      operationId: applyOrderHold
+      x-passage-duty: sales.order.hold
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ApplyHoldRequest"}
+      responses:
+        "201":
+          description: the order at its new version with the hold listed as ACTIVE
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Order"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422":
+          description: SLS-0028 the order is shipped, closed or cancelled, or already has an ACTIVE hold of this type
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+  /v1/sales/product-listings:
+    get:
+      summary: Listing inquiry - ALLOW and DENY entries in the caller's scope, newest first (BR-27.13)
+      operationId: listProductListings
+      x-passage-duty: sales.order.read
+      parameters:
+        - $ref: "#/components/parameters/LegalEntityQuery"
+        - {name: productId, in: query, schema: {type: string, format: uuid}}
+        - {name: scopeKey, in: query, description: customer UUID or group code, schema: {type: string, maxLength: 80}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      responses:
+        "200":
+          description: listing entries
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/ProductListing"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+    post:
+      summary: Add an ALLOW or DENY entry for a product per customer or customer group, with optional validity (FR-27.15)
+      operationId: createProductListing
+      x-passage-duty: sales.listing.maintain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ProductListingRequest"}
+      responses:
+        "201":
+          description: the stored entry
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ProductListing"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+  /v1/sales/product-listings/{id}:
+    delete:
+      summary: Remove a listing entry; orders already taken keep their logged overrides
+      operationId: deleteProductListing
+      x-passage-duty: sales.listing.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "204": {description: removed}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/sales/agreements:
+    get:
+      summary: Sales agreements in the caller's scope, newest first, with commitment, released and remaining quantity
+      operationId: listSalesAgreements
+      x-passage-duty: sales.order.read
+      parameters:
+        - $ref: "#/components/parameters/LegalEntityQuery"
+        - {name: customerId, in: query, schema: {type: string, format: uuid}}
+        - {name: status, in: query, schema: {type: string, enum: [ACTIVE, EXHAUSTED]}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      responses:
+        "200":
+          description: agreements
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/SalesAgreement"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+    post:
+      summary: Create an ACTIVE quantity commitment for one product of a customer at an agreed price, numbered SA- (FR-27.10)
+      operationId: createSalesAgreement
+      x-passage-duty: sales.agreement.maintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/SalesAgreementRequest"}
+      responses:
+        "201":
+          description: the new agreement
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/SalesAgreement"}
+        "200":
+          description: a repeat of the Idempotency-Key with the same body returns the stored agreement
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/SalesAgreement"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "422":
+          description: idempotency_key_reuse - the key was used with a different body
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+  /v1/sales/agreements/{id}:
+    get:
+      summary: One agreement with its remaining commitment and release history, newest first
+      operationId: getSalesAgreement
+      x-passage-duty: sales.order.read
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: the agreement
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/SalesAgreement"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/sales/agreements/{id}:release-order:
+    post:
+      summary: >-
+        Draw quantity against the commitment and create a DRAFT order of one line at the
+        agreement price (channel AGREEMENT), atomically under the agreement's row lock
+        (FR-27.10, BR-27.9). The order passes the product listing check.
+      operationId: releaseAgreementOrder
+      x-passage-duty: sales.agreement.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/AgreementReleaseRequest"}
+      responses:
+        "201":
+          description: the release was applied; the agreement after it and the order it created
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AgreementReleaseResult"}
+        "200":
+          description: a repeat of the Idempotency-Key with the same body returns the stored result
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AgreementReleaseResult"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "422":
+          description: >-
+            SLS-0008 AGREEMENT_EXHAUSTED (AC-27.9), SLS-0029 outside the validity period,
+            SLS-0011 PRODUCT_NOT_LISTED, or idempotency_key_reuse
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
   /v1/sales/atp:check:
     post:
       summary: Stateless ATP promise check over caller-supplied buckets (BR-27.1)
@@ -465,11 +666,129 @@ components:
         requestedShipDate: {type: string, format: date}
         channel: {type: string, pattern: "^[A-Za-z0-9_-]{1,40}$", default: UI}
         externalRef: {type: string, minLength: 1, maxLength: 100}
+        customerGroup:
+          type: string
+          minLength: 1
+          maxLength: 80
+          description: The customer's group for GROUP listing entries (BR-27.13), until the w7 party lookup supplies it.
+        listingOverrideReason:
+          type: string
+          maxLength: 500
+          description: >-
+            With duty sales.order.approve, accepts lines the product listing denies (FR-27.15);
+            each accepted line is logged in listingOverrides. Without it a denied line is
+            422 SLS-0011 PRODUCT_NOT_LISTED.
         lines:
           type: array
           minItems: 1
           maxItems: 2000
           items: {$ref: "#/components/schemas/OrderLineRequest"}
+    ApplyHoldRequest:
+      type: object
+      required: [holdType, reasonCode]
+      properties:
+        holdType: {type: string, enum: [MANUAL, FRAUD, PRICE_REVIEW]}
+        reasonCode: {type: string, minLength: 1, maxLength: 80}
+    ListingOverride:
+      type: object
+      description: A denied line accepted by a user with sales.order.approve (FR-27.15, AC-27.11)
+      required: [lineNo, productId, decision, reason, actor]
+      properties:
+        lineNo: {type: integer}
+        productId: {type: string, format: uuid}
+        decision: {type: string, enum: [CUSTOMER_DENY, GROUP_DENY, NOT_LISTED]}
+        reason: {type: string}
+        actor: {type: string}
+    ProductListingRequest:
+      type: object
+      required: [legalEntityId, scopeType, scopeKey, productId, listingType]
+      properties:
+        legalEntityId: {type: string, format: uuid}
+        scopeType: {type: string, enum: [CUSTOMER, GROUP]}
+        scopeKey: {type: string, minLength: 1, maxLength: 80, description: customer UUID for CUSTOMER; group code for GROUP}
+        productId: {type: string, format: uuid}
+        listingType: {type: string, enum: [ALLOW, DENY]}
+        validFrom: {type: string, format: date}
+        validTo: {type: string, format: date}
+    ProductListing:
+      type: object
+      required: [id, legalEntityId, scopeType, scopeKey, productId, listingType, createdBy, createdAt]
+      properties:
+        id: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        scopeType: {type: string, enum: [CUSTOMER, GROUP]}
+        scopeKey: {type: string}
+        productId: {type: string, format: uuid}
+        listingType: {type: string, enum: [ALLOW, DENY]}
+        validFrom: {type: string, format: date}
+        validTo: {type: string, format: date}
+        createdBy: {type: string}
+        createdAt: {type: string, format: date-time}
+    SalesAgreementRequest:
+      type: object
+      required: [legalEntityId, customerId, productId, unit, unitPrice, currency, commitmentQty]
+      properties:
+        legalEntityId: {type: string, format: uuid}
+        customerId: {type: string, format: uuid}
+        invoiceAccountId: {type: string, format: uuid, description: defaults to the customer}
+        productId: {type: string, format: uuid}
+        unit: {type: string, minLength: 1, maxLength: 10}
+        unitPrice: {$ref: "#/components/schemas/Money"}
+        currency: {type: string, pattern: "^[A-Z]{3}$"}
+        commitmentQty: {$ref: "#/components/schemas/Money"}
+        validFrom: {type: string, format: date}
+        validTo: {type: string, format: date}
+    SalesAgreement:
+      type: object
+      required: [id, legalEntityId, agreementNumber, customerId, invoiceAccountId, productId, unit, unitPrice, currency, commitmentQty, releasedQty, remainingQty, status, version]
+      properties:
+        id: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        agreementNumber: {type: string, example: "SA-0000001", description: unique per legal entity}
+        customerId: {type: string, format: uuid}
+        invoiceAccountId: {type: string, format: uuid}
+        productId: {type: string, format: uuid}
+        unit: {type: string}
+        unitPrice: {$ref: "#/components/schemas/Money"}
+        currency: {type: string}
+        commitmentQty: {$ref: "#/components/schemas/Money"}
+        releasedQty: {$ref: "#/components/schemas/Money"}
+        remainingQty: {$ref: "#/components/schemas/Money"}
+        status: {type: string, enum: [ACTIVE, EXHAUSTED]}
+        validFrom: {type: string, format: date}
+        validTo: {type: string, format: date}
+        version: {type: integer, minimum: 1}
+        createdBy: {type: string}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+        releases:
+          type: array
+          description: release history, newest first; present on GET /agreements/{id} only
+          items: {$ref: "#/components/schemas/AgreementReleaseRecord"}
+    AgreementReleaseRecord:
+      type: object
+      required: [id, quantity, salesOrderId, orderNumber, actor, releasedAt]
+      properties:
+        id: {type: string, format: uuid}
+        quantity: {$ref: "#/components/schemas/Money"}
+        salesOrderId: {type: string, format: uuid}
+        orderNumber: {type: string}
+        actor: {type: string}
+        releasedAt: {type: string, format: date-time}
+    AgreementReleaseRequest:
+      type: object
+      required: [quantity, siteId, warehouseId, requestedShipDate]
+      properties:
+        quantity: {$ref: "#/components/schemas/Money"}
+        siteId: {type: string, format: uuid}
+        warehouseId: {type: string, format: uuid}
+        requestedShipDate: {type: string, format: date}
+    AgreementReleaseResult:
+      type: object
+      required: [agreement, order]
+      properties:
+        agreement: {$ref: "#/components/schemas/SalesAgreement"}
+        order: {$ref: "#/components/schemas/Order"}
     OrderLineRequest:
       type: object
       required: [productId, quantity, unit, siteId, warehouseId, unitPrice, requestedShipDate]
@@ -497,6 +816,7 @@ components:
         requestedShipDate: {type: string, format: date}
         channel: {type: string}
         externalRef: {type: string}
+        customerGroup: {type: string}
         netTotal: {$ref: "#/components/schemas/Money"}
         version: {type: integer, minimum: 0}
         creditCheck: {$ref: "#/components/schemas/CreditEvaluation"}
@@ -506,6 +826,9 @@ components:
         holds:
           type: array
           items: {$ref: "#/components/schemas/Hold"}
+        listingOverrides:
+          type: array
+          items: {$ref: "#/components/schemas/ListingOverride"}
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}
     OrderLine:

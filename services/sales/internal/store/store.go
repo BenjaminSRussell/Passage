@@ -28,16 +28,22 @@ import (
 
 // Stable problem codes (README lists the full catalogue).
 const (
-	CodeCreditHold       = "SLS-0005"
-	CodeVersionConflict  = "SLS-0006"
-	CodeDuplicateIntake  = "SLS-0007"
-	CodeNotConfirmable   = "SLS-0019"
-	CodeHoldBlocks       = "SLS-0021"
-	CodeHoldNotActive    = "SLS-0022"
-	CodeOrderNotFound    = "SLS-0100"
-	CodeHoldNotFound     = "SLS-0101"
-	CodeProfileNotFound  = "SLS-0102"
-	CodeIdempotencyReuse = "idempotency_key_reuse"
+	CodeCreditHold         = "SLS-0005"
+	CodeVersionConflict    = "SLS-0006"
+	CodeDuplicateIntake    = "SLS-0007"
+	CodeAgreementExhausted = "SLS-0008"
+	CodeProductNotListed   = "SLS-0011"
+	CodeNotConfirmable     = "SLS-0019"
+	CodeHoldBlocks         = "SLS-0021"
+	CodeHoldNotActive      = "SLS-0022"
+	CodeHoldNotApplicable  = "SLS-0028"
+	CodeAgreementNotValid  = "SLS-0029"
+	CodeOrderNotFound      = "SLS-0100"
+	CodeHoldNotFound       = "SLS-0101"
+	CodeProfileNotFound    = "SLS-0102"
+	CodeAgreementNotFound  = "SLS-0103"
+	CodeListingNotFound    = "SLS-0104"
+	CodeIdempotencyReuse   = "idempotency_key_reuse"
 
 	uniqueViolation = "23505"
 	eventSource     = "sales"
@@ -76,25 +82,27 @@ type Hold struct {
 
 // Order is a sales order header with its lines and holds.
 type Order struct {
-	ID                string          `json:"id"`
-	LegalEntityID     string          `json:"legalEntityId"`
-	OrderNumber       string          `json:"orderNumber"`
-	CustomerID        string          `json:"customerId"`
-	InvoiceAccountID  string          `json:"invoiceAccountId"`
-	OrderType         string          `json:"orderType"`
-	Status            string          `json:"status"`
-	Currency          string          `json:"currency"`
-	RequestedShipDate string          `json:"requestedShipDate"`
-	Channel           string          `json:"channel"`
-	ExternalRef       *string         `json:"externalRef,omitempty"`
-	NetTotal          decimal.Decimal `json:"netTotal"`
-	Version           int             `json:"version"`
-	CreditCheck       json.RawMessage `json:"creditCheck,omitempty"`
-	Lines             []Line          `json:"lines"`
-	Holds             []Hold          `json:"holds"`
-	RequestHash       string          `json:"-"`
-	CreatedAt         time.Time       `json:"createdAt"`
-	UpdatedAt         time.Time       `json:"updatedAt"`
+	ID                string            `json:"id"`
+	LegalEntityID     string            `json:"legalEntityId"`
+	OrderNumber       string            `json:"orderNumber"`
+	CustomerID        string            `json:"customerId"`
+	InvoiceAccountID  string            `json:"invoiceAccountId"`
+	OrderType         string            `json:"orderType"`
+	Status            string            `json:"status"`
+	Currency          string            `json:"currency"`
+	RequestedShipDate string            `json:"requestedShipDate"`
+	Channel           string            `json:"channel"`
+	ExternalRef       *string           `json:"externalRef,omitempty"`
+	CustomerGroup     *string           `json:"customerGroup,omitempty"`
+	NetTotal          decimal.Decimal   `json:"netTotal"`
+	Version           int               `json:"version"`
+	CreditCheck       json.RawMessage   `json:"creditCheck,omitempty"`
+	Lines             []Line            `json:"lines"`
+	Holds             []Hold            `json:"holds"`
+	ListingOverrides  []ListingOverride `json:"listingOverrides"`
+	RequestHash       string            `json:"-"`
+	CreatedAt         time.Time         `json:"createdAt"`
+	UpdatedAt         time.Time         `json:"updatedAt"`
 }
 
 // NewOrder is an intake request after validation.
@@ -110,6 +118,17 @@ type NewOrder struct {
 	IdempotencyKey    *string
 	RequestHash       string
 	Lines             []Line
+
+	// CustomerGroup stands in for the w7 customer group until the party lookup
+	// exists; GROUP listing entries apply only when it is given (BR-27.13).
+	CustomerGroup *string
+	// OrderDate is the day listing validity is evaluated on (BR-27.13).
+	OrderDate time.Time
+	// Actor is the caller; CanOverrideListing and ListingOverrideReason come from
+	// the caller's duties (sales.order.approve) and the request body (FR-27.15).
+	Actor                 string
+	CanOverrideListing    bool
+	ListingOverrideReason string
 }
 
 // OrderSummary is one row of the order list: the header without lines, plus
@@ -181,6 +200,14 @@ type Store interface {
 	GetCreditProfile(ctx context.Context, legalEntityID, customerID string) (CreditProfile, error)
 	ListCreditProfiles(ctx context.Context, legalEntityID string, limit int) ([]CreditProfile, error)
 	PutCreditProfile(ctx context.Context, in CreditProfile, version int) (CreditProfile, error)
+	ApplyHold(ctx context.Context, orderID string, version int, in HoldRequest, actor string) (Order, error)
+	CreateListing(ctx context.Context, in ProductListing) (ProductListing, error)
+	ListListings(ctx context.Context, f ListingFilter) ([]ProductListing, error)
+	DeleteListing(ctx context.Context, id string) error
+	CreateAgreement(ctx context.Context, in NewAgreement) (Agreement, bool, error)
+	ListAgreements(ctx context.Context, f AgreementFilter) ([]Agreement, error)
+	GetAgreement(ctx context.Context, id string) (Agreement, error)
+	ReleaseAgreement(ctx context.Context, id string, in AgreementRelease, now time.Time) (ReleaseResult, bool, error)
 	Ping(ctx context.Context) error
 }
 
@@ -225,33 +252,8 @@ func (s *Postgres) CreateOrder(ctx context.Context, in NewOrder) (Order, bool, e
 			out = existing
 			return nil
 		}
-		seq, err := nextOrderSequence(ctx, tx, p.TenantID, in.LegalEntityID)
-		if err != nil {
-			return err
-		}
-		id := ids.New()
-		net := decimal.Zero
-		for _, l := range in.Lines {
-			net = net.Add(l.LineNet)
-		}
-		if _, err := tx.Exec(ctx, `insert into sales_order (tenant_id, id, legal_entity_id, order_number, customer_id, invoice_account_id, order_type, status, currency,
-				requested_ship_date, net_total, channel, external_ref, idempotency_key, request_hash)
-			values ($1, $2, $3, $4, $5, $6, $7, 'DRAFT', $8, $9::date, $10::numeric, $11, $12, $13, $14)`,
-			p.TenantID, id, in.LegalEntityID, domain.FormatOrderNumber(seq), in.CustomerID, in.InvoiceAccountID, in.OrderType, in.Currency,
-			in.RequestedShipDate, net.String(), in.Channel, in.ExternalRef, in.IdempotencyKey, in.RequestHash); err != nil {
-			return err
-		}
-		for _, l := range in.Lines {
-			if _, err := tx.Exec(ctx, `insert into sales_order_line (tenant_id, id, order_id, line_no, product_id, quantity, unit, site_id, warehouse_id,
-					unit_price, disc_pct, line_net, requested_ship_date, line_status)
-				values ($1, $2, $3, $4, $5, $6::numeric, $7, $8, $9, $10::numeric, $11::numeric, $12::numeric, $13::date, 'OPEN')`,
-				p.TenantID, ids.New(), id, l.LineNo, l.ProductID, l.Quantity.String(), l.Unit, l.SiteID, l.WarehouseID,
-				l.UnitPrice.String(), l.DiscPct.String(), l.LineNet.String(), l.RequestedShipDate); err != nil {
-				return err
-			}
-		}
-		out, err = loadOrder(ctx, tx, p.TenantID, id, false)
-		created = true
+		out, err = createOrderTx(ctx, tx, p.TenantID, in)
+		created = err == nil
 		return err
 	})
 	var pgErr *pgconn.PgError
@@ -262,6 +264,45 @@ func (s *Postgres) CreateOrder(ctx context.Context, in NewOrder) (Order, bool, e
 		return Order{}, false, err
 	}
 	return out, created, nil
+}
+
+// createOrderTx checks the product listings (BR-27.13) and inserts a DRAFT
+// order with its lines in the caller's transaction.
+func createOrderTx(ctx context.Context, tx pgx.Tx, tenantID string, in NewOrder) (Order, error) {
+	overrides, err := checkListings(ctx, tx, tenantID, in)
+	if err != nil {
+		return Order{}, err
+	}
+	overrideJSON, err := json.Marshal(overrides)
+	if err != nil {
+		return Order{}, err
+	}
+	seq, err := nextOrderSequence(ctx, tx, tenantID, in.LegalEntityID)
+	if err != nil {
+		return Order{}, err
+	}
+	id := ids.New()
+	net := decimal.Zero
+	for _, l := range in.Lines {
+		net = net.Add(l.LineNet)
+	}
+	if _, err := tx.Exec(ctx, `insert into sales_order (tenant_id, id, legal_entity_id, order_number, customer_id, invoice_account_id, order_type, status, currency,
+			requested_ship_date, net_total, channel, external_ref, idempotency_key, request_hash, listing_overrides, customer_group)
+		values ($1, $2, $3, $4, $5, $6, $7, 'DRAFT', $8, $9::date, $10::numeric, $11, $12, $13, $14, $15::jsonb, $16)`,
+		tenantID, id, in.LegalEntityID, domain.FormatOrderNumber(seq), in.CustomerID, in.InvoiceAccountID, in.OrderType, in.Currency,
+		in.RequestedShipDate, net.String(), in.Channel, in.ExternalRef, in.IdempotencyKey, in.RequestHash, string(overrideJSON), in.CustomerGroup); err != nil {
+		return Order{}, err
+	}
+	for _, l := range in.Lines {
+		if _, err := tx.Exec(ctx, `insert into sales_order_line (tenant_id, id, order_id, line_no, product_id, quantity, unit, site_id, warehouse_id,
+				unit_price, disc_pct, line_net, requested_ship_date, line_status)
+			values ($1, $2, $3, $4, $5, $6::numeric, $7, $8, $9, $10::numeric, $11::numeric, $12::numeric, $13::date, 'OPEN')`,
+			tenantID, ids.New(), id, l.LineNo, l.ProductID, l.Quantity.String(), l.Unit, l.SiteID, l.WarehouseID,
+			l.UnitPrice.String(), l.DiscPct.String(), l.LineNet.String(), l.RequestedShipDate); err != nil {
+			return Order{}, err
+		}
+	}
+	return loadOrder(ctx, tx, tenantID, id, false)
 }
 
 func findIntake(ctx context.Context, tx pgx.Tx, tenantID string, in NewOrder) (Order, bool, error) {
@@ -289,10 +330,15 @@ func findIntake(ctx context.Context, tx pgx.Tx, tenantID string, in NewOrder) (O
 }
 
 func nextOrderSequence(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID string) (int64, error) {
+	return nextSequence(ctx, tx, tenantID, legalEntityID, "SO")
+}
+
+// nextSequence draws the next number of a per-legal-entity sequence (SO-, SA-).
+func nextSequence(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, sequenceID string) (int64, error) {
 	var seq int64
-	err := tx.QueryRow(ctx, `insert into sales_number_sequence (tenant_id, legal_entity_id, sequence_id, next_value) values ($1, $2, 'SO', 2)
+	err := tx.QueryRow(ctx, `insert into sales_number_sequence (tenant_id, legal_entity_id, sequence_id, next_value) values ($1, $2, $3, 2)
 		on conflict (tenant_id, legal_entity_id, sequence_id) do update set next_value = sales_number_sequence.next_value + 1
-		returning next_value - 1`, tenantID, legalEntityID).Scan(&seq)
+		returning next_value - 1`, tenantID, legalEntityID, sequenceID).Scan(&seq)
 	return seq, err
 }
 
@@ -312,16 +358,18 @@ func orderNotFound() error { return problem(http.StatusNotFound, CodeOrderNotFou
 
 func loadOrder(ctx context.Context, tx pgx.Tx, tenantID, id string, lock bool) (Order, error) {
 	q := `select id::text, legal_entity_id::text, order_number, customer_id::text, invoice_account_id::text, order_type, status, currency::text,
-			requested_ship_date::text, channel, external_ref, net_total::text, version, request_hash, credit_check_result::text, created_at, updated_at
+			requested_ship_date::text, channel, external_ref, customer_group, net_total::text, version, request_hash, credit_check_result::text,
+			listing_overrides::text, created_at, updated_at
 		from sales_order where tenant_id = $1 and id = $2`
 	if lock {
 		q += " for update"
 	}
 	var o Order
-	var net string
+	var net, overrides string
 	var creditCheck *string
 	err := tx.QueryRow(ctx, q, tenantID, id).Scan(&o.ID, &o.LegalEntityID, &o.OrderNumber, &o.CustomerID, &o.InvoiceAccountID, &o.OrderType,
-		&o.Status, &o.Currency, &o.RequestedShipDate, &o.Channel, &o.ExternalRef, &net, &o.Version, &o.RequestHash, &creditCheck, &o.CreatedAt, &o.UpdatedAt)
+		&o.Status, &o.Currency, &o.RequestedShipDate, &o.Channel, &o.ExternalRef, &o.CustomerGroup, &net, &o.Version, &o.RequestHash, &creditCheck, &overrides,
+		&o.CreatedAt, &o.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Order{}, orderNotFound()
 	}
@@ -331,6 +379,10 @@ func loadOrder(ctx context.Context, tx pgx.Tx, tenantID, id string, lock bool) (
 	o.NetTotal = decimal.RequireFromString(net)
 	if creditCheck != nil {
 		o.CreditCheck = json.RawMessage(*creditCheck)
+	}
+	o.ListingOverrides = []ListingOverride{}
+	if err := json.Unmarshal([]byte(overrides), &o.ListingOverrides); err != nil {
+		return Order{}, err
 	}
 	lineRows, err := tx.Query(ctx, `select id::text, line_no, product_id::text, quantity::text, unit, site_id::text, warehouse_id::text,
 			unit_price::text, disc_pct::text, line_net::text, requested_ship_date::text, confirmed_ship_date::text, line_status

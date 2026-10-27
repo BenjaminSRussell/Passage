@@ -1,5 +1,7 @@
 import { createElement } from "react";
 import type { PassageModule } from "../registry";
+import { AgreementDetailPage } from "./AgreementDetailPage";
+import { AgreementsPage, NewAgreementPage } from "./AgreementsPage";
 import { AtpCheckPage } from "./AtpCheckPage";
 import { BackorderRunPage } from "./BackorderRunPage";
 import { ChangeOrderPage } from "./ChangeOrderPage";
@@ -8,12 +10,14 @@ import { CreditProfilesPage } from "./CreditProfilesPage";
 import { NewOrderPage } from "./NewOrderPage";
 import { OrderDetailPage } from "./OrderDetailPage";
 import { CreditHoldsPage, OrdersPage } from "./OrdersPage";
+import { NewProductListingPage, ProductListingsPage } from "./ProductListingsPage";
 import { ScheduleReleasePage } from "./ScheduleReleasePage";
 
 const sales: PassageModule = {
   id: "sales",
   title: "Sales",
-  description: "Enter, confirm, change and cancel sales orders, release credit holds, maintain credit profiles, check available-to-promise, reconcile scheduling releases and preview backorder runs.",
+  description:
+    "Enter, confirm, change and cancel sales orders, apply and release holds, maintain credit profiles, product listings and sales agreements, check available-to-promise, reconcile scheduling releases and preview backorder runs.",
   routes: [
     { path: "/sales", element: createElement(OrdersPage), handle: { title: "Sales orders" } },
     { path: "/sales/orders", element: createElement(OrdersPage) },
@@ -27,6 +31,11 @@ const sales: PassageModule = {
     { path: "/sales/atp", element: createElement(AtpCheckPage) },
     { path: "/sales/schedule-releases", element: createElement(ScheduleReleasePage), handle: { title: "Scheduling release check" } },
     { path: "/sales/backorder-runs", element: createElement(BackorderRunPage), handle: { title: "Backorder run preview" } },
+    { path: "/sales/product-listings", element: createElement(ProductListingsPage) },
+    { path: "/sales/product-listings/new", element: createElement(NewProductListingPage), handle: { title: "New listing entry" } },
+    { path: "/sales/agreements", element: createElement(AgreementsPage) },
+    { path: "/sales/agreements/new", element: createElement(NewAgreementPage), handle: { title: "New sales agreement" } },
+    { path: "/sales/agreements/:id", element: createElement(AgreementDetailPage), handle: { title: "Sales agreement" } },
   ],
   nav: [
     { label: "Sales orders", to: "/sales/orders", duty: "sales.order.read" },
@@ -36,6 +45,8 @@ const sales: PassageModule = {
     { label: "ATP check", to: "/sales/atp", duty: "sales.order.read" },
     { label: "Scheduling release check", to: "/sales/schedule-releases", duty: "sales.agreement.maintain" },
     { label: "Backorder run preview", to: "/sales/backorder-runs", duty: "sales.backorder.run" },
+    { label: "Product listings", to: "/sales/product-listings", duty: "sales.order.read" },
+    { label: "Sales agreements", to: "/sales/agreements", duty: "sales.order.read" },
   ],
 };
 

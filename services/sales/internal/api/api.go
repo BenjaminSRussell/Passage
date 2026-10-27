@@ -41,11 +41,15 @@ const (
 	dutyCreditMaintain = "sales.credit.maintain"
 	dutyAgreement      = "sales.agreement.maintain"
 	dutyBackorder      = "sales.backorder.run"
+	dutyListing        = "sales.listing.maintain"
+	dutyOrderApprove   = "sales.order.approve"
 
-	orders         = "/v1/sales/orders"
-	creditProfiles = "/v1/sales/credit-profiles"
-	releaseCheck   = "/v1/sales/schedule-releases:check"
-	backorderRun   = "/v1/sales/backorder-runs:preview"
+	orders          = "/v1/sales/orders"
+	creditProfiles  = "/v1/sales/credit-profiles"
+	releaseCheck    = "/v1/sales/schedule-releases:check"
+	backorderRun    = "/v1/sales/backorder-runs:preview"
+	productListings = "/v1/sales/product-listings"
+	agreements      = "/v1/sales/agreements"
 )
 
 var (
@@ -61,6 +65,7 @@ type API struct {
 	created  atomic.Int64
 	confirms atomic.Int64
 	held     atomic.Int64
+	applied  atomic.Int64
 	released atomic.Int64
 	atp      atomic.Int64
 	changed  atomic.Int64
@@ -100,7 +105,15 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRead)).Get(orders+"/{id}/versions", a.listOrderVersions)
 	r.With(authz.RequireDuty(dutyAgreement)).Post(releaseCheck, a.checkRelease)
 	r.With(authz.RequireDuty(dutyBackorder)).Post(backorderRun, a.previewBackorder)
+	r.With(authz.RequireDuty(dutyHold)).Post(orders+"/{id}/holds", a.applyHold)
 	r.With(requireAny(dutyCreditRelease, dutyHold)).Post(orders+"/{id}/holds/{holdId}:release", a.releaseHold)
+	r.With(authz.RequireDuty(dutyListing)).Post(productListings, a.createListing)
+	r.With(authz.RequireDuty(dutyRead)).Get(productListings, a.listListings)
+	r.With(authz.RequireDuty(dutyListing)).Delete(productListings+"/{id}", a.deleteListing)
+	r.With(authz.RequireDuty(dutyAgreement)).Post(agreements, a.createAgreement)
+	r.With(authz.RequireDuty(dutyRead)).Get(agreements, a.listAgreements)
+	r.With(authz.RequireDuty(dutyRead)).Get(agreements+"/{id}", a.getAgreement)
+	r.With(authz.RequireDuty(dutyAgreement)).Post(agreements+"/{id}:release-order", a.releaseOrder)
 	r.With(authz.RequireDuty(dutyRead)).Post("/v1/sales/atp:check", a.atpCheck)
 	r.With(authz.RequireDuty(dutyRead)).Get(creditProfiles, a.listCreditProfiles)
 	r.With(authz.RequireDuty(dutyRead)).Get(creditProfiles+"/{customerId}", a.getCreditProfile)
@@ -114,6 +127,7 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP sales_orders_created_total Sales orders stored; idempotent replays are not counted.\n# TYPE sales_orders_created_total counter\nsales_orders_created_total %d\n", a.created.Load())
 		fmt.Fprintf(w, "# HELP sales_orders_confirm_requests_total Confirm requests that passed validation.\n# TYPE sales_orders_confirm_requests_total counter\nsales_orders_confirm_requests_total %d\n", a.confirms.Load())
 		fmt.Fprintf(w, "# HELP sales_credit_holds_applied_total CREDIT holds placed by the credit check.\n# TYPE sales_credit_holds_applied_total counter\nsales_credit_holds_applied_total %d\n", a.held.Load())
+		fmt.Fprintf(w, "# HELP sales_holds_applied_total MANUAL, FRAUD and PRICE_REVIEW holds applied through the holds API.\n# TYPE sales_holds_applied_total counter\nsales_holds_applied_total %d\n", a.applied.Load())
 		fmt.Fprintf(w, "# HELP sales_holds_released_total Holds released.\n# TYPE sales_holds_released_total counter\nsales_holds_released_total %d\n", a.released.Load())
 		fmt.Fprintf(w, "# HELP sales_atp_checks_total Stateless ATP promise checks.\n# TYPE sales_atp_checks_total counter\nsales_atp_checks_total %d\n", a.atp.Load())
 		fmt.Fprintf(w, "# HELP sales_orders_changed_total Order changes that produced a new version.\n# TYPE sales_orders_changed_total counter\nsales_orders_changed_total %d\n", a.changed.Load())

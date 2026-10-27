@@ -3,14 +3,16 @@
 The sales bounded context: sales orders, order holds, the credit check and
 release, the stateless ATP promise check, credit profiles, order change and
 cancel with versions and diffs, the scheduling-release reconciliation check and
-the backorder run preview. Wave 27, slices 1 and 2 of PSG-27. Reference:
+the backorder run preview, holds applied by hand (MANUAL, FRAUD, PRICE_REVIEW),
+product listings and exclusions checked at order entry, and sales agreements
+whose releases create orders. Wave 27, slices 1 to 3 of PSG-27. Reference:
 `docs/prd/phase-5-order-to-cash.md` §5.27.
 
-Out of these slices (see `NOT-IMPLEMENTED.md`): quotations, sales agreements
-and release storage, the ATP projection and reservations, change approval and
-`:cancel-remainder`, the committed backorder run, allocation, consignment,
-supplementary items, product listing, the intake dedup window beyond the
-order's own key, and the Temporal release workflow.
+Out of these slices (see `NOT-IMPLEMENTED.md`): quotations, amount-based
+agreements and scheduling-agreement release storage, the ATP projection and
+reservations, change approval and `:cancel-remainder`, the committed backorder
+run, allocation, consignment, supplementary items, cross-selling, the intake
+dedup window beyond the order's own key, and the Temporal release workflow.
 
 ## Run
 
@@ -55,13 +57,20 @@ PASSAGE_TEST_DATABASE_URL=postgres://... go test ./...   # run store and RLS tes
   `order.changed`), the credit re-check when a change raises the total, cancel
   (lines cancelled, holds cleared, out of the release queue, `order.cancelled`,
   refused with a picked line), and FORCE row-level security per tenant and
-  legal entity, including the version history. Uses `platform/go/testkit`, skipped without
+  legal entity, including the version history; product listing denial and
+  override (AC-27.11), group precedence and validity on the order date;
+  agreement releases (AC-27.9: order at the agreement price, exhaustion, replay,
+  key reuse, `agreement.released`), validity and concurrent releases that never
+  overdraw; holds applied by hand (FRAUD blocks confirm, one per type, SoD on
+  release, none on a cancelled order). Uses `platform/go/testkit`, skipped without
   `PASSAGE_TEST_DATABASE_URL`.
 
 Web module: `apps/web/src/modules/sales` — sales orders list, new order, order
 detail (confirm, release holds, credit rules, change history), order change
 and cancel, credit release queue, credit profiles list and form, the ATP check,
-the scheduling-release check and the backorder run preview (`npx vitest --run src/modules/sales`
+the scheduling-release check, the backorder run preview, apply hold and listing
+overrides on the order detail, product listings (list, new entry, remove) and
+sales agreements (list, new, detail with release-order and history) (`npx vitest --run src/modules/sales`
 and `npx tsc --noEmit` in `apps/web`).
 
 ## Endpoints
@@ -78,6 +87,12 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | PATCH | `/v1/sales/orders/{id}` | `sales.order.write` | `If-Match`; header and OPEN/RESERVED line edits; new version with a field-level diff; re-promises changed quantities/dates of a CONFIRMED order and re-runs credit when its total rises; emits `order.changed` |
 | POST | `/v1/sales/orders/{id}:cancel` | `sales.order.confirm` | `If-Match`; optional `reason`; cancels OPEN/RESERVED lines, clears ACTIVE holds; emits `order.cancelled` |
 | GET | `/v1/sales/orders/{id}/versions` | `sales.order.read` | Change history, newest first, with each version's diff |
+| POST | `/v1/sales/orders/{id}/holds` | `sales.order.hold` | `If-Match`; MANUAL, FRAUD or PRICE_REVIEW with a reason code; emits `orderhold.applied` |
+| GET / POST | `/v1/sales/product-listings` | `sales.order.read` / `sales.listing.maintain` | Listing inquiry (`legalEntityId`, `productId`, `scopeKey`, `limit`); add an ALLOW or DENY entry per customer or group |
+| DELETE | `/v1/sales/product-listings/{id}` | `sales.listing.maintain` | Remove an entry |
+| GET / POST | `/v1/sales/agreements` | `sales.order.read` / `sales.agreement.maintain` | List (`legalEntityId`, `customerId`, `status`, `limit`); create with `Idempotency-Key`, numbered `SA-` |
+| GET | `/v1/sales/agreements/{id}` | `sales.order.read` | With remaining quantity and release history |
+| POST | `/v1/sales/agreements/{id}:release-order` | `sales.agreement.maintain` | `Idempotency-Key`; creates a DRAFT order at the agreement price and decrements the commitment atomically; emits `agreement.released` |
 | POST | `/v1/sales/atp:check` | `sales.order.read` | Stateless BR-27.1 check over supplied buckets |
 | POST | `/v1/sales/schedule-releases:check` | `sales.agreement.maintain` | Stateless BR-27.12 reconciliation; a mismatch returns `held: true`, `code: CUM_QTY_MISMATCH` and no schedule lines |
 | POST | `/v1/sales/backorder-runs:preview` | `sales.backorder.run` | Stateless FR-27.17 preview over supplied lines; nothing is committed |
@@ -105,7 +120,24 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
   re-confirm of the same order within that window and within 5% of the held
   amount does not re-hold. The user who applied a hold
   cannot release it. Releases and confirms are versioned by `If-Match`.
-  (Blocking by MANUAL and PRICE_REVIEW on release is not yet enforced; see NOT-IMPLEMENTED.)
+  MANUAL, FRAUD and PRICE_REVIEW holds are applied by hand with
+  `sales.order.hold` on a DRAFT, OPEN or CONFIRMED order (one ACTIVE hold per
+  type); CREDIT holds only come from the credit check. (Blocking by MANUAL and
+  PRICE_REVIEW on warehouse release belongs with w28; see NOT-IMPLEMENTED.)
+- **BR-27.13 / FR-27.15** listings: every line of a new order (including an
+  agreement release) is checked on the order date. A customer DENY beats
+  everything, then customer ALLOW, group DENY, group ALLOW; a product with no
+  ALLOW entry is unrestricted, otherwise a customer not on the list is
+  NOT_LISTED. A denied line is 422 `SLS-0011` unless the caller has
+  `sales.order.approve` and gives `listingOverrideReason`; each accepted line is
+  logged on the order (`listingOverrides`). Group entries apply when the order
+  names its `customerGroup` (until the w7 party lookup supplies it).
+- **BR-27.9 / FR-27.10** agreements: a quantity commitment at an agreed price.
+  `:release-order` locks the agreement row, refuses a release beyond the
+  remaining quantity (`SLS-0008` AGREEMENT_EXHAUSTED, AC-27.9) or outside the
+  validity period (`SLS-0029`), creates the DRAFT order (channel `AGREEMENT`)
+  and stores the release in the same transaction. At the commitment the
+  agreement is EXHAUSTED. Overdelivery is 0 until the parameter table exists.
 - **FR-27.9 / BR-27.5** change management: PATCH changes the header date and
   OPEN/RESERVED lines of a DRAFT, OPEN or CONFIRMED order. Each change that
   alters something bumps the version, stores the field-level diff in
@@ -141,7 +173,9 @@ Problem details are `application/problem+json` with `type` =
 |---|---|---|
 | `SLS-0005` | 422 | Credit hold applied (rule failed) |
 | `SLS-0006` | 412 / 428 | `If-Match` stale (412), or missing (428) |
-| `SLS-0007` | 409 | Duplicate `(channel, externalRef)` with a different payload |
+| `SLS-0007` | 409 | Duplicate `(channel, externalRef)` with a different payload; or a concurrent create of the same agreement or release |
+| `SLS-0008` | 422 | Agreement commitment exhausted (`AGREEMENT_EXHAUSTED`) |
+| `SLS-0011` | 422 | Product not listed for the customer (`PRODUCT_NOT_LISTED`) |
 | `SLS-0014` | 200 (held) | Cumulative quantity mismatch; the scheduling release is held (`code` = `CUM_QTY_MISMATCH`) |
 | `SLS-0015` | 200 (warning) | Backorder run preview would deconfirm lines (`warningCode`) |
 | `SLS-0019` | 422 | Order not confirmable in its current state |
@@ -152,9 +186,13 @@ Problem details are `application/problem+json` with `type` =
 | `SLS-0025` | 422 | Order cannot be cancelled: shipped, closed or cancelled, or a line is picked, delivered or invoiced |
 | `SLS-0026` | 422 | Scheduling release refused: negative quantities, unordered or decreasing buckets |
 | `SLS-0027` | 422 | Backorder run refused: unknown strategy, supply below zero, or a WIN, GAIN or LOSE run that cannot keep a protected confirmation |
+| `SLS-0028` | 422 | Hold cannot be applied: CREDIT by hand, the order is shipped, closed or cancelled, or an ACTIVE hold of the type exists |
+| `SLS-0029` | 422 | Agreement is not valid on the release date |
 | `SLS-0100` | 404 | Order not found |
 | `SLS-0101` | 404 | Hold not found |
 | `SLS-0102` | 404 | Credit profile not found |
+| `SLS-0103` | 404 | Sales agreement not found |
+| `SLS-0104` | 404 | Product listing not found |
 | `idempotency_key_reuse` | 422 | Same `Idempotency-Key` with a different body (kernel) |
 | `COM-0001` | 400 | Request failed validation; field errors in `errors` |
 | `AUTH-0001` | 401 | Missing or malformed tenant |

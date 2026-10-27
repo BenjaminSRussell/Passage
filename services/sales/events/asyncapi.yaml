@@ -42,17 +42,28 @@ channels:
     messages:
       orderCancelled:
         $ref: "#/components/messages/OrderCancelled"
+  agreementReleased:
+    address: passage.sales.agreement
+    messages:
+      agreementReleased:
+        $ref: "#/components/messages/AgreementReleased"
 operations:
+  publishAgreementReleased:
+    action: send
+    channel: {$ref: "#/channels/agreementReleased"}
+    summary: One release drew quantity against a sales agreement commitment and created a DRAFT order, in the same transaction (FR-27.10). Consumers - planning, analytics, key account reporting.
+    messages:
+      - {$ref: "#/channels/agreementReleased/messages/agreementReleased"}
   publishOrderChanged:
     action: send
     channel: {$ref: "#/channels/orderChanged"}
-    summary: An order changed after creation; carries the version and the field-level diff. Consumers: fulfillment, planning (re-promise), portal.
+    summary: An order changed after creation; carries the version and the field-level diff. Consumers - fulfillment, planning (re-promise), portal.
     messages:
       - {$ref: "#/channels/orderChanged/messages/orderChanged"}
   publishOrderCancelled:
     action: send
     channel: {$ref: "#/channels/orderCancelled"}
-    summary: An order was cancelled; its open lines are CANCELLED and its active holds CLEARED. Consumers: fulfillment, planning, portal.
+    summary: An order was cancelled; its open lines are CANCELLED and its active holds CLEARED. Consumers - fulfillment, planning, portal.
     messages:
       - {$ref: "#/channels/orderCancelled/messages/orderCancelled"}
   publishOrderConfirmed:
@@ -60,7 +71,7 @@ operations:
     channel: {$ref: "#/channels/orderConfirmed"}
     summary: >-
       An order was confirmed, by :confirm after a passing credit check or by the
-      release of its CREDIT hold. Consumers: fulfillment, planning, analytics.
+      release of its CREDIT hold. Consumers - fulfillment, planning, analytics.
     messages:
       - {$ref: "#/channels/orderConfirmed/messages/orderConfirmed"}
   publishOrderHoldApplied:
@@ -113,6 +124,13 @@ components:
         $ref: "#/components/schemas/CloudEventHeaders"
       payload:
         $ref: "#/components/schemas/CreditCheckData"
+    AgreementReleased:
+      name: dev.passage.sales.agreement.released.v1
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/AgreementReleasedData"
     OrderChanged:
       name: dev.passage.sales.order.changed.v1
       contentType: application/cloudevents+json
@@ -212,6 +230,21 @@ components:
         reason_code: {type: string}
         actor: {type: string}
         version: {type: integer}
+    AgreementReleasedData:
+      type: object
+      required: [agreement_id, agreement_number, customer_id, product_id, sales_order_id, quantity, released_qty, remaining_qty, status, version, actor]
+      properties:
+        agreement_id: {type: string, format: uuid}
+        agreement_number: {type: string, example: SA-0000001}
+        customer_id: {type: string, format: uuid}
+        product_id: {type: string, format: uuid}
+        sales_order_id: {type: string, format: uuid, description: the DRAFT order the release created}
+        quantity: {type: string, description: quantity drawn by this release (decimal string)}
+        released_qty: {type: string, description: cumulative released quantity after this release}
+        remaining_qty: {type: string, description: commitment less released quantity}
+        status: {type: string, enum: [ACTIVE, EXHAUSTED]}
+        version: {type: integer, description: the agreement version after the release}
+        actor: {type: string}
     CreditCheckData:
       type: object
       required: [customer_id, order_id, rules, outcome]

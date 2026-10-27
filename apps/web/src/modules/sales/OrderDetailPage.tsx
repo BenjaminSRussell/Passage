@@ -1,7 +1,8 @@
-import { useState, type ReactNode } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Alert, Badge, Button, buttonClassName, Card, DataTable, EmptyState, PageHeader, Skeleton, StatusPill, type DataTableColumn } from "../../shell/ui";
+import { Alert, Badge, Button, buttonClassName, Card, DataTable, EmptyState, FormField, Input, PageHeader, Select, Skeleton, StatusPill, type DataTableColumn } from "../../shell/ui";
 import {
+  applyHold,
   CHANGEABLE_STATUSES,
   confirmOrder,
   describeProblem,
@@ -9,6 +10,9 @@ import {
   releaseHold,
   type CreditRule,
   type Hold,
+  type ListingOverride,
+  type ManualHoldType,
+  MANUAL_HOLD_TYPES,
   type Order,
   type OrderLine,
   type Problem,
@@ -43,6 +47,9 @@ export function OrderDetailPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [failure, setFailure] = useState<Problem | null>(null);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
+  const [holdType, setHoldType] = useState<ManualHoldType>("MANUAL");
+  const [reasonCode, setReasonCode] = useState("");
+  const [reasonError, setReasonError] = useState<string | undefined>();
   const current = latest && latest.value.id === id ? latest : state.data;
 
   if (state.error && !current) {
@@ -94,6 +101,27 @@ export function OrderDetailPage() {
         : { tone: "success", text: `${sentence(hold.holdType)} hold released.` },
     );
 
+  async function placeHold(event: FormEvent) {
+    event.preventDefault();
+    const reason = reasonCode.trim();
+    if (reason.length < 1 || reason.length > 80) {
+      setReasonError("Enter a reason code of up to 80 characters.");
+      return;
+    }
+    setReasonError(undefined);
+    await run(
+      "hold",
+      async () => {
+        const res = await applyHold(order.id, etag, holdType, reason);
+        return { ...res, value: { ...res.value, confirmed: false } };
+      },
+      () => {
+        setReasonCode("");
+        return { tone: "success", text: `${sentence(holdType)} hold applied.` };
+      },
+    );
+  }
+
   const confirmable = order.status === "DRAFT" || order.status === "OPEN";
   const blocked = order.holds.some((h) => h.status === "ACTIVE" && (h.holdType === "CREDIT" || h.holdType === "FRAUD"));
   const stale = failure?.code === "SLS-0006";
@@ -106,6 +134,7 @@ export function OrderDetailPage() {
     ["Legal entity", order.legalEntityId],
     ["Requested ship date", order.requestedShipDate],
     ["Channel", order.externalRef ? `${order.channel} · ${order.externalRef}` : order.channel],
+    ["Customer group", order.customerGroup ?? dash],
     ["Net total", money(order.netTotal, order.currency)],
     ["Version", String(order.version)],
     ["Created", formatDateTime(order.createdAt)],
@@ -142,6 +171,14 @@ export function OrderDetailPage() {
           dash
         ),
     },
+  ];
+
+  const overrideColumns: DataTableColumn<ListingOverride>[] = [
+    { key: "lineNo", header: "Line", align: "end" },
+    { key: "productId", header: "Product", mono: true },
+    { key: "decision", header: "Listing decision", render: (o) => sentence(o.decision) },
+    { key: "reason", header: "Reason" },
+    { key: "actor", header: "Accepted by" },
   ];
 
   const ruleColumns: DataTableColumn<CreditRule>[] = [
@@ -220,7 +257,33 @@ export function OrderDetailPage() {
         ) : (
           <DataTable label="Holds" columns={holdColumns} rows={order.holds} getRowKey={(h) => h.id} />
         )}
+        {CHANGEABLE_STATUSES.includes(order.status) ? (
+          <form className={styles.toolbar} onSubmit={placeHold} noValidate aria-label="Apply a hold">
+            <FormField id="hold-type" label="Hold type" hint="Fraud blocks confirmation; manual and price review block warehouse release.">
+              {(control) => (
+                <Select {...control} value={holdType} onChange={(e) => setHoldType(e.target.value as ManualHoldType)}>
+                  {MANUAL_HOLD_TYPES.map((t) => (
+                    <option key={t} value={t}>
+                      {sentence(t)}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </FormField>
+            <FormField id="hold-reason" label="Reason code" error={reasonError}>
+              {(control) => <Input {...control} value={reasonCode} onChange={(e) => setReasonCode(e.target.value)} invalid={Boolean(reasonError)} />}
+            </FormField>
+            <Button type="submit" loading={busy === "hold"} disabled={busy !== null && busy !== "hold"}>
+              Apply hold
+            </Button>
+          </form>
+        ) : null}
       </Card>
+      {order.listingOverrides && order.listingOverrides.length > 0 ? (
+        <Card title="Listing overrides">
+          <DataTable label="Listing overrides" columns={overrideColumns} rows={order.listingOverrides} getRowKey={(o) => String(o.lineNo)} />
+        </Card>
+      ) : null}
       <Card title="Last credit check">
         {order.creditCheck ? (
           <div className={styles.stack}>

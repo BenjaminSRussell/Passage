@@ -16,7 +16,10 @@ import (
 	"github.com/BenjaminSRussell/passage/services/sales/internal/store"
 )
 
-const dayLayout = "2006-01-02"
+const (
+	dayLayout         = "2006-01-02"
+	maxOverrideReason = 500
+)
 
 type orderLineRequest struct {
 	ProductID         string  `json:"productId"`
@@ -29,16 +32,22 @@ type orderLineRequest struct {
 	RequestedShipDate string  `json:"requestedShipDate"`
 }
 
+// createOrderRequest is the body of POST /v1/sales/orders. customerGroup
+// stands in for the w7 customer group so GROUP listing entries apply;
+// listingOverrideReason is required, with duty sales.order.approve, to accept a
+// line the product listing denies (FR-27.15).
 type createOrderRequest struct {
-	LegalEntityID     string             `json:"legalEntityId"`
-	CustomerID        string             `json:"customerId"`
-	InvoiceAccountID  string             `json:"invoiceAccountId"`
-	OrderType         string             `json:"orderType"`
-	Currency          string             `json:"currency"`
-	RequestedShipDate string             `json:"requestedShipDate"`
-	Channel           string             `json:"channel"`
-	ExternalRef       *string            `json:"externalRef"`
-	Lines             []orderLineRequest `json:"lines"`
+	LegalEntityID         string             `json:"legalEntityId"`
+	CustomerID            string             `json:"customerId"`
+	InvoiceAccountID      string             `json:"invoiceAccountId"`
+	OrderType             string             `json:"orderType"`
+	Currency              string             `json:"currency"`
+	RequestedShipDate     string             `json:"requestedShipDate"`
+	Channel               string             `json:"channel"`
+	ExternalRef           *string            `json:"externalRef"`
+	CustomerGroup         *string            `json:"customerGroup,omitempty"`
+	ListingOverrideReason string             `json:"listingOverrideReason,omitempty"`
+	Lines                 []orderLineRequest `json:"lines"`
 }
 
 // confirmResponse is the order with the confirmation outcome.
@@ -83,11 +92,18 @@ func buildOrder(req createOrderRequest) (store.NewOrder, map[string]string) {
 	if req.ExternalRef != nil && (*req.ExternalRef == "" || len(*req.ExternalRef) > 100) {
 		f["externalRef"] = "must be 1 to 100 characters"
 	}
+	if req.CustomerGroup != nil && (*req.CustomerGroup == "" || len(*req.CustomerGroup) > maxScopeKey) {
+		f["customerGroup"] = fmt.Sprintf("must be 1 to %d characters", maxScopeKey)
+	}
+	if len(req.ListingOverrideReason) > maxOverrideReason {
+		f["listingOverrideReason"] = fmt.Sprintf("must be at most %d characters", maxOverrideReason)
+	}
 	if len(req.Lines) == 0 || len(req.Lines) > maxLines {
 		f["lines"] = fmt.Sprintf("must have 1 to %d lines", maxLines)
 	}
 	in := store.NewOrder{LegalEntityID: req.LegalEntityID, CustomerID: req.CustomerID, InvoiceAccountID: req.InvoiceAccountID,
-		OrderType: orderType, Currency: req.Currency, RequestedShipDate: req.RequestedShipDate, Channel: channel, ExternalRef: req.ExternalRef}
+		OrderType: orderType, Currency: req.Currency, RequestedShipDate: req.RequestedShipDate, Channel: channel, ExternalRef: req.ExternalRef,
+		CustomerGroup: req.CustomerGroup, ListingOverrideReason: req.ListingOverrideReason}
 	for i, l := range req.Lines {
 		path := func(name string) string { return fmt.Sprintf("lines[%d].%s", i, name) }
 		line, ok := buildLine(i, l, f, path)
@@ -183,6 +199,9 @@ func (a *API) createOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	in.RequestHash = hash
 	in.IdempotencyKey = &key
+	in.Actor = p.UserID
+	in.CanOverrideListing = p.HasDuty(dutyOrderApprove)
+	in.OrderDate = a.now()
 	order, created, err := a.store.CreateOrder(r.Context(), in)
 	if err != nil {
 		a.fail(w, r, "create order", err)
