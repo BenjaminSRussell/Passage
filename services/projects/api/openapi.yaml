@@ -1,0 +1,326 @@
+openapi: 3.1.0
+info:
+  title: Passage Projects API
+  version: 0.1.0
+  description: |
+    Wave 41 (PSG-41), slice 1: project master and hierarchy (FR-41.1) with stage
+    transitions. WBS, journals, billing, estimates, timesheets and the rest of
+    wave 41 are later slices (see NOT-IMPLEMENTED.md).
+    Browser calls use `/api/v1/projects/...`; the BFF rewrites them to `/v1/projects/...`.
+servers:
+  - url: https://api.{env}.passage.dev
+    variables:
+      env:
+        default: dev
+paths:
+  /v1/projects:
+    post:
+      operationId: createProject
+      summary: Create a project (stage CREATED)
+      x-passage-duty: ProjMaintain
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProjectRequest'
+      responses:
+        '201':
+          description: Project created
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '200':
+          description: Idempotent replay of an earlier create with the same key and body
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Idempotent-Replayed:
+              schema:
+                type: string
+                enum: ['true']
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+    get:
+      operationId: listProjects
+      summary: List projects (cursor pagination)
+      x-passage-duty: ProjInquire
+      parameters:
+        - name: stage
+          in: query
+          schema:
+            $ref: '#/components/schemas/Stage'
+        - name: projectType
+          in: query
+          schema:
+            $ref: '#/components/schemas/ProjectType'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 100
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: One page of projects
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Project'
+                  nextCursor:
+                    type: string
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+  /v1/projects/{id}:
+    get:
+      operationId: getProject
+      summary: Read a project
+      x-passage-duty: ProjInquire
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: The project
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+  /v1/projects/{id}/transitions:
+    post:
+      operationId: transitionProject
+      summary: Move a project to another stage (CREATED → IN_PROCESS → FINISHED, IN_PROCESS ⇄ ON_HOLD)
+      x-passage-duty: ProjManage
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransitionRequest'
+      responses:
+        '200':
+          description: Stage changed
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '428':
+          $ref: '#/components/responses/Problem'
+components:
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        maxLength: 255
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: The project version as an ETag, for example `"3"`.
+      schema:
+        type: string
+    ProjectId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        maxLength: 20
+  headers:
+    ETag:
+      description: Project version, quoted.
+      schema:
+        type: string
+  responses:
+    Problem:
+      description: RFC 9457 problem details
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+  schemas:
+    Stage:
+      type: string
+      enum: [CREATED, IN_PROCESS, ON_HOLD, FINISHED]
+    ProjectType:
+      type: string
+      enum: [TIME_MATERIAL, FIXED_PRICE, INTERNAL, COST, INVESTMENT, TIME]
+    CreateProjectRequest:
+      type: object
+      additionalProperties: false
+      required: [id, legalEntityId, projectType, currency, startDate]
+      description: |
+        A sub-project (parentProjectId set) inherits projectGroupId, customerPartyId and
+        contractId from its parent when they are omitted (FR-41.1). It must be in the
+        parent's legal entity and cannot name a different customer (422 PROJ-PARENT-002).
+        A parent the caller cannot see, or that does not exist, is 422 PROJ-PARENT-001.
+      properties:
+        id:
+          type: string
+          pattern: '^[A-Z0-9][A-Z0-9-]{0,19}$'
+          description: Project id. Will come from number sequence PROJ once the kernel sequence package lands.
+        legalEntityId:
+          type: string
+          format: uuid
+        parentProjectId:
+          type: string
+          maxLength: 20
+        projectGroupId:
+          type: string
+          minLength: 1
+          maxLength: 10
+          description: Required unless parentProjectId is set (then inherited when omitted).
+        projectType:
+          $ref: '#/components/schemas/ProjectType'
+        customerPartyId:
+          type: string
+          format: uuid
+          description: Required for external types (TIME_MATERIAL, FIXED_PRICE) unless inherited from the parent.
+        contractId:
+          type: string
+          format: uuid
+          description: Inherited from the parent when omitted on a sub-project.
+        currency:
+          type: string
+          pattern: '^[A-Z]{3}$'
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+          description: Must be on or after startDate.
+    TransitionRequest:
+      type: object
+      additionalProperties: false
+      required: [to]
+      properties:
+        to:
+          $ref: '#/components/schemas/Stage'
+    Project:
+      type: object
+      required: [id, legalEntityId, projectGroupId, projectType, currency, stage, startDate, version]
+      properties:
+        id:
+          type: string
+        legalEntityId:
+          type: string
+          format: uuid
+        parentProjectId:
+          type: string
+        projectGroupId:
+          type: string
+        projectType:
+          $ref: '#/components/schemas/ProjectType'
+        customerPartyId:
+          type: string
+          format: uuid
+        contractId:
+          type: string
+          format: uuid
+        currency:
+          type: string
+        stage:
+          $ref: '#/components/schemas/Stage'
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+        version:
+          type: integer
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    Problem:
+      type: object
+      description: RFC 9457 with Passage extensions (code, traceId, errors).
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          format: uri
+          example: https://passage.dev/problems/PROJ-STAGE-001
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+        code:
+          type: string
+        traceId:
+          type: string
+        errors:
+          type: object
+          additionalProperties:
+            type: string

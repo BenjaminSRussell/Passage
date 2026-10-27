@@ -1,0 +1,6 @@
+apiVersion: v2
+name: projects
+description: Passage projects service (wave 41, project master and stages)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

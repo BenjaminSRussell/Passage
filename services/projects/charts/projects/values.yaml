@@ -1,0 +1,41 @@
+image:
+  repository: ghcr.io/benjaminsrussell/passage-projects
+  # Digest-pinned by Argo CD in deploy/; the tag is a fallback for local k3d.
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+service:
+  type: ClusterIP
+  port: 8080
+  adminPort: 9090
+
+# DATABASE_URL is read from this existing secret (key: DATABASE_URL), never inlined.
+database:
+  secretName: projects-db
+  secretKey: DATABASE_URL
+
+env:
+  PASSAGE_ENV: dev
+  SERVICE_NAME: projects
+  HTTP_ADDR: ":8080"
+  MIGRATE_ON_START: "false"
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+probes:
+  liveness:
+    path: /healthz
+  readiness:
+    path: /readyz
+
+serviceMonitor:
+  enabled: false
+  interval: 30s

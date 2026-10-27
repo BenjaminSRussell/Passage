@@ -1,0 +1,127 @@
+asyncapi: 3.0.0
+info:
+  title: Passage Projects events
+  version: 0.1.0
+  description: |
+    CloudEvents 1.0 published through the outbox in the same transaction as the
+    state change (Debezium outbox router relays to Kafka). Consumers: analytics,
+    budget control (wave 38), resource planning. Slice 1 publishes project master
+    events only.
+defaultContentType: application/cloudevents+json
+channels:
+  projectCreated:
+    address: passage.projects.project
+    messages:
+      projectCreated:
+        $ref: '#/components/messages/ProjectCreated'
+  projectUpdated:
+    address: passage.projects.project
+    messages:
+      projectUpdated:
+        $ref: '#/components/messages/ProjectUpdated'
+operations:
+  publishProjectCreated:
+    action: send
+    channel:
+      $ref: '#/channels/projectCreated'
+  publishProjectUpdated:
+    action: send
+    channel:
+      $ref: '#/channels/projectUpdated'
+components:
+  messages:
+    ProjectCreated:
+      name: dev.passage.projects.project.created.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: '#/components/schemas/ProjectCreatedEvent'
+    ProjectUpdated:
+      name: dev.passage.projects.project.updated.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: '#/components/schemas/ProjectUpdatedEvent'
+  schemas:
+    CloudEventEnvelope:
+      type: object
+      description: The platform envelope (platform/go/events.Event), structured mode.
+      required: [specversion, id, source, type, subject, time, datacontenttype, data, tenantid]
+      properties:
+        specversion:
+          type: string
+          const: '1.0'
+        id:
+          type: string
+          description: Event id (UUID v7), unique per event; consumers de-duplicate on it.
+        source:
+          type: string
+          const: projects
+        type:
+          type: string
+        subject:
+          type: string
+          description: The project id.
+        time:
+          type: string
+          format: date-time
+        datacontenttype:
+          type: string
+          const: application/json
+        tenantid:
+          type: string
+          format: uuid
+        actor:
+          type: string
+          description: User id of the caller that made the change.
+        correlationid:
+          type: string
+        causationid:
+          type: string
+    ProjectCreatedEvent:
+      allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: object
+              required: [id, legalEntityId, projectType, stage, currency, version]
+              properties:
+                id:
+                  type: string
+                legalEntityId:
+                  type: string
+                  format: uuid
+                parentProjectId:
+                  type: string
+                  description: Set for a sub-project.
+                projectType:
+                  type: string
+                  enum: [TIME_MATERIAL, FIXED_PRICE, INTERNAL, COST, INVESTMENT, TIME]
+                stage:
+                  type: string
+                  enum: [CREATED]
+                currency:
+                  type: string
+                version:
+                  type: integer
+    ProjectUpdatedEvent:
+      allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: object
+              required: [id, changedFields, stage, version]
+              properties:
+                id:
+                  type: string
+                changedFields:
+                  type: array
+                  items:
+                    type: string
+                stage:
+                  type: string
+                  enum: [CREATED, IN_PROCESS, ON_HOLD, FINISHED]
+                version:
+                  type: integer
