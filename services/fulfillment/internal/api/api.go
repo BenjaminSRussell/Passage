@@ -77,6 +77,7 @@ func (a *API) Routes(r chi.Router) {
 	r.With(authz.RequireDuty("PackingSlipPost")).Post("/api/v1/fulfillment/packing-slips/{id}:cancel", a.cancelPackingSlip)
 	a.routesPacking(r)
 	a.routesWorkbench(r)
+	a.routesInquiry(r)
 }
 
 // ---- request and response DTOs -------------------------------------------

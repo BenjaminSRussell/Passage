@@ -38,6 +38,18 @@ matching OpenAPI and AsyncAPI, and the web screens: picking workbench, pick
 waves and wave detail, and on the shipment detail the remainder pick, cancel,
 tracking with manual entry, the ZPL label and the ASN option.
 
+Slice 4 adds the delivered-not-invoiced report (FR-28.12, section 5.28.14):
+`GET /delivered-not-invoiced` gives, for one legal entity and optionally one
+customer as of a date, the open balance on account 1405 per currency and the
+packing slips that make it up with their days outstanding. The balance is read
+from the slip journals, so a slip posted with `cogsAtShipment` (Dr 5000) never
+appears, a slip cancelled after the report date still counts on that date, and
+an invoiced slip drops out. Store tests against Postgres cover AC-28.8 (scaled
+down, with the Σ 1405 reconciliation), the as-of date around a cancellation, the
+customer filter, tenant isolation and the legal-entity scope. The web screen
+`/fulfillment/delivered-not-invoiced` shows the totals and the slips and opens a
+slip on its packing slip page.
+
 Everything listed below is missing. Each row gives a status and a reason.
 Status is `later slice of PSG-28` (same service, next slice) or `handoff`
 (needs another wave, the kernel, or a path outside this wave's ownership).
@@ -78,7 +90,7 @@ Status is `later slice of PSG-28` (same service, next slice) or `handoff`
 | D6 | Packing instructions and auto-pack (`packing_rule`, BR-28.11) | partial | Built: container types, packing rules per product with an optional customer (the customer rule wins), `POST /shipments/{id}:auto-pack` filling containers most specific rule first and closing on quantity or max weight, FUL-0012 warnings for lines without a rule, FUL-0013 when one unit exceeds the max weight, manual repack, and the screens. Not built: rules per product group (needs wave 8 groups), nesting levels, the `auto_pack_enabled` warehouse setting, serial-tracked lines (the domain never splits a serial unit, but the store does not know which lines are serial-tracked until BR-28.10 tracking dimensions are built), and a one-click accept of a proposed plan (auto-pack packs directly; the result lists what it did). |
 | D7 | Packaging materials, packaging fee per kg and country, statistical packaging line | partial | Built: packaging material weight per product unit, container types with a material, country fee rates valid from a date, the fee per material (product packaging × shipped units, plus the tare of non-returnable containers of a material) rounded half-even per material, FUL-0014 when a shipped material has no rate, the mirror lines on cancel, the packaging report per country and month (optionally per legal entity) and the screens. Not built: material attributes (type, recyclable flag, unit) beyond the code; the billable SURCHARGE (handoff above); the authoritative DE/FR/ES rate tables, LUCID/CITEO exports and the period statement document (handoff to the country packs, wave 48); the monthly accrual job. |
 | D7 | Returnable transport packaging balances (`RTP_NEGATIVE`) | partial | Built: balance per (customer, container type) raised by returnable containers on post, lowered on cancel and by `POST /returnable-packaging:return`, refused below zero with FUL-0015, the balance list and the screen. Not built: the aging inquiry (days outstanding) and its nightly job, the charge hook after `rtp_charge_days` (handoff to wave 30), return receipts from wave 30 RMA lines (handoff to wave 30), manual balance adjustments (`ReturnablePackagingMaintain`), the `rtp_tracking_enabled` setting, and an event for return receipts. |
-| Deploy | Fulfillment workspace (tiles, release board, packing station, shipment detail) | partial | Built: workspace tiles (released, picking, packed not shipped, partially shipped, shipped), release board with carrier and pick zone, picking workbench, pick waves and wave detail, shipments list, shipment detail with pick and remainder pick, auto-pack, pack, post (with ship-to country and ASN), cancel, tracking and the ZPL label, packing slip journal and detail with packaging fees, scan page, container types, packing rules, packaging materials, packaging fees and report, returnable packaging. Not built: carrier exceptions and DNI tiles, pick list print, packing-station scan-to-pack, bulk release on multi-select, per-warehouse layouts. They need the carrier, DNI and wave endpoints. |
+| Deploy | Fulfillment workspace (tiles, release board, packing station, shipment detail) | partial | Built: workspace tiles (released, picking, packed not shipped, partially shipped, shipped), release board with carrier and pick zone, picking workbench, pick waves and wave detail, shipments list, shipment detail with pick and remainder pick, auto-pack, pack, post (with ship-to country and ASN), cancel, tracking and the ZPL label, packing slip journal and detail with packaging fees, delivered-not-invoiced report, scan page, container types, packing rules, packaging materials, packaging fees and report, returnable packaging. Not built: the carrier exceptions tile, a DNI balance tile on the workspace (the balance is per legal entity, so the workspace links to the report instead), pick list print, packing-station scan-to-pack, bulk release on multi-select, per-warehouse layouts. They need the carrier, DNI and wave endpoints. |
 | Deploy | Mobile pick UI (basic PWA) in the demo warehouse | handoff to pwa-apps (owned elsewhere) | The PWA is outside this wave's owned paths. The GS1 parser (`apps/web/src/modules/fulfillment/gs1.ts`) can be reused. |
 | Deploy | Demo warehouse seed data | handoff to deployment (`deploy/`) | `deploy/` is not owned by this wave. |
 | Deploy | Feature flags `fulfillment.consolidation`, `fulfillment.asn`, `fulfillment.mobile_pick` | later slice of PSG-28 | No flag system wired in this slice. |
@@ -99,14 +111,18 @@ AC-28.11 (auto-pack 12, 12, 6 with valid SSCCs and gross weights), AC-28.12
 (balance 6 after 10 out and 4 back; a return of 7 refused) are covered by store
 tests against Postgres (`internal/store/packing_test.go`), domain tests and web
 tests. The rejection code is `FUL-0015` from the message catalog (section
-5.28.18), not the `RTP_NEGATIVE` string in BR-28.13. Other ACs in section 5.28.8
-(AC-28.5 through AC-28.9) map to deliverables above and are not built yet.
+5.28.18), not the `RTP_NEGATIVE` string in BR-28.13. AC-28.5 (drop-ship), AC-28.6 (carrier
+adapters) and AC-28.7 (1,000-order E2E) map to deliverables above and are not
+built yet. AC-28.9 is met by the scan page parser (`module.test.tsx`); the
+mobile pick PWA around it is a handoff (see Deploy).
 AC-28.10 (60 lines for UPS across 12 customers, waves of at most 20 lines, no
 shipment split, one action) is covered by domain, store and web tests
 (`wave_test.go`, `store/workbench_test.go`, `waves.test.tsx`). AC-28.4 is
 partial: 90 of 100 picked ships 90, the shipment stays PARTIALLY_SHIPPED with 10
 to go and `pick.confirmed` carries `backordered` 10; the reservation release is
-inventory's (handoff above).
+inventory's (handoff above). AC-28.8 is partial: the DNI report equals the cost of
+the uninvoiced slips and Σ 1405 of their journals (store test, scaled from 50
+slips to 5); the comparison with the ledger's GL 1405 is a handoff to ledger.
 
 ## Test plan items (section 5.28.9)
 
@@ -117,7 +133,7 @@ inventory's (handoff above).
 | SSCC and GS1-128 property tests | built | `domain/sscc_test.go` and `web gs1.test.ts`. |
 | Pick-pack-ship 1k E2E | later slice of PSG-28 | Needs inventory (handoff). |
 | Carrier adapters (recordings) | handoff | carrier-gateway. |
-| DNI equals GL 1405 (daily job) | later slice of PSG-28 | No DNI projection or 02:00 job. Needs ledger (handoff). |
+| DNI equals GL 1405 (daily job) | partial | Built: the DNI report and a store test that it equals Σ 1405 over the uninvoiced slip journals (AC-28.8 scaled to 5 slips, 2 invoiced, plus one `cogsAtShipment` slip). Not built: the 02:00 job and the comparison with the ledger's GL 1405 balance, which needs the ledger client (handoff to ledger, wave 11). |
 | Fixtures `warehouse-sim-1k`, `sscc-200`, `carrier-recorded`, `dropship-30`, `cogs-matrix-14` under `testdata/` | later slice of PSG-28 | Not built. |
 
 ## Operations and API surface
@@ -128,7 +144,7 @@ inventory's (handoff above).
 | Pick confirmation per wave (`/waves/{id}:confirm-pick`) | later slice of PSG-28 | `/waves` (create, list), `/waves:preview` and `/waves/{id}` are built (slice 3). Picks are confirmed per shipment with `/shipments/{id}:confirm-pick`. |
 | `PackingSlipPost` cancel requires `If-Match` (convention) | deviation | A posted slip is immutable and has no version. Only Idempotency-Key is required. |
 | Idempotency keys are scoped per tenant and key, not per principal | deviation | The stored fingerprint covers the method, path and body, so a key reused on another resource is refused, not replayed. The table matches `dbx.IdempotencyDDL`. Records are not expired after 24 hours yet (no cleanup job). |
-| Duties on handlers (`x-passage-duty`) | built as route-level checks | OPA decision point is handled by the kernel `authz` package. Slice 2 uses `PackingRuleMaintain` (container types, packing rules, packaging materials), `PackagingFeeMaintain` (rates and report) and `WarehouseReceive` (return receipts); the config lists are `WarehouseView`. Slice 3 uses `WarehouseRelease` (workbench preview and create, shipment cancel), `WarehouseView` (waves, tracking list, container label) and `WarehouseShip` (recording a tracking event). The `CarrierAdmin` and `ReturnablePackagingMaintain` duties are not used yet (no carrier configuration or balance-adjustment endpoints). Segregation of duties (WarehousePick with PackingSlipPost under `pick_post_separation`; PackingSlipPost with SalesOrderMaintain; ReturnablePackagingMaintain with WarehouseReceive; PackagingFeeMaintain with InvoiceMaintain) is not enforced. The web nav carries the duty per entry. |
+| Duties on handlers (`x-passage-duty`) | built as route-level checks | OPA decision point is handled by the kernel `authz` package. Slice 2 uses `PackingRuleMaintain` (container types, packing rules, packaging materials), `PackagingFeeMaintain` (rates and report) and `WarehouseReceive` (return receipts); the config lists are `WarehouseView`. Slice 3 uses `WarehouseRelease` (workbench preview and create, shipment cancel), `WarehouseView` (waves, tracking list, container label) and `WarehouseShip` (recording a tracking event). Slice 4 uses `WarehouseView` for the DNI report (section 5.28.17: "GET shipments, tracking, DNI"). The `CarrierAdmin` and `ReturnablePackagingMaintain` duties are not used yet (no carrier configuration or balance-adjustment endpoints). Segregation of duties (WarehousePick with PackingSlipPost under `pick_post_separation`; PackingSlipPost with SalesOrderMaintain; ReturnablePackagingMaintain with WarehouseReceive; PackagingFeeMaintain with InvoiceMaintain) is not enforced. The web nav carries the duty per entry. |
 | Returnable balances are kept per (customer, container type), not per (customer, packaging material) as FR-28.16 states | deviation | A returnable container type is the item the customer holds and returns (for example EUR-PALLET), and a return receipt names it. Two returnable types of one material keep separate balances. |
 | Cancelling a slip writes the mirror packaging fee lines in the month of the reversal, not the month of the original | deviation | It matches the reversing journal, which is dated on the cancel day, and leaves a reported month unchanged once filed. Within one month the report nets to zero. |
 | Cancelling a slip whose returnable containers the customer has already returned is refused with FUL-0015 | deviation | The balance would go negative (BR-28.13). Reverse the return first, or post a manual adjustment once adjustments exist. |
@@ -141,9 +157,13 @@ inventory's (handoff above).
 | `GS1_COMPANY_PREFIX` per legal entity (BR-28.5) | deviation | Slice 1 has one prefix per process. It is not per legal entity. The serial counter is per tenant and prefix, gap-free, and a serial that no longer fits the prefix is refused. |
 | SSCC no reuse for 12 months (`sscc_no_reuse_months`) | later slice of PSG-28 | No register or reuse check. Uniqueness per tenant is enforced by the database. |
 | Period check (FUL-0002), negative on-hand (FUL-0003), tolerance (FUL-0005), tracking dims (FUL-0006) on post | later slice of PSG-28 | Period control is wave 14. Negative on-hand is wave 16. |
-| Consolidation (BR-28.8, FUL-0011) | later slice of PSG-28 | |
+| Consolidation (BR-28.8, FUL-0011, `consolidation_enabled`, flag `fulfillment.consolidation`) | later slice of PSG-28 | A shipment holds one order (`order_id`), has no delivery address, and the order's `ship_separately` flag is not read from sales (wave 27). Consolidating needs multi-order shipments, the address on the shipment and the flag, so the FUL-0011 check is not built until release can use it. |
 | Shipment cancel of a packed shipment | later slice of PSG-28 | `POST /shipments/{id}:cancel` (slice 3) cancels from OPEN to PACKED while nothing has shipped and the shipment holds no container. Unpacking containers is not built, so a shipment with containers cannot cancel (FUL-0021). |
-| DNI projection and daily reconciliation job (FR-28.12) | later slice of PSG-28 | Needs ledger handoff. |
+| DNI report (FR-28.12) | built | `GET /delivered-not-invoiced` (`WarehouseView`) and the web screen. It is computed from the slip journals on read, not from a stored projection. |
+| DNI daily reconciliation job (02:00, `dni_check_time`), the "GL 1405 diff" column and the DNI diff alert | handoff to ledger (wave 11) and later slice of PSG-28 | The diff needs the ledger's GL 1405 balance per legal entity; the ledger client is a kernel item not yet built. No scheduler is wired in this service. |
+| DNI report is per packing slip, not per slip line (section 5.28.14 lists "slip, line, qty, cost") | deviation | The 1405 balance is posted per slip; lines with quantities are on the packing slip detail the row opens. |
+| An INVOICED slip leaves the DNI report for every as-of date | deviation | Billing (wave 29) sets INVOICED and relieves 1405; this service does not record the invoice date, so a past as-of date cannot tell whether the slip was still open then. Cancellations are dated (the reversal's posting date) and are honoured exactly. |
+| DNI report returns at most `limit` slips (default 100, max 500) | deviation | `totals` and `lineCount` always cover every open slip; the web screen asks for 500 and says when the list is cut. Cursor paging is not built. |
 | Release job every 15 min per warehouse | later slice of PSG-28 | Release is on-demand through the API only. |
 | Saga watchdog, carrier retries (BR-28.9), manifest cutoff | later slice of PSG-28 | |
 | Outbox events `shipment.released`, `pick.confirmed`, `packingslip.posted`, `packingslip.cancelled`, `shipment.cancelled`, `wave.created`, `asn.issued`, `tracking.updated` | built | Written in the same transaction as the state change. Consumers are not in this slice. `wave.created` uses the aggregate type `wave`. |
@@ -152,7 +172,7 @@ inventory's (handoff above).
 | `POST /waves:preview` is a read-only POST without Idempotency-Key | deviation | The filter is a JSON body; nothing is written. `POST /waves` (create) requires the key. |
 | Container `:close` endpoint and label reference | later slice of PSG-28 | See D1. |
 | Migration from AX/SAP | later slice of PSG-28 | |
-| Reporting: DNI, SSCC register; RTP aging; short picks and backorders | later slice of PSG-28 | Shipments list (with the PARTIALLY_SHIPPED filter), release board, pick waves, packing slip journal, packaging weights per country and month, and RTP balances are built. |
+| Reporting: SSCC register; RTP aging; short picks and backorders; carrier exceptions and cost | later slice of PSG-28 | Shipments list (with the PARTIALLY_SHIPPED filter), release board, pick waves, packing slip journal, delivered not invoiced, packaging weights per country and month, and RTP balances are built. |
 | Documents: packing slip PDF, delivery note, GS1 label, carrier label, manifest, BOL, packaging fee statement | later slice of PSG-28 | Document rendering is wave 5 (docgen). |
 
 ## Known risks
@@ -163,3 +183,4 @@ inventory's (handoff above).
 - Migration 0003 links every SHIPPED container to its packing slip. It back-fills existing containers with the shipment's live posted slip, which is exact because before slice 3 a shipment had at most one live slip.
 - The workbench reads RELEASED shipments through row-level security, so a user scoped to some legal entities plans waves only from theirs; a wave never mixes legal entities.
 - A DELIVERED tracking event on a PARTIALLY_SHIPPED shipment is stored and published but does not change the shipment; the shipment becomes SHIPPED only when its remainder ships.
+- The DNI report is computed on read from the slip journals (partial index `packing_slip_dni_idx` skips invoiced slips). Cancelled slips and their reversals stay in that index for good; if a legal entity's open plus cancelled slips grow past what the 5-minute budget of section 5.28.19 allows, a stored DNI projection fed by `packingslip.posted` / `cancelled` and the billing invoice event should replace it.

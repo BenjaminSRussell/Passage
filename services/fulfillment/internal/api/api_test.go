@@ -39,6 +39,8 @@ type fakeStore struct {
 	lastPost       store.PostInput
 	packing        packingCalls
 	workbench      workbenchCalls
+	dniFilter      store.DNIFilter
+	dniRows        []domain.DNIRow
 }
 
 func (f *fakeStore) RunRelease(_ context.Context, warehouseID string, groups []domain.ReleaseGroup, idem store.Idem) (store.ReleaseResult, error) {

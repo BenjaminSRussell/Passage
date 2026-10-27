@@ -918,6 +918,60 @@ paths:
                         currency: { type: string }
         "400": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
+  /api/v1/fulfillment/delivered-not-invoiced:
+    get:
+      operationId: deliveredNotInvoiced
+      summary: Delivered-not-invoiced report, the open GL 1405 balance per currency and its packing slips (FR-28.12, section 5.28.14)
+      description: >-
+        A slip counts while its Dr 1405 is not reversed by a cancellation dated on or before asOf and it is not INVOICED.
+        Slips posted with cogsAtShipment carry no 1405 line and never appear. totals cover all lineCount slips;
+        lines holds at most limit of them, oldest posting date first.
+      x-passage-duty: WarehouseView
+      parameters:
+        - { name: legalEntityId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: customerId, in: query, schema: { type: string, format: uuid } }
+        - { name: asOf, in: query, description: "Report date (YYYY-MM-DD, UTC); default today.", schema: { type: string, format: date } }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: Report
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [legalEntityId, customerId, asOf, account, totals, lineCount, lines]
+                properties:
+                  legalEntityId: { type: string, format: uuid }
+                  customerId: { type: [string, "null"], format: uuid }
+                  asOf: { type: string, format: date }
+                  account: { type: string, example: "1405" }
+                  totals:
+                    type: array
+                    items:
+                      type: object
+                      required: [currency, count, amount]
+                      properties:
+                        currency: { type: string }
+                        count: { type: integer }
+                        amount: { $ref: "#/components/schemas/Decimal" }
+                  lineCount: { type: integer }
+                  lines:
+                    type: array
+                    items:
+                      type: object
+                      required: [packingSlipId, packingSlipNumber, shipmentId, orderId, customerId, currency, postingDate, amount, daysOutstanding]
+                      properties:
+                        packingSlipId: { type: string, format: uuid }
+                        packingSlipNumber: { type: string }
+                        shipmentId: { type: string, format: uuid }
+                        orderId: { type: string, format: uuid }
+                        customerId: { type: string, format: uuid }
+                        currency: { type: string }
+                        postingDate: { type: string, format: date-time }
+                        amount: { $ref: "#/components/schemas/Decimal" }
+                        daysOutstanding: { type: integer, minimum: 0 }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
   /api/v1/fulfillment/returnable-packaging:
     get:
       operationId: listReturnableBalances

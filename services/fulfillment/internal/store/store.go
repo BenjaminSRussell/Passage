@@ -255,6 +255,8 @@ type Store interface {
 	PackContainer(ctx context.Context, id string, version int, containerType string, lines []PackInput, idem Idem) (PackResult, error)
 	PostPackingSlip(ctx context.Context, id string, version int, in PostInput, idem Idem) (PackingSlip, error)
 	CancelPackingSlip(ctx context.Context, slipID string, idem Idem) (PackingSlip, error)
+	// DeliveredNotInvoiced is the DNI report (FR-28.12, inquiry.go).
+	DeliveredNotInvoiced(ctx context.Context, f DNIFilter) ([]domain.DNIRow, error)
 	PackingStore
 	WorkbenchStore
 	Ping(ctx context.Context) error

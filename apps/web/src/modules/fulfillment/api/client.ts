@@ -135,6 +135,31 @@ export interface PackagingReportRow {
   currency: string;
 }
 
+/** One packing slip in the delivered-not-invoiced report (FR-28.12). */
+export interface DniLine {
+  packingSlipId: string;
+  packingSlipNumber: string;
+  shipmentId: string;
+  orderId: string;
+  customerId: string;
+  currency: string;
+  postingDate: string;
+  /** Open balance on account 1405, a decimal string. */
+  amount: string;
+  daysOutstanding: number;
+}
+
+export interface DniReport {
+  legalEntityId: string;
+  customerId: string | null;
+  asOf: string;
+  account: string;
+  totals: { currency: string; count: number; amount: string }[];
+  /** All open slips; `lines` holds at most the requested limit of them. */
+  lineCount: number;
+  lines: DniLine[];
+}
+
 export interface ReturnableBalance {
   customerId: string;
   containerType: string;
@@ -487,4 +512,16 @@ export function listReturnableBalances(filter: { customerId?: string } = {}, sig
 /** Records returnable containers received back from a customer; more than the balance is FUL-0015. */
 export function returnPackaging(input: { customerId: string; containerType: string; qty: string }, key: string): Promise<ReturnableBalance> {
   return command<ReturnableBalance>("/returnable-packaging:return", input, key);
+}
+
+/** Delivered-not-invoiced balance (GL 1405) of a legal entity as of a date, with its slips (FR-28.12). */
+export async function deliveredNotInvoiced(
+  filter: { legalEntityId: string; customerId?: string; asOf?: string; limit?: number },
+  signal?: AbortSignal,
+): Promise<DniReport> {
+  const body = await send<DniReport>(`/delivered-not-invoiced${query(filter)}`, {}, signal);
+  if (!Array.isArray(body.totals) || !Array.isArray(body.lines)) {
+    throw new FulfillmentApiError(0, "COM-0001", "The response has no totals or lines", {});
+  }
+  return body;
 }
