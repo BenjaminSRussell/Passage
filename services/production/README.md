@@ -3,7 +3,8 @@
 Production orders for Passage (wave 21, ticket PSG-21, PRD section 4.21). Slice 1 covers the
 order itself; slice 2 adds journals, WIP postings and settlement; slice 3 adds rework orders and
 as-built genealogy; slice 4 adds the bulk status update, and split and merge; slice 5 adds
-order-specific BOM and route edits and the WIP balance and variance reports.
+order-specific BOM and route edits and the WIP balance and variance reports; slice 6 adds trigger
+points on operation feedback.
 
 Slice 1:
 
@@ -141,6 +142,33 @@ Slice 5:
   order, variance type and posting period: each variance with the planned cost of its cost group
   and its percentage of it, totals per currency and type, and the net.
 
+Slice 6:
+
+- Trigger points (FR-21.17, BR-21.13): `POST …/orders/{id}/trigger-points` defines a rule on an
+  operation of an open order (operation, sequence unique per operation, condition, function,
+  `repeatable`, and the operations it inserts or routes), with `production.setup.write` (and
+  `production.order.rework` for a trigger that creates rework orders); `GET` lists them with
+  their firings; `DELETE /v1/production/trigger-points/{id}` removes one that never fired. The
+  condition is `<field> <op> <number>` over the route-card line of the operation (`qty_error`,
+  `qty_good`, `hours`; `>`, `>=`, `<`, `<=`, `==`, `!=`).
+- Posting a route card evaluates, per operation it reports on, the due trigger points in
+  ascending sequence, in the post's transaction. `insert-operations` inserts its operations after
+  the operation, numbered operation + 5, + 6, … or, when that would reach the next operation,
+  right after the operation (operations on the route are never renumbered, since journals and
+  costs refer to them); each processes the error quantity, or else the operation's process
+  quantity (AC-21.13: 3 error units on 20 insert 25 and 26 before 30). `create-rework-order`
+  creates a Created rework order (FR-21.20) of the product for the error quantity, with the
+  trigger's operations as its route, referencing the order. `notify` only publishes the event.
+  A trigger fires once per operation unless `repeatable`. Each function runs in a savepoint: a
+  failure (no room for the operations, no error quantity to rework) changes nothing, is recorded
+  with its reason (PROD-0019, `PRODUCTION_TRIGGER_FUNCTION_FAILED`) and never blocks the post;
+  the trigger stays due. The post returns the firings in `triggerFirings` (also on replays and
+  journal reads), and each emits `triggerpoint.fired`. Operations a trigger inserts are not on
+  the journal, so nothing is evaluated on them in the same post (BR-21.13).
+- Migration `0006_trigger_points.sql` adds `production_trigger_point` (its operation reference
+  cascades when an order edit removes the operation) and the firing log
+  `production_trigger_firing`, with RLS and grants.
+
 Inventory transactions (wave 16), GL booking (wave 11) and period control (wave 14) are
 handoffs. Everything not built is listed in `NOT-IMPLEMENTED.md`.
 
@@ -153,20 +181,22 @@ internal/domain/       pure rules: status.go (BR-21.1 state machine, reset, RAF 
                        journal.go (proposals, tolerances, posting profiles, postings, settlement),
                        rework.go (FR-21.20), asbuilt.go (FR-21.19, BR-21.14),
                        bulk.go (FR-21.12), split.go (FR-21.15 split and merge),
-                       order_edit.go (FR-21.18 BOM and route edits), inquiry.go (variance % of planned)
+                       order_edit.go (FR-21.18 BOM and route edits), inquiry.go (variance % of planned),
+                       trigger.go (FR-21.17 conditions, due triggers, inserted numbering, rework route)
 internal/domain/testdata/  prod-orders-50.json and the exact-fraction generator that computed it
 internal/store/        Postgres repositories (pgx), tenant-scoped transactions, row locks, outbox writes:
                        store.go (orders, commands), journal.go (journals, postings, settlement, reversals),
                        profile.go (posting profiles), asbuilt.go (as-built genealogy),
                        split.go (split, merge, bulk status), order_edit.go (BOM and route edits, audit),
-                       inquiry.go (WIP balance and variance reports)
+                       inquiry.go (WIP balance and variance reports), trigger.go (trigger points, firing on route cards)
 internal/api/          HTTP handlers, request validation, platform authz duties
 internal/events/       event types and payloads
 migrations/            0001_init.sql (orders), 0002_journals.sql (profiles, journals, WIP postings,
                        variances), 0003_rework_asbuilt.sql (rework reference, rework variance account,
                        as-built records), 0004_split_merge.sql (split and merge links),
-                       0005_order_edits.sql (orderBomModified, edit audit, report indexes), with RLS and
-                       app-role grants on every table; migrations.go (embed)
+                       0005_order_edits.sql (orderBomModified, edit audit, report indexes),
+                       0006_trigger_points.sql (trigger points and firings), with RLS and app-role grants
+                       on every table; migrations.go (embed)
 api/openapi.yaml       OpenAPI 3.1 for every route (a test checks it against the router)
 events/asyncapi.yaml   AsyncAPI 3 for every event (a test checks it against the payloads)
 charts/production/     Helm chart (deployment, service, HPA on CPU 70%, optional ServiceMonitor)
@@ -210,16 +240,16 @@ drift-free RAF receipts and the variances clearing the posted WIP in every curre
 
 | Duty (PRD 4.21.17) | Key | Used by |
 |---|---|---|
-| View production orders | `production.order.read` | list, read, status log, BOM edit history, journal list and read, as-built and where-used |
+| View production orders | `production.order.read` | list, read, status log, BOM edit history, journal list and read, as-built and where-used, trigger points |
 | View production costs | `production.cost.read` | `GET …/{id}/costs`, `GET /v1/production/wip-balances`, `GET /v1/production/variances` |
 | Maintain production orders | `production.order.write` | create, PATCH, `:estimate`, `:schedule`, `PATCH …/{id}/bom` |
 | Maintain order BOM after release | `production.order.bom-after-release` | `PATCH …/{id}/bom` on a Released order (with `production.order.write`) |
-| Create rework orders | `production.order.rework` | create with `originType` `Rework` (with `production.order.write`) |
+| Create rework orders | `production.order.rework` | create with `originType` `Rework` (with `production.order.write`); defining a `create-rework-order` trigger point (with `production.setup.write`) |
 | Release production orders | `production.order.release` | `:release`, `:start`, `:cancel`, `:reset-status`, `:split`, `orders:merge`, `orders:bulk-status` (with the command's duty) |
 | Post production journals | `production.journal.post` | `:report-finished`, create, `:post` and delete journals, assign and `:detach` as-built records |
 | Post production over-consumption | `production.journal.over-consume` | posting beyond the requirement plus `PRODUCTION_OVERCONSUMPTION_PCT` |
 | View production setup | `production.setup.read` | `GET /v1/production/posting-profiles` |
-| Maintain production setup | `production.setup.write` | `PUT /v1/production/posting-profiles` |
+| Maintain production setup | `production.setup.write` | `PUT /v1/production/posting-profiles`, define and delete trigger points |
 | End production orders | `production.order.end` | `:end` |
 | End production order with zero output | `production.order.zero-output` | `:end` from Started with no output |
 
@@ -262,6 +292,18 @@ Problems are RFC 9457 with `type` `https://passage.dev/problems/<code>`.
 | `SERIAL_DUPLICATE` | 422 | The component serial is already attached to a finished serial (PROD-0009, BR-21.14) |
 | `PRODUCTION_SPLIT_QUANTITY` | 422 | The split quantity is not above zero and below the order quantity, is below the minimum order quantity or is not a multiple (PROD-0015) |
 | `PRODUCTION_MERGE_REFUSED` | 422 | An order has posted journals (PROD-0016), an order to be cancelled has drafts, an order is not Created to Released, or the orders differ in product, site, warehouse, currency, item group, rework reference or BOM and route |
+| `PRODUCTION_ORDER_EDIT_NOT_ALLOWED` | 409 | BOM or route edit on a Started or later order (FR-21.18) |
+| `PRODUCTION_ORDER_EDIT_TARGET_EXISTS` | 409 | The line or operation to add is already on the order |
+| `PRODUCTION_ORDER_EDIT_TARGET_IN_USE` | 409 | The line or operation has consumption, feedback or journals |
+| `PRODUCTION_ORDER_EDIT_TARGET_NOT_FOUND` | 422 | The line or operation to change or remove is not on the order |
+| `PRODUCTION_TRIGGER_CONDITION_INVALID` | 422 | The trigger condition is not `<field> <op> <number>` |
+| `PRODUCTION_TRIGGER_FUNCTION_UNSUPPORTED` | 422 | `release-next` or `start-workflow` (waves 23 and 4) |
+| `PRODUCTION_TRIGGER_OPERATION_NOT_FOUND` | 422 | The trigger's operation is not on the order's route |
+| `PRODUCTION_TRIGGER_POINT_EXISTS` | 409 | The operation already has a trigger point with that sequence |
+| `PRODUCTION_TRIGGER_ORDER_CLOSED` | 409 | Trigger point on an Ended or Cancelled order |
+| `PRODUCTION_TRIGGER_POINT_NOT_FOUND` | 404 | No trigger point with that id in the caller's scope |
+| `PRODUCTION_TRIGGER_POINT_FIRED` | 409 | Deleting a trigger point that fired |
+| `PRODUCTION_TRIGGER_FUNCTION_FAILED` | firing | Not a response: the reason a due trigger did nothing, on the firing and its event (PROD-0019) |
 | `PRODUCTION_BULK_PARTIAL` | 200 body | Some orders of a bulk status update failed; see `results` (PROD-0022) |
 | `idempotency_key_reuse` | 422 | The Idempotency-Key was used for a different body, command or order |
 | `conflict_version` | 412 | If-Match does not match the order or profile version (PROD-0003) |
@@ -274,6 +316,6 @@ The stable PROD-00nn service codes are not yet carried in the problem body, beca
 
 ## Wave reference
 
-PSG-21 (wave 21), slices PSG-2101 to PSG-2104. Depends on PSG-20 (costing). Later slices: job
-cards, subcontracting, the split of Started orders with the WIP transfer of BR-21.11, order change
-management, order-specific BOM and route edits, and trigger points. See `NOT-IMPLEMENTED.md`.
+PSG-21 (wave 21), slices PSG-2101 to PSG-2106. Depends on PSG-20 (costing). Later slices: job
+cards, subcontracting, the split of Started orders with the WIP transfer of BR-21.11 and order
+change management. See `NOT-IMPLEMENTED.md`.

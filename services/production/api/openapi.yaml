@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Passage production orders
-  version: 0.21.5
+  version: 0.21.6
   description: |
     Wave 21 slices 1 to 4 of PSG-21. Creates production orders with BOM and route
     explosion, lists and reads them, edits the header, runs the status state machine
@@ -19,6 +19,9 @@ info:
     Slice 5 adds order-specific BOM and route edits before Started (FR-21.18: add, remove and
     change lines and operations, re-explosion, re-estimate, orderBomModified and the audit
     trail) and the cross-order WIP balance and variance reports (4.21.14).
+    Slice 6 adds trigger points (FR-21.17, BR-21.13): rules on an order's operations that
+    route-card feedback evaluates, inserting rework operations, creating a rework order for
+    the error quantity or publishing a notification; the firings come back on the post.
     Problems are RFC 9457 with a stable `code` (see README). The gateway serves these paths
     under `/api`.
 servers:
@@ -39,6 +42,11 @@ components:
       required: true
       schema: { type: string, format: uuid }
     JournalId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    TriggerPointId:
       name: id
       in: path
       required: true
@@ -465,6 +473,89 @@ components:
         postings:
           type: array
           items: { $ref: '#/components/schemas/Posting' }
+        triggerFirings:
+          type: array
+          description: On a posted route card, the trigger points its feedback made due (FR-21.17), in the order they acted.
+          items: { $ref: '#/components/schemas/TriggerFiring' }
+    TriggerFunction:
+      type: string
+      enum: [insert-operations, create-rework-order, release-next, start-workflow, notify]
+      description: |
+        insert-operations inserts the operations after the reporting one; create-rework-order
+        creates a rework order (FR-21.20) for the reported error quantity; notify publishes
+        dev.passage.production.triggerpoint.fired.v1 and nothing else. release-next (needs
+        scheduled jobs, wave 23) and start-workflow (needs the workflow engine, wave 4) are
+        refused with PRODUCTION_TRIGGER_FUNCTION_UNSUPPORTED.
+    TriggerOperation:
+      type: object
+      required: [resourceId]
+      additionalProperties: false
+      description: An operation a trigger inserts or routes on its rework order; the number is assigned when it fires.
+      properties:
+        resourceId: { type: string, format: uuid }
+        setupTimeH: { $ref: '#/components/schemas/Decimal' }
+        runTimeHPer: { $ref: '#/components/schemas/Decimal' }
+        scrapPct: { $ref: '#/components/schemas/Decimal' }
+        laborRate: { $ref: '#/components/schemas/Decimal' }
+        overheadRate: { $ref: '#/components/schemas/Decimal' }
+    CreateTriggerPoint:
+      type: object
+      required: [operNumber, sequence, condition, function]
+      additionalProperties: false
+      properties:
+        operNumber: { type: integer, minimum: 1, description: An operation on the order's route. }
+        sequence: { type: integer, minimum: 1, maximum: 9999, description: Unique per operation; due triggers act in ascending sequence (BR-21.13). }
+        condition:
+          type: string
+          maxLength: 200
+          examples: ['qty_error > 0', 'hours >= 8']
+          description: '`<field> <op> <number>` over the route-card line of the operation; field qty_error, qty_good or hours; op > >= < <= == !=.'
+        function: { $ref: '#/components/schemas/TriggerFunction' }
+        repeatable: { type: boolean, default: false, description: Without it the trigger fires once per operation (FR-21.17). }
+        operations:
+          type: array
+          maxItems: 50
+          description: Required for insert-operations and create-rework-order, refused for notify.
+          items: { $ref: '#/components/schemas/TriggerOperation' }
+    TriggerFeedback:
+      type: object
+      properties:
+        hours: { $ref: '#/components/schemas/Decimal' }
+        qtyGood: { $ref: '#/components/schemas/Decimal' }
+        qtyError: { $ref: '#/components/schemas/Decimal' }
+    TriggerFiring:
+      type: object
+      required: [id, triggerPointId, journalId, operNumber, function, status, feedback, insertedOperations, actor, firedAt]
+      properties:
+        id: { type: string, format: uuid }
+        triggerPointId: { type: string, format: uuid }
+        journalId: { type: string, format: uuid }
+        operNumber: { type: integer }
+        function: { $ref: '#/components/schemas/TriggerFunction' }
+        status: { type: string, enum: [fired, failed] }
+        reason: { type: string, description: 'On a failed firing (PROD-0019, PRODUCTION_TRIGGER_FUNCTION_FAILED): why the function changed nothing.' }
+        feedback: { $ref: '#/components/schemas/TriggerFeedback' }
+        insertedOperations: { type: array, items: { type: integer } }
+        reworkOrderId: { type: string, format: uuid }
+        actor: { type: string }
+        firedAt: { type: string, format: date-time }
+    TriggerPoint:
+      type: object
+      required: [id, orderId, operNumber, sequence, condition, function, operations, repeatable, firedCount, createdBy, createdAt, firings]
+      properties:
+        id: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        operNumber: { type: integer }
+        sequence: { type: integer }
+        condition: { type: string, description: In canonical form. }
+        function: { $ref: '#/components/schemas/TriggerFunction' }
+        operations: { type: array, items: { $ref: '#/components/schemas/TriggerOperation' } }
+        repeatable: { type: boolean }
+        firedCount: { type: integer }
+        lastFiredAt: { type: string, format: date-time }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        firings: { type: array, items: { $ref: '#/components/schemas/TriggerFiring' } }
     PostingProfileInput:
       type: object
       additionalProperties: false
@@ -1092,6 +1183,10 @@ paths:
         report as finished moves a Started order to ReportedAsFinished (both write the status
         log and emit dev.passage.production.order.statuschanged.v1). Consumption beyond the
         requirement plus PRODUCTION_OVERCONSUMPTION_PCT needs production.journal.over-consume.
+        A route card then evaluates the trigger points of each operation it reports on, in
+        ascending sequence (FR-21.17, BR-21.13), and returns them in triggerFirings, each
+        emitting dev.passage.production.triggerpoint.fired.v1. A function that fails is
+        recorded with its reason and never blocks the post (PROD-0019).
       x-passage-duty: production.journal.post
       parameters:
         - { $ref: '#/components/parameters/JournalId' }
@@ -1386,3 +1481,84 @@ paths:
               schema: { $ref: '#/components/schemas/VarianceReport' }
         '400': { description: COM-0001, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '403': { $ref: '#/components/responses/Problem' }
+  /v1/production/orders/{id}/trigger-points:
+    get:
+      operationId: listProductionTriggerPoints
+      summary: Trigger points of an order with their firings (FR-21.17)
+      x-passage-duty: production.order.read
+      parameters:
+        - { $ref: '#/components/parameters/OrderId' }
+      responses:
+        '200':
+          description: By operation and sequence; each with its firings, oldest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  orderId: { type: string, format: uuid }
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/TriggerPoint' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: PRODUCTION_ORDER_NOT_FOUND, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    post:
+      operationId: createProductionTriggerPoint
+      summary: Define a trigger point on an operation of the order (FR-21.17)
+      description: |
+        Under the order's row lock. The order is not Ended or Cancelled (409
+        PRODUCTION_TRIGGER_ORDER_CLOSED), the operation is on its route (422
+        PRODUCTION_TRIGGER_OPERATION_NOT_FOUND) and the sequence is free on the operation (409
+        PRODUCTION_TRIGGER_POINT_EXISTS). The condition must parse (422
+        PRODUCTION_TRIGGER_CONDITION_INVALID); release-next and start-workflow are refused (422
+        PRODUCTION_TRIGGER_FUNCTION_UNSUPPORTED). A trigger point that creates rework orders also
+        needs production.order.rework.
+
+        When a route card reports on the operation and the condition holds on that line's
+        hours, good and error quantity: insert-operations inserts its operations numbered
+        operation + 5, + 6, ... (or right after the operation when that would reach the next
+        one; operations on the route are never renumbered), each processing the error quantity
+        or else the operation's process quantity; create-rework-order creates a Created rework
+        order of the product for the error quantity with the trigger's operations as its route
+        (10, 20, ...), referencing this order; notify only publishes the event. A trigger fires
+        once per operation unless repeatable.
+      x-passage-duty: production.setup.write
+      parameters:
+        - { $ref: '#/components/parameters/OrderId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateTriggerPoint' }
+      responses:
+        '201':
+          description: Defined.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TriggerPoint' }
+        '200':
+          description: Replay of an earlier request with the same Idempotency-Key and body.
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TriggerPoint' }
+        '400': { description: COM-0001, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: 'AUTH-0003: production.setup.write, and production.order.rework for create-rework-order', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: PRODUCTION_ORDER_NOT_FOUND, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: 'PRODUCTION_TRIGGER_ORDER_CLOSED, PRODUCTION_TRIGGER_POINT_EXISTS', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: 'PRODUCTION_TRIGGER_CONDITION_INVALID, PRODUCTION_TRIGGER_FUNCTION_UNSUPPORTED, PRODUCTION_TRIGGER_OPERATION_NOT_FOUND, PRODUCTION_INVALID_INPUT, idempotency_key_reuse', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/production/trigger-points/{id}:
+    delete:
+      operationId: deleteProductionTriggerPoint
+      summary: Remove a trigger point that never fired
+      description: A trigger point that fired is kept as the record of what it did (409 PRODUCTION_TRIGGER_POINT_FIRED).
+      x-passage-duty: production.setup.write
+      parameters:
+        - { $ref: '#/components/parameters/TriggerPointId' }
+      responses:
+        '204': { description: Removed with its failed firings. }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: PRODUCTION_TRIGGER_POINT_NOT_FOUND, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: PRODUCTION_TRIGGER_POINT_FIRED, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }

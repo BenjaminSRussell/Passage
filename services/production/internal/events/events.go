@@ -18,11 +18,14 @@ var (
 	AsBuiltDetached    = events.Type(Context, "asbuilt", "detached", 1)
 	// OrderBOMEdited reports an order-specific BOM or route edit (FR-21.18).
 	OrderBOMEdited = events.Type(Context, "order", "bomedited", 1)
+	// TriggerPointFired reports a trigger point evaluated as due on route-card feedback
+	// (FR-21.17): what its function did, or why it failed (PROD-0019).
+	TriggerPointFired = events.Type(Context, "triggerpoint", "fired", 1)
 )
 
 // All lists every event type this service publishes.
 func All() []string {
-	return []string{OrderCreated, OrderUpdated, OrderStatusChanged, OrderSettled, JournalPosted, AsBuiltAssigned, AsBuiltDetached, OrderBOMEdited}
+	return []string{OrderCreated, OrderUpdated, OrderStatusChanged, OrderSettled, JournalPosted, AsBuiltAssigned, AsBuiltDetached, OrderBOMEdited, TriggerPointFired}
 }
 
 // OrderCreatedData is the payload of order.created.v1.
@@ -181,4 +184,33 @@ type OrderBOMEditedData struct {
 	Lines       []RequirementLine `json:"lines"`
 	PlannedCost *CostByGroup      `json:"plannedCost"`
 	Actor       string            `json:"actor"`
+}
+
+// TriggerFeedback is the route-card feedback a trigger point's condition was evaluated
+// against: the hours, good and error quantity reported on its operation.
+type TriggerFeedback struct {
+	Hours    string `json:"hours"`
+	QtyGood  string `json:"qtyGood"`
+	QtyError string `json:"qtyError"`
+}
+
+// TriggerPointFiredData is the payload of triggerpoint.fired.v1 (FR-21.17, BR-21.13).
+// Status is fired or failed; a failed function carries the reason and changed nothing.
+// InsertedOperations are the operation numbers insert-operations added; ReworkOrderID is
+// the order create-rework-order created. notify does nothing but publish this event.
+type TriggerPointFiredData struct {
+	FiringID           string          `json:"firingId"`
+	TriggerPointID     string          `json:"triggerPointId"`
+	OrderID            string          `json:"orderId"`
+	JournalID          string          `json:"journalId"`
+	OperNumber         int             `json:"operNumber"`
+	Sequence           int             `json:"sequence"`
+	Condition          string          `json:"condition"`
+	Function           string          `json:"function"`
+	Status             string          `json:"status"`
+	Reason             *string         `json:"reason"`
+	Feedback           TriggerFeedback `json:"feedback"`
+	InsertedOperations []int           `json:"insertedOperations"`
+	ReworkOrderID      *string         `json:"reworkOrderId"`
+	Actor              string          `json:"actor"`
 }

@@ -137,6 +137,9 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/orders/{id}/bom-edits", a.getOrderEdits)
 	r.With(authz.RequireDuty(DutyCostRead)).Get("/v1/production/wip-balances", a.wipReport)
 	r.With(authz.RequireDuty(DutyCostRead)).Get("/v1/production/variances", a.varianceReport)
+	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/orders/{id}/trigger-points", a.listTriggerPoints)
+	r.With(authz.RequireDuty(DutySetupWrite)).Post("/v1/production/orders/{id}/trigger-points", a.createTriggerPoint)
+	r.With(authz.RequireDuty(DutySetupWrite)).Delete("/v1/production/trigger-points/{id}", a.deleteTriggerPoint)
 }
 
 // Metrics serves Prometheus text for the admin port.

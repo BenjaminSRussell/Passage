@@ -58,6 +58,8 @@ type Journal struct {
 	CreatedAt      time.Time          `json:"createdAt"`
 	Lines          []JournalLine      `json:"lines"`
 	Postings       []domain.Posting   `json:"postings"`
+	// TriggerFirings are the trigger points a posted route card made due (FR-21.17).
+	TriggerFirings []TriggerFiring `json:"triggerFirings,omitempty"`
 }
 
 // JournalLine is one line: an issue of a BOM line (Qty is the quantity), hours
@@ -568,7 +570,11 @@ func postJournal(ctx context.Context, tx pgx.Tx, tenantID string, h *orderHead, 
 		return err
 	}
 	j.Posted, j.Postings = true, postings
-	return enqueueJournalPosted(ctx, tx, tenantID, *h, *j, o.actor)
+	if err := enqueueJournalPosted(ctx, tx, tenantID, *h, *j, o.actor); err != nil {
+		return err
+	}
+	// FR-21.17: the route card's feedback evaluates the trigger points of its operations.
+	return fireTriggers(ctx, tx, tenantID, *h, j, o.actor)
 }
 
 // applyLines stores the valued lines of a posted journal and books them on
@@ -1088,5 +1094,14 @@ func loadJournal(ctx context.Context, q querier, tenantID, id string, lock ...st
 		w.Dr, w.Cr = dec(dr), dec(cr)
 		j.Postings = append(j.Postings, w)
 	}
-	return j, prows.Err()
+	if err := prows.Err(); err != nil {
+		return Journal{}, err
+	}
+	prows.Close()
+	if j.Type == domain.JournalRouteCard && j.Posted {
+		if j.TriggerFirings, err = loadFirings(ctx, q, tenantID, `f.journal_id = $2`, id); err != nil {
+			return Journal{}, err
+		}
+	}
+	return j, nil
 }

@@ -16,8 +16,9 @@ import {
   type Problem,
   type ProductionOrder,
   type Proposal,
+  type TriggerFiring,
 } from "./api/client";
-import { addDecimals, amount, dash, isZero, journalTypeLabel, proposalLabel } from "./labels";
+import { addDecimals, amount, dash, describeFiring, isZero, journalTypeLabel, proposalLabel, triggerFunctionLabel } from "./labels";
 import styles from "./pages.module.css";
 
 const quantityPattern = /^[0-9]{1,12}(\.[0-9]{1,6})?$/;
@@ -36,9 +37,9 @@ export interface Draft {
   postingDate: string;
   quantity: string;
   errorQuantity: string;
-  /** Manual lines: quantity and unit cost by BOM line, hours and good quantity by operation. */
+  /** Manual lines: quantity and unit cost by BOM line; hours, good and error quantity by operation. */
   issues: Record<string, { quantity: string; unitCost: string }>;
-  hours: Record<string, { hours: string; qtyGood: string }>;
+  hours: Record<string, { hours: string; qtyGood: string; qtyError?: string }>;
 }
 
 export const emptyDraft = (type: JournalType | ""): Draft => ({
@@ -80,7 +81,8 @@ export function toJournalInput(draft: Draft): { input?: CreateJournalInput; erro
     if (draft.type === "route-card") {
       input.hours = [];
       for (const [oper, line] of Object.entries(draft.hours)) {
-        if (line.hours === "" && line.qtyGood === "") {
+        const qtyError = line.qtyError ?? "";
+        if (line.hours === "" && line.qtyGood === "" && qtyError === "") {
           continue;
         }
         if (line.hours !== "" && (!hoursPattern.test(line.hours) || !positive(line.hours))) {
@@ -89,10 +91,18 @@ export function toJournalInput(draft: Draft): { input?: CreateJournalInput; erro
         if (line.qtyGood !== "" && !quantityPattern.test(line.qtyGood)) {
           errors[`good.${oper}`] = "Enter a quantity with up to 6 decimals.";
         }
-        input.hours.push({ operNumber: Number(oper), hours: line.hours || "0", ...(line.qtyGood ? { qtyGood: line.qtyGood } : {}) });
+        if (qtyError !== "" && !quantityPattern.test(qtyError)) {
+          errors[`error.${oper}`] = "Enter a quantity with up to 6 decimals.";
+        }
+        input.hours.push({
+          operNumber: Number(oper),
+          hours: line.hours || "0",
+          ...(line.qtyGood ? { qtyGood: line.qtyGood } : {}),
+          ...(qtyError ? { qtyError } : {}),
+        });
       }
       if (input.hours.length === 0) {
-        errors.lines = "Enter hours or a good quantity for at least one operation.";
+        errors.lines = "Enter hours, a good or an error quantity for at least one operation.";
       }
     } else {
       input.issues = [];
@@ -124,10 +134,27 @@ const lineColumns: DataTableColumn<JournalLine>[] = [
   { key: "itemId", header: "Item", mono: true, render: (l) => l.itemId ?? dash },
   { key: "qty", header: "Quantity or hours", align: "end" },
   { key: "qtyGood", header: "Good", align: "end", render: (l) => (l.kind === "issue" ? dash : l.qtyGood) },
+  { key: "qtyError", header: "Error", align: "end", render: (l) => (l.kind === "issue" ? dash : l.qtyError) },
   { key: "unitCost", header: "Unit cost", align: "end" },
   { key: "amount", header: "Amount", align: "end", render: (l) => amount(l.amount) },
   { key: "overheadAmount", header: "Overhead", align: "end", render: (l) => (l.kind === "hours" ? amount(l.overheadAmount) : dash) },
 ];
+
+const firingColumns: DataTableColumn<TriggerFiring>[] = [
+  { key: "operNumber", header: "Operation", align: "end" },
+  { key: "function", header: "Trigger", render: (f) => triggerFunctionLabel[f.function] ?? f.function },
+  { key: "status", header: "Result", render: (f) => <Badge tone={f.status === "fired" ? "success" : "warning"}>{f.status === "fired" ? "Fired" : "Failed"}</Badge> },
+  { key: "outcome", header: "What happened", render: (f) => describeFiring(f) },
+];
+
+/** The notice after a post: the journal, and what its trigger points did (FR-21.17). */
+export function postedNotice(journalNumber: string, firings: TriggerFiring[] = []): string {
+  const fired = firings.filter((f) => f.status === "fired");
+  if (fired.length === 0) {
+    return `Journal ${journalNumber} posted.`;
+  }
+  return `Journal ${journalNumber} posted. ${fired.map((f) => `Operation ${f.operNumber}: ${describeFiring(f)}.`).join(" ")}`;
+}
 
 const postingColumns: DataTableColumn<Posting>[] = [
   { key: "postingType", header: "Posting type" },
@@ -146,6 +173,7 @@ export function JournalsPanel({ order, onChanged }: JournalsPanelProps) {
   const [busy, setBusy] = useState<"create" | "post" | "delete" | null>(null);
   const [failure, setFailure] = useState<Problem | null>(null);
   const [notice, setNotice] = useState("");
+  const [triggerFailures, setTriggerFailures] = useState<TriggerFiring[]>([]);
   const [confirmDelete, setConfirmDelete] = useState(false);
   // One Idempotency-Key per create body and per journal post, so a retry replays.
   const keys = useRef(new Map<string, string>());
@@ -205,9 +233,11 @@ export function JournalsPanel({ order, onChanged }: JournalsPanelProps) {
     setBusy("post");
     setFailure(null);
     setNotice("");
+    setTriggerFailures([]);
     try {
       const posted = await postJournal(journal.id, keyFor(`post:${journal.id}`));
-      setNotice(`Journal ${posted.journalNumber} posted.`);
+      setNotice(postedNotice(posted.journalNumber, posted.triggerFirings));
+      setTriggerFailures((posted.triggerFirings ?? []).filter((f) => f.status === "failed"));
       await load();
       onChanged();
     } catch (err) {
@@ -259,8 +289,8 @@ export function JournalsPanel({ order, onChanged }: JournalsPanelProps) {
   const manual = draft.proposal === "none";
   const setIssue = (lineNo: string, patch: Partial<{ quantity: string; unitCost: string }>) =>
     setDraft({ ...draft, issues: { ...draft.issues, [lineNo]: { ...(draft.issues[lineNo] ?? { quantity: "", unitCost: "" }), ...patch } } });
-  const setHours = (oper: number, patch: Partial<{ hours: string; qtyGood: string }>) =>
-    setDraft({ ...draft, hours: { ...draft.hours, [oper]: { ...(draft.hours[oper] ?? { hours: "", qtyGood: "" }), ...patch } } });
+  const setHours = (oper: number, patch: Partial<{ hours: string; qtyGood: string; qtyError: string }>) =>
+    setDraft({ ...draft, hours: { ...draft.hours, [oper]: { ...(draft.hours[oper] ?? { hours: "", qtyGood: "", qtyError: "" }), ...patch } } });
 
   return (
     <Card title="Journals">
@@ -273,6 +303,12 @@ export function JournalsPanel({ order, onChanged }: JournalsPanelProps) {
         {failure ? (
           <Alert tone="danger" live="alert" title="The journal was refused">
             {failure.message} ({failure.code})
+          </Alert>
+        ) : null}
+        {triggerFailures.length > 0 ? (
+          <Alert tone="warning" live="alert" title="A trigger point did nothing; the journal was posted">
+            {triggerFailures.map((f) => `Operation ${f.operNumber}, ${triggerFunctionLabel[f.function] ?? f.function}: ${f.reason ?? ""}`).join(" ")} Fix the
+            trigger point; it acts again on the next feedback.
           </Alert>
         ) : null}
         {journals.error ? (
@@ -340,6 +376,14 @@ export function JournalsPanel({ order, onChanged }: JournalsPanelProps) {
                 empty={{ title: "No postings", description: "A journal whose lines are all zero posts nothing." }}
               />
             ) : null}
+            {current.triggerFirings && current.triggerFirings.length > 0 ? (
+              <DataTable
+                label={`Trigger points fired by ${current.journalNumber}`}
+                columns={firingColumns}
+                rows={current.triggerFirings}
+                getRowKey={(f) => f.id}
+              />
+            ) : null}
           </section>
         ) : null}
 
@@ -403,6 +447,16 @@ export function JournalsPanel({ order, onChanged }: JournalsPanelProps) {
                       <FormField id={`journal-good-${op.operNumber}`} label="Good quantity" optional error={errors[`good.${op.operNumber}`]}>
                         {(control) => (
                           <Input {...control} inputMode="decimal" value={draft.hours[op.operNumber]?.qtyGood ?? ""} onChange={(e) => setHours(op.operNumber, { qtyGood: e.target.value })} />
+                        )}
+                      </FormField>
+                      <FormField id={`journal-error-${op.operNumber}`} label="Error quantity" optional error={errors[`error.${op.operNumber}`]}>
+                        {(control) => (
+                          <Input
+                            {...control}
+                            inputMode="decimal"
+                            value={draft.hours[op.operNumber]?.qtyError ?? ""}
+                            onChange={(e) => setHours(op.operNumber, { qtyError: e.target.value })}
+                          />
                         )}
                       </FormField>
                     </fieldset>

@@ -12,6 +12,10 @@ import type {
   ReworkReference,
   ReworkRefType,
   Tracking,
+  TriggerField,
+  TriggerFiring,
+  TriggerFunction,
+  TriggerOperator,
   VarianceType,
 } from "./api/client";
 
@@ -159,4 +163,53 @@ export function addDecimals(values: string[]): string {
   const whole = abs / 10n ** BigInt(SCALE);
   const fraction = (abs % 10n ** BigInt(SCALE)).toString().padStart(SCALE, "0").replace(/0+$/, "");
   return `${negative ? "-" : ""}${whole}${fraction ? `.${fraction}` : ""}`;
+}
+
+/** Trigger point functions (FR-21.17). */
+export const triggerFunctionLabel: Record<TriggerFunction, string> = {
+  "insert-operations": "Insert operations",
+  "create-rework-order": "Create a rework order",
+  notify: "Notify",
+};
+
+/** The feedback a trigger condition compares. */
+export const triggerFieldLabel: Record<TriggerField, string> = {
+  qty_error: "Error quantity",
+  qty_good: "Good quantity",
+  hours: "Hours",
+};
+
+export const triggerOperatorLabel: Record<TriggerOperator, string> = {
+  ">": "is more than",
+  ">=": "is at least",
+  "<": "is less than",
+  "<=": "is at most",
+  "==": "equals",
+  "!=": "is not",
+};
+
+/** A firing in words: what the trigger did, or why it did nothing. */
+export function describeFiring(f: TriggerFiring): string {
+  if (f.status === "failed") {
+    return `Failed: ${f.reason ?? "no reason given"}`;
+  }
+  switch (f.function) {
+    case "insert-operations":
+      return `Inserted operations ${f.insertedOperations.join(", ")}`;
+    case "create-rework-order":
+      return `Created a rework order for ${f.feedback.qtyError}`;
+    default:
+      return "Notification sent";
+  }
+}
+
+/** A stored condition (`qty_error > 0`) in words, or as stored when it does not parse. */
+export function describeCondition(condition: string): string {
+  const [field, op, value, ...rest] = condition.trim().split(/\s+/);
+  const fieldLabel = triggerFieldLabel[field as TriggerField];
+  const opLabel = triggerOperatorLabel[op as TriggerOperator];
+  if (!fieldLabel || !opLabel || value === undefined || rest.length > 0) {
+    return condition;
+  }
+  return `${fieldLabel} ${opLabel} ${value}`;
 }

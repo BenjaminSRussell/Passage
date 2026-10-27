@@ -184,7 +184,7 @@ describe("Journals on the order detail", () => {
     await userEvent.selectOptions(within(form).getByLabelText("Journal type"), "route-card");
     await userEvent.selectOptions(within(form).getByLabelText("Lines"), "none");
     await userEvent.click(within(form).getByRole("button", { name: "Create journal" }));
-    expect(await within(form).findByText("Enter hours or a good quantity for at least one operation.")).toBeInTheDocument();
+    expect(await within(form).findByText("Enter hours, a good or an error quantity for at least one operation.")).toBeInTheDocument();
     const operation = within(form).getByRole("group", { name: "Operation 10" });
     await userEvent.type(within(operation).getByLabelText("Hours"), "1.005");
     await userEvent.click(within(form).getByRole("button", { name: "Create journal" }));

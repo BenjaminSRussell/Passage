@@ -44,6 +44,7 @@ import { AsBuiltPanel } from "./AsBuiltPanel";
 import { JournalsPanel } from "./JournalsPanel";
 import { OrderEditPanel } from "./OrderEditPanel";
 import { SplitPanel } from "./SplitPanel";
+import { TriggerPointsPanel } from "./TriggerPointsPanel";
 import {
   addDecimals,
   amount,
@@ -518,6 +519,8 @@ export function ProductionOrderDetail({ orderId, onBack, onCreateRework, onOpenO
       ) : null}
 
       <JournalsPanel order={current} onChanged={reload} />
+
+      <TriggerPointsPanel order={current} onOpenOrder={onOpenOrder} />
 
       <AsBuiltPanel order={current} />
 

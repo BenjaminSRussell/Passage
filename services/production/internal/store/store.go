@@ -199,6 +199,9 @@ type Store interface {
 	OrderEdits(ctx context.Context, orderID string) ([]OrderEditEntry, error)
 	WIPReport(ctx context.Context, f WIPFilter) (WIPReport, error)
 	VarianceReport(ctx context.Context, f VarianceFilter) (VarianceReport, error)
+	CreateTriggerPoint(ctx context.Context, in NewTriggerPoint) (TriggerPoint, bool, error)
+	ListTriggerPoints(ctx context.Context, orderID string) ([]TriggerPoint, error)
+	DeleteTriggerPoint(ctx context.Context, id string) error
 }
 
 // Postgres is the production store.
@@ -261,50 +264,60 @@ func (s *Postgres) CreateOrder(ctx context.Context, in NewOrder) (Order, bool, e
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		var seq int64
-		if err := tx.QueryRow(ctx, `insert into production_order_sequence (tenant_id, legal_entity_id, next_value) values ($1, $2, 2)
-			on conflict (tenant_id, legal_entity_id) do update set next_value = production_order_sequence.next_value + 1
-			returning next_value - 1`, p.TenantID, in.LegalEntityID).Scan(&seq); err != nil {
-			return err
-		}
-		var refType, refID *string
 		if ref := in.ReworkReference; ref != nil {
 			if err := checkReworkSource(ctx, tx, p.TenantID, in, *ref); err != nil {
 				return err
 			}
-			t := string(ref.Type)
-			refType, refID = &t, &ref.ID
 		}
-		id := ids.New()
-		number := fmt.Sprintf("PO-%06d", seq)
-		if _, err := tx.Exec(ctx, `insert into production_order (tenant_id, id, legal_entity_id, order_number, product_id, site_id, warehouse_id, currency,
-			quantity, delivery_date, origin_type, origin_id, idempotency_key, request_hash, item_group, rework_reference_type, rework_reference_id)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::date, $11, $12, $13, $14, $15, $16, $17)`,
-			p.TenantID, id, in.LegalEntityID, number, in.ProductID, in.SiteID, in.WarehouseID, in.Currency,
-			in.Quantity.String(), in.DeliveryDate, in.OriginType, in.OriginID, in.IdempotencyKey, in.RequestHash, in.ItemGroup, refType, refID); err != nil {
-			return err
-		}
-		if err := insertLines(ctx, tx, p.TenantID, id, in.Lines); err != nil {
-			return err
-		}
-		if err := insertOperations(ctx, tx, p.TenantID, id, in.Operations); err != nil {
-			return err
-		}
-		out, err = loadOrder(ctx, tx, p.TenantID, id)
+		id, err := insertOrder(ctx, tx, p.TenantID, p.UserID, in)
 		if err != nil {
 			return err
 		}
-		created = true
-		data := prodevents.OrderCreatedData{
-			OrderID: id, OrderNumber: number, ProductID: in.ProductID, Quantity: in.Quantity.String(), SiteID: in.SiteID,
-			DeliveryDate: in.DeliveryDate, OriginType: in.OriginType, OriginID: in.OriginID,
-		}
-		if ref := in.ReworkReference; ref != nil {
-			data.ReworkReference = &prodevents.ReworkReference{Type: string(ref.Type), ID: ref.ID}
-		}
-		return enqueue(ctx, tx, id, prodevents.OrderCreated, p.TenantID, p.UserID, data)
+		out, err = loadOrder(ctx, tx, p.TenantID, id)
+		created = err == nil
+		return err
 	})
 	return out, created, err
+}
+
+// insertOrder allocates the order number from the legal entity's sequence, inserts the
+// order with its lines and operations and enqueues order.created. It returns the new id.
+// A rework reference is stored as given; the caller checks it.
+func insertOrder(ctx context.Context, tx pgx.Tx, tenantID, actor string, in NewOrder) (string, error) {
+	var seq int64
+	if err := tx.QueryRow(ctx, `insert into production_order_sequence (tenant_id, legal_entity_id, next_value) values ($1, $2, 2)
+		on conflict (tenant_id, legal_entity_id) do update set next_value = production_order_sequence.next_value + 1
+		returning next_value - 1`, tenantID, in.LegalEntityID).Scan(&seq); err != nil {
+		return "", err
+	}
+	var refType, refID *string
+	if ref := in.ReworkReference; ref != nil {
+		t := string(ref.Type)
+		refType, refID = &t, &ref.ID
+	}
+	id := ids.New()
+	number := fmt.Sprintf("PO-%06d", seq)
+	if _, err := tx.Exec(ctx, `insert into production_order (tenant_id, id, legal_entity_id, order_number, product_id, site_id, warehouse_id, currency,
+		quantity, delivery_date, origin_type, origin_id, idempotency_key, request_hash, item_group, rework_reference_type, rework_reference_id)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::date, $11, $12, $13, $14, $15, $16, $17)`,
+		tenantID, id, in.LegalEntityID, number, in.ProductID, in.SiteID, in.WarehouseID, in.Currency,
+		in.Quantity.String(), in.DeliveryDate, in.OriginType, in.OriginID, in.IdempotencyKey, in.RequestHash, in.ItemGroup, refType, refID); err != nil {
+		return "", err
+	}
+	if err := insertLines(ctx, tx, tenantID, id, in.Lines); err != nil {
+		return "", err
+	}
+	if err := insertOperations(ctx, tx, tenantID, id, in.Operations); err != nil {
+		return "", err
+	}
+	data := prodevents.OrderCreatedData{
+		OrderID: id, OrderNumber: number, ProductID: in.ProductID, Quantity: in.Quantity.String(), SiteID: in.SiteID,
+		DeliveryDate: in.DeliveryDate, OriginType: in.OriginType, OriginID: in.OriginID,
+	}
+	if ref := in.ReworkReference; ref != nil {
+		data.ReworkReference = &prodevents.ReworkReference{Type: string(ref.Type), ID: ref.ID}
+	}
+	return id, enqueue(ctx, tx, id, prodevents.OrderCreated, tenantID, actor, data)
 }
 
 // checkReworkSource checks a rework order's reference to an original order

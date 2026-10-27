@@ -279,6 +279,79 @@ export interface Journal {
   createdAt: string;
   lines: JournalLine[];
   postings: Posting[];
+  /** On a posted route card: the trigger points its feedback made due (FR-21.17). */
+  triggerFirings?: TriggerFiring[];
+}
+
+/**
+ * What a trigger point does when its condition holds (FR-21.17). release-next and
+ * start-workflow need scheduling (wave 23) and the workflow engine (wave 4); the service refuses them.
+ */
+export type TriggerFunction = "insert-operations" | "create-rework-order" | "notify";
+
+export const TRIGGER_FUNCTIONS: TriggerFunction[] = ["insert-operations", "create-rework-order", "notify"];
+
+/** The feedback fields a condition compares: the route-card line of the operation. */
+export type TriggerField = "qty_error" | "qty_good" | "hours";
+
+export type TriggerOperator = ">" | ">=" | "<" | "<=" | "==" | "!=";
+
+/** An operation a trigger inserts, or routes on the rework order it creates; numbered when it fires. */
+export interface TriggerOperation {
+  resourceId: string;
+  setupTimeH?: string;
+  runTimeHPer?: string;
+  scrapPct?: string;
+  laborRate?: string;
+  overheadRate?: string;
+}
+
+export interface CreateTriggerPointInput {
+  operNumber: number;
+  sequence: number;
+  /** `<field> <op> <number>`, for example `qty_error > 0`. */
+  condition: string;
+  function: TriggerFunction;
+  repeatable?: boolean;
+  operations?: TriggerOperation[];
+}
+
+export interface TriggerFeedback {
+  hours: string;
+  qtyGood: string;
+  qtyError: string;
+}
+
+/** One due trigger point on a route-card post: fired, or failed with the reason (PROD-0019). */
+export interface TriggerFiring {
+  id: string;
+  triggerPointId: string;
+  journalId: string;
+  operNumber: number;
+  function: TriggerFunction;
+  status: "fired" | "failed";
+  reason?: string;
+  feedback: TriggerFeedback;
+  insertedOperations: number[];
+  reworkOrderId?: string;
+  actor: string;
+  firedAt: string;
+}
+
+export interface TriggerPoint {
+  id: string;
+  orderId: string;
+  operNumber: number;
+  sequence: number;
+  condition: string;
+  function: TriggerFunction;
+  operations: TriggerOperation[];
+  repeatable: boolean;
+  firedCount: number;
+  lastFiredAt?: string;
+  createdBy: string;
+  createdAt: string;
+  firings: TriggerFiring[];
 }
 
 export interface IssueInput {
@@ -731,6 +804,31 @@ export async function queryAsBuilt(query: AsBuiltQuery, signal?: AbortSignal): P
   }
   const body = await requestAt<{ items?: AsBuiltRecord[] }>(`${root}/as-built?${params}`, { signal });
   return Array.isArray(body.items) ? body.items : [];
+}
+
+/** The trigger points of an order with their firings, by operation and sequence (FR-21.17). */
+export async function listTriggerPoints(orderId: string, signal?: AbortSignal): Promise<TriggerPoint[]> {
+  const body = await request<{ items?: TriggerPoint[] }>(`/${encodeURIComponent(orderId)}/trigger-points`, { signal });
+  return Array.isArray(body.items) ? body.items.map((tp) => ({ ...tp, firings: Array.isArray(tp.firings) ? tp.firings : [] })) : [];
+}
+
+/** Defines a trigger point on an operation of the order; a retry with the same key replays. */
+export function createTriggerPoint(orderId: string, input: CreateTriggerPointInput, idempotencyKey: string): Promise<TriggerPoint> {
+  return request<TriggerPoint>(`/${encodeURIComponent(orderId)}/trigger-points`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify(input),
+  });
+}
+
+/** Removes a trigger point that never fired. */
+export function deleteTriggerPoint(id: string): Promise<void> {
+  return requestAt<void>(`${root}/trigger-points/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+/** Trigger points can be defined until the order is ended or cancelled. */
+export function canDefineTriggers(status: ProductionStatus): boolean {
+  return status !== "Ended" && status !== "Cancelled";
 }
 
 /** Journal types an order in this status can take (FR-21.5 to FR-21.7; a route card starts a Released order). */

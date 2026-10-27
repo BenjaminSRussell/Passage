@@ -54,6 +54,11 @@ type fakeStore struct {
 	wip         store.WIPReport
 	varFilters  []store.VarianceFilter
 	variances   store.VarianceReport
+	triggers    []store.NewTriggerPoint
+	triggerList []store.TriggerPoint
+	triggerDel  []string
+	triggerErr  error
+	triggerOld  bool // CreateTriggerPoint answers as a replay
 }
 
 func (f *fakeStore) Ping(context.Context) error { return f.pingErr }
