@@ -1,11 +1,14 @@
 asyncapi: 3.0.0
 info:
   title: Passage Metadata events
-  version: 0.1.0
+  version: 1.0.0
   description: >
     CloudEvents 1.0 published through the transactional outbox (Debezium
     outbox router), in the same transaction as the entity version it reports.
     Payloads match EntityPublishedData in internal/registry/postgres.go.
+    Schema evolution is additive only. The PRD's api_major is not carried yet:
+    the registry does not track an API major per entity version, so the field
+    is added when it does.
 defaultContentType: application/cloudevents+json
 channels:
   entity:
@@ -28,8 +31,15 @@ components:
   schemas:
     EntityPublishedData:
       type: object
-      required: [entity, version, changes]
+      required: [entity, domain, version, diff_summary]
       properties:
         entity: { type: string }
+        domain: { type: string }
         version: { type: integer, minimum: 1 }
-        changes: { type: integer, minimum: 0, description: Number of diff entries against the previous version. }
+        diff_summary:
+          type: object
+          required: [added, changed, removed]
+          properties:
+            added: { type: integer, minimum: 0 }
+            changed: { type: integer, minimum: 0 }
+            removed: { type: integer, minimum: 0 }

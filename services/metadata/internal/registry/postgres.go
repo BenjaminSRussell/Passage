@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -22,10 +23,32 @@ const (
 	eventSource     = "metadata"
 )
 
+type DiffSummary struct {
+	Added   int `json:"added"`
+	Changed int `json:"changed"`
+	Removed int `json:"removed"`
+}
+
 type EntityPublishedData struct {
-	Entity  string `json:"entity"`
-	Version int    `json:"version"`
-	Changes int    `json:"changes"`
+	Entity      string      `json:"entity"`
+	Domain      string      `json:"domain"`
+	Version     int         `json:"version"`
+	DiffSummary DiffSummary `json:"diff_summary"`
+}
+
+func summarize(changes []domain.Change) DiffSummary {
+	var summary DiffSummary
+	for _, change := range changes {
+		switch {
+		case strings.HasSuffix(change.Kind, ".added") || strings.HasSuffix(change.Kind, ".value_added"):
+			summary.Added++
+		case strings.HasSuffix(change.Kind, ".removed") || strings.HasSuffix(change.Kind, ".value_removed"):
+			summary.Removed++
+		default:
+			summary.Changed++
+		}
+	}
+	return summary
 }
 
 type Postgres struct {
@@ -79,10 +102,10 @@ func publishTx(ctx context.Context, tx pgx.Tx, tenantID string, entity *domain.E
 		return Version{}, fmt.Errorf("publish metadata version: %w", err)
 	}
 	evt, err := events.New(EntityPublished, eventSource, entity.Name, tenantID, EntityPublishedData{
-		Entity: entity.Name, Version: version.Number, Changes: len(version.Changes),
+		Entity: entity.Name, Domain: entity.Domain, Version: version.Number, DiffSummary: summarize(version.Changes),
 	})
 	if err != nil {
-		return Version{}, err
+		return Version{}, fmt.Errorf("build metadata event: %w", err)
 	}
 	if err := outbox.Enqueue(ctx, tx, "entity", entity.Name, evt); err != nil {
 		return Version{}, fmt.Errorf("enqueue metadata event: %w", err)

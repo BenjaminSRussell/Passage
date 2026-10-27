@@ -13,7 +13,7 @@ Delivered: transactional outbox + inbox relay (AC1), Temporal approval workflow 
 | Deliverable 3: Temporal cluster applied | manifests only | `deploy/temporal/values.yaml` and the worker chart exist; Wave 01 owns Argo CD wiring |
 | Deliverable 6: live SMTP/HTTP provider | in-process queue | adapters, bounce ingest and distributor ticker are domain-complete; sending to a real relay waits on ESO secrets |
 | Wave 08 `product.explode` / `product.group-change` | handoff | product still runs those jobs in-process; Wave 08 owns `services/product/` so this wave only reserved the handler codes |
-| Wave 03 `dev.passage.metadata.entity.published.v1` | backbone ready | topic, CloudEvents type and schema gate exist; metadata's publish and extend paths write the outbox in the same transaction; a Debezium connector for the metadata database is deploy-side |
+| Wave 03 `dev.passage.metadata.entity.published.v1` | backbone ready | topic, CloudEvents type and schema gate exist; metadata's publish and extend paths write the outbox in the same transaction; the Debezium connector, ACL and route for the metadata database are tracked in #190 |
 | Wave 03 nightly usage job | handler reserved | `metadata.usage` is a registered batch code; metadata still calls the collector in-process |
 | Argo CD wiring for `deploy/kafka/` and `deploy/temporal/` | handoff | `deploy/envs/dev/apps/` is outside wave 4 ownership |
 | Outbox `headers` written by `outbox.Enqueue` | handoff | `platform/` is not editable |
