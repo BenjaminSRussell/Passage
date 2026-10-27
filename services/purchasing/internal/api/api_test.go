@@ -64,6 +64,9 @@ type fakeStore struct {
 
 	// Invoicing plans: what the plan methods received and what they answer.
 	planLog planLog
+
+	// Subsequent price change: what the reprice methods received.
+	reprice repriceLog
 }
 
 func newFake() *fakeStore {

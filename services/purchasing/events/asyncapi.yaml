@@ -1,9 +1,9 @@
 asyncapi: 3.0.0
 info:
   title: Passage Purchasing events
-  version: 0.5.0
+  version: 0.6.0
   description: |
-    Events published by the purchasing service in wave 17 slices 1 to 4. Each is written to the
+    Events published by the purchasing service in wave 17 slices 1 to 6. Each is written to the
     outbox in the same transaction as the state change and relayed by Debezium to the topic
     passage.<context>.<entity>. Payload structs live in internal/events. Schema evolution is
     additive only (BACKWARD_TRANSITIVE).
@@ -25,12 +25,14 @@ channels:
         $ref: '#/components/messages/AgreementThreshold'
   po:
     address: passage.procurement.po
-    description: Purchase order confirmation and cancellation; the Kafka key is the PO id so events stay ordered.
+    description: Purchase order confirmation, cancellation and subsequent price change; the Kafka key is the PO id so events stay ordered.
     messages:
       poConfirmed:
         $ref: '#/components/messages/POConfirmed'
       poCancelled:
         $ref: '#/components/messages/POCancelled'
+      poRepriced:
+        $ref: '#/components/messages/PORepriced'
   poversion:
     address: passage.procurement.poversion
     description: Confirmed purchase order versions above 1 (change orders); the Kafka key is the PO id.
@@ -76,6 +78,12 @@ operations:
       $ref: '#/channels/po'
     messages:
       - $ref: '#/channels/po/messages/poCancelled'
+  publishPORepriced:
+    action: send
+    channel:
+      $ref: '#/channels/po'
+    messages:
+      - $ref: '#/channels/po/messages/poRepriced'
   publishPOVersionCreated:
     action: send
     channel:
@@ -172,6 +180,19 @@ components:
               type: { type: string, const: dev.passage.procurement.po.cancelled.v1 }
               subject: { type: string, format: uuid, description: purchase order id }
               data: { $ref: '#/components/schemas/POCancelledData' }
+    PORepriced:
+      name: PORepriced
+      title: po.repriced.v1
+      summary: A subsequent price change was applied to a CONFIRMED purchase order (FR-17.22, BR-17.18). Consumed by payables (wave 18 FR-18.18 subsequent debit/credit for invoiced_lines) and analytics.
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.po.repriced.v1 }
+              subject: { type: string, format: uuid, description: purchase order id }
+              data: { $ref: '#/components/schemas/PORepricedData' }
     RFQSent:
       name: RFQSent
       title: rfq.sent.v1
@@ -330,6 +351,55 @@ components:
               product_id: { type: string, format: uuid }
               unit: { type: string }
               remaining_qty: { type: string, description: decimal string still to be received when cancelled }
+    PORepricedData:
+      type: object
+      required: [po_id, number, version_no, reapproval_required, currency, total_delta, lines, invoiced_lines]
+      additionalProperties: false
+      properties:
+        po_id: { type: string, format: uuid }
+        number: { type: string, example: PO-00000001 }
+        version_no: { type: integer, description: "version holding the moved prices; the current confirmed version when only invoiced lines were handed over" }
+        reapproval_required: { type: boolean, description: "true when the version waits for re-approval; po.confirmed follows when it is confirmed" }
+        currency: { type: string }
+        total_delta: { type: string, description: decimal string, sum of the deltas of lines }
+        lines:
+          type: array
+          description: Open, un-invoiced lines moved to the new price in version_no.
+          items:
+            type: object
+            required: [line_no, qty, old_price, old_price_unit, new_price, new_price_unit, old_amount, new_amount, delta, old_price_source, new_price_source]
+            additionalProperties: false
+            properties:
+              line_no: { type: integer }
+              qty: { type: string, description: decimal string; the line quantity for lines, the invoiced quantity for invoiced_lines }
+              old_price: { type: string, description: decimal string }
+              old_price_unit: { type: string, description: decimal string }
+              new_price: { type: string, description: decimal string }
+              new_price_unit: { type: string, description: decimal string }
+              old_amount: { type: string, description: decimal string, amount of qty at the old price after discount }
+              new_amount: { type: string, description: decimal string, amount of qty at the new price after discount }
+              delta: { type: string, description: decimal string, new_amount minus old_amount }
+              old_price_source: { type: string, description: "TRADE_AGREEMENT:<id> the line was priced from" }
+              new_price_source: { type: string, description: "TRADE_AGREEMENT:<id> that wins now" }
+        invoiced_lines:
+          type: array
+          description: Invoiced lines whose trade agreement price changed. They keep the old price; payables raises a subsequent debit or credit for the invoiced quantity (wave 18 FR-18.18). Each price row is handed over once per line.
+          items:
+            type: object
+            required: [line_no, qty, old_price, old_price_unit, new_price, new_price_unit, old_amount, new_amount, delta, old_price_source, new_price_source]
+            additionalProperties: false
+            properties:
+              line_no: { type: integer }
+              qty: { type: string, description: decimal string; the line quantity for lines, the invoiced quantity for invoiced_lines }
+              old_price: { type: string, description: decimal string }
+              old_price_unit: { type: string, description: decimal string }
+              new_price: { type: string, description: decimal string }
+              new_price_unit: { type: string, description: decimal string }
+              old_amount: { type: string, description: decimal string, amount of qty at the old price after discount }
+              new_amount: { type: string, description: decimal string, amount of qty at the new price after discount }
+              delta: { type: string, description: decimal string, new_amount minus old_amount }
+              old_price_source: { type: string, description: "TRADE_AGREEMENT:<id> the line was priced from" }
+              new_price_source: { type: string, description: "TRADE_AGREEMENT:<id> that wins now" }
     RFQSentData:
       type: object
       required: [rfq_id, number, legal_entity_id, vendor_ids, reply_deadline, lines]

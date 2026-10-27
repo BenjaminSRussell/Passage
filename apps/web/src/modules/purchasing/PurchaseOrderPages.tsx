@@ -858,6 +858,11 @@ export function PurchaseOrderDetailPage() {
                   {po.versionNo > 0 ? "Change order" : "Edit"}
                 </Link>
               ) : null}
+              {po.approvalStatus === "CONFIRMED" ? (
+                <Link className={buttonClassName("secondary")} to={`/purchasing/purchase-orders/${po.id}/reprice`}>
+                  Update prices
+                </Link>
+              ) : null}
               {actions.map((a) => (
                 <Button
                   key={a.action}

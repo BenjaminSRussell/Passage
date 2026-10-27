@@ -60,108 +60,106 @@ func (s *Postgres) EditPurchaseOrder(ctx context.Context, id string, ifMatch int
 		if err != nil {
 			return err
 		}
-		if err := checkRowVersion(cur, ifMatch); err != nil {
-			return err
-		}
-		if err := domain.CheckEditable(cur.ApprovalStatus); err != nil {
-			return err
-		}
-		if err := checkHeaderUnchanged(cur, next); err != nil {
-			return err
-		}
-		removed, err := checkLineChanges(cur.Lines, next.Lines)
-		if err != nil {
-			return err
-		}
-		if err := checkAgreementDates(ctx, tx, cur.Lines, next.Lines); err != nil {
-			return err
-		}
-		next.ID, next.Number = id, cur.Number
-		next.LegalEntityID, next.VendorID, next.Currency = cur.LegalEntityID, cur.VendorID, cur.Currency
-		next.ChangeManagement = cur.ChangeManagement
-		next.VersionNo = cur.VersionNo
-		merged := mergeLines(cur.Lines, next.Lines, removed)
-
-		if cur.VersionNo == 0 {
-			// Not yet confirmed: a plain edit that restarts approval.
-			if err := applyLines(ctx, tx, next, removed); err != nil {
-				return err
-			}
-			next.ApprovalStatus = domain.POStatusDraft
-			if err := updateHeader(ctx, tx, next); err != nil {
-				return err
-			}
-			out, err = loadPurchaseOrder(ctx, tx, id)
-			return err
-		}
-
-		base, ok, err := loadVersion(ctx, tx, id, cur.VersionNo)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return fmt.Errorf("purchase order %s: confirmed version %d is missing", cur.Number, cur.VersionNo)
-		}
-		nextSnap := snapshotOf(next, merged)
-		patch, err := domain.VersionDiff(base.Snapshot, nextSnap)
-		if err != nil {
-			return err
-		}
-		pendingNo := cur.VersionNo + 1
-		if len(patch) == 0 {
-			if cur.ApprovalStatus == domain.POStatusConfirmed {
-				out = cur // nothing changed and nothing pending
-				return nil
-			}
-			// The change was edited back to the confirmed content: drop it.
-			if err := deleteVersion(ctx, tx, id, pendingNo); err != nil {
-				return err
-			}
-			if err := applyLines(ctx, tx, next, removed); err != nil {
-				return err
-			}
-			next.ApprovalStatus = domain.POStatusConfirmed
-			if err := updateHeader(ctx, tx, next); err != nil {
-				return err
-			}
-			out, err = loadPurchaseOrder(ctx, tx, id)
-			return err
-		}
-		reapproval := cur.ChangeManagement &&
-			domain.ChangeNeedsReapproval(base.Snapshot, nextSnap, patch, domain.DefaultReapprovalRules())
-		if err := applyLines(ctx, tx, next, removed); err != nil {
-			return err
-		}
-		if reapproval {
-			if err := writeVersion(ctx, tx, id, pendingNo, nextSnap, patch, true); err != nil {
-				return err
-			}
-			next.ApprovalStatus = domain.POStatusInReview
-			if err := updateHeader(ctx, tx, next); err != nil {
-				return err
-			}
-			out, err = loadPurchaseOrder(ctx, tx, id)
-			return err
-		}
-		if err := writeVersion(ctx, tx, id, pendingNo, nextSnap, patch, false); err != nil {
-			return err
-		}
-		if err := markConfirmed(ctx, tx, id, pendingNo); err != nil {
-			return err
-		}
-		next.ApprovalStatus, next.VersionNo = domain.POStatusConfirmed, pendingNo
-		if err := updateHeader(ctx, tx, next); err != nil {
-			return err
-		}
-		if out, err = loadPurchaseOrder(ctx, tx, id); err != nil {
-			return err
-		}
-		if err := emitConfirmed(ctx, tx, out); err != nil {
-			return err
-		}
-		return emitVersionCreated(ctx, tx, out, patch, false)
+		out, _, err = editLocked(ctx, tx, cur, ifMatch, next)
+		return err
 	})
 	return out, err
+}
+
+// editResult says which version an edit of a confirmed PO wrote: its number
+// (0 when the edit changed nothing or the PO was never confirmed) and whether
+// it waits for re-approval.
+type editResult struct {
+	versionNo  int
+	reapproval bool
+}
+
+// editLocked is the body of EditPurchaseOrder for cur, which the caller has
+// locked and loaded inside tx. It returns the PO as stored afterwards.
+func editLocked(ctx context.Context, tx pgx.Tx, cur PurchaseOrder, ifMatch int, next PurchaseOrder) (PurchaseOrder, editResult, error) {
+	id := cur.ID
+	if err := checkRowVersion(cur, ifMatch); err != nil {
+		return PurchaseOrder{}, editResult{}, err
+	}
+	if err := domain.CheckEditable(cur.ApprovalStatus); err != nil {
+		return PurchaseOrder{}, editResult{}, err
+	}
+	if err := checkHeaderUnchanged(cur, next); err != nil {
+		return PurchaseOrder{}, editResult{}, err
+	}
+	removed, err := checkLineChanges(cur.Lines, next.Lines)
+	if err != nil {
+		return PurchaseOrder{}, editResult{}, err
+	}
+	if err := checkAgreementDates(ctx, tx, cur.Lines, next.Lines); err != nil {
+		return PurchaseOrder{}, editResult{}, err
+	}
+	next.ID, next.Number = id, cur.Number
+	next.LegalEntityID, next.VendorID, next.Currency = cur.LegalEntityID, cur.VendorID, cur.Currency
+	next.ChangeManagement = cur.ChangeManagement
+	next.VersionNo = cur.VersionNo
+	merged := mergeLines(cur.Lines, next.Lines, removed)
+	// rewrite stores next's lines and header in status and reloads the PO.
+	rewrite := func(status string, res editResult) (PurchaseOrder, editResult, error) {
+		if err := applyLines(ctx, tx, next, removed); err != nil {
+			return PurchaseOrder{}, editResult{}, err
+		}
+		next.ApprovalStatus = status
+		if err := updateHeader(ctx, tx, next); err != nil {
+			return PurchaseOrder{}, editResult{}, err
+		}
+		out, err := loadPurchaseOrder(ctx, tx, id)
+		return out, res, err
+	}
+
+	if cur.VersionNo == 0 {
+		// Not yet confirmed: a plain edit that restarts approval.
+		return rewrite(domain.POStatusDraft, editResult{})
+	}
+
+	base, ok, err := loadVersion(ctx, tx, id, cur.VersionNo)
+	if err != nil {
+		return PurchaseOrder{}, editResult{}, err
+	}
+	if !ok {
+		return PurchaseOrder{}, editResult{}, fmt.Errorf("purchase order %s: confirmed version %d is missing", cur.Number, cur.VersionNo)
+	}
+	nextSnap := snapshotOf(next, merged)
+	patch, err := domain.VersionDiff(base.Snapshot, nextSnap)
+	if err != nil {
+		return PurchaseOrder{}, editResult{}, err
+	}
+	pendingNo := cur.VersionNo + 1
+	if len(patch) == 0 {
+		if cur.ApprovalStatus == domain.POStatusConfirmed {
+			return cur, editResult{}, nil // nothing changed and nothing pending
+		}
+		// The change was edited back to the confirmed content: drop it.
+		if err := deleteVersion(ctx, tx, id, pendingNo); err != nil {
+			return PurchaseOrder{}, editResult{}, err
+		}
+		return rewrite(domain.POStatusConfirmed, editResult{})
+	}
+	reapproval := cur.ChangeManagement &&
+		domain.ChangeNeedsReapproval(base.Snapshot, nextSnap, patch, domain.DefaultReapprovalRules())
+	if err := writeVersion(ctx, tx, id, pendingNo, nextSnap, patch, reapproval); err != nil {
+		return PurchaseOrder{}, editResult{}, err
+	}
+	if reapproval {
+		return rewrite(domain.POStatusInReview, editResult{versionNo: pendingNo, reapproval: true})
+	}
+	if err := markConfirmed(ctx, tx, id, pendingNo); err != nil {
+		return PurchaseOrder{}, editResult{}, err
+	}
+	next.VersionNo = pendingNo
+	out, res, err := rewrite(domain.POStatusConfirmed, editResult{versionNo: pendingNo})
+	if err != nil {
+		return PurchaseOrder{}, editResult{}, err
+	}
+	if err := emitConfirmed(ctx, tx, out); err != nil {
+		return PurchaseOrder{}, editResult{}, err
+	}
+	return out, res, emitVersionCreated(ctx, tx, out, patch, false)
 }
 
 // ActOnPurchaseOrder runs one custom method on a PO (submit, approve, reject,

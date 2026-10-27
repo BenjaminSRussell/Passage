@@ -17,6 +17,7 @@ var allTypes = map[string]string{
 	events.POConfirmed:          "po",
 	events.POVersionCreated:     "poversion",
 	events.POCancelled:          "po",
+	events.PORepriced:           "po",
 	events.RFQSent:              "rfq",
 	events.RFQAwarded:           "rfq",
 }
@@ -65,6 +66,7 @@ func TestPayloadFieldsAreInTheAsyncAPI(t *testing.T) {
 		events.POConfirmedData{SiteID: "s", WarehouseID: "w", Lines: []events.POLineData{{ProductID: "p", Description: "d"}}},
 		events.POVersionCreatedData{Patch: []any{}},
 		events.POCancelledData{Lines: []events.POCancelledLine{{ProductID: "p"}}},
+		events.PORepricedData{Lines: []events.PORepricedLine{{}}, InvoicedLines: []events.PORepricedLine{{}}},
 		events.RFQSentData{VendorIDs: []string{"v"}, Lines: []events.RFQLineData{{ProductID: "p", Description: "d", RequiredDate: "2026-11-01"}}},
 		events.RFQAwardedData{Awards: []events.RFQAwardedLine{{OverrideReason: "only bid"}}},
 	} {

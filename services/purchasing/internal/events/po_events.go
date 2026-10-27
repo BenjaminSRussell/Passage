@@ -12,6 +12,9 @@ const (
 	POVersionCreated = "dev.passage.procurement.poversion.created.v1"
 	// POCancelled is written by :cancel.
 	POCancelled = "dev.passage.procurement.po.cancelled.v1"
+	// PORepriced is written when :reprice applies a subsequent price change as
+	// the next PO version (FR-17.22).
+	PORepriced = "dev.passage.procurement.po.repriced.v1"
 )
 
 // POLineData is one line as carried on po.confirmed.v1. Money and quantities
@@ -74,4 +77,37 @@ type POCancelledData struct {
 	VersionNo   int               `json:"version_no"`
 	PriorStatus string            `json:"prior_status"`
 	Lines       []POCancelledLine `json:"lines"`
+}
+
+// PORepricedLine is one line on po.repriced.v1. Prices, quantities and amounts
+// are decimal strings; amounts are for Qty, and Delta = NewAmount − OldAmount.
+type PORepricedLine struct {
+	LineNo       int    `json:"line_no"`
+	Qty          string `json:"qty"`
+	OldPrice     string `json:"old_price"`
+	OldPriceUnit string `json:"old_price_unit"`
+	NewPrice     string `json:"new_price"`
+	NewPriceUnit string `json:"new_price_unit"`
+	OldAmount    string `json:"old_amount"`
+	NewAmount    string `json:"new_amount"`
+	Delta        string `json:"delta"`
+	OldSource    string `json:"old_price_source"`
+	NewSource    string `json:"new_price_source"`
+}
+
+// PORepricedData is the data member of po.repriced.v1 (FR-17.22, BR-17.18).
+// VersionNo is the version the run wrote; when ReapprovalRequired it waits for
+// re-approval and po.confirmed follows once it is confirmed. Lines are the
+// moved lines (Qty is the line quantity). InvoicedLines kept the old price and
+// carry the invoiced quantity and its delta for the wave 18 subsequent debit or
+// credit (FR-18.18).
+type PORepricedData struct {
+	POID               string           `json:"po_id"`
+	Number             string           `json:"number"`
+	VersionNo          int              `json:"version_no"`
+	ReapprovalRequired bool             `json:"reapproval_required"`
+	Currency           string           `json:"currency"`
+	TotalDelta         string           `json:"total_delta"`
+	Lines              []PORepricedLine `json:"lines"`
+	InvoicedLines      []PORepricedLine `json:"invoiced_lines"`
 }

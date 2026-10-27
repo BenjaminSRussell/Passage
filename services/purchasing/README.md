@@ -1,13 +1,14 @@
 # purchasing
 
-Passage purchasing service. Wave 17 (PSG-17), slices 1 to 5 of the procurement
+Passage purchasing service. Wave 17 (PSG-17), slices 1 to 6 of the procurement
 context: purchase requisitions with amount/category approval routing,
 consolidation of approved requisition lines into purchase orders, purchase orders
 with persisted totals, the PO approval lifecycle with versioned change
 management, purchase agreements with release tracking, trade agreement
 price lookup with explain, the RFQ cycle (send, replies, compare, award to
 purchase orders) with sealed bids and weighted scoring, invoicing plans on PO
-lines, and the web workspace module at `apps/web/src/modules/purchasing`.
+lines, the subsequent price change (reprice) of confirmed POs, and the web
+workspace module at `apps/web/src/modules/purchasing`.
 
 Full ticket scope and the list of what is not yet built are in
 [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
@@ -19,7 +20,8 @@ cmd/purchasing/        entrypoint: dbx.Connect -> dbx.Migrate -> api.Register ->
 internal/domain/       pure rules: approval bands, trade agreement lookup, PO totals, reapproval,
                        PO state machine, version snapshots and RFC 6902 diffs, agreement releases (limits, validity, threshold), consolidation grouping,
                        RFQ state machine, reply ranking and award checks, sealed bids and weighted scoring,
-                       invoicing plan generation and reproportioning
+                       invoicing plan generation and reproportioning, reprice planning,
+                       scheduling agreement zone rules (BR-17.13, rules only)
 internal/store/        Postgres repositories (pgx), every transaction via dbx.WithTenantTx
 internal/api/          HTTP handlers under /v1/procurement, duties via authz.RequireDuty
 internal/events/       event types and payloads (dev.passage.procurement.*)
@@ -29,6 +31,7 @@ migrations/            0001_init.sql (tables, sequences, RLS, outbox, idempotenc
                        0004_rfq.sql (RFQs, lines, invitations, replies; PO line link to the awarded reply)
                        0005_rfq_sealed_scoring.sql (sealed flag and opening log, scoring criteria, vendor scores)
                        0006_invoicing_plan.sql (invoicing plans and their rows per PO line)
+                       0007_reprice.sql (invoiced-line reprice hand-over mark, trade-priced line index)
 api/openapi.yaml       OpenAPI 3.1 for every route
 events/asyncapi.yaml   AsyncAPI 3 for every event emitted
 charts/purchasing/     Helm chart (probes on /healthz and /readyz, DATABASE_URL from a secret)
@@ -73,6 +76,8 @@ row-level-security test also needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-owner
 | PATCH `/purchase-orders/{id}` | PurchaseOrderMaintain | If-Match (row version) required; whole order as on create, `lineNo` names an existing line; see the change rules below |
 | POST `/purchase-orders/{id}:submit` / `:cancel` | PurchaseOrderMaintain | Idempotency-Key and If-Match required |
 | POST `/purchase-orders/{id}:approve` / `:reject` / `:confirm` | PurchaseOrderConfirm | Idempotency-Key and If-Match required; approve and reject stand in for the wave 4 approval task |
+| POST `/purchase-orders/{id}:reprice` | PurchaseOrderInquire (preview) / PurchaseOrderConfirm (apply) | Subsequent price change on one CONFIRMED PO; `{"apply": false}` previews (ETag = row version); apply needs If-Match and Idempotency-Key |
+| POST `/purchase-orders:reprice` | PurchaseOrderInquire (preview) / PurchaseOrderConfirm (apply) | The run over a page of CONFIRMED POs (`legalEntityId`, `vendorId`, `tradeAgreementId`, `limit` ≤ 100, `cursor`); apply needs an Idempotency-Key and writes each PO on its own |
 | GET `/purchase-orders/{id}/versions` | PurchaseOrderInquire | Every stored version oldest first, a pending change included |
 | GET `/purchase-orders/{id}/versions/{n}/diff` | PurchaseOrderInquire | RFC 6902 patch from version n−1 to n |
 | GET `/purchase-orders/{id}/invoicing-plans` | PurchaseOrderInquire | Every invoicing plan of the PO in line order |
@@ -225,6 +230,25 @@ down). Metrics: `GET :9090/metrics` (Prometheus text counters).
   (PRC-IP-001). Cancelling the line or the PO removes its plan, unless a row is
   invoiced (PRC-IP-002), which also blocks replacing or deleting the plan. Plan
   writes take If-Match on the PO row version and bump it.
+- **Subsequent price change (FR-17.22, BR-17.18, AC-17.16).** Only a CONFIRMED PO
+  is repriced (PRC-PO-STATE otherwise). Each live line priced from a trade agreement
+  (`TRADE_AGREEMENT:<id>`) is looked up again with the PO creation rules (FR-17.6) on
+  the order date (BR-17.3) for the PO's vendor, the line's product, quantity, unit and
+  currency. A line moves when the winning row's price or price unit differs; a
+  `MANUAL` line never moves, a line drawn against a purchase agreement keeps its
+  release amount (PRC-PO-010), and agreement, RFQ and estimate prices are left alone.
+  A line with an invoiced quantity keeps the old price and is handed to payables:
+  `invoiced` (and `invoiced_lines` on the event) carries the change on the invoiced
+  quantity for the wave 18 subsequent debit/credit, and the line is marked with the
+  row handed over so the same change is never sent twice. Lines with receipts but no
+  invoice move (their GR/IR expectation follows the new price). Apply goes through
+  the PO edit: the moved prices, re-priced amounts and totals become the next version,
+  confirmed at once (`po.confirmed`, `poversion.created`) or IN_REVIEW when a
+  reapproval rule fires, and invoicing plans follow the new line amounts; then
+  `po.repriced.v1` is written in the same transaction. The run over many POs plans
+  each PO and applies it in its own transaction at the row version it read; a
+  failing PO is reported in its item and the others still apply, and the run's
+  Idempotency-Key is claimed per PO so a retried page writes no PO twice.
 - **Idempotency.** Creates and custom methods store the key with a hash of the operation
   and body; a replay returns the original resource, a different body (or endpoint)
   with the same key is `idempotency_key_reuse`.
@@ -300,5 +324,5 @@ platform go.mod).
 `apps/web/src/modules/purchasing` gives the procurement workspace: requisition,
 RFQ, purchase order, purchase agreement and trade agreement lists with create forms
 and detail pages, the consolidation board, the price lookup with explain, sealed-bid
-and scoring screens on the RFQ, and the invoicing plan page per PO line. See its
-README.
+and scoring screens on the RFQ, the invoicing plan page per PO line, and the price
+change pages (one PO, and the run over many). See its README.

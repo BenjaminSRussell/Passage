@@ -105,6 +105,7 @@ type API struct {
 	sealedRFQsOpened   atomic.Int64
 
 	invoicingPlansSaved atomic.Int64
+	repricesApplied     atomic.Int64
 }
 
 // New returns the API over s using the default approval policy (FR-17.2) and
@@ -144,6 +145,9 @@ func (a *API) Register(r chi.Router) {
 		// orderAction, since approve, reject and confirm need PurchaseOrderConfirm.
 		maintain.Patch("/purchase-orders/{id}", a.editOrder)
 		r.Post("/purchase-orders/{id}", a.orderAction)
+		// Subsequent price change over many POs (FR-17.22); preview needs
+		// PurchaseOrderInquire and apply PurchaseOrderConfirm, checked in repriceRun.
+		r.Post("/purchase-orders:reprice", a.repriceRun)
 		inquire.Get("/purchase-orders/{id}/versions", a.orderVersions)
 		inquire.Get("/purchase-orders/{id}/versions/{n}/diff", a.orderVersionDiff)
 		// Invoicing plans per PO line (FR-17.21); a line amount change
@@ -204,6 +208,7 @@ func (a *API) Metrics() http.Handler {
 			{"purchasing_rfq_vendors_scored_total", "RFQ vendor scorings recorded.", a.rfqVendorsScored.Load()},
 			{"purchasing_sealed_rfqs_opened_total", "Sealed RFQs whose replies were opened after the deadline.", a.sealedRFQsOpened.Load()},
 			{"purchasing_invoicing_plans_saved_total", "Invoicing plans written by PUT.", a.invoicingPlansSaved.Load()},
+			{"purchasing_purchase_orders_repriced_total", "Subsequent price changes applied to a purchase order.", a.repricesApplied.Load()},
 		} {
 			fmt.Fprintf(w, "# HELP %[1]s %[2]s\n# TYPE %[1]s counter\n%[1]s %[3]d\n", c.name, c.help, c.value)
 		}

@@ -54,6 +54,8 @@ type Store interface {
 	ListPurchaseOrders(ctx context.Context, f PurchaseOrderFilter, after string, limit int) (Page[PurchaseOrderSummary], error)
 	EditPurchaseOrder(ctx context.Context, id string, ifMatch int, next PurchaseOrder) (PurchaseOrder, error)
 	ActOnPurchaseOrder(ctx context.Context, id string, ifMatch int, action string, idem Idem) (PurchaseOrder, error)
+	RepriceCandidates(ctx context.Context, f RepriceFilter, after string, limit int) (Page[string], error)
+	RepricePurchaseOrder(ctx context.Context, id string, ifMatch int, next PurchaseOrder, plan domain.RepricePlan, idem Idem) (RepriceOutcome, error)
 	ListPurchaseOrderVersions(ctx context.Context, poID string) ([]PurchaseOrderVersion, error)
 	GetPurchaseOrderVersion(ctx context.Context, poID string, no int) (PurchaseOrderVersion, error)
 	CreateAgreement(ctx context.Context, in domain.Agreement, idem Idem) (AgreementDetail, error)

@@ -64,6 +64,10 @@ type PurchaseOrderLine struct {
 	ReceivedQty       decimal.Decimal `json:"receivedQty"`
 	InvoicedQty       decimal.Decimal `json:"invoicedQty"`
 	Status            string          `json:"status"`
+	// InvoicedRepriceSource is the trade agreement price source a reprice run
+	// last handed to payables for this invoiced line (FR-17.22, BR-17.18), so a
+	// later run does not hand the same price change over twice.
+	InvoicedRepriceSource string `json:"invoicedRepriceSource,omitempty"`
 }
 
 // PurchaseOrderCharge is a priced header charge (FR-17.9).
@@ -172,7 +176,8 @@ func loadPurchaseOrder(ctx context.Context, tx pgx.Tx, id string) (PurchaseOrder
 	}
 	lines, err := tx.Query(ctx, `select line_no, coalesce(product_id::text, ''), description, qty, unit, unit_price, price_unit,
 		discount_pct, gross_amount, discount_amount, line_amount, tax_amount, delivery_date, price_source,
-		coalesce(requisition_line_id::text, ''), coalesce(agreement_line_id::text, ''), received_qty, invoiced_qty, status
+		coalesce(requisition_line_id::text, ''), coalesce(agreement_line_id::text, ''), received_qty, invoiced_qty, status,
+		coalesce(invoiced_reprice_source, '')
 		from purchase_order_line where tenant_id = $1 and purchase_order_id = $2 order by line_no`, p.TenantID, id)
 	if err != nil {
 		return PurchaseOrder{}, err
@@ -184,7 +189,7 @@ func loadPurchaseOrder(ctx context.Context, tx pgx.Tx, id string) (PurchaseOrder
 		var due time.Time
 		if err := lines.Scan(&l.LineNo, &l.ProductID, &l.Description, &l.Qty, &l.Unit, &l.UnitPrice, &l.PriceUnit, &l.DiscountPct,
 			&l.GrossAmount, &l.DiscountAmount, &l.LineAmount, &l.TaxAmount, &due, &l.PriceSource, &l.RequisitionLineID,
-			&l.AgreementLineID, &l.ReceivedQty, &l.InvoicedQty, &l.Status); err != nil {
+			&l.AgreementLineID, &l.ReceivedQty, &l.InvoicedQty, &l.Status, &l.InvoicedRepriceSource); err != nil {
 			return PurchaseOrder{}, err
 		}
 		l.DeliveryDate = day(due)

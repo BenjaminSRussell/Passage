@@ -150,7 +150,8 @@ func numberLines(cur store.PurchaseOrder, body []orderLineBody, lines []store.Pu
 }
 
 // orderAction handles POST /purchase-orders/{id}:submit|approve|reject|confirm|cancel.
-// Each needs its duty, If-Match and an Idempotency-Key.
+// Each needs its duty, If-Match and an Idempotency-Key. :reprice is handed to
+// repriceOrder, which checks its own duty.
 func (a *API) orderAction(w http.ResponseWriter, r *http.Request) {
 	p, err := principal(r.Context())
 	if err != nil {
@@ -158,6 +159,10 @@ func (a *API) orderAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, action, found := strings.Cut(chi.URLParam(r, "id"), ":")
+	if found && action == repriceAction && ids.Valid(id) {
+		a.repriceOrder(w, r, p, id)
+		return
+	}
 	if !found || !isPOAction(action) || !ids.Valid(id) {
 		fail(w, r, httpx.NewProblem(http.StatusNotFound, codeUnknownAction, "unknown purchase order action"))
 		return

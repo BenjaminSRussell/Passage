@@ -33,6 +33,12 @@ describe("purchasing module", () => {
     expect(purchasing.routes.map((r) => r.path)).toContain("/purchasing/purchase-orders/:id/lines/:lineNo/invoicing-plan");
   });
 
+  it("routes the price change pages for one order and for the run", () => {
+    expect(purchasing.routes.map((r) => r.path)).toEqual(
+      expect.arrayContaining(["/purchasing/purchase-orders/:id/reprice", "/purchasing/reprice"]),
+    );
+  });
+
   it("routes the consolidation board", () => {
     expect(purchasing.routes.map((r) => r.path)).toContain("/purchasing/consolidation");
   });

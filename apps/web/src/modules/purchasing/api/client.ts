@@ -145,6 +145,8 @@ export interface PurchaseOrderLine {
   receivedQty?: string;
   invoicedQty?: string;
   status: string;
+  /** TRADE_AGREEMENT:<id> a reprice run last handed to payables for this invoiced line (FR-17.22). */
+  invoicedRepriceSource?: string;
 }
 
 export interface PurchaseOrderCharge {
@@ -868,4 +870,99 @@ export function putInvoicingPlan(poId: string, lineNo: number, rowVersion: numbe
 export async function deleteInvoicingPlan(poId: string, lineNo: number, rowVersion: number) {
   const { etag } = await send<undefined>("DELETE", planPath(poId, lineNo), { headers: { "If-Match": `"${rowVersion}"` } });
   return etag === null ? rowVersion + 1 : Number(etag.replace(/"/g, ""));
+}
+
+// --- Subsequent price change (FR-17.22, BR-17.18). Wire shapes follow services/purchasing/api/openapi.yaml. ---
+
+/** One line at its current and at the winning trade agreement price; amounts are for qty. */
+export interface RepriceChange {
+  lineNo: number;
+  qty: string;
+  oldPrice: string;
+  oldPriceUnit: string;
+  newPrice: string;
+  newPriceUnit: string;
+  oldAmount: string;
+  newAmount: string;
+  delta: string;
+  oldPriceSource: string;
+  newPriceSource: string;
+}
+
+export type RepriceSkipReason =
+  | "MANUAL_PRICE"
+  | "AGREEMENT_LINE"
+  | "NOT_TRADE_AGREEMENT"
+  | "NO_CURRENT_PRICE"
+  | "UNCHANGED"
+  | "INVOICED"
+  | "HANDED_OVER";
+
+export interface RepriceSkip {
+  lineNo: number;
+  reason: RepriceSkipReason;
+}
+
+export interface RepriceResult {
+  purchaseOrderId: string;
+  number: string;
+  currency: string;
+  applied: boolean;
+  replayed?: boolean;
+  versionNo: number;
+  reapprovalRequired: boolean;
+  pricingDate: string;
+  totalDelta: string;
+  /** Open, un-invoiced lines that move. */
+  changes: RepriceChange[];
+  /** Invoiced lines that keep the old price and go to payables for a subsequent credit or debit. */
+  invoiced: RepriceChange[];
+  skipped: RepriceSkip[];
+  /** Set only in a run over many orders. */
+  error?: { code: string; detail: string };
+}
+
+export interface RepriceRunInput {
+  legalEntityId?: string;
+  vendorId?: string;
+  tradeAgreementId?: string;
+  limit?: number;
+  cursor?: string;
+}
+
+export interface RepriceRunResult {
+  applied: boolean;
+  visited: number;
+  items: RepriceResult[];
+  nextCursor?: string;
+}
+
+function repricePath(poId: string): string {
+  return `/purchase-orders/${encodeURIComponent(poId)}:reprice`;
+}
+
+/** Read-only preview (PurchaseOrderInquire); the ETag is the PO row version to pass to applyReprice. */
+export function previewReprice(poId: string, signal?: AbortSignal) {
+  return send<RepriceResult>("POST", repricePath(poId), { body: { apply: false }, signal });
+}
+
+/** Applies the run as the next PO version (PurchaseOrderConfirm); a stale rowVersion is 412 PRC-PO-009. */
+export function applyReprice(poId: string, rowVersion: number, idempotencyKey = newIdempotencyKey()) {
+  return send<RepriceResult>("POST", repricePath(poId), {
+    body: { apply: true },
+    headers: { "Idempotency-Key": idempotencyKey, "If-Match": `"${rowVersion}"` },
+  });
+}
+
+/** One page of the run over many confirmed orders; apply writes each order in its own transaction. */
+export async function runReprice(input: RepriceRunInput, apply: boolean, idempotencyKey = newIdempotencyKey()) {
+  const body: Record<string, unknown> = { apply };
+  for (const [k, v] of Object.entries(input)) {
+    if (v !== undefined && String(v).trim() !== "") body[k] = typeof v === "string" ? v.trim() : v;
+  }
+  const { body: result } = await send<RepriceRunResult>("POST", "/purchase-orders:reprice", {
+    body,
+    headers: apply ? { "Idempotency-Key": idempotencyKey } : undefined,
+  });
+  return result;
 }
