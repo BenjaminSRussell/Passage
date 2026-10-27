@@ -20,12 +20,13 @@ const (
 
 // fakeStore records calls; slice3 (activation_test.go) holds the activation,
 // copy, read and lookup fakes, slice4 (setup_test.go) the valuation setup and
-// aging snapshot fakes.
+// aging snapshot fakes, slice5 (valuereport_test.go) the cost transaction fakes.
 type fakeStore struct {
 	imported []store.ItemCost
 	versions map[string]store.CostingVersion
 	slice3
 	slice4
+	slice5
 }
 
 func (f *fakeStore) CreateCostingVersion(_ context.Context, in store.CostingVersion, key string) (store.CostingVersion, bool, error) {

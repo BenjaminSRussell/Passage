@@ -466,3 +466,125 @@ export function getAgingSnapshot(id: string, signal?: AbortSignal, fetchImpl: ty
 export function createAgingSnapshot(body: SnapshotRequest, idempotencyKey: string, fetchImpl: typeof fetch = fetch): Promise<AgingSnapshot> {
   return post("/api/v1/costing/aging/snapshots", body, fetchImpl, { "Idempotency-Key": idempotencyKey });
 }
+
+// ---- cost transactions, inventory value report and GL tie-out (FR-20.4) ----
+
+export const REPORT_DIMENSIONS = ["product", "site", "warehouse", "valuationType"] as const;
+export type ReportDimension = (typeof REPORT_DIMENSIONS)[number];
+
+export const COST_KINDS = ["PHYSICAL", "FINANCIAL", "INVOICE_DIFF", "SETTLEMENT_ADJ", "PPV", "REVALUATION", "MANUAL_ADJ", "RECALC"] as const;
+export type CostKind = (typeof COST_KINDS)[number];
+
+export interface ValueReportParams {
+  legalEntityId: string;
+  asOf: string;
+  /** A valuation ledger of the legal entity; omitted for the primary valuation. */
+  valuationLedgerId?: string;
+  siteId?: string;
+  /** Empty is one total row. */
+  groupBy: ReportDimension[];
+}
+
+export interface ValueAmounts {
+  qty: string;
+  /** PHYSICAL rows: received or shipped, not yet invoiced. */
+  physicalValue: string;
+  financialValue: string;
+  /** physicalValue + financialValue, which the tie-out compares with the ledger. */
+  value: string;
+}
+
+export interface ValueReportRow extends ValueAmounts {
+  key: Partial<Record<ReportDimension, string>>;
+}
+
+interface ReportHeader {
+  legalEntityId: string;
+  asOf: string;
+  valuationLedgerId?: string;
+  valuationLedgerCode?: string;
+  siteId?: string;
+  /** Empty when neither a ledger nor any row names one. */
+  currency: string;
+  groupBy: ReportDimension[];
+}
+
+export interface ValueReport extends ReportHeader {
+  rows: ValueReportRow[];
+  total: ValueAmounts;
+}
+
+export interface LedgerBalance {
+  dimensions: Partial<Record<ReportDimension, string>>;
+  balance: string;
+}
+
+export interface TieOutRow {
+  key: Partial<Record<ReportDimension, string>>;
+  inventory: string;
+  ledger: string;
+  diff: string;
+}
+
+export interface TieOut extends ReportHeader {
+  rows: TieOutRow[];
+  differences: number;
+  totalDiff: string;
+  ties: boolean;
+}
+
+export interface CostTransaction {
+  id: string;
+  sourceKey: string;
+  legalEntityId: string;
+  inventoryTransactionId?: string;
+  ledgerEntryId?: string;
+  productId: string;
+  siteId: string;
+  warehouseId?: string;
+  valuationType?: string;
+  valuationLedgerId?: string;
+  kind: CostKind;
+  qty: string;
+  amount: string;
+  currency: string;
+  financialDate: string;
+  createdAt: string;
+}
+
+export interface CostTransactionFilter {
+  legalEntityId: string;
+  valuationLedgerId?: string;
+  productId?: string;
+  siteId?: string;
+  kind?: CostKind | "";
+  asOf?: string;
+  cursor?: string;
+}
+
+/** The inventory value at a date, grouped by the given dimensions, for one valuation ledger. */
+export function getValueReport(params: ValueReportParams, signal?: AbortSignal, fetchImpl: typeof fetch = fetch): Promise<ValueReport> {
+  const q = new URLSearchParams({ legalEntityId: params.legalEntityId, asOf: params.asOf, groupBy: params.groupBy.join(",") });
+  if (params.valuationLedgerId) q.set("valuationLedgerId", params.valuationLedgerId);
+  if (params.siteId) q.set("siteId", params.siteId);
+  return request(`/api/v1/costing/value-report?${q.toString()}`, { method: "GET", signal }, fetchImpl);
+}
+
+/** Compares the value report with ledger balances grouped the same way. It only reads. */
+export function tieOutValueReport(body: ValueReportParams & { glBalances: LedgerBalance[] }, fetchImpl: typeof fetch = fetch): Promise<TieOut> {
+  return post("/api/v1/costing/value-report:tie-out", body, fetchImpl);
+}
+
+/** The cost transactions behind the report, newest financial date first. */
+export function listCostTransactions(filter: CostTransactionFilter, signal?: AbortSignal, fetchImpl: typeof fetch = fetch): Promise<Page<CostTransaction>> {
+  const q = query({
+    legalEntityId: filter.legalEntityId,
+    valuationLedgerId: filter.valuationLedgerId,
+    productId: filter.productId,
+    siteId: filter.siteId,
+    kind: filter.kind || undefined,
+    asOf: filter.asOf,
+    cursor: filter.cursor,
+  });
+  return request(`/api/v1/costing/cost-transactions${q}`, { method: "GET", signal }, fetchImpl);
+}

@@ -23,6 +23,8 @@ describe("costing module", () => {
       "/costing/aging/snapshots",
       "/costing/valuation-setup",
       "/costing/versions",
+      "/costing/value-report",
+      "/costing/cost-transactions",
     ]);
     for (const n of costing.nav) {
       expect(paths).toContain(n.to);

@@ -1,17 +1,19 @@
 openapi: 3.1.0
 info:
   title: Passage Costing API
-  version: 0.4.0
+  version: 0.5.0
   description: >-
-    Inventory costing (PSG-20, wave 20), slices 1 to 4. Settlement preview under the
+    Inventory costing (PSG-20, wave 20), slices 1 to 5. Settlement preview under the
     item model group's costing method (with marking and split valuation types),
     parallel valuation ledger preview, inventory aging preview, costing versions with
     item-cost import (JSON or CSV), copy with percent change, standard cost activation
     with revaluation preview, the as-of standard cost lookup, and the internal purchase
     price variance hook. Slice 4 adds the valuation ledger and valuation category
-    registries, saved aging bucket sets and stored month-end aging snapshots.
-    Settlement, ledger, aging previews and PPV are stateless; versions, item costs,
-    valuation setup, bucket sets and snapshots are persisted with RLS.
+    registries, saved aging bucket sets and stored month-end aging snapshots. Slice 5
+    adds the append-only cost transaction projection, the inventory value report by
+    product, site, warehouse and valuation type per valuation ledger, and its tie-out
+    to ledger balances. Settlement, ledger, aging previews and PPV are stateless; versions, item costs,
+    valuation setup, bucket sets, snapshots and cost transactions are persisted with RLS.
 servers:
   - url: https://api.{env}.passage.dev
     variables:
@@ -591,6 +593,136 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
+  /v1/costing/value-report:
+    get:
+      operationId: getValueReport
+      summary: Inventory value by dimension at a date, physical and financial (FR-20.4, FR-20.15, FR-20.16)
+      description: >-
+        Sums the cost transactions of one legal entity and valuation ledger with a financial date
+        up to asOf. PPV rows never count (they post to the PPV account). Without valuationLedgerId
+        the report is the primary valuation, in the primary ledger's currency when one exists.
+        CST-RPT-001 for an unknown grouping, CST-RPT-004 when the ledger holds rows in another
+        currency, CST-VLG-005 (404) for a ledger the legal entity does not have.
+      x-passage-duty: costing.read
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/Duties"
+        - { name: legalEntityId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: asOf, in: query, required: true, schema: { type: string, format: date } }
+        - $ref: "#/components/parameters/ValuationLedgerFilter"
+        - { name: siteId, in: query, required: false, description: Only this site., schema: { type: string, format: uuid } }
+        - name: groupBy
+          in: query
+          required: false
+          description: Comma list of product, site, warehouse, valuationType. Absent means site; empty means one total row.
+          schema: { type: string, default: site }
+      responses:
+        "200":
+          description: the value report with totals
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ValueReport" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/costing/value-report:tie-out:
+    post:
+      operationId: tieOutValueReport
+      summary: Compare the value report with the ledger balances of the inventory accounts (read only)
+      description: >-
+        The caller supplies the ledger balances grouped like the report; each balance names exactly
+        the grouping dimensions (CST-RPT-002) and at most once (CST-RPT-003). A group on one side only
+        is compared with zero. The daily costing.reconcile job that reads the ledger itself and emits
+        reconciliation.diff is a later slice.
+      x-passage-duty: costing.read
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/Duties"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TieOutRequest" }
+      responses:
+        "200":
+          description: one row per group; ties is true when every group agrees with the ledger
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TieOut" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/costing/cost-transactions:
+    get:
+      operationId: listCostTransactions
+      summary: Cost transactions of one legal entity and valuation ledger, newest financial date first (value report drill-down)
+      x-passage-duty: costing.read
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/Duties"
+        - { name: legalEntityId, in: query, required: true, schema: { type: string, format: uuid } }
+        - $ref: "#/components/parameters/ValuationLedgerFilter"
+        - { name: productId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: siteId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: kind, in: query, required: false, schema: { $ref: "#/components/schemas/CostTransactionKind" } }
+        - { name: asOf, in: query, required: false, description: Financial date up to and including., schema: { type: string, format: date } }
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: one page of cost transactions
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CostTransactionList" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /internal/v1/costing/cost-transactions:
+    post:
+      operationId: recordCostTransactions
+      summary: Append value-affecting cost transactions (producers' hook; all or nothing, idempotent per sourceKey)
+      description: >-
+        A sourceKey already recorded with the same content is a replay and is skipped; with other
+        content the batch is refused with CST-CTX-001. A valuationLedgerId must be a ledger of the
+        row's legal entity (CST-VLG-005); rows of the primary ledger are stored as the primary
+        valuation. Every row is in its ledger's currency (CST-CTX-002). Rows are never updated.
+      x-passage-duty: costing.cost-transaction.post
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: "#/components/parameters/Duties"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items: { $ref: "#/components/schemas/CostTransactionRequest" }
+      responses:
+        "201":
+          description: recorded; received counts the batch, inserted the new source keys
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [received, inserted]
+                properties:
+                  received: { type: integer }
+                  inserted: { type: integer }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
 components:
   parameters:
     TenantHeader:
@@ -626,6 +758,12 @@ components:
       in: query
       required: false
       description: Only this legal entity; without it, every legal entity in the caller's scope.
+      schema: { type: string, format: uuid }
+    ValuationLedgerFilter:
+      name: valuationLedgerId
+      in: query
+      required: false
+      description: A valuation ledger of the legal entity; without it (or with the primary ledger's id), the primary valuation.
       schema: { type: string, format: uuid }
     Cursor:
       name: cursor
@@ -1140,6 +1278,115 @@ components:
       properties:
         items: { type: array, items: { $ref: "#/components/schemas/Snapshot" } }
         nextCursor: { type: string, description: Absent on the last page. }
+    CostTransactionKind:
+      type: string
+      enum: [PHYSICAL, FINANCIAL, INVOICE_DIFF, SETTLEMENT_ADJ, PPV, REVALUATION, MANUAL_ADJ, RECALC]
+      description: PHYSICAL, FINANCIAL and PPV may carry quantity; the others are value-only (qty 0). PPV never counts in the inventory value.
+    CostTransactionRequest:
+      type: object
+      required: [sourceKey, legalEntityId, productId, siteId, kind, qty, amount, currency, financialDate]
+      properties:
+        sourceKey: { type: string, minLength: 1, maxLength: 200, description: "The producer's own key of the event (voucher line, settlement row)." }
+        legalEntityId: { type: string, format: uuid }
+        inventoryTransactionId: { type: string, format: uuid, description: "Wave 16 inventory transaction; absent for an on-hand revaluation." }
+        ledgerEntryId: { type: string, format: uuid, description: "The ledger voucher (waves 11-14)." }
+        productId: { type: string, format: uuid }
+        siteId: { type: string, format: uuid }
+        warehouseId: { type: string, format: uuid }
+        valuationType: { type: string, maxLength: 64, description: "Split valuation type (FR-20.16); empty for none." }
+        valuationLedgerId: { type: string, format: uuid, description: "Absent for the primary valuation." }
+        kind: { $ref: "#/components/schemas/CostTransactionKind" }
+        qty: { $ref: "#/components/schemas/Decimal", description: "Signed; at most 22 integer digits and 6 decimals." }
+        amount: { $ref: "#/components/schemas/Decimal", description: "Signed, in the ledger currency; at most 15 integer digits and 4 decimals." }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        financialDate: { type: string, format: date }
+    CostTransaction:
+      allOf:
+        - $ref: "#/components/schemas/CostTransactionRequest"
+        - type: object
+          required: [id, createdAt]
+          properties:
+            id: { type: string, format: uuid }
+            createdAt: { type: string, format: date-time }
+    CostTransactionList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/CostTransaction" } }
+        nextCursor: { type: string, description: Absent on the last page. }
+    ValueAmounts:
+      type: object
+      required: [qty, physicalValue, financialValue, value]
+      properties:
+        qty: { $ref: "#/components/schemas/Decimal" }
+        physicalValue: { $ref: "#/components/schemas/Decimal", description: "PHYSICAL rows: received or shipped, not yet invoiced." }
+        financialValue: { $ref: "#/components/schemas/Decimal", description: "Every other inventory kind." }
+        value: { $ref: "#/components/schemas/Decimal", description: "physicalValue + financialValue; what the tie-out compares with the ledger." }
+    ReportHeader:
+      type: object
+      required: [legalEntityId, asOf, currency, groupBy]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        asOf: { type: string, format: date }
+        valuationLedgerId: { type: string, format: uuid, description: "Absent for the primary valuation requested without an id." }
+        valuationLedgerCode: { type: string }
+        siteId: { type: string, format: uuid }
+        currency: { type: string, description: "Empty when no ledger and no row names one." }
+        groupBy: { type: array, items: { type: string, enum: [product, site, warehouse, valuationType] } }
+    ValueReport:
+      allOf:
+        - $ref: "#/components/schemas/ReportHeader"
+        - type: object
+          required: [rows, total]
+          properties:
+            rows:
+              type: array
+              items:
+                allOf:
+                  - $ref: "#/components/schemas/ValueAmounts"
+                  - type: object
+                    required: [key]
+                    properties:
+                      key: { type: object, additionalProperties: { type: string }, description: "Grouping dimension values; an empty warehouse or valuation type is none." }
+            total: { $ref: "#/components/schemas/ValueAmounts" }
+    TieOutRequest:
+      type: object
+      required: [legalEntityId, asOf, glBalances]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        asOf: { type: string, format: date }
+        valuationLedgerId: { type: string, format: uuid }
+        siteId: { type: string, format: uuid }
+        groupBy: { type: array, items: { type: string, enum: [product, site, warehouse, valuationType] }, default: [site] }
+        glBalances:
+          type: array
+          minItems: 1
+          maxItems: 10000
+          items:
+            type: object
+            required: [dimensions, balance]
+            properties:
+              dimensions: { type: object, additionalProperties: { type: string }, description: "Exactly the grouping dimensions." }
+              balance: { $ref: "#/components/schemas/Decimal", description: "Ledger balance of the inventory account(s) for the group." }
+    TieOut:
+      allOf:
+        - $ref: "#/components/schemas/ReportHeader"
+        - type: object
+          required: [rows, differences, totalDiff, ties]
+          properties:
+            rows:
+              type: array
+              items:
+                type: object
+                required: [key, inventory, ledger, diff]
+                properties:
+                  key: { type: object, additionalProperties: { type: string } }
+                  inventory: { $ref: "#/components/schemas/Decimal" }
+                  ledger: { $ref: "#/components/schemas/Decimal" }
+                  diff: { $ref: "#/components/schemas/Decimal", description: "inventory - ledger" }
+            differences: { type: integer, description: "Groups whose diff is not zero." }
+            totalDiff: { $ref: "#/components/schemas/Decimal" }
+            ties: { type: boolean }
     PpvRequest:
       type: object
       required: [kind, currency, qty, poUnitPrice, sourceDocumentId]

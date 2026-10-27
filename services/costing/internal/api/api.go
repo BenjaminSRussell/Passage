@@ -1,6 +1,7 @@
 // Package api exposes the costing HTTP surface: settlement, ledger and aging
 // previews, costing versions with item-cost import and activation, valuation
-// setup, aging bucket sets and snapshots, and the internal PPV hook.
+// setup, aging bucket sets and snapshots, the cost transaction projection with
+// the inventory value report and its GL tie-out, and the internal PPV hook.
 package api
 
 import (
@@ -52,16 +53,17 @@ var (
 
 // API holds the handlers and their counters.
 type API struct {
-	store           store.Store
-	versionsCreated atomic.Int64
-	itemsImported   atomic.Int64
-	previews        atomic.Int64
-	ppvCalculated   atomic.Int64
-	domainRefusals  atomic.Int64
-	activations     atomic.Int64
-	costsActivated  atomic.Int64
-	itemsCopied     atomic.Int64
-	agingSnapshots  atomic.Int64
+	store            store.Store
+	versionsCreated  atomic.Int64
+	itemsImported    atomic.Int64
+	previews         atomic.Int64
+	ppvCalculated    atomic.Int64
+	domainRefusals   atomic.Int64
+	activations      atomic.Int64
+	costsActivated   atomic.Int64
+	itemsCopied      atomic.Int64
+	agingSnapshots   atomic.Int64
+	costTxnsRecorded atomic.Int64
 }
 
 // New returns an API over s.
@@ -91,6 +93,10 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/costing/aging/snapshots", a.listAgingSnapshots)
 	r.With(authz.RequireDuty(dutyAgingWrite)).Post("/v1/costing/aging/snapshots", a.createAgingSnapshot)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/costing/aging/snapshots/{id}", a.getAgingSnapshot)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/costing/value-report", a.getValueReport)
+	r.With(authz.RequireDuty(dutyRead)).Post("/v1/costing/value-report:tie-out", a.tieOutValueReport)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/costing/cost-transactions", a.listCostTransactions)
+	r.With(authz.RequireDuty(dutyCostTxnPost)).Post("/internal/v1/costing/cost-transactions", a.recordCostTransactions)
 	r.With(authz.RequireDuty(dutyPPVPost)).Post("/internal/v1/costing/ppv", a.postPPV)
 }
 
@@ -107,6 +113,7 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP costing_ppv_calculated_total PPV amounts calculated.\n# TYPE costing_ppv_calculated_total counter\ncosting_ppv_calculated_total %d\n", a.ppvCalculated.Load())
 		fmt.Fprintf(w, "# HELP costing_domain_refusals_total Requests refused by a domain rule.\n# TYPE costing_domain_refusals_total counter\ncosting_domain_refusals_total %d\n", a.domainRefusals.Load())
 		fmt.Fprintf(w, "# HELP costing_aging_snapshots_total Aging snapshots stored; idempotent replays are not counted.\n# TYPE costing_aging_snapshots_total counter\ncosting_aging_snapshots_total %d\n", a.agingSnapshots.Load())
+		fmt.Fprintf(w, "# HELP costing_cost_transactions_recorded_total Cost transactions recorded; replayed source keys are not counted.\n# TYPE costing_cost_transactions_recorded_total counter\ncosting_cost_transactions_recorded_total %d\n", a.costTxnsRecorded.Load())
 	})
 }
 

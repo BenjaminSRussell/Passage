@@ -9,7 +9,9 @@ info:
     stored. Both are written to the outbox in the same transaction as the change and
     relayed by Debezium (CloudEvents 1.0 envelope with tenantid); an idempotent replay
     emits nothing. Settlement, ledger and aging previews and PPV remain
-    request/response only, and costing consumes no events yet. The x-planned-events
+    request/response only. Recording cost transactions and the value report and its
+    tie-out (slice 5) emit no events; reconciliation.diff waits for the daily
+    costing.reconcile job. Costing consumes no events yet. The x-planned-events
     are the wave 20 catalog for later slices and are not emitted.
 defaultContentType: application/json
 channels:

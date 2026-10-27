@@ -1,5 +1,5 @@
-// Package store persists costing versions, item costs, valuation setup and
-// aging snapshots in the costing schema.
+// Package store persists costing versions, item costs, valuation setup, aging
+// snapshots and the cost transaction projection in the costing schema.
 // Every query runs inside dbx.WithTenantTx, so row-level security applies.
 package store
 
@@ -18,6 +18,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/BenjaminSRussell/passage/services/costing/internal/domain"
 )
 
 const (
@@ -81,6 +82,11 @@ type Store interface {
 	CreateAgingSnapshot(ctx context.Context, in AgingSnapshot, idempotencyKey string) (snap AgingSnapshot, created bool, err error)
 	GetAgingSnapshot(ctx context.Context, id string) (AgingSnapshot, error)
 	ListAgingSnapshots(ctx context.Context, legalEntityID, after string, limit int) (SnapshotPage, error)
+	// Cost transactions and the value report (FR-20.4). RecordCostTransactions
+	// returns the number of rows inserted; replays of a source key are skipped.
+	RecordCostTransactions(ctx context.Context, in []CostTransaction) (int, error)
+	ValueBalances(ctx context.Context, q BalanceQuery) ([]domain.Balance, error)
+	ListCostTransactions(ctx context.Context, f CostTxnFilter, after string, limit int) (CostTxnPage, error)
 	Ping(ctx context.Context) error
 }
 
