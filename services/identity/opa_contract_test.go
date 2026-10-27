@@ -87,7 +87,7 @@ func startRealPolicy(t *testing.T) string {
 		t.Fatal(err)
 	}
 	exited := make(chan error, 1)
-	go func() { exited <- cmd.Wait() }()
+	go func() { exited <- cmd.Wait(); close(exited) }()
 	t.Cleanup(func() {
 		_ = cmd.Process.Kill()
 		<-exited
@@ -268,8 +268,13 @@ func TestDutyContractExpectations(t *testing.T) {
 			if resp.Code != http.StatusForbidden {
 				t.Fatalf("status = %d, want 403", resp.Code)
 			}
-			if tt.wantDutyMissing != "" && !strings.Contains(resp.Body.String(), `"duty_missing":"`+tt.wantDutyMissing+`"`) {
-				t.Fatalf("body = %s, want duty_missing %q", resp.Body.String(), tt.wantDutyMissing)
+			if tt.wantDutyMissing != "" {
+				var problem struct {
+					Errors map[string]string `json:"errors"`
+				}
+				if err := json.Unmarshal(resp.Body.Bytes(), &problem); err != nil || problem.Errors["duty_missing"] != tt.wantDutyMissing {
+					t.Fatalf("body = %s, want duty_missing %q", resp.Body.String(), tt.wantDutyMissing)
+				}
 			}
 		})
 	}
