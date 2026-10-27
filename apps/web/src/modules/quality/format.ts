@@ -127,6 +127,7 @@ export const PULL_STATUS_LABELS: Record<PullStatus, { label: string; tone: Badge
   ORDERED: { label: "Order created", tone: "info" },
   PULLED: { label: "Pulled", tone: "success" },
   MISSED: { label: "Missed", tone: "danger" },
+  CANCELLED: { label: "Cancelled", tone: "neutral" },
 };
 
 export const NCR_STATUS_LABELS: Record<NcrStatus, { label: string; tone: BadgeTone }> = {

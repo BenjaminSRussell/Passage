@@ -46,6 +46,7 @@ type fakeStore struct {
 	certNCRs    []domain.Nonconformance
 	samples     []domain.Sample
 	sampleKeys  map[string]domain.Sample
+	s5          fakeSlice5
 }
 
 func newFake() *fakeStore {
@@ -92,10 +93,12 @@ func (f *fakeStore) ListTestGroups(context.Context, int) ([]domain.TestGroup, er
 	return out, nil
 }
 
-func (f *fakeStore) ListInstruments(context.Context, int) ([]domain.Instrument, error) {
+func (f *fakeStore) ListInstruments(_ context.Context, filter store.InstrumentFilter) ([]domain.Instrument, error) {
 	out := []domain.Instrument{}
 	for _, i := range f.instruments {
-		out = append(out, i)
+		if filter.DueBefore == nil || !i.DueAt.After(*filter.DueBefore) {
+			out = append(out, i)
+		}
 	}
 	return out, nil
 }

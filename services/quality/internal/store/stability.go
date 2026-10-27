@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/jackc/pgx/v5"
@@ -22,14 +23,15 @@ type StudyFilter struct {
 }
 
 const (
-	studyColumns = "id, item_id, batch_id, protocol, condition, start_date, test_group_id, lead_days, window_days, status, version, created_at"
-	dateLayout   = "2006-01-02"
+	studyColumns = "id, item_id, batch_id, protocol, condition, start_date, test_group_id, lead_days, window_days, status, version, created_at, " +
+		"status_reason, status_changed_by, status_changed_at"
+	dateLayout = "2006-01-02"
 )
 
 func scanStudy(row pgx.Row) (domain.Study, error) {
 	var st domain.Study
 	err := row.Scan(&st.ID, &st.ItemID, &st.BatchID, &st.Protocol, &st.Condition, &st.StartDate, &st.TestGroupID,
-		&st.LeadDays, &st.WindowDays, &st.Status, &st.Version, &st.CreatedAt)
+		&st.LeadDays, &st.WindowDays, &st.Status, &st.Version, &st.CreatedAt, &st.StatusReason, &st.StatusChangedBy, &st.StatusChangedAt)
 	return st, err
 }
 
@@ -62,7 +64,16 @@ func loadPulls(ctx context.Context, tx pgx.Tx, st *domain.Study) error {
 }
 
 func studyTx(ctx context.Context, tx pgx.Tx, id string) (domain.Study, error) {
-	st, err := scanStudy(tx.QueryRow(ctx, `select `+studyColumns+` from quality_stability_study where `+ownTenant+` and id = $1`, id))
+	return readStudy(ctx, tx, id, false)
+}
+
+// readStudy reads one study with its pulls; lock takes the study's row lock.
+func readStudy(ctx context.Context, tx pgx.Tx, id string, lock bool) (domain.Study, error) {
+	q := `select ` + studyColumns + ` from quality_stability_study where ` + ownTenant + ` and id = $1`
+	if lock {
+		q += ` for update`
+	}
+	st, err := scanStudy(tx.QueryRow(ctx, q, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return st, notFound(domain.CodeStudyMissing, "stability study not found")
 	}
@@ -171,6 +182,52 @@ func (s *Postgres) ListStudies(ctx context.Context, f StudyFilter) ([]domain.Stu
 			}
 		}
 		return nil
+	})
+	return out, err
+}
+
+// TransitionStudy applies change to the locked study when expectedVersion is its
+// version (If-Match, 412 otherwise), stores the new status and the pulls it
+// cancelled, and writes stabilitystudy.statuschanged in the same transaction.
+func (s *Postgres) TransitionStudy(ctx context.Context, id string, expectedVersion int, change func(domain.Study) (domain.Study, error)) (domain.Study, error) {
+	p, _ := tenant.FromContext(ctx)
+	var out domain.Study
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		cur, err := readStudy(ctx, tx, id, true)
+		if err != nil {
+			return err
+		}
+		if cur.Version != expectedVersion {
+			return httpx.NewProblem(http.StatusPreconditionFailed, CodeVersionConflict, fmt.Sprintf("current version is %d, not %d", cur.Version, expectedVersion))
+		}
+		next, err := change(cur)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `update quality_stability_study set status = $3, status_reason = $4, status_changed_by = $5,
+			status_changed_at = $6, version = version + 1 where `+ownTenant+` and id = $1 and version = $2`,
+			id, expectedVersion, next.Status, next.StatusReason, next.StatusChangedBy, next.StatusChangedAt); err != nil {
+			return err
+		}
+		cancelled := []int{}
+		for i, pl := range next.Pulls {
+			if pl.Status != cur.Pulls[i].Status {
+				if _, err := tx.Exec(ctx, `update quality_pull_point set status = $3 where `+ownTenant+` and study_id = $1 and months = $2`,
+					id, pl.Months, pl.Status); err != nil {
+					return err
+				}
+				if pl.Status == domain.PullCancelled {
+					cancelled = append(cancelled, pl.Months)
+				}
+			}
+		}
+		if err := enqueue(ctx, tx, "stabilitystudy", id, qevents.StabilityStudyStatusChanged, p.TenantID, qevents.StabilityStudyStatusChangedData{
+			StudyID: id, From: cur.Status, To: next.Status, Reason: next.StatusReason, User: next.StatusChangedBy, CancelledPulls: cancelled,
+		}); err != nil {
+			return err
+		}
+		out, err = studyTx(ctx, tx, id)
+		return err
 	})
 	return out, err
 }

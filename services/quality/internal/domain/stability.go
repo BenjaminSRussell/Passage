@@ -18,13 +18,18 @@ const (
 	StudyTerminated = "TERMINATED"
 )
 
-// Pull point statuses. Every pull starts PLANNED; the scheduling workflow moves it on.
+// Pull point statuses. Every pull starts PLANNED; the scheduling workflow moves it
+// on. Terminating a study cancels the pulls still PLANNED.
 const (
-	PullPlanned = "PLANNED"
-	PullOrdered = "ORDERED"
-	PullPulled  = "PULLED"
-	PullMissed  = "MISSED"
+	PullPlanned   = "PLANNED"
+	PullOrdered   = "ORDERED"
+	PullPulled    = "PULLED"
+	PullMissed    = "MISSED"
+	PullCancelled = "CANCELLED"
 )
+
+// MaxStudyReason bounds the reason recorded with a study status change.
+const MaxStudyReason = 500
 
 // Defaults for the study inputs the API fills in when the caller omits them
 // (parameters stability_lead_days and stability_pull_window_days).
@@ -194,13 +199,50 @@ func ValidateStudy(s StudySpec) map[string]string {
 
 // Study is a stability study with its generated pull schedule (FR-33.16). A new
 // study starts PLANNED at version 1; its pulls are fixed when it is created (BR-33.14).
+// StatusReason, StatusChangedBy and StatusChangedAt describe the last status change.
 type Study struct {
-	ID        string    `json:"id"`
-	Status    string    `json:"status"`
-	Version   int       `json:"version"`
-	CreatedAt time.Time `json:"createdAt"`
+	ID              string     `json:"id"`
+	Status          string     `json:"status"`
+	Version         int        `json:"version"`
+	CreatedAt       time.Time  `json:"createdAt"`
+	StatusReason    string     `json:"statusReason,omitempty"`
+	StatusChangedBy string     `json:"statusChangedBy,omitempty"`
+	StatusChangedAt *time.Time `json:"statusChangedAt,omitempty"`
 	StudySpec
 	Pulls []Pull `json:"pulls"`
+}
+
+// Transition moves the study to status to (FR-33.16: PLANNED -> ACTIVE ->
+// COMPLETED, or TERMINATED from PLANNED or ACTIVE). TERMINATED needs a reason and
+// cancels the pulls still PLANNED, so the scheduling workflow creates no more
+// orders; ORDERED pulls keep their quality orders. COMPLETED and TERMINATED are final.
+func (s Study) Transition(to, reason, user string, now time.Time) (Study, error) {
+	if !ValidStudyStatus(to) || to == StudyPlanned {
+		return s, invalid("to must be ACTIVE, COMPLETED or TERMINATED")
+	}
+	reason = strings.TrimSpace(reason)
+	if len(reason) > MaxStudyReason {
+		return s, invalid("a status reason must be 500 characters or fewer")
+	}
+	if !CanTransitionStudy(s.Status, to) {
+		return s, fail(CodeStudyStatus, "a stability study cannot move from "+s.Status+" to "+to)
+	}
+	if to == StudyTerminated && reason == "" {
+		return s, invalid("terminating a stability study needs a reason")
+	}
+	at := now.UTC()
+	s.Status, s.StatusReason, s.StatusChangedBy, s.StatusChangedAt = to, reason, user, &at
+	if to == StudyTerminated {
+		pulls := make([]Pull, len(s.Pulls))
+		for i, p := range s.Pulls {
+			if p.Status == PullPlanned {
+				p.Status = PullCancelled
+			}
+			pulls[i] = p
+		}
+		s.Pulls = pulls
+	}
+	return s, nil
 }
 
 // NewStudy validates a study request and generates its pull schedule, each pull

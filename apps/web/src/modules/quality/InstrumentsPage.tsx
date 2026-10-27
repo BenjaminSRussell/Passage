@@ -1,6 +1,6 @@
 import { useRef, useState, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { Alert, Badge, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Alert, Badge, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
 import { calibrateInstrument, createInstrument, describeProblem, listInstruments, newKey, type Instrument, type NewInstrument, type Problem } from "./api/client";
 import { CALIBRATION_LABELS, CODE, formatDate, pickFields } from "./format";
 import styles from "./pages.module.css";
@@ -22,9 +22,18 @@ const baseColumns: DataTableColumn<Instrument>[] = [
   },
 ];
 
-/** Instruments and their calibration due dates (BR-33.8); results from an overdue instrument are refused. */
+/** Horizons offered on the calibration due list (section 6.33.14), in days. */
+export const DUE_WINDOWS = [14, 30, 90] as const;
+
+/**
+ * Instruments and their calibration due dates (BR-33.8); results from an overdue
+ * instrument are refused. "Due within" turns the register into the calibration due list.
+ */
 export function InstrumentsPage() {
-  const state = useLoad((signal) => listInstruments(signal), "instruments");
+  const [params, setParams] = useSearchParams();
+  const raw = params.get("due") ?? "";
+  const due = /^\d{1,4}$/.test(raw) && Number(raw) <= 3650 ? Number(raw) : undefined;
+  const state = useLoad((signal) => listInstruments(signal, due), `instruments|${due ?? ""}`);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [failure, setFailure] = useState<Problem | null>(null);
@@ -68,6 +77,27 @@ export function InstrumentsPage() {
           </Link>
         }
       />
+      <div className={styles.toolbar}>
+        <FormField id="instruments-due" label="Due within">
+          {(control) => (
+            <Select
+              {...control}
+              value={due === undefined ? "" : String(due)}
+              onChange={(event) => {
+                const next = new URLSearchParams(params);
+                if (event.target.value) next.set("due", event.target.value);
+                else next.delete("due");
+                setParams(next);
+              }}
+            >
+              <option value="">All instruments</option>
+              {DUE_WINDOWS.map((d) => (
+                <option key={d} value={String(d)}>{`${d} days, overdue included`}</option>
+              ))}
+            </Select>
+          )}
+        </FormField>
+      </div>
       {notice ? (
         <Alert tone="success" live="status">
           {notice}
@@ -89,7 +119,11 @@ export function InstrumentsPage() {
           rows={state.data ?? []}
           getRowKey={(row) => row.id}
           loading={state.loading}
-          empty={{ title: "No instruments yet", description: "Register the gauges and meters your inspectors record results with." }}
+          empty={
+            due === undefined
+              ? { title: "No instruments yet", description: "Register the gauges and meters your inspectors record results with." }
+              : { title: `No instrument is due within ${due} days`, description: "Every registered instrument is calibrated beyond this horizon." }
+          }
         />
       )}
     </div>

@@ -293,8 +293,9 @@ export function createTestGroup(input: NewTestGroup, key: string = newKey()): Pr
   return post<TestGroup>("/test-groups", input, { "Idempotency-Key": key });
 }
 
-export function listInstruments(signal?: AbortSignal): Promise<Instrument[]> {
-  return items<Instrument>("/instruments", signal);
+/** Instruments, soonest due first; dueWithinDays keeps those due within that many days, overdue included (QM_VIEW). */
+export function listInstruments(signal?: AbortSignal, dueWithinDays?: number): Promise<Instrument[]> {
+  return items<Instrument>(`/instruments${query({ dueWithinDays: dueWithinDays === undefined ? undefined : String(dueWithinDays) })}`, signal);
 }
 
 export function createInstrument(input: NewInstrument, key: string = newKey()): Promise<Instrument> {
@@ -435,7 +436,7 @@ export function evaluateCompliance(itemId: string, region: string): Promise<Comp
 }
 
 export type StudyStatus = "PLANNED" | "ACTIVE" | "COMPLETED" | "TERMINATED";
-export type PullStatus = "PLANNED" | "ORDERED" | "PULLED" | "MISSED";
+export type PullStatus = "PLANNED" | "ORDERED" | "PULLED" | "MISSED" | "CANCELLED";
 
 export interface Pull {
   months: number;
@@ -463,6 +464,10 @@ export interface Study extends Omit<NewStudy, "leadDays" | "windowDays"> {
   status: StudyStatus;
   version: number;
   createdAt: string;
+  /** Reason of the last status change; always set on TERMINATED. */
+  statusReason?: string;
+  statusChangedBy?: string;
+  statusChangedAt?: string;
   leadDays: number;
   windowDays: number;
   pulls: Pull[];
@@ -479,6 +484,13 @@ export function getStudy(id: string, signal?: AbortSignal): Promise<Study> {
 /** Plans a study and generates its pull schedule (QM_STABILITY_MAINTAIN). */
 export function createStudy(input: NewStudy, key: string = newKey()): Promise<Study> {
   return post<Study>("/stability-studies", input, { "Idempotency-Key": key });
+}
+
+export type StudyTarget = Exclude<StudyStatus, "PLANNED">;
+
+/** Moves a study on (FR-33.16); version is its ETag from the last read, and TERMINATED needs a reason (QM_STABILITY_MAINTAIN). */
+export function transitionStudy(id: string, version: number, to: StudyTarget, reason?: string): Promise<Study> {
+  return post<Study>(`/stability-studies/${encodeURIComponent(id)}:transition`, reason ? { to, reason } : { to }, { "If-Match": `"${version}"` });
 }
 
 export interface SpcLimits {
@@ -736,4 +748,104 @@ export function listSamples(filter: { qualityOrderId?: string; status?: SampleSt
 /** Registers a physical sample of a quality order (QM_RESULTS_RECORD). */
 export function registerSample(input: NewSample, key: string = newKey()): Promise<Sample> {
   return post<Sample>("/samples", input, { "Idempotency-Key": key });
+}
+
+// ---- Slice 5: source inspection at receipt (FR-33.19, BR-33.16) and certificates of analysis (FR-33.9, BR-33.10) ----
+
+export interface NewReceiptCheck {
+  poLineId: string;
+  batch: string;
+  receiptLineId: string;
+  receivedQty: string;
+}
+
+export interface ReceiptCheck extends NewReceiptCheck {
+  id: string;
+  /** What source inspection of the PO line and batch accepted, over all its orders. */
+  acceptedQty: string;
+  /** What earlier receipts of the PO line and batch already used. */
+  coveredBefore: string;
+  /** No receiving quality order is needed (QM-0128). */
+  skip: boolean;
+  coveredQty: string;
+  /** The quantity a receiving quality order must inspect. */
+  normalQty: string;
+  code?: "QM-0128";
+  message: string;
+  checkedBy: string;
+  checkedAt: string;
+}
+
+export function listReceiptChecks(filter: { poLineId?: string; batch?: string }, signal?: AbortSignal): Promise<ReceiptCheck[]> {
+  return items<ReceiptCheck>(`/receipt-checks${query({ poLineId: filter.poLineId, batch: filter.batch })}`, signal);
+}
+
+/** Checks a receipt line against accepted source inspection; it uses up the covered quantity (QM_ORDER_MAINTAIN). */
+export function checkReceipt(input: NewReceiptCheck, key: string = newKey()): Promise<ReceiptCheck> {
+  return post<ReceiptCheck>("/receipt-checks", input, { "Idempotency-Key": key });
+}
+
+export interface CoALine {
+  testId: string;
+  testName: string;
+  kind: "VARIABLE" | "ATTRIBUTE";
+  required: boolean;
+  decimals: number;
+  min?: string;
+  max?: string;
+  sampleNo: number;
+  retestNo: number;
+  value?: string;
+  outcomeId?: string;
+  passed: boolean;
+  instrumentId?: string;
+  recordedBy: string;
+  recordedAt: string;
+}
+
+export interface CoA {
+  id: string;
+  qualityOrderId: string;
+  shipmentId?: string;
+  customerId?: string;
+  itemId: string;
+  batch: string;
+  dims: Record<string, string>;
+  uom: string;
+  lotQty: string;
+  acceptQty: string;
+  deviationQty: string;
+  deviations: string[];
+  testGroupId: string;
+  testGroupCode: string;
+  testGroupVersion: number;
+  specificationSet: "DEFAULT";
+  revision: number;
+  supersedes?: string;
+  reason?: string;
+  lines: CoALine[];
+  decisionId: string;
+  /** The usage-decision user. */
+  signedBy: string;
+  signedAt: string;
+  issuedBy: string;
+  issuedAt: string;
+}
+
+export interface NewCoA {
+  qualityOrderId: string;
+  shipmentId?: string;
+  customerId?: string;
+  /** Required for every revision after the first of the same (order, shipment) chain. */
+  reason?: string;
+}
+
+/** Every CoA revision of an order, the batch chain first (QM_VIEW). */
+export function listCoAs(orderId: string, signal?: AbortSignal): Promise<CoA[]> {
+  return items<CoA>(`/quality-orders/${encodeURIComponent(orderId)}/coas`, signal);
+}
+
+/** Issues the next CoA revision of a closed order whose decision released quantity (QM_COA). */
+export function generateCoA(input: NewCoA, key: string = newKey()): Promise<CoA> {
+  return post<CoA>("/coa:generate", input, { "Idempotency-Key": key });
 }

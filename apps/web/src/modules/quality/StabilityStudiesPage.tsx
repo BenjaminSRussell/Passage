@@ -1,7 +1,22 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { Alert, Badge, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, Skeleton, StatGroup, StatTile, type DataTableColumn } from "../../shell/ui";
-import { createStudy, describeProblem, getStudy, listStudies, listTestGroups, newKey, type NewStudy, type Problem, type Pull, type Study, type StudyStatus, type TestGroup } from "./api/client";
+import { Alert, Badge, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, Skeleton, StatGroup, StatTile, Textarea, type DataTableColumn } from "../../shell/ui";
+import {
+  createStudy,
+  describeProblem,
+  getStudy,
+  listStudies,
+  listTestGroups,
+  newKey,
+  transitionStudy,
+  type NewStudy,
+  type Problem,
+  type Pull,
+  type Study,
+  type StudyStatus,
+  type StudyTarget,
+  type TestGroup,
+} from "./api/client";
 import { dash, formatDate, formatDateTime, PULL_STATUS_LABELS, shortId, STUDY_STATUS_LABELS, STUDY_STATUSES, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
@@ -345,11 +360,128 @@ export function StudyDetailPage() {
           {detail("Order lead time", `${study.leadDays} days before each pull`)}
           {detail("Late-pull window", `${study.windowDays} days`)}
           {detail("Planned", formatDateTime(study.createdAt))}
+          {study.statusChangedAt ? detail("Status changed", `${study.statusChangedBy || dash}, ${formatDateTime(study.statusChangedAt)}`) : null}
+          {study.statusReason ? detail("Reason", study.statusReason) : null}
         </dl>
       </Card>
+      <StudyLifecyclePanel study={study} onChanged={state.reload} />
       <Card title="Pull schedule">
         <DataTable label="Pull schedule" columns={pullColumns} rows={study.pulls} getRowKey={(row) => String(row.months)} empty={{ title: "No pull points" }} />
       </Card>
     </div>
+  );
+}
+
+/** The moves a study in each status offers (FR-33.16); COMPLETED and TERMINATED are final. */
+export function nextMoves(status: StudyStatus): StudyTarget[] {
+  switch (status) {
+    case "PLANNED":
+      return ["ACTIVE", "TERMINATED"];
+    case "ACTIVE":
+      return ["COMPLETED", "TERMINATED"];
+  }
+  return [];
+}
+
+/** A termination needs a reason of up to 500 characters; other moves may carry none. */
+export function validateTermination(reason: string): string | undefined {
+  const r = reason.trim();
+  if (r === "") return "Give the reason for terminating the study.";
+  if (r.length > 500) return "Keep the reason to 500 characters.";
+  return undefined;
+}
+
+/** Start, complete or terminate a study under its ETag. */
+function StudyLifecyclePanel({ study, onChanged }: { study: Study; onChanged(): void }) {
+  const moves = nextMoves(study.status);
+  const [reason, setReason] = useState("");
+  const [reasonError, setReasonError] = useState<string | undefined>();
+  const [failure, setFailure] = useState<Problem | null>(null);
+  const [busy, setBusy] = useState<StudyTarget | null>(null);
+
+  async function move(to: StudyTarget) {
+    setFailure(null);
+    if (to === "TERMINATED") {
+      const error = validateTermination(reason);
+      setReasonError(error);
+      if (error) return;
+    }
+    setBusy(to);
+    try {
+      await transitionStudy(study.id, study.version, to, to === "TERMINATED" ? reason.trim() : undefined);
+      setReason("");
+      onChanged();
+    } catch (error) {
+      const problem = describeProblem(error);
+      if (problem.fields.reason) setReasonError(problem.fields.reason);
+      else setFailure(problem);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function terminate(event: FormEvent) {
+    event.preventDefault();
+    void move("TERMINATED");
+  }
+
+  if (moves.length === 0) {
+    return (
+      <Card title="Lifecycle">
+        <p className={styles.note}>
+          {study.status === "COMPLETED" ? "The study is completed. No further pulls are scheduled." : "The study was terminated; its remaining pulls are cancelled."}
+        </p>
+      </Card>
+    );
+  }
+  const forward = moves.find((m) => m !== "TERMINATED");
+  return (
+    <Card title="Lifecycle">
+      <div className={styles.stack}>
+        <p className={styles.note}>
+          {study.status === "PLANNED"
+            ? "Start the study when the batch is placed in the storage condition. Terminating it cancels every pull still planned."
+            : "Complete the study after its last pull. Terminating it cancels the pulls still planned; pulls already ordered keep their quality orders."}
+        </p>
+        {failure ? (
+          <Alert
+            tone="danger"
+            title={failure.code === "conflict_version" ? "The study changed since you opened it" : "Could not change the study"}
+            live="alert"
+            action={failure.code === "conflict_version" ? <Button size="sm" onClick={onChanged}>Reload the study</Button> : undefined}
+          >
+            {failure.message} ({failure.code})
+          </Alert>
+        ) : null}
+        {forward ? (
+          <div className={styles.actions}>
+            <Button variant="primary" loading={busy === forward} disabled={busy !== null} onClick={() => void move(forward)}>
+              {forward === "ACTIVE" ? "Start the study" : "Complete the study"}
+            </Button>
+          </div>
+        ) : null}
+        <form className={styles.form} onSubmit={terminate} noValidate aria-label="Terminate the study">
+          <FormField id="study-terminate-reason" label="Termination reason" hint="Recorded with your name; the study cannot be reopened." error={reasonError}>
+            {(control) => (
+              <Textarea
+                {...control}
+                rows={2}
+                value={reason}
+                invalid={Boolean(reasonError)}
+                onChange={(event) => {
+                  setReason(event.target.value);
+                  setReasonError(undefined);
+                }}
+              />
+            )}
+          </FormField>
+          <div className={styles.formActions}>
+            <Button type="submit" loading={busy === "TERMINATED"} disabled={busy !== null && busy !== "TERMINATED"}>
+              Terminate the study
+            </Button>
+          </div>
+        </form>
+      </div>
+    </Card>
   );
 }

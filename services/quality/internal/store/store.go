@@ -45,7 +45,7 @@ type Store interface {
 	CreateInstrument(ctx context.Context, in domain.Instrument, key string) (domain.Instrument, bool, error)
 	GetInstruments(ctx context.Context, ids []string) (map[string]domain.Instrument, error)
 	CalibrateInstrument(ctx context.Context, id string, calibrate func(domain.Instrument) (domain.Instrument, error)) (domain.Instrument, error)
-	ListInstruments(ctx context.Context, limit int) ([]domain.Instrument, error)
+	ListInstruments(ctx context.Context, f InstrumentFilter) ([]domain.Instrument, error)
 	CreateAssociation(ctx context.Context, in domain.Association, key string) (domain.Association, bool, error)
 	ListAssociations(ctx context.Context) ([]domain.Association, error)
 	CreateOrder(ctx context.Context, in domain.Order, key string) (domain.Order, bool, error)
@@ -76,6 +76,11 @@ type Store interface {
 	ListCertificates(ctx context.Context, orderID string) ([]domain.CertRecord, error)
 	RegisterSample(ctx context.Context, in domain.Sample, key string) (domain.Sample, bool, error)
 	ListSamples(ctx context.Context, f SampleFilter) ([]domain.Sample, error)
+	TransitionStudy(ctx context.Context, id string, expectedVersion int, change func(domain.Study) (domain.Study, error)) (domain.Study, error)
+	CheckReceipt(ctx context.Context, in domain.ReceiptCheckInput, key string, check func(accepted, coveredBefore decimal.Decimal) (domain.ReceiptCheck, error)) (domain.ReceiptCheck, bool, error)
+	ListReceiptChecks(ctx context.Context, f ReceiptCheckFilter) ([]domain.ReceiptCheck, error)
+	IssueCoA(ctx context.Context, req domain.CoARequest, key string, build func(prev *domain.CoA) (domain.CoA, error)) (domain.CoA, bool, error)
+	ListCoAs(ctx context.Context, orderID string) ([]domain.CoA, error)
 	Ping(ctx context.Context) error
 }
 
@@ -323,11 +328,20 @@ func (s *Postgres) CalibrateInstrument(ctx context.Context, id string, calibrate
 	return out, err
 }
 
+// InstrumentFilter narrows the instrument list. A non-nil DueBefore keeps the
+// instruments due on or before it, overdue ones included (calibration due list,
+// section 6.33.14).
+type InstrumentFilter struct {
+	DueBefore *time.Time
+	Limit     int
+}
+
 // ListInstruments returns instruments, the soonest calibration due first.
-func (s *Postgres) ListInstruments(ctx context.Context, limit int) ([]domain.Instrument, error) {
+func (s *Postgres) ListInstruments(ctx context.Context, f InstrumentFilter) ([]domain.Instrument, error) {
 	out := []domain.Instrument{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `select `+instrumentColumns+` from quality_instrument where `+ownTenant+` order by due_at, code limit $1`, limit)
+		rows, err := tx.Query(ctx, `select `+instrumentColumns+` from quality_instrument where `+ownTenant+`
+			and ($2::timestamptz is null or due_at <= $2) order by due_at, code limit $1`, f.Limit, f.DueBefore)
 		if err != nil {
 			return err
 		}

@@ -2,6 +2,7 @@ import { Link, useParams } from "react-router-dom";
 import { Alert, Badge, Button, buttonClassName, Card, DataTable, PageHeader, Skeleton, StatGroup, StatTile, type DataTableColumn } from "../../shell/ui";
 import { getOrder, listInstruments, type Instrument, type OrderView, type Result } from "./api/client";
 import { CertificatesPanel } from "./CertificatesPanel";
+import { CoAPanel } from "./CoAPanel";
 import { CERT_LABELS, DECISION_LABELS, dash, formatDateTime, qty, shortId, TRIGGER_LABELS } from "./format";
 import { OrderStatusBadge } from "./OrdersPage";
 import styles from "./pages.module.css";
@@ -181,6 +182,7 @@ export function OrderDetailPage() {
       ) : order.status === "PENDING_DECISION" ? (
         <UsageDecisionForm order={order} onPosted={state.reload} />
       ) : null}
+      {order.status === "CLOSED" ? <CoAPanel order={order} /> : null}
     </div>
   );
 }

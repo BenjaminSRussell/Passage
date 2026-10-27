@@ -1,6 +1,6 @@
 # quality
 
-Passage quality management service. Wave 33 (ticket PSG-33), slices 1 to 4.
+Passage quality management service. Wave 33 (ticket PSG-33), slices 1 to 5.
 
 ## What it does (slice 1)
 
@@ -99,10 +99,40 @@ Passage quality management service. Wave 33 (ticket PSG-33), slices 1 to 4.
   is DUE_FOR_DISPOSAL from the expiry day (AC-33.18). Drawn samples (PRIMARY and
   RESERVE) may not exceed the lot.
 
+## What it does (slice 5)
+
+- **Stability study lifecycle (FR-33.16):** `:transition` moves a study PLANNED → ACTIVE →
+  COMPLETED, or to TERMINATED from either open state, under `If-Match` (QM-0184 for a move
+  the lifecycle does not allow). TERMINATED needs a reason and cancels the pulls still
+  PLANNED (status CANCELLED); ORDERED pulls keep their quality orders. The study records
+  who changed it, when and why, and `stabilitystudy.statuschanged` names the cancelled
+  pulls so the scheduling workflow stops.
+- **Source inspection at receipt (FR-33.19, BR-33.16, AC-33.14):** a source inspection
+  is a SOURCE_INSPECTION quality order whose `sourceRef.id` is the PO line and
+  `dims.batch` the batch (`sourceRef.line` tells several batches of one PO line apart).
+  Receiving posts each receipt line to `/receipt-checks`: what closed source inspections
+  of the PO line and batch released (accept plus accept with deviation), less what
+  earlier receipts already used, covers the receipt up to its quantity. A fully covered
+  receipt skips receiving inspection (`skip`, QM-0128); otherwise receiving creates a
+  PURCHASE_RECEIPT order for `normalQty`. Checks of one PO line and batch serialise on an
+  advisory lock; a receipt line is checked once (the same values answer the stored
+  check, other values are QM-0185).
+- **Certificates of analysis (FR-33.9, BR-33.10):** `coa:generate` issues an immutable
+  revision for a closed order whose decision released quantity (QM-0186 otherwise),
+  for the batch or one shipment (each its own revision chain). It prints the results the
+  decision was taken on (recorded up to the decision, latest retest per test and
+  sample) with the test group limits, the accepted and deviation quantities with the
+  deviation reasons, and the decision user as signer; the caller is recorded as issuer.
+  A later revision supersedes the previous one and needs a reason (QM-0187). The order's
+  row lock serialises revisions; `coa.issued` goes out in the same transaction.
+- **Calibration due list:** `GET /instruments?dueWithinDays=n` lists the instruments due
+  within n days, overdue ones included (section 6.33.14).
+
 Code layout: `internal/domain` (pure rules and unit/property tests),
 `internal/store` (pgx, RLS-scoped transactions, outbox), `internal/api` (HTTP),
 `internal/events` (event names and payloads), `migrations/` (`0001_init.sql`,
-`0002_compliance_stability.sql`, `0003_nonconformance_capa.sql`, `0004_certificates_samples.sql`).
+`0002_compliance_stability.sql`, `0003_nonconformance_capa.sql`, `0004_certificates_samples.sql`,
+`0005_study_lifecycle_source_coa.sql`).
 
 ## Run
 
@@ -134,7 +164,7 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | GET | `/v1/quality/test-groups` | QM_VIEW |
 | GET | `/v1/quality/test-groups/{id}` | QM_VIEW |
 | POST | `/v1/quality/test-groups` | QM_SETUP_MAINTAIN |
-| GET | `/v1/quality/instruments` | QM_VIEW |
+| GET | `/v1/quality/instruments?dueWithinDays=&limit=` | QM_VIEW |
 | POST | `/v1/quality/instruments` | QM_SETUP_MAINTAIN |
 | POST | `/v1/quality/instruments/{id}:calibrate` | QM_SETUP_MAINTAIN |
 | GET | `/v1/quality/associations` | QM_VIEW |
@@ -157,6 +187,11 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | GET | `/v1/quality/stability-studies?status=&itemId=&limit=` | QM_VIEW |
 | POST | `/v1/quality/stability-studies` | QM_STABILITY_MAINTAIN |
 | GET | `/v1/quality/stability-studies/{id}` | QM_VIEW |
+| POST | `/v1/quality/stability-studies/{id}:transition` | QM_STABILITY_MAINTAIN |
+| GET | `/v1/quality/receipt-checks?poLineId=&batch=&limit=` | QM_VIEW |
+| POST | `/v1/quality/receipt-checks` | QM_ORDER_MAINTAIN |
+| POST | `/v1/quality/coa:generate` | QM_COA |
+| GET | `/v1/quality/quality-orders/{id}/coas` | QM_VIEW |
 | GET | `/v1/quality/spc?itemId=&testId=&orders=` | QM_VIEW |
 | GET | `/v1/quality/nonconformances?status=&source=&severity=&qualityOrderId=&limit=` | QM_VIEW |
 | POST | `/v1/quality/nonconformances` | QM_NCR_MAINTAIN |
@@ -173,7 +208,8 @@ convention `/v1/<context>/...`. Lists answer `{"items": [...]}` with `limit` 1 t
 `:evaluate-compliance` are idempotent by value. The usage decision requires
 `If-Match` carrying the order's ETag (428 when absent, 412 when stale). Every change to a
 nonconformance (approve, refuse, start the 8D, complete a step, the effectiveness check)
-requires `If-Match` with the NCR's ETag; starting the 8D also takes `Idempotency-Key`. Duties are checked
+requires `If-Match` with the NCR's ETag; starting the 8D also takes `Idempotency-Key`. A study
+transition requires `If-Match` with the study's ETag. Duties are checked
 through the platform `authz` package; they are not read from the token.
 
 ## Error codes
@@ -183,7 +219,7 @@ Problems are RFC 9457 (`application/problem+json`) with `code` set to the stable
 | Code | HTTP | Meaning |
 |---|---|---|
 | COM-0001 | 400 | Validation failed; `errors` names the fields |
-| COM-0428 | 428 | `If-Match` required on the usage decision and NCR changes |
+| COM-0428 | 428 | `If-Match` required on the usage decision, NCR changes and study transitions |
 | AUTH-0001 | 401 | Missing or malformed tenant |
 | QM-0100 | 422 | No quality association matches the trigger |
 | QM-0102 | 422 | `INSTRUMENT_OVERDUE`: instrument past its calibration due date |
@@ -221,6 +257,12 @@ Problems are RFC 9457 (`application/problem+json`) with `code` set to the stable
 | QM-0181 | 422 | A pooled sample names a sample that is not a PRIMARY sample of the same order |
 | QM-0182 | 422 | Drawn samples (PRIMARY and RESERVE) would exceed the lot quantity |
 | QM-0183 | 409 | The same `Idempotency-Key` is recording a certificate or sample concurrently; retry |
+| QM-0128 | — | Result code on a receipt check: the batch was source-inspected, receiving inspection skipped |
+| QM-0184 | 409 | The stability study lifecycle does not allow the move (for example completing a PLANNED study) |
+| QM-0185 | 409 | The receipt line was already checked with another PO line, batch or quantity |
+| QM-0186 | 422 | A CoA needs a quality order closed by a decision that released quantity |
+| QM-0187 | 422 | A CoA already exists for this batch or shipment; a new revision needs a reason |
+| QM-0188 | 409 | A CoA revision or receipt check is being written concurrently; retry |
 | idempotency_key_reuse | 422 | The `Idempotency-Key` was used for a decision, certificate or sample on another order |
 | conflict_version | 412 | Stale `If-Match` |
 | idempotency_key_reuse | 422 | Decision or correction `Idempotency-Key` already used on another order or NCR |

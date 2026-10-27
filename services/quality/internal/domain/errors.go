@@ -52,6 +52,15 @@ const (
 	CodeSamplePrimary   = "QM-0181" // a pooled sample names a sample that is not a PRIMARY sample of the order
 	CodeSampleOverLot   = "QM-0182" // drawn samples would exceed the lot quantity
 	CodeCertSampleRace  = "QM-0183" // the same Idempotency-Key is recording a certificate or sample concurrently
+
+	// Slice 5: stability study lifecycle (FR-33.16), source inspection (FR-33.19,
+	// BR-33.16) and certificates of analysis (FR-33.9, BR-33.10).
+	CodeSourceSkipped     = "QM-0128" // info: the receipt is covered by an accepted source inspection
+	CodeStudyStatus       = "QM-0184" // the study lifecycle does not allow the change
+	CodeReceiptCheckDupe  = "QM-0185" // the receipt line was already checked with other values
+	CodeCoANotReleasable  = "QM-0186" // a CoA needs a closed order whose decision released quantity
+	CodeCoAReasonRequired = "QM-0187" // a new CoA revision needs the reason for the amendment
+	CodeWriteRace         = "QM-0188" // a CoA revision or receipt check is being written concurrently
 )
 
 // Error is a rule violation with a stable code. Reason is an optional machine

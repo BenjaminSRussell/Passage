@@ -53,6 +53,8 @@ type API struct {
 	ncrsCreated          atomic.Int64
 	certificatesRecorded atomic.Int64
 	samplesRegistered    atomic.Int64
+	receiptChecks        atomic.Int64
+	coasIssued           atomic.Int64
 }
 
 // New returns the API over s.
@@ -88,6 +90,11 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyStability)).Post("/v1/quality/stability-studies", a.createStudy)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/quality/stability-studies", a.listStudies)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/quality/stability-studies/{id}", a.getStudy)
+	r.With(authz.RequireDuty(dutyStability)).Post("/v1/quality/stability-studies/{id}:transition", a.transitionStudy)
+	r.With(authz.RequireDuty(dutyOrder)).Post("/v1/quality/receipt-checks", a.checkReceipt)
+	r.With(authz.RequireDuty(dutyView)).Get("/v1/quality/receipt-checks", a.listReceiptChecks)
+	r.With(authz.RequireDuty(dutyCoA)).Post("/v1/quality/coa:generate", a.generateCoA)
+	r.With(authz.RequireDuty(dutyView)).Get("/v1/quality/quality-orders/{id}/coas", a.listCoAs)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/quality/spc", a.spcChart)
 	r.With(authz.RequireDuty(dutyNCR)).Post("/v1/quality/nonconformances", a.createNonconformance)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/quality/nonconformances", a.listNonconformances)
@@ -111,6 +118,8 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP quality_stability_studies_created_total Stability studies created; idempotent replays are not counted.\n# TYPE quality_stability_studies_created_total counter\nquality_stability_studies_created_total %d\n", a.studiesCreated.Load())
 		fmt.Fprintf(w, "# HELP quality_certificates_recorded_total Incoming certificate receipts and waivers recorded; idempotent replays are not counted.\n# TYPE quality_certificates_recorded_total counter\nquality_certificates_recorded_total %d\n", a.certificatesRecorded.Load())
 		fmt.Fprintf(w, "# HELP quality_samples_registered_total Physical samples registered; idempotent replays are not counted.\n# TYPE quality_samples_registered_total counter\nquality_samples_registered_total %d\n", a.samplesRegistered.Load())
+		fmt.Fprintf(w, "# HELP quality_receipt_checks_total Receipt lines checked against source inspection; idempotent replays are not counted.\n# TYPE quality_receipt_checks_total counter\nquality_receipt_checks_total %d\n", a.receiptChecks.Load())
+		fmt.Fprintf(w, "# HELP quality_coas_issued_total Certificate of analysis revisions issued; idempotent replays are not counted.\n# TYPE quality_coas_issued_total counter\nquality_coas_issued_total %d\n", a.coasIssued.Load())
 		fmt.Fprintf(w, "# HELP quality_nonconformances_created_total Nonconformances raised through the API; idempotent replays and NCRs raised by decisions are not counted.\n# TYPE quality_nonconformances_created_total counter\nquality_nonconformances_created_total %d\n", a.ncrsCreated.Load())
 	})
 }
@@ -264,6 +273,12 @@ func (a *API) createInstrument(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, statusFor(inserted), inst)
 }
 
+// maxDueWithinDays bounds ?dueWithinDays= on the instrument list.
+const maxDueWithinDays = 3650
+
+// listInstruments answers ?dueWithinDays=&limit=, the soonest due first. With
+// dueWithinDays it is the calibration due list (section 6.33.14): instruments due
+// within that many days, overdue ones included.
 func (a *API) listInstruments(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
@@ -273,12 +288,22 @@ func (a *API) listInstruments(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
-	instruments, err := a.store.ListInstruments(r.Context(), limit)
+	now := time.Now().UTC()
+	f := store.InstrumentFilter{Limit: limit}
+	if raw := r.URL.Query().Get("dueWithinDays"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 0 || n > maxDueWithinDays {
+			httpx.Fail(w, r, validation(map[string]string{"dueWithinDays": fmt.Sprintf("must be 0 to %d", maxDueWithinDays)}))
+			return
+		}
+		due := now.AddDate(0, 0, n)
+		f.DueBefore = &due
+	}
+	instruments, err := a.store.ListInstruments(r.Context(), f)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}
-	now := time.Now().UTC()
 	for i := range instruments {
 		instruments[i].CalibrationStatus = domain.CalibrationStatus(instruments[i], now)
 	}
@@ -964,7 +989,7 @@ func httpStatus(code string) int {
 		return http.StatusNotFound
 	case domain.CodeClosed, domain.CodeResultDuplicate, domain.CodeInstrumentDupe, domain.CodeStatus, domain.CodeSourceLineDupe,
 		domain.CodeListRace, domain.CodeCompositionRace, domain.CodeStudyRace, domain.CodeNCRStatus, domain.CodeNCRRace, domain.CodeCAPAStep,
-		domain.CodeCertNotRequired, domain.CodeCertSampleRace:
+		domain.CodeCertNotRequired, domain.CodeCertSampleRace, domain.CodeStudyStatus, domain.CodeReceiptCheckDupe, domain.CodeWriteRace:
 		return http.StatusConflict
 	}
 	return http.StatusUnprocessableEntity

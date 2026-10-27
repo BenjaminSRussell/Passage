@@ -17,12 +17,15 @@ var (
 	// Slice 3.
 	NonconformanceCreated = events.Type(Context, "nonconformance", "created", 1)
 	CAPAClosed            = events.Type(Context, "capa", "closed", 1)
+	// Slice 5.
+	StabilityStudyStatusChanged = events.Type(Context, "stabilitystudy", "statuschanged", 1)
+	CoAIssued                   = events.Type(Context, "coa", "issued", 1)
 )
 
 // All lists every event type this service publishes.
 func All() []string {
 	return []string{OrderCreated, ResultRecorded, UsageDecisionPosted, ComplianceListCreated, ComplianceResultRecorded, StabilityStudyCreated,
-		NonconformanceCreated, CAPAClosed}
+		NonconformanceCreated, CAPAClosed, StabilityStudyStatusChanged, CoAIssued}
 }
 
 // OrderCreatedData is the data member of dev.passage.quality.order.created.v1.
@@ -140,4 +143,34 @@ type CAPAClosedData struct {
 	EffectivenessResult string `json:"effectiveness_result"`
 	Reopened            int    `json:"reopened"`
 	ClosedAt            string `json:"closed_at"`
+}
+
+// StabilityStudyStatusChangedData is the data member of
+// dev.passage.quality.stabilitystudy.statuschanged.v1. The scheduling workflow
+// stops on COMPLETED or TERMINATED; cancelled_pulls are the pull months a
+// termination cancelled.
+type StabilityStudyStatusChangedData struct {
+	StudyID        string `json:"study_id"`
+	From           string `json:"from"`
+	To             string `json:"to"`
+	Reason         string `json:"reason,omitempty"`
+	User           string `json:"user"`
+	CancelledPulls []int  `json:"cancelled_pulls"`
+}
+
+// CoAIssuedData is the data member of dev.passage.quality.coa.issued.v1: one
+// immutable CoA revision (FR-33.9, BR-33.10). The shipment hook (wave 28) and the
+// customer portal deliver it; supersedes names the revision it replaces.
+type CoAIssuedData struct {
+	CoAID          string `json:"coa_id"`
+	QualityOrderID string `json:"quality_order_id"`
+	ShipmentID     string `json:"shipment_id,omitempty"`
+	CustomerID     string `json:"customer_id,omitempty"`
+	ItemID         string `json:"item_id"`
+	Batch          string `json:"batch"`
+	Revision       int    `json:"revision"`
+	Supersedes     string `json:"supersedes,omitempty"`
+	AcceptQty      string `json:"accept_qty"`
+	DeviationQty   string `json:"deviation_qty"`
+	SignedBy       string `json:"signed_by"`
 }

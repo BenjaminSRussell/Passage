@@ -160,7 +160,7 @@ func TestPostgres_InstrumentAndAssociationRoundTrip(t *testing.T) {
 	if err != nil || len(found) != 1 || found[created.ID].Code != "PH-01" {
 		t.Fatalf("get instruments: %+v %v", found, err)
 	}
-	if all, err := s.ListInstruments(ctx, 10); err != nil || len(all) != 1 {
+	if all, err := s.ListInstruments(ctx, InstrumentFilter{Limit: 10}); err != nil || len(all) != 1 {
 		t.Fatalf("list instruments: %+v %v", all, err)
 	}
 	recal := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
