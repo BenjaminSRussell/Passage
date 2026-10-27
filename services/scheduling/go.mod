@@ -6,6 +6,7 @@ require (
 	github.com/BenjaminSRussell/passage/platform v0.0.0
 	github.com/go-chi/chi/v5 v5.2.1
 	github.com/jackc/pgx/v5 v5.7.2
+	github.com/shopspring/decimal v1.4.0
 	pgregory.net/rapid v1.1.0
 )
 

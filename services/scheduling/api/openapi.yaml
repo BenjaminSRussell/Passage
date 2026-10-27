@@ -322,6 +322,350 @@ paths:
                     type: array
                     items: { $ref: '#/components/schemas/LoadItem' }
         '400': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/networks:
+    post:
+      operationId: createNetwork
+      summary: Create a resource network with its allowed transitions (FR-23.13)
+      x-passage-duty: scheduling.setup.write
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NetworkRequest' }
+      responses:
+        '201':
+          description: 'Created. An idempotent replay returns 200 with Idempotent-Replayed: true.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Network' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listNetworks
+      summary: Resource networks ordered by code, with their edges
+      x-passage-duty: scheduling.read
+      responses:
+        '200':
+          description: Networks
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Network' }
+  /v1/scheduling/networks/{id}:
+    get:
+      operationId: getNetwork
+      summary: One resource network with its edges
+      x-passage-duty: scheduling.read
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: The network
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Network' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/setup-matrices:
+    post:
+      operationId: createSetupMatrix
+      summary: Create the next version of a resource's setup matrix (FR-23.15)
+      x-passage-duty: scheduling.setup.write
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SetupMatrixRequest' }
+      responses:
+        '201':
+          description: 'Created. An idempotent replay returns 200 with Idempotent-Replayed: true.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SetupMatrix' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listSetupMatrices
+      summary: Setup matrices, newest version first
+      x-passage-duty: scheduling.read
+      parameters:
+        - name: resourceId
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Setup matrices
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/SetupMatrix' }
+        '400': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/setup-matrices/{id}:
+    get:
+      operationId: getSetupMatrix
+      summary: One setup matrix with its changeover entries
+      x-passage-duty: scheduling.read
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: The matrix
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SetupMatrix' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/cleanout-rules:
+    post:
+      operationId: createCleanoutRule
+      summary: Create the cleanout rule of a setup group (FR-23.15, BR-23.13)
+      x-passage-duty: scheduling.setup.write
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CleanoutRuleRequest' }
+      responses:
+        '201':
+          description: 'Created. An idempotent replay returns 200 with Idempotent-Replayed: true.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CleanoutRule' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listCleanoutRules
+      summary: Cleanout rules ordered by setup group
+      x-passage-duty: scheduling.read
+      responses:
+        '200':
+          description: Cleanout rules
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/CleanoutRule' }
+  /v1/scheduling/capacity-blocks:
+    post:
+      operationId: createCapacityBlock
+      summary: Create a capacity block restricted to an attribute condition (FR-23.17)
+      x-passage-duty: scheduling.capacity.write
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CapacityBlockRequest' }
+      responses:
+        '201':
+          description: 'Created. An idempotent replay returns 200 with Idempotent-Replayed: true.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CapacityBlock' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listCapacityBlocks
+      summary: Capacity blocks by resource, highest priority first
+      x-passage-duty: scheduling.read
+      parameters:
+        - name: resourceId
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Capacity blocks
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/CapacityBlock' }
+        '400': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/campaigns:
+    post:
+      operationId: createCampaign
+      summary: Create a proposed campaign with its orders (FR-23.14)
+      x-passage-duty: scheduling.campaign.write
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CampaignRequest' }
+      responses:
+        '201':
+          description: 'Created, with ETag "<version>". An idempotent replay returns 200 with Idempotent-Replayed: true.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Campaign' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listCampaigns
+      summary: Campaigns, newest first (without their orders)
+      x-passage-duty: scheduling.read
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [proposed, planned, started, completed, cancelled] }
+        - name: resourceId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        '200':
+          description: Campaigns
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Campaign' }
+        '400': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/campaigns/{id}:
+    get:
+      operationId: getCampaign
+      summary: One campaign with its orders in run order; ETag carries the version
+      x-passage-duty: scheduling.read
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: The campaign
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Campaign' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/campaigns/{id}/orders:
+    post:
+      operationId: addCampaignOrder
+      summary: Add an order to a campaign that has not started; clears its sequence (SCHED-0011 when started)
+      x-passage-duty: scheduling.campaign.write
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CampaignOrderRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/Campaign' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/campaigns/{id}/orders/{orderId}:
+    delete:
+      operationId: removeCampaignOrder
+      summary: Take an order out of a campaign that has not started; clears its sequence
+      x-passage-duty: scheduling.campaign.write
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - name: orderId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200': { $ref: '#/components/responses/Campaign' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/campaigns/{id}:sequence:
+    post:
+      operationId: sequenceCampaign
+      summary: >
+        Sequence the campaign with the setup matrix in force on its planned start
+        (BR-23.12) and insert cleanouts (BR-23.13); the campaign becomes planned and
+        campaign.sequenced is published. SCHED-0012 warnings list pairs without a matrix entry.
+      x-passage-duty: scheduling.schedule.write
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200': { $ref: '#/components/responses/Campaign' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/campaigns/{id}:start:
+    post:
+      operationId: startCampaign
+      summary: Start a planned campaign; it is frozen afterwards and campaign.started is published
+      x-passage-duty: scheduling.campaign.write
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200': { $ref: '#/components/responses/Campaign' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/campaigns/{id}:allocate-cost:
+    post:
+      operationId: allocateCampaignCost
+      summary: >
+        Compute the allocation of a campaign's setup and cleanout cost to its orders
+        (FR-23.16, BR-23.14). Nothing is posted or stored, so no Idempotency-Key is needed.
+      x-passage-duty: scheduling.campaign.write
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AllocationRequest' }
+      responses:
+        '200':
+          description: The allocation; amounts sum exactly to the cost
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Allocation' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /healthz:
     get:
       operationId: healthz
@@ -349,12 +693,23 @@ components:
       in: header
       required: true
       schema: { type: string, minLength: 1, maxLength: 200 }
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: The campaign version from its ETag, for example "3". A stale version gets 412 SCHED-0115.
+      schema: { type: string }
   responses:
     Problem:
       description: RFC 9457 problem details
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
+    Campaign:
+      description: 'The changed campaign with ETag "<version>". A replay of the same Idempotency-Key returns the first answer with Idempotent-Replayed: true.'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Campaign' }
   schemas:
     Problem:
       type: object
@@ -550,3 +905,257 @@ components:
         bookedMinutes: { type: integer }
         loadPct: { type: number }
         bottleneck: { type: boolean }
+    Decimal:
+      type: string
+      pattern: '^-?[0-9]+(\.[0-9]+)?$'
+      description: Exact decimal as a string (numbers are accepted on input).
+    NetworkEdge:
+      type: object
+      required: [fromResourceId, toResourceId]
+      properties:
+        fromResourceId: { type: string, format: uuid }
+        toResourceId: { type: string, format: uuid }
+        transferMinutes: { type: integer, minimum: 0, maximum: 10080, default: 0 }
+        maxWaitMinutes: { type: [integer, 'null'], minimum: 0, maximum: 10080 }
+        secondaryResourceId: { type: string, format: uuid }
+    NetworkRequest:
+      type: object
+      required: [code, name, activeFrom, edges]
+      properties:
+        code: { type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{0,31}$' }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        activeFrom: { type: string, format: date }
+        activeTo: { type: [string, 'null'], format: date }
+        edges:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items: { $ref: '#/components/schemas/NetworkEdge' }
+    Network:
+      allOf:
+        - $ref: '#/components/schemas/NetworkRequest'
+        - type: object
+          required: [id, version, createdAt]
+          properties:
+            id: { type: string, format: uuid }
+            version: { type: integer }
+            createdAt: { type: string, format: date-time }
+    SetupEntry:
+      type: object
+      required: [fromGroup, toGroup, minutes]
+      properties:
+        fromGroup: { type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{0,31}$' }
+        toGroup: { type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{0,31}$' }
+        minutes: { type: integer, minimum: 0, maximum: 10080 }
+        cost: { $ref: '#/components/schemas/Decimal' }
+        cleaningSetId: { type: string, maxLength: 64 }
+    SetupMatrixRequest:
+      type: object
+      required: [resourceId, activeFrom, currency, entries]
+      properties:
+        resourceId: { type: string, format: uuid }
+        activeFrom: { type: string, format: date }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        entries:
+          type: array
+          minItems: 1
+          maxItems: 2500
+          items: { $ref: '#/components/schemas/SetupEntry' }
+    SetupMatrix:
+      allOf:
+        - $ref: '#/components/schemas/SetupMatrixRequest'
+        - type: object
+          required: [id, version, createdAt]
+          properties:
+            id: { type: string, format: uuid }
+            version: { type: integer, description: Next version per resource; the active matrix is the highest version with activeFrom on or before the day }
+            createdAt: { type: string, format: date-time }
+    CleanoutRuleRequest:
+      type: object
+      required: [setupGroup, durationMinutes]
+      properties:
+        setupGroup: { type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{0,31}$' }
+        durationMinutes: { type: integer, minimum: 1, maximum: 10080 }
+        operationSetId: { type: string, maxLength: 64 }
+        afterBatches: { type: [integer, 'null'], minimum: 1, maximum: 10000 }
+        afterHours: { type: [integer, 'null'], minimum: 1, maximum: 8760 }
+        atCampaignEnd: { type: boolean, default: true }
+    CleanoutRule:
+      allOf:
+        - $ref: '#/components/schemas/CleanoutRuleRequest'
+        - type: object
+          required: [id, version, createdAt]
+          properties:
+            id: { type: string, format: uuid }
+            version: { type: integer }
+            createdAt: { type: string, format: date-time }
+    Predicate:
+      type: object
+      required: [attribute, op, value]
+      properties:
+        attribute: { type: string, minLength: 1, maxLength: 64 }
+        op: { type: string, enum: ['=', '!=', '>=', '<=', '>', '<'] }
+        value: { type: string, maxLength: 64, description: Ordering operators need a decimal value }
+    CapacityBlockRequest:
+      type: object
+      required: [resourceId, code]
+      description: Either weekly windows (site-local, in the resource's time zone) or startAt and endAt.
+      properties:
+        resourceId: { type: string, format: uuid }
+        code: { type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{0,31}$' }
+        windows:
+          type: array
+          minItems: 1
+          maxItems: 14
+          items: { $ref: '#/components/schemas/Shift' }
+        startAt: { type: string, format: date-time }
+        endAt: { type: string, format: date-time }
+        condition:
+          type: array
+          maxItems: 20
+          items: { $ref: '#/components/schemas/Predicate' }
+        priority: { type: integer, minimum: 0, maximum: 1000, default: 0 }
+        active: { type: boolean, default: true }
+    CapacityBlock:
+      allOf:
+        - $ref: '#/components/schemas/CapacityBlockRequest'
+        - type: object
+          required: [id, condition, priority, active, version, createdAt]
+          properties:
+            id: { type: string, format: uuid }
+            version: { type: integer }
+            createdAt: { type: string, format: date-time }
+    CampaignOrderRequest:
+      type: object
+      required: [orderId, setupGroup, quantity]
+      properties:
+        orderId: { type: string, format: uuid }
+        setupGroup: { type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{0,31}$' }
+        quantity: { $ref: '#/components/schemas/Decimal' }
+        runMinutes: { type: integer, minimum: 0, maximum: 100000 }
+        routeSetupMinutes: { type: integer, minimum: 0, maximum: 10080, description: Used as the changeover when the matrix has no entry (SCHED-0012) }
+        dueAt: { type: string, format: date-time }
+    CampaignOrder:
+      allOf:
+        - $ref: '#/components/schemas/CampaignOrderRequest'
+        - type: object
+          required: [position, sequence]
+          properties:
+            position: { type: integer, description: Order in which it was added (the manual sequence) }
+            sequence: { type: [integer, 'null'], description: Run position once sequenced }
+    CampaignRequest:
+      type: object
+      required: [resourceId, campaignKey, plannedStart]
+      properties:
+        resourceId: { type: string, format: uuid }
+        campaignKey: { type: string, minLength: 1, maxLength: 64 }
+        plannedStart: { type: string, format: date-time }
+        maxOrders: { type: [integer, 'null'], minimum: 1, maximum: 1000 }
+        maxQty: { $ref: '#/components/schemas/Decimal' }
+        maxMinutes: { type: [integer, 'null'], minimum: 1, maximum: 1000000, description: Run, changeover and cleanout minutes together }
+        sequenceRule: { type: string, enum: [nearest-neighbor, manual], default: nearest-neighbor }
+        currentSetupGroup: { type: [string, 'null'], description: The resource's setup group before the campaign (leading setup) }
+        orders:
+          type: array
+          maxItems: 1000
+          items: { $ref: '#/components/schemas/CampaignOrderRequest' }
+    Changeover:
+      type: object
+      required: [afterOrderId, fromGroup, toGroup, minutes, cost, missing]
+      properties:
+        beforeOrderId: { type: string, format: uuid, description: Absent for the leading setup }
+        afterOrderId: { type: string, format: uuid }
+        fromGroup: { type: string }
+        toGroup: { type: string }
+        minutes: { type: integer }
+        cost: { $ref: '#/components/schemas/Decimal' }
+        cleaningSetId: { type: string }
+        missing: { type: boolean, description: No matrix entry; route setup minutes used (SCHED-0012) }
+    PlannedCleanout:
+      type: object
+      required: [afterOrderId, setupGroup, minutes, reason]
+      properties:
+        afterOrderId: { type: string, format: uuid }
+        setupGroup: { type: string }
+        minutes: { type: integer }
+        reason: { type: string, enum: [batches, run-time, campaign-end] }
+        cleaningSetId: { type: string }
+    Campaign:
+      type: object
+      required: [id, resourceId, campaignKey, status, plannedStart, sequenceRule, orderCount, runMinutes, changeoverMinutes, cleanoutMinutes, plan, version, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        resourceId: { type: string, format: uuid }
+        campaignKey: { type: string }
+        status: { type: string, enum: [proposed, planned, started, completed, cancelled] }
+        plannedStart: { type: string, format: date-time }
+        maxOrders: { type: [integer, 'null'] }
+        maxQty: { type: [string, 'null'] }
+        maxMinutes: { type: [integer, 'null'] }
+        sequenceRule: { type: string, enum: [nearest-neighbor, manual] }
+        currentSetupGroup: { type: [string, 'null'] }
+        orderCount: { type: integer }
+        runMinutes: { type: integer }
+        changeoverMinutes: { type: integer }
+        cleanoutMinutes: { type: integer }
+        plan:
+          type: [object, 'null']
+          required: [changeovers, cleanouts, warnings]
+          properties:
+            changeovers:
+              type: array
+              items: { $ref: '#/components/schemas/Changeover' }
+            cleanouts:
+              type: array
+              items: { $ref: '#/components/schemas/PlannedCleanout' }
+            warnings:
+              type: array
+              items:
+                type: object
+                required: [code, detail]
+                properties:
+                  code: { type: string }
+                  detail: { type: string }
+            matrixId: { type: string, format: uuid }
+        sequencedAt: { type: [string, 'null'], format: date-time }
+        startedAt: { type: [string, 'null'], format: date-time }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+        orders:
+          type: array
+          description: Present on the single-campaign read and command responses, in run order
+          items: { $ref: '#/components/schemas/CampaignOrder' }
+    AllocationRequest:
+      type: object
+      required: [amount, currency]
+      properties:
+        amount: { $ref: '#/components/schemas/Decimal' }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        basis: { type: string, enum: [quantity, equal, run-minutes], default: quantity }
+        actuals:
+          type: array
+          description: Actual RAF quantity or run minutes per order; the planned values are used otherwise
+          items:
+            type: object
+            required: [orderId]
+            properties:
+              orderId: { type: string, format: uuid }
+              quantity: { $ref: '#/components/schemas/Decimal' }
+              runMinutes: { type: integer, minimum: 0 }
+    Allocation:
+      type: object
+      required: [campaignId, basis, currency, amount, lines]
+      properties:
+        campaignId: { type: string, format: uuid }
+        basis: { type: string }
+        currency: { type: string }
+        amount: { type: string }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [orderId, weight, amount]
+            properties:
+              orderId: { type: string, format: uuid }
+              weight: { $ref: '#/components/schemas/Decimal' }
+              amount: { type: string, description: Rounded to the currency's minor unit }

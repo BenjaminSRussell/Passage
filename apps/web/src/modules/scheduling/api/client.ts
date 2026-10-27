@@ -280,3 +280,299 @@ export function firmJob(jobId: string, firmed: boolean, key: string = newKey()):
 export function fetchCapacityLoad(from: string, weeks: number, resourceIds: string[] = [], signal?: AbortSignal): Promise<LoadItem[]> {
   return items<LoadItem>(`/capacity-load${query({ from, weeks, resourceIds: resourceIds.join(",") })}`, signal);
 }
+
+// Slice 2: resource networks, setup matrices, cleanout rules, capacity blocks
+// and campaigns (FR-23.13 to FR-23.17). Decimals travel as strings.
+
+export interface NetworkEdge {
+  fromResourceId: string;
+  toResourceId: string;
+  transferMinutes: number;
+  maxWaitMinutes: number | null;
+  secondaryResourceId?: string;
+}
+
+export interface Network {
+  id: string;
+  code: string;
+  name: string;
+  activeFrom: string;
+  activeTo: string | null;
+  edges: NetworkEdge[];
+  version: number;
+  createdAt: string;
+}
+
+export interface NewNetwork {
+  code: string;
+  name: string;
+  activeFrom: string;
+  activeTo?: string;
+  edges: NetworkEdge[];
+}
+
+export interface SetupEntry {
+  fromGroup: string;
+  toGroup: string;
+  minutes: number;
+  cost: string;
+  cleaningSetId?: string;
+}
+
+export interface SetupMatrix {
+  id: string;
+  resourceId: string;
+  version: number;
+  activeFrom: string;
+  currency: string;
+  entries: SetupEntry[];
+  createdAt: string;
+}
+
+export interface NewSetupMatrix {
+  resourceId: string;
+  activeFrom: string;
+  currency: string;
+  entries: SetupEntry[];
+}
+
+export interface CleanoutRule {
+  id: string;
+  setupGroup: string;
+  durationMinutes: number;
+  operationSetId?: string;
+  afterBatches: number | null;
+  afterHours: number | null;
+  atCampaignEnd: boolean;
+  version: number;
+  createdAt: string;
+}
+
+export interface NewCleanoutRule {
+  setupGroup: string;
+  durationMinutes: number;
+  operationSetId?: string;
+  afterBatches?: number;
+  afterHours?: number;
+  atCampaignEnd: boolean;
+}
+
+export const PREDICATE_OPS = ["=", "!=", ">=", "<=", ">", "<"] as const;
+export type PredicateOp = (typeof PREDICATE_OPS)[number];
+
+export interface Predicate {
+  attribute: string;
+  op: PredicateOp;
+  value: string;
+}
+
+export interface CapacityBlock {
+  id: string;
+  resourceId: string;
+  code: string;
+  windows?: Shift[];
+  startAt?: string;
+  endAt?: string;
+  condition: Predicate[];
+  priority: number;
+  active: boolean;
+  version: number;
+  createdAt: string;
+}
+
+export interface NewCapacityBlock {
+  resourceId: string;
+  code: string;
+  windows?: Shift[];
+  startAt?: string;
+  endAt?: string;
+  condition: Predicate[];
+  priority: number;
+  active: boolean;
+}
+
+export const CAMPAIGN_STATUSES = ["proposed", "planned", "started", "completed", "cancelled"] as const;
+export type CampaignStatus = (typeof CAMPAIGN_STATUSES)[number];
+export const SEQUENCE_RULES = ["nearest-neighbor", "manual"] as const;
+export type SequenceRule = (typeof SEQUENCE_RULES)[number];
+
+export interface CampaignOrder {
+  orderId: string;
+  setupGroup: string;
+  quantity: string;
+  runMinutes: number;
+  routeSetupMinutes: number;
+  dueAt?: string;
+  position: number;
+  sequence: number | null;
+}
+
+export interface NewCampaignOrder {
+  orderId: string;
+  setupGroup: string;
+  quantity: string;
+  runMinutes: number;
+  routeSetupMinutes: number;
+  dueAt?: string;
+}
+
+export interface Changeover {
+  beforeOrderId?: string;
+  afterOrderId: string;
+  fromGroup: string;
+  toGroup: string;
+  minutes: number;
+  cost: string;
+  cleaningSetId?: string;
+  missing: boolean;
+}
+
+export interface PlannedCleanout {
+  afterOrderId: string;
+  setupGroup: string;
+  minutes: number;
+  reason: "batches" | "run-time" | "campaign-end";
+  cleaningSetId?: string;
+}
+
+export interface CampaignPlan {
+  changeovers: Changeover[];
+  cleanouts: PlannedCleanout[];
+  warnings: { code: string; detail: string }[];
+  matrixId?: string;
+}
+
+export interface Campaign {
+  id: string;
+  resourceId: string;
+  campaignKey: string;
+  status: CampaignStatus;
+  plannedStart: string;
+  maxOrders: number | null;
+  maxQty: string | null;
+  maxMinutes: number | null;
+  sequenceRule: SequenceRule;
+  currentSetupGroup: string | null;
+  orderCount: number;
+  runMinutes: number;
+  changeoverMinutes: number;
+  cleanoutMinutes: number;
+  plan: CampaignPlan | null;
+  sequencedAt: string | null;
+  startedAt: string | null;
+  version: number;
+  createdAt: string;
+  orders?: CampaignOrder[];
+}
+
+export interface NewCampaign {
+  resourceId: string;
+  campaignKey: string;
+  plannedStart: string;
+  sequenceRule: SequenceRule;
+  currentSetupGroup?: string;
+  maxOrders?: number;
+  maxQty?: string;
+  maxMinutes?: number;
+  orders: NewCampaignOrder[];
+}
+
+export const ALLOCATION_BASES = ["quantity", "equal", "run-minutes"] as const;
+export type AllocationBasis = (typeof ALLOCATION_BASES)[number];
+
+export interface AllocationRequest {
+  amount: string;
+  currency: string;
+  basis: AllocationBasis;
+  actuals?: { orderId: string; quantity?: string; runMinutes?: number }[];
+}
+
+export interface Allocation {
+  campaignId: string;
+  basis: AllocationBasis;
+  currency: string;
+  amount: string;
+  lines: { orderId: string; weight: string; amount: string }[];
+}
+
+export function listNetworks(signal?: AbortSignal): Promise<Network[]> {
+  return items<Network>("/networks", signal);
+}
+
+export function getNetwork(id: string, signal?: AbortSignal): Promise<Network> {
+  return send<Network>(`/networks/${encodeURIComponent(id)}`, {}, signal);
+}
+
+export function createNetwork(input: NewNetwork, key: string = newKey()): Promise<Network> {
+  return post<Network>("/networks", input, key);
+}
+
+export function listSetupMatrices(resourceId = "", signal?: AbortSignal): Promise<SetupMatrix[]> {
+  return items<SetupMatrix>(`/setup-matrices${query({ resourceId })}`, signal);
+}
+
+export function getSetupMatrix(id: string, signal?: AbortSignal): Promise<SetupMatrix> {
+  return send<SetupMatrix>(`/setup-matrices/${encodeURIComponent(id)}`, {}, signal);
+}
+
+export function createSetupMatrix(input: NewSetupMatrix, key: string = newKey()): Promise<SetupMatrix> {
+  return post<SetupMatrix>("/setup-matrices", input, key);
+}
+
+export function listCleanoutRules(signal?: AbortSignal): Promise<CleanoutRule[]> {
+  return items<CleanoutRule>("/cleanout-rules", signal);
+}
+
+export function createCleanoutRule(input: NewCleanoutRule, key: string = newKey()): Promise<CleanoutRule> {
+  return post<CleanoutRule>("/cleanout-rules", input, key);
+}
+
+export function listCapacityBlocks(resourceId = "", signal?: AbortSignal): Promise<CapacityBlock[]> {
+  return items<CapacityBlock>(`/capacity-blocks${query({ resourceId })}`, signal);
+}
+
+export function createCapacityBlock(input: NewCapacityBlock, key: string = newKey()): Promise<CapacityBlock> {
+  return post<CapacityBlock>("/capacity-blocks", input, key);
+}
+
+export function listCampaigns(filter: { status?: CampaignStatus | ""; resourceId?: string } = {}, signal?: AbortSignal): Promise<Campaign[]> {
+  return items<Campaign>(`/campaigns${query({ status: filter.status, resourceId: filter.resourceId })}`, signal);
+}
+
+export function getCampaign(id: string, signal?: AbortSignal): Promise<Campaign> {
+  return send<Campaign>(`/campaigns/${encodeURIComponent(id)}`, {}, signal);
+}
+
+export function createCampaign(input: NewCampaign, key: string = newKey()): Promise<Campaign> {
+  return post<Campaign>("/campaigns", input, key);
+}
+
+/** A campaign command carries the version the planner saw (If-Match) and an Idempotency-Key. */
+function campaignCommand(id: string, suffix: string, method: "POST" | "DELETE", version: number, body: unknown, key: string): Promise<Campaign> {
+  return send<Campaign>(`/campaigns/${encodeURIComponent(id)}${suffix}`, {
+    method,
+    headers: { "Idempotency-Key": key, "If-Match": `"${version}"` },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
+
+export function addCampaignOrder(id: string, version: number, order: NewCampaignOrder, key: string = newKey()): Promise<Campaign> {
+  return campaignCommand(id, "/orders", "POST", version, order, key);
+}
+
+export function removeCampaignOrder(id: string, version: number, orderId: string, key: string = newKey()): Promise<Campaign> {
+  return campaignCommand(id, `/orders/${encodeURIComponent(orderId)}`, "DELETE", version, undefined, key);
+}
+
+export function sequenceCampaign(id: string, version: number, key: string = newKey()): Promise<Campaign> {
+  return campaignCommand(id, ":sequence", "POST", version, {}, key);
+}
+
+export function startCampaign(id: string, version: number, key: string = newKey()): Promise<Campaign> {
+  return campaignCommand(id, ":start", "POST", version, {}, key);
+}
+
+/** Computes the split of a campaign's setup and cleanout cost; nothing is posted. */
+export function allocateCampaignCost(id: string, input: AllocationRequest): Promise<Allocation> {
+  return post<Allocation>(`/campaigns/${encodeURIComponent(id)}:allocate-cost`, input);
+}

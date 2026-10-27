@@ -148,6 +148,27 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutySchedule)).Post("/v1/scheduling/jobs/{id}:move", a.moveJob)
 	r.With(authz.RequireDuty(dutySchedule)).Post("/v1/scheduling/jobs/{id}:firm", a.firmJob)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/capacity-load", a.capacityLoad)
+
+	// Slice 2: resource networks, setup matrices, cleanout rules, capacity
+	// blocks and campaigns (FR-23.13 to FR-23.17).
+	r.With(authz.RequireDuty(dutySetup)).Post("/v1/scheduling/networks", a.createNetwork)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/networks", a.listNetworks)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/networks/{id}", a.getNetwork)
+	r.With(authz.RequireDuty(dutySetup)).Post("/v1/scheduling/setup-matrices", a.createSetupMatrix)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/setup-matrices", a.listSetupMatrices)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/setup-matrices/{id}", a.getSetupMatrix)
+	r.With(authz.RequireDuty(dutySetup)).Post("/v1/scheduling/cleanout-rules", a.createCleanoutRule)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/cleanout-rules", a.listCleanoutRules)
+	r.With(authz.RequireDuty(dutyCapacity)).Post("/v1/scheduling/capacity-blocks", a.createCapacityBlock)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/capacity-blocks", a.listCapacityBlocks)
+	r.With(authz.RequireDuty(dutyCampaign)).Post("/v1/scheduling/campaigns", a.createCampaign)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/campaigns", a.listCampaigns)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/campaigns/{id}", a.getCampaign)
+	r.With(authz.RequireDuty(dutyCampaign)).Post("/v1/scheduling/campaigns/{id}/orders", a.addCampaignOrder)
+	r.With(authz.RequireDuty(dutyCampaign)).Delete("/v1/scheduling/campaigns/{id}/orders/{orderId}", a.removeCampaignOrder)
+	r.With(authz.RequireDuty(dutySchedule)).Post("/v1/scheduling/campaigns/{id}:sequence", a.sequenceCampaign)
+	r.With(authz.RequireDuty(dutyCampaign)).Post("/v1/scheduling/campaigns/{id}:start", a.startCampaign)
+	r.With(authz.RequireDuty(dutyCampaign)).Post("/v1/scheduling/campaigns/{id}:allocate-cost", a.allocateCampaignCost)
 }
 
 // Metrics serves Prometheus text on the admin port.

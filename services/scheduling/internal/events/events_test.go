@@ -1,6 +1,8 @@
 package events
 
 import (
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/BenjaminSRussell/passage/platform/events"
@@ -11,6 +13,8 @@ func TestEveryTypeFollowsTheNamingRule(t *testing.T) {
 		"dev.passage.scheduling.run.completed.v1":      true,
 		"dev.passage.scheduling.job.scheduled.v1":      true,
 		"dev.passage.scheduling.orderdates.changed.v1": true,
+		"dev.passage.scheduling.campaign.sequenced.v1": true,
+		"dev.passage.scheduling.campaign.started.v1":   true,
 	}
 	for _, typ := range All() {
 		if !events.ValidType(typ) {
@@ -23,5 +27,18 @@ func TestEveryTypeFollowsTheNamingRule(t *testing.T) {
 	}
 	if len(want) != 0 {
 		t.Fatalf("documented types not published: %v", want)
+	}
+}
+
+// Every published type has a message in events/asyncapi.yaml.
+func TestAsyncAPIDeclaresEveryType(t *testing.T) {
+	spec, err := os.ReadFile("../../events/asyncapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, typ := range All() {
+		if !strings.Contains(string(spec), "name: "+typ+"\n") {
+			t.Errorf("events/asyncapi.yaml has no message named %s", typ)
+		}
 	}
 }

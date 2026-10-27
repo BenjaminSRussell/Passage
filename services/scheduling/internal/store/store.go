@@ -184,6 +184,8 @@ type Store interface {
 	MoveJob(ctx context.Context, req MoveRequest, idem Idem) (MoveOutcome, bool, error)
 	FirmJob(ctx context.Context, jobID string, firmed bool, idem Idem) (Firm, bool, error)
 	CapacityLoad(ctx context.Context, f LoadFilter) ([]domain.WeekLoad, error)
+	SetupStore
+	CampaignStore
 	Ping(ctx context.Context) error
 }
 

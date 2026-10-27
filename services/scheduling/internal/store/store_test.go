@@ -379,7 +379,7 @@ func TestMigration_EveryTableHasForcedRLSAndATenantPolicy(t *testing.T) {
 			t.Fatalf("%s: rls=%v force=%v tenant policy=%v tenant_id not null=%v", name, rls, force, policy, tenantCol)
 		}
 	}
-	if seen < 6 {
-		t.Fatalf("checked %d tables, want at least 6", seen)
+	if seen < 14 {
+		t.Fatalf("checked %d tables, want at least 14", seen)
 	}
 }

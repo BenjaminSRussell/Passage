@@ -12,6 +12,25 @@ jobs and order dates; OpenAPI, AsyncAPI, chart, Dockerfile; the CP-SAT job-shop
 optimizer in `services/scheduler-py` (ft06 reaches the optimum 55); and web
 screens (Gantt workspace with drag, preview and firm; capacity load; runs list,
 start run and run detail; resources list, create and detail; operations list
+and create).
+
+Slice 2 builds: resource networks with allowed transitions, transfer time,
+maximum wait and transfer resource (FR-23.13 data and the BR-23.11 edge
+rules in `domain/network.go`); versioned setup matrices per resource with
+changeover minutes, cost (exact decimals) and recipe-dependent cleaning sets,
+and cleanout rules per setup group (FR-23.15); campaigns with order, quantity
+and duration limits, join and leave until started, `:sequence` by
+nearest-neighbour (BR-23.12) or manual order with the leading setup, SCHED-0012
+fallback to route setup and BR-23.13 cleanouts, `:start` freezing the campaign
+(SCHED-0011), If-Match versioning, idempotent commands and
+`campaign.sequenced` / `campaign.started` events through the outbox
+(FR-23.14); the BR-23.14 cost split as a computation (`:allocate-cost`,
+FR-23.16); capacity blocks with weekly or dated windows, attribute
+predicates and priority, and the BR-23.15 placement rule in
+`domain/block.go` (FR-23.17); OpenAPI, AsyncAPI, store tests under RLS and web
+screens (campaigns list, create and detail with orders, sequence, start and
+cost allocation; setup matrices list, create and detail; cleanout rules list
+and create; resource networks list, create and detail; capacity blocks list
 and create). Everything else in the ticket and PRD 4.23 is listed here.
 
 No file outside the wave 23 ownership entry was changed, so there are no
@@ -27,7 +46,7 @@ moved-out handoff rows.
 | 1 | Duration from route times and efficiency (BR-23.1) | handoff — wave 21 (production operations) | Operations arrive with their minutes through `POST /v1/scheduling/operations`; deriving minutes from `run_time_h_per`, quantity and efficiency needs wave 21 route operations. |
 | 1 | Secondary resources booked with the primary (BR-23.4, SCHED-0005) | later slice of PSG-23 | No `secondary_resource_ids` on operations or jobs yet. |
 | 1 | Resource selection by resource group and capability with level and expiry (FR-23.2, FR-23.12, SCHED-0004 for capabilities) | handoff — wave 9 (resources, groups, capabilities) | Candidates are explicit resource ids in priority order. Slice 1 keeps its own `scheduling_resource` table with a weekly calendar; wave 9 resources, calendars, efficiency % and capacity-per-day overrides replace it. |
-| 1 | Setup optimization (setup matrix sequencing) | later slice of PSG-23 | See deliverable 7. |
+| 1 | Setup optimization inside schedule runs: changeover jobs from the matrix replacing the route setup between consecutive jobs on a resource | later slice of PSG-23 | Campaign sequencing uses the matrix (deliverable 7); the run heuristic still places one block of process minutes per operation and does not read the matrix. |
 | 1 | Reported hours and `finished` jobs frozen with remaining minutes (BR-23.6) | handoff — wave 25 (shop-floor feedback) | Only firmed jobs are frozen; there is no reported-hours input yet. |
 | 2 | Gantt with drag-reschedule, dry-run preview, constraint warnings and firm | built | `apps/web/src/modules/scheduling`. Bars are DOM buttons; a keyboard move form gives the same preview and commit. |
 | 2 | Canvas rendering above 1,000 bars, row virtualization, zoom, Shift+drag of a whole order, undo stack of 20 moves, user drag-snap setting | later slice of PSG-23 | The page fetches a 1-14 day window and snaps to 5 minutes. |
@@ -40,11 +59,24 @@ moved-out handoff rows.
 | 4 | OR-Library fixture set `orlib-jobshop-30` (ft10, ft20, la01-la20, abz5-abz9) and the 30/30 feasibility test (AC1) | later slice of PSG-23 | Only ft06 is checked in (`services/scheduler-py/testdata/orlib/ft06.txt`, also embedded in the Go heuristic test). The instance files must be copied from OR-Library verbatim, with their published optima. |
 | 5 | Schedule dates flow to production orders and planning (FR-23.10) | partial — consumers are waves 21 and 22 | `job.scheduled` and `orderdates.changed` are published through the outbox with start, end and late minutes. Production order date updates and the `planning.finite-capacity` flag (AC-23.8) are owned by the consuming waves. |
 | 5 | Operations fed from wave 21 production orders and jobs instead of the API | handoff — wave 21 (production orders) | Slice 1 registers operations through its own API; a consumer of wave 21 events is not built. |
-| 6 | Resource networks with allowed transitions and max wait (FR-23.13, BR-23.11, AC-23.10, SCHED-0009/0010) | later slice of PSG-23 | No ResourceNetwork or NetworkEdge tables. |
-| 7 | Campaigns, setup matrix, changeover and cleanout orders, campaign cost allocation (FR-23.14-23.16, BR-23.12-23.14, AC-23.11/23.12, SCHED-0011-0013) | later slice of PSG-23 | No Campaign, SetupMatrix or CleanoutRule tables; cost allocation also needs wave 21 order costing. |
-| 8 | Block planning (FR-23.17, BR-23.15, AC-23.13, SCHED-0014) | later slice of PSG-23 | No CapacityBlock table. |
+| 6 | Resource networks: definition, edges, edge rules (FR-23.13, BR-23.11 wait check) | built | `POST/GET /v1/scheduling/networks`; `domain.ResourceNetwork` (`Successors` in transfer-time order, `ChainAllowed`, `WaitOK`). |
+| 6 | Networks as scheduler constraints: the heuristic restricting operation n+1 to an edge of operation n, delaying the predecessor up to 7 days for the maximum wait, SCHED-0009 `NETWORK_INFEASIBLE` and SCHED-0010 warnings (AC-23.10); CP-SAT `AddAllowedAssignments` | later slice of PSG-23 | Runs do not read networks yet; the domain functions they will call are built and tested. |
+| 6 | Network per site and assigned to a route operation chain; network update and deactivation endpoints | handoff — wave 9 (sites) and wave 21 (route operation chains) | A network is tenant-wide and applies to no chain until operations carry a network reference. Networks are create-and-read in this slice. |
+| 7 | Campaigns, setup matrix sequencing, leading setup and cleanouts in the plan (FR-23.14, FR-23.15, BR-23.12, BR-23.13, AC-23.11, SCHED-0011, SCHED-0012) | built | `/v1/scheduling/campaigns`, `:sequence`, `:start`, `/setup-matrices`, `/cleanout-rules`. |
+| 7 | Placing a sequenced campaign contiguously on the Gantt (changeover and cleanout jobs as scheduled jobs; cleanout never split, BR-23.13) | later slice of PSG-23 | The plan is stored on the campaign; schedule runs do not place campaign jobs yet. |
+| 7 | Cleanout and setup orders as lightweight production orders of type `cleanout` (`cleanout_order_id`, `setup_order_id`), consuming cleaning materials and labour | handoff — wave 21 (production orders) | Columns exist and stay null; `campaign.sequenced` carries the cleanouts for wave 21 to create them. |
+| 7 | Campaign start from the first order Started; complete and cancel transitions | partial — wave 21 (order status events) | `:start` freezes a planned campaign explicitly; there are no complete or cancel endpoints yet (later slice of PSG-23). |
+| 7 | `campaign-proposal` job proposing campaigns from planned and firmed orders sharing a campaign key within 14 days | later slice of PSG-23 (needs wave 22 planned orders) | Campaigns are created by hand with their orders. |
+| 7 | CP-SAT circuit sequencing (`AddCircuit`, 30 s, at most 50 orders) | later slice of PSG-23 | `sequence_rule` accepts `nearest-neighbor` and `manual`; `cp-sat` is refused with a field error. |
+| 7 | Setup matrix and campaign per resource group; setup group taken from the product (w8) or formula (w24) | handoff — wave 9 (resource groups), waves 8 and 24 | Matrices and campaigns are per resource; each campaign order carries its setup group. |
+| 7 | Batch and run-hour counters carried in from the resource's history | later slice of PSG-23 (needs wave 25 feedback) | Each campaign plan starts its counters at zero. |
+| 7 | Posting the campaign changeover allocation as `campaign-changeover` overhead cost lines before orders end (FR-23.16) | handoff — wave 21 (order costing and journals) | `:allocate-cost` computes the BR-23.14 split (amounts sum exactly to the cost, residual to the largest order) and writes nothing. |
+| 7 | SCHED-0013: refuse to end an order while the campaign cleanout is unended; `campaign.allowEarlyEnd` estimate and true-up | handoff — wave 21 (order end) | The order end lives in wave 21. |
+| 8 | Capacity blocks: definition and the BR-23.15 matching and priority rule (FR-23.17) | built | `POST/GET /v1/scheduling/capacity-blocks`; `domain.Placeable`, `MatchesAny`. |
+| 8 | Blocks applied in schedule runs (job placed inside a matching block, otherwise unblocked capacity or late; SCHED-0014 warning; AC-23.13 end to end) | later slice of PSG-23 | Runs do not read blocks yet; jobs carry no product or batch attributes until waves 8 and 21 feed them. |
+| 8 | RRULE recurrence, block update and deactivation | later slice of PSG-23 | Blocks are weekly shifts or one dated window; `active` is set at creation only. |
 
-## PRD items (section 4.23) not built in slice 1
+## PRD items (section 4.23) not built yet
 
 | Item | Status | Reason |
 |---|---|---|

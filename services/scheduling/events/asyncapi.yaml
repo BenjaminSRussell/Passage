@@ -23,6 +23,13 @@ channels:
     messages:
       orderDatesChanged:
         $ref: '#/components/messages/OrderDatesChanged'
+  campaign:
+    address: passage.scheduling.campaign
+    messages:
+      campaignSequenced:
+        $ref: '#/components/messages/CampaignSequenced'
+      campaignStarted:
+        $ref: '#/components/messages/CampaignStarted'
 operations:
   publishRunCompleted:
     action: send
@@ -36,6 +43,18 @@ operations:
     action: send
     channel: { $ref: '#/channels/orderDatesChanged' }
     summary: An order start or end changed (production, planning, sales consume it)
+  publishCampaignSequenced:
+    action: send
+    channel: { $ref: '#/channels/campaign' }
+    messages:
+      - $ref: '#/channels/campaign/messages/campaignSequenced'
+    summary: A campaign was sequenced by the setup matrix (production consumes the order sequence and cleanouts)
+  publishCampaignStarted:
+    action: send
+    channel: { $ref: '#/channels/campaign' }
+    messages:
+      - $ref: '#/channels/campaign/messages/campaignStarted'
+    summary: A campaign started and is frozen (production and planning consume it)
 components:
   messages:
     RunCompleted:
@@ -53,6 +72,16 @@ components:
       contentType: application/cloudevents+json
       payload:
         $ref: '#/components/schemas/OrderDatesChangedData'
+    CampaignSequenced:
+      name: dev.passage.scheduling.campaign.sequenced.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: '#/components/schemas/CampaignSequencedData'
+    CampaignStarted:
+      name: dev.passage.scheduling.campaign.started.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: '#/components/schemas/CampaignStartedData'
   schemas:
     RunCompletedData:
       type: object
@@ -84,3 +113,39 @@ components:
         start: { type: string, format: date-time }
         end: { type: string, format: date-time }
         lateMinutes: { type: integer }
+    CampaignSequencedData:
+      type: object
+      required: [campaignId, resourceId, campaignKey, plannedStart, orders, changeoverMinutes, cleanouts, version]
+      properties:
+        campaignId: { type: string, format: uuid }
+        resourceId: { type: string, format: uuid }
+        campaignKey: { type: string }
+        plannedStart: { type: string, format: date-time }
+        orders:
+          type: array
+          items:
+            type: object
+            required: [orderId, sequence]
+            properties:
+              orderId: { type: string, format: uuid }
+              sequence: { type: integer, minimum: 1 }
+        changeoverMinutes: { type: integer }
+        cleanouts:
+          type: array
+          items:
+            type: object
+            required: [afterOrderId, setupGroup, minutes, reason]
+            properties:
+              afterOrderId: { type: string, format: uuid }
+              setupGroup: { type: string }
+              minutes: { type: integer }
+              reason: { type: string, enum: [batches, run-time, campaign-end] }
+        version: { type: integer }
+    CampaignStartedData:
+      type: object
+      required: [campaignId, resourceId, startedAt, version]
+      properties:
+        campaignId: { type: string, format: uuid }
+        resourceId: { type: string, format: uuid }
+        startedAt: { type: string, format: date-time }
+        version: { type: integer }

@@ -22,7 +22,7 @@ const (
 )
 
 var (
-	allDuties = "scheduling.read,scheduling.run,scheduling.schedule.write,scheduling.capacity.write"
+	allDuties = "scheduling.read,scheduling.run,scheduling.schedule.write,scheduling.capacity.write,scheduling.setup.write,scheduling.campaign.write"
 	at0       = time.Date(2026, 1, 5, 8, 0, 0, 0, time.UTC)
 )
 
@@ -36,6 +36,16 @@ type fakeStore struct {
 	lastIdem store.Idem
 	lastLoad store.LoadFilter
 	lastOps  store.OperationFilter
+
+	// slice 2
+	campaign     store.Campaign
+	lastCmd      store.CampaignCommand
+	lastCampaign store.Campaign
+	lastNetwork  store.Network
+	lastMatrix   store.SetupMatrix
+	lastRule     store.CleanoutRule
+	lastBlock    store.CapacityBlock
+	lastFilter   store.CampaignFilter
 }
 
 func (f *fakeStore) CreateResource(_ context.Context, in store.Resource, _ store.Idem) (store.Resource, bool, error) {
