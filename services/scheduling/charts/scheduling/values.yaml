@@ -1,0 +1,49 @@
+image:
+  repository: ghcr.io/benjaminsrussell/passage-scheduling
+  # Pin by digest in deploy/ (Argo CD digest-pinned sync); tag is a fallback for dev.
+  tag: "0.1.0"
+  digest: ""
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+# Apply migrations/*.sql at start-up (dev clusters); production runs them as a job.
+migrateOnStart: false
+
+service:
+  port: 8080
+  adminPort: 9090
+
+database:
+  # Secret holding DATABASE_URL (provisioned by External Secrets from Vault).
+  secretName: scheduling-db
+  secretKey: DATABASE_URL
+
+# Environment passed through unchanged; names match cmd/scheduling/main.go.
+config:
+  SCHED_BOTTLENECK_PCT: "90"
+  SCHED_BOTTLENECK_WEEKS: "3"
+  SCHED_HORIZON_DAYS: "365"
+
+resources:
+  requests:
+    cpu: "1"
+    memory: 2Gi
+  limits:
+    cpu: "4"
+    memory: 8Gi
+
+serviceMonitor:
+  enabled: false
+  interval: 30s
+
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: scheduler-opt
+description: Passage scheduling optimizer (OR-Tools CP-SAT job shop, wave 23)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

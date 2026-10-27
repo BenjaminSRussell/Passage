@@ -1,0 +1,86 @@
+asyncapi: 3.0.0
+info:
+  title: Passage Scheduling events
+  version: 0.1.0
+  description: >
+    CloudEvents 1.0 published through the transactional outbox (Debezium
+    outbox router). Event types follow dev.passage.<context>.<entity>.<verb>.v<n>.
+    Payloads match internal/events/events.go.
+defaultContentType: application/cloudevents+json
+channels:
+  runCompleted:
+    address: passage.scheduling.run
+    messages:
+      runCompleted:
+        $ref: '#/components/messages/RunCompleted'
+  jobScheduled:
+    address: passage.scheduling.job
+    messages:
+      jobScheduled:
+        $ref: '#/components/messages/JobScheduled'
+  orderDatesChanged:
+    address: passage.scheduling.orderdates
+    messages:
+      orderDatesChanged:
+        $ref: '#/components/messages/OrderDatesChanged'
+operations:
+  publishRunCompleted:
+    action: send
+    channel: { $ref: '#/channels/runCompleted' }
+    summary: A schedule run finished (production and planning consume it)
+  publishJobScheduled:
+    action: send
+    channel: { $ref: '#/channels/jobScheduled' }
+    summary: A job was placed or moved (production and shop floor consume it)
+  publishOrderDatesChanged:
+    action: send
+    channel: { $ref: '#/channels/orderDatesChanged' }
+    summary: An order start or end changed (production, planning, sales consume it)
+components:
+  messages:
+    RunCompleted:
+      name: dev.passage.scheduling.run.completed.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: '#/components/schemas/RunCompletedData'
+    JobScheduled:
+      name: dev.passage.scheduling.job.scheduled.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: '#/components/schemas/JobScheduledData'
+    OrderDatesChanged:
+      name: dev.passage.scheduling.orderdates.changed.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: '#/components/schemas/OrderDatesChangedData'
+  schemas:
+    RunCompletedData:
+      type: object
+      required: [runId, scope, operations, makespanMinutes, totalLatenessMinutes]
+      properties:
+        runId: { type: string, format: uuid }
+        scope: { type: string, enum: [site, selection] }
+        operations: { type: integer }
+        makespanMinutes: { type: integer }
+        totalLatenessMinutes: { type: integer }
+        solverStatus: { type: [string, 'null'] }
+    JobScheduledData:
+      type: object
+      required: [jobId, orderId, operNumber, resourceId, start, end, runId, firmed]
+      properties:
+        jobId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        operNumber: { type: integer }
+        resourceId: { type: string, format: uuid }
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+        runId: { type: string, format: uuid }
+        firmed: { type: boolean }
+    OrderDatesChangedData:
+      type: object
+      required: [orderId, start, end, lateMinutes]
+      properties:
+        orderId: { type: string, format: uuid }
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+        lateMinutes: { type: integer }

@@ -1,0 +1,7 @@
+image: { repository: ghcr.io/benjaminsrussell/passage-scheduler-opt, digest: "", tag: "", pullPolicy: IfNotPresent }
+# PRD 4.23.10: one replica, 8 CPU / 16 GB (CP-SAT uses num_workers = 8).
+replicaCount: 1
+resources:
+  requests: { cpu: "2", memory: 4Gi }
+  limits: { cpu: "8", memory: 16Gi }
+serviceMonitor: { enabled: false }

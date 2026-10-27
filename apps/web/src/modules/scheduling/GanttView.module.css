@@ -1,0 +1,141 @@
+.gantt {
+  display: flex;
+  flex-direction: column;
+  min-inline-size: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  overflow: hidden;
+}
+
+.axis,
+.row {
+  display: grid;
+  grid-template-columns: 8rem minmax(0, 1fr);
+  align-items: center;
+}
+
+.axis {
+  background: var(--color-bg-muted);
+  border-block-end: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs-size);
+  line-height: var(--text-xs-leading);
+  font-weight: var(--weight-semibold);
+}
+
+.corner,
+.label {
+  padding-inline: var(--space-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.corner {
+  padding-block: var(--space-2);
+}
+
+.label {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm-size);
+  line-height: var(--text-sm-leading);
+}
+
+.ticks {
+  display: grid;
+}
+
+.days1 { grid-template-columns: repeat(1, 1fr); }
+.days2 { grid-template-columns: repeat(2, 1fr); }
+.days3 { grid-template-columns: repeat(3, 1fr); }
+.days7 { grid-template-columns: repeat(7, 1fr); }
+.days14 { grid-template-columns: repeat(14, 1fr); }
+
+.tick {
+  padding-block: var(--space-2);
+  padding-inline: var(--space-2);
+  border-inline-start: 1px solid var(--color-border);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row + .row {
+  border-block-start: 1px solid var(--color-border);
+}
+
+.row:nth-child(even) {
+  background: color-mix(in srgb, var(--color-bg-muted) 50%, transparent);
+}
+
+.track {
+  display: block;
+  inline-size: 100%;
+  block-size: var(--row-height);
+  touch-action: pan-y;
+}
+
+.grid,
+.gridMajor {
+  stroke: var(--color-border);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.grid {
+  stroke-dasharray: 2 3;
+}
+
+.bar {
+  cursor: grab;
+  stroke: var(--color-bg-surface);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+
+.bar:hover {
+  opacity: 0.85;
+}
+
+.dragging {
+  cursor: grabbing;
+  opacity: 0.7;
+}
+
+.tone0 { fill: var(--color-accent); }
+.tone1 { fill: var(--color-info); }
+.tone2 { fill: var(--color-success); }
+.tone3 { fill: var(--color-warning); }
+.tone4 { fill: var(--color-accent-strong); }
+.tone5 { fill: color-mix(in srgb, var(--color-info) 55%, var(--color-success)); }
+.tone6 { fill: color-mix(in srgb, var(--color-accent) 55%, var(--color-warning)); }
+.tone7 { fill: var(--color-text-muted); }
+
+.late {
+  stroke: var(--color-warning);
+  stroke-width: 2;
+}
+
+.firmed {
+  stroke: var(--color-text);
+  stroke-width: 2;
+  stroke-dasharray: 4 2;
+}
+
+.selected {
+  stroke: var(--color-text);
+  stroke-width: 3;
+}
+
+.violation {
+  stroke: var(--color-danger);
+  stroke-width: 3;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bar {
+    transition: none;
+  }
+}

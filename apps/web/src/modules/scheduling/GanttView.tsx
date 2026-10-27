@@ -1,0 +1,168 @@
+import { useRef, useState, type PointerEvent } from "react";
+import { cx } from "../../shell/ui/cx";
+import type { GanttBar } from "./api/client";
+import { formatDateTime } from "./format";
+import { barPosition, draggedStart, groupByResource, orderTone, SNAP_MINUTES } from "./gantt";
+import styles from "./GanttView.module.css";
+
+export interface GanttResource {
+  id: string;
+  code: string;
+}
+
+/** Window lengths the axis has layout classes for. */
+export const GANTT_DAYS = [1, 2, 3, 7, 14] as const;
+export type GanttDays = (typeof GANTT_DAYS)[number];
+
+export interface GanttViewProps {
+  bars: GanttBar[];
+  resources: GanttResource[];
+  /** Window start (UTC midnight) and length in days. */
+  from: string;
+  days: GanttDays;
+  selectedJobId?: string | null;
+  /** jobId → message; those bars get a danger outline and the message as tooltip (FR-23.7). */
+  violations?: Record<string, string>;
+  onSelect?(bar: GanttBar): void;
+  /** Called with the snapped new start after a horizontal drag. */
+  onDrop?(bar: GanttBar, newStart: string): void;
+}
+
+const VIEW_WIDTH = 1000;
+const ROW_HEIGHT = 32;
+const BAR_INSET = 5;
+const DAY_MS = 86_400_000;
+
+interface Drag {
+  bar: GanttBar;
+  originX: number;
+  trackPx: number;
+  dx: number;
+}
+
+function dayLabel(ms: number): string {
+  const d = new Date(ms);
+  return d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" });
+}
+
+/**
+ * Resources × time Gantt drawn as one SVG track per resource. Bars are placed
+ * by SVG geometry attributes and coloured by order through CSS classes. Drag a
+ * bar sideways to propose a new start; click it to select it. The SVG is a
+ * pointer surface only: the page's jobs table offers the same actions from the
+ * keyboard.
+ */
+export function GanttView({ bars, resources, from, days, selectedJobId, violations = {}, onSelect, onDrop }: GanttViewProps) {
+  const [drag, setDrag] = useState<Drag | null>(null);
+  const moved = useRef(false);
+  const start = Date.parse(from);
+  const to = new Date(start + days * DAY_MS).toISOString();
+  const windowMinutes = days * 24 * 60;
+  const rows = groupByResource(
+    bars,
+    resources.map((r) => r.id),
+  );
+  const ticks = Array.from({ length: days }, (_, i) => start + i * DAY_MS);
+  const gridLines = days <= 3 ? days * 4 : days;
+
+  function pointerDown(event: PointerEvent<SVGRectElement>, bar: GanttBar) {
+    const track = event.currentTarget.ownerSVGElement?.getBoundingClientRect().width ?? 0;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    moved.current = false;
+    setDrag({ bar, originX: event.clientX, trackPx: track, dx: 0 });
+  }
+
+  function pointerMove(event: PointerEvent<SVGRectElement>) {
+    if (!drag) return;
+    const dx = event.clientX - drag.originX;
+    if (Math.abs(dx) > 2) moved.current = true;
+    setDrag({ ...drag, dx });
+  }
+
+  function pointerUp(event: PointerEvent<SVGRectElement>) {
+    const current = drag;
+    setDrag(null);
+    if (!current) return;
+    const dx = event.clientX - current.originX;
+    const minutes = current.trackPx > 0 ? (dx / current.trackPx) * windowMinutes : 0;
+    if (!moved.current || Math.abs(minutes) < SNAP_MINUTES) {
+      onSelect?.(current.bar);
+      return;
+    }
+    onDrop?.(current.bar, draggedStart(current.bar, dx, current.trackPx, windowMinutes));
+  }
+
+  return (
+    <div className={styles.gantt}>
+      <div className={styles.axis} aria-hidden="true">
+        <span className={styles.corner}>Resource</span>
+        <div className={cx(styles.ticks, styles[`days${days}`])}>
+          {ticks.map((t) => (
+            <span key={t} className={styles.tick}>
+              {dayLabel(t)}
+            </span>
+          ))}
+        </div>
+      </div>
+      {resources.map((res) => {
+        const rowBars = rows.get(res.id) ?? [];
+        return (
+          <div key={res.id} className={styles.row}>
+            <span className={styles.label}>{res.code}</span>
+            <svg
+              className={styles.track}
+              viewBox={`0 0 ${VIEW_WIDTH} ${ROW_HEIGHT}`}
+              preserveAspectRatio="none"
+              aria-hidden="true"
+              data-resource={res.code}
+            >
+              {Array.from({ length: gridLines - 1 }, (_, i) => {
+                const x = ((i + 1) * VIEW_WIDTH) / gridLines;
+                const major = days <= 3 ? (i + 1) % 4 === 0 : true;
+                return <line key={x} x1={x} x2={x} y1={0} y2={ROW_HEIGHT} className={major ? styles.gridMajor : styles.grid} />;
+              })}
+              {rowBars.map((bar) => {
+                const pos = barPosition(bar, from, to);
+                if (!pos) return null;
+                const violation = violations[bar.jobId];
+                const dragging = drag?.bar.jobId === bar.jobId;
+                const shift = dragging && drag.trackPx > 0 ? (drag.dx / drag.trackPx) * VIEW_WIDTH : 0;
+                const late = bar.lateMinutes > 0 ? `, late by ${bar.lateMinutes} min` : "";
+                return (
+                  <rect
+                    key={`${bar.jobId}-${bar.segment}`}
+                    data-job={bar.jobId}
+                    x={pos.x * VIEW_WIDTH}
+                    y={BAR_INSET}
+                    width={Math.max(pos.width * VIEW_WIDTH, 1)}
+                    height={ROW_HEIGHT - 2 * BAR_INSET}
+                    rx={3}
+                    transform={shift ? `translate(${shift} 0)` : undefined}
+                    className={cx(
+                      styles.bar,
+                      styles[`tone${orderTone(bar.orderId)}`],
+                      bar.lateMinutes > 0 && styles.late,
+                      bar.firmed && styles.firmed,
+                      violation && styles.violation,
+                      selectedJobId === bar.jobId && styles.selected,
+                      dragging && styles.dragging,
+                    )}
+                    onPointerDown={(event) => pointerDown(event, bar)}
+                    onPointerMove={pointerMove}
+                    onPointerUp={pointerUp}
+                    onPointerCancel={() => setDrag(null)}
+                  >
+                    <title>
+                      {violation ??
+                        `Order ${bar.orderId.slice(0, 8)} operation ${bar.operNumber}: ${formatDateTime(bar.start)} to ${formatDateTime(bar.end)}${late}${bar.firmed ? ", firmed" : ""}`}
+                    </title>
+                  </rect>
+                );
+              })}
+            </svg>
+          </div>
+        );
+      })}
+    </div>
+  );
+}

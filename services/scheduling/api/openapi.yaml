@@ -1,0 +1,552 @@
+openapi: 3.1.0
+info:
+  title: Passage Scheduling
+  version: 0.1.0
+  description: >
+    Finite capacity scheduling (wave 23, PSG-23). Routes match the handlers in
+    internal/api. Errors are RFC 9457 problem details (application/problem+json)
+    with a stable `code`; see README.md for the error codes.
+servers:
+  - url: https://api.{env}.passage.dev
+    variables:
+      env:
+        default: dev
+paths:
+  /v1/scheduling/resources:
+    post:
+      operationId: createResource
+      summary: Create a resource with its weekly calendar
+      x-passage-duty: scheduling.capacity.write
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResourceRequest' }
+      responses:
+        '201':
+          description: 'Created. An idempotent replay returns 200 with Idempotent-Replayed: true.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Resource' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listResources
+      summary: Resources ordered by code
+      x-passage-duty: scheduling.read
+      responses:
+        '200':
+          description: Resources
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Resource' }
+  /v1/scheduling/resources/{id}:
+    get:
+      operationId: getResource
+      summary: One resource with its weekly calendar
+      x-passage-duty: scheduling.read
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: The resource
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Resource' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/resources/{id}/capacity:
+    get:
+      operationId: getResourceCapacity
+      summary: Open capacity intervals (UTC) of a resource in a window of at most 62 days (FR-23.1)
+      x-passage-duty: scheduling.read
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: Open intervals clipped to the window
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Interval' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/operations:
+    post:
+      operationId: createOperation
+      summary: Add a schedulable operation of an order
+      x-passage-duty: scheduling.schedule.write
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OperationRequest' }
+      responses:
+        '201':
+          description: 'Created. An idempotent replay returns 200 with Idempotent-Replayed: true.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Operation' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listOperations
+      summary: Operations ordered by order and operation number
+      x-passage-duty: scheduling.read
+      parameters:
+        - name: orderId
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, enum: [open, scheduled, unplaced] }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 200 }
+      responses:
+        '200':
+          description: Operations
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Operation' }
+        '400': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/runs:
+    post:
+      operationId: createRun
+      summary: Run the forward heuristic over the site or a selection of operations
+      x-passage-duty: scheduling.run
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RunRequest' }
+      responses:
+        '201':
+          description: 'Run completed. An idempotent replay returns 200 with Idempotent-Replayed: true.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Run' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listRuns
+      summary: Schedule runs, newest first
+      x-passage-duty: scheduling.read
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        '200':
+          description: Runs
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Run' }
+        '400': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/runs/{id}:
+    get:
+      operationId: getRun
+      summary: Run status and metrics
+      x-passage-duty: scheduling.read
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: The run
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Run' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/gantt:
+    get:
+      operationId: listGantt
+      summary: Scheduled segments for a Gantt window (at most 5,000 bars)
+      x-passage-duty: scheduling.read
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, format: date-time }
+        - name: resourceIds
+          in: query
+          required: false
+          description: Comma-separated resource UUIDs.
+          schema: { type: string }
+      responses:
+        '200':
+          description: Bars in the window
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Bar' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/jobs/{id}:move:
+    post:
+      operationId: moveJob
+      summary: Move or reassign a job; dryRun previews violations and dependents
+      description: >
+        A commit (dryRun false) requires Idempotency-Key; a replay returns the
+        stored outcome with Idempotent-Replayed: true. A preview writes nothing
+        and needs no key. Firmed jobs cannot be moved (SCHED-0008).
+      x-passage-duty: scheduling.schedule.write
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Required when dryRun is false.
+          schema: { type: string, maxLength: 200 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MoveRequest' }
+      responses:
+        '200':
+          description: Preview or committed move. Infeasible dry runs return feasible=false.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MoveResponse' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/jobs/{id}:firm:
+    post:
+      operationId: firmJob
+      summary: Firm or unfirm a placement; firmed placements are frozen against later runs
+      x-passage-duty: scheduling.schedule.write
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [firmed]
+              properties:
+                firmed: { type: boolean }
+      responses:
+        '200':
+          description: 'Updated placement. A replay carries Idempotent-Replayed: true.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Firm' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/capacity-load:
+    get:
+      operationId: listCapacityLoad
+      summary: Booked versus open minutes per resource and week, with bottleneck flags
+      x-passage-duty: scheduling.read
+      parameters:
+        - name: from
+          in: query
+          required: false
+          description: Date (YYYY-MM-DD); defaults to today.
+          schema: { type: string, format: date }
+        - name: weeks
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 53, default: 4 }
+        - name: resourceIds
+          in: query
+          required: false
+          description: Comma-separated resource UUIDs; all resources when omitted.
+          schema: { type: string }
+      responses:
+        '200':
+          description: Weekly load (weeks start Monday 00:00 UTC)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/LoadItem' }
+        '400': { $ref: '#/components/responses/Problem' }
+  /healthz:
+    get:
+      operationId: healthz
+      summary: Liveness
+      security: []
+      responses:
+        '200': { description: Process is up }
+  /readyz:
+    get:
+      operationId: readyz
+      summary: Readiness (Postgres reachable)
+      security: []
+      responses:
+        '200': { description: Ready }
+        '503': { description: Database unreachable }
+components:
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 200 }
+  responses:
+    Problem:
+      description: RFC 9457 problem details
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: { type: string, format: uri, example: 'https://passage.dev/problems/SCHED-0001' }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string }
+        traceId: { type: string }
+        errors:
+          type: object
+          description: Field name to message for validation failures (COM-0001).
+          additionalProperties: { type: string }
+    Interval:
+      type: object
+      required: [start, end, minutes]
+      properties:
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+        minutes: { type: integer }
+    ResourceRequest:
+      type: object
+      required: [code, name, timeZone, shifts]
+      properties:
+        code: { type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{0,31}$' }
+        name: { type: string }
+        finite: { type: boolean, default: true }
+        timeZone: { type: string, description: IANA zone of the site calendar }
+        shifts:
+          type: array
+          minItems: 1
+          maxItems: 14
+          items: { $ref: '#/components/schemas/Shift' }
+    Shift:
+      type: object
+      required: [weekday, startMinute, endMinute]
+      properties:
+        weekday: { type: integer, minimum: 0, maximum: 6, description: Go time.Weekday, 0 = Sunday }
+        startMinute: { type: integer, minimum: 0, maximum: 1440 }
+        endMinute: { type: integer, minimum: 0, maximum: 1440 }
+    Resource:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        finite: { type: boolean }
+        timeZone: { type: string }
+        shifts:
+          type: array
+          items: { $ref: '#/components/schemas/Shift' }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+    OperationRequest:
+      type: object
+      required: [orderId, operNumber, minutes, resourceIds]
+      properties:
+        orderId: { type: string, format: uuid }
+        operNumber: { type: integer, minimum: 1 }
+        minutes: { type: integer, minimum: 1, maximum: 100000 }
+        dueAt: { type: string, format: date-time }
+        readyAt: { type: string, format: date-time }
+        priority: { type: integer, minimum: 0, maximum: 1000, default: 100, description: Lower runs first among orders with the same due date. }
+        resourceIds:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items: { type: string, format: uuid }
+          description: Candidate resources, named resource first (FR-23.2).
+    Operation:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        operNumber: { type: integer }
+        minutes: { type: integer }
+        dueAt: { type: string, format: date-time }
+        readyAt: { type: string, format: date-time }
+        priority: { type: integer }
+        resourceIds:
+          type: array
+          items: { type: string, format: uuid }
+        status: { type: string, enum: [open, scheduled, unplaced] }
+        createdAt: { type: string, format: date-time }
+    RunRequest:
+      type: object
+      description: >
+        Heuristic run, always forward from start (backward direction and the
+        cp-sat algorithm are later slices; see NOT-IMPLEMENTED.md). finite
+        false is an infinite-capacity run: jobs stay inside open calendar time
+        but may overlap and do not reserve capacity.
+      required: [scope]
+      properties:
+        scope: { type: string, enum: [site, selection], description: 'site (every operation) or selection (operationIds)' }
+        mode: { type: string, enum: [operations, jobs], default: jobs, description: Recorded on the run; both modes place at minute granularity in this slice. }
+        finite: { type: boolean, default: true }
+        operationIds:
+          type: array
+          maxItems: 5000
+          description: Required for selection scope, omitted for site scope.
+          items: { type: string, format: uuid }
+        start: { type: string, format: date-time, description: Defaults to now; must not be before today (UTC). }
+        horizonDays: { type: integer, minimum: 30, maximum: 730, default: 365 }
+    Run:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        scope: { type: string, enum: [site, selection, move] }
+        mode: { type: string }
+        direction: { type: string }
+        finite: { type: boolean }
+        algorithm: { type: string, enum: [heuristic] }
+        status: { type: string }
+        operationsCount: { type: integer }
+        makespanMinutes: { type: integer }
+        totalLatenessMinutes: { type: integer }
+        solverStatus:
+          type: [string, 'null']
+          description: Set for cp-sat runs (OPTIMAL, FEASIBLE, UNKNOWN).
+        messages:
+          type: array
+          items: { type: string }
+        createdAt: { type: string, format: date-time }
+    Bar:
+      type: object
+      properties:
+        jobId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        operNumber: { type: integer }
+        resourceId: { type: string, format: uuid }
+        segment: { type: integer }
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+        lateMinutes: { type: integer }
+        firmed: { type: boolean }
+    MoveRequest:
+      type: object
+      required: [start]
+      properties:
+        resourceId: { type: string, format: uuid, description: Reassign within the capability set. }
+        start: { type: string, format: date-time }
+        dryRun: { type: boolean, default: false }
+    MoveResponse:
+      type: object
+      required: [dryRun, feasible, violations, changes]
+      properties:
+        dryRun: { type: boolean }
+        feasible: { type: boolean }
+        violations:
+          type: array
+          items:
+            type: object
+            required: [code, detail]
+            properties:
+              code: { type: string }
+              detail: { type: string }
+              jobId: { type: string, format: uuid }
+        changes:
+          type: array
+          items:
+            type: object
+            properties:
+              operationId: { type: string, format: uuid }
+              orderId: { type: string, format: uuid }
+              resourceId: { type: string, format: uuid }
+              oldStart: { type: string, format: date-time }
+              oldEnd: { type: string, format: date-time }
+              newStart: { type: string, format: date-time }
+              newEnd: { type: string, format: date-time }
+              lateMinutes: { type: integer }
+        orderId: { type: string, format: uuid }
+        orderStart: { type: string, format: date-time }
+        orderEnd: { type: string, format: date-time }
+        run: { $ref: '#/components/schemas/Run' }
+    Firm:
+      type: object
+      properties:
+        jobId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        resourceId: { type: string, format: uuid }
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+        firmed: { type: boolean }
+    LoadItem:
+      type: object
+      properties:
+        resourceId: { type: string, format: uuid }
+        weekStart: { type: string, format: date }
+        openMinutes: { type: integer }
+        bookedMinutes: { type: integer }
+        loadPct: { type: number }
+        bottleneck: { type: boolean }
