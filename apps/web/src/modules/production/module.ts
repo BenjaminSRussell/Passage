@@ -65,7 +65,7 @@ const production: PassageModule = {
   id: "production",
   title: "Production",
   description:
-    "Production orders: create, estimate, release, start, post picking lists, route cards and reports as finished, end with settlement; rework orders, as-built genealogy and posting profiles.",
+    "Production orders: create, estimate, release, start, post picking lists, route cards and reports as finished, end with settlement; bulk status updates, split and merge; rework orders, as-built genealogy and posting profiles.",
   routes: [
     { path: list, element: createElement(OrdersRoute) },
     { path: `${list}/new`, element: createElement(CreateRoute), handle: { title: "New production order" } },

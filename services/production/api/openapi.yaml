@@ -1,9 +1,9 @@
 openapi: 3.1.0
 info:
   title: Passage production orders
-  version: 0.21.3
+  version: 0.21.4
   description: |
-    Wave 21 slices 1 to 3 of PSG-21. Creates production orders with BOM and route
+    Wave 21 slices 1 to 4 of PSG-21. Creates production orders with BOM and route
     explosion, lists and reads them, edits the header, runs the status state machine
     (BR-21.1) and estimates planned cost. Slice 2 adds posting profiles (FR-21.13), picking
     lists, route cards and report-as-finished journals with their WIP postings (FR-21.5 to
@@ -14,6 +14,8 @@ info:
     at the reworked units' existing cost, End settles the rest as variances of type rework)
     and as-built genealogy (FR-21.19, BR-21.14: assign, detach, and the as-built / where-used
     inquiry).
+    Slice 4 adds the bulk status update (FR-21.12: one command on up to 500 orders with
+    per-order results), and split and merge of Created to Released orders (FR-21.15).
     Problems are RFC 9457 with a stable `code` (see README). The gateway serves these paths
     under `/api`.
 servers:
@@ -292,6 +294,8 @@ components:
         originType: { type: string }
         originId: { type: string, format: uuid }
         reworkReference: { $ref: '#/components/schemas/ReworkReference' }
+        splitFromOrderId: { type: string, format: uuid, description: 'The order a split took this order''s quantity from (FR-21.15).' }
+        mergedIntoOrderId: { type: string, format: uuid, description: 'Set on a Cancelled order that a merge moved into this order (FR-21.15).' }
         version: { type: integer }
         lines:
           type: array
@@ -329,7 +333,7 @@ components:
     StatusLogEntry:
       type: object
       properties:
-        command: { $ref: '#/components/schemas/Command' }
+        command: { type: string, enum: [estimate, schedule, release, start, report-finished, end, cancel, reset-status, split, merge], description: 'A status command, or split and merge (FR-21.15).' }
         from: { $ref: '#/components/schemas/Status' }
         to: { $ref: '#/components/schemas/Status' }
         actor: { type: string }
@@ -484,6 +488,67 @@ components:
             version: { type: integer }
             updatedBy: { type: string }
             updatedAt: { type: string, format: date-time }
+    SplitOrder:
+      type: object
+      required: [splitQty]
+      additionalProperties: false
+      properties:
+        splitQty: { $ref: '#/components/schemas/Decimal', description: 'The quantity the new order receives; above zero and below the order quantity.' }
+        minimumQty: { $ref: '#/components/schemas/Decimal', description: 'The item''s minimum order quantity (released-product settings, wave 8, are not read yet); 0 or absent: no minimum.' }
+        multiple: { $ref: '#/components/schemas/Decimal', description: 'The item''s order multiple; 0 or absent: any quantity.' }
+    SplitResult:
+      type: object
+      properties:
+        original: { $ref: '#/components/schemas/Order' }
+        new: { $ref: '#/components/schemas/Order' }
+    MergeOrders:
+      type: object
+      required: [orders]
+      additionalProperties: false
+      properties:
+        orders:
+          type: array
+          minItems: 2
+          maxItems: 500
+          description: The first order survives; the others are cancelled into it.
+          items:
+            type: object
+            required: [orderId, version]
+            properties:
+              orderId: { type: string, format: uuid }
+              version: { type: integer, minimum: 1, description: The order version (ETag) the caller read. }
+    MergeResult:
+      type: object
+      properties:
+        survivor: { $ref: '#/components/schemas/Order' }
+        merged: { type: array, items: { type: string, format: uuid } }
+    BulkStatus:
+      type: object
+      required: [command, orderIds]
+      additionalProperties: false
+      properties:
+        command: { type: string, enum: [estimate, schedule, release, start, end, cancel] }
+        orderIds: { type: array, minItems: 1, maxItems: 500, uniqueItems: true, items: { type: string, format: uuid } }
+    BulkItem:
+      type: object
+      required: [orderId, ok]
+      properties:
+        orderId: { type: string, format: uuid }
+        ok: { type: boolean }
+        status: { $ref: '#/components/schemas/Status' }
+        version: { type: integer }
+        replayed: { type: boolean, description: The order was already moved by an earlier run of this batch. }
+        code: { type: string, description: 'The problem code of a failed order, for example PRODUCTION_ILLEGAL_TRANSITION or PRODUCTION_ORDER_NOT_FOUND.' }
+        detail: { type: string }
+    BulkResult:
+      type: object
+      properties:
+        command: { type: string }
+        succeeded: { type: integer }
+        failed: { type: integer }
+        code: { type: string, description: 'PRODUCTION_BULK_PARTIAL (PROD-0022) when some orders failed.' }
+        detail: { type: string }
+        results: { type: array, items: { $ref: '#/components/schemas/BulkItem' } }
     Problem:
       type: object
       description: RFC 9457 problem details, application/problem+json.
@@ -510,7 +575,7 @@ paths:
         - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
         - { name: siteId, in: query, schema: { type: string, format: uuid } }
         - { name: productId, in: query, schema: { type: string, format: uuid } }
-        - { name: originType, in: query, schema: { type: string, enum: [PlannedOrder, SalesOrderLine, Manual, Kanban, Rework] } }
+        - { name: originType, in: query, schema: { type: string, enum: [PlannedOrder, SalesOrderLine, Manual, Kanban, Rework, Split] } }
         - { name: reworkOf, in: query, description: 'An order id: only the rework orders that reference it (FR-21.20).', schema: { type: string, format: uuid } }
         - { name: cursor, in: query, description: nextCursor of the previous page, schema: { type: string, format: uuid } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
@@ -561,6 +626,72 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { description: 'AUTH-0003: a missing route duty, or originType Rework without production.order.rework', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: 'Explosion or operation rule failed (PRODUCTION_INVALID_INPUT); the rework reference does not name an order of the same product with enough output (PRODUCTION_REWORK_REFERENCE_INVALID); key reused with another body (idempotency_key_reuse)', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/production/orders:bulk-status:
+    post:
+      operationId: bulkProductionOrderStatus
+      summary: Apply one status command to up to 500 orders (FR-21.12)
+      description: |
+        Each order runs in its own transaction at its current version (continue on error),
+        in request order, with the same rules, posting effects and events as the single
+        `:command`. The call answers 200 with a result per order; when some fail, `code` is
+        PRODUCTION_BULK_PARTIAL (PROD-0022). The Idempotency-Key of order X is
+        `<key>:<X>`, so a retried batch replays the orders it already moved and retries the
+        rest. The route needs production.order.release and the command its own duty as well
+        (end: production.order.end; estimate and schedule: production.order.write).
+        report-finished and reset-status need per-order input and are not accepted.
+      x-passage-duty: production.order.release
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BulkStatus' }
+      responses:
+        '200':
+          description: Per-order results.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BulkResult' }
+        '400': { description: 'No, too many, duplicate or malformed ids, a command not allowed in bulk, or Idempotency-Key missing (COM-0001)', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { description: 'AUTH-0003: the route duty or the command''s duty is missing', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/production/orders:merge:
+    post:
+      operationId: mergeProductionOrders
+      summary: Merge orders into the first one (FR-21.15)
+      description: |
+        The orders must be Created to Released and share legal entity, product, site,
+        warehouse, currency, item group, rework reference and the BOM and route snapshot.
+        The first order survives with the summed quantity, its lines and operations
+        re-exploded and, once estimated, re-estimated; it emits
+        dev.passage.production.order.updated.v1. Every other order becomes Cancelled with
+        mergedIntoOrderId set, a `merge` status-log row and
+        dev.passage.production.order.statuschanged.v1. Refused (422
+        PRODUCTION_MERGE_REFUSED, PROD-0016) when any order has posted journals, an order
+        to be cancelled has draft journals, or the orders differ.
+      x-passage-duty: production.order.release
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MergeOrders' }
+      responses:
+        '200':
+          description: The survivor and the merged order ids. Replays carry Idempotent-Replayed.
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MergeResult' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: PRODUCTION_ORDER_NOT_FOUND, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '412': { description: 'An order version is stale (conflict_version)', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: 'PRODUCTION_MERGE_REFUSED (PROD-0016) or idempotency_key_reuse', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/production/orders/{id}:
     get:
       operationId: getProductionOrder
@@ -692,6 +823,54 @@ paths:
         '409': { description: 'PRODUCTION_ILLEGAL_TRANSITION; PRODUCTION_UNPOSTED_JOURNALS on end', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '412': { description: conflict_version, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: 'Guard failed (PRODUCTION_END_REQUIRES_RAF, PRODUCTION_ZERO_OUTPUT_NOT_PERMITTED, PRODUCTION_RAF_EXCEEDS_REMAINING, PRODUCTION_INVALID_INPUT, PRODUCTION_POSTING_PROFILE_MISSING, PRODUCTION_END_BEFORE_LAST_JOURNAL, PRODUCTION_POSTING_NOT_BALANCED) or key reused (idempotency_key_reuse)', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '428': { description: precondition_required, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/production/orders/{id}:split:
+    post:
+      operationId: splitProductionOrder
+      summary: Split a Created to Released order in two (FR-21.15)
+      description: |
+        The original keeps quantity − splitQty; the new order receives splitQty with the same
+        header, BOM and route snapshot and status, a new number, originType Split, originId
+        and splitFromOrderId set to the original (a rework order's split stays a rework order
+        of the same reference). Both orders are re-exploded for their quantity (BR-21.2,
+        BR-21.8; each keeps its setup) and, once estimated, re-estimated. Emits
+        dev.passage.production.order.created.v1 for the new order and
+        dev.passage.production.order.updated.v1 for the original, and writes a `split`
+        status-log row on both. Started orders (the WIP transfer of BR-21.11) are not split
+        yet: 409 PRODUCTION_ILLEGAL_TRANSITION.
+      x-passage-duty: production.order.release
+      parameters:
+        - { $ref: '#/components/parameters/OrderId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SplitOrder' }
+      responses:
+        '201':
+          description: The original and the new order; ETag is the original's version, Location the new order.
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SplitResult' }
+        '200':
+          description: Replay of an earlier split with the same Idempotency-Key and body.
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SplitResult' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: PRODUCTION_ORDER_NOT_FOUND, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: 'PRODUCTION_ILLEGAL_TRANSITION: the order is not Created to Released', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '412': { description: conflict_version, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: 'PRODUCTION_SPLIT_QUANTITY (PROD-0015) or idempotency_key_reuse', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: precondition_required, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/production/orders/{id}/journals:
     get:

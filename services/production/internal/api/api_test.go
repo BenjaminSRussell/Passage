@@ -43,6 +43,10 @@ type fakeStore struct {
 	asBuiltF    []store.AsBuiltFilter
 	detached    []string
 	asBuiltErr  error
+	splits      []store.Split
+	merges      []store.Merge
+	bulks       []store.Bulk
+	batchErr    error
 }
 
 func (f *fakeStore) Ping(context.Context) error { return f.pingErr }

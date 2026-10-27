@@ -15,6 +15,7 @@ import {
 } from "../../shell/ui";
 import {
   allowedCommands,
+  canSplit,
   describeProblem,
   getCosts,
   getOrder,
@@ -40,6 +41,7 @@ import {
 } from "./api/client";
 import { AsBuiltPanel } from "./AsBuiltPanel";
 import { JournalsPanel } from "./JournalsPanel";
+import { SplitPanel } from "./SplitPanel";
 import {
   addDecimals,
   amount,
@@ -49,6 +51,7 @@ import {
   describeReference,
   flushingLabel,
   isZero,
+  loggedCommandLabel,
   negate,
   statusLabel,
   statusTone,
@@ -108,7 +111,7 @@ const costColumns: DataTableColumn<CostRow>[] = [
 
 const logColumns: DataTableColumn<StatusLogEntry>[] = [
   { key: "occurredAt", header: "When", mono: true, render: (row) => <time dateTime={row.occurredAt}>{row.occurredAt}</time> },
-  { key: "command", header: "Command", render: (row) => commandLabel[row.command] ?? row.command },
+  { key: "command", header: "Command", render: (row) => loggedCommandLabel[row.command] ?? row.command },
   { key: "from", header: "From", render: (row) => statusLabel[row.from] ?? row.from },
   { key: "to", header: "To", render: (row) => statusLabel[row.to] ?? row.to },
   { key: "actor", header: "Actor" },
@@ -415,6 +418,19 @@ export function ProductionOrderDetail({ orderId, onBack, onCreateRework, onOpenO
         )}
       </Card>
 
+      {canSplit(current.status) ? (
+        <SplitPanel
+          order={current}
+          onOpenOrder={onOpenOrder}
+          onSplit={(result) => {
+            setOrder({ value: result.original, loading: false, error: null });
+            setNotice("");
+            setCommandError(null);
+            loadSide();
+          }}
+        />
+      ) : null}
+
       <Card title="Order">
         <dl className={styles.details}>
           <Detail term="Product" mono>
@@ -439,6 +455,28 @@ export function ProductionOrderDetail({ orderId, onBack, onCreateRework, onOpenO
                 </Button>
               ) : (
                 describeReference(current.reworkReference)
+              )}
+            </Detail>
+          ) : null}
+          {current.splitFromOrderId ? (
+            <Detail term="Split from">
+              {onOpenOrder ? (
+                <Button variant="ghost" size="sm" onClick={() => onOpenOrder(current.splitFromOrderId ?? "")}>
+                  Open the order it was split from
+                </Button>
+              ) : (
+                <span className={styles.mono}>{current.splitFromOrderId}</span>
+              )}
+            </Detail>
+          ) : null}
+          {current.mergedIntoOrderId ? (
+            <Detail term="Merged into">
+              {onOpenOrder ? (
+                <Button variant="ghost" size="sm" onClick={() => onOpenOrder(current.mergedIntoOrderId ?? "")}>
+                  Open the order it was merged into
+                </Button>
+              ) : (
+                <span className={styles.mono}>{current.mergedIntoOrderId}</span>
               )}
             </Detail>
           ) : null}

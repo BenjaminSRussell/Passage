@@ -1,8 +1,10 @@
 import type { BadgeTone } from "../../shell/ui";
 import type {
+  BulkCommand,
   CostGroup,
   Flushing,
   JournalType,
+  LoggedCommand,
   ProductionCommand,
   ProductionStatus,
   Proposal,
@@ -21,6 +23,23 @@ export const commandLabel: Record<ProductionCommand, string> = {
   end: "End",
   cancel: "Cancel order",
   "reset-status": "Reset status",
+};
+
+/** Labels of status-log commands, including split and merge (FR-21.15). */
+export const loggedCommandLabel: Record<LoggedCommand, string> = {
+  ...commandLabel,
+  split: "Split",
+  merge: "Merge",
+};
+
+/** Labels of the bulk commands, in the words of a list action. */
+export const bulkCommandLabel: Record<BulkCommand, string> = {
+  estimate: "Estimate",
+  schedule: "Schedule",
+  release: "Release",
+  start: "Start",
+  end: "End",
+  cancel: "Cancel",
 };
 
 export const statusLabel: Record<ProductionStatus, string> = {

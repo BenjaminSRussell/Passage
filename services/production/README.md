@@ -2,7 +2,7 @@
 
 Production orders for Passage (wave 21, ticket PSG-21, PRD section 4.21). Slice 1 covers the
 order itself; slice 2 adds journals, WIP postings and settlement; slice 3 adds rework orders and
-as-built genealogy.
+as-built genealogy; slice 4 adds the bulk status update, and split and merge.
 
 Slice 1:
 
@@ -90,6 +90,33 @@ Slice 3:
   finished serial and where-used of a component serial (AC-21.14). Events `asbuilt.assigned` and
   `asbuilt.detached`.
 
+Slice 4:
+
+- Bulk status update (FR-21.12): `POST /v1/production/orders:bulk-status` applies `estimate`,
+  `schedule`, `release`, `start`, `end` or `cancel` to 1 to 500 distinct orders. Each order runs
+  in its own transaction at its current version with the same rules, postings and events as the
+  single command (continue on error), and the answer lists a result per order with its code;
+  `PRODUCTION_BULK_PARTIAL` (PROD-0022) marks a batch with failures. Order X runs under the key
+  `<Idempotency-Key>:X`, so a retried batch replays what it moved and retries the rest. The route
+  needs the release duty and the command its own duty too. It runs in the request, not as the
+  Temporal job of 4.21.12 (wave 4).
+- Split (FR-21.15): `POST /v1/production/orders/{id}:split` with `splitQty` (and the item's
+  `minimumQty` and `multiple` until wave 8 supplies them, PROD-0015) on a Created to Released
+  order. The new order takes the header, BOM and route snapshot and status, origin `Split` with
+  `originId` and `splitFromOrderId` set to the original (a rework order's split stays a rework
+  order of the same reference), and the next number. Both orders are re-exploded for their
+  quantity (BR-21.2 and BR-21.8, each with its own setup) and re-estimated once estimated; the
+  two quantities add up to the original's (PRD 4.21.4 invariant). Events `order.created` for the
+  new order and `order.updated` for the original; a `split` status-log row on both.
+- Merge (FR-21.15): `POST /v1/production/orders:merge` with the orders and the versions read.
+  The orders must be Created to Released, of one legal entity, product, site, warehouse,
+  currency, item group and rework reference, with the same BOM and route snapshot. Refused when
+  any of them has posted journals (PROD-0016) or an order to be cancelled has drafts. The first
+  order survives with the summed quantity, re-exploded and re-estimated (`order.updated`); the
+  others become Cancelled with `mergedIntoOrderId` (`order.statuschanged`, a `merge` log row).
+  Rows are locked in id order. Migration `0004_split_merge.sql` adds the two links (self foreign
+  keys, partial indexes) and the check that a merged order is Cancelled.
+
 Inventory transactions (wave 16), GL booking (wave 11) and period control (wave 14) are
 handoffs. Everything not built is listed in `NOT-IMPLEMENTED.md`.
 
@@ -100,16 +127,19 @@ cmd/production/        entrypoint: config, dbx.Connect, optional dbx.Migrate, ht
 internal/domain/       pure rules: status.go (BR-21.1 state machine, reset, RAF and edit guards),
                        quantity.go (BR-21.2, BR-21.8), explode.go (FR-21.1), cost.go (FR-21.3, BR-21.6),
                        journal.go (proposals, tolerances, posting profiles, postings, settlement),
-                       rework.go (FR-21.20), asbuilt.go (FR-21.19, BR-21.14)
+                       rework.go (FR-21.20), asbuilt.go (FR-21.19, BR-21.14),
+                       bulk.go (FR-21.12), split.go (FR-21.15 split and merge)
 internal/domain/testdata/  prod-orders-50.json and the exact-fraction generator that computed it
 internal/store/        Postgres repositories (pgx), tenant-scoped transactions, row locks, outbox writes:
                        store.go (orders, commands), journal.go (journals, postings, settlement, reversals),
-                       profile.go (posting profiles), asbuilt.go (as-built genealogy)
+                       profile.go (posting profiles), asbuilt.go (as-built genealogy),
+                       split.go (split, merge, bulk status)
 internal/api/          HTTP handlers, request validation, platform authz duties
 internal/events/       event types and payloads
 migrations/            0001_init.sql (orders), 0002_journals.sql (profiles, journals, WIP postings,
                        variances), 0003_rework_asbuilt.sql (rework reference, rework variance account,
-                       as-built records), each with RLS and app-role grants; migrations.go (embed)
+                       as-built records), 0004_split_merge.sql (split and merge links), with RLS and
+                       app-role grants on every table; migrations.go (embed)
 api/openapi.yaml       OpenAPI 3.1 for every route (a test checks it against the router)
 events/asyncapi.yaml   AsyncAPI 3 for every event (a test checks it against the payloads)
 charts/production/     Helm chart (deployment, service, HPA on CPU 70%, optional ServiceMonitor)
@@ -157,7 +187,7 @@ drift-free RAF receipts and the variances clearing the posted WIP in every curre
 | View production costs | `production.cost.read` | `GET …/{id}/costs` |
 | Maintain production orders | `production.order.write` | create, PATCH, `:estimate`, `:schedule` |
 | Create rework orders | `production.order.rework` | create with `originType` `Rework` (with `production.order.write`) |
-| Release production orders | `production.order.release` | `:release`, `:start`, `:cancel`, `:reset-status` |
+| Release production orders | `production.order.release` | `:release`, `:start`, `:cancel`, `:reset-status`, `:split`, `orders:merge`, `orders:bulk-status` (with the command's duty) |
 | Post production journals | `production.journal.post` | `:report-finished`, create, `:post` and delete journals, assign and `:detach` as-built records |
 | Post production over-consumption | `production.journal.over-consume` | posting beyond the requirement plus `PRODUCTION_OVERCONSUMPTION_PCT` |
 | View production setup | `production.setup.read` | `GET /v1/production/posting-profiles` |
@@ -181,7 +211,7 @@ Problems are RFC 9457 with `type` `https://passage.dev/problems/<code>`.
 | `PRODUCTION_ZERO_OUTPUT_NOT_PERMITTED` | 422 | Ending with zero output without the zero-output duty (PROD-0013) |
 | `PRODUCTION_INVALID_INPUT` | 422 | Explosion or planning rule failed (quantities, scrap, series, operation order) |
 | `PRODUCTION_ORDER_NOT_FOUND` | 404 | No order with that id in the caller's tenant and legal-entity scope |
-| `PRODUCTION_UNKNOWN_ACTION` | 404 | The `:command` is not one of the eight, a journal action is not `:post`, or an as-built action is not `:detach` |
+| `PRODUCTION_UNKNOWN_ACTION` | 404 | The `:command` is not one of the eight or `:split`, a journal action is not `:post`, or an as-built action is not `:detach` |
 | `PRODUCTION_JOURNAL_NOT_FOUND` | 404 | No journal with that id in the caller's scope |
 | `PRODUCTION_JOURNAL_NOT_ALLOWED` | 409 | The journal type cannot post on the order's status |
 | `PRODUCTION_JOURNAL_ALREADY_POSTED` | 409 | Posting or deleting a posted journal |
@@ -202,6 +232,9 @@ Problems are RFC 9457 with `type` `https://passage.dev/problems/<code>`.
 | `PRODUCTION_AS_BUILT_TOO_MANY_FINISHED` | 422 | More finished serials or batches than the order quantity |
 | `PRODUCTION_AS_BUILT_NOT_FOUND` | 404 | No as-built record with that id in the caller's scope |
 | `SERIAL_DUPLICATE` | 422 | The component serial is already attached to a finished serial (PROD-0009, BR-21.14) |
+| `PRODUCTION_SPLIT_QUANTITY` | 422 | The split quantity is not above zero and below the order quantity, is below the minimum order quantity or is not a multiple (PROD-0015) |
+| `PRODUCTION_MERGE_REFUSED` | 422 | An order has posted journals (PROD-0016), an order to be cancelled has drafts, an order is not Created to Released, or the orders differ in product, site, warehouse, currency, item group, rework reference or BOM and route |
+| `PRODUCTION_BULK_PARTIAL` | 200 body | Some orders of a bulk status update failed; see `results` (PROD-0022) |
 | `idempotency_key_reuse` | 422 | The Idempotency-Key was used for a different body, command or order |
 | `conflict_version` | 412 | If-Match does not match the order or profile version (PROD-0003) |
 | `precondition_required` | 428 | If-Match is missing on a command, PATCH or profile replacement |
@@ -213,6 +246,6 @@ The stable PROD-00nn service codes are not yet carried in the problem body, beca
 
 ## Wave reference
 
-PSG-21 (wave 21), slices PSG-2101, PSG-2102 and PSG-2103. Depends on PSG-20 (costing). Later
-slices: job cards, subcontracting, bulk status, split and merge, order change management and
-trigger points. See `NOT-IMPLEMENTED.md`.
+PSG-21 (wave 21), slices PSG-2101 to PSG-2104. Depends on PSG-20 (costing). Later slices: job
+cards, subcontracting, the split of Started orders with the WIP transfer of BR-21.11, order change
+management, order-specific BOM and route edits, and trigger points. See `NOT-IMPLEMENTED.md`.

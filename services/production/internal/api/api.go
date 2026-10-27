@@ -65,7 +65,9 @@ const (
 var (
 	currencyCode = regexp.MustCompile(`^[A-Z]{3}$`)
 	originTypes  = map[string]bool{"PlannedOrder": true, "SalesOrderLine": true, "Manual": true, "Kanban": true, domain.OriginRework: true}
-	commands     = map[string]domain.Command{
+	// listOriginTypes adds Split, which only a split sets (FR-21.15).
+	listOriginTypes = map[string]bool{"PlannedOrder": true, "SalesOrderLine": true, "Manual": true, "Kanban": true, domain.OriginRework: true, domain.OriginSplit: true}
+	commands        = map[string]domain.Command{
 		"estimate": domain.CmdEstimate, "schedule": domain.CmdSchedule, "release": domain.CmdRelease, "start": domain.CmdStart,
 		"report-finished": domain.CmdReportFinished, "end": domain.CmdEnd, "cancel": domain.CmdCancel, "reset-status": domain.CmdResetStatus,
 	}
@@ -106,12 +108,15 @@ type API struct {
 func New(st store.Store, cfg Config) *API { return &API{store: st, cfg: cfg} }
 
 // Register mounts the production routes on r. Duties are enforced by the
-// platform authz middleware; a status command's duty depends on the command,
-// so that route resolves it before applying the same middleware.
+// platform authz middleware; a status command's duty depends on the command
+// (`:split` needs the release duty), so that route resolves it before applying
+// the same middleware.
 func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
 	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/orders", a.listOrders)
 	r.With(authz.RequireDuty(DutyWrite)).Post("/v1/production/orders", a.createOrder)
+	r.With(authz.RequireDuty(DutyRelease)).Post("/v1/production/orders:bulk-status", a.bulkStatus)
+	r.With(authz.RequireDuty(DutyRelease)).Post("/v1/production/orders:merge", a.merge)
 	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/orders/{id}", a.getOrder)
 	r.With(authz.RequireDuty(DutyWrite)).Patch("/v1/production/orders/{id}", a.patchOrder)
 	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/orders/{id}/status-log", a.getStatusLog)
@@ -252,8 +257,8 @@ func (a *API) listOrders(w http.ResponseWriter, r *http.Request) {
 	f := store.ListFilter{Status: domain.Status(q.Get("status")), LegalEntityID: q.Get("legalEntityId"), SiteID: q.Get("siteId"),
 		ProductID: q.Get("productId"), OriginType: q.Get("originType"), ReworkOf: q.Get("reworkOf"), Cursor: q.Get("cursor"), Limit: defaultPageSize}
 	fields := map[string]string{}
-	if f.OriginType != "" && !originTypes[f.OriginType] {
-		fields["originType"] = "must be PlannedOrder, SalesOrderLine, Manual, Kanban or Rework"
+	if f.OriginType != "" && !listOriginTypes[f.OriginType] {
+		fields["originType"] = "must be PlannedOrder, SalesOrderLine, Manual, Kanban, Rework or Split"
 	}
 	if f.Status != "" && !f.Status.Valid() {
 		fields["status"] = "must be one of Created, Estimated, Scheduled, Released, Started, ReportedAsFinished, Ended, Cancelled"
@@ -373,10 +378,16 @@ type commandRequest struct {
 
 func (a *API) transition(w http.ResponseWriter, r *http.Request) {
 	raw, name, found := strings.Cut(chi.URLParam(r, "id"), ":")
+	if found && ids.Valid(raw) && name == string(domain.CmdSplit) {
+		authz.RequireDuty(DutyRelease)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			a.split(w, r, raw)
+		})).ServeHTTP(w, r)
+		return
+	}
 	cmd, known := commands[name]
 	if !found || !ids.Valid(raw) || !known {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, unknownActionCode,
-			"use :estimate, :schedule, :release, :start, :report-finished, :end, :cancel or :reset-status on an order"))
+			"use :estimate, :schedule, :release, :start, :report-finished, :end, :cancel, :reset-status or :split on an order"))
 		return
 	}
 	authz.RequireDuty(commandDuty[cmd])(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -407,12 +418,7 @@ func (a *API) applyCommand(w http.ResponseWriter, r *http.Request, id string, cm
 		invalid(w, r, fields)
 		return
 	}
-	t.RequestHash = hashOf(struct {
-		Command domain.Command
-		ResetTo domain.Status
-		Good    string
-		Error   string
-	}{cmd, t.ResetTo, t.Good.String(), t.Error.String()})
+	t.RequestHash = commandHash(cmd, t.ResetTo, t.Good, t.Error)
 	order, replayed, err := a.store.Transition(r.Context(), t)
 	if err != nil {
 		a.refuse(w, r, err)

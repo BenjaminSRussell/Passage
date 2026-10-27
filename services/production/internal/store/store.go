@@ -51,13 +51,17 @@ type Order struct {
 	OriginType    string          `json:"originType"`
 	OriginID      *string         `json:"originId,omitempty"`
 	// ReworkReference is the original order, batch or serial of a rework order (FR-21.20).
-	ReworkReference *domain.ReworkRef  `json:"reworkReference,omitempty"`
-	Version         int                `json:"version"`
-	Lines           []domain.OrderLine `json:"lines"`
-	Operations      []domain.Operation `json:"operations"`
-	Costs           []domain.CostRow   `json:"costs"`
-	CreatedAt       time.Time          `json:"createdAt"`
-	UpdatedAt       time.Time          `json:"updatedAt"`
+	ReworkReference *domain.ReworkRef `json:"reworkReference,omitempty"`
+	// SplitFromOrderID is the order a split took this order's quantity from;
+	// MergedIntoOrderID the order a merge moved it into (FR-21.15).
+	SplitFromOrderID  *string            `json:"splitFromOrderId,omitempty"`
+	MergedIntoOrderID *string            `json:"mergedIntoOrderId,omitempty"`
+	Version           int                `json:"version"`
+	Lines             []domain.OrderLine `json:"lines"`
+	Operations        []domain.Operation `json:"operations"`
+	Costs             []domain.CostRow   `json:"costs"`
+	CreatedAt         time.Time          `json:"createdAt"`
+	UpdatedAt         time.Time          `json:"updatedAt"`
 }
 
 // OrderSummary is one row of the order list (PRD 4.21.14 "Production orders list").
@@ -185,6 +189,9 @@ type Store interface {
 	AssignAsBuilt(ctx context.Context, in NewAsBuilt) (AsBuiltRecord, bool, error)
 	ListAsBuilt(ctx context.Context, f AsBuiltFilter) ([]AsBuiltRecord, error)
 	DetachAsBuilt(ctx context.Context, id, actor string) (AsBuiltRecord, error)
+	SplitOrder(ctx context.Context, in Split) (SplitResult, error)
+	MergeOrders(ctx context.Context, in Merge) (MergeResult, error)
+	BulkTransition(ctx context.Context, in Bulk) []BulkItem
 }
 
 // Postgres is the production store.
@@ -552,6 +559,12 @@ func requantify(ctx context.Context, tx pgx.Tx, tenantID, orderID string, qty de
 	if ops, err = domain.PlanOperations(ops, qty); err != nil {
 		return domainProblem(err)
 	}
+	return writeQuantities(ctx, tx, tenantID, orderID, lines, ops)
+}
+
+// writeQuantities stores re-exploded required line quantities and operation
+// process quantities of an order.
+func writeQuantities(ctx context.Context, tx pgx.Tx, tenantID, orderID string, lines []domain.OrderLine, ops []domain.Operation) error {
 	for _, l := range lines {
 		if _, err := tx.Exec(ctx, `update production_bom_line set qty_required = $4 where tenant_id = $1 and order_id = $2 and line_number = $3`,
 			tenantID, orderID, l.LineNo, l.QtyRequired.String()); err != nil {
@@ -735,10 +748,10 @@ func loadOrder(ctx context.Context, q querier, tenantID, id string) (Order, erro
 	var refType, refID *string
 	err := q.QueryRow(ctx, `select id::text, legal_entity_id::text, order_number, product_id::text, site_id::text, warehouse_id::text, currency::text,
 		quantity::text, qty_raf::text, qty_error::text, status, delivery_date::text, origin_type, origin_id::text, version, created_at, updated_at,
-		item_group, rework_reference_type, rework_reference_id
+		item_group, rework_reference_type, rework_reference_id, split_from_order_id::text, merged_into_order_id::text
 		from production_order where tenant_id = $1 and id = $2`, tenantID, id).Scan(&o.ID, &o.LegalEntityID, &o.OrderNumber, &o.ProductID,
 		&o.SiteID, &o.WarehouseID, &o.Currency, &qty, &raf, &qerr, &status, &o.DeliveryDate, &o.OriginType, &o.OriginID, &o.Version,
-		&o.CreatedAt, &o.UpdatedAt, &o.ItemGroup, &refType, &refID)
+		&o.CreatedAt, &o.UpdatedAt, &o.ItemGroup, &refType, &refID, &o.SplitFromOrderID, &o.MergedIntoOrderID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Order{}, notFound()
 	}

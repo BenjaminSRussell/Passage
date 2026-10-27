@@ -34,6 +34,17 @@ export type ProductionCommand =
   | "cancel"
   | "reset-status";
 
+/** The status-log command of a row: a status command, or a split or merge (FR-21.15). */
+export type LoggedCommand = ProductionCommand | "split" | "merge";
+
+/** The commands a bulk status update accepts (FR-21.12); the others need per-order input. */
+export type BulkCommand = "estimate" | "schedule" | "release" | "start" | "end" | "cancel";
+
+export const BULK_COMMANDS: BulkCommand[] = ["estimate", "schedule", "release", "start", "end", "cancel"];
+
+/** The most orders one bulk status update or merge carries. */
+export const MAX_BULK = 500;
+
 export type CostGroup = "material" | "labor" | "overhead" | "subcontract";
 
 /** When a BOM line's material is consumed (FR-21.5). */
@@ -56,6 +67,9 @@ export interface ReworkReference {
 
 /** The origin type of a rework order. */
 export const REWORK = "Rework";
+
+/** The origin type of an order a split created (FR-21.15). */
+export const SPLIT = "Split";
 
 /** How an as-built component is identified (FR-21.19): a serial in quantity 1, or a batch. */
 export type Tracking = "serial" | "batch";
@@ -115,6 +129,10 @@ export interface ProductionOrder {
   originType: string;
   originId?: string;
   reworkReference?: ReworkReference;
+  /** The order a split took this order's quantity from (FR-21.15). */
+  splitFromOrderId?: string;
+  /** Set on a cancelled order that a merge moved into another one. */
+  mergedIntoOrderId?: string;
   version: number;
   lines: OrderLine[];
   operations: Operation[];
@@ -151,7 +169,7 @@ export interface OrderPage {
 }
 
 export interface StatusLogEntry {
-  command: ProductionCommand;
+  command: LoggedCommand;
   from: ProductionStatus;
   to: ProductionStatus;
   actor: string;
@@ -352,6 +370,51 @@ export interface CommandBody {
   quantity?: string;
   errorQuantity?: string;
   status?: ProductionStatus;
+}
+
+/** The outcome for one order of a bulk status update. */
+export interface BulkItem {
+  orderId: string;
+  ok: boolean;
+  status?: ProductionStatus;
+  version?: number;
+  /** An earlier run of the same batch already moved the order. */
+  replayed?: boolean;
+  code?: string;
+  detail?: string;
+}
+
+/** Per-order results of a bulk status update; code is PRODUCTION_BULK_PARTIAL when some failed. */
+export interface BulkResult {
+  command: BulkCommand;
+  succeeded: number;
+  failed: number;
+  code?: string;
+  detail?: string;
+  results: BulkItem[];
+}
+
+/** A split: the new order receives splitQty; minimumQty and multiple are the item's order rules. */
+export interface SplitInput {
+  splitQty: string;
+  minimumQty?: string;
+  multiple?: string;
+}
+
+export interface SplitResult {
+  original: ProductionOrder;
+  new: ProductionOrder;
+}
+
+/** An order of a merge with the version (ETag) the user read. */
+export interface MergeRef {
+  orderId: string;
+  version: number;
+}
+
+export interface MergeResult {
+  survivor: ProductionOrder;
+  merged: string[];
 }
 
 export interface Problem {
@@ -591,6 +654,46 @@ export function runCommand(
     headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey, "If-Match": `"${version}"` },
     body: JSON.stringify(body),
   });
+}
+
+/** Applies one command to up to 500 orders; every order gets its own result (FR-21.12). */
+export async function bulkStatus(orderIds: string[], command: BulkCommand, idempotencyKey: string): Promise<BulkResult> {
+  const body = await requestAt<Partial<BulkResult>>(`${base}:bulk-status`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({ command, orderIds }),
+  });
+  return {
+    command: body.command ?? command,
+    succeeded: body.succeeded ?? 0,
+    failed: body.failed ?? 0,
+    code: body.code,
+    detail: body.detail,
+    results: Array.isArray(body.results) ? body.results : [],
+  };
+}
+
+/** Splits splitQty off a Created to Released order into a new order (FR-21.15). */
+export function splitOrder(id: string, version: number, input: SplitInput, idempotencyKey: string): Promise<SplitResult> {
+  return request<SplitResult>(`/${encodeURIComponent(id)}:split`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey, "If-Match": `"${version}"` },
+    body: JSON.stringify(input),
+  });
+}
+
+/** Merges the orders into the first one; the others are cancelled into it (FR-21.15). */
+export function mergeOrders(orders: MergeRef[], idempotencyKey: string): Promise<MergeResult> {
+  return requestAt<MergeResult>(`${base}:merge`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({ orders }),
+  });
+}
+
+/** Split and merge take orders before Started (FR-21.15; a Started split needs the WIP transfer of a later slice). */
+export function canSplit(status: ProductionStatus): boolean {
+  return status === "Created" || status === "Estimated" || status === "Scheduled" || status === "Released";
 }
 
 /** The forward command for a status, or null at the end of the line (BR-21.1). */

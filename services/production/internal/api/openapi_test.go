@@ -40,8 +40,8 @@ func declaredOperations(spec string) map[string]bool {
 	return declared
 }
 
-// The router serves the `{id}:{command}` custom methods on the {id} route;
-// the spec documents them on their own templated path.
+// The router serves the `{id}:{command}` custom methods and `{id}:split` on
+// the {id} route; the spec documents them on their own templated paths.
 func servedOperations(t *testing.T) map[string]bool {
 	t.Helper()
 	r := httpx.NewRouter()
@@ -52,6 +52,7 @@ func servedOperations(t *testing.T) map[string]bool {
 			return nil
 		}
 		if route == "/v1/production/orders/{id}" && method == http.MethodPost {
+			served["/v1/production/orders/{id}:split post"] = true
 			route = "/v1/production/orders/{id}:{command}"
 		}
 		if route == "/v1/production/journals/{id}" && method == http.MethodPost {
@@ -73,7 +74,7 @@ func TestOpenAPIMatchesTheRouter(t *testing.T) {
 	}
 	declared := declaredOperations(string(raw))
 	served := servedOperations(t)
-	if len(served) != 18 {
+	if len(served) != 21 {
 		t.Fatalf("router walk found %d operations: %v", len(served), served)
 	}
 	var problems []string
@@ -108,7 +109,8 @@ func TestOpenAPINamesDutiesAndCodes(t *testing.T) {
 		store.CodeUnpostedJournals, store.CodeEndBeforeLastPosted, domain.CodeNoPostingProfile, domain.CodeOverConsumption,
 		domain.CodeUnbalanced, domain.CodeInvalidHours, DutyRework, domain.OriginRework, domain.CodeReworkReference,
 		domain.CodeAsBuiltState, domain.CodeAsBuiltNotOnBOM, domain.CodeAsBuiltExceedsConsumed, domain.CodeAsBuiltFinishedCount,
-		domain.CodeSerialDuplicate, store.CodeAsBuiltNotFound,
+		domain.CodeSerialDuplicate, store.CodeAsBuiltNotFound, domain.CodeSplitQuantity, domain.CodeMergeRefused, domain.CodeBulkPartial,
+		domain.OriginSplit,
 		unknownActionCode, "PRODUCTION_ILLEGAL_TRANSITION", "PRODUCTION_RAF_EXCEEDS_REMAINING", "PRODUCTION_FIELD_NOT_EDITABLE",
 		"PRODUCTION_END_REQUIRES_RAF", "PRODUCTION_ZERO_OUTPUT_NOT_PERMITTED", "PRODUCTION_ORDER_NOT_FOUND", "conflict_version",
 		"precondition_required", "idempotency_key_reuse"} {
