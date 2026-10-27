@@ -22,6 +22,7 @@ spec:
         {{- end }}
       ports:
         - { protocol: TCP, port: 8080 }
+    {{- if .Values.networkPolicy.metricsFrom }}
     - from:
         {{- range .Values.networkPolicy.metricsFrom }}
         - namespaceSelector:
@@ -30,4 +31,5 @@ spec:
         {{- end }}
       ports:
         - { protocol: TCP, port: 9090 }
+    {{- end }}
 {{- end }}

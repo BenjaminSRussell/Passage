@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -89,7 +90,7 @@ type Store interface {
 	FinishRunAborted(ctx context.Context, runID string, attempts int, cause error) error
 	ListRuns(ctx context.Context, provider string) ([]Run, error)
 	LastSuccess(ctx context.Context, provider, rateType string) (*time.Time, error)
-	LockKey(ctx context.Context, key string) (unlock func(), err error)
+	PublishIdempotent(ctx context.Context, key, requestHash string, in []RateInput, render func([]Posted) (json.RawMessage, error)) (rec IdempotencyRecord, replayed bool, err error)
 	GetIdempotency(ctx context.Context, key string) (IdempotencyRecord, bool, error)
 	PutIdempotency(ctx context.Context, rec IdempotencyRecord) error
 }
@@ -217,42 +218,56 @@ type keyRow struct {
 	rate    decimal.Decimal
 }
 
-func (s *Postgres) PostRates(ctx context.Context, in []RateInput) ([]Posted, error) {
+func (s *Postgres) validateAll(in []RateInput) error {
 	if len(in) == 0 {
-		return nil, invalid("at least one rate is required")
+		return invalid("at least one rate is required")
 	}
 	now := s.now()
 	for i, r := range in {
 		if err := validate(r, now); err != nil {
-			return nil, fmt.Errorf("item %d: %w", i, err)
+			return fmt.Errorf("item %d: %w", i, err)
 		}
 	}
-	p, _ := tenant.FromContext(ctx)
-	posted := make([]Posted, 0, len(in))
+	return nil
+}
+
+func (s *Postgres) PostRates(ctx context.Context, in []RateInput) ([]Posted, error) {
+	if err := s.validateAll(in); err != nil {
+		return nil, err
+	}
+	var posted []Posted
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		typeIDs := map[string]string{}
-		for i, r := range in {
-			typeID, ok := typeIDs[r.RateType]
-			if !ok {
-				err := tx.QueryRow(ctx, `select id from exchange_rate_type where tenant_id=$1 and code=$2`, p.TenantID, r.RateType).Scan(&typeID)
-				if errors.Is(err, pgx.ErrNoRows) {
-					return fmt.Errorf("item %d: %w", i, invalid("unknown rate type %q", r.RateType))
-				}
-				if err != nil {
-					return err
-				}
-				typeIDs[r.RateType] = typeID
-			}
-			out, err := postOne(ctx, tx, p, typeID, r)
-			if err != nil {
-				return fmt.Errorf("item %d: %w", i, err)
-			}
-			posted = append(posted, out)
-		}
-		return nil
+		var err error
+		posted, err = postRatesTx(ctx, tx, in)
+		return err
 	})
 	if err != nil {
 		return nil, conflict(err)
+	}
+	return posted, nil
+}
+
+func postRatesTx(ctx context.Context, tx pgx.Tx, in []RateInput) ([]Posted, error) {
+	p, _ := tenant.FromContext(ctx)
+	posted := make([]Posted, 0, len(in))
+	typeIDs := map[string]string{}
+	for i, r := range in {
+		typeID, ok := typeIDs[r.RateType]
+		if !ok {
+			err := tx.QueryRow(ctx, `select id from exchange_rate_type where tenant_id=$1 and code=$2`, p.TenantID, r.RateType).Scan(&typeID)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil, fmt.Errorf("item %d: %w", i, invalid("unknown rate type %q", r.RateType))
+			}
+			if err != nil {
+				return nil, err
+			}
+			typeIDs[r.RateType] = typeID
+		}
+		out, err := postOne(ctx, tx, p, typeID, r)
+		if err != nil {
+			return nil, fmt.Errorf("item %d: %w", i, err)
+		}
+		posted = append(posted, out)
 	}
 	return posted, nil
 }

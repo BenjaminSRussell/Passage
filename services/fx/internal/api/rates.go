@@ -1,7 +1,10 @@
 package api
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"regexp"
 	"time"
@@ -146,6 +149,18 @@ func parseRate(fields map[string]string, name, raw string) decimal.Decimal {
 }
 
 func (a *API) publishRates(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	key, ok := idempotencyKey(w, r)
+	if !ok {
+		return
+	}
+	raw, ok := readBody(w, r)
+	if !ok {
+		return
+	}
+	r.Body = io.NopCloser(bytes.NewReader(raw))
 	var req publishRequest
 	if err := httpx.Decode(r, &req); err != nil {
 		httpx.Fail(w, r, err)
@@ -157,34 +172,46 @@ func (a *API) publishRates(w http.ResponseWriter, r *http.Request) {
 	}
 	inputs := make([]store.RateInput, 0, len(req.Rates))
 	for i, item := range req.Rates {
-		key := func(name string) string { return fmt.Sprintf("rates[%d].%s", i, name) }
+		field := func(name string) string { return fmt.Sprintf("rates[%d].%s", i, name) }
 		validFrom := time.Time{}
 		if item.ValidFrom == "" {
-			fields[key("validFrom")] = "is required"
+			fields[field("validFrom")] = "is required"
 		} else {
-			validFrom = parseDate(fields, key("validFrom"), item.ValidFrom)
+			validFrom = parseDate(fields, field("validFrom"), item.ValidFrom)
 		}
-		checkCurrency(fields, key("from"), item.From, true)
-		checkCurrency(fields, key("to"), item.To, true)
+		checkCurrency(fields, field("from"), item.From, true)
+		checkCurrency(fields, field("to"), item.To, true)
 		inputs = append(inputs, store.RateInput{
 			RateType: item.RateType, From: item.From, To: item.To, ValidFrom: validFrom,
-			Rate: parseRate(fields, key("rate"), item.Rate), Source: sourceManual,
+			Rate: parseRate(fields, field("rate"), item.Rate), Source: sourceManual,
 		})
 	}
 	if len(fields) > 0 {
 		httpx.Fail(w, r, badRequest(fields))
 		return
 	}
-	posted, err := a.store.PostRates(r.Context(), inputs)
+	rec, replayed, err := a.store.PublishIdempotent(r.Context(), key, requestHash(r.Method, r.URL.Path, raw), inputs, renderPosted)
 	if err != nil {
+		if p, isProblem := err.(*httpx.Problem); isProblem && p.Status == http.StatusConflict {
+			w.Header().Set("Retry-After", "1")
+		}
 		a.fail(w, r, "publish rates failed", err)
 		return
 	}
+	w.Header().Set("Content-Type", "application/json")
+	if replayed {
+		w.Header().Set("Idempotent-Replayed", "true")
+	}
+	w.WriteHeader(rec.ResponseStatus)
+	_, _ = w.Write(rec.ResponseBody)
+}
+
+func renderPosted(posted []store.Posted) (json.RawMessage, error) {
 	out := publishResponse{Rates: make([]postedBody, len(posted))}
 	for i, p := range posted {
 		out.Rates[i] = postedBody{ID: p.ID, Version: p.Version, Superseded: p.Superseded, Unchanged: p.Unchanged}
 	}
-	httpx.JSON(w, http.StatusCreated, out)
+	return json.Marshal(out)
 }
 
 func (a *API) bookAt(r *http.Request, date time.Time) (*domain.Book, error) {

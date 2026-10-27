@@ -43,6 +43,12 @@ export function amountError(raw: string): string | undefined {
 }
 
 export function formatRate(rate: string): string {
-  const n = Number(rate);
-  return Number.isFinite(n) ? n.toFixed(6) : rate;
+  const match = /^(-?)(\d+)(?:\.(\d+))?$/.exec(rate);
+  if (!match) return rate;
+  const [, sign, whole, fraction = ""] = match;
+  const padded = fraction.padEnd(7, "0");
+  let scaled = BigInt(whole + padded.slice(0, 6));
+  if (padded[6] >= "5") scaled += 1n;
+  const digits = scaled.toString().padStart(7, "0");
+  return `${sign}${digits.slice(0, -6)}.${digits.slice(-6)}`;
 }

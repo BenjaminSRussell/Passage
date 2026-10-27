@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
-	"time"
+	"net/http"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 )
 
@@ -20,33 +22,67 @@ type IdempotencyRecord struct {
 	ResponseBody   json.RawMessage
 }
 
-const lockSQL = `select pg_advisory_lock(hashtextextended($1, 0))`
-const unlockSQL = `select pg_advisory_unlock(hashtextextended($1, 0))`
+const (
+	CodeIdempotencyInProgress = "FX_IDEMPOTENCY_IN_PROGRESS"
+	CodeIdempotencyConflict   = "COM-0409"
+	lockNotAvailable          = "55P03"
+	publishedStatus           = http.StatusCreated
+	lockTimeout               = "5s"
+)
 
-func (s *Postgres) LockKey(ctx context.Context, key string) (func(), error) {
+func idempotencyRace(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && (pgErr.Code == lockNotAvailable || (pgErr.Code == uniqueViolation && strings.Contains(pgErr.ConstraintName, "idempotency"))) {
+		return httpx.NewProblem(http.StatusConflict, CodeIdempotencyInProgress, "a request with this Idempotency-Key is still in progress; retry shortly")
+	}
+	return err
+}
+
+func (s *Postgres) PublishIdempotent(ctx context.Context, key, requestHash string, in []RateInput, render func([]Posted) (json.RawMessage, error)) (IdempotencyRecord, bool, error) {
 	if key == "" {
-		return nil, invalid("idempotency key required")
+		return IdempotencyRecord{}, false, invalid("idempotency key required")
+	}
+	if err := s.validateAll(in); err != nil {
+		return IdempotencyRecord{}, false, err
 	}
 	p, _ := tenant.FromContext(ctx)
-	name := p.TenantID + "/" + key
-	conn, err := s.pool.Acquire(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := conn.Exec(ctx, lockSQL, name); err != nil {
-		conn.Release()
-		return nil, err
-	}
-	return func() {
-		unlockCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		if _, err := conn.Exec(unlockCtx, unlockSQL, name); err != nil {
-			slog.Error("idempotency unlock failed; closing connection", "err", err)
-			_ = conn.Hijack().Close(unlockCtx)
-			return
+	rec := IdempotencyRecord{Key: key, RequestHash: requestHash, ResponseStatus: publishedStatus}
+	replayed := false
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `set local lock_timeout = '`+lockTimeout+`'`); err != nil {
+			return err
 		}
-		conn.Release()
-	}, nil
+		if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended($1, 0))`, p.TenantID+"/"+key); err != nil {
+			return err
+		}
+		var storedHash string
+		err := tx.QueryRow(ctx, `select request_hash, response_status, response_body from idempotency_keys where tenant_id=$1 and key=$2`,
+			p.TenantID, key).Scan(&storedHash, &rec.ResponseStatus, &rec.ResponseBody)
+		if err == nil {
+			if storedHash != requestHash {
+				return httpx.NewProblem(http.StatusUnprocessableEntity, CodeIdempotencyConflict, "idempotency key reused with a different request")
+			}
+			replayed = true
+			return nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		posted, err := postRatesTx(ctx, tx, in)
+		if err != nil {
+			return err
+		}
+		if rec.ResponseBody, err = render(posted); err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, `insert into idempotency_keys (tenant_id, key, request_hash, response_status, response_body) values ($1,$2,$3,$4,$5)`,
+			p.TenantID, key, requestHash, publishedStatus, rec.ResponseBody)
+		return err
+	})
+	if err != nil {
+		return IdempotencyRecord{}, false, conflict(idempotencyRace(err))
+	}
+	return rec, replayed, nil
 }
 
 func (s *Postgres) GetIdempotency(ctx context.Context, key string) (IdempotencyRecord, bool, error) {

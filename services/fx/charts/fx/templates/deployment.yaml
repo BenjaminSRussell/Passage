@@ -5,7 +5,7 @@ metadata:
   labels:
     app.kubernetes.io/name: fx
 spec:
-  replicas: {{ if and .Values.import.tenantId (gt (int .Values.replicaCount) 1) }}{{ fail "replicaCount must be 1 while import.tenantId is set: the import ticker has no cross-replica lock" }}{{ else }}{{ .Values.replicaCount }}{{ end }}
+  replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
       app.kubernetes.io/name: fx

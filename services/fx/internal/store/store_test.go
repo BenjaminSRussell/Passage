@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,6 +27,12 @@ var valid = time.Now().UTC().AddDate(0, 0, -3)
 
 func in(source, rate string) store.RateInput {
 	return store.RateInput{RateType: "CLOSING", From: "EUR", To: "USD", ValidFrom: valid, Rate: decimal.RequireFromString(rate), Source: source}
+}
+
+func pair(source, to string) store.RateInput {
+	r := in(source, "1.5")
+	r.To = to
+	return r
 }
 
 func ctxFor(n int) context.Context {
@@ -632,36 +640,74 @@ func TestMigrationGrantsKeepRatesAppendOnlyForAppRole(t *testing.T) {
 	}
 }
 
-func TestLockKeySerialisesSameKeyPerTenantOnly(t *testing.T) {
-	s, _, ctx := migrated(t)
-	unlock, err := s.LockKey(ctx, "k")
+func TestPublishIdempotentSurvivesASmallPoolUnderConcurrency(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	ctx, cancel := context.WithTimeout(ctxFor(1), 30*time.Second)
+	defer cancel()
+	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.New(app).PutRateType(ctx, store.RateType{Code: "CLOSING", Name: "Closing", AllowInverse: true}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := app.Config().Copy()
+	cfg.MaxConns = 2
+	small, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	acquired := make(chan func(), 1)
-	go func() {
-		u, err := s.LockKey(ctx, "k")
-		if err != nil {
-			t.Error(err)
-			return
+	defer small.Close()
+	s := store.New(small)
+	render := func(p []store.Posted) (json.RawMessage, error) { return json.Marshal(p) }
+
+	const workers, keys = 6, 3
+	type outcome struct {
+		replayed bool
+		err      error
+	}
+	results := make(chan outcome, workers)
+	for i := 0; i < workers; i++ {
+		go func() {
+			rec, replayed, err := s.PublishIdempotent(ctx, "key-"+strconv.Itoa(i%keys), "hash-"+strconv.Itoa(i%keys), []store.RateInput{pair("manual", []string{"USD", "GBP", "JPY"}[i%keys])}, render)
+			if err == nil && rec.ResponseStatus != 201 {
+				err = errors.New("status " + strconv.Itoa(rec.ResponseStatus))
+			}
+			results <- outcome{replayed, err}
+		}()
+	}
+	fresh := 0
+	for i := 0; i < workers; i++ {
+		got := <-results
+		if got.err != nil {
+			t.Fatalf("publish: %v", got.err)
 		}
-		acquired <- u
-	}()
-	select {
-	case <-acquired:
-		t.Fatal("second lock on the same tenant and key must wait")
-	case <-time.After(300 * time.Millisecond):
+		if !got.replayed {
+			fresh++
+		}
 	}
-	otherTenant, err := s.LockKey(ctxFor(2), "k")
-	if err != nil {
+	if fresh != keys {
+		t.Fatalf("fresh publishes = %d, want one per key (%d)", fresh, keys)
+	}
+	if _, _, err := s.PublishIdempotent(ctx, "key-0", "other-hash", []store.RateInput{in("manual", "1.1")}, render); err == nil || !strings.Contains(err.Error(), "COM-0409") {
+		t.Fatalf("changed body under a used key: %v", err)
+	}
+}
+
+func TestStartRunSkipsAFreshRunningRunAndRestartsAStaleOne(t *testing.T) {
+	s, pool, ctx := migrated(t)
+	first, done, err := s.StartRun(ctx, "ecb", "CLOSING", valid)
+	if err != nil || done {
+		t.Fatalf("first start: done=%v err=%v", done, err)
+	}
+	second, done, err := s.StartRun(ctx, "ecb", "CLOSING", valid)
+	if err != nil || !done || second.ID != first.ID || second.Status != store.RunRunning {
+		t.Fatalf("a replica must skip a fresh running run: %+v done=%v err=%v", second, done, err)
+	}
+	if _, err := pool.Exec(ctx, `update provider_import_run set started_at = now() - interval '11 minutes'`); err != nil {
 		t.Fatal(err)
 	}
-	otherTenant()
-	unlock()
-	select {
-	case u := <-acquired:
-		u()
-	case <-time.After(5 * time.Second):
-		t.Fatal("second lock never acquired after unlock")
+	third, done, err := s.StartRun(ctx, "ecb", "CLOSING", valid)
+	if err != nil || done || third.ID != first.ID {
+		t.Fatalf("a stale running run must restart: %+v done=%v err=%v", third, done, err)
 	}
 }

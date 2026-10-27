@@ -26,6 +26,8 @@ const (
 	FallbackNone      = "none"
 )
 
+const staleRunAfter = "10 minutes"
+
 var ErrRunNotFound = errors.New("import run not found")
 
 type Run struct {
@@ -83,6 +85,7 @@ func (s *Postgres) StartRun(ctx context.Context, provider, rateType string, runD
 			on conflict (tenant_id, provider, rate_type_id, run_date) do update
 			set status='running', attempts=0, error=null, started_at=excluded.started_at, finished_at=null
 			where provider_import_run.status <> 'succeeded'
+			  and (provider_import_run.status <> 'running' or provider_import_run.started_at <= $6 - interval '`+staleRunAfter+`')
 			returning id`, p.TenantID, ids.New(), provider, typeID, day, s.now()).Scan(&id)
 		if errors.Is(err, pgx.ErrNoRows) {
 			done = true

@@ -85,7 +85,7 @@ paths:
         '400': { $ref: '#/components/responses/Problem', description: 'COM-0001 validation with errors naming each field; FX_RATE_INVALID rate or pair rejected.' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
-        '409': { $ref: '#/components/responses/Problem', description: FX_RATE_CONFLICT a concurrent write created the same version. }
+        '409': { $ref: '#/components/responses/Problem', description: 'FX_RATE_CONFLICT a concurrent write created the same version; FX_IDEMPOTENCY_IN_PROGRESS another request holds this key (Retry-After: 1).' }
         '422': { $ref: '#/components/responses/Problem', description: 'COM-0409 idempotency key reused with a different request; FX_RATE_DATE_FUTURE.' }
         '500': { $ref: '#/components/responses/Problem' }
     get:

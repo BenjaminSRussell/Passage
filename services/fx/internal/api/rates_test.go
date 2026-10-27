@@ -12,6 +12,7 @@ import (
 
 	"github.com/shopspring/decimal"
 
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/fx/internal/domain"
@@ -50,7 +51,7 @@ func idemKey(ctx context.Context, key string) string {
 	return p.TenantID + "/" + key
 }
 
-func (f *fakeStore) LockKey(ctx context.Context, key string) (func(), error) {
+func (f *fakeStore) PublishIdempotent(ctx context.Context, key, hash string, in []store.RateInput, render func([]store.Posted) (json.RawMessage, error)) (store.IdempotencyRecord, bool, error) {
 	f.mu.Lock()
 	if f.locks == nil {
 		f.locks = map[string]*sync.Mutex{}
@@ -62,24 +63,32 @@ func (f *fakeStore) LockKey(ctx context.Context, key string) (func(), error) {
 	}
 	f.mu.Unlock()
 	l.Lock()
-	return l.Unlock, nil
-}
-
-func (f *fakeStore) GetIdempotency(ctx context.Context, key string) (store.IdempotencyRecord, bool, error) {
+	defer l.Unlock()
 	f.mu.Lock()
-	defer f.mu.Unlock()
-	rec, ok := f.idem[idemKey(ctx, key)]
-	return rec, ok, nil
-}
-
-func (f *fakeStore) PutIdempotency(ctx context.Context, rec store.IdempotencyRecord) error {
+	existing, found := f.idem[idemKey(ctx, key)]
+	f.mu.Unlock()
+	if found {
+		if existing.RequestHash != hash {
+			return store.IdempotencyRecord{}, false, httpx.NewProblem(http.StatusUnprocessableEntity, "COM-0409", "idempotency key reused with a different request")
+		}
+		return existing, true, nil
+	}
+	posted, err := f.PostRates(ctx, in)
+	if err != nil {
+		return store.IdempotencyRecord{}, false, err
+	}
+	body, err := render(posted)
+	if err != nil {
+		return store.IdempotencyRecord{}, false, err
+	}
+	rec := store.IdempotencyRecord{Key: key, RequestHash: hash, ResponseStatus: http.StatusCreated, ResponseBody: body}
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	if f.idem == nil {
 		f.idem = map[string]store.IdempotencyRecord{}
 	}
-	f.idem[idemKey(ctx, rec.Key)] = rec
-	return nil
+	f.idem[idemKey(ctx, key)] = rec
+	f.mu.Unlock()
+	return rec, false, nil
 }
 
 func bookWith(t *testing.T, rates ...domain.Rate) *domain.Book {
