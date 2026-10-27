@@ -3,16 +3,18 @@ info:
   title: expense
   version: 0.1.0
   description: >-
-    Expense management, slices 1-2 of PSG-43. Stateless previews: policy evaluation of report
+    Expense management, slices 1-3 of PSG-43. Stateless previews: policy evaluation of report
     lines against the default rule set (receipts at 25.00 and up, alcohol blocked, submission
     later than 60 days blocked, duplicates of merchant, amount and date blocked, meals over
     75.00 a day without attendees needing justification), oldest-first cash-advance settlement
     (BR-43.9), travel requisition variance (BR-43.13), per diem (BR-43.6), cash-advance aging
-    (FR-43.15), requisition window and closure (BR-43.13) and card feed parsing (CSV, OFX;
-    FR-43.13). Nothing is persisted, so no call takes an Idempotency-Key. Money is a decimal
+    (FR-43.15), requisition window and closure (BR-43.13), card feed parsing (CSV, OFX;
+    FR-43.13), the travel requisition category gate (FR-43.16), the lodging cap and mileage
+    amount (BR-43.5) and one-to-one card-to-receipt matching (FR-43.13). Nothing is persisted, so no call takes an Idempotency-Key. Money is a decimal
     string, never a float.
     Error codes: COM-0001, AUTH-0001, AUTH-0003, COM-0500. Result codes (in bodies, not
-    errors): EXP-POL-001, EXP-POL-002, EXP-REC-001, EXP-TR-001, EXP-ADV-002, EXP-ADV-003.
+    errors): EXP-POL-001, EXP-POL-002, EXP-REC-001, EXP-TR-001, EXP-TR-002, EXP-ADV-002,
+    EXP-ADV-003.
 servers:
   - url: https://app.local.passage.dev
 paths:
@@ -22,8 +24,10 @@ paths:
       x-passage-duty: expense.report.write
       description: >-
         Evaluates every line at the submit date, PER_DAY rules and duplicate detection across
-        the report's lines. submittable is false while any BLOCK applies or any REQUIRE_* is
-        unsatisfied. Line ids must be unique (400 COM-0001).
+        the report's lines. A line whose category is in requisitionCategories (ignoring case)
+        is an EXP-TR-002 BLOCK unless hasRequisition is true (FR-43.16). submittable is false
+        while any BLOCK applies or any REQUIRE_* is unsatisfied. Line ids must be unique
+        (400 COM-0001).
       requestBody:
         required: true
         content:
@@ -160,6 +164,70 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/CardFeedResponse' }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/expense/lodging-checks:
+    post:
+      operationId: checkLodging
+      x-passage-duty: expense.report.write
+      description: >-
+        BR-43.5 lodging cap. A stay costing more than lodgingRate x 1.5 x nights needs a
+        justification (rule EXP-LODG-150, REQUIRE_JUSTIFICATION, code EXP-POL-001); a stay at
+        exactly the cap is allowed. lodgingRate is the per-diem lodging rate for the city and
+        date, supplied by the caller until the pack tables load. Nothing is stored.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LodgingRequest' }
+      responses:
+        '200':
+          description: The cap and, when over it, the policy result.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LodgingResponse' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/expense/mileage-computations:
+    post:
+      operationId: computeMileage
+      x-passage-duty: expense.report.write
+      description: >-
+        BR-43.5 mileage amount, distance x rate rounded half away from zero to the cent. rate is
+        the pack's table value per mile or km for the vehicle type and date (IRS 0.70 USD/mile,
+        BMF 0.30 EUR/km in 2025), supplied by the caller. Nothing is stored.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MileageRequest' }
+      responses:
+        '200':
+          description: The mileage amount.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MileageResponse' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/expense/card-matches:
+    post:
+      operationId: matchCardTransactions
+      x-passage-duty: expense.report.write
+      description: >-
+        FR-43.13 one-to-one card-to-receipt matching. A receipt matches a card transaction of the
+        same worker with an equal merchant (ignoring case and surrounding space), a date within
+        toleranceDays and an amount within tolerancePct of the card amount (defaults 1 % and 2
+        days; range 0-10 each). Cards are taken in date then id order, each taking the unused
+        receipt with the smallest amount difference, then the closest date, then the lowest id.
+        Ids must be unique within each list (400 COM-0001). Nothing is stored.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CardMatchRequest' }
+      responses:
+        '200':
+          description: Pairs, what stayed unmatched (input order) and matched cards over all cards.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CardMatchResponse' }
+        default: { $ref: '#/components/responses/Problem' }
   /readyz:
     get:
       operationId: readyz
@@ -214,6 +282,12 @@ components:
       properties:
         submitDate: { type: string, format: date }
         lines: { type: array, minItems: 1, maxItems: 500, items: { $ref: '#/components/schemas/ExpenseLine' } }
+        requisitionCategories:
+          type: array
+          maxItems: 50
+          description: Categories that need an approved travel requisition (FR-43.16 parameter).
+          items: { type: string, minLength: 1, maxLength: 32 }
+        hasRequisition: { type: boolean, description: The report is linked to an approved travel requisition. }
     PolicyResult:
       type: object
       required: [lineId, ruleId, ruleVersion, outcome, code, message, satisfied]
@@ -222,7 +296,7 @@ components:
         ruleId: { type: string, example: EXP-RCPT-025 }
         ruleVersion: { type: integer }
         outcome: { type: string, enum: [WARN, BLOCK, REQUIRE_JUSTIFICATION, REQUIRE_RECEIPT] }
-        code: { type: string, enum: [EXP-POL-001, EXP-POL-002, EXP-REC-001], description: 'BLOCK and REQUIRE_JUSTIFICATION EXP-POL-001, WARN EXP-POL-002, REQUIRE_RECEIPT EXP-REC-001.' }
+        code: { type: string, enum: [EXP-POL-001, EXP-POL-002, EXP-REC-001, EXP-TR-002], description: 'BLOCK and REQUIRE_JUSTIFICATION EXP-POL-001, WARN EXP-POL-002, REQUIRE_RECEIPT EXP-REC-001; a missing travel requisition EXP-TR-002 (BLOCK).' }
         message: { type: string }
         satisfied: { type: boolean }
     EvaluationResponse:
@@ -440,3 +514,67 @@ components:
             properties:
               line: { type: integer }
               reason: { type: string }
+    LodgingRequest:
+      type: object
+      required: [amount, nights, lodgingRate]
+      additionalProperties: false
+      properties:
+        lineId: { type: string, maxLength: 64, description: Echoed in the result. }
+        amount: { type: string, description: Non-negative decimal, the whole stay. }
+        nights: { type: integer, minimum: 1, maximum: 366 }
+        lodgingRate: { type: string, description: Non-negative per-diem lodging rate per night. }
+        justification: { type: string, maxLength: 500 }
+    LodgingResponse:
+      type: object
+      required: [capPerNight, cap, overCap, satisfied]
+      properties:
+        capPerNight: { type: string, description: lodgingRate x 1.5. }
+        cap: { type: string, description: capPerNight x nights. }
+        overCap: { type: boolean }
+        satisfied: { type: boolean, description: True within the cap, or over it with a non-blank justification. }
+        result: { $ref: '#/components/schemas/PolicyResult' }
+    MileageRequest:
+      type: object
+      required: [distance, rate]
+      additionalProperties: false
+      properties:
+        distance: { type: string, description: 'Non-negative decimal, at most 100000.' }
+        rate: { type: string, description: 'Non-negative decimal per unit, at most 100.' }
+    MileageResponse:
+      type: object
+      required: [amount]
+      properties:
+        amount: { type: string, example: '70.00' }
+    MatchItem:
+      type: object
+      required: [id, workerId, date, merchant, amount]
+      additionalProperties: false
+      properties:
+        id: { type: string, maxLength: 64 }
+        workerId: { type: string, maxLength: 64 }
+        date: { type: string, format: date }
+        merchant: { type: string, minLength: 1, maxLength: 200 }
+        amount: { type: string, description: Non-negative decimal. }
+    CardMatchRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        cards: { type: array, maxItems: 1000, items: { $ref: '#/components/schemas/MatchItem' } }
+        receipts: { type: array, maxItems: 1000, items: { $ref: '#/components/schemas/MatchItem' } }
+        tolerancePct: { type: string, description: 'Percentage 0-10; default 1.' }
+        toleranceDays: { type: integer, minimum: 0, maximum: 10, description: Default 2. }
+    CardMatchResponse:
+      type: object
+      required: [matches, unmatchedCards, unmatchedReceipts, autoMatchRate]
+      properties:
+        matches:
+          type: array
+          items:
+            type: object
+            required: [cardId, receiptId]
+            properties:
+              cardId: { type: string }
+              receiptId: { type: string }
+        unmatchedCards: { type: array, items: { type: string } }
+        unmatchedReceipts: { type: array, items: { type: string } }
+        autoMatchRate: { type: string, example: '0.9500', description: Matched cards over all cards, four places; 0.0000 for no cards. }

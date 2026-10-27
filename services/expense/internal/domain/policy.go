@@ -87,6 +87,12 @@ type Rule struct {
 // Context carries the report-level facts a rule may test.
 type Context struct {
 	SubmitDate time.Time
+	// RequisitionCategories are the categories whose lines need an approved
+	// travel requisition (FR-43.16 parameter "Travel requisition required",
+	// compared ignoring case). Empty means none do.
+	RequisitionCategories []string
+	// HasRequisition is true when the report is linked to an approved requisition.
+	HasRequisition bool
 }
 
 // Result is one rule that applied to one line.
@@ -130,7 +136,9 @@ func Evaluate(rules []Rule, line Line, ctx Context) []Result {
 
 // EvaluateReport returns, line by line in input order, the rules that apply to
 // a report's lines at the submit date in ctx (FR-43.12). PER_DAY rules and
-// duplicate detection look across the report's lines.
+// duplicate detection look across the report's lines. After a line's rule
+// results comes the EXP-TR-002 BLOCK when its category needs a requisition the
+// report does not have.
 func EvaluateReport(rules []Rule, lines []Line, ctx Context) []Result {
 	dayTotals := map[dayKey]decimal.Decimal{}
 	for _, r := range rules {
@@ -161,6 +169,9 @@ func EvaluateReport(rules []Rule, lines []Line, ctx Context) []Result {
 			}
 			out = append(out, Result{LineID: line.ID, RuleID: r.ID, Version: r.Version, Outcome: r.Outcome,
 				Code: outcomeCode(r.Outcome), Message: r.Message, Satisfied: satisfied(r.Outcome, line)})
+		}
+		if res, ok := requisitionResult(line, ctx); ok {
+			out = append(out, res)
 		}
 	}
 	return out

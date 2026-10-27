@@ -1,6 +1,7 @@
 // Package api exposes the expense rules over HTTP as stateless previews: report
 // policy evaluation, advance settlement, travel variance, per diem, advance aging,
-// requisition window and closure, and card feed parsing. Report persistence,
+// requisition window and closure, card feed parsing, the requisition category
+// gate, lodging cap, mileage and batch card matching. Report persistence,
 // receipts, stored card import and AP posting arrive in later slices.
 package api
 
@@ -47,6 +48,9 @@ type API struct {
 	agings            atomic.Int64
 	requisitionChecks atomic.Int64
 	feeds             atomic.Int64
+	lodgings          atomic.Int64
+	mileages          atomic.Int64
+	cardMatches       atomic.Int64
 }
 
 // New returns the API. db may be nil in tests.
@@ -63,6 +67,9 @@ func (a *API) Register(r chi.Router) {
 	r.With(duty).Post("/v1/expense/per-diem-computations", a.perDiem)
 	r.With(duty).Post("/v1/expense/cash-advance-aging", a.advanceAging)
 	r.With(duty).Post("/v1/expense/travel-requisition-checks", a.requisitionCheck)
+	r.With(duty).Post("/v1/expense/lodging-checks", a.lodgingCheck)
+	r.With(duty).Post("/v1/expense/mileage-computations", a.mileage)
+	r.With(duty).Post("/v1/expense/card-matches", a.cardMatch)
 	r.With(authz.RequireDuty(dutyCardImport)).Post("/v1/expense/card-transactions:parse", a.cardFeedParse)
 }
 
@@ -76,6 +83,9 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP expense_cash_advance_aging_total Advance aging checks served.\n# TYPE expense_cash_advance_aging_total counter\nexpense_cash_advance_aging_total %d\n", a.agings.Load())
 		fmt.Fprintf(w, "# HELP expense_requisition_checks_total Requisition window checks served.\n# TYPE expense_requisition_checks_total counter\nexpense_requisition_checks_total %d\n", a.requisitionChecks.Load())
 		fmt.Fprintf(w, "# HELP expense_card_feed_parses_total Card feed parses served.\n# TYPE expense_card_feed_parses_total counter\nexpense_card_feed_parses_total %d\n", a.feeds.Load())
+		fmt.Fprintf(w, "# HELP expense_lodging_checks_total Lodging cap checks served.\n# TYPE expense_lodging_checks_total counter\nexpense_lodging_checks_total %d\n", a.lodgings.Load())
+		fmt.Fprintf(w, "# HELP expense_mileage_computations_total Mileage computations served.\n# TYPE expense_mileage_computations_total counter\nexpense_mileage_computations_total %d\n", a.mileages.Load())
+		fmt.Fprintf(w, "# HELP expense_card_matches_total Card match previews served.\n# TYPE expense_card_matches_total counter\nexpense_card_matches_total %d\n", a.cardMatches.Load())
 	})
 }
 
@@ -107,6 +117,11 @@ type lineDTO struct {
 type evaluationRequest struct {
 	SubmitDate string    `json:"submitDate"`
 	Lines      []lineDTO `json:"lines"`
+	// RequisitionCategories are the categories that need an approved travel
+	// requisition (FR-43.16 parameter; EXP-TR-002 when the report has none).
+	RequisitionCategories []string `json:"requisitionCategories"`
+	// HasRequisition is true when the report is linked to an approved requisition.
+	HasRequisition bool `json:"hasRequisition"`
 }
 
 type evaluationResponse struct {
@@ -135,6 +150,7 @@ func (a *API) evaluate(w http.ResponseWriter, r *http.Request) {
 	if len(req.Lines) == 0 || len(req.Lines) > maxLines {
 		fields["lines"] = fmt.Sprintf("must hold 1 to %d lines", maxLines)
 	}
+	requisitionCategories(fields, req.RequisitionCategories)
 	lines := make([]domain.Line, 0, len(req.Lines))
 	for i, l := range req.Lines {
 		line, ok := toLine(fields, fmt.Sprintf("lines[%d].", i), l)
@@ -150,7 +166,9 @@ func (a *API) evaluate(w http.ResponseWriter, r *http.Request) {
 		refuse(w, r, map[string]string{"lines": "line id " + dup + " is used more than once"})
 		return
 	}
-	results := domain.EvaluateReport(domain.DefaultRules(), lines, domain.Context{SubmitDate: submit})
+	results := domain.EvaluateReport(domain.DefaultRules(), lines, domain.Context{
+		SubmitDate: submit, RequisitionCategories: req.RequisitionCategories, HasRequisition: req.HasRequisition,
+	})
 	t := domain.SumLines(lines)
 	a.evaluations.Add(1)
 	httpx.JSON(w, http.StatusOK, evaluationResponse{

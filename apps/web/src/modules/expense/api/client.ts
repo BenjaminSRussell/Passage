@@ -22,7 +22,7 @@ export interface PolicyResult {
   ruleId: string;
   ruleVersion: number;
   outcome: Outcome;
-  code: "EXP-POL-001" | "EXP-POL-002" | "EXP-REC-001";
+  code: "EXP-POL-001" | "EXP-POL-002" | "EXP-REC-001" | "EXP-TR-002";
   message: string;
   satisfied: boolean;
 }
@@ -123,6 +123,66 @@ export interface CardFeedResult {
   rejected: RejectedRow[];
 }
 
+/** FR-43.16 travel requisition gate sent with a report evaluation. */
+export interface RequisitionGate {
+  requisitionCategories: string[];
+  hasRequisition: boolean;
+}
+
+/** BR-43.5 lodging cap input: one stay and the per-diem lodging rate per night. */
+export interface LodgingInput {
+  lineId?: string;
+  amount: string;
+  nights: number;
+  lodgingRate: string;
+  justification?: string;
+}
+
+export interface LodgingResult {
+  capPerNight: string;
+  cap: string;
+  overCap: boolean;
+  satisfied: boolean;
+  result?: PolicyResult;
+}
+
+export interface MileageInput {
+  distance: string;
+  rate: string;
+}
+
+export interface MileageResult {
+  amount: string;
+}
+
+/** FR-43.13 card transaction or receipt to match. */
+export interface MatchItem {
+  id: string;
+  workerId: string;
+  date: string;
+  merchant: string;
+  amount: string;
+}
+
+export interface CardMatchInput {
+  cards: MatchItem[];
+  receipts: MatchItem[];
+  tolerancePct?: string;
+  toleranceDays?: number;
+}
+
+export interface CardMatchPair {
+  cardId: string;
+  receiptId: string;
+}
+
+export interface CardMatchResult {
+  matches: CardMatchPair[];
+  unmatchedCards: string[];
+  unmatchedReceipts: string[];
+  autoMatchRate: string;
+}
+
 /** A RFC 9457 problem returned by the service, with its stable code and field errors. */
 export class ExpenseProblem extends Error {
   constructor(
@@ -167,8 +227,13 @@ async function post<T>(path: string, body: unknown, fetchImpl: typeof fetch): Pr
   return json as T;
 }
 
-export function evaluateReport(submitDate: string, lines: ExpenseLineInput[], fetchImpl: typeof fetch = fetch): Promise<EvaluationResponse> {
-  return post("/api/v1/expense/report-evaluations", { submitDate, lines }, fetchImpl);
+export function evaluateReport(
+  submitDate: string,
+  lines: ExpenseLineInput[],
+  gate?: RequisitionGate,
+  fetchImpl: typeof fetch = fetch,
+): Promise<EvaluationResponse> {
+  return post("/api/v1/expense/report-evaluations", { submitDate, lines, ...gate }, fetchImpl);
 }
 
 export function computePerDiem(input: PerDiemInput, fetchImpl: typeof fetch = fetch): Promise<PerDiemResult> {
@@ -185,4 +250,16 @@ export function checkRequisition(input: RequisitionCheckInput, fetchImpl: typeof
 
 export function parseCardFeed(format: FeedFormat, content: string, fetchImpl: typeof fetch = fetch): Promise<CardFeedResult> {
   return post("/api/v1/expense/card-transactions:parse", { format, content }, fetchImpl);
+}
+
+export function checkLodging(input: LodgingInput, fetchImpl: typeof fetch = fetch): Promise<LodgingResult> {
+  return post("/api/v1/expense/lodging-checks", input, fetchImpl);
+}
+
+export function computeMileage(input: MileageInput, fetchImpl: typeof fetch = fetch): Promise<MileageResult> {
+  return post("/api/v1/expense/mileage-computations", input, fetchImpl);
+}
+
+export function matchCards(input: CardMatchInput, fetchImpl: typeof fetch = fetch): Promise<CardMatchResult> {
+  return post("/api/v1/expense/card-matches", input, fetchImpl);
 }

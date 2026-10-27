@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Alert, Badge, Button, Card, DataTable, EmptyState, FormField, Input, PageHeader, Select, type BadgeTone, type DataTableColumn } from "../../shell/ui";
 import { describeProblem, evaluateReport, type EvaluationResponse, type Outcome, type PolicyResult, type Problem } from "./api/client";
-import { DECIMAL, today } from "./format";
+import { DECIMAL, splitList, today } from "./format";
 import styles from "./pages.module.css";
 
 const OUTCOME_TONE: Record<Outcome, BadgeTone> = { BLOCK: "danger", REQUIRE_JUSTIFICATION: "warning", REQUIRE_RECEIPT: "warning", WARN: "info" };
@@ -21,6 +21,9 @@ export function ExpenseHome() {
   const [amount, setAmount] = useState("80.00");
   const [hasReceipt, setHasReceipt] = useState(true);
   const [justification, setJustification] = useState("");
+  const [requisitionCategories, setRequisitionCategories] = useState("");
+  const [hasRequisition, setHasRequisition] = useState(false);
+  const [categoriesError, setCategoriesError] = useState<string | undefined>();
   const [result, setResult] = useState<EvaluationResponse | null>(null);
   const [amountError, setAmountError] = useState<string | undefined>();
   const [failure, setFailure] = useState<Problem | null>(null);
@@ -34,13 +37,19 @@ export function ExpenseHome() {
       return;
     }
     setAmountError(undefined);
+    const categories = splitList(requisitionCategories).map((c) => c.toUpperCase());
+    if (categories.length > 50 || categories.some((c) => c.length > 32)) {
+      setCategoriesError("Enter at most 50 categories of up to 32 characters each.");
+      return;
+    }
+    setCategoriesError(undefined);
     const date = today();
     setBusy(true);
     try {
       setResult(
         await evaluateReport(date, [
           { id: "draft-1", category, txnDate: date, amount: amount.trim(), merchant: "", attendees: 0, hasReceipt, justification, paidBy: "EMPLOYEE" },
-        ]),
+        ], { requisitionCategories: categories, hasRequisition }),
       );
     } catch (err) {
       setResult(null);
@@ -52,7 +61,10 @@ export function ExpenseHome() {
 
   return (
     <div className={styles.stack}>
-      <PageHeader title="Check an expense line" description="Policy outcomes are shown before you submit. A blocked line cannot be submitted. Nothing is saved." />
+      <PageHeader
+        title="Check an expense line"
+        description="Policy outcomes are shown before you submit. A blocked line cannot be submitted, including a line whose category needs a travel requisition the report does not have. Nothing is saved."
+      />
       <Card>
         <form className={styles.form} onSubmit={onSubmit} noValidate>
           <FormField id="line-category" label="Category">
@@ -60,6 +72,8 @@ export function ExpenseHome() {
               <Select {...c} value={category} onChange={(e) => setCategory(e.target.value)}>
                 <option value="MEALS">Meals</option>
                 <option value="TRAVEL">Travel</option>
+                <option value="AIRFARE">Airfare</option>
+                <option value="LODGING">Lodging</option>
                 <option value="ALCOHOL">Alcohol</option>
               </Select>
             )}
@@ -70,10 +84,17 @@ export function ExpenseHome() {
           <FormField id="line-justification" label="Justification" optional>
             {(c) => <Input {...c} value={justification} onChange={(e) => setJustification(e.target.value)} />}
           </FormField>
+          <FormField id="line-requisition-categories" label="Categories that need a travel requisition" optional hint="Comma separated, such as AIRFARE, LODGING." error={categoriesError}>
+            {(c) => <Input {...c} className={styles.mono} value={requisitionCategories} onChange={(e) => setRequisitionCategories(e.target.value)} invalid={Boolean(categoriesError)} />}
+          </FormField>
           <div className={styles.formActions}>
             <span className={styles.check}>
               <Input id="line-receipt" type="checkbox" checked={hasReceipt} onChange={(e) => setHasReceipt(e.target.checked)} />
               <label htmlFor="line-receipt">Receipt attached</label>
+            </span>
+            <span className={styles.check}>
+              <Input id="line-has-requisition" type="checkbox" checked={hasRequisition} onChange={(e) => setHasRequisition(e.target.checked)} />
+              <label htmlFor="line-has-requisition">Report has an approved travel requisition</label>
             </span>
           </div>
           {failure ? (

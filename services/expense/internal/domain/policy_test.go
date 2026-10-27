@@ -32,15 +32,15 @@ func TestEvaluateDefaultRules(t *testing.T) {
 		wantRules  map[string]Outcome
 		wantSubmit bool
 	}{
-		{"receipt missing at 25.00", Line{Category: "TRAVEL", Amount: amt("25.00"), Merchant: "Air"}, Context{submit}, map[string]Outcome{"EXP-RCPT-025": OutcomeRequireReceipt}, false},
-		{"receipt present at 25.00", Line{Category: "TRAVEL", Amount: amt("25.00"), HasReceipt: true}, Context{submit}, map[string]Outcome{}, true},
-		{"24.99 needs no receipt", Line{Category: "TRAVEL", Amount: amt("24.99")}, Context{submit}, map[string]Outcome{}, true},
-		{"alcohol is blocked", Line{Category: "ALCOHOL", Amount: amt("12.00"), HasReceipt: true}, Context{submit}, map[string]Outcome{"EXP-ALC-001": OutcomeBlock}, false},
-		{"60 days is still in time", Line{Category: "TRAVEL", Amount: amt("5"), HasReceipt: true, TxnDate: txn}, Context{txn.AddDate(0, 0, 60)}, map[string]Outcome{}, true},
-		{"61 days is blocked", Line{Category: "TRAVEL", Amount: amt("5"), HasReceipt: true, TxnDate: txn}, Context{txn.AddDate(0, 0, 61)}, map[string]Outcome{"EXP-SUB-060": OutcomeBlock}, false},
-		{"meal over 75 without attendees", Line{Category: "MEALS", Amount: amt("80"), HasReceipt: true}, Context{submit}, map[string]Outcome{"EXP-MEAL-075": OutcomeRequireJustification}, false},
-		{"meal over 75 with attendees", Line{Category: "MEALS", Amount: amt("80"), HasReceipt: true, Attendees: 3}, Context{submit}, map[string]Outcome{}, true},
-		{"meal exactly 75 is not over", Line{Category: "MEALS", Amount: amt("75"), HasReceipt: true}, Context{submit}, map[string]Outcome{}, true},
+		{"receipt missing at 25.00", Line{Category: "TRAVEL", Amount: amt("25.00"), Merchant: "Air"}, Context{SubmitDate: submit}, map[string]Outcome{"EXP-RCPT-025": OutcomeRequireReceipt}, false},
+		{"receipt present at 25.00", Line{Category: "TRAVEL", Amount: amt("25.00"), HasReceipt: true}, Context{SubmitDate: submit}, map[string]Outcome{}, true},
+		{"24.99 needs no receipt", Line{Category: "TRAVEL", Amount: amt("24.99")}, Context{SubmitDate: submit}, map[string]Outcome{}, true},
+		{"alcohol is blocked", Line{Category: "ALCOHOL", Amount: amt("12.00"), HasReceipt: true}, Context{SubmitDate: submit}, map[string]Outcome{"EXP-ALC-001": OutcomeBlock}, false},
+		{"60 days is still in time", Line{Category: "TRAVEL", Amount: amt("5"), HasReceipt: true, TxnDate: txn}, Context{SubmitDate: txn.AddDate(0, 0, 60)}, map[string]Outcome{}, true},
+		{"61 days is blocked", Line{Category: "TRAVEL", Amount: amt("5"), HasReceipt: true, TxnDate: txn}, Context{SubmitDate: txn.AddDate(0, 0, 61)}, map[string]Outcome{"EXP-SUB-060": OutcomeBlock}, false},
+		{"meal over 75 without attendees", Line{Category: "MEALS", Amount: amt("80"), HasReceipt: true}, Context{SubmitDate: submit}, map[string]Outcome{"EXP-MEAL-075": OutcomeRequireJustification}, false},
+		{"meal over 75 with attendees", Line{Category: "MEALS", Amount: amt("80"), HasReceipt: true, Attendees: 3}, Context{SubmitDate: submit}, map[string]Outcome{}, true},
+		{"meal exactly 75 is not over", Line{Category: "MEALS", Amount: amt("75"), HasReceipt: true}, Context{SubmitDate: submit}, map[string]Outcome{}, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -81,7 +81,7 @@ func TestEvaluateReportLooksAcrossLines(t *testing.T) {
 		{ID: "T2", Category: "TRAVEL", Amount: amt("20"), TxnDate: txn, Merchant: " taxi co "},
 	}
 	got := map[string]Result{}
-	for _, r := range EvaluateReport(rules, lines, Context{submit}) {
+	for _, r := range EvaluateReport(rules, lines, Context{SubmitDate: submit}) {
 		got[r.LineID+"/"+r.RuleID] = r
 	}
 	want := map[string]string{"M1/EXP-MEAL-075": CodeBlock, "M2/EXP-MEAL-075": CodeBlock, "T2/EXP-DUP-001": CodeBlock}
@@ -124,7 +124,7 @@ func TestLatestEffectiveRuleVersionWins(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := Evaluate(rules, Line{ID: "L", Category: "TAXI", Amount: amt(tc.amount), TxnDate: tc.date}, Context{tc.date})
+			got := Evaluate(rules, Line{ID: "L", Category: "TAXI", Amount: amt(tc.amount), TxnDate: tc.date}, Context{SubmitDate: tc.date})
 			if tc.version == 0 {
 				if len(got) != 0 {
 					t.Fatalf("got %+v, want none", got)
@@ -140,11 +140,11 @@ func TestLatestEffectiveRuleVersionWins(t *testing.T) {
 
 func TestJustificationSatisfiesRequireJustification(t *testing.T) {
 	line := Line{ID: "L1", Category: "MEALS", Amount: amt("80"), HasReceipt: true, TxnDate: txn, Justification: "  "}
-	if Submittable(Evaluate(DefaultRules(), line, Context{submit})) {
+	if Submittable(Evaluate(DefaultRules(), line, Context{SubmitDate: submit})) {
 		t.Fatal("blank justification must not satisfy the rule")
 	}
 	line.Justification = "client dinner, paid by company card holder"
-	if !Submittable(Evaluate(DefaultRules(), line, Context{submit})) {
+	if !Submittable(Evaluate(DefaultRules(), line, Context{SubmitDate: submit})) {
 		t.Fatal("justified line should be submittable")
 	}
 }
@@ -156,7 +156,7 @@ func TestReceiptRuleNeverFlagsSmallLinesOrReceiptedLines(t *testing.T) {
 		receipt := rapid.Bool().Draw(t, "receipt")
 		line := Line{ID: "L", Category: "TRAVEL", TxnDate: txn, HasReceipt: receipt,
 			Amount: decimal.New(cents, -2)}
-		for _, r := range Evaluate(rules, line, Context{submit}) {
+		for _, r := range Evaluate(rules, line, Context{SubmitDate: submit}) {
 			if r.RuleID == "EXP-RCPT-025" && (receipt || line.Amount.LessThan(amt("25"))) {
 				t.Fatalf("false receipt flag for %s receipt=%v", line.Amount, receipt)
 			}

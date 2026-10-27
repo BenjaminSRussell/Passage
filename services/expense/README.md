@@ -1,10 +1,10 @@
 # expense
 
-Expense management, wave 43 (PSG-43), slices 1-2.
+Expense management, wave 43 (PSG-43), slices 1-3.
 
 ## What it does
 
-Slices 1-2 are the pure expense rules and calculations behind stateless HTTP previews:
+Slices 1-3 are the pure expense rules and calculations behind stateless HTTP previews:
 
 - Policy evaluation (BR-43.5, `internal/domain/policy.go`): typed, versioned rules
   evaluated over a report's lines at the submit date; the highest version effective on
@@ -16,6 +16,17 @@ Slices 1-2 are the pure expense rules and calculations behind stateless HTTP pre
   day without attendees need a justification (`EXP-MEAL-075` v3, PER_DAY,
   REQUIRE_JUSTIFICATION). A report is submittable when no BLOCK applies and every
   REQUIRE_* is satisfied.
+- Travel requisition required by category (FR-43.16 parameter, `internal/domain/travel.go`):
+  a line whose category the caller lists in `requisitionCategories` (ignoring case) is
+  an `EXP-TR-002` BLOCK unless the report has an approved requisition
+  (`hasRequisition`). The result follows the line's own rule results.
+- Lodging cap (BR-43.5, `CheckLodging`): a stay costing more than the per-diem lodging
+  rate × 1.5 × nights needs a justification (`EXP-LODG-150`, REQUIRE_JUSTIFICATION,
+  `EXP-POL-001`); exactly the cap is allowed. The test never divides, so no per-night
+  rounding moves the boundary. The rate is caller input until the pack tables load.
+- Mileage (BR-43.5, `MileageAmount`): distance × rate, rounded half away from zero to
+  the cent. The rate is the pack table value (IRS 0.70 USD/mile, BMF 0.30 EUR/km in
+  2025), caller input.
 - Cash-advance settlement at report approval (BR-43.9, `internal/domain/settlement.go`):
   the worker's PAID advances are applied oldest first, each taking min(its open amount,
   what is still unapplied); the AP invoice carries the rest. Each advance reports its
@@ -24,8 +35,10 @@ Slices 1-2 are the pure expense rules and calculations behind stateless HTTP pre
   requires justification (`EXP-TR-001`).
 - Card-to-receipt matching (FR-43.13): same worker, merchant equal ignoring case,
   date within 2 calendar days, amount within 1% (defaults), never across workers;
-  `MatchReceipts` pairs cards and receipts one to one, closest amount first. Domain
-  only (no matching endpoint; feed import and match persistence are not built).
+  `MatchReceipts` pairs cards and receipts one to one, closest amount first.
+  `MatchAll` (slice 3) adds what stayed unmatched and the auto-match rate (matched
+  cards over all cards, AC-43.7) behind `POST /v1/expense/card-matches`, with the
+  tenant tolerance as optional input (0-10 % and 0-10 days). Nothing is stored.
 - Per diem (BR-43.6, `internal/domain/perdiem.go`): one trip of consecutive days.
   Lodging per charged night. The first and last day pay 75% of the M&IE rate (a
   one-day trip is both); provided breakfast, lunch and dinner are deducted at
@@ -58,7 +71,8 @@ Nothing is persisted or posted yet. See `NOT-IMPLEMENTED.md`.
 ```
 cmd/expense/            entrypoint: dbx.Connect -> dbx.Migrate -> httpx.NewRouter -> Serve
 internal/domain/        pure rules, settlement, variance, card matching, per diem,
-                        advance aging, requisition window, card feed parsing (no I/O)
+                        advance aging, requisition window, card feed parsing,
+                        requisition gate, lodging cap, mileage (no I/O)
 internal/api/           HTTP handlers and DTOs
 migrations/             NNNN_*.sql applied by dbx.Migrate (infrastructure tables only so far)
 api/openapi.yaml        OpenAPI 3.1 for every endpoint
@@ -92,6 +106,9 @@ skipped unless `PASSAGE_TEST_DATABASE_URL` is set.
 | POST   | /v1/expense/per-diem-computations      | expense.report.write |
 | POST   | /v1/expense/cash-advance-aging         | expense.report.write |
 | POST   | /v1/expense/travel-requisition-checks  | expense.report.write |
+| POST   | /v1/expense/lodging-checks             | expense.report.write |
+| POST   | /v1/expense/mileage-computations       | expense.report.write |
+| POST   | /v1/expense/card-matches               | expense.report.write |
 | POST   | /v1/expense/card-transactions:parse    | expense.card.import  |
 | GET    | /healthz, /readyz                      | public               |
 
@@ -108,12 +125,14 @@ Problem details use `type: https://passage.dev/problems/<code>`.
 
 Result codes reported in response bodies (not HTTP errors): each policy result carries
 `EXP-POL-001` (BLOCK, and REQUIRE_JUSTIFICATION, which stops submission until
-justified), `EXP-POL-002` (WARN) or `EXP-REC-001` (REQUIRE_RECEIPT); the variance
+justified), `EXP-POL-002` (WARN), `EXP-REC-001` (REQUIRE_RECEIPT) or `EXP-TR-002`
+(BLOCK, category needs a travel requisition the report lacks); the variance
 check returns `EXP-TR-001` when justification is required; the settlement preview
 returns `EXP-ADV-003` when any advance was applied; the aging check returns
 `EXP-ADV-002` when new advances are blocked.
 
-Duties: `expense.report.write` is the EssExpense duty for the previews;
+Duties: `expense.report.write` is the EssExpense duty for the previews (card matching
+is part of the ESS expense report screen, 8.43.6);
 `expense.card.import` is the ExpenseAdmin duty for card feeds (PRD 8.43.16 puts card
 import with ExpenseAdmin).
 
