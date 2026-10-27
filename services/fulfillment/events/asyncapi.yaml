@@ -1,0 +1,154 @@
+asyncapi: 3.0.0
+info:
+  title: Passage Fulfillment events
+  version: 1.0.0
+  description: >
+    Events published by the fulfillment service through the transactional outbox
+    (Debezium outbox event router to Kafka). Types follow
+    dev.passage.<context>.<entity>.<verb>.v<n>; the packing-slip entity is
+    "packingslip" because the kernel allows one segment per name part.
+    Source /passage/fulfillment/fulfillment. Schema evolution is additive only.
+defaultContentType: application/cloudevents+json
+channels:
+  shipmentReleased:
+    address: passage.fulfillment.shipment
+    messages:
+      shipmentReleased:
+        $ref: "#/components/messages/ShipmentReleased"
+  pickConfirmed:
+    address: passage.fulfillment.pick
+    messages:
+      pickConfirmed:
+        $ref: "#/components/messages/PickConfirmed"
+  packingSlipPosted:
+    address: passage.fulfillment.packingslip
+    messages:
+      packingSlipPosted:
+        $ref: "#/components/messages/PackingSlipPosted"
+  packingSlipCancelled:
+    address: passage.fulfillment.packingslip
+    messages:
+      packingSlipCancelled:
+        $ref: "#/components/messages/PackingSlipCancelled"
+operations:
+  publishShipmentReleased:
+    action: send
+    channel: { $ref: "#/channels/shipmentReleased" }
+    messages:
+      - $ref: "#/channels/shipmentReleased/messages/shipmentReleased"
+  publishPickConfirmed:
+    action: send
+    channel: { $ref: "#/channels/pickConfirmed" }
+    messages:
+      - $ref: "#/channels/pickConfirmed/messages/pickConfirmed"
+  publishPackingSlipPosted:
+    action: send
+    channel: { $ref: "#/channels/packingSlipPosted" }
+    messages:
+      - $ref: "#/channels/packingSlipPosted/messages/packingSlipPosted"
+  publishPackingSlipCancelled:
+    action: send
+    channel: { $ref: "#/channels/packingSlipCancelled" }
+    messages:
+      - $ref: "#/channels/packingSlipCancelled/messages/packingSlipCancelled"
+components:
+  messages:
+    ShipmentReleased:
+      name: dev.passage.fulfillment.shipment.released.v1
+      contentType: application/json
+      payload:
+        type: object
+        required: [shipment_id, shipment_number, order_id, warehouse, lines]
+        properties:
+          shipment_id: { type: string, format: uuid }
+          shipment_number: { type: string }
+          order_id: { type: string, format: uuid }
+          warehouse: { type: string, format: uuid }
+          lines:
+            type: array
+            items:
+              type: object
+              properties:
+                order_line_id: { type: string, format: uuid }
+                qty: { type: string }
+    PickConfirmed:
+      name: dev.passage.fulfillment.pick.confirmed.v1
+      summary: Picks confirmed on a shipment; backordered is the short-picked remainder whose reservation inventory releases (FR-28.2).
+      contentType: application/json
+      payload:
+        type: object
+        required: [shipment_id, lines]
+        properties:
+          shipment_id: { type: string, format: uuid }
+          lines:
+            type: array
+            items:
+              type: object
+              properties:
+                order_line_id: { type: string, format: uuid }
+                qty: { type: string }
+                backordered: { type: string }
+    PackingSlipPosted:
+      name: dev.passage.fulfillment.packingslip.posted.v1
+      summary: >
+        A packing slip posted. Inventory issues the line quantities; the ledger posts
+        the journal with Idempotency-Key = packing_slip_id (BR-28.1, BR-28.4).
+      contentType: application/json
+      payload:
+        type: object
+        required: [packing_slip_id, packing_slip_number, shipment_id, order_id, posting_date, currency, total_cost, lines, journal]
+        properties:
+          packing_slip_id: { type: string, format: uuid }
+          packing_slip_number: { type: string, example: "PS-0000001" }
+          shipment_id: { type: string, format: uuid }
+          order_id: { type: string, format: uuid }
+          posting_date: { type: string, format: date }
+          currency: { type: string }
+          total_cost: { type: string }
+          lines:
+            type: array
+            items: { $ref: "#/components/schemas/SlipLine" }
+          journal:
+            type: array
+            items: { $ref: "#/components/schemas/JournalEntry" }
+    PackingSlipCancelled:
+      name: dev.passage.fulfillment.packingslip.cancelled.v1
+      summary: >
+        A posted, uninvoiced packing slip was cancelled. reversal_id names the reversing
+        slip; its lines carry negative quantities and costs and its journal mirrors the
+        original with negative amounts (FR-28.5).
+      contentType: application/json
+      payload:
+        type: object
+        required: [packing_slip_id, reversal_id, shipment_id, order_id, posting_date, currency, lines, journal]
+        properties:
+          packing_slip_id: { type: string, format: uuid, description: The cancelled slip. }
+          reversal_id: { type: string, format: uuid, description: The reversing slip. }
+          shipment_id: { type: string, format: uuid }
+          order_id: { type: string, format: uuid }
+          posting_date: { type: string, format: date }
+          currency: { type: string }
+          lines:
+            type: array
+            items: { $ref: "#/components/schemas/SlipLine" }
+          journal:
+            type: array
+            items: { $ref: "#/components/schemas/JournalEntry" }
+  schemas:
+    SlipLine:
+      type: object
+      required: [order_line_id, qty, cost_amount, cost_snapshot_id]
+      properties:
+        order_line_id: { type: string, format: uuid }
+        qty: { type: string }
+        cost_amount: { type: string }
+        cost_snapshot_id: { type: string }
+    JournalEntry:
+      type: object
+      description: Signed amount; debits positive, credits negative.
+      required: [account, amount, currency, order_line_id]
+      properties:
+        account: { type: string, example: "1405" }
+        amount: { type: string }
+        currency: { type: string }
+        order_line_id: { type: string, format: uuid }

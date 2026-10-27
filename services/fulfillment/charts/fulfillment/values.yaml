@@ -1,0 +1,45 @@
+image:
+  repository: ghcr.io/benjaminsrussell/passage/fulfillment
+  tag: "0.1.0"
+  digest: ""
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+service:
+  type: ClusterIP
+  port: 8080
+
+# Secret holding DATABASE_URL (and DATABASE_MIGRATOR_URL when migrations run in-process).
+database:
+  secretName: fulfillment-db
+  secretKey: DATABASE_URL
+
+config:
+  gs1CompanyPrefix: ""          # 6 to 12 digits, required (BR-28.5)
+  ssccExtensionDigit: "0"
+  releaseHorizonDays: "2"       # RELEASE_HORIZON_DAYS (FR-28.1)
+  releaseRequiresFullAtp: "true"
+  migrateOnStart: "false"       # dev only; stage and prod run the Argo PreSync migration Job
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+probes:
+  liveness:
+    path: /healthz
+    initialDelaySeconds: 5
+    periodSeconds: 10
+  readiness:
+    path: /readyz
+    initialDelaySeconds: 5
+    periodSeconds: 10
+
+serviceMonitor:
+  enabled: false
+  interval: 30s

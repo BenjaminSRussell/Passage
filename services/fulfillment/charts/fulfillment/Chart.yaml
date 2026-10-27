@@ -1,0 +1,6 @@
+apiVersion: v2
+name: fulfillment
+description: "Passage fulfillment service (wave 28): release, picking, packing and packing-slip posting."
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

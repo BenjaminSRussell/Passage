@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Chart.Name }}
+  labels:
+    app.kubernetes.io/name: {{ .Chart.Name }}
+    app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Chart.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Chart.Name }}
+    spec:
+      containers:
+        - name: {{ .Chart.Name }}
+          {{- if .Values.image.digest }}
+          image: "{{ .Values.image.repository }}@{{ .Values.image.digest }}"
+          {{- else }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          {{- end }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+            - name: admin
+              containerPort: 9090
+          env:
+            - name: HTTP_ADDR
+              value: ":{{ .Values.service.port }}"
+            - name: ADMIN_ADDR
+              value: ":9090"
+            - name: SERVICE_NAME
+              value: {{ .Chart.Name | quote }}
+            - name: SERVICE_VERSION
+              value: {{ .Chart.AppVersion | quote }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.secretName }}
+                  key: {{ .Values.database.secretKey }}
+            - name: GS1_COMPANY_PREFIX
+              value: {{ .Values.config.gs1CompanyPrefix | quote }}
+            - name: SSCC_EXTENSION_DIGIT
+              value: {{ .Values.config.ssccExtensionDigit | quote }}
+            - name: RELEASE_HORIZON_DAYS
+              value: {{ .Values.config.releaseHorizonDays | quote }}
+            - name: RELEASE_REQUIRES_FULL_ATP
+              value: {{ .Values.config.releaseRequiresFullAtp | quote }}
+            - name: MIGRATE_ON_START
+              value: {{ .Values.config.migrateOnStart | quote }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.probes.liveness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.readiness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false

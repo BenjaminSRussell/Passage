@@ -1,0 +1,83 @@
+// Command fulfillment serves the fulfillment API: release, picking, packing and
+// packing-slip posting. Startup validates configuration and exits non-zero on error.
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"os"
+	"regexp"
+	"strconv"
+
+	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/services/fulfillment/internal/api"
+	"github.com/BenjaminSRussell/passage/services/fulfillment/internal/store"
+	"github.com/BenjaminSRussell/passage/services/fulfillment/migrations"
+)
+
+var gs1Prefix = regexp.MustCompile(`^[0-9]{6,12}$`)
+
+func main() {
+	if err := run(); err != nil {
+		slog.Error("fulfillment stopped", "err", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	ctx := context.Background()
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		return errors.New("DATABASE_URL is required")
+	}
+	prefix := os.Getenv("GS1_COMPANY_PREFIX")
+	if !gs1Prefix.MatchString(prefix) {
+		return errors.New("GS1_COMPANY_PREFIX must be 6 to 12 digits")
+	}
+	ext, err := intEnv("SSCC_EXTENSION_DIGIT", 0, 0, 9)
+	if err != nil {
+		return err
+	}
+	horizon, err := intEnv("RELEASE_HORIZON_DAYS", 2, 0, 30)
+	if err != nil {
+		return err
+	}
+	fullATP := os.Getenv("RELEASE_REQUIRES_FULL_ATP") != "false"
+
+	pool, err := dbx.Connect(ctx, dsn)
+	if err != nil {
+		return fmt.Errorf("connect: %w", err)
+	}
+	defer pool.Close()
+	if os.Getenv("MIGRATE_ON_START") == "true" {
+		if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
+			return fmt.Errorf("migrate: %w", err)
+		}
+	}
+
+	s := store.New(pool, prefix, ext)
+	r := httpx.NewRouter()
+	api.New(s, api.Options{ReleaseHorizonDays: horizon, RequireFullATP: fullATP}).Routes(r)
+
+	addr := os.Getenv("HTTP_ADDR")
+	if addr == "" {
+		addr = ":8080"
+	}
+	slog.Info("fulfillment listening", "addr", addr)
+	return httpx.Serve(ctx, addr, r)
+}
+
+func intEnv(name string, def, lo, hi int) (int, error) {
+	raw := os.Getenv(name)
+	if raw == "" {
+		return def, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < lo || n > hi {
+		return 0, fmt.Errorf("%s must be an integer from %d to %d", name, lo, hi)
+	}
+	return n, nil
+}

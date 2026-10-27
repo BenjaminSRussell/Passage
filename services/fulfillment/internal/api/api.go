@@ -1,0 +1,581 @@
+// Package api exposes the fulfillment HTTP surface described in api/openapi.yaml.
+// Handlers decode and validate, read the principal from the tenant context,
+// call the store, and answer with httpx.JSON or httpx.Fail.
+package api
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/shopspring/decimal"
+
+	"github.com/BenjaminSRussell/passage/platform/authz"
+	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/services/fulfillment/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/fulfillment/internal/store"
+)
+
+// Error codes owned by the API layer (service catalog FUL-*, plus kernel codes).
+const (
+	CodeValidation     = "FUL-0050"
+	CodeIdemMissing    = "FUL-0051"
+	CodePreconditionIf = "precondition_required"
+	codeMalformed      = "COM-0001"
+	headerIdempotency  = "Idempotency-Key"
+	maxBodyBytes       = 4 << 20
+	dateLayout         = "2006-01-02"
+	validationDetail   = "request failed validation"
+)
+
+var (
+	currencyCode = regexp.MustCompile(`^[A-Z]{3}$`)
+	unitCode     = regexp.MustCompile(`^[A-Za-z0-9]{1,8}$`)
+)
+
+// Options are the release parameters read from configuration (RELEASE_HORIZON_DAYS, FR-28.1).
+type Options struct {
+	ReleaseHorizonDays int
+	RequireFullATP     bool
+}
+
+// API holds the store and the release parameters.
+type API struct {
+	store store.Store
+	opts  Options
+	now   func() time.Time
+}
+
+// New returns the API over s.
+func New(s store.Store, opts Options) *API {
+	return &API{store: s, opts: opts, now: func() time.Time { return time.Now().UTC() }}
+}
+
+// Routes mounts every fulfillment endpoint on r. Each route carries the duty
+// named by its operation's x-passage-duty.
+func (a *API) Routes(r chi.Router) {
+	r.With(authz.RequireDuty("WarehouseRelease")).Post("/api/v1/fulfillment/releases:run", a.runRelease)
+	r.With(authz.RequireDuty("WarehouseView")).Get("/api/v1/fulfillment/shipments", a.listShipments)
+	r.With(authz.RequireDuty("WarehouseView")).Get("/api/v1/fulfillment/shipments/{id}", a.getShipment)
+	r.With(authz.RequireDuty("WarehouseView")).Get("/api/v1/fulfillment/packing-slips", a.listPackingSlips)
+	r.With(authz.RequireDuty("WarehouseView")).Get("/api/v1/fulfillment/packing-slips/{id}", a.getPackingSlip)
+	r.With(authz.RequireDuty("WarehousePick")).Post("/api/v1/fulfillment/shipments/{id}:confirm-pick", a.confirmPick)
+	r.With(authz.RequireDuty("WarehousePack")).Post("/api/v1/fulfillment/shipments/{id}/containers", a.packContainer)
+	r.With(authz.RequireDuty("PackingSlipPost")).Post("/api/v1/fulfillment/shipments/{id}:post-packing-slip", a.postPackingSlip)
+	r.With(authz.RequireDuty("PackingSlipPost")).Post("/api/v1/fulfillment/packing-slips/{id}:cancel", a.cancelPackingSlip)
+}
+
+// ---- request and response DTOs -------------------------------------------
+
+type releaseRequest struct {
+	WarehouseID    string        `json:"warehouseId"`
+	HorizonDays    *int          `json:"horizonDays,omitempty"`
+	RequireFullATP *bool         `json:"requireFullAtp,omitempty"`
+	Lines          []releaseLine `json:"lines"`
+}
+
+type releaseLine struct {
+	OrderID           string `json:"orderId"`
+	OrderLineID       string `json:"orderLineId"`
+	CustomerID        string `json:"customerId"`
+	LegalEntityID     string `json:"legalEntityId"`
+	ProductID         string `json:"productId"`
+	Unit              string `json:"unit"`
+	Qty               string `json:"qty"`
+	ConfirmedShipDate string `json:"confirmedShipDate"`
+	ATPOK             bool   `json:"atpOk"`
+	Held              bool   `json:"held"`
+}
+
+type releaseResponse struct {
+	Shipments []store.Shipment `json:"shipments"`
+	Skipped   []domain.Skip    `json:"skipped"`
+}
+
+type listResponse[T any] struct {
+	Items []T `json:"items"`
+}
+
+var (
+	shipmentStatuses = map[string]bool{"OPEN": true, "RELEASED": true, "PICKING": true, "PICKED": true, "PACKED": true,
+		"SHIPPED": true, "DELIVERED": true, "CANCELLED": true}
+	slipStatuses = map[string]bool{"PENDING": true, "POSTED": true, "CANCELLED": true, "INVOICED": true}
+)
+
+type confirmPickRequest struct {
+	Picks []pickDTO `json:"picks"`
+}
+
+type pickDTO struct {
+	ShipmentLineID string `json:"shipmentLineId"`
+	Picked         string `json:"picked"`
+}
+
+type packRequest struct {
+	ContainerType string    `json:"containerType"`
+	Lines         []packDTO `json:"lines"`
+}
+
+type packDTO struct {
+	ShipmentLineID string `json:"shipmentLineId"`
+	Qty            string `json:"qty"`
+}
+
+type postRequest struct {
+	PostingDate    string    `json:"postingDate"`
+	Currency       string    `json:"currency"`
+	CogsAtShipment bool      `json:"cogsAtShipment"`
+	Costs          []costDTO `json:"costs"`
+}
+
+type costDTO struct {
+	ShipmentLineID string `json:"shipmentLineId"`
+	UnitCost       string `json:"unitCost"`
+	CostSnapshotID string `json:"costSnapshotId"`
+}
+
+// ---- handlers --------------------------------------------------------------
+
+func (a *API) runRelease(w http.ResponseWriter, r *http.Request) {
+	var req releaseRequest
+	_, idem, err := command(r, &req)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if !ids.Valid(req.WarehouseID) {
+		fail(w, r, "warehouseId", "must be a UUID")
+		return
+	}
+	lines, err := toReleaseLines(req)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	horizon, fullATP := a.opts.ReleaseHorizonDays, a.opts.RequireFullATP
+	if req.HorizonDays != nil {
+		if *req.HorizonDays < 0 || *req.HorizonDays > 30 {
+			fail(w, r, "horizonDays", "must be 0 to 30")
+			return
+		}
+		horizon = *req.HorizonDays
+	}
+	if req.RequireFullATP != nil {
+		fullATP = *req.RequireFullATP
+	}
+	groups, skipped := domain.Release(lines, domain.ReleaseRule{Today: a.now(), HorizonDays: horizon, RequireFullATP: fullATP})
+	res, err := a.store.RunRelease(r.Context(), req.WarehouseID, groups, idem)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	out := releaseResponse{Shipments: res.Shipments, Skipped: append(append([]domain.Skip{}, skipped...), res.Skipped...)}
+	if out.Shipments == nil {
+		out.Shipments = []store.Shipment{}
+	}
+	httpx.JSON(w, http.StatusCreated, out)
+}
+
+func (a *API) listShipments(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	f := store.ShipmentFilter{Status: q.Get("status"), WarehouseID: q.Get("warehouseId"), OrderID: q.Get("orderId")}
+	if f.Status != "" && !shipmentStatuses[f.Status] {
+		fail(w, r, "status", "must be a shipment status")
+		return
+	}
+	if f.WarehouseID != "" && !ids.Valid(f.WarehouseID) {
+		fail(w, r, "warehouseId", "must be a UUID")
+		return
+	}
+	if f.OrderID != "" && !ids.Valid(f.OrderID) {
+		fail(w, r, "orderId", "must be a UUID")
+		return
+	}
+	limit, ok := limitParam(w, r)
+	if !ok {
+		return
+	}
+	f.Limit = limit
+	items, err := a.store.ListShipments(r.Context(), f)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, listResponse[store.ShipmentSummary]{Items: items})
+}
+
+func (a *API) listPackingSlips(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	f := store.PackingSlipFilter{ShipmentID: q.Get("shipmentId"), OrderID: q.Get("orderId"), Status: q.Get("status")}
+	if f.ShipmentID != "" && !ids.Valid(f.ShipmentID) {
+		fail(w, r, "shipmentId", "must be a UUID")
+		return
+	}
+	if f.OrderID != "" && !ids.Valid(f.OrderID) {
+		fail(w, r, "orderId", "must be a UUID")
+		return
+	}
+	if f.Status != "" && !slipStatuses[f.Status] {
+		fail(w, r, "status", "must be a packing slip status")
+		return
+	}
+	limit, ok := limitParam(w, r)
+	if !ok {
+		return
+	}
+	f.Limit = limit
+	items, err := a.store.ListPackingSlips(r.Context(), f)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, listResponse[store.PackingSlipSummary]{Items: items})
+}
+
+func (a *API) getPackingSlip(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if !ids.Valid(id) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeSlipNotFound, "packing slip not found"))
+		return
+	}
+	slip, err := a.store.GetPackingSlip(r.Context(), id)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, slip)
+}
+
+func (a *API) getShipment(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if !ids.Valid(id) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeShipmentNotFound, "shipment not found"))
+		return
+	}
+	sh, err := a.store.GetShipment(r.Context(), id)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	etag(w, sh.Version)
+	httpx.JSON(w, http.StatusOK, sh)
+}
+
+func (a *API) confirmPick(w http.ResponseWriter, r *http.Request) {
+	id, version, ok := a.shipmentCommand(w, r)
+	if !ok {
+		return
+	}
+	var req confirmPickRequest
+	_, idem, err := command(r, &req)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if len(req.Picks) == 0 {
+		fail(w, r, "picks", "at least one pick is required")
+		return
+	}
+	picks := make([]store.PickInput, 0, len(req.Picks))
+	seen := map[string]bool{}
+	for i, p := range req.Picks {
+		if !ids.Valid(p.ShipmentLineID) {
+			fail(w, r, fmt.Sprintf("picks[%d].shipmentLineId", i), "must be a UUID")
+			return
+		}
+		if seen[p.ShipmentLineID] {
+			fail(w, r, fmt.Sprintf("picks[%d].shipmentLineId", i), "appears more than once")
+			return
+		}
+		seen[p.ShipmentLineID] = true
+		q, err := nonNegative(p.Picked)
+		if err != nil {
+			fail(w, r, fmt.Sprintf("picks[%d].picked", i), "must be a non-negative decimal with at most 6 decimals")
+			return
+		}
+		picks = append(picks, store.PickInput{ShipmentLineID: p.ShipmentLineID, Picked: q})
+	}
+	sh, err := a.store.ConfirmPick(r.Context(), id, version, picks, idem)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	etag(w, sh.Version)
+	httpx.JSON(w, http.StatusOK, sh)
+}
+
+func (a *API) packContainer(w http.ResponseWriter, r *http.Request) {
+	id, version, ok := a.shipmentCommand(w, r)
+	if !ok {
+		return
+	}
+	var req packRequest
+	_, idem, err := command(r, &req)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if strings.TrimSpace(req.ContainerType) == "" || len(req.ContainerType) > 64 {
+		fail(w, r, "containerType", "is required and must be at most 64 characters")
+		return
+	}
+	if len(req.Lines) == 0 {
+		fail(w, r, "lines", "at least one line is required")
+		return
+	}
+	lines := make([]store.PackInput, 0, len(req.Lines))
+	seen := map[string]bool{}
+	for i, l := range req.Lines {
+		if !ids.Valid(l.ShipmentLineID) {
+			fail(w, r, fmt.Sprintf("lines[%d].shipmentLineId", i), "must be a UUID")
+			return
+		}
+		if seen[l.ShipmentLineID] {
+			fail(w, r, fmt.Sprintf("lines[%d].shipmentLineId", i), "appears more than once")
+			return
+		}
+		seen[l.ShipmentLineID] = true
+		q, err := positive(l.Qty)
+		if err != nil {
+			fail(w, r, fmt.Sprintf("lines[%d].qty", i), "must be a positive decimal with at most 6 decimals")
+			return
+		}
+		lines = append(lines, store.PackInput{ShipmentLineID: l.ShipmentLineID, Qty: q})
+	}
+	res, err := a.store.PackContainer(r.Context(), id, version, strings.TrimSpace(req.ContainerType), lines, idem)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	etag(w, res.Shipment.Version)
+	httpx.JSON(w, http.StatusCreated, res)
+}
+
+func (a *API) postPackingSlip(w http.ResponseWriter, r *http.Request) {
+	id, version, ok := a.shipmentCommand(w, r)
+	if !ok {
+		return
+	}
+	var req postRequest
+	_, idem, err := command(r, &req)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	postingDate, err := time.Parse(dateLayout, req.PostingDate)
+	if err != nil {
+		fail(w, r, "postingDate", "must be a date as YYYY-MM-DD")
+		return
+	}
+	if !currencyCode.MatchString(req.Currency) {
+		fail(w, r, "currency", "must be an ISO 4217 alpha-3 code")
+		return
+	}
+	costs := make(map[string]store.Cost, len(req.Costs))
+	for i, c := range req.Costs {
+		if !ids.Valid(c.ShipmentLineID) {
+			fail(w, r, fmt.Sprintf("costs[%d].shipmentLineId", i), "must be a UUID")
+			return
+		}
+		if _, dup := costs[c.ShipmentLineID]; dup {
+			fail(w, r, fmt.Sprintf("costs[%d].shipmentLineId", i), "appears more than once")
+			return
+		}
+		unit, err := nonNegative(c.UnitCost)
+		if err != nil {
+			fail(w, r, fmt.Sprintf("costs[%d].unitCost", i), "must be a non-negative decimal with at most 6 decimals")
+			return
+		}
+		if strings.TrimSpace(c.CostSnapshotID) == "" || len(c.CostSnapshotID) > 128 {
+			fail(w, r, fmt.Sprintf("costs[%d].costSnapshotId", i), "is required and must be at most 128 characters")
+			return
+		}
+		costs[c.ShipmentLineID] = store.Cost{UnitCost: unit, CostSnapshotID: c.CostSnapshotID}
+	}
+	in := store.PostInput{PostingDate: postingDate, Currency: req.Currency, CogsAtShipment: req.CogsAtShipment, Costs: costs}
+	slip, err := a.store.PostPackingSlip(r.Context(), id, version, in, idem)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, slip)
+}
+
+func (a *API) cancelPackingSlip(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if !ids.Valid(id) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeSlipNotFound, "packing slip not found"))
+		return
+	}
+	_, idem, err := command(r, nil)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	slip, err := a.store.CancelPackingSlip(r.Context(), id, idem)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, slip)
+}
+
+// ---- helpers ---------------------------------------------------------------
+
+// shipmentCommand validates the shipment id and the If-Match version of a
+// state-changing shipment command (428 when If-Match is absent).
+func (a *API) shipmentCommand(w http.ResponseWriter, r *http.Request) (string, int, bool) {
+	id := chi.URLParam(r, "id")
+	if !ids.Valid(id) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeShipmentNotFound, "shipment not found"))
+		return "", 0, false
+	}
+	raw := strings.Trim(strings.TrimSpace(r.Header.Get("If-Match")), `"`)
+	if raw == "" {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusPreconditionRequired, CodePreconditionIf, "If-Match with the shipment version is required"))
+		return "", 0, false
+	}
+	version, err := strconv.Atoi(raw)
+	if err != nil || version < 1 {
+		fail(w, r, "If-Match", "must be the shipment version as an integer")
+		return "", 0, false
+	}
+	return id, version, true
+}
+
+// command reads the body into v (when v is non-nil), checks the Idempotency-Key
+// and returns the key with a hash of the method, path and body. The path is in
+// the hash so a key reused on another resource (for example cancelling a second
+// slip, whose body is empty too) is refused instead of replaying the first answer.
+func command(r *http.Request, v any) ([]byte, store.Idem, error) {
+	raw, err := io.ReadAll(io.LimitReader(r.Body, maxBodyBytes))
+	if err != nil {
+		return nil, store.Idem{}, httpx.NewProblem(http.StatusBadRequest, codeMalformed, "body could not be read")
+	}
+	if v != nil && len(bytes.TrimSpace(raw)) > 0 {
+		dec := json.NewDecoder(bytes.NewReader(raw))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(v); err != nil {
+			return nil, store.Idem{}, httpx.NewProblem(http.StatusBadRequest, codeMalformed, "malformed JSON body: "+err.Error())
+		}
+	} else if v != nil {
+		return nil, store.Idem{}, httpx.NewProblem(http.StatusBadRequest, codeMalformed, "a JSON body is required")
+	}
+	key := strings.TrimSpace(r.Header.Get(headerIdempotency))
+	if key == "" || len(key) > 255 {
+		return nil, store.Idem{}, httpx.NewProblem(http.StatusBadRequest, CodeIdemMissing, "Idempotency-Key header is required (1 to 255 characters)")
+	}
+	h := sha256.New()
+	h.Write([]byte(r.Method + " " + r.URL.Path + "\n"))
+	h.Write(raw)
+	return raw, store.Idem{Key: key, Hash: hex.EncodeToString(h.Sum(nil))}, nil
+}
+
+// invalid builds a validation problem that names the offending field.
+func invalid(field, rule string) error {
+	p := httpx.NewProblem(http.StatusBadRequest, CodeValidation, validationDetail)
+	p.Errors = map[string]string{field: rule}
+	return p
+}
+
+func toReleaseLines(req releaseRequest) ([]domain.ReleaseLine, error) {
+	if len(req.Lines) == 0 {
+		return nil, invalid("lines", "at least one line is required")
+	}
+	out := make([]domain.ReleaseLine, 0, len(req.Lines))
+	seen := map[string]bool{}
+	type orderParties struct{ customer, legalEntity string }
+	orders := map[string]orderParties{}
+	for i, l := range req.Lines {
+		field := func(name string) string { return fmt.Sprintf("lines[%d].%s", i, name) }
+		for _, c := range []struct{ name, id string }{{"orderId", l.OrderID}, {"orderLineId", l.OrderLineID},
+			{"customerId", l.CustomerID}, {"legalEntityId", l.LegalEntityID}, {"productId", l.ProductID}} {
+			if !ids.Valid(c.id) {
+				return nil, invalid(field(c.name), "must be a UUID")
+			}
+		}
+		if !unitCode.MatchString(l.Unit) {
+			return nil, invalid(field("unit"), "must be 1 to 8 letters or digits")
+		}
+		qty, err := positive(l.Qty)
+		if err != nil {
+			return nil, invalid(field("qty"), "must be a positive decimal with at most 6 decimals")
+		}
+		ship, err := time.Parse(dateLayout, l.ConfirmedShipDate)
+		if err != nil {
+			return nil, invalid(field("confirmedShipDate"), "must be a date as YYYY-MM-DD")
+		}
+		if seen[l.OrderLineID] {
+			return nil, invalid(field("orderLineId"), "appears more than once")
+		}
+		seen[l.OrderLineID] = true
+		// A shipment belongs to one customer and one legal entity, so every
+		// line of one order must name the same ones.
+		if prev, ok := orders[l.OrderID]; ok {
+			if prev.customer != l.CustomerID {
+				return nil, invalid(field("customerId"), "differs from another line of the same order")
+			}
+			if prev.legalEntity != l.LegalEntityID {
+				return nil, invalid(field("legalEntityId"), "differs from another line of the same order")
+			}
+		} else {
+			orders[l.OrderID] = orderParties{customer: l.CustomerID, legalEntity: l.LegalEntityID}
+		}
+		out = append(out, domain.ReleaseLine{OrderID: l.OrderID, OrderLineID: l.OrderLineID, CustomerID: l.CustomerID,
+			LegalEntityID: l.LegalEntityID, WarehouseID: req.WarehouseID, ProductID: l.ProductID, Unit: l.Unit, Qty: qty,
+			ConfirmedShipDate: ship, ATPOK: l.ATPOK, Held: l.Held})
+	}
+	return out, nil
+}
+
+// limitParam reads ?limit= (default 100, 1 to 500).
+func limitParam(w http.ResponseWriter, r *http.Request) (int, bool) {
+	raw := r.URL.Query().Get("limit")
+	if raw == "" {
+		return 100, true
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 || n > 500 {
+		fail(w, r, "limit", "must be an integer from 1 to 500")
+		return 0, false
+	}
+	return n, true
+}
+
+// maxScale is the number of decimals the numeric(20,6) columns keep; a value
+// with more would be rounded silently by Postgres, so it is refused here.
+const maxScale = 6
+
+func positive(s string) (decimal.Decimal, error) {
+	d, err := decimal.NewFromString(s)
+	if err != nil || !d.IsPositive() || !d.Equal(d.Round(maxScale)) {
+		return decimal.Zero, fmt.Errorf("not a positive decimal")
+	}
+	return d, nil
+}
+
+func nonNegative(s string) (decimal.Decimal, error) {
+	d, err := decimal.NewFromString(s)
+	if err != nil || d.IsNegative() || !d.Equal(d.Round(maxScale)) {
+		return decimal.Zero, fmt.Errorf("not a non-negative decimal")
+	}
+	return d, nil
+}
+
+func fail(w http.ResponseWriter, r *http.Request, field, rule string) {
+	httpx.Fail(w, r, invalid(field, rule))
+}
+
+func etag(w http.ResponseWriter, version int) {
+	w.Header().Set("ETag", fmt.Sprintf(`"%d"`, version))
+}

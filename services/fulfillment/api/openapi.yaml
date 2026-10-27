@@ -1,0 +1,468 @@
+openapi: 3.1.0
+info:
+  title: Passage Fulfillment API
+  version: 1.0.0
+  description: >
+    Wave 28 slice 1. Release, pick, pack and packing-slip posting. Carrier,
+    drop-ship, wave, tracking and packaging endpoints are later slices (see
+    NOT-IMPLEMENTED.md). Errors are RFC 9457 problem details with a stable code.
+servers:
+  - url: https://api.{env}.passage.dev
+    variables:
+      env:
+        default: dev
+components:
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 255 }
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: Shipment version from the ETag of the last read, e.g. "3".
+      schema: { type: string }
+    ShipmentId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    PackingSlipId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+  schemas:
+    Problem:
+      type: object
+      description: RFC 9457 problem details (application/problem+json).
+      required: [type, title, status, code]
+      properties:
+        type: { type: string, format: uri, example: "https://passage.dev/problems/FUL-0051" }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string }
+        traceId: { type: string }
+        errors:
+          type: object
+          additionalProperties: { type: string }
+    Decimal:
+      type: string
+      description: Decimal as a string; quantities and costs keep at most 6 decimals.
+      pattern: '^-?[0-9]+(\.[0-9]+)?$'
+    ShipmentStatus:
+      type: string
+      enum: [OPEN, RELEASED, PICKING, PICKED, PACKED, SHIPPED, DELIVERED, CANCELLED]
+    ShipmentSummary:
+      type: object
+      required: [id, shipmentNumber, status, version, lineCount]
+      properties:
+        id: { type: string, format: uuid }
+        shipmentNumber: { type: string, example: "SH-0000001" }
+        legalEntityId: { type: string, format: uuid }
+        warehouseId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        customerId: { type: string, format: uuid }
+        status: { $ref: "#/components/schemas/ShipmentStatus" }
+        plannedShipDate: { type: string, format: date-time }
+        actualShipDate: { type: [string, "null"], format: date-time }
+        version: { type: integer, minimum: 1 }
+        lineCount: { type: integer }
+    PackingSlipSummary:
+      type: object
+      required: [id, packingSlipNumber, shipmentId, status, postingDate, currency, totalCost]
+      properties:
+        id: { type: string, format: uuid }
+        packingSlipNumber: { type: string, example: "PS-0000001" }
+        shipmentId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        status: { type: string, enum: [PENDING, POSTED, CANCELLED, INVOICED] }
+        postingDate: { type: string, format: date-time }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        totalCost: { $ref: "#/components/schemas/Decimal" }
+        reversalOfId: { type: [string, "null"], format: uuid }
+    JournalEntry:
+      type: object
+      description: Signed journal line; debits positive, credits negative (BR-28.1).
+      required: [account, amount, currency, orderLineId]
+      properties:
+        account: { type: string, example: "1405" }
+        amount: { $ref: "#/components/schemas/Decimal" }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        orderLineId: { type: string, format: uuid }
+    Shipment:
+      type: object
+      required: [id, shipmentNumber, status, version, lines, containers]
+      properties:
+        id: { type: string, format: uuid }
+        shipmentNumber: { type: string, example: "SH-0000001" }
+        legalEntityId: { type: string, format: uuid }
+        warehouseId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        customerId: { type: string, format: uuid }
+        status: { $ref: "#/components/schemas/ShipmentStatus" }
+        plannedShipDate: { type: string, format: date-time }
+        actualShipDate: { type: [string, "null"], format: date-time, description: "Set when the packing slip posts; cleared on cancellation." }
+        version: { type: integer, minimum: 1 }
+        lines:
+          type: array
+          items: { $ref: "#/components/schemas/ShipmentLine" }
+        containers:
+          type: array
+          items: { $ref: "#/components/schemas/Container" }
+    ShipmentLine:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        orderLineId: { type: string, format: uuid }
+        productId: { type: string, format: uuid }
+        unit: { type: string }
+        qtyPlanned: { $ref: "#/components/schemas/Decimal" }
+        qtyPicked: { $ref: "#/components/schemas/Decimal" }
+        qtyPacked: { $ref: "#/components/schemas/Decimal" }
+        qtyShipped: { $ref: "#/components/schemas/Decimal" }
+        pickConfirmed: { type: boolean }
+    Container:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        containerType: { type: string }
+        sscc: { type: string, pattern: '^[0-9]{18}$', description: "SSCC-18 with a valid GS1 mod-10 check digit." }
+        status: { type: string, enum: [OPEN, CLOSED, SHIPPED] }
+        lines:
+          type: array
+          items:
+            type: object
+            properties:
+              shipmentLineId: { type: string, format: uuid }
+              qty: { $ref: "#/components/schemas/Decimal" }
+    PackingSlip:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        packingSlipNumber: { type: string, example: "PS-0000001" }
+        shipmentId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        status: { type: string, enum: [PENDING, POSTED, CANCELLED, INVOICED] }
+        postingDate: { type: string, format: date-time }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        totalCost: { $ref: "#/components/schemas/Decimal" }
+        reversalOfId: { type: [string, "null"], format: uuid, description: "Set on a reversing slip; names the slip it cancels." }
+        lines:
+          type: array
+          description: On a reversing slip quantities and costs are negative.
+          items:
+            type: object
+            properties:
+              orderLineId: { type: string, format: uuid }
+              shipmentLineId: { type: string, format: uuid }
+              qty: { $ref: "#/components/schemas/Decimal" }
+              costAmount: { $ref: "#/components/schemas/Decimal" }
+              costSnapshotId: { type: string }
+        journal:
+          type: array
+          items: { $ref: "#/components/schemas/JournalEntry" }
+  responses:
+    Problem:
+      description: Problem details
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+paths:
+  /api/v1/fulfillment/releases:run:
+    post:
+      operationId: runRelease
+      summary: Run release rules for a warehouse (FR-28.1)
+      x-passage-duty: WarehouseRelease
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [warehouseId, lines]
+              additionalProperties: false
+              properties:
+                warehouseId: { type: string, format: uuid }
+                horizonDays: { type: integer, minimum: 0, maximum: 30 }
+                requireFullAtp: { type: boolean }
+                lines:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required: [orderId, orderLineId, customerId, legalEntityId, productId, unit, qty, confirmedShipDate]
+                    properties:
+                      orderId: { type: string, format: uuid }
+                      orderLineId: { type: string, format: uuid }
+                      customerId: { type: string, format: uuid }
+                      legalEntityId: { type: string, format: uuid }
+                      productId: { type: string, format: uuid }
+                      unit: { type: string, maxLength: 8 }
+                      qty: { $ref: "#/components/schemas/Decimal" }
+                      confirmedShipDate: { type: string, format: date }
+                      atpOk: { type: boolean }
+                      held: { type: boolean }
+      responses:
+        "201":
+          description: Shipments created (one per order, warehouse and ship date) and lines skipped
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  shipments:
+                    type: array
+                    items: { $ref: "#/components/schemas/Shipment" }
+                  skipped:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        orderLineId: { type: string, format: uuid }
+                        reason: { type: string, enum: [held, beyond_horizon, atp_short, non_positive_qty, already_released] }
+        "400": { description: "FUL-0050 validation (also a repeated orderLineId, or lines of one order with different customers or legal entities), FUL-0051 Idempotency-Key, COM-0001 malformed body", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { description: "idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /api/v1/fulfillment/shipments:
+    get:
+      operationId: listShipments
+      summary: Shipments list / delivery monitor, newest first
+      x-passage-duty: WarehouseView
+      parameters:
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/ShipmentStatus" } }
+        - { name: warehouseId, in: query, schema: { type: string, format: uuid } }
+        - { name: orderId, in: query, schema: { type: string, format: uuid } }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: Shipments
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/ShipmentSummary" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /api/v1/fulfillment/packing-slips:
+    get:
+      operationId: listPackingSlips
+      summary: Packing slip journal, newest first
+      x-passage-duty: WarehouseView
+      parameters:
+        - { name: shipmentId, in: query, schema: { type: string, format: uuid } }
+        - { name: orderId, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [PENDING, POSTED, CANCELLED, INVOICED] } }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: Packing slips
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/PackingSlipSummary" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /api/v1/fulfillment/packing-slips/{id}:
+    get:
+      operationId: getPackingSlip
+      summary: Read a packing slip with its lines and journal
+      x-passage-duty: WarehouseView
+      parameters:
+        - { $ref: "#/components/parameters/PackingSlipId" }
+      responses:
+        "200":
+          description: Packing slip
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PackingSlip" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { description: FUL-0040, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /api/v1/fulfillment/shipments/{id}:
+    get:
+      operationId: getShipment
+      summary: Read a shipment (ETag carries the version)
+      x-passage-duty: WarehouseView
+      parameters:
+        - { $ref: "#/components/parameters/ShipmentId" }
+      responses:
+        "200":
+          description: Shipment
+          headers:
+            ETag: { schema: { type: string }, description: 'Quoted shipment version, e.g. "3"' }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Shipment" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /api/v1/fulfillment/shipments/{id}:confirm-pick:
+    post:
+      operationId: confirmPick
+      summary: Confirm picked quantities; short picks release the remainder (FR-28.2)
+      x-passage-duty: WarehousePick
+      parameters:
+        - { $ref: "#/components/parameters/ShipmentId" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [picks]
+              additionalProperties: false
+              properties:
+                picks:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required: [shipmentLineId, picked]
+                    properties:
+                      shipmentLineId: { type: string, format: uuid }
+                      picked: { $ref: "#/components/schemas/Decimal" }
+      responses:
+        "200":
+          description: Updated shipment
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Shipment" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { description: "FUL-0020 shipment or FUL-0041 line not found", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "409": { description: FUL-0021 invalid move, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0001 status, FUL-0004 over-pick, FUL-0030 negative, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /api/v1/fulfillment/shipments/{id}/containers:
+    post:
+      operationId: packContainer
+      summary: Pack lines into a container with an SSCC (FR-28.3)
+      x-passage-duty: WarehousePack
+      parameters:
+        - { $ref: "#/components/parameters/ShipmentId" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [containerType, lines]
+              additionalProperties: false
+              properties:
+                containerType: { type: string, maxLength: 64 }
+                lines:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required: [shipmentLineId, qty]
+                    properties:
+                      shipmentLineId: { type: string, format: uuid }
+                      qty: { $ref: "#/components/schemas/Decimal" }
+      responses:
+        "201":
+          description: Container closed with SSCC and the updated shipment
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  container: { $ref: "#/components/schemas/Container" }
+                  shipment: { $ref: "#/components/schemas/Shipment" }
+          headers:
+            ETag: { schema: { type: string } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { description: "FUL-0020 shipment or FUL-0041 line not found", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0001 status, FUL-0023 over-pack, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /api/v1/fulfillment/shipments/{id}:post-packing-slip:
+    post:
+      operationId: postPackingSlip
+      summary: Post the packing slip; journal per BR-28.1 and packingslip.posted in one transaction (FR-28.4)
+      description: >
+        Posts every packed, not yet shipped quantity of a PACKED shipment. The inventory
+        issue and the ledger posting are made by their owners from the
+        packingslip.posted event (see NOT-IMPLEMENTED.md).
+      x-passage-duty: PackingSlipPost
+      parameters:
+        - { $ref: "#/components/parameters/ShipmentId" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [postingDate, currency, costs]
+              additionalProperties: false
+              properties:
+                postingDate: { type: string, format: date }
+                currency: { type: string, pattern: '^[A-Z]{3}$' }
+                cogsAtShipment: { type: boolean, default: false }
+                costs:
+                  type: array
+                  items:
+                    type: object
+                    required: [shipmentLineId, unitCost, costSnapshotId]
+                    properties:
+                      shipmentLineId: { type: string, format: uuid }
+                      unitCost: { $ref: "#/components/schemas/Decimal" }
+                      costSnapshotId: { type: string, maxLength: 128 }
+      responses:
+        "201":
+          description: Packing slip POSTED
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PackingSlip" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { description: FUL-0020, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0001 not PACKED, FUL-0042 cost missing, FUL-0044 nothing to ship, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /api/v1/fulfillment/packing-slips/{id}:cancel:
+    post:
+      operationId: cancelPackingSlip
+      summary: Reverse a packing slip with mirror inventory and journal entries (FR-28.5)
+      x-passage-duty: PackingSlipPost
+      parameters:
+        - { $ref: "#/components/parameters/PackingSlipId" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      responses:
+        "201":
+          description: Reversing packing slip (reversalOfId names the cancelled slip)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PackingSlip" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { description: FUL-0040, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "409": { description: "FUL-0010 invoiced, FUL-0043 not posted or a reversal, FUL-0021 shipment cannot return to PACKED", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
