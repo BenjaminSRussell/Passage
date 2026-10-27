@@ -7,6 +7,14 @@ export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 /** A decimal string with at most 6 decimals, the precision the service stores. */
 export const DECIMAL = /^\d{1,14}(\.\d{1,6})?$/;
 
+/** Container type code and packaging material code, as the service accepts them. */
+export const CONTAINER_CODE = /^[A-Za-z0-9_.-]{1,64}$/;
+export const MATERIAL_CODE = /^[A-Za-z0-9_.-]{1,32}$/;
+export const COUNTRY = /^[A-Z]{2}$/;
+export const CURRENCY = /^[A-Z]{3}$/;
+/** A calendar month as YYYY-MM. */
+export const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
+
 /** Today's date as YYYY-MM-DD (UTC). */
 export function today(): string {
   return new Date().toISOString().slice(0, 10);

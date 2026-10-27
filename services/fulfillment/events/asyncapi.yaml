@@ -96,12 +96,13 @@ components:
       contentType: application/json
       payload:
         type: object
-        required: [packing_slip_id, packing_slip_number, shipment_id, order_id, posting_date, currency, total_cost, lines, journal]
+        required: [packing_slip_id, packing_slip_number, shipment_id, order_id, customer_id, posting_date, currency, total_cost, lines, journal, packaging_fees, returnables]
         properties:
           packing_slip_id: { type: string, format: uuid }
           packing_slip_number: { type: string, example: "PS-0000001" }
           shipment_id: { type: string, format: uuid }
           order_id: { type: string, format: uuid }
+          customer_id: { type: string, format: uuid }
           posting_date: { type: string, format: date }
           currency: { type: string }
           total_cost: { type: string }
@@ -111,6 +112,14 @@ components:
           journal:
             type: array
             items: { $ref: "#/components/schemas/JournalEntry" }
+          packaging_fees:
+            type: array
+            description: Statistical packaging fee lines (BR-28.12); not part of the journal.
+            items: { $ref: "#/components/schemas/PackagingFee" }
+          returnables:
+            type: array
+            description: Returnable containers added to the customer's balance (BR-28.13).
+            items: { $ref: "#/components/schemas/ReturnableMove" }
     PackingSlipCancelled:
       name: dev.passage.fulfillment.packingslip.cancelled.v1
       summary: >
@@ -120,7 +129,7 @@ components:
       contentType: application/json
       payload:
         type: object
-        required: [packing_slip_id, reversal_id, shipment_id, order_id, posting_date, currency, lines, journal]
+        required: [packing_slip_id, reversal_id, shipment_id, order_id, posting_date, currency, lines, journal, packaging_fees, returnables]
         properties:
           packing_slip_id: { type: string, format: uuid, description: The cancelled slip. }
           reversal_id: { type: string, format: uuid, description: The reversing slip. }
@@ -134,6 +143,14 @@ components:
           journal:
             type: array
             items: { $ref: "#/components/schemas/JournalEntry" }
+          packaging_fees:
+            type: array
+            description: The original slip's packaging fee lines with negative weight and fee.
+            items: { $ref: "#/components/schemas/PackagingFee" }
+          returnables:
+            type: array
+            description: Returnable containers taken back off the customer's balance (negative qty).
+            items: { $ref: "#/components/schemas/ReturnableMove" }
   schemas:
     SlipLine:
       type: object
@@ -152,3 +169,19 @@ components:
         amount: { type: string }
         currency: { type: string }
         order_line_id: { type: string, format: uuid }
+    PackagingFee:
+      type: object
+      required: [country_code, material_code, weight_kg, rate_per_kg, fee_amount, currency]
+      properties:
+        country_code: { type: string, example: DE }
+        material_code: { type: string, example: CARDBOARD }
+        weight_kg: { type: string }
+        rate_per_kg: { type: string }
+        fee_amount: { type: string, description: Rounded half-even to the currency's minor unit. }
+        currency: { type: string }
+    ReturnableMove:
+      type: object
+      required: [container_type, qty]
+      properties:
+        container_type: { type: string, example: PALLET }
+        qty: { type: string, description: Signed change of the balance. }

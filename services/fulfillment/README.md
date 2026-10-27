@@ -1,13 +1,17 @@
 # fulfillment
 
-Passage fulfillment service, wave 28 (PSG-28), slice 1. It releases confirmed
+Passage fulfillment service, wave 28 (PSG-28), slices 1 and 2. It releases confirmed
 order lines to a warehouse shipment, records pick and pack quantities,
-closes containers with GS1 SSCC-18 numbers, and posts a packing slip that
+closes containers with GS1 SSCC-18 numbers (by hand or by packing rule with
+auto-pack), and posts a packing slip that
 journals delivered-not-invoiced (Dr 1405 / Cr 1400 at cost, or Dr 5000 / Cr 1400
 when COGS posts at shipment), with a mirror reversal on cancellation. The
 inventory issue and the ledger posting are made by their owning services from
 the `packingslip.posted` event; this service does not write their tables (see
-NOT-IMPLEMENTED.md).
+NOT-IMPLEMENTED.md). The slip also carries statistical packaging fee lines
+(packaging weight per material × the ship-to country's rate, never journaled)
+and raises the customer's returnable packaging balance for each returnable
+container it ships.
 
 Engineering rules: `docs/engineering/CONVENTIONS.md`. Requirements:
 `docs/prd/phase-5-order-to-cash.md` section 5.28. Gaps in this slice are listed in
@@ -23,7 +27,9 @@ internal/store/         Postgres repositories, tenant-scoped transactions, outbo
                         release de-duplication, PS- numbering per legal entity
 internal/events/        event types dev.passage.fulfillment.* and payloads
 internal/api/           HTTP handlers, DTO validation, duties, If-Match, Idempotency-Key
-migrations/             0001_init.sql (RLS, outbox, idempotency, number counters)
+migrations/             0001_init.sql (RLS, outbox, idempotency, number counters),
+                        0002_packing_packaging.sql (container types, packing rules,
+                        product packaging, fee rates and lines, returnable balances)
 api/openapi.yaml        OpenAPI 3.1 for every endpoint in this slice
 events/asyncapi.yaml    AsyncAPI 3 for every event in this slice
 charts/fulfillment/     Helm chart (helm lint passes)
@@ -56,11 +62,13 @@ go vet ./... && go test ./...
 ```
 
 Domain tests are table-driven and use `pgregory.net/rapid` for the SSCC property
-(generation, check digit, single-digit change detection), plus the GS1 General
-Specifications example `106141411234567897`. The store tests run release, pick,
-short pick, pack, post (both BR-28.1 debit accounts), cancel, re-post, idempotent
-replay, key reuse, release de-duplication and tenant and legal-entity isolation
-against Postgres through `platform/go/testkit`. They run as the application role
+(generation, check digit, single-digit change detection) and the auto-pack
+invariants (every unit packed once, no container over its quantity or weight),
+plus the GS1 General Specifications example `106141411234567897`. The store
+tests run release, pick, short pick, pack, post (both BR-28.1 debit accounts),
+cancel, re-post, idempotent replay, key reuse, release de-duplication, tenant
+and legal-entity isolation, auto-pack (AC-28.11), the packaging fee and report
+(AC-28.12) and returnable balances (AC-28.13) against Postgres through `platform/go/testkit`. They run as the application role
 so row-level security applies, which needs both URLs:
 
 ```
@@ -76,9 +84,11 @@ that `api/openapi.yaml` documents exactly the mounted routes with a duty each,
 and the events test checks `events/asyncapi.yaml` against the published types.
 
 The web module (`apps/web/src/modules/fulfillment`) has the fulfillment workspace,
-release board, shipments list, shipment detail (confirm pick, pack container,
-post packing slip with a journal preview), packing slip journal and detail
-(cancel), and the GS1-128 scan page. Run `npx vitest --run src/modules/fulfillment`
+release board, shipments list, shipment detail (confirm pick, auto-pack, pack
+container, post packing slip with a journal preview and ship-to country),
+packing slip journal and detail (cancel, packaging fees), the GS1-128 scan
+page, and the container types, packing rules, packaging materials, packaging
+fees (rates and report) and returnable packaging pages. Run `npx vitest --run src/modules/fulfillment`
 and `npx tsc --noEmit` in `apps/web`.
 
 ## Endpoints (slice 1)
@@ -93,7 +103,23 @@ and `npx tsc --noEmit` in `apps/web`.
 | POST | `/api/v1/fulfillment/shipments/{id}:post-packing-slip` | PackingSlipPost | Slip, journal, containers SHIPPED and outbox in one transaction; Idempotency-Key, If-Match |
 | GET | `/api/v1/fulfillment/packing-slips` | WarehouseView | Packing slip journal; filters `shipmentId`, `orderId`, `status`, `limit` |
 | GET | `/api/v1/fulfillment/packing-slips/{id}` | WarehouseView | Slip with lines and journal |
-| POST | `/api/v1/fulfillment/packing-slips/{id}:cancel` | PackingSlipPost | Reversing slip with mirror lines and journal; Idempotency-Key |
+| POST | `/api/v1/fulfillment/packing-slips/{id}:cancel` | PackingSlipPost | Reversing slip with mirror lines, journal and packaging fee lines; takes returnable containers back off the customer's balance; Idempotency-Key |
+
+## Endpoints (slice 2)
+
+| Method | Path | Duty | Notes |
+|---|---|---|---|
+| GET / POST | `/api/v1/fulfillment/container-types` | WarehouseView / PackingRuleMaintain | Code, tare, returnable, packaging material; POST replaces by code |
+| GET / POST | `/api/v1/fulfillment/packing-rules` | WarehouseView / PackingRuleMaintain | Per product and optional customer; POST replaces the rule of that scope and keeps its id; unknown container type is FUL-0050 (422) |
+| GET / POST | `/api/v1/fulfillment/product-packaging` | WarehouseView / PackingRuleMaintain | kg of a material per product unit |
+| POST | `/api/v1/fulfillment/shipments/{id}:auto-pack` | WarehousePack | Idempotency-Key, If-Match; optional `unitWeights` per line; FUL-0012 warnings, FUL-0013 |
+| GET / POST | `/api/v1/fulfillment/packaging-fee-rates` | PackagingFeeMaintain | Rate per kg per country and material, valid from a date |
+| GET | `/api/v1/fulfillment/packaging-report` | PackagingFeeMaintain | `countryCode`, `period` (YYYY-MM), optional `legalEntityId`; net of reversals |
+| GET | `/api/v1/fulfillment/returnable-packaging` | WarehouseView | Balances, optional `customerId` |
+| POST | `/api/v1/fulfillment/returnable-packaging:return` | WarehouseReceive | Standalone return receipt, whole containers; FUL-0015 below zero |
+
+The post takes an optional `countryCode` (ship-to); with it, the slip carries
+the packaging fee lines and a shipped material without a rate is FUL-0014.
 
 Idempotency: a key is stored per tenant with a fingerprint of the method, path
 and body. A replay returns the stored response; the same key on another path or
@@ -112,6 +138,10 @@ Codes raised in this slice:
 | `FUL-0001` | Shipment status does not allow the command (for example, not PACKED) |
 | `FUL-0004` | Over-pick: picked exceeds planned |
 | `FUL-0010` | Cannot cancel: the packing slip is invoiced (409) |
+| `FUL-0012` | Warning in the auto-pack response: no packing rule for the product; the line stays unpacked |
+| `FUL-0013` | Auto-pack: one unit is heavier than the rule's max weight (422) |
+| `FUL-0014` | Packaging fee rate missing (or in another currency) for a shipped material in the ship-to country (422) |
+| `FUL-0015` | Returnable packaging balance would become negative: a return above the balance, or a cancel after the customer returned the containers (422) |
 | `FUL-0017` | GS1-128 scan could not be parsed (web parser, `gs1.ts`) |
 | `FUL-0020` | Shipment not found |
 | `FUL-0021` | Invalid move between shipment states |
@@ -129,9 +159,9 @@ Codes raised in this slice:
 | `conflict_version` | `If-Match` does not match the current version (412) |
 | `idempotency_key_reuse` | Same Idempotency-Key with a different body (422) |
 
-Catalog codes `FUL-0002`, `FUL-0003`, `FUL-0005` to `FUL-0009` and `FUL-0011` to
+Catalog codes `FUL-0002`, `FUL-0003`, `FUL-0005` to `FUL-0009`, `FUL-0011` and
 `FUL-0016` belong to later slices (period control, negative stock, tolerance,
-tracking dimensions, carrier, saga, consolidation, packaging, RTP, workbench).
+tracking dimensions, carrier, saga, consolidation, workbench).
 
 ## Dependencies
 

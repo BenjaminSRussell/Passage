@@ -41,6 +41,10 @@ const (
 	CodeSlipNotCancellable = "FUL-0043"
 	CodeNothingToShip      = "FUL-0044"
 	CodeSlipInvoiced       = "FUL-0010"
+	CodeWeightExceeded     = "FUL-0013"
+	CodeRateMissing        = "FUL-0014"
+	CodeRTPNegative        = "FUL-0015"
+	CodeValidation         = "FUL-0050"
 	CodeVersion            = "conflict_version"
 	CodeIdempotencyReuse   = "idempotency_key_reuse"
 	eventSource            = "fulfillment"
@@ -106,13 +110,19 @@ type ShipmentLine struct {
 	PickConfirmed bool            `json:"pickConfirmed"`
 }
 
-// Container is a closed package with its SSCC (BR-28.5).
+// Container is a closed package with its SSCC (BR-28.5). Tare, returnable and
+// packaging material are copied from the container type when it is packed;
+// gross weight is the tare plus the unit weights the packer supplied.
 type Container struct {
-	ID            string          `json:"id"`
-	ContainerType string          `json:"containerType"`
-	SSCC          string          `json:"sscc"`
-	Status        string          `json:"status"`
-	Lines         []ContainerLine `json:"lines"`
+	ID                string          `json:"id"`
+	ContainerType     string          `json:"containerType"`
+	SSCC              string          `json:"sscc"`
+	Status            string          `json:"status"`
+	TareKg            decimal.Decimal `json:"tareKg"`
+	GrossKg           decimal.Decimal `json:"grossKg"`
+	Returnable        bool            `json:"returnable"`
+	PackagingMaterial *string         `json:"packagingMaterial"`
+	Lines             []ContainerLine `json:"lines"`
 }
 
 // ContainerLine is a quantity of one shipment line packed into a container.
@@ -134,6 +144,9 @@ type PackingSlip struct {
 	ReversalOfID *string           `json:"reversalOfId"`
 	Lines        []PackingSlipLine `json:"lines"`
 	Journal      []JournalEntry    `json:"journal"`
+	// PackagingFees are the statistical packaging fee lines (BR-28.12). They
+	// are not journal lines; a reversing slip carries them negated.
+	PackagingFees []PackagingFeeLine `json:"packagingFees"`
 }
 
 // PackingSlipSummary is one row of the packing slip journal (section 5.28.14).
@@ -204,6 +217,9 @@ type PostInput struct {
 	Currency       string
 	CogsAtShipment bool
 	Costs          map[string]Cost // keyed by shipment line id
+	// CountryCode is the ship-to country whose packaging fee rates apply
+	// (FR-28.14). Empty posts no packaging fee.
+	CountryCode string
 }
 
 // Idem is the Idempotency-Key and the hash of the request body.
@@ -223,6 +239,7 @@ type Store interface {
 	PackContainer(ctx context.Context, id string, version int, containerType string, lines []PackInput, idem Idem) (PackResult, error)
 	PostPackingSlip(ctx context.Context, id string, version int, in PostInput, idem Idem) (PackingSlip, error)
 	CancelPackingSlip(ctx context.Context, slipID string, idem Idem) (PackingSlip, error)
+	PackingStore
 	Ping(ctx context.Context) error
 }
 
@@ -315,6 +332,10 @@ func mapDomain(err error) error {
 		return httpx.NewProblem(http.StatusUnprocessableEntity, CodeNegativeQty, err.Error())
 	case errors.Is(err, domain.ErrInvalidMove):
 		return httpx.NewProblem(http.StatusConflict, CodeInvalidMove, err.Error())
+	case errors.Is(err, domain.ErrContainerWeight):
+		return httpx.NewProblem(http.StatusUnprocessableEntity, CodeWeightExceeded, err.Error())
+	case errors.Is(err, domain.ErrRuleInvalid), errors.Is(err, domain.ErrSerialFraction):
+		return httpx.NewProblem(http.StatusUnprocessableEntity, CodeValidation, err.Error())
 	}
 	return err
 }
@@ -595,17 +616,20 @@ func loadShipment(ctx context.Context, tx pgx.Tx, id string) (Shipment, error) {
 }
 
 func loadContainers(ctx context.Context, tx pgx.Tx, shipmentID string) ([]Container, error) {
-	rows, err := tx.Query(ctx, `select id, container_type, sscc, status from container where shipment_id = $1 order by sscc`, shipmentID)
+	rows, err := tx.Query(ctx, `select id, container_type, sscc, status, tare_weight_kg::text, gross_weight_kg::text, returnable, packaging_material_code
+		from container where shipment_id = $1 order by sscc`, shipmentID)
 	if err != nil {
 		return nil, err
 	}
 	containers := []Container{}
 	for rows.Next() {
 		var c Container
-		if err := rows.Scan(&c.ID, &c.ContainerType, &c.SSCC, &c.Status); err != nil {
+		var tare, gross string
+		if err := rows.Scan(&c.ID, &c.ContainerType, &c.SSCC, &c.Status, &tare, &gross, &c.Returnable, &c.PackagingMaterial); err != nil {
 			rows.Close()
 			return nil, err
 		}
+		c.TareKg, c.GrossKg = dec(tare), dec(gross)
 		c.Lines = []ContainerLine{}
 		containers = append(containers, c)
 	}
@@ -713,29 +737,17 @@ func (s *Postgres) PackContainer(ctx context.Context, id string, version int, co
 				}
 				cont.Lines = append(cont.Lines, ContainerLine{ShipmentLineID: in.ShipmentLineID, Qty: in.Qty})
 			}
-			serial, err := nextNumber(ctx, tx, p.TenantID, "sscc:"+s.gs1Prefix)
+			// A known container type gives the tare, the returnable flag and the
+			// packaging material; a free-text type packs with none of them.
+			ct, known, err := loadContainerType(ctx, tx, containerType)
 			if err != nil {
 				return PackResult{}, err
 			}
-			cont.SSCC, err = domain.SSCC(s.extension, s.gs1Prefix, uint64(serial))
-			if err != nil {
-				return PackResult{}, err
+			if known {
+				cont.TareKg, cont.GrossKg, cont.Returnable, cont.PackagingMaterial = ct.TareKg, ct.TareKg, ct.Returnable, ct.PackagingMaterial
 			}
-			if _, err := tx.Exec(ctx, `insert into container (tenant_id, id, shipment_id, container_type, sscc) values ($1, $2, $3, $4, $5)`,
-				p.TenantID, cont.ID, sh.ID, cont.ContainerType, cont.SSCC); err != nil {
+			if err := s.insertContainer(ctx, tx, p.TenantID, &sh, &cont); err != nil {
 				return PackResult{}, err
-			}
-			for _, cl := range cont.Lines {
-				idx := lineIndex(sh, cl.ShipmentLineID)
-				if _, err := tx.Exec(ctx, `insert into container_line (tenant_id, container_id, shipment_line_id, qty) values ($1, $2, $3, $4)`,
-					p.TenantID, cont.ID, cl.ShipmentLineID, cl.Qty); err != nil {
-					return PackResult{}, err
-				}
-				if _, err := tx.Exec(ctx, `update shipment_line set qty_packed = qty_packed + $3 where tenant_id = $1 and id = $2`,
-					p.TenantID, cl.ShipmentLineID, cl.Qty); err != nil {
-					return PackResult{}, err
-				}
-				sh.Lines[idx].Packed = sh.Lines[idx].Packed.Add(cl.Qty)
 			}
 			target := sh.Status
 			if domain.AllPacked(lineQtys(sh)) {
@@ -746,7 +758,6 @@ func (s *Postgres) PackContainer(ctx context.Context, id string, version int, co
 			if err := bumpShipment(ctx, tx, p.TenantID, &sh, target); err != nil {
 				return PackResult{}, err
 			}
-			sh.Containers = append(sh.Containers, cont)
 			return PackResult{Container: cont, Shipment: sh}, nil
 		})
 		out = res
@@ -776,7 +787,7 @@ func (s *Postgres) PostPackingSlip(ctx context.Context, id string, version int, 
 			}
 			var postLines []domain.PostingLine
 			slip := PackingSlip{ID: ids.New(), ShipmentID: sh.ID, OrderID: sh.OrderID,
-				Status: "POSTED", PostingDate: in.PostingDate, Currency: in.Currency, Lines: []PackingSlipLine{}}
+				Status: "POSTED", PostingDate: in.PostingDate, Currency: in.Currency, Lines: []PackingSlipLine{}, PackagingFees: []PackagingFeeLine{}}
 			for _, l := range sh.Lines {
 				q := l.Packed.Sub(l.Shipped)
 				if !q.IsPositive() {
@@ -811,6 +822,18 @@ func (s *Postgres) PostPackingSlip(ctx context.Context, id string, version int, 
 			if err := insertSlip(ctx, tx, p.TenantID, sh.LegalEntityID, slip); err != nil {
 				return PackingSlip{}, err
 			}
+			if slip.PackagingFees, err = recordPackagingFees(ctx, tx, p.TenantID, sh, slip, in.CountryCode); err != nil {
+				return PackingSlip{}, err
+			}
+			// Returnable containers leaving with this slip raise the customer's
+			// balance (BR-28.13); counted before the containers become SHIPPED.
+			returnables, err := countReturnables(ctx, tx, sh.ID, "CLOSED")
+			if err != nil {
+				return PackingSlip{}, err
+			}
+			if err := moveBalances(ctx, tx, p.TenantID, sh.CustomerID, returnables, 1); err != nil {
+				return PackingSlip{}, err
+			}
 			for _, pl := range slip.Lines {
 				if _, err := tx.Exec(ctx, `update shipment_line set qty_shipped = qty_shipped + $3 where tenant_id = $1 and id = $2`,
 					p.TenantID, pl.ShipmentLineID, pl.Qty); err != nil {
@@ -824,7 +847,7 @@ func (s *Postgres) PostPackingSlip(ctx context.Context, id string, version int, 
 			if err := bumpShipment(ctx, tx, p.TenantID, &sh, domain.StatusShipped); err != nil {
 				return PackingSlip{}, err
 			}
-			if err := enqueue(ctx, tx, sh.ID, fulevents.PackingSlipPosted, p.TenantID, slipPostedData(slip, sh)); err != nil {
+			if err := enqueue(ctx, tx, sh.ID, fulevents.PackingSlipPosted, p.TenantID, slipPostedData(slip, sh, returnables)); err != nil {
 				return PackingSlip{}, err
 			}
 			return slip, nil
@@ -864,7 +887,7 @@ func (s *Postgres) CancelPackingSlip(ctx context.Context, slipID string, idem Id
 			}
 			rev := PackingSlip{ID: ids.New(), ShipmentID: orig.ShipmentID, OrderID: orig.OrderID, Status: "POSTED",
 				PostingDate: dateOnly(time.Now()), Currency: orig.Currency, TotalCost: orig.TotalCost.Neg(), ReversalOfID: &orig.ID,
-				Journal: toEntries(domain.Reverse(toJournal(orig.Journal))), Lines: []PackingSlipLine{}}
+				Journal: toEntries(domain.Reverse(toJournal(orig.Journal))), Lines: []PackingSlipLine{}, PackagingFees: []PackagingFeeLine{}}
 			seq, err := nextNumber(ctx, tx, p.TenantID, "PS:"+sh.LegalEntityID)
 			if err != nil {
 				return PackingSlip{}, err
@@ -881,6 +904,18 @@ func (s *Postgres) CancelPackingSlip(ctx context.Context, slipID string, idem Id
 			if err := insertSlip(ctx, tx, p.TenantID, sh.LegalEntityID, rev); err != nil {
 				return PackingSlip{}, err
 			}
+			if rev.PackagingFees, err = mirrorFeeLines(ctx, tx, p.TenantID, sh.LegalEntityID, orig, rev); err != nil {
+				return PackingSlip{}, err
+			}
+			// The returnable containers come back from the customer's balance; a
+			// customer who already returned them blocks the cancel (FUL-0015).
+			returnables, err := countReturnables(ctx, tx, sh.ID, "SHIPPED")
+			if err != nil {
+				return PackingSlip{}, err
+			}
+			if err := moveBalances(ctx, tx, p.TenantID, sh.CustomerID, returnables, -1); err != nil {
+				return PackingSlip{}, err
+			}
 			if _, err := tx.Exec(ctx, `update packing_slip set status = 'CANCELLED' where tenant_id = $1 and id = $2`, p.TenantID, orig.ID); err != nil {
 				return PackingSlip{}, err
 			}
@@ -894,7 +929,7 @@ func (s *Postgres) CancelPackingSlip(ctx context.Context, slipID string, idem Id
 			if err := enqueue(ctx, tx, sh.ID, fulevents.PackingSlipCancelled, p.TenantID, fulevents.PackingSlipCancelledData{
 				PackingSlipID: orig.ID, ReversalID: rev.ID, ShipmentID: sh.ID, OrderID: sh.OrderID,
 				PostingDate: rev.PostingDate.Format("2006-01-02"), Currency: rev.Currency, Lines: slipLineData(rev.Lines),
-				Journal: journalData(rev.Journal),
+				Journal: journalData(rev.Journal), PackagingFees: feeData(rev.PackagingFees), Returnables: returnableData(returnables, -1),
 			}); err != nil {
 				return PackingSlip{}, err
 			}
@@ -988,7 +1023,12 @@ func loadSlip(ctx context.Context, tx pgx.Tx, id string) (PackingSlip, error) {
 		l.Qty, l.CostAmount = dec(qty), dec(cost)
 		slip.Lines = append(slip.Lines, l)
 	}
-	return slip, rows.Err()
+	if err := rows.Err(); err != nil {
+		return slip, err
+	}
+	rows.Close()
+	slip.PackagingFees, err = loadFeeLines(ctx, tx, id)
+	return slip, err
 }
 
 func journalData(lines []JournalEntry) []fulevents.JournalEntry {
@@ -1007,10 +1047,11 @@ func slipLineData(lines []PackingSlipLine) []fulevents.SlipLine {
 	return out
 }
 
-func slipPostedData(slip PackingSlip, sh Shipment) fulevents.PackingSlipPostedData {
+func slipPostedData(slip PackingSlip, sh Shipment, returnables []returnableCount) fulevents.PackingSlipPostedData {
 	return fulevents.PackingSlipPostedData{
-		PackingSlipID: slip.ID, PackingSlipNumber: slip.Number, ShipmentID: sh.ID, OrderID: sh.OrderID,
+		PackingSlipID: slip.ID, PackingSlipNumber: slip.Number, ShipmentID: sh.ID, OrderID: sh.OrderID, CustomerID: sh.CustomerID,
 		PostingDate: slip.PostingDate.Format("2006-01-02"), Currency: slip.Currency, TotalCost: slip.TotalCost.String(),
 		Lines: slipLineData(slip.Lines), Journal: journalData(slip.Journal),
+		PackagingFees: feeData(slip.PackagingFees), Returnables: returnableData(returnables, 1),
 	}
 }

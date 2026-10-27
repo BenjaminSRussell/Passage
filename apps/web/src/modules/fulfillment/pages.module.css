@@ -120,3 +120,8 @@
   gap: var(--space-4);
   margin: 0;
 }
+
+.plainList {
+  margin: 0;
+  padding-inline-start: var(--space-5);
+}

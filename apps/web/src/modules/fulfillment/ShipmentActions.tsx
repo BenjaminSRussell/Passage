@@ -1,48 +1,27 @@
-// The three shipment commands of the detail page: confirm pick (FR-28.2), pack a
-// container (FR-28.3) and post the packing slip (FR-28.4). Each form keeps one
+// The shipment commands of the detail page: confirm pick (FR-28.2), auto-pack by
+// packing rule (FR-28.15), pack a container (FR-28.3) and post the packing slip
+// (FR-28.4). Each form keeps one
 // Idempotency-Key until its values change, and sends the shipment version as If-Match.
-import { useRef, useState, type FormEvent } from "react";
-import { Alert, Button, Card, DataTable, FormField, Input, type DataTableColumn } from "../../shell/ui";
+import { useState, type FormEvent } from "react";
+import { Button, Card, DataTable, FormField, Input, type DataTableColumn } from "../../shell/ui";
 import {
   confirmPick,
+  autoPack,
   describeProblem,
-  newKey,
   packContainer,
   postPackingSlip,
+  type AutoPackResult,
   type PackingSlip,
   type Problem,
   type Shipment,
   type ShipmentLine,
 } from "./api/client";
-import { compareDecimal, DECIMAL, multiplyDecimal, shortId, subtractDecimal, sumDecimals, today } from "./format";
+import { compareDecimal, COUNTRY, CURRENCY, DECIMAL, multiplyDecimal, shortId, subtractDecimal, sumDecimals, today } from "./format";
+import { explain, ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
-
-const CURRENCY = /^[A-Z]{3}$/;
-
-function ProblemAlert({ title, problem }: { title: string; problem: Problem | null }) {
-  if (!problem) return null;
-  return (
-    <div className={styles.formActions}>
-      <Alert tone="danger" title={title} live="alert">
-        {problem.message} ({problem.code})
-      </Alert>
-    </div>
-  );
-}
-
-/** Messages for the codes a stale or conflicting command gets, so the user knows to reload. */
-function explain(problem: Problem): Problem {
-  if (problem.code === "conflict_version") return { ...problem, message: "Someone else changed this shipment. Reload it and try again." };
-  return problem;
-}
 
 function lineLabel(line: ShipmentLine): string {
   return `Line ${shortId(line.orderLineId)} (${line.unit})`;
-}
-
-function useCommandKey() {
-  const key = useRef(newKey());
-  return { current: () => key.current, renew: () => (key.current = newKey()) };
 }
 
 /** Confirm picked quantities for the lines not yet confirmed. A short pick leaves the rest on backorder. */
@@ -104,6 +83,80 @@ export function PickForm({ shipment, onDone }: { shipment: Shipment; onDone(next
         <div className={styles.formActions}>
           <Button type="submit" variant="primary" loading={busy}>
             Confirm pick
+          </Button>
+        </div>
+      </form>
+    </Card>
+  );
+}
+
+/**
+ * Auto-pack the picked, unpacked lines by packing rule (BR-28.11). Unit weights are
+ * optional: with one, a container also closes at the rule's max weight. Lines
+ * without a rule stay unpacked; the page shows the FUL-0012 warnings.
+ */
+export function AutoPackForm({ shipment, onDone }: { shipment: Shipment; onDone(result: AutoPackResult): void }) {
+  const open = shipment.lines.filter((l) => compareDecimal(l.qtyPicked, l.qtyPacked) > 0);
+  const [weights, setWeights] = useState<Record<string, string>>({});
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [failure, setFailure] = useState<Problem | null>(null);
+  const [busy, setBusy] = useState(false);
+  const key = useCommandKey();
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    const found: Record<string, string> = {};
+    const unitWeights: Record<string, string> = {};
+    for (const l of open) {
+      const v = (weights[l.id] ?? "").trim();
+      if (v === "") continue;
+      if (!DECIMAL.test(v)) found[l.id] = "Enter the unit weight in kg, with at most 6 decimals, or leave it empty.";
+      else unitWeights[l.id] = v;
+    }
+    setErrors(found);
+    setFailure(null);
+    if (Object.keys(found).length > 0) return;
+    setBusy(true);
+    try {
+      const result = await autoPack(shipment.id, shipment.version, unitWeights, key.current());
+      key.renew();
+      onDone(result);
+    } catch (error) {
+      const problem = explain(describeProblem(error));
+      setFailure(problem);
+      if (problem.code === "idempotency_key_reuse") key.renew();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (open.length === 0) return null;
+  return (
+    <Card title="Auto-pack by packing rule">
+      <form className={styles.form} onSubmit={submit} noValidate>
+        <p className={styles.note}>
+          Fills containers from the packing rules of each product, most specific rule first, and closes each one with an SSCC. Give a unit weight to also respect the rule&apos;s max weight.
+        </p>
+        {open.map((l) => (
+          <FormField key={l.id} id={`autopack-${l.id}`} label={`${lineLabel(l)} unit weight (kg)`} hint={`To pack: ${subtractDecimal(l.qtyPicked, l.qtyPacked)}`} error={errors[l.id]} optional>
+            {(control) => (
+              <Input
+                {...control}
+                inputMode="decimal"
+                value={weights[l.id] ?? ""}
+                invalid={Boolean(errors[l.id])}
+                onChange={(event) => {
+                  setWeights({ ...weights, [l.id]: event.target.value });
+                  key.renew();
+                }}
+              />
+            )}
+          </FormField>
+        ))}
+        <ProblemAlert title="Could not auto-pack" problem={failure} />
+        <div className={styles.formActions}>
+          <Button type="submit" variant="primary" loading={busy}>
+            Auto-pack
           </Button>
         </div>
       </form>
@@ -231,6 +284,7 @@ export function PostForm({ shipment, onPosted }: { shipment: Shipment; onPosted(
   const [postingDate, setPostingDate] = useState(today());
   const [currency, setCurrency] = useState("USD");
   const [cogsAtShipment, setCogsAtShipment] = useState(false);
+  const [countryCode, setCountryCode] = useState("");
   const [costs, setCosts] = useState<Record<string, CostValues>>(() => Object.fromEntries(open.map((l) => [l.id, { unitCost: "", costSnapshotId: "" }])));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [failure, setFailure] = useState<Problem | null>(null);
@@ -258,6 +312,7 @@ export function PostForm({ shipment, onPosted }: { shipment: Shipment; onPosted(
     const found: Record<string, string> = {};
     if (!/^\d{4}-\d{2}-\d{2}$/.test(postingDate)) found.postingDate = "Enter the posting date.";
     if (!CURRENCY.test(currency.trim())) found.currency = "Enter a 3-letter currency code, such as USD.";
+    if (countryCode.trim() !== "" && !COUNTRY.test(countryCode.trim())) found.countryCode = "Enter a 2-letter country code, such as DE, or leave it empty.";
     for (const l of open) {
       const c = costs[l.id] ?? { unitCost: "", costSnapshotId: "" };
       if (!DECIMAL.test(c.unitCost.trim())) found[`${l.id}-cost`] = "Enter the unit cost, 0 or more, with at most 6 decimals.";
@@ -275,6 +330,7 @@ export function PostForm({ shipment, onPosted }: { shipment: Shipment; onPosted(
           postingDate,
           currency: currency.trim(),
           cogsAtShipment,
+          ...(countryCode.trim() ? { countryCode: countryCode.trim() } : {}),
           costs: open.map((l) => ({ shipmentLineId: l.id, unitCost: costs[l.id].unitCost.trim(), costSnapshotId: costs[l.id].costSnapshotId.trim() })),
         },
         key.current(),
@@ -299,6 +355,9 @@ export function PostForm({ shipment, onPosted }: { shipment: Shipment; onPosted(
         </FormField>
         <FormField id="post-currency" label="Currency" error={errors.currency}>
           {(control) => <Input {...control} maxLength={3} value={currency} invalid={Boolean(errors.currency)} onChange={(event) => { setCurrency(event.target.value.toUpperCase()); key.renew(); }} />}
+        </FormField>
+        <FormField id="post-country" label="Ship-to country" hint="Applies that country's packaging fee rates (statistical, not journaled). Empty: no packaging fee." error={errors.countryCode} optional>
+          {(control) => <Input {...control} maxLength={2} value={countryCode} invalid={Boolean(errors.countryCode)} onChange={(event) => { setCountryCode(event.target.value.toUpperCase()); key.renew(); }} />}
         </FormField>
         <FormField id="post-cogs" label="Post cost of goods sold at shipment" hint="Off: Dr 1405 delivered-not-invoiced (default). On: Dr 5000 COGS.">
           {(control) => <Input {...control} type="checkbox" checked={cogsAtShipment} onChange={(event) => { setCogsAtShipment(event.target.checked); key.renew(); }} />}

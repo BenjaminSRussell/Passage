@@ -73,6 +73,7 @@ func (a *API) Routes(r chi.Router) {
 	r.With(authz.RequireDuty("WarehousePack")).Post("/api/v1/fulfillment/shipments/{id}/containers", a.packContainer)
 	r.With(authz.RequireDuty("PackingSlipPost")).Post("/api/v1/fulfillment/shipments/{id}:post-packing-slip", a.postPackingSlip)
 	r.With(authz.RequireDuty("PackingSlipPost")).Post("/api/v1/fulfillment/packing-slips/{id}:cancel", a.cancelPackingSlip)
+	a.routesPacking(r)
 }
 
 // ---- request and response DTOs -------------------------------------------
@@ -135,6 +136,7 @@ type postRequest struct {
 	PostingDate    string    `json:"postingDate"`
 	Currency       string    `json:"currency"`
 	CogsAtShipment bool      `json:"cogsAtShipment"`
+	CountryCode    string    `json:"countryCode"`
 	Costs          []costDTO `json:"costs"`
 }
 
@@ -381,6 +383,10 @@ func (a *API) postPackingSlip(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, "currency", "must be an ISO 4217 alpha-3 code")
 		return
 	}
+	if req.CountryCode != "" && !countryRE.MatchString(req.CountryCode) {
+		fail(w, r, "countryCode", "must be a 2-letter ISO 3166 code when given")
+		return
+	}
 	costs := make(map[string]store.Cost, len(req.Costs))
 	for i, c := range req.Costs {
 		if !ids.Valid(c.ShipmentLineID) {
@@ -402,7 +408,8 @@ func (a *API) postPackingSlip(w http.ResponseWriter, r *http.Request) {
 		}
 		costs[c.ShipmentLineID] = store.Cost{UnitCost: unit, CostSnapshotID: c.CostSnapshotID}
 	}
-	in := store.PostInput{PostingDate: postingDate, Currency: req.Currency, CogsAtShipment: req.CogsAtShipment, Costs: costs}
+	in := store.PostInput{PostingDate: postingDate, Currency: req.Currency, CogsAtShipment: req.CogsAtShipment,
+		CountryCode: req.CountryCode, Costs: costs}
 	slip, err := a.store.PostPackingSlip(r.Context(), id, version, in, idem)
 	if err != nil {
 		httpx.Fail(w, r, err)

@@ -36,6 +36,8 @@ type fakeStore struct {
 	shipmentFilter store.ShipmentFilter
 	slipFilter     store.PackingSlipFilter
 	picks          []store.PickInput
+	lastPost       store.PostInput
+	packing        packingCalls
 }
 
 func (f *fakeStore) RunRelease(_ context.Context, warehouseID string, groups []domain.ReleaseGroup, idem store.Idem) (store.ReleaseResult, error) {
@@ -93,6 +95,7 @@ func (f *fakeStore) PackContainer(_ context.Context, id string, _ int, _ string,
 
 func (f *fakeStore) PostPackingSlip(_ context.Context, id string, _ int, in store.PostInput, idem store.Idem) (store.PackingSlip, error) {
 	f.lastIdem = idem
+	f.lastPost = in
 	if !in.PostingDate.Equal(time.Date(2026, 10, 21, 0, 0, 0, 0, time.UTC)) {
 		return store.PackingSlip{}, httpx.NewProblem(http.StatusBadRequest, store.CodeStatus, "bad date")
 	}

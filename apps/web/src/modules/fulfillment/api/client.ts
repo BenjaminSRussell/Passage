@@ -28,6 +28,11 @@ export interface Container {
   containerType: string;
   sscc: string;
   status: "OPEN" | "CLOSED" | "SHIPPED";
+  /** Decimal strings in kg. */
+  tareKg: string;
+  grossKg: string;
+  returnable: boolean;
+  packagingMaterial: string | null;
   lines: { shipmentLineId: string; qty: string }[];
 }
 
@@ -70,9 +75,74 @@ export interface PackingSlipSummary {
   reversalOfId: string | null;
 }
 
+/** A statistical packaging fee line of a slip (BR-28.12); never a journal line. */
+export interface PackagingFeeLine {
+  countryCode: string;
+  period: string;
+  materialCode: string;
+  weightKg: string;
+  ratePerKg: string;
+  feeAmount: string;
+  currency: string;
+}
+
 export interface PackingSlip extends PackingSlipSummary {
   lines: { orderLineId: string; shipmentLineId: string; qty: string; costAmount: string; costSnapshotId: string }[];
   journal: JournalEntry[];
+  packagingFees: PackagingFeeLine[];
+}
+
+export interface ContainerType {
+  code: string;
+  tareKg: string;
+  returnable: boolean;
+  packagingMaterial: string | null;
+}
+
+export interface PackingRule {
+  id: string;
+  productId: string;
+  /** Null is the product's general rule. */
+  customerId: string | null;
+  containerType: string;
+  qtyPerContainer: string;
+  maxWeightKg: string;
+}
+
+export interface ProductPackaging {
+  productId: string;
+  materialCode: string;
+  weightPerUnitKg: string;
+}
+
+export interface FeeRate {
+  countryCode: string;
+  materialCode: string;
+  currency: string;
+  ratePerKg: string;
+  validFrom: string;
+}
+
+export interface PackagingReportRow {
+  materialCode: string;
+  weightKg: string;
+  feeAmount: string;
+  currency: string;
+}
+
+export interface ReturnableBalance {
+  customerId: string;
+  containerType: string;
+  balance: string;
+  lastShippedAt: string | null;
+  lastReturnedAt: string | null;
+}
+
+export interface AutoPackResult {
+  shipment: Shipment;
+  containers: Container[];
+  unpackedLineIds: string[];
+  warnings: { code: string; shipmentLineId: string; productId: string; message: string }[];
 }
 
 export interface ReleaseLineInput {
@@ -109,6 +179,8 @@ export interface PostInput {
   postingDate: string;
   currency: string;
   cogsAtShipment: boolean;
+  /** Ship-to country whose packaging fee rates apply; omit for no packaging fee. */
+  countryCode?: string;
   costs: { shipmentLineId: string; unitCost: string; costSnapshotId: string }[];
 }
 
@@ -236,4 +308,57 @@ export function getPackingSlip(id: string, signal?: AbortSignal): Promise<Packin
 /** Reverses a posted, uninvoiced slip; the response is the reversing slip (FR-28.5). */
 export function cancelPackingSlip(id: string, key: string): Promise<PackingSlip> {
   return command<PackingSlip>(`${slipPath(id)}:cancel`, undefined, key);
+}
+
+/** Auto-packs picked lines by packing rule (FR-28.15); unitWeights maps a shipment line id to kg per unit. */
+export function autoPack(id: string, version: number, unitWeights: Record<string, string>, key: string): Promise<AutoPackResult> {
+  return command<AutoPackResult>(`${shipmentPath(id)}:auto-pack`, { unitWeights }, key, version);
+}
+
+export function listContainerTypes(signal?: AbortSignal): Promise<ContainerType[]> {
+  return items<ContainerType>("/container-types?limit=500", signal);
+}
+
+/** Creates or replaces a container type (code is the key). */
+export function saveContainerType(input: ContainerType, key: string): Promise<ContainerType> {
+  return command<ContainerType>("/container-types", input, key);
+}
+
+export function listPackingRules(filter: { productId?: string } = {}, signal?: AbortSignal): Promise<PackingRule[]> {
+  return items<PackingRule>(`/packing-rules${query({ ...filter, limit: 500 })}`, signal);
+}
+
+/** Creates the rule of a product and customer scope, or replaces it. */
+export function savePackingRule(input: Omit<PackingRule, "id">, key: string): Promise<PackingRule> {
+  return command<PackingRule>("/packing-rules", input, key);
+}
+
+export function listProductPackaging(filter: { productId?: string } = {}, signal?: AbortSignal): Promise<ProductPackaging[]> {
+  return items<ProductPackaging>(`/product-packaging${query({ ...filter, limit: 500 })}`, signal);
+}
+
+export function saveProductPackaging(input: ProductPackaging, key: string): Promise<ProductPackaging> {
+  return command<ProductPackaging>("/product-packaging", input, key);
+}
+
+export function listFeeRates(filter: { countryCode?: string } = {}, signal?: AbortSignal): Promise<FeeRate[]> {
+  return items<FeeRate>(`/packaging-fee-rates${query({ ...filter, limit: 500 })}`, signal);
+}
+
+export function saveFeeRate(input: FeeRate, key: string): Promise<FeeRate> {
+  return command<FeeRate>("/packaging-fee-rates", input, key);
+}
+
+/** Packaging weight and fee per material for a country and month (YYYY-MM), net of reversals. */
+export function packagingReport(filter: { countryCode: string; period: string; legalEntityId?: string }, signal?: AbortSignal): Promise<PackagingReportRow[]> {
+  return items<PackagingReportRow>(`/packaging-report${query(filter)}`, signal);
+}
+
+export function listReturnableBalances(filter: { customerId?: string } = {}, signal?: AbortSignal): Promise<ReturnableBalance[]> {
+  return items<ReturnableBalance>(`/returnable-packaging${query({ ...filter, limit: 500 })}`, signal);
+}
+
+/** Records returnable containers received back from a customer; more than the balance is FUL-0015. */
+export function returnPackaging(input: { customerId: string; containerType: string; qty: string }, key: string): Promise<ReturnableBalance> {
+  return command<ReturnableBalance>("/returnable-packaging:return", input, key);
 }

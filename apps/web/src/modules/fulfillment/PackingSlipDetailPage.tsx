@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, DataTable, PageHeader, Skeleton, type DataTableColumn } from "../../shell/ui";
-import { cancelPackingSlip, describeProblem, getPackingSlip, newKey, type JournalEntry, type PackingSlip, type Problem } from "./api/client";
+import { cancelPackingSlip, describeProblem, getPackingSlip, newKey, type JournalEntry, type PackagingFeeLine, type PackingSlip, type Problem } from "./api/client";
 import { SlipStatusBadge } from "./badges";
 import { fixed, formatDate, formatMoney, shortId } from "./format";
 import styles from "./pages.module.css";
@@ -23,7 +23,16 @@ const journalColumns: DataTableColumn<JournalEntry>[] = [
   { key: "credit", header: "Credit", align: "end", render: (row) => (row.amount.startsWith("-") ? formatMoney(row.amount.slice(1), row.currency) : "") },
 ];
 
-/** A packing slip with its lines and journal; a posted, uninvoiced slip can be cancelled (FR-28.5). */
+const feeColumns: DataTableColumn<PackagingFeeLine>[] = [
+  { key: "materialCode", header: "Material", mono: true },
+  { key: "countryCode", header: "Country" },
+  { key: "period", header: "Period" },
+  { key: "weightKg", header: "Weight kg", align: "end" },
+  { key: "ratePerKg", header: "Rate per kg", align: "end" },
+  { key: "feeAmount", header: "Fee", align: "end", render: (row) => formatMoney(row.feeAmount, row.currency) },
+];
+
+/** A packing slip with its lines, journal and statistical packaging fees; a posted, uninvoiced slip can be cancelled (FR-28.5). */
 export function PackingSlipDetailPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
@@ -139,6 +148,16 @@ export function PackingSlipDetailPage() {
           rows={slip.journal}
           getRowKey={(row, i) => `${row.account}-${row.orderLineId}-${i}`}
           empty={{ title: "No journal lines", description: "Drop-ship and non-stocked lines post nothing at shipment." }}
+        />
+      </Card>
+      <Card title="Packaging fees">
+        <p className={styles.note}>Statistical lines (BR-28.12): reported per country and month, never posted to the journal.</p>
+        <DataTable
+          label="Packaging fees"
+          columns={feeColumns}
+          rows={slip.packagingFees ?? []}
+          getRowKey={(row) => `${row.countryCode}-${row.materialCode}`}
+          empty={{ title: "No packaging fee", description: "The slip was posted without a ship-to country, or its products carry no packaging material." }}
         />
       </Card>
     </div>

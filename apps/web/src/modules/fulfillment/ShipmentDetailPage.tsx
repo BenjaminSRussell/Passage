@@ -1,10 +1,11 @@
+import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, DataTable, PageHeader, Skeleton, type DataTableColumn } from "../../shell/ui";
-import { getShipment, listPackingSlips, type Container, type PackingSlipSummary, type Shipment, type ShipmentLine } from "./api/client";
+import { getShipment, listPackingSlips, type AutoPackResult, type Container, type PackingSlipSummary, type Shipment, type ShipmentLine } from "./api/client";
 import { ShipmentStatusBadge, SlipStatusBadge } from "./badges";
-import { formatDate, formatDateTime, formatMoney, shortId } from "./format";
+import { dash, formatDate, formatDateTime, formatMoney, shortId } from "./format";
 import styles from "./pages.module.css";
-import { PackForm, PickForm, PostForm } from "./ShipmentActions";
+import { AutoPackForm, PackForm, PickForm, PostForm } from "./ShipmentActions";
 import { useLoad } from "./useLoad";
 
 interface Detail {
@@ -28,6 +29,9 @@ function containerColumns(lines: ShipmentLine[]): DataTableColumn<Container>[] {
     { key: "sscc", header: "SSCC", mono: true },
     { key: "containerType", header: "Type" },
     { key: "status", header: "Status" },
+    { key: "grossKg", header: "Gross kg", align: "end" },
+    { key: "returnable", header: "Returnable", render: (row) => (row.returnable ? "Yes" : "No") },
+    { key: "packagingMaterial", header: "Material", render: (row) => row.packagingMaterial ?? dash },
     { key: "lines", header: "Contents", render: (row) => row.lines.map((l) => `${orderLine(l.shipmentLineId)} × ${l.qty}`).join(", ") },
   ];
 }
@@ -43,6 +47,7 @@ const slipColumns: DataTableColumn<PackingSlipSummary>[] = [
 export function ShipmentDetailPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
+  const [autoPacked, setAutoPacked] = useState<AutoPackResult | null>(null);
   const state = useLoad<Detail>(async (signal) => {
     const [shipment, slips] = await Promise.all([getShipment(id, signal), listPackingSlips({ shipmentId: id }, signal)]);
     return { shipment, slips };
@@ -103,6 +108,31 @@ export function ShipmentDetailPage() {
       </Card>
       <DataTable label="Shipment lines" columns={lineColumns} rows={shipment.lines} getRowKey={(row) => row.id} />
       {canPick ? <PickForm key={`pick-${shipment.version}`} shipment={shipment} onDone={state.reload} /> : null}
+      {autoPacked ? (
+        <Alert tone={autoPacked.warnings.length > 0 ? "warning" : "success"} title={`Auto-pack closed ${autoPacked.containers.length} container${autoPacked.containers.length === 1 ? "" : "s"}`} live="status">
+          {autoPacked.warnings.length > 0 ? (
+            <ul className={styles.plainList}>
+              {autoPacked.warnings.map((w) => (
+                <li key={w.shipmentLineId}>
+                  {w.message} ({w.code}). Pack it below or add a packing rule.
+                </li>
+              ))}
+            </ul>
+          ) : (
+            "Every picked line is packed."
+          )}
+        </Alert>
+      ) : null}
+      {canPack ? (
+        <AutoPackForm
+          key={`autopack-${shipment.version}`}
+          shipment={shipment}
+          onDone={(result) => {
+            setAutoPacked(result);
+            state.reload();
+          }}
+        />
+      ) : null}
       {canPack ? <PackForm key={`pack-${shipment.version}`} shipment={shipment} onDone={state.reload} /> : null}
       {canPost ? <PostForm key={`post-${shipment.version}`} shipment={shipment} onPosted={(slip) => navigate(`/fulfillment/packing-slips/${slip.id}`)} /> : null}
       <Card title="Containers">

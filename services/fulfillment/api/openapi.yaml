@@ -3,9 +3,12 @@ info:
   title: Passage Fulfillment API
   version: 1.0.0
   description: >
-    Wave 28 slice 1. Release, pick, pack and packing-slip posting. Carrier,
-    drop-ship, wave, tracking and packaging endpoints are later slices (see
-    NOT-IMPLEMENTED.md). Errors are RFC 9457 problem details with a stable code.
+    Wave 28 slices 1 and 2. Release, pick, pack and packing-slip posting;
+    container types, packing rules and auto-pack; packaging materials, country
+    fee rates, the statistical packaging fee and the packaging report;
+    returnable transport packaging balances. Carrier, drop-ship, wave and
+    tracking endpoints are later slices (see NOT-IMPLEMENTED.md). Errors are
+    RFC 9457 problem details with a stable code.
 servers:
   - url: https://api.{env}.passage.dev
     variables:
@@ -137,6 +140,10 @@ components:
         containerType: { type: string }
         sscc: { type: string, pattern: '^[0-9]{18}$', description: "SSCC-18 with a valid GS1 mod-10 check digit." }
         status: { type: string, enum: [OPEN, CLOSED, SHIPPED] }
+        tareKg: { $ref: "#/components/schemas/Decimal" }
+        grossKg: { $ref: "#/components/schemas/Decimal", description: "Tare plus the packed units at the unit weights given to auto-pack; the tare alone for a manual pack." }
+        returnable: { type: boolean, description: "Copied from the container type when packed; returnable containers count toward the customer's balance on post." }
+        packagingMaterial: { type: [string, "null"] }
         lines:
           type: array
           items:
@@ -170,6 +177,64 @@ components:
         journal:
           type: array
           items: { $ref: "#/components/schemas/JournalEntry" }
+        packagingFees:
+          type: array
+          description: Statistical packaging fee lines (BR-28.12); not journal lines. Negative on a reversing slip.
+          items: { $ref: "#/components/schemas/PackagingFeeLine" }
+    PackagingFeeLine:
+      type: object
+      required: [countryCode, period, materialCode, weightKg, ratePerKg, feeAmount, currency]
+      properties:
+        countryCode: { type: string, pattern: '^[A-Z]{2}$' }
+        period: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' }
+        materialCode: { type: string }
+        weightKg: { $ref: "#/components/schemas/Decimal" }
+        ratePerKg: { $ref: "#/components/schemas/Decimal" }
+        feeAmount: { $ref: "#/components/schemas/Decimal", description: "Weight × rate, rounded half-even to the currency's minor unit." }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+    ContainerType:
+      type: object
+      required: [code, tareKg, returnable, packagingMaterial]
+      properties:
+        code: { type: string, pattern: '^[A-Za-z0-9_.-]{1,64}$' }
+        tareKg: { $ref: "#/components/schemas/Decimal" }
+        returnable: { type: boolean }
+        packagingMaterial: { type: [string, "null"], pattern: '^[A-Za-z0-9_.-]{1,32}$' }
+    PackingRule:
+      type: object
+      required: [id, productId, customerId, containerType, qtyPerContainer, maxWeightKg]
+      properties:
+        id: { type: string, format: uuid }
+        productId: { type: string, format: uuid }
+        customerId: { type: [string, "null"], format: uuid, description: "Null is the product's general rule; a customer rule wins over it." }
+        containerType: { type: string }
+        qtyPerContainer: { $ref: "#/components/schemas/Decimal" }
+        maxWeightKg: { $ref: "#/components/schemas/Decimal" }
+    ProductPackaging:
+      type: object
+      required: [productId, materialCode, weightPerUnitKg]
+      properties:
+        productId: { type: string, format: uuid }
+        materialCode: { type: string, pattern: '^[A-Za-z0-9_.-]{1,32}$' }
+        weightPerUnitKg: { $ref: "#/components/schemas/Decimal" }
+    FeeRate:
+      type: object
+      required: [countryCode, materialCode, currency, ratePerKg, validFrom]
+      properties:
+        countryCode: { type: string, pattern: '^[A-Z]{2}$' }
+        materialCode: { type: string, pattern: '^[A-Za-z0-9_.-]{1,32}$' }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        ratePerKg: { $ref: "#/components/schemas/Decimal" }
+        validFrom: { type: string, format: date }
+    ReturnableBalance:
+      type: object
+      required: [customerId, containerType, balance, lastShippedAt, lastReturnedAt]
+      properties:
+        customerId: { type: string, format: uuid }
+        containerType: { type: string }
+        balance: { $ref: "#/components/schemas/Decimal" }
+        lastShippedAt: { type: [string, "null"], format: date-time }
+        lastReturnedAt: { type: [string, "null"], format: date-time }
   responses:
     Problem:
       description: Problem details
@@ -426,6 +491,7 @@ paths:
                 postingDate: { type: string, format: date }
                 currency: { type: string, pattern: '^[A-Z]{3}$' }
                 cogsAtShipment: { type: boolean, default: false }
+                countryCode: { type: string, pattern: '^[A-Z]{2}$', description: "Ship-to country whose packaging fee rates apply (FR-28.14). Omit to post no packaging fee." }
                 costs:
                   type: array
                   items:
@@ -445,7 +511,7 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "404": { description: FUL-0020, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-        "422": { description: "FUL-0001 not PACKED, FUL-0042 cost missing, FUL-0044 nothing to ship, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0001 not PACKED, FUL-0014 packaging fee rate missing for a shipped material, FUL-0042 cost missing, FUL-0044 nothing to ship, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
   /api/v1/fulfillment/packing-slips/{id}:cancel:
     post:
@@ -465,4 +531,347 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "404": { description: FUL-0040, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "409": { description: "FUL-0010 invoiced, FUL-0043 not posted or a reversal, FUL-0021 shipment cannot return to PACKED", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0015 the customer already returned the slip's returnable containers, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /api/v1/fulfillment/container-types:
+    get:
+      operationId: listContainerTypes
+      summary: Container types by code (FR-28.14, FR-28.15)
+      x-passage-duty: WarehouseView
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: Items
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/ContainerType" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: saveContainerType
+      summary: Create or replace a container type; packed containers keep the values they were packed with
+      x-passage-duty: PackingRuleMaintain
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, tareKg]
+              additionalProperties: false
+              properties:
+                code: { type: string, pattern: '^[A-Za-z0-9_.-]{1,64}$' }
+                tareKg: { $ref: "#/components/schemas/Decimal" }
+                returnable: { type: boolean, default: false }
+                packagingMaterial: { type: [string, "null"], pattern: '^[A-Za-z0-9_.-]{1,32}$' }
+      responses:
+        "201":
+          description: Saved
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ContainerType" }
+        "400": { description: "FUL-0050 validation, FUL-0051 Idempotency-Key, COM-0001 malformed body", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "403": { $ref: "#/components/responses/Problem" }
         "422": { description: idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /api/v1/fulfillment/packing-rules:
+    get:
+      operationId: listPackingRules
+      summary: Packing rules, general rule of a product first (FR-28.15)
+      x-passage-duty: WarehouseView
+      parameters:
+        - { name: productId, in: query, schema: { type: string, format: uuid } }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: Items
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/PackingRule" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: savePackingRule
+      summary: Create the rule of a product and customer scope, or replace it (keeps its id)
+      x-passage-duty: PackingRuleMaintain
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [productId, containerType, qtyPerContainer, maxWeightKg]
+              additionalProperties: false
+              properties:
+                productId: { type: string, format: uuid }
+                customerId: { type: [string, "null"], format: uuid, description: "Omit, null or empty for the product's general rule." }
+                containerType: { type: string, description: "Code of an existing container type." }
+                qtyPerContainer: { $ref: "#/components/schemas/Decimal" }
+                maxWeightKg: { $ref: "#/components/schemas/Decimal" }
+      responses:
+        "201":
+          description: Saved
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PackingRule" }
+        "400": { description: "FUL-0050 validation, FUL-0051 Idempotency-Key, COM-0001 malformed body", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { description: "FUL-0050 containerType is not a known container type, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /api/v1/fulfillment/product-packaging:
+    get:
+      operationId: listProductPackaging
+      summary: Packaging material weight per product unit (FR-28.14)
+      x-passage-duty: WarehouseView
+      parameters:
+        - { name: productId, in: query, schema: { type: string, format: uuid } }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: Items
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/ProductPackaging" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: saveProductPackaging
+      summary: Set the weight of a packaging material per unit of a product (0 stops it counting)
+      x-passage-duty: PackingRuleMaintain
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [productId, materialCode, weightPerUnitKg]
+              additionalProperties: false
+              properties:
+                productId: { type: string, format: uuid }
+                materialCode: { type: string, pattern: '^[A-Za-z0-9_.-]{1,32}$' }
+                weightPerUnitKg: { $ref: "#/components/schemas/Decimal" }
+      responses:
+        "201":
+          description: Saved
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProductPackaging" }
+        "400": { description: "FUL-0050 validation, FUL-0051 Idempotency-Key, COM-0001 malformed body", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { description: idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /api/v1/fulfillment/shipments/{id}:auto-pack:
+    post:
+      operationId: autoPack
+      summary: Auto-pack picked lines into containers by packing rule (FR-28.15, BR-28.11)
+      description: >
+        Fills containers line by line, most specific rule first, and closes a container
+        when its quantity per container or max weight is reached. Each container gets an
+        SSCC. Lines without a rule stay unpacked with a FUL-0012 warning. When nothing is
+        packed the shipment and its version are unchanged.
+      x-passage-duty: WarehousePack
+      parameters:
+        - { $ref: "#/components/parameters/ShipmentId" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                unitWeights:
+                  type: object
+                  description: Unit weight in kg per shipment line id; a line without one is limited by quantity only.
+                  additionalProperties: { $ref: "#/components/schemas/Decimal" }
+      responses:
+        "201":
+          description: Containers created, the updated shipment and the lines left unpacked
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [shipment, containers, unpackedLineIds, warnings]
+                properties:
+                  shipment: { $ref: "#/components/schemas/Shipment" }
+                  containers:
+                    type: array
+                    items: { $ref: "#/components/schemas/Container" }
+                  unpackedLineIds:
+                    type: array
+                    items: { type: string, format: uuid }
+                  warnings:
+                    type: array
+                    items:
+                      type: object
+                      required: [code, shipmentLineId, productId, message]
+                      properties:
+                        code: { type: string, example: FUL-0012 }
+                        shipmentLineId: { type: string, format: uuid }
+                        productId: { type: string, format: uuid }
+                        message: { type: string }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { description: "FUL-0020 shipment not found, FUL-0041 a unit weight names a line not on the shipment", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0001 status, FUL-0013 one unit exceeds the rule's max weight, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /api/v1/fulfillment/packaging-fee-rates:
+    get:
+      operationId: listFeeRates
+      summary: Packaging fee rates per country and material, newest first (FR-28.14)
+      x-passage-duty: PackagingFeeMaintain
+      parameters:
+        - { name: countryCode, in: query, schema: { type: string, pattern: '^[A-Z]{2}$' } }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: Items
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/FeeRate" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: saveFeeRate
+      summary: Create or replace the fee rate of a country and material valid from a date
+      x-passage-duty: PackagingFeeMaintain
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [countryCode, materialCode, currency, ratePerKg, validFrom]
+              additionalProperties: false
+              properties:
+                countryCode: { type: string, pattern: '^[A-Z]{2}$' }
+                materialCode: { type: string, pattern: '^[A-Za-z0-9_.-]{1,32}$' }
+                currency: { type: string, pattern: '^[A-Z]{3}$' }
+                ratePerKg: { $ref: "#/components/schemas/Decimal" }
+                validFrom: { type: string, format: date }
+      responses:
+        "201":
+          description: Saved
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FeeRate" }
+        "400": { description: "FUL-0050 validation, FUL-0051 Idempotency-Key, COM-0001 malformed body", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { description: idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /api/v1/fulfillment/packaging-report:
+    get:
+      operationId: packagingReport
+      summary: Packaging weight and fee per material for a country and month, net of reversals (section 5.28.14)
+      x-passage-duty: PackagingFeeMaintain
+      parameters:
+        - { name: countryCode, in: query, required: true, schema: { type: string, pattern: '^[A-Z]{2}$' } }
+        - { name: period, in: query, required: true, schema: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$' } }
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Report rows
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [countryCode, period, legalEntityId, items]
+                properties:
+                  countryCode: { type: string }
+                  period: { type: string }
+                  legalEntityId: { type: [string, "null"], format: uuid }
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [materialCode, weightKg, feeAmount, currency]
+                      properties:
+                        materialCode: { type: string }
+                        weightKg: { $ref: "#/components/schemas/Decimal" }
+                        feeAmount: { $ref: "#/components/schemas/Decimal" }
+                        currency: { type: string }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /api/v1/fulfillment/returnable-packaging:
+    get:
+      operationId: listReturnableBalances
+      summary: Returnable packaging balances per customer and container type (FR-28.16)
+      x-passage-duty: WarehouseView
+      parameters:
+        - { name: customerId, in: query, schema: { type: string, format: uuid } }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: Items
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/ReturnableBalance" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /api/v1/fulfillment/returnable-packaging:return:
+    post:
+      operationId: returnPackaging
+      summary: Record a standalone return receipt of returnable containers (BR-28.13)
+      x-passage-duty: WarehouseReceive
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [customerId, containerType, qty]
+              additionalProperties: false
+              properties:
+                customerId: { type: string, format: uuid }
+                containerType: { type: string }
+                qty: { type: string, pattern: '^[0-9]{1,9}$', description: "Whole number of containers returned, 1 or more." }
+      responses:
+        "201":
+          description: Saved
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReturnableBalance" }
+        "400": { description: "FUL-0050 validation, FUL-0051 Idempotency-Key, COM-0001 malformed body", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { description: "FUL-0015 the return exceeds the customer's balance, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }

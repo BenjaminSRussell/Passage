@@ -66,6 +66,7 @@ const slip: PackingSlip = {
     { account: "1405", amount: "125", currency: "USD", orderLineId: ORDER_LINE },
     { account: "1400", amount: "-125", currency: "USD", orderLineId: ORDER_LINE },
   ],
+  packagingFees: [],
 };
 
 describe("shipments list", () => {
@@ -218,7 +219,7 @@ describe("shipment detail", () => {
     server.handler = (url, init) => {
       if (init.method === "POST" && url.pathname.endsWith("/containers")) {
         current = { ...shipment("PACKED", { qtyPicked: "30", qtyPacked: "30", pickConfirmed: true }, 5) };
-        current.containers = [{ id: ID, containerType: "C12", sscc: "006141410000000011", status: "CLOSED", lines: [{ shipmentLineId: LINE, qty: "30" }] }];
+        current.containers = [{ id: ID, containerType: "C12", sscc: "006141410000000011", status: "CLOSED", tareKg: "0.5", grossKg: "0.5", returnable: false, packagingMaterial: null, lines: [{ shipmentLineId: LINE, qty: "30" }] }];
         return json(201, { container: current.containers[0], shipment: current });
       }
       return base(url, init);
