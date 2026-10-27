@@ -58,7 +58,11 @@ go vet ./... && go test ./...
 
 Domain tests are pure (table-driven plus `rapid` property tests). `internal/api`
 tests drive the real router over an in-memory store. `internal/store` tests use
-`platform/go/testkit` and skip unless `PASSAGE_TEST_DATABASE_URL` is set; the
+`platform/go/testkit` and skip unless `PASSAGE_TEST_DATABASE_URL` is set. That
+URL must name a role without SUPERUSER or BYPASSRLS (as in `services/org`): the
+tables FORCE row-level security, and the legal-entity scope assertions (for
+example in `TestRFQ_CreateReplayListAndTenantIsolation`) fail under a superuser,
+which skips every policy. The
 row-level-security test also needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-owner
 `passage_app` role) and skips without it.
 
