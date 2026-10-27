@@ -74,14 +74,15 @@ func jsonKeys(t *testing.T, v any) []string {
 func TestPayloadsMatchAsyncAPISchemas(t *testing.T) {
 	spec := readSpec(t)
 	payloads := map[string]any{
-		"TransactionPostedData": TransactionPostedData{},
-		"OnhandChangedData":     OnhandChangedData{},
-		"JournalPostedData":     JournalPostedData{},
-		"ReservationData":       ReservationData{},
-		"BlockingData":          BlockingData{},
-		"TransferData":          TransferData{},
-		"OwnershipChangedData":  OwnershipChangedData{},
-		"OwnershipLineData":     OwnershipLineData{},
+		"TransactionPostedData":  TransactionPostedData{},
+		"OnhandChangedData":      OnhandChangedData{},
+		"JournalPostedData":      JournalPostedData{},
+		"ReservationData":        ReservationData{},
+		"BlockingData":           BlockingData{},
+		"TransferData":           TransferData{},
+		"OwnershipChangedData":   OwnershipChangedData{},
+		"OwnershipLineData":      OwnershipLineData{},
+		"ReconciliationDiffData": ReconciliationDiffData{},
 	}
 	for schema, payload := range payloads {
 		if got, want := jsonKeys(t, payload), requiredFields(t, spec, schema); !slices.Equal(got, want) {

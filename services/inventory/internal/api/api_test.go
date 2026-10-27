@@ -95,6 +95,11 @@ type fakeStore struct {
 	changeFilter  store.StatusChangeFilter
 	changeRows    int
 	detailHistory []store.StatusChange
+
+	// slice 7: reconciliation (fake methods in reconciliation_test.go)
+	reconIn     store.ReconcileInput
+	reconFilter store.ReconciliationFilter
+	reconRuns   []domain.Reconciliation
 }
 
 func (f *fakeStore) CreateJournal(_ context.Context, j domain.Journal, key string) (domain.Journal, bool, error) {
@@ -567,8 +572,8 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		served[route+" "+strings.ToLower(method)] = true
 		return nil
 	})
-	if len(served) != 55 {
-		t.Fatalf("router walk yielded %d operations, want 55: %v", len(served), served)
+	if len(served) != 58 {
+		t.Fatalf("router walk yielded %d operations, want 58: %v", len(served), served)
 	}
 	declared := declaredOperations(string(spec))
 	for op := range served {

@@ -1057,3 +1057,54 @@ export async function listConsignmentStock(vendor = "", signal?: AbortSignal): P
   const { body } = await send<{ items?: ConsignmentStockItem[] }>(`/consignment/stock${query({ vendor })}`, {}, signal);
   return body.items ?? [];
 }
+
+/** Inventory-to-ledger reconciliation (FR-16.12). */
+export const RECONCILIATION_STATUSES = ["MATCHED", "DIFFERENCE"] as const;
+export type ReconciliationStatus = (typeof RECONCILIATION_STATUSES)[number];
+
+/**
+ * One run per legal entity, inventory account, currency and run date; a
+ * re-run on the same day overwrites it. diff is inventoryValue minus
+ * ledgerBalance. GL_JOURNALS compares with the GL of the posted inventory
+ * journals; LEDGER_OVERRIDE with a balance read from the ledger.
+ */
+export interface Reconciliation {
+  id: string;
+  legalEntityId: string;
+  account: string;
+  currency: string;
+  runDate: string;
+  inventoryValue: string;
+  ledgerBalance: string;
+  diff: string;
+  status: ReconciliationStatus;
+  ledgerSource: "GL_JOURNALS" | "LEDGER_OVERRIDE";
+  negativeRows: number;
+  createdAt: string;
+}
+
+export interface ReconcileInput {
+  legalEntityId: string;
+  currency: string;
+  /** Inventory account balance from the ledger; omitted to compare with the posted journals. */
+  ledgerBalance?: string;
+}
+
+/** Runs the reconciliation now (inventory.admin). Safe to repeat: the day's run is recomputed. */
+export async function runReconciliation(input: ReconcileInput): Promise<Reconciliation> {
+  const body: Record<string, string> = { legalEntityId: input.legalEntityId, currency: input.currency };
+  if (input.ledgerBalance?.trim()) body.ledgerBalance = input.ledgerBalance.trim();
+  return (await send<Reconciliation>("/reconciliations", { method: "POST", body: JSON.stringify(body) })).body;
+}
+
+export async function listReconciliations(
+  q: { legalEntityId?: string; status?: ReconciliationStatus | "" } = {},
+  signal?: AbortSignal,
+): Promise<Reconciliation[]> {
+  const { body } = await send<{ items?: Reconciliation[] }>(`/reconciliations${query({ ...q })}`, {}, signal);
+  return body.items ?? [];
+}
+
+export async function getReconciliation(id: string, signal?: AbortSignal): Promise<Reconciliation> {
+  return (await send<Reconciliation>(`/reconciliations/${encodeURIComponent(id)}`, {}, signal)).body;
+}

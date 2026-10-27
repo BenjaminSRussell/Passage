@@ -37,7 +37,8 @@ internal/events/          event type constants and payloads
 migrations/               0001 ledger, 0002 reservations and batch expiry, 0003 blocking and counts,
                           0004 transfer orders, 0005 ABC runs, 0006 reversal links and count tags,
                           0007 consignment orders, ownership-change origins, reservation segment,
-                          0008 status-change audit (embedded, applied by dbx.Migrate)
+                          0008 status-change audit, 0009 reconciliation runs (embedded, applied by
+                          dbx.Migrate)
 api/openapi.yaml          OpenAPI 3.1 for every endpoint (parity is tested)
 events/asyncapi.yaml      AsyncAPI 3 for every event published (payload parity is tested)
 charts/inventory/         Helm chart (Deployment, Service, HPA, ServiceMonitor toggle)
@@ -102,6 +103,9 @@ charts/inventory/         Helm chart (Deployment, Service, HPA, ServiceMonitor t
 | POST | `/v1/inventory/transactions/{id}:cancel-reservation` | `inventory.transaction.step` | (no PRD duty) |
 | GET | `/v1/inventory/transactions/{id}` | `inventory.read` | InventoryInquire |
 | GET | `/v1/inventory/status-changes` | `inventory.read` | InventoryInquire |
+| POST | `/v1/inventory/reconciliations` | `inventory.admin` | InventoryAdmin (reconciliation re-run) |
+| GET | `/v1/inventory/reconciliations` | `inventory.read` | InventoryInquire |
+| GET | `/v1/inventory/reconciliations/{id}` | `inventory.read` | InventoryInquire |
 
 Creating an OWNERSHIP_CHANGE journal also needs `inventory.consignment.write`
 (ConsignmentMaintain); its lines and posting use the journal duties.
@@ -217,6 +221,33 @@ compares it with the stored row in one snapshot and reports the differing rows a
 fields. `?repair=true` locks each differing row in posting lock order, rebuilds it again
 under the lock and overwrites it (a missing row is recreated, an orphan zeroed).
 
+## Inventory-to-ledger reconciliation (FR-16.12)
+
+`POST /v1/inventory/reconciliations` (`legalEntityId`, `currency`, optional `ledgerBalance`)
+compares, for the legal entity and currency:
+
+- the inventory value: the sum of `on_hand.posted_value` of the rows valued in the currency;
+- the ledger balance of the inventory account (`INV_INVENTORY_ACCOUNT`; unset is `INV-JNL-005`):
+  without `ledgerBalance`, debit minus credit of that account over the GL entries of the POSTED
+  inventory journals in the currency (`GL_JOURNALS`); with it, the balance the caller read from
+  the wave 11 ledger, which also carries manual journals (`LEDGER_OVERRIDE`, AC-16.9).
+
+Both sides are rounded to the currency's minor unit and the difference is inventory minus
+ledger; `MATCHED` means zero. The run also counts on-hand rows of the legal entity with
+negative physical stock (`negativeRows`, FR-16.4), which does not change the status. Blocking,
+transfer and ownership-change legs move value between rows of the legal entity (or post their
+own GL entry), so the GL-derived run matches whenever the projection and the journals agree;
+a status step to SOLD / PURCHASED through `transactions:apply` moves posted value without a GL
+entry here (the calling document posts it), so it shows as a difference until the ledger
+balance is supplied.
+
+A run is keyed by (legal entity, account, currency, run date = today UTC): a re-run on the same
+day recomputes and overwrites that day's row (same id). A non-zero difference enqueues
+`dev.passage.inventory.reconciliation.diff.v1` in the same transaction, once per run that
+differs. `GET /v1/inventory/reconciliations` (filters `legalEntityId`, `status`) and
+`GET /v1/inventory/reconciliations/{id}` are the report. The 02:00 tenant-local Temporal cron
+that would call it daily is not wired (see NOT-IMPLEMENTED.md).
+
 ## Status model commands (FR-16.2, BR-16.1)
 
 Journals, blockings, transfers and consignment write each transaction at its final status.
@@ -324,6 +355,7 @@ They skip without `PASSAGE_TEST_DATABASE_URL`. Domain property tests use `pgrego
 | `INV-STP-001` | 422 | Status move not allowed: backward or across directions under STEP, a named command that does not apply at the current status, or a registration at a financial status or one that does not match the quantity's sign |
 | `INV-STP-002` | 409 | The origin already has a transaction (one transaction per origin) |
 | `INV-TXN-001` | 404 | Transaction id not found in the tenant / legal-entity scope |
+| `INV-REC-001` | 404 | Reconciliation run not found in the tenant / legal-entity scope |
 | `idempotency_key_conflict` | 409 | The status-change Idempotency-Key is held by a change in a legal entity outside the caller's scope |
 | `conflict_version` | 412 | `If-Match` does not match the journal, blocking or count sheet version, or `fromStatus` of a STEP is not the transaction's current status |
 | `idempotency_key_reuse` | 422 | Idempotency-Key (or a line `clientKey`) reused with a different body |

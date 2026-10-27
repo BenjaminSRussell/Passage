@@ -1,14 +1,15 @@
 openapi: 3.1.0
 info:
   title: Passage Inventory
-  version: 0.16.5
+  version: 0.16.7
   description: |
     Inventory journals, posting, the on-hand and transaction inquiries, reservations, blocking
     and quarantine, cycle counting (wave 16, slices 1 and 2), transfer orders with stock in
     transit and ABC classification (slice 3), journal reversal, tag counting and the on-hand
     rebuild-and-compare (slice 4), the journal approval workflow and :validate, vendor consignment
     (replenishment orders, OWNERSHIP_CHANGE journals, consignment stock) and segment-aware
-    reservations (slice 5). Quantities and money are decimal strings; money
+    reservations (slice 5), transaction status steps and named backward commands (slice 6), and
+    the daily inventory-to-ledger reconciliation (slice 7). Quantities and money are decimal strings; money
     is in the journal (accounting) currency, rounded to its minor unit. Browser calls use
     /api/v1/inventory/..., which the web BFF rewrites to these paths.
 servers:
@@ -896,6 +897,83 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/AbcRun' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/reconciliations:
+    post:
+      operationId: runInventoryReconciliation
+      summary: Run the inventory-to-ledger reconciliation for a legal entity now (FR-16.12)
+      description: |
+        Compares the inventory value (sum of on-hand posted value of the legal entity in the
+        currency) with the ledger balance (debit minus credit) of the configured inventory
+        account, both rounded to the currency's minor unit. Without ledgerBalance the ledger side
+        is the net of the inventory account over the GL entries of the POSTED inventory journals
+        (GL_JOURNALS); with it, the balance read from the wave 11 ledger, which also carries
+        manual journals (LEDGER_OVERRIDE, AC-16.9). The run also counts the on-hand rows with
+        negative physical stock (FR-16.4). The run date is today (UTC); a re-run on the same day
+        recomputes and overwrites that day's row (the run id stays), so no Idempotency-Key is
+        needed. A non-zero difference publishes dev.passage.inventory.reconciliation.diff.v1 in the
+        same transaction. 422 INV-JNL-005 when no inventory account is configured; 403 AUTH-0003
+        for a legal entity outside the caller's scope.
+      x-passage-duty: inventory.admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [legalEntityId, currency]
+              additionalProperties: false
+              properties:
+                legalEntityId: { type: string, format: uuid }
+                currency: { type: string, pattern: '^[A-Z]{3}$', description: Accounting currency (ISO 4217 alpha-3) }
+                ledgerBalance: { type: [string, 'null'], description: 'Decimal string, at most 6 decimals: the inventory account balance from the ledger; replaces the GL-derived balance' }
+      responses:
+        '200':
+          description: The run as stored
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Reconciliation' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listInventoryReconciliations
+      summary: Reconciliation runs, newest run date first (at most 200); the inventory-to-ledger reconciliation report
+      x-passage-duty: inventory.read
+      parameters:
+        - { name: legalEntityId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: status, in: query, required: false, schema: { type: string, enum: [MATCHED, DIFFERENCE] } }
+      responses:
+        '200':
+          description: Reconciliation runs
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Reconciliation' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/reconciliations/{id}:
+    get:
+      operationId: getInventoryReconciliation
+      summary: Read one reconciliation run (404 INV-REC-001 when unknown or outside the caller's scope)
+      x-passage-duty: inventory.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Reconciliation run
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Reconciliation' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
@@ -2185,6 +2263,22 @@ components:
             a: { $ref: '#/components/schemas/Decimal' }
             b: { $ref: '#/components/schemas/Decimal' }
             c: { $ref: '#/components/schemas/Decimal' }
+    Reconciliation:
+      type: object
+      required: [id, legalEntityId, account, currency, runDate, inventoryValue, ledgerBalance, diff, status, ledgerSource, negativeRows, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        account: { type: string, description: Inventory posting account code }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        runDate: { type: string, format: date }
+        inventoryValue: { type: string, description: Decimal string rounded to the minor unit }
+        ledgerBalance: { type: string, description: Decimal string rounded to the minor unit }
+        diff: { type: string, description: inventoryValue minus ledgerBalance }
+        status: { type: string, enum: [MATCHED, DIFFERENCE] }
+        ledgerSource: { type: string, enum: [GL_JOURNALS, LEDGER_OVERRIDE] }
+        negativeRows: { type: integer, minimum: 0, description: On-hand rows with negative physical stock at the run (FR-16.4) }
+        createdAt: { type: string, format: date-time, description: When the row was last computed }
     AbcRun:
       type: object
       required: [id, legalEntityId, criterion, thresholds, zeroClass, createdAt, classCounts]

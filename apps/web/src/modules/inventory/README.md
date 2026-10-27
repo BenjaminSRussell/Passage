@@ -1,6 +1,6 @@
 # Inventory module (web)
 
-Wave 16 slice 1 to 6 screens for `services/inventory` (`/api/v1/inventory/...`, rewritten by the
+Wave 16 slice 1 to 7 screens for `services/inventory` (`/api/v1/inventory/...`, rewritten by the
 web BFF to the service's `/v1/inventory/...`). Built from the shell primitives in
 `src/shell/ui` and `pages.module.css`, following `apps/web/docs/design-system.md`.
 
@@ -33,6 +33,9 @@ web BFF to the service's `/v1/inventory/...`). Built from the shell primitives i
 | `/inventory/consignment-orders/new` | New consignment order: legal entity, vendor, site, warehouse, requested date, currency, lines with consignment price and location / batch / serial | `inventory.consignment.write` |
 | `/inventory/consignment-orders/:id` | Consignment order: details, lines (ordered, received, open, price), Receive per open line (If-Match) as vendor-owned stock | `inventory.read` (receive needs `inventory.consignment.write`) |
 | `/inventory/consignment/stock` | Consignment stock by vendor: vendor-owned quantity, consignment price, statistical value, first receipt and age; New ownership change | `inventory.read` |
+| `/inventory/reconciliations` | Inventory-to-ledger reconciliation report: runs newest first with inventory value, ledger balance, difference, status and negative on-hand rows; status filter | `inventory.read` |
+| `/inventory/reconciliations/new` | Run reconciliation: legal entity, currency, optional ledger balance read from the ledger (else the posted inventory journals); a same-day re-run recomputes that day's run | `inventory.admin` |
+| `/inventory/reconciliations/:id` | Reconciliation run: matched or difference with the amount, negative-stock warning, both sides and the ledger source | `inventory.read` |
 
 Every screen has loading (skeleton rows or a busy region), empty and error states; errors
 show the service's problem code.
@@ -44,7 +47,7 @@ show the service's problem code.
 - `format.ts` — labels, tones and small formatters.
 - `parts.tsx` — shared detail entry, problem alert, row action button and field-error mapping.
 
-Tests: `api/client.test.ts`, `module.test.ts`, `pages.test.tsx`, `slice2.test.tsx`, `slice3.test.tsx`, `slice4.test.tsx`, `slice5.test.tsx`, `slice6.test.tsx` (`npx vitest --run src/modules/inventory`).
+Tests: `api/client.test.ts`, `module.test.ts`, `pages.test.tsx`, `slice2.test.tsx`, `slice3.test.tsx`, `slice4.test.tsx`, `slice5.test.tsx`, `slice6.test.tsx`, `slice7.test.tsx` (`npx vitest --run src/modules/inventory`).
 
 Needs: none. No npm dependencies were added. Product and legal-entity pickers (the forms take
 ids), the workspace tiles, the quarantine disposition choice and the offline count PWA are later

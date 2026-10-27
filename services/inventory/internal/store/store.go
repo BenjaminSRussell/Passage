@@ -93,6 +93,9 @@ type Store interface {
 	ApplyStatusStep(ctx context.Context, in StatusStepInput) (StatusChange, bool, error)
 	GetTransaction(ctx context.Context, id string) (TransactionRow, []StatusChange, error)
 	ListStatusChanges(ctx context.Context, f StatusChangeFilter) ([]StatusChange, error)
+	Reconcile(ctx context.Context, in ReconcileInput) (domain.Reconciliation, error)
+	GetReconciliation(ctx context.Context, id string) (domain.Reconciliation, error)
+	ListReconciliations(ctx context.Context, f ReconciliationFilter) ([]domain.Reconciliation, error)
 	Ping(ctx context.Context) error
 }
 

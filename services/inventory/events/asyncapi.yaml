@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: Passage Inventory events
-  version: 0.16.5
+  version: 0.16.7
   description: |
     Published through the transactional outbox in the same database transaction as the
     posting, relayed by Debezium. CloudEvents 1.0 envelope (tenantid, correlationid,
@@ -49,6 +49,11 @@ channels:
     messages:
       ownershipChanged:
         $ref: '#/components/messages/OwnershipChanged'
+  reconciliationDiff:
+    address: passage.inventory.reconciliation
+    messages:
+      reconciliationDiff:
+        $ref: '#/components/messages/ReconciliationDiff'
 operations:
   publishTransactionPosted:
     action: send
@@ -78,6 +83,10 @@ operations:
     action: send
     channel: { $ref: '#/channels/ownershipChanged' }
     summary: An OWNERSHIP_CHANGE journal posted, moving vendor-owned stock to the legal entity (FR-16.17); wave 18 settles it
+  publishReconciliationDiff:
+    action: send
+    channel: { $ref: '#/channels/reconciliationDiff' }
+    summary: A daily inventory-to-ledger run found a non-zero difference (FR-16.12, AC-16.9); a matched run publishes nothing, a same-day re-run that still differs publishes again for the same run id
 components:
   messages:
     TransactionPosted:
@@ -140,6 +149,12 @@ components:
       contentType: application/json
       payload:
         $ref: '#/components/schemas/OwnershipChangedData'
+    ReconciliationDiff:
+      name: dev.passage.inventory.reconciliation.diff.v1
+      x-passage-type: dev.passage.inventory.reconciliation.diff.v1
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/ReconciliationDiffData'
   schemas:
     OwnershipChangedData:
       type: object
@@ -284,3 +299,17 @@ components:
         reason: { type: string, enum: [QUALITY, DAMAGE, RECALL, LEGAL, OTHER] }
         state: { type: string, enum: [ACTIVE, RELEASED] }
         disposition: { type: [string, 'null'], enum: [RELEASE, SCRAP, RETURN, null] }
+    ReconciliationDiffData:
+      type: object
+      required: [account, currency, diff, inventoryValue, ledgerBalance, ledgerSource, legalEntityId, negativeRows, runDate, runId]
+      properties:
+        runId: { type: string, format: uuid, description: The run row; one per legal entity, account, currency and run date }
+        legalEntityId: { type: string, format: uuid }
+        account: { type: string, description: Inventory posting account code }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        runDate: { type: string, format: date }
+        inventoryValue: { type: string, description: Sum of on-hand posted value of the legal entity in the currency, rounded to the minor unit }
+        ledgerBalance: { type: string, description: Net (debit minus credit) of the inventory account, rounded to the minor unit }
+        diff: { type: string, description: Non-zero; inventoryValue minus ledgerBalance }
+        ledgerSource: { type: string, enum: [GL_JOURNALS, LEDGER_OVERRIDE], description: GL_JOURNALS is the GL of the posted inventory journals; LEDGER_OVERRIDE a balance read from the wave 11 ledger }
+        negativeRows: { type: integer, minimum: 0, description: On-hand rows of the legal entity with negative physical stock (FR-16.4) }
