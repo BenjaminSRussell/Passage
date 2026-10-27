@@ -60,17 +60,21 @@ func (f *fakeStore) DeletePlannedOrder(_ context.Context, _ string, expected int
 	return nil
 }
 
-func (f *fakeStore) UpsertForecastLines(_ context.Context, code string, expected int, spec *store.ModelSpec, _ []store.ForecastCellInput) (store.ForecastModel, error) {
+func (f *fakeStore) UpsertForecastLines(ctx context.Context, code string, expected int, spec *store.ModelSpec, _ []store.ForecastCellInput) (store.ForecastModel, error) {
 	if f.models == nil {
 		f.models = map[string]store.ForecastModel{}
 	}
 	m, ok := f.models[code]
 	if !ok {
-		m = store.ForecastModel{Code: code, ReductionPrinciple: domain.ReductionTransactions, ReductionPercent: "0"}
+		m = store.ForecastModel{Code: code, ReductionPrinciple: domain.ReductionTransactions, ReductionPercent: "0", Status: domain.ConsensusDraft}
 	}
 	if m.Version != expected {
 		return store.ForecastModel{}, httpx.NewProblem(http.StatusPreconditionFailed, store.CodeVersionConflict, "stale")
 	}
+	if !domain.ConsensusWritable(statusOf(m)) {
+		return store.ForecastModel{}, httpx.NewProblem(http.StatusConflict, store.CodeForecastLocked, "locked")
+	}
+	f.recordEditor(ctx, code)
 	m.Version++
 	if spec != nil {
 		m.ReductionPrinciple = spec.ReductionPrinciple

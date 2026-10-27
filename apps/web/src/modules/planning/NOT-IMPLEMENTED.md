@@ -1,6 +1,6 @@
-# NOT-IMPLEMENTED (PSG-22, planning web module, slices 1 to 5)
+# NOT-IMPLEMENTED (PSG-22, planning web module, slices 1 to 6)
 
-Screens of slices 1 to 5, all registered in `module.ts` and built from the
+Screens of slices 1 to 6, all registered in `module.ts` and built from the
 shell primitives (`src/shell/ui`) with CSS Modules:
 
 - `/planning`: master planning workspace with plan picker, summary tiles
@@ -16,7 +16,7 @@ shell primitives (`src/shell/ui`) with CSS Modules:
   selection, shows the 409 problem, and reloads the list. A firmed order's page
   shows the order it became.
 - `/planning/messages`: action and delay messages with an action filter
-  (slice 4 adds cancel and decrease).
+  (slice 4 adds cancel and decrease, slice 6 increase).
 - `/planning/net-requirements` (slice 5): the MD04-style view of one item
   (`?plan=` and `?item=`) in the current version: date, gross requirements,
   scheduled and planned receipts, projected balance (negative shown as a
@@ -33,7 +33,13 @@ shell primitives (`src/shell/ui`) with CSS Modules:
   days.
 - `/planning/forecast` (slice 2): forecast cells of a model (`?model=`, default
   `BASE`) with forecast, open sales and reduced forecast, and a form that adds
-  or changes a cell and the model's reduction principle under If-Match.
+  or changes a cell and the model's reduction principle under If-Match. Since
+  slice 6 the model card shows the consensus status, and a Consensus card
+  submits a draft for approval, then publishes it or returns it to draft
+  (under If-Match), with the publication summary on success and the
+  segregation-of-duties refusal (`PLAN-CONSENSUS-SOD`) explained. A submitted
+  or published model shows its cells read-only with a "Cells are locked"
+  notice instead of the cell form.
 - `/planning/calculators` (slice 3): one card per stateless calculator of the
   service (DDMRP buffer, quota arrangement, forecast consumption, supply
   schedule and inventory forecast, shelf-life check), each a form prefilled
@@ -50,14 +56,15 @@ Each list has loading, empty and error states; the plan in view is kept in the
 | Planned orders: firm (grouped) | built | Firm card on `/planning/planned-orders` (`Firming.tsx`). |
 | Planned orders: bulk approve, change and delete; keyboard range selection with `F` to firm | later slice of PSG-22 | Selection is by checkbox (or all open orders) and is used for firming only; maintenance stays one order at a time. |
 | Firming result report (PDF, email) | later slice of PSG-22 | The service renders no document yet; the card lists the orders created. |
-| Hide maintenance and firming controls from users without `planning.order.maintain` or `planning.order.firm` | later slice of PSG-22 | The shell exposes no per-duty check to pages yet; the service refuses the write with 403 and the card shows the problem. |
+| Hide maintenance, firming and consensus controls from users without `planning.order.maintain`, `planning.order.firm`, `planning.forecast.maintain` or `planning.forecast.approve` | later slice of PSG-22 | The shell exposes no per-duty check to pages yet; the service refuses the write with 403 and the card shows the problem. |
 | Net requirements (MD04) list of one item with drill to pegging | built | `/planning/net-requirements` (`NetRequirementsPage.tsx`); the drill goes through the item's planned orders. |
 | Net requirements: what-if simulate, messages column, virtualized 365 x 20 grid, site or version choice | later slice of PSG-22 | The service has no simulate action, stores no messages per day, and reads the current version only; the list is a plain table of days with movement (at most 500). |
 | Site work calendar read from the site (w6) instead of entered on the run form | handoff (PSG-6) | The service takes the calendar on the run until site calendars are readable. |
 | Action messages: apply action to the source order, dismiss | later slice of PSG-22 | Action endpoints not built. |
 | Forecast: list cells and edit one cell with source badge | built | `/planning/forecast` (`ForecastPage.tsx`); a row opens in the form. |
 | Forecast grid with in-place cell editing (item x period columns) | later slice of PSG-22 | Cells are a row list with a form, not a pivoted grid. |
-| Forecast: generate statistical, submit consensus, MAPE badge | later slice of PSG-22 | `POST /forecasts/{model}:generate` and the consensus workflow are not built in the planning service. |
+| Forecast: submit, publish and reject the consensus | built | Consensus card on `/planning/forecast` (`ForecastPage.tsx`, tests in `consensus.test.tsx`). Both buttons show for the model's status; the service decides who may press them (duty and segregation of duties). |
+| Forecast: generate statistical, MAPE badge | later slice of PSG-22 | `POST /forecasts/{model}:generate` is not built in the planning service. |
 | Coverage groups and item coverage setup | later slice of PSG-22 | Setup API not built; coverage travels on the run snapshot. |
 | Pegging tree lazy-loads children per node | later slice of PSG-22 | The API returns the tree to depth 20 in one response; it is rendered fully. |
 | Supply schedule and inventory forecast on entered figures | built | Calculator card on `/planning/calculators` (`calculators.tsx`). |

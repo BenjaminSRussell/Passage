@@ -40,6 +40,7 @@ const (
 	ActionShortage = "shortage"
 	ActionCancel   = "cancel"
 	ActionDecrease = "decrease"
+	ActionIncrease = "increase"
 
 	PrioritySales     = 1
 	PriorityForecast  = 2
@@ -158,6 +159,10 @@ type ledger struct {
 	// pending holds planned supply that lands after the walk's current day.
 	pending []layer
 	pegs    []Peg
+	// receipts are the item's existing supply sorted by date; increased maps
+	// a receipt ref to its Increase message in rs.res.Messages (FR-22.7).
+	receipts  []Requirement
+	increased map[string]int
 }
 
 // Run plans every item with lead times and margins in calendar days. Items are
@@ -330,7 +335,7 @@ func (rs *runState) plan(item *Item) error {
 		return receipts[a].Ref < receipts[b].Ref
 	})
 
-	L := &ledger{rs: rs, item: item}
+	L := &ledger{rs: rs, item: item, receipts: receipts}
 	if item.OnHand.IsPositive() {
 		L.addSupply(layer{ref: RefOnHand + ":" + item.ID, refType: RefOnHand, date: rs.today, qty: item.OnHand})
 	}
@@ -528,6 +533,50 @@ func (L *ledger) check(t int, rest, receipts []Requirement) error {
 	return nil
 }
 
+// increase raises Increase (FR-22.7) for a shortage at day t inside the
+// freeze fence, where no planned order may be created (BR-22.4). The latest
+// existing receipt dated on or before t is already fully pegged (FIFO), so
+// raising its quantity by the shortage covers the demand on time; its date
+// stays. Only a receipt inside the action fence is asked. Later shortages of
+// the same receipt add to its one Increase message. A shortage of safety
+// stock alone raises nothing: the buffer is not a customer need.
+func (L *ledger) increase(t int) {
+	need := decimal.Zero
+	demandRef := ""
+	for _, u := range L.unmet {
+		if u.refType == RefSafety {
+			continue
+		}
+		if demandRef == "" {
+			demandRef = u.ref
+		}
+		need = need.Add(u.qty)
+	}
+	if !need.IsPositive() {
+		return
+	}
+	var r *Requirement
+	for i := range L.receipts {
+		if L.receipts[i].Date > t {
+			break
+		}
+		r = &L.receipts[i]
+	}
+	if r == nil || !withinFence(L.rs.today, r.Date, L.item.ActionDays) {
+		return
+	}
+	if i, ok := L.increased[r.Ref]; ok {
+		m := &L.rs.res.Messages[i]
+		m.Qty = m.Qty.Add(need)
+		return
+	}
+	if L.increased == nil {
+		L.increased = map[string]int{}
+	}
+	L.increased[r.Ref] = len(L.rs.res.Messages)
+	L.rs.res.Messages = append(L.rs.res.Messages, Message{Action: ActionIncrease, ItemID: L.item.ID, SupplyRef: r.Ref, DemandRef: demandRef, SuggestedDate: r.Date, Qty: need})
+}
+
 func (L *ledger) unmetSafetyOnly() bool {
 	if len(L.unmet) == 0 {
 		return false
@@ -547,7 +596,9 @@ func (L *ledger) order(t int, need decimal.Decimal) error {
 	if frozen(today, t, it.FreezeDays) {
 		// BR-22.4: a requirement inside the freeze fence gets no planned
 		// order. What is still uncovered is reported as a shortage, so every
-		// demand is either pegged in full or has a message for the rest.
+		// demand is either pegged in full or has a message for the rest, and
+		// an existing receipt that could cover it is asked to increase.
+		L.increase(t)
 		for _, u := range L.unmet {
 			L.rs.res.Messages = append(L.rs.res.Messages, Message{Action: ActionShortage, ItemID: it.ID, DemandRef: u.ref, SuggestedDate: u.date, Qty: u.qty})
 		}

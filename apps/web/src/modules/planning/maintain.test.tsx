@@ -163,7 +163,7 @@ describe("Planned order maintenance", () => {
   });
 });
 
-const model: ForecastModel = { code: "BASE", version: 3, reductionPrinciple: "transactions", reductionPercent: "0.000000" };
+const model: ForecastModel = { code: "BASE", version: 3, reductionPrinciple: "transactions", reductionPercent: "0.000000", status: "draft" };
 const cell: ForecastLine = {
   itemId: "00000000-0000-0000-0000-0000000000c1",
   siteId: "00000000-0000-0000-0000-0000000000d1",

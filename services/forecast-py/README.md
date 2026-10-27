@@ -1,4 +1,4 @@
-# forecast-py (wave 22, PSG-22, slices 1 and 2)
+# forecast-py (wave 22, PSG-22, slices 1, 2 and 6)
 
 Statistical forecast baseline for master planning (PRD FR-22.9). Numeric work
 only, per the Python rules in the engineering conventions.
@@ -38,7 +38,10 @@ uvicorn forecast.api:app --port 8080
 `POST /v1/forecast/forecasts:generate` takes 1 to 1,000 series, each with a
 non-empty, non-negative, finite `history` (at most 600 periods), `model` (`auto` |
 `ets` | `croston` | `tsb` | `naive`), `horizonPeriods` (1 to 104) and
-`seasonLength` (1 to 24, default 12; 1 turns seasonality off). It returns the
+`seasonLength` (1 to 24, default 12; 1 turns seasonality off) and optionally
+`historyMonths` (12 to 120, the tenant parameter "forecast history months";
+only the last that many values are modelled and backtested, and a window under
+24 months falls back to naive with PLAN-0012). It returns the
 model used, `shortHistory`, the forecast per horizon period (flat for the level
 models, trend and season for ETS), `mape` and `wmape` (holdout backtest of the
 same path over the last min(12, n/4) periods; null when undefined) and warnings.
@@ -48,7 +51,7 @@ Any schema violation (negative or non-finite history, unknown model) is a 422.
 
 | HTTP | Meaning |
 |---|---|
-| 422 | Request fails schema validation: empty batch or history, negative or non-finite value, unknown model, horizon or season length out of range |
+| 422 | Request fails schema validation: empty batch or history, negative or non-finite value, unknown model, horizon, season length or history months out of range |
 | warning `PLAN-0012` | History shorter than 24 periods; naive model used |
 
 ## Wave reference

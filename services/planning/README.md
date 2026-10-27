@@ -1,4 +1,4 @@
-# planning (wave 22, PSG-22, slices 1 to 5)
+# planning (wave 22, PSG-22, slices 1 to 6)
 
 Master planning for Passage: nets demand against supply level by level through
 the BOM and writes planned purchase, production and transfer orders, each pegged
@@ -14,7 +14,11 @@ Decrease messages beyond the coverage time fence (FR-22.7), and the version
 purge (`PLANNING_MAX_VERSIONS`). Slice 5 adds the site work calendar on a run
 (FR-22.5, BR-22.8), the stored MD04-style net requirements view with
 `GET /net-requirements` (FR-22.12, AC-22.10), and the `plan.started.v1` and
-`message.raised.v1` events. What is not built yet is listed in
+`message.raised.v1` events. Slice 6 adds Increase messages for shortages inside
+the freeze fence (FR-22.7), the forecast consensus workflow with segregation of
+duties and `forecast.published.v1` (FR-22.9, 4.22.17), the dynamic-plan reach
+set (BR-22.6, domain only) and the forecast history window in `forecast-py`.
+What is not built yet is listed in
 [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
 
 ## Layout
@@ -22,15 +26,17 @@ purge (`PLANNING_MAX_VERSIONS`). Slice 5 adds the site work calendar on a run
 ```
 cmd/planning/          entrypoint: dbx.Connect -> dbx.Migrate (MIGRATE_ON_START=true) -> httpx.NewRouter -> register -> httpx.Serve
 internal/domain/       pure engine: low-level codes, lot sizing, netting, pegging, messages, delay propagation, plan hash,
-                       work calendar (calendar.go), net requirements view (netreq.go);
+                       work calendar (calendar.go), net requirements view (netreq.go), forecast consensus
+                       (consensus.go), dynamic-plan reach set (reach.go);
                        calculators: ddmrp.go, quota.go, strategy.go, shelflife.go, projection.go
 internal/store/        Postgres repository (pgx); a plan run is one transaction with its outbox events
 internal/api/          HTTP handlers under /v1/planning, RFC 9457 problems, /readyz with a database ping
-internal/events/       plan.started.v1, plan.completed.v1, message.raised.v1 and plannedorder.firmed.v1 types and payloads
+internal/events/       plan.started.v1, plan.completed.v1, message.raised.v1, plannedorder.firmed.v1 and forecast.published.v1 types and payloads
 migrations/            0001_init.sql (plan, plan_version, planned_order, pegging, action_message, outbox; RLS on all)
                        0002_forecast_and_maintenance.sql (planned_order version/vendor/deleted, forecast_model, forecast_line; RLS)
                        0003_firming.sql (firming_batch with RLS, firmed target on planned_order, cancel/decrease actions)
                        0004_net_requirements.sql (net_requirement per version, item and day; RLS)
+                       0005_increase_and_consensus.sql (increase action, forecast_model consensus status, forecast_line writer)
 api/openapi.yaml       OpenAPI 3.1 for every exposed endpoint (kept in step by TestOpenAPI_MatchesRoutes)
 events/asyncapi.yaml   AsyncAPI 3 for every event published
 charts/planning/       Helm chart (deployment, service, servicemonitor toggle)
@@ -86,6 +92,13 @@ Dockerfile             distroless static image, built from the repository root
   stays as it is (BR-22.2: PO-1's 400 surplus raises no Cancel). 0 disables
   them; the PRD default of 100 days is not applied because the fence does not
   yet limit netting (NOT-IMPLEMENTED.md).
+- Increase (FR-22.7): a shortage inside the freeze fence gets no planned order
+  (BR-22.4), so the latest existing receipt dated on or before the shortage,
+  inside the action fence, gets Increase by the shortage (qty = the shortfall
+  of non-safety demand, date = the receipt's own date). Later frozen shortages
+  of the same receipt add to its one message. The shortage message stays, so
+  the demand still has a message for its uncovered part. A receipt after the
+  shortage is not asked (it would still be late), nor is one for safety stock.
 - Time fences (BR-22.4), per item in days from the plan date: a requirement
   inside `freezeFenceDays` gets no planned order and what on-hand and
   receipts do not cover is a shortage message; Advance/Postpone only for
@@ -137,6 +150,28 @@ Decrease messages, and the version purge.
   the period, never below 0, BR-22.3), `transactions-dynamic` (sales above a
   period's forecast also consume the following periods). Until sales orders
   (w27) feed the planning service, `salesQty` per cell is entered with it.
+  Each written cell records its writer (`updated_by`).
+
+## Forecast consensus (slice 6, FR-22.9)
+
+A forecast model is `draft`, `submitted` or `published`; only a draft accepts
+cell writes (409 `PLAN-FORECAST-LOCKED` otherwise). Every step takes `If-Match`
+on the model's version (an existing model, so at least `"1"`) and bumps it, so
+a replayed step is answered 412 instead of being applied twice.
+
+- `:submit` (`planning.forecast.maintain`) locks a draft that has cells (422
+  `PLAN-CONSENSUS-EMPTY` without) and records the submitter.
+- `:publish` (`planning.forecast.approve`) marks every cell `consensus`, locks
+  the model for good and writes `forecast.published.v1` (model, version, item
+  series, periods, first and last day, submitter and approver) to the outbox
+  in the same transaction.
+- `:reject` (`planning.forecast.approve`) returns a submitted model to draft.
+- 4.22.17 segregation of duties: Approve forecast consensus conflicts with
+  Maintain forecasts on the same version, so publish and reject are refused
+  (403 `PLAN-CONSENSUS-SOD`) for the submitter, for anyone who wrote a cell of
+  the model, and for a request without a user (`X-Passage-User`); a submit
+  without a user is refused the same way. A wrong status is 409
+  `PLAN-CONSENSUS-STATE`.
 
 ## Firming (slice 4)
 
@@ -203,6 +238,9 @@ NOT-IMPLEMENTED.md):
 | GET | `/v1/planning/messages?planCode=&action=&limit=` | `planning.read` |
 | GET | `/v1/planning/forecasts/{modelCode}/lines?itemId=&siteId=&limit=` | `planning.read` |
 | PUT | `/v1/planning/forecasts/{modelCode}/lines` | `planning.forecast.maintain` (If-Match required) |
+| POST | `/v1/planning/forecasts/{modelCode}:submit` | `planning.forecast.maintain` (If-Match required) |
+| POST | `/v1/planning/forecasts/{modelCode}:publish` | `planning.forecast.approve` (If-Match required; not the submitter or a cell writer) |
+| POST | `/v1/planning/forecasts/{modelCode}:reject` | `planning.forecast.approve` (If-Match required; same rule) |
 | POST | `/v1/planning/ddmrp/buffers:evaluate` | `planning.read` (stateless calculator) |
 | POST | `/v1/planning/quota-arrangements:allocate` | `planning.read` (stateless calculator) |
 | POST | `/v1/planning/strategies:consume-forecast` | `planning.read` (stateless calculator) |
@@ -221,12 +259,16 @@ swaps the current pointer.
 | 400 | `COM-0001` | Request failed validation (field errors in `errors`) |
 | 401 | `AUTH-0001` | No or malformed tenant |
 | 403 | `AUTH-0003` | Missing duty |
+| 403 | `PLAN-CONSENSUS-SOD` | 4.22.17: the forecast consensus is decided by its submitter or a cell writer, or a consensus step has no user |
 | 404 | `PLAN-VERSION-NOT-FOUND` | No such version for the plan |
 | 404 | `PLAN-ORDER-NOT-FOUND` | No such planned order (on firming: an id unknown for the tenant) |
 | 404 | `PLAN-FORECAST-NOT-FOUND` | No such forecast model (422 when a run names it) |
 | 409 | `PLAN-0001` | `PLAN_ALREADY_RUNNING`: a run of the plan is in progress |
 | 409 | `PLAN-0002` | BR-22.9: a planned order to firm is already firmed |
 | 409 | `PLAN-ORDER-NOT-EDITABLE` | The planned order is firmed, deleted or not in the current version |
+| 409 | `PLAN-FORECAST-LOCKED` | The forecast model is submitted or published; its cells are locked |
+| 409 | `PLAN-CONSENSUS-STATE` | The consensus step is not allowed from the model's status |
+| 422 | `PLAN-CONSENSUS-EMPTY` | A forecast model without cells cannot be submitted |
 | 412 | `conflict_version` | If-Match is not the current version of the order or forecast model |
 | 422 | `PLAN-ORDER-INVALID` | Order date after delivery date, or a vendor on a non-purchase order |
 | 428 | `precondition_required` | If-Match missing on a maintenance write |

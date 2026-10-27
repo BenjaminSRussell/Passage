@@ -68,3 +68,33 @@ def test_generate_rejects_invalid_series(series):
 
 def test_generate_rejects_empty_batch():
     assert client.post("/v1/forecast/forecasts:generate", json={"series": []}).status_code == 422
+
+
+def test_history_months_models_only_the_window():
+    # Two histories that differ only before the 24-month window forecast alike;
+    # without the window the old level shows through.
+    tail = [float(10 + (i % 3)) for i in range(24)]
+    high = {"itemId": "I-1", "siteId": "S-1", "history": [500.0] * 24 + tail, "historyMonths": 24, "horizonPeriods": 2}
+    low = {**high, "itemId": "I-2", "history": [1.0] * 24 + tail}
+    unwindowed = {k: v for k, v in high.items() if k != "historyMonths"} | {"itemId": "I-3"}
+    r = client.post("/v1/forecast/forecasts:generate", json={"series": [high, low, unwindowed]})
+    assert r.status_code == 200
+    res = r.json()["results"]
+    assert res[0]["forecast"] == res[1]["forecast"]
+    assert res[0]["shortHistory"] is False and res[0]["warnings"] == []
+    assert res[2]["forecast"] != res[0]["forecast"]
+
+
+def test_history_window_below_the_model_minimum_falls_back_to_naive():
+    # A 12-month window leaves less than the 24 months ETS needs (PLAN-0012).
+    body = {"series": [{"itemId": "I-1", "siteId": "S-1", "history": [10.0] * 36, "historyMonths": 12, "horizonPeriods": 2}]}
+    res = client.post("/v1/forecast/forecasts:generate", json=body).json()["results"][0]
+    assert res["model"] == "naive"
+    assert res["shortHistory"] is True
+    assert res["warnings"] == ["PLAN-0012"]
+
+
+@pytest.mark.parametrize("months", [6, 11, 121])
+def test_history_months_out_of_range_is_rejected(months):
+    body = {"series": [{"itemId": "I-1", "siteId": "S-1", "history": [10.0] * 30, "historyMonths": months}]}
+    assert client.post("/v1/forecast/forecasts:generate", json=body).status_code == 422

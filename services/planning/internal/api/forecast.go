@@ -196,3 +196,67 @@ func (a *API) getForecastLines(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("ETag", etagOf(m.Version))
 	httpx.JSON(w, http.StatusOK, map[string]any{"model": m, "items": lines})
 }
+
+// submitForecast submits a draft model for consensus approval (FR-22.9): its
+// cells lock until an approver publishes or rejects it. If-Match is required,
+// so a replay of the same submit is answered 412 rather than applied twice.
+func (a *API) submitForecast(w http.ResponseWriter, r *http.Request) {
+	code, expected, ok := consensusRequest(w, r)
+	if !ok {
+		return
+	}
+	m, err := a.store.SubmitForecastConsensus(r.Context(), code, expected)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	w.Header().Set("ETag", etagOf(m.Version))
+	httpx.JSON(w, http.StatusOK, map[string]any{"model": m})
+}
+
+// publishForecast approves a submitted model and publishes it as
+// forecast.published.v1. The approver must not have submitted or edited it.
+func (a *API) publishForecast(w http.ResponseWriter, r *http.Request) {
+	a.decideForecast(w, r, true)
+}
+
+// rejectForecast returns a submitted model to draft so planners can change it.
+func (a *API) rejectForecast(w http.ResponseWriter, r *http.Request) {
+	a.decideForecast(w, r, false)
+}
+
+func (a *API) decideForecast(w http.ResponseWriter, r *http.Request, approve bool) {
+	code, expected, ok := consensusRequest(w, r)
+	if !ok {
+		return
+	}
+	m, pub, err := a.store.DecideForecastConsensus(r.Context(), code, expected, approve)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	w.Header().Set("ETag", etagOf(m.Version))
+	body := map[string]any{"model": m}
+	if pub != nil {
+		body["publication"] = pub
+	}
+	httpx.JSON(w, http.StatusOK, body)
+}
+
+// consensusRequest checks the tenant, the model code and If-Match (an
+// existing model's version, so at least 1).
+func consensusRequest(w http.ResponseWriter, r *http.Request) (string, int, bool) {
+	if !validTenant(w, r) {
+		return "", 0, false
+	}
+	code := chi.URLParam(r, "modelCode")
+	if !planCodePattern.MatchString(code) {
+		validationFailed(w, r, map[string]string{"modelCode": codeMessage})
+		return "", 0, false
+	}
+	expected, ok := ifMatch(w, r, 1)
+	if !ok {
+		return "", 0, false
+	}
+	return code, expected, true
+}

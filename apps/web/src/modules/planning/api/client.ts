@@ -5,7 +5,7 @@ export const PLANNING_API = "/api/v1/planning";
 
 export const OrderType = z.enum(["purchase", "production", "transfer"]);
 export const OrderStatus = z.enum(["unprocessed", "approved", "firmed", "deleted"]);
-export const MessageAction = z.enum(["delay", "postpone", "advance", "shortage", "cancel", "decrease"]);
+export const MessageAction = z.enum(["delay", "postpone", "advance", "shortage", "cancel", "decrease", "increase"]);
 export const TargetType = z.enum(["purchase-order", "production-order", "transfer-order"]);
 
 export const PlannedOrder = z.object({
@@ -118,12 +118,22 @@ export type NetRequirement = z.infer<typeof NetRequirement>;
 export const ReductionPrinciple = z.enum(["none", "percent", "transactions", "transactions-dynamic"]);
 export type ReductionPrinciple = z.infer<typeof ReductionPrinciple>;
 
+/** Forecast consensus status (FR-22.9): only a draft accepts cell writes. */
+export const ConsensusStatus = z.enum(["draft", "submitted", "published"]);
+export type ConsensusStatus = z.infer<typeof ConsensusStatus>;
+
 export const ForecastModel = z.object({
   code: z.string(),
   /** The model's ETag; a model that does not exist yet is version 0. */
   version: z.number().int().min(0),
   reductionPrinciple: ReductionPrinciple,
   reductionPercent: z.string(),
+  status: ConsensusStatus,
+  /** Who submitted the consensus; null while the model is a draft. */
+  submittedBy: z.string().nullish(),
+  /** Who last published or rejected it. */
+  decidedBy: z.string().nullish(),
+  publishedAt: z.string().nullish(),
 });
 export type ForecastModel = z.infer<typeof ForecastModel>;
 
@@ -367,4 +377,33 @@ export async function putForecastLines(modelCode: string, version: number, body:
     },
   );
   return out.model;
+}
+
+export const ForecastPublication = z.object({
+  items: z.number().int(),
+  horizonPeriods: z.number().int(),
+  periodFrom: z.string(),
+  periodTo: z.string(),
+});
+export type ForecastPublication = z.infer<typeof ForecastPublication>;
+
+const ConsensusResult = z.object({ model: ForecastModel, publication: ForecastPublication.nullish() });
+export type ConsensusResult = z.infer<typeof ConsensusResult>;
+
+/** The consensus steps of FR-22.9 and the route of each. */
+export type ConsensusStep = "submit" | "publish" | "reject";
+
+/**
+ * Moves a forecast model through the consensus workflow under If-Match on its
+ * version. `submit` (Maintain forecasts) locks a draft for approval;
+ * `publish` and `reject` (Approve forecast consensus) decide it. 403
+ * `PLAN-CONSENSUS-SOD` means the user submitted or edited the model and must
+ * leave the decision to someone else; 409 `PLAN-CONSENSUS-STATE` that the
+ * model is not in the status the step needs.
+ */
+export async function forecastConsensus(modelCode: string, step: ConsensusStep, version: number): Promise<ConsensusResult> {
+  return request(`/forecasts/${encodeURIComponent(modelCode)}:${step}`, ConsensusResult, {
+    method: "POST",
+    headers: { "If-Match": ifMatch(version) },
+  });
 }

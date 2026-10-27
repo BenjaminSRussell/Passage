@@ -59,6 +59,8 @@ type Store interface {
 	UpsertForecastLines(ctx context.Context, modelCode string, expectedVersion int, spec *ModelSpec, cells []ForecastCellInput) (ForecastModel, error)
 	ListForecastLines(ctx context.Context, modelCode, itemID, siteID string, limit int) (ForecastModel, []ForecastLine, error)
 	ForecastDemand(ctx context.Context, modelCode, siteID string, from time.Time) ([]ForecastDemandLine, error)
+	SubmitForecastConsensus(ctx context.Context, modelCode string, expectedVersion int) (ForecastModel, error)
+	DecideForecastConsensus(ctx context.Context, modelCode string, expectedVersion int, approve bool) (ForecastModel, *ForecastPublication, error)
 	ListNetRequirements(ctx context.Context, planCode, itemID string, limit int) ([]NetRequirement, error)
 	Ping(ctx context.Context) error
 }

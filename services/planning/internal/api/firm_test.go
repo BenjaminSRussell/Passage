@@ -136,13 +136,13 @@ func TestFirm_FirmsThenReplays(t *testing.T) {
 	}
 }
 
-func TestMessages_AcceptsCancelAndDecrease(t *testing.T) {
-	for _, action := range []string{"cancel", "decrease"} {
+func TestMessages_AcceptsCancelDecreaseAndIncrease(t *testing.T) {
+	for _, action := range []string{"cancel", "decrease", "increase"} {
 		if rec := do(t, &fakeStore{}, http.MethodGet, "/v1/planning/messages?planCode=MAIN&action="+action, "", dutyRead, true, ""); rec.Code != http.StatusOK {
 			t.Fatalf("action %s: status %d", action, rec.Code)
 		}
 	}
-	if rec := do(t, &fakeStore{}, http.MethodGet, "/v1/planning/messages?planCode=MAIN&action=increase", "", dutyRead, true, ""); rec.Code != http.StatusBadRequest {
+	if rec := do(t, &fakeStore{}, http.MethodGet, "/v1/planning/messages?planCode=MAIN&action=derived", "", dutyRead, true, ""); rec.Code != http.StatusBadRequest {
 		t.Fatalf("unknown action: status %d, want 400", rec.Code)
 	}
 }

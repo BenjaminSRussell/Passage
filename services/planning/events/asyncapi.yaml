@@ -1,8 +1,8 @@
 asyncapi: 3.0.0
 info:
   title: Passage Planning events
-  version: 0.3.0
-  description: CloudEvents 1.0 with Passage extensions (tenantid, correlationid, causationid, actor). Published through the outbox in the same transaction as the plan version change or the firming.
+  version: 0.4.0
+  description: CloudEvents 1.0 with Passage extensions (tenantid, correlationid, causationid, actor). Published through the outbox in the same transaction as the plan version change, the firming or the forecast publication.
 defaultContentType: application/cloudevents+json
 channels:
   plan:
@@ -19,6 +19,11 @@ channels:
     messages:
       plannedOrderFirmedV1:
         $ref: '#/components/messages/PlannedOrderFirmedV1'
+  forecast:
+    address: passage.planning.forecast
+    messages:
+      forecastPublishedV1:
+        $ref: '#/components/messages/ForecastPublishedV1'
 operations:
   publishPlanStarted:
     action: send
@@ -46,6 +51,13 @@ operations:
     channel:
       $ref: '#/channels/plannedOrderFirmed'
     summary: A planned order was firmed (FR-22.10). One event per planned order; the owning context creates the target order with target_id, and orders that share a target_id are the lines of one purchase order.
+  publishForecastPublished:
+    action: send
+    channel:
+      $ref: '#/channels/forecast'
+    messages:
+      - $ref: '#/channels/forecast/messages/forecastPublishedV1'
+    summary: An approver published a submitted forecast consensus (FR-22.9). Written in the publishing transaction; the model's cells are locked from then on.
 components:
   messages:
     PlanStartedV1:
@@ -68,6 +80,11 @@ components:
       contentType: application/json
       payload:
         $ref: '#/components/schemas/PlannedOrderFirmedData'
+    ForecastPublishedV1:
+      name: dev.passage.planning.forecast.published.v1
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/ForecastPublishedData'
   schemas:
     PlanStartedData:
       type: object
@@ -90,7 +107,7 @@ components:
         plan_code: {type: string}
         version_id: {type: string, format: uuid}
         site_id: {type: string, format: uuid}
-        action: {type: string, enum: [delay, postpone, advance, shortage, cancel, decrease]}
+        action: {type: string, enum: [delay, postpone, advance, shortage, cancel, decrease, increase]}
         item_id: {type: string, format: uuid}
         supply_ref: {type: string, description: Planned order number or receipt ref; empty for a shortage}
         demand_ref: {type: string, description: 'Demand the message is about (sales line, forecast, bom line); empty when none'}
@@ -132,3 +149,16 @@ components:
         qty: {type: string, description: Decimal string in the inventory unit}
         order_date: {type: string, format: date}
         delivery_date: {type: string, format: date}
+    ForecastPublishedData:
+      type: object
+      required: [model_id, model_code, version, items, horizon_periods, period_from, period_to, submitted_by, approved_by]
+      properties:
+        model_id: {type: string, format: uuid}
+        model_code: {type: string}
+        version: {type: integer, description: The model's version (ETag) after publishing}
+        items: {type: integer, description: Item and site series in the published forecast}
+        horizon_periods: {type: integer, description: Distinct periods of the published cells}
+        period_from: {type: string, format: date, description: First period start}
+        period_to: {type: string, format: date, description: Last period end}
+        submitted_by: {type: string, description: User who submitted the consensus}
+        approved_by: {type: string, description: User who approved it; never the submitter or a cell writer}

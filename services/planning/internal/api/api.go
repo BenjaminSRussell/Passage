@@ -32,6 +32,7 @@ const (
 	dutyMaintainOrders   = "planning.order.maintain"    // Maintain planned orders
 	dutyMaintainForecast = "planning.forecast.maintain" // Maintain forecasts
 	dutyFirmOrders       = "planning.order.firm"        // Firm planned orders
+	dutyApproveForecast  = "planning.forecast.approve"  // Approve forecast consensus
 
 	idempotencyKey = "Idempotency-Key"
 	dateLayout     = "2006-01-02"
@@ -83,6 +84,9 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/net-requirements", a.listNetRequirements)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/forecasts/{modelCode}/lines", a.getForecastLines)
 	r.With(authz.RequireDuty(dutyMaintainForecast)).Put("/v1/planning/forecasts/{modelCode}/lines", a.putForecastLines)
+	r.With(authz.RequireDuty(dutyMaintainForecast)).Post("/v1/planning/forecasts/{modelCode}:submit", a.submitForecast)
+	r.With(authz.RequireDuty(dutyApproveForecast)).Post("/v1/planning/forecasts/{modelCode}:publish", a.publishForecast)
+	r.With(authz.RequireDuty(dutyApproveForecast)).Post("/v1/planning/forecasts/{modelCode}:reject", a.rejectForecast)
 	a.registerCalculators(r)
 }
 
@@ -634,9 +638,9 @@ func (a *API) listMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch action {
-	case "", domain.ActionDelay, domain.ActionPostpone, domain.ActionAdvance, domain.ActionShortage, domain.ActionCancel, domain.ActionDecrease:
+	case "", domain.ActionDelay, domain.ActionPostpone, domain.ActionAdvance, domain.ActionShortage, domain.ActionCancel, domain.ActionDecrease, domain.ActionIncrease:
 	default:
-		validationFailed(w, r, map[string]string{"action": "must be delay, postpone, advance, shortage, cancel or decrease"})
+		validationFailed(w, r, map[string]string{"action": "must be delay, postpone, advance, shortage, cancel, decrease or increase"})
 		return
 	}
 	limit, ok := limitParam(w, r)

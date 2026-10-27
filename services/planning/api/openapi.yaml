@@ -1,14 +1,15 @@
 openapi: 3.1.0
 info:
   title: Passage Planning API
-  version: 0.2.0
+  version: 0.3.0
   description: |
-    Master planning (wave 22, slices 1 to 5). Covers static plan runs with time
+    Master planning (wave 22, slices 1 to 6). Covers static plan runs with time
     fences, forecast demand and a site work calendar, run history and version
     status, planned orders with their maintenance (change, approve, delete
     under If-Match) and firming, explain-tree pegging, action/delay messages,
-    the MD04-style net requirements view, forecast cells with reduction, and
-    stateless calculators. Every planned order is pegged to the demand it
+    the MD04-style net requirements view, forecast cells with reduction and
+    the forecast consensus workflow (submit, publish, reject), and stateless
+    calculators. Every planned order is pegged to the demand it
     serves. Browser clients call these paths under /api (the web BFF strips the
     prefix). Not yet exposed (see NOT-IMPLEMENTED.md): coverage groups,
     statistical forecast generation, simulation plans.
@@ -290,7 +291,7 @@ paths:
           schema: {type: string}
         - name: action
           in: query
-          schema: {type: string, enum: [delay, postpone, advance, shortage, cancel, decrease]}
+          schema: {type: string, enum: [delay, postpone, advance, shortage, cancel, decrease, increase]}
         - $ref: '#/components/parameters/Limit'
       responses:
         '200':
@@ -396,6 +397,83 @@ paths:
                   updated: {type: integer}
         '400': {$ref: '#/components/responses/Problem'}
         '403': {$ref: '#/components/responses/Problem'}
+        '409': {description: 'PLAN-FORECAST-LOCKED: the model is submitted or published', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '412': {$ref: '#/components/responses/Problem'}
+        '428': {$ref: '#/components/responses/Problem'}
+  /v1/planning/forecasts/{modelCode}:submit:
+    post:
+      operationId: submitForecastConsensus
+      summary: Submit a draft forecast model for consensus approval (FR-22.9); its cells lock
+      description: |
+        Records the signed-in user as submitter. The model must exist and have
+        cells. If-Match is required, so a replayed submit is answered 412.
+      x-passage-duty: planning.forecast.maintain
+      parameters:
+        - $ref: '#/components/parameters/ModelCode'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Submitted; the ETag header carries the new model version
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ConsensusResult'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {description: 'Missing duty, or PLAN-CONSENSUS-SOD: no user identity', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {description: 'PLAN-CONSENSUS-STATE: the model is not a draft', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '412': {$ref: '#/components/responses/Problem'}
+        '422': {description: 'PLAN-CONSENSUS-EMPTY: the model has no cells', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '428': {$ref: '#/components/responses/Problem'}
+  /v1/planning/forecasts/{modelCode}:publish:
+    post:
+      operationId: publishForecastConsensus
+      summary: Approve and publish a submitted forecast model (FR-22.9)
+      description: |
+        The approver must be neither the submitter nor a writer of any cell of
+        the model (4.22.17). Marks the cells consensus, locks the model for good
+        and writes dev.passage.planning.forecast.published.v1 in the same
+        transaction.
+      x-passage-duty: planning.forecast.approve
+      parameters:
+        - $ref: '#/components/parameters/ModelCode'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Published; the ETag header carries the new model version
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ConsensusResult'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {description: 'Missing duty, or PLAN-CONSENSUS-SOD: the approver submitted or edited the model', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {description: 'PLAN-CONSENSUS-STATE: the model is not submitted', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '412': {$ref: '#/components/responses/Problem'}
+        '428': {$ref: '#/components/responses/Problem'}
+  /v1/planning/forecasts/{modelCode}:reject:
+    post:
+      operationId: rejectForecastConsensus
+      summary: Return a submitted forecast model to draft (FR-22.9)
+      description: Same segregation of duties as publish. The cells can be written again.
+      x-passage-duty: planning.forecast.approve
+      parameters:
+        - $ref: '#/components/parameters/ModelCode'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Rejected; the ETag header carries the new model version
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ConsensusResult'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {description: 'Missing duty, or PLAN-CONSENSUS-SOD', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {description: 'PLAN-CONSENSUS-STATE: the model is not submitted', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
         '412': {$ref: '#/components/responses/Problem'}
         '428': {$ref: '#/components/responses/Problem'}
   /v1/planning/ddmrp/buffers:evaluate:
@@ -931,12 +1009,30 @@ components:
         status: {type: string, enum: [approved], description: Approve the order; firming is a separate command}
     ForecastModel:
       type: object
-      required: [code, version, reductionPrinciple, reductionPercent]
+      required: [code, version, reductionPrinciple, reductionPercent, status, submittedBy, decidedBy, publishedAt]
       properties:
         code: {type: string}
         version: {type: integer, minimum: 0}
         reductionPrinciple: {type: string, enum: [none, percent, transactions, transactions-dynamic]}
         reductionPercent: {type: string, description: Decimal string, used by principle percent}
+        status: {type: string, enum: [draft, submitted, published], description: 'FR-22.9 consensus status; only a draft accepts cell writes'}
+        submittedBy: {type: [string, 'null'], description: User who submitted the model; null in draft}
+        decidedBy: {type: [string, 'null'], description: User who last published or rejected the model}
+        publishedAt: {type: [string, 'null'], format: date-time}
+    ConsensusResult:
+      type: object
+      required: [model]
+      properties:
+        model: {$ref: '#/components/schemas/ForecastModel'}
+        publication:
+          type: object
+          description: Present on publish only
+          required: [items, horizonPeriods, periodFrom, periodTo]
+          properties:
+            items: {type: integer, description: Item and site series}
+            horizonPeriods: {type: integer, description: Distinct periods}
+            periodFrom: {type: string, format: date}
+            periodTo: {type: string, format: date}
     ForecastLine:
       type: object
       required: [itemId, siteId, periodStart, periodEnd, source, qty, salesQty, reducedQty]
@@ -1011,11 +1107,11 @@ components:
     Message:
       type: object
       properties:
-        action: {type: string, enum: [delay, postpone, advance, shortage, cancel, decrease]}
+        action: {type: string, enum: [delay, postpone, advance, shortage, cancel, decrease, increase]}
         itemId: {type: string, format: uuid}
         supplyRef: {type: string, description: Planned order number or receipt ref; empty for a shortage}
         demandRef: {type: string, description: Demand the message is about; empty when none}
-        suggestedDate: {type: string, format: date, description: 'delay: expected date; postpone/advance: suggested receipt date; shortage: demand date; cancel/decrease: receipt date'}
+        suggestedDate: {type: string, format: date, description: 'delay: expected date; postpone/advance: suggested receipt date; shortage: demand date; cancel/decrease/increase: receipt date'}
         delayDays: {type: integer}
         qty: {type: string}
     Problem:

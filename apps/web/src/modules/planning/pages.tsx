@@ -43,7 +43,7 @@ export const PAGE_LIMIT = 500;
 const dash = "—";
 
 const ORDER_STATUSES = ["unprocessed", "approved", "firmed"] as const;
-const MESSAGE_ACTIONS = ["delay", "postpone", "advance", "shortage", "cancel", "decrease"] as const;
+const MESSAGE_ACTIONS = ["delay", "postpone", "advance", "shortage", "cancel", "decrease", "increase"] as const;
 
 const orderTypeLabel: Record<PlannedOrder["orderType"], string> = {
   purchase: "Purchase",
@@ -58,6 +58,7 @@ const actionTone: Record<Message["action"], BadgeTone> = {
   postpone: "info",
   cancel: "warning",
   decrease: "warning",
+  increase: "warning",
 };
 
 const targetLabel: Record<NonNullable<PlannedOrder["firmedTargetType"]>, string> = {
@@ -498,7 +499,7 @@ export function MessagesPage() {
   };
   return (
     <div className={styles.stack}>
-      <PageHeader title="Action messages" description={`Delays, early and late receipts, shortages and supply to cancel or decrease in the current version of plan ${plan}.`} />
+      <PageHeader title="Action messages" description={`Delays, early and late receipts, shortages and supply to cancel, decrease or increase in the current version of plan ${plan}.`} />
       <PlanPicker>
         <div className={styles.toolbarField}>
           <FormField id="planning-action" label="Action">

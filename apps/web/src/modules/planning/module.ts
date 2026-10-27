@@ -10,7 +10,7 @@ const planning: PassageModule = {
   id: "planning",
   title: "Master planning",
   description:
-    "Run the plan in working days, review, change, approve and firm planned orders, read messages and net requirements, explain any planned order back to its demand, and maintain the forecast.",
+    "Run the plan in working days, review, change, approve and firm planned orders, read messages and net requirements, explain any planned order back to its demand, and maintain the forecast and its consensus.",
   routes: [
     { path: "/planning", element: createElement(PlanningHome) },
     { path: "/planning/planned-orders", element: createElement(PlannedOrdersPage) },

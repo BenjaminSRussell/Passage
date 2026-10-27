@@ -26,6 +26,9 @@ func TestEventTypesFollowTheNamingRule(t *testing.T) {
 	if MessageRaised != "dev.passage.planning.message.raised.v1" {
 		t.Errorf("MessageRaised = %s", MessageRaised)
 	}
+	if ForecastPublished != "dev.passage.planning.forecast.published.v1" {
+		t.Errorf("ForecastPublished = %s", ForecastPublished)
+	}
 }
 
 // TestAsyncAPIDeclaresEveryEvent keeps events/asyncapi.yaml and All() in step.

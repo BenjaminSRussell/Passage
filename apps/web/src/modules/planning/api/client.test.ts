@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   deletePlannedOrder,
+  forecastConsensus,
   getForecastLines,
   getPegging,
   getPlannedOrder,
@@ -186,7 +187,7 @@ describe("planning api client", () => {
   });
 
   it("reads and writes forecast cells on the model path", async () => {
-    const model = { code: "BASE", version: 2, reductionPrinciple: "transactions", reductionPercent: "0" };
+    const model = { code: "BASE", version: 2, reductionPrinciple: "transactions", reductionPercent: "0", status: "draft" };
     const read = mockFetch(() => jsonResponse(200, { model, items: [] }));
     vi.stubGlobal("fetch", read);
     expect((await getForecastLines("BASE", { siteId: "s-1", limit: 50 })).model.version).toBe(2);
@@ -200,5 +201,24 @@ describe("planning api client", () => {
     expect(init.method).toBe("PUT");
     expect((init.headers as Record<string, string>)["If-Match"]).toBe('"2"');
     expect(JSON.parse(init.body as string)).toEqual(body);
+  });
+
+  it("posts each consensus step to its route under If-Match", async () => {
+    const model = { code: "BASE", version: 5, reductionPrinciple: "none", reductionPercent: "0", status: "published", submittedBy: "alice", decidedBy: "bob" };
+    const publication = { items: 2, horizonPeriods: 6, periodFrom: "2026-11-02", periodTo: "2027-04-30" };
+    const post = mockFetch(() => jsonResponse(200, { model, publication }));
+    vi.stubGlobal("fetch", post);
+    const out = await forecastConsensus("BASE", "publish", 4);
+    expect(post.mock.calls[0][0]).toBe("/api/v1/planning/forecasts/BASE:publish");
+    const init = post.mock.calls[0][1] as RequestInit;
+    expect(init.method).toBe("POST");
+    expect((init.headers as Record<string, string>)["If-Match"]).toBe('"4"');
+    expect(out.model.status).toBe("published");
+    expect(out.publication?.horizonPeriods).toBe(6);
+
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(403, { code: "PLAN-CONSENSUS-SOD", detail: "decided by someone else" })));
+    const err = await forecastConsensus("BASE", "submit", 3).catch((e: unknown) => e);
+    expect((err as PlanningApiError).status).toBe(403);
+    expect((err as PlanningApiError).code).toBe("PLAN-CONSENSUS-SOD");
   });
 });

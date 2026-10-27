@@ -21,9 +21,29 @@ var PlanStarted = events.Type(Context, "plan", "started", 1)
 // (FR-22.7), in the run's transaction.
 var MessageRaised = events.Type(Context, "message", "raised", 1)
 
+// ForecastPublished is published when an approver publishes a submitted
+// forecast consensus (FR-22.9), in the publishing transaction.
+var ForecastPublished = events.Type(Context, "forecast", "published", 1)
+
 // All lists the event types this service publishes.
 func All() []string {
-	return []string{PlanStarted, PlanCompleted, PlannedOrderFirmed, MessageRaised}
+	return []string{PlanStarted, PlanCompleted, PlannedOrderFirmed, MessageRaised, ForecastPublished}
+}
+
+// ForecastPublishedData is the data member of forecast.published.v1. Version
+// is the model's ETag after publishing; Items counts the item and site series
+// and HorizonPeriods the distinct periods of the published cells, which run
+// from PeriodFrom to PeriodTo.
+type ForecastPublishedData struct {
+	ModelID        string `json:"model_id"`
+	ModelCode      string `json:"model_code"`
+	Version        int    `json:"version"`
+	Items          int    `json:"items"`
+	HorizonPeriods int    `json:"horizon_periods"`
+	PeriodFrom     string `json:"period_from"`
+	PeriodTo       string `json:"period_to"`
+	SubmittedBy    string `json:"submitted_by"`
+	ApprovedBy     string `json:"approved_by"`
 }
 
 // PlanStartedData is the data member of plan.started.v1. Kind is static until

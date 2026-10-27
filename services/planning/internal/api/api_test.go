@@ -47,6 +47,9 @@ type fakeStore struct {
 	lastFirm store.FirmRequest
 	// lastLimit is the page size the last list read received.
 	lastLimit int
+	// editors are the users who wrote cells of each forecast model
+	// (consensus_test.go).
+	editors map[string][]string
 }
 
 func (f *fakeStore) RunPlan(_ context.Context, req store.RunRequest) (store.Version, bool, error) {

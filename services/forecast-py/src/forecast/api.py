@@ -24,6 +24,10 @@ class Series(BaseModel):
     horizonPeriods: int = Field(default=12, ge=1, le=104)
     # Periods per season for the seasonal ETS candidate; 1 turns seasonality off.
     seasonLength: int = Field(default=models.DEFAULT_SEASON, ge=1, le=24)
+    # Tenant parameter "forecast history months" (4.22.13, 12 to 120; the
+    # planning service sends its default of 36). Only the last historyMonths
+    # values of the monthly history are modelled; omitted, all of it is.
+    historyMonths: int | None = Field(default=None, ge=12, le=120)
 
 
 class GenerateRequest(BaseModel):
@@ -60,9 +64,10 @@ def readyz() -> dict[str, str]:
 def generate(req: GenerateRequest) -> GenerateResponse:
     results: list[SeriesResult] = []
     for s in req.series:
-        fc = models.select_model(s.history, s.model, horizon=s.horizonPeriods, season=s.seasonLength)
+        history = s.history if s.historyMonths is None else s.history[-s.historyMonths :]
+        fc = models.select_model(history, s.model, horizon=s.horizonPeriods, season=s.seasonLength)
         warnings = ["PLAN-0012"] if fc.short_history else []
-        mape, wmape = models.backtest(s.history, fc.model, season=s.seasonLength)
+        mape, wmape = models.backtest(history, fc.model, season=s.seasonLength)
         results.append(
             SeriesResult(
                 itemId=s.itemId,

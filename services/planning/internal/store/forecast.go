@@ -16,15 +16,37 @@ import (
 	"github.com/BenjaminSRussell/passage/services/planning/internal/domain"
 )
 
-// ForecastModel is one forecast model and its reduction setup (FR-22.8).
-// Version is the ETag: every write to the model or its lines bumps it.
+// ForecastModel is one forecast model, its reduction setup (FR-22.8) and its
+// consensus status (FR-22.9). Version is the ETag: every write to the model,
+// its lines or its status bumps it. Only a draft accepts cell writes.
 type ForecastModel struct {
 	id                 string
-	Code               string `json:"code"`
-	Version            int    `json:"version"`
-	ReductionPrinciple string `json:"reductionPrinciple"`
-	ReductionPercent   string `json:"reductionPercent"`
+	Code               string  `json:"code"`
+	Version            int     `json:"version"`
+	ReductionPrinciple string  `json:"reductionPrinciple"`
+	ReductionPercent   string  `json:"reductionPercent"`
+	Status             string  `json:"status"`
+	SubmittedBy        *string `json:"submittedBy"`
+	DecidedBy          *string `json:"decidedBy"`
+	PublishedAt        *string `json:"publishedAt"`
 }
+
+// ForecastPublication summarises a published consensus: the item and site
+// series, the distinct periods and the first and last day they span.
+type ForecastPublication struct {
+	Items          int    `json:"items"`
+	HorizonPeriods int    `json:"horizonPeriods"`
+	PeriodFrom     string `json:"periodFrom"`
+	PeriodTo       string `json:"periodTo"`
+}
+
+// Problem codes of the consensus workflow (FR-22.9).
+const (
+	CodeForecastLocked = "PLAN-FORECAST-LOCKED"
+	CodeConsensusState = "PLAN-CONSENSUS-STATE"
+	CodeConsensusSoD   = "PLAN-CONSENSUS-SOD"
+	CodeConsensusEmpty = "PLAN-CONSENSUS-EMPTY"
+)
 
 // ModelSpec replaces the reduction setup of a model.
 type ModelSpec struct {
@@ -60,11 +82,12 @@ type ForecastDemandLine struct {
 	ReducedQty  decimal.Decimal
 }
 
-const modelSelect = `select id::text, code, version, reduction_principle, reduction_percent::text from forecast_model`
+const modelSelect = `select id::text, code, version, reduction_principle, reduction_percent::text, status, submitted_by, decided_by,
+	to_char(published_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') from forecast_model`
 
 func scanModel(row pgx.Row) (ForecastModel, error) {
 	var m ForecastModel
-	err := row.Scan(&m.id, &m.Code, &m.Version, &m.ReductionPrinciple, &m.ReductionPercent)
+	err := row.Scan(&m.id, &m.Code, &m.Version, &m.ReductionPrinciple, &m.ReductionPercent, &m.Status, &m.SubmittedBy, &m.DecidedBy, &m.PublishedAt)
 	return m, err
 }
 
@@ -102,6 +125,9 @@ func (s *Postgres) UpsertForecastLines(ctx context.Context, modelCode string, ex
 		if err != nil {
 			return err
 		}
+		if !domain.ConsensusWritable(m.Status) {
+			return httpx.NewProblem(http.StatusConflict, CodeForecastLocked, "forecast model "+m.Code+" is "+m.Status+"; its cells are locked")
+		}
 		if spec != nil {
 			m.ReductionPrinciple = spec.ReductionPrinciple
 			m.ReductionPercent = spec.ReductionPercent.String()
@@ -116,11 +142,12 @@ func (s *Postgres) UpsertForecastLines(ctx context.Context, modelCode string, ex
 		var series []seriesKey
 		seen := map[seriesKey]bool{}
 		for _, c := range cells {
-			batch.Queue(`insert into forecast_line (tenant_id, id, model_id, item_id, site_id, period_start, period_end, qty, source, sales_qty, reduced_qty)
-				values ($1, $2, $3::uuid, $4::uuid, $5::uuid, $6::date, $7::date, $8::numeric, $9, $10::numeric, $8::numeric)
+			batch.Queue(`insert into forecast_line (tenant_id, id, model_id, item_id, site_id, period_start, period_end, qty, source, sales_qty, reduced_qty, updated_by)
+				values ($1, $2, $3::uuid, $4::uuid, $5::uuid, $6::date, $7::date, $8::numeric, $9, $10::numeric, $8::numeric, $11)
 				on conflict (tenant_id, model_id, item_id, site_id, period_start) do update set period_end = excluded.period_end,
-				qty = excluded.qty, source = excluded.source, sales_qty = excluded.sales_qty, reduced_qty = excluded.reduced_qty, updated_at = now()`,
-				p.TenantID, ids.New(), m.id, c.ItemID, c.SiteID, c.PeriodStart, c.PeriodEnd, c.Qty.String(), c.Source, c.SalesQty.String())
+				qty = excluded.qty, source = excluded.source, sales_qty = excluded.sales_qty, reduced_qty = excluded.reduced_qty,
+				updated_by = excluded.updated_by, updated_at = now()`,
+				p.TenantID, ids.New(), m.id, c.ItemID, c.SiteID, c.PeriodStart, c.PeriodEnd, c.Qty.String(), c.Source, c.SalesQty.String(), nullableText(p.UserID))
 			k := seriesKey{c.ItemID, c.SiteID}
 			if !seen[k] {
 				seen[k] = true
@@ -207,6 +234,14 @@ func reduceSeries(ctx context.Context, tx pgx.Tx, tenantID string, m ForecastMod
 		batch.Queue(`update forecast_line set reduced_qty = $3::numeric where tenant_id = $1 and id = $2::uuid`, tenantID, id, reduced[i].String())
 	}
 	return tx.SendBatch(ctx, batch).Close()
+}
+
+// nullableText turns an empty string into SQL null.
+func nullableText(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
 
 // nullableUUID turns an empty filter into SQL null.

@@ -1,6 +1,6 @@
-# NOT-IMPLEMENTED (PSG-22, planning service, slices 1 to 5)
+# NOT-IMPLEMENTED (PSG-22, planning service, slices 1 to 6)
 
-Every ticket deliverable and acceptance criterion that slices 1 to 5 do not
+Every ticket deliverable and acceptance criterion that slices 1 to 6 do not
 build. Slice 2 added the freeze, action and futures fences (BR-22.4),
 planned-order maintenance (FR-22.11) and forecast cells with reduction that a
 run nets as demand (FR-22.8, AC-22.6). Slice 3 added five stateless calculators
@@ -15,7 +15,11 @@ Decrease messages beyond the coverage time fence (FR-22.7), and the version
 purge (`PLANNING_MAX_VERSIONS`). Slice 5 added the site work calendar on the
 run input (FR-22.5, BR-22.8), the stored net requirements view and
 `GET /net-requirements` (FR-22.12, AC-22.10), and the `plan.started.v1` and
-`message.raised.v1` events.
+`message.raised.v1` events. Slice 6 added Increase messages for shortages
+inside the freeze fence (FR-22.7), the forecast consensus workflow (submit,
+publish, reject) with the segregation of duties of 4.22.17 and
+`forecast.published.v1` (FR-22.9), the reach set of a dynamic net-change run
+(BR-22.6, domain only), and the forecast history window in `forecast-py`.
 Status is `later slice of PSG-22` (planned work in this wave), `partly built`
 (the stated part exists and is tested; the rest is named) or `handoff`
 (needs another wave or owner; the handoff is recorded here because this wave may
@@ -45,14 +49,14 @@ not edit that code).
 | 3 | Approved orders "become firmed on next run" (FR-22.11), and firmed orders as supply of the next run (FR-22.1) | later slice of PSG-22 | A run replaces the whole version from its inline snapshot and does not carry approved, edited or firmed orders of the previous version forward. Until the target orders reach the snapshot as receipts (source contexts, see deliverable 2), send them as `receipts` on the run. |
 | 3 | Vendor check against w17 vendors on PATCH | handoff (PSG-17) | `vendorId` is checked as a UUID and only on purchase orders; whether the vendor exists is not checked. |
 | 3 | Order grouping on firm (vendor, vendor-date, vendor-week) | built | `domain.GroupForFirming`: planned purchases of one site and vendor merge per grouping (weeks run Monday to Sunday); production and transfer orders never merge. AC-22.8 is `TestGroupForFirming_AC228` and the store test `TestFirmPlannedOrders`. The legal-entity default is the request default `vendor-date`; the parameter itself is not persisted (setup, see "Coverage groups API"). |
-| 3 | Decrease, increase, cancel and derived action messages for existing supply (FR-22.7) | partly built | Built: delay (with propagation to parents and to the sales line or forecast), postpone, advance, shortage, and Cancel/Decrease for receipts at or beyond the coverage time fence whose quantity is not (fully) pegged, inside the action fence. Not built: Increase (a receipt is never raised; the shortfall becomes a new planned order) and Derived (a parent's message passed to its components). |
+| 3 | Decrease, increase, cancel and derived action messages for existing supply (FR-22.7) | partly built | Built: delay (with propagation to parents and to the sales line or forecast), postpone, advance, shortage, Cancel/Decrease for receipts at or beyond the coverage time fence whose quantity is not (fully) pegged, inside the action fence, and (slice 6) Increase: a shortage inside the freeze fence, where no planned order may be created, raises Increase on the latest existing receipt dated on or before it inside the action fence (`domain/increase_test.go`, with a property that increases never exceed the reported shortages; stored and filtered in `TestRunPlan_StoresIncrease`). Outside the freeze fence a shortfall still becomes a new planned order rather than an Increase of existing supply, and a receipt after the shortage gets no combined Advance-and-Increase. Not built: Derived (a parent's message passed to its components). |
 | 3 | Kanban planned-order type (FR-22.3) | later slice of PSG-22 | Order types purchase, production and transfer are planned; kanban needs wave 24 kanban rules. |
 | 3 | Planned transfer demand at the from-warehouse (BR-22.7) | later slice of PSG-22 | Transfer planned orders are proposed, but no issue demand is created at a source warehouse; warehouse scopes are not modelled (deliverable 8). |
 | 3 | Message catalog codes on messages (PLAN-0006, PLAN-0007, PLAN-0010 to PLAN-0015) | later slice of PSG-22 | Messages carry an action (`delay`, `postpone`, `advance`, `shortage`), not a catalog code; the user texts of 4.22.18 are not rendered yet. |
-| 4 | Statistical forecast via ETS and Croston/TSB (FR-22.9) | partly built | `services/forecast-py` implements ETS A,N / A,A,N / A,A,A selected by AICc, Croston, TSB, ADI selection and holdout MAPE/wMAPE. Not built: the `statsforecast` library wrapper and `POST /forecasts/{modelId}:generate`, which would write statistical cells into a model. |
+| 4 | Statistical forecast via ETS and Croston/TSB (FR-22.9) | partly built | `services/forecast-py` implements ETS A,N / A,A,N / A,A,A selected by AICc, Croston, TSB, ADI selection, holdout MAPE/wMAPE and (slice 6) the `historyMonths` window of the tenant parameter "forecast history months". Not built: the `statsforecast` library wrapper, `POST /forecasts/{modelId}:generate`, which would write statistical cells into a model, and the tenant parameter itself (default 36), which the generate job would send. |
 | 4 | Forecast batch generation for 50k items under 15 min (FR-22.9) | later slice of PSG-22 | Forecast endpoint exists in Python; the batch job, item batching, and Temporal workflow are not built. |
 | 4 | Manual override per cell | built | `PUT /forecasts/{modelCode}/lines` with source `manual` (or `statistical` for a loader); the forecast screen in the web module edits cells. |
-| 4 | Consensus workflow (Temporal approval), version lock and `forecast.published.v1` | later slice of PSG-22 | Source `consensus` is reserved for that workflow and refused on PUT. Forecast models carry a write version (ETag), not published forecast versions. |
+| 4 | Consensus workflow, version lock and `forecast.published.v1` (FR-22.9, 4.22.17) | partly built | `POST /forecasts/{modelCode}:submit` (Maintain forecasts) locks a draft with cells; `:publish` and `:reject` (duty `planning.forecast.approve`) decide it. The approver may be neither the submitter nor a writer of any cell of the model (403 `PLAN-CONSENSUS-SOD`); publish marks the cells `consensus`, locks the model and writes `forecast.published.v1` in the same transaction. Cell writes on a submitted or published model are 409 `PLAN-FORECAST-LOCKED`. Tests: `domain/consensus_test.go`, `api/consensus_test.go`, `store/consensus_test.go` (database). Not built: the Temporal approval step (the decision is a synchronous call), notifications to approvers, reopening a published model (the next forecast cycle uses a new model code), several published versions of one model, and restricting a run to published models (a run nets any model it names). |
 | 4 | ForecastLine persistence and PUT lines API | built | Migration `0002`, RLS on both tables. |
 | 5 | Explain-this-plan pegging tree | built | `GET /v1/planning/planned-orders/{id}/pegging` and the planned-order screen. A bom-line demand expands through the planned order that drives it. The tree is returned in one response (depth up to 20), not lazy-loaded per node as the UI rule asks. |
 | 6 | Simulation plans and planning scenarios (FR-22.15, BR-22.14) | later slice of PSG-22 | Plan kind `simulation`, ScenarioOverride, rough-cut and purchase-volume evaluations and version diff are not built. |
@@ -69,7 +73,7 @@ not edit that code).
 
 | Item | Status | Reason |
 |---|---|---|
-| Dynamic net-change plan with 60 s debounce (FR-22.1, BR-22.6) | later slice of PSG-22 | Needs the event consumer and reach-set computation. |
+| Dynamic net-change plan with 60 s debounce (FR-22.1, BR-22.6) | partly built | `domain.ReachSet` gives the changed items plus every item below them through the BOM (`domain/reach_test.go`). Not built: run kind `dynamic` on `:run`, the event consumer with `PLANNING_DYNAMIC_DEBOUNCE_SECONDS`, holding the dependent demand that planned orders outside the set put on items inside it, and merging the replanned set into the current version without changing other orders. |
 | Plan run as a Temporal batch job; nightly 01:00 static plan | later slice of PSG-22 | Slice 1 runs synchronously in the request, which is not the target for 50k items. |
 | Pointer swap on success, partitions per PlanVersion | partly built | Slice 1 runs in one transaction, marks the new version current and demotes the old one. Per-version partitions are not built. |
 | Version purge beyond `PLANNING_MAX_VERSIONS` (20) | partly built | Each run deletes versions beyond the newest `PLANNING_MAX_VERSIONS` (env, 2 to 100, default 20) with their rows, in the run transaction; versions holding a firmed planned order are kept. Not built: the daily 03:00 job, partition drops (no partitions yet) and the per-plan parameter (one setting per deployment). |
@@ -81,7 +85,7 @@ not edit that code).
 | UoM conversion of forecast lines and inventory UoM (BR-22.10) | later slice of PSG-22 | Quantities are taken as given (decimal, 6 places in the database). |
 | Coverage groups API `GET /coverage-groups` and item coverage setup | later slice of PSG-22 | Setup entities are not persisted; coverage is passed on the run input. |
 | Events `plan.started.v1` and `message.raised.v1` | partly built | Both are written to the outbox in the run's transaction: `plan.started.v1` (plan, version, kind `static`, site, as-of, items) ahead of the run's other events, and one `message.raised.v1` per stored message (message id, action, item, supply and demand ref, suggested date, delay days, qty). Because runs are synchronous, `plan.started` reaches consumers together with `plan.completed`; it will lead it once the run is a Temporal job. The PRD's `requirementId`/`refType`/`refId` are carried as `supply_ref` and `demand_ref`, since Requirement rows are not stored. |
-| Event `forecast.published.v1` | later slice of PSG-22 | Needs the consensus workflow (deliverable 4). `plan.completed.v1` and `plannedorder.firmed.v1` are emitted (outbox, same transaction); the PRD spells the latter `planned-order.firmed.v1`, but the kernel's event type rule admits no hyphen in the entity segment. |
+| Event `forecast.published.v1` | built | Written to the outbox in the publish transaction (`store/consensus.go`) with model id and code, version, item series, horizon periods, first and last day, submitter and approver; declared in `events/asyncapi.yaml`. The PRD spells the firming event `planned-order.firmed.v1`, but the kernel's event type rule admits no hyphen in the entity segment, so it is `plannedorder.firmed.v1`. |
 | Feature flags `planning.dynamic`, `planning.statistical-forecast`, `planning.mps-scope` | later slice of PSG-22 | Not read yet. |
 | Plan run summary email and firming result report (PDF, email; 4.22.15) | later slice of PSG-22 | The firming response and the web module list the target orders of a batch; no document or email is rendered. |
 | Sanctions screening block on firming (w48) | handoff (PSG-48) | Firming does not consult screening; PSG-48 owns the screening status of vendors. |
@@ -115,7 +119,7 @@ not edit that code).
 
 | Item | Status | Reason |
 |---|---|---|
-| Database-backed tests and `0001_init.sql` to `0004_net_requirements.sql` on an empty database | built | Run in review against Postgres 16 with an admin URL and a non-superuser app role (`PASSAGE_TEST_DATABASE_URL`, `PASSAGE_TEST_APP_DATABASE_URL`). CI must set both. |
+| Database-backed tests and `0001_init.sql` to `0005_increase_and_consensus.sql` on an empty database | built | Run in review against Postgres 16 with an admin URL and a non-superuser app role (`PASSAGE_TEST_DATABASE_URL`, `PASSAGE_TEST_APP_DATABASE_URL`). CI must set both. |
 | Pytest run of `services/forecast-py` | built | Run in review with Python 3.12; CI wiring for Python services belongs to the platform owner. |
 
 ## Reconciliation and test plan (PRD 4.22.9)
@@ -141,3 +145,4 @@ not edit that code).
 - PSG-24 batch and shelf life: sellable shelf-life days (FR-24.19).
 - PSG-20 inventory costing: current item cost for the inventory forecast value (FR-22.22).
 - PSG-48 sanctions screening.
+- Policies (`policies/`, not owned by this wave): register the duty `planning.forecast.approve` (Approve forecast consensus) for the supply chain manager role, apart from `planning.forecast.maintain` (Demand planner).

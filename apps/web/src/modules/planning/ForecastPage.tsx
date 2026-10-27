@@ -16,9 +16,13 @@ import {
   type DataTableColumn,
 } from "../../shell/ui";
 import {
+  forecastConsensus,
   getForecastLines,
   putForecastLines,
   ReductionPrinciple,
+  type ConsensusResult,
+  type ConsensusStatus,
+  type ConsensusStep,
   type ForecastLine,
   type ForecastModel,
   type ForecastWrite,
@@ -43,8 +47,15 @@ export const principleLabel: Record<ReductionPrinciple, string> = {
 
 const sourceTone: Record<ForecastLine["source"], BadgeTone> = { statistical: "info", manual: "neutral", consensus: "success" };
 
+const statusTone: Record<ConsensusStatus, BadgeTone> = { draft: "neutral", submitted: "warning", published: "success" };
+export const statusLabel: Record<ConsensusStatus, string> = {
+  draft: "Draft",
+  submitted: "Submitted for approval",
+  published: "Published",
+};
+
 /** The setup of a model before its first write (the service default). */
-const newModel = (code: string): ForecastModel => ({ code, version: 0, reductionPrinciple: "transactions", reductionPercent: "0" });
+const newModel = (code: string): ForecastModel => ({ code, version: 0, reductionPrinciple: "transactions", reductionPercent: "0", status: "draft" });
 
 export interface CellDraft {
   itemId: string;
@@ -224,10 +235,99 @@ function CellForm({ model, draft, setDraft, onSaved }: {
   );
 }
 
+const stepLabel: Record<ConsensusStep, string> = {
+  submit: "Submit for approval",
+  publish: "Publish consensus",
+  reject: "Return to draft",
+};
+
+/** The confirmation the page shows after a consensus step. */
+export function consensusOutcome(step: ConsensusStep, r: ConsensusResult): string {
+  const code = r.model.code;
+  switch (step) {
+    case "submit":
+      return `Forecast model ${code} is submitted for approval. Its cells are locked until it is published or returned to draft.`;
+    case "reject":
+      return `Forecast model ${code} is back in draft; its cells can be changed again.`;
+    case "publish": {
+      const p = r.publication;
+      return p
+        ? `Forecast model ${code} is published: ${p.items} item and site series over ${p.horizonPeriods} periods, ${p.periodFrom} to ${p.periodTo}.`
+        : `Forecast model ${code} is published.`;
+    }
+  }
+}
+
+/**
+ * The consensus workflow of a model (FR-22.9): a planner submits the draft,
+ * and a supply chain manager who neither submitted nor edited it publishes it
+ * or returns it to draft. The service enforces the duties and the
+ * segregation of duties; refusals are shown with their code.
+ */
+function ConsensusCard({ model, onDone }: { model: ForecastModel; onDone: (step: ConsensusStep, r: ConsensusResult) => void }) {
+  const [busy, setBusy] = useState<ConsensusStep | null>(null);
+  const [failure, setFailure] = useState<LoadError | null>(null);
+
+  async function run(step: ConsensusStep) {
+    if (busy) return;
+    setBusy(step);
+    setFailure(null);
+    try {
+      onDone(step, await forecastConsensus(model.code, step, model.version));
+    } catch (err) {
+      setFailure(describeError(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const failureTitle = !failure
+    ? undefined
+    : failure.code === "PLAN-CONSENSUS-SOD"
+      ? "Someone who neither submitted nor edited this forecast must decide it"
+      : failure.status === 412
+        ? "Someone else changed this forecast; reload it and try again"
+        : "The consensus step was not done";
+  const steps: ConsensusStep[] = model.status === "draft" ? ["submit"] : model.status === "submitted" ? ["publish", "reject"] : [];
+
+  return (
+    <Card title="Consensus">
+      <div className={styles.stack}>
+        <p className={styles.summary}>
+          {model.status === "draft"
+            ? "Submit the forecast when it is ready. Its cells lock while a supply chain manager reviews it."
+            : model.status === "submitted"
+              ? `Submitted by ${model.submittedBy ?? "an unknown user"}. A supply chain manager who did not submit or edit it publishes it or returns it to draft.`
+              : `Published${model.publishedAt ? ` on ${model.publishedAt.slice(0, 10)}` : ""}${model.decidedBy ? ` by ${model.decidedBy}` : ""}. The forecast is final and its cells stay locked.`}
+        </p>
+        <Alert tone="danger" title={failureTitle} live="alert">
+          {failure ? `${failure.message} (${failure.code})` : null}
+        </Alert>
+        {steps.length > 0 ? (
+          <div className={styles.formActions}>
+            {steps.map((step) => (
+              <Button
+                key={step}
+                variant={step === "reject" ? "secondary" : "primary"}
+                loading={busy === step}
+                disabled={busy !== null && busy !== step}
+                onClick={() => void run(step)}
+              >
+                {stepLabel[step]}
+              </Button>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    </Card>
+  );
+}
+
 /**
  * Forecast (FR-22.8, FR-22.9 manual override): the cells of a forecast model
- * with their reduced quantities, and a form to add or change a cell and the
- * model's reduction principle.
+ * with their reduced quantities, a form to add or change a cell and the
+ * model's reduction principle while it is a draft, and its consensus
+ * workflow (FR-22.9).
  */
 export function ForecastPage() {
   const [params, setParams] = useSearchParams();
@@ -257,6 +357,12 @@ export function ForecastPage() {
     setDraft(null);
     setReload((n) => n + 1);
   };
+  const onConsensus = (step: ConsensusStep, r: ConsensusResult) => {
+    setSaved(consensusOutcome(step, r));
+    setDraft(null);
+    setReload((n) => n + 1);
+  };
+  const writable = current?.status === "draft";
 
   const columns: DataTableColumn<ForecastLine>[] = [
     { key: "itemId", header: "Item", mono: true },
@@ -303,6 +409,12 @@ export function ForecastPage() {
                 <dd className={styles.value}>{value}</dd>
               </div>
             ))}
+            <div className={styles.entry}>
+              <dt className={styles.term}>Consensus</dt>
+              <dd className={styles.value}>
+                <Badge tone={statusTone[current.status]}>{statusLabel[current.status]}</Badge>
+              </dd>
+            </div>
           </dl>
         ) : null}
       </Card>
@@ -324,10 +436,18 @@ export function ForecastPage() {
           getRowKey={(l) => `${l.itemId}-${l.siteId}-${l.periodStart}`}
           loading={state.loading}
           empty={{ title: "No forecast cells", description: "Save a cell below to add the first one." }}
-          onRowOpen={edit}
+          onRowOpen={writable ? edit : undefined}
         />
       ) : null}
-      {current && form && !state.loading ? <CellForm key={`${current.code}-${current.version}`} model={current} draft={form} setDraft={setDraft} onSaved={onSaved} /> : null}
+      {state.data && !state.loading ? <ConsensusCard key={`consensus-${state.data.model.code}-${state.data.model.version}`} model={state.data.model} onDone={onConsensus} /> : null}
+      {current && form && !state.loading && writable ? (
+        <CellForm key={`${current.code}-${current.version}`} model={current} draft={form} setDraft={setDraft} onSaved={onSaved} />
+      ) : null}
+      {current && !state.loading && !writable ? (
+        <Alert tone="info" title="Cells are locked">
+          {`Forecast model ${current.code} is ${statusLabel[current.status].toLowerCase()}, so its cells cannot be changed.`}
+        </Alert>
+      ) : null}
     </div>
   );
 }
