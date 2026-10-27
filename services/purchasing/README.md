@@ -1,9 +1,11 @@
 # purchasing
 
-Passage purchasing service. Wave 17 (PSG-17), slice 1 of the procurement
-context: purchase requisitions with amount/category approval routing, purchase
-orders with persisted totals, trade agreement price lookup with explain, and the
-web workspace module at `apps/web/src/modules/purchasing`.
+Passage purchasing service. Wave 17 (PSG-17), slices 1 and 2 of the procurement
+context: purchase requisitions with amount/category approval routing,
+consolidation of approved requisition lines into purchase orders, purchase orders
+with persisted totals, purchase agreements with release tracking, trade agreement
+price lookup with explain, and the web workspace module at
+`apps/web/src/modules/purchasing`.
 
 Full ticket scope and the list of what is not yet built are in
 [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
@@ -12,11 +14,13 @@ Full ticket scope and the list of what is not yet built are in
 
 ```
 cmd/purchasing/        entrypoint: dbx.Connect -> dbx.Migrate -> api.Register -> httpx.Serve
-internal/domain/       pure rules: approval bands, trade agreement lookup, PO totals, reapproval
+internal/domain/       pure rules: approval bands, trade agreement lookup, PO totals, reapproval,
+                       agreement releases (limits, validity, threshold), consolidation grouping
 internal/store/        Postgres repositories (pgx), every transaction via dbx.WithTenantTx
 internal/api/          HTTP handlers under /v1/procurement, duties via authz.RequireDuty
 internal/events/       event types and payloads (dev.passage.procurement.*)
 migrations/            0001_init.sql (tables, sequences, RLS, outbox, idempotency, total trigger)
+                       0002_agreements_consolidation.sql (purchase agreements, PO line and requisition line links)
 api/openapi.yaml       OpenAPI 3.1 for every route
 events/asyncapi.yaml   AsyncAPI 3 for every event emitted
 charts/purchasing/     Helm chart (probes on /healthz and /readyz, DATABASE_URL from a secret)
@@ -58,6 +62,12 @@ row-level-security test also needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-owner
 | POST `/purchase-orders` | PurchaseOrderMaintain | Idempotency-Key required; missing unit prices come from trade agreements |
 | GET `/purchase-orders` | PurchaseOrderInquire | Newest first; `approvalStatus`, `vendorId`, `limit`, `cursor` |
 | GET `/purchase-orders/{id}` | PurchaseOrderInquire | ETag = row version |
+| GET `/requisition-lines` | PurchaseOrderMaintain | Consolidation queue: OPEN lines of APPROVED requisitions; `sourcing` = NEEDS_SOURCING (no preferred vendor) or HAS_VENDOR, `vendorId`, `limit`, `cursor` |
+| POST `/requisitions:consolidate` | PurchaseOrderMaintain | Idempotency-Key required; one DRAFT PO per legal entity × vendor × currency × site × delivery window (`windowDays`, default 7, 1–60); `vendorId` per line overrides the preferred vendor |
+| POST `/agreements` | AgreementMaintain | Idempotency-Key required; purchase agreement, EFFECTIVE unless `status` = DRAFT; max 500 lines |
+| GET `/agreements` | AgreementMaintain | Newest first; `status`, `vendorId`, `limit`, `cursor`; each row carries `maxPctReleased` |
+| GET `/agreements/{id}` | AgreementMaintain | Lines with released, remaining and % released, plus the PO lines released against them; ETag = version |
+| POST `/agreements/{id}:activate` / `:hold` / `:close` | AgreementMaintain | Idempotency-Key and If-Match (version) required |
 | GET `/pricing/lookup` | PurchaseOrderMaintain | Winner plus candidate explain list; `vendorGroup`/`productGroup` add memberships; `tie` = LATEST_FROM_DATE (default) or LOWEST_PRICE |
 | POST `/trade-agreements` | TradeAgreementMaintain | PRICE relation only in this slice; PRC-TA-002 on an overlapping row |
 | GET `/trade-agreements` | TradeAgreementMaintain | Newest first; `accountId`, `itemId`, `status`, `limit`, `cursor` |
@@ -90,8 +100,33 @@ down). Metrics: `GET :9090/metrics` (Prometheus text counters).
   exact qty × price ÷ price unit. Header totals are sums of rounded lines.
   `total = subtotal − discount_total + charges_total + tax_total` is checked by a
   deferred constraint trigger in the database.
-- **Price source (FR-17.7).** Each PO line stores `MANUAL` or `TRADE_AGREEMENT:<id>`;
-  the price date is the order date (BR-17.3 default).
+- **Price source (FR-17.7).** Each PO line stores `MANUAL`, `AGREEMENT:<agreement
+  line id>`, `TRADE_AGREEMENT:<id>` or `REQUISITION_ESTIMATE`; the price date is the
+  order date (BR-17.3 default).
+- **Consolidation (FR-17.3).** Approved requisition lines are grouped by legal
+  entity, vendor (the buyer's choice, else the preferred vendor), currency, site and
+  delivery window: a window opens at the earliest requested date of a stream and
+  takes every line requested less than `windowDays` later. A line with no vendor is
+  refused with PRC-CONS-002 and stays in the NEEDS_SOURCING queue. Each PO line is
+  priced like a direct PO line and falls back to the requisition estimate; it keeps
+  `requisitionLineId`, and the requisition line becomes CONSOLIDATED with the PO id
+  and line number. A requisition whose lines are all ordered becomes CLOSED. Any PO
+  (direct or consolidated) that names a requisition line claims it under a row lock:
+  it must be OPEN on an APPROVED requisition of the same legal entity.
+- **Purchase agreements (FR-17.5, BR-17.10).** Commitment types QUANTITY (product,
+  unit, quantity), VALUE (product, amount), CATEGORY_VALUE (category, amount) and
+  TOTAL_VALUE (amount); maximum enforcement HARD (default), SOFT or NONE. A PO line
+  with `agreementLineId` releases against the line inside the PO transaction, with
+  the line locked: the agreement must be EFFECTIVE (PRC-AGR-007), of the PO's legal
+  entity, vendor and currency (PRC-AGR-006), the line's delivery date within
+  validity (PRC-AGR-005), and a QUANTITY/VALUE line for the same product (and unit
+  for QUANTITY, PRC-AGR-008). The draw adds the quantity and net line amount; the
+  commitment type picks the measure. A HARD overrun refuses the whole PO
+  (PRC-AGR-003) and a database check enforces `released ≤ committed` for HARD lines.
+  Reaching 90 % of the commitment, or any SOFT overrun, writes
+  `agreement.threshold.v1` and returns a PRC-AGR-004 warning on the PO. With
+  `priceOverride`, the agreement line's unit price and discount price the PO line
+  ahead of trade agreements.
 - **Idempotency.** Creates and `:submit` store the key with a hash of the operation
   and body; a replay returns the original resource, a different body (or endpoint)
   with the same key is `idempotency_key_reuse`.
@@ -117,11 +152,24 @@ store codes are returned as the `code` field.
 | PRC-PO-NOT-FOUND | 404 | Purchase order not found |
 | PRC-TA-NOT-FOUND | 404 | Trade agreement not found |
 | PRC-TA-002 | 409 | Overlapping ACTIVE trade agreement row with equal specificity and valid_from |
-| PRC-VERSION-CONFLICT | 409 | Requisition is at another version than If-Match |
+| PRC-VERSION-CONFLICT | 409 | Requisition or agreement is at another version than If-Match |
 | PRC-PRICE-001 | 422 | No trade agreement price for the line; enter a unit price |
 | PRC-PRICE-002 | 422 | Unknown tie rule |
 | PRC-PO-TOTAL | 500 (COM-0500) | Database total identity violated; the trigger refuses the write and the client sees COM-0500. Should not occur because totals come from `domain.Price` |
-| PRC-ACTION-001 | 404 | Unknown custom action on a requisition |
+| PRC-ACTION-001 | 404 | Unknown custom action on a requisition or agreement |
+| PRC-REQ-005 | 422 | A PO line names a requisition line of another legal entity |
+| PRC-REQ-LINE-NOT-FOUND | 404 | Requisition line not found |
+| PRC-CONS-001 | 422 | Consolidation window outside 1–60 days |
+| PRC-CONS-002 | 422 | A consolidation line has no vendor (needs sourcing) |
+| PRC-AGR-NOT-FOUND | 404 | Purchase agreement or agreement line not found |
+| PRC-AGR-STATE | 409 | Agreement status does not allow the action |
+| PRC-AGR-002 | 422 | Agreement has more than 500 lines |
+| PRC-AGR-003 | 422 | A release would exceed a HARD agreement line |
+| PRC-AGR-004 | warning | Returned in `warnings` on PO create: agreement line at the threshold or over a SOFT limit |
+| PRC-AGR-005 | 422 | PO delivery date outside agreement validity |
+| PRC-AGR-006 | 422 | Agreement is for another legal entity, vendor or currency |
+| PRC-AGR-007 | 422 | Agreement is not EFFECTIVE |
+| PRC-AGR-008 | 422 | PO line product or unit does not match the agreement line |
 | idempotency_key_reuse | 422 | Idempotency key reused with a different body or on another endpoint |
 
 ## Dependencies
@@ -133,5 +181,6 @@ platform go.mod).
 ## Web module
 
 `apps/web/src/modules/purchasing` gives the procurement workspace: requisition,
-purchase order and trade agreement lists with create forms and detail pages, and
-the price lookup with explain. See its README.
+purchase order, purchase agreement and trade agreement lists with create forms and
+detail pages, the consolidation board, and the price lookup with explain. See its
+README.

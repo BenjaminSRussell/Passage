@@ -1,5 +1,5 @@
 import { useMemo, useState, type FormEvent } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
   Badge,
@@ -25,6 +25,7 @@ import {
   type PurchaseOrderInput,
   type PurchaseOrderLine,
   type PurchaseOrderSummary,
+  type Warning,
 } from "./api/client";
 import {
   Details,
@@ -140,6 +141,7 @@ interface LineDraft {
   discountPct: string;
   taxAmount: string;
   deliveryDate: string;
+  agreementLineId: string;
 }
 
 interface ChargeDraft {
@@ -160,6 +162,7 @@ function emptyLine(): LineDraft {
     discountPct: "",
     taxAmount: "",
     deliveryDate: todayIso(),
+    agreementLineId: "",
   };
 }
 
@@ -184,6 +187,7 @@ export function validateOrder(legalEntityId: string, vendorId: string, currency:
     }
     if (l.taxAmount !== "" && !decimalPattern.test(l.taxAmount)) errors[f("taxAmount")] = "Enter a decimal tax amount.";
     if (!datePattern.test(l.deliveryDate)) errors[f("deliveryDate")] = "Enter a date.";
+    if (l.agreementLineId !== "" && !uuidPattern.test(l.agreementLineId.trim())) errors[f("agreementLineId")] = "Agreement line id must be a UUID.";
   });
   charges.forEach((c, i) => {
     if (!decimalPattern.test(c.value)) errors[`charges[${i}].value`] = "Enter a decimal value.";
@@ -207,6 +211,7 @@ function toInput(legalEntityId: string, vendorId: string, currency: string, line
       discountPct: opt(l.discountPct),
       taxAmount: opt(l.taxAmount),
       deliveryDate: l.deliveryDate,
+      agreementLineId: opt(l.agreementLineId),
     })),
     charges: charges.length > 0 ? charges.map((c) => ({ calc: c.calc, value: c.value.trim() })) : undefined,
   };
@@ -240,7 +245,7 @@ export function PurchaseOrderCreatePage() {
     setBusy(true);
     try {
       const { body } = await createPurchaseOrder(toInput(le, vendor, currency, lines, charges), key);
-      navigate(`/purchasing/purchase-orders/${body.id}`);
+      navigate(`/purchasing/purchase-orders/${body.id}`, { state: { warnings: body.warnings ?? [] } });
     } catch (error) {
       const problem = describeProblem(error);
       setFailure(problem);
@@ -254,7 +259,7 @@ export function PurchaseOrderCreatePage() {
     <div className={styles.stack}>
       <PageHeader
         title="New purchase order"
-        description="Leave a unit price blank to take the most specific trade agreement price for the vendor, product and quantity."
+        description="Leave a unit price blank to take the agreement line's price when it overrides, else the most specific trade agreement price for the vendor, product and quantity."
       />
       <form className={styles.form} onSubmit={onSubmit} noValidate>
         <Card title="Order">
@@ -318,6 +323,9 @@ export function PurchaseOrderCreatePage() {
                   </FormField>
                   <FormField id={id("delivery")} label="Delivery date" error={err("deliveryDate")}>
                     {(c) => <Input {...c} type="date" value={line.deliveryDate} onChange={(e) => update(i, { deliveryDate: e.target.value })} />}
+                  </FormField>
+                  <FormField id={id("agreement")} label="Agreement line id" optional hint="Releases the line against a purchase agreement" error={err("agreementLineId")}>
+                    {(c) => <Input {...c} value={line.agreementLineId} onChange={(e) => update(i, { agreementLineId: e.target.value })} />}
                   </FormField>
                 </div>
               </fieldset>
@@ -385,6 +393,9 @@ function PriceSource({ source }: { source: string }) {
       </Link>
     );
   }
+  if (source.startsWith("AGREEMENT:")) {
+    return <Badge tone="info">Purchase agreement</Badge>;
+  }
   return <Badge tone="neutral">{statusLabel(source)}</Badge>;
 }
 
@@ -403,6 +414,8 @@ const lineColumns = (currency: string): DataTableColumn<PurchaseOrderLine>[] => 
 /** Purchase order detail: header, totals panel, lines with price source, charges. */
 export function PurchaseOrderDetailPage() {
   const { id = "" } = useParams();
+  // Warnings (PRC-AGR-004) come back only on create; the create page hands them over in router state.
+  const warnings = (useLocation().state as { warnings?: Warning[] } | null)?.warnings ?? [];
   const resource = useResource((signal) => getPurchaseOrder(id, signal), [id]);
   const po = resource.data?.body;
 
@@ -443,6 +456,17 @@ export function PurchaseOrderDetailPage() {
   return (
     <div className={styles.stack}>
       <PageHeader title={`Purchase order ${po.number}`} meta={<StatusBadge status={po.approvalStatus} />} />
+      {warnings.length > 0 ? (
+        <Alert tone="warning" title="Agreement limits">
+          <ul className={styles.cardLinks}>
+            {warnings.map((w) => (
+              <li key={`${w.code}-${w.lineNo}`}>
+                Line {w.lineNo}: {w.detail} ({w.code})
+              </li>
+            ))}
+          </ul>
+        </Alert>
+      ) : null}
       <Card title="Summary">
         <Details
           items={[

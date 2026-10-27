@@ -1,5 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ProcurementApiError, describeProblem, listPurchaseOrders, lookupPrice, submitRequisition } from "./client";
+import {
+  ProcurementApiError,
+  changePurchaseAgreement,
+  consolidateRequisitions,
+  describeProblem,
+  listOpenRequisitionLines,
+  listPurchaseOrders,
+  lookupPrice,
+  submitRequisition,
+} from "./client";
 
 function jsonResponse(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), {
@@ -83,5 +92,33 @@ describe("purchasing API client", () => {
 
     expect(describeProblem(err)).toEqual({ message: "Bad Gateway", code: "502", errors: undefined });
     expect(describeProblem(new TypeError("fetch failed")).code).toBe("NETWORK");
+  });
+
+  it("changes an agreement through its custom method with If-Match and an Idempotency-Key", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ id: "a1", status: "ON_HOLD", version: 3 }, 200, { ETag: '"3"' }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const out = await changePurchaseAgreement("a1", "hold", 2, "key-h");
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/v1/procurement/agreements/a1:hold");
+    expect(init.method).toBe("POST");
+    expect(init.body).toBeUndefined();
+    expect(init.headers as Record<string, string>).toMatchObject({ "If-Match": '"2"', "Idempotency-Key": "key-h" });
+    expect(out.body.status).toBe("ON_HOLD");
+  });
+
+  it("posts a consolidation and reads the queue with its sourcing filter", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ purchaseOrders: [], items: [] }, 201));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await consolidateRequisitions({ windowDays: 7, lines: [{ requisitionLineId: "l1" }] }, "key-c");
+    await listOpenRequisitionLines({ sourcing: "" }, { limit: 50 });
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/v1/procurement/requisitions:consolidate");
+    expect(JSON.parse(String(init.body))).toEqual({ windowDays: 7, lines: [{ requisitionLineId: "l1" }] });
+    expect((init.headers as Record<string, string>)["Idempotency-Key"]).toBe("key-c");
+    expect((fetchMock.mock.calls[1] as unknown as [string])[0]).toBe("/api/v1/procurement/requisition-lines?limit=50");
   });
 });

@@ -328,6 +328,18 @@ const lineColumns = (currency: string): DataTableColumn<RequisitionLine>[] => [
   { key: "amount", header: "Amount", align: "end", render: (l) => money(l.amount, currency) },
   { key: "requestedDate", header: "Requested", mono: true },
   { key: "status", header: "Status", render: (l) => <StatusBadge status={l.status} /> },
+  {
+    key: "purchaseOrder",
+    header: "Purchase order",
+    render: (l) =>
+      l.purchaseOrderId ? (
+        <Link className={styles.link} to={`/purchasing/purchase-orders/${l.purchaseOrderId}`}>
+          Line {l.purchaseOrderLineNo} of the order
+        </Link>
+      ) : (
+        "—"
+      ),
+  },
 ];
 
 /** Requisition detail: header, approval chain, lines, and Submit for a DRAFT. */

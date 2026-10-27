@@ -13,6 +13,10 @@ const (
 	// RequisitionApproved is written when a requisition reaches APPROVED; in
 	// this slice that happens on submit when the policy chain is empty.
 	RequisitionApproved = "dev.passage.procurement.requisition.approved.v1"
+	// AgreementThreshold is written when a release takes a purchase agreement
+	// line to the threshold (90 % by default) or overruns a SOFT limit
+	// (FR-17.5, BR-17.10, PRD 3.17.5).
+	AgreementThreshold = "dev.passage.procurement.agreement.threshold.v1"
 )
 
 // RequisitionLine is one line of a requisition event. Money is a decimal string.
@@ -38,4 +42,20 @@ type RequisitionData struct {
 	ApproverChain []string          `json:"approver_chain"`
 	PolicyVersion string            `json:"policy_version"`
 	Status        string            `json:"status"`
+}
+
+// AgreementThresholdData is the data member of agreement.threshold.v1. Pct is
+// the released percentage of the line's commitment after the release; Overrun
+// is true when a SOFT limit was exceeded. Expiry is the agreement's valid_to,
+// omitted when open-ended.
+type AgreementThresholdData struct {
+	AgreementID    string `json:"agreement_id"`
+	Number         string `json:"number"`
+	VendorID       string `json:"vendor_id"`
+	Line           int    `json:"line"`
+	LineID         string `json:"line_id"`
+	CommitmentType string `json:"commitment_type"`
+	Pct            string `json:"pct"`
+	Overrun        bool   `json:"overrun"`
+	Expiry         string `json:"expiry,omitempty"`
 }

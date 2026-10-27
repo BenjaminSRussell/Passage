@@ -1,9 +1,9 @@
 asyncapi: 3.0.0
 info:
   title: Passage Purchasing events
-  version: 0.2.0
+  version: 0.3.0
   description: |
-    Events published by the purchasing service in wave 17 slice 1. Each is written to the
+    Events published by the purchasing service in wave 17 slices 1 and 2. Each is written to the
     outbox in the same transaction as the state change and relayed by Debezium to the topic
     passage.<context>.<entity>. Payload structs live in internal/events. Schema evolution is
     additive only (BACKWARD_TRANSITIVE).
@@ -17,6 +17,12 @@ channels:
         $ref: '#/components/messages/RequisitionSubmitted'
       requisitionApproved:
         $ref: '#/components/messages/RequisitionApproved'
+  agreement:
+    address: passage.procurement.agreement
+    description: Purchase agreement release alerts; the Kafka key is the agreement id.
+    messages:
+      agreementThreshold:
+        $ref: '#/components/messages/AgreementThreshold'
 operations:
   publishRequisitionSubmitted:
     action: send
@@ -30,6 +36,12 @@ operations:
       $ref: '#/channels/requisition'
     messages:
       - $ref: '#/channels/requisition/messages/requisitionApproved'
+  publishAgreementThreshold:
+    action: send
+    channel:
+      $ref: '#/channels/agreement'
+    messages:
+      - $ref: '#/channels/agreement/messages/agreementThreshold'
 components:
   messages:
     RequisitionSubmitted:
@@ -56,6 +68,19 @@ components:
             properties:
               type: { type: string, const: dev.passage.procurement.requisition.approved.v1 }
               data: { $ref: '#/components/schemas/RequisitionData' }
+    AgreementThreshold:
+      name: AgreementThreshold
+      title: agreement.threshold.v1
+      summary: A PO line released against a purchase agreement line took it to the threshold (90 % of the commitment) or over a SOFT limit (FR-17.5, BR-17.10). Written in the PO's transaction; the threshold fires once per line, a SOFT overrun on every release that exceeds.
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.agreement.threshold.v1 }
+              subject: { type: string, format: uuid, description: agreement id }
+              data: { $ref: '#/components/schemas/AgreementThresholdData' }
   schemas:
     Envelope:
       type: object
@@ -66,7 +91,7 @@ components:
         id: { type: string, format: uuid }
         source: { type: string, const: /passage/procurement/purchasing }
         type: { type: string }
-        subject: { type: string, format: uuid, description: requisition id }
+        subject: { type: string, format: uuid, description: id of the aggregate (requisition or agreement) }
         time: { type: string, format: date-time }
         datacontenttype: { type: string, const: application/json }
         tenantid: { type: string, format: uuid }
@@ -99,3 +124,17 @@ components:
           items: { type: string, enum: [MANAGER, CATEGORY_OWNER, CFO] }
         policy_version: { type: string, example: builtin-1 }
         status: { type: string, enum: [IN_REVIEW, APPROVED] }
+    AgreementThresholdData:
+      type: object
+      required: [agreement_id, number, vendor_id, line, line_id, commitment_type, pct, overrun]
+      additionalProperties: false
+      properties:
+        agreement_id: { type: string, format: uuid }
+        number: { type: string, example: PA-00000001 }
+        vendor_id: { type: string, format: uuid }
+        line: { type: integer, description: agreement line number }
+        line_id: { type: string, format: uuid }
+        commitment_type: { type: string, enum: [QUANTITY, VALUE, CATEGORY_VALUE, TOTAL_VALUE] }
+        pct: { type: string, description: decimal string, released percentage of the commitment after the release }
+        overrun: { type: boolean, description: true when a SOFT limit was exceeded }
+        expiry: { type: string, format: date, description: the agreement valid_to; absent when open-ended }

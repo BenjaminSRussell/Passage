@@ -37,6 +37,12 @@ type orderLineBody struct {
 	TaxAmount         string     `json:"taxAmount,omitempty"`
 	DeliveryDate      domain.Day `json:"deliveryDate"`
 	RequisitionLineID string     `json:"requisitionLineId,omitempty"`
+	AgreementLineID   string     `json:"agreementLineId,omitempty"`
+
+	// estimate is the requisition line's estimated unit price, set only by
+	// consolidation: it prices the line when neither an agreement nor a trade
+	// agreement does (source REQUISITION_ESTIMATE).
+	estimate *decimal.Decimal
 }
 
 type chargeBody struct {
@@ -136,9 +142,18 @@ func (a *API) buildOrder(ctx context.Context, body orderBody) (store.PurchaseOrd
 		}
 		charges = append(charges, domain.ChargeInput{Calc: c.Calc, Value: v})
 	}
-	doc, err := domain.Price(inputs, charges, money.MinorUnits(cur))
-	if err != nil {
+	if err := priceDocument(&out, inputs, charges); err != nil {
 		return store.PurchaseOrder{}, err
+	}
+	return out, nil
+}
+
+// priceDocument fills line amounts, charge amounts and header totals of out from
+// the domain pricing function (BR-17.5, FR-17.11). out.Lines must align with inputs.
+func priceDocument(out *store.PurchaseOrder, inputs []domain.LineInput, charges []domain.ChargeInput) error {
+	doc, err := domain.Price(inputs, charges, money.MinorUnits(out.Currency))
+	if err != nil {
+		return err
 	}
 	for i := range out.Lines {
 		la := doc.Lines[i]
@@ -147,6 +162,7 @@ func (a *API) buildOrder(ctx context.Context, body orderBody) (store.PurchaseOrd
 		out.Lines[i].LineAmount = la.Amount
 		out.Lines[i].TaxAmount = la.Tax
 	}
+	out.Charges = out.Charges[:0]
 	for i, c := range charges {
 		out.Charges = append(out.Charges, store.PurchaseOrderCharge{Seq: i + 1, Calc: c.Calc, Value: c.Value, Amount: doc.Charges[i]})
 	}
@@ -155,7 +171,7 @@ func (a *API) buildOrder(ctx context.Context, body orderBody) (store.PurchaseOrd
 	out.ChargesTotal = doc.Totals.ChargesTotal
 	out.TaxTotal = doc.Totals.TaxTotal
 	out.Total = doc.Totals.Total
-	return out, nil
+	return nil
 }
 
 // buildOrderLine validates one line and resolves its price. A supplied unit
@@ -167,6 +183,9 @@ func (a *API) buildOrderLine(ctx context.Context, idx int, l orderLineBody, vend
 		return store.PurchaseOrderLine{}, domain.LineInput{}, err
 	}
 	if err := uuidField(field("requisitionLineId"), l.RequisitionLineID, false); err != nil {
+		return store.PurchaseOrderLine{}, domain.LineInput{}, err
+	}
+	if err := uuidField(field("agreementLineId"), l.AgreementLineID, false); err != nil {
 		return store.PurchaseOrderLine{}, domain.LineInput{}, err
 	}
 	if l.ProductID == "" && l.Description == "" {
@@ -217,6 +236,9 @@ func (a *API) buildOrderLine(ctx context.Context, idx int, l orderLineBody, vend
 	if source.priceUnit != nil {
 		priceUnit = *source.priceUnit
 	}
+	if source.discountPct != nil && strings.TrimSpace(l.DiscountPct) == "" {
+		discount = *source.discountPct
+	}
 	in := domain.LineInput{Qty: qty, UnitPrice: price, PriceUnit: priceUnit, DiscountPct: discount, Tax: tax}
 	line := store.PurchaseOrderLine{
 		LineNo:            idx + 1,
@@ -230,18 +252,24 @@ func (a *API) buildOrderLine(ctx context.Context, idx int, l orderLineBody, vend
 		DeliveryDate:      l.DeliveryDate,
 		PriceSource:       source.label,
 		RequisitionLineID: l.RequisitionLineID,
+		AgreementLineID:   l.AgreementLineID,
 	}
 	return line, in, nil
 }
 
 // lineSource is the price a line took and where it came from.
 type lineSource struct {
-	label     string
-	unitPrice *decimal.Decimal
-	priceUnit *decimal.Decimal
+	label       string
+	unitPrice   *decimal.Decimal
+	priceUnit   *decimal.Decimal
+	discountPct *decimal.Decimal
 }
 
-// linePrice returns the explicit price or the trade agreement price for the line.
+// linePrice returns, in order: the explicit price (MANUAL); the price of the
+// referenced agreement line when it overrides trade agreements (FR-17.5,
+// AGREEMENT:<line id>, with its discount unless the line gives one); the trade
+// agreement winner (TRADE_AGREEMENT:<id>); or, for consolidated lines, the
+// requisition estimate (REQUISITION_ESTIMATE).
 func (a *API) linePrice(ctx context.Context, l orderLineBody, vendor, cur string, qty decimal.Decimal, date domain.Day, field func(string) string) (decimal.Decimal, lineSource, error) {
 	if l.UnitPrice != "" {
 		p, err := decimalField(field("unitPrice"), l.UnitPrice, "")
@@ -253,7 +281,24 @@ func (a *API) linePrice(ctx context.Context, l orderLineBody, vendor, cur string
 		}
 		return p, lineSource{label: "MANUAL"}, nil
 	}
+	if l.AgreementLineID != "" {
+		agr, err := a.store.GetAgreementLine(ctx, l.AgreementLineID)
+		if err != nil {
+			return decimal.Zero, lineSource{}, err
+		}
+		if al := agr.Lines[0]; al.PriceOverride {
+			price, unit, disc := al.UnitPrice, decimal.NewFromInt(1), al.DiscountPct
+			return price, lineSource{label: "AGREEMENT:" + al.ID, unitPrice: &price, priceUnit: &unit, discountPct: &disc}, nil
+		}
+	}
+	estimate := func() (decimal.Decimal, lineSource, error) {
+		p := *l.estimate
+		return p, lineSource{label: "REQUISITION_ESTIMATE", unitPrice: &p}, nil
+	}
 	if l.ProductID == "" {
+		if l.estimate != nil {
+			return estimate()
+		}
 		return decimal.Zero, lineSource{}, invalid(field("unitPrice"), "is required when the line has no product")
 	}
 	res, err := a.resolve(ctx, domain.Query{
@@ -267,6 +312,9 @@ func (a *API) linePrice(ctx context.Context, l orderLineBody, vendor, cur string
 	}, nil, nil)
 	if err != nil {
 		return decimal.Zero, lineSource{}, err
+	}
+	if res.Winner == nil && l.estimate != nil {
+		return estimate()
 	}
 	if res.Winner == nil {
 		return decimal.Zero, lineSource{}, httpx.NewProblem(http.StatusUnprocessableEntity, codeNoPrice,

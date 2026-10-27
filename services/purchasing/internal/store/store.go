@@ -21,13 +21,16 @@ import (
 
 // Problem codes raised by the store. The README lists them with their HTTP status.
 const (
-	CodeRequisitionNotFound    = "PRC-REQ-NOT-FOUND"
-	CodePurchaseOrderNotFound  = "PRC-PO-NOT-FOUND"
-	CodeTradeAgreementNotFound = "PRC-TA-NOT-FOUND"
-	CodeRequisitionState       = "PRC-REQ-STATE"
-	CodeVersionConflict        = "PRC-VERSION-CONFLICT"
-	CodeIdempotencyReuse       = "idempotency_key_reuse"
-	eventSource                = "/passage/procurement/purchasing"
+	CodeRequisitionNotFound     = "PRC-REQ-NOT-FOUND"
+	CodePurchaseOrderNotFound   = "PRC-PO-NOT-FOUND"
+	CodeTradeAgreementNotFound  = "PRC-TA-NOT-FOUND"
+	CodeRequisitionState        = "PRC-REQ-STATE"
+	CodeRequisitionLineNotFound = "PRC-REQ-LINE-NOT-FOUND"
+	CodeRequisitionLegalEntity  = "PRC-REQ-005"
+	CodeAgreementNotFound       = "PRC-AGR-NOT-FOUND"
+	CodeVersionConflict         = "PRC-VERSION-CONFLICT"
+	CodeIdempotencyReuse        = "idempotency_key_reuse"
+	eventSource                 = "/passage/procurement/purchasing"
 )
 
 // Page sizes for the list endpoints.
@@ -49,6 +52,14 @@ type Store interface {
 	CreatePurchaseOrder(ctx context.Context, in PurchaseOrder, idem Idem) (PurchaseOrder, error)
 	GetPurchaseOrder(ctx context.Context, id string) (PurchaseOrder, error)
 	ListPurchaseOrders(ctx context.Context, f PurchaseOrderFilter, after string, limit int) (Page[PurchaseOrderSummary], error)
+	CreateAgreement(ctx context.Context, in domain.Agreement, idem Idem) (AgreementDetail, error)
+	GetAgreement(ctx context.Context, id string) (AgreementDetail, error)
+	GetAgreementLine(ctx context.Context, lineID string) (domain.Agreement, error)
+	ListAgreements(ctx context.Context, f AgreementFilter, after string, limit int) (Page[AgreementSummary], error)
+	ChangeAgreementStatus(ctx context.Context, id string, version int, action string, idem Idem) (AgreementDetail, error)
+	ListOpenRequisitionLines(ctx context.Context, f SourcingFilter, after string, limit int) (Page[SourcingLine], error)
+	RequisitionLinesByID(ctx context.Context, lineIDs []string) ([]SourcingLine, error)
+	ConsolidateRequisitionLines(ctx context.Context, orders []PurchaseOrder, lineIDs []string, idem Idem) ([]PurchaseOrder, error)
 	Ping(ctx context.Context) error
 }
 

@@ -42,6 +42,12 @@ func openAPIOperations(t *testing.T) map[string]bool {
 	return ops
 }
 
+// customMethods lists the ":action" suffixes served by one POST route.
+var customMethods = map[string][]string{
+	"/v1/procurement/requisitions/{id}": {"submit"},
+	"/v1/procurement/agreements/{id}":   {"activate", "hold", "close"},
+}
+
 func TestOpenAPI_MatchesRegisteredRoutes(t *testing.T) {
 	r := chi.NewRouter()
 	New(newFake()).Register(r)
@@ -51,8 +57,13 @@ func TestOpenAPI_MatchesRegisteredRoutes(t *testing.T) {
 			return nil
 		}
 		route = strings.TrimSuffix(route, "/")
-		if route == "/v1/procurement/requisitions/{id}" && method == http.MethodPost {
-			route += ":submit" // the custom method is dispatched inside requisitionAction
+		// Custom methods are dispatched inside requisitionAction and
+		// purchaseAgreementAction; each action is its own spec operation.
+		if actions, ok := customMethods[route]; ok && method == http.MethodPost {
+			for _, action := range actions {
+				routes[method+" "+route+":"+action] = true
+			}
+			return nil
 		}
 		routes[method+" "+route] = true
 		return nil

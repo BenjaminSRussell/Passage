@@ -36,9 +36,18 @@ type fakeStore struct {
 	lastAfter       string
 	lastLimit       int
 	pingErr         error
+
+	purchaseAgreements map[string]store.AgreementDetail
+	sourcing           []store.SourcingLine
+	lastAgrFilter      store.AgreementFilter
+	lastSourcing       store.SourcingFilter
+	lastConsolidated   []string
+	lastIdem           store.Idem
 }
 
-func newFake() *fakeStore { return &fakeStore{requisitions: map[string]store.Requisition{}} }
+func newFake() *fakeStore {
+	return &fakeStore{requisitions: map[string]store.Requisition{}, purchaseAgreements: map[string]store.AgreementDetail{}}
+}
 
 func (f *fakeStore) CreateTradeAgreement(_ context.Context, row domain.TradeAgreement, _ store.Idem) (domain.TradeAgreement, error) {
 	row.ID = ids.New()
@@ -110,6 +119,89 @@ func (f *fakeStore) ListPurchaseOrders(_ context.Context, of store.PurchaseOrder
 }
 
 func (f *fakeStore) Ping(context.Context) error { return f.pingErr }
+
+func (f *fakeStore) CreateAgreement(_ context.Context, in domain.Agreement, idem store.Idem) (store.AgreementDetail, error) {
+	f.lastIdem = idem
+	in.ID, in.Number, in.Version = ids.New(), "PA-00000001", 1
+	for i := range in.Lines {
+		in.Lines[i].ID, in.Lines[i].LineNo = ids.New(), i+1
+	}
+	d := store.AgreementDetail{Agreement: in}
+	f.purchaseAgreements[in.ID] = d
+	return d, nil
+}
+
+func (f *fakeStore) GetAgreement(_ context.Context, id string) (store.AgreementDetail, error) {
+	d, ok := f.purchaseAgreements[id]
+	if !ok {
+		return store.AgreementDetail{}, httpx.NewProblem(http.StatusNotFound, store.CodeAgreementNotFound, "purchase agreement not found")
+	}
+	return d, nil
+}
+
+func (f *fakeStore) GetAgreementLine(_ context.Context, lineID string) (domain.Agreement, error) {
+	for _, d := range f.purchaseAgreements {
+		for _, l := range d.Agreement.Lines {
+			if l.ID == lineID {
+				a := d.Agreement
+				a.Lines = []domain.AgreementLine{l}
+				return a, nil
+			}
+		}
+	}
+	return domain.Agreement{}, httpx.NewProblem(http.StatusNotFound, store.CodeAgreementNotFound, "agreement line not found")
+}
+
+func (f *fakeStore) ListAgreements(_ context.Context, af store.AgreementFilter, after string, limit int) (store.Page[store.AgreementSummary], error) {
+	f.lastAgrFilter, f.lastAfter, f.lastLimit = af, after, limit
+	return store.Page[store.AgreementSummary]{Items: []store.AgreementSummary{}}, nil
+}
+
+func (f *fakeStore) ChangeAgreementStatus(_ context.Context, id string, version int, action string, idem store.Idem) (store.AgreementDetail, error) {
+	f.lastIdem = idem
+	d, ok := f.purchaseAgreements[id]
+	if !ok {
+		return store.AgreementDetail{}, httpx.NewProblem(http.StatusNotFound, store.CodeAgreementNotFound, "purchase agreement not found")
+	}
+	if d.Agreement.Version != version {
+		return store.AgreementDetail{}, httpx.NewProblem(http.StatusConflict, store.CodeVersionConflict, "stale")
+	}
+	next, err := domain.NextStatus(d.Agreement.Status, action)
+	if err != nil {
+		return store.AgreementDetail{}, httpx.NewProblem(http.StatusConflict, domain.CodeAgreementState, err.Error())
+	}
+	d.Agreement.Status, d.Agreement.Version = next, version+1
+	f.purchaseAgreements[id] = d
+	return d, nil
+}
+
+func (f *fakeStore) ListOpenRequisitionLines(_ context.Context, sf store.SourcingFilter, after string, limit int) (store.Page[store.SourcingLine], error) {
+	f.lastSourcing, f.lastAfter, f.lastLimit = sf, after, limit
+	return store.Page[store.SourcingLine]{Items: f.sourcing}, nil
+}
+
+func (f *fakeStore) RequisitionLinesByID(_ context.Context, lineIDs []string) ([]store.SourcingLine, error) {
+	want := map[string]bool{}
+	for _, id := range lineIDs {
+		want[id] = true
+	}
+	var out []store.SourcingLine
+	for _, l := range f.sourcing {
+		if want[l.ID] {
+			out = append(out, l)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeStore) ConsolidateRequisitionLines(_ context.Context, orders []store.PurchaseOrder, lineIDs []string, idem store.Idem) ([]store.PurchaseOrder, error) {
+	f.lastConsolidated, f.lastIdem = lineIDs, idem
+	for i := range orders {
+		orders[i].ID, orders[i].RowVersion = ids.New(), 1
+	}
+	f.orders = append(f.orders, orders...)
+	return orders, nil
+}
 
 type groups struct{ vendor, product []string }
 

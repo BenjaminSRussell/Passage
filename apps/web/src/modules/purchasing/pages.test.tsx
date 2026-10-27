@@ -202,6 +202,15 @@ describe("requisition detail", () => {
     expect(screen.queryByRole("button", { name: "Submit for approval" })).not.toBeInTheDocument();
   });
 
+  it("links a consolidated line to the purchase order that orders it", async () => {
+    const closed = { ...requisition, status: "CLOSED", lines: [{ ...requisition.lines[0], status: "CONSOLIDATED", purchaseOrderId: PO_ID, purchaseOrderLineNo: 2 }] };
+    stubFetch(() => json(closed));
+    renderAt(`/purchasing/requisitions/${REQ_ID}`);
+    const lines = await screen.findByRole("table", { name: "Requisition lines" });
+    expect(within(lines).getByText("Consolidated")).toBeInTheDocument();
+    expect(within(lines).getByRole("link", { name: "Line 2 of the order" })).toHaveAttribute("href", `/purchasing/purchase-orders/${PO_ID}`);
+  });
+
   it("shows the conflict code when someone else changed it", async () => {
     stubFetch((_url, init) =>
       init.method === "POST" ? problem(409, "PRC-VERSION-CONFLICT", "requisition is at version 2, not 1") : json(requisition),
@@ -285,6 +294,30 @@ describe("purchase orders", () => {
     fireEvent.change(screen.getByLabelText("Product id"), { target: { value: PRODUCT } });
     fireEvent.click(screen.getByRole("button", { name: "Save purchase order" }));
     expect(await screen.findByText(/PRC-PRICE-001/)).toBeInTheDocument();
+  });
+
+  it("releases a line against an agreement and shows the PRC-AGR-004 warning after create", async () => {
+    const AGR_LINE = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const released = {
+      ...purchaseOrder,
+      lines: [{ ...purchaseOrder.lines[0], priceSource: `AGREEMENT:${AGR_LINE}`, agreementLineId: AGR_LINE }],
+      warnings: [{ code: "PRC-AGR-004", lineNo: 1, detail: "Agreement line 1 is at 95 % of commitment" }],
+    };
+    const fetchMock = stubFetch((_url, init) => (init.method === "POST" ? json(released, 201) : json(released)));
+    const { router } = renderAt("/purchasing/purchase-orders/new");
+    fireEvent.change(await screen.findByLabelText("Legal entity id"), { target: { value: LE } });
+    fireEvent.change(screen.getByLabelText("Vendor id"), { target: { value: VENDOR } });
+    fireEvent.change(screen.getByLabelText("Product id"), { target: { value: PRODUCT } });
+    fireEvent.change(screen.getByLabelText("Agreement line id"), { target: { value: "nope" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save purchase order" }));
+    expect(await screen.findByText("Agreement line id must be a UUID.")).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText("Agreement line id"), { target: { value: AGR_LINE } });
+    fireEvent.click(screen.getByRole("button", { name: "Save purchase order" }));
+    await waitFor(() => expect(router.state.location.pathname).toBe(`/purchasing/purchase-orders/${PO_ID}`));
+    expect(JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body)).lines[0].agreementLineId).toBe(AGR_LINE);
+    expect(await screen.findByText(/at 95 % of commitment \(PRC-AGR-004\)/)).toBeInTheDocument();
+    expect(within(screen.getByRole("table", { name: "Purchase order lines" })).getByText("Purchase agreement")).toBeInTheDocument();
   });
 
   it("shows totals, price sources and charges on the detail page", async () => {
@@ -416,6 +449,8 @@ describe("workspace", () => {
       if (url.includes("status=IN_REVIEW")) return json({ items: [{}, {}], nextCursor: undefined });
       if (url.includes("status=APPROVED")) return json({ items: new Array(200).fill({}), nextCursor: "x" });
       if (url.includes("approvalStatus=DRAFT")) return json({ items: [{}] });
+      if (url.includes("sourcing=NEEDS_SOURCING")) return json({ items: [{}, {}, {}] });
+      if (url.includes("status=EFFECTIVE")) return json({ items: [{}] });
       return json({ items: [] });
     });
     const { container } = renderAt("/purchasing");
@@ -424,6 +459,10 @@ describe("workspace", () => {
     expect(tiles).toHaveTextContent("Approved requisitions to source 200+");
     expect(tiles).toHaveTextContent("Draft purchase orders 1");
     expect(tiles).toHaveTextContent("Active price rows 0");
+    expect(tiles).toHaveTextContent("Lines needing a vendor 3");
+    expect(tiles).toHaveTextContent("Effective purchase agreements 1");
+    expect(screen.getByRole("link", { name: "Consolidate approved lines" })).toHaveAttribute("href", "/purchasing/consolidation");
+    expect(screen.getByRole("link", { name: "Purchase agreements" })).toHaveAttribute("href", "/purchasing/agreements");
     expect(screen.getByRole("link", { name: "New purchase order" })).toHaveAttribute("href", "/purchasing/purchase-orders/new");
     expect(pageViolations(container)).toEqual([]);
   });

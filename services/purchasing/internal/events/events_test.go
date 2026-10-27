@@ -10,12 +10,18 @@ import (
 	"github.com/BenjaminSRussell/passage/services/purchasing/internal/events"
 )
 
+var allTypes = map[string]string{
+	events.RequisitionSubmitted: "requisition",
+	events.RequisitionApproved:  "requisition",
+	events.AgreementThreshold:   "agreement",
+}
+
 func TestEventTypesFollowTheNamingRule(t *testing.T) {
-	for _, typ := range []string{events.RequisitionSubmitted, events.RequisitionApproved} {
+	for typ, entity := range allTypes {
 		if !platformevents.ValidType(typ) {
 			t.Errorf("%s does not match dev.passage.<context>.<entity>.<verb>.v<n>", typ)
 		}
-		if want := "passage." + events.Context + ".requisition"; platformevents.Topic(typ) != want {
+		if want := "passage." + events.Context + "." + entity; platformevents.Topic(typ) != want {
 			t.Errorf("%s routes to topic %s, want %s", typ, platformevents.Topic(typ), want)
 		}
 	}
@@ -42,12 +48,18 @@ func TestPayloadFieldsAreInTheAsyncAPI(t *testing.T) {
 	for k := range lines[0] {
 		keys = append(keys, k)
 	}
+	raw, _ = json.Marshal(events.AgreementThresholdData{Expiry: "2027-12-31"})
+	var threshold map[string]any
+	_ = json.Unmarshal(raw, &threshold)
+	for k := range threshold {
+		keys = append(keys, k)
+	}
 	for _, k := range keys {
 		if !strings.Contains(string(spec), "\n        "+k+":") && !strings.Contains(string(spec), "\n              "+k+":") {
 			t.Errorf("payload field %q is not declared in asyncapi.yaml", k)
 		}
 	}
-	for _, typ := range []string{events.RequisitionSubmitted, events.RequisitionApproved} {
+	for typ := range allTypes {
 		if !strings.Contains(string(spec), "const: "+typ) {
 			t.Errorf("event type %s is not in asyncapi.yaml", typ)
 		}

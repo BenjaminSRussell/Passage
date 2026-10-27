@@ -1,6 +1,13 @@
 import { Link } from "react-router-dom";
 import { Card, CardGrid, PageHeader, Skeleton, StatGroup, StatTile } from "../../shell/ui";
-import { listPurchaseOrders, listRequisitions, listTradeAgreements, type Page } from "./api/client";
+import {
+  listOpenRequisitionLines,
+  listPurchaseAgreements,
+  listPurchaseOrders,
+  listRequisitions,
+  listTradeAgreements,
+  type Page,
+} from "./api/client";
 import { LoadError, useResource } from "./parts";
 import styles from "./pages.module.css";
 
@@ -22,23 +29,25 @@ const sections = [
   },
   {
     title: "Purchase orders",
-    description: "Orders to vendors, priced from trade agreements, with totals that balance to the cent.",
+    description: "Orders to vendors, priced from agreements and trade agreements, with totals that balance to the cent.",
     links: [
+      { label: "Consolidate approved lines", to: "/purchasing/consolidation" },
       { label: "All purchase orders", to: "/purchasing/purchase-orders" },
       { label: "New purchase order", to: "/purchasing/purchase-orders/new" },
     ],
   },
   {
-    title: "Vendor pricing",
-    description: "Trade agreement price rows and the lookup that explains which row wins.",
+    title: "Agreements and pricing",
+    description: "Blanket purchase agreements with release tracking, trade agreement price rows, and the lookup that explains which row wins.",
     links: [
+      { label: "Purchase agreements", to: "/purchasing/agreements" },
       { label: "Trade agreements", to: "/purchasing/trade-agreements" },
       { label: "Price lookup", to: "/purchasing/pricing" },
     ],
   },
 ];
 
-/** Procurement workspace (FR-17.14 tiles available in this slice) and links to each area. */
+/** Procurement workspace (the FR-17.14 tiles built so far) and links to each area. */
 export function WorkspacePage() {
   const counts = useResource(
     (signal) =>
@@ -47,13 +56,15 @@ export function WorkspacePage() {
         listRequisitions({ status: "APPROVED" }, { limit: COUNT_LIMIT, signal }),
         listPurchaseOrders({ approvalStatus: "DRAFT" }, { limit: COUNT_LIMIT, signal }),
         listTradeAgreements({ status: "ACTIVE" }, { limit: COUNT_LIMIT, signal }),
+        listOpenRequisitionLines({ sourcing: "NEEDS_SOURCING" }, { limit: COUNT_LIMIT, signal }),
+        listPurchaseAgreements({ status: "EFFECTIVE" }, { limit: COUNT_LIMIT, signal }),
       ]),
     [],
   );
 
   return (
     <div className={styles.stack}>
-      <PageHeader title="Procurement workspace" description="Requisitions, purchase orders and vendor pricing in one place." />
+      <PageHeader title="Procurement workspace" description="Requisitions, purchase orders, agreements and vendor pricing in one place." />
       {counts.error ? <LoadError what="workspace counts" error={counts.error} onRetry={counts.reload} /> : null}
       {counts.loading ? (
         <div aria-busy="true">
@@ -64,7 +75,9 @@ export function WorkspacePage() {
         <StatGroup label="Procurement tiles">
           <StatTile label="Requisitions in review" value={countLabel(counts.data[0])} />
           <StatTile label="Approved requisitions to source" value={countLabel(counts.data[1])} />
+          <StatTile label="Lines needing a vendor" value={countLabel(counts.data[4])} />
           <StatTile label="Draft purchase orders" value={countLabel(counts.data[2])} />
+          <StatTile label="Effective purchase agreements" value={countLabel(counts.data[5])} />
           <StatTile label="Active price rows" value={countLabel(counts.data[3])} />
         </StatGroup>
       ) : null}

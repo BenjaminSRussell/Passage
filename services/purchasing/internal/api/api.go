@@ -45,12 +45,13 @@ const (
 	codeUnknownAction  = "PRC-ACTION-001"
 )
 
-// Duties (PRD 3.17.17) enforced on the routes of this slice.
+// Duties (PRD 3.17.17) enforced on the routes.
 const (
 	dutyRequisitionCreate      = "RequisitionCreate"
 	dutyPurchaseOrderMaintain  = "PurchaseOrderMaintain"
 	dutyPurchaseOrderInquire   = "PurchaseOrderInquire"
 	dutyTradeAgreementMaintain = "TradeAgreementMaintain"
+	dutyAgreementMaintain      = "AgreementMaintain"
 )
 
 // maxRequisitionLines is the FR-17.1 cap on lines per requisition.
@@ -89,6 +90,8 @@ type API struct {
 	ordersCreated         atomic.Int64
 	agreementsCreated     atomic.Int64
 	priceLookups          atomic.Int64
+
+	purchaseAgreementsCreated atomic.Int64
 }
 
 // New returns the API over s using the default approval policy (FR-17.2) and
@@ -114,7 +117,11 @@ func (a *API) Register(r chi.Router) {
 		create.Get("/requisitions/{id}", a.getRequisition)
 		// Custom methods (":submit") arrive as one path segment; see requisitionAction.
 		create.Post("/requisitions/{id}", a.requisitionAction)
-		r.With(authz.RequireDuty(dutyPurchaseOrderMaintain)).Post("/purchase-orders", a.createOrder)
+		maintain := r.With(authz.RequireDuty(dutyPurchaseOrderMaintain))
+		maintain.Post("/purchase-orders", a.createOrder)
+		// The consolidation queue and :consolidate (FR-17.3).
+		maintain.Get("/requisition-lines", a.listOpenRequisitionLines)
+		maintain.Post("/requisitions:consolidate", a.consolidateRequisitions)
 		r.With(authz.RequireDuty(dutyPurchaseOrderInquire)).Get("/purchase-orders", a.listOrders)
 		r.With(authz.RequireDuty(dutyPurchaseOrderInquire)).Get("/purchase-orders/{id}", a.getOrder)
 		r.With(authz.RequireDuty(dutyPurchaseOrderMaintain)).Get("/pricing/lookup", a.lookupPrice)
@@ -122,6 +129,13 @@ func (a *API) Register(r chi.Router) {
 		ta.Post("/trade-agreements", a.createAgreement)
 		ta.Get("/trade-agreements", a.listAgreements)
 		ta.Get("/trade-agreements/{id}", a.getAgreement)
+		// Purchase agreements (FR-17.5); custom methods (":activate", ":hold",
+		// ":close") arrive as one path segment, see purchaseAgreementAction.
+		pa := r.With(authz.RequireDuty(dutyAgreementMaintain))
+		pa.Post("/agreements", a.createPurchaseAgreement)
+		pa.Get("/agreements", a.listPurchaseAgreements)
+		pa.Get("/agreements/{id}", a.getPurchaseAgreement)
+		pa.Post("/agreements/{id}", a.purchaseAgreementAction)
 	})
 }
 
@@ -138,6 +152,7 @@ func (a *API) Metrics() http.Handler {
 			{"purchasing_purchase_orders_created_total", "Purchase orders created.", a.ordersCreated.Load()},
 			{"purchasing_trade_agreements_created_total", "Trade agreement rows created.", a.agreementsCreated.Load()},
 			{"purchasing_price_lookups_total", "Trade agreement price lookups answered.", a.priceLookups.Load()},
+			{"purchasing_purchase_agreements_created_total", "Purchase agreements created.", a.purchaseAgreementsCreated.Load()},
 		} {
 			fmt.Fprintf(w, "# HELP %[1]s %[2]s\n# TYPE %[1]s counter\n%[1]s %[3]d\n", c.name, c.help, c.value)
 		}

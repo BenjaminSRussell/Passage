@@ -61,6 +61,8 @@ const tones: Record<string, BadgeTone> = {
   EXPIRED: "warning",
   OPEN: "neutral",
   CONSOLIDATED: "success",
+  EFFECTIVE: "success",
+  ON_HOLD: "warning",
 };
 
 /** Sentence-case label for an upper-snake status, e.g. IN_REVIEW → In review. */

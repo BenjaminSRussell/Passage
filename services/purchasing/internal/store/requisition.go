@@ -65,6 +65,10 @@ type RequisitionLine struct {
 	SiteID             string          `json:"siteId,omitempty"`
 	PreferredVendorID  string          `json:"preferredVendorId,omitempty"`
 	Status             string          `json:"status"`
+	// PurchaseOrderID and PurchaseOrderLineNo name the PO line that ordered a
+	// CONSOLIDATED line (FR-17.3 commitment tracking).
+	PurchaseOrderID     string `json:"purchaseOrderId,omitempty"`
+	PurchaseOrderLineNo int    `json:"purchaseOrderLineNo,omitempty"`
 }
 
 // RequisitionSummary is a list row: the header without lines.
@@ -254,7 +258,8 @@ func loadRequisition(ctx context.Context, tx pgx.Tx, id string) (Requisition, er
 		return Requisition{}, notFound(err, CodeRequisitionNotFound, "requisition not found")
 	}
 	rows, err := tx.Query(ctx, `select id, line_no, coalesce(product_id::text, ''), description, category, qty, unit,
-		estimated_unit_price, amount, requested_date, coalesce(site_id::text, ''), coalesce(preferred_vendor_id::text, ''), status
+		estimated_unit_price, amount, requested_date, coalesce(site_id::text, ''), coalesce(preferred_vendor_id::text, ''), status,
+		coalesce(purchase_order_id::text, ''), coalesce(purchase_order_line_no, 0)
 		from purchase_requisition_line where tenant_id = $1 and requisition_id = $2 order by line_no`, p.TenantID, id)
 	if err != nil {
 		return Requisition{}, err
@@ -265,7 +270,7 @@ func loadRequisition(ctx context.Context, tx pgx.Tx, id string) (Requisition, er
 		var l RequisitionLine
 		var requested time.Time
 		if err := rows.Scan(&l.ID, &l.LineNo, &l.ProductID, &l.Description, &l.Category, &l.Qty, &l.Unit, &l.EstimatedUnitPrice,
-			&l.Amount, &requested, &l.SiteID, &l.PreferredVendorID, &l.Status); err != nil {
+			&l.Amount, &requested, &l.SiteID, &l.PreferredVendorID, &l.Status, &l.PurchaseOrderID, &l.PurchaseOrderLineNo); err != nil {
 			return Requisition{}, err
 		}
 		l.RequestedDate = day(requested)

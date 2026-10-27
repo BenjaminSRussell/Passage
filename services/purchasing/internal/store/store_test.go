@@ -48,10 +48,16 @@ func day(t *testing.T, s string) domain.Day {
 	return d
 }
 
+// problemCode is the stable code of a store problem or of a domain rule
+// error (which the API turns into a 422).
 func problemCode(err error) string {
 	var p *httpx.Problem
 	if errors.As(err, &p) {
 		return p.Code
+	}
+	var de *domain.Error
+	if errors.As(err, &de) {
+		return de.Code
 	}
 	return ""
 }
@@ -366,6 +372,21 @@ func TestRowLevelSecurity_AppRoleSeesOnlyItsTenant(t *testing.T) {
 	scoped := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(11), LegalEntityID: ids.New()})
 	if _, err := s.GetRequisition(scoped, r.ID); problemCode(err) != store.CodeRequisitionNotFound {
 		t.Fatalf("out-of-scope read = %v", err)
+	}
+	// Purchase agreements (0002) are isolated the same way, by tenant and by
+	// legal entity scope.
+	pa, err := s.CreateAgreement(a, blanket(t, ids.New(), ids.New()), store.Idem{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetAgreement(b, pa.Agreement.ID); problemCode(err) != store.CodeAgreementNotFound {
+		t.Fatalf("tenant B read tenant A's agreement: %v", err)
+	}
+	if _, err := s.GetAgreementLine(b, pa.Agreement.Lines[0].ID); problemCode(err) != store.CodeAgreementNotFound {
+		t.Fatalf("tenant B read tenant A's agreement line: %v", err)
+	}
+	if _, err := s.GetAgreement(scoped, pa.Agreement.ID); problemCode(err) != store.CodeAgreementNotFound {
+		t.Fatalf("out-of-scope agreement read = %v", err)
 	}
 	// Writes are checked too: the app role cannot insert a row for another tenant.
 	_, err = app.Exec(ctx, `insert into trade_agreement (tenant_id, id, relation, account_code, item_code, currency, unit, price, valid_from)

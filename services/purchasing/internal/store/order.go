@@ -37,10 +37,13 @@ type PurchaseOrder struct {
 	Charges          []PurchaseOrderCharge `json:"charges"`
 	CreatedAt        time.Time             `json:"createdAt"`
 	UpdatedAt        time.Time             `json:"updatedAt"`
+	// Warnings are computed on create (PRC-AGR-004) and not stored.
+	Warnings []Warning `json:"warnings,omitempty"`
 }
 
-// PurchaseOrderLine is one PO line. PriceSource is "MANUAL" or
-// "TRADE_AGREEMENT:<id>" so the price can be explained later.
+// PurchaseOrderLine is one PO line. PriceSource is "MANUAL",
+// "TRADE_AGREEMENT:<id>", "AGREEMENT:<agreement line id>" or
+// "REQUISITION_ESTIMATE" so the price can be explained later.
 type PurchaseOrderLine struct {
 	LineNo            int             `json:"lineNo"`
 	ProductID         string          `json:"productId,omitempty"`
@@ -57,6 +60,7 @@ type PurchaseOrderLine struct {
 	DeliveryDate      domain.Day      `json:"deliveryDate"`
 	PriceSource       string          `json:"priceSource"`
 	RequisitionLineID string          `json:"requisitionLineId,omitempty"`
+	AgreementLineID   string          `json:"agreementLineId,omitempty"`
 	Status            string          `json:"status"`
 }
 
@@ -70,7 +74,6 @@ type PurchaseOrderCharge struct {
 
 // CreatePurchaseOrder stores a DRAFT PO with its priced lines and charges.
 func (s *Postgres) CreatePurchaseOrder(ctx context.Context, in PurchaseOrder, idem Idem) (PurchaseOrder, error) {
-	p, _ := tenant.FromContext(ctx)
 	in.ID = ids.New()
 	var out PurchaseOrder
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
@@ -82,40 +85,63 @@ func (s *Postgres) CreatePurchaseOrder(ctx context.Context, in PurchaseOrder, id
 			out, err = loadPurchaseOrder(ctx, tx, existing)
 			return err
 		}
-		var seq int64
-		if err := tx.QueryRow(ctx, `select nextval('purchase_order_number_seq')`).Scan(&seq); err != nil {
-			return err
-		}
-		in.Number = fmt.Sprintf("PO-%08d", seq)
-		in.ApprovalStatus, in.DocumentStatus, in.VersionNo = "DRAFT", "NONE", 0
-		if _, err := tx.Exec(ctx, `insert into purchase_order (tenant_id, id, legal_entity_id, number, vendor_id, site_id, warehouse_id,
-			currency, approval_status, document_status, version_no, change_management, subtotal, discount_total, charges_total, tax_total, total)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
-			p.TenantID, in.ID, in.LegalEntityID, in.Number, in.VendorID, nullable(in.SiteID), nullable(in.WarehouseID), in.Currency,
-			in.ApprovalStatus, in.DocumentStatus, in.VersionNo, in.ChangeManagement, in.Subtotal, in.DiscountTotal, in.ChargesTotal,
-			in.TaxTotal, in.Total); err != nil {
-			return err
-		}
-		for _, l := range in.Lines {
-			if _, err := tx.Exec(ctx, `insert into purchase_order_line (tenant_id, purchase_order_id, line_no, product_id, description,
-				qty, unit, unit_price, price_unit, discount_pct, gross_amount, discount_amount, line_amount, tax_amount, delivery_date,
-				price_source, requisition_line_id, status)
-				values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 'OPEN')`,
-				p.TenantID, in.ID, l.LineNo, nullable(l.ProductID), l.Description, l.Qty, l.Unit, l.UnitPrice, l.PriceUnit,
-				l.DiscountPct, l.GrossAmount, l.DiscountAmount, l.LineAmount, l.TaxAmount, l.DeliveryDate.Time, l.PriceSource,
-				nullable(l.RequisitionLineID)); err != nil {
-				return err
-			}
-		}
-		for _, c := range in.Charges {
-			if _, err := tx.Exec(ctx, `insert into purchase_order_charge (tenant_id, purchase_order_id, seq, calc, value, amount)
-				values ($1, $2, $3, $4, $5, $6)`, p.TenantID, in.ID, c.Seq, c.Calc, c.Value, c.Amount); err != nil {
-				return err
-			}
-		}
-		out, err = loadPurchaseOrder(ctx, tx, in.ID)
+		out, err = insertPurchaseOrder(ctx, tx, in)
 		return err
 	})
+	return out, err
+}
+
+// insertPurchaseOrder numbers and writes a DRAFT PO inside the caller's tx
+// (in.ID must be set). Before writing it claims the requisition lines the PO
+// orders and releases its lines against their agreement lines (FR-17.5), so a
+// PRC-AGR or PRC-REQ error rolls the whole document back; after writing it links
+// the requisition lines to their PO lines (FR-17.3).
+func insertPurchaseOrder(ctx context.Context, tx pgx.Tx, in PurchaseOrder) (PurchaseOrder, error) {
+	p, _ := tenant.FromContext(ctx)
+	reqIDs, err := claimRequisitionLines(ctx, tx, in)
+	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	warnings, err := drawAgreements(ctx, tx, in)
+	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	var seq int64
+	if err := tx.QueryRow(ctx, `select nextval('purchase_order_number_seq')`).Scan(&seq); err != nil {
+		return PurchaseOrder{}, err
+	}
+	in.Number = fmt.Sprintf("PO-%08d", seq)
+	in.ApprovalStatus, in.DocumentStatus, in.VersionNo = "DRAFT", "NONE", 0
+	if _, err := tx.Exec(ctx, `insert into purchase_order (tenant_id, id, legal_entity_id, number, vendor_id, site_id, warehouse_id,
+		currency, approval_status, document_status, version_no, change_management, subtotal, discount_total, charges_total, tax_total, total)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+		p.TenantID, in.ID, in.LegalEntityID, in.Number, in.VendorID, nullable(in.SiteID), nullable(in.WarehouseID), in.Currency,
+		in.ApprovalStatus, in.DocumentStatus, in.VersionNo, in.ChangeManagement, in.Subtotal, in.DiscountTotal, in.ChargesTotal,
+		in.TaxTotal, in.Total); err != nil {
+		return PurchaseOrder{}, err
+	}
+	for _, l := range in.Lines {
+		if _, err := tx.Exec(ctx, `insert into purchase_order_line (tenant_id, purchase_order_id, line_no, product_id, description,
+			qty, unit, unit_price, price_unit, discount_pct, gross_amount, discount_amount, line_amount, tax_amount, delivery_date,
+			price_source, requisition_line_id, agreement_line_id, status)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, 'OPEN')`,
+			p.TenantID, in.ID, l.LineNo, nullable(l.ProductID), l.Description, l.Qty, l.Unit, l.UnitPrice, l.PriceUnit,
+			l.DiscountPct, l.GrossAmount, l.DiscountAmount, l.LineAmount, l.TaxAmount, l.DeliveryDate.Time, l.PriceSource,
+			nullable(l.RequisitionLineID), nullable(l.AgreementLineID)); err != nil {
+			return PurchaseOrder{}, err
+		}
+	}
+	for _, c := range in.Charges {
+		if _, err := tx.Exec(ctx, `insert into purchase_order_charge (tenant_id, purchase_order_id, seq, calc, value, amount)
+			values ($1, $2, $3, $4, $5, $6)`, p.TenantID, in.ID, c.Seq, c.Calc, c.Value, c.Amount); err != nil {
+			return PurchaseOrder{}, err
+		}
+	}
+	if err := linkRequisitionLines(ctx, tx, in, reqIDs); err != nil {
+		return PurchaseOrder{}, err
+	}
+	out, err := loadPurchaseOrder(ctx, tx, in.ID)
+	out.Warnings = warnings
 	return out, err
 }
 
@@ -144,7 +170,7 @@ func loadPurchaseOrder(ctx context.Context, tx pgx.Tx, id string) (PurchaseOrder
 	}
 	lines, err := tx.Query(ctx, `select line_no, coalesce(product_id::text, ''), description, qty, unit, unit_price, price_unit,
 		discount_pct, gross_amount, discount_amount, line_amount, tax_amount, delivery_date, price_source,
-		coalesce(requisition_line_id::text, ''), status
+		coalesce(requisition_line_id::text, ''), coalesce(agreement_line_id::text, ''), status
 		from purchase_order_line where tenant_id = $1 and purchase_order_id = $2 order by line_no`, p.TenantID, id)
 	if err != nil {
 		return PurchaseOrder{}, err
@@ -155,7 +181,8 @@ func loadPurchaseOrder(ctx context.Context, tx pgx.Tx, id string) (PurchaseOrder
 		var l PurchaseOrderLine
 		var due time.Time
 		if err := lines.Scan(&l.LineNo, &l.ProductID, &l.Description, &l.Qty, &l.Unit, &l.UnitPrice, &l.PriceUnit, &l.DiscountPct,
-			&l.GrossAmount, &l.DiscountAmount, &l.LineAmount, &l.TaxAmount, &due, &l.PriceSource, &l.RequisitionLineID, &l.Status); err != nil {
+			&l.GrossAmount, &l.DiscountAmount, &l.LineAmount, &l.TaxAmount, &due, &l.PriceSource, &l.RequisitionLineID,
+			&l.AgreementLineID, &l.Status); err != nil {
 			return PurchaseOrder{}, err
 		}
 		l.DeliveryDate = day(due)

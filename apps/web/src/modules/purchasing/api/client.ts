@@ -69,6 +69,9 @@ export interface RequisitionLine {
   siteId?: string;
   preferredVendorId?: string;
   status: string;
+  /** Set when CONSOLIDATED: the purchase order line that orders this line. */
+  purchaseOrderId?: string;
+  purchaseOrderLineNo?: number;
 }
 
 export interface Requisition {
@@ -137,6 +140,7 @@ export interface PurchaseOrderLine {
   deliveryDate: string;
   priceSource: string;
   requisitionLineId?: string;
+  agreementLineId?: string;
   status: string;
 }
 
@@ -169,6 +173,8 @@ export interface PurchaseOrder {
   charges: PurchaseOrderCharge[];
   createdAt: string;
   updatedAt: string;
+  /** Returned on create only: PRC-AGR-004 when a release reaches an agreement threshold. */
+  warnings?: Warning[];
 }
 
 export interface PurchaseOrderSummary {
@@ -198,6 +204,7 @@ export interface PurchaseOrderLineInput {
   taxAmount?: string;
   deliveryDate: string;
   requisitionLineId?: string;
+  agreementLineId?: string;
 }
 
 export interface PurchaseOrderInput {
@@ -275,6 +282,113 @@ export interface LookupParams {
   tie?: TieRule | "";
   vendorGroup?: string;
   productGroup?: string;
+}
+
+export type AgreementStatus = "DRAFT" | "EFFECTIVE" | "ON_HOLD" | "CLOSED";
+export type CommitmentType = "QUANTITY" | "VALUE" | "CATEGORY_VALUE" | "TOTAL_VALUE";
+export type MaxEnforced = "HARD" | "SOFT" | "NONE";
+export type AgreementAction = "activate" | "hold" | "close";
+
+export interface PurchaseAgreementLine {
+  id: string;
+  lineNo: number;
+  commitmentType: CommitmentType;
+  productId?: string;
+  category?: string;
+  unit?: string;
+  committedQty: string;
+  committedAmount: string;
+  unitPrice: string;
+  discountPct: string;
+  maxEnforced: MaxEnforced;
+  priceOverride: boolean;
+  releasedQty: string;
+  releasedAmount: string;
+  pctReleased: string;
+  remaining: string;
+}
+
+export interface AgreementRelease {
+  agreementLineId: string;
+  purchaseOrderId: string;
+  purchaseOrderNumber: string;
+  lineNo: number;
+  qty: string;
+  unit: string;
+  lineAmount: string;
+  deliveryDate: string;
+  approvalStatus: ApprovalStatus;
+  createdAt: string;
+}
+
+export interface PurchaseAgreement {
+  id: string;
+  number: string;
+  legalEntityId: string;
+  vendorId: string;
+  currency: string;
+  status: AgreementStatus;
+  validFrom: string;
+  validTo?: string;
+  version: number;
+  lines: PurchaseAgreementLine[];
+  releases: AgreementRelease[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PurchaseAgreementSummary {
+  id: string;
+  number: string;
+  legalEntityId: string;
+  vendorId: string;
+  currency: string;
+  validFrom: string;
+  validTo?: string;
+  status: AgreementStatus;
+  lineCount: number;
+  maxPctReleased: string;
+  version: number;
+  createdAt: string;
+}
+
+export interface PurchaseAgreementLineInput {
+  commitmentType: CommitmentType;
+  productId?: string;
+  category?: string;
+  unit?: string;
+  committedQty?: string;
+  committedAmount?: string;
+  unitPrice?: string;
+  discountPct?: string;
+  maxEnforced?: MaxEnforced;
+  priceOverride?: boolean;
+}
+
+export interface PurchaseAgreementInput {
+  legalEntityId: string;
+  vendorId: string;
+  currency: string;
+  status?: "DRAFT" | "EFFECTIVE";
+  validFrom: string;
+  validTo?: string;
+  lines: PurchaseAgreementLineInput[];
+}
+
+export type SourcingFilter = "NEEDS_SOURCING" | "HAS_VENDOR";
+
+/** An OPEN line of an APPROVED requisition waiting to be ordered. */
+export interface SourcingLine extends RequisitionLine {
+  requisitionId: string;
+  requisitionNumber: string;
+  requisitionStatus: RequisitionStatus;
+  legalEntityId: string;
+  currency: string;
+}
+
+export interface ConsolidationInput {
+  windowDays?: number;
+  lines: { requisitionLineId: string; vendorId?: string; agreementLineId?: string }[];
 }
 
 /** Fresh key for one logical command; reuse it when retrying the same command. */
@@ -388,4 +502,38 @@ export function createTradeAgreement(input: TradeAgreementInput, idempotencyKey 
 
 export function lookupPrice(params: LookupParams, signal?: AbortSignal) {
   return send<PriceLookup>("GET", `/pricing/lookup${query({ ...params })}`, { signal });
+}
+
+export function listPurchaseAgreements(filters: { status?: AgreementStatus | ""; vendorId?: string } = {}, options: ListOptions = {}) {
+  return list<PurchaseAgreementSummary>("/agreements", { status: filters.status || undefined, vendorId: filters.vendorId }, options);
+}
+
+export function getPurchaseAgreement(id: string, signal?: AbortSignal) {
+  return send<PurchaseAgreement>("GET", `/agreements/${encodeURIComponent(id)}`, { signal });
+}
+
+export function createPurchaseAgreement(input: PurchaseAgreementInput, idempotencyKey = newIdempotencyKey()) {
+  return send<PurchaseAgreement>("POST", "/agreements", {
+    body: input,
+    headers: { "Idempotency-Key": idempotencyKey },
+  });
+}
+
+/** Activates, holds or closes an agreement; version is the ETag read when it was loaded. */
+export function changePurchaseAgreement(id: string, action: AgreementAction, version: number, idempotencyKey = newIdempotencyKey()) {
+  return send<PurchaseAgreement>("POST", `/agreements/${encodeURIComponent(id)}:${action}`, {
+    headers: { "Idempotency-Key": idempotencyKey, "If-Match": `"${version}"` },
+  });
+}
+
+export function listOpenRequisitionLines(filters: { sourcing?: SourcingFilter | ""; vendorId?: string } = {}, options: ListOptions = {}) {
+  return list<SourcingLine>("/requisition-lines", { sourcing: filters.sourcing || undefined, vendorId: filters.vendorId }, options);
+}
+
+/** Creates one DRAFT purchase order per vendor, currency, site and delivery window. */
+export function consolidateRequisitions(input: ConsolidationInput, idempotencyKey = newIdempotencyKey()) {
+  return send<{ purchaseOrders: PurchaseOrder[] }>("POST", "/requisitions:consolidate", {
+    body: input,
+    headers: { "Idempotency-Key": idempotencyKey },
+  });
 }
