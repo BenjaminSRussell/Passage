@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
   Badge,
@@ -20,13 +20,14 @@ import {
   getJournal,
   LINE_DIMENSIONS,
   postJournal,
+  reverseJournal,
   type GLLine,
   type Journal,
   type JournalLine,
   type LineDimension,
   type Problem,
 } from "./api/client";
-import { dash, DECIMAL, describeDimensions, formatDateTime, sentence, statusTone, typeLabels, UUID } from "./format";
+import { dash, DECIMAL, describeDimensions, formatDateTime, sentence, shortId, statusTone, today, typeLabels, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -154,6 +155,61 @@ function AddLineForm({ journal, onAdded }: { journal: Journal; onAdded(updated: 
   );
 }
 
+/** Creates the DRAFT reversal of a posted journal and opens it (BR-16.12). */
+function ReverseForm({ journal, onCancel }: { journal: Journal; onCancel(): void }) {
+  const navigate = useNavigate();
+  const [date, setDate] = useState(today());
+  const [error, setError] = useState("");
+  const [failure, setFailure] = useState<Problem | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      setError("Enter the posting date of the reversal.");
+      return;
+    }
+    setError("");
+    setFailure(null);
+    setBusy(true);
+    try {
+      const reversal = await reverseJournal(journal.id, date);
+      navigate(`/inventory/journals/${reversal.id}`);
+    } catch (e) {
+      setFailure(describeProblem(e));
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card title="Reverse journal">
+      <form onSubmit={submit} noValidate className={styles.form}>
+        <p className={`${styles.muted} ${styles.formActions}`}>
+          Creates a draft journal with every line negated. Posting it takes each line out at the value the original posted, so the GL entry mirrors the original.
+        </p>
+        <FormField id="reverse-date" label="Posting date" error={error}>
+          {(control) => <Input {...control} type="date" value={date} onChange={(e) => setDate(e.target.value)} invalid={Boolean(error)} />}
+        </FormField>
+        {failure ? (
+          <div className={styles.formActions}>
+            <Alert tone="danger" title="The journal was not reversed" live="alert">
+              {failure.message} ({failure.code})
+            </Alert>
+          </div>
+        ) : null}
+        <div className={styles.formActions}>
+          <Button type="submit" variant="primary" loading={busy}>
+            Create reversal
+          </Button>
+          <Button variant="ghost" onClick={onCancel}>
+            Cancel
+          </Button>
+        </div>
+      </form>
+    </Card>
+  );
+}
+
 function Detail({ term, children, mono = false }: { term: string; children: string; mono?: boolean }) {
   return (
     <div className={styles.entry}>
@@ -163,7 +219,7 @@ function Detail({ term, children, mono = false }: { term: string; children: stri
   );
 }
 
-/** Journal detail: header, lines, add line (DRAFT), post, and the GL entry once posted. */
+/** Journal detail: header, lines, add line (DRAFT), post, reverse (POSTED), and the GL entry once posted. */
 export function JournalDetailPage() {
   const { id = "" } = useParams();
   const state = useLoad((signal) => getJournal(id, signal), id);
@@ -171,9 +227,11 @@ export function JournalDetailPage() {
   const [posting, setPosting] = useState(false);
   const [postFailure, setPostFailure] = useState<Problem | null>(null);
   const [notice, setNotice] = useState("");
+  const [reversing, setReversing] = useState(false);
 
   useEffect(() => {
     setJournal(state.data);
+    setReversing(false);
   }, [state.data]);
 
   async function post() {
@@ -219,6 +277,8 @@ export function JournalDetailPage() {
   }
 
   const draft = journal.status === "DRAFT";
+  const reversal = Boolean(journal.reversesJournalId);
+  const canReverse = journal.status === "POSTED" && !journal.reversedByJournalId;
   return (
     <div className={styles.stack}>
       <PageHeader
@@ -230,9 +290,10 @@ export function JournalDetailPage() {
             {back}
             {draft ? (
               <Button variant="primary" loading={posting} disabled={journal.lines.length === 0} onClick={post}>
-                Post journal
+                {reversal ? "Post reversal" : "Post journal"}
               </Button>
             ) : null}
+            {canReverse && !reversing ? <Button onClick={() => setReversing(true)}>Reverse journal</Button> : null}
           </>
         }
       />
@@ -247,6 +308,18 @@ export function JournalDetailPage() {
           action={postFailure.code === "conflict_version" ? <Button size="sm" onClick={state.reload}>Reload journal</Button> : undefined}
         >
           {postFailure.message} ({postFailure.code})
+        </Alert>
+      ) : null}
+      {reversing ? <ReverseForm journal={journal} onCancel={() => setReversing(false)} /> : null}
+      {journal.reversesJournalId ? (
+        <Alert tone="info" title={draft ? "Reversal draft" : "Reversal"}>
+          This journal reverses journal <Link to={`/inventory/journals/${journal.reversesJournalId}`}>{shortId(journal.reversesJournalId)}</Link>.
+          {draft ? " It holds exactly the negated lines; post it to take the movement back out." : ""}
+        </Alert>
+      ) : null}
+      {journal.reversedByJournalId ? (
+        <Alert tone="info" title="Reversed">
+          Reversed by journal <Link to={`/inventory/journals/${journal.reversedByJournalId}`}>{shortId(journal.reversedByJournalId)}</Link>.
         </Alert>
       ) : null}
       <Card title="Details">
@@ -272,7 +345,7 @@ export function JournalDetailPage() {
         getRowKey={(row) => row.id}
         empty={{ title: "No lines yet", description: draft ? "Add a line below, then post the journal." : "This journal has no lines." }}
       />
-      {draft ? <AddLineForm journal={journal} onAdded={setJournal} /> : null}
+      {draft && !reversal ? <AddLineForm journal={journal} onAdded={setJournal} /> : null}
       {journal.glEntry ? (
         <Card title="GL entry">
           <div className={styles.stack}>

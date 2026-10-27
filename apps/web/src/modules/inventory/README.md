@@ -1,6 +1,6 @@
 # Inventory module (web)
 
-Wave 16 slice 1 to 3 screens for `services/inventory` (`/api/v1/inventory/...`, rewritten by the
+Wave 16 slice 1 to 4 screens for `services/inventory` (`/api/v1/inventory/...`, rewritten by the
 web BFF to the service's `/v1/inventory/...`). Built from the shell primitives in
 `src/shell/ui` and `pages.module.css`, following `apps/web/docs/design-system.md`.
 
@@ -9,13 +9,14 @@ web BFF to the service's `/v1/inventory/...`). Built from the shell primitives i
 | `/inventory`, `/inventory/onhand` | On-hand inquiry: filter by product, site, warehouse, batch; group by any dimension; groups holding negative stock say "Negative stock" in text | `inventory.read` |
 | `/inventory/journals` | Journal list with status and type filters and "Load more" paging | `inventory.read` |
 | `/inventory/journals/new` | New journal header (type, legal entity, posting date, currency, offset account for MOVEMENT) | `inventory.journal.write` |
-| `/inventory/journals/:id` | Journal detail: header, lines, add line (DRAFT), post (If-Match), GL entry once posted | `inventory.read` (add line / post need the write / post duties on the service) |
+| `/inventory/journals/:id` | Journal detail: header, lines, add line (DRAFT, not on a reversal), post (If-Match), GL entry once posted; Reverse on a POSTED journal (posting date, opens the reversal draft) and links between a journal and its reversal | `inventory.read` (add line / reverse need `inventory.journal.write`, post `inventory.journal.post`) |
 | `/inventory/transactions` | Transaction inquiry: filter by product, status, origin, date range; drill to the journal; "Load more" paging | `inventory.read` |
 | `/inventory/reservations` | Reservations by status with Release on active ones | `inventory.read` (release needs `inventory.reservation.write`) |
 | `/inventory/reservations/new` | Reservation dialog: policy (FIFO, FEFO, LIFO, manual), demand, required date, shelf-life margin, dimensions, partial; shows the allocations and any shortfall | `inventory.reservation.write` |
 | `/inventory/blockings` | Blocked and quarantined stock by state with Release | `inventory.read` (release needs `inventory.blocking.write`) |
 | `/inventory/blockings/new` | Block stock: quantity, unit, BLOCKED or QUARANTINE, reason, note, dimensions | `inventory.blocking.write` |
-| `/inventory/count-plans` | Count plans with Generate sheet (opens the new sheet) | `inventory.read` (generate needs `inventory.count.write`) |
+| `/inventory/count-plans` | Count plans with Generate sheet (opens the new sheet) and Tags | `inventory.read` (generate needs `inventory.count.write`) |
+| `/inventory/count-plans/:id/tags` | Count tags of a plan: list with status filter, generate a range, count (product, quantity, dimensions) or void a tag (If-Match), transfer the used tags to a new count sheet, marking open tags missing as supervisor | `inventory.read` (generate / count / void / transfer need `inventory.count.write`, mark missing `inventory.count.approve`) |
 | `/inventory/count-plans/new` | New count plan: legal entity, warehouse, currency, unit, tolerances, blind | `inventory.count.write` |
 | `/inventory/count-sheets` | Count sheets by status | `inventory.read` |
 | `/inventory/count-sheets/:id` | Count sheet: expected (hidden on blind sheets), inline count entry per line (If-Match), post; variance and count journal once posted | `inventory.read` (entry / post need `inventory.count.write` / `.post`, approval above tolerance `.approve`) |
@@ -37,7 +38,7 @@ show the service's problem code.
 - `format.ts` — labels, tones and small formatters.
 - `parts.tsx` — shared detail entry, problem alert, row action button and field-error mapping.
 
-Tests: `api/client.test.ts`, `module.test.ts`, `pages.test.tsx`, `slice2.test.tsx`, `slice3.test.tsx` (`npx vitest --run src/modules/inventory`).
+Tests: `api/client.test.ts`, `module.test.ts`, `pages.test.tsx`, `slice2.test.tsx`, `slice3.test.tsx`, `slice4.test.tsx` (`npx vitest --run src/modules/inventory`).
 
 Needs: none. No npm dependencies were added. Product and legal-entity pickers (the forms take
 ids), the workspace tiles, the quarantine disposition choice and the offline count PWA are later

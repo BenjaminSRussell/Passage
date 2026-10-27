@@ -61,6 +61,20 @@ type fakeStore struct {
 	receiptDate      time.Time
 	abcIn            store.AbcRunInput
 	transferNegative domain.NegativePolicy
+
+	// slice 4: tags, reversal, rebuild (fake methods in tags_test.go)
+	tagKey          string
+	tagCount        int
+	tagStatus       domain.TagStatus
+	tagVersion      int
+	tagProduct      string
+	tagDims         domain.Dimensions
+	tagQty          decimal.Decimal
+	transferMissing bool
+	transferApprove bool
+	reverseReplay   bool
+	reverseDate     time.Time
+	repair          bool
 }
 
 func (f *fakeStore) CreateJournal(_ context.Context, j domain.Journal, key string) (domain.Journal, bool, error) {
@@ -533,8 +547,8 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		served[route+" "+strings.ToLower(method)] = true
 		return nil
 	})
-	if len(served) != 31 {
-		t.Fatalf("router walk yielded %d operations, want 31: %v", len(served), served)
+	if len(served) != 38 {
+		t.Fatalf("router walk yielded %d operations, want 38: %v", len(served), served)
 	}
 	declared := declaredOperations(string(spec))
 	for op := range served {

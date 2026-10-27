@@ -8,8 +8,9 @@ by any dimension subset. Slice 2: reservations (MANUAL, FIFO, FEFO, LIFO),
 blocking and quarantine, cycle counting with tolerance approval and blind count
 (posted as COUNT journals), and the transaction inquiry. Slice 3: transfer orders
 through an in-transit warehouse (ship, receive with tolerances and close-short,
-cancel), the stock-in-transit inquiry and ABC classification by on-hand value. The
-web screens live in
+cancel), the stock-in-transit inquiry and ABC classification by on-hand value. Slice 4:
+journal reversal (BR-16.12), tag counting with transfer to a count sheet (FR-16.18) and
+the on-hand rebuild-and-compare (FR-16.3). The web screens live in
 `apps/web/src/modules/inventory`.
 
 Requirements source: `docs/prd/phase-3-procure-to-pay.md` section 3.16.
@@ -26,7 +27,7 @@ internal/store/           pgx repositories: journals, posting, on-hand projectio
 internal/api/             HTTP handlers, DTOs, validation, Problem responses
 internal/events/          event type constants and payloads
 migrations/               0001 ledger, 0002 reservations and batch expiry, 0003 blocking and counts,
-                          0004 transfer orders, 0005 ABC runs
+                          0004 transfer orders, 0005 ABC runs, 0006 reversal links and count tags
                           (embedded, applied by dbx.Migrate)
 api/openapi.yaml          OpenAPI 3.1 for every endpoint (parity is tested)
 events/asyncapi.yaml      AsyncAPI 3 for every event published (payload parity is tested)
@@ -68,6 +69,13 @@ charts/inventory/         Helm chart (Deployment, Service, HPA, ServiceMonitor t
 | POST | `/v1/inventory/abc-runs` | `inventory.abc.write` | InventorySetupMaintain (ABC setup) |
 | GET | `/v1/inventory/abc-runs` | `inventory.read` | InventoryInquire |
 | GET | `/v1/inventory/abc-runs/{id}` | `inventory.read` | InventoryInquire |
+| POST | `/v1/inventory/journals/{id}:reverse` | `inventory.journal.write` | InventoryJournalMaintain (the reversal is posted with `:post`) |
+| POST | `/v1/inventory/count-plans/{id}:generate-tags` | `inventory.count.write` | CycleCountMaintain |
+| GET | `/v1/inventory/count-plans/{id}/tags` | `inventory.read` | InventoryInquire |
+| POST | `/v1/inventory/count-plans/{id}:transfer-tags` | `inventory.count.write` (+ `inventory.count.approve` to mark open tags MISSING) | CycleCountMaintain / CycleCountApprove |
+| POST | `/v1/inventory/count-tags/{id}:use` | `inventory.count.write` | CycleCountMaintain |
+| POST | `/v1/inventory/count-tags/{id}:void` | `inventory.count.write` | CycleCountMaintain |
+| POST | `/internal/v1/inventory/onhand:rebuild` | `inventory.admin` | InventoryAdmin |
 
 Duty names follow the repository's `<context>.<entity>.<action>` convention; the
 right-hand column is the PRD 3.16.17 name each one stands for.
@@ -151,6 +159,35 @@ written as a COUNT journal (gains valued at the running average) and posted thro
 journal path, so the negative policy, GL entry (inventory against the adjustment account)
 and events are those of any journal.
 
+## Journal reversal (BR-16.12)
+
+`:reverse` on a POSTED journal creates a DRAFT journal of the same type, legal entity,
+offset account and currency, with one negated line per original line (`reversesLineId`).
+The original is never changed and has at most one reversal (a repeat returns it). A
+reversal takes no extra lines. Posting it goes through the normal `:post`, except that
+each line is valued at the negated value of the transaction it corrects (not the running
+average), its transaction carries `corrects_transaction_id`, and `journal.posted` carries
+`reversesJournalId`: the GL entry is the exact mirror of the original. The negative
+policy still applies, so stock already issued cannot be reversed out.
+
+## Tag counting (FR-16.18, BR-16.15)
+
+`:generate-tags` creates a range of OPEN tags for a count plan, numbered from the legal
+entity's `TAG-` sequence. Each tag is counted once with `:use` (product, dimensions,
+counted quantity; zero is a count; the plan's warehouse is filled in) or voided before it
+is transferred. `:transfer-tags` sums the untransferred USED tags per product x dimension
+set into a new OPEN count sheet (counted = tag sum, expected = book now); the sheet is
+then posted like any count sheet. Open tags block the transfer (`INV-TAG-002`) unless the
+caller marks them MISSING, which needs `inventory.count.approve`.
+
+## Rebuild and compare (FR-16.3)
+
+`POST /internal/v1/inventory/onhand:rebuild` recomputes every visible on-hand row from the
+transactions (status sums through the posting arithmetic) and the ACTIVE reservations,
+compares it with the stored row in one snapshot and reports the differing rows and
+fields. `?repair=true` locks each differing row in posting lock order, rebuilds it again
+under the lock and overwrites it (a missing row is recreated, an orphan zeroed).
+
 ## Run
 
 ```
@@ -192,7 +229,7 @@ They skip without `PASSAGE_TEST_DATABASE_URL`. Domain property tests use `pgrego
 | `INV-JNL-001` | 422 | Journal exceeds the maximum number of lines |
 | `INV-JNL-002` | 422 | Movement journal requires an offset account (store and posting check; the create endpoint reports it earlier as a `COM-0001` field error on `offsetAccountId`) |
 | `INV-JNL-003` | 409 | Journal is already posting (reserved for the Temporal workflow) |
-| `INV-JNL-004` | 409 | Journal is not in a state that allows the change (lines on a non-DRAFT journal, posting from another status) |
+| `INV-JNL-004` | 409 | Journal is not in a state that allows the change (lines on a non-DRAFT or reversal journal, posting from another status, reversing a journal that is not POSTED) |
 | `INV-NEG-001` | 422 | Issue would make available physical stock negative (policy forbids it); detail names product, dimensions and shortfall |
 | `INV-NEG-002` | 422 | Issue would make financial (ordered) stock negative |
 | `INV-SER-001` | 422 | Serial already in physical stock in the legal entity |
@@ -213,6 +250,12 @@ They skip without `PASSAGE_TEST_DATABASE_URL`. Domain property tests use `pgrego
 | `INV-CNT-003` | 422 | Count sheet is not OPEN |
 | `INV-CNT-004` | 404 | Count plan, sheet or line not found |
 | `INV-CNT-005` | 422 | Count sheet posted with no counted line |
+| `INV-TAG-001` | 422 | Count tag already used |
+| `INV-TAG-002` | 422 | Open tags block the transfer to a count sheet |
+| `INV-TAG-003` | 422 | Tag is VOID, MISSING or already on a count sheet |
+| `INV-TAG-004` | 422 | No used tag to transfer |
+| `INV-TAG-005` | 404 | Count tag not found |
+| `INV-TAG-006` | 403 | Marking open tags MISSING without `inventory.count.approve` |
 | `conflict_version` | 412 | `If-Match` does not match the journal, blocking or count sheet version |
 | `idempotency_key_reuse` | 422 | Idempotency-Key (or a line `clientKey`) reused with a different body |
 
@@ -221,7 +264,7 @@ Problems are RFC 9457 `application/problem+json` with `type` =
 
 ## Wave reference
 
-- Wave 16 / PSG-16 slices 1 and 2. Dependencies: wave 6 (sites, warehouses, UoM), wave 8
+- Wave 16 / PSG-16 slices 1 to 4. Dependencies: wave 6 (sites, warehouses, UoM), wave 8
   (products, dimension groups, item model groups), wave 11 (`Post(JournalEntry)`),
   wave 14 (period control), wave 4 (Temporal, outbox), wave 10 (migration framework).
 - Slice 1 posts synchronously in the request. The Temporal `PostInventoryJournal`

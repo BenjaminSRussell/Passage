@@ -6,6 +6,7 @@ import { BlockingsPage } from "./BlockingsPage";
 import { CountPlansPage } from "./CountPlansPage";
 import { CountSheetPage } from "./CountSheetPage";
 import { CountSheetsPage } from "./CountSheetsPage";
+import { CountTagsPage } from "./CountTagsPage";
 import { InTransitPage } from "./InTransitPage";
 import { JournalDetailPage } from "./JournalDetailPage";
 import { JournalsPage } from "./JournalsPage";
@@ -25,7 +26,7 @@ const inventory: PassageModule = {
   id: "inventory",
   title: "Inventory",
   description:
-    "On-hand stock by any dimension, the journals and transactions that move it, reservations, blocking, cycle counts, transfer orders and ABC classification.",
+    "On-hand stock by any dimension, the journals and transactions that move it, reservations, blocking, cycle and tag counts, journal reversals, transfer orders and ABC classification.",
   routes: [
     { path: "/inventory", element: createElement(OnHandPage), handle: { title: "On-hand inquiry" } },
     { path: "/inventory/onhand", element: createElement(OnHandPage) },
@@ -39,6 +40,7 @@ const inventory: PassageModule = {
     { path: "/inventory/blockings/new", element: createElement(NewBlockingPage) },
     { path: "/inventory/count-plans", element: createElement(CountPlansPage) },
     { path: "/inventory/count-plans/new", element: createElement(NewCountPlanPage) },
+    { path: "/inventory/count-plans/:id/tags", element: createElement(CountTagsPage), handle: { title: "Count tags" } },
     { path: "/inventory/count-sheets", element: createElement(CountSheetsPage) },
     { path: "/inventory/count-sheets/:id", element: createElement(CountSheetPage), handle: { title: "Count sheet" } },
     { path: "/inventory/transfer-orders", element: createElement(TransferOrdersPage) },

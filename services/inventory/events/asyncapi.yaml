@@ -159,7 +159,7 @@ components:
               closed: { type: boolean }
     TransactionPostedData:
       type: object
-      required: [transactionId, legalEntityId, sourceType, journalId, referenceId, originId, productId, dimensionSet, qty, issueStatus, receiptStatus, physicalDate, financialDate, currency, costAmountPhysical, costAmountPosted]
+      required: [transactionId, legalEntityId, sourceType, journalId, referenceId, originId, productId, dimensionSet, qty, issueStatus, receiptStatus, physicalDate, financialDate, currency, costAmountPhysical, costAmountPosted, correctsTransactionId]
       properties:
         transactionId: { type: string, format: uuid }
         legalEntityId: { type: string, format: uuid }
@@ -177,6 +177,7 @@ components:
         currency: { type: string, pattern: '^[A-Z]{3}$' }
         costAmountPhysical: { type: string, description: Signed value in currency, rounded to its minor unit }
         costAmountPosted: { type: string }
+        correctsTransactionId: { type: [string, 'null'], format: uuid, description: 'Transaction a reversal line negates (BR-16.12, FR-16.1 corrects_transaction_id); null otherwise' }
     OnhandChangedData:
       type: object
       required: [legalEntityId, productId, dimensionSet, availPhysical, availOrdered, physicalInvent, deltaBucket, deltaQty]
@@ -191,7 +192,7 @@ components:
         deltaQty: { type: string, description: Net signed quantity change of that bucket }
     JournalPostedData:
       type: object
-      required: [journalId, legalEntityId, journalType, postingDate, currency, lineCount, glLines, ledgerEntryId]
+      required: [journalId, legalEntityId, journalType, postingDate, currency, lineCount, glLines, ledgerEntryId, reversesJournalId]
       properties:
         journalId: { type: string, format: uuid }
         legalEntityId: { type: string, format: uuid }
@@ -209,6 +210,7 @@ components:
               debit: { type: string }
               credit: { type: string }
         ledgerEntryId: { type: [string, 'null'], format: uuid, description: Null until the wave 11 ledger Post exists }
+        reversesJournalId: { type: [string, 'null'], format: uuid, description: 'The journal this one reverses (BR-16.12): same type, negated lines, each valued at the negated value of the transaction it corrects; null for other journals' }
     ReservationData:
       type: object
       required: [reservationId, legalEntityId, productId, dimensionSet, qty, demandType, demandId, policy, status]

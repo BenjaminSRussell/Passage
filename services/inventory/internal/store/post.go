@@ -124,6 +124,10 @@ func (s *Postgres) postLoaded(ctx context.Context, tx pgx.Tx, tenantID string, j
 	if err := lockSerials(ctx, tx, tenantID, j.LegalEntityID, serials); err != nil {
 		return err
 	}
+	corrected, err := correctedTransactions(ctx, tx, tenantID, j)
+	if err != nil {
+		return err
+	}
 	for _, k := range order {
 		r := rows[k]
 		if err := lockRow(ctx, tx, tenantID, j.LegalEntityID, j.Currency, r); err != nil {
@@ -131,7 +135,10 @@ func (s *Postgres) postLoaded(ctx context.Context, tx pgx.Tx, tenantID string, j
 		}
 		for _, i := range r.lines {
 			l := plan[i].Line
-			if l.Qty.Sign() > 0 {
+			if orig, ok := corrected[l.ReversesLineID]; ok {
+				// A reversal line mirrors the transaction it corrects (BR-16.12).
+				plan[i].Value, plan[i].Corrects = orig.value.Neg(), orig.id
+			} else if l.Qty.Sign() > 0 {
 				plan[i].Value = domain.ReceiptValue(l.Qty, l.CostPrice, j.Currency)
 			} else {
 				plan[i].Value = r.oh.IssueValue(l.Qty, l.CostPrice, j.Currency)
@@ -179,6 +186,52 @@ func (s *Postgres) postLoaded(ctx context.Context, tx pgx.Tx, tenantID string, j
 		return err
 	}
 	return enqueue(ctx, tx, "journal", j.ID, invevents.JournalPosted, tenantID, journalPosted(j, entry))
+}
+
+// postedTransaction is the transaction a posted journal line produced.
+type postedTransaction struct {
+	id    string
+	value decimal.Decimal
+}
+
+// correctedTransactions maps each reversed line id of a reversal journal to
+// the transaction that line posted. A line whose original has no transaction
+// (the original was not posted) is an error: a reversal only negates posted
+// stock movements.
+func correctedTransactions(ctx context.Context, tx pgx.Tx, tenantID string, j domain.Journal) (map[string]postedTransaction, error) {
+	var lineIDs []string
+	for _, l := range j.Lines {
+		if l.ReversesLineID != "" {
+			lineIDs = append(lineIDs, l.ReversesLineID)
+		}
+	}
+	out := map[string]postedTransaction{}
+	if len(lineIDs) == 0 {
+		return out, nil
+	}
+	rows, err := tx.Query(ctx, `select o.source_id::text, t.id::text, coalesce(t.cost_amount_posted, t.cost_amount_physical)::text
+		from inventory_transaction_origin o join inventory_transaction t on t.tenant_id = o.tenant_id and t.origin_id = o.id
+		where o.tenant_id = $1 and o.source_type = $2 and o.source_id = any($3::uuid[])`, tenantID, sourceJournalLine, lineIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var line, id, value string
+		if err := rows.Scan(&line, &id, &value); err != nil {
+			return nil, err
+		}
+		out[line] = postedTransaction{id: id, value: decimal.RequireFromString(value)}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for _, id := range lineIDs {
+		if _, ok := out[id]; !ok {
+			return nil, problem(http.StatusConflict, CodeJournalState, "a reversed line has no posted transaction; only posted journals can be reversed")
+		}
+	}
+	return out, nil
 }
 
 // groupRows collects the plan into projection rows, sorted by lock key.
@@ -380,17 +433,22 @@ func writeTransaction(ctx context.Context, tx pgx.Tx, tenantID string, doc docum
 	}
 	value := pl.Value.String()
 	date := doc.date.Format(dateLayout)
+	var corrects *string
+	if pl.Corrects != "" {
+		corrects = &pl.Corrects
+	}
 	if _, err := tx.Exec(ctx, `insert into inventory_transaction (tenant_id, legal_entity_id, id, origin_id, product_id, dimension_set_hash, qty, entered_qty,
-		entered_unit, issue_status, receipt_status, physical_date, financial_date, currency, cost_amount_physical, cost_amount_posted)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12, $13, $14, $14)`,
+		entered_unit, issue_status, receipt_status, physical_date, financial_date, currency, cost_amount_physical, cost_amount_posted, corrects_transaction_id)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12, $13, $14, $14, $15)`,
 		tenantID, doc.legalEntityID, txnID, originID, r.product, r.hash, pl.Line.Qty.String(), pl.Line.EnteredQty.String(), pl.Line.EnteredUnit,
-		issue, receipt, date, doc.currency, value); err != nil {
+		issue, receipt, date, doc.currency, value, corrects); err != nil {
 		return "", err
 	}
 	data := invevents.TransactionPostedData{
 		TransactionID: txnID, LegalEntityID: doc.legalEntityID, SourceType: doc.sourceType, OriginID: originID, ProductID: r.product,
 		DimensionSet: map[string]string(r.dims), Qty: pl.Line.Qty.String(), IssueStatus: issue, ReceiptStatus: receipt,
 		PhysicalDate: date, FinancialDate: date, Currency: doc.currency, CostAmountPhysical: value, CostAmountPosted: value,
+		CorrectsTransactionID: corrects,
 	}
 	if doc.journalID != "" {
 		data.JournalID = &doc.journalID
@@ -408,6 +466,9 @@ func onHandFrom(b [11]string) domain.OnHand {
 func journalPosted(j domain.Journal, entry domain.JournalEntry) invevents.JournalPostedData {
 	out := invevents.JournalPostedData{JournalID: j.ID, LegalEntityID: j.LegalEntityID, JournalType: string(j.Type),
 		PostingDate: j.PostingDate.Format(dateLayout), Currency: entry.Currency, LineCount: len(j.Lines), GLLines: []invevents.GLLineData{}}
+	if j.ReversesJournalID != "" {
+		out.ReversesJournalID = &j.ReversesJournalID
+	}
 	for _, l := range entry.Lines {
 		out.GLLines = append(out.GLLines, invevents.GLLineData{Account: l.Account, Debit: l.Debit.String(), Credit: l.Credit.String()})
 	}

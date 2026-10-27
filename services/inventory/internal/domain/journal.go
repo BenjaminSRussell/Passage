@@ -87,17 +87,19 @@ func CanMoveJournal(from, to JournalStatus) bool {
 // JournalLine is one keyed line. Qty is in the inventory unit; EnteredQty and
 // EnteredUnit record what the user typed (equal to Qty until wave 6/8 unit
 // conversion is wired in). ClientKey is the optional per-line idempotency key
-// of lines:bulk.
+// of lines:bulk. ReversesLineID links a reversal line to the posted line it
+// negates (BR-16.12).
 type JournalLine struct {
-	ID          string
-	LineNo      int
-	ClientKey   string
-	ProductID   string
-	Dims        Dimensions
-	Qty         decimal.Decimal
-	EnteredQty  decimal.Decimal
-	EnteredUnit string
-	CostPrice   decimal.Decimal
+	ID             string
+	LineNo         int
+	ClientKey      string
+	ReversesLineID string
+	ProductID      string
+	Dims           Dimensions
+	Qty            decimal.Decimal
+	EnteredQty     decimal.Decimal
+	EnteredUnit    string
+	CostPrice      decimal.Decimal
 }
 
 // SameContent reports whether two lines carry the same keyed values; it is the
@@ -109,21 +111,24 @@ func (l JournalLine) SameContent(o JournalLine) bool {
 		l.Qty.Equal(o.Qty) && l.EnteredQty.Equal(o.EnteredQty) && l.EnteredUnit == o.EnteredUnit && l.CostPrice.Equal(o.CostPrice)
 }
 
-// Journal is an inventory journal with its lines.
+// Journal is an inventory journal with its lines. ReversesJournalID is set on
+// a reversal journal; ReversedByJournalID on a journal that has one (BR-16.12).
 type Journal struct {
-	ID              string
-	LegalEntityID   string
-	Type            JournalType
-	Status          JournalStatus
-	PostingDate     time.Time
-	OffsetAccountID string
-	Currency        string
-	Lines           []JournalLine
-	LineCount       int
-	Version         int
-	GLEntry         *JournalEntry
-	CreatedAt       time.Time
-	PostedAt        *time.Time
+	ID                  string
+	LegalEntityID       string
+	ReversesJournalID   string
+	ReversedByJournalID string
+	Type                JournalType
+	Status              JournalStatus
+	PostingDate         time.Time
+	OffsetAccountID     string
+	Currency            string
+	Lines               []JournalLine
+	LineCount           int
+	Version             int
+	GLEntry             *JournalEntry
+	CreatedAt           time.Time
+	PostedAt            *time.Time
 }
 
 // JournalRules are the tenant limits applied during validation.
@@ -225,11 +230,13 @@ func ValidateJournal(j Journal, r JournalRules) error {
 // PostedLine is a journal line planned as one inventory transaction. Value is
 // the signed cost in the accounting currency, rounded to its minor unit; it is
 // set by the posting once the on-hand row is locked (issues are valued at the
-// row's running average).
+// row's running average). Corrects is the transaction a reversal line
+// negates (corrects_transaction_id, FR-16.1).
 type PostedLine struct {
-	Line   JournalLine
-	Status Status
-	Value  decimal.Decimal
+	Line     JournalLine
+	Status   Status
+	Value    decimal.Decimal
+	Corrects string
 }
 
 // PlanPosting turns journal lines into transactions. Each line is posted in one
@@ -246,6 +253,28 @@ func PlanPosting(j Journal) []PostedLine {
 		out = append(out, PostedLine{Line: l, Status: st})
 	}
 	return out
+}
+
+// ReverseJournal builds the DRAFT reversal of a POSTED journal
+// (BR-16.12): same legal entity, type, offset account and currency, every line
+// negated and linked to the line it reverses. The original is not changed; the
+// caller assigns the ids. A reversal is posted like any journal, but each line
+// is valued at the negated value of the transaction it corrects, so the GL
+// entry is the exact mirror of the original.
+func ReverseJournal(orig Journal, newID string, postingDate time.Time) (Journal, error) {
+	if orig.Status != JournalPosted {
+		return Journal{}, fail(CodeJournalNotReady, "only a POSTED journal can be reversed; this one is %s", orig.Status)
+	}
+	if orig.ReversedByJournalID != "" {
+		return Journal{}, fail(CodeJournalNotReady, "journal is already reversed by %s", orig.ReversedByJournalID)
+	}
+	out := Journal{ID: newID, LegalEntityID: orig.LegalEntityID, ReversesJournalID: orig.ID, Type: orig.Type, Status: JournalDraft,
+		PostingDate: postingDate, OffsetAccountID: orig.OffsetAccountID, Currency: orig.Currency, Version: 1}
+	for _, l := range orig.Lines {
+		out.Lines = append(out.Lines, JournalLine{LineNo: l.LineNo, ReversesLineID: l.ID, ProductID: l.ProductID, Dims: l.Dims,
+			Qty: l.Qty.Neg(), EnteredQty: l.EnteredQty.Neg(), EnteredUnit: l.EnteredUnit, CostPrice: l.CostPrice})
+	}
+	return out, nil
 }
 
 // ReceiptValue is a receipt's value: quantity times the entered cost price,

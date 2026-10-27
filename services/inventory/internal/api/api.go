@@ -75,6 +75,8 @@ func (a *API) Register(r chi.Router) {
 	a.registerBlocking(r)
 	a.registerCount(r)
 	a.registerTransfers(r)
+	a.registerTags(r)
+	a.registerOps(r)
 }
 
 // Metrics serves the counters for the admin port.
@@ -103,15 +105,16 @@ type addLinesRequest struct {
 }
 
 type lineResponse struct {
-	ID          string            `json:"id"`
-	LineNo      int               `json:"lineNo"`
-	ClientKey   string            `json:"clientKey,omitempty"`
-	ProductID   string            `json:"productId"`
-	Dimensions  map[string]string `json:"dimensions"`
-	Qty         string            `json:"qty"`
-	EnteredQty  string            `json:"enteredQty"`
-	EnteredUnit string            `json:"enteredUnit"`
-	CostPrice   string            `json:"costPrice"`
+	ID             string            `json:"id"`
+	LineNo         int               `json:"lineNo"`
+	ClientKey      string            `json:"clientKey,omitempty"`
+	ReversesLineID string            `json:"reversesLineId,omitempty"`
+	ProductID      string            `json:"productId"`
+	Dimensions     map[string]string `json:"dimensions"`
+	Qty            string            `json:"qty"`
+	EnteredQty     string            `json:"enteredQty"`
+	EnteredUnit    string            `json:"enteredUnit"`
+	CostPrice      string            `json:"costPrice"`
 }
 
 type glLineResponse struct {
@@ -138,6 +141,10 @@ type journalSummary struct {
 	LineCount       int        `json:"lineCount"`
 	CreatedAt       time.Time  `json:"createdAt"`
 	PostedAt        *time.Time `json:"postedAt,omitempty"`
+	// ReversesJournalID and ReversedByJournalID link a journal and its
+	// reversal (BR-16.12).
+	ReversesJournalID   string `json:"reversesJournalId,omitempty"`
+	ReversedByJournalID string `json:"reversedByJournalId,omitempty"`
 }
 
 type journalResponse struct {
@@ -440,13 +447,13 @@ func splitList(raw string) []string {
 func summaryOf(j domain.Journal) journalSummary {
 	return journalSummary{ID: j.ID, LegalEntityID: j.LegalEntityID, JournalType: string(j.Type), Status: string(j.Status),
 		PostingDate: j.PostingDate.Format("2006-01-02"), OffsetAccountID: j.OffsetAccountID, Currency: j.Currency, Version: j.Version,
-		LineCount: j.LineCount, CreatedAt: j.CreatedAt, PostedAt: j.PostedAt}
+		LineCount: j.LineCount, CreatedAt: j.CreatedAt, PostedAt: j.PostedAt, ReversesJournalID: j.ReversesJournalID, ReversedByJournalID: j.ReversedByJournalID}
 }
 
 func writeJournal(w http.ResponseWriter, status int, j domain.Journal) {
 	resp := journalResponse{journalSummary: summaryOf(j), Lines: []lineResponse{}}
 	for _, l := range j.Lines {
-		resp.Lines = append(resp.Lines, lineResponse{ID: l.ID, LineNo: l.LineNo, ClientKey: l.ClientKey, ProductID: l.ProductID, Dimensions: l.Dims,
+		resp.Lines = append(resp.Lines, lineResponse{ID: l.ID, LineNo: l.LineNo, ClientKey: l.ClientKey, ReversesLineID: l.ReversesLineID, ProductID: l.ProductID, Dimensions: l.Dims,
 			Qty: l.Qty.String(), EnteredQty: l.EnteredQty.String(), EnteredUnit: l.EnteredUnit, CostPrice: l.CostPrice.String()})
 	}
 	resp.LineCount = len(j.Lines)

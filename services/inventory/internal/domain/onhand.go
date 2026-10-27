@@ -135,3 +135,31 @@ func Rebuild(entries []Contribution) (OnHand, error) {
 	}
 	return o, nil
 }
+
+// Diff names the bucket fields where a stored projection row differs from a
+// rebuilt one (FR-16.3 rebuild-and-compare). An empty result means equal.
+func Diff(stored, rebuilt OnHand) []string {
+	pairs := []struct {
+		name string
+		a, b decimal.Decimal
+	}{
+		{"posted_qty", stored.PostedQty, rebuilt.PostedQty},
+		{"posted_value", stored.PostedValue, rebuilt.PostedValue},
+		{"received", stored.Received, rebuilt.Received},
+		{"registered", stored.Registered, rebuilt.Registered},
+		{"arrived", stored.Arrived, rebuilt.Arrived},
+		{"ordered", stored.Ordered, rebuilt.Ordered},
+		{"deducted", stored.Deducted, rebuilt.Deducted},
+		{"picked", stored.Picked, rebuilt.Picked},
+		{"reserved_physical", stored.ReservedPhysical, rebuilt.ReservedPhysical},
+		{"reserved_ordered", stored.ReservedOrdered, rebuilt.ReservedOrdered},
+		{"on_order", stored.OnOrder, rebuilt.OnOrder},
+	}
+	var out []string
+	for _, p := range pairs {
+		if !p.a.Equal(p.b) {
+			out = append(out, p.name)
+		}
+	}
+	return out
+}

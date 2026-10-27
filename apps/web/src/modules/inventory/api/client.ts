@@ -32,12 +32,18 @@ export interface JournalSummary {
   lineCount: number;
   createdAt: string;
   postedAt?: string;
+  /** Set on a reversal journal (BR-16.12). */
+  reversesJournalId?: string;
+  /** Set on a journal that has been reversed. */
+  reversedByJournalId?: string;
 }
 
 export interface JournalLine {
   id: string;
   lineNo: number;
   clientKey?: string;
+  /** On a reversal journal, the line this one negates. */
+  reversesLineId?: string;
   productId: string;
   dimensions: Partial<Record<string, string>>;
   qty: string;
@@ -228,6 +234,14 @@ export async function addLines(journalId: string, lines: LineInput[]): Promise<J
 /** Posts the journal at the version the screen shows (If-Match). */
 export async function postJournal(journalId: string, version: number): Promise<Journal> {
   return (await send<Journal>(`/journals/${encodeURIComponent(journalId)}:post`, { method: "POST", headers: { "If-Match": `"${version}"` } })).body;
+}
+
+/**
+ * Creates the DRAFT reversal of a POSTED journal (BR-16.12). A journal has one
+ * reversal, so repeating the call returns the same one.
+ */
+export async function reverseJournal(journalId: string, postingDate: string): Promise<Journal> {
+  return (await send<Journal>(`/journals/${encodeURIComponent(journalId)}:reverse`, { method: "POST", body: JSON.stringify({ postingDate }) })).body;
 }
 
 // ---- Transaction inquiry (FR-16.13) ----
@@ -540,6 +554,82 @@ export async function enterCount(sheetId: string, lineId: string, version: numbe
 
 export async function postCountSheet(sheetId: string, version: number): Promise<CountSheet> {
   return (await send<CountSheet>(`/count-sheets/${encodeURIComponent(sheetId)}:post`, { method: "POST", headers: { "If-Match": `"${version}"` } })).body;
+}
+
+// ---- Tag counting (FR-16.18) ----
+
+export const TAG_STATUSES = ["OPEN", "USED", "VOID", "MISSING"] as const;
+export type TagStatus = (typeof TAG_STATUSES)[number];
+
+/** Most tags one generate call creates. */
+export const MAX_TAGS = 1000;
+
+export interface CountTag {
+  id: string;
+  tagNumber: string;
+  planId: string;
+  status: TagStatus;
+  productId?: string;
+  dimensions: Partial<Record<string, string>>;
+  /** Counted quantity of a used tag (zero is a count); null while open. */
+  countedQty: string | null;
+  countedBy?: string;
+  /** Count sheet the tag was transferred to; the tag is then final. */
+  sheetId?: string;
+  version: number;
+}
+
+export interface TagCountInput {
+  productId: string;
+  dimensions: Partial<Record<string, string>>;
+  countedQty: string;
+}
+
+export async function generateTags(planId: string, count: number, key: string = newKey()): Promise<CountTag[]> {
+  const { body } = await send<{ items?: CountTag[] }>(`/count-plans/${encodeURIComponent(planId)}:generate-tags`, {
+    method: "POST",
+    headers: { "Idempotency-Key": key },
+    body: JSON.stringify({ count }),
+  });
+  return body.items ?? [];
+}
+
+export async function listTags(planId: string, signal?: AbortSignal): Promise<CountTag[]> {
+  const { body } = await send<{ items?: CountTag[] }>(`/count-plans/${encodeURIComponent(planId)}/tags`, {}, signal);
+  return body.items ?? [];
+}
+
+/** Enters the count of one open tag at the version the screen shows (If-Match). */
+export async function enterTagCount(tagId: string, version: number, input: TagCountInput): Promise<CountTag> {
+  const dimensions: Record<string, string> = {};
+  for (const [name, value] of Object.entries(input.dimensions)) {
+    if (value && value.trim() !== "") dimensions[name] = value.trim();
+  }
+  return (
+    await send<CountTag>(`/count-tags/${encodeURIComponent(tagId)}:use`, {
+      method: "POST",
+      headers: { "If-Match": `"${version}"` },
+      body: JSON.stringify({ productId: input.productId, dimensions, countedQty: input.countedQty }),
+    })
+  ).body;
+}
+
+export async function voidTag(tagId: string, version: number): Promise<CountTag> {
+  return (await send<CountTag>(`/count-tags/${encodeURIComponent(tagId)}:void`, { method: "POST", headers: { "If-Match": `"${version}"` } })).body;
+}
+
+/**
+ * Moves the plan's used tags to a new count sheet. markOpenMissing (supervisor
+ * only) marks the tags still open as MISSING instead of blocking the transfer.
+ */
+export async function transferTags(planId: string, markOpenMissing: boolean, key: string = newKey()): Promise<CountSheet> {
+  return (
+    await send<CountSheet>(`/count-plans/${encodeURIComponent(planId)}:transfer-tags`, {
+      method: "POST",
+      headers: { "Idempotency-Key": key },
+      body: JSON.stringify({ markOpenMissing }),
+    })
+  ).body;
 }
 
 // ---- Transfer orders and stock in transit (FR-16.15, FR-16.16) ----

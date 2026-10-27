@@ -74,6 +74,13 @@ type Store interface {
 	RunABC(ctx context.Context, in AbcRunInput) (domain.AbcRun, bool, error)
 	GetABCRun(ctx context.Context, id string) (domain.AbcRun, error)
 	ListABCRuns(ctx context.Context) ([]AbcRunSummary, error)
+	ReverseJournal(ctx context.Context, id string, postingDate time.Time) (domain.Journal, bool, error)
+	RebuildOnHand(ctx context.Context, repair bool) (RebuildReport, error)
+	GenerateTags(ctx context.Context, planID, key string, count int) ([]domain.CountTag, bool, error)
+	ListTags(ctx context.Context, planID string, status domain.TagStatus) ([]domain.CountTag, error)
+	UseTag(ctx context.Context, tagID string, version int, productID string, dims domain.Dimensions, qty decimal.Decimal) (domain.CountTag, error)
+	VoidTag(ctx context.Context, tagID string, version int) (domain.CountTag, error)
+	TransferTags(ctx context.Context, planID, key string, markOpenMissing, canApprove bool) (domain.CountSheet, bool, error)
 	Ping(ctx context.Context) error
 }
 
@@ -165,13 +172,16 @@ func upsertDimensionSet(ctx context.Context, tx pgx.Tx, tenantID string, dims do
 
 const journalColumns = `id::text, legal_entity_id::text, journal_type, status, to_char(posting_date, 'YYYY-MM-DD'), coalesce(offset_account_id, ''),
 	currency::text, version, gl_entry, created_at, posted_at,
-	(select count(*) from inventory_journal_line l where l.tenant_id = j.tenant_id and l.journal_id = j.id)`
+	(select count(*) from inventory_journal_line l where l.tenant_id = j.tenant_id and l.journal_id = j.id),
+	coalesce(reverses_journal_id::text, ''),
+	coalesce((select r.id::text from inventory_journal r where r.tenant_id = j.tenant_id and r.reverses_journal_id = j.id), '')`
 
 func scanJournal(row pgx.Row) (domain.Journal, error) {
 	var j domain.Journal
 	var jt, st, dateText string
 	var gl []byte
-	err := row.Scan(&j.ID, &j.LegalEntityID, &jt, &st, &dateText, &j.OffsetAccountID, &j.Currency, &j.Version, &gl, &j.CreatedAt, &j.PostedAt, &j.LineCount)
+	err := row.Scan(&j.ID, &j.LegalEntityID, &jt, &st, &dateText, &j.OffsetAccountID, &j.Currency, &j.Version, &gl, &j.CreatedAt, &j.PostedAt, &j.LineCount,
+		&j.ReversesJournalID, &j.ReversedByJournalID)
 	if err != nil {
 		return j, err
 	}
@@ -203,8 +213,8 @@ func loadJournal(ctx context.Context, tx pgx.Tx, id string, forUpdate bool) (dom
 	if err != nil {
 		return j, err
 	}
-	rows, err := tx.Query(ctx, `select id::text, line_no, coalesce(client_key, ''), product_id::text, dims, qty::text, entered_qty::text, entered_unit, cost_price::text
-		from inventory_journal_line where tenant_id = $1 and journal_id = $2 order by line_no`, p.TenantID, id)
+	rows, err := tx.Query(ctx, `select id::text, line_no, coalesce(client_key, ''), coalesce(reverses_line_id::text, ''), product_id::text, dims, qty::text,
+		entered_qty::text, entered_unit, cost_price::text from inventory_journal_line where tenant_id = $1 and journal_id = $2 order by line_no`, p.TenantID, id)
 	if err != nil {
 		return j, err
 	}
@@ -213,7 +223,7 @@ func loadJournal(ctx context.Context, tx pgx.Tx, id string, forUpdate bool) (dom
 		var l domain.JournalLine
 		var raw []byte
 		var qty, entered, cost string
-		if err := rows.Scan(&l.ID, &l.LineNo, &l.ClientKey, &l.ProductID, &raw, &qty, &entered, &l.EnteredUnit, &cost); err != nil {
+		if err := rows.Scan(&l.ID, &l.LineNo, &l.ClientKey, &l.ReversesLineID, &l.ProductID, &raw, &qty, &entered, &l.EnteredUnit, &cost); err != nil {
 			return j, err
 		}
 		if err := json.Unmarshal(raw, &l.Dims); err != nil {
@@ -285,6 +295,9 @@ func (s *Postgres) AddJournalLines(ctx context.Context, journalID string, lines 
 		}
 		if j.Status != domain.JournalDraft {
 			return problem(http.StatusConflict, CodeJournalState, "lines can only be added to a DRAFT journal")
+		}
+		if j.ReversesJournalID != "" {
+			return problem(http.StatusConflict, CodeJournalState, "a reversal journal holds exactly the reversed lines; post a new journal for other movements")
 		}
 		existing := map[string]domain.JournalLine{}
 		for _, l := range j.Lines {

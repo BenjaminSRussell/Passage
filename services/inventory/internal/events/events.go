@@ -50,6 +50,8 @@ type TransactionPostedData struct {
 	Currency           string            `json:"currency"`
 	CostAmountPhysical string            `json:"costAmountPhysical"`
 	CostAmountPosted   string            `json:"costAmountPosted"`
+	// CorrectsTransactionID is the transaction a reversal line negates (BR-16.12).
+	CorrectsTransactionID *string `json:"correctsTransactionId"`
 }
 
 // OnhandChangedData is the projection row after a posting changed it.
@@ -82,6 +84,8 @@ type JournalPostedData struct {
 	LineCount     int          `json:"lineCount"`
 	GLLines       []GLLineData `json:"glLines"`
 	LedgerEntryID *string      `json:"ledgerEntryId"`
+	// ReversesJournalID is set when the posted journal reverses another (BR-16.12).
+	ReversesJournalID *string `json:"reversesJournalId"`
 }
 
 // ReservationData is the payload of both reservation events: one allocation

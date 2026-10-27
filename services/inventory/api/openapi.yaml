@@ -1,11 +1,12 @@
 openapi: 3.1.0
 info:
   title: Passage Inventory
-  version: 0.16.3
+  version: 0.16.4
   description: |
     Inventory journals, posting, the on-hand and transaction inquiries, reservations, blocking
     and quarantine, cycle counting (wave 16, slices 1 and 2), transfer orders with stock in
-    transit and ABC classification (slice 3). Quantities and money are decimal strings; money
+    transit and ABC classification (slice 3), journal reversal, tag counting and the on-hand
+    rebuild-and-compare (slice 4). Quantities and money are decimal strings; money
     is in the journal (accounting) currency, rounded to its minor unit. Browser calls use
     /api/v1/inventory/..., which the web BFF rewrites to these paths.
 servers:
@@ -894,6 +895,262 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/journals/{id}:reverse:
+    post:
+      operationId: reverseInventoryJournal
+      summary: Create the DRAFT reversal of a POSTED journal (BR-16.12)
+      description: |
+        The reversal has the original's type, legal entity, offset account and currency, and one
+        line per original line with negated quantities, each linked to the line it reverses
+        (reversesLineId). The original is never changed. Post the reversal with :post (duty
+        inventory.journal.post and If-Match): each line is then valued at the negated value of
+        the transaction it corrects, its transaction carries correctsTransactionId, and the GL
+        entry mirrors the original. The negative-stock policy applies, so stock already issued
+        cannot be reversed out (INV-NEG-001). A reversal takes no extra lines. A journal has one
+        reversal: repeating the request returns it (200, Idempotent-Replayed). 409 INV-JNL-004
+        when the journal is not POSTED.
+      x-passage-duty: inventory.journal.write
+      parameters:
+        - $ref: '#/components/parameters/JournalId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [postingDate]
+              properties:
+                postingDate: { type: string, format: date, description: Posting date of the reversal }
+      responses:
+        '201':
+          description: Reversal created (DRAFT)
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Journal' }
+        '200':
+          description: The journal's existing reversal
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+            Idempotent-Replayed: { schema: { type: string, enum: ['true'] } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Journal' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/count-plans/{id}:generate-tags:
+    post:
+      operationId: generateInventoryCountTags
+      summary: Generate a range of pre-numbered OPEN count tags for a plan (FR-16.18)
+      description: |
+        Numbers come from the legal entity's TAG- sequence (TAG-000001, ...), so a tag number is
+        used once (BR-16.15). The Idempotency-Key makes a retry return the same range; the same key
+        for another plan or count is idempotency_key_reuse.
+      x-passage-duty: inventory.count.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [count]
+              properties:
+                count: { type: integer, minimum: 1, maximum: 1000 }
+      responses:
+        '201':
+          description: Tags generated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CountTagList' }
+        '200':
+          description: Idempotent replay
+          headers:
+            Idempotent-Replayed: { schema: { type: string, enum: ['true'] } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CountTagList' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/count-plans/{id}/tags:
+    get:
+      operationId: listInventoryCountTags
+      summary: List a plan's count tags in number order, optionally of one status
+      description: Lists the missing and void tags before a transfer (FR-16.18).
+      x-passage-duty: inventory.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/CountTagStatus' } }
+      responses:
+        '200':
+          description: Tags of the plan
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CountTagList' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/count-plans/{id}:transfer-tags:
+    post:
+      operationId: transferInventoryCountTags
+      summary: Transfer the plan's USED tags to a new count sheet (FR-16.18, AC-16.13)
+      description: |
+        Aggregates the untransferred USED tags by product x dimension set into an OPEN count sheet:
+        counted = the sum of the tags (a zero count is a count), expected = the book quantity now.
+        The sheet is entered and posted like any count sheet, so the COUNT journal holds counted
+        minus book at posting and the plan tolerance approval applies. Open tags block the
+        transfer (INV-TAG-002) unless markOpenMissing, which marks them MISSING and needs the
+        supervisor duty inventory.count.approve (403 INV-TAG-006 without it, BR-16.15). No used
+        tag is INV-TAG-004. The Idempotency-Key makes a retry return the same sheet.
+      x-passage-duty: inventory.count.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                markOpenMissing: { type: boolean, default: false }
+      responses:
+        '201':
+          description: Count sheet created from the tags
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CountSheet' }
+        '200':
+          description: Idempotent replay
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+            Idempotent-Replayed: { schema: { type: string, enum: ['true'] } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CountSheet' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/count-tags/{id}:use:
+    post:
+      operationId: useInventoryCountTag
+      summary: Enter the count of one OPEN tag
+      description: |
+        Records product, dimensions and counted quantity; the tag becomes USED. Requires If-Match
+        with the tag version. A used tag is INV-TAG-001, a void, missing or transferred tag
+        INV-TAG-003. site is mandatory (INV-DIM-001); a plan's warehouse is filled in when absent
+        and another warehouse is refused; a serial counts 0 or 1 (INV-SER-002).
+      x-passage-duty: inventory.count.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [productId, countedQty]
+              properties:
+                productId: { type: string, format: uuid }
+                dimensions: { $ref: '#/components/schemas/Dimensions' }
+                countedQty: { $ref: '#/components/schemas/Decimal', description: Zero or more, up to 6 decimals }
+      responses:
+        '200':
+          description: Tag counted
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CountTag' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/count-tags/{id}:void:
+    post:
+      operationId: voidInventoryCountTag
+      summary: Void an OPEN or USED tag that has not been transferred
+      x-passage-duty: inventory.count.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Tag voided
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CountTag' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+  /internal/v1/inventory/onhand:rebuild:
+    post:
+      operationId: rebuildInventoryOnHand
+      summary: Rebuild the on-hand projection from the ledger and compare (FR-16.3, AC2)
+      description: |
+        Recomputes every on-hand row the caller can see from the inventory transactions (sums per
+        status through the posting arithmetic) and the ACTIVE reservations (reserved_physical),
+        compares it with the stored row in one snapshot, and reports the differing rows (at most
+        100 listed; diffCount is exact). With repair=true each differing row is locked in posting
+        lock order, rebuilt again under the lock and overwritten. Internal path: not exposed by
+        the web BFF.
+      x-passage-duty: inventory.admin
+      parameters:
+        - { name: repair, in: query, schema: { type: boolean, default: false } }
+      responses:
+        '200':
+          description: Comparison (and repair) result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [checked, diffCount, repaired, diffs]
+                properties:
+                  checked: { type: integer, description: Projection rows compared }
+                  diffCount: { type: integer }
+                  repaired: { type: boolean }
+                  diffs:
+                    type: array
+                    maxItems: 100
+                    items:
+                      type: object
+                      required: [legalEntityId, productId, dimensionSetHash, fields]
+                      properties:
+                        legalEntityId: { type: string, format: uuid }
+                        productId: { type: string, format: uuid }
+                        dimensionSetHash: { type: string, description: Hex SHA-256 of the dimension set }
+                        fields: { type: array, items: { type: string }, description: 'Buckets that differ (posted_qty, posted_value, reserved_physical, ...)' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
 components:
   parameters:
     Limit:
@@ -993,6 +1250,7 @@ components:
         id: { type: string, format: uuid }
         lineNo: { type: integer }
         clientKey: { type: string }
+        reversesLineId: { type: string, format: uuid, description: On a reversal journal, the line this one negates }
         productId: { type: string, format: uuid }
         dimensions: { $ref: '#/components/schemas/Dimensions' }
         qty: { $ref: '#/components/schemas/Decimal' }
@@ -1029,6 +1287,8 @@ components:
         lineCount: { type: integer }
         createdAt: { type: string, format: date-time }
         postedAt: { type: string, format: date-time }
+        reversesJournalId: { type: string, format: uuid, description: Set on a reversal journal (BR-16.12) }
+        reversedByJournalId: { type: string, format: uuid, description: Set on a journal that has a reversal }
     Journal:
       allOf:
         - $ref: '#/components/schemas/JournalSummary'
@@ -1363,6 +1623,30 @@ components:
               value: { $ref: '#/components/schemas/Decimal' }
               cumPct: { type: string, description: Cumulative share of the value up to and including the item, percent with 2 decimals }
               class: { type: string, enum: [A, B, C, N] }
+    CountTagStatus:
+      type: string
+      enum: [OPEN, USED, VOID, MISSING]
+    CountTag:
+      type: object
+      required: [id, tagNumber, planId, status, dimensions, countedQty, version]
+      properties:
+        id: { type: string, format: uuid }
+        tagNumber: { type: string, description: 'TAG- number from the legal entity sequence' }
+        planId: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/CountTagStatus' }
+        productId: { type: string, format: uuid }
+        dimensions: { $ref: '#/components/schemas/Dimensions' }
+        countedQty: { type: [string, 'null'], description: Counted quantity of a USED tag (zero is a count); null while open }
+        countedBy: { type: string }
+        sheetId: { type: string, format: uuid, description: Count sheet the tag was transferred to; the tag is then final }
+        version: { type: integer }
+    CountTagList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/CountTag' }
     Problem:
       type: object
       required: [type, title, status]

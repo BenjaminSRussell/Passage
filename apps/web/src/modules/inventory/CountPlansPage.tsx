@@ -6,7 +6,7 @@ import { ProblemAlert, RowAction } from "./parts";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
-/** Count plans (FR-16.9) with "Generate sheet", which opens the new count sheet. */
+/** Count plans (FR-16.9) with "Generate sheet", which opens the new count sheet, and tag counting (FR-16.18). */
 export function CountPlansPage() {
   const navigate = useNavigate();
   const state = useLoad((signal) => listCountPlans(signal), "plans");
@@ -22,16 +22,21 @@ export function CountPlansPage() {
       key: "actions",
       header: "Actions",
       render: (row) => (
-        <RowAction
-          label="Generate sheet"
-          name={`for ${row.name}`}
-          run={async () => {
-            const sheet = await generateCountSheet(row.id);
-            navigate(`/inventory/count-sheets/${sheet.id}`);
-          }}
-          onDone={() => setFailure(null)}
-          onError={setFailure}
-        />
+        <span className={styles.inline}>
+          <RowAction
+            label="Generate sheet"
+            name={`for ${row.name}`}
+            run={async () => {
+              const sheet = await generateCountSheet(row.id);
+              navigate(`/inventory/count-sheets/${sheet.id}`);
+            }}
+            onDone={() => setFailure(null)}
+            onError={setFailure}
+          />
+          <Link className={buttonClassName("ghost", "sm")} to={`/inventory/count-plans/${row.id}/tags`} aria-label={`Tags for ${row.name}`}>
+            Tags
+          </Link>
+        </span>
       ),
     },
   ];
@@ -40,7 +45,7 @@ export function CountPlansPage() {
     <div className={styles.stack}>
       <PageHeader
         title="Count plans"
-        description="Cycle count plans for a legal entity or one warehouse. Generate a sheet to count the stock as it stands now."
+        description="Cycle count plans for a legal entity or one warehouse. Generate a sheet to count the stock as it stands now, or count with pre-numbered tags."
         actions={
           <>
             <Link className={buttonClassName("ghost")} to="/inventory/count-sheets">
