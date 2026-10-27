@@ -6,22 +6,59 @@ updates:
   - package-ecosystem: gomod
     directories:
       - /platform/go
+      - /services/analytics
+      - /services/assets
       - /services/audit
       - /services/batch
+      - /services/billing
+      - /services/budgeting
       - /services/close
+      - /services/consolidation
+      - /services/costacct
+      - /services/costing
+      - /services/eam
+      - /services/edi
       - /services/engineering
+      - /services/expense
+      - /services/fieldservice
+      - /services/finreport
+      - /services/fulfillment
       - /services/fx
+      - /services/hr
       - /services/identity
+      - /services/intercompany
+      - /services/inventory
+      - /services/iot-edge
+      - /services/lean
+      - /services/ledger
       - /services/metadata
       - /services/migration
       - /services/numbering
       - /services/org
       - /services/party
       - /services/payables
+      - /services/payroll
+      - /services/planning
       - /services/platform-health
+      - /services/pricing
+      - /services/print
+      - /services/processmfg
       - /services/product
+      - /services/productcost
+      - /services/production
+      - /services/projects
+      - /services/purchasing
+      - /services/quality
+      - /services/receivables
       - /services/receiving
+      - /services/revrec
+      - /services/sales
+      - /services/scheduling
+      - /services/shopfloor
       - /services/tax
+      - /services/transport
+      - /services/treasury
+      - /services/warehouse
       - /tools/connectors
       - /tools/importexport
     schedule:
@@ -30,6 +67,11 @@ updates:
     groups:
       go-minor-patch:
         update-types: [minor, patch]
+    ignore:
+      # shopspring/decimal 1.6.0 rejects huge exponents at parse time, which
+      # flips fx/migration reject codes (RANGE -> COERCE); hold at v1.4.0.
+      - dependency-name: github.com/shopspring/decimal
+        versions: ['>=1.5.0']
 
   - package-ecosystem: npm
     directories:
