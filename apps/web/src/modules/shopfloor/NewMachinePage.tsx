@@ -1,7 +1,7 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader } from "../../shell/ui";
-import { createMachine, describeProblem, newKey, type NewMachine, type Problem } from "./api/client";
+import { createMachine, describeProblem, IDLE_THRESHOLD, newKey, type NewMachine, type Problem } from "./api/client";
 import { UUID } from "./format";
 import styles from "./pages.module.css";
 
@@ -10,12 +10,15 @@ interface Values {
   resourceId: string;
   siteId: string;
   idealCycleSeconds: string;
+  /** Empty means the service default (300 s). */
+  idleThresholdSeconds?: string;
 }
 
 type Field = keyof Values;
 type Errors = Partial<Record<Field, string>>;
 
 const CYCLE = /^\d{1,5}(\.\d{1,3})?$/;
+const WHOLE = /^\d{1,4}$/;
 
 /** Checks that mirror the service, and the request the form sends. */
 export function validateMachine(values: Values): { errors: Errors; input?: NewMachine } {
@@ -28,17 +31,20 @@ export function validateMachine(values: Values): { errors: Errors; input?: NewMa
   if (!CYCLE.test(cycle) || /^0+(\.0+)?$/.test(cycle) || Number(cycle) > 86_400) {
     errors.idealCycleSeconds = "Enter seconds per unit above 0 and at most 86400, such as 60 or 1.5.";
   }
+  const idle = (values.idleThresholdSeconds ?? "").trim();
+  if (idle !== "" && (!WHOLE.test(idle) || Number(idle) < IDLE_THRESHOLD.min || Number(idle) > IDLE_THRESHOLD.max)) {
+    errors.idleThresholdSeconds = `Enter whole seconds from ${IDLE_THRESHOLD.min} to ${IDLE_THRESHOLD.max}, or leave it empty for ${IDLE_THRESHOLD.default}.`;
+  }
   if (Object.keys(errors).length > 0) return { errors };
-  return {
-    errors,
-    input: { machineId: code, resourceId: values.resourceId.trim(), siteId: values.siteId.trim() || null, idealCycleSeconds: cycle },
-  };
+  const input: NewMachine = { machineId: code, resourceId: values.resourceId.trim(), siteId: values.siteId.trim() || null, idealCycleSeconds: cycle };
+  if (idle !== "") input.idleThresholdSeconds = Number(idle);
+  return { errors, input };
 }
 
 /** Register a machine so its edge events are stored and its OEE computed. */
 export function NewMachinePage() {
   const navigate = useNavigate();
-  const [values, setValues] = useState<Values>({ machineId: "", resourceId: "", siteId: "", idealCycleSeconds: "" });
+  const [values, setValues] = useState<Values>({ machineId: "", resourceId: "", siteId: "", idealCycleSeconds: "", idleThresholdSeconds: "" });
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
@@ -62,7 +68,7 @@ export function NewMachinePage() {
     } catch (error) {
       const problem = describeProblem(error);
       const fieldErrors: Errors = {};
-      for (const name of ["machineId", "resourceId", "siteId", "idealCycleSeconds"] as const) {
+      for (const name of ["machineId", "resourceId", "siteId", "idealCycleSeconds", "idleThresholdSeconds"] as const) {
         if (problem.fields[name]) fieldErrors[name] = problem.fields[name];
       }
       if (problem.code === "SF-0109") fieldErrors.machineId = "This machine code or resource is already registered.";
@@ -80,7 +86,7 @@ export function NewMachinePage() {
         <Input
           {...control}
           {...extra}
-          value={values[id]}
+          value={values[id] ?? ""}
           onChange={(event) => update({ [id]: event.target.value } as Partial<Values>)}
           invalid={Boolean(errors[id])}
         />
@@ -97,6 +103,13 @@ export function NewMachinePage() {
           {field("resourceId", "Resource id", "The work center resource (wave 23) this machine runs.")}
           {field("siteId", "Site id", "Andon alerts can be filtered by site.", true)}
           {field("idealCycleSeconds", "Ideal cycle time (seconds)", "Seconds per unit at rated speed; sets OEE performance.", false, { inputMode: "decimal" })}
+          {field(
+            "idleThresholdSeconds",
+            "Idle threshold (seconds)",
+            `Running without a count for longer than this counts as idle. ${IDLE_THRESHOLD.min} to ${IDLE_THRESHOLD.max}; empty means ${IDLE_THRESHOLD.default}.`,
+            true,
+            { inputMode: "numeric" },
+          )}
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not register the machine" live="alert">

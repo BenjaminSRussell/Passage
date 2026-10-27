@@ -43,6 +43,11 @@ const (
 	DutyExport    = "shopfloor.pay.export"
 	// DutyIngest is held by the edge gateway's service identity, not by people.
 	DutyIngest = "shopfloor.machine.ingest"
+	// DutyKioskLogin is the PRD duty "Kiosk login" (sessions:badge), held by operators.
+	DutyKioskLogin = "shopfloor.kiosk.login"
+	// DutyOEERollup is held by the platform scheduler's service identity that runs
+	// the OEE rollup job; no person role should hold it.
+	DutyOEERollup = "shopfloor.oee.rollup"
 )
 
 const (
@@ -89,6 +94,9 @@ type Store interface {
 	ReprocessDelivery(ctx context.Context, messageID, destination, reason string, now time.Time, idem store.Idem) (store.ProcessMessage, error)
 	DeleteProcessMessage(ctx context.Context, messageID, reason string, now time.Time, idem store.Idem) (store.ProcessMessage, error)
 	ClaimRetries(ctx context.Context, now time.Time, limit int) ([]store.RetryClaim, error)
+	SaveOEEBuckets(ctx context.Context, r store.OEERollup) (store.OEERollupResult, error)
+	BadgeLogin(ctx context.Context, badge string) (store.KioskSession, error)
+	ClockedIn(ctx context.Context, limit int) ([]store.ClockedWorker, error)
 }
 
 // API holds the handlers and the counters served on the admin port.
@@ -114,6 +122,11 @@ type API struct {
 	processRetried atomic.Int64
 	// processDeleted counts process messages deleted with a reason.
 	processDeleted atomic.Int64
+	// oeeChanged and oeeRemoved count stored OEE buckets the rollup wrote or removed.
+	oeeChanged atomic.Int64
+	oeeRemoved atomic.Int64
+	// badgeRejected counts kiosk badge logins refused with SF-0001.
+	badgeRejected atomic.Int64
 }
 
 // New returns the API over s.
@@ -207,6 +220,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(DutyView)).Get("/api/v1/shopfloor/worker-days", a.listWorkerDays)
 	a.registerFloor(r)
 	a.registerProcess(r)
+	a.registerKiosk(r)
 }
 
 // Metrics serves the counters in Prometheus text format on the admin port.
@@ -230,6 +244,9 @@ func (a *API) Metrics() http.Handler {
 		counter("shopfloor_process_deliveries_reprocessed_total", "Process message destinations in error sent again by a supervisor.", a.processReprocessed.Load())
 		counter("shopfloor_process_deliveries_retried_total", "Process message destinations published again by the retry sweep.", a.processRetried.Load())
 		counter("shopfloor_process_messages_deleted_total", "Process messages deleted with a reason by a supervisor.", a.processDeleted.Load())
+		counter("shopfloor_oee_buckets_changed_total", "Stored OEE buckets the rollup inserted or changed (FR-25.10).", a.oeeChanged.Load())
+		counter("shopfloor_oee_buckets_removed_total", "Stored OEE buckets the rollup removed because their planned time is gone.", a.oeeRemoved.Load())
+		counter("shopfloor_kiosk_badge_rejected_total", "Kiosk badge logins refused as not recognized (SF-0001).", a.badgeRejected.Load())
 		counter("shopfloor_failed_total", "Requests that failed in the store.", a.failed.Load())
 	})
 }

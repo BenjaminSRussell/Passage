@@ -298,7 +298,12 @@ export interface NewMachine {
   siteId?: string | null;
   /** Decimal seconds per unit, above 0. */
   idealCycleSeconds: string;
+  /** RUNNING with no count for longer than this is idle (BR-25.6); 30 to 3600, default 300. */
+  idleThresholdSeconds?: number;
 }
+
+/** Bounds and default of the machine idle threshold, in seconds (BR-25.6). */
+export const IDLE_THRESHOLD = { min: 30, max: 3600, default: 300 } as const;
 
 export interface Machine {
   id: string;
@@ -306,6 +311,7 @@ export interface Machine {
   resourceId: string;
   siteId: string | null;
   idealCycleSeconds: string;
+  idleThresholdSeconds: number;
   lastSeq: number;
   createdAt: string;
 }
@@ -544,4 +550,43 @@ export function reprocessProcessMessage(
  */
 export function deleteProcessMessage(id: string, input: { reason: string }, key: string = newKey()): Promise<ProcessMessage> {
   return post<ProcessMessage>(`/process-messages/${encodeURIComponent(id)}:delete`, input, key);
+}
+
+// --- Kiosk login and who is clocked in (slice 6, FR-25.1, FR-25.14) ---
+
+/** The worker a badge resolves to on a shared kiosk. */
+export interface KioskSession {
+  workerId: string;
+  partyId: string;
+  name: string;
+  userId: string | null;
+  /** The open clock-in, or null when the worker is clocked out. */
+  clockedInAt: string | null;
+  /** Sign the worker out after this many minutes without input. */
+  idleTimeoutMinutes: number;
+}
+
+export interface CurrentJob {
+  jobId: string;
+  bundleId: string | null;
+  startedAt: string;
+}
+
+export interface ClockedWorker {
+  workerId: string;
+  name: string;
+  badgeId: string | null;
+  active: boolean;
+  clockedInAt: string;
+  /** Jobs started since the clock-in and not yet stopped (every job of a bundle). */
+  jobs: CurrentJob[];
+}
+
+/** Resolves a scanned badge; an unknown or deactivated badge is SF-0001. Nothing is stored, so there is no key. */
+export function badgeLogin(badgeId: string): Promise<KioskSession> {
+  return post<KioskSession>("/sessions:badge", { badgeId });
+}
+
+export function listClockedIn(signal?: AbortSignal): Promise<ClockedWorker[]> {
+  return items<ClockedWorker>("/clocked-in", signal);
 }

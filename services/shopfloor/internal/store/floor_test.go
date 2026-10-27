@@ -127,16 +127,21 @@ func TestFloor_IngestDowntimeAndonAndGaps(t *testing.T) {
 		t.Fatalf("machines = %+v, %v", machines, err)
 	}
 
-	// OEE stream for 08:00-08:40: RUNNING 0-10, DOWN 10-32, RUNNING 32-40.
+	// OEE stream for 08:00-08:40: RUNNING 0-10 (count at 5), DOWN 10-32, RUNNING 32-40.
+	// The default idle threshold is 300 s and the next count comes at 40 (the
+	// horizon), so 32-40 is 8 minutes without a count: IDLE (BR-25.6).
 	streams, err := s.LoadOEEStreams(ctx, []string{resource, ids.New()}, t0, at(40))
 	if err != nil || len(streams) != 1 {
 		t.Fatalf("streams = %+v, %v", streams, err)
+	}
+	if st := streams[resource]; st.IdleThreshold != domain.DefaultIdleThreshold || !st.HistoryFrom.Equal(t0.Add(-5*time.Minute)) || !st.Horizon.Equal(at(40)) {
+		t.Fatalf("idle threshold %s, history from %s, horizon %s", st.IdleThreshold, st.HistoryFrom, st.Horizon)
 	}
 	buckets, err := domain.BuildBuckets(streams[resource], t0, at(40), 40*time.Minute)
 	if err != nil || len(buckets) != 1 {
 		t.Fatalf("buckets = %+v, %v", buckets, err)
 	}
-	if !buckets[0].RunMinutes.Equal(decimal.NewFromInt(18)) || !buckets[0].PlannedMinutes.Equal(decimal.NewFromInt(40)) ||
+	if !buckets[0].RunMinutes.Equal(decimal.NewFromInt(10)) || !buckets[0].PlannedMinutes.Equal(decimal.NewFromInt(40)) ||
 		buckets[0].TotalCount != 6 || buckets[0].GoodCount != 5 {
 		t.Fatalf("bucket = %+v", buckets[0])
 	}
@@ -148,7 +153,7 @@ func TestFloor_IngestDowntimeAndonAndGaps(t *testing.T) {
 	if err != nil || len(streams[resource].PlannedDown) != 1 {
 		t.Fatalf("planned downtime = %+v, %v", streams, err)
 	}
-	if buckets, err = domain.BuildBuckets(streams[resource], t0, at(40), 40*time.Minute); err != nil || !buckets[0].PlannedMinutes.Equal(decimal.NewFromInt(18)) || !buckets[0].Availability.Equal(decimal.NewFromInt(1)) {
+	if buckets, err = domain.BuildBuckets(streams[resource], t0, at(40), 40*time.Minute); err != nil || !buckets[0].PlannedMinutes.Equal(decimal.NewFromInt(18)) || !buckets[0].Availability.Equal(decimal.RequireFromString("0.5556")) {
 		t.Fatalf("planned bucket = %+v, %v", buckets, err)
 	}
 	// A window starting mid-downtime takes the DOWN state in effect at its start.

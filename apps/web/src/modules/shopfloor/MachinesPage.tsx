@@ -10,6 +10,7 @@ const columns: DataTableColumn<Machine>[] = [
   { key: "resourceId", header: "Resource", mono: true },
   { key: "siteId", header: "Site", mono: true, render: (row) => row.siteId ?? dash },
   { key: "idealCycleSeconds", header: "Ideal cycle", align: "end", render: (row) => `${row.idealCycleSeconds} s` },
+  { key: "idleThresholdSeconds", header: "Idle after", align: "end", render: (row) => `${row.idleThresholdSeconds} s` },
   { key: "lastSeq", header: "Last sequence", align: "end", render: (row) => (row.lastSeq > 0 ? String(row.lastSeq) : dash) },
   { key: "createdAt", header: "Registered", render: (row) => formatDateTime(row.createdAt) },
 ];
@@ -21,7 +22,7 @@ export function MachinesPage() {
     <div className={styles.stack}>
       <PageHeader
         title="Machines"
-        description="Edge machine codes mapped to the resources whose OEE and downtime they report. The ideal cycle time sets the performance target."
+        description="Edge machine codes mapped to the resources whose OEE and downtime they report. The ideal cycle time sets the performance target; running without a count for longer than the idle threshold counts as idle."
         actions={
           <Link className={buttonClassName("primary")} to="/shopfloor/machines/new">
             Register machine

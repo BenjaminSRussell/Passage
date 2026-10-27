@@ -59,7 +59,7 @@ export function OeePage() {
     <div className={styles.stack}>
       <PageHeader
         title="OEE"
-        description="Availability × performance × quality per bucket, from machine states and counts. Totals add minutes and counts; ratios are never averaged."
+        description="Availability × performance × quality per bucket, from machine states and counts. Running without a count for longer than the machine's idle threshold counts as idle downtime. Totals add minutes and counts; ratios are never averaged."
       />
       <div className={styles.toolbar}>
         <FormField id="oee-date" label="Day" error={range ? undefined : "Enter a date."}>

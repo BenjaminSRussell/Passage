@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shopspring/decimal"
+
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/shopfloor/internal/store"
@@ -92,11 +94,15 @@ func TestHTTP_MachineDowntimeAndOEE(t *testing.T) {
 	h := newRouter(store.New(app))
 	key := func(k string) map[string]string { return map[string]string{"Idempotency-Key": k} }
 
-	body := fmt.Sprintf(`{"machineId":"M-101","resourceId":%q,"siteId":%q,"idealCycleSeconds":"60"}`, resourceID, siteID)
+	// An hour-long idle threshold: the sparse counts below stay run time (BR-25.6).
+	body := fmt.Sprintf(`{"machineId":"M-101","resourceId":%q,"siteId":%q,"idealCycleSeconds":"60","idleThresholdSeconds":3600}`, resourceID, siteID)
 	first := callWith(t, h, http.MethodPost, "/api/v1/shopfloor/machines", body, floorDuty, key("m-1"))
 	again := callWith(t, h, http.MethodPost, "/api/v1/shopfloor/machines", body, floorDuty, key("m-1"))
 	if first.Code != http.StatusCreated || again.Code != http.StatusCreated || again.Header().Get("Idempotent-Replayed") != "true" {
 		t.Fatalf("machine: %d %d %s", first.Code, again.Code, again.Body.String())
+	}
+	if !strings.Contains(first.Body.String(), `"idleThresholdSeconds":3600`) {
+		t.Fatalf("idle threshold not stored: %s", first.Body.String())
 	}
 	if rec := callWith(t, h, http.MethodPost, "/api/v1/shopfloor/machines", body, floorDuty, key("m-2")); rec.Code != http.StatusConflict || problemCode(t, rec) != store.CodeMachineExists {
 		t.Fatalf("second machine on the resource: %d %s", rec.Code, rec.Body.String())
@@ -310,5 +316,73 @@ func TestHTTP_ProcessMessageSweepDeleteAndPaging(t *testing.T) {
 	_ = json.Unmarshal(rec.Body.Bytes(), &page)
 	if len(page.Items) != 1 || page.Items[0].ID != ids[1] || page.NextCursor != nil {
 		t.Fatalf("second page (the deleted message is not listed): %s", rec.Body.String())
+	}
+}
+
+// End to end over HTTP and Postgres (FR-25.1, FR-25.14, FR-25.10): a badge
+// signs a worker in on the kiosk, the kiosk clocks them in, the supervisor board
+// lists them, and the rollup job stores the OEE of every registered machine.
+func TestHTTP_KioskBoardAndRollup(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	h := newRouter(store.New(app))
+	key := func(k string) map[string]string { return map[string]string{"Idempotency-Key": k} }
+	duties := allDuty + "," + DutyKioskLogin + "," + DutyOEERollup + "," + DutyIngest
+
+	rec := callWith(t, h, http.MethodPost, "/api/v1/shopfloor/workers", `{"partyId":"`+jobID+`","name":"Ana Silva","badgeId":"B-42","costRate":"20","currency":"USD"}`, duties, key("w-1"))
+	var w store.Worker
+	_ = json.Unmarshal(rec.Body.Bytes(), &w)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("worker %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := call(t, h, http.MethodPost, "/api/v1/shopfloor/sessions:badge", `{"badgeId":"B-99"}`, duties); rec.Code != http.StatusUnprocessableEntity || problemCode(t, rec) != store.CodeBadgeUnknown {
+		t.Fatalf("unknown badge %d %s", rec.Code, rec.Body.String())
+	}
+	rec = call(t, h, http.MethodPost, "/api/v1/shopfloor/sessions:badge", `{"badgeId":"B-42"}`, duties)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"workerId":"`+w.ID+`"`) || !strings.Contains(rec.Body.String(), `"clockedInAt":null`) {
+		t.Fatalf("badge %d %s", rec.Code, rec.Body.String())
+	}
+	clockIn := fmt.Sprintf(`{"items":[{"id":"0195f0a0-0000-7000-8000-0000000000c1","workerId":%q,"kind":"clock-in","startedAt":"2026-10-21T07:00:00Z"}]}`, w.ID)
+	if rec := call(t, h, http.MethodPost, "/api/v1/shopfloor/registrations", clockIn, duties); rec.Code != http.StatusOK {
+		t.Fatalf("clock-in %d %s", rec.Code, rec.Body.String())
+	}
+	rec = call(t, h, http.MethodGet, "/api/v1/shopfloor/clocked-in", "", duties)
+	var board itemsResponse[store.ClockedWorker]
+	_ = json.Unmarshal(rec.Body.Bytes(), &board)
+	if rec.Code != http.StatusOK || len(board.Items) != 1 || board.Items[0].Name != "Ana Silva" || len(board.Items[0].Jobs) != 0 {
+		t.Fatalf("board %d %s", rec.Code, rec.Body.String())
+	}
+
+	body := fmt.Sprintf(`{"machineId":"M-201","resourceId":%q,"idealCycleSeconds":"60"}`, resourceID)
+	if rec := callWith(t, h, http.MethodPost, "/api/v1/shopfloor/machines", body, duties, key("m-1")); rec.Code != http.StatusCreated {
+		t.Fatalf("machine %d %s", rec.Code, rec.Body.String())
+	}
+	t0 := time.Now().UTC().Truncate(time.Hour).Add(-2 * time.Hour)
+	ts := func(min int) string { return t0.Add(time.Duration(min) * time.Minute).Format(time.RFC3339) }
+	events := fmt.Sprintf(`{"events":[
+		{"machineId":"M-201","seq":1,"kind":"state","ts":%q,"state":"RUNNING"},
+		{"machineId":"M-201","seq":2,"kind":"count","ts":%q,"goodCount":4},
+		{"machineId":"M-201","seq":3,"kind":"count","ts":%q,"goodCount":4},
+		{"machineId":"M-201","seq":4,"kind":"state","ts":%q,"state":"OFF"}]}`, ts(0), ts(4), ts(8), ts(15))
+	if rec := call(t, h, http.MethodPost, "/api/v1/shopfloor/machine-events", events, duties); rec.Code != http.StatusOK {
+		t.Fatalf("ingest %d %s", rec.Code, rec.Body.String())
+	}
+	window := fmt.Sprintf(`{"from":%q,"to":%q}`, ts(0), ts(30))
+	for i, want := range []int{1, 0} {
+		rec := call(t, h, http.MethodPost, "/api/v1/shopfloor/oee:rollup", window, duties)
+		var res store.OEERollupResult
+		_ = json.Unmarshal(rec.Body.Bytes(), &res)
+		if rec.Code != http.StatusOK || res.Computed != 1 || res.Changed != want {
+			t.Fatalf("rollup %d: %d %s", i, rec.Code, rec.Body.String())
+		}
+	}
+	// 0-8 run with counts every 4 minutes, 8-15 idle (7 min without a count to OFF).
+	rec = call(t, h, http.MethodGet, "/api/v1/shopfloor/oee?resourceIds="+resourceID+"&from="+ts(0)+"&to="+ts(30)+"&bucket=15m", "", duties)
+	var series itemsResponse[oeeItem]
+	_ = json.Unmarshal(rec.Body.Bytes(), &series)
+	if len(series.Items) != 1 || !series.Items[0].RunMin.Equal(decimal.NewFromInt(8)) || !series.Items[0].DownMin.Equal(decimal.NewFromInt(7)) {
+		t.Fatalf("oee %s", rec.Body.String())
 	}
 }

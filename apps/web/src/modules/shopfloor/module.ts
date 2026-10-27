@@ -2,7 +2,9 @@ import { createElement } from "react";
 import type { PassageModule } from "../registry";
 import { AndonPage } from "./AndonPage";
 import { BundleDetailPage } from "./BundleDetailPage";
+import { ClockedInPage } from "./ClockedInPage";
 import { DowntimesPage } from "./DowntimesPage";
+import { KioskPage } from "./KioskPage";
 import { MachinesPage } from "./MachinesPage";
 import { NewMachinePage } from "./NewMachinePage";
 import { NewProcessMessagePage } from "./NewProcessMessagePage";
@@ -19,12 +21,15 @@ import { WorkersPage } from "./WorkersPage";
 const shopfloor: PassageModule = {
   id: "shopfloor",
   title: "Shop floor",
-  description: "Workers and their time, job bundles, pay approval and payroll export; machines, downtimes, andon alerts and OEE; process messages and their deliveries.",
+  description:
+    "Kiosk clock in and out; workers, who is clocked in, their time, job bundles, pay approval and payroll export; machines, downtimes, andon alerts and OEE; process messages and their deliveries.",
   routes: [
     { path: "/shopfloor/workers", element: createElement(WorkersPage), handle: { title: "Workers" } },
     { path: "/shopfloor/workers/new", element: createElement(NewWorkerPage), handle: { title: "New worker" } },
     { path: "/shopfloor/workers/:id", element: createElement(WorkerDetailPage), handle: { title: "Worker" } },
     { path: "/shopfloor/bundles/:id", element: createElement(BundleDetailPage), handle: { title: "Bundle" } },
+    { path: "/shopfloor/kiosk", element: createElement(KioskPage), handle: { title: "Kiosk" } },
+    { path: "/shopfloor/clocked-in", element: createElement(ClockedInPage), handle: { title: "Who is clocked in" } },
     { path: "/shopfloor/time", element: createElement(TimeApprovalPage), handle: { title: "Time approval" } },
     { path: "/shopfloor/pay-exports", element: createElement(PayExportsPage), handle: { title: "Payroll export" } },
     { path: "/shopfloor/pay-exports/:id", element: createElement(PayExportDetailPage), handle: { title: "Export batch" } },
@@ -38,7 +43,9 @@ const shopfloor: PassageModule = {
     { path: "/shopfloor/process-messages/:id", element: createElement(ProcessMessageDetailPage), handle: { title: "Process message" } },
   ],
   nav: [
+    { label: "Kiosk", to: "/shopfloor/kiosk", duty: "shopfloor.kiosk.login" },
     { label: "Workers", to: "/shopfloor/workers", duty: "shopfloor.view" },
+    { label: "Who is clocked in", to: "/shopfloor/clocked-in", duty: "shopfloor.view" },
     { label: "Time approval", to: "/shopfloor/time", duty: "shopfloor.pay.approve" },
     { label: "Payroll export", to: "/shopfloor/pay-exports", duty: "shopfloor.pay.export" },
     { label: "Machines", to: "/shopfloor/machines", duty: "shopfloor.view" },

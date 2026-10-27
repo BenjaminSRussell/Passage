@@ -7,7 +7,8 @@ info:
     outbox (Debezium relays to Kafka), written in the same transaction as the
     change. Source is `shopfloor`; the Kafka key is the aggregate id
     (registration id, worker id for payday approvals, batch id for payroll
-    exports, alert id for andon, message id for process messages).
+    exports, alert id for andon, message id for process messages, resource id
+    for OEE buckets).
     Schema evolution is additive only.
 defaultContentType: application/cloudevents+json
 channels:
@@ -31,6 +32,18 @@ channels:
     messages:
       andonRaised:
         $ref: "#/components/messages/AndonRaised"
+  oeeBuckets:
+    address: passage.shopfloor.oee
+    description: |
+      Stored OEE buckets written by the OEE rollup job (FR-25.10; the PRD names the
+      event `passage.shopfloor.oee.bucket-updated.v1`, renamed to the platform rule
+      of one word per segment). Dashboards (w46) roll buckets up by summing minutes
+      and counts, never by averaging ratios (BR-25.5).
+    messages:
+      oeeBucketUpdated:
+        $ref: "#/components/messages/OEEBucketUpdated"
+      oeeBucketRemoved:
+        $ref: "#/components/messages/OEEBucketRemoved"
   processMessages:
     address: passage.shopfloor.process-messages
     description: |
@@ -46,6 +59,18 @@ channels:
       processMessageDeleted:
         $ref: "#/components/messages/ProcessMessageDeleted"
 operations:
+  publishOEEBucketUpdated:
+    action: send
+    channel:
+      $ref: "#/channels/oeeBuckets"
+    messages:
+      - $ref: "#/channels/oeeBuckets/messages/oeeBucketUpdated"
+  publishOEEBucketRemoved:
+    action: send
+    channel:
+      $ref: "#/channels/oeeBuckets"
+    messages:
+      - $ref: "#/channels/oeeBuckets/messages/oeeBucketRemoved"
   publishProcessMessageReceived:
     action: send
     channel:
@@ -90,6 +115,18 @@ operations:
       - $ref: "#/channels/paydayApproved/messages/paydayApproved"
 components:
   messages:
+    OEEBucketUpdated:
+      name: dev.passage.shopfloor.oeebucket.updated.v1
+      contentType: application/cloudevents+json
+      description: Published by the OEE rollup for a bucket that is new or whose values changed; an unchanged bucket publishes nothing.
+      payload:
+        $ref: "#/components/schemas/OEEBucketUpdatedData"
+    OEEBucketRemoved:
+      name: dev.passage.shopfloor.oeebucket.removed.v1
+      contentType: application/cloudevents+json
+      description: Published by the OEE rollup when a stored bucket no longer has planned time (for example its downtime was later coded as planned).
+      payload:
+        $ref: "#/components/schemas/OEEBucketRemovedData"
     RegistrationPosted:
       name: dev.passage.shopfloor.registration.posted.v1
       contentType: application/cloudevents+json
@@ -267,6 +304,59 @@ components:
               currency:
                 type: string
                 pattern: "^[A-Z]{3}$"
+    OEEBucketUpdatedData:
+      type: object
+      required: [resourceId, bucketMinutes, bucketStart, plannedMinutes, runMinutes, downMinutes, totalCount, goodCount,
+        availability, performance, quality, oee, overRate]
+      additionalProperties: false
+      properties:
+        resourceId:
+          type: string
+          format: uuid
+        bucketMinutes:
+          type: integer
+          enum: [5, 15, 60]
+        bucketStart:
+          type: string
+          format: date-time
+        plannedMinutes:
+          type: string
+          description: Decimal, 4 places.
+        runMinutes:
+          type: string
+        downMinutes:
+          type: string
+          description: Unplanned downtime (planned less run), including idle time (BR-25.6).
+        totalCount:
+          type: integer
+        goodCount:
+          type: integer
+        availability:
+          type: string
+          description: Decimal ratio, 4 places.
+        performance:
+          type: string
+          description: Decimal ratio, 4 places, capped at 1.
+        quality:
+          type: string
+        oee:
+          type: string
+        overRate:
+          type: boolean
+    OEEBucketRemovedData:
+      type: object
+      required: [resourceId, bucketMinutes, bucketStart]
+      additionalProperties: false
+      properties:
+        resourceId:
+          type: string
+          format: uuid
+        bucketMinutes:
+          type: integer
+          enum: [5, 15, 60]
+        bucketStart:
+          type: string
+          format: date-time
     AndonRaisedData:
       type: object
       required: [alertId, resourceId, kind, severity, jobId, startedAt]

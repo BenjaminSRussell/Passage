@@ -64,6 +64,7 @@ const machine: Machine = {
   resourceId: RESOURCE,
   siteId: SITE,
   idealCycleSeconds: "60",
+  idleThresholdSeconds: 300,
   lastSeq: 184233,
   createdAt: "2026-10-20T08:00:00Z",
 };
@@ -87,6 +88,7 @@ describe("Machines", () => {
     const table = await screen.findByRole("table", { name: "Machines" });
     await waitFor(() => expect(table).toHaveTextContent("M-101"));
     expect(table).toHaveTextContent("60 s");
+    expect(table).toHaveTextContent("300 s");
     expect(table).toHaveTextContent("184233");
     expect(screen.getByRole("link", { name: "Register machine" })).toHaveAttribute("href", "/shopfloor/machines/new");
     expect(pageViolations(container)).toEqual([]);

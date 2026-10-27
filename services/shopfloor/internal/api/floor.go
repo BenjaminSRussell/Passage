@@ -34,6 +34,8 @@ type machineRequest struct {
 	ResourceID        string  `json:"resourceId"`
 	SiteID            *string `json:"siteId"`
 	IdealCycleSeconds string  `json:"idealCycleSeconds"`
+	// IdleThresholdSeconds is optional; the default is 300 (BR-25.6).
+	IdleThresholdSeconds *int `json:"idleThresholdSeconds"`
 }
 
 type measurementItem struct {
@@ -85,7 +87,7 @@ type oeeItem struct {
 	SourceEvents int             `json:"sourceEvents"`
 }
 
-// registerFloor mounts the machine, downtime, andon, OEE and payroll export routes.
+// registerFloor mounts the machine, downtime, andon, OEE, OEE rollup and payroll export routes.
 func (a *API) registerFloor(r chi.Router) {
 	r.With(authz.RequireDuty(DutySetup)).Post("/api/v1/shopfloor/machines", a.createMachine)
 	r.With(authz.RequireDuty(DutyView)).Get("/api/v1/shopfloor/machines", a.listMachines)
@@ -94,6 +96,7 @@ func (a *API) registerFloor(r chi.Router) {
 	r.With(authz.RequireDuty(DutyRegister)).Post("/api/v1/shopfloor/downtimes/{id}:code", a.codeDowntime)
 	r.With(authz.RequireDuty(DutyView)).Get("/api/v1/shopfloor/andon", a.listAndon)
 	r.With(authz.RequireDuty(DutyView)).Get("/api/v1/shopfloor/oee", a.oee)
+	r.With(authz.RequireDuty(DutyOEERollup)).Post("/api/v1/shopfloor/oee:rollup", a.rollupOEE)
 	r.With(authz.RequireDuty(DutyExport)).Post("/api/v1/shopfloor/pay:export", a.exportPay)
 	r.With(authz.RequireDuty(DutyExport)).Get("/api/v1/shopfloor/pay-exports", a.listPayExports)
 	r.With(authz.RequireDuty(DutyExport)).Get("/api/v1/shopfloor/pay-exports/{id}", a.getPayExport)
@@ -127,6 +130,13 @@ func (a *API) createMachine(w http.ResponseWriter, r *http.Request) {
 	if err != nil || !ideal.IsPositive() || ideal.GreaterThan(decimal.NewFromInt(maxIdealSecs)) || ideal.Exponent() < -3 {
 		fields["idealCycleSeconds"] = fmt.Sprintf("must be a decimal string above 0 and at most %d with up to 3 decimals", maxIdealSecs)
 	}
+	idle := int(domain.DefaultIdleThreshold / time.Second)
+	if req.IdleThresholdSeconds != nil {
+		idle = *req.IdleThresholdSeconds
+	}
+	if minIdle, maxIdle := int(domain.MinIdleThreshold/time.Second), int(domain.MaxIdleThreshold/time.Second); idle < minIdle || idle > maxIdle {
+		fields["idleThresholdSeconds"] = fmt.Sprintf("must be %d to %d seconds", minIdle, maxIdle)
+	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
 		return
@@ -135,7 +145,7 @@ func (a *API) createMachine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m, err := a.store.RegisterMachine(r.Context(), store.Machine{
-		Code: code, ResourceID: req.ResourceID, SiteID: req.SiteID, IdealCycleSeconds: ideal,
+		Code: code, ResourceID: req.ResourceID, SiteID: req.SiteID, IdealCycleSeconds: ideal, IdleThresholdSeconds: idle,
 	}, idem)
 	if err != nil {
 		a.fail(w, r, "register machine", err)
@@ -413,13 +423,14 @@ func (a *API) oee(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, "load oee streams", err)
 		return
 	}
+	now := a.now().UTC()
 	items := []oeeItem{}
 	for _, rid := range resourceIDs {
 		s, ok := streams[rid]
 		if !ok {
 			continue
 		}
-		buckets, err := domain.BuildBuckets(s, from, to, width)
+		buckets, err := domain.BuildBuckets(withHorizon(s, now), from, to, width)
 		if err != nil {
 			a.fail(w, r, "build oee buckets", err)
 			return

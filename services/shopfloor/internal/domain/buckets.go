@@ -11,15 +11,34 @@ import (
 // ErrBucketWindow reports an invalid bucket request.
 var ErrBucketWindow = errors.New("oee: invalid bucket window")
 
+// Idle threshold bounds and default (BR-25.6, parameter "Idle threshold s").
+const (
+	DefaultIdleThreshold = 300 * time.Second
+	MinIdleThreshold     = 30 * time.Second
+	MaxIdleThreshold     = 3600 * time.Second
+)
+
 // OEEStream is one machine's history for an OEE window. Initial is the state in
-// effect at the window start ("" when unknown). Events are the machine's events
-// inside [from, to) in time order. PlannedDown lists the downtimes coded as
-// planned that overlap the window (an open one ends at the window end).
+// effect at the start of the history ("" when unknown): the window start, or
+// HistoryFrom when the history begins earlier. Events are the machine's events
+// in [HistoryFrom, to) in time order; those before the window start are a
+// look-back that only tells idle detection when the last count was. PlannedDown
+// lists the downtimes coded as planned that overlap the window (an open one
+// ends at the window end).
+//
+// IdleThreshold turns RUNNING time into IDLE (BR-25.6); zero disables idle
+// detection. Horizon is how far the history is known: the first count or state
+// event at or after the window end, or the time of the computation when there
+// is none. Zero means the history is known through the window end. Time after
+// a Horizon inside the window is not scheduled (it has not happened yet).
 type OEEStream struct {
 	IdealCycleSeconds decimal.Decimal
 	Initial           string
 	Events            []MachineEvent
 	PlannedDown       []Interval
+	IdleThreshold     time.Duration
+	HistoryFrom       time.Time
+	Horizon           time.Time
 }
 
 // Interval is a half-open time span [Start, End).
@@ -43,6 +62,11 @@ type OEEBucket struct {
 // the rest is unplanned downtime. OFF (the machine switched off, outside open
 // hours) and time before the first known state are not scheduled. Buckets
 // without planned time are omitted.
+//
+// BR-25.6: when a RUNNING stretch has no count for longer than the idle
+// threshold, the whole gap from the last count (or from the start of RUNNING)
+// to the next count or state change is IDLE, which is downtime; a later count
+// closes the gap. At the end of the window the gap runs to the Horizon.
 func BuildBuckets(s OEEStream, from, to time.Time, width time.Duration) ([]OEEBucket, error) {
 	if width <= 0 || !to.After(from) {
 		return nil, fmt.Errorf("%w: from %s to %s width %s", ErrBucketWindow, from, to, width)
@@ -90,9 +114,38 @@ func BuildBuckets(s OEEStream, from, to time.Time, width time.Duration) ([]OEEBu
 		}
 	}
 
-	cur, curStart := s.Initial, from
+	start := from
+	if !s.HistoryFrom.IsZero() && s.HistoryFrom.Before(from) {
+		start = s.HistoryFrom
+	}
+	// ref is the last count, or the instant the machine started RUNNING.
+	cur, curStart, ref := s.Initial, from, start
+	// flush books the open span [curStart, end) whose count gap ends at gapEnd.
+	flush := func(end, gapEnd time.Time) {
+		if cur == "" || !end.After(curStart) {
+			return
+		}
+		state := cur
+		if cur == MachineRunning && s.IdleThreshold > 0 && gapEnd.Sub(ref) > s.IdleThreshold {
+			state = MachineIdle
+		}
+		addSpan(curStart, end, state)
+	}
 	for _, e := range s.Events {
-		if e.At.Before(from) || !e.At.Before(to) {
+		if e.At.Before(start) || !e.At.Before(to) {
+			continue
+		}
+		if e.At.Before(from) {
+			// Look-back: follow the state and the last count, book nothing.
+			if e.Kind == EventCount {
+				ref = e.At
+			}
+			if e.State != "" {
+				if e.State == MachineRunning && cur != MachineRunning {
+					ref = e.At
+				}
+				cur = e.State
+			}
 			continue
 		}
 		i := index(e.At)
@@ -100,17 +153,27 @@ func BuildBuckets(s OEEStream, from, to time.Time, width time.Duration) ([]OEEBu
 		if e.Kind == EventCount {
 			accs[i].total += e.GoodCount + e.RejectCount
 			accs[i].good += e.GoodCount
+			// A count closes the gap: book the span up to it and restart there.
+			// Splitting a span at a count does not change the sums.
+			flush(e.At, e.At)
+			curStart, ref = e.At, e.At
 		}
 		if e.State != "" {
-			if cur != "" {
-				addSpan(curStart, e.At, cur)
+			flush(e.At, e.At)
+			if e.State == MachineRunning && cur != MachineRunning {
+				ref = e.At
 			}
 			cur, curStart = e.State, e.At
 		}
 	}
-	if cur != "" {
-		addSpan(curStart, to, cur)
+	end, gapEnd := to, to
+	if !s.Horizon.IsZero() {
+		gapEnd = s.Horizon
+		if s.Horizon.Before(to) {
+			end = s.Horizon
+		}
 	}
+	flush(end, gapEnd)
 
 	var out []OEEBucket
 	for i, a := range accs {

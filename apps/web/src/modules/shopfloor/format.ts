@@ -132,3 +132,12 @@ export function formatOffset(seconds?: number | null): string {
   const abs = Math.abs(seconds);
   return abs % 60 === 0 ? `${sign}${abs / 60} min` : abs < 60 ? `${sign}${abs} s` : `${sign}${Math.floor(abs / 60)} min ${abs % 60} s`;
 }
+
+/** Time present since start, e.g. "7 h 05 min" or "45 min"; "—" for a bad date. */
+export function elapsed(start: string, now: number = Date.now()): string {
+  const from = Date.parse(start);
+  if (Number.isNaN(from)) return dash;
+  const minutes = Math.max(0, Math.floor((now - from) / 60_000));
+  const hours = Math.floor(minutes / 60);
+  return hours > 0 ? `${hours} h ${String(minutes % 60).padStart(2, "0")} min` : `${minutes} min`;
+}

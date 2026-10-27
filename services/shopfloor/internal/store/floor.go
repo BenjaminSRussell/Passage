@@ -32,8 +32,11 @@ type Machine struct {
 	ResourceID        string          `json:"resourceId"`
 	SiteID            *string         `json:"siteId"`
 	IdealCycleSeconds decimal.Decimal `json:"idealCycleSeconds"`
-	LastSeq           int64           `json:"lastSeq"`
-	CreatedAt         time.Time       `json:"createdAt"`
+	// IdleThresholdSeconds is how long RUNNING may go without a count before the
+	// gap is IDLE (BR-25.6). Zero on registration means the default, 300.
+	IdleThresholdSeconds int       `json:"idleThresholdSeconds"`
+	LastSeq              int64     `json:"lastSeq"`
+	CreatedAt            time.Time `json:"createdAt"`
 }
 
 // MachineEventIn is one edge event addressed to a machine code.
@@ -94,12 +97,12 @@ type Andon struct {
 	StartedAt  time.Time `json:"startedAt"`
 }
 
-const machineColumns = `id::text, code, resource_id::text, site_id::text, ideal_cycle_s::text, last_seq, created_at`
+const machineColumns = `id::text, code, resource_id::text, site_id::text, ideal_cycle_s::text, idle_threshold_s, last_seq, created_at`
 
 func scanMachine(row pgx.Row) (Machine, error) {
 	var m Machine
 	var ideal string
-	if err := row.Scan(&m.ID, &m.Code, &m.ResourceID, &m.SiteID, &ideal, &m.LastSeq, &m.CreatedAt); err != nil {
+	if err := row.Scan(&m.ID, &m.Code, &m.ResourceID, &m.SiteID, &ideal, &m.IdleThresholdSeconds, &m.LastSeq, &m.CreatedAt); err != nil {
 		return Machine{}, err
 	}
 	var err error
@@ -112,12 +115,15 @@ func scanMachine(row pgx.Row) (Machine, error) {
 // registration of either the code or the resource is SF-0109.
 func (s *Postgres) RegisterMachine(ctx context.Context, in Machine, idem Idem) (Machine, error) {
 	p, _ := tenant.FromContext(ctx)
+	if in.IdleThresholdSeconds == 0 {
+		in.IdleThresholdSeconds = int(domain.DefaultIdleThreshold / time.Second)
+	}
 	var out Machine
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
-		out, err = scanMachine(tx.QueryRow(ctx, `insert into machine (tenant_id, id, code, resource_id, site_id, ideal_cycle_s)
-			values ($1, $2, $3, $4, $5, $6) returning `+machineColumns,
-			p.TenantID, ids.New(), in.Code, in.ResourceID, in.SiteID, in.IdealCycleSeconds.String()))
+		out, err = scanMachine(tx.QueryRow(ctx, `insert into machine (tenant_id, id, code, resource_id, site_id, ideal_cycle_s, idle_threshold_s)
+			values ($1, $2, $3, $4, $5, $6, $7) returning `+machineColumns,
+			p.TenantID, ids.New(), in.Code, in.ResourceID, in.SiteID, in.IdealCycleSeconds.String(), in.IdleThresholdSeconds))
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
 			return httpx.NewProblem(http.StatusConflict, CodeMachineExists, "machine code or resource is already registered")
@@ -416,22 +422,28 @@ func (s *Postgres) OpenAndon(ctx context.Context, siteID string) ([]Andon, error
 	return out, err
 }
 
-// LoadOEEStreams reads, per resource with a machine, the machine's events in
-// [from, to), the state in effect at from and the downtimes coded as planned
-// that overlap the window. Resources without a machine are absent.
+// LoadOEEStreams reads, per resource with a machine, the machine's ideal cycle
+// and idle threshold, its events in [from - look-back, to), the state in effect
+// at the start of that history, the downtimes coded as planned that overlap the
+// window and the first count or state event at or after to (the Horizon, zero
+// when there is none yet). The look-back is the longest idle threshold of the
+// machines read, so idle detection (BR-25.6) knows the last count before the
+// window. Resources without a machine are absent.
 func (s *Postgres) LoadOEEStreams(ctx context.Context, resourceIDs []string, from, to time.Time) (map[string]domain.OEEStream, error) {
 	out := map[string]domain.OEEStream{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		resourceOf := map[string]string{}
 		var machineIDs []string
-		rows, err := tx.Query(ctx, `select resource_id::text, id::text, ideal_cycle_s::text from machine
+		var lookBack time.Duration
+		rows, err := tx.Query(ctx, `select resource_id::text, id::text, ideal_cycle_s::text, idle_threshold_s from machine
 			where resource_id = any($1::uuid[])`, resourceIDs)
 		if err != nil {
 			return err
 		}
 		for rows.Next() {
 			var rid, mid, ideal string
-			if err := rows.Scan(&rid, &mid, &ideal); err != nil {
+			var idle int
+			if err := rows.Scan(&rid, &mid, &ideal, &idle); err != nil {
 				rows.Close()
 				return err
 			}
@@ -440,9 +452,11 @@ func (s *Postgres) LoadOEEStreams(ctx context.Context, resourceIDs []string, fro
 				rows.Close()
 				return err
 			}
+			threshold := time.Duration(idle) * time.Second
+			lookBack = max(lookBack, threshold)
 			resourceOf[mid] = rid
 			machineIDs = append(machineIDs, mid)
-			out[rid] = domain.OEEStream{IdealCycleSeconds: d}
+			out[rid] = domain.OEEStream{IdealCycleSeconds: d, IdleThreshold: threshold}
 		}
 		rows.Close()
 		if err := rows.Err(); err != nil {
@@ -451,25 +465,43 @@ func (s *Postgres) LoadOEEStreams(ctx context.Context, resourceIDs []string, fro
 		if len(machineIDs) == 0 {
 			return nil
 		}
+		historyFrom := from.Add(-lookBack)
+		for rid, st := range out {
+			st.HistoryFrom = historyFrom
+			out[rid] = st
+		}
 
-		prior, err := tx.Query(ctx, `select distinct on (machine_id) machine_id::text, state from machine_event
-			where machine_id = any($1::uuid[]) and ts < $2 and state is not null
-			order by machine_id, ts desc, seq desc`, machineIDs, from)
+		// One indexed probe per machine on (tenant_id, machine_id, ts): the state in
+		// effect at the start of the history and the first count or state event at
+		// or after the window end.
+		edges, err := tx.Query(ctx, `select m.id::text,
+				(select e.state from machine_event e where e.machine_id = m.id and e.ts < $2 and e.state is not null
+					order by e.ts desc, e.seq desc limit 1),
+				(select e.ts from machine_event e where e.machine_id = m.id and e.ts >= $3 and (e.kind = 'count' or e.state is not null)
+					order by e.ts, e.seq limit 1)
+			from unnest($1::uuid[]) as m(id)`, machineIDs, historyFrom, to)
 		if err != nil {
 			return err
 		}
-		for prior.Next() {
-			var mid, state string
-			if err := prior.Scan(&mid, &state); err != nil {
-				prior.Close()
+		for edges.Next() {
+			var mid string
+			var state *string
+			var horizon *time.Time
+			if err := edges.Scan(&mid, &state, &horizon); err != nil {
+				edges.Close()
 				return err
 			}
 			st := out[resourceOf[mid]]
-			st.Initial = state
+			if state != nil {
+				st.Initial = *state
+			}
+			if horizon != nil {
+				st.Horizon = *horizon
+			}
 			out[resourceOf[mid]] = st
 		}
-		prior.Close()
-		if err := prior.Err(); err != nil {
+		edges.Close()
+		if err := edges.Err(); err != nil {
 			return err
 		}
 
@@ -497,7 +529,7 @@ func (s *Postgres) LoadOEEStreams(ctx context.Context, resourceIDs []string, fro
 
 		evts, err := tx.Query(ctx, `select machine_id::text, seq, kind, ts, good_count, reject_count, coalesce(state, '')
 			from machine_event where machine_id = any($1::uuid[]) and ts >= $2 and ts < $3
-			order by machine_id, ts, seq`, machineIDs, from, to)
+			order by machine_id, ts, seq`, machineIDs, historyFrom, to)
 		if err != nil {
 			return err
 		}

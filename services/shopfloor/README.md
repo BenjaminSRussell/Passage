@@ -3,6 +3,43 @@
 Shop floor execution service. Wave reference: **PSG-25 / Wave 25**
 (Shop Floor Execution, Time Registration & IoT), PRD section 4.25.
 
+## Slice 6: idle detection, OEE rollup, kiosk badge login, who is clocked in
+
+- Idle detection (BR-25.6): each machine has an idle threshold (`idleThresholdSeconds` on
+  `POST machines`, 30 to 3,600, default 300; migration 0006). When a RUNNING stretch has
+  no count for longer than the threshold, the whole gap, from the last count (or the start
+  of RUNNING) to the next count or state change, is IDLE downtime; a later count closes the
+  gap. The store reads one threshold of look-back before the window so a window that starts
+  mid-gap knows the last count, and the first count or state event after the window (the
+  horizon) so the last gap is measured to where it really ends. With no later event the gap
+  runs to now, and time after now is not scheduled, so `GET oee` for today no longer books
+  the rest of the day as run time.
+- OEE rollup (`POST oee:rollup`, duty `shopfloor.oee.rollup`, PRD job "OEE rollup" every
+  15 minutes): computes the buckets of a window (start on a bucket boundary in UTC, whole
+  buckets, at most 24 hours, not in the future) exactly as `GET oee` does, for the given
+  resources or every registered machine, and upserts them into `oee_bucket` by (resource,
+  bucket width, bucket start). A new or changed bucket emits
+  `dev.passage.shopfloor.oeebucket.updated.v1` with its minutes, counts and ratios; a stored
+  bucket that lost all planned time (its downtime later coded as planned) is removed with
+  `dev.passage.shopfloor.oeebucket.removed.v1`; an unchanged bucket is not rewritten and
+  emits nothing, so the job is safe to repeat and takes no `Idempotency-Key`. Counted in
+  `shopfloor_oee_buckets_changed_total` and `shopfloor_oee_buckets_removed_total`.
+- Kiosk badge login (`POST sessions:badge`, duty `shopfloor.kiosk.login`, FR-25.1): a
+  scanned badge resolves to the active worker with name, party, sign-in user, the open
+  clock-in (or null) and the idle timeout (10 minutes, the PRD default). An unknown badge and
+  the badge of a deactivated worker are both SF-0001, counted in
+  `shopfloor_kiosk_badge_rejected_total`; the badge is never logged.
+- Who is clocked in (`GET clocked-in`, duty `shopfloor.view`, FR-25.14 and inquiry 4.25.14):
+  workers whose latest clock punch is a clock-in, longest present first, with the jobs they
+  started since that clock-in and have not stopped (no `stoppedAt` and no later
+  `job-stop` for the job; every job of a bundle is listed).
+- Migration 0006 also grants `process_message` and `process_message_delivery` to
+  `passage_app`: migration 0004 created them without the grant, so the service could not
+  use them under the application role.
+- Web: a kiosk page (badge sign-in, clock in and out, sign-out after the idle timeout), the
+  "Who is clocked in" board, and the idle threshold on machine registration and the
+  machines list.
+
 ## Slice 5: retry sweep, delete with reason, monitor paging
 
 - Retry sweep (`POST process-messages:retry-due?limit=`, duty `shopfloor.process.deliver`,
@@ -167,6 +204,7 @@ migrations/            0001_init.sql (worker, time_registration, worker_day, pay
                        0003_bundles_offline.sql (clock offset, bundle index)
                        0004_process_messages.sql (process_message, process_message_delivery)
                        0005_process_message_delete.sql (deletion audit columns, monitor keyset index)
+                       0006_idle_oee_buckets.sql (machine idle threshold, oee_bucket, process message grants)
 api/openapi.yaml       OpenAPI 3.1 for every endpoint
 events/asyncapi.yaml   AsyncAPI 3 for every event
 charts/shopfloor       Helm chart (3 replicas, /healthz and /readyz probes, ServiceMonitor toggle)
@@ -207,7 +245,9 @@ OpenAPI and AsyncAPI files in step with the router and the published event types
 | POST `/api/v1/shopfloor/pay:approve` | `shopfloor.pay.approve` (Approve time registrations) |
 | GET `/api/v1/shopfloor/worker-days` | `shopfloor.view` |
 | POST `/api/v1/shopfloor/machines` | `shopfloor.setup.maintain` |
-| GET `/api/v1/shopfloor/machines`, `/downtimes`, `/andon`, `/oee` | `shopfloor.view` |
+| GET `/api/v1/shopfloor/machines`, `/downtimes`, `/andon`, `/oee`, `/clocked-in` | `shopfloor.view` |
+| POST `/api/v1/shopfloor/oee:rollup` | `shopfloor.oee.rollup` (scheduler service identity; not in the PRD duty table) |
+| POST `/api/v1/shopfloor/sessions:badge` | `shopfloor.kiosk.login` (Kiosk login) |
 | POST `/api/v1/shopfloor/machine-events` | `shopfloor.machine.ingest` (edge gateway service identity) |
 | POST `/api/v1/shopfloor/downtimes/{id}:code` | `shopfloor.time.register` |
 | POST `/api/v1/shopfloor/pay:export`, GET `/pay-exports`, `/pay-exports/{id}` | `shopfloor.pay.export` (Export time to payroll) |
@@ -227,6 +267,7 @@ Problem details use `application/problem+json` with `type` `https://passage.dev/
 | `AUTH-0001` | 401 | Missing or malformed tenant, or no authenticated user for approval, export or deletion |
 | `COM-0001` | 400 | Request failed validation (or no `Idempotency-Key`); `errors` lists the fields |
 | `AUTH-0003` | 403 | Missing duty |
+| `SF-0001` | 422 | Badge is not recognized (unknown, or the worker is deactivated) |
 | `SF-0006` | 422 | Day cannot be approved: flags are open |
 | `SF-0007` | 422 | Worker-day exceeds 24.00 hours |
 | `SF-0101` | 422 (404 on GET) | Worker not found or inactive |

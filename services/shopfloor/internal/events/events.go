@@ -21,11 +21,16 @@ var (
 	ProcessMessageReceived  = events.Type(Context, "processmessage", "received", 1)
 	ProcessMessageDelivered = events.Type(Context, "processmessage", "delivered", 1)
 	ProcessMessageDeleted   = events.Type(Context, "processmessage", "deleted", 1)
+	// PRD 4.25.5 names this event passage.shopfloor.oee.bucket-updated.v1; the
+	// platform naming rule allows one [a-z0-9] word per segment.
+	OEEBucketUpdated = events.Type(Context, "oeebucket", "updated", 1)
+	OEEBucketRemoved = events.Type(Context, "oeebucket", "removed", 1)
 )
 
 // All lists every event type the service publishes (used by the startup registry check).
 func All() []string {
-	return []string{RegistrationPosted, PaydayApproved, PaydayExported, AndonRaised, ProcessMessageReceived, ProcessMessageDelivered, ProcessMessageDeleted}
+	return []string{RegistrationPosted, PaydayApproved, PaydayExported, AndonRaised, ProcessMessageReceived, ProcessMessageDelivered, ProcessMessageDeleted,
+		OEEBucketUpdated, OEEBucketRemoved}
 }
 
 // ProcessMessageReceivedData is the payload of dev.passage.shopfloor.processmessage.received.v1,
@@ -67,6 +72,35 @@ type ProcessMessageDeletedData struct {
 	Undelivered  []string  `json:"undelivered"`
 	DeletedBy    string    `json:"deletedBy"`
 	DeletedAt    time.Time `json:"deletedAt"`
+}
+
+// OEEBucketUpdatedData is the payload of dev.passage.shopfloor.oeebucket.updated.v1,
+// published by the OEE rollup for a bucket that is new or whose values changed
+// (FR-25.10). Minutes and counts travel with the ratios so a dashboard rolls
+// buckets up to a shift by summing them, never by averaging ratios (BR-25.5).
+type OEEBucketUpdatedData struct {
+	ResourceID     string          `json:"resourceId"`
+	BucketMinutes  int             `json:"bucketMinutes"`
+	BucketStart    time.Time       `json:"bucketStart"`
+	PlannedMinutes decimal.Decimal `json:"plannedMinutes"`
+	RunMinutes     decimal.Decimal `json:"runMinutes"`
+	DownMinutes    decimal.Decimal `json:"downMinutes"`
+	TotalCount     int64           `json:"totalCount"`
+	GoodCount      int64           `json:"goodCount"`
+	Availability   decimal.Decimal `json:"availability"`
+	Performance    decimal.Decimal `json:"performance"`
+	Quality        decimal.Decimal `json:"quality"`
+	OEE            decimal.Decimal `json:"oee"`
+	OverRate       bool            `json:"overRate"`
+}
+
+// OEEBucketRemovedData is the payload of dev.passage.shopfloor.oeebucket.removed.v1,
+// published when a rollup finds that a stored bucket no longer has planned time
+// (for example its downtime was coded as planned afterwards).
+type OEEBucketRemovedData struct {
+	ResourceID    string    `json:"resourceId"`
+	BucketMinutes int       `json:"bucketMinutes"`
+	BucketStart   time.Time `json:"bucketStart"`
 }
 
 // PaydayExportedData is the payload of dev.passage.shopfloor.payday.exported.v1:

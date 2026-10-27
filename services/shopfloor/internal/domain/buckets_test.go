@@ -225,3 +225,137 @@ func TestBuildBuckets_PlannedDowntimeLeavesPlannedTime(t *testing.T) {
 		t.Fatalf("planned-only bucket: %+v, %v", got, err)
 	}
 }
+
+func count(seq int64, m int) MachineEvent {
+	return MachineEvent{Seq: seq, Kind: EventCount, At: minutes(m), GoodCount: 1}
+}
+
+// BR-25.6: a RUNNING stretch with no count for longer than the idle threshold is
+// IDLE for the whole gap, from the last count (or the start of RUNNING) to the
+// next count or state change; a later count closes the gap.
+func TestBuildBuckets_IdleDetection(t *testing.T) {
+	cases := []struct {
+		name        string
+		initial     string
+		historyFrom int
+		horizon     *int
+		events      []MachineEvent
+		planned     int64
+		run         int64
+	}{
+		{name: "a gap over the threshold is idle from the last count to the next", initial: MachineRunning,
+			events: []MachineEvent{count(1, 2), count(2, 12), count(3, 14)}, planned: 15, run: 5},
+		{name: "a gap of exactly the threshold stays running", initial: MachineRunning,
+			events: []MachineEvent{count(1, 5), count(2, 10), count(3, 15)}, planned: 15, run: 15},
+		{name: "no count until the horizon idles the whole window", initial: MachineRunning,
+			horizon: ptrInt(20), planned: 15, run: 0},
+		{name: "a short tail before the horizon stays running", initial: MachineRunning,
+			events: []MachineEvent{count(1, 4), count(2, 8), count(3, 12)}, horizon: ptrInt(16), planned: 15, run: 15},
+		{name: "a count in the look-back starts the gap before the window", initial: MachineRunning, historyFrom: -5,
+			events: []MachineEvent{count(1, -1), count(2, 3)}, planned: 15, run: 3},
+		{name: "without a look-back count the gap starts at the history start", initial: MachineRunning, historyFrom: -5,
+			events: []MachineEvent{count(1, 3)}, planned: 15, run: 0},
+		{name: "RUNNING in the look-back after DOWN starts the gap at the state change", initial: MachineDown, historyFrom: -5,
+			events:  []MachineEvent{{Seq: 1, Kind: EventState, At: minutes(-2), State: MachineRunning}, count(2, 2), count(3, 6), count(4, 10), count(5, 15)},
+			planned: 15, run: 15},
+		{name: "RUNNING after DOWN counts the gap from the state change", initial: MachineDown,
+			events: []MachineEvent{{Seq: 1, Kind: EventState, At: minutes(10), State: MachineRunning}, count(2, 14)}, planned: 15, run: 5},
+		{name: "a stop ends the gap: RUNNING without counts before DOWN is idle", initial: MachineRunning,
+			events: []MachineEvent{{Seq: 1, Kind: EventState, At: minutes(8), State: MachineDown}}, planned: 15, run: 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := OEEStream{IdealCycleSeconds: decimal.NewFromInt(60), IdleThreshold: 5 * time.Minute, Initial: c.initial, Events: c.events}
+			if c.historyFrom != 0 {
+				s.HistoryFrom = minutes(c.historyFrom)
+			}
+			if c.horizon != nil {
+				s.Horizon = minutes(*c.horizon)
+			}
+			got, err := BuildBuckets(s, floorNow, minutes(15), 15*time.Minute)
+			if err != nil || len(got) != 1 {
+				t.Fatalf("buckets %+v, %v", got, err)
+			}
+			if !got[0].PlannedMinutes.Equal(decimal.NewFromInt(c.planned)) || !got[0].RunMinutes.Equal(decimal.NewFromInt(c.run)) {
+				t.Fatalf("planned %s run %s, want %d and %d", got[0].PlannedMinutes, got[0].RunMinutes, c.planned, c.run)
+			}
+			// Look-back events are not counted in the window.
+			inWindow := 0
+			for _, e := range c.events {
+				if !e.At.Before(floorNow) && e.At.Before(minutes(15)) {
+					inWindow++
+				}
+			}
+			if got[0].SourceEvents != inWindow {
+				t.Fatalf("source events %d, want %d", got[0].SourceEvents, inWindow)
+			}
+		})
+	}
+}
+
+func ptrInt(n int) *int { return &n }
+
+// Without a threshold RUNNING stays run time however sparse the counts are.
+func TestBuildBuckets_IdleDetectionOffWithoutThreshold(t *testing.T) {
+	got, err := BuildBuckets(OEEStream{IdealCycleSeconds: decimal.NewFromInt(60), Initial: MachineRunning, Horizon: minutes(90)},
+		floorNow, minutes(15), 15*time.Minute)
+	if err != nil || len(got) != 1 || !got[0].RunMinutes.Equal(decimal.NewFromInt(15)) {
+		t.Fatalf("buckets %+v, %v", got, err)
+	}
+}
+
+// A horizon inside the window (the computation runs before the window ends)
+// leaves the time after it unscheduled instead of extending the last state.
+func TestBuildBuckets_HorizonInsideWindowIsNotScheduled(t *testing.T) {
+	got, err := BuildBuckets(OEEStream{IdealCycleSeconds: decimal.NewFromInt(60), Initial: MachineRunning, Horizon: minutes(20)},
+		floorNow, minutes(60), 15*time.Minute)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("buckets %+v, %v", got, err)
+	}
+	if !got[1].PlannedMinutes.Equal(decimal.NewFromInt(5)) || !got[1].RunMinutes.Equal(decimal.NewFromInt(5)) {
+		t.Fatalf("partial bucket %+v", got[1])
+	}
+}
+
+// Property: idle detection only moves time from run to downtime. Planned time
+// and counts are unchanged and run time never grows.
+func TestBuildBuckets_PropertyIdleOnlyLowersRun(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		const window = 120
+		var events []MachineEvent
+		at := 0
+		for i := 0; i < rapid.IntRange(0, 12).Draw(t, "events"); i++ {
+			at += rapid.IntRange(1, 15).Draw(t, "step")
+			if at >= window {
+				break
+			}
+			if rapid.Bool().Draw(t, "isCount") {
+				events = append(events, count(int64(i+1), at))
+			} else {
+				events = append(events, MachineEvent{Seq: int64(i + 1), Kind: EventState, At: minutes(at),
+					State: rapid.SampledFrom([]string{MachineRunning, MachineDown, MachineIdle}).Draw(t, "state")})
+			}
+		}
+		threshold := time.Duration(rapid.IntRange(1, 30).Draw(t, "threshold")) * time.Minute
+		base := OEEStream{IdealCycleSeconds: decimal.NewFromInt(1), Initial: MachineRunning, Events: events}
+		idle := base
+		idle.IdleThreshold = threshold
+		plain, err := BuildBuckets(base, floorNow, minutes(window), 15*time.Minute)
+		if err != nil {
+			t.Fatal(err)
+		}
+		withIdle, err := BuildBuckets(idle, floorNow, minutes(window), 15*time.Minute)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(plain) != len(withIdle) {
+			t.Fatalf("bucket count %d vs %d", len(plain), len(withIdle))
+		}
+		for i := range plain {
+			p, q := plain[i], withIdle[i]
+			if !p.PlannedMinutes.Equal(q.PlannedMinutes) || p.TotalCount != q.TotalCount || q.RunMinutes.GreaterThan(p.RunMinutes) {
+				t.Fatalf("bucket %d: plain %+v idle %+v", i, p, q)
+			}
+		}
+	})
+}

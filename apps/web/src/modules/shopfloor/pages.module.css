@@ -106,3 +106,13 @@
   line-height: var(--text-sm-leading);
   font-weight: var(--weight-medium);
 }
+
+/* Kiosk: one column, touch targets of at least 48px (PRD 4.25.6 interaction rules). */
+.kiosk {
+  max-inline-size: 32rem;
+}
+
+.kioskButton {
+  min-block-size: var(--space-12);
+  inline-size: 100%;
+}

@@ -8,9 +8,12 @@ info:
     the lists the supervisor approval screen reads. Slice 2: machines, edge
     machine-event ingest, downtimes and reason codes, andon, the OEE series and
     payroll export batches. Slice 4: process messages (record, monitor, delivery
-    reports from the consuming contexts, reprocess). Commands that change state
-    (except the registration batch, idempotent per item id, and process message
-    creation, idempotent per source and sourceMessageId) require an
+    reports from the consuming contexts, reprocess). Slice 6: per-machine idle
+    threshold (BR-25.6), the OEE rollup that stores buckets, kiosk badge login
+    and the "Who is clocked in" inquiry. Commands that change state
+    (except the registration batch, idempotent per item id, process message
+    creation, idempotent per source and sourceMessageId, and the scheduler jobs
+    that are safe to repeat) require an
     `Idempotency-Key` header; a repeated key returns the stored
     outcome with `Idempotent-Replayed: true`. Errors are RFC 9457 problem
     details (application/problem+json) with a stable `code`; see README.md.
@@ -519,7 +522,9 @@ paths:
       summary: OEE series per resource and bucket (FR-25.10, BR-25.5)
       description: |
         Computed on read from stored machine events. Downtime coded as planned
-        is taken out of planned minutes. Buckets without planned time (no known
+        is taken out of planned minutes. RUNNING time with no count for longer
+        than the machine's idle threshold is idle downtime from the last count to
+        the next count (BR-25.6); time after now is not scheduled. Buckets without planned time (no known
         state, OFF, or wholly planned downtime) are omitted, as are resources
         without a machine. Roll up to a shift by summing minutes and counts, never by
         averaging ratios.
@@ -563,6 +568,101 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/OeeBucket"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /api/v1/shopfloor/oee:rollup:
+    post:
+      operationId: rollupOee
+      summary: OEE rollup job - store the buckets of a window (FR-25.10)
+      description: |
+        PRD job "OEE rollup" (every 15 minutes). The platform scheduler calls it per
+        tenant with a service identity holding the rollup duty. The buckets are
+        computed exactly as GET /oee computes them and upserted by (resource, bucket
+        width, bucket start). A new or changed bucket publishes
+        `dev.passage.shopfloor.oeebucket.updated.v1`; a stored bucket of the window
+        that no longer has planned time is removed and publishes
+        `dev.passage.shopfloor.oeebucket.removed.v1`; an unchanged bucket is not
+        rewritten and publishes nothing, so calling it again is safe and it takes no
+        Idempotency-Key. Without `resourceIds` every registered machine is rolled up.
+      x-passage-duty: shopfloor.oee.rollup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OeeRollup"
+      responses:
+        "200":
+          description: What the rollup wrote.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OeeRollupResult"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /api/v1/shopfloor/sessions:badge:
+    post:
+      operationId: badgeLogin
+      summary: Kiosk login by badge scan (FR-25.1)
+      description: |
+        Resolves a scanned badge (GS1 barcode or NFC payload) to an active worker and
+        says whether the worker is clocked in. The BFF holds the kiosk session and
+        logs it out after `idleTimeoutMinutes` without input. An unknown badge and the
+        badge of a deactivated worker are both SF-0001 (422). Nothing is stored, so
+        there is no Idempotency-Key. PIN login is not built yet.
+      x-passage-duty: shopfloor.kiosk.login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BadgeLogin"
+      responses:
+        "200":
+          description: The worker the kiosk now acts for.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KioskSession"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /api/v1/shopfloor/clocked-in:
+    get:
+      operationId: listClockedIn
+      summary: Who is clocked in (PRD 4.25.14, FR-25.14 supervisor view)
+      description: |
+        Workers whose latest clock punch is a clock-in, longest present first, with
+        the jobs they started since and have not stopped (a bundle lists each job).
+      x-passage-duty: shopfloor.view
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Clocked-in workers.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ClockedWorker"
         "400":
           $ref: "#/components/responses/Problem"
         "401":
@@ -1376,9 +1476,15 @@ components:
           type: string
           description: Decimal seconds per unit, above 0 and at most 86400, up to 3 decimals.
           examples: ["60", "1.5"]
+        idleThresholdSeconds:
+          type: integer
+          minimum: 30
+          maximum: 3600
+          default: 300
+          description: RUNNING with no count for longer than this is idle (BR-25.6).
     Machine:
       type: object
-      required: [id, machineId, resourceId, siteId, idealCycleSeconds, lastSeq, createdAt]
+      required: [id, machineId, resourceId, siteId, idealCycleSeconds, idleThresholdSeconds, lastSeq, createdAt]
       properties:
         id:
           type: string
@@ -1393,6 +1499,8 @@ components:
           format: uuid
         idealCycleSeconds:
           type: string
+        idleThresholdSeconds:
+          type: integer
         lastSeq:
           type: integer
           description: Highest sequence number stored for the machine.
@@ -1587,6 +1695,125 @@ components:
           description: Performance exceeded 1.0 and was capped.
         sourceEvents:
           type: integer
+    OeeRollup:
+      type: object
+      required: [from, to]
+      properties:
+        resourceIds:
+          type: array
+          maxItems: 1000
+          items:
+            type: string
+            format: uuid
+          description: Omit to roll up every registered machine.
+        from:
+          type: string
+          format: date-time
+          description: On a bucket boundary in UTC.
+        to:
+          type: string
+          format: date-time
+          description: A whole number of buckets after from, at most 24 hours later, not in the future.
+        bucket:
+          type: string
+          enum: [5m, 15m, 60m]
+          default: 15m
+    OeeRollupResult:
+      type: object
+      required: [bucketMinutes, computed, changed, removed]
+      properties:
+        bucketMinutes:
+          type: integer
+        computed:
+          type: integer
+          description: Buckets with planned time in the window.
+        changed:
+          type: integer
+          description: Buckets inserted or rewritten because a value changed.
+        removed:
+          type: integer
+          description: Stored buckets removed because they no longer have planned time.
+    BadgeLogin:
+      type: object
+      required: [badgeId]
+      properties:
+        badgeId:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: The scanned badge; surrounding blanks are ignored.
+    KioskSession:
+      type: object
+      required: [workerId, partyId, name, userId, clockedInAt, idleTimeoutMinutes]
+      properties:
+        workerId:
+          type: string
+          format: uuid
+        partyId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        userId:
+          type: [string, "null"]
+        clockedInAt:
+          type: [string, "null"]
+          format: date-time
+          description: The open clock-in, or null when the worker is clocked out.
+        idleTimeoutMinutes:
+          type: integer
+          description: Site parameter "Kiosk idle timeout min" (default 10).
+    CurrentJob:
+      type: object
+      required: [jobId, bundleId, startedAt]
+      properties:
+        jobId:
+          type: string
+          format: uuid
+        bundleId:
+          type: [string, "null"]
+          format: uuid
+        startedAt:
+          type: string
+          format: date-time
+    ClockedWorker:
+      type: object
+      required: [workerId, name, badgeId, active, clockedInAt, jobs]
+      properties:
+        workerId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        badgeId:
+          type: [string, "null"]
+        active:
+          type: boolean
+        clockedInAt:
+          type: string
+          format: date-time
+        jobs:
+          type: array
+          items:
+            $ref: "#/components/schemas/CurrentJob"
+    PayRange:
+      type: object
+      required: [workerId, from, to]
+      properties:
+        workerId:
+          type: string
+          format: uuid
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+          description: Inclusive, at most 28 days after from.
+        timeZone:
+          type: string
+          default: UTC
+          description: IANA time zone the worker-days are calculated in.
     PayExportRange:
       type: object
       required: [from, to]
