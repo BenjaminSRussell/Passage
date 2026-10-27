@@ -1,4 +1,4 @@
-FROM golang:1.25.11-alpine3.22 AS build
+FROM golang:1.25-alpine AS build
 WORKDIR /src
 COPY platform/go platform/go
 COPY services/metadata services/metadata
