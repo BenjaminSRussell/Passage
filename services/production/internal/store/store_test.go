@@ -472,7 +472,7 @@ func TestStore_RowLevelSecurity(t *testing.T) {
 	}
 	for _, table := range []string{"production_order_sequence", "production_order", "production_bom_line", "production_operation",
 		"production_cost_estimate", "production_status_log", "outbox", "production_posting_profile", "production_journal_sequence",
-		"production_journal", "production_journal_line", "production_wip_posting", "production_variance", "production_as_built"} {
+		"production_journal", "production_journal_line", "production_wip_posting", "production_variance", "production_as_built", "production_order_edit"} {
 		var enabled, forced bool
 		if err := admin.QueryRow(context.Background(), `select relrowsecurity, relforcerowsecurity from pg_class
 			where relname = $1 and relnamespace = current_schema()::regnamespace`, table).Scan(&enabled, &forced); err != nil || !enabled || !forced {
@@ -543,10 +543,25 @@ func TestStore_RowLevelSecurity(t *testing.T) {
 			t.Fatalf("as-built leaked outside its tenant or legal entity: %d rows (%v)", len(rows), err)
 		}
 	}
+	// Order edits (FR-21.18) and the WIP and variance reports (4.21.14) are scoped too.
+	if _, err := s.EditOrder(ctxA, OrderEdit{OrderID: inB.ID, IfMatch: inB.Version, Actor: "x",
+		Edits: domain.OrderEdits{Lines: []domain.LineEdit{{Op: domain.EditChange, LineNo: "10", ScrapPct: qty("1")}}}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.OrderEdits(scoped, inB.ID)
+	expectProblem(t, err, http.StatusNotFound, CodeOrderNotFound)
+	_, err = s.EditOrder(ctxOther, OrderEdit{OrderID: inB.ID, IfMatch: inB.Version + 1, Actor: "x",
+		Edits: domain.OrderEdits{Lines: []domain.LineEdit{{Op: domain.EditRemove, LineNo: "10"}}}})
+	expectProblem(t, err, http.StatusNotFound, CodeOrderNotFound)
+	for _, ctx := range []context.Context{ctxOther, scopedCtx(tenantA, leB)} {
+		if rep, err := s.WIPReport(ctx, WIPFilter{}); err != nil || len(rep.Items) != 0 {
+			t.Fatalf("WIP report leaked outside its tenant or legal entity: %d rows (%v)", len(rep.Items), err)
+		}
+	}
 	var leaked int
 	if err := dbx.WithTenantTx(ctxOther, app, func(tx pgx.Tx) error {
 		return tx.QueryRow(context.Background(), `select (select count(*) from production_wip_posting) + (select count(*) from production_journal_line)
-			+ (select count(*) from production_as_built)`).Scan(&leaked)
+			+ (select count(*) from production_as_built) + (select count(*) from production_order_edit)`).Scan(&leaked)
 	}); err != nil || leaked != 0 {
 		t.Fatalf("another tenant sees %d WIP or journal rows (%v)", leaked, err)
 	}

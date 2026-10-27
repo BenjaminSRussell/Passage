@@ -2,6 +2,7 @@ import type { BadgeTone } from "../../shell/ui";
 import type {
   BulkCommand,
   CostGroup,
+  EditOp,
   Flushing,
   JournalType,
   LoggedCommand,
@@ -96,6 +97,12 @@ export const varianceLabel: Record<VarianceType, string> = {
   "production-price": "Price",
   "production-substitution": "Substitution",
   rework: "Rework",
+};
+
+export const editOpLabel: Record<EditOp, string> = {
+  add: "Added",
+  remove: "Removed",
+  change: "Changed",
 };
 
 export const reworkRefLabel: Record<ReworkRefType, string> = {

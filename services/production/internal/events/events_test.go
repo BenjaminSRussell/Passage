@@ -50,6 +50,7 @@ func TestAsyncAPIMatchesThePayloads(t *testing.T) {
 		{"journalPosted", JournalPosted, JournalPostedData{}},
 		{"asBuiltAssigned", AsBuiltAssigned, AsBuiltData{}},
 		{"asBuiltDetached", AsBuiltDetached, AsBuiltData{}},
+		{"orderBOMEdited", OrderBOMEdited, OrderBOMEditedData{}},
 	}
 	if len(cases) != len(All()) {
 		t.Fatalf("%d cases for %d event types", len(cases), len(All()))

@@ -15,6 +15,7 @@ import {
 } from "../../shell/ui";
 import {
   allowedCommands,
+  canEditBOM,
   canSplit,
   describeProblem,
   getCosts,
@@ -41,6 +42,7 @@ import {
 } from "./api/client";
 import { AsBuiltPanel } from "./AsBuiltPanel";
 import { JournalsPanel } from "./JournalsPanel";
+import { OrderEditPanel } from "./OrderEditPanel";
 import { SplitPanel } from "./SplitPanel";
 import {
   addDecimals,
@@ -305,7 +307,12 @@ export function ProductionOrderDetail({ orderId, onBack, onCreateRework, onOpenO
       <PageHeader
         title={`Production order ${current.orderNumber}`}
         description={`Version ${current.version}${current.createdAt ? ` · created ${current.createdAt.slice(0, 10)}` : ""}`}
-        meta={<Badge tone={statusTone[current.status]}>{statusLabel[current.status]}</Badge>}
+        meta={
+          <span className={styles.actions}>
+            <Badge tone={statusTone[current.status]}>{statusLabel[current.status]}</Badge>
+            {current.orderBomModified ? <Badge tone="warning">BOM edited</Badge> : null}
+          </span>
+        }
         actions={
           <div className={styles.actions}>
             {onCreateRework && !isZero(current.qtyRaf) && current.status !== "Cancelled" ? (
@@ -497,6 +504,18 @@ export function ProductionOrderDetail({ orderId, onBack, onCreateRework, onOpenO
       <Card title="Route" padded={false}>
         <DataTable label="Order operations" columns={operationColumns} rows={current.operations} getRowKey={(row) => String(row.operNumber)} />
       </Card>
+
+      {canEditBOM(current.status) ? (
+        <OrderEditPanel
+          order={current}
+          onEdited={(updated) => {
+            setOrder({ value: updated, loading: false, error: null });
+            setNotice("");
+            setCommandError(null);
+            loadSide();
+          }}
+        />
+      ) : null}
 
       <JournalsPanel order={current} onChanged={reload} />
 

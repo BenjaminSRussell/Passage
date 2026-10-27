@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: production
-  version: 0.21.4
+  version: 0.21.5
   description: |
     CloudEvents 1.0 envelope from platform/go/events; payloads below are the data member.
     Every event is written to the outbox in the same transaction as the change it reports and
@@ -12,7 +12,8 @@ info:
     balanced ledger lines for the general ledger (wave 11) to book; subcontract.po-requested
     arrives with the slice that creates subcontract purchase orders. asbuilt.assigned and
     asbuilt.detached carry the as-built genealogy (FR-21.19) for the trace inquiry (wave 16)
-    and nonconformance (wave 33).
+    and nonconformance (wave 33). order.bomedited reports an order-specific BOM or route edit
+    (FR-21.18) with the requirement lines planning needs.
 channels:
   passage.production.order:
     address: passage.production.order
@@ -26,6 +27,8 @@ channels:
         $ref: '#/components/messages/orderStatusChanged'
       settled:
         $ref: '#/components/messages/orderSettled'
+      bomedited:
+        $ref: '#/components/messages/orderBOMEdited'
   passage.production.journal:
     address: passage.production.journal
     description: Keyed by order id (the outbox aggregate), so an order's journals stay ordered.
@@ -57,6 +60,10 @@ operations:
     action: send
     channel: { $ref: '#/channels/passage.production.order' }
     messages: [{ $ref: '#/channels/passage.production.order/messages/settled' }]
+  onOrderBOMEdited:
+    action: send
+    channel: { $ref: '#/channels/passage.production.order' }
+    messages: [{ $ref: '#/channels/passage.production.order/messages/bomedited' }]
   onJournalPosted:
     action: send
     channel: { $ref: '#/channels/passage.production.journal' }
@@ -147,6 +154,26 @@ components:
           variances: { type: array, items: { $ref: '#/components/schemas/variance' } }
           postings: { type: array, items: { $ref: '#/components/schemas/posting' } }
       x-passage-type: dev.passage.production.order.settled.v1
+    orderBOMEdited:
+      name: bomedited
+      title: Production order BOM or route edited
+      description: |
+        Emitted by PATCH /v1/production/orders/{id}/bom in the same transaction as the edit
+        (FR-21.18): the edits applied, every requirement line after them, and the re-estimated
+        planned cost, null while the order is not estimated. The order is flagged
+        orderBomModified (consumers: planning, scheduling).
+      payload:
+        type: object
+        required: [orderId, status, version, edits, lines, plannedCost, actor]
+        properties:
+          orderId: { type: string, format: uuid }
+          status: { type: string, enum: [Created, Estimated, Scheduled, Released] }
+          version: { type: integer }
+          edits: { type: array, items: { $ref: '#/components/schemas/editApplied' } }
+          lines: { type: array, items: { $ref: '#/components/schemas/requirementLine' } }
+          plannedCost: { oneOf: [{ $ref: '#/components/schemas/costByGroup' }, { type: 'null' }] }
+          actor: { type: string }
+      x-passage-type: dev.passage.production.order.bomedited.v1
     journalPosted:
       name: posted
       title: Production journal posted
@@ -255,3 +282,18 @@ components:
         account: { type: string }
         debit: { type: string }
         credit: { type: string }
+    editApplied:
+      type: object
+      required: [target, op, key]
+      properties:
+        target: { type: string, enum: [line, operation] }
+        op: { type: string, enum: [add, remove, change] }
+        key: { type: string, description: The line number, or the operation number as text. }
+    requirementLine:
+      type: object
+      required: [lineNo, itemId, qtyRequired, flushing]
+      properties:
+        lineNo: { type: string }
+        itemId: { type: string, format: uuid }
+        qtyRequired: { type: string }
+        flushing: { type: string, enum: [manual, start, finish, available-at-location] }

@@ -54,14 +54,17 @@ type Order struct {
 	ReworkReference *domain.ReworkRef `json:"reworkReference,omitempty"`
 	// SplitFromOrderID is the order a split took this order's quantity from;
 	// MergedIntoOrderID the order a merge moved it into (FR-21.15).
-	SplitFromOrderID  *string            `json:"splitFromOrderId,omitempty"`
-	MergedIntoOrderID *string            `json:"mergedIntoOrderId,omitempty"`
-	Version           int                `json:"version"`
-	Lines             []domain.OrderLine `json:"lines"`
-	Operations        []domain.Operation `json:"operations"`
-	Costs             []domain.CostRow   `json:"costs"`
-	CreatedAt         time.Time          `json:"createdAt"`
-	UpdatedAt         time.Time          `json:"updatedAt"`
+	SplitFromOrderID  *string `json:"splitFromOrderId,omitempty"`
+	MergedIntoOrderID *string `json:"mergedIntoOrderId,omitempty"`
+	// OrderBOMModified is set once the order's BOM or route was edited after
+	// explosion (FR-21.18); OCM leaves such an order to manual review.
+	OrderBOMModified bool               `json:"orderBomModified"`
+	Version          int                `json:"version"`
+	Lines            []domain.OrderLine `json:"lines"`
+	Operations       []domain.Operation `json:"operations"`
+	Costs            []domain.CostRow   `json:"costs"`
+	CreatedAt        time.Time          `json:"createdAt"`
+	UpdatedAt        time.Time          `json:"updatedAt"`
 }
 
 // OrderSummary is one row of the order list (PRD 4.21.14 "Production orders list").
@@ -192,6 +195,10 @@ type Store interface {
 	SplitOrder(ctx context.Context, in Split) (SplitResult, error)
 	MergeOrders(ctx context.Context, in Merge) (MergeResult, error)
 	BulkTransition(ctx context.Context, in Bulk) []BulkItem
+	EditOrder(ctx context.Context, in OrderEdit) (Order, error)
+	OrderEdits(ctx context.Context, orderID string) ([]OrderEditEntry, error)
+	WIPReport(ctx context.Context, f WIPFilter) (WIPReport, error)
+	VarianceReport(ctx context.Context, f VarianceFilter) (VarianceReport, error)
 }
 
 // Postgres is the production store.
@@ -728,15 +735,18 @@ func replaceEstimate(ctx context.Context, tx pgx.Tx, tenantID, orderID string) e
 }
 
 // domainProblem maps a domain rule violation to a problem: an illegal
-// transition, a locked field or an as-built change in the wrong status is a
-// 409 conflict with the order's state, the other rules are 422.
+// transition, a locked field, an as-built change or an order edit in the wrong
+// status, or an edit that collides with the order's lines, operations or
+// journals is a 409 conflict with the order's state, the other rules are 422.
 func domainProblem(err error) error {
 	var de *domain.Error
 	if !errors.As(err, &de) {
 		return err
 	}
 	status := http.StatusUnprocessableEntity
-	if de.Code == domain.CodeIllegalTransition || de.Code == domain.CodeNotEditable || de.Code == domain.CodeAsBuiltState {
+	switch de.Code {
+	case domain.CodeIllegalTransition, domain.CodeNotEditable, domain.CodeAsBuiltState,
+		domain.CodeEditNotAllowed, domain.CodeEditTargetExists, domain.CodeEditTargetInUse:
 		status = http.StatusConflict
 	}
 	return httpx.NewProblem(status, de.Code, de.Detail)
@@ -748,10 +758,10 @@ func loadOrder(ctx context.Context, q querier, tenantID, id string) (Order, erro
 	var refType, refID *string
 	err := q.QueryRow(ctx, `select id::text, legal_entity_id::text, order_number, product_id::text, site_id::text, warehouse_id::text, currency::text,
 		quantity::text, qty_raf::text, qty_error::text, status, delivery_date::text, origin_type, origin_id::text, version, created_at, updated_at,
-		item_group, rework_reference_type, rework_reference_id, split_from_order_id::text, merged_into_order_id::text
+		item_group, rework_reference_type, rework_reference_id, split_from_order_id::text, merged_into_order_id::text, order_bom_modified
 		from production_order where tenant_id = $1 and id = $2`, tenantID, id).Scan(&o.ID, &o.LegalEntityID, &o.OrderNumber, &o.ProductID,
 		&o.SiteID, &o.WarehouseID, &o.Currency, &qty, &raf, &qerr, &status, &o.DeliveryDate, &o.OriginType, &o.OriginID, &o.Version,
-		&o.CreatedAt, &o.UpdatedAt, &o.ItemGroup, &refType, &refID, &o.SplitFromOrderID, &o.MergedIntoOrderID)
+		&o.CreatedAt, &o.UpdatedAt, &o.ItemGroup, &refType, &refID, &o.SplitFromOrderID, &o.MergedIntoOrderID, &o.OrderBOMModified)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Order{}, notFound()
 	}

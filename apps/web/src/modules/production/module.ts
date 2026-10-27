@@ -7,6 +7,8 @@ import { CreateProductionOrderPage, type OrderValues } from "./CreateOrderPage";
 import { ProductionOrderDetail } from "./OrderDetailPage";
 import { ProductionOrdersPage } from "./OrdersPage";
 import { PostingProfilesPage } from "./PostingProfilesPage";
+import { VarianceReportPage } from "./VarianceReportPage";
+import { WIPReportPage } from "./WIPReportPage";
 
 const list = "/production";
 const open = (id: string) => `${list}/${encodeURIComponent(id)}`;
@@ -61,22 +63,36 @@ function AsBuiltRoute() {
   return createElement(AsBuiltInquiryPage, { onOpenOrder: (orderId) => navigate(open(orderId)) });
 }
 
+function WIPRoute() {
+  const navigate = useNavigate();
+  return createElement(WIPReportPage, { onOpenOrder: (orderId) => navigate(open(orderId)) });
+}
+
+function VariancesRoute() {
+  const navigate = useNavigate();
+  return createElement(VarianceReportPage, { onOpenOrder: (orderId) => navigate(open(orderId)) });
+}
+
 const production: PassageModule = {
   id: "production",
   title: "Production",
   description:
-    "Production orders: create, estimate, release, start, post picking lists, route cards and reports as finished, end with settlement; bulk status updates, split and merge; rework orders, as-built genealogy and posting profiles.",
+    "Production orders: create, estimate, release, start, post picking lists, route cards and reports as finished, end with settlement; bulk status updates, split and merge, order-specific BOM and route edits; WIP balance and variance reports; rework orders, as-built genealogy and posting profiles.",
   routes: [
     { path: list, element: createElement(OrdersRoute) },
     { path: `${list}/new`, element: createElement(CreateRoute), handle: { title: "New production order" } },
     { path: `${list}/posting-profiles`, element: createElement(PostingProfilesPage), handle: { title: "Posting profiles" } },
     { path: `${list}/as-built`, element: createElement(AsBuiltRoute), handle: { title: "As-built and where-used" } },
+    { path: `${list}/wip-balances`, element: createElement(WIPRoute), handle: { title: "WIP balance by order" } },
+    { path: `${list}/variances`, element: createElement(VariancesRoute), handle: { title: "Production variances" } },
     { path: `${list}/:id`, element: createElement(DetailRoute), handle: { title: "Production order" } },
   ],
   nav: [
     { label: "Production orders", to: list, duty: "production.order.read" },
     { label: "New production order", to: `${list}/new`, duty: "production.order.write" },
     { label: "As-built and where-used", to: `${list}/as-built`, duty: "production.order.read" },
+    { label: "WIP balance", to: `${list}/wip-balances`, duty: "production.cost.read" },
+    { label: "Production variances", to: `${list}/variances`, duty: "production.cost.read" },
     { label: "Posting profiles", to: `${list}/posting-profiles`, duty: "production.setup.read" },
   ],
 };

@@ -113,11 +113,11 @@ func (s *Postgres) SplitOrder(ctx context.Context, in Split) (SplitResult, error
 		// depends on it); every other split is origin Split from the original.
 		if _, err := tx.Exec(ctx, `insert into production_order (tenant_id, id, legal_entity_id, order_number, product_id, site_id, warehouse_id, currency,
 				quantity, delivery_date, origin_type, origin_id, idempotency_key, request_hash, item_group, rework_reference_type, rework_reference_id,
-				status, split_from_order_id)
+				status, split_from_order_id, order_bom_modified)
 			select tenant_id, $2, legal_entity_id, $3, product_id, site_id, warehouse_id, currency,
 				$4::numeric, delivery_date, case when origin_type = 'Rework' then 'Rework' else 'Split' end,
 				case when origin_type = 'Rework' then origin_id else id end, $5, $6, item_group, rework_reference_type, rework_reference_id,
-				status, id
+				status, id, order_bom_modified
 			from production_order where tenant_id = $1 and id = $7`,
 			p.TenantID, newID, number, plan.SplitQty.String(), in.IdempotencyKey, in.RequestHash, in.OrderID); err != nil {
 			return err
@@ -237,11 +237,14 @@ func (s *Postgres) MergeOrders(ctx context.Context, in Merge) (MergeResult, erro
 			return err
 		}
 		inputs := make([]domain.MergeInput, 0, len(in.Orders))
+		// The survivor carries the merged orders' BOM, so it is flagged when any of them was edited (FR-21.18).
+		modified := false
 		for _, ref := range in.Orders {
 			o, err := loadOrder(ctx, tx, p.TenantID, ref.OrderID)
 			if err != nil {
 				return err
 			}
+			modified = modified || o.OrderBOMModified
 			inputs = append(inputs, domain.MergeInput{ID: o.ID, LegalEntityID: o.LegalEntityID, ProductID: o.ProductID, SiteID: o.SiteID,
 				WarehouseID: o.WarehouseID, Currency: o.Currency, ItemGroup: o.ItemGroup, ReworkReference: o.ReworkReference,
 				Status: o.Status, Quantity: o.Quantity, Lines: o.Lines, Operations: o.Operations})
@@ -255,8 +258,9 @@ func (s *Postgres) MergeOrders(ctx context.Context, in Merge) (MergeResult, erro
 		if err := writeQuantities(ctx, tx, p.TenantID, survivorID, merged.Lines, merged.Operations); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `update production_order set quantity = $3, version = version + 1, updated_at = now() where tenant_id = $1 and id = $2`,
-			p.TenantID, survivorID, merged.Quantity.String()); err != nil {
+		if _, err := tx.Exec(ctx, `update production_order set quantity = $3, order_bom_modified = order_bom_modified or $4, version = version + 1,
+				updated_at = now() where tenant_id = $1 and id = $2`,
+			p.TenantID, survivorID, merged.Quantity.String(), modified); err != nil {
 			return err
 		}
 		if survivor.status != domain.Created {

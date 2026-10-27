@@ -74,7 +74,7 @@ func TestOpenAPIMatchesTheRouter(t *testing.T) {
 	}
 	declared := declaredOperations(string(raw))
 	served := servedOperations(t)
-	if len(served) != 21 {
+	if len(served) != 25 {
 		t.Fatalf("router walk found %d operations: %v", len(served), served)
 	}
 	var problems []string
@@ -110,7 +110,8 @@ func TestOpenAPINamesDutiesAndCodes(t *testing.T) {
 		domain.CodeUnbalanced, domain.CodeInvalidHours, DutyRework, domain.OriginRework, domain.CodeReworkReference,
 		domain.CodeAsBuiltState, domain.CodeAsBuiltNotOnBOM, domain.CodeAsBuiltExceedsConsumed, domain.CodeAsBuiltFinishedCount,
 		domain.CodeSerialDuplicate, store.CodeAsBuiltNotFound, domain.CodeSplitQuantity, domain.CodeMergeRefused, domain.CodeBulkPartial,
-		domain.OriginSplit,
+		domain.OriginSplit, DutyBOMAfterRelease, domain.CodeEditNotAllowed, domain.CodeEditTargetExists, domain.CodeEditTargetInUse,
+		domain.CodeEditTargetMissing,
 		unknownActionCode, "PRODUCTION_ILLEGAL_TRANSITION", "PRODUCTION_RAF_EXCEEDS_REMAINING", "PRODUCTION_FIELD_NOT_EDITABLE",
 		"PRODUCTION_END_REQUIRES_RAF", "PRODUCTION_ZERO_OUTPUT_NOT_PERMITTED", "PRODUCTION_ORDER_NOT_FOUND", "conflict_version",
 		"precondition_required", "idempotency_key_reuse"} {

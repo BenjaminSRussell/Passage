@@ -2,7 +2,8 @@
 
 Production orders for Passage (wave 21, ticket PSG-21, PRD section 4.21). Slice 1 covers the
 order itself; slice 2 adds journals, WIP postings and settlement; slice 3 adds rework orders and
-as-built genealogy; slice 4 adds the bulk status update, and split and merge.
+as-built genealogy; slice 4 adds the bulk status update, and split and merge; slice 5 adds
+order-specific BOM and route edits and the WIP balance and variance reports.
 
 Slice 1:
 
@@ -117,6 +118,29 @@ Slice 4:
   Rows are locked in id order. Migration `0004_split_merge.sql` adds the two links (self foreign
   keys, partial indexes) and the check that a merged order is Cancelled.
 
+Slice 5:
+
+- Order-specific BOM and route edits (FR-21.18): `PATCH /v1/production/orders/{id}/bom` under
+  If-Match with `lines` and `operations` edits (`add`, `remove`, `change`; a change sends only the
+  fields it sets), applied in order after explosion and before Started. Required quantities are
+  re-exploded (BR-21.2), process quantities re-planned (BR-21.8), the planned cost re-estimated
+  once the order is estimated, and the order flagged `orderBomModified`. A line or operation with
+  consumption, route feedback or any journal (posted, reversed or draft) is never removed or moved
+  to another item or resource, a requirement never drops below what was consumed, and the order
+  keeps one operation. A Released order also needs `production.order.bom-after-release` (Maintain
+  order BOM after release, 403 `AUTH-0003`); Started and later are 409
+  `PRODUCTION_ORDER_EDIT_NOT_ALLOWED`. Each edit is audited with the line or operation before and
+  after it (`GET …/{id}/bom-edits`), and `order.bomedited` carries the edits, the requirement lines
+  and the planned cost. A split copies the flag; a merge survivor keeps it when any merged order
+  had it. Migration `0005_order_edits.sql` adds the flag and the `production_order_edit` audit table.
+- WIP balance by order (4.21.14): `GET /v1/production/wip-balances` with legal entity, site,
+  status and as-of date: per order with WIP rows up to the date, the posted consumption, the value
+  received by reports as finished, what End settled and the balance (Σ debit − Σ credit of the WIP
+  rows, so it reconciles to the subledger), keyset-paged, with totals per currency.
+- Variance report (4.21.14): `GET /v1/production/variances` with legal entity, site, item group,
+  order, variance type and posting period: each variance with the planned cost of its cost group
+  and its percentage of it, totals per currency and type, and the net.
+
 Inventory transactions (wave 16), GL booking (wave 11) and period control (wave 14) are
 handoffs. Everything not built is listed in `NOT-IMPLEMENTED.md`.
 
@@ -128,17 +152,20 @@ internal/domain/       pure rules: status.go (BR-21.1 state machine, reset, RAF 
                        quantity.go (BR-21.2, BR-21.8), explode.go (FR-21.1), cost.go (FR-21.3, BR-21.6),
                        journal.go (proposals, tolerances, posting profiles, postings, settlement),
                        rework.go (FR-21.20), asbuilt.go (FR-21.19, BR-21.14),
-                       bulk.go (FR-21.12), split.go (FR-21.15 split and merge)
+                       bulk.go (FR-21.12), split.go (FR-21.15 split and merge),
+                       order_edit.go (FR-21.18 BOM and route edits), inquiry.go (variance % of planned)
 internal/domain/testdata/  prod-orders-50.json and the exact-fraction generator that computed it
 internal/store/        Postgres repositories (pgx), tenant-scoped transactions, row locks, outbox writes:
                        store.go (orders, commands), journal.go (journals, postings, settlement, reversals),
                        profile.go (posting profiles), asbuilt.go (as-built genealogy),
-                       split.go (split, merge, bulk status)
+                       split.go (split, merge, bulk status), order_edit.go (BOM and route edits, audit),
+                       inquiry.go (WIP balance and variance reports)
 internal/api/          HTTP handlers, request validation, platform authz duties
 internal/events/       event types and payloads
 migrations/            0001_init.sql (orders), 0002_journals.sql (profiles, journals, WIP postings,
                        variances), 0003_rework_asbuilt.sql (rework reference, rework variance account,
-                       as-built records), 0004_split_merge.sql (split and merge links), with RLS and
+                       as-built records), 0004_split_merge.sql (split and merge links),
+                       0005_order_edits.sql (orderBomModified, edit audit, report indexes), with RLS and
                        app-role grants on every table; migrations.go (embed)
 api/openapi.yaml       OpenAPI 3.1 for every route (a test checks it against the router)
 events/asyncapi.yaml   AsyncAPI 3 for every event (a test checks it against the payloads)
@@ -183,9 +210,10 @@ drift-free RAF receipts and the variances clearing the posted WIP in every curre
 
 | Duty (PRD 4.21.17) | Key | Used by |
 |---|---|---|
-| View production orders | `production.order.read` | list, read, status log, journal list and read, as-built and where-used |
-| View production costs | `production.cost.read` | `GET …/{id}/costs` |
-| Maintain production orders | `production.order.write` | create, PATCH, `:estimate`, `:schedule` |
+| View production orders | `production.order.read` | list, read, status log, BOM edit history, journal list and read, as-built and where-used |
+| View production costs | `production.cost.read` | `GET …/{id}/costs`, `GET /v1/production/wip-balances`, `GET /v1/production/variances` |
+| Maintain production orders | `production.order.write` | create, PATCH, `:estimate`, `:schedule`, `PATCH …/{id}/bom` |
+| Maintain order BOM after release | `production.order.bom-after-release` | `PATCH …/{id}/bom` on a Released order (with `production.order.write`) |
 | Create rework orders | `production.order.rework` | create with `originType` `Rework` (with `production.order.write`) |
 | Release production orders | `production.order.release` | `:release`, `:start`, `:cancel`, `:reset-status`, `:split`, `orders:merge`, `orders:bulk-status` (with the command's duty) |
 | Post production journals | `production.journal.post` | `:report-finished`, create, `:post` and delete journals, assign and `:detach` as-built records |

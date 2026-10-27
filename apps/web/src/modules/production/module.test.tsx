@@ -29,12 +29,16 @@ describe("production module", () => {
       "/production/new",
       "/production/posting-profiles",
       "/production/as-built",
+      "/production/wip-balances",
+      "/production/variances",
       "/production/:id",
     ]);
     expect(production.nav).toEqual([
       { label: "Production orders", to: "/production", duty: "production.order.read" },
       { label: "New production order", to: "/production/new", duty: "production.order.write" },
       { label: "As-built and where-used", to: "/production/as-built", duty: "production.order.read" },
+      { label: "WIP balance", to: "/production/wip-balances", duty: "production.cost.read" },
+      { label: "Production variances", to: "/production/variances", duty: "production.cost.read" },
       { label: "Posting profiles", to: "/production/posting-profiles", duty: "production.setup.read" },
     ]);
     expect(loadModules().some((m) => m.id === "production")).toBe(true);

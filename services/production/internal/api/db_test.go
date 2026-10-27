@@ -108,4 +108,15 @@ func TestHTTP_OrderThroughTheDatabase(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &journals); err != nil || len(journals.Items) != 1 || journals.Items[0].ID != j.ID {
 		t.Fatalf("journals: %s", rec.Body.String())
 	}
+
+	// FR-21.18: a Started order's BOM is locked; 4.21.14: the WIP report shows the picked material.
+	edit := editCall(order.ID, `{"lines":[{"op":"change","lineNo":"10","qtyPer":"4"}]}`, all...)
+	edit.headers["If-Match"] = do(r, call{method: http.MethodGet, path: "/v1/production/orders/" + order.ID, duties: all}).Header().Get("ETag")
+	expectProblem(t, do(r, edit), http.StatusConflict, domain.CodeEditNotAllowed)
+	rec = do(r, call{method: http.MethodGet, path: "/v1/production/wip-balances?status=Started", duties: all})
+	var wip wipReportView
+	if err := json.Unmarshal(rec.Body.Bytes(), &wip); err != nil || len(wip.Items) != 1 || wip.Items[0].WIPBalance != "3950.00" ||
+		wip.Items[0].Consumption != "3950.00" || wip.Totals[0].Orders != 1 {
+		t.Fatalf("wip report: %d %s", rec.Code, rec.Body.String())
+	}
 }

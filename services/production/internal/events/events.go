@@ -16,11 +16,13 @@ var (
 	JournalPosted      = events.Type(Context, "journal", "posted", 1)
 	AsBuiltAssigned    = events.Type(Context, "asbuilt", "assigned", 1)
 	AsBuiltDetached    = events.Type(Context, "asbuilt", "detached", 1)
+	// OrderBOMEdited reports an order-specific BOM or route edit (FR-21.18).
+	OrderBOMEdited = events.Type(Context, "order", "bomedited", 1)
 )
 
 // All lists every event type this service publishes.
 func All() []string {
-	return []string{OrderCreated, OrderUpdated, OrderStatusChanged, OrderSettled, JournalPosted, AsBuiltAssigned, AsBuiltDetached}
+	return []string{OrderCreated, OrderUpdated, OrderStatusChanged, OrderSettled, JournalPosted, AsBuiltAssigned, AsBuiltDetached, OrderBOMEdited}
 }
 
 // OrderCreatedData is the payload of order.created.v1.
@@ -150,4 +152,33 @@ type AsBuiltData struct {
 	AssignedBy             string  `json:"assignedBy"`
 	AssignedAt             string  `json:"assignedAt"`
 	DetachedAt             *string `json:"detachedAt"`
+}
+
+// EditApplied names one applied edit of order.bomedited.v1: the target (line or
+// operation), the op (add, remove, change) and the line or operation number.
+type EditApplied struct {
+	Target string `json:"target"`
+	Op     string `json:"op"`
+	Key    string `json:"key"`
+}
+
+// RequirementLine is a BOM line requirement after an edit, for planning.
+type RequirementLine struct {
+	LineNo      string `json:"lineNo"`
+	ItemID      string `json:"itemId"`
+	QtyRequired string `json:"qtyRequired"`
+	Flushing    string `json:"flushing"`
+}
+
+// OrderBOMEditedData is the payload of order.bomedited.v1 (FR-21.18): the edits
+// applied, the order's requirement lines after them and the re-estimated planned
+// cost (null while the order is not estimated).
+type OrderBOMEditedData struct {
+	OrderID     string            `json:"orderId"`
+	Status      string            `json:"status"`
+	Version     int               `json:"version"`
+	Edits       []EditApplied     `json:"edits"`
+	Lines       []RequirementLine `json:"lines"`
+	PlannedCost *CostByGroup      `json:"plannedCost"`
+	Actor       string            `json:"actor"`
 }

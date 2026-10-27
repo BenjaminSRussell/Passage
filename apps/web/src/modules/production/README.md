@@ -12,6 +12,9 @@ by the shell through `module.ts`.
 | (on the detail page) | `JournalsPanel` (`JournalsPanel.tsx`): journals of the order with Draft / Posted / Reversal / Reversed status and value; open one to see its lines and postings, post it or delete the draft (with confirmation); create a picking list, route card or report as finished with a proposal or with lines entered per component or operation | `production.journal.post` to change | `GET/POST …/{id}/journals`, `POST /api/v1/production/journals/{id}:post`, `DELETE …/journals/{id}` |
 | (on the detail page) | `AsBuiltPanel` (`AsBuiltPanel.tsx`): the order's as-built records (FR-21.19); while Started or Reported as finished, assign a component serial or batch to a finished serial or batch, and detach a wrong one after confirmation | `production.journal.post` to change | `GET/POST …/{id}/as-built`, `POST /api/v1/production/as-built/{id}:detach` |
 | (on the detail page) | Rework orders of the order (FR-21.20), with the reference of a rework order and a link to its original | `production.order.read` | `GET /api/v1/production/orders?reworkOf=` |
+| (on the detail page) | `OrderEditPanel` (`OrderEditPanel.tsx`): while Created to Released, add, change or remove a component line or an operation of this order only (FR-21.18; a change sends only the fields filled in), then show the re-exploded lines, route and costs and a "BOM edited" badge; the edit history lists every edit with the line or operation before and after | `production.order.write`; on a Released order also `production.order.bom-after-release` | `PATCH …/{id}/bom`, `GET …/{id}/bom-edits` |
+| `/production/wip-balances` | `WIPReportPage` (`WIPReportPage.tsx`): WIP balance by order (4.21.14) with status, as-of date and site filters, consumption, received value, settled and balance per order, totals per currency, load more, opens the order | `production.cost.read` | `GET /api/v1/production/wip-balances` |
+| `/production/variances` | `VarianceReportPage` (`VarianceReportPage.tsx`): posted variances (4.21.14) with type, period and item group filters, amount, planned and % of planned, totals per type and the net per currency, load more, opens the order | `production.cost.read` | `GET /api/v1/production/variances` |
 | `/production/as-built` | `AsBuiltInquiryPage` (`AsBuiltInquiryPage.tsx`): as-built of a finished serial or where-used of a component serial (4.21.14, AC-21.14), opens the order | `production.order.read` | `GET /api/v1/production/as-built` |
 | `/production/posting-profiles` | `PostingProfilesPage` (`PostingProfilesPage.tsx`): profiles by item group × site with the optional rework variance account, create, edit under If-Match | `production.setup.read` | `GET/PUT /api/v1/production/posting-profiles` |
 
@@ -27,7 +30,7 @@ by the shell through `module.ts`.
 - Journals: one Idempotency-Key per create body and per journal post, so a retry replays. As-built
   assignments keep one key per body the same way.
 - Pages use the shell primitives (`PageHeader`, `Card`, `DataTable`, `FormField`, `Input`, `Select`,
-  `Button`, `Badge`, `Alert`, `EmptyState`, `Skeleton`) and `pages.module.css` tokens. Every page has
+  `Button`, `Badge`, `Alert`, `EmptyState`, `Skeleton`, `StatGroup`, `StatTile`) and `pages.module.css` tokens. Every page has
   loading, empty and error states.
 
 Tests: `npx vitest --run src/modules/production` and `npx tsc --noEmit` in `apps/web`. The page
@@ -42,7 +45,8 @@ tests render the module routes inside a stand-in shell frame and run the in-repo
   `localStorage` drafts in the journal editor, the drill-down from a variance to the GL journal
   entry (wave 11) and the SSE live update of the costs (PRD 4.21.6) are later work.
 - A checkbox primitive in the shell (wave 5) to offer the route-card `finished` flag; the API
-  accepts it today.
+  accepts it today. The BOM editor offers round-up and the WIP report's legal entity as selects
+  and fields for the same reason; subcontracting an operation is not offered in the editor yet.
 - Serial and batch lookups from item tracking (wave 16) for the as-built form; until then the
   numbers are typed, and the kiosk assignment at RAF is wave 25.
 - No npm dependencies added.

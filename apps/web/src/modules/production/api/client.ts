@@ -133,6 +133,8 @@ export interface ProductionOrder {
   splitFromOrderId?: string;
   /** Set on a cancelled order that a merge moved into another one. */
   mergedIntoOrderId?: string;
+  /** The BOM or route was edited after explosion (FR-21.18). */
+  orderBomModified?: boolean;
   version: number;
   lines: OrderLine[];
   operations: Operation[];
@@ -417,6 +419,129 @@ export interface MergeResult {
   merged: string[];
 }
 
+/** Order-specific BOM and route edits (FR-21.18). */
+export type EditOp = "add" | "remove" | "change";
+
+/** One BOM line edit: add needs itemId and qtyPer; change sends only what changes; remove sends lineNo only. */
+export interface LineEdit {
+  op: EditOp;
+  lineNo: string;
+  itemId?: string;
+  qtyPer?: string;
+  seriesSize?: string;
+  scrapPct?: string;
+  roundUp?: boolean;
+  unitCost?: string;
+  flushing?: Flushing;
+}
+
+/** One route operation edit: add needs resourceId; change sends only what changes; remove sends operNumber only. */
+export interface OperationEdit {
+  op: EditOp;
+  operNumber: number;
+  resourceId?: string;
+  setupTimeH?: string;
+  runTimeHPer?: string;
+  scrapPct?: string;
+  laborRate?: string;
+  overheadRate?: string;
+  subcontract?: boolean;
+  subcontractPrice?: string;
+}
+
+export interface OrderEdits {
+  lines?: LineEdit[];
+  operations?: OperationEdit[];
+}
+
+/** One audit row of an order edit: the line or operation before and after it. */
+export interface OrderEditEntry {
+  orderVersion: number;
+  seq: number;
+  target: "line" | "operation";
+  op: EditOp;
+  key: string;
+  before: OrderLine | Operation | null;
+  after: OrderLine | Operation | null;
+  actor: string;
+  traceId: string;
+  occurredAt: string;
+}
+
+/** One order of the WIP balance report (4.21.14); amounts in the order currency's minor unit. */
+export interface WIPRow {
+  orderId: string;
+  orderNumber: string;
+  legalEntityId: string;
+  siteId: string;
+  productId: string;
+  status: ProductionStatus;
+  currency: string;
+  consumption: string;
+  rafValue: string;
+  settled: string;
+  wipBalance: string;
+}
+
+export interface WIPTotal {
+  currency: string;
+  orders: number;
+  consumption: string;
+  rafValue: string;
+  settled: string;
+  wipBalance: string;
+}
+
+export interface WIPReport {
+  asOf: string;
+  items: WIPRow[];
+  totals: WIPTotal[];
+  nextCursor?: string;
+}
+
+export interface WIPQuery {
+  status?: ProductionStatus | "";
+  siteId?: string;
+  asOf?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+/** One posted variance of the variance report (4.21.14); positive is unfavourable. */
+export interface VarianceRow {
+  id: string;
+  orderId: string;
+  orderNumber: string;
+  siteId: string;
+  itemGroup?: string;
+  currency: string;
+  type: VarianceType;
+  costGroup: CostGroup;
+  amount: string;
+  planned: string;
+  /** Null when nothing was planned for the cost group. */
+  pctOfPlanned: string | null;
+  postedOn: string;
+}
+
+export interface VarianceReport {
+  items: VarianceRow[];
+  totals: { currency: string; type: VarianceType; amount: string }[];
+  net: { currency: string; amount: string }[];
+  nextCursor?: string;
+}
+
+export interface VarianceQuery {
+  varianceType?: VarianceType | "";
+  siteId?: string;
+  itemGroup?: string;
+  orderId?: string;
+  from?: string;
+  to?: string;
+  cursor?: string;
+  limit?: number;
+}
+
 export interface Problem {
   status: number;
   code: string;
@@ -689,6 +814,58 @@ export function mergeOrders(orders: MergeRef[], idempotencyKey: string): Promise
     headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
     body: JSON.stringify({ orders }),
   });
+}
+
+/** Applies BOM and route edits under If-Match (FR-21.18); a Released order also needs the after-release duty. */
+export function editOrderBOM(id: string, version: number, edits: OrderEdits): Promise<ProductionOrder> {
+  return request<ProductionOrder>(`/${encodeURIComponent(id)}/bom`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", "If-Match": `"${version}"` },
+    body: JSON.stringify(edits),
+  });
+}
+
+/** The audit trail of an order's BOM and route edits, oldest first. */
+export async function listOrderEdits(id: string, signal?: AbortSignal): Promise<OrderEditEntry[]> {
+  const body = await request<{ items?: OrderEditEntry[] }>(`/${encodeURIComponent(id)}/bom-edits`, { signal });
+  return Array.isArray(body.items) ? body.items : [];
+}
+
+/** The BOM and route can be edited after explosion and before Started (FR-21.18). */
+export function canEditBOM(status: ProductionStatus): boolean {
+  return canSplit(status);
+}
+
+function query(values: Record<string, string | number | undefined>): string {
+  const params = new URLSearchParams();
+  for (const [name, value] of Object.entries(values)) {
+    if (value !== undefined && value !== "") {
+      params.set(name, String(value));
+    }
+  }
+  return params.toString();
+}
+
+/** The WIP balance by order as of a date (4.21.14). */
+export async function getWIPBalances({ limit = 50, ...filter }: WIPQuery = {}, signal?: AbortSignal): Promise<WIPReport> {
+  const body = await requestAt<Partial<WIPReport>>(`${root}/wip-balances?${query({ ...filter, limit })}`, { signal });
+  return {
+    asOf: body.asOf ?? filter.asOf ?? "",
+    items: Array.isArray(body.items) ? body.items : [],
+    totals: Array.isArray(body.totals) ? body.totals : [],
+    nextCursor: body.nextCursor,
+  };
+}
+
+/** The posted variances with totals by type and the net per currency (4.21.14). */
+export async function getVarianceReport({ limit = 50, ...filter }: VarianceQuery = {}, signal?: AbortSignal): Promise<VarianceReport> {
+  const body = await requestAt<Partial<VarianceReport>>(`${root}/variances?${query({ ...filter, limit })}`, { signal });
+  return {
+    items: Array.isArray(body.items) ? body.items : [],
+    totals: Array.isArray(body.totals) ? body.totals : [],
+    net: Array.isArray(body.net) ? body.net : [],
+    nextCursor: body.nextCursor,
+  };
 }
 
 /** Split and merge take orders before Started (FR-21.15; a Started split needs the WIP transfer of a later slice). */

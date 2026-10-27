@@ -47,6 +47,13 @@ type fakeStore struct {
 	merges      []store.Merge
 	bulks       []store.Bulk
 	batchErr    error
+	edits       []store.OrderEdit
+	editErr     error
+	editLog     []store.OrderEditEntry
+	wipFilters  []store.WIPFilter
+	wip         store.WIPReport
+	varFilters  []store.VarianceFilter
+	variances   store.VarianceReport
 }
 
 func (f *fakeStore) Ping(context.Context) error { return f.pingErr }
