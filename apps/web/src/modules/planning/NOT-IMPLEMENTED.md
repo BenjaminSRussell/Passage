@@ -1,6 +1,6 @@
-# NOT-IMPLEMENTED (PSG-22, planning web module, slices 1 to 9)
+# NOT-IMPLEMENTED (PSG-22, planning web module, slices 1 to 10)
 
-Screens of slices 1 to 9, all registered in `module.ts` and built from the
+Screens of slices 1 to 10, all registered in `module.ts` and built from the
 shell primitives (`src/shell/ui`) with CSS Modules:
 
 - `/planning`: master planning workspace with plan picker, summary tiles
@@ -67,6 +67,35 @@ shell primitives (`src/shell/ui`) with CSS Modules:
   rules first (UUIDs, decimal quantities with at most 6 decimals compared
   without floats, max 0 or at least min, day ranges) and names 409
   `PLAN-ITEM-COVERAGE-EXISTS`. Tests in `itemcoverage.test.tsx`.
+- `/planning/buffer-profiles` (slice 10, `BufferPages.tsx`): DDMRP buffer
+  profiles (code, item type, LTF, VF, order cycle, MOQ, spike threshold, ADU
+  window) with loading, empty and error states; a row opens
+  `/planning/buffer-profiles/:id`, which edits it under If-Match (reload offer
+  on 412) and links to a recalculation with the profile chosen.
+  `/planning/buffer-profiles/new` creates one from the 4.22.13 defaults with an
+  Idempotency-Key kept across retries, checks the service's rules first
+  (numeric(5,3) factors, spike 1 to 500%, ADU window of at least 7 days) and
+  names 409 `PLAN-PROFILE-EXISTS`.
+- `/planning/ddmrp-buffers` (slice 10): the DDMRP buffer status inquiry
+  (4.22.14) filtered by site, zone and a priority ceiling in percent
+  (`?site=&zone=&maxPct=`), most urgent first: item, site / warehouse, profile,
+  net flow, tops of red, yellow and green, priority as a percent (decimal
+  shifted without floats), zone badge, planned quantity and calculation time.
+  A "Recalculate a buffer" card posts today's state (ADU, DLT, DAF, on-hand,
+  open supply, qualified demand as day 0) with a stored profile, shows the
+  zone, net flow, priority and order, and reloads the list.
+- `/planning/quota-arrangements` (slice 10, `QuotaPages.tsx`): arrangements
+  filtered by item, site and a valid-on date, with validity, sources and
+  quotas, the source the next requirement goes to (lowest BR-22.12 rating,
+  skipping blocked and quota-0 sources) and the split flag; a row opens
+  `/planning/quota-arrangements/:id` with the sources' allocated quantity,
+  rating ("Fallback" for quota 0) and status, and edits the arrangement and
+  all its sources under If-Match. `/planning/quota-arrangements/new` creates
+  one with any number of sources (vendor, own production or transfer, each
+  with its reference, quota, allocated and base quantity, priority, optional
+  maximum per period, blocked) under an Idempotency-Key, checks the rules
+  first and names 409 `PLAN-QUOTA-OVERLAP`. Tests in `buffers.test.tsx` and
+  `quota.test.tsx`.
 
 Each list has loading, empty and error states; the plan in view is kept in the
 `?plan=` query. Needs: none (uses only libraries already in `apps/web`).
@@ -78,7 +107,7 @@ Each list has loading, empty and error states; the plan in view is kept in the
 | Planned orders: firm (grouped) | built | Firm card on `/planning/planned-orders` (`Firming.tsx`). |
 | Planned orders: bulk approve, change and delete; keyboard range selection with `F` to firm | later slice of PSG-22 | Selection is by checkbox (or all open orders) and is used for firming only; maintenance stays one order at a time. |
 | Firming result report (PDF, email) | later slice of PSG-22 | The service renders no document yet; the card lists the orders created. |
-| Hide maintenance, firming, consensus, coverage-group and item-coverage controls from users without `planning.order.maintain`, `planning.order.firm`, `planning.forecast.maintain`, `planning.forecast.approve` or `planning.setup.maintain` | later slice of PSG-22 | The shell exposes no per-duty check to pages yet; the service refuses the write with 403 and the card shows the problem. |
+| Hide maintenance, firming, consensus, coverage-group, item-coverage, buffer-profile, recalculation and quota-arrangement controls from users without `planning.order.maintain`, `planning.order.firm`, `planning.forecast.maintain`, `planning.forecast.approve`, `planning.setup.maintain` or `planning.run` | later slice of PSG-22 | The shell exposes no per-duty check to pages yet; the service refuses the write with 403 and the card shows the problem. |
 | Net requirements (MD04) list of one item with drill to pegging | built | `/planning/net-requirements` (`NetRequirementsPage.tsx`); the drill goes through the item's planned orders. |
 | Net requirements: what-if simulate, messages column, virtualized 365 x 20 grid, site or version choice | later slice of PSG-22 | The service has no simulate action, stores no messages per day, and reads the current version only; the list is a plain table of days with movement (at most 500). |
 | Site work calendar read from the site (w6) instead of entered on the run form | handoff (PSG-6) | The service takes the calendar on the run until site calendars are readable. |
@@ -95,6 +124,9 @@ Each list has loading, empty and error states; the plan in view is kept in the
 | Pegging tree lazy-loads children per node | later slice of PSG-22 | The API returns the tree to depth 20 in one response; it is rendered fully. |
 | Supply schedule and inventory forecast on entered figures | built | Calculator card on `/planning/calculators` (`calculators.tsx`). |
 | Supply schedule workbench over the stored plan (item selection, inline planned-order creation, quantity edits, firming, printable report) | later slice of PSG-22 | The service projects only the figures sent to it; requirements of a plan version are not readable per period yet. |
-| DDMRP buffer, quota and shelf-life screens on stored setup (buffer list by priority, quota arrangement maintenance and analysis, expiring-supply messages) | later slice of PSG-22 | Buffers, quota arrangements and batches are not persisted by the service yet; the calculators work on entered figures. |
+| Buffer profiles: list, create, edit; DDMRP buffer status by site, zone and priority; recalculate one buffer | built | `BufferPages.tsx` (slice 10). |
+| Quota arrangements: list, create, edit with sources and ratings | built | `QuotaPages.tsx` (slice 10). |
+| Buffer profile chosen by code on the item coverage form | later slice of PSG-22 | The item coverage form still takes the profile id; the service now checks it (422 `PLAN-PROFILE-NOT-FOUND`, shown by the form). |
+| Planner worklist sorted by planning priority with the planned orders of red buffers; quota arrangement analysis (planned vs actual split, MEQ6/MEQ8); expiring-supply messages | later slice of PSG-22 | The run does not plan from buffers or arrangements and books no allocated quantity yet, and batches are not persisted (service NOT-IMPLEMENTED.md, deliverables 7 to 9). |
 | Paging beyond 500 rows | later slice of PSG-22 | The list endpoints return at most 500 rows and no cursor yet; the workspace tiles say when they count only the first 500. |
 | Duty-gated visibility of nav entries | built | Reads and the forecast page declare `planning.read`, the run form `planning.run`; the shell enforces them. |

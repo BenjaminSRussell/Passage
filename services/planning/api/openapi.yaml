@@ -501,10 +501,10 @@ paths:
                 profile:
                   type: object
                   properties:
-                    leadTimeFactor: {type: string, description: Decimal, 0 or more}
-                    variabilityFactor: {type: string, description: Decimal, 0 or more}
+                    leadTimeFactor: {type: string, description: 'Decimal, 0 or more'}
+                    variabilityFactor: {type: string, description: 'Decimal, 0 or more'}
                     orderCycleDays: {type: integer, minimum: 0, maximum: 3650}
-                    minOrderQty: {type: string, description: Decimal, 0 or more}
+                    minOrderQty: {type: string, description: 'Decimal, 0 or more'}
                     spikeThresholdPct: {type: string, description: 'Percent of the red zone, 0 to 500; default 50'}
                 adu: {type: string, description: Average daily usage; send adu or history}
                 history:
@@ -514,15 +514,15 @@ paths:
                 pastDays: {type: integer, minimum: 0, maximum: 3650, default: 90}
                 futureDays: {type: integer, minimum: 0, maximum: 3650, default: 0}
                 daf: {type: string, description: 'Dynamic adjustment factor; default 1'}
-                dltDays: {type: string, description: Decoupled lead time in days, 0 to 3650}
+                dltDays: {type: string, description: 'Decoupled lead time in days, 0 to 3650'}
                 onHand: {type: string}
-                openSupply: {type: string, description: Open supply inside the DLT, 0 or more}
+                openSupply: {type: string, description: 'Open supply inside the DLT, 0 or more'}
                 demand:
                   type: array
                   maxItems: 10000
                   items: {$ref: '#/components/schemas/DayQty'}
                 spikeHorizonDays: {type: integer, minimum: 0, maximum: 3650, description: Default is the DLT rounded up}
-                orderMultiple: {type: string, description: Decimal, 0 or more; 0 means none}
+                orderMultiple: {type: string, description: 'Decimal, 0 or more; 0 means none'}
       responses:
         '200':
           description: Zones, net flow, planned quantity and priority
@@ -548,7 +548,7 @@ paths:
                   qualifiedDemand: {type: string}
                   netFlow: {type: string}
                   plannedQty: {type: string, description: 0 when NFP is above the top of yellow}
-                  priority: {type: string, description: NFP / TOG, 4 decimals}
+                  priority: {type: string, description: 'NFP / TOG, 4 decimals'}
                   zone: {type: string, enum: [red, yellow, green]}
         '400': {$ref: '#/components/responses/Problem'}
         '403': {$ref: '#/components/responses/Problem'}
@@ -583,7 +583,7 @@ paths:
                     properties:
                       id: {type: string, maxLength: 64}
                       type: {type: string, enum: [vendor, production, transfer]}
-                      quota: {type: string, description: Decimal, 0 or more}
+                      quota: {type: string, description: 'Decimal, 0 or more'}
                       baseQty: {type: string}
                       allocatedQty: {type: string}
                       priority: {type: integer}
@@ -709,7 +709,7 @@ paths:
                 bucket: {type: string, enum: [day, week, month]}
                 openingOnHand: {type: string}
                 safetyStock: {type: string}
-                unitCost: {type: string, description: Current cost per inventory unit, 0 or more}
+                unitCost: {type: string, description: 'Current cost per inventory unit, 0 or more'}
                 currency: {type: string, pattern: '^[A-Z]{3}$', description: ISO 4217 code of unitCost}
                 demand:
                   type: array
@@ -968,7 +968,8 @@ paths:
         scope: per warehouse for a warehouse scope, per vendor for a
         subcontractor scope; another is 409 PLAN-ITEM-COVERAGE-EXISTS. A
         coverage group the tenant does not have is 422
-        PLAN-COVERAGE-GROUP-UNKNOWN. With an Idempotency-Key, a retry of the
+        PLAN-COVERAGE-GROUP-UNKNOWN, a buffer profile it does not have 422
+        PLAN-PROFILE-NOT-FOUND. With an Idempotency-Key, a retry of the
         same body returns the created coverage with 200 and
         Idempotent-Replayed: true; another body under the key is 422.
       x-passage-duty: planning.setup.maintain
@@ -1045,6 +1046,302 @@ paths:
         '412': {$ref: '#/components/responses/Problem'}
         '422': {$ref: '#/components/responses/Problem'}
         '428': {$ref: '#/components/responses/Problem'}
+  /v1/planning/buffer-profiles:
+    get:
+      operationId: listBufferProfiles
+      summary: DDMRP buffer profiles of the tenant, ordered by code (FR-22.16)
+      x-passage-duty: planning.read
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Buffer profiles
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/BufferProfile'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+    post:
+      operationId: createBufferProfile
+      summary: Set up a DDMRP buffer profile (FR-22.16, Maintain planning setup)
+      description: |
+        Omitted fields take the 4.22.13 defaults: spike threshold 50 percent of
+        the red zone, ADU window 90 past and 0 future days, minimum order qty 0,
+        spike horizon null (the DLT of the buffered item). A code already in use
+        is 409 PLAN-PROFILE-EXISTS. With an Idempotency-Key, a retry of the
+        same body returns the created profile with 200 and
+        Idempotent-Replayed: true; another body under the key is 422.
+      x-passage-duty: planning.setup.maintain
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: {type: string, maxLength: 255}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/BufferProfileInput'}
+      responses:
+        '201':
+          description: The created profile; the ETag header carries its version
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BufferProfile'}
+        '200':
+          description: Idempotent replay of an earlier create
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BufferProfile'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
+  /v1/planning/buffer-profiles/{id}:
+    get:
+      operationId: getBufferProfile
+      summary: One buffer profile by id
+      x-passage-duty: planning.read
+      parameters:
+        - $ref: '#/components/parameters/EntityId'
+      responses:
+        '200':
+          description: The buffer profile; the ETag header carries its version
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BufferProfile'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+    put:
+      operationId: updateBufferProfile
+      summary: Replace a buffer profile under If-Match; omitted fields take the defaults, as on create. Stored buffers keep their zones until recalculated.
+      x-passage-duty: planning.setup.maintain
+      parameters:
+        - $ref: '#/components/parameters/EntityId'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/BufferProfileInput'}
+      responses:
+        '200':
+          description: The changed profile with its new ETag
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BufferProfile'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '412': {$ref: '#/components/responses/Problem'}
+        '428': {$ref: '#/components/responses/Problem'}
+  /v1/planning/ddmrp/buffers:
+    get:
+      operationId: listDdmrpBuffers
+      summary: DDMRP buffer status inquiry (4.22.14), most urgent (lowest priority) first
+      x-passage-duty: planning.read
+      parameters:
+        - name: siteId
+          in: query
+          schema: {type: string, format: uuid}
+        - name: zone
+          in: query
+          schema: {type: string, enum: [red, yellow, green]}
+        - name: maxPriority
+          in: query
+          description: Only buffers whose priority (NFP / TOG) is at most this decimal, e.g. 0.5 for 50%
+          schema: {type: string}
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Stored buffers
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/DdmrpBuffer'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+  /v1/planning/ddmrp/buffers:recalculate:
+    post:
+      operationId: recalculateDdmrpBuffer
+      summary: Evaluate a buffer with its stored profile (BR-22.11) and replace the stored result of its item, site and warehouse scope
+      description: |
+        The profile supplies the factors, spike threshold, ADU window and spike
+        horizon (the body's spikeHorizonDays overrides it; null on both means
+        the DLT). Repeating a request stores the same row again, so no
+        Idempotency-Key is needed. An unknown profile is 422
+        PLAN-PROFILE-NOT-FOUND; an empty ADU window or inconsistent parameters
+        422 PLAN-INPUT-INVALID.
+      x-passage-duty: planning.run
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [itemId, siteId, profileId, dltDays]
+              properties:
+                itemId: {type: string, format: uuid}
+                siteId: {type: string, format: uuid}
+                warehouseId: {type: string, format: uuid, description: Absent for the site scope}
+                profileId: {type: string, format: uuid}
+                adu: {type: string, description: ADU as a decimal string; or send history}
+                history:
+                  type: array
+                  maxItems: 100000
+                  items: {$ref: '#/components/schemas/DayQty'}
+                daf: {type: string, default: '1', description: 'Dynamic adjustment factor, at most 999.999'}
+                dltDays: {type: string, description: 'Decoupled lead time in days, at most 2 decimals'}
+                onHand: {type: string}
+                openSupply: {type: string, description: Open supply inside the DLT}
+                demand:
+                  type: array
+                  maxItems: 10000
+                  items: {$ref: '#/components/schemas/DayQty'}
+                orderMultiple: {type: string, default: '0'}
+                spikeHorizonDays: {type: [integer, 'null'], minimum: 0, maximum: 3650}
+      responses:
+        '200':
+          description: The stored buffer
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DdmrpBuffer'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
+  /v1/planning/quota-arrangements:
+    get:
+      operationId: listQuotaArrangements
+      summary: Quota arrangements with their sources (FR-22.17), ordered by item, site and validity start
+      x-passage-duty: planning.read
+      parameters:
+        - name: itemId
+          in: query
+          schema: {type: string, format: uuid}
+        - name: siteId
+          in: query
+          schema: {type: string, format: uuid}
+        - name: validOn
+          in: query
+          description: Only arrangements valid on this date
+          schema: {type: string, format: date}
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Quota arrangements
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/QuotaArrangement'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+    post:
+      operationId: createQuotaArrangement
+      summary: Set up a quota arrangement and its sources (FR-22.17, Maintain planning setup)
+      description: |
+        Its validity (inclusive dates) must not overlap another arrangement of
+        the same item and site: 409 PLAN-QUOTA-OVERLAP. With an
+        Idempotency-Key, a retry of the same body returns the created
+        arrangement with 200 and Idempotent-Replayed: true; another body under
+        the key is 422.
+      x-passage-duty: planning.setup.maintain
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: {type: string, maxLength: 255}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/QuotaArrangementInput'}
+      responses:
+        '201':
+          description: The created arrangement; the ETag header carries its version
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/QuotaArrangement'}
+        '200':
+          description: Idempotent replay of an earlier create
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/QuotaArrangement'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
+  /v1/planning/quota-arrangements/{id}:
+    get:
+      operationId: getQuotaArrangement
+      summary: One quota arrangement with its sources
+      x-passage-duty: planning.read
+      parameters:
+        - $ref: '#/components/parameters/EntityId'
+      responses:
+        '200':
+          description: The arrangement; the ETag header carries its version
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/QuotaArrangement'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+    put:
+      operationId: updateQuotaArrangement
+      summary: Replace an arrangement and all its sources under If-Match; the overlap rule applies as on create
+      x-passage-duty: planning.setup.maintain
+      parameters:
+        - $ref: '#/components/parameters/EntityId'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/QuotaArrangementInput'}
+      responses:
+        '200':
+          description: The changed arrangement with its new ETag
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/QuotaArrangement'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '412': {$ref: '#/components/responses/Problem'}
+        '428': {$ref: '#/components/responses/Problem'}
 components:
   headers:
     ETag:
@@ -1062,6 +1359,11 @@ components:
       in: path
       required: true
       schema: {type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{1,19}$'}
+    EntityId:
+      name: id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
     ItemCoverageId:
       name: id
       in: path
@@ -1120,10 +1422,10 @@ components:
       properties:
         itemId: {type: string, format: uuid}
         siteId: {type: string, format: uuid}
-        warehouseId: {type: [string, 'null'], format: uuid, description: Required for warehouse scope, absent otherwise}
+        warehouseId: {type: [string, 'null'], format: uuid, description: 'Required for warehouse scope, absent otherwise'}
         coverageGroupId: {type: string, format: uuid}
         minQty: {type: string, default: '0', description: 'Decimal string, at most 6 decimals'}
-        maxQty: {type: string, default: '0', description: Decimal string; 0 means no maximum, otherwise at least minQty}
+        maxQty: {type: string, default: '0', description: 'Decimal string; 0 means no maximum, otherwise at least minQty'}
         safetyMarginReceiptDays: {type: integer, minimum: 0, maximum: 365, default: 0}
         leadTimeDays: {type: [integer, 'null'], minimum: 0, maximum: 3650, description: Lead time override; null uses the item lead time}
         vendorId: {type: [string, 'null'], format: uuid, description: Default vendor; the subcontractor for subcontractor scope}
@@ -1131,7 +1433,7 @@ components:
         planningStrategy: {type: string, enum: [mts-net, mts-gross, mto, assemble-to-order-final, plan-without-final-assembly, subassembly], default: mts-net}
         planningScope: {type: string, enum: [site, warehouse, subcontractor], default: site, description: MRP area (FR-22.18)}
         decouplingPoint: {type: boolean, default: false, description: Strategic DDMRP buffer position (FR-22.16)}
-        bufferProfileId: {type: [string, 'null'], format: uuid}
+        bufferProfileId: {type: [string, 'null'], format: uuid, description: A stored buffer profile of the tenant (422 PLAN-PROFILE-NOT-FOUND otherwise)}
         requiredShelfLifeDays: {type: integer, minimum: 0, maximum: 3650, default: 0, description: Remaining shelf life a demand needs (FR-22.20)}
         priorityBased: {type: boolean, default: false, description: Plan by planning priority instead of date (FR-22.16)}
     ItemCoverage:
@@ -1159,6 +1461,127 @@ components:
         bufferProfileId: {type: [string, 'null'], format: uuid}
         requiredShelfLifeDays: {type: integer}
         priorityBased: {type: boolean}
+    BufferProfileInput:
+      type: object
+      required: [code, itemType, leadTimeFactor, variabilityFactor]
+      description: Omitted fields take the defaults below.
+      properties:
+        code: {type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{1,19}$'}
+        itemType: {type: string, enum: [manufactured, purchased, distributed]}
+        leadTimeFactor: {type: string, description: 'LTF, decimal string 0 to 99.999 with at most 3 decimals'}
+        variabilityFactor: {type: string, description: 'VF, decimal string 0 to 99.999 with at most 3 decimals'}
+        orderCycleDays: {type: integer, minimum: 0, maximum: 3650, default: 0}
+        minOrderQty: {type: string, default: '0', description: 'MOQ, decimal string with at most 6 decimals'}
+        spikeThresholdPct: {type: string, default: '50', description: 'Percent of the red zone, 1 to 500'}
+        spikeHorizonDays: {type: [integer, 'null'], minimum: 0, maximum: 3650, description: null means the DLT of the buffered item}
+        aduWindowPastDays: {type: integer, minimum: 0, maximum: 365, default: 90, description: Past and future windows together cover at least 7 days}
+        aduWindowFutureDays: {type: integer, minimum: 0, maximum: 365, default: 0}
+    BufferProfile:
+      type: object
+      required: [id, version, code, itemType, leadTimeFactor, variabilityFactor, orderCycleDays, minOrderQty, spikeThresholdPct,
+        spikeHorizonDays, aduWindowPastDays, aduWindowFutureDays]
+      properties:
+        id: {type: string, format: uuid}
+        version: {type: integer, minimum: 1, description: Same as the ETag}
+        code: {type: string}
+        itemType: {type: string, enum: [manufactured, purchased, distributed]}
+        leadTimeFactor: {type: string}
+        variabilityFactor: {type: string}
+        orderCycleDays: {type: integer}
+        minOrderQty: {type: string}
+        spikeThresholdPct: {type: string}
+        spikeHorizonDays: {type: [integer, 'null']}
+        aduWindowPastDays: {type: integer}
+        aduWindowFutureDays: {type: integer}
+    BufferZones:
+      type: object
+      required: [redBase, redSafety, yellow, green, topOfRed, topOfYellow, topOfGreen]
+      properties:
+        redBase: {type: string}
+        redSafety: {type: string}
+        yellow: {type: string}
+        green: {type: string}
+        topOfRed: {type: string}
+        topOfYellow: {type: string}
+        topOfGreen: {type: string}
+    DdmrpBuffer:
+      type: object
+      description: Stored result of the last recalculation of one item, site and warehouse scope (data model DdmrpBuffer, BR-22.11)
+      required: [id, itemId, siteId, warehouseId, profileId, profileCode, adu, dltDays, daf, adjustedAdu, zones, qualifiedDemand,
+        netFlow, plannedQty, priority, zone, calculatedAt]
+      properties:
+        id: {type: string, format: uuid}
+        itemId: {type: string, format: uuid}
+        siteId: {type: string, format: uuid}
+        warehouseId: {type: [string, 'null'], format: uuid}
+        profileId: {type: string, format: uuid}
+        profileCode: {type: string}
+        adu: {type: string}
+        dltDays: {type: string}
+        daf: {type: string}
+        adjustedAdu: {type: string, description: ADU × DAF}
+        zones: {$ref: '#/components/schemas/BufferZones'}
+        qualifiedDemand: {type: string}
+        netFlow: {type: string, description: NFP = on-hand + open supply − qualified demand}
+        plannedQty: {type: string, description: 'TOG − NFP when NFP ≤ TOY (at least MOQ, rounded up to the order multiple); 0 otherwise'}
+        priority: {type: string, description: 'NFP / TOG, 4 decimals; lower is more urgent'}
+        zone: {type: string, enum: [red, yellow, green]}
+        calculatedAt: {type: string, format: date-time}
+    QuotaSourceInput:
+      type: object
+      required: [type, quota]
+      description: Exactly the reference of the source type is set; a source may not be named twice in one arrangement.
+      properties:
+        type: {type: string, enum: [vendor, production, transfer]}
+        vendorId: {type: string, format: uuid, description: 'Required for vendor, absent otherwise'}
+        productionVersionId: {type: string, format: uuid, description: 'Required for production, absent otherwise'}
+        fromWarehouseId: {type: string, format: uuid, description: 'Required for transfer, absent otherwise'}
+        quota: {type: string, description: 'Share weight 0 to 99999.9999; 0 is a fallback used only when every other source is blocked'}
+        baseQty: {type: string, default: '0'}
+        allocatedQty: {type: string, default: '0', description: Carried over from a legacy system (SAP EQUP)}
+        maxQtyPerPeriod: {type: [string, 'null'], description: Positive; given together with periodDays}
+        periodDays: {type: [integer, 'null'], minimum: 1, maximum: 366}
+        priority: {type: integer, minimum: 0, maximum: 999, default: 0, description: 'Breaks rating ties, lower first'}
+        blocked: {type: boolean, default: false}
+    QuotaSource:
+      allOf:
+        - $ref: '#/components/schemas/QuotaSourceInput'
+        - type: object
+          required: [id, rating]
+          properties:
+            id: {type: string, format: uuid}
+            rating: {type: [string, 'null'], description: '(allocated + base) / quota, 4 decimals (BR-22.12); null for quota 0'}
+    QuotaArrangementInput:
+      type: object
+      required: [itemId, siteId, validFrom, validTo, sources]
+      properties:
+        itemId: {type: string, format: uuid}
+        siteId: {type: string, format: uuid}
+        validFrom: {type: string, format: date}
+        validTo: {type: string, format: date, description: Inclusive; on or after validFrom}
+        split: {type: boolean, default: false, description: Split one requirement across sources (BR-22.12)}
+        minSplitQty: {type: string, default: '0'}
+        sources:
+          type: array
+          minItems: 1
+          maxItems: 100
+          description: The quotas must add up to more than 0
+          items: {$ref: '#/components/schemas/QuotaSourceInput'}
+    QuotaArrangement:
+      type: object
+      required: [id, version, itemId, siteId, validFrom, validTo, split, minSplitQty, sources]
+      properties:
+        id: {type: string, format: uuid}
+        version: {type: integer, minimum: 1, description: Same as the ETag}
+        itemId: {type: string, format: uuid}
+        siteId: {type: string, format: uuid}
+        validFrom: {type: string, format: date}
+        validTo: {type: string, format: date}
+        split: {type: boolean}
+        minSplitQty: {type: string}
+        sources:
+          type: array
+          items: {$ref: '#/components/schemas/QuotaSource'}
     RunRequest:
       type: object
       required: [asOf, siteId, items]
@@ -1251,7 +1674,7 @@ components:
         plannedOrders: {type: integer}
         messages: {type: integer}
         durationMs: {type: integer, format: int64}
-        planHash: {type: string, description: sha256 hex over orders, pegging and messages}
+        planHash: {type: string, description: 'sha256 hex over orders, pegging and messages'}
     PlannedOrder:
       type: object
       properties:
@@ -1308,7 +1731,7 @@ components:
       minProperties: 1
       additionalProperties: false
       properties:
-        qty: {type: string, description: Positive decimal string, at most 6 decimals}
+        qty: {type: string, description: 'Positive decimal string, at most 6 decimals'}
         orderDate: {type: string, format: date}
         deliveryDate: {type: string, format: date}
         vendorId: {type: string, format: uuid, description: Planned purchase orders only}
@@ -1320,7 +1743,7 @@ components:
         code: {type: string}
         version: {type: integer, minimum: 0}
         reductionPrinciple: {type: string, enum: [none, percent, transactions, transactions-dynamic]}
-        reductionPercent: {type: string, description: Decimal string, used by principle percent}
+        reductionPercent: {type: string, description: 'Decimal string, used by principle percent'}
         status: {type: string, enum: [draft, submitted, published], description: 'FR-22.9 consensus status; only a draft accepts cell writes'}
         submittedBy: {type: [string, 'null'], description: User who submitted the model; null in draft}
         decidedBy: {type: [string, 'null'], description: User who last published or rejected the model}
@@ -1372,7 +1795,7 @@ components:
               periodStart: {type: string, format: date}
               periodEnd: {type: string, format: date}
               qty: {type: string, description: 'Decimal string, 0 or more with at most 6 decimals; 0 clears the period'}
-              salesQty: {type: string, description: Decimal string, 0 or more}
+              salesQty: {type: string, description: 'Decimal string, 0 or more'}
               source: {type: string, enum: [manual, statistical], default: manual}
     DayQty:
       type: object
@@ -1380,7 +1803,7 @@ components:
       description: A quantity on a day offset from day 0 of a calculation; negative days are in the past
       properties:
         day: {type: integer, minimum: -3650, maximum: 3650}
-        qty: {type: string, description: Decimal string, 0 or more}
+        qty: {type: string, description: 'Decimal string, 0 or more'}
     Pegging:
       type: object
       required: [orderId, number, qty, tree]

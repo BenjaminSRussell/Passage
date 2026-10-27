@@ -71,6 +71,16 @@ type Store interface {
 	GetItemCoverage(ctx context.Context, id string) (ItemCoverage, error)
 	CreateItemCoverage(ctx context.Context, req ItemCoverageCreate) (ItemCoverage, bool, error)
 	UpdateItemCoverage(ctx context.Context, id string, expectedVersion int, spec domain.ItemCoverageSpec) (ItemCoverage, error)
+	ListBufferProfiles(ctx context.Context, limit int) ([]BufferProfile, error)
+	GetBufferProfile(ctx context.Context, id string) (BufferProfile, error)
+	CreateBufferProfile(ctx context.Context, req BufferProfileCreate) (BufferProfile, bool, error)
+	UpdateBufferProfile(ctx context.Context, id string, expectedVersion int, spec domain.BufferProfileSpec) (BufferProfile, error)
+	UpsertDdmrpBuffer(ctx context.Context, b DdmrpBuffer) (DdmrpBuffer, error)
+	ListDdmrpBuffers(ctx context.Context, q BufferQuery) ([]DdmrpBuffer, error)
+	ListQuotaArrangements(ctx context.Context, q QuotaQuery) ([]QuotaArrangement, error)
+	GetQuotaArrangement(ctx context.Context, id string) (QuotaArrangement, error)
+	CreateQuotaArrangement(ctx context.Context, req QuotaCreate) (QuotaArrangement, bool, error)
+	UpdateQuotaArrangement(ctx context.Context, id string, expectedVersion int, spec domain.QuotaArrangementSpec) (QuotaArrangement, error)
 	Ping(ctx context.Context) error
 }
 

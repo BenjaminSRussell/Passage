@@ -124,19 +124,19 @@ func toZonesDTO(z domain.BufferZones) zonesDTO {
 		TopOfRed: z.TopOfRed.String(), TopOfYellow: z.TopOfYellow.String(), TopOfGreen: z.TopOfGreen.String()}
 }
 
-// evaluateBuffer answers POST /v1/planning/ddmrp/buffers:evaluate.
-func (a *API) evaluateBuffer(w http.ResponseWriter, r *http.Request) {
-	if !validTenant(w, r) {
-		return
-	}
-	var req bufferEvalRequest
-	if err := httpx.Decode(r, &req); err != nil {
-		httpx.Fail(w, r, err)
-		return
-	}
+// bufferResult is one evaluated buffer: the ADU and adjustment factor used, and the status.
+type bufferResult struct {
+	ADU    decimal.Decimal
+	DAF    decimal.Decimal
+	Status domain.BufferStatus
+}
+
+// evaluateBufferInput validates and evaluates one buffer request (FR-22.16). Field
+// problems come back as a map; a window or parameter problem as an error. The
+// stored recalculation shares this path with the stateless evaluate endpoint.
+func evaluateBufferInput(req bufferEvalRequest) (bufferResult, map[string]string, error) {
 	if fields := req.validate(); len(fields) > 0 {
-		validationFailed(w, r, fields)
-		return
+		return bufferResult{}, fields, nil
 	}
 	pastDays, futureDays := defaultPastDays, 0
 	if req.PastDays != nil {
@@ -152,8 +152,7 @@ func (a *API) evaluateBuffer(w http.ResponseWriter, r *http.Request) {
 	} else {
 		var err error
 		if adu, err = domain.AverageDailyUsage(history, pastDays, futureDays); err != nil {
-			httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, codeInput, "the ADU window is empty"))
-			return
+			return bufferResult{}, nil, httpx.NewProblem(http.StatusUnprocessableEntity, codeInput, "the ADU window is empty")
 		}
 	}
 	daf := decimal.NewFromInt(1)
@@ -177,11 +176,33 @@ func (a *API) evaluateBuffer(w http.ResponseWriter, r *http.Request) {
 		Demand: toDayQty(req.Demand), SpikeHorizonDays: horizon, OrderMultiple: req.OrderMultiple,
 	})
 	if err != nil {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, codeInput, "buffer parameters are inconsistent"))
+		return bufferResult{}, nil, httpx.NewProblem(http.StatusUnprocessableEntity, codeInput, "buffer parameters are inconsistent")
+	}
+	return bufferResult{ADU: adu, DAF: daf, Status: st}, nil, nil
+}
+
+// evaluateBuffer answers POST /v1/planning/ddmrp/buffers:evaluate.
+func (a *API) evaluateBuffer(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
 		return
 	}
+	var req bufferEvalRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	res, fields, err := evaluateBufferInput(req)
+	if len(fields) > 0 {
+		validationFailed(w, r, fields)
+		return
+	}
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	st := res.Status
 	httpx.JSON(w, http.StatusOK, map[string]any{
-		"adu": adu.String(), "adjustedAdu": st.AdjustedADU.String(), "zones": toZonesDTO(st.Zones),
+		"adu": res.ADU.String(), "adjustedAdu": st.AdjustedADU.String(), "zones": toZonesDTO(st.Zones),
 		"qualifiedDemand": st.QualifiedDemand.String(), "netFlow": st.NetFlow.String(),
 		"plannedQty": st.PlannedQty.String(), "priority": st.Priority.String(), "zone": st.Zone,
 	})

@@ -49,6 +49,13 @@ describe("planning module", () => {
       "/planning/item-coverages",
       "/planning/item-coverages/new",
       "/planning/item-coverages/:id",
+      "/planning/buffer-profiles",
+      "/planning/buffer-profiles/new",
+      "/planning/buffer-profiles/:id",
+      "/planning/ddmrp-buffers",
+      "/planning/quota-arrangements",
+      "/planning/quota-arrangements/new",
+      "/planning/quota-arrangements/:id",
     ]);
     for (const route of planning.routes) {
       expect(route.element).not.toBeNull();
@@ -65,6 +72,9 @@ describe("planning module", () => {
     expect(duties["/planning/calculators"]).toBe("planning.read");
     expect(duties["/planning/net-requirements"]).toBe("planning.read");
     expect(duties["/planning/coverage-groups"]).toBe("planning.read");
+    expect(duties["/planning/buffer-profiles"]).toBe("planning.read");
+    expect(duties["/planning/ddmrp-buffers"]).toBe("planning.read");
+    expect(duties["/planning/quota-arrangements"]).toBe("planning.read");
   });
 
   it("is auto-discovered by the registry", () => {

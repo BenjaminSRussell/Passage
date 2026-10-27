@@ -58,6 +58,16 @@ type fakeStore struct {
 	// Idempotency-Key (itemcoverage_test.go).
 	covs    []store.ItemCoverage
 	covKeys map[string]string
+	// Buffer profiles, stored buffers and quota arrangements with the input
+	// hash stored per Idempotency-Key and the last list queries
+	// (buffer_quota_test.go).
+	profiles    []store.BufferProfile
+	profileKeys map[string]string
+	buffers     []store.DdmrpBuffer
+	bufferQuery store.BufferQuery
+	quotas      []store.QuotaArrangement
+	quotaKeys   map[string]string
+	quotaQuery  store.QuotaQuery
 }
 
 func (f *fakeStore) RunPlan(_ context.Context, req store.RunRequest) (store.Version, bool, error) {

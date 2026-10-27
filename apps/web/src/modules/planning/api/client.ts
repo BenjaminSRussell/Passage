@@ -573,3 +573,241 @@ export async function updateItemCoverage(id: string, version: number, input: Ite
     body: JSON.stringify(input),
   });
 }
+
+/* ---- DDMRP buffer profiles and stored buffers (FR-22.16) ---- */
+
+export const BufferItemType = z.enum(["manufactured", "purchased", "distributed"]);
+export type BufferItemType = z.infer<typeof BufferItemType>;
+
+/** The fields a buffer profile create or update sends (BufferProfileInput in the OpenAPI); factors and quantities are decimal strings. */
+export interface BufferProfileInput {
+  code: string;
+  itemType: BufferItemType;
+  leadTimeFactor: string;
+  variabilityFactor: string;
+  orderCycleDays: number;
+  minOrderQty: string;
+  spikeThresholdPct: string;
+  /** null means the decoupled lead time of the buffered item. */
+  spikeHorizonDays: number | null;
+  aduWindowPastDays: number;
+  aduWindowFutureDays: number;
+}
+
+/** A stored buffer profile; `version` is its ETag. */
+export const BufferProfile = z.object({
+  id: z.string(),
+  version: z.number().int().min(1),
+  code: z.string(),
+  itemType: BufferItemType,
+  leadTimeFactor: z.string(),
+  variabilityFactor: z.string(),
+  orderCycleDays: z.number().int(),
+  minOrderQty: z.string(),
+  spikeThresholdPct: z.string(),
+  spikeHorizonDays: z.number().int().nullable(),
+  aduWindowPastDays: z.number().int(),
+  aduWindowFutureDays: z.number().int(),
+});
+export type BufferProfile = z.infer<typeof BufferProfile>;
+
+export async function listBufferProfiles(init?: RequestInit): Promise<BufferProfile[]> {
+  const out = await request(`/buffer-profiles?limit=500`, z.object({ items: z.array(BufferProfile) }), init);
+  return out.items;
+}
+
+export async function getBufferProfile(id: string, init?: RequestInit): Promise<BufferProfile> {
+  return request(`/buffer-profiles/${encodeURIComponent(id)}`, BufferProfile, init);
+}
+
+/** Creates a buffer profile (Maintain planning setup); 409 `PLAN-PROFILE-EXISTS` means the code is taken. */
+export async function createBufferProfile(input: BufferProfileInput, idempotencyKey: string): Promise<BufferProfile> {
+  return request(`/buffer-profiles`, BufferProfile, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify(input),
+  });
+}
+
+/** Replaces a buffer profile under If-Match; 412 means someone else changed it. */
+export async function updateBufferProfile(id: string, version: number, input: BufferProfileInput): Promise<BufferProfile> {
+  return request(`/buffer-profiles/${encodeURIComponent(id)}`, BufferProfile, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", "If-Match": ifMatch(version) },
+    body: JSON.stringify(input),
+  });
+}
+
+export const BufferZone = z.enum(["red", "yellow", "green"]);
+export type BufferZone = z.infer<typeof BufferZone>;
+
+/** The stored result of one buffer recalculation (data model DdmrpBuffer, BR-22.11). */
+export const DdmrpBuffer = z.object({
+  id: z.string(),
+  itemId: z.string(),
+  siteId: z.string(),
+  warehouseId: z.string().nullable(),
+  profileId: z.string(),
+  profileCode: z.string(),
+  adu: z.string(),
+  dltDays: z.string(),
+  daf: z.string(),
+  adjustedAdu: z.string(),
+  zones: z.object({
+    redBase: z.string(),
+    redSafety: z.string(),
+    yellow: z.string(),
+    green: z.string(),
+    topOfRed: z.string(),
+    topOfYellow: z.string(),
+    topOfGreen: z.string(),
+  }),
+  qualifiedDemand: z.string(),
+  netFlow: z.string(),
+  plannedQty: z.string(),
+  /** NFP / TOG; lower is more urgent. */
+  priority: z.string(),
+  zone: BufferZone,
+  calculatedAt: z.string(),
+});
+export type DdmrpBuffer = z.infer<typeof DdmrpBuffer>;
+
+export interface BufferFilter {
+  siteId?: string;
+  zone?: BufferZone | "";
+  /** Priority ceiling as a decimal (0.5 for 50%). */
+  maxPriority?: string;
+}
+
+/** The DDMRP buffer status inquiry (4.22.14): stored buffers, most urgent first. */
+export async function listDdmrpBuffers(f: BufferFilter = {}, init?: RequestInit): Promise<DdmrpBuffer[]> {
+  const params = new URLSearchParams({ limit: "500" });
+  if (f.siteId) params.set("siteId", f.siteId);
+  if (f.zone) params.set("zone", f.zone);
+  if (f.maxPriority) params.set("maxPriority", f.maxPriority);
+  const out = await request(`/ddmrp/buffers?${params}`, z.object({ items: z.array(DdmrpBuffer) }), init);
+  return out.items;
+}
+
+/** Today's state of one buffered item at a site; the stored profile supplies the factors. */
+export interface BufferRecalculation {
+  itemId: string;
+  siteId: string;
+  warehouseId?: string;
+  profileId: string;
+  adu: string;
+  dltDays: string;
+  daf: string;
+  onHand: string;
+  openSupply: string;
+  /** Past-due and today's demand (day 0) plus any spikes, as dated quantities. */
+  demand: { day: number; qty: string }[];
+}
+
+/** Recalculates and stores one buffer (Run master planning); repeats replace the same row. */
+export async function recalculateDdmrpBuffer(body: BufferRecalculation): Promise<DdmrpBuffer> {
+  return request(`/ddmrp/buffers:recalculate`, DdmrpBuffer, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/* ---- Quota arrangements (FR-22.17) ---- */
+
+export const QuotaSourceType = z.enum(["vendor", "production", "transfer"]);
+export type QuotaSourceType = z.infer<typeof QuotaSourceType>;
+
+/** One source of an arrangement as sent; only the reference of its type is set. */
+export interface QuotaSourceInput {
+  type: QuotaSourceType;
+  vendorId?: string;
+  productionVersionId?: string;
+  fromWarehouseId?: string;
+  quota: string;
+  baseQty: string;
+  allocatedQty: string;
+  maxQtyPerPeriod: string | null;
+  periodDays: number | null;
+  priority: number;
+  blocked: boolean;
+}
+
+export interface QuotaArrangementInput {
+  itemId: string;
+  siteId: string;
+  validFrom: string;
+  validTo: string;
+  split: boolean;
+  minSplitQty: string;
+  sources: QuotaSourceInput[];
+}
+
+export const QuotaSource = z.object({
+  id: z.string(),
+  type: QuotaSourceType,
+  vendorId: z.string().nullable(),
+  productionVersionId: z.string().nullable(),
+  fromWarehouseId: z.string().nullable(),
+  quota: z.string(),
+  baseQty: z.string(),
+  allocatedQty: z.string(),
+  maxQtyPerPeriod: z.string().nullable(),
+  periodDays: z.number().int().nullable(),
+  priority: z.number().int(),
+  blocked: z.boolean(),
+  /** (allocated + base) / quota (BR-22.12); null for a quota-0 fallback source. */
+  rating: z.string().nullable(),
+});
+export type QuotaSource = z.infer<typeof QuotaSource>;
+
+/** A stored quota arrangement; `version` is its ETag. */
+export const QuotaArrangement = z.object({
+  id: z.string(),
+  version: z.number().int().min(1),
+  itemId: z.string(),
+  siteId: z.string(),
+  validFrom: z.string(),
+  validTo: z.string(),
+  split: z.boolean(),
+  minSplitQty: z.string(),
+  sources: z.array(QuotaSource),
+});
+export type QuotaArrangement = z.infer<typeof QuotaArrangement>;
+
+export interface QuotaFilter {
+  itemId?: string;
+  siteId?: string;
+  validOn?: string;
+}
+
+export async function listQuotaArrangements(f: QuotaFilter = {}, init?: RequestInit): Promise<QuotaArrangement[]> {
+  const params = new URLSearchParams({ limit: "500" });
+  if (f.itemId) params.set("itemId", f.itemId);
+  if (f.siteId) params.set("siteId", f.siteId);
+  if (f.validOn) params.set("validOn", f.validOn);
+  const out = await request(`/quota-arrangements?${params}`, z.object({ items: z.array(QuotaArrangement) }), init);
+  return out.items;
+}
+
+export async function getQuotaArrangement(id: string, init?: RequestInit): Promise<QuotaArrangement> {
+  return request(`/quota-arrangements/${encodeURIComponent(id)}`, QuotaArrangement, init);
+}
+
+/** Creates an arrangement; 409 `PLAN-QUOTA-OVERLAP` means another one of the item and site is valid in that period. */
+export async function createQuotaArrangement(input: QuotaArrangementInput, idempotencyKey: string): Promise<QuotaArrangement> {
+  return request(`/quota-arrangements`, QuotaArrangement, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify(input),
+  });
+}
+
+/** Replaces an arrangement and its sources under If-Match; 412 means someone else changed it. */
+export async function updateQuotaArrangement(id: string, version: number, input: QuotaArrangementInput): Promise<QuotaArrangement> {
+  return request(`/quota-arrangements/${encodeURIComponent(id)}`, QuotaArrangement, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", "If-Match": ifMatch(version) },
+    body: JSON.stringify(input),
+  });
+}

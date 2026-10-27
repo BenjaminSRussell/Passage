@@ -99,6 +99,16 @@ func TestOpenAPI_MatchesRoutes(t *testing.T) {
 		"POST /v1/planning/item-coverages":                    dutyMaintainSetup,
 		"GET /v1/planning/item-coverages/{id}":                dutyRead,
 		"PUT /v1/planning/item-coverages/{id}":                dutyMaintainSetup,
+		"GET /v1/planning/buffer-profiles":                    dutyRead,
+		"POST /v1/planning/buffer-profiles":                   dutyMaintainSetup,
+		"GET /v1/planning/buffer-profiles/{id}":               dutyRead,
+		"PUT /v1/planning/buffer-profiles/{id}":               dutyMaintainSetup,
+		"GET /v1/planning/ddmrp/buffers":                      dutyRead,
+		"POST /v1/planning/ddmrp/buffers:recalculate":         dutyRun,
+		"GET /v1/planning/quota-arrangements":                 dutyRead,
+		"POST /v1/planning/quota-arrangements":                dutyMaintainSetup,
+		"GET /v1/planning/quota-arrangements/{id}":            dutyRead,
+		"PUT /v1/planning/quota-arrangements/{id}":            dutyMaintainSetup,
 	}
 	for op, want := range duties {
 		if got := documented[op]; got != want {

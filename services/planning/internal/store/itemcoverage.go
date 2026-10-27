@@ -31,6 +31,7 @@ const (
 	itemCoverageScopeConstraint       = "item_coverage_scope_key"
 	itemCoverageIdempotencyConstraint = "item_coverage_idempotency_key"
 	itemCoverageGroupConstraint       = "item_coverage_group_fkey"
+	itemCoverageProfileConstraint     = "item_coverage_buffer_profile_fkey"
 )
 
 // ItemCoverage is a stored item coverage. Version is its ETag;
@@ -80,7 +81,8 @@ func itemCoverageNotFound() error {
 }
 
 // itemCoverageWriteError maps the constraint violations of a create or update
-// to their problems: the scope key is 409, an unknown coverage group 422.
+// to their problems: the scope key is 409, an unknown coverage group or
+// buffer profile 422.
 func itemCoverageWriteError(err error, spec domain.ItemCoverageSpec) error {
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) {
@@ -96,6 +98,9 @@ func itemCoverageWriteError(err error, spec domain.ItemCoverageSpec) error {
 	case pgErr.Code == foreignKeyViolation && pgErr.ConstraintName == itemCoverageGroupConstraint:
 		return httpx.NewProblem(http.StatusUnprocessableEntity, CodeCoverageGroupUnknown,
 			"coverage group "+spec.CoverageGroupID+" does not exist")
+	case pgErr.Code == foreignKeyViolation && pgErr.ConstraintName == itemCoverageProfileConstraint:
+		return httpx.NewProblem(http.StatusUnprocessableEntity, CodeProfileNotFound,
+			"buffer profile "+spec.BufferProfileID+" does not exist")
 	}
 	return err
 }

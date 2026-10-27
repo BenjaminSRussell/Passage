@@ -1,4 +1,4 @@
-# planning (wave 22, PSG-22, slices 1 to 7)
+# planning (wave 22, PSG-22, slices 1 to 10)
 
 Master planning for Passage: nets demand against supply level by level through
 the BOM and writes planned purchase, production and transfer orders, each pegged
@@ -20,7 +20,10 @@ duties and `forecast.published.v1` (FR-22.9, 4.22.17), the dynamic-plan reach
 set (BR-22.6, domain only) and the forecast history window in `forecast-py`.
 Slice 7 adds coverage groups as persisted setup (FR-22.2), auto-firming of
 planned orders inside the firming time fence during a run (BR-22.4), and
-resumable batch generation in `forecast-py` (FR-22.9, 4.22.16).
+resumable batch generation in `forecast-py` (FR-22.9, 4.22.16). Slice 9 adds
+item coverage as persisted setup. Slice 10 adds DDMRP buffer profiles, stored
+buffers with recalculation and the buffer status inquiry (FR-22.16), and quota
+arrangements with their sources (FR-22.17), each with web screens.
 What is not built yet is listed in
 [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
 
@@ -31,7 +34,8 @@ cmd/planning/          entrypoint: dbx.Connect -> dbx.Migrate (MIGRATE_ON_START=
 internal/domain/       pure engine: low-level codes, lot sizing, netting, pegging, messages, delay propagation, plan hash,
                        work calendar (calendar.go), net requirements view (netreq.go), forecast consensus
                        (consensus.go), dynamic-plan reach set (reach.go), coverage group setup rules (coveragegroup.go),
-                       item coverage setup rules (itemcoverage.go);
+                       item coverage setup rules (itemcoverage.go), buffer profile and quota arrangement setup rules
+                       (buffer_profile.go, quota_arrangement.go);
                        calculators: ddmrp.go, quota.go, strategy.go, shelflife.go, projection.go
 internal/store/        Postgres repository (pgx); a plan run is one transaction with its outbox events
 internal/api/          HTTP handlers under /v1/planning, RFC 9457 problems, /readyz with a database ping
@@ -43,6 +47,8 @@ migrations/            0001_init.sql (plan, plan_version, planned_order, pegging
                        0005_increase_and_consensus.sql (increase action, forecast_model consensus status, forecast_line writer)
                        0006_coverage_groups.sql (coverage_group setup with the FR-22.2 defaults and checks; RLS)
                        0007_item_coverage.sql (item_coverage per item, site and planning scope; RLS)
+                       0008_buffer_profile_ddmrp.sql (buffer_profile, ddmrp_buffer per item/site/warehouse, item_coverage profile FK; RLS)
+                       0009_quota_arrangement.sql (quota_arrangement, quota_source; RLS)
 api/openapi.yaml       OpenAPI 3.1 for every exposed endpoint (kept in step by TestOpenAPI_MatchesRoutes)
 events/asyncapi.yaml   AsyncAPI 3 for every event published
 charts/planning/       Helm chart (deployment, service, servicemonitor toggle)
@@ -253,6 +259,41 @@ orders forward: until the target orders reach the snapshot as receipts, the
 caller sends them as `receipts`, or the next run would plan (and firm) the same
 demand again.
 
+## Buffer profiles, stored buffers and quota arrangements (slice 10)
+
+DDMRP buffer profiles (FR-22.16, data model BufferProfile) are planning setup
+under `planning.setup.maintain`: `POST /buffer-profiles` (optional
+`Idempotency-Key`), `PUT /buffer-profiles/{id}` under `If-Match`, and `GET`
+lists or reads them. A profile holds the item type, LTF and VF (numeric(5,3)),
+order cycle, MOQ, spike threshold (1 to 500 percent of red, default 50), spike
+horizon (null means the item's DLT) and the ADU window (default 90 past, 0
+future days; at least 7 days together). A code in use is 409
+`PLAN-PROFILE-EXISTS`. Item coverage's `bufferProfileId` now refers to a stored
+profile: an unknown one is 422 `PLAN-PROFILE-NOT-FOUND` (the constraint is
+`NOT VALID`, so rows written before the profile table existed are kept).
+
+`POST /ddmrp/buffers:recalculate` (`planning.run`, the run-side job of
+4.22.16) evaluates one buffer with its stored profile through the same code as
+`:evaluate` (BR-22.11) and upserts the result per item, site and warehouse in
+one statement, so a repeat replaces the row and needs no Idempotency-Key. The
+caller sends ADU (or history), DLT, DAF, on-hand, open supply and the demand
+days until the run supplies them. `GET /ddmrp/buffers?siteId=&zone=&maxPriority=`
+is the DDMRP buffer status inquiry (4.22.14), most urgent (lowest NFP / TOG)
+first.
+
+Quota arrangements (FR-22.17, data model QuotaArrangement and QuotaSource) are
+planning setup too: `POST /quota-arrangements` (optional `Idempotency-Key`),
+`PUT /quota-arrangements/{id}` under `If-Match` (replaces all sources), and
+`GET` lists (`?itemId=&siteId=&validOn=`) or reads them. Each source names
+exactly the reference of its type (vendor, production version or
+from-warehouse), at most once per arrangement, with quota, base, allocated
+(carried over on create), an optional maximum per period with its period
+length, priority and a blocked flag; the quotas must add up to more than 0.
+Validity periods (inclusive) of arrangements for the same item and site must
+not overlap: 409 `PLAN-QUOTA-OVERLAP`, checked under a transaction advisory
+lock on the item and site. Responses carry each source's BR-22.12 rating. A run
+does not use buffers or arrangements yet (NOT-IMPLEMENTED.md).
+
 ## Planning calculators (slice 3)
 
 Five POST endpoints compute a result from the request and store nothing, so they
@@ -308,6 +349,16 @@ NOT-IMPLEMENTED.md):
 | POST | `/v1/planning/item-coverages` | `planning.setup.maintain` (Idempotency-Key optional) |
 | GET | `/v1/planning/item-coverages/{id}` | `planning.read` |
 | PUT | `/v1/planning/item-coverages/{id}` | `planning.setup.maintain` (If-Match required) |
+| GET | `/v1/planning/buffer-profiles?limit=` | `planning.read` |
+| POST | `/v1/planning/buffer-profiles` | `planning.setup.maintain` (Idempotency-Key optional) |
+| GET | `/v1/planning/buffer-profiles/{id}` | `planning.read` |
+| PUT | `/v1/planning/buffer-profiles/{id}` | `planning.setup.maintain` (If-Match required) |
+| GET | `/v1/planning/ddmrp/buffers?siteId=&zone=&maxPriority=&limit=` | `planning.read` |
+| POST | `/v1/planning/ddmrp/buffers:recalculate` | `planning.run` (upsert per scope; no Idempotency-Key) |
+| GET | `/v1/planning/quota-arrangements?itemId=&siteId=&validOn=&limit=` | `planning.read` |
+| POST | `/v1/planning/quota-arrangements` | `planning.setup.maintain` (Idempotency-Key optional) |
+| GET | `/v1/planning/quota-arrangements/{id}` | `planning.read` |
+| PUT | `/v1/planning/quota-arrangements/{id}` | `planning.setup.maintain` (If-Match required) |
 
 The web module calls these under `/api/v1/planning/...`; the BFF strips `/api`.
 A run is synchronous in slice 1: the engine runs in the request and the store
@@ -327,6 +378,8 @@ swaps the current pointer.
 | 404 | `PLAN-FORECAST-NOT-FOUND` | No such forecast model (422 when a run names it) |
 | 404 | `PLAN-COVERAGE-NOT-FOUND` | No such coverage group |
 | 404 | `PLAN-ITEM-COVERAGE-NOT-FOUND` | No such item coverage |
+| 404 | `PLAN-PROFILE-NOT-FOUND` | No such buffer profile (422 when an item coverage or a recalculation names it) |
+| 404 | `PLAN-QUOTA-NOT-FOUND` | No such quota arrangement |
 | 409 | `PLAN-0001` | `PLAN_ALREADY_RUNNING`: a run of the plan is in progress |
 | 409 | `PLAN-0002` | BR-22.9: a planned order to firm is already firmed |
 | 409 | `PLAN-ORDER-NOT-EDITABLE` | The planned order is firmed, deleted or not in the current version |
@@ -334,16 +387,18 @@ swaps the current pointer.
 | 409 | `PLAN-CONSENSUS-STATE` | The consensus step is not allowed from the model's status |
 | 409 | `PLAN-COVERAGE-EXISTS` | A coverage group with the code already exists |
 | 409 | `PLAN-ITEM-COVERAGE-EXISTS` | The item already has a coverage for that site and planning scope |
+| 409 | `PLAN-PROFILE-EXISTS` | A buffer profile with the code already exists |
+| 409 | `PLAN-QUOTA-OVERLAP` | The validity overlaps another quota arrangement of the same item and site |
 | 422 | `PLAN-COVERAGE-GROUP-UNKNOWN` | An item coverage names a coverage group the tenant does not have |
 | 422 | `PLAN-CONSENSUS-EMPTY` | A forecast model without cells cannot be submitted |
-| 412 | `conflict_version` | If-Match is not the current version of the order, forecast model, coverage group or item coverage |
+| 412 | `conflict_version` | If-Match is not the current version of the order, forecast model, coverage group, item coverage, buffer profile or quota arrangement |
 | 422 | `PLAN-ORDER-INVALID` | Order date after delivery date, or a vendor on a non-purchase order |
 | 428 | `precondition_required` | If-Match missing on a maintenance write |
 | 422 | `PLAN-0004` | BOM cycle; low-level codes cannot be assigned |
 | 422 | `PLAN-0005` | A requirement would split into more than 1,000 orders |
 | 422 | `PLAN-0009` | Quota arrangement has no usable source (all blocked, or quota 0 with others blocked) |
 | 422 | `PLAN-INPUT-INVALID` | Snapshot rejected by the engine (unknown coverage or order type, duplicate or unknown item), or calculator input the domain rejects (empty ADU window); `detail` names it |
-| 422 | `idempotency_key_reuse` | Same Idempotency-Key with a different plan or snapshot, different orders or grouping on firming, or another coverage group or item coverage body |
+| 422 | `idempotency_key_reuse` | Same Idempotency-Key with a different plan or snapshot, different orders or grouping on firming, or another coverage group, item coverage, buffer profile or quota arrangement body |
 
 ## Wave reference
 
