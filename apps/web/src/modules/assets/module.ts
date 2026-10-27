@@ -6,9 +6,11 @@ import { AdjustPage } from "./AdjustPage";
 import { AssetDetailPage } from "./AssetDetailPage";
 import { AssetsPage } from "./AssetsPage";
 import { CapexDetailPage, CapexListPage, NewCapexPage } from "./CapexPage";
+import { CountSessionDetailPage, CountSessionsPage, NewCountSessionPage } from "./CountPage";
 import { DisposePage } from "./DisposePage";
 import { IndexSeriesPage, NewPolicyPage } from "./InsurancePage";
-import { LeaseDetailPage } from "./LeaseDetailPage";
+import { InsuranceReportPage } from "./InsuranceReportPage";
+import { LeaseDetailPage, ModifyLeasePage } from "./LeaseDetailPage";
 import { LeasesPage, NewLeasePage } from "./LeasesPage";
 import { NewAssetPage } from "./NewAssetPage";
 import { RunDetailPage, RunsPage } from "./RunsPage";
@@ -17,13 +19,18 @@ const assets: PassageModule = {
   id: "assets",
   title: "Fixed assets",
   description:
-    "Keep the asset register, add depreciation books and preview their schedules, post adjustments, impairments and additions, run and post depreciation, record insurance policies, raise capex requests, dispose of assets by sale or scrap, and recognize IFRS 16 leases.",
+    "Keep the asset register, add depreciation books and preview their schedules, post adjustments, impairments and additions, run and post depreciation, record insurance policies and review the insurance report, count assets on site, raise capex requests, dispose of assets by sale or scrap, and recognize and remeasure IFRS 16 leases.",
   routes: [
     { path: "/assets", element: createElement(AssetsPage), handle: { title: "Asset register" } },
     { path: "/assets/new", element: createElement(NewAssetPage), handle: { title: "New asset" } },
     { path: "/assets/leases", element: createElement(LeasesPage), handle: { title: "Leases" } },
     { path: "/assets/leases/new", element: createElement(NewLeasePage), handle: { title: "New lease" } },
     { path: "/assets/leases/:id", element: createElement(LeaseDetailPage), handle: { title: "Lease" } },
+    { path: "/assets/leases/:id/modify", element: createElement(ModifyLeasePage), handle: { title: "Modify lease" } },
+    { path: "/assets/count-sessions", element: createElement(CountSessionsPage), handle: { title: "Count sessions" } },
+    { path: "/assets/count-sessions/new", element: createElement(NewCountSessionPage), handle: { title: "New count session" } },
+    { path: "/assets/count-sessions/:id", element: createElement(CountSessionDetailPage), handle: { title: "Count session" } },
+    { path: "/assets/insurance-report", element: createElement(InsuranceReportPage), handle: { title: "Insurance report" } },
     { path: "/assets/depreciation-runs", element: createElement(RunsPage), handle: { title: "Depreciation runs" } },
     { path: "/assets/depreciation-runs/:id", element: createElement(RunDetailPage), handle: { title: "Depreciation run" } },
     { path: "/assets/capex", element: createElement(CapexListPage), handle: { title: "Capex requests" } },
@@ -43,6 +50,8 @@ const assets: PassageModule = {
     { label: "Depreciation runs", to: "/assets/depreciation-runs", duty: "AssetDepreciate" },
     { label: "Capex requests", to: "/assets/capex", duty: "CapexRequestCreate" },
     { label: "Index series", to: "/assets/index-series", duty: "AssetInsuranceMaintain" },
+    { label: "Insurance report", to: "/assets/insurance-report", duty: "AssetView" },
+    { label: "Count sessions", to: "/assets/count-sessions", duty: "AssetCount" },
     { label: "Leases", to: "/assets/leases", duty: "LeaseMaintain" },
   ],
 };

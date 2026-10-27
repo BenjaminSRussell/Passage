@@ -189,23 +189,29 @@ type Disposal struct {
 }
 
 // Lease is an IFRS 16 lease with its recognized balances and schedule.
+// Liability and ROUAsset are the amounts at initial recognition; every
+// remeasurement is listed in Modifications and reflected in the schedule
+// (BR-37.8). PaymentAmount, TermMonths and IBRRate are the terms in force.
+// RateMethod is Nominal or Effective (lease.periodicRateMethod).
 type Lease struct {
-	ID               string          `json:"id"`
-	LegalEntityID    string          `json:"legalEntityId"`
-	LeaseNumber      string          `json:"leaseNumber"`
-	CommencementDate Date            `json:"commencementDate"`
-	TermMonths       int             `json:"termMonths"`
-	PaymentsPerYear  int             `json:"paymentsPerYear"`
-	PaymentAmount    decimal.Decimal `json:"paymentAmount"`
-	PaymentTiming    string          `json:"paymentTiming"`
-	IBRRate          decimal.Decimal `json:"ibrRate"`
-	Currency         string          `json:"currency"`
-	Liability        decimal.Decimal `json:"liability"`
-	ROUAsset         decimal.Decimal `json:"rouAsset"`
-	Status           string          `json:"status"`
-	Version          int             `json:"version"`
-	CreatedAt        time.Time       `json:"createdAt"`
-	Schedule         []LeaseLine     `json:"schedule,omitempty"`
+	ID               string              `json:"id"`
+	LegalEntityID    string              `json:"legalEntityId"`
+	LeaseNumber      string              `json:"leaseNumber"`
+	CommencementDate Date                `json:"commencementDate"`
+	TermMonths       int                 `json:"termMonths"`
+	PaymentsPerYear  int                 `json:"paymentsPerYear"`
+	PaymentAmount    decimal.Decimal     `json:"paymentAmount"`
+	PaymentTiming    string              `json:"paymentTiming"`
+	IBRRate          decimal.Decimal     `json:"ibrRate"`
+	RateMethod       string              `json:"rateMethod"`
+	Currency         string              `json:"currency"`
+	Liability        decimal.Decimal     `json:"liability"`
+	ROUAsset         decimal.Decimal     `json:"rouAsset"`
+	Status           string              `json:"status"`
+	Version          int                 `json:"version"`
+	CreatedAt        time.Time           `json:"createdAt"`
+	Schedule         []LeaseLine         `json:"schedule,omitempty"`
+	Modifications    []LeaseModification `json:"modifications,omitempty"`
 }
 
 // LeaseFilter narrows ListLeases. After is the id of the last lease of the
@@ -222,10 +228,13 @@ type LeasePage struct {
 	NextCursor string  `json:"nextCursor,omitempty"`
 }
 
-// LeaseLine is one row of lease_schedule_line.
+// LeaseLine is one row of lease_schedule_line. Remeasurement is the
+// modification adjustment added to Opening before the period's payment and
+// interest (zero except on the first period after a modification).
 type LeaseLine struct {
 	PeriodNo        int             `json:"periodNo"`
 	Opening         decimal.Decimal `json:"opening"`
+	Remeasurement   decimal.Decimal `json:"remeasurement"`
 	Interest        decimal.Decimal `json:"interest"`
 	Payment         decimal.Decimal `json:"payment"`
 	Closing         decimal.Decimal `json:"closing"`

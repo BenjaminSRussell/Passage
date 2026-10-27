@@ -109,7 +109,7 @@ func (f *fakeStore) Dispose(_ context.Context, assetID string, in store.Disposal
 }
 
 func (f *fakeStore) CreateLease(_ context.Context, in store.Lease, _ string) (store.Lease, error) {
-	in.ID, in.Status = ids.New(), "Active"
+	in.ID, in.Status, in.Version = ids.New(), "Active", 1
 	f.leases[in.ID] = in
 	return in, nil
 }

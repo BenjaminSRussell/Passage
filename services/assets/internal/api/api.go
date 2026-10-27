@@ -1,7 +1,8 @@
 // Package api exposes the assets HTTP surface: asset register, books, the
 // projected depreciation schedule, transactions and adjustments, additions,
-// depreciation runs, disposal, insurance policies and index series, capex
-// requests and IFRS 16 leases.
+// depreciation runs, disposal, insurance policies, index series and the
+// insurance report, capex requests, physical inventory count sessions and
+// IFRS 16 leases with their remeasurement.
 package api
 
 import (
@@ -40,6 +41,8 @@ const (
 	DutyInsuranceMaintain = "AssetInsuranceMaintain"
 	// DutyCapexCreate covers capital appropriation requests and their submission (FR-37.17).
 	DutyCapexCreate = "CapexRequestCreate"
+	// DutyCount covers physical inventory count sessions (FR-37.11).
+	DutyCount = "AssetCount"
 )
 
 const (
@@ -72,6 +75,9 @@ type API struct {
 	added    atomic.Int64
 	runs     atomic.Int64
 	capex    atomic.Int64
+	// Slice 3: lease remeasurements and count sessions.
+	remeasured atomic.Int64
+	counted    atomic.Int64
 }
 
 // New returns an API over s.
@@ -92,6 +98,7 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(DutyLeaseMaintain)).Post("/v1/leases", a.createLease)
 		r.With(authz.RequireDuty(DutyLeaseMaintain)).Get("/v1/leases", a.listLeases)
 		r.With(authz.RequireDuty(DutyLeaseMaintain)).Get("/v1/leases/{id}", a.getLease)
+		r.With(authz.RequireDuty(DutyLeaseMaintain)).Post("/v1/leases/{id}/modify", a.modifyLease)
 
 		r.With(authz.RequireDuty(DutyPostJournal)).Post("/v1/assets/{id}/transactions", a.adjust)
 		r.With(authz.RequireDuty(DutyMaintain)).Post("/v1/assets/{id}/additions", a.addAddition)
@@ -110,6 +117,11 @@ func (a *API) Register(r chi.Router) {
 		r.With(requireAny(DutyView, DutyCapexCreate)).Get("/v1/assets/capex-requests", a.listCapexRequests)
 		r.With(requireAny(DutyView, DutyCapexCreate)).Get("/v1/assets/capex-requests/{id}", a.getCapexRequest)
 		r.With(authz.RequireDuty(DutyCapexCreate)).Post("/v1/assets/capex-requests/{id}/submit", a.submitCapexRequest)
+
+		r.With(authz.RequireDuty(DutyCount)).Post("/v1/assets/count-sessions", a.createCountSession)
+		r.With(requireAny(DutyView, DutyCount)).Get("/v1/assets/count-sessions", a.listCountSessions)
+		r.With(requireAny(DutyView, DutyCount)).Get("/v1/assets/count-sessions/{id}", a.getCountSession)
+		r.With(requireAny(DutyView, DutyInsuranceMaintain)).Get("/v1/assets/insurance-report", a.insuranceReport)
 	})
 }
 
@@ -136,6 +148,8 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# TYPE assets_additions_total counter\nassets_additions_total %d\n", a.added.Load())
 		fmt.Fprintf(w, "# TYPE assets_depreciation_runs_posted_total counter\nassets_depreciation_runs_posted_total %d\n", a.runs.Load())
 		fmt.Fprintf(w, "# TYPE assets_capex_requests_total counter\nassets_capex_requests_total %d\n", a.capex.Load())
+		fmt.Fprintf(w, "# TYPE assets_leases_remeasured_total counter\nassets_leases_remeasured_total %d\n", a.remeasured.Load())
+		fmt.Fprintf(w, "# TYPE assets_count_sessions_total counter\nassets_count_sessions_total %d\n", a.counted.Load())
 	})
 }
 
@@ -204,6 +218,7 @@ type leaseRequest struct {
 	PaymentAmount    string `json:"paymentAmount"`
 	PaymentTiming    string `json:"paymentTiming"`
 	IBRRate          string `json:"ibrRate"`
+	RateMethod       string `json:"rateMethod"`
 	Currency         string `json:"currency"`
 }
 
@@ -558,6 +573,12 @@ func (a *API) createLease(w http.ResponseWriter, r *http.Request) {
 	if rerr != nil {
 		fields["ibrRate"] = "must be a decimal such as 0.05"
 	}
+	if req.RateMethod == "" {
+		req.RateMethod = domain.RateNominal
+	}
+	if req.RateMethod != domain.RateNominal && req.RateMethod != domain.RateEffective {
+		fields["rateMethod"] = "must be Nominal or Effective"
+	}
 	if len(fields) > 0 {
 		writeValidation(w, r, fields)
 		return
@@ -567,20 +588,21 @@ func (a *API) createLease(w http.ResponseWriter, r *http.Request) {
 	}
 	payment = payment.Round(money.MinorUnits(req.Currency))
 	sched, err := domain.ComputeLease(domain.LeaseTerms{Payment: payment, PaymentsPerYear: req.PaymentsPerYear, TermMonths: req.TermMonths,
-		Advance: req.PaymentTiming == "advance", AnnualRate: rate, Currency: req.Currency})
+		Advance: req.PaymentTiming == "advance", AnnualRate: rate, Currency: req.Currency, RateMethod: req.RateMethod})
 	if err != nil {
 		writeDomain(w, r, err)
 		return
 	}
 	lease := store.Lease{LegalEntityID: req.LegalEntityID, LeaseNumber: strings.TrimSpace(req.LeaseNumber), CommencementDate: commencement,
 		TermMonths: req.TermMonths, PaymentsPerYear: req.PaymentsPerYear, PaymentAmount: payment, PaymentTiming: req.PaymentTiming,
-		IBRRate: rate, Currency: req.Currency, Liability: sched.Liability, ROUAsset: sched.ROUAsset, Schedule: toLeaseLines(sched.Lines)}
+		IBRRate: rate, RateMethod: req.RateMethod, Currency: req.Currency, Liability: sched.Liability, ROUAsset: sched.ROUAsset, Schedule: toLeaseLines(sched.Lines)}
 	created, err := a.store.CreateLease(r.Context(), lease, key)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}
 	a.leased.Add(1)
+	setETag(w, created.Version)
 	httpx.JSON(w, http.StatusCreated, created)
 }
 
@@ -614,13 +636,15 @@ func (a *API) getLease(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
+	setETag(w, lease.Version)
 	httpx.JSON(w, http.StatusOK, lease)
 }
 
 func toLeaseLines(in []domain.LeaseLine) []store.LeaseLine {
 	out := make([]store.LeaseLine, 0, len(in))
 	for _, l := range in {
-		out = append(out, store.LeaseLine{PeriodNo: l.PeriodNo, Opening: l.Opening, Interest: l.Interest, Payment: l.Payment, Closing: l.Closing, ROUDepreciation: l.ROUDepreciation})
+		out = append(out, store.LeaseLine{PeriodNo: l.PeriodNo, Opening: l.Opening, Remeasurement: l.Remeasurement, Interest: l.Interest, Payment: l.Payment,
+			Closing: l.Closing, ROUDepreciation: l.ROUDepreciation})
 	}
 	return out
 }

@@ -76,6 +76,12 @@ type Store interface {
 	GetCapexRequest(ctx context.Context, id string) (CapexRequest, error)
 	SubmitCapexRequest(ctx context.Context, id string, in SubmitInput) (CapexRequest, error)
 
+	ModifyLease(ctx context.Context, leaseID string, in LeaseModificationInput, idempotencyKey string) (LeaseModificationResult, error)
+	CreateCountSession(ctx context.Context, in CountSessionInput, idempotencyKey string) (CountSession, error)
+	ListCountSessions(ctx context.Context, f CountFilter) (CountPage, error)
+	GetCountSession(ctx context.Context, id string) (CountSession, error)
+	InsuranceReport(ctx context.Context, f InsuranceReportFilter) (InsuranceReport, error)
+
 	Ping(ctx context.Context) error
 }
 
@@ -108,7 +114,7 @@ const (
 		in_service_date, cost, accumulated_depreciation, nbv, status, last_depreciated_period, coalesce(acquisition_cost, cost)`
 	txColumns = `t.id, t.asset_book_id, b.book_code, b.currency, t.type, t.transaction_date, t.cost_amount, t.accumulated_amount, t.proceeds_amount, t.gain_loss,
 		t.impairment_amount, t.source_type, t.source_id, t.run_id, t.created_at`
-	leaseColumns = "id, legal_entity_id, lease_number, commencement_date, term_months, payments_per_year, payment_amount, payment_timing, ibr_rate, currency, liability, rou_asset, status, version, created_at"
+	leaseColumns = "id, legal_entity_id, lease_number, commencement_date, term_months, payments_per_year, payment_amount, payment_timing, ibr_rate, rate_method, currency, liability, rou_asset, status, version, created_at"
 )
 
 func principal(ctx context.Context) tenant.Principal {
@@ -214,7 +220,7 @@ func scanTx(row pgx.Row) (Transaction, error) {
 func scanLease(row pgx.Row) (Lease, error) {
 	var l Lease
 	err := row.Scan(&l.ID, &l.LegalEntityID, &l.LeaseNumber, &l.CommencementDate, &l.TermMonths, &l.PaymentsPerYear, &l.PaymentAmount,
-		&l.PaymentTiming, &l.IBRRate, &l.Currency, &l.Liability, &l.ROUAsset, &l.Status, &l.Version, &l.CreatedAt)
+		&l.PaymentTiming, &l.IBRRate, &l.RateMethod, &l.Currency, &l.Liability, &l.ROUAsset, &l.Status, &l.Version, &l.CreatedAt)
 	return l, err
 }
 
@@ -552,29 +558,30 @@ func (s *Postgres) Dispose(ctx context.Context, assetID string, in DisposalInput
 func (s *Postgres) CreateLease(ctx context.Context, in Lease, idempotencyKey string) (Lease, error) {
 	p := principal(ctx)
 	var out Lease
+	if in.RateMethod == "" {
+		in.RateMethod = domain.RateNominal
+	}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		request := struct {
-			LegalEntityID, LeaseNumber, CommencementDate, PaymentAmount, PaymentTiming, IBRRate, Currency string
-			TermMonths, PaymentsPerYear                                                                   int
-		}{in.LegalEntityID, in.LeaseNumber, in.CommencementDate.String(), in.PaymentAmount.String(), in.PaymentTiming, in.IBRRate.String(), in.Currency,
-			in.TermMonths, in.PaymentsPerYear}
+			LegalEntityID, LeaseNumber, CommencementDate, PaymentAmount, PaymentTiming, IBRRate, RateMethod, Currency string
+			TermMonths, PaymentsPerYear                                                                               int
+		}{in.LegalEntityID, in.LeaseNumber, in.CommencementDate.String(), in.PaymentAmount.String(), in.PaymentTiming, in.IBRRate.String(), in.RateMethod,
+			in.Currency, in.TermMonths, in.PaymentsPerYear}
 		var err error
 		out, err = idempotent(ctx, tx, p.TenantID, idempotencyKey, "lease.create", request, func() (Lease, error) {
 			row, err := scanLease(tx.QueryRow(ctx, `insert into lease (tenant_id, id, legal_entity_id, lease_number, commencement_date, term_months, payments_per_year,
-				payment_amount, payment_timing, ibr_rate, currency, liability, rou_asset)
-				values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) returning `+leaseColumns,
+				payment_amount, payment_timing, ibr_rate, rate_method, currency, liability, rou_asset)
+				values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) returning `+leaseColumns,
 				p.TenantID, ids.New(), in.LegalEntityID, in.LeaseNumber, in.CommencementDate, in.TermMonths, in.PaymentsPerYear, in.PaymentAmount,
-				in.PaymentTiming, in.IBRRate, in.Currency, in.Liability, in.ROUAsset))
+				in.PaymentTiming, in.IBRRate, in.RateMethod, in.Currency, in.Liability, in.ROUAsset))
 			if err != nil {
 				return Lease{}, err
 			}
-			for _, l := range in.Schedule {
-				if _, err := tx.Exec(ctx, `insert into lease_schedule_line (tenant_id, lease_id, legal_entity_id, period_no, opening_liability, interest, payment, closing_liability, rou_depreciation)
-					values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`, p.TenantID, row.ID, row.LegalEntityID, l.PeriodNo, l.Opening, l.Interest, l.Payment, l.Closing, l.ROUDepreciation); err != nil {
-					return Lease{}, err
-				}
+			if err := insertLeaseLines(ctx, tx, p.TenantID, row, in.Schedule); err != nil {
+				return Lease{}, err
 			}
 			row.Schedule = in.Schedule
+			row.Modifications = []LeaseModification{}
 			return row, enqueue(ctx, tx, "lease", row.ID, assetevents.LeaseRecognized, p.TenantID, assetevents.LeaseRecognizedData{
 				LeaseID: row.ID, Liability: row.Liability.String(), ROUAsset: row.ROUAsset.String(), Currency: row.Currency,
 				TermMonths: row.TermMonths, Rate: row.IBRRate.String(),
@@ -619,34 +626,14 @@ func (s *Postgres) ListLeases(ctx context.Context, f LeaseFilter) (LeasePage, er
 	return page, err
 }
 
-// GetLease reads a lease with its schedule.
+// GetLease reads a lease with its schedule and modifications.
 func (s *Postgres) GetLease(ctx context.Context, id string) (Lease, error) {
 	p := principal(ctx)
 	var l Lease
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
-		l, err = scanLease(tx.QueryRow(ctx, `select `+leaseColumns+` from lease where tenant_id = $1 and id = $2`, p.TenantID, id))
-		if errors.Is(err, pgx.ErrNoRows) {
-			return notFound(CodeLeaseNotFound, "no lease with id "+id)
-		}
-		if err != nil {
-			return err
-		}
-		rows, err := tx.Query(ctx, `select period_no, opening_liability, interest, payment, closing_liability, rou_depreciation
-			from lease_schedule_line where tenant_id = $1 and lease_id = $2 order by period_no`, p.TenantID, id)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		l.Schedule = []LeaseLine{}
-		for rows.Next() {
-			var line LeaseLine
-			if err := rows.Scan(&line.PeriodNo, &line.Opening, &line.Interest, &line.Payment, &line.Closing, &line.ROUDepreciation); err != nil {
-				return err
-			}
-			l.Schedule = append(l.Schedule, line)
-		}
-		return rows.Err()
+		l, err = loadLease(ctx, tx, p.TenantID, id, false)
+		return err
 	})
 	return l, err
 }

@@ -363,7 +363,7 @@ func TestStore_RowLevelSecurity(t *testing.T) {
 	}
 	for _, table := range []string{"asset", "asset_book", "asset_transaction", "lease", "lease_schedule_line", "outbox", "idempotency_keys",
 		"depreciation_run", "depreciation_run_line", "asset_addition", "asset_index_series", "asset_index_value", "asset_insurance_policy",
-		"capex_request", "capex_request_variant"} {
+		"capex_request", "capex_request_variant", "lease_modification", "asset_count_session", "asset_count_line"} {
 		var enabled, forced bool
 		if err := admin.QueryRow(ctx, `select relrowsecurity, relforcerowsecurity from pg_class where relname = $1 and relnamespace = $2::regnamespace`, table, schema).Scan(&enabled, &forced); err != nil {
 			t.Fatal(table, err)
@@ -409,5 +409,32 @@ func TestStore_RowLevelSecurity(t *testing.T) {
 	}
 	if _, err := s.GetCapexRequest(scoped(1, leA), cr.ID); problemCode(err) != store.CodeCapexNotFound {
 		t.Fatalf("scope A reads B's capex request: err = %v", err)
+	}
+	// Slice 3: a remeasurement, a count session and the insurance report stay
+	// inside their entity, and run as the application role.
+	lease := workedLease(t, s, scoped(1, leA), leA, "L-RLS")
+	if _, err := s.ModifyLease(scoped(1, leA), lease.ID, store.LeaseModificationInput{Version: 1, EffectivePeriod: 3, PaymentAmount: d("12000")}, "rls-mod"); err != nil {
+		t.Fatalf("modify as the app role: %v", err)
+	}
+	if _, err := s.ModifyLease(scoped(1, leB), lease.ID, store.LeaseModificationInput{Version: 2, EffectivePeriod: 4, PaymentAmount: d("1")}, "rls-mod-b"); problemCode(err) != store.CodeLeaseNotFound {
+		t.Fatalf("scope B modifies A's lease: err = %v", err)
+	}
+	session, err := s.CreateCountSession(scoped(1, leA), store.CountSessionInput{LegalEntityID: leA, Location: "Site A", CountedDate: day("2026-04-01"),
+		Barcodes: []string{"NOPE"}}, "rls-count")
+	if err != nil || session.UnknownCount != 1 {
+		t.Fatalf("count as the app role = %+v, %v", session, err)
+	}
+	if _, err := s.GetCountSession(scoped(1, leB), session.ID); problemCode(err) != store.CodeCountSessionNotFound {
+		t.Fatalf("scope B reads A's count session: err = %v", err)
+	}
+	if page, err := s.ListCountSessions(scoped(2, ""), store.CountFilter{Limit: 50}); err != nil || len(page.Items) != 0 {
+		t.Fatalf("tenant 2 sees count sessions %+v, %v", page, err)
+	}
+	if _, err := s.CreateCountSession(scoped(1, leA), store.CountSessionInput{LegalEntityID: leB, Location: "Site B", CountedDate: day("2026-04-01"),
+		Barcodes: []string{}}, "rls-count-b"); err == nil {
+		t.Fatal("count session outside the legal-entity scope was accepted")
+	}
+	if report, err := s.InsuranceReport(scoped(1, leB), store.InsuranceReportFilter{LegalEntityID: leA, AsOf: day("2026-04-01"), Limit: 50}); err != nil || len(report.Items) != 0 {
+		t.Fatalf("scope B reads A's insurance report: %+v, %v", report, err)
 	}
 }

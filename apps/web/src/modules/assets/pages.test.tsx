@@ -373,7 +373,7 @@ describe("leases", () => {
     fireEvent.click(within(table).getByRole("button", { name: "L-2026-01" }));
     const sched = await screen.findByRole("table", { name: "Lease schedule" });
     expect(within(sched).getByText("476.18")).toBeInTheDocument();
-    expect(screen.getByRole("list", { name: "Lease balances" })).toHaveTextContent("Lease liability 43294.77 USD");
+    expect(screen.getByRole("list", { name: "Lease balances" })).toHaveTextContent("Recognized liability 43294.77 USD");
   });
 
   it("shows the empty state", async () => {
@@ -401,7 +401,7 @@ describe("leases", () => {
     expect(await screen.findByRole("heading", { name: "Lease L-2026-01" })).toBeInTheDocument();
     const post = calls.find((c) => c.method === "POST");
     expect(post?.url.pathname).toBe("/api/v1/leases");
-    expect(post?.body).toEqual({ legalEntityId: LE, leaseNumber: "L-2026-01", commencementDate: "2026-01-01", termMonths: 60, paymentsPerYear: 1, paymentAmount: "10000", paymentTiming: "arrears", ibrRate: "0.05", currency: "USD" });
+    expect(post?.body).toEqual({ legalEntityId: LE, leaseNumber: "L-2026-01", commencementDate: "2026-01-01", termMonths: 60, paymentsPerYear: 1, paymentAmount: "10000", paymentTiming: "arrears", ibrRate: "0.05", rateMethod: "Nominal", currency: "USD" });
   });
 
   it("shows the IBR range error from the service", async () => {

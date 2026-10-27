@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
-import { createLease, describeProblem, listLeases, newKey, PAYMENTS_PER_YEAR, type Lease, type NewLease, type Problem } from "./api/client";
+import { createLease, describeProblem, listLeases, newKey, PAYMENTS_PER_YEAR, RATE_METHODS, type Lease, type NewLease, type Problem, type RateMethod } from "./api/client";
 import { StatusBadge } from "./badges";
 import { DATE, DECIMAL, money, percent, today, UUID } from "./format";
 import styles from "./pages.module.css";
@@ -100,6 +100,7 @@ export interface LeaseValues {
   paymentAmount: string;
   paymentTiming: "arrears" | "advance";
   ibrRate: string;
+  rateMethod?: RateMethod;
   currency: string;
 }
 
@@ -135,6 +136,7 @@ export function validateLease(values: LeaseValues): { errors: Errors; input?: Ne
       paymentAmount: values.paymentAmount,
       paymentTiming: values.paymentTiming,
       ibrRate: values.ibrRate,
+      rateMethod: values.rateMethod ?? "Nominal",
       currency: values.currency,
     },
   };
@@ -152,6 +154,7 @@ export function NewLeasePage() {
     paymentAmount: "",
     paymentTiming: "arrears",
     ibrRate: "0.05",
+    rateMethod: "Nominal",
     currency: "USD",
   }));
   const [errors, setErrors] = useState<Errors>({});
@@ -184,7 +187,7 @@ export function NewLeasePage() {
     }
   }
 
-  const text = (name: Exclude<keyof LeaseValues, "paymentTiming" | "paymentsPerYear">, label: string, hint?: string, extra: { type?: string; mono?: boolean; upper?: boolean } = {}) => (
+  const text = (name: Exclude<keyof LeaseValues, "paymentTiming" | "paymentsPerYear" | "rateMethod">, label: string, hint?: string, extra: { type?: string; mono?: boolean; upper?: boolean } = {}) => (
     <FormField id={`lease-${name}`} label={label} hint={hint} error={errors[name]}>
       {(control) => (
         <Input
@@ -230,6 +233,17 @@ export function NewLeasePage() {
           {text("paymentAmount", "Payment amount", "Per payment, in the lease currency.")}
           {text("currency", "Currency", undefined, { upper: true })}
           {text("ibrRate", "Incremental borrowing rate", "Annual rate as a decimal: 0.05 is 5%.")}
+          <FormField id="lease-rateMethod" label="Periodic rate" hint="Nominal divides the annual rate by the payments per year; effective compounds back to it.">
+            {(control) => (
+              <Select {...control} value={values.rateMethod} onChange={(e) => update({ rateMethod: e.target.value as RateMethod })}>
+                {RATE_METHODS.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </FormField>
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title={failure.code === "AST-0007" ? "That lease number is taken" : "Could not recognize the lease"} live="alert">

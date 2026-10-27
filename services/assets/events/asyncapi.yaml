@@ -33,6 +33,11 @@ channels:
     messages:
       depreciationPosted:
         $ref: "#/components/messages/DepreciationPosted"
+  leaseRemeasured:
+    address: passage.assets.lease
+    messages:
+      leaseRemeasured:
+        $ref: "#/components/messages/LeaseRemeasured"
 operations:
   publishAssetAcquired:
     action: send
@@ -49,6 +54,9 @@ operations:
   publishDepreciationPosted:
     action: send
     channel: { $ref: "#/channels/depreciationPosted" }
+  publishLeaseRemeasured:
+    action: send
+    channel: { $ref: "#/channels/leaseRemeasured" }
 components:
   messages:
     AssetAdjusted:
@@ -76,6 +84,11 @@ components:
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/LeaseRecognizedData"
+    LeaseRemeasured:
+      name: dev.passage.assets.lease.remeasured.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/LeaseRemeasuredData"
   schemas:
     AssetAcquiredData:
       type: object
@@ -151,3 +164,25 @@ components:
         totalAmount: { type: string, description: "Decimal string" }
         currency: { type: [string, "null"], pattern: "^[A-Z]{3}$", description: "Null when the run had no book" }
         journalEntryId: { type: [string, "null"], format: uuid, description: "Null until the journal integration links the run." }
+    LeaseRemeasuredData:
+      type: object
+      description: |
+        One event per lease modification (POST /v1/leases/{id}/modify, BR-37.8).
+        Not in the PRD event table; added so the ledger and analytics see every
+        change of the lease liability and ROU asset. adjustment is
+        liabilityAfter - liabilityBefore; the ROU moves by rouAdjustment, which
+        equals adjustment unless the ROU reached zero and profitLossExcess went
+        to profit or loss. Aggregate key is the lease id.
+      required: [leaseId, modificationId, effectivePeriod, termMonths, rate, liabilityBefore, liabilityAfter, adjustment, rouAdjustment, profitLossExcess, currency]
+      properties:
+        leaseId: { type: string, format: uuid }
+        modificationId: { type: string, format: uuid }
+        effectivePeriod: { type: integer, description: "First schedule period under the revised terms" }
+        termMonths: { type: integer, description: "Full lease term after the modification" }
+        rate: { type: string, description: "Annual discount rate used for the remeasurement" }
+        liabilityBefore: { type: string }
+        liabilityAfter: { type: string }
+        adjustment: { type: string, description: "Signed decimal string" }
+        rouAdjustment: { type: string, description: "Signed decimal string" }
+        profitLossExcess: { type: string, description: "Non-negative decimal string" }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }

@@ -4,7 +4,7 @@ Module folder: `apps/web/src/modules/assets/`. Discovered by the shell through
 `module.ts` (`id: "assets"`). Pages use the shell primitives from
 `src/shell/ui` and `pages.module.css` tokens only (docs/design-system.md).
 
-## Screens (slices 1 and 2)
+## Screens (slices 1 to 3)
 
 | Route | Page | Duty (nav) | What it does |
 |---|---|---|---|
@@ -23,8 +23,13 @@ Module folder: `apps/web/src/modules/assets/`. Discovered by the shell through
 | `/assets/capex/new` | `NewCapexPage` | CapexRequestCreate | Create a request with one to ten variants (amounts per year as `2026=200000.00` lines) |
 | `/assets/capex/:id` | `CapexDetailPage` | CapexRequestCreate | Request, variants with totals, and Submit of a Draft with the chosen variant (If-Match); shows the approval level it was routed to |
 | `/assets/leases` | `LeasesPage` | LeaseMaintain | Leases with liability, IBR and status |
-| `/assets/leases/new` | `NewLeasePage` | LeaseMaintain | Recognize an IFRS 16 lease |
-| `/assets/leases/:id` | `LeaseDetailPage` | LeaseMaintain | Liability, ROU asset and the full liability / ROU schedule |
+| `/assets/leases/new` | `NewLeasePage` | LeaseMaintain | Recognize an IFRS 16 lease, with the nominal or effective periodic rate |
+| `/assets/leases/:id` | `LeaseDetailPage` | LeaseMaintain | Recognized liability and ROU asset, the terms in force, the remeasurements and the liability / ROU schedule with the remeasurement column |
+| `/assets/leases/:id/modify` | `ModifyLeasePage` | LeaseMaintain | Remeasure from an effective period: a payment change at the lease's rate, or a scope change (revised term and rate); sent with the lease ETag as If-Match; shows the AST-0516 message and any amount sent to profit or loss |
+| `/assets/count-sessions` | `CountSessionsPage` | AssetCount | Physical inventory sessions, newest first, with expected / found / missing / unknown counts |
+| `/assets/count-sessions/new` | `NewCountSessionPage` | AssetCount | Record a count: legal entity, location, date and the scanned barcodes (one per line) |
+| `/assets/count-sessions/:id` | `CountSessionDetailPage` | AssetView | Result tiles, the AST-0525 warnings and the lines (missing, unknown, found) linking to the asset |
+| `/assets/insurance-report` | `InsuranceReportPage` | AssetView | Policies in force on a date for a legal entity, filterable by type and expiry window: sum insured, indexed replacement value, NBV per book, under-insured and expiring-soon flags |
 
 Every page has loading (skeleton or `DataTable loading`), empty (`EmptyState`
 through `DataTable empty`) and error (`Alert` with "Try again") states. Forms
@@ -35,16 +40,18 @@ replays instead of duplicating.
 ## API used
 
 `api/client.ts` calls the `/api/v1/assets...` (including
-`/assets/depreciation-runs`, `/assets/index-series` and
-`/assets/capex-requests`) and `/api/v1/leases...` paths of
+`/assets/depreciation-runs`, `/assets/index-series`,
+`/assets/capex-requests`, `/assets/count-sessions` and
+`/assets/insurance-report`) and `/api/v1/leases...` paths of
 `services/assets/api/openapi.yaml`. Amounts stay decimal strings; the page
 never parses money to floats.
 
 ## Not in this slice
 
-Transfer / split, lease modification, count sessions (PWA), group assets,
-capex approval (wave-4 workflow), run reversal and the workspace tiles are
-later slices of PSG-37 or handoffs (see `services/assets/NOT-IMPLEMENTED.md`).
+Transfer / split, lease termination, the PWA barcode scanner (the count page
+takes pasted or keyed scans), transfer / scrap proposals from a count, group
+assets, capex approval (wave-4 workflow), run reversal and the workspace tiles
+are later slices of PSG-37 or handoffs (see `services/assets/NOT-IMPLEMENTED.md`).
 
 ## Needs
 

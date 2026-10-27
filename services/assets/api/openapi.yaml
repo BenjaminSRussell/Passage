@@ -3,12 +3,13 @@ info:
   title: Passage Assets (fixed assets and leases)
   version: 1.0.0
   description: |
-    Wave 37 slices 1 and 2. Asset register, depreciation books, the schedule
+    Wave 37 slices 1 to 3. Asset register, depreciation books, the schedule
     preview, asset transactions and adjustments (acquisition and depreciation
     adjustments, revaluation, impairment), additions and components,
     depreciation runs (propose and post), disposals, insurance policies with
-    insured-value index series, capital appropriation (capex) requests and
-    IFRS 16 lease recognition. Money and
+    insured-value index series and the insurance report, physical inventory
+    count sessions, capital appropriation (capex) requests, and IFRS 16 lease
+    recognition and remeasurement. Money and
     rates are decimal strings; calendar dates are YYYY-MM-DD. Errors are
     RFC 9457 problem details with a stable `code` (see README). Every command
     takes an Idempotency-Key: a retry with the same key and body replays the
@@ -615,6 +616,104 @@ paths:
           $ref: "#/components/responses/Problem"
         "428":
           $ref: "#/components/responses/Problem"
+  /v1/assets/count-sessions:
+    get:
+      summary: Physical inventory count sessions, newest first (without lines)
+      operationId: listCountSessions
+      x-passage-duty: AssetView or AssetCount
+      parameters:
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
+        - $ref: "#/components/parameters/After"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: One page of count sessions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CountSessionPage"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+    post:
+      summary: Reconcile a physical inventory scan against the register (FR-37.11)
+      description: |
+        Classifies the scanned barcodes against the Open assets of the legal
+        entity that carry a barcode: Found, Missing (expected, not scanned) and
+        Unknown (scanned, not in the register; one AST-0525 warning each). A
+        barcode scanned more than once counts once and adds to duplicateCount.
+        The register is not changed: a counter cannot adjust it (PRD 7.37.17).
+      operationId: createCountSession
+      x-passage-duty: AssetCount
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CountSessionRequest"
+      responses:
+        "201":
+          description: Session reconciled and stored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CountSession"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /v1/assets/count-sessions/{id}:
+    get:
+      summary: Read a count session with its lines and AST-0525 warnings
+      operationId: getCountSession
+      x-passage-duty: AssetView or AssetCount
+      parameters:
+        - $ref: "#/components/parameters/CountSessionId"
+      responses:
+        "200":
+          description: The session; lines are Missing, then Unknown, then Found, each by barcode
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CountSession"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /v1/assets/insurance-report:
+    get:
+      summary: Insurance report of a legal entity (7.37.14)
+      description: |
+        Policies in force on asOf (coverageFrom <= asOf <= coverageTo), ordered
+        by asset number and policy number, with the sum insured, the indexed
+        replacement value, the NBV of every Open book of the asset and the
+        under-insured flag (sum insured below 90% of the indexed value,
+        AST-0532). expiringSoon marks cover that ends within 30 days of asOf.
+      operationId: insuranceReport
+      x-passage-duty: AssetView or AssetInsuranceMaintain
+      parameters:
+        - { name: legalEntityId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: asOf, in: query, description: "Report date; default today (UTC)", schema: { type: string, format: date } }
+        - { name: insuranceType, in: query, schema: { type: string, enum: [Property, MachineryBreakdown, Transit, Fleet] } }
+        - { name: expiringWithinDays, in: query, description: "Only cover ending within this many days of asOf", schema: { type: integer, minimum: 0, maximum: 366 } }
+        - $ref: "#/components/parameters/After"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: One page of the report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InsuranceReport"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
   /v1/assets/{id}/dispose:
     post:
       summary: Dispose (sale or scrap) a percentage of the asset on every Open book
@@ -688,6 +787,8 @@ paths:
       responses:
         "201":
           description: Lease recognized
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
           content:
             application/json:
               schema:
@@ -710,16 +811,65 @@ paths:
       responses:
         "200":
           description: The lease
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Lease"
         "404":
           $ref: "#/components/responses/Problem"
+  /v1/leases/{id}/modify:
+    post:
+      summary: Remeasure a lease on modification (FR-37.10, BR-37.8)
+      description: |
+        Recomputes the liability as the present value of the remaining
+        payments from effectivePeriod on: at the lease's rate for a payment
+        change, at the revised ibrRate for a scope change (a revised term is
+        always a scope change). The schedule lines from effectivePeriod are
+        replaced, earlier lines are kept; the ROU asset moves by the same
+        adjustment, and any part that would take it below zero goes to profit
+        or loss. The lease becomes Modified and the response carries the
+        AST-0516 info message. A period already posted to the ledger cannot be
+        remeasured (AST-0027). Publishes dev.passage.assets.lease.remeasured.v1.
+        Requires If-Match with the lease ETag.
+      operationId: modifyLease
+      x-passage-duty: LeaseMaintain
+      parameters:
+        - $ref: "#/components/parameters/LeaseId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModifyLeaseRequest"
+      responses:
+        "201":
+          description: Lease remeasured
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LeaseModificationResult"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "428":
+          $ref: "#/components/responses/Problem"
 components:
   headers:
     ETag:
-      description: Strong ETag of the resource version (asset, run or capex request), for example "3"
+      description: Strong ETag of the resource version (asset, run, capex request or lease), for example "3"
       schema: { type: string }
   parameters:
     IdempotencyKey:
@@ -750,6 +900,11 @@ components:
       required: true
       schema: { type: string, format: uuid }
     LeaseId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    CountSessionId:
       name: id
       in: path
       required: true
@@ -943,12 +1098,53 @@ components:
         paymentAmount: { type: string }
         paymentTiming: { type: string, enum: [arrears, advance] }
         ibrRate: { type: string, description: "Annual rate in (0, 0.5]; AST-0515 outside" }
+        rateMethod:
+          type: string
+          enum: [Nominal, Effective]
+          default: Nominal
+          description: "lease.periodicRateMethod: Nominal is ibrRate / paymentsPerYear, Effective is (1 + ibrRate)^(1 / paymentsPerYear) - 1"
         currency: { type: string, pattern: "^[A-Z]{3}$" }
+    ModifyLeaseRequest:
+      type: object
+      additionalProperties: false
+      required: [effectivePeriod, paymentAmount]
+      properties:
+        effectivePeriod: { type: integer, minimum: 1, description: "First schedule period under the revised terms; earlier periods are kept" }
+        paymentAmount: { type: string, description: "Revised payment per period, rounded to the currency minor unit" }
+        termMonths: { type: integer, minimum: 1, maximum: 600, description: "Revised full term from commencement; needs scopeChange. Omit to keep the term" }
+        scopeChange: { type: boolean, default: false, description: "A change in scope: remeasure at the revised ibrRate" }
+        ibrRate: { type: string, description: "Revised annual rate in (0, 0.5]; required with scopeChange and refused without it" }
+    LeaseModification:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        leaseId: { type: string, format: uuid }
+        effectivePeriod: { type: integer }
+        termMonths: { type: integer }
+        paymentAmount: { type: string }
+        ibrRate: { type: string }
+        scopeChange: { type: boolean }
+        liabilityBefore: { type: string, description: "Carrying liability at the start of the effective period" }
+        liabilityAfter: { type: string, description: "Present value of the remaining payments under the revised terms" }
+        adjustment: { type: string, description: "liabilityAfter - liabilityBefore" }
+        rouBefore: { type: string }
+        rouAfter: { type: string, description: "Never negative" }
+        rouAdjustment: { type: string, description: "rouAfter - rouBefore; equals adjustment unless the ROU reached zero" }
+        profitLossExcess: { type: string, description: "Part of a negative adjustment beyond the ROU carrying amount, recognized in P&L" }
+        createdAt: { type: string, format: date-time }
+    LeaseModificationResult:
+      type: object
+      required: [modification, lease, messages]
+      properties:
+        modification: { $ref: "#/components/schemas/LeaseModification" }
+        lease: { $ref: "#/components/schemas/Lease" }
+        messages: { type: array, items: { type: string }, description: "The AST-0516 info message" }
     LeaseLine:
       type: object
       properties:
         periodNo: { type: integer }
         opening: { type: string }
+        remeasurement: { type: string, description: "Modification adjustment added to opening before the period's payment and interest" }
         interest: { type: string }
         payment: { type: string }
         closing: { type: string }
@@ -964,10 +1160,11 @@ components:
         paymentsPerYear: { type: integer }
         paymentAmount: { type: string }
         paymentTiming: { type: string, enum: [arrears, advance] }
-        ibrRate: { type: string }
+        ibrRate: { type: string, description: "Rate in force (the revised rate after a scope change)" }
+        rateMethod: { type: string, enum: [Nominal, Effective] }
         currency: { type: string }
-        liability: { type: string }
-        rouAsset: { type: string }
+        liability: { type: string, description: "Liability at initial recognition" }
+        rouAsset: { type: string, description: "ROU asset at initial recognition" }
         status: { type: string, enum: [Draft, Active, Modified, Terminated] }
         version: { type: integer }
         createdAt: { type: string, format: date-time }
@@ -975,6 +1172,10 @@ components:
           type: array
           description: Present on GET /v1/leases/{id} and on create; omitted from the list
           items: { $ref: "#/components/schemas/LeaseLine" }
+        modifications:
+          type: array
+          description: Remeasurements in order; present on GET /v1/leases/{id} once the lease was modified
+          items: { $ref: "#/components/schemas/LeaseModification" }
     LeasePage:
       type: object
       required: [items]
@@ -1153,6 +1354,80 @@ components:
         underInsured: { type: boolean, description: "sumInsured below 90% of indexedValue (AST-0532)" }
         warnings: { type: array, items: { type: string } }
         createdAt: { type: string, format: date-time }
+    InsuranceReportRow:
+      allOf:
+        - $ref: "#/components/schemas/InsurancePolicy"
+        - type: object
+          properties:
+            assetNumber: { type: string }
+            assetName: { type: string }
+            assetStatus: { $ref: "#/components/schemas/AssetStatus" }
+            books:
+              type: array
+              description: NBV of every Open book of the asset
+              items:
+                type: object
+                properties:
+                  bookCode: { type: string }
+                  currency: { type: string }
+                  nbv: { type: string }
+            expiringSoon: { type: boolean, description: "Cover ends within 30 days of asOf" }
+    InsuranceReport:
+      type: object
+      required: [asOf, items]
+      properties:
+        asOf: { type: string, format: date }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/InsuranceReportRow" }
+        nextCursor: { type: string, format: uuid }
+    CountSessionRequest:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId, location, barcodes]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        location: { type: string, minLength: 1, maxLength: 80, description: "Where the count took place" }
+        countedDate: { type: string, format: date, description: "Default today (UTC)" }
+        barcodes:
+          type: array
+          maxItems: 5000
+          description: Scans in order; each is trimmed and 1 to 64 characters; repeats are allowed
+          items: { type: string, minLength: 1, maxLength: 64 }
+    CountLine:
+      type: object
+      properties:
+        barcode: { type: string }
+        outcome: { type: string, enum: [Found, Missing, Unknown] }
+        assetId: { type: [string, "null"], format: uuid }
+        assetNumber: { type: [string, "null"] }
+        assetName: { type: [string, "null"] }
+    CountSession:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        location: { type: string }
+        countedDate: { type: string, format: date }
+        expectedCount: { type: integer, description: "Open assets of the entity with a barcode" }
+        foundCount: { type: integer }
+        missingCount: { type: integer }
+        unknownCount: { type: integer }
+        duplicateCount: { type: integer, description: "Repeated scans of a barcode already counted" }
+        createdAt: { type: string, format: date-time }
+        lines:
+          type: array
+          description: On create and GET /v1/assets/count-sessions/{id}; omitted from the list
+          items: { $ref: "#/components/schemas/CountLine" }
+        warnings: { type: array, items: { type: string }, description: "AST-0525 per unknown barcode" }
+    CountSessionPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/CountSession" }
+        nextCursor: { type: string, format: uuid }
     CapexStatus:
       type: string
       enum: [Draft, Submitted, InApproval, Approved, Released, Closed, Rejected, Postponed]

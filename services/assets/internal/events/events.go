@@ -16,7 +16,29 @@ var (
 	// table and is added so consumers see every change of a book's balances.
 	AssetAdjusted      = events.Type(Context, "asset", "adjusted", 1)
 	DepreciationPosted = events.Type(Context, "depreciation", "posted", 1)
+	// LeaseRemeasured is published for every lease modification (BR-37.8); it
+	// is not in the PRD event table and is added so the ledger and analytics
+	// see every change of the lease liability and ROU asset.
+	LeaseRemeasured = events.Type(Context, "lease", "remeasured", 1)
 )
+
+// LeaseRemeasuredData is the payload of LeaseRemeasured. Amounts are decimal
+// strings; Adjustment = LiabilityAfter - LiabilityBefore, the ROU moves by
+// ROUAdjustment and ProfitLossExcess is the part recognized in P&L because the
+// ROU would have gone below zero.
+type LeaseRemeasuredData struct {
+	LeaseID          string `json:"leaseId"`
+	ModificationID   string `json:"modificationId"`
+	EffectivePeriod  int    `json:"effectivePeriod"`
+	TermMonths       int    `json:"termMonths"`
+	Rate             string `json:"rate"`
+	LiabilityBefore  string `json:"liabilityBefore"`
+	LiabilityAfter   string `json:"liabilityAfter"`
+	Adjustment       string `json:"adjustment"`
+	ROUAdjustment    string `json:"rouAdjustment"`
+	ProfitLossExcess string `json:"profitLossExcess"`
+	Currency         string `json:"currency"`
+}
 
 // AssetAdjustedData is the payload of AssetAdjusted: one adjustment on one
 // book. Deltas are signed decimal strings.

@@ -290,6 +290,8 @@ export interface Disposal {
 export interface LeaseLine {
   periodNo: number;
   opening: Decimal;
+  /** Modification adjustment added to the opening before the period's payment and interest (BR-37.8). */
+  remeasurement?: Decimal;
   interest: Decimal;
   payment: Decimal;
   closing: Decimal;
@@ -306,13 +308,119 @@ export interface Lease {
   paymentAmount: Decimal;
   paymentTiming: "arrears" | "advance";
   ibrRate: Decimal;
+  rateMethod?: RateMethod;
   currency: string;
+  /** Liability at initial recognition. */
   liability: Decimal;
+  /** ROU asset at initial recognition. */
   rouAsset: Decimal;
   status: "Draft" | "Active" | "Modified" | "Terminated";
   version: number;
   createdAt: string;
   schedule?: LeaseLine[];
+  modifications?: LeaseModification[];
+}
+
+export const RATE_METHODS = ["Nominal", "Effective"] as const;
+export type RateMethod = (typeof RATE_METHODS)[number];
+
+/** One remeasurement of a lease (FR-37.10, BR-37.8). */
+export interface LeaseModification {
+  id: string;
+  leaseId: string;
+  effectivePeriod: number;
+  termMonths: number;
+  paymentAmount: Decimal;
+  ibrRate: Decimal;
+  scopeChange: boolean;
+  liabilityBefore: Decimal;
+  liabilityAfter: Decimal;
+  adjustment: Decimal;
+  rouBefore: Decimal;
+  rouAfter: Decimal;
+  rouAdjustment: Decimal;
+  profitLossExcess: Decimal;
+  createdAt: string;
+}
+
+export interface ModifyLeaseInput {
+  effectivePeriod: number;
+  paymentAmount: Decimal;
+  /** Revised full term; only with scopeChange. */
+  termMonths?: number;
+  scopeChange: boolean;
+  /** Revised rate; required with scopeChange, refused without. */
+  ibrRate?: Decimal;
+}
+
+export interface LeaseModificationResult {
+  modification: LeaseModification;
+  lease: Lease;
+  /** The AST-0516 info message. */
+  messages: string[];
+}
+
+export type CountOutcome = "Found" | "Missing" | "Unknown";
+
+export interface CountLine {
+  barcode: string;
+  outcome: CountOutcome;
+  assetId: string | null;
+  assetNumber: string | null;
+  assetName: string | null;
+}
+
+/** A physical inventory count session (FR-37.11). */
+export interface CountSession {
+  id: string;
+  legalEntityId: string;
+  location: string;
+  countedDate: string;
+  expectedCount: number;
+  foundCount: number;
+  missingCount: number;
+  unknownCount: number;
+  duplicateCount: number;
+  createdAt: string;
+  lines?: CountLine[];
+  /** AST-0525 per unknown barcode. */
+  warnings?: string[];
+}
+
+export interface NewCountSession {
+  legalEntityId: string;
+  location: string;
+  countedDate?: string;
+  barcodes: string[];
+}
+
+export interface BookValue {
+  bookCode: string;
+  currency: string;
+  nbv: Decimal;
+}
+
+export interface InsuranceReportRow extends InsurancePolicy {
+  assetNumber: string;
+  assetName: string;
+  assetStatus: AssetStatus;
+  books: BookValue[];
+  /** Cover ends within 30 days of the report date. */
+  expiringSoon: boolean;
+}
+
+export interface InsuranceReport {
+  asOf: string;
+  items: InsuranceReportRow[];
+  nextCursor?: string;
+}
+
+export interface InsuranceReportFilter {
+  legalEntityId: string;
+  asOf?: string;
+  insuranceType?: (typeof INSURANCE_TYPES)[number] | "";
+  expiringWithinDays?: number;
+  after?: string;
 }
 
 export interface NewAsset {
@@ -353,6 +461,7 @@ export interface NewLease {
   paymentAmount: Decimal;
   paymentTiming: "arrears" | "advance";
   ibrRate: Decimal;
+  rateMethod?: RateMethod;
   currency: string;
 }
 
@@ -476,8 +585,12 @@ export function listLeases(after?: string, signal?: AbortSignal): Promise<Page<L
   return json(`/leases${query({ after })}`, {}, signal);
 }
 
-export function getLease(leaseId: string, signal?: AbortSignal): Promise<Lease> {
-  return json(`/leases/${id(leaseId)}`, {}, signal);
+export async function getLease(leaseId: string, signal?: AbortSignal): Promise<Versioned<Lease>> {
+  return versioned(await send(`/leases/${id(leaseId)}`, {}, signal));
+}
+
+export function modifyLease(leaseId: string, etag: string, input: ModifyLeaseInput, key: string = newKey()): Promise<LeaseModificationResult> {
+  return post(`/leases/${id(leaseId)}/modify`, input, key, { "If-Match": etag });
 }
 
 export function createLease(input: NewLease, key: string = newKey()): Promise<Lease> {
@@ -548,5 +661,31 @@ export function createCapex(input: NewCapexRequest, key: string = newKey()): Pro
 export async function submitCapex(requestId: string, etag: string, variantId: string): Promise<Versioned<CapexRequest>> {
   return versioned(
     await send(`/assets/capex-requests/${id(requestId)}/submit`, { method: "POST", body: JSON.stringify({ variantId }), headers: { "If-Match": etag } }),
+  );
+}
+
+export function listCountSessions(after?: string, signal?: AbortSignal): Promise<Page<CountSession>> {
+  return json(`/assets/count-sessions${query({ after })}`, {}, signal);
+}
+
+export function getCountSession(sessionId: string, signal?: AbortSignal): Promise<CountSession> {
+  return json(`/assets/count-sessions/${id(sessionId)}`, {}, signal);
+}
+
+export function createCountSession(input: NewCountSession, key: string = newKey()): Promise<CountSession> {
+  return post(`/assets/count-sessions`, input, key);
+}
+
+export function getInsuranceReport(filter: InsuranceReportFilter, signal?: AbortSignal): Promise<InsuranceReport> {
+  return json(
+    `/assets/insurance-report${query({
+      legalEntityId: filter.legalEntityId,
+      asOf: filter.asOf,
+      insuranceType: filter.insuranceType,
+      expiringWithinDays: filter.expiringWithinDays,
+      after: filter.after,
+    })}`,
+    {},
+    signal,
   );
 }
