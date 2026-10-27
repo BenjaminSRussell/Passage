@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strconv"
 	"testing"
+	"time"
 
 	"pgregory.net/rapid"
 )
@@ -140,4 +141,27 @@ func TestSSCC_Property(t *testing.T) {
 			t.Fatalf("single-digit change %s -> %s not detected", sscc, b)
 		}
 	})
+}
+
+// BR-28.5: an SSCC stays blocked for sscc_no_reuse_months from its UTC issue date.
+func TestSSCCNoReuseUntil(t *testing.T) {
+	ny := time.FixedZone("EST", -5*3600)
+	cases := []struct {
+		name   string
+		issued time.Time
+		months int
+		want   string
+	}{
+		{"default window", time.Date(2026, 10, 21, 15, 4, 5, 0, time.UTC), SSCCNoReuseMonths, "2027-10-21"},
+		{"issue date is the UTC date", time.Date(2026, 10, 21, 22, 0, 0, 0, ny), 12, "2027-10-22"},
+		{"leap day rolls to 1 March", time.Date(2028, 2, 29, 0, 0, 0, 0, time.UTC), 12, "2029-03-01"},
+		{"longest window", time.Date(2026, 1, 31, 0, 0, 0, 0, time.UTC), 60, "2031-01-31"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := SSCCNoReuseUntil(tc.issued, tc.months).Format("2006-01-02"); got != tc.want {
+				t.Fatalf("SSCCNoReuseUntil = %s, want %s", got, tc.want)
+			}
+		})
+	}
 }

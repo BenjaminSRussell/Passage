@@ -1,5 +1,5 @@
 import { Badge, type BadgeTone } from "../../shell/ui";
-import type { PackingSlipStatus, ShipmentStatus } from "./api/client";
+import type { ContainerStatus, PackingSlipStatus, ShipmentStatus } from "./api/client";
 import { SHIPMENT_STATUS_LABELS } from "./format";
 
 const shipmentTones: Record<ShipmentStatus, BadgeTone> = {
@@ -26,4 +26,12 @@ const slipLabels: Record<PackingSlipStatus, string> = { PENDING: "Pending", POST
 export function SlipStatusBadge({ status, reversal }: { status: PackingSlipStatus; reversal?: boolean }) {
   if (reversal) return <Badge tone="neutral">Reversal</Badge>;
   return <Badge tone={slipTones[status] ?? "neutral"}>{slipLabels[status] ?? status}</Badge>;
+}
+
+const containerTones: Record<ContainerStatus, BadgeTone> = { OPEN: "neutral", CLOSED: "info", SHIPPED: "success" };
+const containerLabels: Record<ContainerStatus, string> = { OPEN: "Open", CLOSED: "Closed", SHIPPED: "Shipped" };
+
+/** Container state: CLOSED is packed and labelled, SHIPPED left on a packing slip. */
+export function ContainerStatusBadge({ status }: { status: ContainerStatus }) {
+  return <Badge tone={containerTones[status] ?? "neutral"}>{containerLabels[status] ?? status}</Badge>;
 }

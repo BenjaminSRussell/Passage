@@ -17,6 +17,7 @@ const links = [
   { to: "/fulfillment/shipments", title: "Shipments", text: "Pick, pack into containers with SSCCs, post the packing slip and track the carrier." },
   { to: "/fulfillment/packing-slips", title: "Packing slips", text: "Posted delivery notes with their cost journal; cancel before invoicing." },
   { to: "/fulfillment/delivered-not-invoiced", title: "Delivered not invoiced", text: "Shipped cost not yet invoiced: the GL 1405 balance per legal entity and its slips." },
+  { to: "/fulfillment/sscc-register", title: "SSCC register", text: "Every SSCC issued, with its container, shipment and the date it could be reused." },
   { to: "/fulfillment/scan", title: "Scan a label", text: "Read a GS1-128 barcode into GTIN, batch, serial and quantity." },
 ];
 

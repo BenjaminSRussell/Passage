@@ -50,6 +50,17 @@ customer filter, tenant isolation and the legal-entity scope. The web screen
 `/fulfillment/delivered-not-invoiced` shows the totals and the slips and opens a
 slip on its packing slip page.
 
+Slice 5 adds the SSCC register (section 5.28.14, BR-28.5):
+`GET /sscc-register` (`WarehouseView`) lists every issued SSCC in SSCC order
+with its container type and status, shipment, order, customer, the packing slip
+it shipped on, the issue time and the no-reuse date (issue date + 12 months),
+filtered by GS1 company prefix, customer and issue-date range and paged with a
+keyset cursor. Containers are read through their shipment, so the tenant and
+legal-entity row-level security applies. A store test against Postgres covers
+the order, the filters, a back-dated SSCC, the cursor, tenant isolation and the
+legal-entity scope. The web screen `/fulfillment/sscc-register` filters, pages
+and opens the shipment of a row.
+
 Everything listed below is missing. Each row gives a status and a reason.
 Status is `later slice of PSG-28` (same service, next slice) or `handoff`
 (needs another wave, the kernel, or a path outside this wave's ownership).
@@ -155,7 +166,9 @@ slips to 5); the comparison with the ledger's GL 1405 is a handoff to ledger.
 | Event type naming | deviation | Events use `dev.passage.fulfillment.packingslip.*` (the kernel accepts one segment per name part). The PRD uses `passage.fulfillment.packing-slip.*`, which is not a valid kernel type. |
 | Config `COGS_AT_SHIPMENT` per legal entity | later slice of PSG-28 | Slice 1 takes `cogsAtShipment` per request. |
 | `GS1_COMPANY_PREFIX` per legal entity (BR-28.5) | deviation | Slice 1 has one prefix per process. It is not per legal entity. The serial counter is per tenant and prefix, gap-free, and a serial that no longer fits the prefix is refused. |
-| SSCC no reuse for 12 months (`sscc_no_reuse_months`) | later slice of PSG-28 | No register or reuse check. Uniqueness per tenant is enforced by the database. |
+| SSCC no reuse for 12 months (`sscc_no_reuse_months`) | deviation | `UNIQUE (tenant_id, sscc)` means an SSCC is never issued twice in a tenant, which is stricter than 12 months. The tenant setting `sscc_no_reuse_months` (12 to 60) is not stored: this service has no tenant settings yet, so the register's `noReuseUntil` always uses the default 12. |
+| SSCC register columns `printed_at` and "reused flag" (section 5.28.14) | deviation | Labels are rendered on request and not stored (`label_ref` is not built, see D1), so there is no print time; the register returns `issuedAt` instead. An SSCC cannot be reused (unique per tenant), so a reused flag would always be false; the register returns `noReuseUntil` instead. |
+| SSCC sequence check (nightly 00:30, alert on duplicates or check-digit failures) | later slice of PSG-28 | No scheduler is wired in this service. The database refuses duplicates and the label endpoint checks the check digit (FUL-0007). |
 | Period check (FUL-0002), negative on-hand (FUL-0003), tolerance (FUL-0005), tracking dims (FUL-0006) on post | later slice of PSG-28 | Period control is wave 14. Negative on-hand is wave 16. |
 | Consolidation (BR-28.8, FUL-0011, `consolidation_enabled`, flag `fulfillment.consolidation`) | later slice of PSG-28 | A shipment holds one order (`order_id`), has no delivery address, and the order's `ship_separately` flag is not read from sales (wave 27). Consolidating needs multi-order shipments, the address on the shipment and the flag, so the FUL-0011 check is not built until release can use it. |
 | Shipment cancel of a packed shipment | later slice of PSG-28 | `POST /shipments/{id}:cancel` (slice 3) cancels from OPEN to PACKED while nothing has shipped and the shipment holds no container. Unpacking containers is not built, so a shipment with containers cannot cancel (FUL-0021). |
@@ -172,7 +185,7 @@ slips to 5); the comparison with the ledger's GL 1405 is a handoff to ledger.
 | `POST /waves:preview` is a read-only POST without Idempotency-Key | deviation | The filter is a JSON body; nothing is written. `POST /waves` (create) requires the key. |
 | Container `:close` endpoint and label reference | later slice of PSG-28 | See D1. |
 | Migration from AX/SAP | later slice of PSG-28 | |
-| Reporting: SSCC register; RTP aging; short picks and backorders; carrier exceptions and cost | later slice of PSG-28 | Shipments list (with the PARTIALLY_SHIPPED filter), release board, pick waves, packing slip journal, delivered not invoiced, packaging weights per country and month, and RTP balances are built. |
+| Reporting: RTP aging; short picks and backorders; carrier exceptions and cost | later slice of PSG-28 | Shipments list (with the PARTIALLY_SHIPPED filter), release board, pick waves, packing slip journal, delivered not invoiced, packaging weights per country and month, RTP balances and the SSCC register are built. |
 | Documents: packing slip PDF, delivery note, GS1 label, carrier label, manifest, BOL, packaging fee statement | later slice of PSG-28 | Document rendering is wave 5 (docgen). |
 
 ## Known risks

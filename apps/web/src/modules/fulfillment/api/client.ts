@@ -160,6 +160,40 @@ export interface DniReport {
   lines: DniLine[];
 }
 
+export type ContainerStatus = "OPEN" | "CLOSED" | "SHIPPED";
+
+/** One issued SSCC in the register (section 5.28.14, BR-28.5). */
+export interface SsccRow {
+  sscc: string;
+  containerId: string;
+  containerType: string;
+  status: ContainerStatus;
+  shipmentId: string;
+  shipmentNumber: string;
+  orderId: string;
+  customerId: string;
+  /** The slip the container shipped on; null until it ships. */
+  packingSlipId: string | null;
+  issuedAt: string;
+  /** First date the SSCC could be issued again (YYYY-MM-DD). */
+  noReuseUntil: string;
+}
+
+export interface SsccPage {
+  items: SsccRow[];
+  /** Pass back as `cursor` for the next page; absent on the last page. */
+  nextCursor?: string;
+}
+
+export interface SsccFilter {
+  companyPrefix?: string;
+  customerId?: string;
+  from?: string;
+  to?: string;
+  cursor?: string;
+  limit?: number;
+}
+
 export interface ReturnableBalance {
   customerId: string;
   containerType: string;
@@ -522,6 +556,15 @@ export async function deliveredNotInvoiced(
   const body = await send<DniReport>(`/delivered-not-invoiced${query(filter)}`, {}, signal);
   if (!Array.isArray(body.totals) || !Array.isArray(body.lines)) {
     throw new FulfillmentApiError(0, "COM-0001", "The response has no totals or lines", {});
+  }
+  return body;
+}
+
+/** One page of the SSCC register, in SSCC order (BR-28.5, section 5.28.14). */
+export async function ssccRegister(filter: SsccFilter, signal?: AbortSignal): Promise<SsccPage> {
+  const body = await send<SsccPage>(`/sscc-register${query({ ...filter })}`, {}, signal);
+  if (!Array.isArray(body.items)) {
+    throw new FulfillmentApiError(0, "COM-0001", "The response has no items", {});
   }
   return body;
 }

@@ -257,6 +257,8 @@ type Store interface {
 	CancelPackingSlip(ctx context.Context, slipID string, idem Idem) (PackingSlip, error)
 	// DeliveredNotInvoiced is the DNI report (FR-28.12, inquiry.go).
 	DeliveredNotInvoiced(ctx context.Context, f DNIFilter) ([]domain.DNIRow, error)
+	// ListSSCCs is the SSCC register (BR-28.5, sscc.go).
+	ListSSCCs(ctx context.Context, f SSCCFilter) ([]SSCCRow, error)
 	PackingStore
 	WorkbenchStore
 	Ping(ctx context.Context) error

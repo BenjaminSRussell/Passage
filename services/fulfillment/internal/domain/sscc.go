@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 )
 
 // SSCCLength is the number of digits in an SSCC-18 (GS1 application identifier 00).
@@ -99,4 +100,17 @@ func pow10(n int) uint64 {
 		v *= 10
 	}
 	return v
+}
+
+// SSCCNoReuseMonths is the default of the tenant setting sscc_no_reuse_months
+// (section 5.28.13, range 12 to 60): an SSCC may not be issued again for this
+// many months after it was issued (BR-28.5).
+const SSCCNoReuseMonths = 12
+
+// SSCCNoReuseUntil is the first UTC date on which an SSCC issued at issued
+// could be issued again: the issue date plus months calendar months. A month
+// end that does not exist rolls forward (29 February + 12 months = 1 March).
+func SSCCNoReuseUntil(issued time.Time, months int) time.Time {
+	d := issued.UTC()
+	return time.Date(d.Year(), d.Month()+time.Month(months), d.Day(), 0, 0, 0, 0, time.UTC)
 }

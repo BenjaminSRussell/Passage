@@ -12,6 +12,7 @@ import { ReturnablePackagingPage } from "./ReturnablePackagingPage";
 import { ScanPage } from "./ScanPage";
 import { ShipmentDetailPage } from "./ShipmentDetailPage";
 import { ShipmentsPage } from "./ShipmentsPage";
+import { SsccRegisterPage } from "./SsccRegisterPage";
 import { WaveDetailPage } from "./WaveDetailPage";
 import { WavesPage } from "./WavesPage";
 import { WorkbenchPage } from "./WorkbenchPage";
@@ -32,6 +33,7 @@ const fulfillment: PassageModule = {
     { path: "/fulfillment/packing-slips", element: createElement(PackingSlipsPage), handle: { title: "Packing slips" } },
     { path: "/fulfillment/packing-slips/:id", element: createElement(PackingSlipDetailPage), handle: { title: "Packing slip" } },
     { path: "/fulfillment/delivered-not-invoiced", element: createElement(DeliveredNotInvoicedPage), handle: { title: "Delivered not invoiced" } },
+    { path: "/fulfillment/sscc-register", element: createElement(SsccRegisterPage), handle: { title: "SSCC register" } },
     { path: "/fulfillment/scan", element: createElement(ScanPage), handle: { title: "Scan a label" } },
     { path: "/fulfillment/container-types", element: createElement(ContainerTypesPage), handle: { title: "Container types" } },
     { path: "/fulfillment/packing-rules", element: createElement(PackingRulesPage), handle: { title: "Packing rules" } },
@@ -47,6 +49,7 @@ const fulfillment: PassageModule = {
     { label: "Shipments", to: "/fulfillment/shipments", duty: "WarehouseView" },
     { label: "Packing slips", to: "/fulfillment/packing-slips", duty: "WarehouseView" },
     { label: "Delivered not invoiced", to: "/fulfillment/delivered-not-invoiced", duty: "WarehouseView" },
+    { label: "SSCC register", to: "/fulfillment/sscc-register", duty: "WarehouseView" },
     { label: "Scan a label", to: "/fulfillment/scan", duty: "WarehousePick" },
     { label: "Container types", to: "/fulfillment/container-types", duty: "WarehouseView" },
     { label: "Packing rules", to: "/fulfillment/packing-rules", duty: "WarehouseView" },

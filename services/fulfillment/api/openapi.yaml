@@ -3,12 +3,13 @@ info:
   title: Passage Fulfillment API
   version: 1.0.0
   description: >
-    Wave 28 slices 1 to 3. Release, pick, pack and packing-slip posting;
+    Wave 28 slices 1 to 5. Release, pick, pack and packing-slip posting;
     container types, packing rules and auto-pack; packaging materials, country
     fee rates, the statistical packaging fee and the packaging report;
     returnable transport packaging balances; partial shipments, shipment
     cancellation, the picking workbench and pick waves, carrier tracking
-    events, the ASN on post and the GS1-128 container label (ZPL). Carrier
+    events, the ASN on post, the GS1-128 container label (ZPL), the
+    delivered-not-invoiced report and the SSCC register. Carrier
     rate/label/manifest and drop-ship are later slices (see NOT-IMPLEMENTED.md).
     Errors are RFC 9457 problem details with a stable code.
 servers:
@@ -970,6 +971,50 @@ paths:
                         postingDate: { type: string, format: date-time }
                         amount: { $ref: "#/components/schemas/Decimal" }
                         daysOutstanding: { type: integer, minimum: 0 }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /api/v1/fulfillment/sscc-register:
+    get:
+      operationId: ssccRegister
+      summary: SSCC register, every issued SSCC with its container and shipment (BR-28.5, section 5.28.14)
+      description: >-
+        Ordered by SSCC. noReuseUntil is the issue date plus sscc_no_reuse_months (12); SSCCs are unique per
+        tenant, so an issued SSCC is never issued again. Page with limit and the nextCursor of the previous page.
+      x-passage-duty: WarehouseView
+      parameters:
+        - { name: companyPrefix, in: query, description: "GS1 company prefix (6 to 12 digits) after the extension digit.", schema: { type: string, pattern: "^[0-9]{6,12}$" } }
+        - { name: customerId, in: query, schema: { type: string, format: uuid } }
+        - { name: from, in: query, description: "First issue date (YYYY-MM-DD, UTC), inclusive.", schema: { type: string, format: date } }
+        - { name: to, in: query, description: "Last issue date (YYYY-MM-DD, UTC), inclusive; not before from.", schema: { type: string, format: date } }
+        - { name: cursor, in: query, description: "nextCursor of the previous page.", schema: { type: string, pattern: "^[0-9]{18}$" } }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: One page of the register
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [sscc, containerId, containerType, status, shipmentId, shipmentNumber, orderId, customerId, packingSlipId, issuedAt, noReuseUntil]
+                      properties:
+                        sscc: { type: string, pattern: "^[0-9]{18}$" }
+                        containerId: { type: string, format: uuid }
+                        containerType: { type: string }
+                        status: { type: string, enum: [OPEN, CLOSED, SHIPPED] }
+                        shipmentId: { type: string, format: uuid }
+                        shipmentNumber: { type: string }
+                        orderId: { type: string, format: uuid }
+                        customerId: { type: string, format: uuid }
+                        packingSlipId: { type: [string, "null"], format: uuid, description: "The slip the container shipped on; null until it ships." }
+                        issuedAt: { type: string, format: date-time }
+                        noReuseUntil: { type: string, format: date }
+                  nextCursor: { type: string, pattern: "^[0-9]{18}$", description: "Present when another page exists." }
         "400": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
   /api/v1/fulfillment/returnable-packaging:

@@ -41,6 +41,9 @@ type fakeStore struct {
 	workbench      workbenchCalls
 	dniFilter      store.DNIFilter
 	dniRows        []domain.DNIRow
+	ssccFilter     store.SSCCFilter
+	ssccRows       []store.SSCCRow
+	ssccCalls      int
 }
 
 func (f *fakeStore) RunRelease(_ context.Context, warehouseID string, groups []domain.ReleaseGroup, idem store.Idem) (store.ReleaseResult, error) {

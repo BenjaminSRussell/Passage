@@ -16,7 +16,8 @@ PARTIALLY_SHIPPED and its remainder is re-picked and posted on another slip.
 The picking workbench groups released shipments into pick waves; carrier
 tracking events are stored and published; containers print a GS1-128 ZPL label.
 The delivered-not-invoiced report gives the open 1405 balance per legal entity
-as of a date, read from the slip journals.
+as of a date, read from the slip journals. The SSCC register lists every SSCC
+issued, with its shipment and no-reuse date.
 
 Engineering rules: `docs/engineering/CONVENTIONS.md`. Requirements:
 `docs/prd/phase-5-order-to-cash.md` section 5.28. Gaps in this slice are listed in
@@ -78,8 +79,8 @@ cancel, re-post, idempotent replay, key reuse, release de-duplication, tenant
 and legal-entity isolation, auto-pack (AC-28.11), the packaging fee and report
 (AC-28.12), returnable balances (AC-28.13), partial shipments over two slips
 with a per-slip cancel (AC-28.4, FR-28.8), shipment cancel, the workbench
-(AC-28.10), tracking, the ASN and the delivered-not-invoiced report (AC-28.8,
-as-of dates around a cancel) against Postgres through `platform/go/testkit`. They run as the application role
+(AC-28.10), tracking, the ASN, the delivered-not-invoiced report (AC-28.8,
+as-of dates around a cancel) and the SSCC register (filters, cursor, scope) against Postgres through `platform/go/testkit`. They run as the application role
 so row-level security applies, which needs both URLs:
 
 ```
@@ -102,7 +103,8 @@ page, and the container types, packing rules, packaging materials, packaging
 fees (rates and report) and returnable packaging pages, and from slice 3 the
 picking workbench, pick waves and wave detail, and on the shipment detail the
 remainder pick, cancel, tracking with manual entry, the ZPL label and the ASN
-option, and from slice 4 the delivered-not-invoiced report. Run `npx vitest --run src/modules/fulfillment`
+option, from slice 4 the delivered-not-invoiced report, and from slice 5 the
+SSCC register. Run `npx vitest --run src/modules/fulfillment`
 and `npx tsc --noEmit` in `apps/web`.
 
 ## Endpoints (slice 1)
@@ -157,6 +159,7 @@ not be below what is packed (FUL-0031).
 | Method | Path | Duty | Notes |
 |---|---|---|---|
 | GET | `/api/v1/fulfillment/delivered-not-invoiced` | WarehouseView | `legalEntityId` (required), `customerId`, `asOf` (default today), `limit`; open 1405 per currency (`totals`, `lineCount`) and the slips with days outstanding |
+| GET | `/api/v1/fulfillment/sscc-register` | WarehouseView | `companyPrefix`, `customerId`, `from`, `to` (issue dates, UTC), `limit`, `cursor`; issued SSCCs in SSCC order with container, shipment, slip, `issuedAt` and `noReuseUntil` (BR-28.5), `nextCursor` when more exist |
 
 Idempotency: a key is stored per tenant with a fingerprint of the method, path
 and body. A replay returns the stored response; the same key on another path or
