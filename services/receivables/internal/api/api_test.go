@@ -7,10 +7,12 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/shopspring/decimal"
 
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/receivables/internal/domain"
@@ -25,6 +27,8 @@ type fakeStore struct {
 	lastKey     string
 	lastFilter  store.PaymentFilter
 	payment     store.Payment
+	lockbox     store.LockboxImport
+	seenFiles   map[string]bool
 }
 
 func (f *fakeStore) CreateOpenItem(context.Context, store.OpenItem) (store.OpenItem, error) {
@@ -55,6 +59,72 @@ func (f *fakeStore) ApplyPayment(_ context.Context, id string, version int, plan
 	return store.ApplyResult{Payment: store.Payment{ID: id, Version: version + 1, Status: "APPLIED"}}, nil
 }
 func (f *fakeStore) Ping(context.Context) error { return nil }
+
+// Collections, dunning and interest stubs; collectionsFake overrides them.
+func (f *fakeStore) OpenDispute(context.Context, store.Dispute, string) (store.Dispute, error) {
+	return store.Dispute{}, nil
+}
+func (f *fakeStore) TransitionDispute(context.Context, string, int, string, *string) (store.Dispute, error) {
+	return store.Dispute{}, nil
+}
+func (f *fakeStore) CreatePromise(context.Context, store.Promise, string) (store.Promise, error) {
+	return store.Promise{}, nil
+}
+func (f *fakeStore) CreateDunningRun(context.Context, store.DunningRun, string) (store.DunningRun, error) {
+	return store.DunningRun{}, nil
+}
+func (f *fakeStore) GetDunningRun(context.Context, string) (store.DunningRun, error) {
+	return store.DunningRun{}, nil
+}
+func (f *fakeStore) TransitionDunningRun(context.Context, string, int, string) (store.DunningRun, error) {
+	return store.DunningRun{}, nil
+}
+func (f *fakeStore) CalculateInterest(context.Context, store.InterestRequest) (store.InterestResult, error) {
+	return store.InterestResult{}, nil
+}
+func (f *fakeStore) PostInterest(context.Context, store.InterestRequest, string) (store.InterestResult, error) {
+	return store.InterestResult{}, nil
+}
+func (f *fakeStore) GetDispute(context.Context, string) (store.Dispute, error) {
+	return store.Dispute{}, nil
+}
+func (f *fakeStore) ListDisputes(context.Context, store.DisputeFilter, int) ([]store.Dispute, error) {
+	return []store.Dispute{}, nil
+}
+func (f *fakeStore) ListPromises(context.Context, store.PromiseFilter, int) ([]store.Promise, error) {
+	return []store.Promise{}, nil
+}
+func (f *fakeStore) ListDunningRuns(context.Context, string, int) ([]store.DunningRunSummary, error) {
+	return []store.DunningRunSummary{}, nil
+}
+func (f *fakeStore) ListInterestNotes(context.Context, string, int) ([]store.InterestNote, error) {
+	return []store.InterestNote{}, nil
+}
+func (f *fakeStore) ListLockboxBatches(context.Context, int) ([]store.LockboxBatch, error) {
+	return []store.LockboxBatch{}, nil
+}
+
+// ImportLockbox mimics the store: one payment per check, and a repeated file hash is refused.
+func (f *fakeStore) ImportLockbox(_ context.Context, in store.LockboxImport) (store.LockboxBatch, error) {
+	if f.seenFiles == nil {
+		f.seenFiles = map[string]bool{}
+	}
+	if f.seenFiles[in.FileSHA256] {
+		return store.LockboxBatch{}, httpx.NewProblem(http.StatusConflict, store.CodeLockboxDuplicate, "File already imported")
+	}
+	f.seenFiles[in.FileSHA256] = true
+	f.lockbox = in
+	out := store.LockboxBatch{ID: ids.New(), LegalEntityID: in.LegalEntityID, FileSHA256: in.FileSHA256,
+		PaymentCount: len(in.Checks), Payments: []store.Payment{}}
+	for _, c := range in.Checks {
+		out.Payments = append(out.Payments, store.Payment{ID: ids.New(), Amount: c.Amount, Currency: c.Currency, Source: "LOCKBOX", Status: "RECEIVED"})
+	}
+	return out, nil
+}
+
+func (f *fakeStore) Worklist(context.Context, string, time.Time) ([]domain.CustomerRisk, error) {
+	return []domain.CustomerRisk{{CustomerID: testItem, Currency: "USD", RiskScore: 45}}, nil
+}
 
 const (
 	testTenant = "00000000-0000-0000-0000-000000000001"

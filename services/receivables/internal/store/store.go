@@ -41,6 +41,8 @@ const (
 	lockNotAvailable     = "55P03"
 	uniqueViolation      = "23505"
 	paymentKeyConstraint = "payment_tenant_id_idempotency_key_key"
+	idempotencyKeysPK    = "idempotency_keys_pkey"
+	disputeActiveIndex   = "dispute_one_active_per_item"
 	dateLayout           = "2006-01-02"
 	openStatuses         = "('OPEN', 'PARTIALLY_SETTLED')"
 )
@@ -136,6 +138,22 @@ type Store interface {
 	GetPayment(ctx context.Context, id string) (Payment, error)
 	MatchPayment(ctx context.Context, id string) (domain.Result, error)
 	ApplyPayment(ctx context.Context, id string, version int, req ApplyRequest, idempotencyKey string) (ApplyResult, error)
+	OpenDispute(ctx context.Context, in Dispute, idempotencyKey string) (Dispute, error)
+	GetDispute(ctx context.Context, id string) (Dispute, error)
+	ListDisputes(ctx context.Context, f DisputeFilter, limit int) ([]Dispute, error)
+	TransitionDispute(ctx context.Context, id string, version int, to string, note *string) (Dispute, error)
+	CreatePromise(ctx context.Context, in Promise, idempotencyKey string) (Promise, error)
+	ListPromises(ctx context.Context, f PromiseFilter, limit int) ([]Promise, error)
+	CreateDunningRun(ctx context.Context, in DunningRun, idempotencyKey string) (DunningRun, error)
+	ListDunningRuns(ctx context.Context, status string, limit int) ([]DunningRunSummary, error)
+	GetDunningRun(ctx context.Context, id string) (DunningRun, error)
+	TransitionDunningRun(ctx context.Context, id string, version int, to string) (DunningRun, error)
+	CalculateInterest(ctx context.Context, req InterestRequest) (InterestResult, error)
+	PostInterest(ctx context.Context, req InterestRequest, idempotencyKey string) (InterestResult, error)
+	ListInterestNotes(ctx context.Context, customerID string, limit int) ([]InterestNote, error)
+	ImportLockbox(ctx context.Context, in LockboxImport) (LockboxBatch, error)
+	ListLockboxBatches(ctx context.Context, limit int) ([]LockboxBatch, error)
+	Worklist(ctx context.Context, legalEntityID string, asOf time.Time) ([]domain.CustomerRisk, error)
 	Ping(ctx context.Context) error
 }
 
@@ -636,9 +654,13 @@ func mapWriteErr(err error) error {
 	}
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
-		if pgErr.ConstraintName == paymentKeyConstraint {
+		switch {
+		case pgErr.ConstraintName == paymentKeyConstraint || pgErr.ConstraintName == idempotencyKeysPK ||
+			strings.HasSuffix(pgErr.ConstraintName, "_idempotency_key_key"):
 			// Two requests with one key raced; the loser retries and replays.
 			return httpx.NewProblem(http.StatusConflict, CodeIdempotencyBusy, "a request with this Idempotency-Key is in progress; retry")
+		case pgErr.ConstraintName == disputeActiveIndex:
+			return httpx.NewProblem(http.StatusConflict, domain.CodeDisputeExists, "the open item already has an active dispute")
 		}
 		return httpx.NewProblem(http.StatusConflict, CodePaymentDuplicate, "a payment or open item with this reference already exists")
 	}

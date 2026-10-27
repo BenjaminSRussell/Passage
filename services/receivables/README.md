@@ -1,9 +1,12 @@
 # passage-receivables
 
-Accounts receivable for Passage, wave 30 (PSG-30), slice 1. This increment covers
+Accounts receivable for Passage, wave 30 (PSG-30), slices 1 and 2. Slice 1 is
 the cash-application core: open items, aging, manual payments, the scored
-matcher (BR-30.1) and settlement validation (BR-30.4). Everything else in the
-wave is listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
+matcher (BR-30.1) and settlement validation (BR-30.4). Slice 2 adds BAI2 lockbox
+import (FR-30.3) and collections: the risk-ranked worklist (FR-30.6, FR-30.10),
+disputes and promises to pay (FR-30.9), dunning runs (FR-30.7, BR-30.2) and
+interest notes (FR-30.8, BR-30.5). Everything else in the wave is listed in
+[NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
 
 ## What it does now
 
@@ -11,7 +14,13 @@ wave is listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
 - **Aging** (`GET /api/v1/receivables/aging?asOf=`): totals per currency and bucket (`CURRENT`, `1-30`, `31-60`, `61-90`, `91-180`, `OVER-180`), with due date as the basis.
 - **Payments**: record a manual payment (`POST /payments`, idempotent), list them (`GET /payments?status=&customer=&limit=`), read one (`GET /payments/{id}`, ETag = version), score candidate settlements (`POST /payments/{id}:match`, changes nothing) and apply (`POST /payments/{id}:apply`, requires `If-Match`; an optional `Idempotency-Key` replays the first response).
 - **Apply rules**: settlements plus on-account residual equal the unapplied amount; every item is in the payment's legal entity and currency (no cross-currency settlement yet) and belongs to the payment's customer; an unidentified payment takes the customer of the items it settles; a cash discount needs the value date on or before the discount date and may not exceed the item's discount; write-off tolerance is the larger of 5.00 and 0.5% of the original item amount.
-- **Events** via the transactional outbox: `dev.passage.receivables.payment.received.v1` and `dev.passage.receivables.payment.applied.v1` (see `events/asyncapi.yaml`).
+- **Lockbox** (`POST /lockbox/imports`, duty ARImport; `GET /lockbox/imports`): a BAI2 file (records 01, 02, 03, 16 with S/V/D funds-type detail, 88, 49, 98, 99; trailer counts checked; first error named by line, AR-0004). Each 16 detail with a check credit type code (default 116, Item in Lockbox Deposit; a bank profile may name other credit codes 100-399) becomes one unidentified CHECK payment with source LOCKBOX, the customer reference as remittance, and `payment.received.v1`. The same file content twice is refused by SHA-256 (AR-0003); a check re-sent in another file is refused by (source, bank reference).
+- **Worklist** (`GET /worklist?legalEntityId=&asOf=`): one row per customer and currency with total open, overdue, oldest days, open-amount-weighted days late, dunning level, open disputes, broken promises and a 0-100 risk score (overdue share 40, days late 20, dunning level 20, disputes 15, broken promises 5), riskiest first. The open amounts are summed in SQL, so the read is complete for any number of items.
+- **Disputes** (`POST /disputes`, `GET /disputes?status=active|<status>&customer=&openItem=`, `GET /disputes/{id}`, `POST /disputes/{id}:review`, `:resolve`; duty CollectionsMaintain to change): one active dispute per item, amount at most the open amount, SLA 120 hours. OPEN → UNDER_REVIEW → RESOLVED_CREDIT | RESOLVED_PAID | RESOLVED_WRITE_OFF, REJECTED from OPEN or UNDER_REVIEW (BR-30.6). While active the item carries `dispute_id` and is left out of dunning and interest.
+- **Promises to pay** (`POST /promises`, `GET /promises`): amount at most the open amount, date today or later; one holding promise per item. A promise holds until its date plus 2 days (BR-30.2); after that it counts as broken on the worklist and the item is dunnable again.
+- **Dunning** (`POST /dunning-runs`, `GET /dunning-runs`, `GET /dunning-runs/{id}`, `POST /dunning-runs/{id}:review`, `:issue`, `:cancel`; duty DunningRun): a run proposes letters as DRAFT per customer and currency. Level 1 once the grace days (default 5) pass, 2 at 15 days, 3 at 30 (fee 25.00 USD / 20.00 EUR), 4 at 45 (fee 50.00 / 40.00); an item rises one level per run and never falls; letter level is the highest item level; items under 1.00 are ignored; blocked, disputed and promised items, letters under 50.00 USD / 45.00 EUR, and customers dunned fewer than 10 days ago are left out with a reason. Issue needs REVIEWED (AR-0007), re-checks every letter under row locks (a letter whose items were paid, disputed, promised or raised since the proposal is SKIPPED), raises item levels, posts the fee as a FEE open item and publishes one `dunningletter.issued.v1` per letter.
+- **Interest** (`POST /interest-notes:calculate` preview, `:post`, `GET /interest-notes`; duty InterestPost): open amount × annual rate × days ÷ 365 (or 360), from due date + grace or from the item's last note, so no day is charged twice; disputed and promised items, INTEREST and FEE items, and amounts under 5.00 are left out. Post writes one INTEREST open item and one note per item and calendar month, serialised per legal entity by an advisory lock; `Idempotency-Key` replays the stored response.
+- **Events** via the transactional outbox: `dev.passage.receivables.payment.received.v1`, `payment.applied.v1`, `dispute.opened.v1`, `dispute.resolved.v1` and `dunningletter.issued.v1` (the PRD's `dunning-letter.issued.v1`; the kernel type rule allows no hyphen). See `events/asyncapi.yaml`.
 
 The API contract is `api/openapi.yaml`. Every operation names its duty in
 `x-passage-duty`.
@@ -20,11 +29,15 @@ The API contract is `api/openapi.yaml`. Every operation names its duty in
 
 ```
 cmd/receivables/       entrypoint: dbx.Connect -> (dbx.Migrate) -> httpx router -> Serve
-internal/domain/       pure rules: match.go (BR-30.1), settle.go (BR-30.4), aging.go (FR-30.6)
+internal/domain/       pure rules: match.go (BR-30.1), settle.go (BR-30.4), aging.go (FR-30.6),
+                       bai2.go (FR-30.3), dunning.go (BR-30.2), interest.go (BR-30.5),
+                       collections.go (FR-30.9, BR-30.6), risk.go and worklist.go (FR-30.10)
 internal/store/        pgx repositories, RLS via dbx.WithTenantTx, outbox writes
 internal/api/          HTTP handlers, DTOs, validation
 internal/events/       event types and payloads
-migrations/            0001 tables and RLS, 0002 outbox, 0003 idempotency_keys
+migrations/            0001 tables and RLS, 0002 outbox, 0003 idempotency_keys,
+                       0004 dispute, promise_to_pay, dunning_run, dunning_letter, interest_note,
+                       0005 lockbox_batch
 api/openapi.yaml       REST contract
 events/asyncapi.yaml   event contract
 charts/receivables/    Helm chart (passage-receivables)
@@ -68,9 +81,9 @@ The `type` is `https://passage.dev/problems/<code>`.
 | `AUTH-0001` | 401 | No principal, or tenant missing or malformed |
 | `AUTH-0003` | 403 | Missing duty, or legal entity outside the caller's scope |
 | `COM-0001` | 400 | Request failed validation (`errors` lists fields) |
-| `COM-0428` | 428 | `If-Match` required on apply |
-| `conflict_version` | 412 | `If-Match` does not match the payment version |
-| `idempotency_key_reuse` | 422 | Same `Idempotency-Key` on create or apply with a different body |
+| `COM-0428` | 428 | `If-Match` required on apply and on dispute and dunning-run moves |
+| `conflict_version` | 412 | `If-Match` does not match the resource version |
+| `idempotency_key_reuse` | 422 | Same `Idempotency-Key` on a create, apply or interest post with a different body |
 | `idempotency_in_progress` | 409 | Two creates with the same `Idempotency-Key` raced; retry to replay |
 | `AR-PAYMENT-NOT-FOUND` | 404 | Payment id unknown or unknown action |
 | `AR-PAYMENT-DUPLICATE` | 409 | Payment or open item reference already recorded (unique violation) |
@@ -79,6 +92,17 @@ The `type` is `https://passage.dev/problems/<code>`.
 | `AR-0001` | 400 | Settlements plus residual must equal the payment amount, or the plan is invalid (other legal entity, currency or customer; discount not available or above terms) |
 | `AR-0002` | 409 | Open item is locked by another settlement (BR-30.7) |
 | `AR-0006` | 422 | Write-off exceeds tolerance |
+| `AR-0003` | 409 | Lockbox file already imported (same SHA-256) |
+| `AR-0004` | 400 | BAI2 file malformed; `detail` names the line |
+| `AR-0007` | 409 | Dunning run must be REVIEWED before issue |
+| `AR-DUNNING-STATE` | 409 | Dunning run status does not allow the move |
+| `AR-DUNNING-RUN-NOT-FOUND` | 404 | Dunning run id unknown or unknown action |
+| `AR-DISPUTE-NOT-FOUND` | 404 | Dispute id unknown or unknown action |
+| `AR-DISPUTE-STATE` | 409 | Dispute status does not allow the move, or the item is no longer open |
+| `AR-DISPUTE-EXISTS` | 409 | The item already has an active dispute |
+| `AR-PROMISE-EXISTS` | 409 | The item already has a promise that has not broken |
+| `AR-PROMISE-STATE` | 409 | The item is no longer open |
+| `AR-AMOUNT-RANGE` | 400 / 422 | Disputed or promised amount is not positive, or exceeds the open amount |
 
 `Idempotency-Key` is enforced on create by storing the key on the payment row
 (unique per tenant). On apply the key and the response are stored in
@@ -88,8 +112,12 @@ retry replays the first response instead of failing with 412.
 ## Web
 
 `apps/web/src/modules/receivables/`: the AR workspace (aging by currency and
-bucket, payments waiting), open items, payments, record payment, and the payment
-page with match candidates and the apply plan.
+bucket, payments waiting, active disputes), open items (with dispute and promise
+actions), payments, record payment, the payment page with match candidates and
+the apply plan; lockbox imports and the import form; the collections worklist;
+disputes (list, open, detail with review and resolve); promises to pay (list,
+record); dunning runs (list, propose, detail with the letter preview, exclusions
+and review, issue, cancel); interest notes (list, calculate and post).
 
 ## Dependencies
 

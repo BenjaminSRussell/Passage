@@ -13,7 +13,57 @@ const Context = "receivables"
 var (
 	PaymentReceived = events.Type(Context, "payment", "received", 1)
 	PaymentApplied  = events.Type(Context, "payment", "applied", 1)
+	DisputeOpened   = events.Type(Context, "dispute", "opened", 1)
+	DisputeResolved = events.Type(Context, "dispute", "resolved", 1)
+	// DunningLetterIssued is the PRD's dunning-letter.issued.v1; the kernel's
+	// naming rule allows no hyphen, so the entity is "dunningletter".
+	DunningLetterIssued = events.Type(Context, "dunningletter", "issued", 1)
 )
+
+// DisputeOpenedData is the payload of dev.passage.receivables.dispute.opened.v1.
+type DisputeOpenedData struct {
+	DisputeID     string          `json:"dispute_id"`
+	LegalEntityID string          `json:"legal_entity_id"`
+	CustomerID    string          `json:"customer_id"`
+	OpenItemID    string          `json:"open_item_id"`
+	Amount        decimal.Decimal `json:"amount"`
+	Currency      string          `json:"currency"`
+	ReasonCode    string          `json:"reason_code"`
+}
+
+// DisputeResolvedData is the payload of dev.passage.receivables.dispute.resolved.v1.
+type DisputeResolvedData struct {
+	DisputeID     string          `json:"dispute_id"`
+	LegalEntityID string          `json:"legal_entity_id"`
+	CustomerID    string          `json:"customer_id"`
+	OpenItemID    string          `json:"open_item_id"`
+	Amount        decimal.Decimal `json:"amount"`
+	Currency      string          `json:"currency"`
+	ReasonCode    string          `json:"reason_code"`
+	Resolution    string          `json:"resolution"`
+}
+
+// LetterItemData is one open item on an issued dunning letter.
+type LetterItemData struct {
+	OpenItemID  string          `json:"open_item_id"`
+	OpenAmount  decimal.Decimal `json:"open_amount"`
+	DaysOverdue int             `json:"days_overdue"`
+}
+
+// DunningLetterIssuedData is the payload of
+// dev.passage.receivables.dunningletter.issued.v1, one event per issued letter
+// (§5.30.5: run_id, customer_id, level, items[], fee, document_ref).
+type DunningLetterIssuedData struct {
+	RunID         string           `json:"run_id"`
+	LetterID      string           `json:"letter_id"`
+	LegalEntityID string           `json:"legal_entity_id"`
+	CustomerID    string           `json:"customer_id"`
+	Currency      string           `json:"currency"`
+	Level         int              `json:"level"`
+	Items         []LetterItemData `json:"items"`
+	Fee           decimal.Decimal  `json:"fee"`
+	DocumentRef   string           `json:"document_ref"`
+}
 
 // PaymentReceivedData is the payload of dev.passage.receivables.payment.received.v1.
 type PaymentReceivedData struct {

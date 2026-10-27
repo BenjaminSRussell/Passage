@@ -27,7 +27,24 @@ describe("receivables module", () => {
       "/receivables/payments",
       "/receivables/payments/new",
       "/receivables/payments/:id",
+      "/receivables/lockbox",
+      "/receivables/lockbox/new",
+      "/receivables/worklist",
+      "/receivables/disputes",
+      "/receivables/disputes/new",
+      "/receivables/disputes/:id",
+      "/receivables/promises",
+      "/receivables/promises/new",
+      "/receivables/dunning-runs",
+      "/receivables/dunning-runs/new",
+      "/receivables/dunning-runs/:id",
+      "/receivables/interest-notes",
+      "/receivables/interest-notes/new",
     ]);
+    // Every nav entry points at a registered route; each route has a title for the shell.
+    const paths = new Set(receivables.routes.map((r) => r.path));
+    expect(receivables.nav.every((n) => paths.has(n.to))).toBe(true);
+    expect(receivables.routes.every((r) => typeof r.handle?.title === "string")).toBe(true);
     expect(receivables.nav.find((n) => n.to === "/receivables")?.duty).toBe("ARView");
     expect(receivables.nav.find((n) => n.to === "/receivables/payments/new")?.duty).toBe("ARPaymentPost");
   });

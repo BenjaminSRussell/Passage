@@ -28,6 +28,8 @@ const (
 	readyTimeout     = 500 * time.Millisecond
 	dutyView         = "ARView"
 	dutyPayment      = "ARPaymentPost"
+	dutyImport       = "ARImport"
+	maxLockboxBytes  = 3 << 20 // below httpx.Decode's 4 MiB body cap, leaving room for JSON escaping
 	validationDetail = "request failed validation"
 	idempotencyKey   = "Idempotency-Key"
 	maxKeyLength     = 200
@@ -64,6 +66,12 @@ func (a *API) Register(r chi.Router) {
 		// Custom methods (:apply, :match) share one route because chi does not
 		// match a literal ':' after a path parameter; paymentAction dispatches.
 		r.Post("/payments/{ref}", a.paymentAction)
+		a.collectionsRoutes(r)
+		a.dunningRoutes(r)
+		a.interestRoutes(r)
+		r.With(authz.RequireDuty(dutyImport)).Post("/lockbox/imports", a.importLockbox)
+		r.With(authz.RequireDuty(dutyView)).Get("/lockbox/imports", a.listLockboxBatches)
+		r.With(authz.RequireDuty(dutyView)).Get("/worklist", a.worklist)
 	})
 }
 
@@ -395,11 +403,11 @@ func (a *API) fail(op string, w http.ResponseWriter, r *http.Request, err error)
 func ifMatch(r *http.Request) (int, error) {
 	raw := strings.Trim(r.Header.Get("If-Match"), `" `)
 	if raw == "" {
-		return 0, httpx.NewProblem(http.StatusPreconditionRequired, "COM-0428", "If-Match header with the payment version is required")
+		return 0, httpx.NewProblem(http.StatusPreconditionRequired, "COM-0428", "If-Match header with the resource version is required")
 	}
 	v, err := strconv.Atoi(raw)
 	if err != nil || v < 1 {
-		return 0, httpx.NewProblem(http.StatusBadRequest, "COM-0001", "If-Match must be a payment version")
+		return 0, httpx.NewProblem(http.StatusBadRequest, "COM-0001", "If-Match must be a resource version")
 	}
 	return v, nil
 }

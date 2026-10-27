@@ -252,3 +252,298 @@ export function applyPayment(id: string, version: number, input: ApplyInput, key
     body: JSON.stringify(input),
   });
 }
+
+// ---- Collections (FR-30.6, FR-30.7, FR-30.8, FR-30.9, FR-30.10) and lockbox (FR-30.3) ----
+
+export const DISPUTE_STATUSES = ["OPEN", "UNDER_REVIEW", "RESOLVED_CREDIT", "RESOLVED_PAID", "RESOLVED_WRITE_OFF", "REJECTED"] as const;
+export type DisputeStatus = (typeof DISPUTE_STATUSES)[number];
+
+export const RESOLUTIONS = ["CREDIT", "PAID", "WRITE_OFF", "REJECTED"] as const;
+export type Resolution = (typeof RESOLUTIONS)[number];
+
+export const RUN_STATUSES = ["DRAFT", "REVIEWED", "ISSUED", "CANCELLED"] as const;
+export type RunStatus = (typeof RUN_STATUSES)[number];
+
+export type ExclusionReason = "BLOCKED" | "DISPUTE" | "PROMISE" | "BELOW_MINIMUM" | "INTERVAL";
+
+export interface Dispute {
+  id: string;
+  legalEntityId: string;
+  customerId: string;
+  openItemId: string;
+  documentNumber: string;
+  reasonCode: string;
+  disputedAmount: string;
+  currency: string;
+  owner: string;
+  status: DisputeStatus;
+  resolutionNote?: string | null;
+  slaDue: string;
+  createdAt: string;
+  resolvedAt?: string | null;
+  version: number;
+}
+
+export interface DisputeInput {
+  legalEntityId: string;
+  openItemId: string;
+  reasonCode: string;
+  disputedAmount: string;
+  owner: string;
+}
+
+/** A promise to pay; named so it does not shadow the global Promise. */
+export interface PaymentPromise {
+  id: string;
+  legalEntityId: string;
+  customerId: string;
+  openItemId: string;
+  documentNumber: string;
+  currency: string;
+  amount: string;
+  promiseDate: string;
+  createdAt: string;
+}
+
+export interface PromiseInput {
+  legalEntityId: string;
+  openItemId: string;
+  amount: string;
+  promiseDate: string;
+}
+
+export interface Exclusion {
+  openItemId: string;
+  customerId: string;
+  reason: ExclusionReason;
+}
+
+export interface LetterItem {
+  openItemId: string;
+  documentNumber: string;
+  dueDate: string;
+  openAmount: string;
+  daysOverdue: number;
+  fromLevel: number;
+  toLevel: number;
+}
+
+export interface DunningLetter {
+  id: string;
+  customerId: string;
+  currency: string;
+  level: number;
+  priorLevel: number;
+  amount: string;
+  feeAmount: string;
+  status: "DRAFT" | "ISSUED" | "SKIPPED";
+  documentRef?: string | null;
+  items: LetterItem[];
+}
+
+export interface DunningRun {
+  id: string;
+  legalEntityId: string;
+  runDate: string;
+  graceDays: number;
+  status: RunStatus;
+  exclusions: Exclusion[];
+  letters: DunningLetter[];
+  issuedAt?: string | null;
+  version: number;
+}
+
+export interface DunningRunSummary {
+  id: string;
+  legalEntityId: string;
+  runDate: string;
+  graceDays: number;
+  status: RunStatus;
+  letterCount: number;
+  issuedAt?: string | null;
+  version: number;
+}
+
+export interface DunningRunInput {
+  legalEntityId: string;
+  runDate: string;
+  graceDays: number;
+}
+
+export type InterestBasis = "ACT_365" | "ACT_360";
+
+export interface InterestInput {
+  legalEntityId: string;
+  calculationDate: string;
+  annualRate: string;
+  basis: InterestBasis;
+  graceDays: number;
+}
+
+export interface InterestCandidate {
+  openItemId: string;
+  customerId: string;
+  documentNumber: string;
+  currency: string;
+  principal: string;
+  days: number;
+  amount: string;
+}
+
+export interface InterestNote {
+  id: string;
+  legalEntityId: string;
+  customerId: string;
+  openItemId: string;
+  documentNumber: string;
+  interestItemId: string;
+  period: string;
+  calculationDate: string;
+  days: number;
+  annualRate: string;
+  basis: InterestBasis;
+  currency: string;
+  principal: string;
+  amount: string;
+}
+
+export interface InterestResult {
+  candidates: InterestCandidate[];
+  exclusions: Exclusion[];
+  posted: InterestNote[];
+}
+
+export interface CustomerRisk {
+  customerId: string;
+  currency: string;
+  totalOpen: string;
+  overdue: string;
+  oldestDays: number;
+  avgDaysLate: number;
+  dunningLevel: number;
+  openDisputes: number;
+  brokenPromises: number;
+  riskScore: number;
+}
+
+export interface WorklistResponse {
+  asOf: string;
+  items: CustomerRisk[];
+}
+
+export interface LockboxImportInput {
+  legalEntityId: string;
+  receivedDate: string;
+  content: string;
+  typeCodes?: string[];
+}
+
+export interface LockboxBatch {
+  id: string;
+  legalEntityId: string;
+  fileSha256: string;
+  receivedDate: string;
+  accountCount: number;
+  paymentCount: number;
+  importedAt?: string | null;
+  payments?: Payment[];
+}
+
+export interface DisputeFilter {
+  status?: DisputeStatus | "active" | "";
+  customer?: string;
+  openItem?: string;
+  limit?: number;
+}
+
+/** GET /disputes - nearest SLA first; status "active" keeps OPEN and UNDER_REVIEW. */
+export function listDisputes(filter: DisputeFilter = {}, signal?: AbortSignal): Promise<Dispute[]> {
+  return items<Dispute>(
+    `/disputes${query({ status: filter.status, customer: filter.customer, openItem: filter.openItem, limit: filter.limit })}`,
+    signal,
+  );
+}
+
+export function getDispute(id: string, signal?: AbortSignal): Promise<Dispute> {
+  return send<Dispute>(`/disputes/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** POST /disputes - excludes the item from dunning and interest while the dispute is active. */
+export function openDispute(input: DisputeInput, key: string = newKey()): Promise<Dispute> {
+  return send<Dispute>("/disputes", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(input) });
+}
+
+/** POST /disputes/{id}:review - OPEN to UNDER_REVIEW; If-Match carries the dispute version. */
+export function reviewDispute(id: string, version: number): Promise<Dispute> {
+  return send<Dispute>(`/disputes/${encodeURIComponent(id)}:review`, { method: "POST", headers: { "If-Match": `"${version}"` } });
+}
+
+/** POST /disputes/{id}:resolve - CREDIT, PAID or WRITE_OFF from review; REJECTED from OPEN or review. */
+export function resolveDispute(id: string, version: number, resolution: Resolution, note: string | null): Promise<Dispute> {
+  return send<Dispute>(`/disputes/${encodeURIComponent(id)}:resolve`, {
+    method: "POST",
+    headers: { "If-Match": `"${version}"` },
+    body: JSON.stringify({ resolution, note }),
+  });
+}
+
+export interface PromiseFilter {
+  customer?: string;
+  openItem?: string;
+  limit?: number;
+}
+
+export function listPromises(filter: PromiseFilter = {}, signal?: AbortSignal): Promise<PaymentPromise[]> {
+  return items<PaymentPromise>(`/promises${query({ customer: filter.customer, openItem: filter.openItem, limit: filter.limit })}`, signal);
+}
+
+/** POST /promises - holds the item out of dunning and interest until the promise date plus two days. */
+export function createPromise(input: PromiseInput, key: string = newKey()): Promise<PaymentPromise> {
+  return send<PaymentPromise>("/promises", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(input) });
+}
+
+export function listDunningRuns(status: RunStatus | "" = "", signal?: AbortSignal): Promise<DunningRunSummary[]> {
+  return items<DunningRunSummary>(`/dunning-runs${query({ status })}`, signal);
+}
+
+export function getDunningRun(id: string, signal?: AbortSignal): Promise<DunningRun> {
+  return send<DunningRun>(`/dunning-runs/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** POST /dunning-runs - proposes letters as a DRAFT run; nothing is raised or posted until issue. */
+export function createDunningRun(input: DunningRunInput, key: string = newKey()): Promise<DunningRun> {
+  return send<DunningRun>("/dunning-runs", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(input) });
+}
+
+/** POST /dunning-runs/{id}:review|:issue|:cancel with If-Match. */
+export function moveDunningRun(id: string, version: number, action: "review" | "issue" | "cancel"): Promise<DunningRun> {
+  return send<DunningRun>(`/dunning-runs/${encodeURIComponent(id)}:${action}`, { method: "POST", headers: { "If-Match": `"${version}"` } });
+}
+
+/** POST /interest-notes:calculate - a preview; writes nothing. */
+export function calculateInterest(input: InterestInput): Promise<InterestResult> {
+  return send<InterestResult>("/interest-notes:calculate", { method: "POST", body: JSON.stringify(input) });
+}
+
+/** POST /interest-notes:post - posts INTEREST open items once per item and month. */
+export function postInterest(input: InterestInput, key: string = newKey()): Promise<InterestResult> {
+  return send<InterestResult>("/interest-notes:post", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(input) });
+}
+
+export function listInterestNotes(customer = "", signal?: AbortSignal): Promise<InterestNote[]> {
+  return items<InterestNote>(`/interest-notes${query({ customer })}`, signal);
+}
+
+/** GET /worklist - customers ranked by risk score, riskiest first. */
+export function fetchWorklist(legalEntityId: string, asOf?: string, signal?: AbortSignal): Promise<WorklistResponse> {
+  return send<WorklistResponse>(`/worklist${query({ legalEntityId, asOf })}`, {}, signal);
+}
+
+export function listLockboxBatches(signal?: AbortSignal): Promise<LockboxBatch[]> {
+  return items<LockboxBatch>("/lockbox/imports", signal);
+}
+
+/** POST /lockbox/imports - a repeated file is 409 AR-0003; a malformed one 400 AR-0004 with the line. */
+export function importLockbox(input: LockboxImportInput): Promise<LockboxBatch> {
+  return send<LockboxBatch>("/lockbox/imports", { method: "POST", body: JSON.stringify(input) });
+}

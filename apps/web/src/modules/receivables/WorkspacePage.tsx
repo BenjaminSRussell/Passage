@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, StatGroup, StatTile, type DataTableColumn } from "../../shell/ui";
-import { BUCKETS, fetchAging, listPayments, type AgingResponse, type Bucket } from "./api/client";
+import { BUCKETS, fetchAging, listDisputes, listPayments, type AgingResponse, type Bucket } from "./api/client";
 import { DAY, sumDecimals, today } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
@@ -27,6 +27,7 @@ interface Overview {
   aging: AgingResponse;
   received: number;
   onAccount: number;
+  disputes: number;
 }
 
 /** One row per currency, one column per bucket; empty buckets show 0.00. */
@@ -59,12 +60,13 @@ export function WorkspacePage() {
   const valid = DAY.test(asOf);
   const state = useLoad<Overview>(
     async (signal) => {
-      const [aging, received, onAccount] = await Promise.all([
+      const [aging, received, onAccount, disputes] = await Promise.all([
         fetchAging(valid ? asOf : undefined, signal),
         listPayments({ status: "RECEIVED", limit: PAGE }, signal),
         listPayments({ status: "ON_ACCOUNT", limit: PAGE }, signal),
+        listDisputes({ status: "active", limit: PAGE }, signal),
       ]);
-      return { aging, received: received.length, onAccount: onAccount.length };
+      return { aging, received: received.length, onAccount: onAccount.length, disputes: disputes.length };
     },
     valid ? asOf : "",
   );
@@ -75,7 +77,7 @@ export function WorkspacePage() {
     <div className={styles.stack}>
       <PageHeader
         title="AR workspace"
-        description="Open receivables by age and the customer payments waiting to be applied."
+        description="Open receivables by age, the customer payments waiting to be applied and the disputes being worked."
         actions={
           <div className={styles.actions}>
             <Link className={buttonClassName("primary")} to="/receivables/payments/new">
@@ -86,6 +88,9 @@ export function WorkspacePage() {
             </Link>
             <Link className={buttonClassName("secondary")} to="/receivables/open-items">
               Open items
+            </Link>
+            <Link className={buttonClassName("secondary")} to="/receivables/worklist">
+              Collections worklist
             </Link>
           </div>
         }
@@ -100,6 +105,7 @@ export function WorkspacePage() {
             <StatTile label="Payments to apply" value={state.data ? count(state.data.received) : "…"} tone="warning" />
             <StatTile label="Payments on account" value={state.data ? count(state.data.onAccount) : "…"} tone="warning" />
             <StatTile label="Currencies with overdue items" value={state.data ? overdue : "…"} tone="danger" />
+            <StatTile label="Active disputes" value={state.data ? count(state.data.disputes) : "…"} tone="warning" />
           </StatGroup>
           <Card title="Aging" headingLevel={3}>
             <div className={styles.stack}>

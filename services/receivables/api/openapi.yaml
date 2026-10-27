@@ -3,8 +3,9 @@ info:
   title: Passage Receivables API
   version: 1.0.0
   description: |
-    Wave 30 slice 1 of the receivables context: open items, aging and manual
-    cash application. Errors are RFC 9457 problem details with a stable `code`
+    Wave 30 receivables context: open items, aging, manual and BAI2 lockbox cash
+    application, the collections worklist with risk scores, dunning runs, interest
+    notes, promises and disputes. Errors are RFC 9457 problem details with a stable `code`
     (see README). Every operation names its duty in `x-passage-duty`.
 servers:
   - url: https://api.{env}.passage.dev
@@ -174,6 +175,411 @@ paths:
         "412": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
         "428": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/lockbox/imports:
+    get:
+      operationId: listLockboxImports
+      summary: Imported lockbox files, newest first
+      x-passage-duty: ARView
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: Lockbox batches (without their payments)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/LockboxBatch" } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: importLockbox
+      summary: Import a BAI2 lockbox file; one unidentified CHECK payment per check credit (FR-30.3)
+      description: |
+        Duplicate files are refused by SHA-256 of the content (AR-0003). A malformed
+        record is refused with AR-0004 and the line number in `detail`.
+      x-passage-duty: ARImport
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LockboxImportRequest" }
+      responses:
+        "201":
+          description: File imported
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LockboxBatch" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/worklist:
+    get:
+      operationId: collectionsWorklist
+      summary: Customers ranked by risk score as of a date (FR-30.6, FR-30.10)
+      x-passage-duty: ARView
+      parameters:
+        - { name: legalEntityId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: asOf, in: query, schema: { type: string, format: date } }
+      responses:
+        "200":
+          description: Ranked worklist rows, riskiest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [asOf, items]
+                properties:
+                  asOf: { type: string, format: date }
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/CustomerRisk" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/dunning-runs:
+    get:
+      operationId: listDunningRuns
+      summary: Dunning runs, latest run date first, with the count of letters not skipped
+      x-passage-duty: ARView
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [DRAFT, REVIEWED, ISSUED, CANCELLED] } }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: Run summaries
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/DunningRunSummary" } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createDunningRun
+      summary: Propose a dunning run (DRAFT); letters are previewed, not issued
+      x-passage-duty: DunningRun
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateDunningRunRequest" }
+      responses:
+        "201":
+          description: Run proposed
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DunningRun" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/dunning-runs/{id}:
+    get:
+      operationId: getDunningRun
+      summary: Read a dunning run with its letters and exclusions
+      x-passage-duty: ARView
+      parameters:
+        - { $ref: "#/components/parameters/RunId" }
+      responses:
+        "200":
+          description: Dunning run
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DunningRun" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/dunning-runs/{id}:review:
+    post:
+      operationId: reviewDunningRun
+      summary: Mark a DRAFT run REVIEWED; requires If-Match
+      x-passage-duty: DunningRun
+      parameters:
+        - { $ref: "#/components/parameters/RunId" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      responses:
+        "200":
+          description: Run reviewed
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DunningRun" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/dunning-runs/{id}:issue:
+    post:
+      operationId: issueDunningRun
+      summary: Issue a REVIEWED run; only issue posts fees and raises levels (AR-0007 unless reviewed)
+      x-passage-duty: DunningRun
+      parameters:
+        - { $ref: "#/components/parameters/RunId" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      responses:
+        "200":
+          description: Run issued
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DunningRun" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/dunning-runs/{id}:cancel:
+    post:
+      operationId: cancelDunningRun
+      summary: Cancel a run that has not been issued; requires If-Match
+      x-passage-duty: DunningRun
+      parameters:
+        - { $ref: "#/components/parameters/RunId" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      responses:
+        "200":
+          description: Run cancelled
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DunningRun" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/interest-notes:
+    get:
+      operationId: listInterestNotes
+      summary: Posted interest notes, latest calculation first
+      x-passage-duty: ARView
+      parameters:
+        - { name: customer, in: query, schema: { type: string, format: uuid } }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: Interest notes
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/InterestNote" } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/interest-notes:calculate:
+    post:
+      operationId: calculateInterest
+      summary: Preview interest on overdue items (BR-30.5); writes nothing
+      x-passage-duty: InterestPost
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InterestRequest" }
+      responses:
+        "200":
+          description: Candidates and exclusions
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InterestResult" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/interest-notes:post:
+    post:
+      operationId: postInterest
+      summary: Post interest notes as INTEREST open items; once per item and month, charging only days after the last note
+      description: |
+        A retry with the same Idempotency-Key replays the stored response; the same
+        key with another body is 422 idempotency_key_reuse.
+      x-passage-duty: InterestPost
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InterestRequest" }
+      responses:
+        "200":
+          description: Candidates, exclusions and notes written
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InterestResult" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/promises:
+    get:
+      operationId: listPromises
+      summary: Promises to pay, latest promise date first
+      x-passage-duty: ARView
+      parameters:
+        - { name: customer, in: query, schema: { type: string, format: uuid } }
+        - { name: openItem, in: query, schema: { type: string, format: uuid } }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: Promises
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/Promise" } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createPromise
+      summary: Record a promise to pay on an open item; excludes it from dunning and interest while open
+      x-passage-duty: CollectionsMaintain
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PromiseRequest" }
+      responses:
+        "201":
+          description: Promise recorded
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Promise" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/disputes:
+    get:
+      operationId: listDisputes
+      summary: Disputes, nearest SLA first
+      x-passage-duty: ARView
+      parameters:
+        - name: status
+          in: query
+          description: A dispute status, or `active` for OPEN and UNDER_REVIEW.
+          schema: { type: string, enum: [active, OPEN, UNDER_REVIEW, RESOLVED_CREDIT, RESOLVED_PAID, RESOLVED_WRITE_OFF, REJECTED] }
+        - { name: customer, in: query, schema: { type: string, format: uuid } }
+        - { name: openItem, in: query, schema: { type: string, format: uuid } }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: Disputes
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/Dispute" } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: openDispute
+      summary: Open a dispute on an open item; excludes it from dunning and interest
+      x-passage-duty: CollectionsMaintain
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OpenDisputeRequest" }
+      responses:
+        "201":
+          description: Dispute opened
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Dispute" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/disputes/{id}:
+    get:
+      operationId: getDispute
+      summary: Read one dispute
+      x-passage-duty: ARView
+      parameters:
+        - { $ref: "#/components/parameters/DisputeId" }
+      responses:
+        "200":
+          description: Dispute
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Dispute" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/disputes/{id}:review:
+    post:
+      operationId: reviewDispute
+      summary: Move an OPEN dispute to UNDER_REVIEW; requires If-Match
+      x-passage-duty: CollectionsMaintain
+      parameters:
+        - { $ref: "#/components/parameters/DisputeId" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      responses:
+        "200":
+          description: Dispute under review
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Dispute" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/disputes/{id}:resolve:
+    post:
+      operationId: resolveDispute
+      summary: Resolve a dispute as CREDIT, PAID, WRITE_OFF or REJECTED; requires If-Match
+      x-passage-duty: CollectionsMaintain
+      parameters:
+        - { $ref: "#/components/parameters/DisputeId" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ResolveDisputeRequest" }
+      responses:
+        "200":
+          description: Dispute resolved
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Dispute" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
 components:
   securitySchemes:
     bearerAuth:
@@ -195,16 +601,32 @@ components:
       name: If-Match
       in: header
       required: true
-      description: Payment version from the last read (ETag). Missing header returns 428.
+      description: Resource version from the last read (ETag). Missing header returns 428.
       schema: { type: string }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 500, default: 500 }
     PaymentId:
       name: id
       in: path
       required: true
       schema: { type: string, format: uuid }
+    RunId:
+      name: id
+      in: path
+      required: true
+      description: Dunning run id.
+      schema: { type: string, format: uuid }
+    DisputeId:
+      name: id
+      in: path
+      required: true
+      description: Dispute id.
+      schema: { type: string, format: uuid }
   headers:
     ETag:
-      description: Payment version, quoted.
+      description: Resource version, quoted.
       schema: { type: string }
   responses:
     Problem:
@@ -345,3 +767,206 @@ components:
               writeOff: { $ref: "#/components/schemas/Money" }
               openAfter: { $ref: "#/components/schemas/Money" }
               itemStatus: { type: string }
+    LockboxImportRequest:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId, receivedDate, content]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        receivedDate: { type: string, format: date, description: Date the checks were received (value date of each payment). }
+        typeCodes:
+          type: array
+          description: Bank profile check credit codes (BAI2 credits, 100 to 399); defaults to 116, Item in Lockbox Deposit.
+          items: { type: string, pattern: "^[1-3][0-9]{2}$" }
+        content: { type: string, maxLength: 3145728, description: BAI2 file as received from the bank, UTF-8. }
+    LockboxBatch:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        fileSha256: { type: string, pattern: "^[0-9a-f]{64}$" }
+        receivedDate: { type: string, format: date }
+        accountCount: { type: integer }
+        paymentCount: { type: integer }
+        importedAt: { type: string, format: date-time }
+        payments:
+          type: array
+          description: The payments created; returned by the import, omitted from the list.
+          items: { $ref: "#/components/schemas/Payment" }
+    CustomerRisk:
+      type: object
+      description: One customer and currency row of the collections worklist.
+      properties:
+        customerId: { type: string, format: uuid }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        totalOpen: { $ref: "#/components/schemas/Money" }
+        overdue: { $ref: "#/components/schemas/Money" }
+        oldestDays: { type: integer }
+        avgDaysLate: { type: integer }
+        dunningLevel: { type: integer, minimum: 0, maximum: 4 }
+        openDisputes: { type: integer }
+        brokenPromises: { type: integer }
+        riskScore: { type: integer, minimum: 0, maximum: 100 }
+    CreateDunningRunRequest:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId, runDate]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        runDate: { type: string, format: date }
+        graceDays: { type: integer, minimum: 0, maximum: 60 }
+    DunningRun:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        runDate: { type: string, format: date }
+        graceDays: { type: integer }
+        status: { type: string, enum: [DRAFT, REVIEWED, ISSUED, CANCELLED] }
+        exclusions: { type: array, items: { $ref: "#/components/schemas/Exclusion" } }
+        letters:
+          type: array
+          items: { $ref: "#/components/schemas/DunningLetter" }
+        issuedAt: { type: [string, "null"], format: date-time }
+        version: { type: integer }
+    DunningRunSummary:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        runDate: { type: string, format: date }
+        graceDays: { type: integer }
+        status: { type: string, enum: [DRAFT, REVIEWED, ISSUED, CANCELLED] }
+        letterCount: { type: integer }
+        issuedAt: { type: [string, "null"], format: date-time }
+        version: { type: integer }
+    Exclusion:
+      type: object
+      properties:
+        openItemId: { type: string, format: uuid }
+        customerId: { type: string, format: uuid }
+        reason: { type: string, enum: [BLOCKED, DISPUTE, PROMISE, BELOW_MINIMUM, INTERVAL] }
+    DunningLetter:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        customerId: { type: string, format: uuid }
+        currency: { type: string }
+        level: { type: integer, minimum: 1, maximum: 4 }
+        priorLevel: { type: integer }
+        amount: { $ref: "#/components/schemas/Money" }
+        feeAmount: { $ref: "#/components/schemas/Money" }
+        status: { type: string, enum: [DRAFT, ISSUED, SKIPPED] }
+        documentRef: { type: string }
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              openItemId: { type: string, format: uuid }
+              documentNumber: { type: string }
+              dueDate: { type: string, format: date }
+              openAmount: { $ref: "#/components/schemas/Money" }
+              daysOverdue: { type: integer }
+              fromLevel: { type: integer }
+              toLevel: { type: integer }
+    InterestRequest:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId, calculationDate, annualRate, basis]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        calculationDate: { type: string, format: date }
+        annualRate: { type: string, description: "Decimal fraction above 0 and at most 1 (0.0900 is 9%)." }
+        basis: { type: string, enum: [ACT_365, ACT_360] }
+        graceDays: { type: integer, minimum: 0, maximum: 60 }
+    InterestResult:
+      type: object
+      properties:
+        candidates:
+          type: array
+          items:
+            type: object
+            properties:
+              openItemId: { type: string, format: uuid }
+              customerId: { type: string, format: uuid }
+              documentNumber: { type: string }
+              currency: { type: string }
+              principal: { $ref: "#/components/schemas/Money" }
+              days: { type: integer }
+              amount: { $ref: "#/components/schemas/Money" }
+        exclusions: { type: array, items: { $ref: "#/components/schemas/Exclusion" } }
+        posted: { type: array, items: { $ref: "#/components/schemas/InterestNote" } }
+    InterestNote:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        customerId: { type: string, format: uuid }
+        openItemId: { type: string, format: uuid }
+        documentNumber: { type: string }
+        interestItemId: { type: string, format: uuid }
+        period: { type: string, pattern: "^[0-9]{4}-[0-9]{2}$" }
+        calculationDate: { type: string, format: date }
+        days: { type: integer }
+        annualRate: { type: string }
+        basis: { type: string, enum: [ACT_365, ACT_360] }
+        currency: { type: string }
+        principal: { $ref: "#/components/schemas/Money" }
+        amount: { $ref: "#/components/schemas/Money" }
+    PromiseRequest:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId, openItemId, amount, promiseDate]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        openItemId: { type: string, format: uuid }
+        amount: { $ref: "#/components/schemas/Money" }
+        promiseDate: { type: string, format: date, description: Today or later. }
+    Promise:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        customerId: { type: string, format: uuid }
+        openItemId: { type: string, format: uuid }
+        documentNumber: { type: string }
+        currency: { type: string }
+        amount: { $ref: "#/components/schemas/Money" }
+        promiseDate: { type: string, format: date }
+        createdAt: { type: string, format: date-time }
+    OpenDisputeRequest:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId, openItemId, reasonCode, disputedAmount, owner]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        openItemId: { type: string, format: uuid }
+        reasonCode: { type: string, pattern: "^[A-Z][A-Z_]{1,31}$", description: "Upper-case code such as PRICE or DAMAGE." }
+        disputedAmount: { $ref: "#/components/schemas/Money" }
+        owner: { type: string, minLength: 1, maxLength: 120 }
+    Dispute:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        customerId: { type: string, format: uuid }
+        openItemId: { type: string, format: uuid }
+        documentNumber: { type: string }
+        reasonCode: { type: string }
+        disputedAmount: { $ref: "#/components/schemas/Money" }
+        currency: { type: string }
+        owner: { type: string }
+        status: { type: string, enum: [OPEN, UNDER_REVIEW, RESOLVED_CREDIT, RESOLVED_PAID, RESOLVED_WRITE_OFF, REJECTED] }
+        resolutionNote: { type: string }
+        slaDue: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        resolvedAt: { type: string, format: date-time }
+        version: { type: integer }
+    ResolveDisputeRequest:
+      type: object
+      additionalProperties: false
+      required: [resolution]
+      properties:
+        resolution: { type: string, enum: [CREDIT, PAID, WRITE_OFF, REJECTED] }
+        note: { type: [string, "null"], maxLength: 2000 }

@@ -4,8 +4,10 @@ Slice 1 builds the cash-application core of the receivables service: open items,
 aging, manual payments, the scored matcher (BR-30.1), settlement validation
 (BR-30.4), the payment events, the OpenAPI and AsyncAPI contracts, the Helm
 chart, and the web module (AR workspace, open items, payments, record payment,
-payment page with match and apply). Everything below is absent, with
-the reason and where it goes. Status is either "later slice of PSG-30" (inside
+payment page with match and apply). Slice 2 adds BAI2 lockbox import, the
+risk-ranked collections worklist, disputes, promises to pay, dunning runs with
+letters and fees, interest notes, their events, and web pages for each.
+Everything below is absent, with the reason and where it goes. Status is either "later slice of PSG-30" (inside
 this service or the web module, in a later increment) or "handoff" (needs another
 owner or a kernel change).
 
@@ -13,15 +15,16 @@ owner or a kernel change).
 
 | # | Deliverable | Status | Reason |
 |---|---|---|---|
-| 1 | Cash application: lockbox BAI2 import | later slice of PSG-30 | Parser (record types 1-9, line-numbered errors) and `lockbox_batch` not in slice 1. |
+| 1 | Cash application: lockbox, BAI lockbox transmission format | later slice of PSG-30 | Slice 2 imports BAI2 cash-management files (01-99 records; each type-16 check credit is one payment, the customer reference is its remittance; duplicate files refused by SHA-256). FR-30.3 names the bank lockbox transmission (record types 1-9, with type 4 overflow carrying several invoice numbers per check); that fixed-width format is bank-specific and is not parsed. Lockbox payments are not matched or auto-applied on import: the clerk opens each one and uses `:match` / `:apply`. |
 | 1 | Cash application: camt.053 auto-match | later slice of PSG-30 | Statement import and entry uniqueness (statement id, entry ref) not built. |
 | 1 | Cash application: ML-assisted suggestions (Python ranker) | later slice of PSG-30 | The ranker is a separate Python service (`matcher-py`), not in this owned path. Rule score only in slice 1. |
 | 1 | Remittance advice matching (CSV, JSON, EDI 820) | later slice of PSG-30 | Only the manual payment's `remittance[]` is accepted; file formats are not parsed. |
-| 2 | Aging worklist ranked by risk score, aging basis option | later slice of PSG-30 | Aging snapshot by due date exists; worklist, invoice-date basis and nightly job do not. |
-| 2 | Collection letters and dunning levels (BR-30.2) | later slice of PSG-30 | `dunning_run` and `dunning_letter` tables and endpoints not built. |
-| 2 | Interest notes (BR-30.5, FR-30.8) | later slice of PSG-30 | Not built. |
-| 2 | Promises to pay and disputes (Temporal workflow) | later slice of PSG-30 | Tables, endpoints and the `collections-workflows` TS service not built. |
-| 2 | Customer risk scoring (FR-30.10) | later slice of PSG-30 | Not built; publishes `customer-balance.changed.v1` once built. |
+| 2 | Aging basis option and nightly aging job | later slice of PSG-30 | The worklist and aging are computed on request, by due date. The 01:30 job, stored snapshots, invoice-date basis and per-entity bucket definitions are not built. |
+| 2 | Dunning: letters rendered through docgen, fees and levels to the ledger, level-4 hold | handoff | Runs, letters, exclusions, levels, intervals and FEE open items are built. `document_ref` is a placeholder (`DL-<letter id>`) until docgen (wave 5) renders the letter; the fee is an open item but is not posted to GL 4300 (ledger posting, see below); the level-4 credit-hold recommendation to sales (CR-3) is only carried in `dunningletter.issued.v1`. |
+| 2 | Dunning procedures per customer group | later slice of PSG-30 | Grace days come from the run request (default 5). Customer-group procedures (`dunning_procedure`, interval and minimum overrides), `collection_letter_basis = CUSTOMER`, legal text and a customer-level dunning block (customer master, wave 6/26) are not built; only item-level `dunning_block` is honoured. |
+| 2 | Interest: rate configuration and GL posting | later slice of PSG-30 | Notes and INTEREST open items are built. Rate, basis and grace come from the request, not from `interest_rate` / `interest_basis` per legal entity and customer group; the interest is not posted to GL 4310 (ledger posting). |
+| 2 | Disputes and promises: Temporal workflow, resolution postings | handoff | Disputes (one active per item, SLA 120 h, BR-30.6 moves) and promises are built as REST state. The `collections-workflows` TS service (Temporal namespace `collections`), SLA timers and escalation, `workflow_run_id`, evidence and timeline, and the CLOSED state after resolution are not. RESOLVED_CREDIT does not post a credit note (billing, wave 29) and RESOLVED_WRITE_OFF does not write the item off (ledger); both only release the item. AC-30.9's credit-note half is therefore not met. A promise excludes its whole item, not only the promised amount. |
+| 2 | Customer risk score published to credit | later slice of PSG-30 | The 0-100 score is computed on the worklist. `customer-balance.changed.v1` to sales credit is not published. "Average days to pay" is approximated by the open-amount-weighted days late of the open items; settled history is not used yet. |
 | 3 | Return orders / RMA dispositions, credit note, restocking | handoff | The `/api/v1/sales/return-orders` routes and inventory receipt belong to sales and inventory. Receivables only settles the credit note once those exist. |
 | 4 | Rebate settlement from wave 26 accruals | handoff | Needs `dev.passage.pricing.rebate.settled.v1` from wave 26 and the AP payment hook from wave 19. Not built here. |
 | 4 | Customer statements (monthly, on demand, PDF) | later slice of PSG-30 | Not built. Needs docgen (wave 5). |
@@ -45,11 +48,11 @@ owner or a kernel change).
 | AC | Status | Reason |
 |---|---|---|
 | AC1 cash-application fixtures: 500 payments, ≥ 90% auto-match, zero false matches | later slice of PSG-30 | The `testdata/cash-app-500` fixture and the answer key are not created. The rules and the subset-sum bound are unit-tested, but the fixture-level accuracy is not measured. |
-| AC2 dunning run respects levels, grace and blocks | later slice of PSG-30 | Dunning is not built. |
+| AC2 dunning run respects levels, grace and blocks | partly met | Levels, grace, minimum, interval, blocks, disputes and promises are unit-tested (`domain/dunning_test.go`) and tested end to end against Postgres (`store/collections_test.go`, including AC-30.4's 10-day interval and AC-30.9's dispute exclusion). The `dunning-60` fixture of AC-30.3 (60 customers, 31 expected letters) is not created. |
 | AC3 RMA E2E: return, inspection, credit note posts to inventory and AR | handoff | Depends on sales, inventory and ledger. |
 | AC4 Phase 5 exit: one-month simulation, reconciliation pack signed | handoff | `sim/phase5-month` spans waves 3-5 and needs the accountant sign-off. Owned by testing-reconciliation. |
 | AC5 every deliverable has code or a reason in this file | met | This file lists every item not built. |
-| AC6 `go vet` and `go test` clean; web vitest and tsc; OpenAPI/AsyncAPI match code; chart lints | met for slice 1 | Go vet and tests pass, including the store tests against Postgres (non-superuser role, so RLS applies); the web module tests and tsc pass; the chart lints. The OpenAPI and AsyncAPI cover the routes and events in code. |
+| AC6 `go vet` and `go test` clean; web vitest and tsc; OpenAPI/AsyncAPI match code; chart lints | met for slices 1 and 2 | Go vet and tests pass, including the store tests against Postgres (non-superuser role, so RLS applies); the web module tests and tsc pass; the chart is unchanged in slice 2. The OpenAPI and AsyncAPI cover the routes and events in code. |
 
 ## Functional requirements not in this slice
 
@@ -57,7 +60,7 @@ owner or a kernel change).
 - **FR-30.2 Manual payments.** Built for CHECK, ACH, WIRE, CARD and CASH. The unapplied residual posts to 1205 only through the ledger, which is not wired (see Ledger posting below).
 - **FR-30.4 Remittance advice files.** Not built (see deliverable 1).
 - **FR-30.5 camt.053 import.** Not built (see deliverable 1).
-- **FR-30.6 Aging worklist and nightly job.** Snapshot on demand is built. The 01:30 job, the risk-ranked worklist and invoice-date basis are not.
+- **FR-30.6 Aging worklist and nightly job.** Snapshot and risk-ranked worklist on demand are built. The 01:30 job and invoice-date basis are not. Saved worklist filters and "log contact" / "hold order" actions are not built.
 - **FR-30.13 Statements.** Not built.
 - **FR-30.14 Customer portal.** Not built (see `apps/customer-portal/README.md`).
 - **FR-30.15 Phase-exit simulation.** Handoff to testing-reconciliation.
@@ -74,13 +77,14 @@ owner or a kernel change).
 
 ## Events not in this slice
 
-- Published and in `events/asyncapi.yaml`: `payment.received.v1`, `payment.applied.v1`.
-- Not built: `customer-balance.changed.v1`, `dunning-letter.issued.v1`, `dispute.opened.v1` and `resolved.v1`, `return-order.*` (sales), `pricing.rebate.settled.v1` (consumed from wave 26).
+- Published and in `events/asyncapi.yaml`: `payment.received.v1` (manual and lockbox), `payment.applied.v1`, `dispute.opened.v1`, `dispute.resolved.v1`, and `dunningletter.issued.v1` (one per issued letter; the PRD names it `dunning-letter.issued.v1`, but the kernel event-type rule `[a-z][a-z0-9]*` allows no hyphen).
+- Not built: `customer-balance.changed.v1`, `return-order.*` (sales), `pricing.rebate.settled.v1` (consumed from wave 26).
 - Consumers of `invoice.*` and `credit-note.*` from wave 29 are not built.
 
 ## Ledger posting
 
 - Settlement and payment postings (Dr 1000/1010, Cr 1200; Dr 4100 for cash discount; Dr 6100 for write-off; FX 7100/7200) are not posted through `ledger.Post`. `journal_posting_id` is never set.
+- Dunning fees (Cr 4300) and interest (Cr 4310) are open items only; their journal postings wait for the same ledger client. Reconciliation of fees and interest to GL is therefore not yet checked.
 - The `ledgerclient` package is a kernel item (new, not yet present). Handoff to the platform kernel and to the ledger wave (w11/w12). Reconciliation Σ open_amount = GL 1200 is therefore not yet checked.
 
 ## Platform and kernel gaps (handoffs)
@@ -92,16 +96,17 @@ owner or a kernel change).
 
 ## Schema and data
 
-- Tables in `0001_init.sql`: `open_item`, `payment`, `settlement`. Not built: `lockbox_batch`, `bank_statement`, `dunning_run`, `dunning_letter`, `dispute`, `promise_to_pay`, `interest_note`, `collection_case`, `dd_mandate`, `direct_debit_run`, `deduction`, `chargeback_claim`, `balance_confirmation`, `correspondence_*`, `rebate_accrual`, `credit_profile`, `return_order`. Each goes into its later slice's migration.
-- `open_item` misses fields from §5.30.4: `invoice_account_id`, `amount_entity_currency`, `dispute_id`, `promise_id`, `special_gl_type`, `last_dunned_at`, and the full status enum (REVERSED).
+- Tables: `open_item`, `payment`, `settlement` (0001); `outbox` (0002); `idempotency_keys` (0003); `dispute`, `promise_to_pay`, `dunning_run`, `dunning_letter`, `interest_note` (0004); `lockbox_batch` (0005). Every table has `tenant_id`, ENABLE and FORCE row-level security, a tenant policy and (except outbox and idempotency_keys) a restrictive legal-entity policy. Not built: `bank_statement`, `collection_case`, `dd_mandate`, `direct_debit_run`, `deduction`, `chargeback_claim`, `balance_confirmation`, `correspondence_*`, `rebate_accrual`, `credit_profile`, `return_order`. Each goes into its later slice's migration.
+- `open_item` misses fields from §5.30.4: `invoice_account_id`, `amount_entity_currency`, `special_gl_type`. `dunning_run.parameters` is reduced to `grace_days`.
 - Migrations were applied to an empty Postgres 16 database by the store tests in the review run.
 
 ## Testdata and fixtures
 
-- `testdata/` is absent. The PRD fixtures `cash-app-500`, `dunning-60`, `rma-30`, `disputes-20`, `rebate-settle-12` and `portal-e2e` are not created.
+- `testdata/` is absent. The PRD fixtures `cash-app-500`, `dunning-60`, `rma-30`, `disputes-20`, `rebate-settle-12` and `portal-e2e` are not created. The BAI2 parser is tested against inline spec-shaped samples and a property test (never panics; dropping a record breaks a count).
 
 ## Web module (`apps/web/src/modules/receivables/`)
 
 - Built: the AR workspace (aging by currency and bucket with an as-of date, tiles for payments to apply and on account), the open items list, the payments list, the record-payment form with remittance lines, and the payment page (match candidates with score and rules, the apply plan with amount, cash discount and write-off per item, on-account residual, If-Match and Idempotency-Key). Vitest tests cover loading, empty and error states and axe AA.
-- Not built: the cash application keyboard flow (J/K, Enter, A) and bulk accept of every candidate ≥ 85, settlements between credits and debits, dunning preview, collections worklist, RMA screen, the unapplied-cash and disputes tiles that need later slices, and the Playwright E2E tests.
+- Built in slice 2: lockbox imports (list, import a file by upload or paste, the payments it created); collections worklist; disputes (list with status filter, open from an open item, detail with review and resolve or reject, If-Match); promises to pay (list, record); dunning runs (list, propose, detail with the letter preview, exclusions and their reasons, review, issue, cancel); interest notes (list, calculate preview, post with Idempotency-Key); "Dispute" and "Promise" actions on open items; an active-disputes tile on the workspace. Vitest tests cover loading, empty and error states, the commands' headers and bodies, and axe AA for every new page.
+- Not built: the cash application keyboard flow (J/K, Enter, A) and bulk accept of every candidate ≥ 85, settlements between credits and debits, the rendered dunning letter (needs docgen), worklist saved filters and contact log, RMA screen, the unapplied-cash tile, and the Playwright E2E tests.
 - Needs for the shell owner (wave 5): none for this slice. The module uses only React and the registry type.

@@ -2,7 +2,7 @@
 // strings; sums use scaled BigInt so no value ever passes through a float.
 
 import type { BadgeTone } from "../../shell/ui";
-import type { PaymentMode, PaymentStatus } from "./api/client";
+import type { DisputeStatus, ExclusionReason, PaymentMode, PaymentStatus, Resolution, RunStatus } from "./api/client";
 
 const SCALE = 6;
 const FACTOR = 10n ** BigInt(SCALE);
@@ -97,4 +97,60 @@ export function today(now: Date = new Date()): string {
 export function shortId(id: string | null | undefined): string {
   if (!id) return "Unidentified";
   return id.length > 8 ? `${id.slice(0, 8)}…` : id;
+}
+
+export const DISPUTE_LABELS: Record<DisputeStatus, string> = {
+  OPEN: "Open",
+  UNDER_REVIEW: "Under review",
+  RESOLVED_CREDIT: "Resolved: credit",
+  RESOLVED_PAID: "Resolved: paid",
+  RESOLVED_WRITE_OFF: "Resolved: write-off",
+  REJECTED: "Rejected",
+};
+
+export const DISPUTE_TONES: Record<DisputeStatus, BadgeTone> = {
+  OPEN: "warning",
+  UNDER_REVIEW: "info",
+  RESOLVED_CREDIT: "success",
+  RESOLVED_PAID: "success",
+  RESOLVED_WRITE_OFF: "neutral",
+  REJECTED: "neutral",
+};
+
+export const RESOLUTION_LABELS: Record<Resolution, string> = {
+  CREDIT: "Credit the customer",
+  PAID: "Customer paid",
+  WRITE_OFF: "Write off",
+  REJECTED: "Reject the dispute",
+};
+
+export const RUN_LABELS: Record<RunStatus, string> = {
+  DRAFT: "Draft",
+  REVIEWED: "Reviewed",
+  ISSUED: "Issued",
+  CANCELLED: "Cancelled",
+};
+
+export const RUN_TONES: Record<RunStatus, BadgeTone> = {
+  DRAFT: "info",
+  REVIEWED: "warning",
+  ISSUED: "success",
+  CANCELLED: "neutral",
+};
+
+export const EXCLUSION_LABELS: Record<ExclusionReason, string> = {
+  BLOCKED: "Dunning block",
+  DISPUTE: "Open dispute",
+  PROMISE: "Promise to pay holds",
+  BELOW_MINIMUM: "Letter below the minimum amount",
+  INTERVAL: "Last letter fewer than 10 days ago",
+};
+
+/** A timestamp as its calendar day and time in UTC, for SLA and audit columns. */
+export function dateTime(iso: string | null | undefined): string {
+  if (!iso) return "None";
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return iso;
+  const utc = at.toISOString();
+  return `${utc.slice(0, 10)} ${utc.slice(11, 16)} UTC`;
 }

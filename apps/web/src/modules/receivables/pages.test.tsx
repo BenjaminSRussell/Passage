@@ -58,6 +58,7 @@ describe("AR workspace", () => {
         return json(200, { asOf: "2027-03-31", totals: [{ currency: "USD", bucket: "1-30", amount: "1250.00" }] });
       }
       if (url.pathname.endsWith("/payments")) return json(200, { items: url.searchParams.get("status") === "RECEIVED" ? [payment] : [] });
+      if (url.pathname.endsWith("/disputes")) return json(200, { items: url.searchParams.get("status") === "active" ? [{ id: "d" }, { id: "e" }] : [] });
       return undefined;
     };
     const { container } = renderAt("/receivables");
@@ -65,6 +66,7 @@ describe("AR workspace", () => {
     await waitFor(() => expect(table).toHaveTextContent("1250.00"));
     expect(screen.getByRole("list", { name: "Receivables tiles" })).toHaveTextContent("Payments to apply 1");
     expect(screen.getByRole("list", { name: "Receivables tiles" })).toHaveTextContent("Currencies with overdue items 1");
+    expect(screen.getByRole("list", { name: "Receivables tiles" })).toHaveTextContent("Active disputes 2");
     expect(server.calls.some((c) => c.url.pathname.endsWith("/aging") && c.url.searchParams.has("asOf"))).toBe(true);
     expect(pageViolations(container)).toEqual([]);
   });

@@ -23,7 +23,27 @@ const columns: DataTableColumn<OpenItem>[] = [
     render: (row) => (row.cashDiscountDate ? `${money(row.cashDiscountAmount, row.currency)} by ${row.cashDiscountDate}` : "None"),
   },
   { key: "status", header: "Status", render: (row) => <StatusPill status={row.status.toLowerCase()} /> },
+  { key: "dunningLevel", header: "Dunning level", mono: true, align: "end" },
+  {
+    key: "collections",
+    header: "Collections",
+    render: (row) =>
+      row.status === "OPEN" || row.status === "PARTIALLY_SETTLED" ? (
+        <span className={styles.actions}>
+          <Link className={buttonClassName("ghost", "sm")} to={`/receivables/disputes/new?${collectionParams(row)}`} aria-label={`Dispute ${row.documentNumber}`}>
+            Dispute
+          </Link>
+          <Link className={buttonClassName("ghost", "sm")} to={`/receivables/promises/new?${collectionParams(row)}`} aria-label={`Promise for ${row.documentNumber}`}>
+            Promise
+          </Link>
+        </span>
+      ) : null,
+  },
 ];
+
+function collectionParams(row: OpenItem): string {
+  return new URLSearchParams({ legalEntity: row.legalEntityId, openItem: row.id, amount: row.openAmount }).toString();
+}
 
 /** Open items (FR-30.1, FBL5N): what each customer owes, ordered by due date. */
 export function OpenItemsPage() {

@@ -15,7 +15,34 @@ channels:
         $ref: "#/components/messages/PaymentReceived"
       paymentApplied:
         $ref: "#/components/messages/PaymentApplied"
+  disputeEvents:
+    address: passage.receivables.dispute
+    messages:
+      disputeOpened:
+        $ref: "#/components/messages/DisputeOpened"
+      disputeResolved:
+        $ref: "#/components/messages/DisputeResolved"
+  dunningLetterEvents:
+    address: passage.receivables.dunningletter
+    messages:
+      dunningLetterIssued:
+        $ref: "#/components/messages/DunningLetterIssued"
 operations:
+  publishDisputeOpened:
+    action: send
+    channel: { $ref: "#/channels/disputeEvents" }
+    messages:
+      - { $ref: "#/channels/disputeEvents/messages/disputeOpened" }
+  publishDisputeResolved:
+    action: send
+    channel: { $ref: "#/channels/disputeEvents" }
+    messages:
+      - { $ref: "#/channels/disputeEvents/messages/disputeResolved" }
+  publishDunningLetterIssued:
+    action: send
+    channel: { $ref: "#/channels/dunningLetterEvents" }
+    messages:
+      - { $ref: "#/channels/dunningLetterEvents/messages/dunningLetterIssued" }
   publishPaymentReceived:
     action: send
     channel: { $ref: "#/channels/paymentEvents" }
@@ -38,7 +65,67 @@ components:
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/PaymentAppliedData"
+    DisputeOpened:
+      name: dev.passage.receivables.dispute.opened.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/DisputeOpenedData"
+    DisputeResolved:
+      name: dev.passage.receivables.dispute.resolved.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/DisputeResolvedData"
+    DunningLetterIssued:
+      name: dev.passage.receivables.dunningletter.issued.v1
+      summary: One per issued letter (PRD dunning-letter.issued.v1; the type rule allows no hyphen). Skipped letters publish nothing.
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/DunningLetterIssuedData"
   schemas:
+    DisputeOpenedData:
+      type: object
+      required: [dispute_id, legal_entity_id, customer_id, open_item_id, amount, currency, reason_code]
+      properties:
+        dispute_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
+        customer_id: { type: string, format: uuid }
+        open_item_id: { type: string, format: uuid }
+        amount: { type: string, description: "decimal string" }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        reason_code: { type: string }
+    DisputeResolvedData:
+      type: object
+      required: [dispute_id, legal_entity_id, customer_id, open_item_id, amount, currency, reason_code, resolution]
+      properties:
+        dispute_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
+        customer_id: { type: string, format: uuid }
+        open_item_id: { type: string, format: uuid }
+        amount: { type: string, description: "disputed amount, decimal string" }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        reason_code: { type: string }
+        resolution: { type: string, enum: [CREDIT, PAID, WRITE_OFF, REJECTED] }
+    DunningLetterIssuedData:
+      type: object
+      required: [run_id, letter_id, legal_entity_id, customer_id, currency, level, items, fee, document_ref]
+      properties:
+        run_id: { type: string, format: uuid }
+        letter_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
+        customer_id: { type: string, format: uuid }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        level: { type: integer, minimum: 1, maximum: 4 }
+        items:
+          type: array
+          items:
+            type: object
+            required: [open_item_id, open_amount, days_overdue]
+            properties:
+              open_item_id: { type: string, format: uuid }
+              open_amount: { type: string, description: "decimal string" }
+              days_overdue: { type: integer }
+        fee: { type: string, description: "decimal string; 0 below level 3, posted as a FEE open item" }
+        document_ref: { type: string }
     PaymentReceivedData:
       type: object
       required: [payment_id, legal_entity_id, source, amount, currency, remittance]
