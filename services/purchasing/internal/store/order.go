@@ -1,0 +1,236 @@
+package store
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/shopspring/decimal"
+
+	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/BenjaminSRussell/passage/services/purchasing/internal/domain"
+)
+
+// PurchaseOrder is a PO in its pre-confirmation state (FR-17.7). Totals are
+// persisted with the lines; a deferred constraint trigger enforces the header identity.
+type PurchaseOrder struct {
+	ID               string                `json:"id"`
+	Number           string                `json:"number"`
+	LegalEntityID    string                `json:"legalEntityId"`
+	VendorID         string                `json:"vendorId"`
+	SiteID           string                `json:"siteId,omitempty"`
+	WarehouseID      string                `json:"warehouseId,omitempty"`
+	Currency         string                `json:"currency"`
+	ApprovalStatus   string                `json:"approvalStatus"`
+	DocumentStatus   string                `json:"documentStatus"`
+	VersionNo        int                   `json:"versionNo"`
+	ChangeManagement bool                  `json:"changeManagement"`
+	Subtotal         decimal.Decimal       `json:"subtotal"`
+	DiscountTotal    decimal.Decimal       `json:"discountTotal"`
+	ChargesTotal     decimal.Decimal       `json:"chargesTotal"`
+	TaxTotal         decimal.Decimal       `json:"taxTotal"`
+	Total            decimal.Decimal       `json:"total"`
+	RowVersion       int                   `json:"rowVersion"`
+	Lines            []PurchaseOrderLine   `json:"lines"`
+	Charges          []PurchaseOrderCharge `json:"charges"`
+	CreatedAt        time.Time             `json:"createdAt"`
+	UpdatedAt        time.Time             `json:"updatedAt"`
+}
+
+// PurchaseOrderLine is one PO line. PriceSource is "MANUAL" or
+// "TRADE_AGREEMENT:<id>" so the price can be explained later.
+type PurchaseOrderLine struct {
+	LineNo            int             `json:"lineNo"`
+	ProductID         string          `json:"productId,omitempty"`
+	Description       string          `json:"description,omitempty"`
+	Qty               decimal.Decimal `json:"qty"`
+	Unit              string          `json:"unit"`
+	UnitPrice         decimal.Decimal `json:"unitPrice"`
+	PriceUnit         decimal.Decimal `json:"priceUnit"`
+	DiscountPct       decimal.Decimal `json:"discountPct"`
+	GrossAmount       decimal.Decimal `json:"grossAmount"`
+	DiscountAmount    decimal.Decimal `json:"discountAmount"`
+	LineAmount        decimal.Decimal `json:"lineAmount"`
+	TaxAmount         decimal.Decimal `json:"taxAmount"`
+	DeliveryDate      domain.Day      `json:"deliveryDate"`
+	PriceSource       string          `json:"priceSource"`
+	RequisitionLineID string          `json:"requisitionLineId,omitempty"`
+	Status            string          `json:"status"`
+}
+
+// PurchaseOrderCharge is a priced header charge (FR-17.9).
+type PurchaseOrderCharge struct {
+	Seq    int             `json:"seq"`
+	Calc   string          `json:"calc"`
+	Value  decimal.Decimal `json:"value"`
+	Amount decimal.Decimal `json:"amount"`
+}
+
+// CreatePurchaseOrder stores a DRAFT PO with its priced lines and charges.
+func (s *Postgres) CreatePurchaseOrder(ctx context.Context, in PurchaseOrder, idem Idem) (PurchaseOrder, error) {
+	p, _ := tenant.FromContext(ctx)
+	in.ID = ids.New()
+	var out PurchaseOrder
+	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		existing, replay, err := claimKey(ctx, tx, idem, in.ID)
+		if err != nil {
+			return err
+		}
+		if replay {
+			out, err = loadPurchaseOrder(ctx, tx, existing)
+			return err
+		}
+		var seq int64
+		if err := tx.QueryRow(ctx, `select nextval('purchase_order_number_seq')`).Scan(&seq); err != nil {
+			return err
+		}
+		in.Number = fmt.Sprintf("PO-%08d", seq)
+		in.ApprovalStatus, in.DocumentStatus, in.VersionNo = "DRAFT", "NONE", 0
+		if _, err := tx.Exec(ctx, `insert into purchase_order (tenant_id, id, legal_entity_id, number, vendor_id, site_id, warehouse_id,
+			currency, approval_status, document_status, version_no, change_management, subtotal, discount_total, charges_total, tax_total, total)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+			p.TenantID, in.ID, in.LegalEntityID, in.Number, in.VendorID, nullable(in.SiteID), nullable(in.WarehouseID), in.Currency,
+			in.ApprovalStatus, in.DocumentStatus, in.VersionNo, in.ChangeManagement, in.Subtotal, in.DiscountTotal, in.ChargesTotal,
+			in.TaxTotal, in.Total); err != nil {
+			return err
+		}
+		for _, l := range in.Lines {
+			if _, err := tx.Exec(ctx, `insert into purchase_order_line (tenant_id, purchase_order_id, line_no, product_id, description,
+				qty, unit, unit_price, price_unit, discount_pct, gross_amount, discount_amount, line_amount, tax_amount, delivery_date,
+				price_source, requisition_line_id, status)
+				values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 'OPEN')`,
+				p.TenantID, in.ID, l.LineNo, nullable(l.ProductID), l.Description, l.Qty, l.Unit, l.UnitPrice, l.PriceUnit,
+				l.DiscountPct, l.GrossAmount, l.DiscountAmount, l.LineAmount, l.TaxAmount, l.DeliveryDate.Time, l.PriceSource,
+				nullable(l.RequisitionLineID)); err != nil {
+				return err
+			}
+		}
+		for _, c := range in.Charges {
+			if _, err := tx.Exec(ctx, `insert into purchase_order_charge (tenant_id, purchase_order_id, seq, calc, value, amount)
+				values ($1, $2, $3, $4, $5, $6)`, p.TenantID, in.ID, c.Seq, c.Calc, c.Value, c.Amount); err != nil {
+				return err
+			}
+		}
+		out, err = loadPurchaseOrder(ctx, tx, in.ID)
+		return err
+	})
+	return out, err
+}
+
+// GetPurchaseOrder returns one PO with its lines and charges.
+func (s *Postgres) GetPurchaseOrder(ctx context.Context, id string) (PurchaseOrder, error) {
+	var out PurchaseOrder
+	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		var err error
+		out, err = loadPurchaseOrder(ctx, tx, id)
+		return err
+	})
+	return out, err
+}
+
+func loadPurchaseOrder(ctx context.Context, tx pgx.Tx, id string) (PurchaseOrder, error) {
+	p, _ := tenant.FromContext(ctx)
+	var o PurchaseOrder
+	err := tx.QueryRow(ctx, `select id, legal_entity_id, number, vendor_id, coalesce(site_id::text, ''), coalesce(warehouse_id::text, ''),
+		currency, approval_status, document_status, version_no, change_management, subtotal, discount_total, charges_total, tax_total, total,
+		row_version, created_at, updated_at from purchase_order where tenant_id = $1 and id = $2`, p.TenantID, id).
+		Scan(&o.ID, &o.LegalEntityID, &o.Number, &o.VendorID, &o.SiteID, &o.WarehouseID, &o.Currency, &o.ApprovalStatus,
+			&o.DocumentStatus, &o.VersionNo, &o.ChangeManagement, &o.Subtotal, &o.DiscountTotal, &o.ChargesTotal, &o.TaxTotal,
+			&o.Total, &o.RowVersion, &o.CreatedAt, &o.UpdatedAt)
+	if err != nil {
+		return PurchaseOrder{}, notFound(err, CodePurchaseOrderNotFound, "purchase order not found")
+	}
+	lines, err := tx.Query(ctx, `select line_no, coalesce(product_id::text, ''), description, qty, unit, unit_price, price_unit,
+		discount_pct, gross_amount, discount_amount, line_amount, tax_amount, delivery_date, price_source,
+		coalesce(requisition_line_id::text, ''), status
+		from purchase_order_line where tenant_id = $1 and purchase_order_id = $2 order by line_no`, p.TenantID, id)
+	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	defer lines.Close()
+	o.Lines = []PurchaseOrderLine{}
+	for lines.Next() {
+		var l PurchaseOrderLine
+		var due time.Time
+		if err := lines.Scan(&l.LineNo, &l.ProductID, &l.Description, &l.Qty, &l.Unit, &l.UnitPrice, &l.PriceUnit, &l.DiscountPct,
+			&l.GrossAmount, &l.DiscountAmount, &l.LineAmount, &l.TaxAmount, &due, &l.PriceSource, &l.RequisitionLineID, &l.Status); err != nil {
+			return PurchaseOrder{}, err
+		}
+		l.DeliveryDate = day(due)
+		o.Lines = append(o.Lines, l)
+	}
+	if err := lines.Err(); err != nil {
+		return PurchaseOrder{}, err
+	}
+	charges, err := tx.Query(ctx, `select seq, calc, value, amount from purchase_order_charge
+		where tenant_id = $1 and purchase_order_id = $2 order by seq`, p.TenantID, id)
+	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	defer charges.Close()
+	o.Charges = []PurchaseOrderCharge{}
+	for charges.Next() {
+		var c PurchaseOrderCharge
+		if err := charges.Scan(&c.Seq, &c.Calc, &c.Value, &c.Amount); err != nil {
+			return PurchaseOrder{}, err
+		}
+		o.Charges = append(o.Charges, c)
+	}
+	return o, charges.Err()
+}
+
+// PurchaseOrderSummary is a list row: the header and its totals without lines.
+type PurchaseOrderSummary struct {
+	ID             string          `json:"id"`
+	Number         string          `json:"number"`
+	LegalEntityID  string          `json:"legalEntityId"`
+	VendorID       string          `json:"vendorId"`
+	Currency       string          `json:"currency"`
+	ApprovalStatus string          `json:"approvalStatus"`
+	DocumentStatus string          `json:"documentStatus"`
+	Total          decimal.Decimal `json:"total"`
+	LineCount      int             `json:"lineCount"`
+	RowVersion     int             `json:"rowVersion"`
+	CreatedAt      time.Time       `json:"createdAt"`
+}
+
+// PurchaseOrderFilter narrows ListPurchaseOrders; empty fields do not filter.
+type PurchaseOrderFilter struct {
+	ApprovalStatus string
+	VendorID       string
+}
+
+// ListPurchaseOrders returns PO headers newest first, after the cursor id.
+func (s *Postgres) ListPurchaseOrders(ctx context.Context, f PurchaseOrderFilter, after string, limit int) (Page[PurchaseOrderSummary], error) {
+	p, _ := tenant.FromContext(ctx)
+	limit = clampLimit(limit)
+	var items []PurchaseOrderSummary
+	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select o.id, o.number, o.legal_entity_id, o.vendor_id, o.currency, o.approval_status, o.document_status,
+			o.total, (select count(*) from purchase_order_line l where l.tenant_id = o.tenant_id and l.purchase_order_id = o.id),
+			o.row_version, o.created_at
+			from purchase_order o
+			where o.tenant_id = $1 and ($2 = '' or o.approval_status = $2) and ($3 = '' or o.vendor_id::text = $3)
+			and ($4::uuid is null or o.id < $4::uuid)
+			order by o.id desc limit $5`, p.TenantID, f.ApprovalStatus, f.VendorID, nullable(after), limit+1)
+		if err != nil {
+			return err
+		}
+		items, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (PurchaseOrderSummary, error) {
+			var o PurchaseOrderSummary
+			err := row.Scan(&o.ID, &o.Number, &o.LegalEntityID, &o.VendorID, &o.Currency, &o.ApprovalStatus, &o.DocumentStatus, &o.Total,
+				&o.LineCount, &o.RowVersion, &o.CreatedAt)
+			return o, err
+		})
+		return err
+	})
+	if err != nil {
+		return Page[PurchaseOrderSummary]{}, err
+	}
+	if items == nil {
+		items = []PurchaseOrderSummary{}
+	}
+	return pageOf(items, limit, func(o PurchaseOrderSummary) string { return o.ID }), nil
+}

@@ -1,0 +1,460 @@
+import { useMemo, useState, type FormEvent } from "react";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  DataTable,
+  EmptyState,
+  FormField,
+  Input,
+  PageHeader,
+  Select,
+  buttonClassName,
+  type DataTableColumn,
+} from "../../shell/ui";
+import {
+  createRequisition,
+  describeProblem,
+  getRequisition,
+  listRequisitions,
+  newIdempotencyKey,
+  submitRequisition,
+  type Requisition,
+  type RequisitionInput,
+  type RequisitionLine,
+  type RequisitionStatus,
+  type RequisitionSummary,
+  type Warning,
+} from "./api/client";
+import {
+  Details,
+  LoadError,
+  ShortId,
+  StatusBadge,
+  currencyPattern,
+  datePattern,
+  decimalPattern,
+  money,
+  statusLabel,
+  todayIso,
+  useResource,
+  uuidPattern,
+  type Failure,
+} from "./parts";
+import styles from "./pages.module.css";
+
+const STATUSES: RequisitionStatus[] = ["DRAFT", "IN_REVIEW", "APPROVED", "REJECTED", "CLOSED", "CANCELLED"];
+
+const roleLabels: Record<string, string> = { MANAGER: "Manager", CATEGORY_OWNER: "Category owner", CFO: "CFO" };
+
+const listColumns: DataTableColumn<RequisitionSummary>[] = [
+  { key: "number", header: "Number", mono: true },
+  { key: "status", header: "Status", render: (row) => <StatusBadge status={row.status} /> },
+  { key: "lineCount", header: "Lines", align: "end" },
+  { key: "total", header: "Estimated total", align: "end", render: (row) => money(row.total, row.currency) },
+  { key: "requesterId", header: "Requester", render: (row) => <ShortId id={row.requesterId} /> },
+  { key: "createdAt", header: "Created", mono: true, render: (row) => row.createdAt.slice(0, 10) },
+];
+
+/** Requisition list: status filter, "only mine", newest first, load-more paging. */
+export function RequisitionsPage() {
+  const navigate = useNavigate();
+  const [status, setStatus] = useState<RequisitionStatus | "">("");
+  const [mine, setMine] = useState(false);
+  const [cursor, setCursor] = useState<string | undefined>();
+  const [rows, setRows] = useState<RequisitionSummary[]>([]);
+  const page = useResource(
+    async (signal) => {
+      const result = await listRequisitions({ status, mine }, { cursor, signal });
+      setRows((prev) => (cursor ? [...prev, ...result.items] : result.items));
+      return result;
+    },
+    [status, mine, cursor],
+  );
+
+  const resetTo = (apply: () => void) => {
+    setCursor(undefined);
+    apply();
+  };
+
+  return (
+    <div className={styles.stack}>
+      <PageHeader
+        title="Requisitions"
+        description="Requests to buy goods and services, routed for approval by amount and category."
+        actions={
+          <Link className={buttonClassName("primary")} to="/purchasing/requisitions/new">
+            New requisition
+          </Link>
+        }
+      />
+      <div className={styles.toolbar}>
+        <div className={styles.filter}>
+          <FormField id="requisition-status-filter" label="Status">
+            {(control) => (
+              <Select {...control} value={status} onChange={(e) => resetTo(() => setStatus(e.target.value as RequisitionStatus | ""))}>
+                <option value="">All statuses</option>
+                {STATUSES.map((s) => (
+                  <option key={s} value={s}>
+                    {statusLabel(s)}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </FormField>
+        </div>
+        <label className={styles.checkboxRow}>
+          <Input type="checkbox" checked={mine} onChange={(e) => resetTo(() => setMine(e.target.checked))} />
+          Only my requisitions
+        </label>
+      </div>
+      {page.error ? <LoadError what="requisitions" error={page.error} onRetry={page.reload} /> : null}
+      <DataTable
+        label="Requisitions"
+        columns={listColumns}
+        rows={page.error ? [] : rows}
+        getRowKey={(row) => row.id}
+        loading={page.loading && rows.length === 0}
+        empty={{ title: "No requisitions yet", description: "Requisitions you or your team raise appear here." }}
+        onRowOpen={(row) => navigate(`/purchasing/requisitions/${row.id}`)}
+      />
+      {page.data?.nextCursor ? (
+        <div className={styles.actions}>
+          <Button loading={page.loading} onClick={() => setCursor(page.data?.nextCursor)}>
+            Load more
+          </Button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+interface LineDraft {
+  key: string;
+  productId: string;
+  description: string;
+  category: string;
+  qty: string;
+  unit: string;
+  estimatedUnitPrice: string;
+  requestedDate: string;
+  preferredVendorId: string;
+}
+
+function emptyLine(): LineDraft {
+  return {
+    key: newIdempotencyKey(),
+    productId: "",
+    description: "",
+    category: "",
+    qty: "1",
+    unit: "EA",
+    estimatedUnitPrice: "",
+    requestedDate: todayIso(),
+    preferredVendorId: "",
+  };
+}
+
+type Errors = Record<string, string>;
+
+/** Client-side checks mirroring the service's validation, keyed like its `errors` map. */
+export function validateRequisition(legalEntityId: string, currency: string, lines: LineDraft[]): Errors {
+  const errors: Errors = {};
+  if (!uuidPattern.test(legalEntityId)) errors.legalEntityId = "Enter the legal entity id (a UUID).";
+  if (!currencyPattern.test(currency)) errors.currency = "Use a three-letter ISO code such as USD.";
+  if (lines.length === 0) errors.lines = "Add at least one line.";
+  lines.forEach((l, i) => {
+    const f = (name: string) => `lines[${i}].${name}`;
+    if (l.productId !== "" && !uuidPattern.test(l.productId)) errors[f("productId")] = "Product id must be a UUID.";
+    if (l.productId === "" && (l.description.trim() === "" || l.category.trim() === "")) {
+      errors[f("description")] = "Enter a product id, or a description and a category.";
+    }
+    if (!decimalPattern.test(l.qty) || Number(l.qty) <= 0) errors[f("qty")] = "Enter a positive quantity.";
+    if (l.unit.trim() === "") errors[f("unit")] = "Enter a unit.";
+    if (l.estimatedUnitPrice !== "" && !decimalPattern.test(l.estimatedUnitPrice)) errors[f("estimatedUnitPrice")] = "Enter a decimal price.";
+    if (!datePattern.test(l.requestedDate)) errors[f("requestedDate")] = "Enter a date.";
+    if (l.preferredVendorId !== "" && !uuidPattern.test(l.preferredVendorId)) errors[f("preferredVendorId")] = "Vendor id must be a UUID.";
+  });
+  return errors;
+}
+
+function toInput(legalEntityId: string, currency: string, lines: LineDraft[]): RequisitionInput {
+  const opt = (v: string) => (v.trim() === "" ? undefined : v.trim());
+  return {
+    legalEntityId,
+    currency,
+    lines: lines.map((l) => ({
+      productId: opt(l.productId),
+      description: opt(l.description),
+      category: opt(l.category),
+      qty: l.qty.trim(),
+      unit: l.unit.trim(),
+      estimatedUnitPrice: opt(l.estimatedUnitPrice),
+      requestedDate: l.requestedDate,
+      preferredVendorId: opt(l.preferredVendorId),
+    })),
+  };
+}
+
+/** New requisition: header plus any number of lines; saves a DRAFT and opens it. */
+export function RequisitionCreatePage() {
+  const navigate = useNavigate();
+  const [legalEntityId, setLegalEntityId] = useState("");
+  const [currency, setCurrency] = useState("USD");
+  const [lines, setLines] = useState<LineDraft[]>(() => [emptyLine()]);
+  const [errors, setErrors] = useState<Errors>({});
+  const [failure, setFailure] = useState<Failure | null>(null);
+  const [busy, setBusy] = useState(false);
+  // One key per logical create so a retry after a network failure cannot duplicate it.
+  const key = useMemo(() => newIdempotencyKey(), [legalEntityId, currency, lines]);
+
+  const update = (index: number, patch: Partial<LineDraft>) => setLines((ls) => ls.map((l, i) => (i === index ? { ...l, ...patch } : l)));
+
+  async function onSubmit(event: FormEvent) {
+    event.preventDefault();
+    const found = validateRequisition(legalEntityId.trim(), currency, lines);
+    setErrors(found);
+    setFailure(null);
+    if (Object.keys(found).length > 0) return;
+    setBusy(true);
+    try {
+      const { body } = await createRequisition(toInput(legalEntityId.trim(), currency, lines), key);
+      navigate(`/purchasing/requisitions/${body.id}`, { state: { warnings: body.warnings ?? [] } });
+    } catch (error) {
+      const problem = describeProblem(error);
+      setFailure(problem);
+      if (problem.errors) setErrors(problem.errors);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const field = (name: string) => errors[name];
+
+  return (
+    <div className={styles.stack}>
+      <PageHeader title="New requisition" description="Leave the estimate blank to take the preferred vendor's trade agreement price." />
+      <form className={styles.form} onSubmit={onSubmit} noValidate>
+        <Card title="Requisition">
+          <div className={styles.grid}>
+            <FormField id="req-legal-entity" label="Legal entity id" error={field("legalEntityId")}>
+              {(control) => <Input {...control} value={legalEntityId} onChange={(e) => setLegalEntityId(e.target.value)} />}
+            </FormField>
+            <FormField id="req-currency" label="Currency" error={field("currency")}>
+              {(control) => (
+                <Input {...control} value={currency} maxLength={3} onChange={(e) => setCurrency(e.target.value.toUpperCase())} />
+              )}
+            </FormField>
+          </div>
+        </Card>
+        <Card
+          title="Lines"
+          actions={
+            <Button size="sm" onClick={() => setLines((ls) => [...ls, emptyLine()])}>
+              Add line
+            </Button>
+          }
+        >
+          {field("lines") ? <p className={styles.muted}>{field("lines")}</p> : null}
+          {lines.map((line, i) => {
+            const id = (name: string) => `req-line-${i}-${name}`;
+            const err = (name: string) => field(`lines[${i}].${name}`);
+            return (
+              <fieldset key={line.key} className={styles.lineCard} aria-label={`Line ${i + 1}`}>
+                <div className={styles.lineHead}>
+                  <p className={styles.lineTitle}>Line {i + 1}</p>
+                  {lines.length > 1 ? (
+                    <Button size="sm" variant="ghost" onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))}>
+                      Remove line {i + 1}
+                    </Button>
+                  ) : null}
+                </div>
+                <div className={styles.grid}>
+                  <FormField id={id("product")} label="Product id" optional error={err("productId")}>
+                    {(c) => <Input {...c} value={line.productId} onChange={(e) => update(i, { productId: e.target.value })} />}
+                  </FormField>
+                  <FormField id={id("description")} label="Description" error={err("description")}>
+                    {(c) => <Input {...c} value={line.description} onChange={(e) => update(i, { description: e.target.value })} />}
+                  </FormField>
+                  <FormField id={id("category")} label="Category">
+                    {(c) => <Input {...c} value={line.category} onChange={(e) => update(i, { category: e.target.value })} />}
+                  </FormField>
+                  <FormField id={id("qty")} label="Quantity" error={err("qty")}>
+                    {(c) => <Input {...c} inputMode="decimal" value={line.qty} onChange={(e) => update(i, { qty: e.target.value })} />}
+                  </FormField>
+                  <FormField id={id("unit")} label="Unit" error={err("unit")}>
+                    {(c) => <Input {...c} value={line.unit} onChange={(e) => update(i, { unit: e.target.value })} />}
+                  </FormField>
+                  <FormField id={id("price")} label="Estimated unit price" optional error={err("estimatedUnitPrice")}>
+                    {(c) => (
+                      <Input {...c} inputMode="decimal" value={line.estimatedUnitPrice} onChange={(e) => update(i, { estimatedUnitPrice: e.target.value })} />
+                    )}
+                  </FormField>
+                  <FormField id={id("date")} label="Requested date" error={err("requestedDate")}>
+                    {(c) => <Input {...c} type="date" value={line.requestedDate} onChange={(e) => update(i, { requestedDate: e.target.value })} />}
+                  </FormField>
+                  <FormField id={id("vendor")} label="Preferred vendor id" optional error={err("preferredVendorId")}>
+                    {(c) => <Input {...c} value={line.preferredVendorId} onChange={(e) => update(i, { preferredVendorId: e.target.value })} />}
+                  </FormField>
+                </div>
+              </fieldset>
+            );
+          })}
+        </Card>
+        <Alert tone="danger" live="alert">
+          {failure ? `${failure.message} (${failure.code})` : null}
+        </Alert>
+        <div className={styles.actions}>
+          <Button type="submit" variant="primary" loading={busy}>
+            Save requisition
+          </Button>
+          <Link className={buttonClassName("ghost")} to="/purchasing/requisitions">
+            Cancel
+          </Link>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+const lineColumns = (currency: string): DataTableColumn<RequisitionLine>[] => [
+  { key: "lineNo", header: "Line", align: "end" },
+  { key: "item", header: "Item", render: (l) => l.description || <ShortId id={l.productId} /> },
+  { key: "category", header: "Category", render: (l) => l.category || "—" },
+  { key: "qty", header: "Quantity", align: "end", render: (l) => `${l.qty} ${l.unit}` },
+  { key: "estimatedUnitPrice", header: "Estimate", align: "end", render: (l) => money(l.estimatedUnitPrice, currency) },
+  { key: "amount", header: "Amount", align: "end", render: (l) => money(l.amount, currency) },
+  { key: "requestedDate", header: "Requested", mono: true },
+  { key: "status", header: "Status", render: (l) => <StatusBadge status={l.status} /> },
+];
+
+/** Requisition detail: header, approval chain, lines, and Submit for a DRAFT. */
+export function RequisitionDetailPage() {
+  const { id = "" } = useParams();
+  // Warnings (PRC-REQ-003) come back only on create; the create page hands them over in router state.
+  const initialWarnings = (useLocation().state as { warnings?: Warning[] } | null)?.warnings ?? [];
+  const resource = useResource((signal) => getRequisition(id, signal), [id]);
+  const [submitted, setSubmitted] = useState<Requisition | null>(null);
+  const [failure, setFailure] = useState<Failure | null>(null);
+  const [busy, setBusy] = useState(false);
+  const req = submitted ?? resource.data?.body ?? null;
+  const submitKey = useMemo(() => newIdempotencyKey(), [req?.version]);
+
+  async function submit() {
+    if (!req) return;
+    setBusy(true);
+    setFailure(null);
+    try {
+      const { body } = await submitRequisition(req.id, req.version, submitKey);
+      setSubmitted(body);
+    } catch (error) {
+      setFailure(describeProblem(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (resource.error) {
+    return (
+      <div className={styles.stack}>
+        <PageHeader title="Requisition" />
+        {resource.error.code === "PRC-REQ-NOT-FOUND" ? (
+          <Card>
+            <EmptyState
+              icon="receipt"
+              title="Requisition not found"
+              description="It may belong to another legal entity, or the link is wrong."
+              action={
+                <Link className={buttonClassName("secondary")} to="/purchasing/requisitions">
+                  Back to requisitions
+                </Link>
+              }
+            />
+          </Card>
+        ) : (
+          <LoadError what="the requisition" error={resource.error} onRetry={resource.reload} />
+        )}
+      </div>
+    );
+  }
+  if (!req) {
+    return (
+      <div className={styles.stack} aria-busy="true">
+        <PageHeader title="Requisition" />
+        <p className={styles.muted} role="status">
+          Loading requisition…
+        </p>
+      </div>
+    );
+  }
+
+  const chain = req.approverChain ?? [];
+  return (
+    <div className={styles.stack}>
+      <PageHeader
+        title={`Requisition ${req.number}`}
+        meta={<StatusBadge status={req.status} />}
+        actions={
+          req.status === "DRAFT" ? (
+            <Button variant="primary" loading={busy} onClick={() => void submit()}>
+              Submit for approval
+            </Button>
+          ) : undefined
+        }
+      />
+      <Alert tone="danger" live="alert">
+        {failure ? `${failure.message} (${failure.code})` : null}
+      </Alert>
+      <Alert tone="success" live="status">
+        {submitted
+          ? submitted.status === "APPROVED"
+            ? "Submitted and approved: the amount is in the auto-approval band."
+            : `Submitted for approval to ${chain.map((r) => roleLabels[r] ?? r).join(", then ")}.`
+          : null}
+      </Alert>
+      {initialWarnings.length > 0 ? (
+        <Alert tone="warning" title="Check these estimates">
+          <ul className={styles.cardLinks}>
+            {initialWarnings.map((w) => (
+              <li key={`${w.code}-${w.lineNo}`}>
+                Line {w.lineNo}: {w.detail} ({w.code})
+              </li>
+            ))}
+          </ul>
+        </Alert>
+      ) : null}
+      <Card title="Summary">
+        <Details
+          items={[
+            { label: "Estimated total", value: money(req.total, req.currency), mono: true },
+            { label: "Legal entity", value: req.legalEntityId, mono: true },
+            { label: "Requester", value: req.requesterId, mono: true },
+            { label: "Policy version", value: req.policyVersion ?? "" },
+            { label: "Version", value: String(req.version), mono: true },
+            { label: "Created", value: req.createdAt.slice(0, 10), mono: true },
+          ]}
+        />
+      </Card>
+      <Card title="Approval">
+        {req.status === "DRAFT" ? (
+          <p className={styles.muted}>The approver chain is set when you submit, from the amount band and line categories.</p>
+        ) : chain.length === 0 ? (
+          <p className={styles.muted}>Approved automatically: the total is within the auto-approval band.</p>
+        ) : (
+          <ol className={styles.chain} aria-label="Approver chain">
+            {chain.map((role, i) => (
+              <li key={role}>
+                <Badge tone="info">
+                  {i + 1}. {roleLabels[role] ?? role}
+                </Badge>
+              </li>
+            ))}
+          </ol>
+        )}
+      </Card>
+      <DataTable label="Requisition lines" columns={lineColumns(req.currency)} rows={req.lines} getRowKey={(l) => l.id || String(l.lineNo)} />
+    </div>
+  );
+}

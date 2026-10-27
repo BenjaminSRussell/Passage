@@ -1,0 +1,101 @@
+asyncapi: 3.0.0
+info:
+  title: Passage Purchasing events
+  version: 0.2.0
+  description: |
+    Events published by the purchasing service in wave 17 slice 1. Each is written to the
+    outbox in the same transaction as the state change and relayed by Debezium to the topic
+    passage.<context>.<entity>. Payload structs live in internal/events. Schema evolution is
+    additive only (BACKWARD_TRANSITIVE).
+defaultContentType: application/cloudevents+json
+channels:
+  requisition:
+    address: passage.procurement.requisition
+    description: Requisition lifecycle; the Kafka key is the requisition id so events stay ordered.
+    messages:
+      requisitionSubmitted:
+        $ref: '#/components/messages/RequisitionSubmitted'
+      requisitionApproved:
+        $ref: '#/components/messages/RequisitionApproved'
+operations:
+  publishRequisitionSubmitted:
+    action: send
+    channel:
+      $ref: '#/channels/requisition'
+    messages:
+      - $ref: '#/channels/requisition/messages/requisitionSubmitted'
+  publishRequisitionApproved:
+    action: send
+    channel:
+      $ref: '#/channels/requisition'
+    messages:
+      - $ref: '#/channels/requisition/messages/requisitionApproved'
+components:
+  messages:
+    RequisitionSubmitted:
+      name: RequisitionSubmitted
+      title: requisition.submitted.v1
+      summary: A DRAFT requisition was submitted; status is IN_REVIEW, or APPROVED when the policy chain is empty.
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.requisition.submitted.v1 }
+              data: { $ref: '#/components/schemas/RequisitionData' }
+    RequisitionApproved:
+      name: RequisitionApproved
+      title: requisition.approved.v1
+      summary: A requisition reached APPROVED. In this slice that is the auto-approval band on submit (written right after requisition.submitted in the same transaction).
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.requisition.approved.v1 }
+              data: { $ref: '#/components/schemas/RequisitionData' }
+  schemas:
+    Envelope:
+      type: object
+      description: CloudEvents 1.0 structured envelope with Passage extensions.
+      required: [specversion, id, source, type, time, datacontenttype, tenantid, subject, data]
+      properties:
+        specversion: { type: string, const: "1.0" }
+        id: { type: string, format: uuid }
+        source: { type: string, const: /passage/procurement/purchasing }
+        type: { type: string }
+        subject: { type: string, format: uuid, description: requisition id }
+        time: { type: string, format: date-time }
+        datacontenttype: { type: string, const: application/json }
+        tenantid: { type: string, format: uuid }
+    RequisitionData:
+      type: object
+      required: [requisition_id, number, legal_entity_id, requester_id, currency, lines, total, approver_chain, policy_version, status]
+      additionalProperties: false
+      properties:
+        requisition_id: { type: string, format: uuid }
+        number: { type: string, example: PR-00000001 }
+        legal_entity_id: { type: string, format: uuid }
+        requester_id: { type: string, format: uuid }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [line_no, line_id, qty, amount]
+            additionalProperties: false
+            properties:
+              line_no: { type: integer }
+              line_id: { type: string, format: uuid }
+              product_id: { type: string, format: uuid }
+              category: { type: string }
+              qty: { type: string, description: decimal string }
+              amount: { type: string, description: decimal string in the requisition currency }
+        total: { type: string, description: decimal string in the requisition currency }
+        approver_chain:
+          type: array
+          items: { type: string, enum: [MANAGER, CATEGORY_OWNER, CFO] }
+        policy_version: { type: string, example: builtin-1 }
+        status: { type: string, enum: [IN_REVIEW, APPROVED] }
