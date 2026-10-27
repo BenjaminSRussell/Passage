@@ -106,13 +106,49 @@ Built in this slice:
 - Web: the raw payload card on the interchange detail, the masking badge on the message,
   and a bulk reprocess card (preview and run) on the message monitor.
 
+## Slice 5 scope
+
+Pure rules with stateless dry-run routes. Nothing in this slice reads or writes the
+database or publishes an event, so these routes also run without a store.
+
+- **Peppol BIS Billing 3.0 UBL 2.1** (`internal/domain/ubl_build.go`, FR-35.6, BR-35.4):
+  invoices (380) and credit notes (381) with elements in schema order. Line amounts are
+  quantity times price rounded to the minor unit; there is one VAT breakdown per category
+  and rate (two German standard rates give two S breakdowns); document allowances and
+  charges carry their own VAT category and lower or raise its taxable amount. Checked
+  before any XML: the BR-35.4 required elements, category codes, rate 0 for Z/E/AE/K/G and
+  no rate for O, an exemption reason for E/AE/K/G/O, the supplier VAT id with S and both
+  VAT ids with AE/K, a due date not before the issue date, then `CheckArithmetic`. A
+  credit note carries the due date as `PaymentMeans/PaymentDueDate`, because UBL 2.1
+  CreditNote has no `DueDate`. Dry run: `POST /edi/v1/peppol/invoices:build`.
+- **cXML codec** (`internal/domain/cxml.go`, FR-35.14, BR-35.14): envelope and document
+  type for ConfirmationRequest, ShipNoticeRequest and InvoiceDetailRequest; the payloadID
+  decision (new, replay with the original response, conflict with EDI-0135) on a content
+  hash; the Response builder and status classification (200/201 accepted, other 4xx
+  rejected, the rest retried). No route yet.
+- **Punchout cart validation** (`internal/domain/punchout.go`, FR-35.13, BR-35.13): a cXML
+  PunchOutOrderMessage or an SAP OCI 4.0/5.0 HOOK_URL form post (`NEW_ITEM-VENDORMAT`,
+  `DESCRIPTION`, `QUANTITY`, `UNIT`, `PRICE`, `PRICEUNIT`, `CURRENCY`, `LEADTIME`, and the
+  UNSPSC code from `EXT_CATEGORY_ID` when `EXT_SCHEMA_TYPE` is UNSPSC). Invalid lines are
+  dropped with EDI-0133, a cart whose stated total differs from the line sum by more than
+  0.01 is rejected whole with EDI-0134, units map through UN/ECE Rec 20 (supplier table
+  first), and a price above reference price plus `tolerancePct` flags the line for
+  approval. Dry run: `POST /edi/v1/punchout/returns:parse`.
+- **Self-billing match** (`internal/domain/selfbill.go`, FR-35.16, BR-35.15): key
+  (delivery note, PO line, item); MATCHED, DIFFERENCE (quantity or unit price beyond
+  tolerance, or VAT more than 0.01 off the VAT recomputed at the shipment's rate on the
+  line as billed) and UNMATCHED; shipments unbilled `waitDays` after shipping raise
+  EDI-0138. Dry run: `POST /edi/v1/self-billing:match`.
+- **Web**: "Punchout cart check", "Self-billing match" and "Peppol invoice" screens in
+  `apps/web/src/modules/integration`.
+
 Not built yet: see `NOT-IMPLEMENTED.md`.
 
 ## Layout
 
 ```
 cmd/edi/            entrypoint (dbx.Connect, optional dbx.Migrate, httpx.Serve)
-internal/domain/    X12 codec, 997 out and in, 850 mapping, 855/856/810 builders, SSCC, segment tree and PII masking, partner rules, UBL arithmetic (pure)
+internal/domain/    X12 codec, 997 out and in, 850 mapping, 855/856/810 builders, SSCC, segment tree and PII masking, partner rules, UBL builder and arithmetic, cXML envelope, punchout and self-billing rules (pure)
 internal/store/     Postgres repositories (RLS via dbx.WithTenantTx, outbox in the same tx)
 internal/api/       HTTP handlers, DTOs, duty checks
 internal/events/    event type constants and payloads
@@ -141,6 +177,9 @@ testdata/x12/       X12 fixtures for the domain and API tests
 | GET | /edi/v1/messages?partnerId=&direction=&status=&transactionSet=&controlNumber=&limit=&cursor= | EDI_OPERATE | `{items, nextCursor}` newest first, limit 1 to 200 (default 50) |
 | GET | /edi/v1/messages/{id} | EDI_OPERATE | One message with envelope and canonical document (party names masked without `EDI_PII_VIEW`) |
 | GET | /edi/v1/partners/sla?days= | EDI_OPERATE | `{days, items}`, days 1 to 365 (default 30) |
+| POST | /edi/v1/punchout/returns:parse | PUR_REQUISITION_CREATE | Dry run of a returned cart (`format` CXML with `document`, or OCI with `fields`); 200 with lines, issues and the total check |
+| POST | /edi/v1/self-billing:match | SELF_BILLING_RECONCILE | Dry run of BR-35.15 over the supplied shipments and self-billed lines; 200 with outcomes and unbilled shipments |
+| POST | /edi/v1/peppol/invoices:build | EINV_OPERATE | Dry run of the UBL build; 200 with `xml` when `valid`, otherwise the blocking issues and no XML |
 
 The web screens live in `apps/web/src/modules/integration` (partners, interchanges,
 receive, send EDI document, message monitor with single and bulk reprocess, raw
@@ -163,7 +202,7 @@ and `EDI_ISA_ID` (our ISA06/GS02 identity on outbound documents, default ZZ/PASS
 ## Dependencies
 
 Allowed set only: platform kernel, chi, pgx/v5, shopspring/decimal, rapid (tests).
-No new third-party dependencies in slices 1 to 3.
+No new third-party dependencies in slices 1 to 5.
 
 ## Error codes
 
@@ -171,7 +210,7 @@ No new third-party dependencies in slices 1 to 3.
 | --- | --- | --- |
 | EDI-0001 | 400 | Request failed validation; `errors` lists the fields |
 | EDI-0002 | 400 | `Idempotency-Key` header missing or longer than 255 characters |
-| EDI-0003 | 400 / 413 / 422 | Malformed X12 interchange, empty interchange, or over 4 MiB; 422 on reprocess when the stored payload no longer parses |
+| EDI-0003 | 400 / 413 / 422 | Malformed X12 interchange, empty interchange, or over 4 MiB; 422 on reprocess when the stored payload no longer parses; 400 for a punchout document that is not a PunchOutOrderMessage or an OCI post without NEW_ITEM fields |
 | EDI-0004 | 409 | Partner with this ISA identity already exists in the environment |
 | EDI-0005 | 404 | Partner, interchange or message not found |
 | EDI-0006 | (in 200 map result) | Transaction set not supported yet; the transaction is rejected (AK5 R) |
@@ -185,6 +224,16 @@ No new third-party dependencies in slices 1 to 3.
 | EDI-0102 | 409 | Duplicate ISA13 inside the duplicate window (TA1 025 semantics; no TA1 interchange is sent yet) |
 | EDI-0103 | (in 200 map result) | CTT01 does not match the PO1 count; the transaction is rejected |
 | EDI-0105 | (in 200 map result) | No item cross-reference for the line; accepted with errors |
+| EDI-0133 | (in 200 punchout result) | Punchout line dropped: missing part id, quantity, price, price unit, allowed currency or mapped unit |
+| EDI-0134 | (in 200 punchout result) | Punchout cart total differs from the line sum by more than 0.01; the cart is rejected |
+| EDI-0135 | (domain only) | cXML payloadID reused with different content (no route yet) |
+| EDI-0136 | (in 200 self-billing result) | Self-billed line differs in quantity, unit price or VAT |
+| EDI-0137 | (in 200 self-billing result) | Self-billed line has no matching shipment (UNMATCHED) |
+| EDI-0138 | (in 200 self-billing result) | Shipment not self-billed after `waitDays` |
+| EINV-0110 | (in 200 UBL result) | A BR-35.4 element or VAT category rule is missing or broken; no XML |
+| EINV-0111 | (in 200 UBL result) | An arithmetic rule failed; no XML |
 
-Catalog codes EDI-0104, EDI-0106 to EDI-0109, EDI-0133 to EDI-0139, EINV-0110 to
-EINV-0112 and HUB-0113 to HUB-0116 are defined in PRD §6.35.18 and not raised yet.
+Catalog codes EDI-0104, EDI-0106 to EDI-0109, EINV-0112 and HUB-0113 to HUB-0116 are
+defined in PRD §6.35.18 and not raised yet. EDI-0139 is raised by the PLM precedence in
+`integration-hub-ts`. EINV-0110 is used for required-element failures before schematron
+exists; the PRD text names it for schematron failures.

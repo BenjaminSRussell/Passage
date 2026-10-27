@@ -536,3 +536,130 @@ export async function partnerSla(days: number, signal?: AbortSignal): Promise<Pa
   }
   return body;
 }
+
+// Slice 5 dry runs: punchout cart check, self-billing match and Peppol UBL build.
+// None of them stores anything, so they send no Idempotency-Key.
+
+/** One requisition line a returned punchout cart would create (BR-35.13). */
+export interface CartLine {
+  line: number;
+  supplierPartId: string;
+  description: string;
+  /** Decimal string. */
+  quantity: string;
+  /** UN/ECE Recommendation 20 code. */
+  unitCode: string;
+  /** Decimal string, price per unit. */
+  unitPrice: string;
+  currency: string;
+  unspsc: string;
+  leadTimeDays: number;
+  /** Always true: the price is catalog-sourced for the wave-17 approval rules. */
+  catalog: boolean;
+  /** The price is above the reference price plus the supplier tolerance. */
+  needsApproval: boolean;
+}
+
+export interface CartResult {
+  lines: CartLine[];
+  issues: Issue[];
+  cartRejected: boolean;
+  computedTotal: string;
+  statedTotal?: string;
+}
+
+export type PunchoutFormat = "CXML" | "OCI";
+
+export interface PunchoutSupplier {
+  currencies: string[];
+  /** Decimal 0..20. */
+  tolerancePct?: string;
+  /** Supplier unit to UN/ECE Recommendation 20 code. */
+  uomMap?: Record<string, string>;
+  /** Catalog reference price by supplier part id. */
+  referencePrices?: Record<string, string>;
+}
+
+export interface PunchoutCheck {
+  format: PunchoutFormat;
+  /** cXML PunchOutOrderMessage, for CXML. */
+  document?: string;
+  /** NEW_ITEM-FIELD[n] pairs of the HOOK_URL form post, for OCI. */
+  fields?: Record<string, string>;
+  supplier: PunchoutSupplier;
+}
+
+export type SelfBillOutcome = "MATCHED" | "DIFFERENCE" | "UNMATCHED";
+
+export interface SelfBillLineResult {
+  line: string;
+  outcome: SelfBillOutcome;
+  shipmentId?: string;
+  differences?: { field: "quantity" | "unitPrice" | "tax"; theirs: string; ours: string }[];
+}
+
+export interface SelfBillResult {
+  lines: SelfBillLineResult[];
+  /** Shipment ids not self-billed after the wait period (EDI-0138). */
+  unbilled: string[];
+  issues: Issue[];
+}
+
+export interface SelfBillShipment {
+  id: string;
+  deliveryNote: string;
+  poLine: string;
+  item: string;
+  quantity: string;
+  unitPrice: string;
+  taxRatePct: string;
+  /** YYYY-MM-DD. */
+  shippedOn: string;
+}
+
+export interface SelfBillLine {
+  line: string;
+  deliveryNote: string;
+  poLine: string;
+  item: string;
+  quantity: string;
+  unitPrice: string;
+  /** VAT the customer computed for the line. */
+  tax: string;
+}
+
+export interface SelfBillMatch {
+  /** YYYY-MM-DD; the service uses today when omitted. */
+  asOf?: string;
+  /** 1..120; the service default is 30. */
+  waitDays?: number;
+  tolerance?: { quantity?: string; price?: string };
+  shipments: SelfBillShipment[];
+  lines: SelfBillLine[];
+}
+
+export interface UblBuildResult {
+  /** The UBL 2.1 XML; empty when valid is false. */
+  xml: string;
+  issues: Issue[];
+  valid: boolean;
+}
+
+function postJson<T>(path: string, body: unknown): Promise<T> {
+  return send<T>(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+}
+
+/** Checks a returned punchout cart against BR-35.13; no requisition line is created. */
+export function checkPunchout(input: PunchoutCheck): Promise<CartResult> {
+  return postJson<CartResult>("/punchout/returns:parse", input);
+}
+
+/** Matches a self-billed document to the supplied shipments (BR-35.15); nothing is posted. */
+export function matchSelfBilling(input: SelfBillMatch): Promise<SelfBillResult> {
+  return postJson<SelfBillResult>("/self-billing:match", input);
+}
+
+/** Builds Peppol BIS Billing 3.0 UBL; blocking issues come back with valid false and no XML. */
+export function buildPeppolInvoice(invoice: unknown): Promise<UblBuildResult> {
+  return postJson<UblBuildResult>("/peppol/invoices:build", invoice);
+}

@@ -39,6 +39,11 @@ type UBLTotals struct {
 	Rounding      decimal.Decimal
 	Payable       decimal.Decimal
 	TaxSubtotals  []TaxSubtotal
+	// DocAllowances and DocCharges are the document-level AllowanceCharge
+	// amounts in their VAT category and rate. They must sum to Allowances and
+	// Charges, and they lower or raise the taxable amount of their category.
+	DocAllowances []TaxedLine
+	DocCharges    []TaxedLine
 }
 
 // CheckArithmetic returns one issue per broken rule, in a stable order: amounts
@@ -48,7 +53,9 @@ type UBLTotals struct {
 // minus prepaid plus rounding; each VAT breakdown (category and rate) has a
 // taxable amount equal to the sum of its lines and a tax equal to the rate
 // rounded to the minor unit; every line's category and rate has a breakdown;
-// the breakdowns sum to TaxAmount.
+// the breakdowns sum to TaxAmount. Document-level allowances and charges sum to
+// AllowanceTotalAmount and ChargeTotalAmount (BR-CO-11, BR-CO-12) and enter the
+// taxable amount of their category and rate (BR-S-08 and its siblings).
 func CheckArithmetic(t UBLTotals) []Issue {
 	var issues []Issue
 	fail := func(format string, args ...any) {
@@ -83,35 +90,63 @@ func CheckArithmetic(t UBLTotals) []Issue {
 	if want := t.TaxInclusive.Sub(t.Prepaid).Add(t.Rounding); !t.Payable.Equal(want) {
 		fail("PayableAmount %s differs from %s", t.Payable, want)
 	}
+	sum := func(parts []TaxedLine) decimal.Decimal {
+		total := decimal.Zero
+		for _, p := range parts {
+			total = total.Add(p.Amount)
+		}
+		return total
+	}
+	if got := sum(t.DocAllowances); !got.Equal(t.Allowances) {
+		fail("AllowanceTotalAmount %s differs from the document allowances %s", t.Allowances, got)
+	}
+	if got := sum(t.DocCharges); !got.Equal(t.Charges) {
+		fail("ChargeTotalAmount %s differs from the document charges %s", t.Charges, got)
+	}
 	sameRate := func(category string, percent decimal.Decimal, st TaxSubtotal) bool {
 		return category == st.Category && percent.Equal(st.Percent)
+	}
+	rateSum := func(parts []TaxedLine, st TaxSubtotal) decimal.Decimal {
+		total := decimal.Zero
+		for _, p := range parts {
+			if sameRate(p.Category, p.Percent, st) {
+				total = total.Add(p.Amount)
+			}
+		}
+		return total
 	}
 	subtotalTax := decimal.Zero
 	for _, st := range t.TaxSubtotals {
 		subtotalTax = subtotalTax.Add(st.Tax)
-		catSum := decimal.Zero
-		for _, l := range t.Lines {
-			if sameRate(l.Category, l.Percent, st) {
-				catSum = catSum.Add(l.Amount)
-			}
-		}
+		catSum := rateSum(t.Lines, st).Sub(rateSum(t.DocAllowances, st)).Add(rateSum(t.DocCharges, st))
 		if !catSum.Equal(st.Taxable) {
-			fail("category %s at %s%% taxable amount %s differs from its lines %s", st.Category, st.Percent, st.Taxable, catSum)
+			fail("category %s at %s%% taxable amount %s differs from its lines, allowances and charges %s", st.Category, st.Percent, st.Taxable, catSum)
 		}
 		if want := st.Taxable.Mul(st.Percent).Div(decimal.NewFromInt(100)).Round(2); !st.Tax.Equal(want) {
 			fail("category %s at %s%% tax %s differs from %s", st.Category, st.Percent, st.Tax, want)
 		}
 	}
-	for i, l := range t.Lines {
-		covered := false
+	covered := func(category string, percent decimal.Decimal) bool {
 		for _, st := range t.TaxSubtotals {
-			if sameRate(l.Category, l.Percent, st) {
-				covered = true
-				break
+			if sameRate(category, percent, st) {
+				return true
 			}
 		}
-		if !covered {
+		return false
+	}
+	for i, l := range t.Lines {
+		if !covered(l.Category, l.Percent) {
 			fail("line %d category %s at %s%% has no VAT breakdown", i+1, l.Category, l.Percent)
+		}
+	}
+	for _, group := range []struct {
+		name  string
+		parts []TaxedLine
+	}{{"allowance", t.DocAllowances}, {"charge", t.DocCharges}} {
+		for i, p := range group.parts {
+			if !covered(p.Category, p.Percent) {
+				fail("document %s %d category %s at %s%% has no VAT breakdown", group.name, i+1, p.Category, p.Percent)
+			}
 		}
 	}
 	if !subtotalTax.Equal(t.TaxAmount) {

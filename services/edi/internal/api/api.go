@@ -90,6 +90,9 @@ func (a *API) Routes() http.Handler {
 		r.With(authz.RequireDuty("EDI_OPERATE")).Get("/messages", a.listMessages)
 		r.With(authz.RequireDuty("EDI_OPERATE")).Get("/messages/{id}", a.getMessage)
 		r.With(authz.RequireDuty("EDI_OPERATE")).Get("/partners/sla", a.partnerSLA)
+		r.With(authz.RequireDuty("PUR_REQUISITION_CREATE")).Post("/punchout/returns:parse", a.punchoutParse)
+		r.With(authz.RequireDuty("SELF_BILLING_RECONCILE")).Post("/self-billing:match", a.selfBillingMatch)
+		r.With(authz.RequireDuty("EINV_OPERATE")).Post("/peppol/invoices:build", a.ublBuild)
 	})
 	return r
 }

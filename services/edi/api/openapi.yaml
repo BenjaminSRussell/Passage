@@ -460,6 +460,237 @@ paths:
         '409': { $ref: '#/components/responses/Problem' }
         '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+  /edi/v1/punchout/returns:parse:
+    post:
+      operationId: checkPunchoutReturn
+      summary: Dry run of a returned punchout cart against BR-35.13
+      description: >
+        Parses a cXML PunchOutOrderMessage (format CXML, document) or an SAP OCI HOOK_URL form post
+        (format OCI, fields) and reports the requisition lines that would be created. Lines with a
+        missing part id, quantity, price, allowed currency or UoM are dropped with EDI-0133. A cart
+        whose stated total differs from the line sum by more than 0.01 is rejected with EDI-0134.
+        OCI fields follow SAP OCI 4.0/5.0 (VENDORMAT, DESCRIPTION, QUANTITY, UNIT, PRICE, PRICEUNIT,
+        CURRENCY, LEADTIME, EXT_SCHEMA_TYPE and EXT_CATEGORY_ID for UNSPSC). A document that is not a
+        PunchOutOrderMessage, or an OCI post without NEW_ITEM fields, is EDI-0003. Nothing is stored and
+        no requisition is created (the wave-17 handoff).
+      x-passage-duty: PUR_REQUISITION_CREATE
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [format, supplier]
+              properties:
+                format: { type: string, enum: [CXML, OCI] }
+                document: { type: string, description: 'cXML PunchOutOrderMessage, required for CXML' }
+                fields:
+                  type: object
+                  additionalProperties: { type: string }
+                  description: NEW_ITEM-FIELD[n] pairs from the OCI form post, required for OCI
+                supplier:
+                  type: object
+                  properties:
+                    currencies: { type: array, items: { type: string } }
+                    tolerancePct: { type: string, description: Decimal 0..20; lines above reference price plus this are flagged }
+                    uomMap: { type: object, additionalProperties: { type: string }, description: Supplier unit to UN/ECE Rec 20 code }
+                    referencePrices: { type: object, additionalProperties: { type: string } }
+      responses:
+        '200':
+          description: Lines that would be created, the issues and the cart total check
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [lines, issues, cartRejected, computedTotal]
+                properties:
+                  lines:
+                    type: array
+                    items:
+                      type: object
+                      required: [line, supplierPartId, description, quantity, unitCode, unitPrice, currency, unspsc, leadTimeDays, catalog, needsApproval]
+                      properties:
+                        line: { type: integer }
+                        supplierPartId: { type: string }
+                        description: { type: string }
+                        quantity: { type: string, description: Decimal }
+                        unitCode: { type: string, description: UN/ECE Recommendation 20 code }
+                        unitPrice: { type: string, description: Decimal price per unit }
+                        currency: { type: string }
+                        unspsc: { type: string }
+                        leadTimeDays: { type: integer }
+                        catalog: { type: boolean, description: Always true; the line is catalog-sourced }
+                        needsApproval: { type: boolean, description: Price above the reference price plus tolerance }
+                  issues: { type: array, items: { $ref: '#/components/schemas/Issue' } }
+                  cartRejected: { type: boolean }
+                  computedTotal: { type: string }
+                  statedTotal: { type: string }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /edi/v1/self-billing:match:
+    post:
+      operationId: matchSelfBilling
+      summary: Dry run of the self-billing match (BR-35.15) over supplied shipments and lines
+      description: >
+        Matches each self-billed line to the first unclaimed shipment with the same delivery note,
+        PO line and item. Quantity or unit price beyond tolerance, or tax differing by more than 0.01
+        from the VAT recomputed at the shipment's rate on the line as billed, is a DIFFERENCE
+        (EDI-0136). A line without a shipment is UNMATCHED (EDI-0137). A shipment still unbilled
+        waitDays after shipping is reported (EDI-0138). Out-of-range waitDays, negative tolerances,
+        malformed numbers or dates and missing ids are EDI-0001. Nothing is posted.
+      x-passage-duty: SELF_BILLING_RECONCILE
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                asOf: { type: string, format: date, description: Reconciliation date; defaults to today }
+                waitDays: { type: integer, minimum: 1, maximum: 120, default: 30 }
+                tolerance:
+                  type: object
+                  properties:
+                    quantity: { type: string, default: '0' }
+                    price: { type: string, default: '0.01' }
+                shipments:
+                  type: array
+                  maxItems: 5000
+                  items:
+                    type: object
+                    required: [id, deliveryNote, poLine, item, quantity, unitPrice, taxRatePct, shippedOn]
+                    properties:
+                      id: { type: string }
+                      deliveryNote: { type: string }
+                      poLine: { type: string }
+                      item: { type: string }
+                      quantity: { type: string }
+                      unitPrice: { type: string }
+                      taxRatePct: { type: string }
+                      shippedOn: { type: string, format: date }
+                lines:
+                  type: array
+                  maxItems: 5000
+                  items:
+                    type: object
+                    required: [line, deliveryNote, poLine, item, quantity, unitPrice, tax]
+                    properties:
+                      line: { type: string }
+                      deliveryNote: { type: string }
+                      poLine: { type: string }
+                      item: { type: string }
+                      quantity: { type: string }
+                      unitPrice: { type: string }
+                      tax: { type: string, description: VAT amount the customer computed for the line }
+      responses:
+        '200':
+          description: Outcome per line, shipments past the wait period and the issues raised
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [lines, unbilled, issues]
+                properties:
+                  lines:
+                    type: array
+                    items:
+                      type: object
+                      required: [line, outcome]
+                      properties:
+                        line: { type: string }
+                        outcome: { type: string, enum: [MATCHED, DIFFERENCE, UNMATCHED] }
+                        shipmentId: { type: string }
+                        differences:
+                          type: array
+                          items:
+                            type: object
+                            required: [field, theirs, ours]
+                            properties:
+                              field: { type: string, enum: [quantity, unitPrice, tax] }
+                              theirs: { type: string }
+                              ours: { type: string }
+                  unbilled: { type: array, items: { type: string }, description: Shipment ids past the wait period }
+                  issues: { type: array, items: { $ref: '#/components/schemas/Issue' } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /edi/v1/peppol/invoices:build:
+    post:
+      operationId: buildPeppolInvoice
+      summary: Build Peppol BIS Billing 3.0 UBL 2.1 for an invoice or credit note, without sending it
+      description: >
+        Checks the BR-35.4 required elements, the VAT category rules that need no schematron (rate 0
+        for Z, E, AE, K, G and no rate for O, an exemption reason for E, AE, K, G and O, the supplier VAT
+        identifier with S, both VAT identifiers with AE and K) and the arithmetic rules, then returns
+        the UBL XML. There is one VAT breakdown per category and rate; document allowances and charges
+        lower or raise the taxable amount of their category and rate. A credit note carries the due
+        date as PaymentMeans/PaymentDueDate. Blocking issues (EINV-0110, EINV-0111) come back with
+        valid false and no XML. Nothing is stored; schematron validation and transmission through the
+        access point are not part of this route.
+      x-passage-duty: EINV_OPERATE
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, issueDate, dueDate, currency, supplier, customer, iban, lines]
+              properties:
+                creditNote: { type: boolean, default: false }
+                id: { type: string }
+                issueDate: { type: string, format: date }
+                dueDate: { type: string, format: date }
+                currency: { type: string, minLength: 3, maxLength: 3 }
+                buyerReference: { type: string, description: BuyerReference or orderReference is required }
+                orderReference: { type: string }
+                supplier: { $ref: '#/components/schemas/UBLParty' }
+                customer: { $ref: '#/components/schemas/UBLParty' }
+                paymentMeansCode: { type: string, enum: ['30', '58'], default: '30' }
+                iban: { type: string }
+                prepaid: { type: string, description: Decimal amount already paid }
+                exemptionReasons:
+                  type: object
+                  additionalProperties: { type: string }
+                  description: TaxExemptionReason per VAT category code
+                allowanceCharges:
+                  type: array
+                  maxItems: 5000
+                  items:
+                    type: object
+                    required: [reason, amount, category, percent]
+                    properties:
+                      charge: { type: boolean, default: false, description: true for a charge, false for an allowance }
+                      reason: { type: string }
+                      amount: { type: string, description: Positive decimal }
+                      category: { type: string, enum: [S, Z, E, AE, K, G, O, L, M] }
+                      percent: { type: string }
+                lines:
+                  type: array
+                  maxItems: 5000
+                  items:
+                    type: object
+                    required: [id, name, unitCode, quantity, unitPrice, category, percent]
+                    properties:
+                      id: { type: string }
+                      name: { type: string }
+                      unitCode: { type: string, description: UN/ECE Recommendation 20 code }
+                      quantity: { type: string }
+                      unitPrice: { type: string }
+                      category: { type: string, enum: [S, Z, E, AE, K, G, O, L, M] }
+                      percent: { type: string }
+      responses:
+        '200':
+          description: The UBL when valid is true, otherwise the blocking issues and an empty xml
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [xml, issues, valid]
+                properties:
+                  xml: { type: string }
+                  issues: { type: array, items: { $ref: '#/components/schemas/Issue' } }
+                  valid: { type: boolean }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
 components:
   parameters:
     IdempotencyKey:
@@ -601,6 +832,16 @@ components:
         p95AckMinutes: { type: number, description: 95th percentile 997 latency in minutes, one decimal; absent when nothing was acked }
         lateAcks: { type: integer }
         overdueAcks: { type: integer }
+    UBLParty:
+      type: object
+      required: [name, endpointScheme, endpointId, countryCode]
+      properties:
+        name: { type: string }
+        legalName: { type: string, description: PartyLegalEntity/RegistrationName; defaults to name }
+        endpointScheme: { type: string, description: 'EAS code, e.g. 0088 (GLN)' }
+        endpointId: { type: string }
+        countryCode: { type: string, description: ISO 3166-1 alpha-2 }
+        vatId: { type: string }
     Issue:
       type: object
       required: [code, detail, reject]

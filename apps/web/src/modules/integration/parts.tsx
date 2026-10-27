@@ -1,4 +1,4 @@
-import { Badge, DataTable, type DataTableColumn } from "../../shell/ui";
+import { Alert, Badge, DataTable, type DataTableColumn } from "../../shell/ui";
 import type {
   AckDocument,
   AckStatus,
@@ -11,6 +11,7 @@ import type {
   ItemRefDoc,
   MessageStatus,
   OrderLine,
+  Problem,
 } from "./api/client";
 import { ACK_LABELS, ACK_TYPES, AK_CODES, dash, formatEdiDate, MESSAGE_LABELS, PURPOSES } from "./format";
 import styles from "./pages.module.css";
@@ -38,6 +39,29 @@ export function IssueList({ issues, label }: { issues: Issue[]; label: string })
         </li>
       ))}
     </ul>
+  );
+}
+
+/** A failed request: the problem text and code, and the fields the service rejected. */
+export function ProblemAlert({ problem, title }: { problem: Problem | null; title: string }) {
+  const fields = problem ? Object.entries(problem.fields) : [];
+  return (
+    <Alert tone="danger" title={problem ? title : undefined} live="alert">
+      {problem ? (
+        <>
+          {`${problem.message} (${problem.code})`}
+          {fields.length > 0 ? (
+            <ul className={styles.plainList} aria-label="Rejected fields">
+              {fields.map(([field, message]) => (
+                <li key={field}>
+                  <span className={styles.mono}>{field}</span> {message}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </>
+      ) : null}
+    </Alert>
   );
 }
 

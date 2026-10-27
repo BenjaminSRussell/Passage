@@ -29,7 +29,23 @@ func TestCheckArithmetic(t *testing.T) {
 	}{
 		{"consistent invoice passes", func(*UBLTotals) {}, 0},
 		{"line sum differs from LineExtensionAmount", func(u *UBLTotals) { u.Lines[0].Amount = d("99.00") }, 2},
-		{"exclusive ignores allowances", func(u *UBLTotals) { u.Allowances = d("10.00") }, 1},
+		// AllowanceTotalAmount without a document allowance breaks BR-CO-11 as
+		// well as the TaxExclusiveAmount rule.
+		{"exclusive ignores allowances", func(u *UBLTotals) { u.Allowances = d("10.00") }, 2},
+		{"document allowance lowers its category's taxable amount", func(u *UBLTotals) {
+			u.DocAllowances = []TaxedLine{{Category: "S", Percent: d("21"), Amount: d("10.00")}}
+			u.Allowances, u.TaxExclusive = d("10.00"), d("140.00")
+			u.TaxSubtotals[0].Taxable, u.TaxSubtotals[0].Tax = d("90.00"), d("18.90")
+			u.TaxAmount, u.TaxInclusive, u.Payable = d("18.90"), d("158.90"), d("158.90")
+		}, 0},
+		{"tax computed before the allowance is caught", func(u *UBLTotals) {
+			u.DocAllowances = []TaxedLine{{Category: "S", Percent: d("21"), Amount: d("10.00")}}
+			u.Allowances, u.TaxExclusive, u.TaxInclusive, u.Payable = d("10.00"), d("140.00"), d("161.00"), d("161.00")
+		}, 1},
+		{"document charge needs a breakdown for its rate", func(u *UBLTotals) {
+			u.DocCharges = []TaxedLine{{Category: "S", Percent: d("9"), Amount: d("5.00")}}
+			u.Charges, u.TaxExclusive, u.TaxInclusive, u.Payable = d("5.00"), d("155.00"), d("176.00"), d("176.00")
+		}, 1},
 		{"payable ignores rounding", func(u *UBLTotals) { u.Rounding = d("0.01") }, 1},
 		{"category tax is wrong", func(u *UBLTotals) { u.TaxSubtotals[0].Tax = d("20.00") }, 2},
 		{"three decimals", func(u *UBLTotals) { u.Payable = d("171.001") }, 2},

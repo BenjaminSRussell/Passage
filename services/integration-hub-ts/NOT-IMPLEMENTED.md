@@ -1,6 +1,6 @@
 # NOT-IMPLEMENTED: integration-hub-ts (PSG-35, wave 35)
 
-Slice 1 implements the webhook delivery policy. Slice 2 adds the pure dispatch state machine (`src/dispatch.ts`, `nextStep`) and replay planning (`deliveryOrder`, `planReplay`, `replayHeaders`). Slice 3 adds the quota token bucket (`src/quota.ts`) and subscription event-type patterns (`src/filter.ts`). Every other deliverable is listed here.
+Slice 1 implements the webhook delivery policy. Slice 2 adds the pure dispatch state machine (`src/dispatch.ts`, `nextStep`) and replay planning (`deliveryOrder`, `planReplay`, `replayHeaders`). Slice 3 adds the quota token bucket (`src/quota.ts`) and subscription event-type patterns (`src/filter.ts`). Slice 5 adds the PLM import precedence (`src/plm.ts`). Every other deliverable is listed here.
 
 | Deliverable / criterion | Status | Reason |
 | --- | --- | --- |
@@ -13,7 +13,7 @@ Slice 1 implements the webhook delivery policy. Slice 2 adds the pure dispatch s
 | FR-35.9 replay from timestamp as a Temporal workflow (BR-35.9, cap 1,000,000) | partly built | `planReplay` (time filter, cap with a `{fromSeconds, skip}` cursor that neither repeats nor loses events when many share a timestamp) over `deliveryOrder` (per-aggregate sequence order even when a producer clock ran behind) and `replayHeaders` (`ce-passagereplay: true`) are built and tested. Needs Temporal wiring, progress, the event archive and Kafka offset lookup. |
 | FR-35.10 message monitor and replay (hub side) | later slice of PSG-35 | Shared monitor lives in the edi service; hub side depends on subscriptions. |
 | FR-35.11 reference connectors Salesforce, Shopify, Stripe | later slice of PSG-35 | Separate Helm charts and connector repos (open question 3, decide by wave 46). |
-| FR-35.15 PLM reference connector (Teamcenter, Windchill, file drop) | later slice of PSG-35 | Built on the hub's public APIs; blocked on the hub API slice. |
+| FR-35.15 PLM reference connector (Teamcenter, Windchill, file drop) | partly built | Built: BR-35.16 precedence in `src/plm.ts` (`decideEcoImport`: DUPLICATE, STALE, TASK for a released BOM version, CREATE_ECR with EDI-0139 for a backdated effectivity; `compareRevisions` for alpha and numeric schemes; `validateSyncInterval` 1..1440), tested in `test/plm.test.ts`. Missing: Teamcenter REST and Windchill REST/OData clients, the JSON/PLMXML file drop, the scheduled sync job (default 15 min) and its change token, the `ConnectorConfig` store and sync log, the import store that supplies `ImportState`, ECR creation in wave 9 (handoff), the release status and effectivity write-back, and a connector sync route. Built on the hub's public APIs once the hub API slice lands. |
 | FR-35.8 API catalog (Backstage-backed `GET /hub/v1/catalog`) | later slice of PSG-35 | Needs the developer portal decision (see apps/developer-portal). |
 | BR-35.7 HTTP 2xx, 410, retry schedule, signature | done in slice 1 | `src/webhook.ts`, tested in `test/webhook.test.ts`. |
 | BR-35.7 per-aggregate ordering | done in slice 1 (policy only) | `deliverableHeads`; dispatcher wiring later. |

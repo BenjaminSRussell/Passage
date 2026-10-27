@@ -3,11 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Integration hub: webhook delivery policy (signing, retry schedule, ordering), dispatch state machine, replay planning, the client quota token bucket and subscription event-type patterns. Dependency-free.",
+  "description": "Integration hub: webhook delivery policy (signing, retry schedule, ordering), dispatch state machine, replay planning, the client quota token bucket, subscription event-type patterns and the PLM import precedence. Dependency-free.",
   "engines": {
     "node": ">=24"
   },
   "scripts": {
-    "test": "node --test test/webhook.test.ts test/dispatch.test.ts test/quota.test.ts test/filter.test.ts"
+    "test": "node --test test/webhook.test.ts test/dispatch.test.ts test/quota.test.ts test/filter.test.ts test/plm.test.ts"
   }
 }

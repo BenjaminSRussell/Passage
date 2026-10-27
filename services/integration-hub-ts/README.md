@@ -44,6 +44,19 @@ Two more pure modules:
   one segment, a trailing `**` one or more; `validatePattern` explains a bad pattern,
   `matchesType` / `matchesAny` decide delivery.
 
+## Slice 5 scope
+
+`src/plm.ts`, the PLM import precedence the reference connector will apply (FR-35.15,
+BR-35.16), pure like the rest:
+
+- `decideEcoImport`: for one engineering change order, in this order: DUPLICATE when the
+  same part and revision were already imported (a second sync changes nothing,
+  AC-35.14); STALE when the revision is older than the latest imported one; TASK when the
+  ECO targets a BOM version already released in Passage (never overwritten); otherwise
+  CREATE_ECR, with an effectivity before today moved to today and EDI-0139.
+- `compareRevisions`: alpha revisions (A < Z < AA) and numeric revisions by value.
+- `validateSyncInterval`: `plm_sync_interval_min` must be an integer in 1..1440.
+
 Everything that touches the network, the database or Kafka is later work. See
 `NOT-IMPLEMENTED.md`.
 
@@ -64,3 +77,4 @@ There are no runtime dependencies. Strict typechecking needs `@types/node` and
 | HUB-0113 | Quota exceeded (429); `take` in `src/quota.ts` computes it and `Retry-After`, the gateway enforces it |
 | HUB-0114 | Subscription paused after a 410 Gone response |
 | HUB-0115 | Event dead-lettered after the retry schedule is exhausted |
+| EDI-0139 | PLM ECO effectivity earlier than today, moved to today (`decideEcoImport` in `src/plm.ts`) |
