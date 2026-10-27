@@ -35,14 +35,27 @@ func (s *Postgres) pendingPool() *pgxpool.Pool {
 	return s.pool
 }
 
-func markPostingsDone(ctx context.Context, tx pgx.Tx, tenantID, subject string) error {
-	_, err := tx.Exec(ctx, `WITH done AS (
+func markPostingsDone(ctx context.Context, tx pgx.Tx, tenantID, subject string, expectOpen bool) error {
+	tag, err := tx.Exec(ctx, `WITH done AS (
 			UPDATE receiving_pending_posting SET done_at = now(), outcome = 'POSTED'
-			WHERE tenant_id = $1 AND done_at IS NULL AND ledger_key IN (
+			WHERE tenant_id = $1 AND done_at IS NULL AND claimed_at IS NULL AND ledger_key IN (
 				SELECT ledger_key FROM receiving_pending_posting_subject WHERE tenant_id = $1 AND subject = $2 AND done_at IS NULL)
 			RETURNING ledger_key)
-		UPDATE receiving_pending_posting_subject SET done_at = now() WHERE tenant_id = $1 AND ledger_key IN (SELECT ledger_key FROM done)`, tenantID, subject)
-	return err
+			UPDATE receiving_pending_posting_subject SET done_at = now() WHERE tenant_id = $1 AND ledger_key IN (SELECT ledger_key FROM done)`, tenantID, subject)
+	if err != nil {
+		return err
+	}
+	if !expectOpen || tag.RowsAffected() > 0 {
+		return nil
+	}
+	var recorded bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM receiving_pending_posting_subject WHERE tenant_id = $1 AND subject = $2)`, tenantID, subject).Scan(&recorded); err != nil {
+		return err
+	}
+	if recorded {
+		return ErrPostingSuperseded
+	}
+	return nil
 }
 
 func lockSubjects(ctx context.Context, tx pgx.Tx, tenantID string, subjects []string) error {
@@ -55,32 +68,40 @@ func lockSubjects(ctx context.Context, tx pgx.Tx, tenantID string, subjects []st
 	return nil
 }
 
-func (s *Postgres) ReservePosting(ctx context.Context, p PendingPosting) error {
+func (s *Postgres) ReservePosting(ctx context.Context, p PendingPosting) (string, error) {
 	tenantID, err := tenantOf(ctx)
 	if err != nil {
-		return err
+		return "", err
 	}
-	return dbx.WithTenantTx(ctx, s.pendingPool(), func(tx pgx.Tx) error {
+	key := p.BaseKey
+	err = dbx.WithTenantTx(ctx, s.pendingPool(), func(tx pgx.Tx) error {
 		if err := lockSubjects(ctx, tx, tenantID, p.Subjects); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `SELECT DISTINCT p.ledger_key, p.request_hash, p.created_at
+		var generation int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM receiving_pending_posting WHERE tenant_id = $1 AND base_key = $2 AND outcome = 'REVERSED'`, tenantID, p.BaseKey).Scan(&generation); err != nil {
+			return err
+		}
+		key = GenerationKey(p.BaseKey, generation)
+		rows, err := tx.Query(ctx, `SELECT p.ledger_key, p.request_hash, p.created_at, p.claimed_at IS NOT NULL, COALESCE(p.outcome, ''), min(c.subject)
 			FROM receiving_pending_posting_subject c
 			JOIN receiving_pending_posting p ON p.tenant_id = c.tenant_id AND p.ledger_key = c.ledger_key
 			WHERE c.tenant_id = $1 AND c.subject = ANY($2)
-			AND (p.done_at IS NULL OR (p.ledger_key = $3 AND p.outcome = 'POSTED'))`, tenantID, p.Subjects, p.Key)
+			AND (p.done_at IS NULL OR (p.ledger_key = $3 AND p.outcome IN ('POSTED', 'REVERSED')))
+			GROUP BY p.ledger_key, p.request_hash, p.created_at, p.claimed_at, p.outcome`, tenantID, p.Subjects, key)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		for rows.Next() {
-			var key, hash string
+			var rowKey, hash, outcome, subject string
 			var created time.Time
-			if err := rows.Scan(&key, &hash, &created); err != nil {
+			var claimed bool
+			if err := rows.Scan(&rowKey, &hash, &created, &claimed, &outcome, &subject); err != nil {
 				return err
 			}
-			if key != p.Key || hash != p.Hash {
-				return &PendingError{Subject: p.Subjects[0], Key: key, CreatedAt: created}
+			if rowKey != key || hash != p.Hash || claimed || outcome == OutcomeReversed {
+				return &PendingError{Subject: subject, Key: rowKey, CreatedAt: created}
 			}
 		}
 		if err := rows.Err(); err != nil {
@@ -89,8 +110,8 @@ func (s *Postgres) ReservePosting(ctx context.Context, p PendingPosting) error {
 		rows.Close()
 		var armed string
 		err = tx.QueryRow(ctx, `INSERT INTO receiving_pending_posting (tenant_id, ledger_key, base_key, subject, request_hash, journal) VALUES ($1, $2, $3, $4, $5, $6)
-			ON CONFLICT (tenant_id, ledger_key) DO UPDATE SET done_at = NULL, outcome = NULL, request_hash = EXCLUDED.request_hash, journal = EXCLUDED.journal, created_at = now()
-			WHERE receiving_pending_posting.outcome = 'REJECTED' RETURNING ledger_key`, tenantID, p.Key, p.BaseKey, p.Subjects[0], p.Hash, p.Journal).Scan(&armed)
+			ON CONFLICT (tenant_id, ledger_key) DO UPDATE SET done_at = NULL, claimed_at = NULL, outcome = NULL, request_hash = EXCLUDED.request_hash, journal = EXCLUDED.journal, created_at = now()
+			WHERE receiving_pending_posting.outcome = 'REJECTED' RETURNING ledger_key`, tenantID, key, p.BaseKey, p.Subjects[0], p.Hash, p.Journal).Scan(&armed)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
@@ -99,31 +120,117 @@ func (s *Postgres) ReservePosting(ctx context.Context, p PendingPosting) error {
 		}
 		for _, subject := range slices.Compact(slices.Sorted(slices.Values(p.Subjects))) {
 			if _, err := tx.Exec(ctx, `INSERT INTO receiving_pending_posting_subject (tenant_id, ledger_key, subject) VALUES ($1, $2, $3)
-				ON CONFLICT (tenant_id, ledger_key, subject) DO UPDATE SET done_at = NULL`, tenantID, p.Key, subject); err != nil {
+				ON CONFLICT (tenant_id, ledger_key, subject) DO UPDATE SET done_at = NULL`, tenantID, key, subject); err != nil {
 				return err
 			}
 		}
 		return nil
 	})
+	return key, err
 }
 
-func (s *Postgres) FinishPending(ctx context.Context, key, outcome string) error {
+func GenerationKey(baseKey string, generation int) string {
+	if generation == 0 {
+		return baseKey
+	}
+	return fmt.Sprintf("%s:r%d", baseKey, generation)
+}
+
+func (s *Postgres) ClaimPending(ctx context.Context, key string, minAge time.Duration) (PendingRow, error) {
+	tenantID, err := tenantOf(ctx)
+	if err != nil {
+		return PendingRow{}, err
+	}
+	var out PendingRow
+	var refusal error
+	err = dbx.WithTenantTx(ctx, s.pendingPool(), func(tx pgx.Tx) error {
+		out, err = scanPending(tx.QueryRow(ctx, `SELECT `+pendingColumns+` FROM receiving_pending_posting p WHERE p.tenant_id = $1 AND p.ledger_key = $2`, tenantID, key))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrPendingNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if err := lockSubjects(ctx, tx, tenantID, out.Subjects); err != nil {
+			return err
+		}
+		var claimed string
+		err = tx.QueryRow(ctx, `UPDATE receiving_pending_posting SET claimed_at = now()
+			WHERE tenant_id = $1 AND ledger_key = $2 AND done_at IS NULL AND claimed_at IS NULL AND created_at <= now() - make_interval(secs => $3::float8)
+			RETURNING ledger_key`, tenantID, key, minAge.Seconds()).Scan(&claimed)
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		var claimedAt *time.Time
+		if err := tx.QueryRow(ctx, `SELECT COALESCE(p.outcome, ''), p.done_at, p.claimed_at FROM receiving_pending_posting p WHERE p.tenant_id = $1 AND p.ledger_key = $2`, tenantID, key).Scan(&out.Outcome, &out.DoneAt, &claimedAt); err != nil {
+			return err
+		}
+		switch {
+		case out.DoneAt != nil:
+			refusal = ErrPendingFinished
+		case claimedAt != nil:
+			refusal = ErrPendingClaimed
+		default:
+			refusal = ErrPendingTooRecent
+		}
+		return nil
+	})
+	if err != nil {
+		return PendingRow{}, err
+	}
+	return out, refusal
+}
+
+func (s *Postgres) ReleaseClaim(ctx context.Context, key string) error {
 	tenantID, err := tenantOf(ctx)
 	if err != nil {
 		return err
 	}
 	return dbx.WithTenantTx(ctx, s.pendingPool(), func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, `UPDATE receiving_pending_posting SET done_at = now(), outcome = $3 WHERE tenant_id = $1 AND ledger_key = $2 AND done_at IS NULL`, tenantID, key, outcome)
-		if err != nil || tag.RowsAffected() == 0 {
-			return err
-		}
-		_, err = tx.Exec(ctx, `UPDATE receiving_pending_posting_subject SET done_at = now() WHERE tenant_id = $1 AND ledger_key = $2 AND done_at IS NULL`, tenantID, key)
+		_, err := tx.Exec(ctx, `UPDATE receiving_pending_posting SET claimed_at = NULL WHERE tenant_id = $1 AND ledger_key = $2 AND done_at IS NULL`, tenantID, key)
 		return err
 	})
 }
 
+func (s *Postgres) FinishPending(ctx context.Context, key, outcome string) error {
+	return s.closePending(ctx, key, outcome, true)
+}
+
 func (s *Postgres) ReleasePosting(ctx context.Context, key string) error {
-	return s.FinishPending(ctx, key, OutcomeRejected)
+	err := s.closePending(ctx, key, OutcomeRejected, false)
+	if errors.Is(err, ErrPendingNotClaimed) {
+		return nil
+	}
+	return err
+}
+
+func (s *Postgres) closePending(ctx context.Context, key, outcome string, claimed bool) error {
+	tenantID, err := tenantOf(ctx)
+	if err != nil {
+		return err
+	}
+	return dbx.WithTenantTx(ctx, s.pendingPool(), func(tx pgx.Tx) error {
+		var subjects []string
+		if err := tx.QueryRow(ctx, `SELECT COALESCE(array_agg(subject), '{}') FROM receiving_pending_posting_subject WHERE tenant_id = $1 AND ledger_key = $2`, tenantID, key).Scan(&subjects); err != nil {
+			return err
+		}
+		if err := lockSubjects(ctx, tx, tenantID, subjects); err != nil {
+			return err
+		}
+		tag, err := tx.Exec(ctx, `UPDATE receiving_pending_posting SET done_at = now(), outcome = $3
+			WHERE tenant_id = $1 AND ledger_key = $2 AND done_at IS NULL AND (claimed_at IS NOT NULL) = $4`, tenantID, key, outcome, claimed)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrPendingNotClaimed
+		}
+		_, err = tx.Exec(ctx, `UPDATE receiving_pending_posting_subject SET done_at = now() WHERE tenant_id = $1 AND ledger_key = $2 AND done_at IS NULL`, tenantID, key)
+		return err
+	})
 }
 
 func (s *Postgres) EnsureNoPending(ctx context.Context, subject string) error {
@@ -148,18 +255,6 @@ func (s *Postgres) EnsureNoPending(ctx context.Context, subject string) error {
 		}
 		return &PendingError{Subject: subject, Key: key, CreatedAt: created}
 	})
-}
-
-func (s *Postgres) PostingGeneration(ctx context.Context, baseKey string) (int, error) {
-	tenantID, err := tenantOf(ctx)
-	if err != nil {
-		return 0, err
-	}
-	var n int
-	err = dbx.WithTenantTx(ctx, s.pendingPool(), func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT count(*) FROM receiving_pending_posting WHERE tenant_id = $1 AND base_key = $2 AND outcome = 'REVERSED'`, tenantID, baseKey).Scan(&n)
-	})
-	return n, err
 }
 
 const pendingColumns = `p.ledger_key, p.base_key, p.request_hash, p.journal, COALESCE(p.outcome, ''), p.created_at, p.done_at,

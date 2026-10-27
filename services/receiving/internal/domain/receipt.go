@@ -23,6 +23,7 @@ const (
 	CodeDuplicateInvoice  = "AP-DUP-001"
 	CodeCorrectionBelow   = "RCV-COR-001"
 	CodePostingPending    = "RCV-IDM-001"
+	CodeLedgerRejected    = "RCV-LDG-001"
 
 	receiptKeyFormat    = "post:receiving:productreceipt:%s:receipt"
 	correctionKeyFormat = "post:receiving:productreceipt:%s:correction:%d"
@@ -155,6 +156,7 @@ func (r Receipt) Post(ctx context.Context, ledger LedgerPoster, profile PostingP
 	entry := JournalEntry{
 		IdempotencyKey: fmt.Sprintf(receiptKeyFormat, r.ID),
 		LegalEntityID:  r.LegalEntityID,
+		LedgerID:       profile.LedgerID,
 		PostingDate:    r.Date,
 		DocumentDate:   r.Date,
 		Source:         DocumentSource{Context: "receiving", DocumentType: "productreceipt", DocumentID: r.ID, Purpose: "receipt"},
@@ -202,7 +204,7 @@ type LineChange struct {
 
 func (r Receipt) adjustmentEntry(key string, postingDate time.Time, changes []LineChange, profile PostingProfile) JournalEntry {
 	entry := JournalEntry{
-		IdempotencyKey: key, LegalEntityID: r.LegalEntityID, PostingDate: postingDate, DocumentDate: r.Date,
+		IdempotencyKey: key, LegalEntityID: r.LegalEntityID, LedgerID: profile.LedgerID, PostingDate: postingDate, DocumentDate: r.Date,
 		Source:   DocumentSource{Context: "receiving", DocumentType: "productreceipt", DocumentID: r.ID, Purpose: "receipt"},
 		RateType: "spot",
 	}

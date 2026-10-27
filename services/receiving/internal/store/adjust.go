@@ -19,7 +19,7 @@ func lockedReceipt(ctx context.Context, tx pgx.Tx, tenantID, id string) (Receipt
 }
 
 func enqueueAdjustment(ctx context.Context, tx pgx.Tx, tenantID, id string, adj Adjustment) error {
-	if err := markPostingsDone(ctx, tx, tenantID, id); err != nil {
+	if err := markPostingsDone(ctx, tx, tenantID, id, adj.LedgerEntryID != ""); err != nil {
 		return err
 	}
 	if adj.Event == nil {

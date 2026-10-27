@@ -49,6 +49,7 @@ type tenantData struct {
 
 type pendingRow struct {
 	store.PendingRow
+	claimedAt *time.Time
 }
 
 type Store struct {
@@ -272,6 +273,9 @@ func (s *Store) Post(ctx context.Context, id string, fn store.PostFunc) (out sto
 		for _, a := range outcome.Amounts {
 			amounts[a.LineNo] = a
 		}
+		if err := s.markDone(ctx, id, outcome.LedgerEntryID != ""); err != nil {
+			return err
+		}
 		now := time.Now().UTC()
 		var items []store.GrirItem
 		for i := range current.Lines {
@@ -291,7 +295,6 @@ func (s *Store) Post(ctx context.Context, id string, fn store.PostFunc) (out sto
 		t.receipts[id] = current
 		t.grir = append(t.grir, items...)
 		s.events = append(s.events, outcome.Event)
-		s.markDone(ctx, id)
 		out = cloneReceipt(current)
 		return nil
 	})
@@ -429,6 +432,14 @@ func (r *pendingRow) touches(subjects []string) bool {
 	return slices.ContainsFunc(subjects, func(sub string) bool { return slices.Contains(r.Subjects, sub) })
 }
 
+func (r *pendingRow) sharedSubject(subjects []string) string {
+	shared := slices.DeleteFunc(slices.Clone(r.Subjects), func(sub string) bool { return !slices.Contains(subjects, sub) })
+	if len(shared) == 0 {
+		return ""
+	}
+	return slices.Min(shared)
+}
+
 func (s *Store) pendingFor(ctx context.Context) (map[string]*pendingRow, error) {
 	principal, ok := tenant.FromContext(ctx)
 	if !ok {
@@ -442,44 +453,87 @@ func (s *Store) pendingFor(ctx context.Context) (map[string]*pendingRow, error) 
 	return rows, nil
 }
 
-func (s *Store) markDone(ctx context.Context, subject string) {
+func (s *Store) markDone(ctx context.Context, subject string, expectOpen bool) error {
 	s.pmu.Lock()
 	defer s.pmu.Unlock()
 	rows, _ := s.pendingFor(ctx)
 	now := time.Now().UTC()
+	var marked []*pendingRow
 	for _, row := range rows {
-		if row.open() && slices.Contains(row.Subjects, subject) {
-			row.DoneAt, row.Outcome = &now, store.OutcomePosted
+		if row.open() && row.claimedAt == nil && slices.Contains(row.Subjects, subject) {
+			marked = append(marked, row)
 		}
 	}
+	if expectOpen && len(marked) == 0 {
+		for _, row := range rows {
+			if slices.Contains(row.Subjects, subject) {
+				return store.ErrPostingSuperseded
+			}
+		}
+	}
+	for _, row := range marked {
+		row.DoneAt, row.Outcome = &now, store.OutcomePosted
+	}
+	return nil
 }
 
-func (s *Store) ReservePosting(ctx context.Context, p store.PendingPosting) error {
+func (s *Store) ReservePosting(ctx context.Context, p store.PendingPosting) (string, error) {
 	s.pmu.Lock()
 	defer s.pmu.Unlock()
 	rows, err := s.pendingFor(ctx)
 	if err != nil {
-		return err
+		return "", err
 	}
-	for key, row := range rows {
-		if !row.touches(p.Subjects) || !(row.open() || (key == p.Key && row.Outcome == store.OutcomePosted)) {
+	generation := 0
+	for _, row := range rows {
+		if row.BaseKey == p.BaseKey && row.Outcome == store.OutcomeReversed {
+			generation++
+		}
+	}
+	key := store.GenerationKey(p.BaseKey, generation)
+	for rowKey, row := range rows {
+		if !row.touches(p.Subjects) || !(row.open() || (rowKey == key && (row.Outcome == store.OutcomePosted || row.Outcome == store.OutcomeReversed))) {
 			continue
 		}
-		if key != p.Key || row.Hash != p.Hash {
-			return &store.PendingError{Subject: p.Subjects[0], Key: key, CreatedAt: row.CreatedAt}
+		if rowKey != key || row.Hash != p.Hash || row.claimedAt != nil || row.Outcome == store.OutcomeReversed {
+			return "", &store.PendingError{Subject: row.sharedSubject(p.Subjects), Key: rowKey, CreatedAt: row.CreatedAt}
 		}
 	}
-	existing := rows[p.Key]
+	existing := rows[key]
 	if existing != nil && existing.Outcome != store.OutcomeRejected {
-		return nil
+		return key, nil
 	}
-	rows[p.Key] = &pendingRow{store.PendingRow{
-		Key: p.Key, BaseKey: p.BaseKey, Subjects: slices.Compact(slices.Sorted(slices.Values(p.Subjects))), Hash: p.Hash, Journal: slices.Clone(p.Journal), CreatedAt: time.Now().UTC(),
+	rows[key] = &pendingRow{PendingRow: store.PendingRow{
+		Key: key, BaseKey: p.BaseKey, Subjects: slices.Compact(slices.Sorted(slices.Values(p.Subjects))), Hash: p.Hash, Journal: slices.Clone(p.Journal), CreatedAt: time.Now().UTC(),
 	}}
-	return nil
+	return key, nil
 }
 
-func (s *Store) FinishPending(ctx context.Context, key, outcome string) error {
+func (s *Store) ClaimPending(ctx context.Context, key string, minAge time.Duration) (store.PendingRow, error) {
+	s.pmu.Lock()
+	defer s.pmu.Unlock()
+	rows, err := s.pendingFor(ctx)
+	if err != nil {
+		return store.PendingRow{}, err
+	}
+	row := rows[key]
+	if row == nil {
+		return store.PendingRow{}, store.ErrPendingNotFound
+	}
+	switch {
+	case !row.open():
+		return row.PendingRow, store.ErrPendingFinished
+	case row.claimedAt != nil:
+		return row.PendingRow, store.ErrPendingClaimed
+	case time.Since(row.CreatedAt) < minAge:
+		return row.PendingRow, store.ErrPendingTooRecent
+	}
+	now := time.Now().UTC()
+	row.claimedAt = &now
+	return row.PendingRow, nil
+}
+
+func (s *Store) ReleaseClaim(ctx context.Context, key string) error {
 	s.pmu.Lock()
 	defer s.pmu.Unlock()
 	rows, err := s.pendingFor(ctx)
@@ -487,14 +541,36 @@ func (s *Store) FinishPending(ctx context.Context, key, outcome string) error {
 		return err
 	}
 	if row := rows[key]; row != nil && row.open() {
-		now := time.Now().UTC()
-		row.DoneAt, row.Outcome = &now, outcome
+		row.claimedAt = nil
 	}
 	return nil
 }
 
+func (s *Store) closePending(ctx context.Context, key, outcome string, claimed bool) error {
+	s.pmu.Lock()
+	defer s.pmu.Unlock()
+	rows, err := s.pendingFor(ctx)
+	if err != nil {
+		return err
+	}
+	row := rows[key]
+	if row == nil || !row.open() || (row.claimedAt != nil) != claimed {
+		return store.ErrPendingNotClaimed
+	}
+	now := time.Now().UTC()
+	row.DoneAt, row.Outcome = &now, outcome
+	return nil
+}
+
+func (s *Store) FinishPending(ctx context.Context, key, outcome string) error {
+	return s.closePending(ctx, key, outcome, true)
+}
+
 func (s *Store) ReleasePosting(ctx context.Context, key string) error {
-	return s.FinishPending(ctx, key, store.OutcomeRejected)
+	if err := s.closePending(ctx, key, store.OutcomeRejected, false); !errors.Is(err, store.ErrPendingNotClaimed) {
+		return err
+	}
+	return nil
 }
 
 func (s *Store) EnsureNoPending(ctx context.Context, subject string) error {
@@ -512,22 +588,6 @@ func (s *Store) EnsureNoPending(ctx context.Context, subject string) error {
 	return nil
 }
 
-func (s *Store) PostingGeneration(ctx context.Context, baseKey string) (int, error) {
-	s.pmu.Lock()
-	defer s.pmu.Unlock()
-	rows, err := s.pendingFor(ctx)
-	if err != nil {
-		return 0, err
-	}
-	n := 0
-	for _, row := range rows {
-		if row.BaseKey == baseKey && row.Outcome == store.OutcomeReversed {
-			n++
-		}
-	}
-	return n, nil
-}
-
 func (s *Store) GetPending(ctx context.Context, key string) (store.PendingRow, error) {
 	s.pmu.Lock()
 	defer s.pmu.Unlock()
@@ -541,6 +601,8 @@ func (s *Store) GetPending(ctx context.Context, key string) (store.PendingRow, e
 	}
 	return row.PendingRow, nil
 }
+
+const listPendingLimit = 200
 
 func (s *Store) ListPending(ctx context.Context) ([]store.PendingRow, error) {
 	s.pmu.Lock()
@@ -556,7 +618,7 @@ func (s *Store) ListPending(ctx context.Context) ([]store.PendingRow, error) {
 		}
 	}
 	slices.SortFunc(out, func(a, b store.PendingRow) int { return a.CreatedAt.Compare(b.CreatedAt) })
-	return out, nil
+	return out[:min(len(out), listPendingLimit)], nil
 }
 
 func (s *Store) emit(adj store.Adjustment) {
@@ -578,6 +640,9 @@ func (s *Store) Correct(ctx context.Context, id string, fn store.AdjustFunc) (ou
 		if err != nil {
 			return err
 		}
+		if err := s.markDone(ctx, id, adj.LedgerEntryID != ""); err != nil {
+			return err
+		}
 		for _, c := range adj.Lines {
 			for i := range current.Lines {
 				if l := &current.Lines[i]; l.LineNo == c.LineNo {
@@ -594,7 +659,6 @@ func (s *Store) Correct(ctx context.Context, id string, fn store.AdjustFunc) (ou
 		current.Version++
 		t.receipts[id] = current
 		s.emit(adj)
-		s.markDone(ctx, id)
 		out = cloneReceipt(current)
 		return nil
 	})
@@ -624,6 +688,9 @@ func (s *Store) Cancel(ctx context.Context, id string, fn store.AdjustFunc) (out
 		if err != nil {
 			return err
 		}
+		if err := s.markDone(ctx, id, adj.LedgerEntryID != ""); err != nil {
+			return err
+		}
 		if current.State == domain.Posted {
 			for i := range t.grir {
 				if g := &t.grir[i]; g.ReceiptID == id {
@@ -637,7 +704,6 @@ func (s *Store) Cancel(ctx context.Context, id string, fn store.AdjustFunc) (out
 		current.Version++
 		t.receipts[id] = current
 		s.emit(adj)
-		s.markDone(ctx, id)
 		out = cloneReceipt(current)
 		return nil
 	})
@@ -686,6 +752,9 @@ func (s *Store) PostInvoice(ctx context.Context, in store.Invoice, fn store.Invo
 		if err != nil {
 			return err
 		}
+		if err := s.markDone(ctx, in.ID, outcome.LedgerEntryID != ""); err != nil {
+			return err
+		}
 		for k, item := range working {
 			g := &t.grir[indexes[k]]
 			g.InvoicedQty, g.ClearedAmount = item.InvoicedQty, item.ClearedAmount.Value
@@ -700,7 +769,6 @@ func (s *Store) PostInvoice(ctx context.Context, in store.Invoice, fn store.Invo
 		}
 		t.invoices[key] = struct{}{}
 		s.events = append(s.events, outcome.Event)
-		s.markDone(ctx, in.ID)
 		in.LedgerEntryID, in.Total, in.CreatedAt = outcome.LedgerEntryID, outcome.Total, time.Now().UTC()
 		out = in
 		return nil

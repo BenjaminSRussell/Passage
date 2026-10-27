@@ -33,7 +33,7 @@ const (
 )
 
 var (
-	profile    = domain.PostingProfile{Inventory: "1400", GRIR: grirAccount, PPV: "5200", VendorControl: "2000"}
+	profile    = domain.PostingProfile{LedgerID: ledgerUUID, Inventory: "1400", GRIR: grirAccount, PPV: "5200", VendorControl: "2000"}
 	postingDay = time.Date(2026, 8, 15, 0, 0, 0, 0, time.UTC)
 )
 
@@ -46,9 +46,9 @@ type recordingLedger struct {
 func (l *recordingLedger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Lines []struct {
-			Account string `json:"account"`
-			Debit   *struct{ Amount string }
-			Credit  *struct{ Amount string }
+			Account     string `json:"account"`
+			DebitCredit string `json:"debitCredit"`
+			Amount      struct{ Value string }
 		} `json:"lines"`
 	}
 	if r.URL.Path != domain.LedgerPostPath || r.Header.Get("Idempotency-Key") == "" || json.NewDecoder(r.Body).Decode(&body) != nil {
@@ -62,11 +62,11 @@ func (l *recordingLedger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if line.Account != grirAccount {
 			continue
 		}
-		if line.Debit != nil {
-			l.grir = l.grir.Add(decimal.RequireFromString(line.Debit.Amount))
+		if line.DebitCredit == "D" {
+			l.grir = l.grir.Add(decimal.RequireFromString(line.Amount.Value))
 		}
-		if line.Credit != nil {
-			l.grir = l.grir.Sub(decimal.RequireFromString(line.Credit.Amount))
+		if line.DebitCredit == "C" {
+			l.grir = l.grir.Sub(decimal.RequireFromString(line.Amount.Value))
 		}
 	}
 	w.WriteHeader(http.StatusCreated)
@@ -80,6 +80,9 @@ func completePostings(t *testing.T, st *memstore.Store) {
 		t.Fatal(err)
 	}
 	for _, row := range rows {
+		if _, err := st.ClaimPending(tenantCtx(), row.Key, 0); err != nil {
+			t.Fatal(err)
+		}
 		if err := st.FinishPending(tenantCtx(), row.Key, "POSTED"); err != nil {
 			t.Fatal(err)
 		}

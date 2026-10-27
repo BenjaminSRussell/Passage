@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
@@ -41,7 +42,8 @@ func newRigOn(st *memstore.Store, periods domain.PeriodStatus) *rig {
 	rg := &rig{st: st, ledger: &domain.FakeLedger{}}
 	a := api.New(rg.st, api.Ports{
 		Periods: domain.FakePeriods{Status: periods}, Ledger: rg.ledger,
-		Profile: domain.PostingProfile{Inventory: "1400", GRIR: "2100", PPV: "5200", VendorControl: "2000"},
+		Profile:       domain.PostingProfile{Inventory: "1400", GRIR: "2100", PPV: "5200", VendorControl: "2000"},
+		ResolveMinAge: time.Nanosecond,
 	})
 	router := httpx.NewRouter()
 	a.Register(router)

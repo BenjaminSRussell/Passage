@@ -136,6 +136,17 @@ func wantPending(t *testing.T, err error, key string) {
 	}
 }
 
+func claim(t *testing.T, b backend, p tenant.Principal, key string) {
+	t.Helper()
+	if _, err := b.st.ClaimPending(ctxOf(p), key, 0); err != nil {
+		t.Fatalf("claim %s: %v", key, err)
+	}
+}
+
+func reservation(base string, hash string, subjects ...string) store.PendingPosting {
+	return store.PendingPosting{BaseKey: base, Subjects: subjects, Hash: hash, Journal: []byte(`{}`)}
+}
+
 func wantCode(t *testing.T, err error, code string) {
 	t.Helper()
 	var de *domain.Error
@@ -597,7 +608,8 @@ var cases = []struct {
 		p := principal(1)
 		r := registered(t, b.st, p, "PS-1", "S1", "S2", "S3")
 		reserve := func(key, hash string) error {
-			return b.st.ReservePosting(ctxOf(p), store.PendingPosting{Key: key, BaseKey: key, Subjects: []string{r.ID}, Hash: hash, Journal: []byte(`{"k":1}`)})
+			_, err := b.st.ReservePosting(ctxOf(p), store.PendingPosting{BaseKey: key, Subjects: []string{r.ID}, Hash: hash, Journal: []byte(`{"k":1}`)})
+			return err
 		}
 		if err := reserve("k1", "h1"); err != nil {
 			t.Fatal(err)
@@ -631,7 +643,8 @@ var cases = []struct {
 	{"a released key can be reserved again with a new body, and a posted key keeps its body", func(t *testing.T, b backend) {
 		p := principal(1)
 		reserve := func(key, hash string) error {
-			return b.st.ReservePosting(ctxOf(p), store.PendingPosting{Key: key, BaseKey: key, Subjects: []string{"subject-a"}, Hash: hash, Journal: []byte(`{}`)})
+			_, err := b.st.ReservePosting(ctxOf(p), store.PendingPosting{BaseKey: key, Subjects: []string{"subject-a"}, Hash: hash, Journal: []byte(`{}`)})
+			return err
 		}
 		if err := reserve("k", "h1"); err != nil {
 			t.Fatal(err)
@@ -647,11 +660,18 @@ var cases = []struct {
 		if err != nil || row.Hash != "h2" || row.DoneAt != nil || len(row.Subjects) != 1 {
 			t.Fatalf("row=%+v err=%v, want the re-armed open row with hash h2", row, err)
 		}
+		if err := b.st.FinishPending(ctxOf(p), "k", store.OutcomeReversed); !errors.Is(err, store.ErrPendingNotClaimed) {
+			t.Fatalf("finishing an unclaimed posting: err=%v, want ErrPendingNotClaimed", err)
+		}
+		claim(t, b, p, "k")
 		if err := b.st.FinishPending(ctxOf(p), "k", store.OutcomeReversed); err != nil {
 			t.Fatal(err)
 		}
-		if n, _ := b.st.PostingGeneration(ctxOf(p), "k"); n != 1 {
-			t.Fatalf("generation %d, want 1 after a reversal", n)
+		if key, err := b.st.ReservePosting(ctxOf(p), store.PendingPosting{BaseKey: "k", Subjects: []string{"subject-a"}, Hash: "h2", Journal: []byte(`{}`)}); err != nil || key != "k:r1" {
+			t.Fatalf("key=%q err=%v, want the next generation k:r1 after a reversal", key, err)
+		}
+		if err := b.st.ReleasePosting(ctxOf(p), "k:r1"); err != nil {
+			t.Fatal(err)
 		}
 		if err := b.st.EnsureNoPending(ctxOf(p), "subject-a"); err != nil {
 			t.Fatalf("a reversed posting frees its subject: %v", err)
@@ -662,27 +682,115 @@ var cases = []struct {
 	}},
 	{"a posting over several subjects blocks each of them and completes them all together", func(t *testing.T, b backend) {
 		p := principal(1)
-		invoice := store.PendingPosting{Key: "inv", BaseKey: "inv", Subjects: []string{"receipt-2", "invoice-1", "receipt-1"}, Hash: "h", Journal: []byte(`{}`)}
-		if err := b.st.ReservePosting(ctxOf(p), invoice); err != nil {
+		invoice := store.PendingPosting{BaseKey: "inv", Subjects: []string{"receipt-2", "invoice-1", "receipt-1"}, Hash: "h", Journal: []byte(`{}`)}
+		if _, err := b.st.ReservePosting(ctxOf(p), invoice); err != nil {
 			t.Fatal(err)
 		}
 		for _, subject := range []string{"receipt-1", "receipt-2", "invoice-1"} {
 			wantPending(t, b.st.EnsureNoPending(ctxOf(p), subject), "inv")
 		}
-		other := store.PendingPosting{Key: "corr", BaseKey: "corr", Subjects: []string{"receipt-2"}, Hash: "h", Journal: []byte(`{}`)}
-		wantPending(t, b.st.ReservePosting(ctxOf(p), other), "inv")
+		other := store.PendingPosting{BaseKey: "corr", Subjects: []string{"receipt-2"}, Hash: "h", Journal: []byte(`{}`)}
+		_, err := b.st.ReservePosting(ctxOf(p), other)
+		wantPending(t, err, "inv")
 		rows, err := b.st.ListPending(ctxOf(p))
 		if err != nil || len(rows) != 1 || len(rows[0].Subjects) != 3 || rows[0].Subjects[0] != "invoice-1" {
 			t.Fatalf("rows=%+v err=%v, want one open row with three sorted subjects", rows, err)
 		}
+		claim(t, b, p, "inv")
 		if err := b.st.FinishPending(ctxOf(p), "inv", store.OutcomeReversed); err != nil {
 			t.Fatal(err)
 		}
-		if err := b.st.ReservePosting(ctxOf(p), other); err != nil {
+		if _, err := b.st.ReservePosting(ctxOf(p), other); err != nil {
 			t.Fatalf("finishing the invoice posting must free the receipts: %v", err)
 		}
-		if err := b.st.ReservePosting(ctxOf(principal(2)), invoice); err != nil {
+		if _, err := b.st.ReservePosting(ctxOf(principal(2)), invoice); err != nil {
 			t.Fatalf("another tenant is unaffected: %v", err)
+		}
+	}},
+	{"a resolve that claims the posting first makes the original command's commit fail and leave the receipt unposted", func(t *testing.T, b backend) {
+		p := principal(1)
+		r := registered(t, b.st, p, "PS-1", "S1", "S2", "S3")
+		if _, err := b.st.ReservePosting(ctxOf(p), reservation("race", "h", r.ID)); err != nil {
+			t.Fatal(err)
+		}
+		claim(t, b, p, "race")
+		if _, err := b.st.ClaimPending(ctxOf(p), "race", 0); !errors.Is(err, store.ErrPendingClaimed) {
+			t.Fatalf("second claim err=%v, want ErrPendingClaimed", err)
+		}
+		if _, err := b.st.ReservePosting(ctxOf(p), reservation("race", "h", r.ID)); err == nil {
+			t.Fatal("the original command must not re-reserve a claimed posting")
+		}
+		if err := b.st.ReleasePosting(ctxOf(p), "race"); err != nil {
+			t.Fatalf("releasing a claimed posting must be a no-op: %v", err)
+		}
+		if row, _ := b.st.GetPending(ctxOf(p), "race"); row.DoneAt != nil {
+			t.Fatalf("a command's release finished a claimed row: %+v", row)
+		}
+		if _, err := b.st.Post(ctxOf(p), r.ID, postWith(t, p, "entry-1")); !errors.Is(err, store.ErrPostingSuperseded) {
+			t.Fatalf("post err=%v, want ErrPostingSuperseded", err)
+		}
+		if got, _ := b.st.GetReceipt(ctxOf(p), r.ID); got.State != domain.Registered {
+			t.Fatalf("receipt is %s after the failed commit, want REGISTERED", got.State)
+		}
+		if err := b.st.ReleaseClaim(ctxOf(p), "race"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := b.st.Post(ctxOf(p), r.ID, postWith(t, p, "entry-1")); err != nil {
+			t.Fatalf("with the claim released the command commits: %v", err)
+		}
+	}},
+	{"a command that commits first makes a later resolve fail with the finished outcome", func(t *testing.T, b backend) {
+		p := principal(1)
+		r := registered(t, b.st, p, "PS-1", "S1", "S2", "S3")
+		if _, err := b.st.ReservePosting(ctxOf(p), reservation("first", "h", r.ID)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := b.st.Post(ctxOf(p), r.ID, postWith(t, p, "entry-1")); err != nil {
+			t.Fatal(err)
+		}
+		row, err := b.st.ClaimPending(ctxOf(p), "first", 0)
+		if !errors.Is(err, store.ErrPendingFinished) || row.Outcome != store.OutcomePosted {
+			t.Fatalf("claim row=%+v err=%v, want ErrPendingFinished with outcome POSTED", row, err)
+		}
+		if err := b.st.FinishPending(ctxOf(p), "first", store.OutcomeReversed); !errors.Is(err, store.ErrPendingNotClaimed) {
+			t.Fatalf("finish err=%v, want ErrPendingNotClaimed, not a silent success", err)
+		}
+		if got, _ := b.st.GetReceipt(ctxOf(p), r.ID); got.State != domain.Posted {
+			t.Fatalf("receipt is %s, want POSTED", got.State)
+		}
+	}},
+	{"a posting younger than the minimum age cannot be claimed", func(t *testing.T, b backend) {
+		p := principal(1)
+		if _, err := b.st.ReservePosting(ctxOf(p), reservation("young", "h", "subject-y")); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := b.st.ClaimPending(ctxOf(p), "young", time.Hour); !errors.Is(err, store.ErrPendingTooRecent) {
+			t.Fatalf("err=%v, want ErrPendingTooRecent", err)
+		}
+		claim(t, b, p, "young")
+	}},
+	{"a reversed key is never reused: each reservation derives the next generation", func(t *testing.T, b backend) {
+		p := principal(1)
+		for generation, want := range []string{"g", "g:r1", "g:r2"} {
+			key, err := b.st.ReservePosting(ctxOf(p), reservation("g", "h", "subject-g"))
+			if err != nil || key != want {
+				t.Fatalf("generation %d: key=%q err=%v, want %q", generation, key, err, want)
+			}
+			claim(t, b, p, key)
+			if err := b.st.FinishPending(ctxOf(p), key, store.OutcomeReversed); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}},
+	{"a conflict names the subject the two postings share", func(t *testing.T, b backend) {
+		p := principal(1)
+		if _, err := b.st.ReservePosting(ctxOf(p), reservation("one", "h", "a", "b")); err != nil {
+			t.Fatal(err)
+		}
+		_, err := b.st.ReservePosting(ctxOf(p), reservation("two", "h", "c", "b"))
+		var pe *store.PendingError
+		if !errors.As(err, &pe) || pe.Subject != "b" || pe.Key != "one" {
+			t.Fatalf("err=%v, want a PendingError for subject b held by one", err)
 		}
 	}},
 	{"ping succeeds on a healthy store", func(t *testing.T, b backend) {

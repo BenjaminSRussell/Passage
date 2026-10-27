@@ -13,9 +13,14 @@ import (
 )
 
 var (
-	ErrPendingNotFound = errors.New("pending posting not found")
-	ErrNotFound        = errors.New("receipt not found")
-	ErrGrirNotFound    = errors.New("no open GR/IR item for the receipt line")
+	ErrPendingNotFound   = errors.New("pending posting not found")
+	ErrPendingFinished   = errors.New("pending posting is already finished")
+	ErrPendingClaimed    = errors.New("pending posting is being resolved")
+	ErrPendingTooRecent  = errors.New("pending posting may still have a command in flight")
+	ErrPendingNotClaimed = errors.New("pending posting is not claimed by a resolve")
+	ErrPostingSuperseded = errors.New("the pending posting was resolved while the command was running")
+	ErrNotFound          = errors.New("receipt not found")
+	ErrGrirNotFound      = errors.New("no open GR/IR item for the receipt line")
 )
 
 type DuplicatePackingSlipError struct{ ReceiptNumber string }
@@ -82,7 +87,6 @@ type PostOutcome struct {
 }
 
 type PendingPosting struct {
-	Key      string
 	BaseKey  string
 	Subjects []string
 	Hash     string
@@ -181,12 +185,13 @@ type Store interface {
 	GetReceipt(ctx context.Context, id string) (Receipt, error)
 	ListReceipts(ctx context.Context, f ReceiptFilter) ([]Receipt, error)
 	ListGrir(ctx context.Context, f GrirFilter) (GrirPage, error)
-	ReservePosting(ctx context.Context, p PendingPosting) error
+	ReservePosting(ctx context.Context, p PendingPosting) (string, error)
 	ReleasePosting(ctx context.Context, key string) error
 	EnsureNoPending(ctx context.Context, subject string) error
-	PostingGeneration(ctx context.Context, baseKey string) (int, error)
 	GetPending(ctx context.Context, key string) (PendingRow, error)
 	ListPending(ctx context.Context) ([]PendingRow, error)
+	ClaimPending(ctx context.Context, key string, minAge time.Duration) (PendingRow, error)
+	ReleaseClaim(ctx context.Context, key string) error
 	FinishPending(ctx context.Context, key, outcome string) error
 	ClaimKey(ctx context.Context, key, hash string, lockFor time.Duration) (ClaimResult, error)
 	CompleteKey(ctx context.Context, key string, status int, body []byte) error

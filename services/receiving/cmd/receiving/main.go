@@ -7,8 +7,9 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"os"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
@@ -61,7 +62,11 @@ func run(ctx context.Context, getenv func(string) string) error {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
-	pendingPool, err := dbx.Connect(ctx, smallPoolURL(databaseURL))
+	pendingConfig, err := smallPoolConfig(databaseURL)
+	if err != nil {
+		return fmt.Errorf("parse pending-posting pool config: %w", err)
+	}
+	pendingPool, err := pgxpool.NewWithConfig(ctx, pendingConfig)
 	if err != nil {
 		return fmt.Errorf("connect pending-posting pool: %w", err)
 	}
@@ -80,15 +85,13 @@ func run(ctx context.Context, getenv func(string) string) error {
 	return <-errs
 }
 
-func smallPoolURL(databaseURL string) string {
-	u, err := url.Parse(databaseURL)
+func smallPoolConfig(databaseURL string) (*pgxpool.Config, error) {
+	cfg, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
-		return databaseURL
+		return nil, err
 	}
-	q := u.Query()
-	q.Set("pool_max_conns", fmt.Sprint(pendingPoolConns))
-	u.RawQuery = q.Encode()
-	return u.String()
+	cfg.MaxConns = pendingPoolConns
+	return cfg, nil
 }
 
 func addr(getenv func(string) string, key, fallback string) string {

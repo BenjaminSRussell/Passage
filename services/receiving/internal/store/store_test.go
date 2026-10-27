@@ -249,7 +249,7 @@ func TestMigration0005_InvoiceTablesIsolationAndUniqueNumber(t *testing.T) {
 		return n
 	}
 	st := store.New(pool)
-	if err := st.ReservePosting(tenant.With(ctx, one), store.PendingPosting{Key: "k", BaseKey: "k", Subjects: []string{receiptID, invoiceID}, Hash: "h", Journal: []byte(`{}`)}); err != nil {
+	if _, err := st.ReservePosting(tenant.With(ctx, one), store.PendingPosting{BaseKey: "k", Subjects: []string{receiptID, invoiceID}, Hash: "h", Journal: []byte(`{}`)}); err != nil {
 		t.Fatal(err)
 	}
 	for _, table := range []string{"receiving_pending_posting", "receiving_pending_posting_subject"} {

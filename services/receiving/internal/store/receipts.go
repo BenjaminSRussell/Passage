@@ -387,7 +387,7 @@ func (s *Postgres) Post(ctx context.Context, id string, fn PostFunc) (Receipt, e
 		if err := outbox.Enqueue(ctx, tx, receiptAggregate, id, outcome.Event); err != nil {
 			return err
 		}
-		if err := markPostingsDone(ctx, tx, tenantID, id); err != nil {
+		if err := markPostingsDone(ctx, tx, tenantID, id, outcome.LedgerEntryID != ""); err != nil {
 			return err
 		}
 		out, err = loadReceipt(ctx, tx, tenantID, id, false)

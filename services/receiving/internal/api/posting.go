@@ -6,7 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"slices"
@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
@@ -87,16 +88,11 @@ func (d durableLedger) Post(ctx context.Context, entry domain.JournalEntry) (str
 	}
 	base := entry.IdempotencyKey
 	sum := sha256.Sum256(append([]byte(base+"\x00"), journal...))
-	generation, err := d.store.PostingGeneration(ctx, base)
+	key, err := d.store.ReservePosting(ctx, store.PendingPosting{BaseKey: base, Subjects: d.subjects, Hash: hex.EncodeToString(sum[:]), Journal: journal})
 	if err != nil {
 		return "", err
 	}
-	if generation > 0 {
-		entry.IdempotencyKey = fmt.Sprintf("%s:r%d", base, generation)
-	}
-	if err := d.store.ReservePosting(ctx, store.PendingPosting{Key: entry.IdempotencyKey, BaseKey: base, Subjects: d.subjects, Hash: hex.EncodeToString(sum[:]), Journal: journal}); err != nil {
-		return "", err
-	}
+	entry.IdempotencyKey = key
 	d.tracker.add(entry.IdempotencyKey, d.subjects)
 	id, err := d.inner.Post(ctx, entry)
 	if errors.Is(err, domain.ErrPeriodClosed) || errors.Is(err, domain.ErrLedgerRejected) {
@@ -166,27 +162,38 @@ func (a *API) resolvePending(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	row, err := a.store.GetPending(ctx, key)
-	if errors.Is(err, store.ErrPendingNotFound) {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, "RCV-NF-003", "pending posting not found"))
-		return
-	}
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
-	if row.DoneAt != nil {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, domain.CodeInvalidTransition, "the posting is already finished as "+row.Outcome))
-		return
-	}
 	reverser, ok := a.ports.Ledger.(domain.LedgerReverser)
 	if !ok {
 		httpx.Fail(w, r, unavailable("the ledger adapter cannot reverse entries"))
 		return
 	}
+	row, err := a.store.ClaimPending(ctx, key, a.resolveMinAge)
+	switch {
+	case errors.Is(err, store.ErrPendingNotFound):
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, "RCV-NF-003", "pending posting not found"))
+		return
+	case errors.Is(err, store.ErrPendingFinished):
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, domain.CodeInvalidTransition, "the posting is already finished as "+row.Outcome))
+		return
+	case errors.Is(err, store.ErrPendingClaimed):
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, domain.CodePostingPending, "another resolve is already working on this posting"))
+		return
+	case errors.Is(err, store.ErrPendingTooRecent):
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, domain.CodePostingPending, "the posting is younger than "+a.resolveMinAge.String()+", so its command may still be running; try again later"))
+		return
+	case err != nil:
+		writeError(w, r, err)
+		return
+	}
+	abandon := func(err error) {
+		if releaseErr := a.store.ReleaseClaim(context.WithoutCancel(ctx), row.Key); releaseErr != nil {
+			slog.ErrorContext(ctx, "release resolve claim failed", "err", releaseErr, "key", row.Key, "correlationId", middleware.GetReqID(ctx))
+		}
+		writeError(w, r, err)
+	}
 	var entry domain.JournalEntry
 	if err := json.Unmarshal(row.Journal, &entry); err != nil {
-		writeError(w, r, err)
+		abandon(err)
 		return
 	}
 	entry.IdempotencyKey = row.Key
@@ -196,14 +203,21 @@ func (a *API) resolvePending(w http.ResponseWriter, r *http.Request) {
 		a.finishPending(w, r, row.Key, store.OutcomeRejected, "")
 		return
 	case errors.Is(err, domain.ErrLedgerConflict):
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, domain.CodePostingPending, "the ledger holds a different entry under this key; resolve it in the ledger"))
+		abandon(httpx.NewProblem(http.StatusConflict, domain.CodePostingPending, "the ledger holds a different entry under this key; resolve it in the ledger"))
 		return
 	case err != nil:
-		httpx.Fail(w, r, unavailable("the ledger could not be reached; try again"))
+		abandon(unavailable("the ledger could not be reached; try again"))
 		return
 	}
-	if err := reverser.Reverse(ctx, id, row.Key+":reverse"); err != nil {
-		httpx.Fail(w, r, unavailable("the ledger entry exists but could not be reversed yet; try again"))
+	switch err := reverser.Reverse(ctx, id, row.Key+":reverse", entry.PostingDate); {
+	case errors.Is(err, domain.ErrPeriodClosed):
+		abandon(httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodePeriodClosed, "the ledger period of the entry is closed, so the entry cannot be reversed"))
+		return
+	case errors.Is(err, domain.ErrLedgerRejected):
+		abandon(httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeLedgerRejected, "the ledger refused the reversal; see the ledger for the reason"))
+		return
+	case err != nil:
+		abandon(unavailable("the ledger entry exists but could not be reversed yet; try again"))
 		return
 	}
 	a.finishPending(w, r, row.Key, store.OutcomeReversed, id)

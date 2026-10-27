@@ -328,7 +328,8 @@ paths:
         '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
         '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
         '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-003' }
-        '409': { $ref: '#/components/responses/Problem', description: 'RCV-STA-001 already finished; RCV-IDM-001 the ledger holds a different entry under the key.' }
+        '409': { $ref: '#/components/responses/Problem', description: 'RCV-STA-001 already finished; RCV-IDM-001 the ledger holds a different entry under the key, another resolve holds the posting, or the posting is younger than 33 s and its command may still be running.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'PER-AP-001 the ledger period of the entry is closed; RCV-LDG-001 the ledger refused the reversal. Not retryable.' }
         '503': { $ref: '#/components/responses/Problem', description: 'COM-0503 the ledger could not be reached or the reversal failed; try again.' }
         '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
   /healthz:

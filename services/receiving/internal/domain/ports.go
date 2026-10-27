@@ -51,6 +51,7 @@ type JournalEntry struct {
 	LedgerEntryID  string            `json:"-"`
 	GrirCleared    []decimal.Decimal `json:"-"`
 	LegalEntityID  string            `json:"legalEntityId"`
+	LedgerID       string            `json:"ledgerId"`
 	PostingDate    time.Time         `json:"postingDate"`
 	DocumentDate   time.Time         `json:"documentDate"`
 	Source         DocumentSource    `json:"source"`
@@ -59,6 +60,7 @@ type JournalEntry struct {
 }
 
 type PostingProfile struct {
+	LedgerID      string
 	Inventory     string
 	GRIR          string
 	PPV           string
@@ -87,7 +89,7 @@ type FakePeriods struct {
 func (f FakePeriods) AP(context.Context, PeriodQuery) (PeriodStatus, error) { return f.Status, f.Err }
 
 type LedgerReverser interface {
-	Reverse(ctx context.Context, entryID, idempotencyKey string) error
+	Reverse(ctx context.Context, entryID, idempotencyKey string, postingDate time.Time) error
 }
 
 type fakePosting struct {
@@ -127,7 +129,7 @@ func (f *FakeLedger) Post(_ context.Context, entry JournalEntry) (string, error)
 	return id, nil
 }
 
-func (f *FakeLedger) Reverse(_ context.Context, entryID, _ string) error {
+func (f *FakeLedger) Reverse(_ context.Context, entryID, _ string, _ time.Time) error {
 	if f.Err != nil {
 		return f.Err
 	}

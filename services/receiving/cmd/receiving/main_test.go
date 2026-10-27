@@ -70,6 +70,7 @@ func TestNotImplementedListsEveryDeliverable(t *testing.T) {
 }
 
 func withAccounts(env map[string]string) map[string]string {
+	env["POSTING_LEDGER_ID"] = "0a1b2c3d-0000-4000-8000-000000000001"
 	env["POSTING_ACCOUNT_INVENTORY"], env["POSTING_ACCOUNT_GRIR"], env["POSTING_ACCOUNT_PPV"], env["POSTING_ACCOUNT_VENDOR_CONTROL"] = "1400", "2100", "5200", "2000"
 	return env
 }
@@ -79,7 +80,15 @@ func TestBuildProfile(t *testing.T) {
 	if err != nil || profile.Inventory != "1400" || profile.GRIR != "2100" || profile.PPV != "5200" || profile.VendorControl != "2000" {
 		t.Fatalf("profile %+v err %v", profile, err)
 	}
-	partial := map[string]string{"POSTING_ACCOUNT_INVENTORY": "1400"}
+	if profile.LedgerID != "0a1b2c3d-0000-4000-8000-000000000001" {
+		t.Fatalf("ledger id %q", profile.LedgerID)
+	}
+	notUUID := withAccounts(map[string]string{})
+	notUUID["POSTING_LEDGER_ID"] = "ledger-1"
+	if _, err := buildProfile(func(k string) string { return notUUID[k] }, false); err == nil || !strings.Contains(err.Error(), "POSTING_LEDGER_ID must be a UUID") {
+		t.Fatalf("got %v, want the ledger id rejected", err)
+	}
+	partial := map[string]string{"POSTING_LEDGER_ID": "0a1b2c3d-0000-4000-8000-000000000001", "POSTING_ACCOUNT_INVENTORY": "1400"}
 	if _, err := buildProfile(func(k string) string { return partial[k] }, false); err == nil || !strings.Contains(err.Error(), "POSTING_ACCOUNT_GRIR is required") {
 		t.Fatalf("got %v, want the GR/IR account reported missing", err)
 	}
@@ -96,7 +105,7 @@ func TestBuildPorts(t *testing.T) {
 		wantErr string
 	}{
 		{"both urls and accounts", withAccounts(map[string]string{"LEDGER_URL": "http://ledger", "CLOSE_URL": "http://close"}), ""},
-		{"both urls without accounts", map[string]string{"LEDGER_URL": "http://ledger", "CLOSE_URL": "http://close"}, "POSTING_ACCOUNT_INVENTORY is required"},
+		{"both urls without accounts", map[string]string{"LEDGER_URL": "http://ledger", "CLOSE_URL": "http://close"}, "POSTING_LEDGER_ID is required"},
 		{"fakes allowed with both urls empty", map[string]string{"PASSAGE_ALLOW_FAKES": "1"}, ""},
 		{"empty urls without the flag", map[string]string{}, "LEDGER_URL is required"},
 		{"flag must be exactly 1", map[string]string{"PASSAGE_ALLOW_FAKES": "true"}, "LEDGER_URL is required"},
@@ -134,9 +143,22 @@ func TestBuildPortsUsesRealAdaptersWhenConfigured(t *testing.T) {
 	}
 }
 
-func TestSmallPoolURLCapsConnectionsAndKeepsTheRest(t *testing.T) {
-	got := smallPoolURL("postgres://passage_app:pw@db:5432/passage_receiving?sslmode=disable")
-	if !strings.Contains(got, "pool_max_conns=2") || !strings.Contains(got, "sslmode=disable") || !strings.HasPrefix(got, "postgres://passage_app:pw@db:5432/passage_receiving?") {
-		t.Fatalf("got %s", got)
+func TestSmallPoolConfigCapsConnectionsForURLAndKeywordDSNs(t *testing.T) {
+	for name, dsn := range map[string]string{
+		"url":     "postgres://passage_app:pw@db:5432/passage_receiving?sslmode=disable",
+		"keyword": "host=db port=5432 user=passage_app password=pw dbname=passage_receiving sslmode=disable",
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg, err := smallPoolConfig(dsn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.MaxConns != pendingPoolConns || cfg.ConnConfig.Host != "db" || cfg.ConnConfig.User != "passage_app" || cfg.ConnConfig.Database != "passage_receiving" {
+				t.Fatalf("max %d host %s user %s db %s", cfg.MaxConns, cfg.ConnConfig.Host, cfg.ConnConfig.User, cfg.ConnConfig.Database)
+			}
+		})
+	}
+	if _, err := smallPoolConfig("://bad"); err == nil {
+		t.Fatal("an unparseable DSN must fail")
 	}
 }

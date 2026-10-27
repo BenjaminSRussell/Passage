@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/money"
@@ -94,11 +97,21 @@ func (c *commitFails) PostInvoice(ctx context.Context, in store.Invoice, fn stor
 
 func brokenRig(t *testing.T) (*rig, *commitFails) {
 	t.Helper()
+	return brokenRigWith(t, time.Nanosecond, nil)
+}
+
+func brokenRigWith(t *testing.T, minAge time.Duration, ledger func(*domain.FakeLedger) domain.LedgerPoster) (*rig, *commitFails) {
+	t.Helper()
 	base := newRig(domain.PeriodOpen)
 	broken := &commitFails{Store: base.st}
+	var poster domain.LedgerPoster = base.ledger
+	if ledger != nil {
+		poster = ledger(base.ledger)
+	}
 	a := api.New(broken, api.Ports{
-		Periods: domain.FakePeriods{Status: domain.PeriodOpen}, Ledger: base.ledger,
-		Profile: domain.PostingProfile{Inventory: "1400", GRIR: "2100", PPV: "5200", VendorControl: "2000"},
+		Periods: domain.FakePeriods{Status: domain.PeriodOpen}, Ledger: poster,
+		Profile:       domain.PostingProfile{Inventory: "1400", GRIR: "2100", PPV: "5200", VendorControl: "2000"},
+		ResolveMinAge: minAge,
 	})
 	router := httpx.NewRouter()
 	a.Register(router)
@@ -351,5 +364,147 @@ func TestMetrics_ExposeTheOldestUnfinishedPosting(t *testing.T) {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Fatalf("metrics missing %q in %s", want, rec.Body.String())
 		}
+	}
+}
+
+type reverseFails struct {
+	*domain.FakeLedger
+	err   error
+	dates *[]time.Time
+}
+
+func (r reverseFails) Reverse(_ context.Context, _, _ string, postingDate time.Time) error {
+	*r.dates = append(*r.dates, postingDate)
+	return r.err
+}
+
+type hookedStore struct {
+	*commitFails
+	beforeCommit func(ctx context.Context)
+}
+
+func (h hookedStore) Correct(ctx context.Context, id string, fn store.AdjustFunc) (store.Receipt, error) {
+	return h.commitFails.Correct(ctx, id, func(rec store.Receipt) (store.Adjustment, error) {
+		adj, err := fn(rec)
+		if err == nil {
+			h.beforeCommit(ctx)
+		}
+		return adj, err
+	})
+}
+
+func TestResolve_RefusesAPostingYoungerThanTheCommandTimeouts(t *testing.T) {
+	rg, broken := brokenRigWith(t, time.Hour, nil)
+	r := rg.posted(t, "PS-1", 10, 4)
+	broken.failing = true
+	rg.call(http.MethodPost, receiptsPath+"/"+r.ID+":correct", correction("-1"), rg.poster(r.Version))
+	broken.failing = false
+	key := "post:receiving:productreceipt:" + r.ID + ":correction:1"
+
+	problemCode(t, rg.call(http.MethodPost, resolvePath(key), "", admin("k1")), http.StatusConflict, "RCV-IDM-001")
+	if len(rg.ledger.Reversed) != 0 {
+		t.Fatalf("a posting whose command may still be running was reversed: %v", rg.ledger.Reversed)
+	}
+}
+
+func TestResolve_ACommandThatCommitsFirstLeavesNothingToReverse(t *testing.T) {
+	rg := newRig(domain.PeriodOpen)
+	r := rg.posted(t, "PS-1", 10, 4)
+	decode[receiptJSON](t, rg.call(http.MethodPost, receiptsPath+"/"+r.ID+":correct", correction("-1"), rg.poster(r.Version)), http.StatusOK)
+	key := "post:receiving:productreceipt:" + r.ID + ":correction:1"
+
+	problemCode(t, rg.call(http.MethodPost, resolvePath(key), "", admin("k1")), http.StatusConflict, "RCV-STA-001")
+	if len(rg.ledger.Reversed) != 0 {
+		t.Fatalf("a posting its command already completed was reversed: %v", rg.ledger.Reversed)
+	}
+	if got := decode[receiptJSON](t, rg.call(http.MethodGet, receiptsPath+"/"+r.ID, "", duty("ReceivingMaintain", "")), http.StatusOK); got.Lines[0].Qty != "3" {
+		t.Fatalf("qty %s, want 3", got.Lines[0].Qty)
+	}
+}
+
+func TestResolve_AResolveThatReversesWhileTheCommandIsInFlightFailsTheCommand(t *testing.T) {
+	base := newRig(domain.PeriodOpen)
+	broken := &commitFails{Store: base.st}
+	hooked := &hookedStore{commitFails: broken}
+	a := api.New(hooked, api.Ports{
+		Periods: domain.FakePeriods{Status: domain.PeriodOpen}, Ledger: base.ledger,
+		Profile:       domain.PostingProfile{Inventory: "1400", GRIR: "2100", PPV: "5200", VendorControl: "2000"},
+		ResolveMinAge: time.Nanosecond,
+	})
+	router := httpx.NewRouter()
+	a.Register(router)
+	base.h, base.api = router, a
+	r := base.posted(t, "PS-1", 10, 4)
+	key := "post:receiving:productreceipt:" + r.ID + ":correction:1"
+	hooked.beforeCommit = func(ctx context.Context) {
+		if _, err := base.st.ClaimPending(ctx, key, 0); err != nil {
+			t.Errorf("claim: %v", err)
+		}
+		if err := base.st.FinishPending(ctx, key, store.OutcomeReversed); err != nil {
+			t.Errorf("finish: %v", err)
+		}
+	}
+	problemCode(t, base.call(http.MethodPost, receiptsPath+"/"+r.ID+":correct", correction("-1"), base.poster(r.Version)), http.StatusConflict, "RCV-IDM-001")
+	got := decode[receiptJSON](t, base.call(http.MethodGet, receiptsPath+"/"+r.ID, "", duty("ReceivingMaintain", "")), http.StatusOK)
+	if got.Lines[0].Qty != "4" || got.Version != r.Version {
+		t.Fatalf("receipt qty %s version %d after the superseded command, want 4 and %d", got.Lines[0].Qty, got.Version, r.Version)
+	}
+}
+
+func TestResolve_LedgerRejectionsOnReverseAreNon422AndReleaseTheClaim(t *testing.T) {
+	var dates []time.Time
+	failure := errors.New("unreachable")
+	rg, broken := brokenRig(t)
+	r := rg.posted(t, "PS-1", 10, 4)
+	broken.failing = true
+	rg.call(http.MethodPost, receiptsPath+"/"+r.ID+":correct", correction("-1"), rg.poster(r.Version))
+	broken.failing = false
+	key := "post:receiving:productreceipt:" + r.ID + ":correction:1"
+
+	for i, tc := range []struct {
+		err    error
+		status int
+		code   string
+	}{
+		{fmt.Errorf("ledger reverse: %w", domain.ErrPeriodClosed), http.StatusUnprocessableEntity, "PER-AP-001"},
+		{fmt.Errorf("ledger reverse: %w", domain.ErrLedgerRejected), http.StatusUnprocessableEntity, "RCV-LDG-001"},
+		{failure, http.StatusServiceUnavailable, "COM-0503"},
+	} {
+		failureLedger := reverseFails{FakeLedger: rg.ledger, err: tc.err, dates: &dates}
+		a := api.New(broken, api.Ports{
+			Periods: domain.FakePeriods{Status: domain.PeriodOpen}, Ledger: failureLedger,
+			Profile:       domain.PostingProfile{Inventory: "1400", GRIR: "2100", PPV: "5200", VendorControl: "2000"},
+			ResolveMinAge: time.Nanosecond,
+		})
+		router := httpx.NewRouter()
+		a.Register(router)
+		problemCode(t, doWith(router, http.MethodPost, resolvePath(key), "", admin("k"+strconv.Itoa(i))), tc.status, tc.code)
+	}
+	if len(dates) != 3 || dates[0].IsZero() {
+		t.Fatalf("reverse posting dates %v, want three non-zero dates", dates)
+	}
+	got := decode[struct{ Outcome string }](t, rg.call(http.MethodPost, resolvePath(key), "", admin("final")), http.StatusOK)
+	if got.Outcome != "REVERSED" {
+		t.Fatalf("outcome %s: a failed resolve must release its claim so a later one can finish", got.Outcome)
+	}
+}
+
+func TestPending_InvoiceTrackerStaysOpenUntilTheCommitSucceeds(t *testing.T) {
+	rg, broken := brokenRig(t)
+	r := rg.posted(t, "PS-1", 10, 4)
+	metric := func() string {
+		rec := httptest.NewRecorder()
+		rg.api.Metrics().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+		return rec.Body.String()
+	}
+	broken.failing = true
+	problemCode(t, rg.call(http.MethodPost, invoicesPath, invoiceBody("INV-1", r.ID, 2, ""), rg.apPoster()), http.StatusInternalServerError, "COM-0500")
+	if !strings.Contains(metric(), "receiving_pending_postings_open 1") {
+		t.Fatalf("a failed invoice commit left the gauge at zero: %s", metric())
+	}
+	broken.failing = false
+	decode[invoiceJSON](t, rg.call(http.MethodPost, invoicesPath, invoiceBody("INV-1", r.ID, 2, ""), rg.apPoster()), http.StatusCreated)
+	if !strings.Contains(metric(), "receiving_pending_postings_open 0") {
+		t.Fatalf("a committed invoice left the gauge open: %s", metric())
 	}
 }

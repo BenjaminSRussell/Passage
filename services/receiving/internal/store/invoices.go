@@ -94,7 +94,7 @@ func (s *Postgres) PostInvoice(ctx context.Context, in Invoice, fn InvoiceFunc) 
 		if err := execBatch(ctx, tx, `UPDATE receiving_receipt_line SET invoiced_qty = $4 WHERE tenant_id = $1 AND receipt_id = $2 AND line_no = $3`, lineRows); err != nil {
 			return err
 		}
-		if err := markPostingsDone(ctx, tx, tenantID, in.ID); err != nil {
+		if err := markPostingsDone(ctx, tx, tenantID, in.ID, outcome.LedgerEntryID != ""); err != nil {
 			return err
 		}
 		return outbox.Enqueue(ctx, tx, invoiceAggregate, in.ID, outcome.Event)

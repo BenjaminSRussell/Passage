@@ -23,6 +23,7 @@ var domainStatus = map[string]int{
 	domain.CodeDuplicateInvoice:  http.StatusConflict,
 	domain.CodeCorrectionBelow:   http.StatusConflict,
 	domain.CodePostingPending:    http.StatusConflict,
+	domain.CodeLedgerRejected:    http.StatusUnprocessableEntity,
 }
 
 func writeError(w http.ResponseWriter, r *http.Request, err error) {
@@ -41,6 +42,8 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 		problem := httpx.NewProblem(http.StatusConflict, domain.CodePostingPending, pending.Error()+"; repeat the original request first")
 		problem.Errors = map[string]string{"pendingKey": pending.Key, "createdAt": pending.CreatedAt.UTC().Format(time.RFC3339)}
 		httpx.Fail(w, r, problem)
+	case errors.Is(err, store.ErrPostingSuperseded) || errors.Is(err, store.ErrPendingNotClaimed):
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, domain.CodePostingPending, err.Error()+"; nothing was committed; review the pending postings before repeating the request"))
 	case errors.Is(err, store.ErrNotFound):
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, "RCV-NF-001", "receipt not found"))
 	case errors.Is(err, store.ErrGrirNotFound):

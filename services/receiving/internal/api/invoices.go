@@ -125,6 +125,14 @@ func buildVendorInvoice(tenantID string, req invoiceRequest) (store.Invoice, map
 	return in, fields
 }
 
+func invoiceSubjects(in store.Invoice) []string {
+	subjects := []string{in.ID}
+	for _, l := range in.Lines {
+		subjects = append(subjects, l.ReceiptID)
+	}
+	return subjects
+}
+
 func (a *API) postVendorInvoice(w http.ResponseWriter, r *http.Request) {
 	p, ok := tenant.FromContext(r.Context())
 	if !ok || !ids.Valid(p.TenantID) {
@@ -166,6 +174,7 @@ func (a *API) postVendorInvoice(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
+	a.pendingPostings.finish(invoiceSubjects(posted)...)
 	a.invoiced.Add(1)
 	httpx.JSON(w, http.StatusCreated, toInvoiceBody(posted))
 }

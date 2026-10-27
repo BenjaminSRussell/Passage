@@ -57,6 +57,7 @@ func PostInvoice(ctx context.Context, in VendorInvoice, periods PeriodControl, l
 	entry := JournalEntry{
 		IdempotencyKey: fmt.Sprintf(invoiceKeyFormat, in.ID),
 		LegalEntityID:  in.LegalEntityID,
+		LedgerID:       in.LedgerID,
 		PostingDate:    in.PostingDate,
 		DocumentDate:   in.InvoiceDate,
 		Source:         DocumentSource{Context: "receiving", DocumentType: "vendorinvoice", DocumentID: in.ID, Purpose: "invoice"},

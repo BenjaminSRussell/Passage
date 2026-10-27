@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/api"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/ledger"
@@ -40,6 +41,7 @@ var profileEnv = []struct {
 	key, fake string
 	field     func(*domain.PostingProfile) *string
 }{
+	{"POSTING_LEDGER_ID", "00000000-0000-4000-8000-000000000001", func(p *domain.PostingProfile) *string { return &p.LedgerID }},
 	{"POSTING_ACCOUNT_INVENTORY", "1400", func(p *domain.PostingProfile) *string { return &p.Inventory }},
 	{"POSTING_ACCOUNT_GRIR", "2100", func(p *domain.PostingProfile) *string { return &p.GRIR }},
 	{"POSTING_ACCOUNT_PPV", "5200", func(p *domain.PostingProfile) *string { return &p.PPV }},
@@ -59,6 +61,9 @@ func buildProfile(getenv func(string) string, allowFakes bool) (domain.PostingPr
 			return domain.PostingProfile{}, fmt.Errorf("%s is required (set PASSAGE_ALLOW_FAKES=1 only for local development)", e.key)
 		}
 		*e.field(&profile) = value
+	}
+	if !ids.Valid(profile.LedgerID) {
+		return domain.PostingProfile{}, fmt.Errorf("POSTING_LEDGER_ID must be a UUID")
 	}
 	return profile, nil
 }

@@ -21,6 +21,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/money"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/ledger"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/store"
 )
 
@@ -42,18 +43,21 @@ type Ports struct {
 	Periods domain.PeriodControl
 	Ledger  domain.LedgerPoster
 	Profile domain.PostingProfile
+
+	ResolveMinAge time.Duration
 }
 
 type API struct {
-	store      store.Store
-	ports      Ports
-	evaluated  atomic.Int64
-	rejected   atomic.Int64
-	arrived    atomic.Int64
-	registered atomic.Int64
-	posted     atomic.Int64
-	adjusted   atomic.Int64
-	invoiced   atomic.Int64
+	store         store.Store
+	ports         Ports
+	resolveMinAge time.Duration
+	evaluated     atomic.Int64
+	rejected      atomic.Int64
+	arrived       atomic.Int64
+	registered    atomic.Int64
+	posted        atomic.Int64
+	adjusted      atomic.Int64
+	invoiced      atomic.Int64
 
 	pendingPostings pendingTracker
 	http            requestMetrics
@@ -63,7 +67,11 @@ func New(s store.Store, ports Ports) *API {
 	if ports.Periods == nil || ports.Ledger == nil {
 		panic("api.New: Ports.Periods and Ports.Ledger are required")
 	}
-	return &API{store: s, ports: ports, http: newRequestMetrics()}
+	minAge := ports.ResolveMinAge
+	if minAge == 0 {
+		minAge = ledger.Timeout + httpx.RequestTimeout
+	}
+	return &API{store: s, ports: ports, resolveMinAge: minAge, http: newRequestMetrics()}
 }
 
 func (a *API) PostInvoice(ctx context.Context, in domain.VendorInvoice, profile domain.PostingProfile) (domain.JournalEntry, error) {
@@ -71,11 +79,7 @@ func (a *API) PostInvoice(ctx context.Context, in domain.VendorInvoice, profile 
 	for _, l := range in.Lines {
 		subjects = append(subjects, l.Item.ReceiptID)
 	}
-	entry, err := domain.PostInvoice(ctx, in, a.ports.Periods, a.ledgerFor(subjects...), profile)
-	if err == nil {
-		a.pendingPostings.finish(subjects...)
-	}
-	return entry, err
+	return domain.PostInvoice(ctx, in, a.ports.Periods, a.ledgerFor(subjects...), profile)
 }
 
 func (a *API) Register(r chi.Router) {

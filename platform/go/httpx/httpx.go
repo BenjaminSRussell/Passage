@@ -20,6 +20,8 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 )
 
+const RequestTimeout = 30 * time.Second
+
 // Problem is an RFC 9457 problem-details body. Code is the stable, documented
 // Passage error code (e.g. "LED-0001"); Errors carries field-level detail.
 type Problem struct {
@@ -44,7 +46,7 @@ func NewProblem(status int, code, detail string) *Problem {
 // panic recovery, a 30s timeout and tenant-context extraction installed.
 func NewRouter() *chi.Mux {
 	r := chi.NewRouter()
-	r.Use(middleware.RequestID, middleware.RealIP, middleware.Recoverer, middleware.Timeout(30*time.Second))
+	r.Use(middleware.RequestID, middleware.RealIP, middleware.Recoverer, middleware.Timeout(RequestTimeout))
 	r.Use(logRequests, tenant.Middleware)
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) { JSON(w, http.StatusOK, map[string]string{"status": "ok"}) })
 	r.Get("/readyz", func(w http.ResponseWriter, _ *http.Request) { JSON(w, http.StatusOK, map[string]string{"status": "ready"}) })

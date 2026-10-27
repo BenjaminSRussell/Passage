@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS receiving_pending_posting (
   journal jsonb NOT NULL,
   outcome text CHECK (outcome IN ('POSTED', 'REJECTED', 'REVERSED')),
   created_at timestamptz NOT NULL DEFAULT now(),
+  claimed_at timestamptz,
   done_at timestamptz,
   PRIMARY KEY (tenant_id, ledger_key)
 );
