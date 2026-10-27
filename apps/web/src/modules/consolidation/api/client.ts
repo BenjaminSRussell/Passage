@@ -262,3 +262,121 @@ export function previewIcDifferences(req: IcDifferenceRequest, signal?: AbortSig
 export function previewValidations(req: { units: UnitStatement[] }, signal?: AbortSignal): Promise<ValidationPreview> {
   return post<ValidationPreview>("/validations:preview", req, signal);
 }
+
+export interface DividendRequest {
+  currency: string;
+  ownershipPct: string;
+  /** Subsidiary-to-group rate on the dividend date. */
+  rate: string;
+  /** Dividend declared, in the subsidiary's currency. */
+  amount: string;
+}
+
+export interface DividendPreview {
+  currency: string;
+  entries: Entry[];
+  totals: Totals;
+  /** Signed debit of the ROUNDING line (BR-40.9); "0.00" when none was needed. */
+  rounding: string;
+  balanced: boolean;
+}
+
+/** Build the E6 elimination of a dividend within the group with its rounding line (FR-40.9, BR-40.9). Nothing is posted. */
+export function previewDividends(req: DividendRequest, signal?: AbortSignal): Promise<DividendPreview> {
+  return post<DividendPreview>("/dividends:preview", req, signal);
+}
+
+export type ReclassLevel = "Entity" | "Group";
+export type ReclassType = "DebitBalanceVendors" | "CreditBalanceCustomers" | "RemainingTerm" | "SignBased";
+
+export interface ReclassRule {
+  code: string;
+  level: ReclassLevel;
+  type: ReclassType;
+  order?: number;
+  version?: number;
+  sourceAccount: string;
+  targetAccount: string;
+  threshold?: string;
+  termMonths?: number;
+}
+
+export interface OpenItem {
+  party: string;
+  account: string;
+  dueDate?: string;
+  /** Signed: positive is a debit balance. */
+  amount: string;
+}
+
+export interface ReclassificationRequest {
+  currency: string;
+  periodEnd: string;
+  rules: ReclassRule[];
+  openItems?: OpenItem[];
+  balances?: { account: string; amount: string }[];
+}
+
+export interface ReclassLine {
+  rule: string;
+  level: ReclassLevel;
+  account: string;
+  party?: string;
+  debit: string;
+  credit: string;
+  reverses: boolean;
+}
+
+export interface ReclassificationPreview {
+  currency: string;
+  periodEnd: string;
+  dryRun: true;
+  applied: string[];
+  reversalDate?: string;
+  lines: ReclassLine[];
+  totals: Totals;
+}
+
+/** Dry run of reclassification and regrouping rules (FR-40.17, BR-40.14, AC-40.13). Nothing is posted. */
+export function previewReclassification(req: ReclassificationRequest, signal?: AbortSignal): Promise<ReclassificationPreview> {
+  return post<ReclassificationPreview>("/reclassification-runs:preview", req, signal);
+}
+
+export type DocumentType = "Adjustment" | "Reclassification" | "Elimination" | "CoI" | "Cumulative";
+
+export interface GroupJournalLine {
+  fsItem: string;
+  debit?: string;
+  credit?: string;
+  partnerUnit?: string;
+}
+
+export interface GroupJournalRequest {
+  periodKey: string;
+  documentType: DocumentType;
+  unitId?: string;
+  currency: string;
+  reason: string;
+  attachmentRef: string;
+  carryForward: boolean;
+  fiscalYearStartMonth?: number;
+  approvalThreshold?: string;
+  lines: GroupJournalLine[];
+}
+
+export interface GroupJournalPreview {
+  currency: string;
+  level: "Group" | "Unit";
+  total: string;
+  balanced: boolean;
+  approvalThreshold: string;
+  approvalRequired: boolean;
+  periods: string[];
+  continuesPastYearEnd: boolean;
+  warnings: Warning[];
+}
+
+/** Check a top-side group journal: approval at the threshold (CNS-0909) and the periods it applies to (FR-40.19, BR-40.18). Nothing is posted. */
+export function previewGroupJournal(req: GroupJournalRequest, signal?: AbortSignal): Promise<GroupJournalPreview> {
+  return post<GroupJournalPreview>("/group-journals:preview", req, signal);
+}

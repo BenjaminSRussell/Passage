@@ -241,6 +241,22 @@ func (a *API) previewCentralPayment(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
+	setup, amount, bank, owning, matrix, f := parseCentralPayment(req)
+	if !validation(w, r, f) {
+		return
+	}
+	pairID := ids.New()
+	j, err := domain.CentralPaymentJournal(matrix, pairID, setup, amount, bank, owning)
+	if err != nil {
+		httpx.Fail(w, r, problemFrom(err))
+		return
+	}
+	a.centralPaymentPreviews.Add(1)
+	httpx.JSON(w, http.StatusOK, previewResponse{PairID: pairID, Balanced: j.Balanced() == nil, Legs: legsOf(j)})
+}
+
+// parseCentralPayment validates a centralized payment and converts it to domain values.
+func parseCentralPayment(req centralPaymentRequest) (domain.CentralizedPaymentSetup, money.Amount, string, string, domain.Matrix, fieldParser) {
 	f := fieldParser{}
 	setup := domain.CentralizedPaymentSetup{
 		PayingEntity:  f.text("payingEntity", req.PayingEntity),
@@ -259,15 +275,5 @@ func (a *API) previewCentralPayment(w http.ResponseWriter, r *http.Request) {
 	bank := f.text("bankAccount", req.BankAccount)
 	owning := f.text("owningAccount", req.OwningAccount)
 	matrix := parseMatrix(req.Matrix, f)
-	if !validation(w, r, f) {
-		return
-	}
-	pairID := ids.New()
-	j, err := domain.CentralPaymentJournal(matrix, pairID, setup, money.Amount{Value: amount, Currency: req.Currency}, bank, owning)
-	if err != nil {
-		httpx.Fail(w, r, problemFrom(err))
-		return
-	}
-	a.centralPaymentPreviews.Add(1)
-	httpx.JSON(w, http.StatusOK, previewResponse{PairID: pairID, Balanced: j.Balanced() == nil, Legs: legsOf(j)})
+	return setup, money.Amount{Value: amount, Currency: req.Currency}, bank, owning, matrix, f
 }

@@ -1,17 +1,19 @@
 import { createElement } from "react";
 import type { PassageModule } from "../registry";
 import { CentralPaymentsPage } from "./CentralPaymentsPage";
+import { ChainsPage } from "./ChainsPage";
 import { ChargesPage } from "./ChargesPage";
 import { IntercompanyHome } from "./IntercompanyHome";
 import { JournalPreviewPage } from "./JournalPreviewPage";
 import { PlanningPage } from "./PlanningPage";
 import { ReconciliationPage } from "./ReconciliationPage";
+import { TransferPricingPage } from "./TransferPricingPage";
 
 const intercompany: PassageModule = {
   id: "intercompany",
   title: "Intercompany",
   description:
-    "Due-to and due-from journals between legal entities, reconciliation of both sides' balances, intercompany charges priced by transfer price, centralized payments and the planning group run order.",
+    "Due-to and due-from journals between legal entities, reconciliation of both sides' balances, intercompany charges priced by transfer price, centralized payments and their reversal, direct delivery chains, transfer-pricing evidence and the planning group run order.",
   routes: [
     { path: "/intercompany", element: createElement(IntercompanyHome), handle: { title: "Intercompany workspace" } },
     { path: "/intercompany/journal", element: createElement(JournalPreviewPage), handle: { title: "Intercompany journal" } },
@@ -19,6 +21,8 @@ const intercompany: PassageModule = {
     { path: "/intercompany/charges", element: createElement(ChargesPage), handle: { title: "Intercompany charges" } },
     { path: "/intercompany/centralized-payments", element: createElement(CentralPaymentsPage), handle: { title: "Centralized payments" } },
     { path: "/intercompany/planning", element: createElement(PlanningPage), handle: { title: "Intercompany planning" } },
+    { path: "/intercompany/chains", element: createElement(ChainsPage), handle: { title: "Direct delivery chains" } },
+    { path: "/intercompany/transfer-pricing", element: createElement(TransferPricingPage), handle: { title: "Transfer-pricing evidence" } },
   ],
   nav: [
     { label: "Intercompany workspace", to: "/intercompany", duty: "IntercompanyView" },
@@ -27,6 +31,8 @@ const intercompany: PassageModule = {
     { label: "Intercompany charges", to: "/intercompany/charges", duty: "IntercompanyPost" },
     { label: "Centralized payments", to: "/intercompany/centralized-payments", duty: "IntercompanyConfigure" },
     { label: "Intercompany planning", to: "/intercompany/planning", duty: "IntercompanyPlan" },
+    { label: "Direct delivery chains", to: "/intercompany/chains", duty: "IntercompanyView" },
+    { label: "Transfer-pricing evidence", to: "/intercompany/transfer-pricing", duty: "IntercompanyView" },
   ],
 };
 

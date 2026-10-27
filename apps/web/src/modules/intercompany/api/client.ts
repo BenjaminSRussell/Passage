@@ -77,7 +77,8 @@ export interface ClassifiedItem {
 export interface ClassifyResult {
   fxTolerancePct: string;
   items: ClassifiedItem[];
-  summary: { matched: number; timing: number; mismatch: number };
+  /** blocking: a Mismatch remains, so consolidation is blocked (CNS-0901) unless overridden (FR-40.6). */
+  summary: { matched: number; timing: number; mismatch: number; blocking: boolean };
 }
 
 /** A failed request, normalised from the service's RFC 9457 problem. */
@@ -120,10 +121,10 @@ async function toError(res: Response): Promise<IntercompanyApiError> {
   return new IntercompanyApiError(res.status, code, message, fields);
 }
 
-async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+async function send(path: string, body: unknown, accept: string, signal?: AbortSignal): Promise<Response> {
   const res = await fetch(`${base}${path}`, {
     method: "POST",
-    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    headers: { Accept: accept, "Content-Type": "application/json" },
     body: JSON.stringify(body),
     credentials: "same-origin",
     signal,
@@ -131,7 +132,11 @@ async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promi
   if (!res.ok) {
     throw await toError(res);
   }
-  return (await res.json()) as T;
+  return res;
+}
+
+async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+  return (await (await send(path, body, "application/json", signal)).json()) as T;
 }
 
 /** Derive the due-to / due-from journal for one IC line (BR-40.4, AC-40.4). Nothing is posted. */
@@ -225,4 +230,74 @@ export function previewCentralPayment(req: CentralPaymentRequest, signal?: Abort
 /** Run order, IC demand and stale suppliers of a planning group (FR-40.15, AC-40.16). Nothing is planned. */
 export function sequencePlanning(req: PlanningRequest, signal?: AbortSignal): Promise<PlanningSequence> {
   return post<PlanningSequence>("/planning-groups:sequence", req, signal);
+}
+
+/** One document of a direct delivery chain (FR-40.3). */
+export interface ChainLeg {
+  docId: string;
+  entity: string;
+  quantity: string;
+}
+
+export interface ChainPreviewRequest {
+  chainId: string;
+  partner: { sellerEntity: string; buyerEntity: string; active: boolean };
+  customerOrder: ChainLeg;
+  icPurchase: ChainLeg;
+  icSales: ChainLeg;
+  /** Packing slip quantity; defaults to the IC sales order quantity. */
+  shippedQuantity?: string;
+}
+
+export type ChainPostingKind = "ProductReceipt" | "CustomerPackingSlip";
+
+export interface ChainPreview {
+  chainId: string;
+  postings: { kind: ChainPostingKind; entity: string; docId: string; quantity: string }[];
+}
+
+/** What the seller's packing slip posts in the buyer entity in one saga (FR-40.3, AC-40.3). Nothing is posted. */
+export function previewChain(req: ChainPreviewRequest, signal?: AbortSignal): Promise<ChainPreview> {
+  return post<ChainPreview>("/chains:preview", req, signal);
+}
+
+/** One priced IC line of the transfer-pricing evidence; price and cost are line totals. */
+export interface EvidenceRow {
+  item: string;
+  quantity: string;
+  price: string;
+  cost: string;
+  basis: string;
+}
+
+export interface EvidenceRequest {
+  sellerEntity: string;
+  buyerEntity: string;
+  period: string;
+  currency: string;
+  rows: EvidenceRow[];
+}
+
+/** The transfer-pricing evidence file as CSV text, with the file name the service suggests. */
+export interface EvidenceFile {
+  fileName: string;
+  csv: string;
+}
+
+/** Render the transfer-pricing evidence file for one entity pair and period (FR-40.4). Nothing is stored. */
+export async function exportEvidence(req: EvidenceRequest, signal?: AbortSignal): Promise<EvidenceFile> {
+  const res = await send("/transfer-pricing/evidence:export", req, "text/csv", signal);
+  const disposition = res.headers.get("Content-Disposition") ?? "";
+  const named = /filename="([^"]+)"/.exec(disposition);
+  return { fileName: named ? named[1] : `tp-evidence-${req.period}.csv`, csv: await res.text() };
+}
+
+export interface CentralPaymentReversalRequest extends CentralPaymentRequest {
+  /** Pair id the original payment posted under. */
+  pairId: string;
+}
+
+/** Reverse a centralized payment returned by the bank in both entities under its pair id (BR-40.11). Nothing is posted. */
+export function previewReversal(req: CentralPaymentReversalRequest, signal?: AbortSignal): Promise<JournalPreview> {
+  return post<JournalPreview>("/centralized-payments/reversals:preview", req, signal);
 }

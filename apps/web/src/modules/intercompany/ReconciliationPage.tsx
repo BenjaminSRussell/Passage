@@ -235,9 +235,9 @@ export function ReconciliationPage() {
             <StatTile label="Timing" value={result.summary.timing} tone="warning" />
             <StatTile label="Mismatch" value={result.summary.mismatch} tone="danger" />
           </StatGroup>
-          {result.summary.mismatch > 0 ? (
+          {result.summary.blocking ? (
             <Alert tone="warning" title="Mismatches block consolidation">
-              Resolve every mismatch before the period's consolidation runs, unless a group approver overrides it.
+              Resolve every mismatch before the period's consolidation runs, unless a group approver overrides it (CNS-0901).
             </Alert>
           ) : null}
           <DataTable

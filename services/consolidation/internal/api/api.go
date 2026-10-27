@@ -1,10 +1,11 @@
-// Package api exposes the consolidation HTTP surface. Slices 1 and 2 are
+// Package api exposes the consolidation HTTP surface. Slices 1 to 3 are
 // stateless: the caller supplies the inputs and the service returns the E1–E5
-// elimination entries (FR-40.9), the IAS 21 translation with CTA (FR-40.8,
-// BR-40.6), unrealized profit per IC receipt layer (FR-40.16), the equity
-// method and divestiture gain (FR-40.18), the two-sided IC elimination with
-// threshold (BR-40.15) or the unit validation rules with the monitor gate
-// (FR-40.20). Nothing is stored; runs, versions and the consolidated dataset
+// elimination entries and the E6 dividend elimination with its rounding line
+// (FR-40.9, BR-40.9), the IAS 21 translation with CTA (FR-40.8, BR-40.6),
+// unrealized profit per IC receipt layer (FR-40.16), the equity method and
+// divestiture gain (FR-40.18), the two-sided IC elimination with threshold
+// (BR-40.15), the unit validation rules with the monitor gate (FR-40.20), the
+// reclassification dry run (FR-40.17) or the top-side journal check (FR-40.19). Nothing is stored; runs, versions and the consolidated dataset
 // are later slices.
 package api
 
@@ -26,11 +27,13 @@ import (
 	"github.com/BenjaminSRussell/passage/services/consolidation/internal/domain"
 )
 
-// Duties from PRD section 7.40.17. The previews are the computing steps of a
-// consolidation run, so they need ConsolidationRun.
+// Duties from PRD section 7.40.5 and 7.40.17. The previews are the computing
+// steps of a consolidation run, so they need ConsolidationRun; the top-side
+// journal check needs ConsolidationJournal, the duty that posts group journals.
 const (
-	DutyView = "ConsolidationView"
-	DutyRun  = "ConsolidationRun"
+	DutyView    = "ConsolidationView"
+	DutyRun     = "ConsolidationRun"
+	DutyJournal = "ConsolidationJournal"
 )
 
 const validationDetail = "request failed validation"
@@ -50,6 +53,9 @@ type API struct {
 	divestiturePreviews  atomic.Int64
 	icDifferencePreviews atomic.Int64
 	validationPreviews   atomic.Int64
+	dividendPreviews     atomic.Int64
+	reclassPreviews      atomic.Int64
+	groupJournalPreviews atomic.Int64
 }
 
 // New returns the API.
@@ -70,6 +76,9 @@ func (a *API) routes() []route {
 		{http.MethodPost, "/v1/consol/divestitures:preview", DutyRun, a.previewDivestiture},
 		{http.MethodPost, "/v1/consol/ic-differences:preview", DutyRun, a.previewICDifferences},
 		{http.MethodPost, "/v1/consol/validations:preview", DutyRun, a.previewValidation},
+		{http.MethodPost, "/v1/consol/dividends:preview", DutyRun, a.previewDividends},
+		{http.MethodPost, "/v1/consol/reclassification-runs:preview", DutyRun, a.previewReclassification},
+		{http.MethodPost, "/v1/consol/group-journals:preview", DutyJournal, a.previewGroupJournal},
 	}
 }
 
@@ -94,6 +103,9 @@ func (a *API) Metrics() http.Handler {
 		counter("consolidation_divestiture_previews_total", "Divestiture gain previews computed.", a.divestiturePreviews.Load())
 		counter("consolidation_ic_difference_previews_total", "Two-sided IC elimination previews computed.", a.icDifferencePreviews.Load())
 		counter("consolidation_validation_previews_total", "Unit validation previews computed.", a.validationPreviews.Load())
+		counter("consolidation_dividend_previews_total", "E6 dividend elimination previews computed.", a.dividendPreviews.Load())
+		counter("consolidation_reclassification_previews_total", "Reclassification dry runs computed.", a.reclassPreviews.Load())
+		counter("consolidation_group_journal_previews_total", "Top-side group journals checked.", a.groupJournalPreviews.Load())
 	})
 }
 

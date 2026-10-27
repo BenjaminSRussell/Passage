@@ -45,6 +45,27 @@ const tools = [
     description:
       "Check each unit's balance sheet, retained earnings roll and intercompany partners, and see whether the group translation task is blocked.",
   },
+  {
+    title: "Dividends within the group",
+    to: "/consolidation/dividends",
+    action: "Eliminate a dividend",
+    description:
+      "Remove a dividend a subsidiary paid to its parent from dividend income and NCI equity against dividends declared, with a rounding line when cents do not add up.",
+  },
+  {
+    title: "Reclassification",
+    to: "/consolidation/reclassification",
+    action: "Dry-run the rules",
+    description:
+      "Regroup vendors in debit, customers in credit, long-term items and negative group balances, and see each line and when entity-level entries reverse.",
+  },
+  {
+    title: "Top-side group journals",
+    to: "/consolidation/group-journals",
+    action: "Check a journal",
+    description:
+      "Check a manual group or unit journal before posting: balance, reason and attachment, whether it needs approval, and the periods a carried-forward entry posts in.",
+  },
 ];
 
 /** Landing page of the consolidation workspace (wave 40). */
@@ -53,7 +74,7 @@ export function ConsolidationHome() {
     <div className={styles.stack}>
       <PageHeader
         title="Consolidation workspace"
-        description="Check the translation, elimination, profit-in-inventory, investment and validation arithmetic of a group consolidation. Group structures, versioned runs, the consolidated trial balance and the stored monitor arrive with the next slices."
+        description="Check the translation, elimination, profit-in-inventory, investment, validation, reclassification and top-side journal arithmetic of a group consolidation. Group structures, versioned runs, the consolidated trial balance and the stored monitor arrive with the next slices."
       />
       <CardGrid as="ul" label="Consolidation tools">
         {tools.map((tool) => (

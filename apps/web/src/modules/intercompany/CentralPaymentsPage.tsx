@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Alert, Button, Card, DataTable, EmptyState, PageHeader } from "../../shell/ui";
-import { previewCentralPayment, type CentralPaymentRequest, type PaymentDirection } from "./api/client";
+import { previewCentralPayment, previewReversal, type CentralPaymentRequest, type PaymentDirection } from "./api/client";
 import { Fields, type FieldSpec } from "./Fields";
 import { isCurrency, isPositive } from "./format";
 import { checkMatrix, emptyMatrixRow, legColumns, matrixFields, type MatrixKey } from "./matrix";
@@ -85,18 +85,31 @@ export function validatePayment(values: PaymentValues): Checked<CentralPaymentRe
 /** Derive the postings of one centralized payment in the paying and owning entities (FR-40.12, AC-40.10). */
 export function CentralPaymentsPage() {
   const [values, setValues] = useState<PaymentValues>(ac4010);
-  const { errors, failure, busy, result, run } = usePreview(previewCentralPayment);
+  const [sent, setSent] = useState<CentralPaymentRequest | null>(null);
+  const preview = usePreview(async (req: CentralPaymentRequest) => {
+    const res = await previewCentralPayment(req);
+    setSent(req);
+    return res;
+  });
+  const reversal = usePreview(previewReversal);
+  const { errors, failure, busy, result } = preview;
 
   function submit(event: FormEvent) {
     event.preventDefault();
-    void run(validatePayment(values));
+    setSent(null);
+    void preview.run(validatePayment(values));
+  }
+
+  function reverse() {
+    if (!sent || !result) return;
+    void reversal.run({ errors: {}, request: { ...sent, pairId: result.pairId } });
   }
 
   return (
     <div className={styles.stack}>
       <PageHeader
         title="Centralized payments"
-        description="A paying entity settles another entity's vendor invoice, or receives its customer's payment, and both entities post due-to and due-from under one pair id. Storing the setup, payment proposals across entities and settling the open item arrive with the payments slice."
+        description="A paying entity settles another entity's vendor invoice, or receives its customer's payment, and both entities post due-to and due-from under one pair id. A payment the bank returns reverses in both entities. Storing the setup, payment proposals across entities and settling the open item arrive with the payments slice."
       />
       <Card title="Payment on behalf" headingLevel={3}>
         <form className={styles.form} onSubmit={submit} noValidate>
@@ -140,6 +153,34 @@ export function CentralPaymentsPage() {
             getRowKey={(l, i) => `${l.entity}-${l.account}-${i}`}
             empty={{ title: "No legs", description: "The service returned no payment legs." }}
           />
+          <Card title="Bank return" headingLevel={3}>
+            <div className={styles.cardBody}>
+              <p className={styles.note}>
+                When the bank returns the payment, both entities reverse their postings in one saga under the same pair id (BR-40.11).
+              </p>
+              {reversal.failure ? (
+                <Alert tone="danger" title="The reversal was not derived" live="alert">
+                  {reversal.failure.message} ({reversal.failure.code})
+                </Alert>
+              ) : null}
+              <div>
+                <Button onClick={reverse} loading={reversal.busy} disabled={!sent}>
+                  Preview reversal
+                </Button>
+              </div>
+            </div>
+          </Card>
+          {reversal.busy ? (
+            <DataTable label="Reversal legs" columns={legColumns} rows={[]} getRowKey={(_, i) => String(i)} loading />
+          ) : reversal.result && reversal.result.pairId === result.pairId ? (
+            <DataTable
+              label="Reversal legs"
+              columns={legColumns}
+              rows={reversal.result.legs}
+              getRowKey={(l, i) => `${l.entity}-${l.account}-${i}`}
+              empty={{ title: "No legs", description: "The service returned no reversal legs." }}
+            />
+          ) : null}
         </>
       ) : (
         <Card>

@@ -29,7 +29,7 @@ const tools = [
     to: "/intercompany/centralized-payments",
     action: "Preview a payment",
     description:
-      "Pay a vendor invoice or receive a customer payment on behalf of another entity, and see the bank, due-to and due-from postings in both entities.",
+      "Pay a vendor invoice or receive a customer payment on behalf of another entity, and see the bank, due-to and due-from postings in both entities and their reversal when the bank returns the payment.",
   },
   {
     title: "Intercompany planning",
@@ -37,6 +37,20 @@ const tools = [
     action: "Sequence a planning group",
     description:
       "Order a planning group so buyers run before their suppliers, and see the intercompany demand each supplier receives after the transport lead time.",
+  },
+  {
+    title: "Direct delivery chains",
+    to: "/intercompany/chains",
+    action: "Check a chain",
+    description:
+      "Link a customer order, its intercompany purchase order and the supplier's sales order that ships straight to the customer, and see the receipt and packing slip the shipment posts in the buying entity.",
+  },
+  {
+    title: "Transfer-pricing evidence",
+    to: "/intercompany/transfer-pricing",
+    action: "Produce an evidence file",
+    description:
+      "List the priced intercompany lines between two entities for a period and download the evidence file with price, cost, margin and pricing basis.",
   },
 ];
 
@@ -46,7 +60,7 @@ export function IntercompanyHome() {
     <div className={styles.stack}>
       <PageHeader
         title="Intercompany workspace"
-        description="Derive intercompany journals, reconcile due-to and due-from balances, price intercompany charges, preview centralized payments and sequence planning groups. Partner setup, mirror documents, posting and the stored reconciliation workspace arrive with the next slices."
+        description="Derive intercompany journals, reconcile due-to and due-from balances, price intercompany charges, preview centralized payments, check direct delivery chains, export transfer-pricing evidence and sequence planning groups. Partner setup, mirror documents, posting and the stored reconciliation workspace arrive with the next slices."
       />
       <CardGrid as="ul" label="Intercompany tools">
         {tools.map((tool) => (

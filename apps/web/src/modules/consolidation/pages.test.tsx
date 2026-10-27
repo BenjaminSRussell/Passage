@@ -59,8 +59,11 @@ describe("consolidation module", () => {
       "/consolidation/ic-differences",
       "/consolidation/investments",
       "/consolidation/validation",
+      "/consolidation/dividends",
+      "/consolidation/reclassification",
+      "/consolidation/group-journals",
     ]);
-    expect(consolidation.nav.map((n) => n.duty)).toEqual(["ConsolidationView", ...Array(6).fill("ConsolidationRun")]);
+    expect(consolidation.nav.map((n) => n.duty)).toEqual(["ConsolidationView", ...Array(8).fill("ConsolidationRun"), "ConsolidationJournal"]);
   });
 
   it("links the workspace to each tool", () => {
@@ -72,6 +75,9 @@ describe("consolidation module", () => {
     expect(screen.getByRole("link", { name: "Eliminate partner pairs" })).toHaveAttribute("href", "/consolidation/ic-differences");
     expect(screen.getByRole("link", { name: "Apply the equity method" })).toHaveAttribute("href", "/consolidation/investments");
     expect(screen.getByRole("link", { name: "Validate units" })).toHaveAttribute("href", "/consolidation/validation");
+    expect(screen.getByRole("link", { name: "Eliminate a dividend" })).toHaveAttribute("href", "/consolidation/dividends");
+    expect(screen.getByRole("link", { name: "Dry-run the rules" })).toHaveAttribute("href", "/consolidation/reclassification");
+    expect(screen.getByRole("link", { name: "Check a journal" })).toHaveAttribute("href", "/consolidation/group-journals");
     expect(pageViolations(container)).toEqual([]);
   });
 });

@@ -1,15 +1,17 @@
 openapi: 3.1.0
 info:
   title: Passage Intercompany
-  version: 0.2.0
+  version: 0.3.0
   description: |
-    Wave 40, slices 1 and 2. Stateless intercompany calculations: the caller
-    supplies the accounting matrix, balances, transfer prices or planning group
-    and the service returns the derived due-to / due-from journal (BR-40.4),
-    the reconciliation classification (FR-40.6, BR-40.5), the priced IC charge
-    with its Journal-mode legs (FR-40.13, BR-40.12), the centralized payment
-    legs (FR-40.12) or the planning group run sequence with IC demand (FR-40.15,
-    BR-40.13). Nothing is stored and no event is published, so no endpoint
+    Wave 40, slices 1 to 3. Stateless intercompany calculations: the caller
+    supplies the accounting matrix, balances, transfer prices, planning group,
+    delivery chain or priced lines and the service returns the derived due-to /
+    due-from journal (BR-40.4), the reconciliation classification (FR-40.6,
+    BR-40.5), the priced IC charge with its Journal-mode legs (FR-40.13,
+    BR-40.12), the centralized payment legs (FR-40.12) and their bank-return
+    reversal (BR-40.11), the planning group run sequence with IC demand
+    (FR-40.15, BR-40.13), the postings of a direct-delivery packing slip
+    (FR-40.3) or the transfer-pricing evidence file (FR-40.4). Nothing is stored and no event is published, so no endpoint
     takes an Idempotency-Key. Mirror sagas, persisted links, reconciliation
     runs, stored setups, charge posting and the planning run are later slices
     of PSG-40 (see NOT-IMPLEMENTED.md). Browser calls go through the web BFF at
@@ -180,6 +182,107 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
+  /v1/interco/chains:preview:
+    post:
+      operationId: previewDeliveryChain
+      summary: Validate a direct delivery chain and list what the seller's packing slip posts in the buyer entity in one saga (FR-40.3, AC-40.3)
+      x-passage-duty: IntercompanyView
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChainPreviewRequest'
+      responses:
+        '200':
+          description: The buyer's product receipt and customer packing slip at the shipped quantity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChainPreview'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '422':
+          description: IC-0801 no active pairing between the sales order's seller and the purchase order's buyer
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /v1/interco/transfer-pricing/evidence:export:
+    post:
+      operationId: exportTransferPricingEvidence
+      summary: Render the transfer-pricing evidence file for one entity pair and period as CSV (FR-40.4)
+      x-passage-duty: IntercompanyView
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EvidenceRequest'
+      responses:
+        '200':
+          description: |
+            CSV with the header seller_entity, buyer_entity, period, item,
+            quantity, currency, price, cost, margin, margin_pct, basis and one
+            line per row in request order. Amounts are at the currency minor
+            unit; margin_pct is margin / price × 100 at two decimals (0.00 for a
+            zero price). Text cells starting with = + - @ are prefixed with an
+            apostrophe.
+          headers:
+            Content-Disposition:
+              schema: { type: string, example: 'attachment; filename="tp-evidence-P-S-2026-11.csv"' }
+          content:
+            text/csv:
+              schema: { type: string }
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+  /v1/interco/centralized-payments/reversals:preview:
+    post:
+      operationId: previewCentralizedPaymentReversal
+      summary: Derive the reversal of a centralized payment returned by the bank, in both entities under the original pair id (BR-40.11)
+      x-passage-duty: IntercompanyConfigure
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CentralPaymentReversalRequest'
+      responses:
+        '200':
+          description: The original legs with every side flipped, under the original pair id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JournalPreview'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '422':
+          description: IC-0805 no accounting matrix row for the entity pair
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
   /healthz:
     get:
       operationId: healthz
@@ -330,11 +433,14 @@ components:
               toleranceApplied: { type: boolean, description: Only the FX tolerance made the sides agree }
         summary:
           type: object
-          required: [matched, timing, mismatch]
+          required: [matched, timing, mismatch, blocking]
           properties:
             matched: { type: integer }
             timing: { type: integer }
             mismatch: { type: integer }
+            blocking:
+              type: boolean
+              description: True while any item is a Mismatch; consolidation is then blocked (CNS-0901) unless ConsolidationApprove overrides (FR-40.6)
     Amount:
       type: string
       pattern: '^[0-9]+(\.[0-9]{1,6})?$'
@@ -425,6 +531,92 @@ components:
           maxItems: 1000
           items:
             $ref: '#/components/schemas/MatrixRow'
+    CentralPaymentReversalRequest:
+      description: The original centralized payment and the pair id it posted under
+      allOf:
+        - $ref: '#/components/schemas/CentralPaymentPreviewRequest'
+        - type: object
+          required: [pairId]
+          properties:
+            pairId: { type: string, format: uuid, description: Pair id of the original payment }
+    ChainLeg:
+      type: object
+      additionalProperties: false
+      required: [docId, entity, quantity]
+      properties:
+        docId: { type: string, minLength: 1 }
+        entity: { type: string, minLength: 1 }
+        quantity:
+          type: string
+          pattern: '^[0-9]+(\.[0-9]{1,6})?$'
+          description: Positive; equal on the three documents
+    ChainPreviewRequest:
+      type: object
+      additionalProperties: false
+      required: [chainId, partner, customerOrder, icPurchase, icSales]
+      properties:
+        chainId: { type: string, minLength: 1 }
+        partner:
+          type: object
+          additionalProperties: false
+          required: [sellerEntity, buyerEntity, active]
+          properties:
+            sellerEntity: { type: string, minLength: 1, description: Entity of the IC sales order }
+            buyerEntity: { type: string, minLength: 1, description: Entity of the IC purchase order and the customer order }
+            active: { type: boolean }
+        customerOrder:
+          $ref: '#/components/schemas/ChainLeg'
+        icPurchase:
+          $ref: '#/components/schemas/ChainLeg'
+        icSales:
+          $ref: '#/components/schemas/ChainLeg'
+        shippedQuantity:
+          type: string
+          pattern: '^[0-9]+(\.[0-9]{1,6})?$'
+          description: Quantity on the packing slip; defaults to the IC sales order quantity and must not exceed it
+    ChainPreview:
+      type: object
+      required: [chainId, postings]
+      properties:
+        chainId: { type: string }
+        postings:
+          type: array
+          items:
+            type: object
+            required: [kind, entity, docId, quantity]
+            properties:
+              kind: { type: string, enum: [ProductReceipt, CustomerPackingSlip] }
+              entity: { type: string }
+              docId: { type: string }
+              quantity: { type: string }
+    EvidenceRequest:
+      type: object
+      additionalProperties: false
+      required: [sellerEntity, buyerEntity, period, currency, rows]
+      properties:
+        sellerEntity: { type: string, minLength: 1 }
+        buyerEntity: { type: string, minLength: 1, description: Must differ from sellerEntity }
+        period: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$' }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        rows:
+          type: array
+          minItems: 1
+          maxItems: 10000
+          items:
+            type: object
+            additionalProperties: false
+            required: [item, quantity, price, cost, basis]
+            properties:
+              item: { type: string, minLength: 1, description: Item number or charge category }
+              quantity:
+                type: string
+                pattern: '^[0-9]+(\.[0-9]{1,6})?$'
+                description: Positive
+              price:
+                $ref: '#/components/schemas/Amount'
+              cost:
+                $ref: '#/components/schemas/Amount'
+              basis: { type: string, minLength: 1, description: Pricing basis recorded on the link, such as CostPlus }
     PlanningSequenceRequest:
       type: object
       additionalProperties: false

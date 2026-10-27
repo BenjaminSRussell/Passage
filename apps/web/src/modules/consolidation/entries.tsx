@@ -21,6 +21,8 @@ export const accountNames: Record<string, string> = {
   INVESTMENT_ASSOCIATE: "Investment in associate",
   SHARE_OF_PROFIT_ASSOCIATES: "Share of profit of associates",
   DIVIDEND_INCOME: "Dividend income",
+  DIVIDENDS_DECLARED: "Dividends declared",
+  ROUNDING: "Rounding difference",
 };
 
 const money = (v: string) => (isNonZero(v) ? amount(v) : dash);

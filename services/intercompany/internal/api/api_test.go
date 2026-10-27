@@ -150,7 +150,10 @@ type classifyBody struct {
 		ID, Status, Difference string
 		ToleranceApplied       bool
 	} `json:"items"`
-	Summary struct{ Matched, Timing, Mismatch int } `json:"summary"`
+	Summary struct {
+		Matched, Timing, Mismatch int
+		Blocking                  bool
+	} `json:"summary"`
 }
 
 func item(id, a, b, extra string) string {
@@ -183,7 +186,7 @@ func TestClassify_StatusesAndSummary(t *testing.T) {
 			t.Fatalf("fx item = %+v; want tolerance applied, difference 4.00", it)
 		}
 	}
-	if got.FXTolerancePct != "0.5" || got.Summary.Matched != 2 || got.Summary.Timing != 1 || got.Summary.Mismatch != 2 {
+	if got.FXTolerancePct != "0.5" || got.Summary.Matched != 2 || got.Summary.Timing != 1 || got.Summary.Mismatch != 2 || !got.Summary.Blocking {
 		t.Fatalf("tolerance %s summary %+v", got.FXTolerancePct, got.Summary)
 	}
 
@@ -192,6 +195,19 @@ func TestClassify_StatusesAndSummary(t *testing.T) {
 	if !strings.Contains(mrec.Body.String(), "intercompany_recon_items_classified_total 5") ||
 		!strings.Contains(mrec.Body.String(), "intercompany_recon_mismatches_total 2") {
 		t.Fatalf("metrics = %s", mrec.Body.String())
+	}
+}
+
+// TestClassify_TimingDoesNotBlock: only a Mismatch blocks consolidation (FR-40.6).
+func TestClassify_TimingDoesNotBlock(t *testing.T) {
+	body := `{"items":[` + item("matched", "10.00", "10.00", "") + "," + item("timing", "250.00", "0", `,"nextPeriodB":"250.00"`) + `]}`
+	rec := do(router(api.New()), classifyPath, tenantID, api.DutyReconcile, body)
+	var got classifyBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+	if got.Summary.Blocking || got.Summary.Timing != 1 {
+		t.Fatalf("summary = %+v; want one timing item and no block", got.Summary)
 	}
 }
 

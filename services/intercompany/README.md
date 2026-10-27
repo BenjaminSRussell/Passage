@@ -1,10 +1,11 @@
-# intercompany (wave 40, PSG-40, slices 1-2)
+# intercompany (wave 40, PSG-40, slices 1-3)
 
 Intercompany trade, transfers and charges between legal entities of one
 tenant: trading-partner rules, the due-to / due-from journal derivation, the
 mirror-document saga state logic, the reconciliation classifier and
-intercompany charge pricing and settlement, centralized payments and the
-planning group sequence (PRD 7.40).
+intercompany charge pricing and settlement, centralized payments and their
+reversal, direct delivery chains, transfer-pricing evidence and the planning
+group sequence (PRD 7.40).
 
 ## What slice 1 delivers
 
@@ -46,6 +47,24 @@ stored, posted or published.
 | OpenAPI matches the mounted routes and duties | `internal/api/contract_test.go` | built, test |
 | Web pages: `/intercompany/charges`, `/intercompany/centralized-payments`, `/intercompany/planning` | `apps/web/src/modules/intercompany` | built, vitest |
 
+## What slice 3 adds
+
+Direct delivery chains, transfer-pricing evidence and the bank-return
+reversal of a centralized payment, each behind a stateless endpoint and a web
+page; the reconciliation summary now says whether it blocks consolidation.
+Still nothing is stored, posted or published.
+
+| Area | Code | Status |
+|---|---|---|
+| Direct delivery chain check: customer order and IC purchase in the buyer, IC sales order in the seller of an active pairing (else IC-0801), three distinct documents with one quantity; the seller's packing slip posts the buyer's product receipt and customer packing slip at the shipped quantity (partial allowed, never above the IC sales order), FR-40.3, AC-40.3 | `internal/domain/chain.go` | built, unit tests |
+| Chain preview `POST /v1/interco/chains:preview` (duty `IntercompanyView`) | `internal/api/slice3.go` | built, tests |
+| Transfer-pricing evidence file per entity pair and period as CSV (seller, buyer, period, item, quantity, currency, price, cost, margin, margin %, basis), amounts at the currency minor unit, spreadsheet formula cells neutralised, FR-40.4 (PRD open question 3: CSV) | `internal/domain/transfer.go` | built, unit tests |
+| Evidence export `POST /v1/interco/transfer-pricing/evidence:export` (duty `IntercompanyView`, `text/csv` with a sanitised `Content-Disposition` file name) | `internal/api/slice3.go` | built, tests |
+| Centralized payment reversal on a bank return: every leg flips side in both entities under the original pair id, BR-40.11 | `internal/domain/reversal.go` | built, unit tests |
+| Reversal preview `POST /v1/interco/centralized-payments/reversals:preview` (duty `IntercompanyConfigure`; takes the original payment and its pair id) | `internal/api/slice3.go` | built, tests |
+| Reconciliation summary `blocking` flag: true while any item is a Mismatch (FR-40.6 gate for CNS-0901) | `internal/api/api.go` | built, tests |
+| Web pages: `/intercompany/chains`, `/intercompany/transfer-pricing`, reversal on `/intercompany/centralized-payments` | `apps/web/src/modules/intercompany` | built, vitest |
+
 Remaining deliverables and acceptance criteria are listed in
 [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
 
@@ -70,7 +89,7 @@ cmd/intercompany/        entrypoint (JSON slog, router, serve)
 internal/domain/         pure rules, no I/O
 internal/api/            HTTP handlers and DTOs
 api/openapi.yaml         OpenAPI 3.1 for every exposed endpoint
-events/asyncapi.yaml     AsyncAPI 3 (no events in slices 1 and 2)
+events/asyncapi.yaml     AsyncAPI 3 (no events in slices 1 to 3)
 charts/intercompany/     Helm chart
 ```
 
@@ -80,7 +99,7 @@ Problem details use `type: https://passage.dev/problems/<code>`.
 
 | Code | Meaning |
 |---|---|
-| COM-0001 | Invalid input (currency, amount, side, date, category, method, or a missing field) |
+| COM-0001 | Invalid input (currency, amount, side, date, period, quantity, category, method, pair id, or a missing field) |
 | IC-0801 | No active IC partner policy between the two entities |
 | IC-0805 | No IC accounting matrix entry for the entity pair (due-to / due-from missing) |
 | IC-0815 | Supplier plan is stale after its buyer was replanned (warning in the planning sequence response) |

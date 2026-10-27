@@ -1,10 +1,11 @@
-# consolidation (wave 40, PSG-40, slices 1-2)
+# consolidation (wave 40, PSG-40, slices 1-3)
 
 Financial consolidation of a legal-entity group: IAS 21 translation with CTA,
-the elimination entries E1–E5 with the non-controlling interest (NCI) share,
+the elimination entries E1–E6 with the non-controlling interest (NCI) share,
 ownership validation, unrealized profit per IC receipt layer, the equity
-method and divestitures, two-sided IC elimination and the unit validation
-rules of the monitor (PRD 7.40).
+method and divestitures, two-sided IC elimination, the unit validation rules
+of the monitor, reclassification and regrouping rules and top-side group
+journals (PRD 7.40).
 
 ## What slice 1 delivers
 
@@ -51,6 +52,23 @@ nothing is stored or published.
 All slice-2 previews need duty `ConsolidationRun`: they are steps of a
 consolidation run (`equity-method-run` runs inside it, PRD 7.40.16).
 
+## What slice 3 adds
+
+E6 dividends with the per-rule rounding line, the reclassification dry run
+and the top-side group journal check, each behind a stateless preview and a
+web page. Still nothing is stored, posted or published.
+
+| Area | Code | Status |
+|---|---|---|
+| E6 dividends within the group: parent share from dividend income, NCI share from NCI equity, the whole dividend from dividends declared, at the dividend-date rate, FR-40.9 | `internal/domain/dividends.go` | built, unit tests |
+| Per-rule rounding line (`ROUNDING`) that keeps a rule balanced after per-line rounding; a residual above half a minor unit per line is a defect and fails with CNS-0903, BR-40.9 | `internal/domain/dividends.go` (`BalanceRule`) | built, unit tests; used by E6 (E1–E5 balance by construction) |
+| Dividend preview `POST /v1/consol/dividends:preview` (duty `ConsolidationRun`) | `internal/api/slice3.go` | built, tests |
+| Reclassification rules run in order: entity-level DebitBalanceVendors, CreditBalanceCustomers and RemainingTerm (default 12 months, per open item due date) per party, group-level SignBased; thresholds, unique codes, versions, level checked against type, each rule balanced; entity-level lines reverse on the first day of the next period, FR-40.17, BR-40.14, AC-40.13 | `internal/domain/reclass.go` | built, unit tests |
+| Reclassification dry run `POST /v1/consol/reclassification-runs:preview` (duty `ConsolidationRun`) | `internal/api/slice3.go` | built, tests |
+| Top-side group journal invariants (document type, reason and attachment, two or more lines, one side per line at the minor unit, balanced or CNS-0903), approval at or above the threshold (default 100,000.00, CNS-0909), periods a carried-forward journal posts in to fiscal year end and Cumulative past it, FR-40.19, BR-40.18 | `internal/domain/groupjournal.go` | built, unit tests |
+| Group journal check `POST /v1/consol/group-journals:preview` (duty `ConsolidationJournal`; CNS-0909 is a warning because nothing is posted) | `internal/api/slice3.go` | built, tests |
+| Web pages: `/consolidation/dividends`, `/consolidation/reclassification`, `/consolidation/group-journals` | `apps/web/src/modules/consolidation` | built, vitest |
+
 Remaining deliverables and acceptance criteria are listed in
 [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
 
@@ -74,7 +92,7 @@ cmd/consolidation/       entrypoint (JSON slog, router, serve)
 internal/domain/         pure rules, no I/O
 internal/api/            HTTP handlers and DTOs
 api/openapi.yaml         OpenAPI 3.1 for every exposed endpoint
-events/asyncapi.yaml     AsyncAPI 3 (no events in slices 1 and 2)
+events/asyncapi.yaml     AsyncAPI 3 (no events in slices 1 to 3)
 charts/consolidation/    Helm chart
 ```
 
@@ -85,11 +103,12 @@ Problem details use `type: https://passage.dev/problems/<code>`.
 | Code | Meaning |
 |---|---|
 | COM-0001 | Invalid input: currency, ownership outside 0 to 100 (0 to 50 for the equity method), rate missing, unsold share outside 0 to 1, negative quantity, cost or threshold, dividends above the carrying amount |
-| CNS-0903 | An elimination rule is unbalanced (defect; the run fails) |
+| CNS-0903 | An elimination or reclassification rule, or a top-side journal, is unbalanced (defect; the run fails) |
 | CNS-0904 | Ownership for a unit totals more than 100.00 % on a date (raised by `ownership.go`; the dated group model is a later slice) |
 | CNS-0905 | Two-sided IC difference above the threshold; returned per pair by the IC difference preview and the task ends in Error (BR-40.15) |
 | CNS-0906 | A validation rule failed for a unit; returned per rule by the validation preview (FR-40.20) |
 | CNS-0908 | Group cost unknown for some layers; margin fallback used (warning in the profit-in-inventory preview) |
+| CNS-0909 | Top-side journal at or above the approval threshold needs approval (warning in the group journal check) |
 | CNS-0910 | Move from an existing equity interest to control is a step acquisition, not supported (domain guard) |
 | AUTH-0001 / AUTH-0003 | Missing tenant / missing duty |
 | CNS-0920 | Bargain purchase: investment cost below the subsidiary's net assets at acquisition. Not in the PRD catalog; proposed for the catalog owner |

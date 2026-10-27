@@ -1,10 +1,13 @@
-// Package api exposes the intercompany HTTP surface. Slices 1 and 2 are
+// Package api exposes the intercompany HTTP surface. Slices 1 to 3 are
 // stateless: the caller supplies the accounting matrix, balances, transfer
-// prices or planning group, and the service returns the derived IC journal
-// (BR-40.4), the reconciliation classification (FR-40.6, BR-40.5), the priced
-// IC charge with its Journal-mode legs (FR-40.13), the centralized payment legs
-// (FR-40.12) or the planning run sequence with IC demand (FR-40.15). Nothing is
-// stored and no event is published, so no endpoint takes an Idempotency-Key.
+// prices, planning group, chain or priced lines, and the service returns the
+// derived IC journal (BR-40.4), the reconciliation classification (FR-40.6,
+// BR-40.5), the priced IC charge with its Journal-mode legs (FR-40.13), the
+// centralized payment legs (FR-40.12) and their bank-return reversal
+// (BR-40.11), the planning run sequence with IC demand (FR-40.15), the
+// direct-delivery chain postings (FR-40.3) or the transfer-pricing evidence
+// file (FR-40.4). Nothing is stored and no event is published, so no endpoint
+// takes an Idempotency-Key.
 package api
 
 import (
@@ -63,6 +66,9 @@ type API struct {
 	chargePreviews         atomic.Int64
 	centralPaymentPreviews atomic.Int64
 	planningSequences      atomic.Int64
+	chainPreviews          atomic.Int64
+	evidenceExports        atomic.Int64
+	reversalPreviews       atomic.Int64
 }
 
 // New returns the API.
@@ -81,6 +87,9 @@ func (a *API) routes() []route {
 		{http.MethodPost, "/v1/interco/charges:preview", DutyPost, a.previewCharge},
 		{http.MethodPost, "/v1/interco/centralized-payments:preview", DutyConfigure, a.previewCentralPayment},
 		{http.MethodPost, "/v1/interco/planning-groups:sequence", DutyPlan, a.sequencePlanning},
+		{http.MethodPost, "/v1/interco/chains:preview", DutyView, a.previewChain},
+		{http.MethodPost, "/v1/interco/transfer-pricing/evidence:export", DutyView, a.exportEvidence},
+		{http.MethodPost, "/v1/interco/centralized-payments/reversals:preview", DutyConfigure, a.previewReversal},
 	}
 }
 
@@ -104,6 +113,9 @@ func (a *API) Metrics() http.Handler {
 		counter("intercompany_charge_previews_total", "IC charges priced by the preview.", a.chargePreviews.Load())
 		counter("intercompany_central_payment_previews_total", "Centralized payment journals derived by the preview.", a.centralPaymentPreviews.Load())
 		counter("intercompany_planning_sequences_total", "Planning group run sequences computed.", a.planningSequences.Load())
+		counter("intercompany_chain_previews_total", "Direct delivery chain postings derived.", a.chainPreviews.Load())
+		counter("intercompany_evidence_exports_total", "Transfer-pricing evidence files exported.", a.evidenceExports.Load())
+		counter("intercompany_reversal_previews_total", "Centralized payment reversals derived.", a.reversalPreviews.Load())
 	})
 }
 
@@ -305,10 +317,14 @@ type classifiedItem struct {
 	ToleranceApplied bool   `json:"toleranceApplied"`
 }
 
+// classifySummary counts the outcomes. Blocking is true while any item is a
+// Mismatch: the period-end summary must be free of Mismatch before
+// consolidation, unless ConsolidationApprove overrides the gate (FR-40.6, CNS-0901).
 type classifySummary struct {
-	Matched  int `json:"matched"`
-	Timing   int `json:"timing"`
-	Mismatch int `json:"mismatch"`
+	Matched  int  `json:"matched"`
+	Timing   int  `json:"timing"`
+	Mismatch int  `json:"mismatch"`
+	Blocking bool `json:"blocking"`
 }
 
 type classifyResponse struct {
@@ -358,6 +374,7 @@ func (a *API) classify(w http.ResponseWriter, r *http.Request) {
 			out.Summary.Mismatch++
 		}
 	}
+	out.Summary.Blocking = out.Summary.Mismatch > 0
 	a.reconItems.Add(int64(len(inputs)))
 	a.reconMismatches.Add(int64(out.Summary.Mismatch))
 	httpx.JSON(w, http.StatusOK, out)

@@ -1,17 +1,19 @@
 openapi: 3.1.0
 info:
   title: Passage Consolidation
-  version: 0.2.0
+  version: 0.3.0
   description: |
-    Wave 40, slices 1 and 2. Stateless consolidation calculators: the E1–E5
-    elimination entries for one parent and subsidiary (FR-40.9), the IAS 21
+    Wave 40, slices 1 to 3. Stateless consolidation calculators: the E1–E5
+    elimination entries for one parent and subsidiary and the E6 dividend
+    elimination with its per-rule rounding line (FR-40.9, BR-40.9), the IAS 21
     unit translation with CTA and its NCI share (FR-40.8, BR-40.6), unrealized
     profit per IC receipt layer (FR-40.16), the equity method and divestiture
-    gain (FR-40.18), the two-sided IC elimination with threshold (BR-40.15)
-    and the unit validation rules with the monitor gate (FR-40.20). Nothing is
-    stored. Groups, collection, runs, consolidated trial balances,
-    reclassification, top-side journals and the monitor are later slices of
-    PSG-40 (see NOT-IMPLEMENTED.md). Browser calls go through the web BFF at
+    gain (FR-40.18), the two-sided IC elimination with threshold (BR-40.15),
+    the unit validation rules with the monitor gate (FR-40.20), the
+    reclassification dry run (FR-40.17, BR-40.14) and the top-side group
+    journal check (FR-40.19, BR-40.18). Nothing is stored. Groups, collection,
+    runs, consolidated trial balances, posted reclassifications, posted
+    top-side journals and the stored monitor are later slices of PSG-40 (see NOT-IMPLEMENTED.md). Browser calls go through the web BFF at
     /api/v1/consol/..., which rewrites to these paths and sets the tenant and
     duty headers.
 servers:
@@ -215,6 +217,105 @@ paths:
           $ref: '#/components/responses/Problem'
         '403':
           $ref: '#/components/responses/Problem'
+  /v1/consol/dividends:preview:
+    post:
+      operationId: previewDividends
+      summary: E6 elimination of a dividend within the group, with the per-rule rounding line (FR-40.9, BR-40.9)
+      x-passage-duty: ConsolidationRun
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DividendRequest'
+      responses:
+        '200':
+          description: 'E6 entries: parent dividend income and NCI equity against dividends declared, balanced'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DividendPreview'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '422':
+          description: CNS-0903 a residual beyond rounding (elimination defect)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /v1/consol/reclassification-runs:preview:
+    post:
+      operationId: previewReclassificationRun
+      summary: Dry run of ordered reclassification and regrouping rules at entity and group level (FR-40.17, BR-40.14, AC-40.13)
+      x-passage-duty: ConsolidationRun
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReclassificationRequest'
+      responses:
+        '200':
+          description: Lines per applied rule; entity-level lines reverse on reversalDate, group-level lines are consolidation entries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReclassificationPreview'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '422':
+          description: CNS-0903 a rule produced unbalanced lines
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /v1/consol/group-journals:preview:
+    post:
+      operationId: previewGroupJournal
+      summary: 'Check a top-side group journal: invariants, approval at the threshold and the periods it applies to (FR-40.19, BR-40.18)'
+      x-passage-duty: ConsolidationJournal
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GroupJournalRequest'
+      responses:
+        '200':
+          description: The journal is valid, with approvalRequired with a CNS-0909 warning when the total is at or above the threshold
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupJournalPreview'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '422':
+          description: CNS-0903 debits differ from credits
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
   /healthz:
     get:
       operationId: healthz
@@ -528,6 +629,146 @@ components:
                     code: { type: string, enum: [CNS-0906] }
                     message: { type: string }
         groupTranslation: { type: string, enum: [NotStarted, Blocked] }
+    DividendRequest:
+      type: object
+      additionalProperties: false
+      required: [currency, ownershipPct, rate, amount]
+      properties:
+        currency: { type: string, pattern: '^[A-Z]{3}$', description: Group currency }
+        ownershipPct: { $ref: '#/components/schemas/Decimal', description: Parent ownership of the paying subsidiary, above 0 and at most 100 }
+        rate: { $ref: '#/components/schemas/Decimal', description: Subsidiary-to-group rate on the dividend date, positive }
+        amount: { $ref: '#/components/schemas/Decimal', description: Dividend declared in the subsidiary's currency, positive }
+    DividendPreview:
+      type: object
+      required: [currency, entries, totals, rounding, balanced]
+      properties:
+        currency: { type: string }
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/Entry'
+        totals:
+          $ref: '#/components/schemas/Totals'
+        rounding: { type: string, description: Signed debit of the ROUNDING line; 0 when none was needed }
+        balanced: { type: boolean }
+    ReclassificationRule:
+      type: object
+      additionalProperties: false
+      required: [code, level, type, sourceAccount, targetAccount]
+      properties:
+        code: { type: string, minLength: 1, description: Unique within the request }
+        level: { type: string, enum: [Entity, Group], description: SignBased is Group; the other types are Entity }
+        type: { type: string, enum: [DebitBalanceVendors, CreditBalanceCustomers, RemainingTerm, SignBased] }
+        order: { type: integer, description: Run order; ties keep request order }
+        version: { type: integer, minimum: 1, description: Defaults to 1 }
+        sourceAccount: { type: string, minLength: 1 }
+        targetAccount: { type: string, minLength: 1, description: Must differ from sourceAccount }
+        threshold: { $ref: '#/components/schemas/Decimal', description: A balance must exceed it to move; default 0 }
+        termMonths: { type: integer, minimum: 0, description: RemainingTerm only; 0 or absent means 12 }
+    ReclassificationRequest:
+      type: object
+      additionalProperties: false
+      required: [currency, periodEnd, rules]
+      properties:
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        periodEnd: { type: string, format: date }
+        rules:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items:
+            $ref: '#/components/schemas/ReclassificationRule'
+        openItems:
+          type: array
+          maxItems: 100000
+          description: One entity's open items, read by Entity rules
+          items:
+            type: object
+            additionalProperties: false
+            required: [party, account, amount]
+            properties:
+              party: { type: string, minLength: 1 }
+              account: { type: string, minLength: 1 }
+              dueDate: { type: string, format: date, description: Needed by RemainingTerm }
+              amount: { $ref: '#/components/schemas/Decimal', description: Signed; positive is a debit balance }
+        balances:
+          type: array
+          maxItems: 100000
+          description: Consolidated FS item balances, read by Group rules
+          items:
+            type: object
+            additionalProperties: false
+            required: [account, amount]
+            properties:
+              account: { type: string, minLength: 1 }
+              amount: { $ref: '#/components/schemas/Decimal', description: Signed; positive is a debit balance }
+    ReclassificationPreview:
+      type: object
+      required: [currency, periodEnd, dryRun, applied, lines, totals]
+      properties:
+        currency: { type: string }
+        periodEnd: { type: string, format: date }
+        dryRun: { type: boolean, const: true }
+        applied: { type: array, items: { type: string }, description: Codes of the rules that produced lines, in run order }
+        reversalDate: { type: string, format: date, description: First day of the next period; present when an entity-level line was produced (BR-40.14) }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [rule, level, account, debit, credit, reverses]
+            properties:
+              rule: { type: string }
+              level: { type: string, enum: [Entity, Group] }
+              account: { type: string }
+              party: { type: string }
+              debit: { type: string }
+              credit: { type: string }
+              reverses: { type: boolean }
+        totals:
+          $ref: '#/components/schemas/Totals'
+    GroupJournalRequest:
+      type: object
+      additionalProperties: false
+      required: [periodKey, documentType, currency, reason, attachmentRef, lines]
+      properties:
+        periodKey: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$' }
+        documentType: { type: string, enum: [Adjustment, Reclassification, Elimination, CoI, Cumulative] }
+        unitId: { type: string, description: Empty for a group-level journal }
+        currency: { type: string, pattern: '^[A-Z]{3}$', description: Group currency }
+        reason: { type: string, minLength: 1 }
+        attachmentRef: { type: string, minLength: 1 }
+        carryForward: { type: boolean }
+        fiscalYearStartMonth: { type: integer, minimum: 1, maximum: 12, description: Defaults to 1 }
+        approvalThreshold: { $ref: '#/components/schemas/Decimal', description: Positive; defaults to 100000.00 }
+        lines:
+          type: array
+          minItems: 2
+          maxItems: 1000
+          items:
+            type: object
+            additionalProperties: false
+            required: [fsItem]
+            properties:
+              fsItem: { type: string, minLength: 1 }
+              debit: { $ref: '#/components/schemas/Decimal', description: Exactly one of debit and credit is positive, at the currency minor unit }
+              credit: { $ref: '#/components/schemas/Decimal' }
+              partnerUnit: { type: string }
+    GroupJournalPreview:
+      type: object
+      required: [currency, level, total, balanced, approvalThreshold, approvalRequired, periods, continuesPastYearEnd, warnings]
+      properties:
+        currency: { type: string }
+        level: { type: string, enum: [Group, Unit] }
+        total: { type: string, description: Debit total, tested against the threshold }
+        balanced: { type: boolean }
+        approvalThreshold: { type: string }
+        approvalRequired: { type: boolean }
+        periods: { type: array, items: { type: string }, description: Periods it posts in through the fiscal year end }
+        continuesPastYearEnd: { type: boolean, description: A carried-forward Cumulative journal also applies after year end }
+        warnings:
+          type: array
+          items:
+            $ref: '#/components/schemas/Warning'
     Problem:
       type: object
       required: [type, title, status]

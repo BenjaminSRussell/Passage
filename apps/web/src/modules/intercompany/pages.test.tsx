@@ -59,6 +59,8 @@ describe("intercompany module", () => {
       "/intercompany/charges",
       "/intercompany/centralized-payments",
       "/intercompany/planning",
+      "/intercompany/chains",
+      "/intercompany/transfer-pricing",
     ]);
     expect(intercompany.nav.map((n) => n.duty)).toEqual([
       "IntercompanyView",
@@ -67,6 +69,8 @@ describe("intercompany module", () => {
       "IntercompanyPost",
       "IntercompanyConfigure",
       "IntercompanyPlan",
+      "IntercompanyView",
+      "IntercompanyView",
     ]);
   });
 
@@ -177,7 +181,7 @@ describe("intercompany reconciliation page", () => {
       { id: "IC-1003", entityA: "P", entityB: "S", period: "2026-11", currency: "USD", amountA: "250.00", amountB: "0.00", difference: "250.00", status: "Timing", toleranceApplied: false },
       { id: "IC-1004", entityA: "P", entityB: "S", period: "2026-11", currency: "USD", amountA: "100.00", amountB: "105.00", difference: "-5.00", status: "Mismatch", toleranceApplied: false },
     ],
-    summary: { matched: 2, timing: 1, mismatch: 1 },
+    summary: { matched: 2, timing: 1, mismatch: 1, blocking: true },
   };
 
   it("classifies the sample pairs and shows the counts, statuses and the consolidation warning", async () => {
