@@ -2,11 +2,12 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
-import type { GanttBar, Operation, Resource, Run } from "./api/client";
+import type { GanttBar, Network, Operation, Resource, Run } from "./api/client";
 import { dayStart, today } from "./format";
 import scheduling from "./module";
 import { parseIds, validateRun } from "./NewRunPage";
-import { validateOperation } from "./NewOperationPage";
+import { emptyOperation, parseAttributes, validateOperation } from "./NewOperationPage";
+import { describeAttributes } from "./OperationsPage";
 import { validateResource } from "./NewResourcePage";
 
 const MIX = "3f1c0000-0000-4000-8000-000000000001";
@@ -15,6 +16,7 @@ const ORDER = "b1000000-0000-4000-8000-000000000001";
 const JOB1 = "0a000000-0000-4000-8000-000000000001";
 const JOB2 = "0a000000-0000-4000-8000-000000000002";
 const RUN = "7e000000-0000-4000-8000-000000000001";
+const NETWORK = "4e000000-0000-4000-8000-000000000001";
 
 type Reply = { status: number; body: unknown };
 type Handler = (url: URL, init: RequestInit) => Reply | undefined;
@@ -74,8 +76,8 @@ const resources: Resource[] = [
 const day = dayStart(today());
 const at = (h: number) => new Date(Date.parse(day) + h * 3_600_000).toISOString().replace(".000Z", "Z");
 const bars: GanttBar[] = [
-  { jobId: JOB1, orderId: ORDER, operNumber: 10, resourceId: MIX, segment: 1, start: at(8), end: at(9), lateMinutes: 0, firmed: false },
-  { jobId: JOB2, orderId: ORDER, operNumber: 20, resourceId: FILL, segment: 1, start: at(9), end: at(11), lateMinutes: 45, firmed: true },
+  { jobId: JOB1, orderId: ORDER, operNumber: 10, resourceId: MIX, segment: 1, start: at(8), end: at(9), lateMinutes: 0, firmed: false, setupGroup: null, changeoverMinutes: 0 },
+  { jobId: JOB2, orderId: ORDER, operNumber: 20, resourceId: FILL, segment: 1, start: at(9), end: at(11), lateMinutes: 45, firmed: true, setupGroup: "WHITE", changeoverMinutes: 30 },
 ];
 
 const run: Run = {
@@ -91,6 +93,7 @@ const run: Run = {
   totalLatenessMinutes: 45,
   solverStatus: null,
   messages: [],
+  warnings: [],
   createdAt: "2026-10-26T06:00:00Z",
 };
 
@@ -101,7 +104,22 @@ const operation: Operation = {
   minutes: 60,
   priority: 100,
   resourceIds: [FILL, MIX],
+  setupGroup: null,
+  setupMinutes: 0,
+  attributes: {},
+  networkId: null,
   status: "unplaced",
+  createdAt: "2026-10-26T06:00:00Z",
+};
+
+const network: Network = {
+  id: NETWORK,
+  code: "MIX-FILL",
+  name: "Mixing to filling",
+  activeFrom: "2027-01-01",
+  activeTo: null,
+  edges: [{ fromResourceId: MIX, toResourceId: FILL, transferMinutes: 10, maxWaitMinutes: 120 }],
+  version: 1,
   createdAt: "2026-10-26T06:00:00Z",
 };
 
@@ -123,8 +141,13 @@ describe("Scheduling workspace", () => {
     const table = await screen.findByRole("table", { name: "Jobs in window" });
     await waitFor(() => expect(table).toHaveTextContent("45 min"));
     expect(table).toHaveTextContent("Firmed");
+    expect(within(table).getAllByRole("row")[2]).toHaveTextContent("30 min");
     expect(container.querySelector('svg[data-resource="MIX-1"] rect')).not.toBeNull();
     expect(container.querySelectorAll("rect[data-job]")).toHaveLength(2);
+    // JOB2 opens with a 30 min changeover: drawn over the bar and named in its title.
+    expect(container.querySelectorAll("rect[data-changeover]")).toHaveLength(1);
+    expect(container.querySelector(`rect[data-changeover="${JOB2}"]`)).not.toBeNull();
+    expect(container.querySelector(`rect[data-job="${JOB2}"] title`)?.textContent).toContain("starts with a 30 min changeover to WHITE");
     const gantt = calls.find((c) => c.url.pathname.endsWith("/gantt"));
     expect(gantt?.url.searchParams.get("from")).toBe(day);
     expect(gantt?.url.searchParams.get("to")).toBe(dayStart(today(), 2));
@@ -272,6 +295,23 @@ describe("Schedule runs", () => {
     expect(await screen.findByRole("heading", { name: "Schedule run" })).toBeInTheDocument();
     expect(await screen.findByText(/no candidate resource has open capacity/)).toBeInTheDocument();
     expect(screen.getByText("Heuristic")).toBeInTheDocument();
+    expect(screen.getByText("No warnings")).toBeInTheDocument();
+  });
+
+  it("lists the warnings a run raised on placed operations", async () => {
+    const warnings = [
+      { code: "SCHED-0012", operationId: JOB1, detail: "setup matrix has no entry A -> D; route setup time 15 min used" },
+      { code: "SCHED-0014", operationId: JOB2, detail: "job does not match any block on PAINT-1; placed in unblocked capacity" },
+    ];
+    handler = () => json(200, { ...run, warnings, messages: [`${JOB1}: SCHED-0009 NETWORK_INFEASIBLE: no allowed successor resource in network MIX-FILL`] });
+    const { container } = renderAt(`/scheduling/runs/${RUN}`);
+    const list = await screen.findByRole("list", { name: "Run warnings" });
+    expect(within(list).getAllByRole("listitem")).toHaveLength(2);
+    expect(list).toHaveTextContent("SCHED-0012 No setup matrix entry");
+    expect(list).toHaveTextContent("route setup time 15 min used");
+    expect(list).toHaveTextContent("SCHED-0014 No matching capacity block");
+    expect(screen.getByText(/NETWORK_INFEASIBLE/)).toBeInTheDocument();
+    expect(pageViolations(container)).toEqual([]);
   });
 
   it("explains an empty run list", async () => {
@@ -375,19 +415,45 @@ describe("Resources", () => {
 
 describe("Operations", () => {
   it("lists operations with candidate codes and filters by status", async () => {
-    handler = (url) => (url.pathname.endsWith("/operations") ? json(200, { items: [operation] }) : json(200, { items: resources }));
+    const constrained = { ...operation, id: JOB2, operNumber: 20, setupGroup: "WHITE", attributes: { color: "white" }, networkId: NETWORK };
+    handler = (url) => {
+      if (url.pathname.endsWith("/operations")) return json(200, { items: [operation, constrained] });
+      if (url.pathname.endsWith("/networks")) return json(200, { items: [network] });
+      return json(200, { items: resources });
+    };
     const { container } = renderAt("/scheduling/operations");
     const table = await screen.findByRole("table", { name: "Operations" });
     await waitFor(() => expect(table).toHaveTextContent("FILL-1, MIX-1"));
     expect(table).toHaveTextContent("Unplaced");
+    const row = within(table).getAllByRole("row")[2];
+    expect(row).toHaveTextContent("WHITE");
+    expect(row).toHaveTextContent("MIX-FILL");
+    expect(row).toHaveTextContent("color=white");
     expect(pageViolations(container)).toEqual([]);
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "unplaced" } });
     await waitFor(() => expect(calls.some((c) => c.url.searchParams.get("status") === "unplaced")).toBe(true));
   });
 
   it("validates a new operation", () => {
-    const values = { orderId: "x", operNumber: "0", minutes: "", dueAt: "", readyAt: "", priority: "2000", resourceIds: [] };
-    expect(Object.keys(validateOperation(values).errors).sort()).toEqual(["minutes", "operNumber", "orderId", "priority", "resourceIds"]);
+    const values = { ...emptyOperation, orderId: "x", operNumber: "0", priority: "2000", setupGroup: "white", setupMinutes: "99999", attributes: "color" };
+    expect(Object.keys(validateOperation(values).errors).sort()).toEqual([
+      "attributes",
+      "minutes",
+      "operNumber",
+      "orderId",
+      "priority",
+      "resourceIds",
+      "setupGroup",
+      "setupMinutes",
+    ]);
+  });
+
+  it("reads attributes as name = value lines", () => {
+    expect(parseAttributes(" color = white \n\ngrade=2")).toEqual({ attributes: { color: "white", grade: "2" } });
+    expect(parseAttributes("color white").error).toBe("Line 1: write name = value.");
+    expect(parseAttributes("color=white\ncolor=red").error).toBe("Line 2: color is listed twice.");
+    expect(parseAttributes(" = white").error).toBe("Line 1: the name is 1 to 64 characters.");
+    expect(describeAttributes({ grade: "2", color: "white" })).toBe("color=white, grade=2");
   });
 
   it("adds an operation with candidates in the order they were checked", async () => {
@@ -409,6 +475,52 @@ describe("Operations", () => {
     expect(await screen.findByRole("table", { name: "Operations" })).toBeInTheDocument();
     const post = calls.find((c) => c.method === "POST")!;
     expect(post.body).toEqual({ orderId: ORDER, operNumber: 10, minutes: 90, dueAt: "2026-11-02T17:00:00Z", resourceIds: [FILL, MIX] });
+  });
+
+  it("adds an operation with its setup group, route setup, network and attributes", async () => {
+    handler = (url, init) => {
+      if (init.method === "POST") return json(201, operation);
+      if (url.pathname.endsWith("/operations")) return json(200, { items: [operation] });
+      if (url.pathname.endsWith("/networks")) return json(200, { items: [network] });
+      return json(200, { items: resources });
+    };
+    const { container } = renderAt("/scheduling/operations/new");
+    fireEvent.click(await screen.findByLabelText("FILL-1"));
+    expect(pageViolations(container)).toEqual([]);
+    fireEvent.change(screen.getByLabelText("Order id"), { target: { value: ORDER } });
+    fireEvent.change(screen.getByLabelText("Operation number"), { target: { value: "20" } });
+    fireEvent.change(screen.getByLabelText("Minutes"), { target: { value: "60" } });
+    fireEvent.change(screen.getByLabelText(/^Setup group/), { target: { value: "WHITE" } });
+    fireEvent.change(screen.getByLabelText(/^Route setup/), { target: { value: "25" } });
+    fireEvent.change(screen.getByLabelText(/^Resource network/), { target: { value: NETWORK } });
+    fireEvent.change(screen.getByLabelText(/^Attributes/), { target: { value: "color = white\ngrade = 2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add operation" }));
+    expect(await screen.findByRole("table", { name: "Operations" })).toBeInTheDocument();
+    expect(calls.find((c) => c.method === "POST")!.body).toEqual({
+      orderId: ORDER,
+      operNumber: 20,
+      minutes: 60,
+      resourceIds: [FILL],
+      setupGroup: "WHITE",
+      setupMinutes: 25,
+      attributes: { color: "white", grade: "2" },
+      networkId: NETWORK,
+    });
+  });
+
+  it("shows a vanished network on its field", async () => {
+    handler = (url, init) => {
+      if (init.method === "POST") return json(422, { code: "SCHED-0109", detail: "the resource network does not exist" });
+      if (url.pathname.endsWith("/networks")) return json(200, { items: [network] });
+      return json(200, { items: resources });
+    };
+    renderAt("/scheduling/operations/new");
+    fireEvent.click(await screen.findByLabelText("MIX-1"));
+    fireEvent.change(screen.getByLabelText("Order id"), { target: { value: ORDER } });
+    fireEvent.change(screen.getByLabelText("Minutes"), { target: { value: "60" } });
+    fireEvent.change(screen.getByLabelText(/^Resource network/), { target: { value: NETWORK } });
+    fireEvent.click(screen.getByRole("button", { name: "Add operation" }));
+    expect(await screen.findByText("This resource network no longer exists.")).toBeInTheDocument();
   });
 
   it("asks for a resource before an operation can be added", async () => {

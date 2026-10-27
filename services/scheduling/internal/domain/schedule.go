@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"fmt"
 	"slices"
 	"sort"
 	"strings"
@@ -17,33 +18,61 @@ const (
 
 // Resource is a work center or machine that can hold work. Infinite resources
 // ignore booked time but still only run inside their open capacity.
+//
+// Blocks restrict parts of the open capacity to jobs whose attributes match
+// (FR-23.17); their windows are UTC and should cover the planning horizon.
+// Matrix prices changeovers between setup groups (FR-23.15); a matrix without
+// entries leaves changeovers off on the resource. CurrentGroup is the setup
+// group the resource is in before its first booked job of the horizon, empty
+// when unknown (the first job then needs no changeover).
 type Resource struct {
-	ID       string
-	Code     string
-	Finite   bool
-	Location *time.Location
-	Shifts   []Shift
+	ID           string
+	Code         string
+	Finite       bool
+	Location     *time.Location
+	Shifts       []Shift
+	Blocks       []CapacityBlock
+	Matrix       SetupMatrix
+	CurrentGroup string
 }
 
 // Operation is one schedulable operation of an order. Candidates are resource
 // ids in priority order (named resource first). DueAt zero means no due date.
+//
+// SetupGroup drives changeovers against the resource's setup matrix, and
+// SetupMinutes is the route's static setup, used only when the matrix has no
+// entry for the pair (SCHED-0012). Attributes are matched against capacity
+// block conditions (BR-23.15). Network is the code of the resource network
+// that governs the step from the order's previous operation into this one
+// (FR-23.13); empty means the step is unconstrained.
 type Operation struct {
-	ID         string
-	OrderID    string
-	OperNumber int
-	Minutes    int
-	DueAt      time.Time
-	ReadyAt    time.Time
-	Priority   int
-	Candidates []string
+	ID           string
+	OrderID      string
+	OperNumber   int
+	Minutes      int
+	DueAt        time.Time
+	ReadyAt      time.Time
+	Priority     int
+	Candidates   []string
+	SetupGroup   string
+	SetupMinutes int
+	Attributes   map[string]string
+	Network      string
 }
 
-// Busy is booked time on a resource held by one job.
+// Busy is booked time on a resource held by one job. Group and Setup are the
+// job's setup group and route setup minutes; Changeover is the changeover the
+// job carries at its start, set on its first segment only. Together they let
+// the scheduler check that a job inserted in front still leaves the booked
+// job enough changeover.
 type Busy struct {
 	ResourceID string
 	Start      time.Time
 	End        time.Time
 	JobID      string
+	Group      string
+	Setup      int
+	Changeover int
 }
 
 // Segment is one contiguous piece of a job on its resource.
@@ -52,16 +81,19 @@ type Segment struct {
 	End   time.Time
 }
 
-// Placement is where one operation landed.
+// Placement is where one operation landed. When ChangeoverMinutes is set, the
+// first that many minutes of the job are the changeover from the previous
+// setup group (FR-23.15); the process minutes follow.
 type Placement struct {
-	OperationID string
-	OrderID     string
-	OperNumber  int
-	ResourceID  string
-	Segments    []Segment
-	Start       time.Time
-	End         time.Time
-	LateMinutes int
+	OperationID       string
+	OrderID           string
+	OperNumber        int
+	ResourceID        string
+	Segments          []Segment
+	Start             time.Time
+	End               time.Time
+	LateMinutes       int
+	ChangeoverMinutes int
 }
 
 // Conflict explains why a placement is infeasible.
@@ -76,15 +108,20 @@ type Conflict struct {
 // the placements of operations that keep their slot (firmed, or not selected)
 // so their successors in the same order still respect precedence. Infinite
 // ignores booked time on every resource (an infinite-capacity run): jobs still
-// run only inside open capacity, but may overlap each other.
+// run only inside open capacity, but may overlap each other, and no
+// changeovers are sequenced. Networks are the resource networks operations
+// name by code; NetworkDelayDays bounds how far a predecessor may be delayed
+// to meet a network's maximum wait (BR-23.11, default 7).
 type Problem struct {
-	Resources   []Resource
-	Operations  []Operation
-	Booked      []Busy
-	Fixed       []Placement
-	Start       time.Time
-	HorizonDays int
-	Infinite    bool
+	Resources        []Resource
+	Operations       []Operation
+	Booked           []Busy
+	Fixed            []Placement
+	Networks         []ResourceNetwork
+	Start            time.Time
+	HorizonDays      int
+	NetworkDelayDays int
+	Infinite         bool
 }
 
 // Unplaced is an operation the heuristic could not place within the horizon.
@@ -93,10 +130,21 @@ type Unplaced struct {
 	Reason      string
 }
 
+// Warning is a finding about a placed operation that does not stop the run:
+// SCHED-0010 (network wait over the maximum behind a frozen predecessor),
+// SCHED-0012 (route setup used for a missing matrix entry) or SCHED-0014 (the
+// job matches no block on its resource).
+type Warning struct {
+	Code        string
+	OperationID string
+	Detail      string
+}
+
 // Result is the heuristic output.
 type Result struct {
 	Placements []Placement
 	Unplaced   []Unplaced
+	Warnings   []Warning
 }
 
 type capacity struct {
@@ -143,10 +191,16 @@ func removeJob(bs []Busy, jobID string) []Busy {
 	return slices.DeleteFunc(bs, func(b Busy) bool { return b.JobID == jobID })
 }
 
-func busyOf(resourceID, jobID string, segs []Segment) []Busy {
-	out := make([]Busy, 0, len(segs))
-	for _, s := range segs {
-		out = append(out, Busy{ResourceID: resourceID, Start: s.Start, End: s.End, JobID: jobID})
+// busyOf books the segments of a placement. The changeover sits on the first
+// segment only, so a check against it looks at the job's start.
+func busyOf(op Operation, pl Placement) []Busy {
+	out := make([]Busy, 0, len(pl.Segments))
+	for i, s := range pl.Segments {
+		b := Busy{ResourceID: pl.ResourceID, Start: s.Start, End: s.End, JobID: pl.OperationID, Group: op.SetupGroup, Setup: op.SetupMinutes}
+		if i == 0 {
+			b.Changeover = pl.ChangeoverMinutes
+		}
+		out = append(out, b)
 	}
 	return out
 }
@@ -211,24 +265,16 @@ func fill(iv []Interval, busy []Busy, t time.Time, minutes int, exact bool) ([]S
 	return segs, nil
 }
 
-// place finds the earliest start at or after ready where the work fits. Only
-// ready and the ends of booked segments can be earliest feasible starts.
-func place(iv []Interval, busy []Busy, ready time.Time, minutes int) ([]Segment, *Conflict) {
+// startCandidates are the only earliest feasible starts at or after ready:
+// ready itself and the ends of booked segments.
+func startCandidates(busy []Busy, ready time.Time) []time.Time {
 	cands := []time.Time{ready}
 	for _, b := range busy {
 		if b.End.After(ready) {
 			cands = append(cands, b.End)
 		}
 	}
-	var last *Conflict
-	for _, c := range cands {
-		segs, conf := fill(iv, busy, c, minutes, false)
-		if conf == nil {
-			return segs, nil
-		}
-		last = conf
-	}
-	return nil, last
+	return cands
 }
 
 func newPlacement(op Operation, resourceID string, segs []Segment) Placement {
@@ -296,74 +342,41 @@ func orderPlan(ops []Operation) []Operation {
 // are placed at the earliest feasible interval on the best candidate, where best
 // means least finish time, then lower load, then lower resource code (BR-23.8).
 // An operation whose predecessor is unplaced is itself unplaced.
+//
+// On top of capacity and precedence the heuristic applies the slice 3
+// constraints: a job runs only in open time its attributes may use under the
+// resource's capacity blocks (FR-23.17, BR-23.15); on a resource with a setup
+// matrix the changeover from the previous job's setup group is laid in front of
+// the process minutes (FR-23.15); and an operation that names a resource
+// network runs only on a resource with an edge from its predecessor's
+// resource, within the edge's transfer time and maximum wait, delaying the
+// predecessor when needed (FR-23.13, BR-23.11).
 func Schedule(p Problem) Result {
-	caps := capacities(p.Resources, p.Start, p.HorizonDays)
-	busy := groupBusy(p.Booked)
-	booked := map[string]int{}
-	for _, b := range p.Booked {
-		booked[b.ResourceID] += minutesBetween(b.Start, b.End)
+	days := p.NetworkDelayDays
+	if days <= 0 {
+		days = DefaultNetworkDelayDays
 	}
-	predEnd := map[string]time.Time{}
-	blocked := map[string]bool{}
+	e := &engine{caps: capacities(p.Resources, p.Start, p.HorizonDays), busy: groupBusy(p.Booked), booked: map[string]int{},
+		nets: map[string]ResourceNetwork{}, infinite: p.Infinite, delay: time.Duration(days) * 24 * time.Hour, days: days}
+	for _, b := range p.Booked {
+		e.booked[b.ResourceID] += minutesBetween(b.Start, b.End)
+	}
+	for _, n := range p.Networks {
+		e.nets[n.Code] = n
+	}
 	fixed := map[string][]Placement{}
 	for _, f := range p.Fixed {
 		fixed[f.OrderID] = append(fixed[f.OrderID], f)
 	}
 	var res Result
-	for _, op := range orderPlan(p.Operations) {
-		switch {
-		case blocked[op.OrderID]:
-			res.Unplaced = append(res.Unplaced, Unplaced{op.ID, "predecessor operation is unplaced"})
-			continue
-		case op.Minutes < 1:
-			res.Unplaced = append(res.Unplaced, Unplaced{op.ID, "duration must be at least one minute"})
-			blocked[op.OrderID] = true
-			continue
+	ops := orderPlan(p.Operations)
+	for i := 0; i < len(ops); {
+		j := i + 1
+		for j < len(ops) && ops[j].OrderID == ops[i].OrderID {
+			j++
 		}
-		ready := p.Start
-		if op.ReadyAt.After(ready) {
-			ready = op.ReadyAt
-		}
-		if e, ok := predEnd[op.OrderID]; ok && e.After(ready) {
-			ready = e
-		}
-		for _, f := range fixed[op.OrderID] {
-			if f.OperNumber < op.OperNumber && f.End.After(ready) {
-				ready = f.End
-			}
-		}
-		var best Placement
-		var bestRID string
-		found := false
-		for _, rid := range op.Candidates {
-			c, ok := caps[rid]
-			if !ok {
-				continue
-			}
-			var bs []Busy
-			if c.res.Finite && !p.Infinite {
-				bs = busy[rid]
-			}
-			segs, conf := place(c.iv, bs, ready, op.Minutes)
-			if conf != nil {
-				continue
-			}
-			cand := newPlacement(op, rid, segs)
-			if !found || betterCandidate(cand, rid, best, bestRID, caps, booked) {
-				best, bestRID, found = cand, rid, true
-			}
-		}
-		if !found {
-			res.Unplaced = append(res.Unplaced, Unplaced{op.ID, "no candidate resource has open capacity in the horizon"})
-			blocked[op.OrderID] = true
-			continue
-		}
-		if caps[bestRID].res.Finite && !p.Infinite {
-			busy[bestRID] = insertBusy(busy[bestRID], busyOf(bestRID, op.ID, best.Segments)...)
-		}
-		booked[bestRID] += op.Minutes
-		predEnd[op.OrderID] = best.End
-		res.Placements = append(res.Placements, best)
+		e.placeChain(ops[i:j], fixed[ops[i].OrderID], p.Start, &res)
+		i = j
 	}
 	return res
 }
@@ -397,6 +410,8 @@ type MoveInput struct {
 	// Firmed lists operations whose placement is frozen (FR-23.4): the moved
 	// operation must not be firmed, and a firmed successor cannot be pushed.
 	Firmed map[string]bool
+	// Networks are the resource networks the order's operations name (FR-23.13).
+	Networks []ResourceNetwork
 }
 
 // MovePlan is the proposed change set. Conflict is set when the move is
@@ -409,6 +424,12 @@ type MovePlan struct {
 
 // PlanMove plans a move (FR-23.8). The moved operation starts no earlier than
 // its predecessor's end. Successors keep their resource and move only forward.
+// Moves keep the slice 3 constraints: the job must start in time its
+// attributes may use under the resource's blocks; changeovers are repriced for
+// every job placed, and every later job on a resource the move touches must
+// still carry the changeover its new predecessor needs; and each network step
+// the move changes must use an edge within its transfer time and maximum wait
+// (SCHED-0009, SCHED-0010).
 func PlanMove(in MoveInput) MovePlan {
 	caps := capacities(in.Resources, in.Start, in.HorizonDays)
 	busy := groupBusy(in.Booked)
@@ -436,21 +457,37 @@ func PlanMove(in MoveInput) MovePlan {
 			}
 		}
 	}
-	old := in.Current[mv.ID]
-	busy[old.ResourceID] = removeJob(busy[old.ResourceID], mv.ID)
+	iv := c.usable(*mv)
+	if t := ceilMinute(at); insideAny(c.iv, t) && !insideAny(iv, t) {
+		return MovePlan{Conflict: &Conflict{Code: CodeOutsideCapacity, Detail: "start is inside a capacity block the job does not match (BR-23.15)"}}
+	}
+	touched := map[string]time.Time{}
+	touch := func(rid string, t time.Time) {
+		if cur, ok := touched[rid]; !ok || t.Before(cur) {
+			touched[rid] = t
+		}
+	}
+	old, wasPlaced := in.Current[mv.ID]
+	if wasPlaced {
+		busy[old.ResourceID] = removeJob(busy[old.ResourceID], mv.ID)
+		touch(old.ResourceID, old.Start)
+	}
 	var bs []Busy
 	if c.res.Finite {
 		bs = busy[in.ResourceID]
 	}
-	segs, conf := fill(c.iv, bs, at, mv.Minutes, true)
+	s, conf := fillSlot(c, iv, *mv, bs, at, true, sequenced(c, *mv, false))
 	if conf != nil {
 		return MovePlan{Conflict: conf}
 	}
+	moved := newPlacement(*mv, in.ResourceID, s.segs)
+	moved.ChangeoverMinutes = s.changeover
 	if c.res.Finite {
-		busy[in.ResourceID] = insertBusy(busy[in.ResourceID], busyOf(in.ResourceID, mv.ID, segs)...)
+		busy[in.ResourceID] = insertBusy(busy[in.ResourceID], busyOf(*mv, moved)...)
 	}
-	changes := []Placement{newPlacement(*mv, in.ResourceID, segs)}
-	pred := changes[0].End
+	touch(in.ResourceID, moved.Start)
+	changes := []Placement{moved}
+	pred := moved.End
 	for _, op := range in.Order {
 		if op.OperNumber <= mv.OperNumber {
 			continue
@@ -476,19 +513,94 @@ func PlanMove(in MoveInput) MovePlan {
 		if cc.res.Finite {
 			sbs = busy[cur.ResourceID]
 		}
-		next, conf := place(cc.iv, sbs, ready, op.Minutes)
+		ns, conf := placeOn(cc, op, sbs, ready, sequenced(cc, op, false))
 		if conf != nil {
 			return MovePlan{Conflict: conf}
 		}
+		next := newPlacement(op, cur.ResourceID, ns.segs)
+		next.ChangeoverMinutes = ns.changeover
 		if cc.res.Finite {
-			busy[cur.ResourceID] = insertBusy(busy[cur.ResourceID], busyOf(cur.ResourceID, op.ID, next)...)
+			busy[cur.ResourceID] = insertBusy(busy[cur.ResourceID], busyOf(op, next)...)
 		}
-		if !next[0].Start.Equal(cur.Start) {
-			changes = append(changes, newPlacement(op, cur.ResourceID, next))
+		if !next.Start.Equal(cur.Start) || !next.End.Equal(cur.End) || next.ChangeoverMinutes != cur.ChangeoverMinutes {
+			changes = append(changes, next)
+			touch(cur.ResourceID, cur.Start)
 		}
-		pred = next[len(next)-1].End
+		pred = next.End
+	}
+	rids := make([]string, 0, len(touched))
+	for rid := range touched {
+		rids = append(rids, rid)
+	}
+	slices.Sort(rids)
+	for _, rid := range rids {
+		if rc, ok := caps[rid]; ok {
+			if conf := checkSequence(rc, busy[rid], touched[rid]); conf != nil {
+				return MovePlan{Conflict: conf}
+			}
+		}
+	}
+	if conf := checkNetworks(in, caps, changes); conf != nil {
+		return MovePlan{Conflict: conf}
 	}
 	return MovePlan{Changes: changes}
+}
+
+// insideAny reports whether t falls inside one of the sorted intervals.
+func insideAny(iv []Interval, t time.Time) bool {
+	i := sort.Search(len(iv), func(k int) bool { return iv[k].End.After(t) })
+	return i < len(iv) && !iv[i].Start.After(t)
+}
+
+// checkNetworks verifies every network step of the order that the move
+// changes: the step must use an edge of the operation's network and start
+// within the edge's transfer time and maximum wait (BR-23.11).
+func checkNetworks(in MoveInput, caps map[string]capacity, changes []Placement) *Conflict {
+	nets := map[string]ResourceNetwork{}
+	for _, n := range in.Networks {
+		nets[n.Code] = n
+	}
+	merged := make(map[string]Placement, len(in.Current)+len(changes))
+	for id, pl := range in.Current {
+		merged[id] = pl
+	}
+	changed := map[string]bool{}
+	for _, c := range changes {
+		merged[c.OperationID] = c
+		changed[c.OperationID] = true
+	}
+	ops := slices.Clone(in.Order)
+	slices.SortFunc(ops, func(a, b Operation) int { return a.OperNumber - b.OperNumber })
+	var prev *Operation
+	for i := range ops {
+		op := &ops[i]
+		cur, placed := merged[op.ID]
+		if !placed {
+			continue
+		}
+		if p := prev; p != nil && op.Network != "" && (changed[op.ID] || changed[p.ID]) {
+			pp := merged[p.ID]
+			n, ok := nets[op.Network]
+			if !ok {
+				return &Conflict{Code: CodeNetworkInfeasible, JobID: op.ID, Detail: fmt.Sprintf("network %s is not defined or not active", op.Network)}
+			}
+			edge, ok := n.Edge(pp.ResourceID, cur.ResourceID)
+			if !ok {
+				return &Conflict{Code: CodeNetworkInfeasible, JobID: op.ID,
+					Detail: fmt.Sprintf("network %s has no transition from %s to %s", n.Code, caps[pp.ResourceID].res.Code, caps[cur.ResourceID].res.Code)}
+			}
+			if !edge.WaitOK(pp.End, cur.Start) {
+				limit := "no maximum"
+				if edge.MaxWaitMinutes != nil {
+					limit = fmt.Sprintf("maximum %d min", *edge.MaxWaitMinutes)
+				}
+				return &Conflict{Code: CodeNetworkWait, JobID: op.ID,
+					Detail: fmt.Sprintf("wait %d min breaks network %s limits (transfer %d min, %s)", minutesBetween(pp.End, cur.Start), n.Code, edge.TransferMinutes, limit)}
+			}
+		}
+		prev = op
+	}
+	return nil
 }
 
 // Makespan is the span from the earliest start to the latest end.

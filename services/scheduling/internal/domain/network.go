@@ -53,6 +53,10 @@ func NewResourceNetwork(code string, edges []NetworkEdge) (ResourceNetwork, erro
 			return ResourceNetwork{}, fmt.Errorf("network %s: transfer minutes must not be negative", code)
 		case e.MaxWaitMinutes != nil && *e.MaxWaitMinutes < 0:
 			return ResourceNetwork{}, fmt.Errorf("network %s: max wait must not be negative", code)
+		case e.MaxWaitMinutes != nil && *e.MaxWaitMinutes < e.TransferMinutes:
+			// The wait runs from the end of operation n and includes the
+			// transfer, so a shorter maximum can never be met (BR-23.11).
+			return ResourceNetwork{}, fmt.Errorf("network %s: edge %s->%s max wait must be at least its transfer minutes", code, e.From, e.To)
 		case e.SecondaryResourceID == e.From || e.SecondaryResourceID == e.To:
 			return ResourceNetwork{}, fmt.Errorf("network %s: edge %s->%s cannot use one of its own resources as the transfer resource", code, e.From, e.To)
 		}

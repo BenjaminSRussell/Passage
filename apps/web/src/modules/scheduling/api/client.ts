@@ -41,6 +41,14 @@ export interface Operation {
   readyAt?: string;
   priority: number;
   resourceIds: string[];
+  /** Setup group that drives changeovers against the resource's setup matrix (FR-23.15). */
+  setupGroup: string | null;
+  /** Route setup time, used when the matrix has no entry for a pair (SCHED-0012). */
+  setupMinutes: number;
+  /** Product or order attributes that capacity block conditions match on (FR-23.17). */
+  attributes: Record<string, string>;
+  /** Network governing the step from the order's previous operation into this one (FR-23.13). */
+  networkId: string | null;
   status: OperationStatus;
   createdAt: string;
 }
@@ -53,6 +61,23 @@ export interface NewOperation {
   readyAt?: string;
   priority?: number;
   resourceIds: string[];
+  setupGroup?: string;
+  setupMinutes?: number;
+  attributes?: Record<string, string>;
+  networkId?: string;
+}
+
+/** Codes a run reports on placed operations (PRD 4.23.18). */
+export const RUN_WARNING_LABELS: Record<string, string> = {
+  "SCHED-0010": "Network wait over the maximum",
+  "SCHED-0012": "No setup matrix entry",
+  "SCHED-0014": "No matching capacity block",
+};
+
+export interface RunWarning {
+  code: string;
+  operationId: string;
+  detail: string;
 }
 
 export interface Run {
@@ -67,7 +92,10 @@ export interface Run {
   makespanMinutes: number;
   totalLatenessMinutes: number;
   solverStatus: string | null;
+  /** One entry per unplaced operation, "operationId: reason". */
   messages: string[];
+  /** Findings on placed operations (SCHED-0010, SCHED-0012, SCHED-0014). */
+  warnings: RunWarning[];
   createdAt: string;
 }
 
@@ -91,6 +119,9 @@ export interface GanttBar {
   end: string;
   lateMinutes: number;
   firmed: boolean;
+  setupGroup: string | null;
+  /** Changeover at the start of the job, on its first segment only (FR-23.15). */
+  changeoverMinutes: number;
 }
 
 export interface MoveRequest {

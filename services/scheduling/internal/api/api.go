@@ -82,14 +82,25 @@ type resourceRequest struct {
 }
 
 type operationRequest struct {
-	OrderID     string     `json:"orderId"`
-	OperNumber  int        `json:"operNumber"`
-	Minutes     int        `json:"minutes"`
-	DueAt       *time.Time `json:"dueAt"`
-	ReadyAt     *time.Time `json:"readyAt"`
-	Priority    *int       `json:"priority"`
-	ResourceIDs []string   `json:"resourceIds"`
+	OrderID      string            `json:"orderId"`
+	OperNumber   int               `json:"operNumber"`
+	Minutes      int               `json:"minutes"`
+	DueAt        *time.Time        `json:"dueAt"`
+	ReadyAt      *time.Time        `json:"readyAt"`
+	Priority     *int              `json:"priority"`
+	ResourceIDs  []string          `json:"resourceIds"`
+	SetupGroup   *string           `json:"setupGroup"`
+	SetupMinutes *int              `json:"setupMinutes"`
+	Attributes   map[string]string `json:"attributes"`
+	NetworkID    *string           `json:"networkId"`
 }
+
+// Operation attribute limits: block conditions match on these (FR-23.17).
+const (
+	maxAttributes     = 20
+	maxAttributeName  = 64
+	maxAttributeValue = 120
+)
 
 type runRequest struct {
 	Scope        string     `json:"scope"`
@@ -353,12 +364,38 @@ func (a *API) createOperation(w http.ResponseWriter, r *http.Request) {
 			fields["priority"] = "must be 0 to 1000"
 		}
 	}
+	var group *string
+	if req.SetupGroup != nil {
+		g := strings.TrimSpace(*req.SetupGroup)
+		if g == "" || len(g) > domain.MaxSetupGroup {
+			fields["setupGroup"] = fmt.Sprintf("must be 1 to %d characters, or omitted", domain.MaxSetupGroup)
+		}
+		group = &g
+	}
+	setupMinutes := 0
+	if req.SetupMinutes != nil {
+		setupMinutes = *req.SetupMinutes
+		if setupMinutes < 0 || setupMinutes > maxWeekMinutes {
+			fields["setupMinutes"] = fmt.Sprintf("must be 0 to %d", maxWeekMinutes)
+		}
+	}
+	if msg := validAttributes(req.Attributes); msg != "" {
+		fields["attributes"] = msg
+	}
+	if req.NetworkID != nil {
+		id := strings.ToLower(*req.NetworkID)
+		if !ids.Valid(id) {
+			fields["networkId"] = "must be a UUID"
+		}
+		req.NetworkID = &id
+	}
 	if len(fields) > 0 {
 		invalid(w, r, fields)
 		return
 	}
 	op, created, err := a.store.CreateOperation(r.Context(), store.Operation{OrderID: req.OrderID, OperNumber: req.OperNumber,
-		Minutes: req.Minutes, DueAt: req.DueAt, ReadyAt: req.ReadyAt, Priority: priority, ResourceIDs: req.ResourceIDs}, idem)
+		Minutes: req.Minutes, DueAt: req.DueAt, ReadyAt: req.ReadyAt, Priority: priority, ResourceIDs: req.ResourceIDs,
+		SetupGroup: group, SetupMinutes: setupMinutes, Attributes: req.Attributes, NetworkID: req.NetworkID}, idem)
 	if err != nil {
 		slog.Error("create operation failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)
@@ -371,6 +408,23 @@ func (a *API) createOperation(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Idempotent-Replayed", "true")
 	}
 	httpx.JSON(w, status, op)
+}
+
+// validAttributes checks the attributes block conditions match on: at most 20
+// named values, names and values of bounded length.
+func validAttributes(attrs map[string]string) string {
+	if len(attrs) > maxAttributes {
+		return fmt.Sprintf("must hold at most %d attributes", maxAttributes)
+	}
+	for name, value := range attrs {
+		if n := len(strings.TrimSpace(name)); n < 1 || n > maxAttributeName || n != len(name) {
+			return fmt.Sprintf("names must be 1 to %d characters without surrounding spaces", maxAttributeName)
+		}
+		if len(value) > maxAttributeValue {
+			return fmt.Sprintf("values must be at most %d characters", maxAttributeValue)
+		}
+	}
+	return ""
 }
 
 func (a *API) createRun(w http.ResponseWriter, r *http.Request) {

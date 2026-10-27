@@ -146,6 +146,16 @@ paths:
     post:
       operationId: createRun
       summary: Run the forward heuristic over the site or a selection of operations
+      description: >
+        The run applies resource networks (FR-23.13: an operation naming a
+        network runs only on a resource with an edge from its predecessor's,
+        within the transfer time and maximum wait, delaying the predecessor up
+        to 7 days, else the order is unplaced with SCHED-0009
+        NETWORK_INFEASIBLE), setup matrix changeovers (FR-23.15: laid in front
+        of the process minutes from the group the resource is in; a missing
+        entry uses the route setup and warns SCHED-0012) and capacity blocks
+        (FR-23.17: a job runs in a block only if it matches; a job matching no
+        block on its resource warns SCHED-0014).
       x-passage-duty: scheduling.run
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -239,7 +249,12 @@ paths:
       description: >
         A commit (dryRun false) requires Idempotency-Key; a replay returns the
         stored outcome with Idempotent-Replayed: true. A preview writes nothing
-        and needs no key. Firmed jobs cannot be moved (SCHED-0008).
+        and needs no key. Firmed jobs cannot be moved (SCHED-0008). A move
+        keeps the run constraints: the start must not fall in a capacity block
+        the job does not match (SCHED-0002), changeovers are repriced and a
+        later job on a touched resource left too short a changeover is a
+        SCHED-0001 violation, and a changed network step needs an edge
+        (SCHED-0009) within its maximum wait (SCHED-0010).
       x-passage-duty: scheduling.schedule.write
       parameters:
         - $ref: '#/components/parameters/Id'
@@ -782,6 +797,14 @@ components:
           maxItems: 50
           items: { type: string, format: uuid }
           description: Candidate resources, named resource first (FR-23.2).
+        setupGroup: { type: string, minLength: 1, maxLength: 32, description: "Setup group that drives changeovers against the resource's setup matrix (FR-23.15)." }
+        setupMinutes: { type: integer, minimum: 0, maximum: 10080, default: 0, description: 'Route setup time, used when the matrix has no entry for a pair (SCHED-0012).' }
+        attributes:
+          type: object
+          maxProperties: 20
+          additionalProperties: { type: string, maxLength: 120 }
+          description: Product or order attributes capacity block conditions match on (FR-23.17); names 1 to 64 characters.
+        networkId: { type: string, format: uuid, description: "Resource network governing the step from the order's previous operation into this one (FR-23.13). Unknown networks are refused with SCHED-0109 (422)." }
     Operation:
       type: object
       properties:
@@ -795,6 +818,12 @@ components:
         resourceIds:
           type: array
           items: { type: string, format: uuid }
+        setupGroup: { type: [string, 'null'] }
+        setupMinutes: { type: integer }
+        attributes:
+          type: object
+          additionalProperties: { type: string }
+        networkId: { type: [string, 'null'], format: uuid }
         status: { type: string, enum: [open, scheduled, unplaced] }
         createdAt: { type: string, format: date-time }
     RunRequest:
@@ -834,8 +863,19 @@ components:
           description: Set for cp-sat runs (OPTIMAL, FEASIBLE, UNKNOWN).
         messages:
           type: array
+          description: 'One entry per unplaced operation: "operationId: reason".'
           items: { type: string }
+        warnings:
+          type: array
+          description: Findings on placed operations (SCHED-0010, SCHED-0012, SCHED-0014).
+          items: { $ref: '#/components/schemas/RunWarning' }
         createdAt: { type: string, format: date-time }
+    RunWarning:
+      type: object
+      properties:
+        code: { type: string, enum: [SCHED-0010, SCHED-0012, SCHED-0014] }
+        operationId: { type: string, format: uuid }
+        detail: { type: string }
     Bar:
       type: object
       properties:
@@ -848,6 +888,8 @@ components:
         end: { type: string, format: date-time }
         lateMinutes: { type: integer }
         firmed: { type: boolean }
+        setupGroup: { type: [string, 'null'] }
+        changeoverMinutes: { type: integer, description: 'Changeover at the start of the job (first segment only; 0 on later segments).' }
     MoveRequest:
       type: object
       required: [start]

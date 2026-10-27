@@ -58,6 +58,10 @@ func NewSetupMatrix(entries []SetupEntry) (SetupMatrix, error) {
 	return m, nil
 }
 
+// Len is the number of changeover entries. The scheduler sequences
+// changeovers only on a resource whose matrix has entries.
+func (m SetupMatrix) Len() int { return len(m.entries) }
+
 // Lookup returns the changeover from one group to another. The same group is
 // free, and so is the first order on a resource whose state is unknown (from
 // is empty). ok is false when no entry exists; the caller then falls back to

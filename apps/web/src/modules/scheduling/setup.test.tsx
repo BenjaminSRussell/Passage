@@ -444,6 +444,9 @@ describe("Resource networks", () => {
     expect(validateNetwork({ ...values, edges: [edge, edge] }).errors.edges).toBe("Transition 2: this transition is listed twice.");
     expect(validateNetwork({ ...values, activeTo: "2026-12-31" }).errors.activeTo).toBe("Enter a day on or after Active from.");
     expect(validateNetwork({ ...values, edges: [{ ...edge, maxWait: "" }] }).input?.edges[0].maxWaitMinutes).toBeNull();
+    expect(validateNetwork({ ...values, edges: [{ ...edge, transfer: "30", maxWait: "20" }] }).errors.edges).toBe(
+      "Transition 1: the maximum wait includes the transfer, so it must be at least the transfer minutes.",
+    );
   });
 
   const network: Network = {

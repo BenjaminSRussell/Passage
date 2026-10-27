@@ -46,6 +46,7 @@ export function validateNetwork(values: NetworkValues): { errors: Errors; input?
     else if (e.secondary !== "" && (e.secondary === e.from || e.secondary === e.to)) errors.edges = `${at}: the transfer resource must be a third resource.`;
     else if (transfer === null) errors.edges = `${at}: transfer minutes must be 0 to ${WEEK_MINUTES}.`;
     else if (maxWait === null) errors.edges = `${at}: maximum wait must be 0 to ${WEEK_MINUTES} minutes, or blank for none.`;
+    else if (maxWait !== undefined && transfer !== null && maxWait < transfer) errors.edges = `${at}: the maximum wait includes the transfer, so it must be at least the transfer minutes.`;
     else if (seen.has(`${e.from}>${e.to}`)) errors.edges = `${at}: this transition is listed twice.`;
     if (errors.edges) break;
     seen.add(`${e.from}>${e.to}`);

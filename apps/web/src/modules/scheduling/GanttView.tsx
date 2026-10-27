@@ -2,7 +2,7 @@ import { useRef, useState, type PointerEvent } from "react";
 import { cx } from "../../shell/ui/cx";
 import type { GanttBar } from "./api/client";
 import { formatDateTime } from "./format";
-import { barPosition, draggedStart, groupByResource, orderTone, SNAP_MINUTES } from "./gantt";
+import { barPosition, changeoverSpan, draggedStart, groupByResource, orderTone, SNAP_MINUTES } from "./gantt";
 import styles from "./GanttView.module.css";
 
 export interface GanttResource {
@@ -128,35 +128,51 @@ export function GanttView({ bars, resources, from, days, selectedJobId, violatio
                 const dragging = drag?.bar.jobId === bar.jobId;
                 const shift = dragging && drag.trackPx > 0 ? (drag.dx / drag.trackPx) * VIEW_WIDTH : 0;
                 const late = bar.lateMinutes > 0 ? `, late by ${bar.lateMinutes} min` : "";
+                const changeover = changeoverSpan(bar);
+                const changeoverPos = changeover ? barPosition(changeover, from, to) : null;
+                const setup = changeover ? `, starts with a ${bar.changeoverMinutes} min changeover${bar.setupGroup ? ` to ${bar.setupGroup}` : ""}` : "";
                 return (
-                  <rect
-                    key={`${bar.jobId}-${bar.segment}`}
-                    data-job={bar.jobId}
-                    x={pos.x * VIEW_WIDTH}
-                    y={BAR_INSET}
-                    width={Math.max(pos.width * VIEW_WIDTH, 1)}
-                    height={ROW_HEIGHT - 2 * BAR_INSET}
-                    rx={3}
-                    transform={shift ? `translate(${shift} 0)` : undefined}
-                    className={cx(
-                      styles.bar,
-                      styles[`tone${orderTone(bar.orderId)}`],
-                      bar.lateMinutes > 0 && styles.late,
-                      bar.firmed && styles.firmed,
-                      violation && styles.violation,
-                      selectedJobId === bar.jobId && styles.selected,
-                      dragging && styles.dragging,
-                    )}
-                    onPointerDown={(event) => pointerDown(event, bar)}
-                    onPointerMove={pointerMove}
-                    onPointerUp={pointerUp}
-                    onPointerCancel={() => setDrag(null)}
-                  >
-                    <title>
-                      {violation ??
-                        `Order ${bar.orderId.slice(0, 8)} operation ${bar.operNumber}: ${formatDateTime(bar.start)} to ${formatDateTime(bar.end)}${late}${bar.firmed ? ", firmed" : ""}`}
-                    </title>
-                  </rect>
+                  <g key={`${bar.jobId}-${bar.segment}`}>
+                    <rect
+                      data-job={bar.jobId}
+                      x={pos.x * VIEW_WIDTH}
+                      y={BAR_INSET}
+                      width={Math.max(pos.width * VIEW_WIDTH, 1)}
+                      height={ROW_HEIGHT - 2 * BAR_INSET}
+                      rx={3}
+                      transform={shift ? `translate(${shift} 0)` : undefined}
+                      className={cx(
+                        styles.bar,
+                        styles[`tone${orderTone(bar.orderId)}`],
+                        bar.lateMinutes > 0 && styles.late,
+                        bar.firmed && styles.firmed,
+                        violation && styles.violation,
+                        selectedJobId === bar.jobId && styles.selected,
+                        dragging && styles.dragging,
+                      )}
+                      onPointerDown={(event) => pointerDown(event, bar)}
+                      onPointerMove={pointerMove}
+                      onPointerUp={pointerUp}
+                      onPointerCancel={() => setDrag(null)}
+                    >
+                      <title>
+                        {violation ??
+                          `Order ${bar.orderId.slice(0, 8)} operation ${bar.operNumber}: ${formatDateTime(bar.start)} to ${formatDateTime(bar.end)}${setup}${late}${bar.firmed ? ", firmed" : ""}`}
+                      </title>
+                    </rect>
+                    {changeoverPos ? (
+                      <rect
+                        data-changeover={bar.jobId}
+                        x={changeoverPos.x * VIEW_WIDTH}
+                        y={BAR_INSET}
+                        width={Math.max(changeoverPos.width * VIEW_WIDTH, 1)}
+                        height={ROW_HEIGHT - 2 * BAR_INSET}
+                        transform={shift ? `translate(${shift} 0)` : undefined}
+                        className={styles.changeover}
+                        aria-hidden="true"
+                      />
+                    ) : null}
+                  </g>
                 );
               })}
             </svg>

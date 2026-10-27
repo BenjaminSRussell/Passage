@@ -17,8 +17,8 @@ import (
 
 const (
 	resourceCols = "id::text, code, name, finite, time_zone, shifts, version, created_at"
-	opCols       = "id::text, order_id::text, oper_number, minutes, due_at, ready_at, priority, candidate_resource_ids::text[], status, created_at"
-	runCols      = "id::text, scope, mode, direction, finite, algorithm, status, operations_count, makespan_minutes, total_lateness_minutes, solver_status, messages, created_at"
+	opCols       = "id::text, order_id::text, oper_number, minutes, due_at, ready_at, priority, candidate_resource_ids::text[], setup_group, setup_minutes, attributes, network_id::text, status, created_at"
+	runCols      = "id::text, scope, mode, direction, finite, algorithm, status, operations_count, makespan_minutes, total_lateness_minutes, solver_status, messages, warnings, created_at"
 )
 
 func scanResource(row pgx.Row, fp *string) (Resource, error) {
@@ -139,21 +139,34 @@ func (s *Postgres) ResourceCapacity(ctx context.Context, id string, from, to tim
 func scanOperation(row pgx.Row, fp *string) (Operation, error) {
 	var o Operation
 	var due, ready *time.Time
-	dest := []any{&o.ID, &o.OrderID, &o.OperNumber, &o.Minutes, &due, &ready, &o.Priority, &o.ResourceIDs, &o.Status, &o.CreatedAt}
+	var attrs []byte
+	dest := []any{&o.ID, &o.OrderID, &o.OperNumber, &o.Minutes, &due, &ready, &o.Priority, &o.ResourceIDs,
+		&o.SetupGroup, &o.SetupMinutes, &attrs, &o.NetworkID, &o.Status, &o.CreatedAt}
 	if fp != nil {
 		dest = append([]any{fp}, dest...)
 	}
-	err := row.Scan(dest...)
+	if err := row.Scan(dest...); err != nil {
+		return Operation{}, err
+	}
 	o.DueAt, o.ReadyAt = due, ready
-	return o, err
+	o.Attributes = map[string]string{}
+	return o, json.Unmarshal(attrs, &o.Attributes)
 }
 
 // CreateOperation registers an operation's demand for scheduling. Every
-// candidate resource must exist in the tenant.
+// candidate resource, and the network when one is named, must exist in the
+// tenant.
 func (s *Postgres) CreateOperation(ctx context.Context, in Operation, idem Idem) (Operation, bool, error) {
+	if in.Attributes == nil {
+		in.Attributes = map[string]string{}
+	}
+	attrs, err := json.Marshal(in.Attributes)
+	if err != nil {
+		return Operation{}, false, err
+	}
 	var out Operation
 	created := false
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		if idem.Key != "" {
 			var stored string
 			existing, err := scanOperation(tx.QueryRow(ctx, `select idempotency_fingerprint, `+opCols+` from scheduling_operation where idempotency_key = $1`, idem.Key), &stored)
@@ -175,9 +188,20 @@ func (s *Postgres) CreateOperation(ctx context.Context, in Operation, idem Idem)
 		if known != len(uniqueStrings(in.ResourceIDs)) {
 			return httpx.NewProblem(http.StatusUnprocessableEntity, CodeUnknownResource, "every candidate resource must exist")
 		}
-		row, err := scanOperation(tx.QueryRow(ctx, `insert into scheduling_operation (tenant_id, id, order_id, oper_number, minutes, due_at, ready_at, priority, candidate_resource_ids, idempotency_key, idempotency_fingerprint)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9::uuid[], $10, $11) returning `+opCols,
-			tenantOf(ctx), ids.New(), in.OrderID, in.OperNumber, in.Minutes, in.DueAt, in.ReadyAt, in.Priority, in.ResourceIDs, nullable(idem.Key), nullable(idem.Fingerprint)), nil)
+		if in.NetworkID != nil {
+			var exists bool
+			if err := tx.QueryRow(ctx, `select exists(select 1 from scheduling_resource_network where id = $1)`, *in.NetworkID).Scan(&exists); err != nil {
+				return err
+			}
+			if !exists {
+				return httpx.NewProblem(http.StatusUnprocessableEntity, CodeNetworkNotFound, "the resource network does not exist")
+			}
+		}
+		row, err := scanOperation(tx.QueryRow(ctx, `insert into scheduling_operation (tenant_id, id, order_id, oper_number, minutes, due_at, ready_at, priority,
+				candidate_resource_ids, setup_group, setup_minutes, attributes, network_id, idempotency_key, idempotency_fingerprint)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9::uuid[], $10, $11, $12, $13, $14, $15) returning `+opCols,
+			tenantOf(ctx), ids.New(), in.OrderID, in.OperNumber, in.Minutes, in.DueAt, in.ReadyAt, in.Priority, in.ResourceIDs,
+			in.SetupGroup, in.SetupMinutes, attrs, in.NetworkID, nullable(idem.Key), nullable(idem.Fingerprint)), nil)
 		if err != nil {
 			return err
 		}
@@ -215,31 +239,41 @@ func (s *Postgres) ListOperations(ctx context.Context, f OperationFilter) ([]Ope
 
 func scanRun(row pgx.Row, fp *string) (Run, error) {
 	var r Run
-	var msgs []byte
+	var msgs, warnings []byte
 	dest := []any{&r.ID, &r.Scope, &r.Mode, &r.Direction, &r.Finite, &r.Algorithm, &r.Status, &r.OperationsCount,
-		&r.MakespanMinutes, &r.TotalLatenessMinutes, &r.SolverStatus, &msgs, &r.CreatedAt}
+		&r.MakespanMinutes, &r.TotalLatenessMinutes, &r.SolverStatus, &msgs, &warnings, &r.CreatedAt}
 	if fp != nil {
 		dest = append([]any{fp}, dest...)
 	}
 	if err := row.Scan(dest...); err != nil {
 		return Run{}, err
 	}
-	return r, json.Unmarshal(msgs, &r.Messages)
+	if err := json.Unmarshal(msgs, &r.Messages); err != nil {
+		return Run{}, err
+	}
+	return r, json.Unmarshal(warnings, &r.Warnings)
 }
 
 func insertRun(ctx context.Context, tx pgx.Tx, r *Run, idem Idem) error {
 	if r.Messages == nil {
 		r.Messages = []string{}
 	}
+	if r.Warnings == nil {
+		r.Warnings = []RunWarning{}
+	}
 	msgs, err := json.Marshal(r.Messages)
 	if err != nil {
 		return err
 	}
+	warnings, err := json.Marshal(r.Warnings)
+	if err != nil {
+		return err
+	}
 	return tx.QueryRow(ctx, `insert into schedule_run (tenant_id, id, scope, mode, direction, finite, algorithm, status, operations_count,
-		makespan_minutes, total_lateness_minutes, messages, idempotency_key, idempotency_fingerprint, finished_at)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, now()) returning created_at`,
+		makespan_minutes, total_lateness_minutes, messages, warnings, idempotency_key, idempotency_fingerprint, finished_at)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, now()) returning created_at`,
 		tenantOf(ctx), r.ID, r.Scope, r.Mode, r.Direction, r.Finite, r.Algorithm, r.Status, r.OperationsCount,
-		r.MakespanMinutes, r.TotalLatenessMinutes, msgs, nullable(idem.Key), nullable(idem.Fingerprint)).Scan(&r.CreatedAt)
+		r.MakespanMinutes, r.TotalLatenessMinutes, msgs, warnings, nullable(idem.Key), nullable(idem.Fingerprint)).Scan(&r.CreatedAt)
 }
 
 // GetRun returns one schedule run.
@@ -306,14 +340,18 @@ func loadResources(ctx context.Context, tx pgx.Tx) ([]domain.Resource, map[strin
 	return out, finite, rows.Err()
 }
 
-// loadOperations reads operations matching where (bound positionally), ordered
-// by order and operation number. lock takes row locks so concurrent runs and
-// moves over the same operations serialize.
+// loadOperations reads operations matching where (bound positionally, columns
+// qualified with o.), ordered by order and operation number, with the code of
+// the network each names. lock takes row locks on the operations so
+// concurrent runs and moves over the same operations serialize.
 func loadOperations(ctx context.Context, tx pgx.Tx, where string, lock bool, args ...any) ([]domain.Operation, error) {
-	q := `select id::text, order_id::text, oper_number, minutes, due_at, ready_at, priority, candidate_resource_ids::text[]
-		from scheduling_operation where ` + where + ` order by order_id, oper_number`
+	q := `select o.id::text, o.order_id::text, o.oper_number, o.minutes, o.due_at, o.ready_at, o.priority, o.candidate_resource_ids::text[],
+			coalesce(o.setup_group, ''), o.setup_minutes, o.attributes, coalesce(n.code, '')
+		from scheduling_operation o
+		left join scheduling_resource_network n on n.tenant_id = o.tenant_id and n.id = o.network_id
+		where ` + where + ` order by o.order_id, o.oper_number`
 	if lock {
-		q += ` for update`
+		q += ` for update of o`
 	}
 	rows, err := tx.Query(ctx, q, args...)
 	if err != nil {
@@ -324,7 +362,12 @@ func loadOperations(ctx context.Context, tx pgx.Tx, where string, lock bool, arg
 	for rows.Next() {
 		var op domain.Operation
 		var due, ready *time.Time
-		if err := rows.Scan(&op.ID, &op.OrderID, &op.OperNumber, &op.Minutes, &due, &ready, &op.Priority, &op.Candidates); err != nil {
+		var attrs []byte
+		if err := rows.Scan(&op.ID, &op.OrderID, &op.OperNumber, &op.Minutes, &due, &ready, &op.Priority, &op.Candidates,
+			&op.SetupGroup, &op.SetupMinutes, &attrs, &op.Network); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(attrs, &op.Attributes); err != nil {
 			return nil, err
 		}
 		if due != nil {
@@ -339,13 +382,25 @@ func loadOperations(ctx context.Context, tx pgx.Tx, where string, lock bool, arg
 }
 
 // loadBooked reads the capacity-reserving (finite) segments that end after
-// from. Infinite-run rows never block other work.
+// from, with the setup group, route setup and changeover the scheduler checks
+// a job inserted in front against. Infinite-run rows never block other work.
 func loadBooked(ctx context.Context, tx pgx.Tx, from time.Time) ([]domain.Busy, error) {
-	rows, err := tx.Query(ctx, `select resource_id::text, job_id::text, start_at, end_at from scheduled_job where finite and end_at > $1`, from)
+	rows, err := tx.Query(ctx, `select j.resource_id::text, j.job_id::text, j.start_at, j.end_at, coalesce(o.setup_group, ''), o.setup_minutes, j.changeover_minutes
+		from scheduled_job j join scheduling_operation o on o.tenant_id = j.tenant_id and o.id = j.job_id
+		where j.finite and j.end_at > $1`, from)
 	if err != nil {
 		return nil, err
 	}
-	return scanBusy(rows)
+	defer rows.Close()
+	var out []domain.Busy
+	for rows.Next() {
+		var b domain.Busy
+		if err := rows.Scan(&b.ResourceID, &b.JobID, &b.Start, &b.End, &b.Group, &b.Setup, &b.Changeover); err != nil {
+			return nil, err
+		}
+		out = append(out, b)
+	}
+	return out, rows.Err()
 }
 
 func scanBusy(rows pgx.Rows) ([]domain.Busy, error) {
@@ -364,7 +419,7 @@ func scanBusy(rows pgx.Rows) ([]domain.Busy, error) {
 // placementsOfOrders rebuilds each scheduled operation's placement of the
 // given orders from its segments, keyed by operation id.
 func placementsOfOrders(ctx context.Context, tx pgx.Tx, orderIDs []string) (map[string]domain.Placement, error) {
-	rows, err := tx.Query(ctx, `select job_id::text, order_id::text, oper_number, resource_id::text, start_at, end_at, late_minutes
+	rows, err := tx.Query(ctx, `select job_id::text, order_id::text, oper_number, resource_id::text, start_at, end_at, late_minutes, changeover_minutes
 		from scheduled_job where order_id = any($1::uuid[]) order by job_id, segment_no`, orderIDs)
 	if err != nil {
 		return nil, err
@@ -373,14 +428,15 @@ func placementsOfOrders(ctx context.Context, tx pgx.Tx, orderIDs []string) (map[
 	out := map[string]domain.Placement{}
 	for rows.Next() {
 		var jobID, oid, rid string
-		var oper, late int
+		var oper, late, changeover int
 		var start, end time.Time
-		if err := rows.Scan(&jobID, &oid, &oper, &rid, &start, &end, &late); err != nil {
+		if err := rows.Scan(&jobID, &oid, &oper, &rid, &start, &end, &late, &changeover); err != nil {
 			return nil, err
 		}
 		pl, ok := out[jobID]
 		if !ok {
-			pl = domain.Placement{OperationID: jobID, OrderID: oid, OperNumber: oper, ResourceID: rid, Start: start, LateMinutes: late}
+			pl = domain.Placement{OperationID: jobID, OrderID: oid, OperNumber: oper, ResourceID: rid, Start: start, LateMinutes: late,
+				ChangeoverMinutes: changeover}
 		}
 		pl.Segments = append(pl.Segments, domain.Segment{Start: start, End: end})
 		pl.End = end

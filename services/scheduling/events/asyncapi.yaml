@@ -95,7 +95,7 @@ components:
         solverStatus: { type: [string, 'null'] }
     JobScheduledData:
       type: object
-      required: [jobId, orderId, operNumber, resourceId, start, end, runId, firmed]
+      required: [jobId, orderId, operNumber, resourceId, start, end, changeoverMinutes, runId, firmed]
       properties:
         jobId: { type: string, format: uuid }
         orderId: { type: string, format: uuid }
@@ -103,6 +103,7 @@ components:
         resourceId: { type: string, format: uuid }
         start: { type: string, format: date-time }
         end: { type: string, format: date-time }
+        changeoverMinutes: { type: integer, minimum: 0, description: 'Changeover at the start of the job, inside [start, end) (FR-23.15).' }
         runId: { type: string, format: uuid }
         firmed: { type: boolean }
     OrderDatesChangedData:

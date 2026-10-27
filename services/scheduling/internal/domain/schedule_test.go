@@ -182,7 +182,8 @@ func TestSchedule_FT06IsFeasibleAndNotBelowOptimum(t *testing.T) {
 }
 
 // checkFeasible asserts the invariants: no double booking on a finite resource,
-// segments inside open capacity, full durations, and precedence within orders.
+// segments inside open capacity, full durations (process plus changeover), and
+// precedence within orders.
 // failer is satisfied by both *testing.T and *rapid.T.
 type failer interface {
 	Helper()
@@ -213,8 +214,8 @@ func checkFeasible(t failer, p Problem, r Result) {
 				t.Fatalf("%s segment %v leaves open capacity", op.ID, s)
 			}
 		}
-		if total != op.Minutes {
-			t.Fatalf("%s has %d minutes, want %d", op.ID, total, op.Minutes)
+		if want := op.Minutes + pl.ChangeoverMinutes; total != want {
+			t.Fatalf("%s has %d minutes, want %d (process plus changeover)", op.ID, total, want)
 		}
 		if caps[pl.ResourceID].res.Finite {
 			byRes[pl.ResourceID] = append(byRes[pl.ResourceID], pl.Segments...)

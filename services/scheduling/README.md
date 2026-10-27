@@ -9,9 +9,10 @@ planner preview and commit Gantt moves that push successors forward (FR-23.8),
 firms jobs, and reports weekly capacity load with bottleneck flags (FR-23.9).
 Slice 2 adds resource networks (FR-23.13), setup matrices and cleanout rules
 (FR-23.15), campaigns sequenced by the setup matrix with cleanouts (FR-23.14),
-the campaign cost split (FR-23.16) and capacity blocks (FR-23.17). Runs do not
-read networks, blocks or campaigns yet. What is not built is listed in
-`NOT-IMPLEMENTED.md`.
+the campaign cost split (FR-23.16) and capacity blocks (FR-23.17). Slice 3
+makes schedule runs and moves apply networks, setup matrix changeovers and
+capacity blocks (see the rules below). Runs do not place campaigns yet. What
+is not built is listed in `NOT-IMPLEMENTED.md`.
 
 ## Model
 
@@ -22,11 +23,16 @@ read networks, blocks or campaigns yet. What is not built is listed in
   wave 9 resources and calendars replace them (see NOT-IMPLEMENTED).
 - **Operation** (`scheduling_operation`): order id, operation number, minutes,
   optional due and ready times, priority, and candidate resources in priority
-  order (named resource first, FR-23.2). Status `open`, `scheduled` or `unplaced`.
+  order (named resource first, FR-23.2); optional setup group and route setup
+  minutes (FR-23.15), attributes for block conditions (FR-23.17) and the
+  network governing the step from the order's previous operation (FR-23.13).
+  Status `open`, `scheduled` or `unplaced`.
 - **ScheduleRun** (`schedule_run`): scope `site`, `selection` or `move`, mode,
-  direction (`forward`), `finite`, algorithm (`heuristic`), metrics and messages.
+  direction (`forward`), `finite`, algorithm (`heuristic`), metrics, messages
+  (unplaced operations) and warnings (SCHED-0010, SCHED-0012, SCHED-0014).
 - **ScheduledJob** (`scheduled_job`): one row per contiguous segment of an
-  operation on a resource, with `run_id`, `firmed`, `finite` and `late_minutes`.
+  operation on a resource, with `run_id`, `firmed`, `finite`, `late_minutes`
+  and, on the first segment, `changeover_minutes`.
   `EXCLUDE USING gist (tenant_id WITH =, resource_id WITH =, tstzrange(start_at, end_at) WITH &&) WHERE (finite)`.
 
 - **ResourceNetwork / NetworkEdge** (`scheduling_resource_network`,
@@ -54,7 +60,35 @@ the candidate with the earliest finish, then the lower load ratio, then the
 lower resource code (BR-23.8). Firmed jobs, and jobs of operations outside a
 selection, stay where they are and hold back their successors. An infinite run
 (`finite: false`) keeps jobs inside open calendar time but ignores other
-bookings; its rows do not reserve capacity.
+bookings and sequences no changeovers; its rows do not reserve capacity.
+
+Constraints (slice 3):
+
+- **Networks** (FR-23.13, BR-23.11): an operation that names a network runs
+  only on a candidate with an edge from its predecessor's resource, no earlier
+  than the edge's transfer time and no later than its maximum wait. When no
+  candidate meets the wait the predecessor is delayed by the overrun and the
+  order tried again, up to 7 days from the predecessor's first start; past
+  that, or with no edge at all, the whole order is unplaced with SCHED-0009
+  `NETWORK_INFEASIBLE`. A firmed predecessor cannot move, so the successor
+  takes the best edge candidate and the run warns SCHED-0010. Networks active
+  on the run date are used; a maximum wait shorter than the transfer is
+  refused when a network is created.
+- **Changeovers** (FR-23.15): on a finite resource with a setup matrix in
+  force on the run date, a job with a setup group starts with the changeover
+  from the group the resource is in (the last job with a group before it, or
+  the group it was left in before the run). A missing matrix entry uses the
+  operation's route setup and warns SCHED-0012. A job without a group leaves
+  the setup as it was. A job is not put in front of a booked job whose stored
+  changeover would be too short after it.
+- **Capacity blocks** (FR-23.17, BR-23.15): a job uses unblocked open time and
+  the windows of the active blocks its attributes match (higher priority wins
+  where blocks overlap). A job that matches no block on its resource warns
+  SCHED-0014.
+- **Moves** keep all three: changeovers are repriced, a start inside a block
+  the job does not match is SCHED-0002, a later job on a touched resource left
+  short of changeover is SCHED-0001, and a changed network step needs an edge
+  (SCHED-0009) within its wait (SCHED-0010).
 
 ## API
 
@@ -112,8 +146,11 @@ platform naming rule allows no hyphen in the verb, so the entity is
 | `SCHED-0002` | 422 | Move start is outside open capacity, or no capacity is left in the horizon |
 | `SCHED-0004` | 422 | Target resource is not a candidate of the operation |
 | `SCHED-0008` | 422 | A firmed job cannot be moved, or the move would push a firmed successor |
+| `SCHED-0009` | 422 / run message | A move puts a network step on resources without an edge; in a run, the order is unplaced as `NETWORK_INFEASIBLE` |
+| `SCHED-0010` | 422 / run warning | A move breaks a network step's transfer or maximum wait; in a run, a frozen predecessor left the successor waiting too long |
 | `SCHED-0011` | 422 | The campaign has started (or is completed or cancelled); orders cannot join, leave or be resequenced |
-| `SCHED-0012` | warning | In a campaign plan: no setup matrix entry for a group pair; the route setup time was used |
+| `SCHED-0012` | warning | In a campaign plan or a run: no setup matrix entry for a group pair; the route setup time was used |
+| `SCHED-0014` | run warning | The job matches no capacity block on its resource and was placed in unblocked capacity |
 | `SCHED-0101` | 409 | Resource code already exists |
 | `SCHED-0102` | 404 | Resource not found |
 | `SCHED-0103` | 409 | The order already has an operation with that number |
@@ -122,7 +159,7 @@ platform naming rule allows no hyphen in the verb, so the entity is
 | `SCHED-0106` | 422 | Gantt window holds more than 5,000 bars |
 | `SCHED-0107` | 422 | A candidate resource does not exist (also any resource a network, matrix, block or campaign names) |
 | `SCHED-0108` | 409 | Resource network code already exists |
-| `SCHED-0109` | 404 | Resource network not found |
+| `SCHED-0109` | 404 / 422 | Resource network not found (422 when an operation names it) |
 | `SCHED-0110` | 404 | Setup matrix not found |
 | `SCHED-0111` | 409 | The setup group already has a cleanout rule |
 | `SCHED-0112` | 409 | The resource already has a capacity block with that code |
@@ -162,7 +199,9 @@ The store tests run as a NOSUPERUSER, NOBYPASSRLS role and cover the outbox,
 idempotent replays, firmed jobs, moves with propagation, the exclusion
 constraint, infinite runs, tenant isolation, networks, matrix versions,
 cleanout rules, blocks, campaign sequencing (AC-23.11), join, leave, start,
-stale If-Match and replays, and that every table forces RLS.
+stale If-Match and replays, runs that apply networks (AC-23.10), changeovers
+and blocks (AC-23.13), moves that keep changeovers, and that every table
+forces RLS.
 Domain tests include the ft06 heuristic run, a 10,000-job no-double-booking
 check (AC-23.2), a 5,000-operation timing check (AC-23.4) and rapid property
 tests.

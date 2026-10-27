@@ -36,6 +36,7 @@ type fakeStore struct {
 	lastIdem store.Idem
 	lastLoad store.LoadFilter
 	lastOps  store.OperationFilter
+	lastOp   store.Operation
 
 	// slice 2
 	campaign     store.Campaign
@@ -72,6 +73,7 @@ func (f *fakeStore) CreateOperation(_ context.Context, in store.Operation, _ sto
 	if f.err != nil {
 		return store.Operation{}, false, f.err
 	}
+	f.lastOp = in
 	in.ID, in.Status = ids.New(), "open"
 	return in, true, nil
 }

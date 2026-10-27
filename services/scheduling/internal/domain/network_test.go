@@ -34,6 +34,7 @@ func TestNewResourceNetwork_Rejects(t *testing.T) {
 		{"duplicate edge", []NetworkEdge{{From: "V1", To: "F1"}, {From: "V1", To: "F1"}}},
 		{"negative transfer", []NetworkEdge{{From: "V1", To: "F1", TransferMinutes: -1}}},
 		{"negative max wait", []NetworkEdge{{From: "V1", To: "F1", MaxWaitMinutes: intPtr(-1)}}},
+		{"max wait shorter than the transfer", []NetworkEdge{{From: "V1", To: "F1", TransferMinutes: 30, MaxWaitMinutes: intPtr(20)}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

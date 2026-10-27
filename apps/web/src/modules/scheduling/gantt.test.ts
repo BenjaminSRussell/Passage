@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { barPosition, draggedStart, groupByResource, jobsOf, localOverlaps, ORDER_TONES, orderTone, snapMinutes, type GanttBar } from "./gantt";
+import { barPosition, changeoverSpan, draggedStart, groupByResource, jobsOf, localOverlaps, ORDER_TONES, orderTone, snapMinutes, type GanttBar } from "./gantt";
 import { describeShifts, formatMinutes, fromUtcInput, parseClock, toUtcInput } from "./format";
 
 const base: GanttBar = {
@@ -12,7 +12,24 @@ const base: GanttBar = {
   end: "2026-10-26T09:00:00Z",
   lateMinutes: 0,
   firmed: false,
+  setupGroup: null,
+  changeoverMinutes: 0,
 };
+
+describe("changeoverSpan", () => {
+  it("is the first changeover minutes of the first segment", () => {
+    expect(changeoverSpan({ ...base, changeoverMinutes: 30 })).toEqual({ start: "2026-10-26T06:00:00Z", end: "2026-10-26T06:30:00Z" });
+  });
+
+  it("is cut at the end of a short first segment", () => {
+    expect(changeoverSpan({ ...base, end: "2026-10-26T06:20:00Z", changeoverMinutes: 30 })?.end).toBe("2026-10-26T06:20:00Z");
+  });
+
+  it("is absent without a changeover and on later segments", () => {
+    expect(changeoverSpan(base)).toBeNull();
+    expect(changeoverSpan({ ...base, segment: 2, changeoverMinutes: 30 })).toBeNull();
+  });
+});
 
 describe("barPosition", () => {
   const from = "2026-10-26T00:00:00Z";

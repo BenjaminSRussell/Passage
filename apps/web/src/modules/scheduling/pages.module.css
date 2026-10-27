@@ -123,6 +123,25 @@
   line-height: var(--text-sm-leading);
 }
 
+/* Run warnings: one finding per row, code badge first. */
+.warnings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-sm-size);
+  line-height: var(--text-sm-leading);
+}
+
+.warning {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
 .rank {
   color: var(--color-text-muted);
   font-size: var(--text-xs-size);

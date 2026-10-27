@@ -25,6 +25,17 @@ export function barPosition(bar: Pick<GanttBar, "start" | "end">, from: string, 
   return { x: (visibleStart - windowStart) / span, width: (visibleEnd - visibleStart) / span };
 }
 
+/**
+ * The changeover part of a bar (FR-23.15): the first changeoverMinutes of the
+ * job's first segment, cut at the segment end. Null when there is none.
+ */
+export function changeoverSpan(bar: Pick<GanttBar, "start" | "end" | "segment" | "changeoverMinutes">): { start: string; end: string } | null {
+  if (bar.segment !== 1 || !(bar.changeoverMinutes > 0)) return null;
+  const start = Date.parse(bar.start);
+  const end = Math.min(start + bar.changeoverMinutes * MINUTE_MS, Date.parse(bar.end));
+  return { start: bar.start, end: new Date(end).toISOString().replace(".000Z", "Z") };
+}
+
 /** Round a minute offset to the nearest grid step. */
 export function snapMinutes(minutes: number, snap: number = SNAP_MINUTES): number {
   return Math.round(minutes / snap) * snap || 0;

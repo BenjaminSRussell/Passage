@@ -13,7 +13,7 @@ import {
   type Problem,
   type Resource,
 } from "./api/client";
-import { dayStart, formatDateTime, fromUtcInput, shortId, today, toUtcInput } from "./format";
+import { dash, dayStart, formatDateTime, formatMinutes, fromUtcInput, shortId, today, toUtcInput } from "./format";
 import { jobsOf } from "./gantt";
 import { GANTT_DAYS, GanttView, type GanttDays } from "./GanttView";
 import styles from "./pages.module.css";
@@ -141,6 +141,7 @@ export function WorkspacePage() {
     { key: "resourceId", header: "Resource", mono: true, render: (row) => codeOf(row.resourceId) },
     { key: "start", header: "Start", render: (row) => formatDateTime(row.start) },
     { key: "end", header: "End", render: (row) => formatDateTime(row.end) },
+    { key: "changeoverMinutes", header: "Changeover", align: "end", render: (row) => (row.changeoverMinutes > 0 ? formatMinutes(row.changeoverMinutes) : dash) },
     { key: "lateMinutes", header: "Late", render: (row) => (row.lateMinutes > 0 ? <Badge tone="warning">{`${row.lateMinutes} min`}</Badge> : "On time") },
     { key: "firmed", header: "Firmed", render: (row) => (row.firmed ? <Badge tone="info">Firmed</Badge> : "No") },
     {

@@ -61,46 +61,67 @@ type Resource struct {
 	CreatedAt time.Time      `json:"createdAt"`
 }
 
+// Operation is an operation of a production order waiting for, or holding, a
+// place in the schedule. SetupGroup and SetupMinutes drive changeovers
+// (FR-23.15), Attributes are matched against capacity blocks (FR-23.17) and
+// NetworkID names the resource network governing the step from the order's
+// previous operation into this one (FR-23.13).
 type Operation struct {
-	ID          string     `json:"id"`
-	OrderID     string     `json:"orderId"`
-	OperNumber  int        `json:"operNumber"`
-	Minutes     int        `json:"minutes"`
-	DueAt       *time.Time `json:"dueAt,omitempty"`
-	ReadyAt     *time.Time `json:"readyAt,omitempty"`
-	Priority    int        `json:"priority"`
-	ResourceIDs []string   `json:"resourceIds"`
-	Status      string     `json:"status"`
-	CreatedAt   time.Time  `json:"createdAt"`
+	ID           string            `json:"id"`
+	OrderID      string            `json:"orderId"`
+	OperNumber   int               `json:"operNumber"`
+	Minutes      int               `json:"minutes"`
+	DueAt        *time.Time        `json:"dueAt,omitempty"`
+	ReadyAt      *time.Time        `json:"readyAt,omitempty"`
+	Priority     int               `json:"priority"`
+	ResourceIDs  []string          `json:"resourceIds"`
+	SetupGroup   *string           `json:"setupGroup"`
+	SetupMinutes int               `json:"setupMinutes"`
+	Attributes   map[string]string `json:"attributes"`
+	NetworkID    *string           `json:"networkId"`
+	Status       string            `json:"status"`
+	CreatedAt    time.Time         `json:"createdAt"`
+}
+
+// RunWarning is a finding about a placed operation that did not stop the run
+// (SCHED-0010, SCHED-0012, SCHED-0014).
+type RunWarning struct {
+	Code        string `json:"code"`
+	OperationID string `json:"operationId"`
+	Detail      string `json:"detail"`
 }
 
 type Run struct {
-	ID                   string    `json:"id"`
-	Scope                string    `json:"scope"`
-	Mode                 string    `json:"mode"`
-	Direction            string    `json:"direction"`
-	Finite               bool      `json:"finite"`
-	Algorithm            string    `json:"algorithm"`
-	Status               string    `json:"status"`
-	OperationsCount      int       `json:"operationsCount"`
-	MakespanMinutes      int       `json:"makespanMinutes"`
-	TotalLatenessMinutes int       `json:"totalLatenessMinutes"`
-	SolverStatus         *string   `json:"solverStatus"`
-	Messages             []string  `json:"messages"`
-	CreatedAt            time.Time `json:"createdAt"`
+	ID                   string       `json:"id"`
+	Scope                string       `json:"scope"`
+	Mode                 string       `json:"mode"`
+	Direction            string       `json:"direction"`
+	Finite               bool         `json:"finite"`
+	Algorithm            string       `json:"algorithm"`
+	Status               string       `json:"status"`
+	OperationsCount      int          `json:"operationsCount"`
+	MakespanMinutes      int          `json:"makespanMinutes"`
+	TotalLatenessMinutes int          `json:"totalLatenessMinutes"`
+	SolverStatus         *string      `json:"solverStatus"`
+	Messages             []string     `json:"messages"`
+	Warnings             []RunWarning `json:"warnings"`
+	CreatedAt            time.Time    `json:"createdAt"`
 }
 
-// Bar is one segment of a scheduled job, as drawn on the Gantt.
+// Bar is one segment of a scheduled job, as drawn on the Gantt. The first
+// segment carries the job's changeover minutes, which open the bar.
 type Bar struct {
-	JobID       string    `json:"jobId"`
-	OrderID     string    `json:"orderId"`
-	OperNumber  int       `json:"operNumber"`
-	ResourceID  string    `json:"resourceId"`
-	Segment     int       `json:"segment"`
-	Start       time.Time `json:"start"`
-	End         time.Time `json:"end"`
-	LateMinutes int       `json:"lateMinutes"`
-	Firmed      bool      `json:"firmed"`
+	JobID             string    `json:"jobId"`
+	OrderID           string    `json:"orderId"`
+	OperNumber        int       `json:"operNumber"`
+	ResourceID        string    `json:"resourceId"`
+	Segment           int       `json:"segment"`
+	Start             time.Time `json:"start"`
+	End               time.Time `json:"end"`
+	LateMinutes       int       `json:"lateMinutes"`
+	Firmed            bool      `json:"firmed"`
+	SetupGroup        *string   `json:"setupGroup"`
+	ChangeoverMinutes int       `json:"changeoverMinutes"`
 }
 
 type RunRequest struct {
@@ -272,7 +293,7 @@ func (s *Postgres) RunSchedule(ctx context.Context, req RunRequest, idem Idem) (
 		if selection == nil {
 			selection = []string{}
 		}
-		ops, err := loadOperations(ctx, tx, "$1::boolean or id = any($2::uuid[])", true, req.Scope == "site", selection)
+		ops, err := loadOperations(ctx, tx, "$1::boolean or o.id = any($2::uuid[])", true, req.Scope == "site", selection)
 		if err != nil {
 			return err
 		}
@@ -302,11 +323,16 @@ func (s *Postgres) RunSchedule(ctx context.Context, req RunRequest, idem Idem) (
 		if err != nil {
 			return err
 		}
+		networks, err := loadConstraints(ctx, tx, resources, req.Start, req.HorizonDays, req.Start)
+		if err != nil {
+			return err
+		}
 		res := domain.Schedule(domain.Problem{Resources: resources, Operations: todo, Booked: booked, Fixed: fixed,
-			Start: req.Start, HorizonDays: req.HorizonDays, Infinite: !req.Finite})
+			Networks: networks, Start: req.Start, HorizonDays: req.HorizonDays, Infinite: !req.Finite})
 		run := Run{ID: ids.New(), Scope: req.Scope, Mode: req.Mode, Direction: "forward", Finite: req.Finite, Algorithm: "heuristic",
 			Status: "completed", OperationsCount: len(todo), MakespanMinutes: domain.Makespan(res.Placements),
-			TotalLatenessMinutes: domain.TotalLateness(res.Placements), Messages: unplacedMessages(res.Unplaced)}
+			TotalLatenessMinutes: domain.TotalLateness(res.Placements), Messages: unplacedMessages(res.Unplaced),
+			Warnings: runWarnings(res.Warnings)}
 		if err := insertRun(ctx, tx, &run, idem); err != nil {
 			return err
 		}
@@ -374,7 +400,7 @@ func (s *Postgres) MoveJob(ctx context.Context, req MoveRequest, idem Idem) (Mov
 		if err != nil {
 			return err
 		}
-		ops, err := loadOperations(ctx, tx, "order_id = $1::uuid", true, orderID)
+		ops, err := loadOperations(ctx, tx, "o.order_id = $1::uuid", true, orderID)
 		if err != nil {
 			return err
 		}
@@ -401,12 +427,16 @@ func (s *Postgres) MoveJob(ctx context.Context, req MoveRequest, idem Idem) (Mov
 		if err != nil {
 			return err
 		}
+		networks, err := loadConstraints(ctx, tx, resources, horizonStart, req.HorizonDays, req.Start)
+		if err != nil {
+			return err
+		}
 		rid := req.ResourceID
 		if rid == "" {
 			rid = placements[req.JobID].ResourceID
 		}
 		plan := domain.PlanMove(domain.MoveInput{Resources: resources, Start: horizonStart, HorizonDays: req.HorizonDays,
-			Booked: booked, Order: ops, Current: placements, Moved: req.JobID, ResourceID: rid, At: req.Start, Firmed: firmed})
+			Booked: booked, Order: ops, Current: placements, Moved: req.JobID, ResourceID: rid, At: req.Start, Firmed: firmed, Networks: networks})
 		if plan.Conflict != nil {
 			out.Conflict = plan.Conflict
 			return nil
@@ -570,9 +600,11 @@ func (s *Postgres) Gantt(ctx context.Context, from, to time.Time, resourceIDs []
 	}
 	bars := []Bar{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `select job_id::text, order_id::text, oper_number, resource_id::text, segment_no, start_at, end_at, late_minutes, firmed
-			from scheduled_job where end_at > $1 and start_at < $2 and ($3::boolean or resource_id = any($4::uuid[]))
-			order by start_at, resource_id, segment_no limit $5`,
+		rows, err := tx.Query(ctx, `select j.job_id::text, j.order_id::text, j.oper_number, j.resource_id::text, j.segment_no, j.start_at, j.end_at,
+				j.late_minutes, j.firmed, o.setup_group, j.changeover_minutes
+			from scheduled_job j join scheduling_operation o on o.tenant_id = j.tenant_id and o.id = j.job_id
+			where j.end_at > $1 and j.start_at < $2 and ($3::boolean or j.resource_id = any($4::uuid[]))
+			order by j.start_at, j.resource_id, j.segment_no limit $5`,
 			from, to, len(resourceIDs) == 0, resourceIDs, MaxBars+1)
 		if err != nil {
 			return err
@@ -580,7 +612,8 @@ func (s *Postgres) Gantt(ctx context.Context, from, to time.Time, resourceIDs []
 		defer rows.Close()
 		for rows.Next() {
 			var b Bar
-			if err := rows.Scan(&b.JobID, &b.OrderID, &b.OperNumber, &b.ResourceID, &b.Segment, &b.Start, &b.End, &b.LateMinutes, &b.Firmed); err != nil {
+			if err := rows.Scan(&b.JobID, &b.OrderID, &b.OperNumber, &b.ResourceID, &b.Segment, &b.Start, &b.End, &b.LateMinutes, &b.Firmed,
+				&b.SetupGroup, &b.ChangeoverMinutes); err != nil {
 				return err
 			}
 			bars = append(bars, b)
@@ -598,16 +631,21 @@ func (s *Postgres) Gantt(ctx context.Context, from, to time.Time, resourceIDs []
 
 // writePlacements inserts one scheduled_job row per segment, pipelined in a
 // single batch. finite maps resource id to whether the row reserves capacity.
+// The job's changeover minutes go on its first segment.
 func writePlacements(ctx context.Context, tx pgx.Tx, runID string, ps []domain.Placement, finite map[string]bool) error {
 	tenantID := tenantOf(ctx)
 	batch := &pgx.Batch{}
 	for _, pl := range ps {
 		for i, seg := range pl.Segments {
 			minutes := int(seg.End.Sub(seg.Start) / time.Minute)
+			changeover := 0
+			if i == 0 {
+				changeover = pl.ChangeoverMinutes
+			}
 			batch.Queue(`insert into scheduled_job (tenant_id, id, job_id, order_id, oper_number, resource_id, segment_no,
-				start_at, end_at, minutes, run_id, finite, late_minutes) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+				start_at, end_at, minutes, run_id, finite, late_minutes, changeover_minutes) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
 				tenantID, ids.New(), pl.OperationID, pl.OrderID, pl.OperNumber, pl.ResourceID, i+1, seg.Start, seg.End, minutes,
-				runID, finite[pl.ResourceID], pl.LateMinutes)
+				runID, finite[pl.ResourceID], pl.LateMinutes, changeover)
 		}
 	}
 	return tx.SendBatch(ctx, batch).Close()
@@ -627,7 +665,7 @@ func enqueuePlacements(ctx context.Context, tx pgx.Tx, runID string, ps []domain
 	for _, pl := range ps {
 		evt, err := newEvent(ctx, schedevents.JobScheduled, pl.OperationID, schedevents.JobScheduledData{JobID: pl.OperationID,
 			OrderID: pl.OrderID, OperNumber: pl.OperNumber, ResourceID: pl.ResourceID, Start: rfc(pl.Start), End: rfc(pl.End),
-			RunID: runID, Firmed: firmed})
+			ChangeoverMinutes: pl.ChangeoverMinutes, RunID: runID, Firmed: firmed})
 		if err != nil {
 			return err
 		}
@@ -706,6 +744,14 @@ func idsOf(ops []domain.Operation) (opIDs, orderIDs []string) {
 		}
 	}
 	return opIDs, orderIDs
+}
+
+func runWarnings(ws []domain.Warning) []RunWarning {
+	out := make([]RunWarning, 0, len(ws))
+	for _, w := range ws {
+		out = append(out, RunWarning{Code: w.Code, OperationID: w.OperationID, Detail: w.Detail})
+	}
+	return out
 }
 
 func unplacedMessages(us []domain.Unplaced) []string {

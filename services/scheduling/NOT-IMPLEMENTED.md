@@ -31,7 +31,31 @@ predicates and priority, and the BR-23.15 placement rule in
 screens (campaigns list, create and detail with orders, sequence, start and
 cost allocation; setup matrices list, create and detail; cleanout rules list
 and create; resource networks list, create and detail; capacity blocks list
-and create). Everything else in the ticket and PRD 4.23 is listed here.
+and create).
+
+Slice 3 makes schedule runs and moves apply those constraints. Operations
+carry a setup group, route setup minutes, attributes and a resource network
+(migration `0003_run_constraints.sql`, `POST /operations`). The heuristic
+(`domain/constraints.go`) restricts an operation that names a network to
+resources with an edge from its predecessor's resource, no earlier than the
+transfer time and within the maximum wait, delaying the predecessor up to 7
+days and otherwise unplacing the order with SCHED-0009 `NETWORK_INFEASIBLE`
+(FR-23.13, BR-23.11, AC-23.10); a frozen predecessor that cannot be delayed
+gives a SCHED-0010 warning. On a resource with a setup matrix the changeover
+from the group the resource is in is laid in front of the process minutes,
+a missing entry falls back to the route setup with SCHED-0012, and a job is
+never put in front of a booked job whose stored changeover would then be too
+short (FR-23.15, AC-23.11 heuristic half). A job only uses capacity-block
+time its attributes match, and a job matching no block on its resource gets
+SCHED-0014 (FR-23.17, BR-23.15, AC-23.13). Moves reprice changeovers, refuse
+a start inside a block the job does not match, refuse leaving a later job
+short of changeover, and check every network step they change. Jobs store
+their changeover minutes, the Gantt bar and `job.scheduled` carry them, and
+runs keep their warnings. Web: the new-operation form takes the setup group,
+route setup, network and attributes; the operations list shows them; run
+detail lists the warnings; the Gantt hatches the changeover at the start of
+a bar and the jobs table shows its minutes. Everything else in the ticket and
+PRD 4.23 is listed here.
 
 No file outside the wave 23 ownership entry was changed, so there are no
 moved-out handoff rows.
@@ -46,7 +70,9 @@ moved-out handoff rows.
 | 1 | Duration from route times and efficiency (BR-23.1) | handoff — wave 21 (production operations) | Operations arrive with their minutes through `POST /v1/scheduling/operations`; deriving minutes from `run_time_h_per`, quantity and efficiency needs wave 21 route operations. |
 | 1 | Secondary resources booked with the primary (BR-23.4, SCHED-0005) | later slice of PSG-23 | No `secondary_resource_ids` on operations or jobs yet. |
 | 1 | Resource selection by resource group and capability with level and expiry (FR-23.2, FR-23.12, SCHED-0004 for capabilities) | handoff — wave 9 (resources, groups, capabilities) | Candidates are explicit resource ids in priority order. Slice 1 keeps its own `scheduling_resource` table with a weekly calendar; wave 9 resources, calendars, efficiency % and capacity-per-day overrides replace it. |
-| 1 | Setup optimization inside schedule runs: changeover jobs from the matrix replacing the route setup between consecutive jobs on a resource | later slice of PSG-23 | Campaign sequencing uses the matrix (deliverable 7); the run heuristic still places one block of process minutes per operation and does not read the matrix. |
+| 1 | Setup optimization inside schedule runs: the changeover from the matrix (or the route setup, SCHED-0012) laid in front of each job on a resource | built | `domain/constraints.go`; the changeover is part of the job's span and stored as `scheduled_job.changeover_minutes` on its first segment. The run places orders in priority order and prices each changeover from the job before it; it does not reorder jobs to cut changeovers outside a campaign. |
+| 1 | Changeover kept in one piece: BR-23.3 says setup is never split across closed time and moves to the next open interval when it does not fit | later slice of PSG-23 | The changeover and the process minutes are filled as one span, so a changeover can still be split across a shift end. |
+| 1 | Changeover cost and the matrix's cleaning operation set on each scheduled changeover | later slice of PSG-23 | Jobs carry changeover minutes only; costs are on the matrix and the campaign plan (`:allocate-cost`). |
 | 1 | Reported hours and `finished` jobs frozen with remaining minutes (BR-23.6) | handoff — wave 25 (shop-floor feedback) | Only firmed jobs are frozen; there is no reported-hours input yet. |
 | 2 | Gantt with drag-reschedule, dry-run preview, constraint warnings and firm | built | `apps/web/src/modules/scheduling`. Bars are DOM buttons; a keyboard move form gives the same preview and commit. |
 | 2 | Canvas rendering above 1,000 bars, row virtualization, zoom, Shift+drag of a whole order, undo stack of 20 moves, user drag-snap setting | later slice of PSG-23 | The page fetches a 1-14 day window and snaps to 5 minutes. |
@@ -60,8 +86,10 @@ moved-out handoff rows.
 | 5 | Schedule dates flow to production orders and planning (FR-23.10) | partial — consumers are waves 21 and 22 | `job.scheduled` and `orderdates.changed` are published through the outbox with start, end and late minutes. Production order date updates and the `planning.finite-capacity` flag (AC-23.8) are owned by the consuming waves. |
 | 5 | Operations fed from wave 21 production orders and jobs instead of the API | handoff — wave 21 (production orders) | Slice 1 registers operations through its own API; a consumer of wave 21 events is not built. |
 | 6 | Resource networks: definition, edges, edge rules (FR-23.13, BR-23.11 wait check) | built | `POST/GET /v1/scheduling/networks`; `domain.ResourceNetwork` (`Successors` in transfer-time order, `ChainAllowed`, `WaitOK`). |
-| 6 | Networks as scheduler constraints: the heuristic restricting operation n+1 to an edge of operation n, delaying the predecessor up to 7 days for the maximum wait, SCHED-0009 `NETWORK_INFEASIBLE` and SCHED-0010 warnings (AC-23.10); CP-SAT `AddAllowedAssignments` | later slice of PSG-23 | Runs do not read networks yet; the domain functions they will call are built and tested. |
-| 6 | Network per site and assigned to a route operation chain; network update and deactivation endpoints | handoff — wave 9 (sites) and wave 21 (route operation chains) | A network is tenant-wide and applies to no chain until operations carry a network reference. Networks are create-and-read in this slice. |
+| 6 | Networks as heuristic constraints: operation n+1 only on an edge from operation n's resource, transfer time, maximum wait with the predecessor delayed up to 7 days, SCHED-0009 `NETWORK_INFEASIBLE`, SCHED-0010 behind a frozen predecessor, move checks (AC-23.10) | built | `domain/constraints.go`, `domain.PlanMove`; networks active on the run date are read by code. The 7-day limit is fixed (`NetworkDelayDays` in the domain) until site parameters exist. A maximum wait shorter than the transfer is now refused when a network is created. |
+| 6 | CP-SAT `AddAllowedAssignments` for network transitions and block windows in the optimizer | later slice of PSG-23 | Optimization runs are not called from the service yet (deliverable 4). |
+| 6 | Booking the edge's transfer resource (a transfer line) during the transfer | later slice of PSG-23 | `secondary_resource_id` is stored on the edge but not booked; secondary resources in general (BR-23.4) are a later slice. |
+| 6 | Network per site and assigned to a route operation chain; network update and deactivation endpoints | handoff — wave 9 (sites) and wave 21 (route operation chains) | A network is tenant-wide and each operation names the network of the step into it (`networkId`) until wave 21 route operation chains carry it. Networks are create-and-read; update and deactivation are a later slice of PSG-23. |
 | 7 | Campaigns, setup matrix sequencing, leading setup and cleanouts in the plan (FR-23.14, FR-23.15, BR-23.12, BR-23.13, AC-23.11, SCHED-0011, SCHED-0012) | built | `/v1/scheduling/campaigns`, `:sequence`, `:start`, `/setup-matrices`, `/cleanout-rules`. |
 | 7 | Placing a sequenced campaign contiguously on the Gantt (changeover and cleanout jobs as scheduled jobs; cleanout never split, BR-23.13) | later slice of PSG-23 | The plan is stored on the campaign; schedule runs do not place campaign jobs yet. |
 | 7 | Cleanout and setup orders as lightweight production orders of type `cleanout` (`cleanout_order_id`, `setup_order_id`), consuming cleaning materials and labour | handoff — wave 21 (production orders) | Columns exist and stay null; `campaign.sequenced` carries the cleanouts for wave 21 to create them. |
@@ -73,7 +101,8 @@ moved-out handoff rows.
 | 7 | Posting the campaign changeover allocation as `campaign-changeover` overhead cost lines before orders end (FR-23.16) | handoff — wave 21 (order costing and journals) | `:allocate-cost` computes the BR-23.14 split (amounts sum exactly to the cost, residual to the largest order) and writes nothing. |
 | 7 | SCHED-0013: refuse to end an order while the campaign cleanout is unended; `campaign.allowEarlyEnd` estimate and true-up | handoff — wave 21 (order end) | The order end lives in wave 21. |
 | 8 | Capacity blocks: definition and the BR-23.15 matching and priority rule (FR-23.17) | built | `POST/GET /v1/scheduling/capacity-blocks`; `domain.Placeable`, `MatchesAny`. |
-| 8 | Blocks applied in schedule runs (job placed inside a matching block, otherwise unblocked capacity or late; SCHED-0014 warning; AC-23.13 end to end) | later slice of PSG-23 | Runs do not read blocks yet; jobs carry no product or batch attributes until waves 8 and 21 feed them. |
+| 8 | Blocks applied in schedule runs and moves (job placed inside a matching block, otherwise unblocked capacity or late; SCHED-0014 warning; AC-23.13 end to end) | built | Active blocks are expanded over the run horizon in the resource's time zone; attributes are entered on the operation. |
+| 8 | Operation attributes fed from product variant dimensions (w8) and order or batch attributes (w21, w24) | handoff — waves 8, 21 and 24 | Attributes are set on `POST /operations` until those waves publish them. |
 | 8 | RRULE recurrence, block update and deactivation | later slice of PSG-23 | Blocks are weekly shifts or one dated window; `active` is set at creation only. |
 
 ## PRD items (section 4.23) not built yet
