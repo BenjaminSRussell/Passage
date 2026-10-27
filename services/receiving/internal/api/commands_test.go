@@ -42,7 +42,7 @@ func newRigOn(st *memstore.Store, periods domain.PeriodStatus) *rig {
 	rg := &rig{st: st, ledger: &domain.FakeLedger{}}
 	a := api.New(rg.st, api.Ports{
 		Periods: domain.FakePeriods{Status: periods}, Ledger: rg.ledger,
-		Profile:       domain.PostingProfile{Inventory: "1400", GRIR: "2100", PPV: "5200", VendorControl: "2000"},
+		Profile:       domain.PostingProfile{LedgerID: ledgerID, Inventory: "1400", GRIR: "2100", PPV: "5200", VendorControl: "2000"},
 		ResolveMinAge: time.Nanosecond,
 	})
 	router := httpx.NewRouter()
@@ -299,6 +299,7 @@ type invoiceJSON struct {
 	ID            string `json:"id"`
 	Total         string `json:"total"`
 	LedgerEntryID string `json:"ledgerEntryId"`
+	LedgerID      string `json:"ledgerId"`
 }
 
 func TestCorrect_CreditsNeverBelowInvoicedQuantity(t *testing.T) {
@@ -448,6 +449,24 @@ func TestInvoice_Rejections(t *testing.T) {
 	problemCode(t, rg.call(http.MethodPost, invoicesPath, invoiceBody("INV-5", r.ID, 1, ""), duty("VendorInvoicePost", "k", "X-Passage-Legal-Entity", ledgerID)), http.StatusForbidden, "AUTH-0003")
 	if len(rg.ledger.Entries) != entries {
 		t.Fatalf("rejected invoices reached the ledger: %d entries, want %d", len(rg.ledger.Entries), entries)
+	}
+}
+
+func TestInvoice_LedgerIDMustMatchTheConfiguredLedgerAndMayBeOmitted(t *testing.T) {
+	rg := newRig(domain.PeriodOpen)
+	r := rg.posted(t, "PS-1", 10, 4)
+	entries := len(rg.ledger.Entries)
+
+	foreign := strings.Replace(invoiceBody("INV-1", r.ID, 1, ""), ledgerID, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", 1)
+	problemCode(t, rg.call(http.MethodPost, invoicesPath, foreign, rg.apPoster()), http.StatusUnprocessableEntity, "RCV-VAL-001")
+	if len(rg.ledger.Entries) != entries {
+		t.Fatalf("an invoice for a foreign ledger reached the ledger: %d entries, want %d", len(rg.ledger.Entries), entries)
+	}
+
+	omitted := strings.Replace(invoiceBody("INV-2", r.ID, 1, ""), `"ledgerId":"`+ledgerID+`",`, "", 1)
+	got := decode[invoiceJSON](t, rg.call(http.MethodPost, invoicesPath, omitted, rg.apPoster()), http.StatusCreated)
+	if got.LedgerID != ledgerID || len(rg.ledger.Entries) != entries+1 || rg.ledger.Entries[entries].LedgerID != ledgerID {
+		t.Fatalf("invoice ledger %q, entries %d: want the configured ledger %s", got.LedgerID, len(rg.ledger.Entries), ledgerID)
 	}
 }
 

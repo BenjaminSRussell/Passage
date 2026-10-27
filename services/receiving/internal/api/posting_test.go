@@ -110,7 +110,7 @@ func brokenRigWith(t *testing.T, minAge time.Duration, ledger func(*domain.FakeL
 	}
 	a := api.New(broken, api.Ports{
 		Periods: domain.FakePeriods{Status: domain.PeriodOpen}, Ledger: poster,
-		Profile:       domain.PostingProfile{Inventory: "1400", GRIR: "2100", PPV: "5200", VendorControl: "2000"},
+		Profile:       domain.PostingProfile{LedgerID: ledgerID, Inventory: "1400", GRIR: "2100", PPV: "5200", VendorControl: "2000"},
 		ResolveMinAge: minAge,
 	})
 	router := httpx.NewRouter()
@@ -428,7 +428,7 @@ func TestResolve_AResolveThatReversesWhileTheCommandIsInFlightFailsTheCommand(t 
 	hooked := &hookedStore{commitFails: broken}
 	a := api.New(hooked, api.Ports{
 		Periods: domain.FakePeriods{Status: domain.PeriodOpen}, Ledger: base.ledger,
-		Profile:       domain.PostingProfile{Inventory: "1400", GRIR: "2100", PPV: "5200", VendorControl: "2000"},
+		Profile:       domain.PostingProfile{LedgerID: ledgerID, Inventory: "1400", GRIR: "2100", PPV: "5200", VendorControl: "2000"},
 		ResolveMinAge: time.Nanosecond,
 	})
 	router := httpx.NewRouter()
@@ -437,7 +437,7 @@ func TestResolve_AResolveThatReversesWhileTheCommandIsInFlightFailsTheCommand(t 
 	r := base.posted(t, "PS-1", 10, 4)
 	key := "post:receiving:productreceipt:" + r.ID + ":correction:1"
 	hooked.beforeCommit = func(ctx context.Context) {
-		if _, err := base.st.ClaimPending(ctx, key, 0); err != nil {
+		if _, err := base.st.ClaimPending(ctx, key, 0, time.Hour); err != nil {
 			t.Errorf("claim: %v", err)
 		}
 		if err := base.st.FinishPending(ctx, key, store.OutcomeReversed); err != nil {
@@ -473,7 +473,7 @@ func TestResolve_LedgerRejectionsOnReverseAreNon422AndReleaseTheClaim(t *testing
 		failureLedger := reverseFails{FakeLedger: rg.ledger, err: tc.err, dates: &dates}
 		a := api.New(broken, api.Ports{
 			Periods: domain.FakePeriods{Status: domain.PeriodOpen}, Ledger: failureLedger,
-			Profile:       domain.PostingProfile{Inventory: "1400", GRIR: "2100", PPV: "5200", VendorControl: "2000"},
+			Profile:       domain.PostingProfile{LedgerID: ledgerID, Inventory: "1400", GRIR: "2100", PPV: "5200", VendorControl: "2000"},
 			ResolveMinAge: time.Nanosecond,
 		})
 		router := httpx.NewRouter()

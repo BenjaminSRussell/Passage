@@ -167,7 +167,7 @@ func (a *API) resolvePending(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, unavailable("the ledger adapter cannot reverse entries"))
 		return
 	}
-	row, err := a.store.ClaimPending(ctx, key, a.resolveMinAge)
+	row, err := a.store.ClaimPending(ctx, key, a.resolveMinAge, a.resolveLease)
 	switch {
 	case errors.Is(err, store.ErrPendingNotFound):
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, "RCV-NF-003", "pending posting not found"))
@@ -186,9 +186,7 @@ func (a *API) resolvePending(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	abandon := func(err error) {
-		if releaseErr := a.store.ReleaseClaim(context.WithoutCancel(ctx), row.Key); releaseErr != nil {
-			slog.ErrorContext(ctx, "release resolve claim failed", "err", releaseErr, "key", row.Key, "correlationId", middleware.GetReqID(ctx))
-		}
+		a.releaseClaim(ctx, row.Key)
 		writeError(w, r, err)
 	}
 	var entry domain.JournalEntry
@@ -223,8 +221,15 @@ func (a *API) resolvePending(w http.ResponseWriter, r *http.Request) {
 	a.finishPending(w, r, row.Key, store.OutcomeReversed, id)
 }
 
+func (a *API) releaseClaim(ctx context.Context, key string) {
+	if err := a.store.ReleaseClaim(context.WithoutCancel(ctx), key); err != nil {
+		slog.ErrorContext(ctx, "release resolve claim failed", "err", err, "key", key, "correlationId", middleware.GetReqID(ctx))
+	}
+}
+
 func (a *API) finishPending(w http.ResponseWriter, r *http.Request, key, outcome, entryID string) {
-	if err := a.store.FinishPending(r.Context(), key, outcome); err != nil {
+	if err := a.store.FinishPending(context.WithoutCancel(r.Context()), key, outcome); err != nil {
+		a.releaseClaim(r.Context(), key)
 		writeError(w, r, err)
 		return
 	}

@@ -71,11 +71,13 @@ func stableID(parts ...string) string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", sum[0:4], sum[4:6], sum[6:8], sum[8:10], sum[10:16])
 }
 
-func buildVendorInvoice(tenantID string, req invoiceRequest) (store.Invoice, map[string]string) {
+func buildVendorInvoice(tenantID, ledgerID string, req invoiceRequest) (store.Invoice, map[string]string) {
 	fields := map[string]string{}
 	checkUUID(fields, "vendorId", req.VendorID)
 	checkUUID(fields, "legalEntityId", req.LegalEntityID)
-	checkUUID(fields, "ledgerId", req.LedgerID)
+	if req.LedgerID != "" {
+		checkUUID(fields, "ledgerId", req.LedgerID)
+	}
 	checkUUID(fields, "fiscalPeriodId", req.FiscalPeriodID)
 	number := strings.TrimSpace(req.InvoiceNumber)
 	if n := utf8.RuneCountInString(number); n < 1 || n > maxInvoiceNumber {
@@ -97,7 +99,7 @@ func buildVendorInvoice(tenantID string, req invoiceRequest) (store.Invoice, map
 	}
 	in := store.Invoice{
 		ID: stableID(tenantID, req.VendorID, strings.ToLower(number)), LegalEntityID: req.LegalEntityID, VendorID: req.VendorID, InvoiceNumber: number,
-		InvoiceDate: invoiceDate, PostingDate: postingDate, Currency: req.Currency, LedgerID: req.LedgerID, FiscalPeriodID: req.FiscalPeriodID,
+		InvoiceDate: invoiceDate, PostingDate: postingDate, Currency: req.Currency, LedgerID: ledgerID, FiscalPeriodID: req.FiscalPeriodID,
 		Lines: make([]store.InvoiceLine, 0, len(req.Lines)),
 	}
 	for i, l := range req.Lines {
@@ -144,9 +146,13 @@ func (a *API) postVendorInvoice(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
-	in, fields := buildVendorInvoice(p.TenantID, req)
+	in, fields := buildVendorInvoice(p.TenantID, a.ports.Profile.LedgerID, req)
 	if len(fields) > 0 {
 		httpx.Fail(w, r, validationProblem(fields))
+		return
+	}
+	if req.LedgerID != "" && req.LedgerID != a.ports.Profile.LedgerID {
+		writeError(w, r, &domain.Error{Code: domain.CodeInvalidReceipt, Detail: "ledgerId differs from the ledger this service posts to"})
 		return
 	}
 	if err := inScope(p, req.LegalEntityID); err != nil {

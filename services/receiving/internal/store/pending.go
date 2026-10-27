@@ -136,7 +136,7 @@ func GenerationKey(baseKey string, generation int) string {
 	return fmt.Sprintf("%s:r%d", baseKey, generation)
 }
 
-func (s *Postgres) ClaimPending(ctx context.Context, key string, minAge time.Duration) (PendingRow, error) {
+func (s *Postgres) ClaimPending(ctx context.Context, key string, minAge, lease time.Duration) (PendingRow, error) {
 	tenantID, err := tenantOf(ctx)
 	if err != nil {
 		return PendingRow{}, err
@@ -156,8 +156,9 @@ func (s *Postgres) ClaimPending(ctx context.Context, key string, minAge time.Dur
 		}
 		var claimed string
 		err = tx.QueryRow(ctx, `UPDATE receiving_pending_posting SET claimed_at = now()
-			WHERE tenant_id = $1 AND ledger_key = $2 AND done_at IS NULL AND claimed_at IS NULL AND created_at <= now() - make_interval(secs => $3::float8)
-			RETURNING ledger_key`, tenantID, key, minAge.Seconds()).Scan(&claimed)
+			WHERE tenant_id = $1 AND ledger_key = $2 AND done_at IS NULL AND created_at <= now() - make_interval(secs => $3::float8)
+			AND (claimed_at IS NULL OR claimed_at <= now() - make_interval(secs => $4::float8))
+			RETURNING ledger_key`, tenantID, key, minAge.Seconds(), lease.Seconds()).Scan(&claimed)
 		if err == nil {
 			return nil
 		}

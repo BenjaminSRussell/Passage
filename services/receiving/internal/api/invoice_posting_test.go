@@ -80,7 +80,7 @@ func completePostings(t *testing.T, st *memstore.Store) {
 		t.Fatal(err)
 	}
 	for _, row := range rows {
-		if _, err := st.ClaimPending(tenantCtx(), row.Key, 0); err != nil {
+		if _, err := st.ClaimPending(tenantCtx(), row.Key, 0, time.Hour); err != nil {
 			t.Fatal(err)
 		}
 		if err := st.FinishPending(tenantCtx(), row.Key, "POSTED"); err != nil {

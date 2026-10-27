@@ -509,7 +509,7 @@ func (s *Store) ReservePosting(ctx context.Context, p store.PendingPosting) (str
 	return key, nil
 }
 
-func (s *Store) ClaimPending(ctx context.Context, key string, minAge time.Duration) (store.PendingRow, error) {
+func (s *Store) ClaimPending(ctx context.Context, key string, minAge, lease time.Duration) (store.PendingRow, error) {
 	s.pmu.Lock()
 	defer s.pmu.Unlock()
 	rows, err := s.pendingFor(ctx)
@@ -523,7 +523,7 @@ func (s *Store) ClaimPending(ctx context.Context, key string, minAge time.Durati
 	switch {
 	case !row.open():
 		return row.PendingRow, store.ErrPendingFinished
-	case row.claimedAt != nil:
+	case row.claimedAt != nil && time.Since(*row.claimedAt) < lease:
 		return row.PendingRow, store.ErrPendingClaimed
 	case time.Since(row.CreatedAt) < minAge:
 		return row.PendingRow, store.ErrPendingTooRecent

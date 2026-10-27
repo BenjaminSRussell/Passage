@@ -45,12 +45,14 @@ type Ports struct {
 	Profile domain.PostingProfile
 
 	ResolveMinAge time.Duration
+	ResolveLease  time.Duration
 }
 
 type API struct {
 	store         store.Store
 	ports         Ports
 	resolveMinAge time.Duration
+	resolveLease  time.Duration
 	evaluated     atomic.Int64
 	rejected      atomic.Int64
 	arrived       atomic.Int64
@@ -71,7 +73,11 @@ func New(s store.Store, ports Ports) *API {
 	if minAge == 0 {
 		minAge = ledger.Timeout + httpx.RequestTimeout
 	}
-	return &API{store: s, ports: ports, resolveMinAge: minAge, http: newRequestMetrics()}
+	lease := ports.ResolveLease
+	if lease == 0 {
+		lease = 2*ledger.Timeout + httpx.RequestTimeout
+	}
+	return &API{store: s, ports: ports, resolveMinAge: minAge, resolveLease: lease, http: newRequestMetrics()}
 }
 
 func (a *API) PostInvoice(ctx context.Context, in domain.VendorInvoice, profile domain.PostingProfile) (domain.JournalEntry, error) {

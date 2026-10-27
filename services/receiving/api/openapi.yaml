@@ -635,7 +635,7 @@ components:
     InvoiceRequest:
       type: object
       additionalProperties: false
-      required: [vendorId, legalEntityId, invoiceNumber, invoiceDate, postingDate, currency, ledgerId, fiscalPeriodId, lines]
+      required: [vendorId, legalEntityId, invoiceNumber, invoiceDate, postingDate, currency, fiscalPeriodId, lines]
       properties:
         vendorId: { type: string, format: uuid }
         legalEntityId: { type: string, format: uuid }
@@ -643,7 +643,7 @@ components:
         invoiceDate: { type: string, format: date }
         postingDate: { type: string, format: date }
         currency: { type: string, pattern: '^[A-Z]{3}$' }
-        ledgerId: { type: string, format: uuid }
+        ledgerId: { type: string, format: uuid, description: Optional. The service posts to its configured ledger (POSTING_LEDGER_ID); a different value is refused with 422 RCV-VAL-001. }
         fiscalPeriodId: { type: string, format: uuid }
         lines:
           type: array

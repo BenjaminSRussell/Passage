@@ -138,7 +138,7 @@ func wantPending(t *testing.T, err error, key string) {
 
 func claim(t *testing.T, b backend, p tenant.Principal, key string) {
 	t.Helper()
-	if _, err := b.st.ClaimPending(ctxOf(p), key, 0); err != nil {
+	if _, err := b.st.ClaimPending(ctxOf(p), key, 0, time.Hour); err != nil {
 		t.Fatalf("claim %s: %v", key, err)
 	}
 }
@@ -714,7 +714,7 @@ var cases = []struct {
 			t.Fatal(err)
 		}
 		claim(t, b, p, "race")
-		if _, err := b.st.ClaimPending(ctxOf(p), "race", 0); !errors.Is(err, store.ErrPendingClaimed) {
+		if _, err := b.st.ClaimPending(ctxOf(p), "race", 0, time.Hour); !errors.Is(err, store.ErrPendingClaimed) {
 			t.Fatalf("second claim err=%v, want ErrPendingClaimed", err)
 		}
 		if _, err := b.st.ReservePosting(ctxOf(p), reservation("race", "h", r.ID)); err == nil {
@@ -748,7 +748,7 @@ var cases = []struct {
 		if _, err := b.st.Post(ctxOf(p), r.ID, postWith(t, p, "entry-1")); err != nil {
 			t.Fatal(err)
 		}
-		row, err := b.st.ClaimPending(ctxOf(p), "first", 0)
+		row, err := b.st.ClaimPending(ctxOf(p), "first", 0, time.Hour)
 		if !errors.Is(err, store.ErrPendingFinished) || row.Outcome != store.OutcomePosted {
 			t.Fatalf("claim row=%+v err=%v, want ErrPendingFinished with outcome POSTED", row, err)
 		}
@@ -759,12 +759,29 @@ var cases = []struct {
 			t.Fatalf("receipt is %s, want POSTED", got.State)
 		}
 	}},
+	{"a claim older than the lease can be taken over, a fresh one cannot", func(t *testing.T, b backend) {
+		p := principal(1)
+		if _, err := b.st.ReservePosting(ctxOf(p), reservation("lease", "h", "subject-l")); err != nil {
+			t.Fatal(err)
+		}
+		claim(t, b, p, "lease")
+		if _, err := b.st.ClaimPending(ctxOf(p), "lease", 0, time.Hour); !errors.Is(err, store.ErrPendingClaimed) {
+			t.Fatalf("within the lease: err=%v, want ErrPendingClaimed", err)
+		}
+		time.Sleep(20 * time.Millisecond)
+		if _, err := b.st.ClaimPending(ctxOf(p), "lease", 0, 10*time.Millisecond); err != nil {
+			t.Fatalf("after the lease expired: %v", err)
+		}
+		if err := b.st.FinishPending(ctxOf(p), "lease", store.OutcomeReversed); err != nil {
+			t.Fatal(err)
+		}
+	}},
 	{"a posting younger than the minimum age cannot be claimed", func(t *testing.T, b backend) {
 		p := principal(1)
 		if _, err := b.st.ReservePosting(ctxOf(p), reservation("young", "h", "subject-y")); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := b.st.ClaimPending(ctxOf(p), "young", time.Hour); !errors.Is(err, store.ErrPendingTooRecent) {
+		if _, err := b.st.ClaimPending(ctxOf(p), "young", time.Hour, time.Hour); !errors.Is(err, store.ErrPendingTooRecent) {
 			t.Fatalf("err=%v, want ErrPendingTooRecent", err)
 		}
 		claim(t, b, p, "young")

@@ -190,7 +190,7 @@ type Store interface {
 	EnsureNoPending(ctx context.Context, subject string) error
 	GetPending(ctx context.Context, key string) (PendingRow, error)
 	ListPending(ctx context.Context) ([]PendingRow, error)
-	ClaimPending(ctx context.Context, key string, minAge time.Duration) (PendingRow, error)
+	ClaimPending(ctx context.Context, key string, minAge, lease time.Duration) (PendingRow, error)
 	ReleaseClaim(ctx context.Context, key string) error
 	FinishPending(ctx context.Context, key, outcome string) error
 	ClaimKey(ctx context.Context, key, hash string, lockFor time.Duration) (ClaimResult, error)
